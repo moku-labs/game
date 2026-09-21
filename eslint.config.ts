@@ -189,6 +189,8 @@ export default [
         "error",
         {
           mainDescription: false,
+          // The default reads functions only: an echo on a member of an `Api` type would pass.
+          contexts: ["any"],
           tags: {
             example:
               "^(?!\\s*```ts\\n\\s*(?:(?:const|let) \\w+(?:: [\\w.<>\\[\\]]+)? = )?(?:await )?[\\w.]+\\((?:[\\w.]+(?:, [\\w.]+)*)?\\);?\\s*```\\s*$)[\\s\\S]+$"
