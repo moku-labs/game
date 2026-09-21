@@ -5,11 +5,6 @@ import type { FlowCtx } from "../types";
 
 /**
  * What a stop needs: the plugin's own config and state, exactly what `onStop` receives.
- *
- * @example
- * ```ts
- * const stopCtx: StopCtx = { config, state };
- * ```
  */
 export type StopCtx = Pick<FlowCtx, "config" | "state">;
 
@@ -24,7 +19,8 @@ import { abortReason } from "./node";
  * @returns The deadline and the way to cancel it.
  * @example
  * ```ts
- * const deadline = startDeadline(ctx.config.settleTimeoutMs);
+ * const deadline = startDeadline(2000);
+ * deadline.cancel(); // the loop settled first: deadline.reached never resolves
  * ```
  */
 function startDeadline(timeoutMs: number): { reached: Promise<void>; cancel(): void } {
@@ -39,11 +35,6 @@ function startDeadline(timeoutMs: number): { reached: Promise<void>; cancel(): v
     reached,
     /**
      * Drops the deadline when the loop settled first.
-     *
-     * @example
-     * ```ts
-     * deadline.cancel();
-     * ```
      */
     cancel: (): void => {
       globalThis.clearTimeout(watch.handle);
@@ -58,10 +49,6 @@ function startDeadline(timeoutMs: number): { reached: Promise<void>; cancel(): v
  * @param ctx - Config and state of the flow plugin.
  * @param running - The promise of `run()`.
  * @returns `true` when the loop settled, `false` when the deadline won and the loop still runs.
- * @example
- * ```ts
- * const settled = await settle(ctx, running);
- * ```
  */
 async function settle(ctx: StopCtx, running: Promise<void>): Promise<boolean> {
   const quiet = running.then(noop, noop);
@@ -81,10 +68,6 @@ async function settle(ctx: StopCtx, running: Promise<void>): Promise<boolean> {
  *
  * @param ctx - Config and state of the flow plugin.
  * @returns A promise that resolves when the graph stands still.
- * @example
- * ```ts
- * createPlugin("flow", { onStop: ({ config, state }) => stopRunner({ config, state }) });
- * ```
  */
 export async function stopRunner(ctx: StopCtx): Promise<void> {
   const state = ctx.state.runner;

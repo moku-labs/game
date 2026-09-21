@@ -16,7 +16,11 @@ const config: Config = { maxFps: 60, maxDeltaMs: 50 };
  *
  * @example
  * ```ts
- * ctx.require(timePlugin).onFrame("animate", advanceTweens);
+ * // A game plugin with frame work declares the dependency and registers a callback on start.
+ * const sparklePlugin = createPlugin("sparkle", {
+ *   depends: [timePlugin],
+ *   onStart: ctx => void ctx.require(timePlugin).onFrame("animate", time => advance(time.delta))
+ * });
  * ```
  */
 export const timePlugin = /*#__PURE__*/ createPlugin("time", {

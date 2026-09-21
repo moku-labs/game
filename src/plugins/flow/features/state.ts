@@ -10,7 +10,7 @@ import type { FeaturesState } from "./types";
  * @returns An empty map of feature name to description.
  * @example
  * ```ts
- * const byName = emptyRegistry();
+ * emptyRegistry().size; // 0
  * ```
  */
 function emptyRegistry(): FeaturesState["byName"] {
@@ -21,10 +21,6 @@ function emptyRegistry(): FeaturesState["byName"] {
  * Creates the features module state: no feature registered, not sealed.
  *
  * @returns A fresh features state, owned by the plugin state of `flow`.
- * @example
- * ```ts
- * const features = createFeaturesState();
- * ```
  */
 export function createFeaturesState(): FeaturesState {
   return { byName: emptyRegistry(), sealed: false };

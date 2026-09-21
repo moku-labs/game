@@ -25,11 +25,6 @@ import type {
 /**
  * A flow spec as the builder reads it, with the graph check already done. It is the widened form
  * of `FlowSpec`: the implementation signature of `defineFlow`, never the signature authors see.
- *
- * @example
- * ```ts
- * const spec: AnyFlowSpec = { nodes, start: "boot", edges: { boot: { done: "home" } } };
- * ```
  */
 type AnyFlowSpec = {
   nodes: Readonly<Record<string, FlowEntry>>;
@@ -50,7 +45,9 @@ const noPayload: Json = null;
  * @returns A tag that carries the payload type and no value.
  * @example
  * ```ts
+ * // The outcomes of a node: `done` carries nothing, `orderComplete` carries the reward id.
  * const outcomes = { done: type(), orderComplete: type<{ rewardId: string }>() };
+ * // outcomes.done: { kind: "type" }. The payload type exists for the compiler only.
  * ```
  */
 export function type<Payload = void>(): TypeTag<NoInfer<Payload>> {
@@ -65,10 +62,11 @@ export function type<Payload = void>(): TypeTag<NoInfer<Payload>> {
  * @returns The node as plain data.
  * @example
  * ```ts
+ * // A transit node of a merge game. `out` has one method per declared outcome.
  * const merge = defineNode({
  *   input: type<{ from: string; to: string }>(),
  *   outcomes: { done: type(), rejected: type() },
- *   run: ({ out }) => out.done()
+ *   run: ({ input, out }) => (input.from === input.to ? out.rejected() : out.done())
  * });
  * ```
  */
@@ -100,10 +98,11 @@ export function defineNode<
  * @returns The flow as plain data.
  * @example
  * ```ts
+ * // The main flow of a dice game. A missing edge or an unknown target is a compile error.
  * const mainFlow = defineFlow("main", {
- *   nodes: { boot, home },
- *   start: "boot",
- *   edges: { boot: { done: "home" }, home: { play: "boot" } }
+ *   nodes: { home, roll },
+ *   start: "home",
+ *   edges: { home: { roll: "roll" }, roll: { done: "home" } }
  * });
  * ```
  */
@@ -123,10 +122,6 @@ export function defineFlow<
  * @param id - Flow id, unique in the game.
  * @param spec - Nodes, start node, edge table, input and outcomes.
  * @returns The flow as plain data.
- * @example
- * ```ts
- * const flow = defineFlow("level", { nodes, start: "prepare", edges });
- * ```
  */
 export function defineFlow(id: string, spec: AnyFlowSpec): AnyFlow {
   return {
@@ -147,7 +142,9 @@ export function defineFlow(id: string, spec: AnyFlowSpec): AnyFlow {
  * @returns The exit target as plain data.
  * @example
  * ```ts
- * edges: { play: { win: exit("win"), lose: exit("lose") } }
+ * // Inside the sub-flow "board": the intent "leave" ends the flow with its outcome "left".
+ * edges: { awaitIntent: { leave: exit("left") } } // the target: { kind: "exit", outcome: "left" }
+ * // The parent flow then follows its own edge: board: { left: "home" }.
  * ```
  */
 export function exit<const Name extends string>(outcome: Name): Exit<Name> {
@@ -163,7 +160,9 @@ export function exit<const Name extends string>(outcome: Name): Exit<Name> {
  * @returns The mapped target as plain data.
  * @example
  * ```ts
+ * // "loadCore" fails with { reason }, "retry" takes { why }: the edge adapts the payload.
  * edges: { loadCore: { failed: to("retry", (failure: { reason: string }) => ({ why: failure.reason })) } }
+ * // to("retry", map): { kind: "map", target: "retry", map }
  * ```
  */
 export function to<const TargetName extends string, Payload, Output>(
@@ -181,7 +180,9 @@ export function to<const TargetName extends string, Payload, Output>(
  * @returns The slot node as plain data.
  * @example
  * ```ts
- * const afterWin = slot("afterWin");
+ * // The main flow leaves room after a finished order. Features contribute sub-flows to it.
+ * nodes: { boot, home, board: boardFlow, afterOrder: slot("afterOrder") }
+ * // slot("afterOrder"): { kind: "slot", name: "afterOrder", input: …, outcomes: { done: … } }
  * ```
  */
 export function slot(name: string): SlotNode {
@@ -196,8 +197,7 @@ export function slot(name: string): SlotNode {
  * @returns One result builder per outcome name.
  * @example
  * ```ts
- * const out = createOut(node.outcomes);
- * const result = await node.run({ ...ctx, out });
+ * createOut({ done: type() }).done?.(); // { outcome: "done", payload: null }
  * ```
  */
 export function createOut(
@@ -211,10 +211,6 @@ export function createOut(
      *
      * @param payload - Data for the next node; absent when the outcome carries none.
      * @returns The result the runner reads to find the edge.
-     * @example
-     * ```ts
-     * return out.done();
-     * ```
      */
     out[outcome] = (payload?: Json): Result => ({ outcome, payload: payload ?? noPayload });
   }

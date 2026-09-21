@@ -14,7 +14,11 @@ import type { Events } from "./types";
  *
  * @example
  * ```ts
- * ctx.require(lifecyclePlugin).push("background");
+ * // A game plugin that reacts to the pause declares the dependency and hooks the event.
+ * const musicPlugin = createPlugin("music", {
+ *   depends: [lifecyclePlugin],
+ *   hooks: () => ({ "lifecycle:changed": ({ paused }) => music.setMuted(paused) })
+ * });
  * ```
  */
 export const lifecyclePlugin = /*#__PURE__*/ createPlugin("lifecycle", {

@@ -13,10 +13,6 @@ import { validateGraph } from "./validate";
  * @param ctx - Domain context of the flow plugin.
  * @returns The top-level flow.
  * @throws {Error} When no main flow was configured.
- * @example
- * ```ts
- * const main = requireMainFlow(ctx);
- * ```
  */
 export function requireMainFlow(ctx: FlowCtx): AnyFlow {
   const main = ctx.config.mainFlow;
@@ -37,10 +33,6 @@ export function requireMainFlow(ctx: FlowCtx): AnyFlow {
  * @param ctx - Domain context of the flow plugin.
  * @param features - Features API, read for the slot contributions.
  * @returns Flow id to flow, the main flow first.
- * @example
- * ```ts
- * ctx.state.runner.flows = collectGraph(ctx, modules.features);
- * ```
  */
 export function collectGraph(ctx: FlowCtx, features: FeaturesApi): Map<string, AnyFlow> {
   const main = requireMainFlow(ctx);
@@ -60,10 +52,6 @@ export function collectGraph(ctx: FlowCtx, features: FeaturesApi): Map<string, A
  * @param ctx - Domain context of the flow plugin.
  * @param features - Features API, read for the slot contributions.
  * @throws {Error} When the graph has problems, all of them in one message.
- * @example
- * ```ts
- * checkGraph(ctx, modules.features);
- * ```
  */
 export function checkGraph(ctx: FlowCtx, features: FeaturesApi): void {
   const report = validateGraph(ctx.state.runner.flows, features, ctx.config);

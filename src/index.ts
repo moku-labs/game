@@ -38,10 +38,6 @@ import type { GameTypes, Kit } from "./plugins/flow/types";
  * The kernel gives this handler no ctx either. Everywhere else errors go through `ctx.log`.
  *
  * @param error - The error thrown by a hook.
- * @example
- * ```ts
- * createCore(coreConfig, { plugins, onError: reportHookError });
- * ```
  */
 function reportHookError(error: Error): void {
   // @log-sink — the only console call in src, see the comment above.
@@ -63,7 +59,11 @@ export * from "./plugins";
  *
  * @example
  * ```ts
- * const app = createApp({ plugins: [boardFeature] });
+ * // The entry point of a game. The graph is started by the game, never by the plugin.
+ * const app = createApp({
+ *   pluginConfigs: { flow: { mainFlow, safeNode: "home" } },
+ *   onStart: ctx => void ctx.flow.run().catch(error => ctx.log.error("game: failed", { error }))
+ * });
  * ```
  */
 export const createApp = framework.createApp;
@@ -73,7 +73,11 @@ export const createApp = framework.createApp;
  *
  * @example
  * ```ts
- * export const scorePlugin = createPlugin("score", { api: createScoreApi });
+ * // A game plugin that writes every edge of the graph to the log.
+ * export const edgeLog = createPlugin("edgeLog", {
+ *   depends: [flowPlugin],
+ *   hooks: ctx => ({ "flow:edge": ({ node, outcome }) => ctx.log.info("edge", { node, outcome }) })
+ * });
  * ```
  */
 export const createPlugin = framework.createPlugin;

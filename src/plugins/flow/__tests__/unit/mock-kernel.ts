@@ -40,10 +40,6 @@ const noop = (): void => {};
  * Builds the default flow config, the same five fields `index.ts` declares.
  *
  * @returns The plugin config used by the root unit tests.
- * @example
- * ```ts
- * const config = createTestConfig();
- * ```
  */
 export function createTestConfig(): Config {
   return {
@@ -80,10 +76,6 @@ export function changed(changes: Partial<LifecycleChanged> = {}): LifecycleChang
  * Creates an empty recorder: nothing required, registered, scheduled or flushed yet.
  *
  * @returns The recorder handed to the fake dependencies.
- * @example
- * ```ts
- * const record = createRecorder();
- * ```
  */
 function createRecorder(): Recorder {
   return {
@@ -101,10 +93,6 @@ function createRecorder(): Recorder {
  * Creates the engine log as spies.
  *
  * @returns A log whose every method is a spy.
- * @example
- * ```ts
- * const log = createMockLog();
- * ```
  */
 function createMockLog(): Log.LogApi {
   return {
@@ -125,10 +113,6 @@ function createMockLog(): Log.LogApi {
  *
  * @param record - The recorder of the mock kernel.
  * @returns The fake time API.
- * @example
- * ```ts
- * const time = createFakeTime(record);
- * ```
  */
 function createFakeTime(record: Recorder): TimeApi {
   return {
@@ -152,10 +136,6 @@ function createFakeTime(record: Recorder): TimeApi {
  *
  * @param record - The recorder of the mock kernel.
  * @returns The fake clock API.
- * @example
- * ```ts
- * const clock = createFakeClock(record);
- * ```
  */
 function createFakeClock(record: Recorder): ClockApi {
   return {
@@ -180,10 +160,6 @@ function createFakeClock(record: Recorder): ClockApi {
  *
  * @param record - The recorder of the mock kernel.
  * @returns The fake model API.
- * @example
- * ```ts
- * const model = createFakeModel(record);
- * ```
  */
 function createFakeModel(record: Recorder): ModelApi {
   return {

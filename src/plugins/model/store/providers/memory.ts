@@ -21,13 +21,21 @@ const noDocument: JsonDocument = {};
  * long as the provider does, so a second app over the same instance reads what the first one
  * wrote, and nothing survives the process.
  *
+ * `load()` reads the fixture, or everything committed since; without either, the player is new.
+ * `commitDurable()` resolves at once: there is no disk behind it.
+ *
  * @param fixture - The save `load()` starts from. Omitted: a new player.
  * @param fixture.state - The saved document.
  * @param fixture.version - Schema version of the saved document.
  * @returns A provider that keeps its document and records its calls.
  * @example
  * ```ts
- * const provider = memory({ state: saveOf({ coins: 5 }, 42), version: 1 });
+ * // A new player is saved at once. One roll reaches the provider at the next rest node.
+ * const provider = memory();
+ * const game = await createHeadless(createGame(provider));
+ *
+ * await game.walk([{ at: "home", intent: "roll" }]);
+ * provider.calls.map(call => call.method); // ["load", "commit", "commit"]
  * ```
  */
 export function memory(fixture?: {
@@ -42,10 +50,6 @@ export function memory(fixture?: {
    * @param patches - Doc patches since the last commit.
    * @param version - Schema version this build writes.
    * @throws {Error} When a patch names a path the held document does not have.
-   * @example
-   * ```ts
-   * hold(patches, 1);
-   * ```
    */
   const hold = (patches: Patch[], version: number): void => {
     held.document = applyTo(held.document ?? noDocument, patches);
@@ -55,16 +59,6 @@ export function memory(fixture?: {
   return {
     calls,
 
-    /**
-     * Reads the save: the fixture, or everything committed since. Without either, the player is
-     * new.
-     *
-     * @returns The held document, or `null` for a new player.
-     * @example
-     * ```ts
-     * const saved = await provider.load();
-     * ```
-     */
     load: async (): Promise<{ state: Json; version: number } | null> => {
       calls.push({ method: "load" });
 
@@ -76,47 +70,16 @@ export function memory(fixture?: {
       return { state: document, version: held.version };
     },
 
-    /**
-     * Records a rest-point commit and applies it to the held document.
-     *
-     * @param patches - Doc patches since the last commit.
-     * @param version - Schema version this build writes.
-     * @example
-     * ```ts
-     * provider.commit(patches, 1);
-     * ```
-     */
     commit: (patches, version): void => {
       calls.push({ method: "commit", patches, version });
       hold(patches, version);
     },
 
-    /**
-     * Records a durable commit and applies it. It resolves at once: there is no disk behind it.
-     *
-     * @param patches - Doc patches since the last commit.
-     * @param txId - Id of the transaction that left the barrier node.
-     * @param version - Schema version this build writes.
-     * @returns Resolves immediately.
-     * @example
-     * ```ts
-     * await provider.commitDurable(patches, "tx-1", 1);
-     * ```
-     */
     commitDurable: async (patches, txId, version): Promise<void> => {
       calls.push({ method: "commitDurable", patches, txId, version });
       hold(patches, version);
     },
 
-    /**
-     * Records a flush.
-     *
-     * @returns Resolves immediately.
-     * @example
-     * ```ts
-     * await provider.flush();
-     * ```
-     */
     flush: async (): Promise<void> => {
       calls.push({ method: "flush" });
     }
@@ -132,6 +95,8 @@ export function memory(fixture?: {
  * @returns The save document.
  * @example
  * ```ts
+ * // A returning player with 5 coins. The test starts from this save, not from `initialPlayer`.
+ * saveOf({ coins: 5 }, 42); // { player: { coins: 5 }, rng: { seed: 42, streams: {} } }
  * const provider = memory({ state: saveOf({ coins: 5 }, 42), version: 1 });
  * ```
  */

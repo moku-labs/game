@@ -9,16 +9,16 @@ import type { PluginCtx } from "@moku-labs/core";
  *
  * @example
  * ```ts
- * // Server time: the device clock is only used to measure the distance from the last sync.
+ * // Server time: the device clock only measures the distance from the last sync. The plugin keeps
+ * // at most one timer alive, so the source remembers one.
  * const serverClock = (serverNow: number): ClockSource => {
  *   const syncedAt = performance.now();
+ *   let timer: ReturnType<typeof setTimeout> | undefined;
  *
  *   return {
  *     now: () => serverNow + (performance.now() - syncedAt),
- *     setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
- *     clearTimer: handle => {
- *       if (typeof handle === "number") clearTimeout(handle);
- *     }
+ *     setTimer: (callback, delayMs) => (timer = setTimeout(callback, delayMs)),
+ *     clearTimer: () => clearTimeout(timer)
  *   };
  * };
  *
@@ -190,10 +190,9 @@ export type Api = {
    *
    * @example
    * ```ts
-   * // The tab comes back from background: the timer of a sleeping tab never fired.
-   * document.addEventListener("visibilitychange", () => {
-   *   if (!document.hidden) app.clock.poke(); // onElapsed listeners get { now } at once
-   * });
+   * // The game synced with its server and the time source jumped forward: let the rules catch up.
+   * // On resume from background the engine pokes by itself, a game never does that.
+   * app.clock.poke(); // onElapsed listeners get { now } at once; the pending moment stays
    * ```
    */
   poke(): void;

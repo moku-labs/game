@@ -29,7 +29,13 @@ const config: Config = {
  *
  * @example
  * ```ts
- * createApp({ pluginConfigs: { flow: { mainFlow } }, onStart: startGraph });
+ * // The game starts the graph itself: an awaited loop in onStart would never let start() resolve.
+ * createApp({
+ *   pluginConfigs: { flow: { mainFlow, safeNode: "home" } },
+ *   onStart: ctx => {
+ *     ctx.flow.run().catch(showFatal);
+ *   }
+ * });
  * ```
  */
 export const flowPlugin = /*#__PURE__*/ createPlugin("flow", {

@@ -13,10 +13,6 @@ import type { Api, LifecycleCtx, PauseReason } from "./types";
  * @param reason - The reason that was pushed or popped.
  * @param action - What happened to that reason.
  * @param resumed - True only on the change that emptied the stack.
- * @example
- * ```ts
- * announce(ctx, "background", "push", false);
- * ```
  */
 function announce(
   ctx: LifecycleCtx,
@@ -36,10 +32,6 @@ function announce(
  * @param ctx - Domain context of the lifecycle plugin.
  * @param time - API of the time plugin, which sits below lifecycle.
  * @param reason - Why the game is paused.
- * @example
- * ```ts
- * pushReason(ctx, time, "background");
- * ```
  */
 function pushReason(ctx: LifecycleCtx, time: TimeApi, reason: PauseReason): void {
   if (ctx.state.reasons.includes(reason)) return;
@@ -61,10 +53,6 @@ function pushReason(ctx: LifecycleCtx, time: TimeApi, reason: PauseReason): void
  * @param ctx - Domain context of the lifecycle plugin.
  * @param time - API of the time plugin, which sits below lifecycle.
  * @param reason - The reason that no longer holds.
- * @example
- * ```ts
- * popReason(ctx, time, "background");
- * ```
  */
 function popReason(ctx: LifecycleCtx, time: TimeApi, reason: PauseReason): void {
   const index = ctx.state.reasons.indexOf(reason);
@@ -88,64 +76,21 @@ function popReason(ctx: LifecycleCtx, time: TimeApi, reason: PauseReason): void 
  *
  * @param ctx - Domain context of the lifecycle plugin.
  * @returns The public API of the lifecycle plugin.
- * @example
- * ```ts
- * const api = createLifecycleApi(ctx);
- * api.push("background");
- * ```
  */
 export function createLifecycleApi(ctx: LifecycleCtx): Api {
   const time = ctx.require(timePlugin);
 
   return {
-    /**
-     * Pushes a reason why the game is paused. A reason already on the stack is ignored, so two
-     * plugins pausing for the same reason never pause twice.
-     *
-     * @param reason - Why the game is paused.
-     * @example
-     * ```ts
-     * lifecycle.push("background");
-     * ```
-     */
     push: reason => {
       pushReason(ctx, time, reason);
     },
 
-    /**
-     * Pops a reason. The game runs again only when the last reason leaves. A reason that is not
-     * on the stack is ignored.
-     *
-     * @param reason - The reason that no longer holds.
-     * @example
-     * ```ts
-     * lifecycle.pop("background");
-     * ```
-     */
     pop: reason => {
       popReason(ctx, time, reason);
     },
 
-    /**
-     * Reads the stack as a frozen copy, in insertion order, so a caller cannot write into it.
-     *
-     * @returns The pause reasons currently held.
-     * @example
-     * ```ts
-     * const holding = lifecycle.reasons();
-     * ```
-     */
     reasons: () => Object.freeze([...ctx.state.reasons]),
 
-    /**
-     * Tells whether the game is paused: true while the stack is not empty.
-     *
-     * @returns True while at least one reason holds.
-     * @example
-     * ```ts
-     * if (lifecycle.isPaused()) showPauseScreen();
-     * ```
-     */
     isPaused: () => ctx.state.reasons.length > 0
   };
 }

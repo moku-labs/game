@@ -30,10 +30,6 @@ const noPayload: Json = null;
  * @param method - Name of the API method that needs it, for the message.
  * @returns The top-level flow.
  * @throws {Error} When no main flow was configured.
- * @example
- * ```ts
- * const main = mainFlow(ctx, "restore");
- * ```
  */
 function mainFlow(ctx: FlowCtx, method: string): AnyFlow {
   const main = ctx.config.mainFlow;
@@ -53,10 +49,6 @@ function mainFlow(ctx: FlowCtx, method: string): AnyFlow {
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
  * @returns The graph.
- * @example
- * ```ts
- * const graph = graphOf(ctx, modules);
- * ```
  */
 function graphOf(ctx: FlowCtx, modules: Modules): FlowGraph {
   return describeGraph(collectGraph(ctx, modules.features), modules.features);
@@ -68,10 +60,6 @@ function graphOf(ctx: FlowCtx, modules: Modules): FlowGraph {
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
  * @returns The path of the first checkpoint, or the start of the main flow.
- * @example
- * ```ts
- * const safe = someCheckpoint(ctx, modules);
- * ```
  */
 function someCheckpoint(ctx: FlowCtx, modules: Modules): string {
   const main = mainFlow(ctx, "restore");
@@ -95,10 +83,6 @@ function someCheckpoint(ctx: FlowCtx, modules: Modules): string {
  * @param modules - Injected sibling APIs.
  * @param bookmark - The bookmark to enter.
  * @throws {Error} When the path is no rest node, or the graph changed since the bookmark.
- * @example
- * ```ts
- * checkBookmark(ctx, modules, bookmark);
- * ```
  */
 function checkBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void {
   const entry = findNode(mainFlow(ctx, "restore"), bookmark.path)?.entry;
@@ -124,10 +108,6 @@ function checkBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
  * @param modules - Injected sibling APIs.
  * @returns A rest node plus a state that really existed there.
  * @throws {Error} When the graph has no position yet.
- * @example
- * ```ts
- * const bookmark = makeBookmark(ctx, modules);
- * ```
  */
 function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
   const state = ctx.state.runner;
@@ -161,10 +141,6 @@ function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
  * @param bookmark - The bookmark to enter.
  * @returns A promise that resolves once the loop rests at the bookmark's node.
  * @throws {Error} When the bookmark names no rest node of this graph.
- * @example
- * ```ts
- * await enterBookmark(ctx, modules, bookmark);
- * ```
  */
 async function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): Promise<void> {
   checkBookmark(ctx, modules, bookmark);
@@ -177,10 +153,6 @@ async function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark)
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns True while the position is empty or points at a rest node.
- * @example
- * ```ts
- * if (!resting(ctx)) throw new Error("...");
- * ```
  */
 function resting(ctx: FlowCtx): boolean {
   const frame = ctx.state.runner.stack.at(-1);
@@ -199,26 +171,11 @@ function resting(ctx: FlowCtx): boolean {
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
  * @returns The runner API.
- * @example
- * ```ts
- * const runner = createRunnerApi(ctx, { features, fx, gate, inbox });
- * ```
  */
 export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
   const state = ctx.state.runner;
 
   return {
-    /**
-     * Validates the graph, seals the features, loads the save and runs the one loop until
-     * `onStop` aborts it. A fatal error rejects: the consumer catches it.
-     *
-     * @returns The promise of the running graph.
-     * @throws {Error} When `run()` was already called.
-     * @example
-     * ```ts
-     * createApp({ onStart: context => context.flow.run().catch(showFatal) });
-     * ```
-     */
     run: (): Promise<void> => {
       if (state.running !== undefined) {
         throw new Error(
@@ -233,16 +190,6 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
       return running;
     },
 
-    /**
-     * Adds a flow the main flow does not reach by reference. Before `run()` only.
-     *
-     * @param flow - The flow to add.
-     * @throws {Error} When the runner is already running.
-     * @example
-     * ```ts
-     * app.flow.register(debugFlow);
-     * ```
-     */
     register: (flow: AnyFlow): void => {
       if (state.running !== undefined) {
         throw new Error(
@@ -253,18 +200,6 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
       if (!state.flows.has(flow.id)) state.flows.set(flow.id, flow);
     },
 
-    /**
-     * Registers a callback run before every node body: `assets` preloads at `load`, `scenes`
-     * switches at `scene`.
-     *
-     * @param stage - `"load"` or `"scene"`.
-     * @param callback - Called with the node and `{ mode, signal }`, awaited.
-     * @returns The unregister function.
-     * @example
-     * ```ts
-     * const off = app.flow.onEnter("load", node => assets.preload(node.path));
-     * ```
-     */
     onEnter: (stage: Stage, callback: EnterCallback): (() => void) => {
       const callbacks = state.enterCallbacks[stage];
 
@@ -277,20 +212,6 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
       };
     },
 
-    /**
-     * Walks a route in fast mode through the running loop. A `from` bookmark is entered through
-     * the same check as `restore`.
-     *
-     * @param route - The player's answers and substituted sub-flow results, in order.
-     * @param options - Walk options.
-     * @param options.from - Bookmark restored before the first step.
-     * @returns The state the walk ended in.
-     * @throws {Error} When the bookmark names no rest node of this graph.
-     * @example
-     * ```ts
-     * await app.flow.walk([{ at: "home", intent: "play" }]);
-     * ```
-     */
     walk: (route: readonly RouteStep[], options?: { from?: Bookmark }): Promise<FlowState> => {
       const from = options?.from;
 
@@ -302,61 +223,18 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
          *
          * @param bookmark - The bookmark to enter.
          * @returns A promise that resolves once the loop rests at its node.
-         * @example
-         * ```ts
-         * await start.restore(start.from);
-         * ```
          */
         restore: (bookmark: Bookmark): Promise<void> => enterBookmark(ctx, modules, bookmark),
         from
       });
     },
 
-    /**
-     * Makes a bookmark of the current rest point.
-     *
-     * @returns The bookmark, ready for JSON.
-     * @example
-     * ```ts
-     * const bookmark = app.flow.bookmark();
-     * ```
-     */
     bookmark: (): Bookmark => makeBookmark(ctx, modules),
 
-    /**
-     * Replaces the state with the bookmark's and enters its node. A checkpoint is always
-     * accepted; any other rest node only while the graph is unchanged.
-     *
-     * @param bookmark - The bookmark to enter.
-     * @returns A promise that resolves once the graph rests at the bookmark's node.
-     * @throws {Error} When the bookmark names no rest node of this graph.
-     * @example
-     * ```ts
-     * await app.flow.restore(bookmark);
-     * ```
-     */
     restore: (bookmark: Bookmark): Promise<void> => enterBookmark(ctx, modules, bookmark),
 
-    /**
-     * Renders the whole graph as JSON, without running the game.
-     *
-     * @returns Nodes, flags, outcomes, edges, slots and who contributed.
-     * @example
-     * ```ts
-     * const graph = app.flow.describe();
-     * ```
-     */
     describe: (): FlowGraph => graphOf(ctx, modules),
 
-    /**
-     * Reads where the graph stands.
-     *
-     * @returns Whether it runs, the path, the stack, what it waits for and the mode.
-     * @example
-     * ```ts
-     * expect(app.flow.state().path).toBe("board/awaitIntent");
-     * ```
-     */
     state: (): FlowState => {
       const open = ctx.state.gate.open;
 
@@ -369,27 +247,8 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
       };
     },
 
-    /**
-     * Reads the edges taken since the last checkpoint.
-     *
-     * @returns A copy of the journal.
-     * @example
-     * ```ts
-     * const [last] = app.flow.history().slice(-1);
-     * ```
-     */
     history: (): readonly JournalEntry[] => [...state.journal],
 
-    /**
-     * Switches between live and fast mode. Legal before `run()` and while the graph rests.
-     *
-     * @param mode - `"live"` or `"fast"`.
-     * @throws {Error} When a transit node is running.
-     * @example
-     * ```ts
-     * app.flow.setMode("fast");
-     * ```
-     */
     setMode: (mode: "live" | "fast"): void => {
       if (state.running !== undefined && !resting(ctx)) {
         throw new Error(

@@ -24,7 +24,13 @@ const config: Config = {
  *
  * @example
  * ```ts
- * const transaction = ctx.require(modelPlugin).store.begin();
+ * // A game plugin that draws from committed state declares the dependency and reads the snapshot.
+ * const hudPlugin = createPlugin("hud", {
+ *   depends: [modelPlugin],
+ *   hooks: ctx => ({
+ *     "model:committed": () => drawCoins(ctx.require(modelPlugin).store.snapshot().player)
+ *   })
+ * });
  * ```
  */
 export const modelPlugin = /*#__PURE__*/ createPlugin("model", {

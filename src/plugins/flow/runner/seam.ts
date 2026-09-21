@@ -10,7 +10,7 @@ import type { LoopSeam, Result, RunnerState } from "./types";
  * @returns An empty map of path to substituted result.
  * @example
  * ```ts
- * const substitutions = emptySubstitutions();
+ * emptySubstitutions().size; // 0
  * ```
  */
 function emptySubstitutions(): Map<string, Result> {
@@ -23,10 +23,6 @@ function emptySubstitutions(): Map<string, Result> {
  *
  * @param state - Runner state.
  * @returns The seam of this runner.
- * @example
- * ```ts
- * loopSeam(ctx.state.runner).substitutions.set("level", { outcome: "win", payload: null });
- * ```
  */
 export function loopSeam(state: RunnerState): LoopSeam {
   const existing = state.seam;
@@ -51,10 +47,6 @@ export function loopSeam(state: RunnerState): LoopSeam {
  * @param state - Runner state.
  * @param path - Path of the sub-flow node.
  * @returns True while a walk holds a result for it.
- * @example
- * ```ts
- * if (hasSubstitution(state, "level")) return;
- * ```
  */
 export function hasSubstitution(state: RunnerState, path: string): boolean {
   return state.seam?.substitutions.has(path) ?? false;
@@ -66,10 +58,6 @@ export function hasSubstitution(state: RunnerState, path: string): boolean {
  * @param state - Runner state.
  * @param path - Path of the sub-flow node.
  * @returns The result a walk substituted, or `undefined`.
- * @example
- * ```ts
- * const substituted = takeSubstitution(state, framePath(state.stack));
- * ```
  */
 export function takeSubstitution(state: RunnerState, path: string): Result | undefined {
   const result = state.seam?.substitutions.get(path);
@@ -86,10 +74,6 @@ export function takeSubstitution(state: RunnerState, path: string): Result | und
  *
  * @param state - Runner state.
  * @param path - Path of the rest node just entered.
- * @example
- * ```ts
- * notifyRest(state, plan.next);
- * ```
  */
 export function notifyRest(state: RunnerState, path: string): void {
   const listeners = state.seam?.rest;
@@ -106,10 +90,6 @@ export function notifyRest(state: RunnerState, path: string): void {
  * the gate module never learns about the walk.
  *
  * @param state - Runner state.
- * @example
- * ```ts
- * notifyGateOpen(ctx.state.runner);
- * ```
  */
 export function notifyGateOpen(state: RunnerState): void {
   const listeners = state.seam?.gateOpen;

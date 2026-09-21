@@ -18,7 +18,8 @@ const MAX_NODES = 15;
  * @returns The node name, or `undefined` for an exit.
  * @example
  * ```ts
- * const next = targetNode(flow.edges.merge?.done ?? "");
+ * targetNode("home"); // "home"
+ * targetNode({ kind: "exit", outcome: "left" }); // undefined
  * ```
  */
 function targetNode(target: Target): string | undefined {
@@ -35,7 +36,7 @@ function targetNode(target: Target): string | undefined {
  * @returns True when the graph can come to rest inside the entry.
  * @example
  * ```ts
- * const waits = entryRests(flow.nodes.board, new Set());
+ * entryRests(boardFlow, new Set()); // true: "awaitIntent" rests inside it
  * ```
  */
 function entryRests(entry: FlowEntry, seen: Set<string>): boolean {
@@ -56,7 +57,8 @@ function entryRests(entry: FlowEntry, seen: Set<string>): boolean {
  * @returns Names of existing nodes of this flow.
  * @example
  * ```ts
- * const next = nextNodes(boardFlow, "merge");
+ * nextNodes(boardFlow, "awaitIntent");
+ * // ["tapGenerator", "merge", "giveToOrder", "catchUp"]: exit("left") names no node
  * ```
  */
 function nextNodes(flow: AnyFlow, name: string): string[] {
@@ -83,7 +85,8 @@ function nextNodes(flow: AnyFlow, name: string): string[] {
  * @returns The problem, or `undefined` when the target exists.
  * @example
  * ```ts
- * const problem = targetProblem(boardFlow, "merge", "done", "awaitIntnet");
+ * targetProblem(boardFlow, "merge", "done", "awaitIntent"); // undefined: the node exists
+ * targetProblem(boardFlow, "merge", "done", "awaitIntnet"); // a sentence: … names no node …
  * ```
  */
 function targetProblem(
@@ -114,7 +117,8 @@ function targetProblem(
  * @returns True when the target is a rest node of this flow.
  * @example
  * ```ts
- * const safe = leadsToRest(boardFlow, "home");
+ * leadsToRest(boardFlow, "awaitIntent"); // true
+ * leadsToRest(boardFlow, { kind: "exit", outcome: "left" }); // false
  * ```
  */
 function leadsToRest(flow: AnyFlow, target: Target): boolean {
@@ -132,7 +136,7 @@ function leadsToRest(flow: AnyFlow, target: Target): boolean {
  * @returns One sentence per problem.
  * @example
  * ```ts
- * const problems = edgeProblems(boardFlow);
+ * edgeProblems(boardFlow); // []: every outcome has an edge and every target exists
  * ```
  */
 function edgeProblems(flow: AnyFlow): string[] {
@@ -174,7 +178,7 @@ function edgeProblems(flow: AnyFlow): string[] {
  * @returns One sentence per problem.
  * @example
  * ```ts
- * const problems = nodeProblems(boardFlow);
+ * nodeProblems(boardFlow); // []: "elapsed" of awaitIntent.inbox is one of its outcomes
  * ```
  */
 function nodeProblems(flow: AnyFlow): string[] {
@@ -214,7 +218,7 @@ function nodeProblems(flow: AnyFlow): string[] {
  * @returns One sentence per problem.
  * @example
  * ```ts
- * const problems = reachProblems(boardFlow);
+ * reachProblems(boardFlow); // []: every node is reached from "awaitIntent"
  * ```
  */
 function reachProblems(flow: AnyFlow): string[] {
@@ -254,7 +258,7 @@ function reachProblems(flow: AnyFlow): string[] {
  * @returns The cycle, first node repeated at the end, or `undefined`.
  * @example
  * ```ts
- * const cycle = findCycle(boardFlow, "merge", [], new Set());
+ * findCycle(boardFlow, "merge", [], new Set()); // undefined: "merge" leads to a rest node
  * ```
  */
 function findCycle(
@@ -290,7 +294,7 @@ function findCycle(
  * @returns One sentence per cycle.
  * @example
  * ```ts
- * const problems = cycleProblems(boardFlow);
+ * cycleProblems(boardFlow); // []: every way round passes the rest node "awaitIntent"
  * ```
  */
 function cycleProblems(flow: AnyFlow): string[] {
@@ -319,7 +323,7 @@ function cycleProblems(flow: AnyFlow): string[] {
  * @returns One sentence per colliding id.
  * @example
  * ```ts
- * const problems = flowIdProblems(flows);
+ * flowIdProblems(collectFlows(mainFlow, [])); // []: "main" and "board" differ
  * ```
  */
 function flowIdProblems(flows: ReadonlyMap<string, AnyFlow>): string[] {
@@ -349,10 +353,6 @@ function flowIdProblems(flows: ReadonlyMap<string, AnyFlow>): string[] {
  * @param flows - Every collected flow by id.
  * @param features - Features API: names and slot contributions.
  * @returns One sentence per problem.
- * @example
- * ```ts
- * const problems = featureProblems(flows, features);
- * ```
  */
 function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: FeaturesApi): string[] {
   const problems: string[] = [];
@@ -401,7 +401,8 @@ function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: Features
  * @returns One sentence, or none.
  * @example
  * ```ts
- * const problems = safeNodeProblems(ctx.config);
+ * // config: { mainFlow, safeNode: "board/awaitIntent", … } of the merge game
+ * safeNodeProblems(config); // one sentence: the safe node is not a checkpoint
  * ```
  */
 function safeNodeProblems(config: Readonly<Config>): string[] {
@@ -432,7 +433,7 @@ function safeNodeProblems(config: Readonly<Config>): string[] {
  * @returns One sentence, or none.
  * @example
  * ```ts
- * const warnings = sizeWarnings(boardFlow);
+ * sizeWarnings(boardFlow); // []: five nodes, the warning starts above fifteen
  * ```
  */
 function sizeWarnings(flow: AnyFlow): string[] {
@@ -458,11 +459,6 @@ function sizeWarnings(flow: AnyFlow): string[] {
  * @param features - Features API: slot contributions and feature names.
  * @param config - Resolved flow config: `mainFlow`, `safeNode`.
  * @returns Problems that stop `run()`, and warnings for the caller to log.
- * @example
- * ```ts
- * const { problems, warnings } = validateGraph(flows, features, config);
- * if (problems.length > 0) throw new Error(problems.join("\n"));
- * ```
  */
 export function validateGraph(
   flows: ReadonlyMap<string, AnyFlow>,

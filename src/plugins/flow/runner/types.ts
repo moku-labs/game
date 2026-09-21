@@ -26,11 +26,6 @@ export type TypeTag<Payload> = {
 
 /**
  * Any type tag. The bound of tag records: it names no payload, so `type()` infers nothing from it.
- *
- * @example
- * ```ts
- * const tag: AnyTypeTag = type<{ level: number }>();
- * ```
  */
 export type AnyTypeTag = { readonly kind: "type" };
 
@@ -86,7 +81,8 @@ type IsVoid<Payload> =
  *
  * @example
  * ```ts
- * const result: Result<"done" | "rejected"> = out.done();
+ * // What `out.rejected({ reason: "empty" })` returns, and what the journal keeps of the edge.
+ * const result: Result = { outcome: "rejected", payload: { reason: "empty" } };
  * ```
  */
 export type Result<Name extends string = string> = {
@@ -100,7 +96,9 @@ export type Result<Name extends string = string> = {
  *
  * @example
  * ```ts
- * run: ({ out }) => (broken ? out.failed({ reason: "clock" }) : out.done())
+ * // In a node with outcomes { done: type(), rejected: type<{ reason: string }>() }:
+ * out.done(); // { outcome: "done", payload: null }
+ * out.rejected({ reason: "empty" }); // { outcome: "rejected", payload: { reason: "empty" } }
  * ```
  */
 export type Out<Tags extends OutcomeTags> = {
@@ -115,7 +113,12 @@ export type Out<Tags extends OutcomeTags> = {
  *
  * @example
  * ```ts
- * run: ({ input, player, out }: NodeContext<Game, { level: number }, Tags>) => out.done()
+ * // The "roll" node of a dice game: the drafts are written in place, the edge commits them.
+ * run: ({ player, session, rng, out }) => {
+ *   player.coins += rng.stream("dice").range(1, 6);
+ *   session.rolls += 1;
+ *   return out.done();
+ * }
  * ```
  */
 export type NodeContext<
@@ -135,11 +138,6 @@ export type NodeContext<
 
 /**
  * The body of a node: plain `await` code that ends with `out.name(data)`.
- *
- * @example
- * ```ts
- * const run: NodeRun<Game, void, { done: TypeTag<void> }> = ({ out }) => out.done();
- * ```
  */
 export type NodeRun<Game extends GameState, Input, Tags extends OutcomeTags> = (
   ctx: NodeContext<Game, Input, Tags>
@@ -147,11 +145,6 @@ export type NodeRun<Game extends GameState, Input, Tags extends OutcomeTags> = (
 
 /**
  * The part of a node, or of a flow used as a node, that an edge table looks at.
- *
- * @example
- * ```ts
- * const wired: Wired<{ level: number }, { win: TypeTag<void> }> = levelFlow;
- * ```
  */
 export type Wired<Input, Tags extends OutcomeTags> = {
   readonly input: TypeTag<Input>;
@@ -160,21 +153,11 @@ export type Wired<Input, Tags extends OutcomeTags> = {
 
 /**
  * Anything that can sit in the `nodes` of a flow: a node, a sub-flow or a slot.
- *
- * @example
- * ```ts
- * const entry: AnyWired = catchUp;
- * ```
  */
 export type AnyWired = { readonly input: AnyTypeTag; readonly outcomes: OutcomeTags };
 
 /**
  * Node name to node: the `nodes` of one flow.
- *
- * @example
- * ```ts
- * const nodes = { catchUp, awaitIntent, merge } satisfies NodeTable;
- * ```
  */
 export type NodeTable = Readonly<Record<string, AnyWired>>;
 
@@ -183,11 +166,9 @@ export type NodeTable = Readonly<Record<string, AnyWired>>;
  *
  * @example
  * ```ts
- * const merge: NodeDefinition<{ from: string; to: string }, { done: TypeTag<void> }> = defineNode({
- *   input: type<{ from: string; to: string }>(),
- *   outcomes: { done: type() },
- *   run: ({ out }) => out.done()
- * });
+ * // What defineNode({ outcomes: { play: type() }, rest: true, checkpoint: true }) returns:
+ * // { kind: "node", input: { kind: "type" }, outcomes: { play: { kind: "type" } }, rest: true,
+ * //   over: false, checkpoint: true, barrier: false, inbox: [] }
  * ```
  */
 export type NodeDefinition<
@@ -250,7 +231,9 @@ export type DefineNode<Game extends GameState> = <
  *
  * @example
  * ```ts
- * const afterWin: SlotNode = slot("afterWin");
+ * const afterOrder: SlotNode = slot("afterOrder");
+ * // { kind: "slot", name: "afterOrder", input: { kind: "type" },
+ * //   outcomes: { done: { kind: "type" } } }
  * ```
  */
 export type SlotNode = Wired<void, { readonly done: TypeTag<void> }> & {
@@ -265,7 +248,7 @@ export type SlotNode = Wired<void, { readonly done: TypeTag<void> }> & {
  *
  * @example
  * ```ts
- * const leave: Exit<"win"> = exit("win");
+ * const leave: Exit<"left"> = exit("left"); // { kind: "exit", outcome: "left" }
  * ```
  */
 export type Exit<Name extends string = string> = {
@@ -296,11 +279,6 @@ export type Mapped<TargetName extends string = string, Payload = never, Output =
  * compared bivariantly, so every checked `Mapped` fits and the runner calls it without a cast.
  * The result is `unknown`: a mapper into a node without input returns nothing, and the runner
  * checks that a mapped payload is plain JSON before it becomes the next input.
- *
- * @example
- * ```ts
- * const input = mapped.map(result.payload);
- * ```
  */
 export type AnyMapped = {
   readonly kind: "map";
@@ -313,7 +291,8 @@ export type AnyMapped = {
  *
  * @example
  * ```ts
- * const target: Target | undefined = flow.edges[node]?.[result.outcome];
+ * const next: Target = "home"; // a node of the same flow
+ * const leave: Target = exit("left"); // { kind: "exit", outcome: "left" }
  * ```
  */
 export type Target = string | Exit | AnyMapped;
@@ -370,11 +349,6 @@ type ExitNamesFor<FlowTags extends OutcomeTags, Payload> = {
 
 /**
  * Every correctly typed `to(node, map)` for `Payload`.
- *
- * @example
- * ```ts
- * type Adapters = MappedFor<{ retry: typeof retry }, { reason: string }>;
- * ```
  */
 type MappedFor<Nodes extends NodeTable, Payload> = {
   [Name in keyof Nodes & string]: Mapped<Name, Payload, InputOf<Nodes[Name]>>;
@@ -382,11 +356,6 @@ type MappedFor<Nodes extends NodeTable, Payload> = {
 
 /**
  * Descriptive type: every legal target of an outcome that carries `Payload`.
- *
- * @example
- * ```ts
- * type AfterMerge = TargetFor<BoardNodes, BoardOutcomes, void>;
- * ```
  */
 export type TargetFor<Nodes extends NodeTable, FlowTags extends OutcomeTags, Payload> =
   | NodeNamesFor<Nodes, Payload>
@@ -400,7 +369,7 @@ export type TargetFor<Nodes extends NodeTable, FlowTags extends OutcomeTags, Pay
  * @example
  * ```ts
  * const edges: Edges<{ boot: typeof boot; home: typeof home }, Record<never, never>> = {
- *   boot: { done: "home" },
+ *   boot: { ready: "home" },
  *   home: { play: "boot" }
  * };
  * ```
@@ -430,11 +399,6 @@ export type GraphError<Message extends string> = { readonly $graphError: Message
 
 /**
  * The loosest legal target of a flow: what a missing entry is expected to be.
- *
- * @example
- * ```ts
- * type Missing = AnyTargetOf<BoardNodes, BoardOutcomes>;
- * ```
  */
 type AnyTargetOf<Nodes extends NodeTable, FlowTags extends OutcomeTags> =
   | (keyof Nodes & string)
@@ -444,11 +408,6 @@ type AnyTargetOf<Nodes extends NodeTable, FlowTags extends OutcomeTags> =
 /**
  * Checks one entry `Value` of the inferred edge table. A legal entry stays itself; a wrong one
  * becomes a `GraphError` sentence.
- *
- * @example
- * ```ts
- * type Checked = CheckTarget<BoardNodes, BoardOutcomes, "merge", "done", void, "awaitIntent">;
- * ```
  */
 type CheckTarget<
   Nodes extends NodeTable,
@@ -518,8 +477,9 @@ export type CheckedEdges<Nodes extends NodeTable, FlowTags extends OutcomeTags, 
  *
  * @example
  * ```ts
- * const levelFlow: FlowDefinition<{ level: number }, { win: TypeTag<void> }, LevelNodes> =
- *   defineFlow("level", { input, outcomes, nodes, start: "prepare", edges });
+ * // What defineFlow("main", { nodes: { boot, home }, start: "boot", edges }) returns:
+ * // { kind: "flow", id: "main", input: { kind: "type" }, outcomes: {}, nodes: { boot, home },
+ * //   start: "boot", edges: { boot: { ready: "home" }, home: { play: "boot" } } }
  * ```
  */
 export type FlowDefinition<
@@ -540,7 +500,13 @@ export type FlowDefinition<
  *
  * @example
  * ```ts
- * defineFlow("main", { nodes: { boot, home }, start: "boot", edges: { boot: { done: "home" } } });
+ * // The spec of a sub-flow: `outcomes` makes it usable as a node, exit() leaves it.
+ * defineFlow("rewardPopup", {
+ *   nodes: { show, grant },
+ *   start: "show",
+ *   outcomes: { done: type() },
+ *   edges: { show: { claim: "grant" }, grant: { done: exit("done") } }
+ * });
  * ```
  */
 export type FlowSpec<Nodes extends NodeTable, Input, FlowTags extends OutcomeTags, Table> = {
@@ -555,11 +521,6 @@ export type FlowSpec<Nodes extends NodeTable, Input, FlowTags extends OutcomeTag
 
 /**
  * The node context as the runner builds it. Every typed `NodeContext` is assignable to it.
- *
- * @example
- * ```ts
- * const ctx: AnyNodeContext = { input, player, session, rng, fx, out, signal, now };
- * ```
  */
 export type AnyNodeContext = {
   input: unknown;
@@ -593,11 +554,6 @@ export type AnyNode = AnyWired & {
 
 /**
  * One entry of a flow's `nodes`: a node, a sub-flow or a slot. The `kind` field tells them apart.
- *
- * @example
- * ```ts
- * const entry: FlowEntry | undefined = flow.nodes[name];
- * ```
  */
 export type FlowEntry = AnyNode | AnyFlow | SlotNode;
 
@@ -606,7 +562,7 @@ export type FlowEntry = AnyNode | AnyFlow | SlotNode;
  *
  * @example
  * ```ts
- * const flows: Map<string, AnyFlow> = collectFlows(mainFlow, []);
+ * const flows: readonly AnyFlow[] = [mainFlow, boardFlow, rewardFlow];
  * ```
  */
 export type AnyFlow = AnyWired & {
@@ -620,11 +576,6 @@ export type AnyFlow = AnyWired & {
 /**
  * Where a path leads: the entry, the flow that holds it and one `{ flow, node }` pair per level,
  * outermost first. The loop turns the trail into frames.
- *
- * @example
- * ```ts
- * const { entry, trail } = findNode(mainFlow, "board/awaitIntent") ?? {};
- * ```
  */
 export type NodeLocation = {
   /** The flow that holds the entry. */
@@ -653,7 +604,11 @@ export type Frame = { flow: string; node: string; input: Json };
  *
  * @example
  * ```ts
- * const [last]: readonly JournalEntry[] = app.flow.history().slice(-1);
+ * // The play button on "home" led into the board sub-flow.
+ * const entry: JournalEntry = {
+ *   index: 1, path: "home", outcome: "play", payload: null,
+ *   next: "board/awaitIntent", now: 1_790_000_000_000, hash: "fbeb1a2f"
+ * };
  * ```
  */
 export type JournalEntry = {
@@ -672,8 +627,8 @@ export type JournalEntry = {
  * @example
  * ```ts
  * const route: RouteStep[] = [
- *   { at: "home", intent: "play" },
- *   { at: "level", result: { outcome: "win", payload: { stars: 3 } } }
+ *   { at: "home", intent: "play" }, // the answer "play" at the rest node "home"
+ *   { at: "board", result: { outcome: "left" } } // the sub-flow "board" is skipped with "left"
  * ];
  * ```
  */
@@ -687,8 +642,11 @@ export type RouteStep =
  *
  * @example
  * ```ts
- * const bookmark: Bookmark = app.flow.bookmark();
- * await app.flow.restore(bookmark);
+ * const bookmark: Bookmark = {
+ *   path: "board/awaitIntent", input: null,
+ *   player: { coins: 7 }, session: { taps: 0 },
+ *   rng: { seed: 42, streams: {} }, graph: "9bcf2186"
+ * };
  * ```
  */
 export type Bookmark = {
@@ -705,7 +663,11 @@ export type Bookmark = {
  *
  * @example
  * ```ts
- * app.flow.onEnter("load", (node: NodeInfo) => preload(node.path));
+ * // The rest node "awaitIntent" of the sub-flow "board" is being entered.
+ * const node: NodeInfo = {
+ *   path: "board/awaitIntent", flow: "board", node: "awaitIntent",
+ *   rest: true, over: false, checkpoint: false, barrier: false
+ * };
  * ```
  */
 export type NodeInfo = {
@@ -725,7 +687,10 @@ export type NodeInfo = {
  * @example
  * ```ts
  * const graph: FlowGraph = app.flow.describe();
- * graph.flows[graph.main]?.start;
+ *
+ * graph.main; // "main"
+ * graph.flows.board?.edges.awaitIntent?.leave; // "exit:left"; a mapped target reads "map:node"
+ * graph.slots.afterOrder; // [{ feature: "reward", flow: "rewardPopup", order: 10 }]
  * ```
  */
 export type FlowGraph = {
@@ -747,7 +712,12 @@ export type FlowGraph = {
  *
  * @example
  * ```ts
- * const node: GraphNode | undefined = app.flow.describe().flows.main?.nodes.board;
+ * // app.flow.describe().flows.main?.nodes.board: the sub-flow "board" used as a node of "main".
+ * const node: GraphNode = {
+ *   path: "main/board", flow: "main", node: "board",
+ *   rest: false, over: false, checkpoint: false, barrier: false,
+ *   outcomes: ["orderComplete", "left"], subFlow: "board"
+ * };
  * ```
  */
 export type GraphNode = NodeInfo & {
@@ -760,11 +730,6 @@ export type GraphNode = NodeInfo & {
 /**
  * What `validateGraph` returns: problems that stop `run()`, and warnings the caller logs. A flow
  * above fifteen nodes is a warning, never an error.
- *
- * @example
- * ```ts
- * const { problems, warnings } = validateGraph(flows, features, config);
- * ```
  */
 export type ValidationReport = { problems: string[]; warnings: string[] };
 
@@ -773,7 +738,11 @@ export type ValidationReport = { problems: string[]; warnings: string[] };
  *
  * @example
  * ```ts
- * const { path, pending }: FlowState = app.flow.state();
+ * // The graph rests at "home" and waits for the intent "play".
+ * const state: FlowState = {
+ *   running: true, path: "home", stack: [{ flow: "main", node: "home", input: null }],
+ *   pending: { gate: ["play"] }, mode: "live"
+ * };
  * ```
  */
 export type FlowState = {
@@ -799,7 +768,12 @@ export type Stage = "load" | "scene";
  *
  * @example
  * ```ts
- * const preloadNode: EnterCallback = (node, { signal }) => assets.preload(node.path, signal);
+ * // The "load" stage of a game plugin: the loop waits for it before the body of the node runs.
+ * const preloadNode: EnterCallback = async (node, { signal }) => {
+ *   if (node.flow === "board") await preloadBoard(signal); // node.path: "board/awaitIntent"
+ * };
+ *
+ * app.flow.onEnter("load", preloadNode);
  * ```
  */
 export type EnterCallback = (
@@ -810,11 +784,6 @@ export type EnterCallback = (
 /**
  * The seam the fast walk and `restore` steer the running loop with. It stays absent while the
  * game just runs: `walk.ts` and `restore` create it through `loopSeam` when they need it.
- *
- * @example
- * ```ts
- * loopSeam(ctx.state.runner).substitutions.set("level", { outcome: "win", payload: null });
- * ```
  */
 export type LoopSeam = {
   /** Sub-flow results a walk substitutes, by path. The loop takes each one once. */
@@ -829,11 +798,6 @@ export type LoopSeam = {
 
 /**
  * runner module state.
- *
- * @example
- * ```ts
- * const runner: RunnerState = createRunnerState();
- * ```
  */
 export type RunnerState = {
   /** Flush started by a background pause. `onStop` awaits it. */
@@ -860,11 +824,6 @@ export type RunnerState = {
 
 /**
  * The sibling module APIs injected into the runner, public and internal parts together.
- *
- * @example
- * ```ts
- * const runner = createRunnerApi(ctx, { features, fx, gate, inbox });
- * ```
  */
 export type Modules = {
   features: FeaturesApi & FeaturesInternal;
@@ -874,22 +833,169 @@ export type Modules = {
 };
 
 /**
- * runner module API. Its methods are spread onto the plugin root: `app.flow.run()`.
+ * runner module API. Its methods are spread onto the plugin root: `app.flow.run()`. `run` owns
+ * the one loop, `walk` and `restore` enter a position through it, `describe`, `state` and
+ * `history` inspect it.
  *
  * @example
  * ```ts
- * createApp({ onStart: ctx => { ctx.flow.run().catch(showFatal); } });
+ * // A live game starts the graph once and then only reads it: answers go through the gate.
+ * app.flow.run().catch(showFatal);
+ * app.flow.state().path; // "home", once the transit node "boot" was played out
  * ```
  */
 export type RunnerApi = {
+  /**
+   * Validates the graph, seals the features, loads the save and runs the one loop until `onStop`
+   * aborts it. A fatal error rejects: the consumer catches it.
+   *
+   * @returns The promise of the running graph. It resolves when the app stops.
+   * @throws {Error} When `run()` was already called.
+   * @example
+   * ```ts
+   * // The game starts the graph from onStart and does not await it: the loop never ends.
+   * createApp({
+   *   pluginConfigs: { flow: { mainFlow, safeNode: "home" } },
+   *   onStart: ctx => {
+   *     ctx.flow.run().catch(showFatal); // a broken graph or an unreadable save ends up here
+   *   }
+   * });
+   * ```
+   */
   run(): Promise<void>;
+
+  /**
+   * Adds a flow the main flow does not reach by reference. Before `run()` only.
+   *
+   * @param flow - The flow to add.
+   * @throws {Error} When the runner is already running.
+   * @remarks No example: no game and no engine plugin calls it; every flow the loop enters is
+   *   reached from `mainFlow` or contributed to a slot.
+   */
   register(flow: AnyFlow): void;
+
+  /**
+   * Registers a callback run before every node body: `assets` preloads at `load`, `scenes`
+   * switches at `scene`. Every `load` callback runs before the first `scene` callback, in
+   * registration order, each awaited.
+   *
+   * @param stage - `"load"` or `"scene"`.
+   * @param callback - Called with the node and `{ mode, signal }`, awaited.
+   * @returns The unregister function.
+   * @example
+   * ```ts
+   * // A scenes plugin switches the screen when the graph enters a node.
+   * const off = app.flow.onEnter("scene", node => showScene(node.path)); // node.path: "home"
+   *
+   * off(); // the plugin stops: the callback is not called any more
+   * ```
+   */
   onEnter(stage: Stage, callback: EnterCallback): () => void;
+
+  /**
+   * Walks a route in fast mode through the running loop: it answers the gate at each step's `at`
+   * and substitutes the result of every sub-flow node the route skips. A `from` bookmark is
+   * entered through the same check as `restore`. The mode of the caller is put back afterwards.
+   *
+   * @param route - The player's answers and substituted sub-flow results, in order.
+   * @param options - Walk options.
+   * @param options.from - Bookmark restored before the first step.
+   * @returns The state the walk ended in.
+   * @throws {Error} Before `run()` was called, when the bookmark is refused, and when a step's
+   *   `at` is never reached.
+   * @example
+   * ```ts
+   * // A test skips the menu and stands on the board, without a screen and without waiting.
+   * const state = await app.flow.walk([{ at: "home", intent: "play" }]);
+   * state.path; // "board/awaitIntent"
+   *
+   * // Devtools jump back to a saved position and leave the board from there.
+   * await app.flow.walk([{ at: "board/awaitIntent", intent: "leave" }], { from: bookmark });
+   * ```
+   */
   walk(route: readonly RouteStep[], options?: { from?: Bookmark }): Promise<FlowState>;
+
+  /**
+   * Makes a bookmark of the current rest point: the rest node plus the committed state.
+   *
+   * @returns The bookmark, ready for JSON.
+   * @throws {Error} When the graph has no position yet.
+   * @example
+   * ```ts
+   * // A devtools button keeps the position while the board rests.
+   * const bookmark = app.flow.bookmark();
+   * bookmark.path; // "board/awaitIntent"
+   * JSON.stringify(bookmark); // plain data: path, input, player, session, rng and the graph hash
+   * ```
+   */
   bookmark(): Bookmark;
+
+  /**
+   * Replaces the state with the bookmark's and enters its node. A checkpoint is always
+   * accepted; any other rest node only while the graph is unchanged.
+   *
+   * @param bookmark - The bookmark to enter.
+   * @returns A promise that resolves once the graph rests at the bookmark's node.
+   * @throws {Error} When the bookmark names no rest node of this graph, when the graph changed
+   *   since a bookmark of a plain rest node, and before `run()`.
+   * @example
+   * ```ts
+   * // The next session opens where the last one stopped: state and position come back together.
+   * await app.flow.restore(bookmark);
+   * app.flow.state().path; // "board/awaitIntent"
+   * ```
+   */
   restore(bookmark: Bookmark): Promise<void>;
+
+  /**
+   * Renders the whole graph as JSON, without running the game. It reads the flows as data, so
+   * it works before `run()`.
+   *
+   * @returns Nodes, flags, outcomes, edges, slots and who contributed.
+   * @example
+   * ```ts
+   * // A devtools panel draws the graph of the merge game.
+   * const graph = app.flow.describe();
+   *
+   * graph.flows.main?.edges.home; // { play: "board" }
+   * graph.flows.board?.nodes.merge?.outcomes; // ["done", "rejected"]
+   * ```
+   */
   describe(): FlowGraph;
+
+  /**
+   * Reads where the graph stands.
+   *
+   * @returns Whether it runs, the path, the stack, what it waits for and the mode.
+   * @example
+   * ```ts
+   * // The screen enables only the buttons the resting node takes.
+   * const { path, pending } = app.flow.state();
+   * // path: "home", pending: { gate: ["play"] }
+   * ```
+   */
   state(): FlowState;
+
+  /**
+   * Reads the edges taken since the last checkpoint.
+   *
+   * @returns A copy of the journal.
+   * @example
+   * ```ts
+   * // A bug report says why the last move was refused.
+   * const last = app.flow.history().at(-1);
+   * // last?.path: "board/merge", last?.outcome: "rejected", last?.payload: { reason: "empty" }
+   * ```
+   */
   history(): readonly JournalEntry[];
+
+  /**
+   * Switches between live and fast mode. Legal before `run()` and while the graph rests.
+   *
+   * @param mode - `"live"` or `"fast"`.
+   * @throws {Error} When a transit node is running.
+   * @remarks No example: only `createHeadless` and `walk` switch the mode; a game gets fast
+   *   mode through them.
+   */
   setMode(mode: "live" | "fast"): void;
 };

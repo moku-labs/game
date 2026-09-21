@@ -13,7 +13,7 @@ import type { Descriptor, GuideOptions, Hint } from "./types";
  * @returns The answer as plain JSON.
  * @example
  * ```ts
- * const json = allowJson({ intent: "merge", payload: { from: "c2", to: "c3" } });
+ * allowJson({ intent: "merge" }); // { intent: "merge" }: no payload key
  * ```
  */
 function allowJson(allow: Allow): Json {
@@ -31,7 +31,9 @@ function allowJson(allow: Allow): Json {
  * @returns The hint as plain data.
  * @example
  * ```ts
+ * // Inside a node body: sparkle on the merged cell, shown once the edge has committed.
  * fx.emit(hint("sparkle", { cell: "c3" }));
+ * // hint("sparkle", { cell: "c3" }) is { kind: "sparkle", payload: { cell: "c3" }, hint: true }
  * ```
  */
 export function hint(kind: string, payload?: Json): Hint {
@@ -49,7 +51,9 @@ export function hint(kind: string, payload?: Json): Hint {
  * @returns The descriptor a node awaits.
  * @example
  * ```ts
- * await fx(schedule(rules.nextDue(player, tables)));
+ * // Inside a node body, after the rules changed a timer: ask for the next `elapsed`.
+ * await fx(schedule(1_790_000_060_000)); // payload: { moment: 1790000060000 }
+ * await fx(schedule(undefined)); // payload: {}, the pending timer is cancelled
  * ```
  */
 export function schedule(moment: number | undefined): Descriptor {
@@ -67,7 +71,10 @@ export function schedule(moment: number | undefined): Descriptor {
  * @returns The descriptor a node awaits.
  * @example
  * ```ts
- * await fx(guide({ allow: { intent: "merge", payload: { from: "c2", to: "c3" } }, hand: "drag" }));
+ * // A tutorial node: the popup lists two intents, the guide lets only "ok" through.
+ * await fx(guide({ allow: { intent: "ok" }, hand: "tap", text: "Only this one" }));
+ * await fx({ kind: "popup", answers: ["ok", "cancel"] });
+ * // app.flow.gate.answer({ intent: "cancel" }) is false until the node exits
  * ```
  */
 export function guide(options: GuideOptions): Descriptor {

@@ -27,10 +27,6 @@ const allRoots: readonly Root[] = Object.freeze(["player", "session", "rng"]);
  * a chest. It is isolated here so a test can watch that a player with a save never reaches it.
  *
  * @returns A uint32 seed.
- * @example
- * ```ts
- * const seed = typeof config.seed === "number" ? config.seed : drawSeed();
- * ```
  */
 function drawSeed(): number {
   const words = globalThis.crypto.getRandomValues(new Uint32Array(1));
@@ -48,10 +44,6 @@ function drawSeed(): number {
  * @param deps - Functions injected by the plugin index.
  * @param deps.createRngView - Factory of an rng view over a draft or frozen rng branch.
  * @returns The `store` half of `app.model`.
- * @example
- * ```ts
- * const store = createStoreApi(ctx, { createRngView });
- * ```
  */
 export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngView }): StoreApi {
   // The branch object is built once per app by `createModelState` and never replaced.
@@ -63,10 +55,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * @param method - Provider method that failed.
    * @param error - The error the provider produced.
    * @throws {unknown} Always, the error of the provider.
-   * @example
-   * ```ts
-   * catch (error) { fail("commit", error); }
-   * ```
    */
   const fail = (method: string, error: unknown): never => {
     ctx.log.error("model:provider-failed", { method, error });
@@ -79,10 +67,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    *
    * @param roots - The roots a listener has to reconcile.
    * @param cause - What produced the change.
-   * @example
-   * ```ts
-   * emitCommitted(["player"], "edge");
-   * ```
    */
   const emitCommitted = (
     roots: readonly Root[],
@@ -97,10 +81,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * or a restored bookmark.
    *
    * @returns One whole-document replace patch.
-   * @example
-   * ```ts
-   * store.pending = wholeDocument();
-   * ```
    */
   const wholeDocument = (): Patch[] => [{ op: "replace", path: [], value: store.doc }];
 
@@ -108,10 +88,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * Builds the document of a brand-new player.
    *
    * @returns The document of a player who has never played.
-   * @example
-   * ```ts
-   * const doc = newDocument();
-   * ```
    */
   const newDocument = (): SaveDoc => ({
     player: structuredClone(ctx.config.initialPlayer),
@@ -126,10 +102,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    *
    * @returns The stored save, or `undefined` when the player is new.
    * @throws {unknown} The error of a failing provider.
-   * @example
-   * ```ts
-   * const saved = await readSave();
-   * ```
    */
   const readSave = async (): Promise<{ state: Json; version: number } | undefined> => {
     try {
@@ -148,10 +120,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * @param saved.version - Schema version the save was written with.
    * @returns The document of the save, at the current schema version.
    * @throws {SaveUnreadableError} When a step is missing, a step throws, or the save is newer.
-   * @example
-   * ```ts
-   * const doc = documentOfSave({ state, version: 1 });
-   * ```
    */
   const documentOfSave = (saved: { state: Json; version: number }): SaveDoc => {
     const migrated = migrate(
@@ -172,10 +140,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * patches, so the next attempt still holds the whole transition.
    *
    * @throws {unknown} The error of a failing provider.
-   * @example
-   * ```ts
-   * commitPending();
-   * ```
    */
   const commitPending = (): void => {
     try {
@@ -187,21 +151,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     store.pending = [];
   };
 
-  /**
-   * Loads the save. A new player gets the initial player and a seed; a stored save runs through
-   * the migration chain. Nothing is written until the document is complete, so a failure leaves
-   * the state exactly as it was and the app can show a clear screen. A document the provider has
-   * no base for — a new player, a migrated save — is handed over at once: a player who leaves on
-   * the first screen is a saved player.
-   *
-   * @returns Resolves when the document is in place.
-   * @throws {SaveUnreadableError} When the save cannot be read by this build.
-   * @throws {unknown} The error of a provider that refuses the first commit.
-   * @example
-   * ```ts
-   * await app.model.store.load();
-   * ```
-   */
   const load = async (): Promise<void> => {
     const saved = await readSave();
     const doc = saved ? documentOfSave(saved) : newDocument();
@@ -219,15 +168,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     emitCommitted(allRoots, "load");
   };
 
-  /**
-   * Hands out the committed trees. Frozen: this is the only thing a view or a projection sees.
-   *
-   * @returns The frozen player, session and rng trees.
-   * @example
-   * ```ts
-   * const { player, session } = app.model.store.snapshot();
-   * ```
-   */
   const snapshot = (): Snapshot => ({
     player: store.doc.player,
     session: store.session,
@@ -239,10 +179,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    *
    * @param transaction - The transaction that wants to close.
    * @throws {Error} When the transaction was already committed or discarded.
-   * @example
-   * ```ts
-   * closeTransaction(transaction);
-   * ```
    */
   const closeTransaction = (transaction: Transaction): void => {
     if (store.transaction !== transaction) {
@@ -261,10 +197,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * @param pair - Its open drafts.
    * @returns The patches split by tree and the touched roots.
    * @throws {Error} When the transaction was already committed or discarded.
-   * @example
-   * ```ts
-   * const { patches, roots } = commitTransaction(transaction, pair);
-   * ```
    */
   const commitTransaction = (transaction: Transaction, pair: DraftPair): CommitResult => {
     closeTransaction(transaction);
@@ -286,27 +218,12 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * @param transaction - The transaction that gives up.
    * @param pair - Its open drafts.
    * @throws {Error} When the transaction was already committed or discarded.
-   * @example
-   * ```ts
-   * discardTransaction(transaction, pair);
-   * ```
    */
   const discardTransaction = (transaction: Transaction, pair: DraftPair): void => {
     closeTransaction(transaction);
     dropDrafts(pair);
   };
 
-  /**
-   * Opens the drafts of one node run. One transaction at a time: a second `begin` is a bug in the
-   * runner, not a state to recover from.
-   *
-   * @returns The open transaction.
-   * @throws {Error} When a transaction is already open.
-   * @example
-   * ```ts
-   * const transaction = app.model.store.begin();
-   * ```
-   */
   const begin = (): Transaction => {
     if (store.transaction) {
       throw new Error(
@@ -319,24 +236,7 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
       player: pair.doc.player,
       session: pair.session,
       rng: deps.createRngView(pair.doc.rng),
-      /**
-       * Commits the drafts of this transaction on the edge.
-       *
-       * @returns The patches and the changed roots.
-       * @example
-       * ```ts
-       * const { patches } = transaction.commit();
-       * ```
-       */
       commit: () => commitTransaction(transaction, pair),
-      /**
-       * Drops the drafts of this transaction. Nothing changes.
-       *
-       * @example
-       * ```ts
-       * transaction.discard();
-       * ```
-       */
       discard: () => {
         discardTransaction(transaction, pair);
       }
@@ -347,35 +247,12 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     return transaction;
   };
 
-  /**
-   * Marks a rest node: the provider receives everything since the last rest point, and only then
-   * does the rest point move. A throwing provider leaves both untouched, so the next attempt
-   * still holds the whole transition.
-   *
-   * @throws {unknown} The error of a failing provider.
-   * @example
-   * ```ts
-   * app.model.store.markRest();
-   * ```
-   */
   const markRest = (): void => {
     commitPending();
 
     store.restPoint = { doc: store.doc, session: store.session };
   };
 
-  /**
-   * Marks a barrier node: rollback cannot cross it, so the rest point moves first. The pending
-   * patches are dropped only once the provider reports the data as durable.
-   *
-   * @param txId - Id of the transaction that left the barrier node.
-   * @returns Resolves when the data is durable.
-   * @throws {unknown} The error of a failing provider.
-   * @example
-   * ```ts
-   * await app.model.store.markBarrier("tx-1");
-   * ```
-   */
   const markBarrier = async (txId: string): Promise<void> => {
     store.restPoint = { doc: store.doc, session: store.session };
 
@@ -388,15 +265,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     store.pending = [];
   };
 
-  /**
-   * Returns to the last rest point. A pointer swap to frozen trees: no inverse patch is replayed.
-   * Everything in `pending` belongs to the failed transition, because a rest point empties it.
-   *
-   * @example
-   * ```ts
-   * app.model.store.rollback();
-   * ```
-   */
   const rollback = (): void => {
     // A node that threw left its drafts open: close them, or the next `begin()` would refuse.
     if (store.transaction) store.transaction.discard();
@@ -413,21 +281,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     emitCommitted(allRoots, "rollback");
   };
 
-  /**
-   * Replaces the trees: a bookmark, a repro, a dev restore after a reload. What is omitted stays
-   * as it is. The provider receives the whole document at the next rest point, never patches on a
-   * base it no longer has.
-   *
-   * @param input - The trees to put in place.
-   * @param input.player - The player tree.
-   * @param input.session - The session tree. Omitted: the current one stays.
-   * @param input.rng - The rng branch. Omitted: the current one stays.
-   * @throws {Error} When a transaction is open.
-   * @example
-   * ```ts
-   * app.model.store.restore({ player: bookmark.player, rng: bookmark.rng });
-   * ```
-   */
   const restore = (input: { player: Json; session?: Json; rng?: RngState }): void => {
     if (store.transaction) {
       throw new Error(
@@ -451,17 +304,6 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     emitCommitted(allRoots, "restore");
   };
 
-  /**
-   * Asks the provider to write what it has accumulated. The pending patches stay: between two
-   * rest nodes they are an unfinished transition, and a kill must lose all of it, never half.
-   *
-   * @returns Resolves when the provider has written.
-   * @throws {unknown} The error of a failing provider.
-   * @example
-   * ```ts
-   * await app.model.store.flush();
-   * ```
-   */
   const flush = async (): Promise<void> => {
     try {
       await store.provider.flush();

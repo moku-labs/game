@@ -18,10 +18,6 @@ import type { Config, State } from "./types";
  * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns The plugin state.
- * @example
- * ```ts
- * const state = createFlowState({ global, config });
- * ```
  */
 export function createFlowState(_ctx: {
   readonly global: Readonly<Record<string, unknown>>;

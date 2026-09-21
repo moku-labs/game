@@ -31,7 +31,8 @@ export type Root = "player" | "session" | "rng";
  *
  * @example
  * ```ts
- * hooks: { "model:committed": ({ roots, cause }) => reconcile(roots, cause) }
+ * // One node run changed the coins and drew from a stream.
+ * const payload: Events["model:committed"] = { roots: ["player", "rng"], cause: "edge" };
  * ```
  */
 export type Events = {
@@ -65,20 +66,16 @@ export type Config = {
 /**
  * model plugin state: one branch per module.
  *
- * @example
- * ```ts
- * const state: State = createModelState({ global, config });
- * ```
  */
 export type State = { store: StoreState; rng: Record<string, never> };
 
 /**
- * model plugin API, grouped by module.
+ * model plugin API, `app.model`, grouped by module.
  *
  * @example
  * ```ts
- * const model: Api = ctx.require(modelPlugin);
- * model.store.snapshot();
+ * app.model.store.snapshot().player; // { coins: 4 }
+ * app.model.rng.peek("chest:42"); // undefined: this chest was never opened
  * ```
  */
 export type Api = { store: StoreApi; rng: RngApi };
@@ -88,10 +85,6 @@ export type Api = { store: StoreApi; rng: RngApi };
  * `emit` is a method signature on purpose: a property-typed `emit` breaks the kernel's event
  * inference when a factory is passed to `createPlugin` by direct reference (`onStart`).
  *
- * @example
- * ```ts
- * export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngView }): StoreApi;
- * ```
  */
 export type ModelCtx = Omit<PluginCtx<Config, State, Events>, "emit"> & {
   emit<Name extends keyof Events>(name: Name, payload: Events[Name]): void;

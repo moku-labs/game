@@ -29,7 +29,7 @@ const stepIncrement = 0x6d_2b_79_f5;
  * @returns The initial uint32 state of the stream.
  * @example
  * ```ts
- * streams[id] = hash32(seed, "chest:42");
+ * hash32(42, "chest:42"); // 2485943101
  * ```
  */
 export function hash32(seed: number, id: string): number {
@@ -57,7 +57,7 @@ export function hash32(seed: number, id: string): number {
  * @returns The drawn uint32 value and the next state of the stream.
  * @example
  * ```ts
- * const { value, state } = nextUint32(streams[id]);
+ * nextUint32(2485943101); // { value: 2042392555, state: 22541618 }
  * ```
  */
 export function nextUint32(state: number): { value: number; state: number } {

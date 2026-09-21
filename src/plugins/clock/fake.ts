@@ -66,13 +66,15 @@ function runDue(state: FakeState, until: number): void {
  * @returns A clock source with the test-only controls `advance` and `set`.
  * @example
  * ```ts
- * // A daily reward becomes ready 24 h after the last claim. The test moves the clock, not the day.
- * const clock = fakeClock(1_790_000_000_000);
- * const app = createApp({ pluginConfigs: { clock: { source: clock }, flow: { mainFlow } } });
- * const game = await createHeadless(app);
+ * // An energy point refills 60 s after it was spent. The test moves the clock, not the minute.
+ * const clock = fakeClock(1000);
+ * const app = createApp({ pluginConfigs: { clock: { source: clock } } });
+ * const seen: number[] = [];
  *
- * clock.advance(24 * 60 * 60 * 1000); // the graph gets the `elapsed` event
- * expect(app.flow.state().path).toBe("dailyReward");
+ * app.clock.onElapsed(({ now }) => seen.push(now));
+ * app.clock.scheduleAt(61_000);
+ * clock.advance(60_000); // the timer fires inside advance, nothing waits
+ * seen; // [61000]
  * ```
  */
 export function fakeClock(start = 0): FakeClock {

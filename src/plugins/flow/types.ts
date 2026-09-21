@@ -20,7 +20,11 @@ import type { AnyFlow, DefineNode, RunnerApi, RunnerState } from "./runner/types
  *
  * @example
  * ```ts
- * hooks: { "flow:rest": ({ path, checkpoint }) => track(path, checkpoint) }
+ * // A plugin that depends on flowPlugin logs every edge the player takes.
+ * createPlugin("edgeLog", {
+ *   depends: [flowPlugin],
+ *   hooks: ctx => ({ "flow:edge": ({ node, outcome }) => ctx.log.info("edge", { node, outcome }) })
+ * }); // the play button on "home" logs { node: "home", outcome: "play" }
  * ```
  */
 export type Events = {
@@ -64,11 +68,6 @@ export type Config = {
 
 /**
  * flow plugin state: one branch per module.
- *
- * @example
- * ```ts
- * const state: State = createFlowState({ global, config });
- * ```
  */
 export type State = {
   features: FeaturesState;
@@ -79,24 +78,21 @@ export type State = {
 };
 
 /**
- * flow plugin API: the runner on the root, the other modules grouped.
+ * flow plugin API, `app.flow`: the runner on the root, the other modules grouped.
  *
  * @example
  * ```ts
- * const flow: Api = ctx.require(flowPlugin);
- * flow.gate.answer({ intent: "play" });
+ * // The game starts the graph once. After that only answers and world events move it.
+ * app.flow.run().catch(showFatal);
+ *
+ * app.flow.gate.answer({ intent: "play" }); // the play button: true when "home" rests
+ * app.flow.inbox.post({ type: "purchased" }); // the shop SDK: waits for a node that lists it
  * ```
  */
 export type Api = RunnerApi & { gate: GateApi; inbox: InboxApi; fx: FxApi; features: FeaturesApi };
 
 /**
  * Resolved dependency APIs.
- *
- * @example
- * ```ts
- * const deps: Deps = resolveDeps(ctx);
- * deps.clock.now();
- * ```
  */
 export type Deps = { time: TimeApi; model: ModelApi; clock: ClockApi };
 
@@ -105,11 +101,6 @@ export type Deps = { time: TimeApi; model: ModelApi; clock: ClockApi };
  * `emit` is one plain method overload per event on purpose: `flow` has dependencies with events,
  * and both a property-typed and a generic `emit` break the kernel's event inference when a
  * factory is passed to `createPlugin` by direct reference (`api`, `hooks`, `onInit`, `onStart`).
- *
- * @example
- * ```ts
- * export function createFlowApi(ctx: KernelSlice): Api;
- * ```
  */
 export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
   emit(name: "flow:edge", payload: Events["flow:edge"]): void;
@@ -122,21 +113,11 @@ export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
 
 /**
  * Domain context shared by the modules.
- *
- * @example
- * ```ts
- * const flowCtx: FlowCtx = { ...ctx, deps: resolveDeps(ctx) };
- * ```
  */
 export type FlowCtx = KernelSlice & { readonly deps: Deps };
 
 /**
  * Payload of the one event flow listens to.
- *
- * @example
- * ```ts
- * const onChanged = (payload: LifecycleChanged) => payload.resumed;
- * ```
  */
 export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
 
@@ -173,7 +154,13 @@ export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginI
  *
  * @example
  * ```ts
- * const kit: Kit<Types> = defineGame<Types>();
+ * // kit.ts of a game: bound once, imported by every node and flow file.
+ * export const { defineNode, defineFlow, defineFeature } = defineGame<{
+ *   player: Player;
+ *   session: Session;
+ *   assets: string;
+ *   strings: Record<string, unknown>;
+ * }>();
  * ```
  */
 export type Kit<Types extends GameTypes> = {

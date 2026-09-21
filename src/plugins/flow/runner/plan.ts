@@ -18,10 +18,6 @@ import type { AnyFlow, Frame, Modules, SlotNode } from "./types";
  * @param ctx - Domain context of the flow plugin.
  * @param frames - The position being planned; mutated while descending.
  * @returns The plan, or the problem that stops it.
- * @example
- * ```ts
- * return describePlan(ctx, frames);
- * ```
  */
 function describePlan(ctx: FlowCtx, frames: Frame[]): Plan {
   for (let depth = 0; depth < maxDepth; depth += 1) {
@@ -62,10 +58,6 @@ function describePlan(ctx: FlowCtx, frames: Frame[]): Plan {
  * @param name - Name of the target node.
  * @param input - Payload that becomes the target's input.
  * @returns The plan, or the problem that stops it.
- * @example
- * ```ts
- * return enterTarget(ctx, frames, location.flow, "home", payload);
- * ```
  */
 function enterTarget(
   ctx: FlowCtx,
@@ -95,10 +87,6 @@ function enterTarget(
  * @param slotName - Name of the slot.
  * @param from - Index of the first contribution to consider.
  * @returns The contribution to run, or `undefined` when the slot is done.
- * @example
- * ```ts
- * const next = pickContribution(ctx, modules.features, "afterWin", 0);
- * ```
  */
 export function pickContribution(
   ctx: FlowCtx,
@@ -130,10 +118,6 @@ export function pickContribution(
  * @param payload - Payload of the result.
  * @param depth - How many sub-flows were left already.
  * @returns The plan, or the problem that stops it.
- * @example
- * ```ts
- * const plan = planFrom(ctx, modules, frames, location, "done", null, 0);
- * ```
  */
 export function planFrom(
   ctx: FlowCtx,
@@ -201,10 +185,6 @@ export function planFrom(
  * @param slot - The slot node.
  * @param finished - Flow id of the contribution that just ended.
  * @returns The plan, or the problem that stops it.
- * @example
- * ```ts
- * return continueSlot(ctx, modules, frames, parent, parent.entry, "reward");
- * ```
  */
 function continueSlot(
   ctx: FlowCtx,

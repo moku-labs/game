@@ -19,10 +19,6 @@ type Pending = { ready: boolean; value: unknown; failure: Error | undefined };
  * @param log - The engine log.
  * @param kind - Effect kind whose handler failed.
  * @param error - What the handler threw or rejected with.
- * @example
- * ```ts
- * reportFailure(ctx.log, "sfx", error);
- * ```
  */
 function reportFailure(log: Log.LogApi, kind: string, error: unknown): void {
   log.error(
@@ -39,10 +35,6 @@ function reportFailure(log: Log.LogApi, kind: string, error: unknown): void {
  * @param state - fx module state.
  * @param kind - Effect kind of the descriptor.
  * @returns The handler entry, or `undefined` when nothing runs.
- * @example
- * ```ts
- * const entry = handlerFor(ctx.state.fx, descriptor.kind);
- * ```
  */
 function handlerFor(state: FxState, kind: string): HandlerEntry | undefined {
   const entry = state.handlers.get(kind);
@@ -62,10 +54,6 @@ function handlerFor(state: FxState, kind: string): HandlerEntry | undefined {
  * @param log - The engine log.
  * @param descriptor - The descriptor or hint to deliver.
  * @param signal - Abort signal handed to the handler.
- * @example
- * ```ts
- * invoke(ctx.state.fx, ctx.log, hint("sparkle"), signal);
- * ```
  */
 function invoke(
   state: FxState,
@@ -96,10 +84,6 @@ function invoke(
  * @param descriptor - The awaited descriptor.
  * @param signal - The node's abort signal.
  * @returns What the handler resolved with.
- * @example
- * ```ts
- * const value = await effectValue(ctx.state.fx, descriptor, signal);
- * ```
  */
 async function effectValue(
   state: FxState,
@@ -127,10 +111,6 @@ async function effectValue(
  * @param state - fx module state.
  * @param work - The promise of the running effect.
  * @returns A promise that settles in the next `signals` phase after `work` settled.
- * @example
- * ```ts
- * return enqueue(ctx.state.fx, effectValue(ctx.state.fx, descriptor, signal));
- * ```
  */
 function enqueue(state: FxState, work: Promise<unknown>): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
@@ -139,11 +119,6 @@ function enqueue(state: FxState, work: Promise<unknown>): Promise<unknown> {
     /**
      * Settles this completion in the `signals` phase. An effect that has not ended yet goes back
      * into the queue in front of everything started later, so start order survives a flush.
-     *
-     * @example
-     * ```ts
-     * for (const queued of drained) queued();
-     * ```
      */
     const entry = (): void => {
       if (!pending.ready) {
@@ -180,10 +155,6 @@ function enqueue(state: FxState, work: Promise<unknown>): Promise<unknown> {
  * @param answers - Intents the gate accepts while the effect runs.
  * @param signal - The node's abort signal.
  * @returns The answer the gate accepted.
- * @example
- * ```ts
- * const answer = await openForAnswers(ctx, gate, descriptor, descriptor.answers, signal);
- * ```
  */
 function openForAnswers(
   ctx: FlowCtx,
@@ -209,31 +180,11 @@ function openForAnswers(
  * @param deps - Injected sibling APIs.
  * @param deps.gate - Internal gate API: opens the gate for a descriptor with `answers`.
  * @returns The public fx API plus the methods injected into the runner.
- * @example
- * ```ts
- * const fx = createFxApi(ctx, { gate });
- * const off = fx.handle("sfx", playSound);
- * ```
  */
 export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi & FxInternal {
   const state = ctx.state.fx;
 
   return {
-    /**
-     * Registers the single handler of one effect kind. A second handler for the same kind throws:
-     * an effect has exactly one owner.
-     *
-     * @param kind - Effect kind, for example `"sfx"`.
-     * @param handler - Called with the descriptor and `{ signal, mode }`.
-     * @param options - Registration options.
-     * @param options.runInFast - `true` makes the handler run in fast mode too.
-     * @returns The unregister function. It removes only the handler it registered.
-     * @throws {Error} When the kind already has a handler.
-     * @example
-     * ```ts
-     * const off = app.flow.fx.handle("load", preload, { runInFast: true });
-     * ```
-     */
     handle: (kind: string, handler: FxHandler, options?: { runInFast?: boolean }): (() => void) => {
       if (state.handlers.has(kind)) {
         throw new Error(
@@ -250,33 +201,10 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       };
     },
 
-    /**
-     * Delivers a descriptor or a released hint to its handler and forgets about it. In fast mode
-     * only a handler registered with `runInFast` is called, exactly as for an awaited effect. A
-     * missing handler is not an error and a failing handler is logged, never thrown.
-     *
-     * @param descriptor - The descriptor or hint to deliver.
-     * @example
-     * ```ts
-     * app.flow.fx.dispatch({ kind: "haptic", payload: { style: "light" } });
-     * ```
-     */
     dispatch: (descriptor: Descriptor | Hint): void => {
       invoke(state, ctx.log, descriptor, new AbortController().signal);
     },
 
-    /**
-     * Runs one awaited effect. With `answers` the gate decides; without it the handler does, and
-     * while the frame loop runs the completion waits for the next `signals` phase.
-     *
-     * @param descriptor - The descriptor the node awaits.
-     * @param signal - The node's abort signal, handed to the handler.
-     * @returns The answer, the handler's value, or `undefined`.
-     * @example
-     * ```ts
-     * const answer = await modules.fx.run(popup, signal);
-     * ```
-     */
     run: (descriptor: Descriptor, signal: AbortSignal): Promise<unknown> => {
       const answers = descriptor.answers;
 
@@ -289,32 +217,12 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       return enqueue(state, work);
     },
 
-    /**
-     * Buffers one hint of the open transaction. In fast mode the hint is dropped: a fast walk
-     * shows nothing.
-     *
-     * @param item - The hint produced by `fx.emit`.
-     * @example
-     * ```ts
-     * modules.fx.buffer(hint("sparkle", { cell: "c3" }));
-     * ```
-     */
     buffer: (item: Hint): void => {
       if (state.mode === "fast") return;
 
       state.buffered.push(item);
     },
 
-    /**
-     * Dispatches the buffered hints in the order they were emitted and empties the buffer. Called
-     * after the commit of the transaction they belong to.
-     *
-     * @example
-     * ```ts
-     * transaction.commit();
-     * modules.fx.release();
-     * ```
-     */
     release: (): void => {
       const hints = [...state.buffered];
 
@@ -322,29 +230,10 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       for (const item of hints) invoke(state, ctx.log, item, new AbortController().signal);
     },
 
-    /**
-     * Drops the buffered hints of a discarded transaction. Nothing the player would have seen for
-     * a change that never happened is shown.
-     *
-     * @example
-     * ```ts
-     * transaction.discard();
-     * modules.fx.drop();
-     * ```
-     */
     drop: (): void => {
       state.buffered.length = 0;
     },
 
-    /**
-     * Resolves every effect that settled since the last frame, in the order the effects were
-     * started. Wired to `time.onFrame("signals")` by the plugin root.
-     *
-     * @example
-     * ```ts
-     * time.onFrame("signals", () => modules.fx.flushSettled());
-     * ```
-     */
     flushSettled: (): void => {
       if (state.settled.length === 0) return;
 
@@ -354,15 +243,6 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       for (const entry of drained) entry();
     },
 
-    /**
-     * Switches between live and fast mode. `walk` and `createHeadless` use it.
-     *
-     * @param mode - `"live"` runs the handlers, `"fast"` skips all but `runInFast`.
-     * @example
-     * ```ts
-     * modules.fx.setMode("fast");
-     * ```
-     */
     setMode: (mode: "live" | "fast"): void => {
       state.mode = mode;
     }

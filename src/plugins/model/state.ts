@@ -14,10 +14,6 @@ import type { Config, State } from "./types";
  * @param ctx.global - Global framework config.
  * @param ctx.config - Resolved plugin config.
  * @returns The plugin state.
- * @example
- * ```ts
- * const state = createModelState({ global, config });
- * ```
  */
 export function createModelState(ctx: {
   readonly global: Readonly<Record<string, unknown>>;
