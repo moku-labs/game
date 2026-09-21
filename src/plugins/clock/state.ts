@@ -11,10 +11,6 @@ import type { Config, State } from "./types";
  * @param ctx - Minimal context.
  * @param ctx.config - Resolved plugin config.
  * @returns A fresh clock state.
- * @example
- * ```ts
- * const state = createClockState({ config: { source: fakeClock(1000) } });
- * ```
  */
 export function createClockState(ctx: { readonly config: Readonly<Config> }): State {
   return {

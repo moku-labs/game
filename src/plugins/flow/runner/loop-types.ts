@@ -13,11 +13,6 @@ export const maxDepth = 32;
 
 /**
  * The JSON value of a node or edge that carries no payload.
- *
- * @example
- * ```ts
- * const input: Json = noPayload;
- * ```
  */
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
 export const noPayload: Json = null;

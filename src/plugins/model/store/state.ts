@@ -18,10 +18,6 @@ const preloadSeed = 0;
  *
  * @param config - Resolved model plugin config.
  * @returns The store branch of the plugin state.
- * @example
- * ```ts
- * const store = createStoreState(config);
- * ```
  */
 export function createStoreState(config: Readonly<Config>): StoreState {
   // Immer records patches only after this call, and a state factory runs once per app.

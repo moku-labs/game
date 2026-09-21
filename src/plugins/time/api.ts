@@ -8,7 +8,7 @@ import type { Api, FrameCallback, Phase, TimeCtx } from "./types";
  *
  * @example
  * ```ts
- * for (const phase of PHASES) runPhase(phase);
+ * PHASES.indexOf("sync"); // 3
  * ```
  */
 export const PHASES: readonly Phase[] = ["input", "animate", "layout", "sync", "signals", "render"];
@@ -28,10 +28,6 @@ const STEP_INSIDE_FRAME =
  *
  * @param ctx - Domain context of the time plugin.
  * @returns The six callback lists, in call order.
- * @example
- * ```ts
- * const lists = capturePhases(ctx);
- * ```
  */
 function capturePhases(ctx: TimeCtx): readonly (readonly FrameCallback[])[] {
   const { captured } = ctx.state;
@@ -50,10 +46,6 @@ function capturePhases(ctx: TimeCtx): readonly (readonly FrameCallback[])[] {
  * registration order. A throwing callback is reported and never stops the others.
  *
  * @param ctx - Domain context of the time plugin.
- * @example
- * ```ts
- * runPhases(ctx);
- * ```
  */
 function runPhases(ctx: TimeCtx): void {
   const { time } = ctx.state;
@@ -78,10 +70,6 @@ function runPhases(ctx: TimeCtx): void {
  *
  * @param ctx - Domain context of the time plugin.
  * @param unscaledDeltaMs - Delta of this frame in milliseconds, before the time scale.
- * @example
- * ```ts
- * runFrame(ctx, 16.67);
- * ```
  */
 function runFrame(ctx: TimeCtx, unscaledDeltaMs: number): void {
   const { time } = ctx.state;
@@ -106,10 +94,6 @@ function runFrame(ctx: TimeCtx, unscaledDeltaMs: number): void {
  *
  * @param ctx - Domain context of the time plugin.
  * @param timestamp - Timestamp handed over by `requestAnimationFrame`, in milliseconds.
- * @example
- * ```ts
- * requestAnimationFrame(timestamp => tickFrame(ctx, timestamp));
- * ```
  */
 export function tickFrame(ctx: TimeCtx, timestamp: number): void {
   if (ctx.state.paused) return;
@@ -132,10 +116,6 @@ export function tickFrame(ctx: TimeCtx, timestamp: number): void {
  * @param phase - Phase the callback belongs to.
  * @param callback - Function called once per frame with the current `Time`.
  * @returns Unsubscribe function; calling it twice is a no-op.
- * @example
- * ```ts
- * const off = addFrameCallback(ctx, "animate", advanceTweens);
- * ```
  */
 function addFrameCallback(ctx: TimeCtx, phase: Phase, callback: FrameCallback): () => void {
   // Copy-on-write: a running frame keeps the list it captured; see `capturePhases`.
@@ -157,113 +137,30 @@ function addFrameCallback(ctx: TimeCtx, phase: Phase, callback: FrameCallback): 
  *
  * @param ctx - Domain context of the time plugin.
  * @returns The public API of the time plugin.
- * @example
- * ```ts
- * const api = createTimeApi(ctx);
- * const off = api.onFrame("animate", advanceTweens);
- * ```
  */
 export function createTimeApi(ctx: TimeCtx): Api {
   return {
-    /**
-     * Registers a frame callback. Callbacks of one phase run in registration order; a callback
-     * registered during a frame runs from the next frame on.
-     *
-     * @param phase - Phase the callback belongs to.
-     * @param callback - Function called once per frame with the current `Time`.
-     * @returns Unsubscribe function.
-     * @example
-     * ```ts
-     * const off = time.onFrame("animate", t => advanceTweens(t.delta));
-     * ```
-     */
     onFrame: (phase, callback) => addFrameCallback(ctx, phase, callback),
 
-    /**
-     * Returns a snapshot of the current `Time`, so a caller cannot write into the frame state.
-     *
-     * @returns A copy of the current `Time`.
-     * @example
-     * ```ts
-     * const elapsed = time.snapshot().elapsed;
-     * ```
-     */
     snapshot: () => ({ ...ctx.state.time }),
 
-    /**
-     * Sets the time scale. Every frame delta is multiplied by it; 0 freezes the game time
-     * while the frames keep running. A negative scale is clamped to 0.
-     *
-     * @param scale - New time scale, 0 or greater.
-     * @example
-     * ```ts
-     * time.setScale(0.5);
-     * ```
-     */
     setScale: scale => {
       ctx.state.time.scale = Math.max(0, scale);
     },
 
-    /**
-     * Pauses the clock: no phase runs and `elapsed` stops advancing. Called by `lifecycle`.
-     *
-     * @example
-     * ```ts
-     * time.pause();
-     * ```
-     */
     pause: () => {
       ctx.state.paused = true;
     },
 
-    /**
-     * Resumes the clock and drops the stale timestamp, so the first frame after the pause has
-     * a normal delta instead of the whole pause. Called by `lifecycle`.
-     *
-     * @example
-     * ```ts
-     * time.resume();
-     * ```
-     */
     resume: () => {
       ctx.state.paused = false;
       ctx.state.lastTimestamp = undefined;
     },
 
-    /**
-     * Tells whether the clock is paused.
-     *
-     * @returns True while paused.
-     * @example
-     * ```ts
-     * if (time.isPaused()) showPauseScreen();
-     * ```
-     */
     isPaused: () => ctx.state.paused,
 
-    /**
-     * Tells whether a real frame source drives the loop. False in plain Bun, where a test
-     * drives the frames with `step`.
-     *
-     * @returns True while the loop runs.
-     * @example
-     * ```ts
-     * const waitsForSignals = time.isRunning();
-     * ```
-     */
     isRunning: () => ctx.state.running,
 
-    /**
-     * Runs exactly one frame with the given unscaled delta, ignoring the fps cap, the pause
-     * flag and `maxDeltaMs`. The time scale still applies. For tests and tools.
-     *
-     * @param deltaMs - Unscaled delta of the frame in milliseconds.
-     * @throws {Error} When called from inside a frame callback.
-     * @example
-     * ```ts
-     * app.time.step(16);
-     * ```
-     */
     step: deltaMs => {
       if (ctx.state.stepping) throw new Error(STEP_INSIDE_FRAME);
 

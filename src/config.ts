@@ -21,11 +21,6 @@ export type Config = {
 
 /**
  * Global events. Empty: every event belongs to a plugin.
- *
- * @example
- * ```ts
- * type AppEvents = Events;
- * ```
  */
 export type Events = Record<never, never>;
 
@@ -35,7 +30,7 @@ export type Events = Record<never, never>;
  *
  * @example
  * ```ts
- * type TimeApi = ApiOf<typeof timePlugin>;
+ * type TimeApi = ApiOf<typeof timePlugin>; // the `Api` type of src/plugins/time/types.ts
  * ```
  */
 export type ApiOf<Plugin> = Plugin extends { readonly _phantom: { readonly api: infer PluginApi } }
@@ -45,11 +40,6 @@ export type ApiOf<Plugin> = Plugin extends { readonly _phantom: { readonly api: 
 /**
  * Structural type of `ctx.require`, for domain factories that resolve their own dependencies.
  * The bound repeats the kernel's plugin shape so the kernel's generic `require` is assignable to it.
- *
- * @example
- * ```ts
- * type LifecycleCtx = PluginCtx<Config, State, Events> & { readonly require: Require };
- * ```
  */
 export type Require = <
   Plugin extends {
@@ -70,11 +60,6 @@ const config: Config = { orientation: "portrait", referenceSide: 1080 };
 
 /**
  * Core config of the engine: `log` and `env` on every plugin context.
- *
- * @example
- * ```ts
- * const framework = createCore(coreConfig, { plugins: [] });
- * ```
  */
 export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, typeof envPlugin]>(
   "game",
@@ -83,20 +68,10 @@ export const coreConfig = createCoreConfig<Config, Events, [typeof logPlugin, ty
 
 /**
  * Creates an engine or game plugin bound to the engine's Config and Events.
- *
- * @example
- * ```ts
- * export const timePlugin = createPlugin("time", { api: createTimeApi });
- * ```
  */
 export const createPlugin = coreConfig.createPlugin;
 
 /**
  * Creates the framework from the core config. Used by `src/index.ts` only.
- *
- * @example
- * ```ts
- * const framework = createCore(coreConfig, { plugins: [timePlugin] });
- * ```
  */
 export const createCore = coreConfig.createCore;

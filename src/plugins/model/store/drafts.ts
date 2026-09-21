@@ -13,10 +13,6 @@ const rootOrder: readonly Root[] = Object.freeze(["player", "session", "rng"]);
  * Turns on Immer's patch recording. Idempotent, and called from the state factory rather than at
  * module scope: a module-scope call would run on import, even when no app is created.
  *
- * @example
- * ```ts
- * enableDraftPatches();
- * ```
  */
 export function enableDraftPatches(): void {
   enablePatches();
@@ -30,7 +26,8 @@ export function enableDraftPatches(): void {
  * @returns The same reference, now frozen.
  * @example
  * ```ts
- * state.store.session = deepFreeze(structuredClone(config.initialSession));
+ * const tree = deepFreeze({ player: { bag: ["key"] } });
+ * Object.isFrozen(tree.player.bag); // true
  * ```
  */
 export function deepFreeze<Tree>(tree: Tree): Tree {
@@ -50,7 +47,8 @@ export function deepFreeze<Tree>(tree: Tree): Tree {
  * @returns The structural patch.
  * @example
  * ```ts
- * const own = toPatch({ op: "replace", path: ["doc", "player"], value: 1 }, ["player"]);
+ * toPatch({ op: "remove", path: ["doc", "player", "key"] }, ["player", "key"]);
+ * // { op: "remove", path: ["player", "key"] }
  * ```
  */
 function toPatch(patch: ImmerPatch, path: (string | number)[]): Patch {
@@ -67,7 +65,8 @@ function toPatch(patch: ImmerPatch, path: (string | number)[]): Patch {
  * @returns The roots a listener has to reconcile.
  * @example
  * ```ts
- * const roots = rootsOf([{ op: "replace", path: ["player"], value: 1 }], []);
+ * rootsOf([{ op: "add", path: ["rng", "streams", "dice"], value: 7 }], []); // ["rng"]
+ * rootsOf([], [{ op: "replace", path: ["rolls"], value: 1 }]); // ["session"]
  * ```
  */
 function rootsOf(docPatches: readonly Patch[], sessionPatches: readonly Patch[]): Root[] {
@@ -93,7 +92,8 @@ function rootsOf(docPatches: readonly Patch[], sessionPatches: readonly Patch[])
  * @returns The open drafts of one transaction.
  * @example
  * ```ts
- * const pair = openDrafts(state.store.doc, state.store.session);
+ * const pair = openDrafts({ player: { coins: 1 }, rng: { seed: 7, streams: {} } }, { rolls: 0 });
+ * pair.session; // a mutable draft of { rolls: 0 }: a write never reaches the frozen input
  * ```
  */
 export function openDrafts(doc: SaveDoc, session: Json): DraftPair {
@@ -109,10 +109,6 @@ export function openDrafts(doc: SaveDoc, session: Json): DraftPair {
  *
  * @param pair - Open drafts of one transaction.
  * @returns The frozen trees, the patches split by tree, and the touched roots.
- * @example
- * ```ts
- * const { doc, session, patches, roots } = finishDrafts(pair);
- * ```
  */
 export function finishDrafts(pair: DraftPair): CommitResult & { doc: SaveDoc; session: Json } {
   const collected: ImmerPatch[] = [];
@@ -150,7 +146,8 @@ export function finishDrafts(pair: DraftPair): CommitResult & { doc: SaveDoc; se
  * @throws {Error} When a patch names a path the document does not have.
  * @example
  * ```ts
- * held.document = applyTo(held.document, [{ op: "replace", path: [], value: doc }]);
+ * applyTo({ player: { coins: 0 } }, [{ op: "replace", path: ["player", "coins"], value: 4 }]);
+ * // { player: { coins: 4 } }
  * ```
  */
 export function applyTo(document: JsonDocument, patches: readonly Patch[]): JsonDocument {
@@ -164,10 +161,6 @@ export function applyTo(document: JsonDocument, patches: readonly Patch[]): Json
  * Drops the drafts without a result: the base trees stay as they are and the drafts are revoked.
  *
  * @param pair - Open drafts of one transaction.
- * @example
- * ```ts
- * dropDrafts(pair);
- * ```
  */
 export function dropDrafts(pair: DraftPair): void {
   // Immer has no separate revoke for a manual draft; finishing and dropping the result is it.

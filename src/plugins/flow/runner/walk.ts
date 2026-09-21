@@ -38,7 +38,8 @@ type EndWatch = { done: boolean; settled: Promise<void> };
  * @returns True when the step carries a result instead of an intent.
  * @example
  * ```ts
- * if (substitutes(step)) armResult(seam, step);
+ * substitutes({ at: "board", result: { outcome: "left" } }); // true
+ * substitutes({ at: "home", intent: "play" }); // false
  * ```
  */
 function substitutes(step: RouteStep): step is ResultStep {
@@ -51,10 +52,6 @@ function substitutes(step: RouteStep): step is ResultStep {
  *
  * @param seam - The seam of the running loop.
  * @param step - The step naming the sub-flow node and its result.
- * @example
- * ```ts
- * armResult(seam, { at: "level", result: { outcome: "win", payload: { stars: 3 } } });
- * ```
  */
 function armResult(seam: LoopSeam, step: ResultStep): void {
   seam.substitutions.set(step.at, {
@@ -69,10 +66,6 @@ function armResult(seam: LoopSeam, step: ResultStep): void {
  *
  * @param seam - The seam of the running loop.
  * @returns The watch and the way to stop it.
- * @example
- * ```ts
- * const watch = watchRest(loopSeam(ctx.state.runner));
- * ```
  */
 function watchRest(seam: LoopSeam): RestWatch {
   const watch: { seen: boolean; wake: (() => void) | undefined } = {
@@ -81,11 +74,6 @@ function watchRest(seam: LoopSeam): RestWatch {
   };
   /**
    * Records a rest point and wakes a waiting step.
-   *
-   * @example
-   * ```ts
-   * listener("home");
-   * ```
    */
   const listener = (): void => {
     const wake = watch.wake;
@@ -102,10 +90,6 @@ function watchRest(seam: LoopSeam): RestWatch {
      * Waits for the next rest point, or returns at once when one was reached meanwhile.
      *
      * @returns A promise that resolves at a rest point of the loop.
-     * @example
-     * ```ts
-     * await watch.next();
-     * ```
      */
     next: (): Promise<void> => {
       if (watch.seen) {
@@ -120,11 +104,6 @@ function watchRest(seam: LoopSeam): RestWatch {
 
     /**
      * Stops watching. The walk always stops, also when a step rejected.
-     *
-     * @example
-     * ```ts
-     * watch.off();
-     * ```
      */
     off: (): void => {
       const index = seam.rest.indexOf(listener);
@@ -143,7 +122,7 @@ function watchRest(seam: LoopSeam): RestWatch {
  * @returns A flag that flips when the loop ends, and the promise of that moment.
  * @example
  * ```ts
- * const ended = watchEnd(ctx.state.runner.running);
+ * watchEnd(Promise.resolve()).done; // false now, true once the promise has settled
  * ```
  */
 function watchEnd(running: Promise<void>): EndWatch {
@@ -153,11 +132,6 @@ function watchEnd(running: Promise<void>): EndWatch {
   };
   /**
    * Marks the loop as ended.
-   *
-   * @example
-   * ```ts
-   * finish();
-   * ```
    */
   const finish = (): void => {
     end.done = true;
@@ -174,20 +148,11 @@ function watchEnd(running: Promise<void>): EndWatch {
  *
  * @param seam - The seam of the running loop.
  * @returns A promise that resolves when the loop opens a gate.
- * @example
- * ```ts
- * await Promise.race([nextGateOpen(seam), ended.settled]);
- * ```
  */
 function nextGateOpen(seam: LoopSeam): Promise<void> {
   return new Promise<void>(resolve => {
     /**
      * Wakes the walk once the loop opened the gate.
-     *
-     * @example
-     * ```ts
-     * listener();
-     * ```
      */
     const listener = (): void => {
       const index = seam.gateOpen.indexOf(listener);
@@ -209,10 +174,6 @@ function nextGateOpen(seam: LoopSeam): Promise<void> {
  * @param ctx - Domain context of the flow plugin.
  * @param seam - The seam of the running loop.
  * @param ended - The watch on the end of the loop.
- * @example
- * ```ts
- * await reachGate(ctx, seam, ended);
- * ```
  */
 async function reachGate(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise<void> {
   if (ctx.state.gate.open !== undefined) return;
@@ -229,7 +190,8 @@ async function reachGate(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise
  * @returns The error `walk` rejects with.
  * @example
  * ```ts
- * throw notReached("board/awaitIntent", "home");
+ * notReached("board/awaitIntent", "home").message;
+ * // starts with: [game] flow.walk() never reached "board/awaitIntent".
  * ```
  */
 function notReached(at: string, path: string): Error {
@@ -245,7 +207,7 @@ function notReached(at: string, path: string): Error {
  * @returns The answer for the gate.
  * @example
  * ```ts
- * const answer = answerOf({ at: "home", intent: "play" });
+ * answerOf({ at: "home", intent: "play" }); // { intent: "play" }
  * ```
  */
 function answerOf(step: IntentStep): Answer {
@@ -263,10 +225,6 @@ function answerOf(step: IntentStep): Answer {
  * @param step - The step to answer with.
  * @param allowed - The intents the open gate takes.
  * @throws {Error} When the loop rests elsewhere, or the node refuses the intent.
- * @example
- * ```ts
- * answerHere(ctx, modules, step, ["play"]);
- * ```
  */
 function answerHere(
   ctx: FlowCtx,
@@ -297,10 +255,6 @@ function answerHere(
  * @param watch - The watch on the rest points of the loop.
  * @param ended - The watch on the end of the loop.
  * @throws {Error} When the loop ends or rests elsewhere before the step is reached.
- * @example
- * ```ts
- * await playStep(ctx, modules, seam, { at: "home", intent: "play" }, watch, ended);
- * ```
  */
 async function playStep(
   ctx: FlowCtx,
@@ -335,10 +289,6 @@ async function playStep(
  * @param seam - The seam of the running loop.
  * @param ended - The watch on the end of the loop.
  * @returns A promise that resolves at the gate of the rest point, or at the end of the loop.
- * @example
- * ```ts
- * await settleAfterRoute(ctx, seam, ended);
- * ```
  */
 function settleAfterRoute(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise<void> {
   return reachGate(ctx, seam, ended);
@@ -353,10 +303,6 @@ function settleAfterRoute(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promis
  * @param route - The player's answers and substituted results, in order.
  * @param running - The promise of `run()`.
  * @throws {Error} When a step is never reached.
- * @example
- * ```ts
- * await playRoute(ctx, modules, route, running);
- * ```
  */
 async function playRoute(
   ctx: FlowCtx,
@@ -389,10 +335,6 @@ async function playRoute(
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns Whether it runs, the path, the stack, what it waits for and the mode.
- * @example
- * ```ts
- * return walkState(ctx);
- * ```
  */
 function walkState(ctx: FlowCtx): FlowState {
   const state = ctx.state.runner;
@@ -421,10 +363,6 @@ function walkState(ctx: FlowCtx): FlowState {
  * @returns The state the walk ended in.
  * @throws {Error} Before `run()` was called, when the bookmark is refused, and when a step's `at`
  *   is never reached.
- * @example
- * ```ts
- * const state = await walkRoute(ctx, modules, [{ at: "home", intent: "play" }]);
- * ```
  */
 export async function walkRoute(
   ctx: FlowCtx,

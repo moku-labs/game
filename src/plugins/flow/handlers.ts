@@ -11,10 +11,6 @@ import type { KernelSlice, LifecycleChanged } from "./types";
  *
  * @param ctx - Kernel context of the flow plugin.
  * @param payload - What changed: the reason, the direction and whether the game resumed.
- * @example
- * ```ts
- * reactToLifecycle(ctx, { reason: "background", action: "push", reasons: ["background"], paused: true, resumed: false });
- * ```
  */
 function reactToLifecycle(ctx: KernelSlice, payload: LifecycleChanged): void {
   const deps = resolveDeps(ctx);
@@ -39,10 +35,6 @@ function reactToLifecycle(ctx: KernelSlice, payload: LifecycleChanged): void {
  *
  * @param ctx - Kernel context of the flow plugin.
  * @returns The one hook of the plugin.
- * @example
- * ```ts
- * createPlugin("flow", { hooks: createHandlers });
- * ```
  */
 export function createHandlers(ctx: KernelSlice): {
   "lifecycle:changed": (payload: LifecycleChanged) => void;
@@ -52,10 +44,6 @@ export function createHandlers(ctx: KernelSlice): {
      * Reacts to a change of the pause stack.
      *
      * @param payload - What changed: the reason, the direction and whether the game resumed.
-     * @example
-     * ```ts
-     * handlers["lifecycle:changed"]({ reason: "background", action: "pop", ... });
-     * ```
      */
     "lifecycle:changed": (payload: LifecycleChanged): void => {
       // The framework `onError` has no ctx and prints to the console. This hook has `ctx.log`, so it

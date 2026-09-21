@@ -12,7 +12,8 @@ import { SaveUnreadableError } from "./types";
  * @returns True when the value is a plain object.
  * @example
  * ```ts
- * if (!isRecord(state)) return undefined;
+ * isRecord({ coins: 1 }); // true
+ * isRecord(["key"]); // false: an array is not a record
  * ```
  */
 function isRecord(value: Json | undefined): value is { [key: string]: Json } {
@@ -26,7 +27,8 @@ function isRecord(value: Json | undefined): value is { [key: string]: Json } {
  * @returns The stream table, or `undefined` when a stream state is not a number.
  * @example
  * ```ts
- * const streams = readStreams({ "chest:1": 7 });
+ * readStreams({ "chest:1": 7 }); // { "chest:1": 7 }
+ * readStreams({ "chest:1": "7" }); // undefined
  * ```
  */
 function readStreams(value: Json | undefined): Record<string, number> | undefined {
@@ -53,7 +55,8 @@ function readStreams(value: Json | undefined): Record<string, number> | undefine
  * @throws {SaveUnreadableError} When the save has no player tree or no readable rng branch.
  * @example
  * ```ts
- * const doc = readSaveDoc(migrated, saved.version, config.schemaVersion);
+ * readSaveDoc({ player: { coins: 5 }, rng: { seed: 42, streams: {} } }, 1, 1); // the same document
+ * readSaveDoc({ coins: 5 }, 1, 2); // throws SaveUnreadableError: no player tree, no rng branch
  * ```
  */
 export function readSaveDoc(state: Json, savedVersion: number, schemaVersion: number): SaveDoc {
@@ -89,7 +92,8 @@ export function readSaveDoc(state: Json, savedVersion: number, schemaVersion: nu
  * @throws {SaveUnreadableError} When a step is missing, a step throws, or the save is newer.
  * @example
  * ```ts
- * const state = migrate(saved.state, saved.version, config.schemaVersion, config.migrations);
+ * migrate({ gold: 7 }, 1, 2, [{ from: 1, up: () => ({ coins: 7 }) }]); // { coins: 7 }
+ * migrate({ gold: 7 }, 3, 2, []); // throws SaveUnreadableError: the save is newer than the build
  * ```
  */
 export function migrate(
@@ -144,7 +148,7 @@ export function migrate(
  * @throws {SaveUnreadableError} When `up` throws.
  * @example
  * ```ts
- * const next = runStep(step, state, 1, 2);
+ * runStep({ from: 1, up: () => ({ coins: 7 }) }, { gold: 7 }, 1, 2); // { coins: 7 }
  * ```
  */
 function runStep(step: Migration, state: Json, from: number, to: number): Json {

@@ -18,7 +18,8 @@ import type { AnyNode, AnyNodeContext, Modules, NodeInfo, RunnerState } from "./
  * @returns `true` for a plain object.
  * @example
  * ```ts
- * if (isPlainRecord(payload)) read(payload.allow);
+ * isPlainRecord({ allow: {} }); // true
+ * isPlainRecord(["c2"]); // false: an array is not a record
  * ```
  */
 function isPlainRecord(value: Json | undefined): value is Record<string, Json> {
@@ -32,7 +33,8 @@ function isPlainRecord(value: Json | undefined): value is Record<string, Json> {
  * @returns The allowed answer, or `undefined` when the payload names none.
  * @example
  * ```ts
- * const allow = guideAllow({ allow: { intent: "merge" } });
+ * guideAllow({ allow: { intent: "merge" } }); // { intent: "merge" }
+ * guideAllow({ text: "Tap here" }); // undefined
  * ```
  */
 function guideAllow(payload: Json | undefined): Allow | undefined {
@@ -56,10 +58,6 @@ function guideAllow(payload: Json | undefined): Allow | undefined {
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @returns The effects gateway of one node run.
- * @example
- * ```ts
- * const fx = nodeFx(modules, step);
- * ```
  */
 function nodeFx(modules: Modules, step: Step): NodeFx {
   /**
@@ -67,10 +65,6 @@ function nodeFx(modules: Modules, step: Step): NodeFx {
    *
    * @param descriptor - The descriptor the node awaits.
    * @returns The answer, the handler's value, or `undefined`.
-   * @example
-   * ```ts
-   * const answer = await fx(popup);
-   * ```
    */
   const run = (descriptor: Descriptor): Promise<unknown> => {
     if (descriptor.kind === "guide") {
@@ -91,10 +85,6 @@ function nodeFx(modules: Modules, step: Step): NodeFx {
      * Buffers one cosmetic hint until the transaction of this node commits.
      *
      * @param item - The hint.
-     * @example
-     * ```ts
-     * fx.emit(hint("sparkle", { cell: "c3" }));
-     * ```
      */
     emit: (item: Hint): void => {
       modules.fx.buffer(item);
@@ -108,10 +98,6 @@ function nodeFx(modules: Modules, step: Step): NodeFx {
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @returns The node context.
- * @example
- * ```ts
- * const context = nodeContext(modules, step);
- * ```
  */
 function nodeContext(modules: Modules, step: Step): AnyNodeContext {
   return {
@@ -135,7 +121,8 @@ function nodeContext(modules: Modules, step: Step): AnyNodeContext {
  * @returns What an `onEnter` callback learns.
  * @example
  * ```ts
- * await runEnterCallbacks(ctx, nodeInfo(path, location, node), signal);
+ * nodeInfo("board/merge", { flow: boardFlow, name: "merge", entry: merge }, merge);
+ * // { path: "board/merge", flow: "board", node: "merge", rest: false, over: false, … }
  * ```
  */
 export function nodeInfo(path: string, location: Location, node: AnyNode): NodeInfo {
@@ -156,10 +143,6 @@ export function nodeInfo(path: string, location: Location, node: AnyNode): NodeI
  * @param ctx - Domain context of the flow plugin.
  * @param info - The node being entered.
  * @param signal - The node's abort signal.
- * @example
- * ```ts
- * await runEnterCallbacks(ctx, info, signal);
- * ```
  */
 export async function runEnterCallbacks(
   ctx: FlowCtx,
@@ -186,7 +169,8 @@ export async function runEnterCallbacks(
  * @returns The reason the runner set.
  * @example
  * ```ts
- * const reason = abortReason(step.signal);
+ * abortReason(AbortSignal.abort("inbox")); // "inbox"
+ * abortReason(AbortSignal.abort()); // "stop": anything unexpected
  * ```
  */
 export function abortReason(signal: AbortSignal): AbortReason {
@@ -203,10 +187,6 @@ export function abortReason(signal: AbortSignal): AbortReason {
  *
  * @param state - Runner state.
  * @returns True once `stopRunner` aborted.
- * @example
- * ```ts
- * if (stopped(state)) return "stop";
- * ```
  */
 export function stopped(state: RunnerState): boolean {
   const signal = state.abort?.signal;
@@ -223,7 +203,7 @@ export function stopped(state: RunnerState): boolean {
  * @returns The abort outcome.
  * @example
  * ```ts
- * const outcome = await Promise.race([body, abortOutcome(signal)]);
+ * await abortOutcome(AbortSignal.abort("restore")); // { kind: "aborted", reason: "restore" }
  * ```
  */
 function abortOutcome(signal: AbortSignal): Promise<NodeOutcome> {
@@ -246,10 +226,6 @@ function abortOutcome(signal: AbortSignal): Promise<NodeOutcome> {
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @returns The result, the abort or the failure.
- * @example
- * ```ts
- * const outcome = await callBody(modules, step);
- * ```
  */
 async function callBody(modules: Modules, step: Step): Promise<NodeOutcome> {
   try {
@@ -280,10 +256,6 @@ async function callBody(modules: Modules, step: Step): Promise<NodeOutcome> {
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @returns The outcome of the body or of the abort, whichever comes first.
- * @example
- * ```ts
- * const outcome = await runBody(modules, step);
- * ```
  */
 function runBody(modules: Modules, step: Step): Promise<NodeOutcome> {
   return Promise.race([callBody(modules, step), abortOutcome(step.signal)]);
@@ -297,10 +269,6 @@ function runBody(modules: Modules, step: Step): Promise<NodeOutcome> {
  * @param step - The node run in progress.
  * @param delivered - Holder of the event the inbox delivered.
  * @returns The outcome of the body, or the delivered event.
- * @example
- * ```ts
- * const outcome = await runRestBody(modules, step, delivered);
- * ```
  */
 async function runRestBody(
   modules: Modules,
@@ -309,11 +277,6 @@ async function runRestBody(
 ): Promise<NodeOutcome> {
   /**
    * Looks for a deliverable event and aborts the node when one is there.
-   *
-   * @example
-   * ```ts
-   * check();
-   * ```
    */
   const check = (): void => {
     if (delivered.event !== undefined) return;
@@ -351,10 +314,6 @@ async function runRestBody(
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
  * @returns The outcome the player or the world produced.
- * @example
- * ```ts
- * const outcome = await waitForAnswer(modules, step);
- * ```
  */
 function waitForAnswer(modules: Modules, step: Step): Promise<NodeOutcome> {
   if (step.signal.aborted) {
@@ -371,10 +330,6 @@ function waitForAnswer(modules: Modules, step: Step): Promise<NodeOutcome> {
      * Ends the wait once, whoever answered first.
      *
      * @param outcome - What ended the wait.
-     * @example
-     * ```ts
-     * finish({ kind: "result", result });
-     * ```
      */
     const finish = (outcome: NodeOutcome): void => {
       if (race.done) return;
@@ -420,10 +375,6 @@ function waitForAnswer(modules: Modules, step: Step): Promise<NodeOutcome> {
  * @param step - The node run in progress.
  * @param delivered - Holder of the event the inbox delivered.
  * @returns The outcome of that node.
- * @example
- * ```ts
- * const outcome = await nodeOutcome(modules, step, delivered);
- * ```
  */
 export function nodeOutcome(
   modules: Modules,
@@ -443,10 +394,6 @@ export function nodeOutcome(
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns A promise that resolves when the pointer is up or the runner was stopped.
- * @example
- * ```ts
- * if (node.over) await waitForPointer(ctx);
- * ```
  */
 export function waitForPointer(ctx: FlowCtx): Promise<void> {
   if (!ctx.state.gate.pointerActive) return Promise.resolve();
@@ -456,11 +403,6 @@ export function waitForPointer(ctx: FlowCtx): Promise<void> {
     const watch: { off: () => void } = { off: noop };
     /**
      * Ends the wait: drops the frame callback and resolves.
-     *
-     * @example
-     * ```ts
-     * ctx.state.gate.wake?.();
-     * ```
      */
     const wake = (): void => {
       watch.off();

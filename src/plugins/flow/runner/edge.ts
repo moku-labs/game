@@ -21,10 +21,6 @@ import type { JournalEntry, Modules, Result } from "./types";
  * @param step - The result ready to be committed.
  * @param next - Path the edge leads to.
  * @returns The journal entry of this edge.
- * @example
- * ```ts
- * const entry = commitEdge(ctx, modules, step, plan.next);
- * ```
  */
 function commitEdge(ctx: FlowCtx, modules: Modules, step: Commit, next: string): JournalEntry {
   const commit = step.transaction.commit();
@@ -69,10 +65,6 @@ function commitEdge(ctx: FlowCtx, modules: Modules, step: Commit, next: string):
  * @param safe - Whether the loop is already recovering.
  * @returns Always `"continue"`: the loop re-enters a position.
  * @throws {Error} When the safe node itself failed.
- * @example
- * ```ts
- * return handleFailure(ctx, modules, transaction, error, path, safe);
- * ```
  */
 export function handleFailure(
   ctx: FlowCtx,
@@ -121,10 +113,6 @@ export function handleFailure(
  * @param transaction - The open transaction of the aborted node.
  * @param reason - Why the node was aborted.
  * @returns `"stop"` when the runner was stopped, `"continue"` otherwise.
- * @example
- * ```ts
- * return handleAbort(modules, transaction, "stop");
- * ```
  */
 export function handleAbort(
   modules: Modules,
@@ -147,10 +135,6 @@ export function handleAbort(
  * @param step - The result ready to be committed.
  * @param safe - Whether the loop is already recovering.
  * @returns Always `"continue"`.
- * @example
- * ```ts
- * return finishNode(ctx, modules, step, safe);
- * ```
  */
 export async function finishNode(
   ctx: FlowCtx,
@@ -211,10 +195,6 @@ export async function finishNode(
  * @param edge.barrier - True when the node the result belongs to is a barrier node.
  * @param edge.now - The moment the node was entered, journalled with the edge.
  * @returns Always `"continue"`.
- * @example
- * ```ts
- * return applyResult(ctx, modules, location, result, safe, { barrier: node.barrier, now });
- * ```
  */
 export function applyResult(
   ctx: FlowCtx,

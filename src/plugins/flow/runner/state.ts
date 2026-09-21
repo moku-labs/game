@@ -10,7 +10,7 @@ import type { RunnerState } from "./types";
  * @returns An empty map of flow id to flow.
  * @example
  * ```ts
- * const flows = emptyFlows();
+ * emptyFlows().size; // 0
  * ```
  */
 function emptyFlows(): RunnerState["flows"] {
@@ -22,10 +22,6 @@ function emptyFlows(): RunnerState["flows"] {
  * Every state gets its own collections, so two apps in one process never share a position.
  *
  * @returns A fresh runner state.
- * @example
- * ```ts
- * const runner = createRunnerState();
- * ```
  */
 export function createRunnerState(): RunnerState {
   return {

@@ -23,7 +23,11 @@ Use `bun` exclusively — never npm, yarn, or pnpm.
 - **Linter:** ESLint 9 flat config + Biome (biome-config-biome must be LAST)
 - **TypeScript:** Strict mode with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`
 - **Imports:** Use `import type` enforced via `@typescript-eslint/consistent-type-imports`
-- **JSDoc:** Required on all source exports with descriptions, params, returns, and examples
+- **JSDoc:** Required on function declarations and exported types, with descriptions, params and returns. Examples follow lint rules L7 and L8:
+  - The members of the public `…Api` types in `types.ts` carry the docs and a scenario `@example`: when a game calls it, literal arguments, the result. Only `types.ts` ships in the `.d.mts`. The implementation of an API method has no JSDoc.
+  - A public member no game can call gets `@remarks No example: <reason>` instead.
+  - A private pure function may keep one line with literals and the result. A private function that takes `ctx`, `state` or `modules`, and a private type, get no `@example`.
+  - Every example must be true: check the real signature and the real result before writing it. Never repeat the signature with identifiers as arguments.
 
 ## Packaging
 

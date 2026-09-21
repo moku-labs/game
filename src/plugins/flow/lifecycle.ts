@@ -19,10 +19,6 @@ import type { Deps, FlowCtx, KernelSlice } from "./types";
  *
  * @param ctx - Kernel context of the flow plugin.
  * @returns The three dependency APIs.
- * @example
- * ```ts
- * const { time, model, clock } = resolveDeps(ctx);
- * ```
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
@@ -37,10 +33,6 @@ export function resolveDeps(ctx: KernelSlice): Deps {
  *
  * @param ctx - Kernel context of the flow plugin.
  * @returns The domain context of the flow plugin.
- * @example
- * ```ts
- * const flowCtx = withDeps(ctx);
- * ```
  */
 function withDeps(ctx: KernelSlice): FlowCtx {
   return { ...ctx, deps: resolveDeps(ctx) };
@@ -54,7 +46,8 @@ function withDeps(ctx: KernelSlice): FlowCtx {
  * @returns The epoch moment to schedule, or `undefined`.
  * @example
  * ```ts
- * clock.scheduleAt(readMoment(descriptor.payload));
+ * readMoment({ moment: 1500 }); // 1500
+ * readMoment({}); // undefined: cancels the pending timer
  * ```
  */
 function readMoment(payload: Json | undefined): number | undefined {
@@ -73,10 +66,6 @@ function readMoment(payload: Json | undefined): number | undefined {
  *
  * @param ctx - Domain context of the flow plugin.
  * @param fx - The effects gateway built over `ctx.state`.
- * @example
- * ```ts
- * registerSchedule(flowCtx, fx);
- * ```
  */
 function registerSchedule(ctx: FlowCtx, fx: FxApi): void {
   fx.handle(
@@ -96,10 +85,6 @@ function registerSchedule(ctx: FlowCtx, fx: FxApi): void {
  * keep their data, so these objects and the API's objects are the same gate and the same fx.
  *
  * @param ctx - Kernel context of the flow plugin.
- * @example
- * ```ts
- * createPlugin("flow", { onInit: connectFlow });
- * ```
  */
 export function connectFlow(ctx: KernelSlice): void {
   const flowCtx = withDeps(ctx);

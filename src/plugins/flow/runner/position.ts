@@ -17,10 +17,6 @@ import type { Frame, Result } from "./types";
  * @param ctx - Domain context of the flow plugin.
  * @param frames - A position, outermost frame first.
  * @returns The flow, the name and the entry, or `undefined` when the position is unknown.
- * @example
- * ```ts
- * const location = locateFrames(ctx, ctx.state.runner.stack);
- * ```
  */
 export function locateFrames(ctx: FlowCtx, frames: readonly Frame[]): Location | undefined {
   const frame = frames.at(-1);
@@ -43,7 +39,8 @@ export function locateFrames(ctx: FlowCtx, frames: readonly Frame[]): Location |
  * @returns The frames of that position.
  * @example
  * ```ts
- * state.stack = framesOf(location.trail, bookmark.input);
+ * const trail = [{ flow: "main", node: "board" }, { flow: "board", node: "merge" }];
+ * framesOf(trail, 7).map(frame => frame.input); // [null, 7]: only the deepest frame
  * ```
  */
 export function framesOf(trail: readonly { flow: string; node: string }[], input: Json): Frame[] {
@@ -60,10 +57,6 @@ export function framesOf(trail: readonly { flow: string; node: string }[], input
  * @param ctx - Domain context of the flow plugin.
  * @returns The position of the safe node.
  * @throws {Error} When the configured safe node is not a node of the graph.
- * @example
- * ```ts
- * state.stack = safeFrames(ctx);
- * ```
  */
 export function safeFrames(ctx: FlowCtx): Frame[] {
   const main = requireMainFlow(ctx);
@@ -88,7 +81,8 @@ export function safeFrames(ctx: FlowCtx): Frame[] {
  * @returns The result the edge table reads.
  * @example
  * ```ts
- * const result = eventResult({ type: "elapsed", payload: { now: 10 } });
+ * eventResult({ type: "elapsed", payload: { now: 10 } });
+ * // { outcome: "elapsed", payload: { now: 10 } }
  * ```
  */
 export function eventResult(event: WorldEvent): Result {
@@ -102,7 +96,7 @@ export function eventResult(event: WorldEvent): Result {
  * @returns The result the edge table reads.
  * @example
  * ```ts
- * const result = answerResult({ intent: "play" });
+ * answerResult({ intent: "play" }); // { outcome: "play", payload: null }
  * ```
  */
 export function answerResult(answer: Answer): Result {
@@ -117,7 +111,8 @@ export function answerResult(answer: Answer): Result {
  * @returns True when the value is JSON all the way down.
  * @example
  * ```ts
- * if (!isJson(mapped)) return { problem: "..." };
+ * isJson({ cells: ["c2", 3] }); // true
+ * isJson({ skip: undefined }); // false
  * ```
  */
 export function isJson(value: unknown): value is Json {

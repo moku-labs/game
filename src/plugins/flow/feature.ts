@@ -14,7 +14,8 @@ import type { FeaturePlugin } from "./types";
  * @returns The set of names `defineFeature` refuses.
  * @example
  * ```ts
- * if (takenNames().has(name)) throw new Error("reserved");
+ * takenNames().has("flow"); // true
+ * takenNames().has("board"); // false
  * ```
  */
 function takenNames(): ReadonlySet<string> {
@@ -60,7 +61,7 @@ function takenNames(): ReadonlySet<string> {
  * @returns A description with `nodes`, `flows` and `contribute` only.
  * @example
  * ```ts
- * const logic = logicKeysOf({ flows: [boardFlow], components: [cell] });
+ * logicKeysOf({ flows: [boardFlow], components: [cell] }); // { flows: [boardFlow] }
  * ```
  */
 function logicKeysOf(description: FeatureDescription): FeatureDescription {
@@ -82,7 +83,7 @@ function logicKeysOf(description: FeatureDescription): FeatureDescription {
  * @returns The plugin instance.
  * @example
  * ```ts
- * const plugin = featurePluginOf("board", description);
+ * featurePluginOf("board", { flows: [boardFlow] }).name; // "board"
  * ```
  */
 function featurePluginOf(name: string, description: FeatureDescription): AnyPluginInstance {
@@ -93,10 +94,6 @@ function featurePluginOf(name: string, description: FeatureDescription): AnyPlug
      * plugin above reads `features.all()` in its `onStart`.
      *
      * @param ctx - Plugin context of this feature plugin.
-     * @example
-     * ```ts
-     * createPlugin("board", { depends: [flowPlugin], onInit });
-     * ```
      */
     onInit: ctx => {
       ctx.require(flowPlugin).features.register(name, description);
@@ -115,10 +112,12 @@ function featurePluginOf(name: string, description: FeatureDescription): AnyPlug
  * @throws {Error} When the name is reserved or belongs to an engine plugin.
  * @example
  * ```ts
- * export const boardFeature = defineFeature("board", {
- *   flows: [boardFlow],
- *   contribute: { afterWin: { flow: rewardFlow, order: 10 } }
+ * // The reward popup is a feature: the main flow only declares slot("afterOrder").
+ * export const rewardFeature = defineFeature("reward", {
+ *   flows: [rewardFlow],
+ *   contribute: { afterOrder: { flow: rewardFlow, order: 10 } }
  * });
+ * createApp({ plugins: [rewardFeature] }); // a headless test passes rewardFeature.logicOnly
  * ```
  */
 export function defineFeature(name: string, description: FeatureDescription): FeaturePlugin {

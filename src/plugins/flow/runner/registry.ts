@@ -21,7 +21,7 @@ import type {
  * @returns An empty map of flow id to flow.
  * @example
  * ```ts
- * const flows = emptyFlows();
+ * emptyFlows().size; // 0
  * ```
  */
 function emptyFlows(): Map<string, AnyFlow> {
@@ -34,10 +34,6 @@ function emptyFlows(): Map<string, AnyFlow> {
  *
  * @param flow - The flow to add.
  * @param flows - The map being filled.
- * @example
- * ```ts
- * addFlow(mainFlow, flows);
- * ```
  */
 function addFlow(flow: AnyFlow, flows: Map<string, AnyFlow>): void {
   if (flows.has(flow.id)) return;
@@ -58,7 +54,7 @@ function addFlow(flow: AnyFlow, flows: Map<string, AnyFlow>): void {
  * @returns Flow id to flow, main first.
  * @example
  * ```ts
- * const flows = collectFlows(mainFlow, [debugFlow]);
+ * [...collectFlows(mainFlow, []).keys()]; // ["main", "board"]: the main flow first
  * ```
  */
 export function collectFlows(main: AnyFlow, extra: readonly AnyFlow[]): Map<string, AnyFlow> {
@@ -78,7 +74,8 @@ export function collectFlows(main: AnyFlow, extra: readonly AnyFlow[]): Map<stri
  * @returns The path, for example `"board/awaitIntent"`; empty without a position.
  * @example
  * ```ts
- * const path = framePath(ctx.state.runner.stack);
+ * const board = { flow: "main", node: "board", input: null };
+ * framePath([board, { flow: "board", node: "merge", input: null }]); // "board/merge"
  * ```
  */
 export function framePath(stack: readonly Frame[]): string {
@@ -94,7 +91,8 @@ export function framePath(stack: readonly Frame[]): string {
  * @returns Where the path leads, or `undefined` when no such node exists.
  * @example
  * ```ts
- * const location = findNode(mainFlow, "board/awaitIntent");
+ * findNode(mainFlow, "board/awaitIntent")?.trail;
+ * // [{ flow: "main", node: "board" }, { flow: "board", node: "awaitIntent" }]
  * ```
  */
 export function findNode(main: AnyFlow, path: string): NodeLocation | undefined {
@@ -125,7 +123,8 @@ export function findNode(main: AnyFlow, path: string): NodeLocation | undefined 
  * @returns The rendered target.
  * @example
  * ```ts
- * const next = renderTarget(flow.edges.merge?.done);
+ * renderTarget("home"); // "home"
+ * renderTarget({ kind: "exit", outcome: "win" }); // "exit:win"
  * ```
  */
 function renderTarget(target: Target): string {
@@ -141,7 +140,7 @@ function renderTarget(target: Target): string {
  * @returns Node name to outcome name to rendered target.
  * @example
  * ```ts
- * const edges = renderEdges(boardFlow);
+ * renderEdges(boardFlow).awaitIntent?.leave; // "exit:left"
  * ```
  */
 function renderEdges(flow: AnyFlow): Record<string, Record<string, string>> {
@@ -163,10 +162,6 @@ function renderEdges(flow: AnyFlow): Record<string, Record<string, string>> {
  *
  * @param features - Features API.
  * @returns Node or flow object to feature name.
- * @example
- * ```ts
- * const owners = collectOwners(features);
- * ```
  */
 function collectOwners(features: FeaturesApi): Map<object, string> {
   const owners = new Map<object, string>();
@@ -190,7 +185,8 @@ function collectOwners(features: FeaturesApi): Map<object, string> {
  * @returns The entry as JSON.
  * @example
  * ```ts
- * const node = describeNode(boardFlow, "merge", merge, "board");
+ * describeNode(mainFlow, "home", home, undefined).path; // "main/home"
+ * describeNode(mainFlow, "board", boardFlow, "board").subFlow; // "board"
  * ```
  */
 function describeNode(
@@ -224,7 +220,7 @@ function describeNode(
  * @returns Node name to description.
  * @example
  * ```ts
- * const nodes = describeNodes(boardFlow, owners);
+ * describeNodes(boardFlow, new Map()).merge?.outcomes; // ["done", "rejected"]
  * ```
  */
 function describeNodes(flow: AnyFlow, owners: Map<object, string>): Record<string, GraphNode> {
@@ -245,7 +241,7 @@ function describeNodes(flow: AnyFlow, owners: Map<object, string>): Record<strin
  * @returns The slot names, in the order the graph declares them, each once.
  * @example
  * ```ts
- * const names = slotNames(flows);
+ * slotNames(collectFlows(mainFlow, [])); // ["afterOrder"]
  * ```
  */
 export function slotNames(flows: ReadonlyMap<string, AnyFlow>): string[] {
@@ -267,10 +263,6 @@ export function slotNames(flows: ReadonlyMap<string, AnyFlow>): string[] {
  * @param flows - Every collected flow by id, the main flow first, as `collectFlows` returns them.
  * @param features - Features API: owners and slot contributions.
  * @returns The graph as plain JSON.
- * @example
- * ```ts
- * const graph = describeGraph(flows, features);
- * ```
  */
 export function describeGraph(
   flows: ReadonlyMap<string, AnyFlow>,
@@ -305,7 +297,7 @@ export function describeGraph(
  * @returns A negative number, zero or a positive number.
  * @example
  * ```ts
- * entries.sort(([first], [second]) => compareKeys(first, second));
+ * compareKeys("edges", "nodes"); // -1
  * ```
  */
 function compareKeys(first: string, second: string): number {
@@ -322,7 +314,7 @@ function compareKeys(first: string, second: string): number {
  * @returns The value as text.
  * @example
  * ```ts
- * const text = stableJson({ b: 1, a: 2 });
+ * stableJson({ b: 1, a: 2 }); // '{"a":2,"b":1}'
  * ```
  */
 function stableJson(value: unknown): string {
@@ -346,7 +338,7 @@ function stableJson(value: unknown): string {
  * @returns Eight lowercase hexadecimal characters.
  * @example
  * ```ts
- * const hash = graphHash(describeGraph(flows, features));
+ * graphHash({ main: "main", flows: {}, slots: {} }); // "cfb16c03"
  * ```
  */
 export function graphHash(graph: FlowGraph): string {

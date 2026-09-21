@@ -90,10 +90,6 @@ function passesNarrow(narrow: Allow | undefined, answer: Answer): boolean {
  * @param state - Gate state.
  * @param answer - The answer given.
  * @returns True when the gate is open, lists the intent and the narrow passes.
- * @example
- * ```ts
- * if (accepts(ctx.state.gate, answer)) deliver(ctx.state.gate, answer);
- * ```
  */
 function accepts(state: GateState, answer: Answer): boolean {
   if (state.open === undefined) return false;
@@ -107,10 +103,6 @@ function accepts(state: GateState, answer: Answer): boolean {
  * answer it was waiting for.
  *
  * @param state - Gate state.
- * @example
- * ```ts
- * shut(ctx.state.gate);
- * ```
  */
 function shut(state: GateState): void {
   state.open = undefined;
@@ -123,10 +115,6 @@ function shut(state: GateState): void {
  *
  * @param state - Gate state.
  * @param answer - The accepted answer.
- * @example
- * ```ts
- * deliver(ctx.state.gate, { intent: "play" });
- * ```
  */
 function deliver(state: GateState, answer: Answer): void {
   const resolve = state.resolve;
@@ -142,10 +130,6 @@ function deliver(state: GateState, answer: Answer): void {
  *
  * @param ctx - Domain context of the flow plugin.
  * @param answer - The answer the closed gate refused.
- * @example
- * ```ts
- * hold(ctx, { intent: "play" });
- * ```
  */
 function hold(ctx: FlowCtx, answer: Answer): void {
   if (ctx.state.fx.mode === "fast") return;
@@ -160,10 +144,6 @@ function hold(ctx: FlowCtx, answer: Answer): void {
  * gate does not accept is dropped, not kept for the next one.
  *
  * @param ctx - Domain context of the flow plugin.
- * @example
- * ```ts
- * offerHeld(ctx);
- * ```
  */
 function offerHeld(ctx: FlowCtx): void {
   const held = ctx.state.gate.held;
@@ -184,25 +164,9 @@ function offerHeld(ctx: FlowCtx): void {
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns The public gate API plus the methods injected into `runner` and `fx`.
- * @example
- * ```ts
- * const gate = createGateApi(ctx);
- * const answer = await gate.open({ allowed: ["play", "shop"] });
- * ```
  */
 export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
   return {
-    /**
-     * Gives one answer. Accepted only while the gate is open and the intent is allowed. An answer
-     * to a closed gate is held for one frame and re-offered when the gate opens within it.
-     *
-     * @param answer - Intent and optional payload.
-     * @returns Whether the answer was accepted.
-     * @example
-     * ```ts
-     * app.flow.gate.answer({ intent: "merge", payload: { from: "c2", to: "c3" } });
-     * ```
-     */
     answer: (answer: Answer): boolean => {
       if (ctx.state.gate.open === undefined) {
         hold(ctx, answer);
@@ -215,47 +179,16 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
       return true;
     },
 
-    /**
-     * Records that a pointer is down. While true the runner delays entering an `over` node, so a
-     * popup never appears mid-drag.
-     *
-     * @param active - True while the pointer is down.
-     * @example
-     * ```ts
-     * app.flow.gate.pointer(true);
-     * ```
-     */
     pointer: (active: boolean): void => {
       ctx.state.gate.pointerActive = active;
     },
 
-    /**
-     * Reads what the gate takes right now.
-     *
-     * @returns Whether the gate is open, the allowed intents and whether a `guide` narrows it.
-     * @example
-     * ```ts
-     * expect(app.flow.gate.state().allowed).toEqual(["play"]);
-     * ```
-     */
     state: (): { open: boolean; allowed: readonly string[]; narrowed: boolean } => ({
       open: ctx.state.gate.open !== undefined,
       allowed: ctx.state.gate.open?.allowed ?? [],
       narrowed: ctx.state.gate.narrow !== undefined
     }),
 
-    /**
-     * Opens the gate for the intents of one node and waits for the answer. An answer held from
-     * this frame is offered at once, so the promise can be resolved before it is returned.
-     *
-     * @param spec - The intents this gate accepts.
-     * @returns The answer that closed the gate.
-     * @throws {Error} When the gate is already open.
-     * @example
-     * ```ts
-     * const answer = await modules.gate.open({ allowed: ["again", "home"] });
-     * ```
-     */
     open: (spec: GateSpec): Promise<Answer> => {
       if (ctx.state.gate.open !== undefined) {
         throw new Error("[game] The gate is already open.\n  Close it before opening it again.");
@@ -268,43 +201,14 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
       });
     },
 
-    /**
-     * Shuts the gate without an answer. Used when the node is left for another reason: an abort, a
-     * world event from the inbox. A running narrow survives.
-     *
-     * @example
-     * ```ts
-     * modules.gate.close();
-     * ```
-     */
     close: (): void => {
       shut(ctx.state.gate);
     },
 
-    /**
-     * Narrows the gate to one answer, or lifts the narrow with `undefined`. This is what `guide`
-     * does while a tutorial step runs.
-     *
-     * @param allow - The one answer that passes, or `undefined` to lift the narrow.
-     * @example
-     * ```ts
-     * modules.gate.narrow({ intent: "merge", payload: { from: "c2", to: "c3" } });
-     * ```
-     */
     narrow: (allow: Allow | undefined): void => {
       ctx.state.gate.narrow = allow;
     },
 
-    /**
-     * Drops an answer that was held in an earlier frame. Wired to `time.onFrame("signals")` by the
-     * plugin root, so a hold lives for exactly the frame it was given in.
-     *
-     * @param frame - The frame that is running now.
-     * @example
-     * ```ts
-     * time.onFrame("signals", ({ frame }) => gate.clearHeld(frame));
-     * ```
-     */
     clearHeld: (frame: number): void => {
       if (ctx.state.gate.held === undefined) return;
       if (ctx.state.gate.held.frame === frame) return;

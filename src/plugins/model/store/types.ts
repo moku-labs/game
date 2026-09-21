@@ -26,11 +26,6 @@ export type SaveDoc = { player: Json; rng: RngState };
 
 /**
  * A JSON object: what a save seam holds, and the only shape a patch can be applied to.
- *
- * @example
- * ```ts
- * const document: JsonDocument = { player: { coins: 0 }, rng: { seed: 42, streams: {} } };
- * ```
  */
 export type JsonDocument = { [key: string]: Json };
 
@@ -39,17 +34,65 @@ export type JsonDocument = { [key: string]: Json };
  *
  * @example
  * ```ts
- * createApp({ pluginConfigs: { model: { playerProvider: memory() } } });
+ * // A server save: the server holds the document and applies the patches it is sent.
+ * const serverSave = (url: string): PlayerStateProvider => {
+ *   const queue: { patches: Patch[]; version: number }[] = [];
+ *
+ *   const send = async (batch: typeof queue, txId?: string): Promise<void> => {
+ *     if (batch.length === 0) return;
+ *     await fetch(url, { method: "POST", body: JSON.stringify({ batch, txId }) });
+ *   };
+ *
+ *   return {
+ *     load: async () => {
+ *       const response = await fetch(url);
+ *       return response.status === 404 ? null : await response.json(); // { state, version }
+ *     },
+ *     commit: (patches, version) => {
+ *       queue.push({ patches, version }); // a rest node: accumulate, write at the next flush
+ *     },
+ *     commitDurable: async (patches, txId, version) => {
+ *       queue.push({ patches, version });
+ *       await send(queue.splice(0), txId); // a barrier node: resolve only when it is stored
+ *     },
+ *     flush: () => send(queue.splice(0))
+ *   };
+ * };
+ *
+ * createApp({ pluginConfigs: { model: { playerProvider: serverSave("/api/save") } } });
  * ```
  */
 export type PlayerStateProvider = {
-  /** `null` means a new player. */
+  /**
+   * Reads the save. Called once, by `store.load()`.
+   *
+   * @returns The stored document and its schema version. `null` means a new player.
+   */
   load(): Promise<{ state: Json; version: number } | null>;
-  /** Called at rest nodes. The provider accumulates and debounces writes. */
+
+  /**
+   * Called at rest nodes. The provider accumulates and debounces writes.
+   *
+   * @param patches - Doc patches since the last commit.
+   * @param version - Schema version this build writes.
+   */
   commit(patches: Patch[], version: number): void;
-  /** Called after a barrier node. Resolves when the data is durable. */
+
+  /**
+   * Called after a barrier node. Resolves when the data is durable.
+   *
+   * @param patches - Doc patches since the last commit.
+   * @param txId - Id of the transaction that left the barrier node.
+   * @param version - Schema version this build writes.
+   * @returns Resolves when the data is durable.
+   */
   commitDurable(patches: Patch[], txId: string, version: number): Promise<void>;
-  /** Background, close. */
+
+  /**
+   * Writes what was accumulated. Called on a background pause and on stop.
+   *
+   * @returns Resolves when the provider has written.
+   */
   flush(): Promise<void>;
 };
 
@@ -58,7 +101,11 @@ export type PlayerStateProvider = {
  *
  * @example
  * ```ts
- * expect(provider.calls).toEqual([{ method: "load" }, { method: "flush" }]);
+ * const call: ProviderCall = {
+ *   method: "commit",
+ *   patches: [{ op: "replace", path: ["player", "coins"], value: 4 }],
+ *   version: 1
+ * };
  * ```
  */
 export type ProviderCall =
@@ -68,11 +115,22 @@ export type ProviderCall =
   | { method: "flush" };
 
 /**
- * One step of the save migration chain.
+ * One step of the save migration chain. `up` of `from: n` gets the whole save document of version
+ * `n` and returns the document of version `n + 1`.
  *
  * @example
  * ```ts
- * const addCoins: Migration = { from: 1, up: state => ({ player: state, coins: 0 }) };
+ * // Version 1 saved `gold`. Version 2 calls it `coins`.
+ * const renameGold: Migration = {
+ *   from: 1,
+ *   up: state => {
+ *     const doc = state as { player: { gold: number }; rng: RngState };
+ *
+ *     return { player: { coins: doc.player.gold }, rng: doc.rng };
+ *   }
+ * };
+ *
+ * createApp({ pluginConfigs: { model: { schemaVersion: 2, migrations: [renameGold] } } });
  * ```
  */
 export type Migration = { from: number; up(state: Json): Json };
@@ -82,7 +140,11 @@ export type Migration = { from: number; up(state: Json): Json };
  *
  * @example
  * ```ts
- * const { player, session }: Snapshot = model.store.snapshot();
+ * const snapshot: Snapshot = {
+ *   player: { coins: 4 },
+ *   session: { rolls: 1 },
+ *   rng: { seed: 42, streams: { dice: 1175946015 } }
+ * };
  * ```
  */
 export type Snapshot = {
@@ -92,22 +154,21 @@ export type Snapshot = {
 };
 
 /**
- * Result of a commit.
+ * Result of a commit: the patches split by tree, and the touched roots in the order `player`,
+ * `session`, `rng`.
  *
  * @example
  * ```ts
- * const { patches, roots }: CommitResult = transaction.commit();
+ * const result: CommitResult = {
+ *   patches: { doc: [{ op: "replace", path: ["player", "coins"], value: 4 }], session: [] },
+ *   roots: ["player"]
+ * };
  * ```
  */
 export type CommitResult = { patches: { doc: Patch[]; session: Patch[] }; roots: Root[] };
 
 /**
  * Open Immer drafts of one transaction. Internal to `drafts.ts` and `api.ts`.
- *
- * @example
- * ```ts
- * const pair: DraftPair = openDrafts(state.doc, state.session);
- * ```
  */
 export type DraftPair = { doc: SaveDoc; session: Json };
 
@@ -116,8 +177,14 @@ export type DraftPair = { doc: SaveDoc; session: Json };
  *
  * @example
  * ```ts
- * const transaction: Transaction = model.store.begin();
- * transaction.commit();
+ * // A game never holds a transaction: the node context carries its drafts and its rng view.
+ * export const roll = defineNode({
+ *   outcomes: { done: type() },
+ *   run: ({ player, rng, out }) => {
+ *     player.coins += rng.stream("dice").range(1, 6);
+ *     return out.done();
+ *   }
+ * });
  * ```
  */
 export type Transaction = {
@@ -125,19 +192,33 @@ export type Transaction = {
   player: Json;
   /** Mutable draft of the session tree. */
   session: Json;
-  /** Rng view bound to the draft `doc.rng`. */
+  /** Rng view bound to the draft `doc.rng`. Draws advance the draft. */
   rng: RngView;
+
+  /**
+   * Commits the drafts of this transaction on the edge: finishes the drafts, swaps the frozen
+   * trees, appends the doc patches to the pending list and emits `model:committed` with cause
+   * `"edge"`.
+   *
+   * @returns The patches split by tree and the touched roots.
+   * @throws {Error} When the transaction was already committed or discarded.
+   * @remarks No example: the flow runner commits the transaction of a node run on the edge; a node
+   * only returns an outcome.
+   */
   commit(): CommitResult;
+
+  /**
+   * Drops the drafts of this transaction. Nothing changes and nothing is emitted.
+   *
+   * @throws {Error} When the transaction was already committed or discarded.
+   * @remarks No example: the flow runner discards the transaction of a node that failed or was
+   * aborted; a game never holds one.
+   */
   discard(): void;
 };
 
 /**
  * store module state.
- *
- * @example
- * ```ts
- * const store: StoreState = createStoreState(config);
- * ```
  */
 export type StoreState = {
   /** Frozen save document. */
@@ -154,35 +235,140 @@ export type StoreState = {
 };
 
 /**
- * store module API.
+ * store module API, `app.model.store`. Logic changes the trees only inside a transaction, and only
+ * a rest point hands patches to the provider, so a kill between two rest nodes loses a whole
+ * transition and never half of one.
  *
  * @example
  * ```ts
- * const store: StoreApi = ctx.require(modelPlugin).store;
- * await store.load();
+ * // A game only reads the store. The flow runner loads, opens transactions and marks rest points.
+ * const { player, session } = app.model.store.snapshot();
  * ```
  */
 export type StoreApi = {
+  /**
+   * Loads the save. A new player gets the initial player and a seed; a stored save runs through
+   * the migration chain. Nothing is written until the document is complete, so a failure leaves
+   * the state exactly as it was and the app can show a clear screen. A document the provider has
+   * no base for, a new player or a migrated save, is handed over at once: a player who leaves on
+   * the first screen is a saved player. Marks the first rest point and emits `model:committed`
+   * with cause `"load"`.
+   *
+   * @returns Resolves when the document is in place.
+   * @throws {SaveUnreadableError} When the save cannot be read by this build.
+   * @throws {unknown} The error of a provider that fails to load or refuses the first commit.
+   * @remarks No example: `app.flow.run()` awaits it once at boot; a game never calls it.
+   */
   load(): Promise<void>;
+
+  /**
+   * Hands out the committed trees. Frozen: this is the only thing a view or a projection sees.
+   * Before `load()` it shows the initial player, never a half-read save.
+   *
+   * @returns The frozen player, session and rng trees.
+   * @example
+   * ```ts
+   * // A test plays two rolls headless and reads what was committed.
+   * await game.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]);
+   * app.model.store.snapshot().session; // { rolls: 2 }
+   * ```
+   */
   snapshot(): Snapshot;
+
+  /**
+   * Opens the drafts of one node run. One transaction at a time: a second `begin` is a bug in the
+   * runner, not a state to recover from.
+   *
+   * @returns The open transaction.
+   * @throws {Error} When a transaction is already open.
+   * @remarks No example: the flow runner keeps one transaction open for every node run, so a call
+   * from a game throws.
+   */
   begin(): Transaction;
+
+  /**
+   * Marks a rest node: the provider receives everything since the last rest point, and only then
+   * does the rest point move. A throwing provider leaves both untouched, so the next attempt
+   * still holds the whole transition.
+   *
+   * @throws {unknown} The error of a failing provider.
+   * @remarks No example: the flow runner calls it on the edge into a rest node; a game marks a
+   * node with `rest: true` instead.
+   */
   markRest(): void;
+
+  /**
+   * Marks a barrier node: rollback cannot cross it, so the rest point moves first. The pending
+   * patches are dropped only once the provider reports the data as durable.
+   *
+   * @param txId - Id of the transaction that left the barrier node.
+   * @returns Resolves when the data is durable.
+   * @throws {unknown} The error of a failing provider.
+   * @remarks No example: the flow runner calls it on the edge out of a barrier node and builds the
+   * `txId` itself; a game marks a node with `barrier: true` instead.
+   */
   markBarrier(txId: string): Promise<void>;
+
+  /**
+   * Returns to the last rest point. It discards an open transaction first. A pointer swap to
+   * frozen trees: no inverse patch is replayed. Everything in `pending` belongs to the failed
+   * transition, because a rest point empties it. Emits `model:committed` with cause `"rollback"`.
+   *
+   * @remarks No example: the flow runner calls it when a node fails; a call from a game would
+   * move the trees away from the node the graph stands on.
+   */
   rollback(): void;
+
+  /**
+   * Replaces the trees: a bookmark, a repro, a dev restore after a reload. What is omitted stays
+   * as it is. The restored trees become the new rest point. The provider receives the whole
+   * document at the next rest point, never patches on a base it no longer has. Emits
+   * `model:committed` with cause `"restore"`.
+   *
+   * @param input - The trees to put in place.
+   * @param input.player - The player tree.
+   * @param input.session - The session tree. Omitted: the current one stays.
+   * @param input.rng - The rng branch. Omitted: the current one stays.
+   * @throws {Error} When a transaction is open.
+   * @remarks No example: a game restores through `app.flow.restore(bookmark)`, which also enters
+   * the node; while the graph runs a transaction is open and a direct call throws.
+   */
   restore(input: { player: Json; session?: Json; rng?: RngState }): void;
+
+  /**
+   * Asks the provider to write what it has accumulated. The pending patches stay: between two
+   * rest nodes they are an unfinished transition, and a kill must lose all of it, never half.
+   * The engine calls it on a background pause and on stop.
+   *
+   * @returns Resolves when the provider has written.
+   * @throws {unknown} The error of a failing provider.
+   * @example
+   * ```ts
+   * // The game leaves the page for a payment screen: write the save first.
+   * await app.model.store.flush();
+   * window.location.assign("/checkout");
+   * ```
+   */
   flush(): Promise<void>;
 };
 
 /**
- * Thrown by `load()` when the save cannot be read by this build.
+ * Thrown by `load()`, and so by `flow.run()`, when the save cannot be read by this build. The
+ * save stays untouched, so the app can show a clear screen instead of overwriting it.
  *
  * @example
  * ```ts
- * if (error instanceof SaveUnreadableError) showSaveScreen(error);
+ * // The player opens an old build over a newer save: show "update the game", keep the save.
+ * app.flow.run().catch((error: unknown) => {
+ *   if (!(error instanceof SaveUnreadableError)) throw error;
+ *   showUpdateScreen(error.savedVersion, error.schemaVersion); // 3, 2
+ * });
  * ```
  */
 export class SaveUnreadableError extends Error {
+  /** Version found in the save. */
   readonly savedVersion: number;
+  /** Version this build writes. */
   readonly schemaVersion: number;
 
   /**
@@ -193,7 +379,8 @@ export class SaveUnreadableError extends Error {
    * @param cause - The underlying failure.
    * @example
    * ```ts
-   * throw new SaveUnreadableError(3, 2, undefined);
+   * const error = new SaveUnreadableError(3, 2, new Error("Written by a newer build."));
+   * error.savedVersion; // 3
    * ```
    */
   constructor(savedVersion: number, schemaVersion: number, cause: unknown) {

@@ -23,10 +23,6 @@ import type { AnyFlow, AnyNode, Bookmark, Modules, SlotNode } from "./types";
  * @param node - The node to run.
  * @param safe - Whether the loop is already recovering.
  * @returns `"stop"` when the runner was stopped, `"continue"` otherwise.
- * @example
- * ```ts
- * return runNode(ctx, modules, location, location.entry, safe);
- * ```
  */
 async function runNode(
   ctx: FlowCtx,
@@ -66,11 +62,6 @@ async function runNode(
     input: state.stack.at(-1)?.input ?? noPayload,
     /**
      * Tells a walk that this node's gate is open.
-     *
-     * @example
-     * ```ts
-     * step.gateOpened();
-     * ```
      */
     gateOpened: (): void => {
       notifyGateOpen(state);
@@ -121,10 +112,6 @@ async function runNode(
  * @param sub - The sub-flow.
  * @param safe - Whether the loop is already recovering.
  * @returns Always `"continue"`.
- * @example
- * ```ts
- * return enterSubFlow(ctx, modules, location, location.entry, safe);
- * ```
  */
 function enterSubFlow(
   ctx: FlowCtx,
@@ -161,10 +148,6 @@ function enterSubFlow(
  * @param slot - The slot node.
  * @param safe - Whether the loop is already recovering.
  * @returns Always `"continue"`.
- * @example
- * ```ts
- * return enterSlot(ctx, modules, location, location.entry, safe);
- * ```
  */
 function enterSlot(
   ctx: FlowCtx,
@@ -195,10 +178,6 @@ function enterSlot(
  * @param ctx - Domain context of the flow plugin.
  * @param bookmark - The bookmark to enter.
  * @throws {Error} When the graph has no node at the bookmark's path.
- * @example
- * ```ts
- * enterBookmark(ctx, bookmark);
- * ```
  */
 function enterBookmark(ctx: FlowCtx, bookmark: Bookmark): void {
   const state = ctx.state.runner;
@@ -240,10 +219,6 @@ function enterBookmark(ctx: FlowCtx, bookmark: Bookmark): void {
  * @param safe - Whether the loop is already recovering.
  * @returns `"stop"` when the runner was stopped, `"continue"` otherwise.
  * @throws {Error} When the position names no node of the graph.
- * @example
- * ```ts
- * const outcome = await advance(ctx, modules, safe);
- * ```
  */
 async function advance(ctx: FlowCtx, modules: Modules, safe: Safe): Promise<StepOutcome> {
   const state = ctx.state.runner;
@@ -290,10 +265,6 @@ async function advance(ctx: FlowCtx, modules: Modules, safe: Safe): Promise<Step
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
  * @returns A promise that resolves when `onStop` aborted the loop.
  * @throws {Error} On a fatal error: validation, an unreadable save, a failure inside `safeNode`.
- * @example
- * ```ts
- * state.runner.running = runLoop(ctx, modules);
- * ```
  */
 export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
   const main = requireMainFlow(ctx);
@@ -328,10 +299,6 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
  * @param bookmark - The bookmark to enter.
  * @returns A promise that resolves once the loop rests at the bookmark's node.
  * @throws {Error} When the loop is not running.
- * @example
- * ```ts
- * await restorePosition(ctx, modules, bookmark);
- * ```
  */
 export function restorePosition(
   ctx: FlowCtx,
@@ -350,11 +317,6 @@ export function restorePosition(
   const entered = new Promise<void>(resolve => {
     /**
      * Resolves once, when the loop rests at the restored node.
-     *
-     * @example
-     * ```ts
-     * listener("home");
-     * ```
      */
     const listener = (): void => {
       const index = seam.rest.indexOf(listener);

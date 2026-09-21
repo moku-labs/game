@@ -34,7 +34,7 @@ export type FeatureDescription = {
  *
  * @example
  * ```ts
- * const [first]: readonly Contribution[] = app.flow.features.contributions("afterWin");
+ * const contribution: Contribution = { feature: "reward", flow: rewardFlow, order: 10 };
  * ```
  */
 export type Contribution = {
@@ -46,11 +46,6 @@ export type Contribution = {
 
 /**
  * features module state.
- *
- * @example
- * ```ts
- * const features: FeaturesState = createFeaturesState();
- * ```
  */
 export type FeaturesState = {
   byName: Map<string, FeatureDescription>;
@@ -59,25 +54,69 @@ export type FeaturesState = {
 };
 
 /**
- * features module API.
+ * features module API, `app.flow.features`: the registry every feature plugin writes itself into.
  *
  * @example
  * ```ts
- * ctx.require(flowPlugin).features.register("board", description);
+ * // The game composed `rewardFeature`. A plugin above asks in its onStart what the game brought.
+ * app.flow.features.all().map(feature => feature.name); // ["reward"]
  * ```
  */
 export type FeaturesApi = {
+  /**
+   * Records what a feature brings. Called from the feature plugin's `onInit`, so every feature
+   * is known before the graph is validated.
+   *
+   * @param name - Feature name. Shares the namespace with plugin names.
+   * @param description - Nodes, flows and slot contributions of the feature.
+   * @throws {Error} After `run()` sealed the registry, and for a duplicate name.
+   * @example
+   * ```ts
+   * // A hand-written feature plugin registers itself in onInit. `defineFeature` does the same.
+   * const rewardPlugin = createPlugin("reward", {
+   *   depends: [flowPlugin],
+   *   onInit: ctx => ctx.require(flowPlugin).features.register("reward", { flows: [rewardFlow] })
+   * });
+   * ```
+   */
   register(name: string, description: FeatureDescription): void;
+
+  /**
+   * Lists every registered feature in registration order. Plugins above read it in their
+   * `onStart` to pick up what they own.
+   *
+   * @returns A fresh list of name and description.
+   * @example
+   * ```ts
+   * // A plugin above collects the flows of every feature.
+   * app.flow.features.all(); // [{ name: "reward", description: { flows: [rewardFlow] } }]
+   * ```
+   */
   all(): readonly { name: string; description: FeatureDescription }[];
+
+  /**
+   * Lists the sub-flows contributed to one slot, lowest `order` first. Two equal orders in one
+   * slot stay in registration order here and are reported by `validate`.
+   *
+   * @param slotName - Name of the slot node.
+   * @returns The contributions of that slot, sorted by `order`.
+   * @example
+   * ```ts
+   * // What runs when the graph enters slot("afterOrder").
+   * app.flow.features.contributions("afterOrder");
+   * // [{ feature: "reward", flow: rewardFlow, order: 10 }]
+   * app.flow.features.contributions("afterLoss"); // []: no feature contributes to this slot
+   * ```
+   */
   contributions(slotName: string): readonly Contribution[];
 };
 
 /**
  * features methods injected into `runner`. Not public.
- *
- * @example
- * ```ts
- * modules.features.seal();
- * ```
  */
-export type FeaturesInternal = { seal(): void };
+export type FeaturesInternal = {
+  /**
+   * Closes the registry. Called once by `run()` after the graph was collected.
+   */
+  seal(): void;
+};

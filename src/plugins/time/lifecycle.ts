@@ -11,21 +11,12 @@ import type { State, TimeCtx } from "./types";
  *
  * @param ctx - Domain context of the time plugin.
  * @returns The function handed to `requestAnimationFrame` on every frame.
- * @example
- * ```ts
- * const onFrame = createFrameFunction(ctx);
- * ctx.state.rafId = requestAnimationFrame(onFrame);
- * ```
  */
 function createFrameFunction(ctx: TimeCtx): (timestamp: number) => void {
   /**
    * One frame of the platform.
    *
    * @param timestamp - Timestamp handed over by `requestAnimationFrame`, in milliseconds.
-   * @example
-   * ```ts
-   * onFrame(performance.now());
-   * ```
    */
   const onFrame = (timestamp: number): void => {
     ctx.state.rafId = globalThis.requestAnimationFrame(onFrame);
@@ -40,10 +31,6 @@ function createFrameFunction(ctx: TimeCtx): (timestamp: number) => void {
  * core 1.6 the kernel hands the plugin its own state at stop.
  *
  * @param state - State of the time plugin.
- * @example
- * ```ts
- * createPlugin("time", { onStop: ({ state }) => stopLoop(state) });
- * ```
  */
 export function stopLoop(state: State): void {
   const { rafId } = state;
@@ -59,10 +46,6 @@ export function stopLoop(state: State): void {
  * Starts the single `requestAnimationFrame` loop when the platform has one. In plain Bun the loop does not start and `isRunning` stays false.
  *
  * @param ctx - Domain context of the time plugin.
- * @example
- * ```ts
- * createPlugin("time", { onStart: startLoop });
- * ```
  */
 export function startLoop(ctx: TimeCtx): void {
   if (typeof globalThis.requestAnimationFrame !== "function") return;

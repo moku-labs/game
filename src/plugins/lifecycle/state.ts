@@ -11,10 +11,6 @@ import type { Config, State } from "./types";
  * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns A fresh state, owned by one app.
- * @example
- * ```ts
- * const state = createLifecycleState({ global, config });
- * ```
  */
 export function createLifecycleState(_ctx: {
   readonly global: Readonly<Record<string, unknown>>;

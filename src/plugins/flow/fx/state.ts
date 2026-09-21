@@ -10,7 +10,7 @@ import type { FxState } from "./types";
  * @returns An empty map of effect kind to handler.
  * @example
  * ```ts
- * const handlers = emptyHandlers();
+ * emptyHandlers().size; // 0
  * ```
  */
 function emptyHandlers(): FxState["handlers"] {
@@ -21,10 +21,6 @@ function emptyHandlers(): FxState["handlers"] {
  * Creates the fx module state: no handler, no buffered hint, no pending completion, mode `"live"`.
  *
  * @returns A fresh fx state, owned by the plugin state of `flow`.
- * @example
- * ```ts
- * const fx = createFxState();
- * ```
  */
 export function createFxState(): FxState {
   return { handlers: emptyHandlers(), buffered: [], settled: [], mode: "live" };

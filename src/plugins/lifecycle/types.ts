@@ -24,7 +24,11 @@ export type PauseReason =
  *
  * @example
  * ```ts
- * const onChanged = (payload: Events["lifecycle:changed"]) => payload.resumed;
+ * // The payload of the first `app.lifecycle.push("background")`.
+ * const payload: Events["lifecycle:changed"] = {
+ *   reason: "background", action: "push",
+ *   reasons: ["background"], paused: true, resumed: false
+ * };
  * ```
  */
 export type Events = {
@@ -53,27 +57,78 @@ export type Config = Record<string, never>;
 
 /**
  * lifecycle plugin state: the pause reasons in insertion order, no duplicates.
- *
- * @example
- * ```ts
- * const state: State = { reasons: ["background"] };
- * ```
  */
 export type State = { reasons: PauseReason[] };
 
 /**
- * lifecycle plugin API.
+ * lifecycle plugin API, `app.lifecycle`. The stack of reasons why the game is paused: the first
+ * reason pauses `time`, the last one to leave resumes it, and every real change of the stack
+ * emits `lifecycle:changed`.
  *
  * @example
  * ```ts
- * const lifecycle: Api = ctx.require(lifecyclePlugin);
- * lifecycle.push("background");
+ * // Two reasons hold the pause, so they never cancel each other.
+ * app.lifecycle.push("background"); // time pauses
+ * app.lifecycle.push("ad"); // still one pause
+ * app.lifecycle.pop("background"); // still paused: "ad" holds
+ * app.lifecycle.pop("ad"); // time resumes
  * ```
  */
 export type Api = {
+  /**
+   * Pushes a reason why the game is paused. A reason already on the stack is ignored, so two
+   * plugins pausing for the same reason never pause twice.
+   *
+   * @param reason - Why the game is paused.
+   * @example
+   * ```ts
+   * // A rewarded ad covers the game: the world stands while it plays.
+   * app.lifecycle.push("ad"); // app.time.isPaused() is true, "lifecycle:changed" is emitted
+   * app.lifecycle.push("ad"); // already on the stack: no second pause, no event
+   * ```
+   */
   push(reason: PauseReason): void;
+
+  /**
+   * Pops a reason. The game runs again only when the last reason leaves. A reason that is not
+   * on the stack is ignored.
+   *
+   * @param reason - The reason that no longer holds.
+   * @example
+   * ```ts
+   * // The tab is visible again. The game runs, unless another reason still holds.
+   * document.addEventListener("visibilitychange", () => {
+   *   if (!document.hidden) app.lifecycle.pop("background");
+   * });
+   * ```
+   */
   pop(reason: PauseReason): void;
+
+  /**
+   * Reads the stack as a frozen copy, in insertion order, so a caller cannot write into it.
+   *
+   * @returns The pause reasons currently held.
+   * @example
+   * ```ts
+   * // A debug overlay shows why the game stands still.
+   * app.lifecycle.push("background");
+   * app.lifecycle.push("ad");
+   * app.lifecycle.reasons(); // ["background", "ad"]
+   * ```
+   */
   reasons(): readonly PauseReason[];
+
+  /**
+   * Tells whether the game is paused: true while the stack is not empty.
+   *
+   * @returns True while at least one reason holds.
+   * @example
+   * ```ts
+   * // The idle hint must not start behind a system dialog.
+   * app.lifecycle.push("system-dialog");
+   * app.lifecycle.isPaused(); // true
+   * ```
+   */
   isPaused(): boolean;
 };
 
@@ -81,11 +136,6 @@ export type Api = {
  * Domain context: the kernel slice with `require`, used to reach `time`.
  * `emit` is a method signature on purpose: a property-typed `emit` breaks the kernel's event
  * inference when a factory is passed to `createPlugin` by direct reference (`api`).
- *
- * @example
- * ```ts
- * const api = createLifecycleApi(ctx satisfies LifecycleCtx);
- * ```
  */
 export type LifecycleCtx = Omit<PluginCtx<Config, State, Events>, "emit"> & {
   emit<Name extends keyof Events>(name: Name, payload: Events[Name]): void;

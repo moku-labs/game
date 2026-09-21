@@ -21,10 +21,6 @@ import type { Api, FlowCtx, KernelSlice } from "./types";
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns The four modules with their public and internal methods, ready for the runner.
- * @example
- * ```ts
- * const modules = createModules(flowCtx);
- * ```
  */
 function createModules(ctx: FlowCtx): Modules {
   const features = createFeaturesApi(ctx);
@@ -41,10 +37,6 @@ function createModules(ctx: FlowCtx): Modules {
  *
  * @param gate - The full gate module.
  * @returns The public gate API.
- * @example
- * ```ts
- * const publicGate = exposeGate(modules.gate);
- * ```
  */
 function exposeGate(gate: GateApi & GateInternal): GateApi {
   return { answer: gate.answer, pointer: gate.pointer, state: gate.state };
@@ -55,10 +47,6 @@ function exposeGate(gate: GateApi & GateInternal): GateApi {
  *
  * @param inbox - The full inbox module.
  * @returns The public inbox API.
- * @example
- * ```ts
- * const publicInbox = exposeInbox(modules.inbox);
- * ```
  */
 function exposeInbox(inbox: InboxApi & InboxInternal): InboxApi {
   return { post: inbox.post };
@@ -70,10 +58,6 @@ function exposeInbox(inbox: InboxApi & InboxInternal): InboxApi {
  *
  * @param fx - The full fx module.
  * @returns The public fx API.
- * @example
- * ```ts
- * const publicFx = exposeFx(modules.fx);
- * ```
  */
 function exposeFx(fx: FxApi & FxInternal): FxApi {
   return { handle: fx.handle, dispatch: fx.dispatch };
@@ -85,10 +69,6 @@ function exposeFx(fx: FxApi & FxInternal): FxApi {
  *
  * @param features - The full features module.
  * @returns The public features API.
- * @example
- * ```ts
- * const publicFeatures = exposeFeatures(modules.features);
- * ```
  */
 function exposeFeatures(features: FeaturesApi & FeaturesInternal): FeaturesApi {
   return {
@@ -106,11 +86,6 @@ function exposeFeatures(features: FeaturesApi & FeaturesInternal): FeaturesApi {
  *
  * @param ctx - Kernel context of the flow plugin.
  * @returns The plugin API.
- * @example
- * ```ts
- * const flow = createFlowApi(ctx);
- * flow.gate.answer({ intent: "play" });
- * ```
  */
 export function createFlowApi(ctx: KernelSlice): Api {
   const flowCtx: FlowCtx = { ...ctx, deps: resolveDeps(ctx) };

@@ -35,15 +35,81 @@ export type HeadlessApp = {
  *
  * @example
  * ```ts
- * const game: HeadlessGame = await createHeadless(app);
- * await game.walk([{ at: "home", intent: "play" }]);
+ * // A test of the dice game: two rolls, no screen, no waiting.
+ * const game = await createHeadless(app);
+ * const state = await game.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]);
+ *
+ * state.path; // "home"
+ * await game.stop();
  * ```
  */
 export type HeadlessGame = {
+  /**
+   * Walks a route through the running loop.
+   *
+   * @param route - The player's answers and substituted sub-flow results, in order.
+   * @returns The state the walk ended in.
+   * @throws {Error} When a step is never reached, or the loop failed fatally.
+   * @example
+   * ```ts
+   * // Open the board and tap the generator twice. Every node's logic runs for real.
+   * const tap = { at: "board/awaitIntent", intent: "tap", payload: { generatorId: "sawmill" } };
+   * const state = await game.walk([{ at: "home", intent: "play" }, tap, tap]);
+   *
+   * state.path; // "board/awaitIntent"
+   * ```
+   */
   walk(route: readonly RouteStep[]): Promise<FlowState>;
+
+  /**
+   * Gives one answer to the gate, the way a tap does.
+   *
+   * @param answer - Intent and optional payload.
+   * @returns Whether the gate took it.
+   * @example
+   * ```ts
+   * // One tap without a route. The test then waits for the loop by itself.
+   * game.answer({ intent: "play" }); // true: "home" rests and lists "play"
+   * ```
+   */
   answer(answer: Answer): boolean;
+
+  /**
+   * Reads where the graph stands.
+   *
+   * @returns Whether it runs, the path, the stack, what it waits for and the mode.
+   * @example
+   * ```ts
+   * // Right after createHeadless: the graph rests at its first rest node.
+   * game.state().path; // "home"
+   * game.state().pending; // { gate: ["play"] }
+   * ```
+   */
   state(): FlowState;
+
+  /**
+   * Reads the edges taken since the last checkpoint.
+   *
+   * @returns A copy of the journal.
+   * @example
+   * ```ts
+   * // After a merge onto an empty cell: the last edge says why the move was refused.
+   * const last = game.history().at(-1);
+   * // last?.path: "board/merge", last?.outcome: "rejected", last?.payload: { reason: "empty" }
+   * ```
+   */
   history(): readonly JournalEntry[];
+
+  /**
+   * Stops the app, then re-throws a fatal error of the loop.
+   *
+   * @throws {Error} When the loop failed fatally.
+   * @example
+   * ```ts
+   * // The last line of a headless test. A fatal error of the loop fails the test here.
+   * await game.stop();
+   * ```
+   */
   stop(): Promise<void>;
 };
 
@@ -68,7 +134,7 @@ export type Repro = {
  *
  * @example
  * ```ts
- * const { path, player }: ReproResult = await runRepro(app, repro);
+ * const result: ReproResult = { path: ["home"], player: { coins: 3 }, session: { visits: 1 } };
  * ```
  */
 export type ReproResult = { path: string[]; player: Json; session: Json };
@@ -83,7 +149,7 @@ type Fatal = { error: unknown };
  * @returns The value itself when it is an error, a wrapped one otherwise.
  * @example
  * ```ts
- * throw asError(fatal.error);
+ * asError("offline").message; // "[game] The headless run failed.\n  offline."
  * ```
  */
 function asError(value: unknown): Error {
@@ -98,10 +164,6 @@ function asError(value: unknown): Error {
  *
  * @param app - The started app.
  * @returns The holder of the fatal error.
- * @example
- * ```ts
- * const fatal = startLoop(app);
- * ```
  */
 function startLoop(app: HeadlessApp): Fatal {
   const fatal: Fatal = { error: undefined };
@@ -124,10 +186,6 @@ function startLoop(app: HeadlessApp): Fatal {
  * @param fatal - Holder of the fatal error of `run()`.
  * @returns Resolves once the loop rests at its first rest node.
  * @throws {Error} When the loop failed fatally instead of reaching a rest node.
- * @example
- * ```ts
- * await settleAtFirstRest(app, fatal);
- * ```
  */
 async function settleAtFirstRest(app: HeadlessApp, fatal: Fatal): Promise<void> {
   await app.flow.walk([]).catch((error: unknown) => {
@@ -149,9 +207,11 @@ async function settleAtFirstRest(app: HeadlessApp, fatal: Fatal): Promise<void> 
  * @throws {Error} When the loop failed fatally before it reached its first rest node.
  * @example
  * ```ts
+ * // A test starts the merge game without a screen. The call resolves at the first rest node.
  * const game = await createHeadless(app);
- * expect(game.state().path).toBe("home");
- * await game.walk([{ at: "board/awaitIntent", intent: "merge", payload: { from: "c2", to: "c3" } }]);
+ *
+ * game.state().path; // "home": the transit node "boot" was played out
+ * game.state().mode; // "fast"
  * await game.stop();
  * ```
  */
@@ -165,17 +225,6 @@ export async function createHeadless(app: HeadlessApp): Promise<HeadlessGame> {
   await settleAtFirstRest(app, fatal);
 
   return {
-    /**
-     * Walks a route through the running loop.
-     *
-     * @param route - The player's answers and substituted sub-flow results, in order.
-     * @returns The state the walk ended in.
-     * @throws {Error} When a step is never reached, or the loop failed fatally.
-     * @example
-     * ```ts
-     * await game.walk([{ at: "home", intent: "play" }]);
-     * ```
-     */
     walk: async (route: readonly RouteStep[]): Promise<FlowState> => {
       const state = await app.flow.walk(route).catch((error: unknown) => {
         throw asError(fatal.error ?? error);
@@ -186,49 +235,12 @@ export async function createHeadless(app: HeadlessApp): Promise<HeadlessGame> {
       return state;
     },
 
-    /**
-     * Gives one answer to the gate, the way a tap does.
-     *
-     * @param answer - Intent and optional payload.
-     * @returns Whether the gate took it.
-     * @example
-     * ```ts
-     * game.answer({ intent: "play" });
-     * ```
-     */
     answer: (answer: Answer): boolean => app.flow.gate.answer(answer),
 
-    /**
-     * Reads where the graph stands.
-     *
-     * @returns Whether it runs, the path, the stack, what it waits for and the mode.
-     * @example
-     * ```ts
-     * expect(game.state().path).toBe("home");
-     * ```
-     */
     state: (): FlowState => app.flow.state(),
 
-    /**
-     * Reads the edges taken since the last checkpoint.
-     *
-     * @returns A copy of the journal.
-     * @example
-     * ```ts
-     * const [last] = game.history().slice(-1);
-     * ```
-     */
     history: (): readonly JournalEntry[] => app.flow.history(),
 
-    /**
-     * Stops the app, then re-throws a fatal error of the loop.
-     *
-     * @throws {Error} When the loop failed fatally.
-     * @example
-     * ```ts
-     * await game.stop();
-     * ```
-     */
     stop: async (): Promise<void> => {
       await app.stop();
 
@@ -244,10 +256,6 @@ export async function createHeadless(app: HeadlessApp): Promise<HeadlessGame> {
  * @param repro - Starting state, optional checkpoint and the route.
  * @returns The path of the node the repro enters.
  * @throws {Error} When the graph has no main flow to start from.
- * @example
- * ```ts
- * const path = reproPath(app, repro);
- * ```
  */
 function reproPath(app: HeadlessApp, repro: Repro): string {
   if (repro.checkpoint !== undefined) return repro.checkpoint;
@@ -271,10 +279,6 @@ function reproPath(app: HeadlessApp, repro: Repro): string {
  * @param app - The started app.
  * @param repro - Starting state, optional checkpoint and the route.
  * @returns The bookmark to restore.
- * @example
- * ```ts
- * const bookmark = reproBookmark(app, repro);
- * ```
  */
 function reproBookmark(app: HeadlessApp, repro: Repro): Bookmark {
   return {
@@ -297,7 +301,12 @@ function reproBookmark(app: HeadlessApp, repro: Repro): Bookmark {
  * @returns The path the run ended at, and the committed state.
  * @example
  * ```ts
- * const result = await runRepro(app, { player: saved, checkpoint: "home", route });
+ * // A bug report on the dice game: "reset keeps my coins". Replay it from the "home" checkpoint.
+ * const reset = { at: "home", intent: "reset" };
+ * const result = await runRepro(app, { player: { coins: 7 }, checkpoint: "home", route: [reset] });
+ *
+ * result.player; // { coins: 0 }; result.path is ["home"]
+ * await app.stop(); // the app keeps running after the run
  * ```
  */
 export async function runRepro(app: HeadlessApp, repro: Repro): Promise<ReproResult> {
@@ -324,7 +333,9 @@ export async function runRepro(app: HeadlessApp, repro: Repro): Promise<ReproRes
  * @param deltaMs - Milliseconds per frame.
  * @example
  * ```ts
- * stepFrames(app, 60, 16);
+ * // A headless game has no frame source: the test moves the six frame phases by hand.
+ * stepFrames(app, 2, 16);
+ * app.time.snapshot(); // frame: 2, delta: 16, elapsed: 32
  * ```
  */
 export function stepFrames(app: HeadlessApp, count: number, deltaMs: number): void {
