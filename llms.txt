@@ -30,7 +30,7 @@ Root exports:
 - Path: node names joined by `/` through sub-flows and slots. Examples: `"home"`, `"board/awaitIntent"`, `"afterBonus/thanks"`.
 - Edge target: a node name, `exit(...)` or `to(...)`. A payload must fit the input of the target. A node without input accepts any payload.
 - Sub-flow: a flow that declares `outcomes` is used as a node of another flow. `exit("name")` leaves it with that outcome.
-- Slot: `slot("name")` is a node with the single outcome `done`. Features contribute sub-flows to it. They run in `order`. `when(snapshot)` can skip one.
+- Slot: `slot("name")` is a node with the single outcome `done`. Features contribute sub-flows to it. They run in `order`. `when(snapshot)` can skip one; it always reads the committed state, also what an earlier contribution of the same slot wrote. A contribution may hold a slot of its own. The slot ends with its own `done` edge after the last contribution.
 - Feature: `defineFeature(name, description)` makes an ordinary plugin that registers into `flow.features` in `onInit`. Pass it in `createApp({ plugins: [...] })`. `feature.logicOnly` is the same plugin with the V1 keys only, for headless tests.
 - Modes: `"live"` and `"fast"`. In fast mode effects answer instantly, hints are dropped and only `runInFast` handlers run. All node logic runs for real.
 

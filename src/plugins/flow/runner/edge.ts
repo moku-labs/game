@@ -97,6 +97,8 @@ export function handleFailure(
   ctx.emit("flow:error", { path, error, rolledBackTo: framePath(target), retry });
 
   state.stack = [...target];
+  // A rollback leaves any slot the loop was in: nothing of it may steer the next slot entry.
+  state.slotAfter = undefined;
 
   if (!retry) {
     safe.inside = true;
@@ -140,6 +142,7 @@ export function arrive(ctx: FlowCtx, plan: Arrival): void {
   const state = ctx.state.runner;
 
   state.stack = plan.stack;
+  state.slotAfter = plan.after;
 
   if (!plan.rest) return;
 
@@ -171,7 +174,6 @@ export async function finishNode(
   const state = ctx.state.runner;
   const plan = planFrom(
     ctx,
-    modules,
     [...state.stack],
     step.location,
     step.result.outcome,

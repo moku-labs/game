@@ -116,6 +116,7 @@ const createMockState = (): State => ({
     enterCallbacks: { load: [], scene: [] },
     stack: [],
     restFrame: undefined,
+    slotAfter: undefined,
     journal: [],
     journalIndex: 0,
     running: undefined,
@@ -1251,6 +1252,31 @@ describe("restorePosition", () => {
       { flow: "main", node: "play", input: { level: 4 } }
     ]);
     expect(harness.calls).toContain("markRest");
+    await stopRunner(harness.ctx);
+  });
+
+  it("forgets the contribution a slot was left after: a restore starts every slot from its first", async () => {
+    const main = flow("main", { home: waiting("play"), play: waiting("home") }, "home", {
+      home: { play: "play" },
+      play: { home: "home" }
+    });
+    const harness = setup({ main });
+    const bookmark: Bookmark = {
+      path: "play",
+      input: {},
+      player: {},
+      session: {},
+      rng: { seed: 2, streams: {} },
+      graph: "deadbeef"
+    };
+
+    harness.start();
+    await tick();
+    harness.ctx.state.runner.slotAfter = "rewardPopup";
+
+    await restorePosition(harness.ctx, harness.modules, bookmark);
+
+    expect(harness.ctx.state.runner.slotAfter).toBeUndefined();
     await stopRunner(harness.ctx);
   });
 

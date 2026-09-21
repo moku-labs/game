@@ -157,7 +157,16 @@ function enterSlot(
   safe: Safe
 ): Promise<StepOutcome> | StepOutcome {
   const state = ctx.state.runner;
-  const next = pickContribution(ctx, modules.features, slot.name, 0);
+  const finished = state.slotAfter;
+  const contributions = modules.features.contributions(slot.name);
+  const from =
+    finished === undefined ? 0 : contributions.findIndex(item => item.flow.id === finished) + 1;
+
+  // Every contribution is picked here, after the commit of the edge before it, so `when` always
+  // reads the committed state: the first one, and the ones after a contribution that ended.
+  state.slotAfter = undefined;
+
+  const next = pickContribution(ctx, modules.features, slot.name, from);
 
   if (next === undefined) {
     return applyResult(ctx, modules, location, { outcome: "done", payload: noPayload }, safe, {
@@ -210,6 +219,7 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
   ctx.deps.model.store.markRest();
 
   state.stack = framesOf(location.trail, bookmark.input);
+  state.slotAfter = undefined;
   state.restFrame = [...state.stack];
   state.failures = 0;
 
@@ -289,6 +299,7 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
 
   state.stack = [{ flow: main.id, node: main.start, input: noPayload }];
   state.restFrame = [...state.stack];
+  state.slotAfter = undefined;
   state.failures = 0;
 
   const safe: Safe = { inside: false };

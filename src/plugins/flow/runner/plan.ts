@@ -9,7 +9,7 @@ import { maxDepth, noPayload } from "./loop-types";
 import { isJson, locateFrames } from "./position";
 import { framePath } from "./registry";
 import { hasSubstitution } from "./seam";
-import type { AnyFlow, Frame, Modules, SlotNode } from "./types";
+import type { AnyFlow, Frame } from "./types";
 
 /**
  * Describes where the frames now point and descends into a sub-flow until a node or a slot is
@@ -113,7 +113,6 @@ export function pickContribution(
  * a sub-flow, which hands the outcome to the parent.
  *
  * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
  * @param frames - The position being planned; mutated.
  * @param location - Where the result was produced.
  * @param outcome - Outcome name of the result.
@@ -123,7 +122,6 @@ export function pickContribution(
  */
 export function planFrom(
   ctx: FlowCtx,
-  modules: Modules,
   frames: Frame[],
   location: Location,
   outcome: string,
@@ -171,38 +169,28 @@ export function planFrom(
   }
 
   if (parent.entry.kind === "slot") {
-    return continueSlot(ctx, modules, frames, parent, parent.entry, location.flow.id);
+    return continueSlot(frames, location.flow.id);
   }
 
-  return planFrom(ctx, modules, frames, parent, target.outcome, payload, depth + 1);
+  return planFrom(ctx, frames, parent, target.outcome, payload, depth + 1);
 }
 
 /**
- * Moves a slot to its next contribution, or ends the slot with `done` when none is left.
+ * Plans the return to a slot after one of its contributions ended. The next contribution is NOT
+ * picked here: `when` reads the committed state, and a plan is made before the commit of the edge.
+ * So the plan stands on the slot node and names the contribution that ended; the loop picks the
+ * next one after the commit, or leaves the slot with its `done` edge.
  *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @param frames - The position being planned; mutated.
- * @param location - The slot's own location.
- * @param slot - The slot node.
- * @param finished - Flow id of the contribution that just ended.
- * @returns The plan, or the problem that stops it.
+ * @param frames - The position, already popped back to the slot node.
+ * @param finished - Id of the contribution flow that just ended.
+ * @returns The plan that stands on the slot node.
  */
-function continueSlot(
-  ctx: FlowCtx,
-  modules: Modules,
-  frames: Frame[],
-  location: Location,
-  slot: SlotNode,
-  finished: string
-): Plan {
-  const contributions = modules.features.contributions(slot.name);
-  const index = contributions.findIndex(contribution => contribution.flow.id === finished);
-  const next = pickContribution(ctx, modules.features, slot.name, index + 1);
-
-  if (next === undefined) return planFrom(ctx, modules, frames, location, "done", noPayload, 0);
-
-  frames.push({ flow: next.flow.id, node: next.flow.start, input: noPayload });
-
-  return describePlan(ctx, frames);
+function continueSlot(frames: Frame[], finished: string): Plan {
+  return {
+    stack: frames,
+    next: framePath(frames),
+    rest: false,
+    checkpoint: false,
+    after: finished
+  };
 }

@@ -95,6 +95,7 @@ const createMockState = (): State => ({
     enterCallbacks: { load: [], scene: [] },
     stack: [],
     restFrame: undefined,
+    slotAfter: undefined,
     journal: [],
     journalIndex: 0,
     running: undefined,

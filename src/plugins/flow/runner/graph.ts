@@ -28,7 +28,8 @@ export function requireMainFlow(ctx: FlowCtx): AnyFlow {
 
 /**
  * Collects every flow of the graph: the main flow, everything it reaches by reference and the
- * sub-flows features contributed to a slot.
+ * sub-flows features contributed to a slot. A contribution may hold a slot of its own, so the slots
+ * are expanded until no new flow appears; flow ids are unique, so that ends.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param features - Features API, read for the slot contributions.
@@ -36,13 +37,20 @@ export function requireMainFlow(ctx: FlowCtx): AnyFlow {
  */
 export function collectGraph(ctx: FlowCtx, features: FeaturesApi): Map<string, AnyFlow> {
   const main = requireMainFlow(ctx);
-  const contributed: AnyFlow[] = [];
+  const graph = { flows: collectFlows(main, []), size: -1 };
 
-  for (const name of slotNames(collectFlows(main, []))) {
-    for (const contribution of features.contributions(name)) contributed.push(contribution.flow);
+  while (graph.size !== graph.flows.size) {
+    const contributed: AnyFlow[] = [];
+
+    for (const name of slotNames(graph.flows)) {
+      for (const contribution of features.contributions(name)) contributed.push(contribution.flow);
+    }
+
+    graph.size = graph.flows.size;
+    graph.flows = collectFlows(main, contributed);
   }
 
-  return collectFlows(main, contributed);
+  return graph.flows;
 }
 
 /**
