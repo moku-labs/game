@@ -26,7 +26,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | Method | Behaviour |
 |---|---|
 | `run(): Promise<void>` | Validates the graph, seals `features`, loads the save and enters `mainFlow.start`. Called once, by the consumer's `onStart`. Rejects on a fatal error; resolves when `onStop` aborts the loop. |
-| `onEnter(stage, fn): () => void` | Registry for the plugins above: `assets` preloads at `"load"`, `scenes` switches at `"scene"`. |
+| `onEnter(stage, fn): () => void` | Registry for the plugins above: `assets` preloads at `"load"`, `scenes` switches at `"scene"`. The callback gets `NodeInfo`, which carries `scene` when the node was defined with `defineNode({ scene: "board", ... })`. A node without `scene` keeps the current scene; an `over` node must not name one. |
 | `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. |
 | `bookmark(): Bookmark` | The current rest point as serialisable data. |
 | `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. |
@@ -40,6 +40,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `inbox.post(event): void` | Queues a world event. It is delivered only to a rest node whose `inbox` lists the type. |
 | `fx.handle(kind, fn, options?)` | Registers the single handler of one effect kind. `{ runInFast: true }` makes it run in fast mode too. |
 | `fx.dispatch(descriptor): void` | Fire-and-forget delivery, `runInFast` handlers only in fast mode. Handler errors are logged, never thrown. |
+| `fx.onHint(listener): () => void` | Hears every released hint after the commit of its edge, in release order, next to any `handle` owner of the kind. Silent in fast mode. `world` routes hints to projection motions with it. |
 | `features.register(name, description)` | Called from a feature plugin's `onInit`. After `run()` it throws. |
 | `features.all()`, `features.contributions(slot)` | What the game brought, and the sub-flows of one slot in `order`. |
 
