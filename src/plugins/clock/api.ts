@@ -10,10 +10,6 @@ import type { Api, ClockCtx, Elapsed, State } from "./types";
  *
  * @param state - Clock state.
  * @returns The highest moment ever returned, in epoch milliseconds.
- * @example
- * ```ts
- * const moment = readNow(ctx.state);
- * ```
  */
 function readNow(state: State): number {
   const moment = Math.trunc(state.source.now());
@@ -26,10 +22,6 @@ function readNow(state: State): number {
  * Drops the pending due moment and its timer, if there is one.
  *
  * @param state - Clock state.
- * @example
- * ```ts
- * cancelPending(ctx.state);
- * ```
  */
 export function cancelPending(state: State): void {
   if (state.handle !== undefined) state.source.clearTimer(state.handle);
@@ -43,10 +35,6 @@ export function cancelPending(state: State): void {
  * first, so a listener that unsubscribes during delivery does not hide its neighbour.
  *
  * @param state - Clock state.
- * @example
- * ```ts
- * deliverElapsed(ctx.state);
- * ```
  */
 function deliverElapsed(state: State): void {
   const moment = readNow(state);
@@ -62,10 +50,6 @@ function deliverElapsed(state: State): void {
  *
  * @param state - Clock state.
  * @param moment - Due moment in epoch milliseconds.
- * @example
- * ```ts
- * arm(ctx.state, rules.nextDue(player, tables));
- * ```
  */
 function arm(state: State, moment: number): void {
   const delayMs = Math.max(0, moment - Math.trunc(state.source.now()));
@@ -80,10 +64,6 @@ function arm(state: State, moment: number): void {
  * never reschedules a delivered moment by itself — the rules decide the next one.
  *
  * @param state - Clock state.
- * @example
- * ```ts
- * state.source.setTimer(() => fireDue(state), delayMs);
- * ```
  */
 function fireDue(state: State): void {
   const moment = state.dueAt;
@@ -103,10 +83,6 @@ function fireDue(state: State): void {
  *
  * @param state - Clock state.
  * @param listener - The listener registered by `onElapsed`.
- * @example
- * ```ts
- * removeListener(ctx.state, listener);
- * ```
  */
 function removeListener(state: State, listener: (input: Elapsed) => void): void {
   const index = state.listeners.indexOf(listener);
@@ -122,35 +98,11 @@ function removeListener(state: State, listener: (input: Elapsed) => void): void 
  *
  * @param ctx - Domain context of the clock plugin.
  * @returns The clock API exposed as `app.clock`.
- * @example
- * ```ts
- * const api = createClockApi(ctx);
- * api.scheduleAt(api.now() + 60_000);
- * ```
  */
 export function createClockApi(ctx: ClockCtx): Api {
   return {
-    /**
-     * Reads trusted time. Never decreases, whatever the device clock does.
-     *
-     * @returns The current moment in epoch milliseconds, an integer.
-     * @example
-     * ```ts
-     * const moment = app.clock.now();
-     * ```
-     */
     now: (): number => readNow(ctx.state),
 
-    /**
-     * Replaces the single pending due moment. `undefined` cancels it. A moment in the past is not
-     * delivered synchronously: it fires on the next macrotask of the source.
-     *
-     * @param moment - Moment in epoch milliseconds, or `undefined` to cancel.
-     * @example
-     * ```ts
-     * app.clock.scheduleAt(rules.nextDue(player, tables));
-     * ```
-     */
     scheduleAt: (moment: number | undefined): void => {
       cancelPending(ctx.state);
 
@@ -159,44 +111,16 @@ export function createClockApi(ctx: ClockCtx): Api {
       arm(ctx.state, moment);
     },
 
-    /**
-     * Registers a listener for the `elapsed` input.
-     *
-     * @param listener - Called with `{ now }` when a due moment arrives or on `poke`.
-     * @returns The unsubscribe function.
-     * @example
-     * ```ts
-     * const off = app.clock.onElapsed(input => inbox.push({ type: "elapsed", ...input }));
-     * ```
-     */
     onElapsed: (listener: (input: Elapsed) => void): (() => void) => {
       ctx.state.listeners.push(listener);
 
       return () => removeListener(ctx.state, listener);
     },
 
-    /**
-     * Delivers `elapsed` right now, without touching the pending due moment. Used on resume from
-     * background, where the timer of a sleeping tab never fired.
-     *
-     * @example
-     * ```ts
-     * app.clock.poke();
-     * ```
-     */
     poke: (): void => {
       deliverElapsed(ctx.state);
     },
 
-    /**
-     * Reads the pending due moment, for inspection and tests.
-     *
-     * @returns The pending moment, or `undefined` when nothing is scheduled.
-     * @example
-     * ```ts
-     * expect(app.clock.dueAt()).toBe(1500);
-     * ```
-     */
     dueAt: (): number | undefined => ctx.state.dueAt
   };
 }

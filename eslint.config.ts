@@ -109,7 +109,9 @@ export default [
         "error",
         {
           require: {
-            ArrowFunctionExpression: true,
+            // API methods are documented on the members of the public `Api` types, not on the
+            // arrow functions that implement them.
+            ArrowFunctionExpression: false,
             ClassDeclaration: true,
             FunctionDeclaration: true,
             FunctionExpression: true,
@@ -123,7 +125,8 @@ export default [
       "jsdoc/require-param-description": "error",
       "jsdoc/require-returns": "error",
       "jsdoc/require-returns-description": "error",
-      "jsdoc/require-example": "error",
+      // An example is required only where a game reads it: see block 6d.
+      "jsdoc/require-example": "off",
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
       "unicorn/require-module-specifiers": "off"
     }

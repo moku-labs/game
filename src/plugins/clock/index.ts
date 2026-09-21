@@ -16,7 +16,11 @@ const config: Config = { source: undefined };
  *
  * @example
  * ```ts
- * ctx.require(clockPlugin).scheduleAt(nextDue);
+ * // A game plugin that needs trusted time declares the dependency and asks for the API.
+ * const energyPlugin = createPlugin("energy", {
+ *   depends: [clockPlugin],
+ *   api: ctx => ({ fullAt: (missing: number) => ctx.require(clockPlugin).now() + missing * 60_000 })
+ * });
  * ```
  */
 export const clockPlugin = /*#__PURE__*/ createPlugin("clock", {
