@@ -46,8 +46,8 @@ export function createHandlers(ctx: KernelSlice): {
      * @param payload - What changed: the reason, the direction and whether the game resumed.
      */
     "lifecycle:changed": (payload: LifecycleChanged): void => {
-      // The framework `onError` has no ctx and prints to the console. This hook has `ctx.log`, so it
-      // reports its own failure there.
+      // The framework `onError` logs every failing hook as "game: a hook failed". This hook names
+      // itself, so the entry says which part of the engine failed.
       try {
         reactToLifecycle(ctx, payload);
       } catch (error) {
