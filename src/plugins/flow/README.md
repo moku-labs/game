@@ -71,7 +71,7 @@ would never let `app.start()` resolve.
 | Event | Payload | When |
 |---|---|---|
 | `flow:edge` | `{ flow, node, outcome, payload, next, patches, index, now }` | After the commit of an edge. |
-| `flow:rest` | `{ path, checkpoint }` | On entering a rest node. |
+| `flow:rest` | `{ path, checkpoint }` | On entering a rest node, also one that starts a slot contribution (`"afterOrder/show"`). The save goes to the provider and `bookmark()` names this node. |
 | `flow:error` | `{ path, error, rolledBackTo, retry }` | After a rollback. |
 
 No engine plugin hooks these events in V1. They are for the game, for projections and for devtools.

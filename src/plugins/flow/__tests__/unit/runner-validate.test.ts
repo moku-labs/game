@@ -393,6 +393,29 @@ describe("validateGraph", () => {
     });
   });
 
+  it("warns when two contributions of one slot have a node with the same name", () => {
+    const coins = flow("coins", { give: node({ rest: true, outcomes: ["go"] }) }, "give", {
+      give: { go: "give" }
+    });
+    const stars = flow("stars", { give: node({ rest: true, outcomes: ["go"] }) }, "give", {
+      give: { go: "give" }
+    });
+    const board = flow(
+      "board",
+      { afterWin: slotNode("afterWin"), home: node({ rest: true, outcomes: ["go"] }) },
+      "afterWin",
+      { afterWin: { done: "home" }, home: { go: "afterWin" } }
+    );
+    const features = featuresWith([
+      { feature: "coins", flow: coins, order: 10 },
+      { feature: "stars", flow: stars, order: 20 }
+    ]);
+
+    expect(report(board, features).warnings).toEqual([
+      '[game] Slot "afterWin": the flows "coins" and "stars" both have a node "give".\n  A bookmark path keeps node names only, so restore enters "coins". Give the nodes different names.'
+    ]);
+  });
+
   it("reports every problem of the graph at once", () => {
     const board = flow(
       "board",

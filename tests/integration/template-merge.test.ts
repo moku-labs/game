@@ -46,6 +46,44 @@ const edgesOf = (entries: readonly { path: string; outcome: string }[]): string[
   entries.map(entry => `${entry.path} -${entry.outcome}->`);
 
 describe("template-merge", () => {
+  it("treats the reward popup, a rest node entered through a slot, as a rest point", async () => {
+    const { app, provider } = createGame();
+    const game = await createHeadless(app);
+
+    await game.walk([{ at: "home", intent: "play" }]);
+
+    const commitsOnTheBoard = provider.calls.filter(call => call.method === "commit").length;
+
+    await game.walk(untilOrder.slice(1));
+
+    expect(game.state().path).toBe("afterOrder/show");
+    expect(app.flow.bookmark().path).toBe("afterOrder/show");
+    expect(provider.calls.filter(call => call.method === "commit").length).toBeGreaterThan(
+      commitsOnTheBoard
+    );
+    expect(provider.calls.at(-1)?.method).toBe("commit");
+
+    await game.stop();
+  });
+
+  it("restores a bookmark taken on the reward popup back onto the popup", async () => {
+    const { app } = createGame();
+    const game = await createHeadless(app);
+
+    await game.walk(untilOrder);
+
+    const bookmark = app.flow.bookmark();
+
+    await game.walk([claim]);
+    await app.flow.restore(bookmark);
+    await tick();
+
+    expect(game.state().path).toBe("afterOrder/show");
+    expect(app.flow.gate.state().allowed).toContain("claim");
+
+    await game.stop();
+  });
+
   it("plays a whole session from home through the board to the reward popup", async () => {
     const { app } = createGame();
     const game = await createHeadless(app);

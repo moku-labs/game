@@ -426,6 +426,38 @@ function safeNodeProblems(config: Readonly<Config>): string[] {
 }
 
 /**
+ * Warns when two contributions of one slot have a node with the same name. A bookmark path keeps
+ * node names only, so `restore` cannot tell the two apart and enters the first one in order.
+ *
+ * @param flows - Every collected flow by id.
+ * @param features - Features API, read for the contributions of every slot.
+ * @returns One warning per slot, node name and pair of flows.
+ */
+function slotNameWarnings(flows: ReadonlyMap<string, AnyFlow>, features: FeaturesApi): string[] {
+  const warnings: string[] = [];
+
+  for (const slotName of slotNames(flows)) {
+    const owners = new Map<string, string>();
+
+    for (const { flow } of features.contributions(slotName)) {
+      for (const nodeName of Object.keys(flow.nodes)) {
+        const first = owners.get(nodeName);
+
+        if (first === undefined) {
+          owners.set(nodeName, flow.id);
+        } else if (first !== flow.id) {
+          warnings.push(
+            `[game] Slot "${slotName}": the flows "${first}" and "${flow.id}" both have a node "${nodeName}".\n  A bookmark path keeps node names only, so restore enters "${first}". Give the nodes different names.`
+          );
+        }
+      }
+    }
+  }
+
+  return warnings;
+}
+
+/**
  * Warns about a flow that grew past fifteen nodes. It is a warning, never a problem: a big flow
  * still runs, it is only hard to read.
  *
@@ -477,6 +509,8 @@ export function validateGraph(
     );
     warnings.push(...sizeWarnings(flow));
   }
+
+  warnings.push(...slotNameWarnings(flows, features));
 
   problems.push(
     ...flowIdProblems(flows),
