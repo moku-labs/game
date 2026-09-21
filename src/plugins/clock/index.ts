@@ -5,9 +5,7 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { teardown } from "../../teardown";
-import { createClockApi } from "./api";
-import { registerClockTeardown } from "./lifecycle";
+import { cancelPending, createClockApi } from "./api";
 import { createClockState } from "./state";
 import type { Config } from "./types";
 
@@ -25,7 +23,6 @@ export const clockPlugin = /*#__PURE__*/ createPlugin("clock", {
   config,
   createState: createClockState,
   api: createClockApi,
-  onStart: registerClockTeardown,
   // @no-resource-check — onStop clears the pending timer.
-  onStop: ({ global }) => teardown.run(global, "clock")
+  onStop: ({ state }) => cancelPending(state)
 });

@@ -4,6 +4,10 @@ import { defineFeature } from "../../src/plugins/flow/feature";
 import { defineFlow, defineNode } from "../../src/plugins/flow/runner/define";
 
 describe("root index", () => {
+  it("exports no teardown registry: a plugin frees its resource in onStop from its state", () => {
+    expect(Object.keys(engine)).not.toContain("teardown");
+  });
+
   it("resolves the package name to the source", () => {
     expect(engine.createApp).toBeTypeOf("function");
     expect(engine.createPlugin).toBeTypeOf("function");

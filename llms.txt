@@ -11,7 +11,7 @@ Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer 
 
 Root exports:
 - Functions: `createApp`, `createPlugin`, `defineGame`, `defineFeature`, `type`, `exit`, `to`, `slot`, `schedule`, `guide`, `hint`.
-- Class: `SaveUnreadableError`. Object: `teardown`.
+- Class: `SaveUnreadableError`.
 - Plugin instances: `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`.
 - Type namespaces: `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`. Use `import type { Flow } from "@moku-labs/game"` and then `Flow.RouteStep`, `Flow.NodeContext`, `Model.Json`, `Model.PlayerStateProvider`, `Clock.ClockSource`, `Time.Phase`, `Lifecycle.PauseReason`.
 - `defineNode` and `defineFlow` are NOT root exports. They come from `defineGame<Types>()`.
@@ -348,7 +348,7 @@ The graph. Modules `runner`, `gate`, `inbox`, `fx`, `features`. Runner methods s
 
 A game plugin is `createPlugin(name, { depends: [flowPlugin], hooks: ctx => ({ "flow:edge": payload => { ... } }) })`. The root README has the full example in its Events section.
 
-A plugin that owns a resource registers a disposer with `teardown.register(ctx.global, "name", dispose)` in `onStart` and runs it with `onStop: ({ global }) => teardown.run(global, "name")`.
+A plugin that owns a resource stores it in its state and frees it in `onStop: ({ state }) => …` (core 1.6: `onStop` receives `{ global, config, state }`). A throwing `onStop` makes `app.stop()` reject. A hook that throws is printed by the engine with `console.error("[game] A hook failed.", error)`; pass `onError: (error, ctx) => ctx.log.error("hook failed", undefined, error)` to `createApp` to get it into the log as well.
 
 ## Testing entry
 

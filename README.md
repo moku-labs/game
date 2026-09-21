@@ -149,6 +149,8 @@ export const createGame = (seed: "from-save" | number = "from-save") =>
   });
 ```
 
+A hook that throws never stops the game. The engine prints it with `console.error("[game] A hook failed.", error)`. Pass `onError: (error, ctx) => ctx.log.error("game: a hook failed", undefined, error)` to `createApp` to get it into the log as well.
+
 **5. Play it headless.** `createHeadless` returns a game object once the graph rests at its first
 rest node. Its `walk` method plays a route.
 
@@ -281,7 +283,6 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 | `type`, `exit`, `to`, `slot` | functions | Type tag of a payload, and the three graph helpers for edge targets and slots |
 | `schedule`, `guide`, `hint` | functions | Effect descriptors: next due moment, tutorial narrowing of the gate, cosmetic hint |
 | `SaveUnreadableError` | class | Thrown by `model.store.load()` when the save cannot be read |
-| `teardown` | object | `teardown.register(global, key, dispose)` and `teardown.run(global, key)` for plugins that own a resource |
 | `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin` | plugin instances | For `depends` and `ctx.require` in game plugins |
 | `Time`, `Lifecycle`, `Model`, `Clock`, `Flow` | type namespaces | All public types of one plugin |
 
@@ -384,7 +385,7 @@ bun run release            # moku-release
 
 | Path | Holds |
 |---|---|
-| `tests/unit/` | Framework-level unit tests: root index, setup, teardown registry |
+| `tests/unit/` | Framework-level unit tests: root index, setup |
 | `tests/integration/` | Framework-level scenarios across plugins |
 | `tests/integration/merge-game/` | The fixture game, written on the public API only. Not published |
 | `src/plugins/<name>/__tests__/unit/` | Unit tests of one plugin |
@@ -403,7 +404,7 @@ The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 | L2 | No static import of `pixi.js` or `yoga-layout`. They are loaded lazily with `import()` | `src/**` |
 | L3 | Determinism: no `Date.now`, `performance.now`, `new Date`, `Math.random`, `setTimeout`, `setInterval` | `model`, `flow`, `clock` except `clock/system.ts`, and the rules of the fixture game |
 | L4 | The rules of the fixture game import only their siblings | `tests/integration/merge-game/rules/` |
-| L5 | No module-scope state: no top-level `let`, no top-level `Map`, `Set`, `WeakMap`, `WeakSet`. The only registry is `src/teardown.ts` | `src/**` |
+| L5 | No module-scope state: no top-level `let`, no top-level `Map`, `Set`, `WeakMap`, `WeakSet`. No allowlist | `src/**` |
 | L6 | Plugin wiring files need no JSDoc on small inline arrows. Every other export needs JSDoc with description, params, returns and example | `src/plugins/*/index.ts` |
 
 ## Requirements

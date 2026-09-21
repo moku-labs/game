@@ -59,4 +59,4 @@ None. Frame work is never an event.
 
 ## Lifecycle
 
-`onStart` starts the loop when `globalThis.requestAnimationFrame` is a function and registers the disposer that cancels the pending frame. In plain Bun there is no frame source: nothing starts, `isRunning()` stays false and tests drive frames with `step`. `onStop` runs the disposer through the teardown registry.
+`onStart` starts the loop when `globalThis.requestAnimationFrame` is a function. In plain Bun there is no frame source: nothing starts, `isRunning()` stays false and tests drive frames with `step`. `onStop` is `({ state }) => stopLoop(state)`: it cancels the pending frame.

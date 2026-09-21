@@ -1,8 +1,6 @@
 /**
- * @file flow plugin — lifecycle functions: dependency resolution, the `onInit` wiring and the
- * teardown registration.
+ * @file flow plugin — lifecycle functions: dependency resolution and the `onInit` wiring.
  */
-import { teardown } from "../../teardown";
 import { clockPlugin } from "../clock";
 import { modelPlugin } from "../model";
 import type { Json } from "../model/types";
@@ -11,7 +9,6 @@ import { createFxApi } from "./fx/api";
 import type { Descriptor, FxApi, Hint } from "./fx/types";
 import { createGateApi } from "./gate/api";
 import { createInboxApi } from "./inbox/api";
-import { stopRunner } from "./runner/loop";
 import type { Deps, FlowCtx, KernelSlice } from "./types";
 
 /**
@@ -120,21 +117,4 @@ export function connectFlow(ctx: KernelSlice): void {
   });
 
   registerSchedule(flowCtx, fx);
-}
-
-/**
- * Registers the flow disposer: on stop the active node is aborted, its settle is awaited up to
- * `settleTimeoutMs` and an open transaction is discarded. It never starts the loop — an endless
- * awaited loop would never let `app.start()` resolve, so the consumer calls `flow.run()`.
- *
- * @param ctx - Kernel context of the flow plugin.
- * @example
- * ```ts
- * createPlugin("flow", { onStart: registerFlowTeardown });
- * ```
- */
-export function registerFlowTeardown(ctx: KernelSlice): void {
-  const flowCtx = withDeps(ctx);
-
-  teardown.register(ctx.global, "flow", () => stopRunner(flowCtx));
 }

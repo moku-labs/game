@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { teardown } from "../../../../teardown";
 import type { Time } from "../../../time/types";
 import type { FlowCtx } from "../../types";
 
 // ---------------------------------------------------------------------------
-// Unit test: resolveDeps, connectFlow, registerFlowTeardown
+// Unit test: resolveDeps, connectFlow
 // ---------------------------------------------------------------------------
 
 const loop = vi.hoisted(() => ({ stopped: [] as FlowCtx[] }));
@@ -16,7 +15,7 @@ vi.mock("../../runner/loop", () => ({
   }
 }));
 
-const { connectFlow, registerFlowTeardown, resolveDeps } = await import("../../lifecycle");
+const { connectFlow, resolveDeps } = await import("../../lifecycle");
 const { createMockKernel } = await import("./mock-kernel");
 
 const frameAt = (frame: number): Readonly<Time> => ({ delta: 16, elapsed: 0, scale: 1, frame });
@@ -116,27 +115,5 @@ describe("connectFlow", () => {
 
       expect(record.scheduled).toEqual([undefined]);
     });
-  });
-});
-
-describe("registerFlowTeardown", () => {
-  it("does not start the loop", () => {
-    const { ctx } = createMockKernel();
-
-    registerFlowTeardown(ctx);
-
-    expect(ctx.state.runner.running).toBeUndefined();
-  });
-
-  it("registers a disposer that stops the runner with the flow context", async () => {
-    const { ctx, clock } = createMockKernel();
-
-    loop.stopped.length = 0;
-    registerFlowTeardown(ctx);
-    await teardown.run(ctx.global, "flow");
-
-    expect(loop.stopped).toHaveLength(1);
-    expect(loop.stopped[0]?.state).toBe(ctx.state);
-    expect(loop.stopped[0]?.deps.clock).toBe(clock);
   });
 });

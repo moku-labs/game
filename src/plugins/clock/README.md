@@ -64,6 +64,6 @@ The plugin declares no `depends` and emits nothing.
 
 ## Lifecycle
 
-- **onStart** registers the teardown disposer. No timer is created until `scheduleAt` is called;
-  the disposer reads `state.handle` at stop time, because it does not exist yet at start.
-- **onStop** runs `teardown.run(global, "clock")`, which clears the pending timer.
+- No `onStart`. No timer is created until `scheduleAt` is called.
+- **onStop** is `({ state }) => cancelPending(state)`: it clears the pending timer and forgets the
+  due moment, so `dueAt()` reports nothing after a stop.
