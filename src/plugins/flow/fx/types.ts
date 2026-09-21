@@ -66,6 +66,20 @@ export type FxHandler = (
 ) => unknown | Promise<unknown>;
 
 /**
+ * Listener of released hints, registered with `fx.onHint`. Every listener hears every hint, so it
+ * reads `kind` itself.
+ *
+ * @example
+ * ```ts
+ * // The world plugin plays a motion for the hints it knows and ignores the rest.
+ * const playMotion: HintListener = released => {
+ *   if (released.kind === "merged") playMergeInto(released.payload);
+ * };
+ * ```
+ */
+export type HintListener = (hint: Hint) => void;
+
+/**
  * fx module state.
  */
 export type FxState = {
@@ -73,6 +87,8 @@ export type FxState = {
   handlers: Map<string, { run: FxHandler; runInFast: boolean }>;
   /** Hints of the open transaction. */
   buffered: Hint[];
+  /** Listeners of released hints, in registration order. */
+  hintListeners: HintListener[];
   /** Completions waiting for the `signals` phase, in start order. */
   settled: Array<() => void>;
   mode: "live" | "fast";
@@ -123,6 +139,26 @@ export type FxApi = {
    * ```
    */
   dispatch(descriptor: Descriptor | Hint): void;
+
+  /**
+   * Registers a listener for every released hint. A hint reaches it after the commit of its edge,
+   * in the order the node emitted them; a discarded transaction sends nothing, and fast mode drops
+   * hints altogether. The handler `handle` registered for the same kind is served as well: a
+   * listener displaces nobody.
+   *
+   * @param listener - Called with each released hint.
+   * @returns The unregister function. It removes only the listener it registered.
+   * @example
+   * ```ts
+   * // The world plugin turns the hints of a committed edge into projection motions.
+   * const off = app.flow.fx.onHint(hint => {
+   *   if (hint.kind === "merged") playMergeInto(hint.payload); // payload: { from: "c1", to: "c2" }
+   * });
+   *
+   * off(); // the plugin stopped: no hint reaches it any more
+   * ```
+   */
+  onHint(listener: HintListener): () => void;
 };
 
 /**
@@ -148,8 +184,8 @@ export type FxInternal = {
   buffer(hint: Hint): void;
 
   /**
-   * Dispatches the buffered hints in the order they were emitted and empties the buffer. Called
-   * after the commit of the transaction they belong to.
+   * Dispatches the buffered hints in the order they were emitted, hands each one to the `onHint`
+   * listeners and empties the buffer. Called after the commit of the transaction they belong to.
    */
   release(): void;
 

@@ -133,7 +133,9 @@ export function nodeInfo(path: string, location: Location, node: AnyNode): NodeI
     rest: node.rest,
     over: node.over,
     checkpoint: node.checkpoint,
-    barrier: node.barrier
+    barrier: node.barrier,
+    // `exactOptionalPropertyTypes`: a node without a scene has no key, not an undefined one.
+    ...(node.scene === undefined ? {} : { scene: node.scene })
   };
 }
 

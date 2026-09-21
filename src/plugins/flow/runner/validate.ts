@@ -394,6 +394,90 @@ function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: Features
 }
 
 /**
+ * Reads the scene id of one entry of a feature's `scenes` list. The list holds whatever
+ * `defineScene` returns; validation reads the `id` and ignores everything else.
+ *
+ * @param value - One entry of the list.
+ * @returns The id, or `undefined` when the entry names none.
+ * @example
+ * ```ts
+ * sceneIdOf({ id: "board", bundle: "board.core" }); // "board"
+ * sceneIdOf("board"); // undefined: a scene is an object with an id
+ * ```
+ */
+function sceneIdOf(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("id" in value)) return undefined;
+
+  return typeof value.id === "string" ? value.id : undefined;
+}
+
+/**
+ * Collects the scene ids of the registered features. When no feature brought a `scenes` key at
+ * all nothing is declared and nothing is checked, so a headless app composed from `logicOnly`
+ * features never fails on a scene name.
+ *
+ * @param features - Features API: the registered descriptions.
+ * @returns The declared ids, or `undefined` when no feature brought a `scenes` key.
+ */
+function declaredScenes(features: FeaturesApi): ReadonlySet<string> | undefined {
+  const lists = features
+    .all()
+    .map(feature => feature.description.scenes)
+    .filter(scenes => scenes !== undefined);
+
+  if (lists.length === 0) return undefined;
+
+  const ids = new Set<string>();
+
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+
+    for (const scene of list) {
+      const id = sceneIdOf(scene);
+
+      if (id !== undefined) ids.add(id);
+    }
+  }
+
+  return ids;
+}
+
+/**
+ * Reports the scenes the nodes name: a scene id no feature registers, and an `over` node that
+ * names a scene at all. An `over` node is drawn over the node below it, so switching the scene
+ * under it would leave that node on the wrong screen.
+ *
+ * @param flows - Every collected flow by id.
+ * @param features - Features API: the registered descriptions.
+ * @returns One sentence per problem.
+ */
+function sceneProblems(flows: ReadonlyMap<string, AnyFlow>, features: FeaturesApi): string[] {
+  const problems: string[] = [];
+  const declared = declaredScenes(features);
+
+  for (const flow of flows.values()) {
+    for (const [name, entry] of Object.entries(flow.nodes)) {
+      if (entry.kind !== "node" || entry.scene === undefined) continue;
+
+      if (entry.over) {
+        problems.push(
+          `[game] Flow "${flow.id}": the over node "${name}" names the scene "${entry.scene}".\n  Remove scene from node "${name}": an over node keeps the scene under it.`
+        );
+        continue;
+      }
+
+      if (declared === undefined || declared.has(entry.scene)) continue;
+
+      problems.push(
+        `[game] Flow "${flow.id}": the scene "${entry.scene}" of node "${name}" is not registered.\n  List it in the scenes of a feature.`
+      );
+    }
+  }
+
+  return problems;
+}
+
+/**
  * Reports a `safeNode` that is not a node of the graph or not a checkpoint. The runner enters it
  * after a failed retry, so it has to build its whole screen from state.
  *
@@ -484,9 +568,9 @@ function sizeWarnings(flow: AnyFlow): string[] {
  * unreachable node, outcome without an edge, missing target, barrier edge that does not reach a
  * rest node of the same flow, cycle with no rest node, slot without a name, equal contribution
  * `order`, one flow contributed twice to a slot, `inbox` type that is not an outcome, rest node
- * with neither `run` nor outcomes,
- * `safeNode` that is not a checkpoint, colliding ids. Types are bypassed by JSON data and casts,
- * so this runs even though the edge table is checked at compile time.
+ * with neither `run` nor outcomes, a scene id no feature registers, an `over` node that names a
+ * scene, `safeNode` that is not a checkpoint, colliding ids. Types are bypassed by JSON data and
+ * casts, so this runs even though the edge table is checked at compile time.
  *
  * @param flows - Every collected flow by id, the main flow first.
  * @param features - Features API: slot contributions and feature names.
@@ -516,6 +600,7 @@ export function validateGraph(
   problems.push(
     ...flowIdProblems(flows),
     ...featureProblems(flows, features),
+    ...sceneProblems(flows, features),
     ...safeNodeProblems(config, features)
   );
 

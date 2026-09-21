@@ -154,6 +154,21 @@ describe("logicOnly", () => {
     });
   });
 
+  it("drops every key the V2 plugins read", () => {
+    const feature = defineFeature("board", {
+      ...description,
+      projections: [{ name: "items" }],
+      systems: [{ name: "highlight" }],
+      components: [{ id: "cell" }],
+      scenes: [{ id: "board" }],
+      assets: { board: ["board.cell"] }
+    });
+
+    const calls = runInit(feature.logicOnly);
+
+    expect(Object.keys(calls[0]?.description ?? {})).toEqual(["nodes", "flows", "contribute"]);
+  });
+
   it("keeps the V1 values by reference", () => {
     const calls = runInit(defineFeature("board", description).logicOnly);
 

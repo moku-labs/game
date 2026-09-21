@@ -53,14 +53,14 @@ function exposeInbox(inbox: InboxApi & InboxInternal): InboxApi {
 }
 
 /**
- * Reduces the effects gateway to registration and fire-and-forget delivery. Awaiting, buffering
- * and the mode switch belong to the runner.
+ * Reduces the effects gateway to registration, fire-and-forget delivery and the hint listeners.
+ * Awaiting, buffering, releasing and the mode switch belong to the runner.
  *
  * @param fx - The full fx module.
  * @returns The public fx API.
  */
 function exposeFx(fx: FxApi & FxInternal): FxApi {
-  return { handle: fx.handle, dispatch: fx.dispatch };
+  return { handle: fx.handle, dispatch: fx.dispatch, onHint: fx.onHint };
 }
 
 /**

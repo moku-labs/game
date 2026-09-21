@@ -18,10 +18,17 @@ function emptyHandlers(): FxState["handlers"] {
 }
 
 /**
- * Creates the fx module state: no handler, no buffered hint, no pending completion, mode `"live"`.
+ * Creates the fx module state: no handler, no hint listener, no buffered hint, no pending
+ * completion, mode `"live"`.
  *
  * @returns A fresh fx state, owned by the plugin state of `flow`.
  */
 export function createFxState(): FxState {
-  return { handlers: emptyHandlers(), buffered: [], settled: [], mode: "live" };
+  return {
+    handlers: emptyHandlers(),
+    buffered: [],
+    hintListeners: [],
+    settled: [],
+    mode: "live"
+  };
 }

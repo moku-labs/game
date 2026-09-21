@@ -10,6 +10,7 @@ import {
 } from "../../../../index";
 import { fakeClock } from "../../../clock/fake";
 import { memory } from "../../../model/store/providers/memory";
+import type { AnyFlow } from "../../runner/types";
 
 // ---------------------------------------------------------------------------
 // Integration: the real time, lifecycle, model, clock and flow plugins
@@ -100,6 +101,54 @@ const main = defineFlow("main", {
 });
 
 const scoringFeature = defineFeature("scoring", { nodes: [apply], flows: [board] });
+
+// ─── a game whose nodes name their scene ──────────────────────
+
+const lobby = defineNode({
+  scene: "lobby",
+  rest: true,
+  checkpoint: true,
+  outcomes: { go: type() }
+});
+
+const lobbyFlow = defineFlow("lobby", {
+  nodes: { lobby },
+  start: "lobby",
+  edges: { lobby: { go: "lobby" } }
+});
+
+const wrongScene = defineNode({
+  scene: "lobyy",
+  rest: true,
+  checkpoint: true,
+  outcomes: { go: type() }
+});
+
+const wrongFlow = defineFlow("wrong", {
+  nodes: { wrongScene },
+  start: "wrongScene",
+  edges: { wrongScene: { go: "wrongScene" } }
+});
+
+const sceneryFeature = defineFeature("scenery", {
+  flows: [lobbyFlow],
+  scenes: [{ id: "lobby" }]
+});
+
+const createSceneGame = (mainFlow: AnyFlow, logicOnly: boolean) =>
+  createApp({
+    plugins: [logicOnly ? sceneryFeature.logicOnly : sceneryFeature],
+    pluginConfigs: {
+      model: {
+        playerProvider: memory(),
+        seed: 7,
+        initialPlayer: { coins: 0, merges: 0 },
+        initialSession: { popups: 0 }
+      },
+      clock: { source: fakeClock(1000) },
+      flow: { mainFlow }
+    }
+  });
 
 const createGame = () => {
   const provider = memory();
@@ -195,6 +244,32 @@ describe("flow plugin", () => {
     expect(game.edges).toEqual(["pause", "armed", "elapsed"]);
 
     await game.app.stop();
+  });
+
+  it("runs a logicOnly app whose nodes name a scene", async () => {
+    const app = createSceneGame(lobbyFlow, true);
+
+    await app.start();
+    app.flow.run().catch(() => undefined);
+    await tick();
+
+    expect(app.flow.state().path).toBe("lobby");
+    expect(app.flow.describe().flows.lobby?.nodes.lobby?.scene).toBe("lobby");
+    expect(app.flow.features.all()[0]?.description.scenes).toBeUndefined();
+
+    await app.stop();
+  });
+
+  it("reports an unknown scene id of a node in the error of run()", async () => {
+    const app = createSceneGame(wrongFlow, false);
+
+    await app.start();
+
+    await expect(app.flow.run()).rejects.toThrow(
+      '[game] Flow "wrong": the scene "lobyy" of node "wrongScene" is not registered.'
+    );
+
+    await app.stop();
   });
 
   it("settles app.stop() while the graph waits at a rest node", async () => {

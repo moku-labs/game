@@ -160,6 +160,10 @@ describe("createFxState", () => {
     expect(state.mode).toBe("live");
   });
 
+  it("starts with no hint listener", () => {
+    expect(createFxState().hintListeners).toEqual([]);
+  });
+
   it("returns a fresh state each call", () => {
     const first = createFxState();
     const second = createFxState();
@@ -655,6 +659,150 @@ describe("hints", () => {
 
     expect(state.fx.buffered).toEqual([]);
     expect(sparkle).not.toHaveBeenCalled();
+  });
+});
+
+// ─── onHint ───────────────────────────────────────────────────
+
+describe("onHint", () => {
+  it("calls the listener for every released hint, in release order", () => {
+    const { api } = setup();
+    const seen: string[] = [];
+
+    api.onHint(item => {
+      seen.push(item.kind);
+    });
+    api.buffer(hint("merged", { cell: "c1" }));
+    api.buffer(hint("sparkle", { cell: "c2" }));
+
+    expect(seen).toEqual([]);
+
+    api.release();
+
+    expect(seen).toEqual(["merged", "sparkle"]);
+  });
+
+  it("hands the whole hint to the listener", () => {
+    const { api } = setup();
+    const listener = vi.fn();
+
+    api.onHint(listener);
+    api.buffer(hint("merged", { from: "c1", to: "c2" }));
+    api.release();
+
+    expect(listener).toHaveBeenCalledWith({
+      kind: "merged",
+      payload: { from: "c1", to: "c2" },
+      hint: true
+    });
+  });
+
+  it("serves the handler of the kind and the listener", () => {
+    const { api } = setup();
+    const merged = vi.fn();
+    const listener = vi.fn();
+
+    api.handle("merged", merged);
+    api.onHint(listener);
+    api.buffer(hint("merged"));
+    api.release();
+
+    expect(merged).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls two listeners in registration order", () => {
+    const { api } = setup();
+    const seen: string[] = [];
+
+    api.onHint(() => {
+      seen.push("first");
+    });
+    api.onHint(() => {
+      seen.push("second");
+    });
+    api.buffer(hint("merged"));
+    api.release();
+
+    expect(seen).toEqual(["first", "second"]);
+  });
+
+  it("stays silent in fast mode, where hints are dropped", () => {
+    const { api } = setup();
+    const listener = vi.fn();
+
+    api.onHint(listener);
+    api.setMode("fast");
+    api.buffer(hint("merged"));
+    api.release();
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("hears nothing of a discarded transaction", () => {
+    const { api } = setup();
+    const listener = vi.fn();
+
+    api.onHint(listener);
+    api.buffer(hint("merged"));
+    api.drop();
+    api.release();
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("is not called for a dispatched descriptor", () => {
+    const { api } = setup();
+    const listener = vi.fn();
+
+    api.onHint(listener);
+    api.dispatch(hint("merged"));
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("returns a remover that stops only its own listener", () => {
+    const { api } = setup();
+    const first = vi.fn();
+    const second = vi.fn();
+
+    const off = api.onHint(first);
+    api.onHint(second);
+    off();
+    api.buffer(hint("merged"));
+    api.release();
+
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes nothing on a second call of the remover", () => {
+    const { api } = setup();
+    const listener = vi.fn();
+
+    const off = api.onHint(listener);
+    off();
+    api.onHint(listener);
+    off();
+    api.buffer(hint("merged"));
+    api.release();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a failing listener and still serves the next one", () => {
+    const { api, log } = setup();
+    const second = vi.fn();
+
+    api.onHint(() => {
+      throw new Error("no projection");
+    });
+    api.onHint(second);
+    api.buffer(hint("merged"));
+
+    expect(() => api.release()).not.toThrow();
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(log.error).toHaveBeenCalledTimes(1);
   });
 });
 

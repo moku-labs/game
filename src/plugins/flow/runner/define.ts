@@ -68,6 +68,9 @@ export function type<Payload = void>(): TypeTag<NoInfer<Payload>> {
  *   outcomes: { done: type(), rejected: type() },
  *   run: ({ input, out }) => (input.from === input.to ? out.rejected() : out.done())
  * });
+ *
+ * // A rest node names the scene it is shown on; a node without `scene` keeps the current one.
+ * const awaitIntent = defineNode({ scene: "board", rest: true, outcomes: { merge: type() } });
  * ```
  */
 export function defineNode<
@@ -83,7 +86,9 @@ export function defineNode<
     over: spec.over === true,
     checkpoint: spec.checkpoint === true,
     barrier: spec.barrier === true,
-    inbox: spec.inbox ?? []
+    inbox: spec.inbox ?? [],
+    // `exactOptionalPropertyTypes`: the key is absent, never present with `undefined`.
+    ...(spec.scene === undefined ? {} : { scene: spec.scene })
   };
 
   return spec.run ? { ...node, run: spec.run } : node;

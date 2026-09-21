@@ -51,6 +51,7 @@ type NodeOptions = {
   checkpoint?: boolean;
   barrier?: boolean;
   inbox?: readonly string[];
+  scene?: string;
   run?: (context: AnyNodeContext) => Result | Promise<Result>;
 };
 
@@ -63,6 +64,7 @@ const node = (options: NodeOptions = {}): AnyNode => ({
   checkpoint: options.checkpoint ?? false,
   barrier: options.barrier ?? false,
   inbox: options.inbox ?? [],
+  ...(options.scene === undefined ? {} : { scene: options.scene }),
   ...(options.run ? { run: options.run } : {})
 });
 
@@ -100,7 +102,7 @@ const createMockLog = (): Log.LogApi => ({
 
 const createMockState = (): State => ({
   features: { byName: new Map(), sealed: false },
-  fx: { handlers: new Map(), buffered: [], settled: [], mode: "live" },
+  fx: { handlers: new Map(), buffered: [], hintListeners: [], settled: [], mode: "live" },
   gate: {
     open: undefined,
     resolve: undefined,
@@ -227,6 +229,7 @@ const createFxFake = (calls: string[]) => {
   const fx: FxApi & FxInternal = {
     handle: vi.fn(() => unregister),
     dispatch: vi.fn(),
+    onHint: vi.fn(() => unregister),
     run: async (descriptor: Descriptor): Promise<unknown> => {
       descriptors.push(descriptor);
       calls.push(`fx:${descriptor.kind}`);
@@ -927,6 +930,26 @@ describe("runLoop", () => {
     await tick();
 
     expect(order.slice(0, 3)).toEqual(["load:boot", "scene:boot", "body"]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("hands the scene of the node to the onEnter callbacks", async () => {
+    const scenes: (string | undefined)[] = [];
+    const main = flow(
+      "main",
+      { boot: node({ scene: "loading", run: () => result("done") }), home: waiting("play") },
+      "boot",
+      { boot: { done: "home" }, home: { play: "boot" } }
+    );
+    const harness = setup({ main });
+
+    harness.ctx.state.runner.enterCallbacks.scene.push(info => {
+      scenes.push(info.scene);
+    });
+    harness.start();
+    await tick();
+
+    expect(scenes).toEqual(["loading", undefined]);
     await stopRunner(harness.ctx);
   });
 

@@ -24,9 +24,11 @@ const tags = (names: readonly string[]): OutcomeTags => {
 type NodeOptions = {
   outcomes?: readonly string[];
   rest?: boolean;
+  over?: boolean;
   checkpoint?: boolean;
   barrier?: boolean;
   inbox?: readonly string[];
+  scene?: string;
   run?: boolean;
 };
 
@@ -35,10 +37,11 @@ const node = (options: NodeOptions = {}): AnyNode => ({
   input: tag,
   outcomes: tags(options.outcomes ?? ["done"]),
   rest: options.rest ?? false,
-  over: false,
+  over: options.over ?? false,
   checkpoint: options.checkpoint ?? false,
   barrier: options.barrier ?? false,
   inbox: options.inbox ?? [],
+  ...(options.scene === undefined ? {} : { scene: options.scene }),
   ...(options.run === false ? {} : { run: () => ({ outcome: "done", payload: 0 }) })
 });
 
@@ -64,6 +67,13 @@ const featuresWith = (
   register: () => undefined,
   all: () => names.map(name => ({ name, description: {} })),
   contributions: () => contributions
+});
+
+/** A feature that brings a `scenes` key, the way the `scenes` plugin will read it. */
+const featuresWithScenes = (ids: readonly string[]): FeaturesApi => ({
+  register: () => undefined,
+  all: () => [{ name: "scenery", description: { scenes: ids.map(id => ({ id })) } }],
+  contributions: () => []
 });
 
 const config = (overrides: Partial<Config> = {}): Config => ({
@@ -432,6 +442,137 @@ describe("validateGraph", () => {
     expect(report(board, features).warnings).toEqual([
       '[game] Slot "afterWin": the flows "coins" and "stars" both have a node "give".\n  A bookmark path keeps node names only, so restore enters "coins". Give the nodes different names.'
     ]);
+  });
+
+  it("reports a node that names a scene no feature registers", () => {
+    const board = flow(
+      "board",
+      { home: node({ rest: true, outcomes: ["go"], scene: "bord" }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(board, featuresWithScenes(["board"])).problems).toContain(
+      '[game] Flow "board": the scene "bord" of node "home" is not registered.\n  List it in the scenes of a feature.'
+    );
+  });
+
+  it("accepts a scene a feature registers", () => {
+    const board = flow(
+      "board",
+      { home: node({ rest: true, outcomes: ["go"], scene: "board" }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(board, featuresWithScenes(["board"])).problems).toEqual([]);
+  });
+
+  it("checks no scene id while no feature brings a scenes key", () => {
+    const board = flow(
+      "board",
+      { home: node({ rest: true, outcomes: ["go"], scene: "bord" }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(board).problems).toEqual([]);
+  });
+
+  it("reports an over node that names a scene", () => {
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, outcomes: ["go"] }),
+        popup: node({ rest: true, over: true, outcomes: ["close"], scene: "board" })
+      },
+      "home",
+      { home: { go: "popup" }, popup: { close: "home" } }
+    );
+
+    expect(report(main, featuresWithScenes(["board"])).problems).toEqual([
+      '[game] Flow "main": the over node "popup" names the scene "board".\n  Remove scene from node "popup": an over node keeps the scene under it.'
+    ]);
+  });
+
+  it("reports an over node with a scene even while no feature brings a scenes key", () => {
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, outcomes: ["go"] }),
+        popup: node({ rest: true, over: true, outcomes: ["close"], scene: "board" })
+      },
+      "home",
+      { home: { go: "popup" }, popup: { close: "home" } }
+    );
+
+    expect(report(main).problems).toHaveLength(1);
+  });
+
+  it("reports an unknown scene and an over node with a scene in one report", () => {
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, outcomes: ["go"], scene: "bord" }),
+        popup: node({ rest: true, over: true, outcomes: ["close"], scene: "board" })
+      },
+      "home",
+      { home: { go: "popup" }, popup: { close: "home" } }
+    );
+
+    expect(report(main, featuresWithScenes(["board"])).problems).toHaveLength(2);
+  });
+
+  it("reads the scene ids of every feature that brings some", () => {
+    const features: FeaturesApi = {
+      register: () => undefined,
+      all: () => [
+        { name: "menu", description: { scenes: [{ id: "home" }] } },
+        { name: "board", description: { scenes: [{ id: "board" }] } },
+        { name: "scoring", description: {} }
+      ],
+      contributions: () => []
+    };
+    const main = flow(
+      "main",
+      { home: node({ rest: true, outcomes: ["go"], scene: "board" }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(main, features).problems).toEqual([]);
+  });
+
+  it("ignores a scenes entry that is not an object with an id", () => {
+    const features: FeaturesApi = {
+      register: () => undefined,
+      all: () => [{ name: "scenery", description: { scenes: ["board", { name: "board" }, 7] } }],
+      contributions: () => []
+    };
+    const main = flow(
+      "main",
+      { home: node({ rest: true, outcomes: ["go"], scene: "board" }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(main, features).problems).toHaveLength(1);
+  });
+
+  it("treats a scenes key that is no list as a declaration with no id", () => {
+    const features: FeaturesApi = {
+      register: () => undefined,
+      all: () => [{ name: "scenery", description: { scenes: { board: {} } } }],
+      contributions: () => []
+    };
+    const main = flow(
+      "main",
+      { home: node({ rest: true, outcomes: ["go"], scene: "board" }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(main, features).problems).toHaveLength(1);
   });
 
   it("reports every problem of the graph at once", () => {

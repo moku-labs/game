@@ -96,7 +96,7 @@ const createFakeApp = (options: AppOptions = {}) => {
       },
       gate: { answer: vi.fn(() => true), pointer: vi.fn(), state: vi.fn() },
       inbox: { post: vi.fn() },
-      fx: { handle: () => unregister, dispatch: vi.fn() },
+      fx: { handle: () => unregister, dispatch: vi.fn(), onHint: () => unregister },
       features: { register: vi.fn(), all: () => [], contributions: () => [] }
     }
   };
