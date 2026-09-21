@@ -35,7 +35,7 @@ describe("time plugin in plain Bun", () => {
     app.time.step(16);
 
     expect(seen).toEqual([1, 2, 3]);
-    expect(app.time.read()).toMatchObject({ frame: 3, elapsed: 48 });
+    expect(app.time.snapshot()).toMatchObject({ frame: 3, elapsed: 48 });
 
     await app.stop();
   });
@@ -100,7 +100,7 @@ describe("time plugin with requestAnimationFrame", () => {
     frames[0]?.(1000);
     frames[1]?.(1010);
 
-    expect(app.time.read()).toMatchObject({ frame: 1, delta: 1000 / 30 });
+    expect(app.time.snapshot()).toMatchObject({ frame: 1, delta: 1000 / 30 });
 
     await app.stop();
   });
@@ -113,7 +113,7 @@ describe("time plugin types", () => {
     const app = createTestApp();
     await app.start();
 
-    expectTypeOf(app.time.read).returns.toEqualTypeOf<Readonly<Time>>();
+    expectTypeOf(app.time.snapshot).returns.toEqualTypeOf<Readonly<Time>>();
     expectTypeOf(app.time.step).parameter(0).toEqualTypeOf<number>();
     // @ts-expect-error — "foo" is not a frame phase
     expectTypeOf(app.time.onFrame).toBeCallableWith("foo", () => {});

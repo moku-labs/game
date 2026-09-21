@@ -23,6 +23,7 @@ export function createTimeState(_ctx: {
   return {
     // The key order is the call order of a frame; `PHASES` in api.ts is the single source of it.
     callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
+    captured: [],
     time: { delta: 0, elapsed: 0, scale: 1, frame: 0 },
     paused: false,
     running: false,

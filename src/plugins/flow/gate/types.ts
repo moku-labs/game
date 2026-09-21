@@ -52,6 +52,8 @@ export type GateState = {
   narrow: Allow | undefined;
   /** True while a pointer is down. Entering an `over` node waits for false. */
   pointerActive: boolean;
+  /** Ends the pending pointer wait of the runner. Set while the wait runs, so a stop needs no frame. */
+  wake: (() => void) | undefined;
 };
 
 /**

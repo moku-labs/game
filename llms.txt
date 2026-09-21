@@ -294,7 +294,7 @@ Registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`. `log` a
 ### time (Standard, no dependencies, no events)
 
 The single `requestAnimationFrame` loop. Six phases in this order: `input`, `animate`, `layout`, `sync`, `signals`, `render`.
-- API: `onFrame(phase, callback): () => void`, `read(): Readonly<Time>`, `setScale(scale)`, `pause()`, `resume()`, `isPaused()`, `isRunning()`, `step(deltaMs)`.
+- API: `onFrame(phase, callback): () => void`, `snapshot(): Readonly<Time>`, `setScale(scale)`, `pause()`, `resume()`, `isPaused()`, `isRunning()`, `step(deltaMs)`.
 - `Time` is `{ delta, elapsed, scale, frame }` in scaled milliseconds.
 - Config: `maxFps: 30 | 60 | 120` default `60`, `maxDeltaMs: number` default `50`.
 - In plain Bun there is no frame source. `isRunning()` is false and tests drive frames with `step`.

@@ -2,6 +2,7 @@
  * @file clock plugin — lifecycle functions.
  */
 import { teardown } from "../../teardown";
+import { cancelPending } from "./api";
 import type { ClockCtx } from "./types";
 
 /**
@@ -15,5 +16,5 @@ import type { ClockCtx } from "./types";
  * ```
  */
 export function registerClockTeardown(ctx: ClockCtx): void {
-  teardown.register(ctx.global, "clock", () => ctx.state.source.clearTimer(ctx.state.handle));
+  teardown.register(ctx.global, "clock", () => cancelPending(ctx.state));
 }

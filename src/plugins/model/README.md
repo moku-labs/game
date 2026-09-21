@@ -91,6 +91,8 @@ createApp({ pluginConfigs: { model: { initialPlayer: { coins: 0 }, seed: 42 } } 
 |---|---|---|
 | `model:committed` | `{ roots: readonly Root[]; cause: "edge" \| "rollback" \| "restore" \| "load" }` | Committed state changed. |
 
+No engine plugin hooks this event in V1. It is for the game, for projections and for devtools.
+
 `Root` is `"player" | "session" | "rng"`. With cause `"edge"` the list holds only the roots the
 transaction touched, in the order `player`, `session`, `rng`. With `"load"`, `"rollback"` and
 `"restore"` it holds all three, because a whole document was swapped. Projections reconcile from

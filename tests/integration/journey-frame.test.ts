@@ -56,7 +56,7 @@ describe("the frame journey", () => {
     stepFrames(app, 2, 16);
 
     expect(calls).toEqual([...phases, ...phases]);
-    expect(app.time.read()).toMatchObject({ frame: 2, delta: 16, elapsed: 32 });
+    expect(app.time.snapshot()).toMatchObject({ frame: 2, delta: 16, elapsed: 32 });
 
     for (const off of offs) off();
 

@@ -18,6 +18,7 @@ export function createGateState(): GateState {
     resolve: undefined,
     held: undefined,
     narrow: undefined,
-    pointerActive: false
+    pointerActive: false,
+    wake: undefined
   };
 }

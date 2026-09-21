@@ -123,13 +123,13 @@ describe("read", () => {
     api.step(16);
     api.step(4);
 
-    expect(api.read()).toEqual({ delta: 4, elapsed: 20, scale: 1, frame: 2 });
+    expect(api.snapshot()).toEqual({ delta: 4, elapsed: 20, scale: 1, frame: 2 });
   });
 
   it("returns a snapshot, so a later frame does not change it", () => {
     const { api, ctx } = createApi();
 
-    const before = api.read();
+    const before = api.snapshot();
     ctx.state.time.elapsed = 999;
 
     expect(before.elapsed).toBe(0);
@@ -145,7 +145,7 @@ describe("setScale", () => {
     api.setScale(0.5);
     api.step(20);
 
-    expect(api.read()).toMatchObject({ delta: 10, elapsed: 10, scale: 0.5 });
+    expect(api.snapshot()).toMatchObject({ delta: 10, elapsed: 10, scale: 0.5 });
   });
 
   it("freezes time at scale 0", () => {
@@ -154,7 +154,7 @@ describe("setScale", () => {
     api.setScale(0);
     api.step(100);
 
-    expect(api.read()).toMatchObject({ delta: 0, elapsed: 0, frame: 1 });
+    expect(api.snapshot()).toMatchObject({ delta: 0, elapsed: 0, frame: 1 });
   });
 
   it("clamps a negative scale to zero", () => {
@@ -162,7 +162,7 @@ describe("setScale", () => {
 
     api.setScale(-2);
 
-    expect(api.read().scale).toBe(0);
+    expect(api.snapshot().scale).toBe(0);
   });
 });
 
@@ -193,7 +193,7 @@ describe("pause and resume", () => {
     tickFrame(ctx, 200);
 
     expect(callback).not.toHaveBeenCalled();
-    expect(api.read()).toMatchObject({ elapsed: 0, frame: 0 });
+    expect(api.snapshot()).toMatchObject({ elapsed: 0, frame: 0 });
   });
 
   it("gives the first frame after a resume a normal delta", () => {
@@ -204,7 +204,7 @@ describe("pause and resume", () => {
     api.resume();
     tickFrame(ctx, 60_000);
 
-    expect(api.read().delta).toBe(1000 / 60);
+    expect(api.snapshot().delta).toBe(1000 / 60);
   });
 
   it("still steps while paused", () => {
@@ -245,7 +245,7 @@ describe("step", () => {
 
     api.step(1000);
 
-    expect(api.read()).toEqual({ delta: 1000, elapsed: 1000, scale: 1, frame: 1 });
+    expect(api.snapshot()).toEqual({ delta: 1000, elapsed: 1000, scale: 1, frame: 1 });
   });
 
   it("ignores the fps cap", () => {
@@ -255,7 +255,7 @@ describe("step", () => {
     api.step(1);
     api.step(1);
 
-    expect(api.read().frame).toBe(3);
+    expect(api.snapshot().frame).toBe(3);
   });
 
   it("throws while a frame runs", () => {
@@ -306,7 +306,7 @@ describe("tickFrame", () => {
 
     tickFrame(ctx, 12_345);
 
-    expect(api.read()).toMatchObject({ delta: 1000 / 60, frame: 1 });
+    expect(api.snapshot()).toMatchObject({ delta: 1000 / 60, frame: 1 });
   });
 
   it("uses the gap between two timestamps as the delta", () => {
@@ -315,7 +315,7 @@ describe("tickFrame", () => {
     tickFrame(ctx, 1000);
     tickFrame(ctx, 1020);
 
-    expect(api.read()).toMatchObject({ delta: 20, frame: 2 });
+    expect(api.snapshot()).toMatchObject({ delta: 20, frame: 2 });
   });
 
   it("clamps the delta at maxDeltaMs", () => {
@@ -324,7 +324,7 @@ describe("tickFrame", () => {
     tickFrame(ctx, 1000);
     tickFrame(ctx, 6000);
 
-    expect(api.read().delta).toBe(50);
+    expect(api.snapshot().delta).toBe(50);
   });
 
   it("skips a frame that arrives before the fps cap allows it", () => {
@@ -333,11 +333,11 @@ describe("tickFrame", () => {
     tickFrame(ctx, 1000);
     tickFrame(ctx, 1010);
 
-    expect(api.read().frame).toBe(1);
+    expect(api.snapshot().frame).toBe(1);
 
     tickFrame(ctx, 1040);
 
-    expect(api.read()).toMatchObject({ frame: 2, delta: 40 });
+    expect(api.snapshot()).toMatchObject({ frame: 2, delta: 40 });
   });
 
   it("runs every frame of a 120 Hz source when the cap is 120", () => {
@@ -347,7 +347,7 @@ describe("tickFrame", () => {
     tickFrame(ctx, 1008);
     tickFrame(ctx, 1016);
 
-    expect(api.read()).toMatchObject({ frame: 3, delta: 8 });
+    expect(api.snapshot()).toMatchObject({ frame: 3, delta: 8 });
   });
 
   it("halves a 120 Hz source under the default cap of 60", () => {
@@ -357,7 +357,7 @@ describe("tickFrame", () => {
     tickFrame(ctx, 1008);
     tickFrame(ctx, 1016);
 
-    expect(api.read()).toMatchObject({ frame: 2, delta: 16 });
+    expect(api.snapshot()).toMatchObject({ frame: 2, delta: 16 });
   });
 
   it("applies the scale to a real frame", () => {
@@ -367,7 +367,7 @@ describe("tickFrame", () => {
     tickFrame(ctx, 1000);
     tickFrame(ctx, 1020);
 
-    expect(api.read()).toMatchObject({ delta: 40 });
+    expect(api.snapshot()).toMatchObject({ delta: 40 });
   });
 });
 
@@ -416,7 +416,7 @@ describe("time api types", () => {
     // @ts-expect-error — "foo" is not a frame phase
     expectTypeOf(api.onFrame).toBeCallableWith("foo", () => {});
 
-    expect(api.read().frame).toBe(0);
+    expect(api.snapshot().frame).toBe(0);
   });
 
   it("hands the callback a readonly Time", () => {
@@ -435,18 +435,18 @@ describe("time api types", () => {
   it("hands out a Time that may not be written to", () => {
     const { api } = createApi();
 
-    const time = api.read();
+    const time = api.snapshot();
     // @ts-expect-error — the Time handed out by the api is readonly
     time.elapsed = 1;
 
-    expect(api.read().elapsed).toBe(0);
+    expect(api.snapshot().elapsed).toBe(0);
   });
 
   it("returns an unsubscribe function from onFrame", () => {
     const { api } = createApi();
 
     expectTypeOf(api.onFrame).returns.toEqualTypeOf<() => void>();
-    expectTypeOf(api.read).returns.toEqualTypeOf<Readonly<Time>>();
+    expectTypeOf(api.snapshot).returns.toEqualTypeOf<Readonly<Time>>();
 
     expect(typeof api.onFrame("sync", () => {})).toBe("function");
   });

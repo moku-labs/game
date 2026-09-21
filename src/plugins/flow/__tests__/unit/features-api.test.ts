@@ -49,7 +49,8 @@ const createMockState = (): State => ({
     resolve: undefined,
     held: undefined,
     narrow: undefined,
-    pointerActive: false
+    pointerActive: false,
+    wake: undefined
   },
   inbox: { queue: [], listeners: [] },
   runner: {
@@ -69,7 +70,7 @@ const createMockState = (): State => ({
 const createMockDeps = (): Deps => ({
   time: {
     onFrame: vi.fn(),
-    read: vi.fn(),
+    snapshot: vi.fn(),
     setScale: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),

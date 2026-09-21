@@ -64,6 +64,10 @@ export type Config = {
  */
 export type State = {
   callbacks: Record<Phase, FrameCallback[]>;
+  /**
+   * Scratch array of a frame: the six callback lists as they were when the frame started.
+   */
+  captured: (readonly FrameCallback[])[];
   time: Time;
   paused: boolean;
   running: boolean;
@@ -86,7 +90,7 @@ export type State = {
  */
 export type Api = {
   onFrame(phase: Phase, callback: FrameCallback): () => void;
-  read(): Readonly<Time>;
+  snapshot(): Readonly<Time>;
   setScale(scale: number): void;
   pause(): void;
   resume(): void;

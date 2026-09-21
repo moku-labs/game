@@ -82,7 +82,7 @@ describe("core boot", () => {
 
     await app.start();
 
-    expect(app.time.read()).toMatchObject({ frame: 0, scale: 1 });
+    expect(app.time.snapshot()).toMatchObject({ frame: 0, scale: 1 });
     expect(app.lifecycle.isPaused()).toBe(false);
     expect(app.model.store.snapshot().player).toEqual({ coins: 0, visits: 0, draws: [] });
     expect(app.clock.now()).toBe(startMoment);

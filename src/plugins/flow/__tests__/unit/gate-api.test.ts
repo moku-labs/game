@@ -34,7 +34,7 @@ const createFakeTime = (): FakeTime => {
 
   return {
     onFrame: vi.fn(() => noop),
-    read: () => time,
+    snapshot: () => time,
     setScale: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),

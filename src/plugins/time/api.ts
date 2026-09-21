@@ -20,18 +20,11 @@ const STEP_INSIDE_FRAME =
   "[game] time.step() called inside a frame.\n  Call it from outside a frame callback.";
 
 /**
- * The callbacks of one phase, as they were when the frame started.
- *
- * @example
- * ```ts
- * const phaseFrame: PhaseFrame = { phase: "animate", callbacks: [advanceTweens] };
- * ```
- */
-/**
  * Captures the callback list of every phase at the start of a frame, in phase order. The lists are
  * copy-on-write (see `addFrameCallback`), so capturing the six references is enough: a callback
  * registered or removed during the frame changes the state's list, never the captured one, and
- * takes effect from the next frame on. No list is copied in the frame loop.
+ * takes effect from the next frame on. No list is copied in the frame loop, and the six
+ * references go into the scratch array of the state, so a frame allocates nothing here.
  *
  * @param ctx - Domain context of the time plugin.
  * @returns The six callback lists, in call order.
@@ -40,8 +33,16 @@ const STEP_INSIDE_FRAME =
  * const lists = capturePhases(ctx);
  * ```
  */
-function capturePhases(ctx: TimeCtx): (readonly FrameCallback[])[] {
-  return PHASES.map(phase => ctx.state.callbacks[phase]);
+function capturePhases(ctx: TimeCtx): readonly (readonly FrameCallback[])[] {
+  const { captured } = ctx.state;
+  let index = 0;
+
+  for (const phase of PHASES) {
+    captured[index] = ctx.state.callbacks[phase];
+    index += 1;
+  }
+
+  return captured;
 }
 
 /**
@@ -56,8 +57,9 @@ function capturePhases(ctx: TimeCtx): (readonly FrameCallback[])[] {
  */
 function runPhases(ctx: TimeCtx): void {
   const { time } = ctx.state;
+  let index = 0;
 
-  for (const [index, callbacks] of capturePhases(ctx).entries()) {
+  for (const callbacks of capturePhases(ctx)) {
     for (const callback of callbacks) {
       try {
         callback(time);
@@ -65,6 +67,8 @@ function runPhases(ctx: TimeCtx): void {
         ctx.log.error("time: frame callback failed", { phase: PHASES[index], error });
       }
     }
+
+    index += 1;
   }
 }
 
@@ -176,15 +180,15 @@ export function createTimeApi(ctx: TimeCtx): Api {
     onFrame: (phase, callback) => addFrameCallback(ctx, phase, callback),
 
     /**
-     * Reads the current `Time` as a snapshot, so a caller cannot write into the frame state.
+     * Returns a snapshot of the current `Time`, so a caller cannot write into the frame state.
      *
      * @returns A copy of the current `Time`.
      * @example
      * ```ts
-     * const elapsed = time.read().elapsed;
+     * const elapsed = time.snapshot().elapsed;
      * ```
      */
-    read: () => ({ ...ctx.state.time }),
+    snapshot: () => ({ ...ctx.state.time }),
 
     /**
      * Sets the time scale. Every frame delta is multiplied by it; 0 freezes the game time

@@ -6,34 +6,34 @@ import { tickFrame } from "./api";
 import type { TimeCtx } from "./types";
 
 /**
- * Asks the platform for the next frame and remembers its handle, so `stopLoop` can cancel it.
+ * Builds the frame function of the loop, once per app, so a frame allocates no closure. Each call
+ * schedules the next frame first, so a throwing frame cannot kill the loop, remembers the handle
+ * for `stopLoop`, then runs the frame.
  *
  * @param ctx - Domain context of the time plugin.
+ * @returns The function handed to `requestAnimationFrame` on every frame.
  * @example
  * ```ts
- * scheduleFrame(ctx);
+ * const onFrame = createFrameFunction(ctx);
+ * ctx.state.rafId = requestAnimationFrame(onFrame);
  * ```
  */
-function scheduleFrame(ctx: TimeCtx): void {
-  ctx.state.rafId = globalThis.requestAnimationFrame(timestamp =>
-    runAnimationFrame(ctx, timestamp)
-  );
-}
+function createFrameFunction(ctx: TimeCtx): (timestamp: number) => void {
+  /**
+   * One frame of the platform.
+   *
+   * @param timestamp - Timestamp handed over by `requestAnimationFrame`, in milliseconds.
+   * @example
+   * ```ts
+   * onFrame(performance.now());
+   * ```
+   */
+  const onFrame = (timestamp: number): void => {
+    ctx.state.rafId = globalThis.requestAnimationFrame(onFrame);
+    tickFrame(ctx, timestamp);
+  };
 
-/**
- * Handles one frame of the platform: schedules the next one first, so a throwing frame cannot
- * kill the loop, then runs the frame.
- *
- * @param ctx - Domain context of the time plugin.
- * @param timestamp - Timestamp handed over by `requestAnimationFrame`, in milliseconds.
- * @example
- * ```ts
- * runAnimationFrame(ctx, performance.now());
- * ```
- */
-function runAnimationFrame(ctx: TimeCtx, timestamp: number): void {
-  scheduleFrame(ctx);
-  tickFrame(ctx, timestamp);
+  return onFrame;
 }
 
 /**
@@ -69,6 +69,6 @@ export function startLoop(ctx: TimeCtx): void {
   if (typeof globalThis.requestAnimationFrame !== "function") return;
 
   ctx.state.running = true;
-  scheduleFrame(ctx);
+  ctx.state.rafId = globalThis.requestAnimationFrame(createFrameFunction(ctx));
   teardown.register(ctx.global, "time", () => stopLoop(ctx));
 }

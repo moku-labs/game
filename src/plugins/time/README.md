@@ -22,7 +22,7 @@ Callbacks of one phase run in registration order. A callback registered during a
 | Method | Behaviour |
 |---|---|
 | `onFrame(phase, fn)` | Registers `fn` for `phase`; returns the unsubscribe function. `fn` receives the current `Readonly<Time>`. |
-| `read()` | A snapshot of the current `Time` — `{ delta, elapsed, scale, frame }`, in scaled milliseconds. |
+| `snapshot()` | A snapshot of the current `Time` — `{ delta, elapsed, scale, frame }`, in scaled milliseconds. |
 | `setScale(scale)` | Sets the time scale; every delta is multiplied by it. A negative value is clamped to 0; 0 freezes game time while frames keep running. |
 | `pause()` / `resume()` | While paused no phase runs and `elapsed` does not advance. `resume` drops the stale timestamp, so the first frame after a pause has a normal delta. Called by `lifecycle`. |
 | `isPaused()` | True while paused. |
@@ -35,7 +35,7 @@ const off = time.onFrame("animate", t => advanceTweens(t.delta));
 
 // in a test
 app.time.step(16);
-expect(app.time.read().frame).toBe(1);
+expect(app.time.snapshot().frame).toBe(1);
 ```
 
 ## Frame algorithm

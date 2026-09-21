@@ -85,7 +85,8 @@ const createMockState = (): State => ({
     resolve: undefined,
     held: undefined,
     narrow: undefined,
-    pointerActive: false
+    pointerActive: false,
+    wake: undefined
   },
   inbox: { queue: [], listeners: [] },
   runner: {
@@ -157,7 +158,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
   const deps: Deps = {
     time: {
       onFrame: () => unregister,
-      read: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
       setScale: vi.fn(),
       pause: vi.fn(),
       resume: vi.fn(),

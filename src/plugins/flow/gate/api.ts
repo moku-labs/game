@@ -152,7 +152,7 @@ function hold(ctx: FlowCtx, answer: Answer): void {
   if (!ctx.deps.time.isRunning()) return;
   if (ctx.state.gate.held !== undefined) return;
 
-  ctx.state.gate.held = { answer, frame: ctx.deps.time.read().frame };
+  ctx.state.gate.held = { answer, frame: ctx.deps.time.snapshot().frame };
 }
 
 /**

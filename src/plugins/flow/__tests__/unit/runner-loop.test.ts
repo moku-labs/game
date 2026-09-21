@@ -106,7 +106,8 @@ const createMockState = (): State => ({
     resolve: undefined,
     held: undefined,
     narrow: undefined,
-    pointerActive: false
+    pointerActive: false,
+    wake: undefined
   },
   inbox: { queue: [], listeners: [] },
   runner: {
@@ -326,7 +327,7 @@ const setup = (options: SetupOptions) => {
           if (index !== -1) frameListeners.splice(index, 1);
         };
       },
-      read: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
       setScale: vi.fn(),
       pause: vi.fn(),
       resume: vi.fn(),
@@ -1145,6 +1146,43 @@ describe("runLoop", () => {
     expect(ended.value).toBe(true);
     await stopping;
   });
+
+  it("ends the pointer wait on stop without a frame, as when the clock is paused", async () => {
+    const entered: string[] = [];
+    const main = flow(
+      "main",
+      {
+        boot: node({ run: () => result("done") }),
+        popup: node({
+          rest: true,
+          over: true,
+          outcomes: ["close"],
+          run: () => {
+            entered.push("popup");
+            return new Promise<Result>(() => undefined);
+          }
+        })
+      },
+      "boot",
+      { boot: { done: "popup" }, popup: { close: "boot" } }
+    );
+    const harness = setup({ main });
+
+    harness.ctx.state.gate.pointerActive = true;
+
+    const running = harness.start();
+
+    await tick();
+
+    expect(harness.ctx.state.gate.wake).toBeTypeOf("function");
+
+    // No frame runs from here on: a paused clock delivers none.
+    await stopRunner(harness.ctx);
+    await running.catch(() => undefined);
+
+    expect(entered).toEqual([]);
+    expect(harness.ctx.state.gate.wake).toBeUndefined();
+  });
 });
 
 // ─── stopRunner ───────────────────────────────────────────────
@@ -1214,5 +1252,73 @@ describe("restorePosition", () => {
     ]);
     expect(harness.calls).toContain("markRest");
     await stopRunner(harness.ctx);
+  });
+
+  it("ends a pointer wait without a frame and never enters the node it waited for", async () => {
+    const entered: string[] = [];
+    const main = flow(
+      "main",
+      {
+        boot: node({ run: () => result("done") }),
+        popup: node({
+          rest: true,
+          over: true,
+          outcomes: ["close"],
+          run: () => {
+            entered.push("popup");
+            return new Promise<Result>(() => undefined);
+          }
+        }),
+        play: waiting("home")
+      },
+      "boot",
+      { boot: { done: "popup" }, popup: { close: "play" }, play: { home: "boot" } }
+    );
+    const harness = setup({ main });
+    const bookmark: Bookmark = {
+      path: "play",
+      input: {},
+      player: {},
+      session: {},
+      rng: { seed: 2, streams: {} },
+      graph: "deadbeef"
+    };
+
+    harness.ctx.state.gate.pointerActive = true;
+    harness.start();
+    await tick();
+
+    expect(harness.ctx.state.gate.wake).toBeTypeOf("function");
+
+    // No frame runs from here on: a paused clock delivers none.
+    await restorePosition(harness.ctx, harness.modules, bookmark);
+
+    expect(entered).toEqual([]);
+    expect(harness.ctx.state.runner.stack).toEqual([{ flow: "main", node: "play", input: {} }]);
+    await stopRunner(harness.ctx);
+  });
+});
+
+// ─── stop deadline ────────────────────────────────────────────
+
+describe("stopRunner deadline", () => {
+  it("gives up after settleTimeoutMs of real time when a callback ignores the abort and no frame runs", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+
+    harness.ctx.state.runner.enterCallbacks.load.push(() => new Promise<void>(() => undefined));
+    harness.start();
+    await tick();
+
+    vi.useFakeTimers();
+    try {
+      const stopping = stopRunner(harness.ctx);
+
+      await vi.advanceTimersByTimeAsync(harness.ctx.config.settleTimeoutMs);
+
+      await expect(stopping).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

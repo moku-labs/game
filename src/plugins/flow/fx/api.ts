@@ -346,6 +346,8 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
      * ```
      */
     flushSettled: (): void => {
+      if (state.settled.length === 0) return;
+
       const drained = state.settled;
 
       state.settled = [];

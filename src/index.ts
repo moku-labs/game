@@ -1,5 +1,30 @@
 /**
- * @file The `@moku-labs/game` package — 2D puzzle game engine on Moku Core.
+ * The `@moku-labs/game` package — 2D puzzle game engine on Moku Core.
+ *
+ * Plugin options and their defaults, set through `pluginConfigs`:
+ *
+ * | Plugin | Option | Default |
+ * |---|---|---|
+ * | time | maxFps | 60 |
+ * | time | maxDeltaMs | 50 |
+ * | clock | source | undefined, the system source |
+ * | model | playerProvider | undefined, in memory |
+ * | model | initialPlayer | {} |
+ * | model | initialSession | {} |
+ * | model | seed | "from-save" |
+ * | model | schemaVersion | 1 |
+ * | model | migrations | [] |
+ * | flow | mainFlow | undefined, required before run() |
+ * | flow | safeNode | undefined, the start of the main flow |
+ * | flow | retries | 1 |
+ * | flow | settleTimeoutMs | 2000 |
+ * | flow | journalLimit | 500 |
+ *
+ * @file The package root: the composed framework and its public exports.
+ * @example
+ * ```ts
+ * const app = createApp({ pluginConfigs: { flow: { mainFlow } } });
+ * ```
  */
 import { coreConfig, createCore } from "./config";
 import { clockPlugin, flowPlugin, lifecyclePlugin, modelPlugin, timePlugin } from "./plugins";

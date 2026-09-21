@@ -51,7 +51,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `mainFlow` | `AnyFlow \| undefined` | `undefined` | The top-level flow. Required before `run()`. |
 | `safeNode` | `string \| undefined` | `undefined` | Checkpoint entered after a failed retry. `undefined` is the main flow's `start`. |
 | `retries` | `number` | `1` | Retries of a failed transition before `safeNode`. |
-| `settleTimeoutMs` | `number` | `2000` | How long `onStop` waits for the active node to settle after abort. |
+| `settleTimeoutMs` | `number` | `2000` | How long `onStop` waits for the active node to settle after abort, in real milliseconds. |
 | `journalLimit` | `number` | `500` | Journal entries kept between checkpoints. |
 
 ```ts
@@ -74,6 +74,8 @@ would never let `app.start()` resolve.
 | `flow:edge` | `{ flow, node, outcome, payload, next, patches, index, now }` | After the commit of an edge. |
 | `flow:rest` | `{ path, checkpoint }` | On entering a rest node. |
 | `flow:error` | `{ path, error, rolledBackTo, retry }` | After a rollback. |
+
+No engine plugin hooks these events in V1. They are for the game, for projections and for devtools.
 
 Rare notifications for the plugins above — preload, editor, analytics. None expects an answer: the
 loop itself never uses the event bus.

@@ -27,7 +27,7 @@ const createMockLog = (): Log.LogApi => ({
 
 const createMockTime = (): TimeApi => ({
   onFrame: vi.fn(() => noop),
-  read: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+  snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
   setScale: vi.fn(),
   pause: vi.fn(),
   resume: vi.fn(),

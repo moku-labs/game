@@ -56,7 +56,7 @@ export type Config = {
   safeNode: string | undefined;
   /** Retries of a failed transition before going to `safeNode`. */
   retries: number;
-  /** How long `onStop` waits for the active node to settle after abort. */
+  /** How long `onStop` waits for the active node to settle after abort, in real milliseconds. */
   settleTimeoutMs: number;
   /** Journal entries kept between checkpoints. */
   journalLimit: number;

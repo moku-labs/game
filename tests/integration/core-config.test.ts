@@ -50,16 +50,16 @@ describe("core config", () => {
       source.run(1000);
 
       // The first frame counts as one capped frame instead of the gap to a stale timestamp.
-      expect(app.time.read().frame).toBe(1);
-      expect(app.time.read().delta).toBeCloseTo(1000 / 30);
+      expect(app.time.snapshot().frame).toBe(1);
+      expect(app.time.snapshot().delta).toBeCloseTo(1000 / 30);
 
       source.run(1020);
 
-      expect(app.time.read().frame).toBe(1);
+      expect(app.time.snapshot().frame).toBe(1);
 
       source.run(1040);
 
-      expect(app.time.read().frame).toBe(2);
+      expect(app.time.snapshot().frame).toBe(2);
 
       await app.stop();
     } finally {

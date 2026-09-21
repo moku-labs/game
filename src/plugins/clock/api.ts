@@ -31,7 +31,7 @@ function readNow(state: State): number {
  * cancelPending(ctx.state);
  * ```
  */
-function cancelPending(state: State): void {
+export function cancelPending(state: State): void {
   if (state.handle !== undefined) state.source.clearTimer(state.handle);
 
   state.handle = undefined;

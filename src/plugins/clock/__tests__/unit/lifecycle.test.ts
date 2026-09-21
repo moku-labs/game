@@ -39,10 +39,24 @@ describe("registerClockTeardown", () => {
     const clearTimer = vi.spyOn(clock, "clearTimer");
 
     registerClockTeardown(ctx);
-    state.handle = clock.setTimer(() => {}, 1000);
+    const handle = clock.setTimer(() => {}, 1000);
+    state.handle = handle;
     await teardown.run(global, "clock");
 
-    expect(clearTimer).toHaveBeenCalledWith(state.handle);
+    expect(clearTimer).toHaveBeenCalledWith(handle);
+  });
+
+  it("forgets the due moment and the handle, so dueAt() reports nothing after stop", async () => {
+    const global = {};
+    const { ctx, state, clock } = createMockCtx(global);
+
+    registerClockTeardown(ctx);
+    state.handle = clock.setTimer(() => {}, 1000);
+    state.dueAt = 2000;
+    await teardown.run(global, "clock");
+
+    expect(state.handle).toBeUndefined();
+    expect(state.dueAt).toBeUndefined();
   });
 
   it("stops the pending timer from firing", async () => {

@@ -137,7 +137,7 @@ function createFakeTime(record: Recorder): TimeApi {
 
       return noop;
     },
-    read: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+    snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
     setScale: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
