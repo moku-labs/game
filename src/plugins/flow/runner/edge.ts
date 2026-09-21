@@ -1,0 +1,239 @@
+/**
+ * @file flow/runner — taking the edge.
+ */
+import type { Transaction } from "../../model/types";
+import type { FlowCtx } from "../types";
+import { compact, pushEntry } from "./journal";
+import type { AbortReason, Commit, Location, Safe, StepOutcome } from "./loop-types";
+import { planFrom } from "./plan";
+import { safeFrames } from "./position";
+import { framePath } from "./registry";
+import { notifyRest } from "./seam";
+import type { JournalEntry, Modules, Result } from "./types";
+
+/**
+ * Commits the transaction of one node, releases its hints, journals the edge and emits
+ * `flow:edge`. This is the only commit of the engine.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs.
+ * @param step - The result ready to be committed.
+ * @param next - Path the edge leads to.
+ * @returns The journal entry of this edge.
+ * @example
+ * ```ts
+ * const entry = commitEdge(ctx, modules, step, plan.next);
+ * ```
+ */
+function commitEdge(ctx: FlowCtx, modules: Modules, step: Commit, next: string): JournalEntry {
+  const commit = step.transaction.commit();
+
+  modules.fx.release();
+
+  const entry = pushEntry(
+    ctx.state.runner,
+    {
+      path: step.path,
+      outcome: step.result.outcome,
+      payload: step.result.payload,
+      next,
+      now: step.now
+    },
+    ctx.config.journalLimit
+  );
+
+  ctx.emit("flow:edge", {
+    flow: step.location.flow.id,
+    node: step.location.name,
+    outcome: step.result.outcome,
+    payload: step.result.payload,
+    next,
+    patches: commit.patches,
+    index: entry.index,
+    now: step.now
+  });
+
+  return entry;
+}
+
+/**
+ * Discards everything the failed node did, rolls back and decides between a retry and the safe
+ * node. A failure while the loop already recovers in the safe node is fatal.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs.
+ * @param transaction - The open transaction, when the node got that far.
+ * @param error - What the node failed with.
+ * @param path - Path of the failed node.
+ * @param safe - Whether the loop is already recovering.
+ * @returns Always `"continue"`: the loop re-enters a position.
+ * @throws {Error} When the safe node itself failed.
+ * @example
+ * ```ts
+ * return handleFailure(ctx, modules, transaction, error, path, safe);
+ * ```
+ */
+export function handleFailure(
+  ctx: FlowCtx,
+  modules: Modules,
+  transaction: Transaction | undefined,
+  error: unknown,
+  path: string,
+  safe: Safe
+): StepOutcome {
+  const state = ctx.state.runner;
+
+  transaction?.discard();
+  modules.fx.drop();
+  modules.gate.close();
+  ctx.deps.model.store.rollback();
+
+  if (safe.inside) {
+    throw new Error(
+      `[game] The node "${path}" failed while the graph was recovering in the safe node.\n  Fix the node or point flow.safeNode at a checkpoint that cannot fail.`,
+      { cause: error }
+    );
+  }
+
+  state.failures += 1;
+
+  const retry = state.failures <= ctx.config.retries;
+  const target = retry ? (state.restFrame ?? safeFrames(ctx)) : safeFrames(ctx);
+
+  ctx.emit("flow:error", { path, error, rolledBackTo: framePath(target), retry });
+
+  state.stack = [...target];
+
+  if (!retry) {
+    safe.inside = true;
+    state.failures = 0;
+  }
+
+  return "continue";
+}
+
+/**
+ * Leaves the aborted node: the transaction is discarded, the hints are dropped and the gate is
+ * shut. `"stop"` ends the loop; `"restore"` lets the next turn enter the bookmark.
+ *
+ * @param modules - Injected sibling APIs.
+ * @param transaction - The open transaction of the aborted node.
+ * @param reason - Why the node was aborted.
+ * @returns `"stop"` when the runner was stopped, `"continue"` otherwise.
+ * @example
+ * ```ts
+ * return handleAbort(modules, transaction, "stop");
+ * ```
+ */
+export function handleAbort(
+  modules: Modules,
+  transaction: Transaction,
+  reason: AbortReason
+): StepOutcome {
+  transaction.discard();
+  modules.fx.drop();
+  modules.gate.close();
+
+  return reason === "stop" ? "stop" : "continue";
+}
+
+/**
+ * Takes the edge of one result: plan, commit, mark the barrier or the rest point, move the
+ * position and announce a rest node.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs.
+ * @param step - The result ready to be committed.
+ * @param safe - Whether the loop is already recovering.
+ * @returns Always `"continue"`.
+ * @example
+ * ```ts
+ * return finishNode(ctx, modules, step, safe);
+ * ```
+ */
+export async function finishNode(
+  ctx: FlowCtx,
+  modules: Modules,
+  step: Commit,
+  safe: Safe
+): Promise<StepOutcome> {
+  const state = ctx.state.runner;
+  const plan = planFrom(
+    ctx,
+    modules,
+    [...state.stack],
+    step.location,
+    step.result.outcome,
+    step.result.payload,
+    0
+  );
+
+  if ("problem" in plan) {
+    return handleFailure(ctx, modules, step.transaction, new Error(plan.problem), step.path, safe);
+  }
+
+  const entry = commitEdge(ctx, modules, step, plan.next);
+
+  if (step.barrier) {
+    await ctx.deps.model.store.markBarrier(`${step.path}#${entry.index}@${step.now}`);
+  } else if (plan.rest) {
+    ctx.deps.model.store.markRest();
+  }
+
+  state.stack = plan.stack;
+  safe.inside = false;
+
+  if (plan.rest) {
+    state.restFrame = [...plan.stack];
+    state.failures = 0;
+
+    if (plan.checkpoint) compact(state);
+
+    ctx.emit("flow:rest", { path: plan.next, checkpoint: plan.checkpoint });
+    notifyRest(state, plan.next);
+  }
+
+  return "continue";
+}
+
+/**
+ * Takes the edge of a result no node body produced: a substituted sub-flow, a finished slot or the
+ * world event that ended a rest node. The empty transaction keeps the commit, the journal entry
+ * and the rest mark in one place.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs.
+ * @param location - Where the result belongs.
+ * @param result - The outcome to follow.
+ * @param safe - Whether the loop is already recovering.
+ * @param edge - The barrier flag of the node that produced it and the moment the edge is taken.
+ * @param edge.barrier - True when the node the result belongs to is a barrier node.
+ * @param edge.now - The moment the node was entered, journalled with the edge.
+ * @returns Always `"continue"`.
+ * @example
+ * ```ts
+ * return applyResult(ctx, modules, location, result, safe, { barrier: node.barrier, now });
+ * ```
+ */
+export function applyResult(
+  ctx: FlowCtx,
+  modules: Modules,
+  location: Location,
+  result: Result,
+  safe: Safe,
+  edge: { barrier: boolean; now: number }
+): Promise<StepOutcome> {
+  return finishNode(
+    ctx,
+    modules,
+    {
+      location,
+      transaction: ctx.deps.model.store.begin(),
+      result,
+      barrier: edge.barrier,
+      now: edge.now,
+      path: framePath(ctx.state.runner.stack)
+    },
+    safe
+  );
+}
