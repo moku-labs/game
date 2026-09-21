@@ -288,6 +288,28 @@ describe("dispatch", () => {
     expect(log.error).toHaveBeenCalledTimes(1);
   });
 
+  it("skips a handler that does not run in fast mode", () => {
+    const { api } = setup();
+    const play = vi.fn();
+
+    api.handle("sfx", play);
+    api.setMode("fast");
+    api.dispatch({ kind: "sfx" });
+
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it("delivers to a runInFast handler in fast mode", () => {
+    const { api } = setup();
+    const preload = vi.fn();
+
+    api.handle("load", preload, { runInFast: true });
+    api.setMode("fast");
+    api.dispatch({ kind: "load" });
+
+    expect(preload).toHaveBeenCalledTimes(1);
+  });
+
   it("delivers a hint like any other descriptor", () => {
     const { api } = setup();
     const sparkle = vi.fn();

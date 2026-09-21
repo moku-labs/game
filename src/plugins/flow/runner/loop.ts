@@ -69,6 +69,7 @@ type Step = {
   now: number;
   path: string;
   input: Json;
+  gateOpened: () => void;
 };
 
 /** One result ready to be committed onto its edge. */
@@ -199,7 +200,12 @@ export function loopSeam(state: RunnerState): LoopSeam {
 
   if (existing !== undefined) return existing;
 
-  const seam: LoopSeam = { substitutions: emptySubstitutions(), rest: [], restoring: undefined };
+  const seam: LoopSeam = {
+    substitutions: emptySubstitutions(),
+    rest: [],
+    gateOpen: [],
+    restoring: undefined
+  };
 
   state.seam = seam;
 
@@ -260,6 +266,26 @@ function notifyRest(state: RunnerState, path: string): void {
   const current = [...listeners];
 
   for (const listener of current) listener(path);
+}
+
+/**
+ * Tells the walk that the gate of a rest node is open. The loop is the one that opens the gate, so
+ * the gate module never learns about the walk.
+ *
+ * @param state - Runner state.
+ * @example
+ * ```ts
+ * notifyGateOpen(ctx.state.runner);
+ * ```
+ */
+function notifyGateOpen(state: RunnerState): void {
+  const listeners = state.seam?.gateOpen;
+
+  if (listeners === undefined) return;
+
+  const current = [...listeners];
+
+  for (const listener of current) listener();
 }
 
 // ─── position ─────────────────────────────────────────────────
@@ -639,14 +665,14 @@ function guideAllow(payload: Json | undefined): Allow | undefined {
  * narrows the gate while it runs; the runner lifts the narrow when the node is left.
  *
  * @param modules - Injected sibling APIs.
- * @param signal - The node's abort signal.
+ * @param step - The node run in progress.
  * @returns The effects gateway of one node run.
  * @example
  * ```ts
- * const fx = nodeFx(modules, step.signal);
+ * const fx = nodeFx(modules, step);
  * ```
  */
-function nodeFx(modules: Modules, signal: AbortSignal): NodeFx {
+function nodeFx(modules: Modules, step: Step): NodeFx {
   /**
    * Awaits one effect.
    *
@@ -664,7 +690,11 @@ function nodeFx(modules: Modules, signal: AbortSignal): NodeFx {
       if (allow !== undefined) modules.gate.narrow(allow);
     }
 
-    return modules.fx.run(descriptor, signal);
+    const value = modules.fx.run(descriptor, step.signal);
+
+    if (descriptor.answers !== undefined) step.gateOpened();
+
+    return value;
   };
 
   return Object.assign(run, {
@@ -700,7 +730,7 @@ function nodeContext(modules: Modules, step: Step): AnyNodeContext {
     player: step.transaction.player,
     session: step.transaction.session,
     rng: step.transaction.rng,
-    fx: nodeFx(modules, step.signal),
+    fx: nodeFx(modules, step),
     out: createOut(step.node.outcomes),
     signal: step.signal,
     now: step.now
@@ -922,7 +952,8 @@ async function runRestBody(
 
 /**
  * Waits at a rest node without a body: the gate answer whose intent names an outcome wins, and so
- * does a world event the node lists in its `inbox`.
+ * does a world event the node lists in its `inbox`. A node whose signal is already aborted — a stop
+ * or a restore that arrived while the `onEnter` callbacks ran — never opens the gate.
  *
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
@@ -933,6 +964,10 @@ async function runRestBody(
  * ```
  */
 function waitForAnswer(modules: Modules, step: Step): Promise<NodeOutcome> {
+  if (step.signal.aborted) {
+    return Promise.resolve({ kind: "aborted", reason: abortReason(step.signal) });
+  }
+
   const queued = modules.inbox.take(step.node.inbox);
 
   if (queued !== undefined) return Promise.resolve({ kind: "result", result: eventResult(queued) });
@@ -971,7 +1006,10 @@ function waitForAnswer(modules: Modules, step: Step): Promise<NodeOutcome> {
       { once: true }
     );
 
-    modules.gate.open({ allowed: Object.keys(step.node.outcomes) }).then(
+    const answered = modules.gate.open({ allowed: Object.keys(step.node.outcomes) });
+
+    step.gateOpened();
+    answered.then(
       answer => {
         finish({ kind: "result", result: answerResult(answer) });
       },
@@ -1003,10 +1041,11 @@ function nodeOutcome(modules: Modules, step: Step, delivered: Delivery): Promise
 
 /**
  * Waits while a pointer is down, so an `over` node never appears mid-drag. Without a running frame
- * loop nothing would ever wake the wait, so the node is entered at once.
+ * loop nothing would ever wake the wait, so the node is entered at once. A stop ends the wait as
+ * well: the runner must not hold the loop open for a pointer that is never lifted.
  *
  * @param ctx - Domain context of the flow plugin.
- * @returns A promise that resolves when the pointer is up.
+ * @returns A promise that resolves when the pointer is up or the runner was stopped.
  * @example
  * ```ts
  * if (node.over) await waitForPointer(ctx);
@@ -1020,7 +1059,7 @@ function waitForPointer(ctx: FlowCtx): Promise<void> {
     const watch: { off: () => void } = { off: noop };
 
     watch.off = ctx.deps.time.onFrame("signals", () => {
-      if (ctx.state.gate.pointerActive) return;
+      if (ctx.state.gate.pointerActive && !stopped(ctx.state.runner)) return;
 
       watch.off();
       resolve();
@@ -1212,18 +1251,22 @@ async function finishNode(
 }
 
 /**
- * Takes the edge of a result no node body produced: a substituted sub-flow or a finished slot.
- * The empty transaction keeps the commit, the journal entry and the rest mark in one place.
+ * Takes the edge of a result no node body produced: a substituted sub-flow, a finished slot or the
+ * world event that ended a rest node. The empty transaction keeps the commit, the journal entry
+ * and the rest mark in one place.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
  * @param location - Where the result belongs.
  * @param result - The outcome to follow.
  * @param safe - Whether the loop is already recovering.
+ * @param edge - The barrier flag of the node that produced it and the moment the edge is taken.
+ * @param edge.barrier - True when the node the result belongs to is a barrier node.
+ * @param edge.now - The moment the node was entered, journalled with the edge.
  * @returns Always `"continue"`.
  * @example
  * ```ts
- * return applyResult(ctx, modules, location, { outcome: "done", payload: null }, safe);
+ * return applyResult(ctx, modules, location, result, safe, { barrier: node.barrier, now });
  * ```
  */
 function applyResult(
@@ -1231,7 +1274,8 @@ function applyResult(
   modules: Modules,
   location: Location,
   result: Result,
-  safe: Safe
+  safe: Safe,
+  edge: { barrier: boolean; now: number }
 ): Promise<StepOutcome> {
   return finishNode(
     ctx,
@@ -1240,8 +1284,8 @@ function applyResult(
       location,
       transaction: ctx.deps.model.store.begin(),
       result,
-      barrier: false,
-      now: ctx.deps.clock.now(),
+      barrier: edge.barrier,
+      now: edge.now,
       path: framePath(ctx.state.runner.stack)
     },
     safe
@@ -1299,7 +1343,18 @@ async function runNode(
     signal: abort.signal,
     now,
     path,
-    input: state.stack.at(-1)?.input ?? noPayload
+    input: state.stack.at(-1)?.input ?? noPayload,
+    /**
+     * Tells a walk that this node's gate is open.
+     *
+     * @example
+     * ```ts
+     * step.gateOpened();
+     * ```
+     */
+    gateOpened: (): void => {
+      notifyGateOpen(state);
+    }
   };
   const delivered: Delivery = { event: undefined };
   const outcome = await nodeOutcome(modules, step, delivered);
@@ -1316,7 +1371,10 @@ async function runNode(
   if (outcome.kind === "event") {
     handleAbort(modules, step.transaction, "inbox");
 
-    return applyResult(ctx, modules, location, eventResult(outcome.event), safe);
+    return applyResult(ctx, modules, location, eventResult(outcome.event), safe, {
+      barrier: node.barrier,
+      now
+    });
   }
 
   return finishNode(
@@ -1358,7 +1416,12 @@ function enterSubFlow(
   const state = ctx.state.runner;
   const substituted = takeSubstitution(state, framePath(state.stack));
 
-  if (substituted !== undefined) return applyResult(ctx, modules, location, substituted, safe);
+  if (substituted !== undefined) {
+    return applyResult(ctx, modules, location, substituted, safe, {
+      barrier: false,
+      now: ctx.deps.clock.now()
+    });
+  }
 
   state.stack = [
     ...state.stack,
@@ -1394,7 +1457,10 @@ function enterSlot(
   const next = pickContribution(ctx, modules.features, slot.name, 0);
 
   if (next === undefined) {
-    return applyResult(ctx, modules, location, { outcome: "done", payload: noPayload }, safe);
+    return applyResult(ctx, modules, location, { outcome: "done", payload: noPayload }, safe, {
+      barrier: false,
+      now: ctx.deps.clock.now()
+    });
   }
 
   state.stack = [...state.stack, { flow: next.flow.id, node: next.flow.start, input: noPayload }];

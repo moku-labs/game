@@ -54,8 +54,9 @@ function handlerFor(state: FxState, kind: string): HandlerEntry | undefined {
 }
 
 /**
- * Calls the handler of a descriptor without waiting for it. A thrown error and a rejected promise
- * are logged, never handed to the caller.
+ * Calls the handler of a descriptor without waiting for it. The mode decides the same way it does
+ * for an awaited effect: in fast mode only a `runInFast` handler runs. A thrown error and a
+ * rejected promise are logged, never handed to the caller.
  *
  * @param state - fx module state.
  * @param log - The engine log.
@@ -72,7 +73,7 @@ function invoke(
   descriptor: Descriptor | Hint,
   signal: AbortSignal
 ): void {
-  const entry = state.handlers.get(descriptor.kind);
+  const entry = handlerFor(state, descriptor.kind);
 
   if (entry === undefined) return;
 
@@ -250,8 +251,9 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
     },
 
     /**
-     * Delivers a descriptor or a released hint to its handler and forgets about it. A missing
-     * handler is not an error and a failing handler is logged, never thrown.
+     * Delivers a descriptor or a released hint to its handler and forgets about it. In fast mode
+     * only a handler registered with `runInFast` is called, exactly as for an awaited effect. A
+     * missing handler is not an error and a failing handler is logged, never thrown.
      *
      * @param descriptor - The descriptor or hint to deliver.
      * @example

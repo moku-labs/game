@@ -342,8 +342,9 @@ function flowIdProblems(flows: ReadonlyMap<string, AnyFlow>): string[] {
 }
 
 /**
- * Reports a feature whose name is already the id of a flow, and two contributions of one slot
- * that carry the same `order`.
+ * Reports a feature whose name is already the id of a flow, two contributions of one slot that
+ * carry the same `order`, and one flow contributed twice to the same slot: the runner finds a
+ * finished contribution by its flow id, so the slot would re-enter the first of the two forever.
  *
  * @param flows - Every collected flow by id.
  * @param features - Features API: names and slot contributions.
@@ -366,18 +367,26 @@ function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: Features
 
   for (const slotName of slotNames(flows)) {
     const byOrder = new Map<number, string>();
+    const byFlow = new Set<string>();
 
-    for (const { feature, order } of features.contributions(slotName)) {
+    for (const { feature, flow, order } of features.contributions(slotName)) {
       const first = byOrder.get(order);
 
-      if (first === undefined) {
-        byOrder.set(order, feature);
+      if (first === undefined) byOrder.set(order, feature);
+      else {
+        problems.push(
+          `[game] Slot "${slotName}": the features "${first}" and "${feature}" both contribute with order ${order}.\n  Give every contribution of a slot a different order.`
+        );
+      }
+
+      if (byFlow.has(flow.id)) {
+        problems.push(
+          `[game] Slot "${slotName}": flow "${flow.id}" is contributed twice.\n  Contribute a flow to one slot once.`
+        );
         continue;
       }
 
-      problems.push(
-        `[game] Slot "${slotName}": the features "${first}" and "${feature}" both contribute with order ${order}.\n  Give every contribution of a slot a different order.`
-      );
+      byFlow.add(flow.id);
     }
   }
 
@@ -440,7 +449,8 @@ function sizeWarnings(flow: AnyFlow): string[] {
  * Validates the whole graph at `run()` and returns every problem as one `[game] …` sentence:
  * unreachable node, outcome without an edge, missing target, barrier edge that does not reach a
  * rest node of the same flow, cycle with no rest node, slot without a name, equal contribution
- * `order`, `inbox` type that is not an outcome, rest node with neither `run` nor outcomes,
+ * `order`, one flow contributed twice to a slot, `inbox` type that is not an outcome, rest node
+ * with neither `run` nor outcomes,
  * `safeNode` that is not a checkpoint, colliding ids. Types are bypassed by JSON data and casts,
  * so this runs even though the edge table is checked at compile time.
  *

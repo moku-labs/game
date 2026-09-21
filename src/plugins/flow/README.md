@@ -40,7 +40,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `gate.state()` | `{ open, allowed, narrowed }`. |
 | `inbox.post(event): void` | Queues a world event. It is delivered only to a rest node whose `inbox` lists the type. |
 | `fx.handle(kind, fn, options?)` | Registers the single handler of one effect kind. `{ runInFast: true }` makes it run in fast mode too. |
-| `fx.dispatch(descriptor): void` | Fire-and-forget delivery. Handler errors are logged, never thrown. |
+| `fx.dispatch(descriptor): void` | Fire-and-forget delivery, `runInFast` handlers only in fast mode. Handler errors are logged, never thrown. |
 | `features.register(name, description)` | Called from a feature plugin's `onInit`. After `run()` it throws. |
 | `features.all()`, `features.contributions(slot)` | What the game brought, and the sub-flows of one slot in `order`. |
 

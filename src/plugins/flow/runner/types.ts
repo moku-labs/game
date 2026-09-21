@@ -821,6 +821,8 @@ export type LoopSeam = {
   substitutions: Map<string, Result>;
   /** Called with the path every time the loop enters a rest node. */
   rest: ((path: string) => void)[];
+  /** Called every time the loop opens the gate of a rest node. The walk waits on it. */
+  gateOpen: (() => void)[];
   /** The bookmark the loop enters at the next turn. */
   restoring: Bookmark | undefined;
 };

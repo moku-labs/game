@@ -152,6 +152,27 @@ function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
 }
 
 /**
+ * Enters a bookmark the way the plugin's `restore` does: the bookmark is checked first, then the
+ * running loop is sent to its node. `walk({ from })` enters through here as well, so both ways
+ * into a position refuse the same bookmarks.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs.
+ * @param bookmark - The bookmark to enter.
+ * @returns A promise that resolves once the loop rests at the bookmark's node.
+ * @throws {Error} When the bookmark names no rest node of this graph.
+ * @example
+ * ```ts
+ * await enterBookmark(ctx, modules, bookmark);
+ * ```
+ */
+async function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): Promise<void> {
+  checkBookmark(ctx, modules, bookmark);
+
+  await restorePosition(ctx, modules, bookmark);
+}
+
+/**
  * Tells whether the graph stands on a rest node. `setMode` is legal there and before `run()`.
  *
  * @param ctx - Domain context of the flow plugin.
@@ -257,19 +278,39 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
     },
 
     /**
-     * Walks a route in fast mode through the running loop.
+     * Walks a route in fast mode through the running loop. A `from` bookmark is entered through
+     * the same check as `restore`.
      *
      * @param route - The player's answers and substituted sub-flow results, in order.
      * @param options - Walk options.
      * @param options.from - Bookmark restored before the first step.
      * @returns The state the walk ended in.
+     * @throws {Error} When the bookmark names no rest node of this graph.
      * @example
      * ```ts
      * await app.flow.walk([{ at: "home", intent: "play" }]);
      * ```
      */
-    walk: (route: readonly RouteStep[], options?: { from?: Bookmark }): Promise<FlowState> =>
-      walkRoute(ctx, modules, route, options?.from),
+    walk: (route: readonly RouteStep[], options?: { from?: Bookmark }): Promise<FlowState> => {
+      const from = options?.from;
+
+      if (from === undefined) return walkRoute(ctx, modules, route);
+
+      return walkRoute(ctx, modules, route, {
+        /**
+         * Enters the bookmark the walk starts from, checked the way `restore` checks it.
+         *
+         * @param bookmark - The bookmark to enter.
+         * @returns A promise that resolves once the loop rests at its node.
+         * @example
+         * ```ts
+         * await start.restore(start.from);
+         * ```
+         */
+        restore: (bookmark: Bookmark): Promise<void> => enterBookmark(ctx, modules, bookmark),
+        from
+      });
+    },
 
     /**
      * Makes a bookmark of the current rest point.
@@ -294,11 +335,7 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
      * await app.flow.restore(bookmark);
      * ```
      */
-    restore: async (bookmark: Bookmark): Promise<void> => {
-      checkBookmark(ctx, modules, bookmark);
-
-      await restorePosition(ctx, modules, bookmark);
-    },
+    restore: (bookmark: Bookmark): Promise<void> => enterBookmark(ctx, modules, bookmark),
 
     /**
      * Renders the whole graph as JSON, without running the game.

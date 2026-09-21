@@ -962,6 +962,189 @@ describe("runLoop", () => {
     expect(payloadsOf(harness.emitted, "flow:rest")[0]).toEqual({ path: "home", checkpoint: true });
     await stopRunner(harness.ctx);
   });
+
+  it("takes a world event that was already queued when the rest node is entered", async () => {
+    const main = flow(
+      "main",
+      {
+        boot: node({
+          run: () => {
+            harness.inbox.post({ type: "confirmed", payload: { id: 1 } });
+            return result("done");
+          }
+        }),
+        home: node({ rest: true, inbox: ["confirmed"], outcomes: ["confirmed"] }),
+        end: waiting("play")
+      },
+      "boot",
+      { boot: { done: "home" }, home: { confirmed: "end" }, end: { play: "boot" } }
+    );
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    expect(harness.ctx.state.runner.journal.map(entry => entry.outcome)).toEqual([
+      "done",
+      "confirmed"
+    ]);
+    expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("takes the done edge of a slot no feature contributes to", async () => {
+    const main = flow("main", { chest: slotNode("afterWin"), home: waiting("play") }, "chest", {
+      chest: { done: "home" },
+      home: { play: "chest" }
+    });
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    expect(harness.ctx.state.runner.journal).toEqual([
+      expect.objectContaining({ path: "chest", outcome: "done", next: "home" })
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("enters an over node at once while no frame loop runs", async () => {
+    const entered: string[] = [];
+    const main = flow(
+      "main",
+      {
+        boot: node({ run: () => result("done") }),
+        popup: node({
+          rest: true,
+          over: true,
+          outcomes: ["close"],
+          run: () => {
+            entered.push("popup");
+            return new Promise<Result>(() => undefined);
+          }
+        })
+      },
+      "boot",
+      { boot: { done: "popup" }, popup: { close: "boot" } }
+    );
+    const harness = setup({ main, running: false });
+
+    harness.ctx.state.gate.pointerActive = true;
+    harness.start();
+    await tick();
+
+    expect(entered).toEqual(["popup"]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("commits a world event of a barrier node with the barrier and the entry time", async () => {
+    const main = flow(
+      "main",
+      {
+        boot: node({ run: () => result("done") }),
+        home: node({
+          rest: true,
+          barrier: true,
+          inbox: ["confirmed"],
+          outcomes: ["confirmed"],
+          run: () => new Promise<Result>(() => undefined)
+        }),
+        end: waiting("play")
+      },
+      "boot",
+      { boot: { done: "home" }, home: { confirmed: "end" }, end: { play: "boot" } }
+    );
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    harness.inbox.post({ type: "confirmed", payload: { id: 7 } });
+    await tick();
+
+    expect(harness.ctx.state.runner.journal.map(entry => entry.now)).toEqual([1010, 1020]);
+    expect(harness.calls).toContain("markBarrier:home#1@1020");
+    await stopRunner(harness.ctx);
+  });
+
+  it("leaves a pure-wait node that was aborted while an onEnter callback ran", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const held: { release: () => void } = { release: () => undefined };
+    const blocked = new Promise<void>(resolve => {
+      held.release = resolve;
+    });
+    const ended = { value: false };
+
+    harness.ctx.state.runner.enterCallbacks.load.push(async () => {
+      await blocked;
+    });
+
+    const running = harness.start();
+
+    running.then(
+      () => {
+        ended.value = true;
+      },
+      () => undefined
+    );
+    await tick();
+
+    harness.ctx.state.runner.abort?.abort("stop");
+    held.release();
+    await tick();
+
+    expect(ended.value).toBe(true);
+    expect(harness.calls).toContain("discard");
+    expect(harness.calls).toContain("close");
+    await stopRunner(harness.ctx);
+  });
+
+  it("stops waiting for the pointer when the runner is stopped mid-drag", async () => {
+    const entered: string[] = [];
+    const main = flow(
+      "main",
+      {
+        boot: node({ run: () => result("done") }),
+        popup: node({
+          rest: true,
+          over: true,
+          outcomes: ["close"],
+          run: () => {
+            entered.push("popup");
+            return new Promise<Result>(() => undefined);
+          }
+        })
+      },
+      "boot",
+      { boot: { done: "popup" }, popup: { close: "boot" } }
+    );
+    const harness = setup({ main });
+    const ended = { value: false };
+
+    harness.ctx.state.gate.pointerActive = true;
+
+    const running = harness.start();
+
+    running.then(
+      () => {
+        ended.value = true;
+      },
+      () => undefined
+    );
+    await tick();
+
+    expect(entered).toEqual([]);
+
+    const stopping = stopRunner(harness.ctx);
+
+    harness.frame();
+    await tick();
+
+    expect(entered).toEqual([]);
+    expect(ended.value).toBe(true);
+    await stopping;
+  });
 });
 
 // ─── stopRunner ───────────────────────────────────────────────

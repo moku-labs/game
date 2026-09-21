@@ -429,6 +429,103 @@ describe("createRunnerApi", () => {
     expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
   });
 
+  it("refuses to restore without a main flow", async () => {
+    const harness = setup(undefined);
+
+    await expect(
+      harness.api.restore({
+        path: "home",
+        input: noPayload,
+        player: {},
+        session: {},
+        rng: { seed: 1, streams: {} },
+        graph: "00000000"
+      })
+    ).rejects.toThrow("[game] flow.restore() needs a main flow.");
+  });
+
+  it("names a checkpoint of the main flow when it refuses a bookmark", async () => {
+    const main = flow(
+      "main",
+      { boot: node(), home: node({ rest: true, checkpoint: true, outcomes: ["play"] }) },
+      "boot",
+      { boot: { done: "home" }, home: { play: "boot" } }
+    );
+    const harness = setup(main);
+
+    await expect(
+      harness.api.restore({
+        path: "boot",
+        input: noPayload,
+        player: {},
+        session: {},
+        rng: { seed: 1, streams: {} },
+        graph: "00000000"
+      })
+    ).rejects.toThrow('for example the checkpoint "home"');
+  });
+
+  it("names a checkpoint inside a sub-flow with its path", async () => {
+    const board = flow(
+      "board",
+      { play: node({ rest: true, checkpoint: true, outcomes: ["quit"] }) },
+      "play",
+      { play: { quit: "play" } }
+    );
+    const main = flow("main", { boot: node(), board }, "boot", {
+      boot: { done: "board" },
+      board: { left: "boot" }
+    });
+    const harness = setup(main);
+
+    await expect(
+      harness.api.restore({
+        path: "boot",
+        input: noPayload,
+        player: {},
+        session: {},
+        rng: { seed: 1, streams: {} },
+        graph: "00000000"
+      })
+    ).rejects.toThrow('for example the checkpoint "board/play"');
+  });
+
+  it("restores a plain rest node while the graph hash still matches", () => {
+    const harness = setup(restingGraph());
+
+    harness.ctx.state.runner.restFrame = [{ flow: "main", node: "home", input: noPayload }];
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const bookmark = harness.api.bookmark();
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+  });
+
+  it("refuses a walk that starts from a bookmark restore would refuse", async () => {
+    const main = flow(
+      "main",
+      { boot: node(), home: node({ rest: true, outcomes: ["play"] }) },
+      "boot",
+      { boot: { done: "home" }, home: { play: "boot" } }
+    );
+    const harness = setup(main);
+    const transit: Bookmark = {
+      path: "boot",
+      input: noPayload,
+      player: {},
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: "00000000"
+    };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.walk([], { from: transit })).rejects.toThrow("is not a rest node");
+  });
+
   it("refuses to restore before run()", async () => {
     const harness = setup(
       flow("main", { home: node({ rest: true, checkpoint: true, outcomes: ["play"] }) }, "home", {

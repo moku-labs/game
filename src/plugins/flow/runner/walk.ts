@@ -6,7 +6,7 @@
 import type { Json } from "../../model/types";
 import type { Answer } from "../gate/types";
 import type { FlowCtx } from "../types";
-import { loopSeam, restorePosition } from "./loop";
+import { loopSeam } from "./loop";
 import { framePath } from "./registry";
 import type { Bookmark, FlowState, LoopSeam, Modules, RouteStep } from "./types";
 
@@ -14,11 +14,10 @@ import type { Bookmark, FlowState, LoopSeam, Modules, RouteStep } from "./types"
 const noPayload: Json = null;
 
 /**
- * How many microtasks the walk yields to the loop while it travels from a committed edge to the
- * gate of the rest node it entered. That stretch is a fixed chain of awaited promises, so a
- * generous budget costs nothing: the wait ends the moment the gate is open.
+ * Where a walk starts from: the bookmark and the checked restore that enters it. They come
+ * together, so a walk can never enter a bookmark the plugin's `restore` would refuse.
  */
-const gateTicks = 64;
+type WalkStart = { restore: (bookmark: Bookmark) => Promise<void>; from: Bookmark };
 
 /** A step of the route that answers a rest node through the gate. */
 type IntentStep = Extract<RouteStep, { intent: string }>;
@@ -170,23 +169,56 @@ function watchEnd(running: Promise<void>): EndWatch {
 }
 
 /**
- * Yields to the loop until its gate is open. The loop needs a handful of microtasks between the
- * edge it commits and the gate of the rest node it enters; this hands them over without a timer.
+ * Waits for the next gate the loop opens. The listener takes itself off when it fires, so a walk
+ * that ended meanwhile leaves nothing behind.
+ *
+ * @param seam - The seam of the running loop.
+ * @returns A promise that resolves when the loop opens a gate.
+ * @example
+ * ```ts
+ * await Promise.race([nextGateOpen(seam), ended.settled]);
+ * ```
+ */
+function nextGateOpen(seam: LoopSeam): Promise<void> {
+  return new Promise<void>(resolve => {
+    /**
+     * Wakes the walk once the loop opened the gate.
+     *
+     * @example
+     * ```ts
+     * listener();
+     * ```
+     */
+    const listener = (): void => {
+      const index = seam.gateOpen.indexOf(listener);
+
+      if (index !== -1) seam.gateOpen.splice(index, 1);
+
+      resolve();
+    };
+
+    seam.gateOpen.push(listener);
+  });
+}
+
+/**
+ * Waits until the loop opens its gate. Between the edge it commits and the gate of the rest node
+ * it enters the loop may need a macrotask — an awaited preload, an effect handler — so the walk
+ * sleeps on the loop's own notification instead of counting ticks.
  *
  * @param ctx - Domain context of the flow plugin.
+ * @param seam - The seam of the running loop.
  * @param ended - The watch on the end of the loop.
  * @example
  * ```ts
- * await reachGate(ctx, ended);
+ * await reachGate(ctx, seam, ended);
  * ```
  */
-async function reachGate(ctx: FlowCtx, ended: EndWatch): Promise<void> {
-  for (let tick = 0; tick < gateTicks; tick += 1) {
-    if (ctx.state.gate.open !== undefined) return;
-    if (ended.done) return;
+async function reachGate(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise<void> {
+  if (ctx.state.gate.open !== undefined) return;
+  if (ended.done) return;
 
-    await Promise.resolve();
-  }
+  await Promise.race([nextGateOpen(seam), ended.settled]);
 }
 
 /**
@@ -260,24 +292,26 @@ function answerHere(
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
+ * @param seam - The seam of the running loop.
  * @param step - The step to answer with.
  * @param watch - The watch on the rest points of the loop.
  * @param ended - The watch on the end of the loop.
  * @throws {Error} When the loop ends or rests elsewhere before the step is reached.
  * @example
  * ```ts
- * await playStep(ctx, modules, { at: "home", intent: "play" }, watch, ended);
+ * await playStep(ctx, modules, seam, { at: "home", intent: "play" }, watch, ended);
  * ```
  */
 async function playStep(
   ctx: FlowCtx,
   modules: Modules,
+  seam: LoopSeam,
   step: IntentStep,
   watch: RestWatch,
   ended: EndWatch
 ): Promise<void> {
   while (!ended.done) {
-    await reachGate(ctx, ended);
+    await reachGate(ctx, seam, ended);
 
     const open = ctx.state.gate.open;
 
@@ -294,25 +328,20 @@ async function playStep(
 
 /**
  * Waits for the loop to come to rest after the last step, so the walk resolves with the position
- * the route leads to and not with the one it answered last. A loop that is still travelling gets
- * one more rest point, or its end.
+ * the route leads to and not with the one it answered last. The wait ends at the gate the loop
+ * opens there, or at the end of the loop.
  *
  * @param ctx - Domain context of the flow plugin.
- * @param watch - The watch on the rest points of the loop.
+ * @param seam - The seam of the running loop.
  * @param ended - The watch on the end of the loop.
+ * @returns A promise that resolves at the gate of the rest point, or at the end of the loop.
  * @example
  * ```ts
- * await settleAfterRoute(ctx, watch, ended);
+ * await settleAfterRoute(ctx, seam, ended);
  * ```
  */
-async function settleAfterRoute(ctx: FlowCtx, watch: RestWatch, ended: EndWatch): Promise<void> {
-  await reachGate(ctx, ended);
-
-  if (ctx.state.gate.open !== undefined) return;
-  if (ended.done) return;
-
-  await Promise.race([watch.next(), ended.settled]);
-  await reachGate(ctx, ended);
+function settleAfterRoute(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise<void> {
+  return reachGate(ctx, seam, ended);
 }
 
 /**
@@ -346,10 +375,10 @@ async function playRoute(
         continue;
       }
 
-      await playStep(ctx, modules, step, watch, ended);
+      await playStep(ctx, modules, seam, step, watch, ended);
     }
 
-    await settleAfterRoute(ctx, watch, ended);
+    await settleAfterRoute(ctx, seam, ended);
   } finally {
     watch.off();
   }
@@ -382,14 +411,16 @@ function walkState(ctx: FlowCtx): FlowState {
  * Walks a route through the running loop: restores `from` when given, switches to fast mode,
  * waits until the loop rests at each step's `at` and answers through the gate, and substitutes
  * the result of every sub-flow node the route skips. The mode of the caller is put back
- * afterwards, also when a step rejects.
+ * afterwards, also when a step rejects, and a substitution the route never reached is disarmed:
+ * it must not skip a sub-flow in the live play that follows.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
  * @param route - The player's answers and substituted results, in order.
- * @param from - Bookmark restored before the first step.
+ * @param start - Bookmark to enter first and the checked restore that enters it.
  * @returns The state the walk ended in.
- * @throws {Error} Before `run()` was called, and when a step's `at` is never reached.
+ * @throws {Error} Before `run()` was called, when the bookmark is refused, and when a step's `at`
+ *   is never reached.
  * @example
  * ```ts
  * const state = await walkRoute(ctx, modules, [{ at: "home", intent: "play" }]);
@@ -399,7 +430,7 @@ export async function walkRoute(
   ctx: FlowCtx,
   modules: Modules,
   route: readonly RouteStep[],
-  from?: Bookmark
+  start?: WalkStart
 ): Promise<FlowState> {
   const running = ctx.state.runner.running;
 
@@ -409,7 +440,7 @@ export async function walkRoute(
     );
   }
 
-  if (from !== undefined) await restorePosition(ctx, modules, from);
+  if (start !== undefined) await start.restore(start.from);
 
   const previous = ctx.state.fx.mode;
 
@@ -418,6 +449,7 @@ export async function walkRoute(
   try {
     await playRoute(ctx, modules, route, running);
   } finally {
+    loopSeam(ctx.state.runner).substitutions.clear();
     modules.fx.setMode(previous);
   }
 

@@ -6,7 +6,7 @@ import { createFeaturesApi } from "../../features/api";
 import { createFxApi } from "../../fx/api";
 import { createGateApi } from "../../gate/api";
 import { createInboxApi } from "../../inbox/api";
-import { runLoop, stopRunner } from "../../runner/loop";
+import { loopSeam, restorePosition, runLoop, stopRunner } from "../../runner/loop";
 import type {
   AnyFlow,
   AnyNode,
@@ -286,6 +286,72 @@ describe("walkRoute", () => {
     await stopRunner(harness.ctx);
   });
 
+  it("walks on when entering a node needs a macrotask", async () => {
+    const main = flow("main", { home: waiting("play"), shop: waiting("buy") }, "home", {
+      home: { play: "shop" },
+      shop: { buy: "home" }
+    });
+    const harness = setup(main);
+    const preloads: Array<() => void> = [];
+    const driver = { stop: false };
+    const drive = async (): Promise<void> => {
+      while (!driver.stop) {
+        await new Promise<void>(resolve => {
+          setTimeout(resolve, 0);
+        });
+        preloads.shift()?.();
+      }
+    };
+
+    harness.ctx.state.runner.enterCallbacks.load.push(
+      () =>
+        new Promise<void>(resolve => {
+          preloads.push(resolve);
+        })
+    );
+    harness.start();
+
+    const driving = drive();
+    const walking = walkRoute(harness.ctx, harness.modules, [
+      { at: "home", intent: "play" },
+      { at: "shop", intent: "buy" }
+    ]);
+    const reached = await Promise.race([
+      walking.then(state => state.path),
+      new Promise<string>(resolve => {
+        setTimeout(() => {
+          resolve("hung");
+        }, 200);
+      })
+    ]);
+
+    driver.stop = true;
+    await driving;
+
+    expect(reached).toBe("home");
+
+    await stopRunner(harness.ctx);
+  });
+
+  it("disarms a substitution the route never reached", async () => {
+    const main = flow("main", { home: waiting("play"), shop: waiting("buy") }, "home", {
+      home: { play: "shop" },
+      shop: { buy: "home" }
+    });
+    const harness = setup(main);
+
+    harness.start();
+
+    await walkRoute(harness.ctx, harness.modules, [
+      { at: "level", result: { outcome: "win", payload: noPayload } },
+      { at: "home", intent: "play" }
+    ]);
+
+    expect(loopSeam(harness.ctx.state.runner).substitutions.size).toBe(0);
+
+    await stopRunner(harness.ctx);
+  });
+
   it("rejects with the resting path when a step is never reached", async () => {
     const main = flow("main", { home: waiting("play"), shop: waiting("buy") }, "home", {
       home: { play: "shop" },
@@ -358,12 +424,10 @@ describe("walkRoute", () => {
       rng: { seed: 1, streams: {} },
       graph: "any"
     };
-    const state = await walkRoute(
-      harness.ctx,
-      harness.modules,
-      [{ at: "shop", intent: "buy" }],
-      bookmark
-    );
+    const state = await walkRoute(harness.ctx, harness.modules, [{ at: "shop", intent: "buy" }], {
+      restore: entered => restorePosition(harness.ctx, harness.modules, entered),
+      from: bookmark
+    });
 
     expect(harness.calls).toContain("restore");
     expect(harness.model.restored.at(-1)?.player).toEqual({ coins: 9 });

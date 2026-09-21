@@ -266,7 +266,7 @@ describe("validateGraph", () => {
     );
   });
 
-  it("accepts contributions with different orders", () => {
+  it("reports one flow contributed twice to the same slot", () => {
     const reward = flow("reward", { give: node({ rest: true, outcomes: ["go"] }) }, "give", {
       give: { go: "give" }
     });
@@ -279,6 +279,29 @@ describe("validateGraph", () => {
     const features = featuresWith([
       { feature: "coins", flow: reward, order: 10 },
       { feature: "stars", flow: reward, order: 20 }
+    ]);
+
+    expect(report(board, features).problems).toContain(
+      '[game] Slot "afterWin": flow "reward" is contributed twice.\n  Contribute a flow to one slot once.'
+    );
+  });
+
+  it("accepts contributions with different orders", () => {
+    const reward = flow("reward", { give: node({ rest: true, outcomes: ["go"] }) }, "give", {
+      give: { go: "give" }
+    });
+    const bonus = flow("bonus", { give: node({ rest: true, outcomes: ["go"] }) }, "give", {
+      give: { go: "give" }
+    });
+    const board = flow(
+      "board",
+      { afterWin: slotNode("afterWin"), home: node({ rest: true, outcomes: ["go"] }) },
+      "afterWin",
+      { afterWin: { done: "home" }, home: { go: "afterWin" } }
+    );
+    const features = featuresWith([
+      { feature: "coins", flow: reward, order: 10 },
+      { feature: "stars", flow: bonus, order: 20 }
     ]);
 
     expect(report(board, features).problems).toEqual([]);
