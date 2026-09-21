@@ -1,5 +1,5 @@
 /**
- * @file lifecycle plugin — state factory skeleton.
+ * @file lifecycle plugin — state factory.
  */
 import type { Config, State } from "./types";
 
@@ -10,7 +10,7 @@ import type { Config, State } from "./types";
  * @param _ctx - Minimal context.
  * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
- * @throws {Error} Always, until the build implements it.
+ * @returns A fresh state, owned by one app.
  * @example
  * ```ts
  * const state = createLifecycleState({ global, config });
@@ -20,5 +20,5 @@ export function createLifecycleState(_ctx: {
   readonly global: Readonly<Record<string, unknown>>;
   readonly config: Readonly<Config>;
 }): State {
-  throw new Error("not implemented");
+  return { reasons: [] };
 }

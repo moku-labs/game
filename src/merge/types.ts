@@ -257,7 +257,7 @@ export type GiveResult =
  * ```
  */
 export type PlaceResult =
-  | { ok: false; reason: "full" }
+  | { ok: false; reason: "full" | "missing" }
   | { ok: true; state: MergeState; slot: number };
 
 /**
