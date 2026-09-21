@@ -48,7 +48,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `mainFlow` | `FlowDefinition \| undefined` | `undefined` | The top-level flow. Required before `run()`. |
+| `mainFlow` | `AnyFlow \| undefined` | `undefined` | The top-level flow. Required before `run()`. |
 | `safeNode` | `string \| undefined` | `undefined` | Checkpoint entered after a failed retry. `undefined` is the main flow's `start`. |
 | `retries` | `number` | `1` | Retries of a failed transition before `safeNode`. |
 | `settleTimeoutMs` | `number` | `2000` | How long `onStop` waits for the active node to settle after abort. |

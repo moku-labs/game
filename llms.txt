@@ -1,0 +1,400 @@
+# @moku-labs/game
+
+> 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state and arrives in milestone V2. Today only V1 exists: the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry. The package is version 0.0.0 and is not published yet.
+
+Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer dependency, no V1 code imports it. Node >= 24, Bun >= 1.3.14. TypeScript strict with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. The engine ships no genre rules: no merge, no match-3, no physics. A game brings its own pure rule functions.
+
+## Entry points
+
+- `@moku-labs/game`: everything a game imports.
+- `@moku-labs/game/testing`: headless play, repro runs, fake clock, in-memory save provider.
+
+Root exports:
+- Functions: `createApp`, `createPlugin`, `defineGame`, `defineFeature`, `type`, `exit`, `to`, `slot`, `schedule`, `guide`, `hint`.
+- Class: `SaveUnreadableError`. Object: `teardown`.
+- Plugin instances: `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`.
+- Type namespaces: `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`. Use `import type { Flow } from "@moku-labs/game"` and then `Flow.RouteStep`, `Flow.NodeContext`, `Model.Json`, `Model.PlayerStateProvider`, `Clock.ClockSource`, `Time.Phase`, `Lifecycle.PauseReason`.
+- `defineNode` and `defineFlow` are NOT root exports. They come from `defineGame<Types>()`.
+
+## Concepts
+
+- Node: a small function with a plain `await` body. It gets one context object and returns `out.<outcome>(payload)`. A bare string is not accepted.
+- Flow: an id, a `nodes` table, a `start` node and an `edges` table. One entry per outcome of every node. The compiler checks the table.
+- Exactly one node is active. The runner opens one model transaction per node run and commits it on the edge. A node that throws changes nothing.
+- Transit node: has `run`, no `rest`. Rest node: `rest: true`. The graph waits there. Without `run` it is a pure wait.
+- A pure wait ends in two ways. A gate answer whose `intent` is an outcome name: the answer payload becomes the outcome payload. Or a world event whose `type` is listed in the node's `inbox`: the event payload becomes the outcome payload.
+- Transition: rest node to rest node. It is a transaction. On an error the runner discards, rolls back to the last rest point, retries `retries` times, then enters `safeNode`. A failure inside `safeNode` rejects `run()`.
+- Entering a rest node calls `model.store.markRest()`: the save provider gets the patches. Leaving a `barrier` node calls `markBarrier(txId)`: a durable write, and rollback cannot cross it.
+- `checkpoint: true` on a rest node: the journal is compacted there. `safeNode` must be a checkpoint.
+- `over: true`: entering the node waits while a pointer is down.
+- Path: node names joined by `/` through sub-flows and slots. Examples: `"home"`, `"board/awaitIntent"`, `"afterBonus/thanks"`.
+- Edge target: a node name, `exit(...)` or `to(...)`. A payload must fit the input of the target. A node without input accepts any payload.
+- Sub-flow: a flow that declares `outcomes` is used as a node of another flow. `exit("name")` leaves it with that outcome.
+- Slot: `slot("name")` is a node with the single outcome `done`. Features contribute sub-flows to it. They run in `order`. `when(snapshot)` can skip one.
+- Feature: `defineFeature(name, description)` makes an ordinary plugin that registers into `flow.features` in `onInit`. Pass it in `createApp({ plugins: [...] })`. `feature.logicOnly` is the same plugin with the V1 keys only, for headless tests.
+- Modes: `"live"` and `"fast"`. In fast mode effects answer instantly, hints are dropped and only `runInFast` handlers run. All node logic runs for real.
+
+## Authoring helpers, with signatures
+
+```ts
+function defineGame<Types extends Flow.GameTypes>(): Flow.Kit<Types>;
+// GameTypes = { player: Json; session: Json; assets: string; strings: Record<string, unknown> }
+// Kit       = { defineNode, defineFlow, defineFeature }
+
+function type<Payload = void>(): TypeTag<Payload>;
+
+// From the kit. Input and Tags are inferred from the spec.
+defineNode(spec: {
+  input?: TypeTag<Input>;
+  outcomes: Tags;                      // { done: type(), failed: type<{ reason: string }>() }
+  rest?: boolean;                      // run is required unless rest: true
+  over?: boolean;
+  checkpoint?: boolean;
+  barrier?: boolean;
+  inbox?: readonly (keyof Tags & string)[];
+  run?: (ctx: NodeContext) => Result | Promise<Result>;
+}): NodeDefinition;
+
+defineFlow(id: string, spec: {
+  nodes: Nodes;                        // node, sub-flow or slot per name
+  start: string;                       // a node whose input accepts the flow input
+  edges: Table;                        // edges[node][outcome] = target
+  input?: TypeTag<Input>;
+  outcomes?: FlowTags;                 // declare them to use the flow as a node
+}): FlowDefinition;
+
+function exit<const Name extends string>(outcome: Name): Exit<Name>;
+function to<const TargetName extends string, Payload, Output>(
+  target: TargetName,
+  map: (payload: Payload) => Output    // annotate the parameter type yourself
+): Mapped<TargetName, Payload, Output>;
+function slot(name: string): SlotNode;
+
+function defineFeature(name: string, description: FeatureDescription): FeaturePlugin;
+// FeatureDescription = {
+//   nodes?: readonly AnyNode[];
+//   flows?: readonly AnyFlow[];
+//   contribute?: Record<string, { flow: AnyFlow; order: number; when?: (snapshot: Snapshot) => boolean }>;
+// }
+
+function schedule(moment: number | undefined): Descriptor;  // awaited, asks the clock for one `elapsed`
+function guide(options: GuideOptions): Descriptor;          // awaited, narrows the gate to one answer
+function hint(kind: string, payload?: Json): Hint;          // for fx.emit, cosmetic
+// GuideOptions = { allow: { intent: string; payload?: Json }; highlight?: readonly string[]; hand?: "tap" | "drag"; text?: string }
+// Descriptor   = { kind: string; payload?: Json; answers?: readonly string[]; cosmetic?: boolean }
+```
+
+## Node context
+
+```ts
+type NodeContext = {
+  input: Input;          // payload of the edge that led here
+  player: Player;        // draft of the saved player tree, mutate it
+  session: Session;      // draft of the session tree, never saved
+  rng: RngView;          // rng.stream(id) gives a deterministic stream
+  fx: NodeFx;            // await fx(descriptor), fx.emit(hint(...))
+  out: Out;              // one method per declared outcome
+  signal: AbortSignal;   // aborted on stop, restore and inbox delivery
+  now: number;           // clock.now() read once at node entry
+};
+```
+
+`RngStream` methods, integers only: `int(maxExclusive)`, `range(min, maxInclusive)`, `pick(items)`, `weighted(table)` with `{ weight: number }` entries, `chance(numerator, denominator)`.
+
+## Rules of determinism
+
+- Never call `Date.now()`, `performance.now()` or `new Date()` in a node or in rule functions. Use `now` from the node context.
+- Never call `Math.random()`. Use `rng.stream("some-id")`. Use one id per source, for example `"chest:42"`. Stream state is part of the save, so a draw commits and rolls back with its transaction.
+- Never call `setTimeout` or `setInterval` in game logic. Store the due moment in `player`, then `await fx(schedule(moment))` and wait for `elapsed` at a rest node with `inbox: ["elapsed"]`.
+- State is plain JSON only. No classes, no `Map`, no `Date`, no `undefined` values in trees.
+- Change state only through `player` and `session` of the node context. Do not keep game state in module scope or closures.
+- Keep rules as pure functions `(state, input, tables) => result`. The node calls the rule and writes the result into the draft.
+- A node never calls `app.model`, `app.clock` or `app.time`. Everything outside logic goes through `fx`.
+- A timer is a moment stored in player state. How long is left is computed from `now`.
+
+## Minimal game
+
+```ts
+// state.ts
+import { defineGame } from "@moku-labs/game";
+
+export type Player = { coins: number; lastRoll: number };
+export type Session = { rolls: number };
+
+export const { defineNode, defineFlow, defineFeature } = defineGame<{
+  player: Player;
+  session: Session;
+  assets: string;
+  strings: Record<string, unknown>;
+}>();
+```
+
+```ts
+// nodes.ts
+import { type } from "@moku-labs/game";
+import { defineNode } from "./state";
+
+export const home = defineNode({
+  outcomes: { roll: type() },
+  rest: true,
+  checkpoint: true
+});
+
+export const roll = defineNode({
+  outcomes: { done: type() },
+  run: ({ player, session, rng, out }) => {
+    const face = rng.stream("dice").range(1, 6);
+
+    player.coins += face;
+    player.lastRoll = face;
+    session.rolls += 1;
+    return out.done();
+  }
+});
+```
+
+```ts
+// flow.ts
+import { defineFlow } from "./state";
+import { home, roll } from "./nodes";
+
+export const mainFlow = defineFlow("main", {
+  nodes: { home, roll },
+  start: "home",
+  edges: {
+    home: { roll: "roll" },
+    roll: { done: "home" }
+  }
+});
+```
+
+```ts
+// game.ts
+import { createApp } from "@moku-labs/game";
+import { mainFlow } from "./flow";
+
+export const createGame = (seed: "from-save" | number = "from-save") =>
+  createApp({
+    pluginConfigs: {
+      model: { initialPlayer: { coins: 0, lastRoll: 0 }, initialSession: { rolls: 0 }, seed },
+      flow: { mainFlow, safeNode: "home" }
+    },
+    onStart: ctx => {
+      ctx.flow.run().catch((error: unknown) => {
+        ctx.log.error("game: the graph failed", { error });
+      });
+    }
+  });
+```
+
+The game calls `flow.run()` itself, once, from `onStart`. Do not await it there: it resolves only when the app stops. The screen sends answers with `app.flow.gate.answer({ intent: "roll" })`.
+
+## More patterns
+
+```ts
+import { exit, hint, schedule, slot, to, type } from "@moku-labs/game";
+import { defineFeature, defineFlow, defineNode } from "./state";
+
+// Awaited effect with answers. The gate opens for these intents. The promise resolves with the answer.
+export const confirmReset = defineNode({
+  outcomes: { yes: type(), no: type() },
+  over: true,
+  run: async ({ fx, out }) => {
+    const answer = (await fx({ kind: "popup", payload: { name: "reset" }, answers: ["yes", "no"] })) as {
+      intent: string;
+    };
+
+    return answer.intent === "yes" ? out.yes() : out.no();
+  }
+});
+
+// Timer: arm the clock, emit a cosmetic hint, then wait for `elapsed` at a rest node.
+export const arm = defineNode({
+  outcomes: { armed: type() },
+  run: async ({ now, fx, out }) => {
+    await fx(schedule(now + 60_000));
+    fx.emit(hint("sparkle", { target: "dice" }));
+    return out.armed();
+  }
+});
+
+export const waiting = defineNode({
+  outcomes: { elapsed: type<{ now: number }>(), skip: type() },
+  rest: true,
+  inbox: ["elapsed"]
+});
+
+// Sub-flow with a mapped edge and two exits.
+const pick = defineNode({ outcomes: { picked: type<{ face: number }>(), back: type() }, rest: true });
+const apply = defineNode({
+  input: type<{ value: number }>(),
+  outcomes: { done: type() },
+  run: ({ input, player, out }) => {
+    player.coins += input.value;
+    return out.done();
+  }
+});
+
+export const bonusFlow = defineFlow("bonus", {
+  nodes: { pick, apply },
+  start: "pick",
+  outcomes: { finished: type(), left: type() },
+  edges: {
+    pick: { picked: to("apply", (payload: { face: number }) => ({ value: payload.face * 2 })), back: exit("left") },
+    apply: { done: exit("finished") }
+  }
+});
+
+// Main flow with the sub-flow as a node and a slot.
+const lobby = defineNode({ outcomes: { bonus: type() }, rest: true, checkpoint: true });
+
+export const main = defineFlow("main", {
+  nodes: { lobby, bonus: bonusFlow, afterBonus: slot("afterBonus") },
+  start: "lobby",
+  edges: {
+    lobby: { bonus: "bonus" },
+    bonus: { finished: "afterBonus", left: "lobby" },
+    afterBonus: { done: "lobby" }
+  }
+});
+
+// Feature: contributes a sub-flow to the slot. A feature name must differ from every flow id.
+const thanks = defineNode({ outcomes: { ok: type() }, rest: true, over: true });
+const thanksFlow = defineFlow("thanksPopup", {
+  nodes: { thanks },
+  start: "thanks",
+  outcomes: { done: type() },
+  edges: { thanks: { ok: exit("done") } }
+});
+
+export const thanksFeature = defineFeature("thanks", {
+  flows: [thanksFlow],
+  contribute: { afterBonus: { flow: thanksFlow, order: 10 } }
+});
+```
+
+A tutorial step is `await fx(guide({ allow: { intent: "roll" }, hand: "tap", text: "Tap the dice" }))`. Only that answer passes the gate until the node exits.
+
+## Graph rules checked at `run()`
+
+- Every outcome of every node has an edge. Every edge names a node of the same flow or a declared flow outcome.
+- The start node is in `nodes`. Every node is reachable from the start node.
+- A cycle needs at least one rest node.
+- Every `inbox` type is an outcome of its node. A rest node has outcomes or a `run` body.
+- Every edge of a `barrier` node leads to a rest node of the same flow.
+- Flow ids are unique. A feature name is not a flow id. It is also not a plugin name: `time`, `lifecycle`, `model`, `clock`, `flow`, `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`, `effects`, `audio`, `platform`, `log`, `env`.
+- Two contributions of one slot need different `order` values.
+- `safeNode` is the path of a checkpoint node.
+- A flow above 15 nodes is a warning. Split it into sub-flows of 7 to 15 nodes.
+
+## Plugins
+
+Registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`. `log` and `env` from `@moku-labs/common` are on every context as `ctx.log` and `ctx.env`. Configure with `createApp({ pluginConfigs: { <name>: { ... } } })`. Global config: `createApp({ config: { orientation, referenceSide } })`, defaults `"portrait"` and `1080`.
+
+### time (Standard, no dependencies, no events)
+
+The single `requestAnimationFrame` loop. Six phases in this order: `input`, `animate`, `layout`, `sync`, `signals`, `render`.
+- API: `onFrame(phase, callback): () => void`, `read(): Readonly<Time>`, `setScale(scale)`, `pause()`, `resume()`, `isPaused()`, `isRunning()`, `step(deltaMs)`.
+- `Time` is `{ delta, elapsed, scale, frame }` in scaled milliseconds.
+- Config: `maxFps: 30 | 60 | 120` default `60`, `maxDeltaMs: number` default `50`.
+- In plain Bun there is no frame source. `isRunning()` is false and tests drive frames with `step`.
+
+### lifecycle (Standard, depends on time)
+
+The stack of pause reasons. The game is paused while the stack is not empty.
+- API: `push(reason)`, `pop(reason)`, `reasons(): readonly PauseReason[]`, `isPaused()`.
+- Named reasons: `"background"`, `"devtools"`, `"system-dialog"`, `"device-lost"`. Any other string is allowed.
+- Event `lifecycle:changed`: `{ reason, action: "push" | "pop", reasons, paused, resumed }`. `resumed` is true only on the change that emptied the stack.
+- No config.
+
+### model (Very Complex, no dependencies)
+
+The `session` tree and the save document `{ player, rng }`. Modules `store` and `rng`.
+- `store`: `load()`, `snapshot(): { player, session, rng }` frozen, `begin(): Transaction`, `markRest()`, `markBarrier(txId)`, `rollback()`, `restore({ player, session?, rng? })`, `flush()`.
+- `rng`: `peek(id): number | undefined`.
+- A game reads `app.model.store.snapshot()`. The runner calls the rest. A node never calls the model.
+- Event `model:committed`: `{ roots: readonly ("player" | "session" | "rng")[]; cause: "edge" | "rollback" | "restore" | "load" }`.
+- Config: `playerProvider: PlayerStateProvider | undefined` default `undefined` which means in-memory, `initialPlayer: Json` default `{}`, `initialSession: Json` default `{}`, `seed: "from-save" | number` default `"from-save"`, `schemaVersion: number` default `1`, `migrations: readonly Migration[]` default `[]`.
+- `PlayerStateProvider`: `load(): Promise<{ state: Json; version: number } | null>`, `commit(patches, version): void`, `commitDurable(patches, txId, version): Promise<void>`, `flush(): Promise<void>`.
+- `Migration` is `{ from: number; up(state: Json): Json }`. `up` of `from: n` produces version `n + 1`. It works on the whole save document.
+- `SaveUnreadableError` has `savedVersion` and `schemaVersion`. `flow.run()` rejects with it when the save is newer, a step is missing, a step throws or the shape is wrong.
+
+### clock (Standard, no dependencies, no events)
+
+Trusted time as an input. Monotonic `now()` and one `elapsed` signal at the next due moment.
+- API: `now()`, `scheduleAt(moment | undefined)`, `onElapsed(listener): () => void`, `poke()`, `dueAt()`.
+- Config: `source: ClockSource | undefined` default `undefined` which means the system clock. `ClockSource` is `{ now(), setTimer(callback, delayMs), clearTimer(handle) }`.
+- A node never touches the clock. It awaits `fx(schedule(moment))`. `flow` posts `{ type: "elapsed", payload: { now } }` into its inbox when the moment arrives and when the game resumes.
+
+### flow (Very Complex, depends on time, lifecycle, model, clock)
+
+The graph. Modules `runner`, `gate`, `inbox`, `fx`, `features`. Runner methods sit on the plugin root.
+- Runner: `run(): Promise<void>`, `register(flow)`, `onEnter(stage: "load" | "scene", callback): () => void`, `walk(route, options?: { from?: Bookmark }): Promise<FlowState>`, `bookmark(): Bookmark`, `restore(bookmark): Promise<void>`, `describe(): FlowGraph`, `state(): FlowState`, `history(): readonly JournalEntry[]`, `setMode("live" | "fast")`.
+- `gate.answer({ intent, payload? }): boolean` is the one entry of player answers. `gate.pointer(active)`. `gate.state(): { open, allowed, narrowed }`.
+- `inbox.post({ type, payload? })` queues a world event. One entry per type. It is delivered only to a rest node whose `inbox` lists the type.
+- `fx.handle(kind, handler, options?: { runInFast?: boolean }): () => void` registers the single handler of one effect kind. `fx.dispatch(descriptor)` is fire-and-forget. An awaited effect without a handler resolves `undefined` at once.
+- `features.register(name, description)`, `features.all()`, `features.contributions(slotName)`.
+- `FlowState` is `{ running, path, stack, pending: { fx?, gate? }, mode }`.
+- `Bookmark` is `{ path, input, player, session, rng, graph }`. Serialisable. `restore` needs a running graph and the path of a rest node. A checkpoint is always accepted. Any other rest node is accepted only when the graph did not change since the bookmark.
+- Events: `flow:edge` `{ flow, node, outcome, payload, next, patches: { doc, session }, index, now }` after the commit of an edge. `flow:rest` `{ path, checkpoint }`. `flow:error` `{ path, error, rolledBackTo, retry }`.
+- Config: `mainFlow` default `undefined` and required before `run()`, `safeNode: string | undefined` default `undefined` which means the main flow's `start`, `retries` default `1`, `settleTimeoutMs` default `2000`, `journalLimit` default `500`.
+
+### Planned, not built
+
+`world`, `renderer`, `input`, `assets`, `scenes` in V2. `anim`, `i18n`, `text`, `ui`, `audio` in V3. `/inspect` and `/control` entries in V4. `effects` in V5. `platform` in V6. Do not import them and do not invent their API. The V2 rendering decision: WebGPU preferred, with Pixi's WebGL fallback.
+
+## Game plugins and events
+
+A game plugin is `createPlugin(name, { depends: [flowPlugin], hooks: ctx => ({ "flow:edge": payload => { ... } }) })`. The root README has the full example in its Events section.
+
+A plugin that owns a resource registers a disposer with `teardown.register(ctx.global, "name", dispose)` in `onStart` and runs it with `onStop: ({ global }) => teardown.run(global, "name")`.
+
+## Testing entry
+
+Exports of `@moku-labs/game/testing`: `createHeadless`, `runRepro`, `stepFrames`, `fakeClock`, `memory`, `saveOf`.
+
+- `createHeadless(app): Promise<HeadlessGame>`. Pass an app that is not started. It sets mode `"fast"`, awaits `app.start()` and starts `flow.run()` unless the app's `onStart` already did.
+- `HeadlessGame`: `walk(route): Promise<FlowState>`, `answer(answer): boolean`, `state()`, `history()`, `stop()`. `walk` and `stop` throw a fatal error of the loop again when the headless runner owns `run()`.
+- `Flow.RouteStep` is `{ at: string; intent: string; payload?: Json }` or `{ at: string; result: { outcome: string; payload?: Json } }`. `at` is the path of a rest node. The `result` form substitutes the result of a sub-flow at that path.
+- `runRepro(app, { player, session?, rng?, checkpoint?, route }): Promise<{ path: string[]; player; session }>`. The app keeps running. Stop it with `app.stop()`.
+- `stepFrames(app, count, deltaMs)` calls `app.time.step(deltaMs)` `count` times.
+- `fakeClock(start = 0)`: a `ClockSource` with `advance(ms)` and `set(moment)`. `advance` fires due timers synchronously.
+- `memory(fixture?)`: in-memory `PlayerStateProvider` with `calls`, the list of every call. `saveOf(player, seed = 1)` builds a `SaveDoc`.
+
+```ts
+import type { Flow } from "@moku-labs/game";
+import { createHeadless } from "@moku-labs/game/testing";
+import { expect, it } from "vitest";
+import { createGame } from "./game";
+
+const rollOnce: Flow.RouteStep = { at: "home", intent: "roll" };
+
+it("plays two rolls without a screen", async () => {
+  const app = createGame(42);
+  const game = await createHeadless(app);
+
+  const state = await game.walk([rollOnce, rollOnce]);
+
+  expect(state.path).toBe("home");
+  expect(app.model.store.snapshot().session).toEqual({ rolls: 2 });
+
+  await game.stop();
+});
+```
+
+For timers, pass `clock: { source: fakeClock(1_000_000) }` in `pluginConfigs`, call `clock.advance(ms)`, then yield the microtask queue before reading the state. For a fixed game, pass `model: { seed: 42 }`. In tests, compose features as `plugins: [feature.logicOnly]`.
+
+## File layout of a game
+
+```
+src/
+  state.ts        Player and Session types, starting state, the defineGame call
+  tables.ts       balance data as plain objects
+  rules/          pure functions, no engine import, no clock, no random
+  nodes/          one file per node: boot.ts, home.ts, await-intent.ts
+  flows/          main.ts, one file per sub-flow, one file per feature
+  game.ts         the single createApp call
+tests/            headless scenarios with createHeadless and walk
+```
+
+This is the layout of the worked example in the engine repository: `tests/integration/merge-game/` with `kit.ts`, `state.ts`, `tables.ts`, `rules/`, `nodes/`, `flows/`, `game.ts`. It is an internal test fixture written on the public API only. It is not published. Its scenario is `tests/integration/template-merge.test.ts`. Each plugin has a README: `src/plugins/<name>/README.md` for `time`, `lifecycle`, `model`, `clock`, `flow`. Moku Core specification: https://github.com/moku-labs/core/tree/main/specification
