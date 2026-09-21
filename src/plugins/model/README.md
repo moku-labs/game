@@ -235,10 +235,11 @@ expect(provider.calls.map(call => call.method)).toEqual(["load", "commit", "flus
 
 ## Lifecycle
 
-- **onStart** registers the teardown disposer only. It does not load the save: loading can fail with
-  a user-visible error, which belongs to the graph's boot, so `flow.run()` awaits `store.load()`.
-- **onStop** runs `teardown.run(global, "model")`, which calls `provider.flush()`. `flow` stops
-  before `model`, so unwritten patches still reach the provider.
+- No `onStart`. The save is not loaded at start: loading can fail with a user-visible error, which
+  belongs to the graph's boot, so `flow.run()` awaits `store.load()`.
+- **onStop** is `({ state }) => state.store.provider.flush()`. `flow` stops before `model`, so
+  unwritten patches still reach the provider. A rejecting flush makes `app.stop()` reject with that
+  error.
 
 ## Dependencies
 

@@ -89,10 +89,13 @@ loop itself never uses the event bus.
   the same fx the API uses.
 - **hooks** `lifecycle:changed`: `resumed` pokes the clock; a `"background"` push starts
   `model.store.flush()` and keeps its promise in `state.runner.flushing` for `onStop`.
-- **onStart** registers the teardown disposer only.
-- **onStop** `teardown.run(global, "flow")`: aborts the active node, awaits settle up to
-  `settleTimeoutMs`, discards an open transaction. `flow` stops before `model`, so `model` still
-  flushes afterwards.
+- No `onStart`. The game calls `flow.run()` itself.
+- **onStop** is `({ config, state }) => stopRunner({ config, state })`: aborts the active node,
+  wakes a pending pointer wait, awaits settle up to `settleTimeoutMs` of real time, with or without
+  a frame loop, and discards an open transaction. `flow` stops before `model`, so `model` still
+  flushes afterwards. The background flush started by the hook never rejects: the store logs its failure, and the flush in the `onStop` of `model` reports a lasting one. When the deadline wins, the stop stays on record, so a loop that wakes later still stops.
+- A throw inside the `lifecycle:changed` hook is reported with
+  `ctx.log.error("flow: lifecycle:changed hook failed", { error })`.
 
 ## Dependencies
 
