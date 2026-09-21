@@ -1,5 +1,6 @@
 /**
- * @file flow/runner — taking the edge.
+ * @file flow/runner — taking the edge. The only place that calls `transaction.commit()`: state
+ * changes on the edge, never inside a node.
  */
 import type { Transaction } from "../../model/types";
 import type { FlowCtx } from "../types";
