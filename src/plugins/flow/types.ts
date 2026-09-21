@@ -1,0 +1,176 @@
+/**
+ * @file flow plugin — shared types of the plugin and its modules.
+ */
+import type { Log } from "@moku-labs/common/browser";
+import type { PluginCtx } from "@moku-labs/core";
+import type { Require } from "../../config";
+import type { Api as ClockApi } from "../clock/types";
+import type { Events as LifecycleEvents } from "../lifecycle/types";
+import type { Json, Api as ModelApi, Patch } from "../model/types";
+import type { Api as TimeApi } from "../time/types";
+import type { FeaturesApi, FeaturesState } from "./features/types";
+import type { FxApi, FxState } from "./fx/types";
+import type { GateApi, GateState } from "./gate/types";
+import type { InboxApi, InboxState } from "./inbox/types";
+import type { AnyFlow, RunnerApi, RunnerState } from "./runner/types";
+
+/**
+ * flow plugin events.
+ *
+ * @example
+ * ```ts
+ * hooks: { "flow:rest": ({ path, checkpoint }) => track(path, checkpoint) }
+ * ```
+ */
+export type Events = {
+  /** An edge was taken and its state committed. */
+  "flow:edge": {
+    flow: string;
+    node: string;
+    outcome: string;
+    payload: Json;
+    next: string;
+    patches: { doc: Patch[]; session: Patch[] };
+    index: number;
+    now: number;
+  };
+  /** The graph reached a rest node. */
+  "flow:rest": { path: string; checkpoint: boolean };
+  /** A node failed and the graph rolled back. */
+  "flow:error": { path: string; error: unknown; rolledBackTo: string; retry: boolean };
+};
+
+/**
+ * flow plugin config.
+ *
+ * @example
+ * ```ts
+ * createApp({ pluginConfigs: { flow: { mainFlow, safeNode: "home" } } });
+ * ```
+ */
+export type Config = {
+  /** The top-level flow. Required before `run()`. */
+  mainFlow: AnyFlow | undefined;
+  /** Path of the checkpoint entered after a failed retry. `undefined`: the main flow's `start`. */
+  safeNode: string | undefined;
+  /** Retries of a failed transition before going to `safeNode`. */
+  retries: number;
+  /** How long `onStop` waits for the active node to settle after abort. */
+  settleTimeoutMs: number;
+  /** Journal entries kept between checkpoints. */
+  journalLimit: number;
+};
+
+/**
+ * flow plugin state: one branch per module.
+ *
+ * @example
+ * ```ts
+ * const state: State = createFlowState({ global, config });
+ * ```
+ */
+export type State = {
+  features: FeaturesState;
+  fx: FxState;
+  gate: GateState;
+  inbox: InboxState;
+  runner: RunnerState;
+};
+
+/**
+ * flow plugin API: the runner on the root, the other modules grouped.
+ *
+ * @example
+ * ```ts
+ * const flow: Api = ctx.require(flowPlugin);
+ * flow.gate.answer({ intent: "play" });
+ * ```
+ */
+export type Api = RunnerApi & { gate: GateApi; inbox: InboxApi; fx: FxApi; features: FeaturesApi };
+
+/**
+ * Resolved dependency APIs.
+ *
+ * @example
+ * ```ts
+ * const deps: Deps = resolveDeps(ctx);
+ * deps.clock.now();
+ * ```
+ */
+export type Deps = { time: TimeApi; model: ModelApi; clock: ClockApi };
+
+/**
+ * What the kernel context offers before the deps are attached.
+ * `emit` is one plain method overload per event on purpose: `flow` has dependencies with events,
+ * and both a property-typed and a generic `emit` break the kernel's event inference when a
+ * factory is passed to `createPlugin` by direct reference (`api`, `hooks`, `onInit`, `onStart`).
+ *
+ * @example
+ * ```ts
+ * export function createFlowApi(ctx: KernelSlice): Api;
+ * ```
+ */
+export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
+  emit(name: "flow:edge", payload: Events["flow:edge"]): void;
+  emit(name: "flow:rest", payload: Events["flow:rest"]): void;
+  emit(name: "flow:error", payload: Events["flow:error"]): void;
+  readonly global: object;
+  readonly log: Log.LogApi;
+  readonly require: Require;
+};
+
+/**
+ * Domain context shared by the modules.
+ *
+ * @example
+ * ```ts
+ * const flowCtx: FlowCtx = { ...ctx, deps: resolveDeps(ctx) };
+ * ```
+ */
+export type FlowCtx = KernelSlice & { readonly deps: Deps };
+
+/**
+ * Payload of the one event flow listens to.
+ *
+ * @example
+ * ```ts
+ * const onChanged = (payload: LifecycleChanged) => payload.resumed;
+ * ```
+ */
+export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
+
+export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";
+export type { Descriptor, FxApi, FxHandler, GuideOptions, Hint, NodeFx } from "./fx/types";
+export type { Allow, Answer, GateApi } from "./gate/types";
+export type { InboxApi, WorldEvent } from "./inbox/types";
+export type {
+  AnyFlow,
+  AnyNode,
+  AnyNodeContext,
+  Bookmark,
+  CheckedEdges,
+  DefineNode,
+  Edges,
+  EnterCallback,
+  Exit,
+  FlowDefinition,
+  FlowGraph,
+  FlowSpec,
+  FlowState,
+  GameState,
+  GraphError,
+  JournalEntry,
+  Mapped,
+  NodeContext,
+  NodeDefinition,
+  NodeInfo,
+  NodeSpec,
+  OutcomeTags,
+  Result,
+  RouteStep,
+  RunnerApi,
+  SlotNode,
+  Stage,
+  Target,
+  TypeTag
+} from "./runner/types";

@@ -1,0 +1,8 @@
+{
+  "name": "p2-bun-hmr",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pixi.js": "8.21.0"
+  }
+}

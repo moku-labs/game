@@ -1,0 +1,64 @@
+Bun v1.3.14 dev server ready in 18.42 ms
+
+url: http://localhost:4173/
+Bundled page in 55ms: index.html
+[browser] [p2] fresh load, no marker
+[browser] [p2] boot 3mmfj0 renderer=webgpu type=2
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=0 boot=3mmfj0 stageChildren=1
+[browser] [p2] plain mounted color=33cc66
+Reloaded in 1ms: scene-accepting.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=3366ff cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=921 boot=3mmfj0 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=921
+[x2] Reloaded in 2ms: scene-accepting.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=1890 boot=3mmfj0 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=1890
+[x3] Reloaded in 1ms: scene-plain.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] bun:beforeFullReload fired at frame 2132
+[browser] [p2] bun:afterUpdate frames=2132
+[browser] [p2] restored after full reload; marker={"frames":2132,"bootId":"3mmfj0","at":1789959646949}
+[browser] [p2] boot 1k6rfv renderer=webgpu type=2
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=0 boot=1k6rfv stageChildren=1
+[browser] [p2] plain mounted color=cccc33
+[x4] Reloaded in 1ms: scene-plain.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] bun:beforeFullReload fired at frame 1360
+[browser] [p2] bun:afterUpdate frames=1360
+[browser] [p2] restored after full reload; marker={"frames":1360,"bootId":"1k6rfv","at":1789959658370}
+[browser] [p2] boot hoj5w5 renderer=webgpu type=2
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=0 boot=hoj5w5 stageChildren=1
+[browser] [p2] plain mounted color=33cc66
+[x5] Reloaded in 1ms: cycle-b.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b11(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=352 boot=hoj5w5 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=352
+[x6] Reloaded in 1ms: cycle-a.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=ff3366 cycle=a2+b11(sees a=2) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=713 boot=hoj5w5 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=713
+[x7] Reloaded in 1ms: cycle-b.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=ff3366 cycle=a2+b10(sees a=2) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=1075 boot=hoj5w5 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=1075
+[x8] Reloaded in 1ms: cycle-a.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=1316 boot=hoj5w5 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=1316
+[x9] Reloaded in 0ms: data-only.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":30} frames=1678 boot=hoj5w5 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=1678
+[x10] Reloaded in 1ms: data-only.ts
+[browser] [p2] bun:beforeUpdate
+[browser] [p2] accepting disposed
+[browser] [p2] accepting mounted color=ff3366 cycle=a1+b10(sees a=1) pulse={"name":"pulse","property":"alpha","from":0.3,"to":1,"durationFrames":120} frames=2040 boot=hoj5w5 stageChildren=2
+[browser] [p2] bun:afterUpdate frames=2040

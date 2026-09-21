@@ -1,0 +1,5 @@
+Bun v1.3.14 dev server ready in 5.85 ms
+
+url: http://localhost:4174/
+Bundled page in 52ms: index.html
+[browser] [p1] {"userAgent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Claude/2.2553.1 Chrome/152.0.7977.76 Safari/537.36","hasNavigatorGpu":true,"adapter":{"info":{"vendor":"apple","architecture":"metal-3","device":""},"maxTextureDimension2D":16384,"maxBufferSize":4294967292,"features":["depth32float-stencil8","rg11b10ufloat-renderable","bgra8unorm-storage","texture-formats-tier1","texture-compression-bc","dual-source-blending","core-features-and-limits","float32-filterable","indirect-first-instance","texture-compression-astc-sliced-3d","float32-blendable","subgroup-size-control"]},"rendererChosen":"webgpu","timeToFirstFrameMs":131,"averageFps":116,"textureBytesEstimate":9216,"canvasSize":"800x600"}

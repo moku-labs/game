@@ -1,0 +1,8 @@
+{
+  "name": "p1-webgpu",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pixi.js": "8.21.0"
+  }
+}
