@@ -44,9 +44,10 @@ export type FrameCallback = (time: Readonly<Time>) => void;
  */
 export type Config = {
   /**
-   * Frame rate cap.
+   * Frame rate cap. The default is 60. 120 is for WebViews that really deliver 120 Hz frames:
+   * Android today; WKWebView on iOS and macOS is capped at 60 by WebKit (bug 294338).
    */
-  maxFps: 30 | 60;
+  maxFps: 30 | 60 | 120;
   /**
    * Upper bound of one frame's delta in milliseconds.
    */

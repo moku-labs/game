@@ -340,6 +340,26 @@ describe("tickFrame", () => {
     expect(api.read()).toMatchObject({ frame: 2, delta: 40 });
   });
 
+  it("runs every frame of a 120 Hz source when the cap is 120", () => {
+    const { api, ctx } = createApi({ maxFps: 120 });
+
+    tickFrame(ctx, 1000);
+    tickFrame(ctx, 1008);
+    tickFrame(ctx, 1016);
+
+    expect(api.read()).toMatchObject({ frame: 3, delta: 8 });
+  });
+
+  it("halves a 120 Hz source under the default cap of 60", () => {
+    const { api, ctx } = createApi();
+
+    tickFrame(ctx, 1000);
+    tickFrame(ctx, 1008);
+    tickFrame(ctx, 1016);
+
+    expect(api.read()).toMatchObject({ frame: 2, delta: 16 });
+  });
+
   it("applies the scale to a real frame", () => {
     const { api, ctx } = createApi();
 

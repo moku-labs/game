@@ -46,7 +46,7 @@ The first frame, and the first frame after a `resume`, counts as one capped fram
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `maxFps` | `30 \| 60` | `60` | Frame rate cap. 30 for weak or hot devices. |
+| `maxFps` | `30 \| 60 \| 120` | `60` | Frame rate cap. 30 for weak or hot devices. 120 only helps where the WebView delivers 120 Hz frames: Android today. WKWebView on iOS and macOS is capped at 60 by WebKit. |
 | `maxDeltaMs` | `number` | `50` | Upper bound of one frame's delta, so a backgrounded tab does not produce a giant step. |
 
 ```ts
