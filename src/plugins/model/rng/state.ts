@@ -1,16 +1,17 @@
 /**
- * @file model/rng — state factory skeleton.
+ * @file model/rng — state factory.
  */
 
 /**
- * Creates the rng module state. It is empty: the rng data lives in the save document.
+ * Creates the rng module state. It is empty: the rng data lives in the save document, so a draw
+ * commits and rolls back with the transaction that drew it.
  *
- * @throws {Error} Always, until the build implements it.
+ * @returns The empty rng branch of the plugin state.
  * @example
  * ```ts
- * const rng = createRngState();
+ * const state = { store: createStoreState(config), rng: createRngState() };
  * ```
  */
 export function createRngState(): Record<string, never> {
-  throw new Error("not implemented");
+  return {};
 }

@@ -1,5 +1,5 @@
 /**
- * @file time plugin — state factory skeleton.
+ * @file time plugin — state factory.
  */
 import type { Config, State } from "./types";
 
@@ -10,7 +10,7 @@ import type { Config, State } from "./types";
  * @param _ctx - Minimal context.
  * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
- * @throws {Error} Always, until the build implements it.
+ * @returns A fresh state, owned by one app.
  * @example
  * ```ts
  * const state = createTimeState({ global, config });
@@ -20,5 +20,14 @@ export function createTimeState(_ctx: {
   readonly global: Readonly<Record<string, unknown>>;
   readonly config: Readonly<Config>;
 }): State {
-  throw new Error("not implemented");
+  return {
+    // The key order is the call order of a frame; `PHASES` in api.ts is the single source of it.
+    callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
+    time: { delta: 0, elapsed: 0, scale: 1, frame: 0 },
+    paused: false,
+    running: false,
+    stepping: false,
+    rafId: undefined,
+    lastTimestamp: undefined
+  };
 }

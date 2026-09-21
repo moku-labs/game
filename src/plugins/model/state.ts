@@ -1,23 +1,27 @@
 /**
- * @file model plugin — state factory skeleton.
+ * @file model plugin — state factory.
  */
+import { createRngState } from "./rng/state";
+import { createStoreState } from "./store/state";
 import type { Config, State } from "./types";
 
 /**
  * Creates the initial model state: one branch per module, `store` and `rng`.
+ * The rng branch is empty on purpose — randomness lives in the save document, so a draw commits
+ * and rolls back together with the transaction that drew it.
  *
- * @param _ctx - Minimal context.
- * @param _ctx.global - Global framework config.
- * @param _ctx.config - Resolved plugin config.
- * @throws {Error} Always, until the build implements it.
+ * @param ctx - Minimal context.
+ * @param ctx.global - Global framework config.
+ * @param ctx.config - Resolved plugin config.
+ * @returns The plugin state.
  * @example
  * ```ts
  * const state = createModelState({ global, config });
  * ```
  */
-export function createModelState(_ctx: {
+export function createModelState(ctx: {
   readonly global: Readonly<Record<string, unknown>>;
   readonly config: Readonly<Config>;
 }): State {
-  throw new Error("not implemented");
+  return { store: createStoreState(ctx.config), rng: createRngState() };
 }
