@@ -25,7 +25,7 @@ Use `bun` exclusively — never npm, yarn, or pnpm.
 - **Imports:** Use `import type` enforced via `@typescript-eslint/consistent-type-imports`
 - **JSDoc:** Required on function declarations and exported types, with descriptions, params and returns. Examples follow lint rules L7 and L8:
   - The members of the public `…Api` types in `types.ts` carry the docs and a scenario `@example`: when a game calls it, literal arguments, the result. Only `types.ts` ships in the `.d.mts`. The implementation of an API method has no JSDoc.
-  - A public member no game can call gets `@remarks No example: <reason>` instead.
+  - API means public: there is no private tier. A member another plugin calls gets an example from that plugin's point of view (`ctx.require(timePlugin).pause()`). A member nobody can write an honest example for leaves the API as a plain function, or is deleted.
   - A private pure function may keep one line with literals and the result. A private function that takes `ctx`, `state` or `modules`, and a private type, get no `@example`.
   - Every example must be true: check the real signature and the real result before writing it. Never repeat the signature with identifiers as arguments.
 

@@ -229,21 +229,10 @@ describe("createRunnerApi", () => {
     await expect(running).resolves.toBeUndefined();
   });
 
-  it("registers an extra flow before run() and refuses one after", async () => {
+  it("has no register method: a flow is part of the graph when the main flow reaches it", () => {
     const harness = setup(restingGraph());
-    const extra = flow("debug", { start: node() }, "start", { start: { done: "start" } });
 
-    harness.api.register(extra);
-
-    expect(harness.ctx.state.runner.flows.get("debug")).toBe(extra);
-
-    const running = harness.api.run();
-
-    running.catch(() => undefined);
-    await tick();
-
-    expect(() => harness.api.register(extra)).toThrow("after flow.run()");
-    await stopRunner(harness.ctx);
+    expect(Object.keys(harness.api)).not.toContain("register");
   });
 
   it("registers and removes an onEnter callback", () => {

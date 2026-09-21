@@ -202,8 +202,14 @@ export type Transaction = {
    *
    * @returns The patches split by tree and the touched roots.
    * @throws {Error} When the transaction was already committed or discarded.
-   * @remarks No example: the flow runner commits the transaction of a node run on the edge; a node
-   * only returns an outcome.
+   * @example
+   * ```ts
+   * // A runner plugin commits on the edge, after the node body returned its outcome.
+   * const { store } = ctx.require(modelPlugin);
+   * const transaction = store.begin();
+   * await runNodeBody(transaction); // the node wrote coins into transaction.player
+   * transaction.commit().roots; // ["player"]
+   * ```
    */
   commit(): CommitResult;
 
@@ -211,8 +217,12 @@ export type Transaction = {
    * Drops the drafts of this transaction. Nothing changes and nothing is emitted.
    *
    * @throws {Error} When the transaction was already committed or discarded.
-   * @remarks No example: the flow runner discards the transaction of a node that failed or was
-   * aborted; a game never holds one.
+   * @example
+   * ```ts
+   * // The node threw or was aborted: nothing of its drafts may reach the state.
+   * transaction.discard();
+   * store.snapshot().player; // as it was before begin()
+   * ```
    */
   discard(): void;
 };
@@ -257,7 +267,13 @@ export type StoreApi = {
    * @returns Resolves when the document is in place.
    * @throws {SaveUnreadableError} When the save cannot be read by this build.
    * @throws {unknown} The error of a provider that fails to load or refuses the first commit.
-   * @remarks No example: `app.flow.run()` awaits it once at boot; a game never calls it.
+   * @example
+   * ```ts
+   * // The flow runner loads the save once, before the first node; a game calls app.flow.run().
+   * const { store } = ctx.require(modelPlugin);
+   * await store.load(); // model:committed fires with cause "load"
+   * store.snapshot().player; // { coins: 0 } for a new player, from config.initialPlayer
+   * ```
    */
   load(): Promise<void>;
 
@@ -281,8 +297,12 @@ export type StoreApi = {
    *
    * @returns The open transaction.
    * @throws {Error} When a transaction is already open.
-   * @remarks No example: the flow runner keeps one transaction open for every node run, so a call
-   * from a game throws.
+   * @example
+   * ```ts
+   * // The flow runner opens one transaction when it enters a node and keeps it until the edge.
+   * const transaction = ctx.require(modelPlugin).store.begin();
+   * transaction.player; // a draft: writes stay invisible to snapshot() until commit()
+   * ```
    */
   begin(): Transaction;
 
@@ -292,8 +312,12 @@ export type StoreApi = {
    * still holds the whole transition.
    *
    * @throws {unknown} The error of a failing provider.
-   * @remarks No example: the flow runner calls it on the edge into a rest node; a game marks a
-   * node with `rest: true` instead.
+   * @example
+   * ```ts
+   * // The edge led into a node with `rest: true`: the provider gets the whole transition.
+   * transaction.commit();
+   * store.markRest(); // provider.commit() receives every patch since the last rest point
+   * ```
    */
   markRest(): void;
 
@@ -304,8 +328,12 @@ export type StoreApi = {
    * @param txId - Id of the transaction that left the barrier node.
    * @returns Resolves when the data is durable.
    * @throws {unknown} The error of a failing provider.
-   * @remarks No example: the flow runner calls it on the edge out of a barrier node and builds the
-   * `txId` itself; a game marks a node with `barrier: true` instead.
+   * @example
+   * ```ts
+   * // The edge left a node with `barrier: true`, for example a granted purchase: wait for the disk.
+   * // The id is path#journalIndex@now, built by the runner.
+   * await store.markBarrier("shop/grant#12@1790000000000");
+   * ```
    */
   markBarrier(txId: string): Promise<void>;
 
@@ -314,8 +342,11 @@ export type StoreApi = {
    * frozen trees: no inverse patch is replayed. Everything in `pending` belongs to the failed
    * transition, because a rest point empties it. Emits `model:committed` with cause `"rollback"`.
    *
-   * @remarks No example: the flow runner calls it when a node fails; a call from a game would
-   * move the trees away from the node the graph stands on.
+   * @example
+   * ```ts
+   * // A node failed after it wrote into its drafts: back to the last rest point, then retry.
+   * store.rollback(); // model:committed fires with cause "rollback"
+   * ```
    */
   rollback(): void;
 
@@ -330,8 +361,13 @@ export type StoreApi = {
    * @param input.session - The session tree. Omitted: the current one stays.
    * @param input.rng - The rng branch. Omitted: the current one stays.
    * @throws {Error} When a transaction is open.
-   * @remarks No example: a game restores through `app.flow.restore(bookmark)`, which also enters
-   * the node; while the graph runs a transaction is open and a direct call throws.
+   * @example
+   * ```ts
+   * // The flow runner enters a bookmark: the trees first, then the rest point, then the node.
+   * // A game calls app.flow.restore(bookmark), which does all three.
+   * store.restore({ player: bookmark.player, session: bookmark.session, rng: bookmark.rng });
+   * store.markRest();
+   * ```
    */
   restore(input: { player: Json; session?: Json; rng?: RngState }): void;
 

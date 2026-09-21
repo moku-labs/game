@@ -65,7 +65,6 @@ const createFakeApp = (options: AppOptions = {}) => {
 
         return loop.promise;
       },
-      register: vi.fn(),
       onEnter: () => unregister,
       walk: async (route: readonly RouteStep[]): Promise<FlowState> => {
         calls.push("walk");

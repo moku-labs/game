@@ -802,7 +802,7 @@ export type LoopSeam = {
 export type RunnerState = {
   /** Flush started by a background pause. `onStop` awaits it. */
   flushing: Promise<void> | undefined;
-  /** Every reachable or registered flow by id. */
+  /** Every flow of the graph by id, collected at `run()`. */
   flows: Map<string, AnyFlow>;
   enterCallbacks: Record<Stage, EnterCallback[]>;
   /** The position: one frame per nesting level. */
@@ -863,16 +863,6 @@ export type RunnerApi = {
    * ```
    */
   run(): Promise<void>;
-
-  /**
-   * Adds a flow the main flow does not reach by reference. Before `run()` only.
-   *
-   * @param flow - The flow to add.
-   * @throws {Error} When the runner is already running.
-   * @remarks No example: no game and no engine plugin calls it; every flow the loop enters is
-   *   reached from `mainFlow` or contributed to a slot.
-   */
-  register(flow: AnyFlow): void;
 
   /**
    * Registers a callback run before every node body: `assets` preloads at `load`, `scenes`
@@ -994,8 +984,13 @@ export type RunnerApi = {
    *
    * @param mode - `"live"` or `"fast"`.
    * @throws {Error} When a transit node is running.
-   * @remarks No example: only `createHeadless` and `walk` switch the mode; a game gets fast
-   *   mode through them.
+   * @example
+   * ```ts
+   * // A headless run plays without effects: fast mode before the app starts.
+   * app.flow.setMode("fast");
+   * await app.start();
+   * app.flow.state().mode; // "fast"
+   * ```
    */
   setMode(mode: "live" | "fast"): void;
 };

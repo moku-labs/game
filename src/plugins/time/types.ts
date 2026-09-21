@@ -135,8 +135,13 @@ export type Api = {
   /**
    * Pauses the clock: no phase runs and `elapsed` stops advancing. Called by `lifecycle`.
    *
-   * @remarks No example: a game pauses through `app.lifecycle.push(reason)`; only `lifecycle`
-   * calls this.
+   * @example
+   * ```ts
+   * // The lifecycle plugin owns the pause policy: the first pause reason stops the clock.
+   * // A game pauses through app.lifecycle.push(reason), never here.
+   * const time = ctx.require(timePlugin);
+   * if (reasons.length === 1) time.pause(); // app.time.isPaused() is true, no phase runs
+   * ```
    */
   pause(): void;
 
@@ -144,8 +149,12 @@ export type Api = {
    * Resumes the clock and drops the stale timestamp, so the first frame after the pause has
    * a normal delta instead of the whole pause. Called by `lifecycle`.
    *
-   * @remarks No example: a game resumes through `app.lifecycle.pop(reason)`; only `lifecycle`
-   * calls this.
+   * @example
+   * ```ts
+   * // The lifecycle plugin resumes when the last pause reason is gone.
+   * const time = ctx.require(timePlugin);
+   * if (reasons.length === 0) time.resume(); // the next frame has a normal delta, not the whole pause
+   * ```
    */
   resume(): void;
 

@@ -330,7 +330,7 @@ Trusted time as an input. Monotonic `now()` and one `elapsed` signal at the next
 ### flow (Very Complex, depends on time, lifecycle, model, clock)
 
 The graph. Modules `runner`, `gate`, `inbox`, `fx`, `features`. Runner methods sit on the plugin root.
-- Runner: `run(): Promise<void>`, `register(flow)`, `onEnter(stage: "load" | "scene", callback): () => void`, `walk(route, options?: { from?: Bookmark }): Promise<FlowState>`, `bookmark(): Bookmark`, `restore(bookmark): Promise<void>`, `describe(): FlowGraph`, `state(): FlowState`, `history(): readonly JournalEntry[]`, `setMode("live" | "fast")`.
+- Runner: `run(): Promise<void>`, `onEnter(stage: "load" | "scene", callback): () => void`, `walk(route, options?: { from?: Bookmark }): Promise<FlowState>`, `bookmark(): Bookmark`, `restore(bookmark): Promise<void>`, `describe(): FlowGraph`, `state(): FlowState`, `history(): readonly JournalEntry[]`, `setMode("live" | "fast")`.
 - `gate.answer({ intent, payload? }): boolean` is the one entry of player answers. `gate.pointer(active)`. `gate.state(): { open, allowed, narrowed }`.
 - `inbox.post({ type, payload? })` queues a world event. One entry per type. It is delivered only to a rest node whose `inbox` lists the type.
 - `fx.handle(kind, handler, options?: { runInFast?: boolean }): () => void` registers the single handler of one effect kind. `fx.dispatch(descriptor)` is fire-and-forget. An awaited effect without a handler resolves `undefined` at once.

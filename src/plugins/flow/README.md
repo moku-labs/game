@@ -26,7 +26,6 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | Method | Behaviour |
 |---|---|
 | `run(): Promise<void>` | Validates the graph, seals `features`, loads the save and enters `mainFlow.start`. Called once, by the consumer's `onStart`. Rejects on a fatal error; resolves when `onStop` aborts the loop. |
-| `register(flow): void` | Adds a flow that is not reachable from `mainFlow` by reference. Before `run()` only. |
 | `onEnter(stage, fn): () => void` | Registry for the plugins above: `assets` preloads at `"load"`, `scenes` switches at `"scene"`. |
 | `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. |
 | `bookmark(): Bookmark` | The current rest point as serialisable data. |
