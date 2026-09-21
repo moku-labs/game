@@ -25,6 +25,16 @@ export type Patch = { op: "add" | "remove" | "replace"; path: (string | number)[
 export type SaveDoc = { player: Json; rng: RngState };
 
 /**
+ * A JSON object: what a save seam holds, and the only shape a patch can be applied to.
+ *
+ * @example
+ * ```ts
+ * const document: JsonDocument = { player: { coins: 0 }, rng: { seed: 42, streams: {} } };
+ * ```
+ */
+export type JsonDocument = { [key: string]: Json };
+
+/**
  * The save seam implemented by the application layer. `state` is the whole SaveDoc.
  *
  * @example

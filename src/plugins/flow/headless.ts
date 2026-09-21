@@ -116,15 +116,41 @@ function startLoop(app: HeadlessApp): Fatal {
 }
 
 /**
- * Starts an app headless: sets flow mode `"fast"`, awaits `app.start()` and starts `flow.run()`
- * unless the app's own `onStart` already did. A fatal error of the loop is re-thrown by `walk`
+ * Waits until the loop rests for the first time, or ends. An empty route walks nowhere: it only
+ * waits for the gate the loop opens at the node it enters, so a start that is a chain of transit
+ * nodes is played out before anything reads the game.
+ *
+ * @param app - The started app whose loop is running.
+ * @param fatal - Holder of the fatal error of `run()`.
+ * @returns Resolves once the loop rests at its first rest node.
+ * @throws {Error} When the loop failed fatally instead of reaching a rest node.
+ * @example
+ * ```ts
+ * await settleAtFirstRest(app, fatal);
+ * ```
+ */
+async function settleAtFirstRest(app: HeadlessApp, fatal: Fatal): Promise<void> {
+  await app.flow.walk([]).catch((error: unknown) => {
+    throw asError(fatal.error ?? error);
+  });
+
+  if (fatal.error !== undefined) throw asError(fatal.error);
+}
+
+/**
+ * Starts an app headless: sets flow mode `"fast"`, awaits `app.start()`, starts `flow.run()`
+ * unless the app's own `onStart` already did, and waits until the loop rests for the first time.
+ * `game.state().path` therefore names the first rest node of the graph as soon as the call
+ * resolves. A fatal error of the loop rejects this call, and a later one is re-thrown by `walk`
  * and by `stop`, so a headless test never loses it.
  *
  * @param app - An app that is not started yet.
  * @returns The game: walk it, answer it, read it, stop it.
+ * @throws {Error} When the loop failed fatally before it reached its first rest node.
  * @example
  * ```ts
  * const game = await createHeadless(app);
+ * expect(game.state().path).toBe("home");
  * await game.walk([{ at: "board/awaitIntent", intent: "merge", payload: { from: "c2", to: "c3" } }]);
  * await game.stop();
  * ```
@@ -135,6 +161,8 @@ export async function createHeadless(app: HeadlessApp): Promise<HeadlessGame> {
   await app.start();
 
   const fatal = startLoop(app);
+
+  await settleAtFirstRest(app, fatal);
 
   return {
     /**

@@ -70,8 +70,6 @@ describe("flow against clock", () => {
     const { app, clock } = createGame({ mainFlow: main, plugins: [log.plugin] });
     const game = await createHeadless(app);
 
-    await tick();
-
     expect(game.state().path).toBe("home");
 
     // `home` does not list `elapsed`, so the event waits in the inbox instead of moving the graph.

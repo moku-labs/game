@@ -2,9 +2,9 @@
  * @file model/store — Immer drafts of one transaction. The only file that imports `immer`.
  */
 import type { Patch as ImmerPatch } from "immer";
-import { createDraft, enablePatches, finishDraft } from "immer";
+import { applyPatches, createDraft, enablePatches, finishDraft } from "immer";
 import type { Json, Root } from "../types";
-import type { CommitResult, DraftPair, Patch, SaveDoc } from "./types";
+import type { CommitResult, DraftPair, JsonDocument, Patch, SaveDoc } from "./types";
 
 /** Root order of a commit result, so two commits never report the same roots in another order. */
 const rootOrder: readonly Root[] = Object.freeze(["player", "session", "rng"]);
@@ -137,6 +137,27 @@ export function finishDrafts(pair: DraftPair): CommitResult & { doc: SaveDoc; se
     patches: { doc: docPatches, session: sessionPatches },
     roots: rootsOf(docPatches, sessionPatches)
   };
+}
+
+/**
+ * Applies the patches of one commit to a document, the way a save seam stores what it was handed.
+ * A whole-document patch carries the path `[]` and replaces the document. The input is left as it
+ * is: the result is a new frozen document.
+ *
+ * @param document - The document the patches apply to.
+ * @param patches - The patches of one commit, in order.
+ * @returns The document after the patches.
+ * @throws {Error} When a patch names a path the document does not have.
+ * @example
+ * ```ts
+ * held.document = applyTo(held.document, [{ op: "replace", path: [], value: doc }]);
+ * ```
+ */
+export function applyTo(document: JsonDocument, patches: readonly Patch[]): JsonDocument {
+  // The Patches plugin carries `applyPatches` as well, and turning it on twice changes nothing.
+  enablePatches();
+
+  return applyPatches(document, patches);
 }
 
 /**

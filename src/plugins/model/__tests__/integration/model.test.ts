@@ -67,7 +67,7 @@ describe("model plugin", () => {
     await app.stop();
 
     expect(record(app.model.store.snapshot().player).coins).toBe(5);
-    expect(provider.calls.map(call => call.method)).toEqual(["load", "commit", "flush"]);
+    expect(provider.calls.map(call => call.method)).toEqual(["load", "commit", "commit", "flush"]);
   });
 
   it("delivers the committed event to a listener plugin", async () => {

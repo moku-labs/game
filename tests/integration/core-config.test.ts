@@ -76,12 +76,12 @@ describe("core config", () => {
     await tick();
 
     expect(app.model.store.snapshot().rng.seed).toBe(7);
-    // The loop reads the save through the configured provider before it enters the first node.
-    expect(provider.calls.map(call => call.method)).toEqual(["load"]);
+    // The loop reads the save through the configured provider, and a new player is saved at once.
+    expect(provider.calls.map(call => call.method)).toEqual(["load", "commit"]);
 
     await app.flow.walk([{ at: "home", intent: "play" }]);
 
-    expect(provider.calls.map(call => call.method)).toEqual(["load", "commit"]);
+    expect(provider.calls.map(call => call.method)).toEqual(["load", "commit", "commit"]);
 
     await app.stop();
   });

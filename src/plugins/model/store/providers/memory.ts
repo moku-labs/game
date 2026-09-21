@@ -2,20 +2,29 @@
  * @file model/store — in-memory player state provider. The default seam and the test double.
  */
 import type { Json } from "../../types";
-import type { PlayerStateProvider, ProviderCall, SaveDoc } from "../types";
+import { applyTo } from "../drafts";
+import type { JsonDocument, Patch, PlayerStateProvider, ProviderCall, SaveDoc } from "../types";
 
 /** Seed of a save built by `saveOf` when the caller does not pin one. */
 const defaultSeed = 1;
 
+/** The document the provider holds, and the schema version it was written with. */
+type Held = { document: JsonDocument | undefined; version: number };
+
+/** The base a patch applies to when the provider was never handed a document. */
+const noDocument: JsonDocument = {};
+
 /**
- * Creates an in-memory provider that persists nothing and records every call.
+ * Creates an in-memory provider that keeps what it was committed and records every call.
  * It is the default when a game configures no `playerProvider`, and the double every test uses:
- * `provider.calls` is the whole persistence protocol of one run, in order.
+ * `provider.calls` is the whole persistence protocol of one run, in order. The document lives as
+ * long as the provider does, so a second app over the same instance reads what the first one
+ * wrote, and nothing survives the process.
  *
- * @param fixture - Save returned by `load()`. Omitted: a new player.
+ * @param fixture - The save `load()` starts from. Omitted: a new player.
  * @param fixture.state - The saved document.
  * @param fixture.version - Schema version of the saved document.
- * @returns A provider that records its calls.
+ * @returns A provider that keeps its document and records its calls.
  * @example
  * ```ts
  * const provider = memory({ state: saveOf({ coins: 5 }, 42), version: 1 });
@@ -26,14 +35,31 @@ export function memory(fixture?: {
   version: number;
 }): PlayerStateProvider & { calls: ProviderCall[] } {
   const calls: ProviderCall[] = [];
+  const held: Held = { document: fixture?.state, version: fixture?.version ?? 0 };
+  /**
+   * Applies the patches of one commit to the held document.
+   *
+   * @param patches - Doc patches since the last commit.
+   * @param version - Schema version this build writes.
+   * @throws {Error} When a patch names a path the held document does not have.
+   * @example
+   * ```ts
+   * hold(patches, 1);
+   * ```
+   */
+  const hold = (patches: Patch[], version: number): void => {
+    held.document = applyTo(held.document ?? noDocument, patches);
+    held.version = version;
+  };
 
   return {
     calls,
 
     /**
-     * Reads the save. Without a fixture the player is new.
+     * Reads the save: the fixture, or everything committed since. Without either, the player is
+     * new.
      *
-     * @returns The fixture, or `null` for a new player.
+     * @returns The held document, or `null` for a new player.
      * @example
      * ```ts
      * const saved = await provider.load();
@@ -42,12 +68,16 @@ export function memory(fixture?: {
     load: async (): Promise<{ state: Json; version: number } | null> => {
       calls.push({ method: "load" });
 
+      const document = held.document;
+
       // eslint-disable-next-line unicorn/no-null -- `null` is the provider contract for a new player.
-      return fixture ? { state: fixture.state, version: fixture.version } : null;
+      if (document === undefined) return null;
+
+      return { state: document, version: held.version };
     },
 
     /**
-     * Records a rest-point commit. Nothing is written anywhere.
+     * Records a rest-point commit and applies it to the held document.
      *
      * @param patches - Doc patches since the last commit.
      * @param version - Schema version this build writes.
@@ -58,10 +88,11 @@ export function memory(fixture?: {
      */
     commit: (patches, version): void => {
       calls.push({ method: "commit", patches, version });
+      hold(patches, version);
     },
 
     /**
-     * Records a durable commit. It resolves at once: there is no disk behind it.
+     * Records a durable commit and applies it. It resolves at once: there is no disk behind it.
      *
      * @param patches - Doc patches since the last commit.
      * @param txId - Id of the transaction that left the barrier node.
@@ -74,6 +105,7 @@ export function memory(fixture?: {
      */
     commitDurable: async (patches, txId, version): Promise<void> => {
       calls.push({ method: "commitDurable", patches, txId, version });
+      hold(patches, version);
     },
 
     /**

@@ -6,7 +6,7 @@ import type { Model } from "@moku-labs/game";
 import { SaveUnreadableError, type } from "@moku-labs/game";
 import { createHeadless, memory, saveOf } from "@moku-labs/game/testing";
 import { describe, expect, it } from "vitest";
-import { createGame, defineFlow, defineNode, tick } from "./helpers";
+import { createGame, defineFlow, defineNode } from "./helpers";
 
 const home = defineNode({ outcomes: { play: type() }, rest: true, checkpoint: true });
 
@@ -56,13 +56,9 @@ describe("the save journey", () => {
 
     expect(first.provider.calls.at(-1)?.method).toBe("flush");
 
-    const second = createGame({
-      mainFlow: main,
-      provider: memory({ state: saveOf(saved), version: 1 })
-    });
+    // The same provider instance: the second app reads exactly what the first one wrote into it.
+    const second = createGame({ mainFlow: main, provider: first.provider });
     const secondGame = await createHeadless(second.app);
-
-    await tick();
 
     expect(secondGame.state().path).toBe("home");
     expect(second.app.model.store.snapshot().player).toEqual(saved);
@@ -84,8 +80,6 @@ describe("the save journey", () => {
       migrations: [{ from: 1, up: addVisits }]
     });
     const game = await createHeadless(app);
-
-    await tick();
 
     expect(app.model.store.snapshot().player).toEqual({ coins: 7, visits: 1, draws: [] });
 

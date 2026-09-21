@@ -4,6 +4,9 @@ import type { Patch } from "../../store/types";
 
 const patches: Patch[] = [{ op: "replace", path: ["player", "coins"], value: 3 }];
 
+/** A fresh provider with a save at version 1, the base the patches above apply to. */
+const stored = () => memory({ state: saveOf({ coins: 0 }), version: 1 });
+
 describe("saveOf", () => {
   it("builds a save document with no streams drawn yet", () => {
     expect(saveOf({ coins: 5 })).toEqual({ player: { coins: 5 }, rng: { seed: 1, streams: {} } });
@@ -37,7 +40,7 @@ describe("memory provider", () => {
   });
 
   it("records a commit with its patches and version", () => {
-    const provider = memory();
+    const provider = stored();
 
     provider.commit(patches, 1);
 
@@ -45,7 +48,7 @@ describe("memory provider", () => {
   });
 
   it("records a durable commit with its transaction id", async () => {
-    const provider = memory();
+    const provider = stored();
 
     await provider.commitDurable(patches, "tx-1", 1);
 
@@ -63,7 +66,7 @@ describe("memory provider", () => {
   });
 
   it("records the calls in order", async () => {
-    const provider = memory();
+    const provider = stored();
 
     await provider.load();
     provider.commit(patches, 1);
@@ -73,20 +76,57 @@ describe("memory provider", () => {
   });
 
   it("keeps two providers apart", () => {
-    const first = memory();
-    const second = memory();
+    const first = stored();
+    const second = stored();
 
     first.commit(patches, 1);
 
     expect(second.calls).toEqual([]);
   });
 
-  it("persists nothing: a second load still reports the fixture", async () => {
-    const provider = memory({ state: saveOf({ coins: 5 }, 42), version: 1 });
+  it("keeps what it committed: a second load returns the patched document", async () => {
+    const provider = stored();
 
     provider.commit(patches, 1);
     const reloaded = await provider.load();
 
-    expect(reloaded?.state).toEqual(saveOf({ coins: 5 }, 42));
+    expect(reloaded).toEqual({ state: saveOf({ coins: 3 }), version: 1 });
+  });
+
+  it("takes a whole-document replace from a provider that stored nothing", async () => {
+    const provider = memory();
+    const document = saveOf({ coins: 9 }, 42);
+
+    provider.commit([{ op: "replace", path: [], value: document }], 2);
+
+    await expect(provider.load()).resolves.toEqual({ state: document, version: 2 });
+  });
+
+  it("applies a durable commit as well", async () => {
+    const provider = stored();
+
+    await provider.commitDurable(patches, "tx-1", 1);
+    const reloaded = await provider.load();
+
+    expect(reloaded?.state).toEqual(saveOf({ coins: 3 }));
+  });
+
+  it("shares no document between two instances", async () => {
+    const first = memory();
+    const second = memory();
+
+    first.commit([{ op: "replace", path: [], value: saveOf({ coins: 9 }) }], 1);
+
+    await expect(second.load()).resolves.toBeNull();
+  });
+
+  it("leaves the fixture it was given untouched", async () => {
+    const document = saveOf({ coins: 5 }, 42);
+    const provider = memory({ state: document, version: 1 });
+
+    provider.commit(patches, 1);
+
+    expect(document.player).toEqual({ coins: 5 });
+    await expect(provider.load()).resolves.toEqual({ state: saveOf({ coins: 3 }, 42), version: 1 });
   });
 });

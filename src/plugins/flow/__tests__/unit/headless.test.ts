@@ -18,18 +18,22 @@ const graph: FlowGraph = {
   slots: {}
 };
 
-type AppOptions = { running?: boolean; fatal?: Error; walkFails?: Error };
+type AppOptions = { running?: boolean; fatal?: Error };
 
 const createFakeApp = (options: AppOptions = {}) => {
   const calls: string[] = [];
   const routes: RouteStep[][] = [];
   const restored: Bookmark[] = [];
   const steps: number[] = [];
-  const live = { running: options.running ?? false, mode: "live" as "live" | "fast" };
+  // The loop of the fake: it rests — and so gets a path — only once a walk waited for it.
+  const loop = Promise.withResolvers<void>();
+  // What a walk after the loop died rejects with, the way the real `walk` reports a dead loop.
+  const dead: { error: Error | undefined } = { error: undefined };
+  const live = { running: options.running ?? false, mode: "live" as "live" | "fast", path: "" };
   const state = (): FlowState => ({
     running: live.running,
-    path: "home",
-    stack: [{ flow: "main", node: "home", input: noPayload }],
+    path: live.path,
+    stack: live.path === "" ? [] : [{ flow: "main", node: "home", input: noPayload }],
     pending: {},
     mode: live.mode
   });
@@ -59,15 +63,16 @@ const createFakeApp = (options: AppOptions = {}) => {
 
         if (options.fatal) return Promise.reject(options.fatal);
 
-        return new Promise<void>(() => undefined);
+        return loop.promise;
       },
       register: vi.fn(),
       onEnter: () => unregister,
       walk: async (route: readonly RouteStep[]): Promise<FlowState> => {
         calls.push("walk");
         routes.push([...route]);
+        live.path = "home";
 
-        if (options.walkFails) throw options.walkFails;
+        if (dead.error) throw dead.error;
 
         return state();
       },
@@ -97,7 +102,21 @@ const createFakeApp = (options: AppOptions = {}) => {
     }
   };
 
-  return { app, calls, restored, routes, steps };
+  /**
+   * Kills the loop of the fake app the way a fatal error of `run()` does.
+   *
+   * @param error - What the loop failed with.
+   * @example
+   * ```ts
+   * fake.fail(new Error("[game] The safe node failed."));
+   * ```
+   */
+  const fail = (error: Error): void => {
+    dead.error = error;
+    loop.reject(error);
+  };
+
+  return { app, calls, fail, restored, routes, steps };
 };
 
 describe("createHeadless", () => {
@@ -125,10 +144,27 @@ describe("createHeadless", () => {
     expect(fake.calls).not.toContain("run");
   });
 
-  it("re-throws a fatal error of the loop from walk", async () => {
-    const fatal = new Error("[game] The save is unreadable.");
-    const fake = createFakeApp({ fatal, walkFails: new Error("never reached") });
+  it("waits for the first rest point of the loop", async () => {
+    const fake = createFakeApp();
+
     const game = await createHeadless(fake.app);
+
+    expect(game.state().path).toBe("home");
+    expect(fake.routes).toEqual([[]]);
+  });
+
+  it("rejects when the loop fails fatally before the first rest point", async () => {
+    const fatal = new Error("[game] flow.run() needs a main flow.");
+    const fake = createFakeApp({ fatal });
+
+    await expect(createHeadless(fake.app)).rejects.toThrow("[game] flow.run() needs a main flow.");
+  });
+
+  it("re-throws a fatal error of the loop from walk", async () => {
+    const fake = createFakeApp();
+    const game = await createHeadless(fake.app);
+
+    fake.fail(new Error("[game] The save is unreadable."));
 
     await expect(game.walk([{ at: "home", intent: "play" }])).rejects.toThrow(
       "[game] The save is unreadable."
@@ -136,9 +172,10 @@ describe("createHeadless", () => {
   });
 
   it("re-throws a fatal error of the loop from stop", async () => {
-    const fatal = new Error("[game] The safe node failed.");
-    const fake = createFakeApp({ fatal });
+    const fake = createFakeApp();
     const game = await createHeadless(fake.app);
+
+    fake.fail(new Error("[game] The safe node failed."));
 
     await expect(game.stop()).rejects.toThrow("[game] The safe node failed.");
     expect(fake.calls).toContain("stop");
@@ -150,7 +187,7 @@ describe("createHeadless", () => {
     const walked = await game.walk([{ at: "home", intent: "play" }]);
 
     expect(walked.path).toBe("home");
-    expect(fake.routes).toEqual([[{ at: "home", intent: "play" }]]);
+    expect(fake.routes).toEqual([[], [{ at: "home", intent: "play" }]]);
     expect(game.state().mode).toBe("fast");
     expect(game.history()).toEqual([]);
     expect(game.answer({ intent: "play" })).toBe(true);
@@ -173,7 +210,7 @@ describe("runRepro", () => {
       player: { coins: 7 },
       session: { visits: 2 }
     });
-    expect(fake.calls.indexOf("restore")).toBeLessThan(fake.calls.indexOf("walk"));
+    expect(fake.calls.indexOf("restore")).toBeLessThan(fake.calls.lastIndexOf("walk"));
     expect(result).toEqual({ path: ["home"], player: { coins: 3 }, session: { visits: 1 } });
   });
 

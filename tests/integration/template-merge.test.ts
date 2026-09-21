@@ -4,7 +4,7 @@
  */
 
 import type { Flow } from "@moku-labs/game";
-import { createHeadless, memory, runRepro, saveOf } from "@moku-labs/game/testing";
+import { createHeadless, runRepro } from "@moku-labs/game/testing";
 import { describe, expect, it } from "vitest";
 import { createGame, startMoment } from "./merge-game/game";
 import { startingPlayer, startingSession } from "./merge-game/state";
@@ -50,8 +50,6 @@ describe("template-merge", () => {
     const { app } = createGame();
     const game = await createHeadless(app);
 
-    // `createHeadless` starts the loop but does not await its first rest point.
-    await tick();
     expect(game.state().path).toBe("home");
 
     const board = await game.walk(untilOrder);
@@ -188,10 +186,9 @@ describe("template-merge", () => {
     expect(methods).toContain("commit");
     expect(methods.at(-1)).toBe("flush");
 
-    const second = createGame({ provider: memory({ state: saveOf(saved), version: 1 }) });
+    // The same provider instance: the second app reads exactly what the first one wrote into it.
+    const second = createGame({ provider: first.provider });
     const secondGame = await createHeadless(second.app);
-
-    await tick();
 
     expect(secondGame.state().path).toBe("home");
     expect(second.app.model.store.snapshot().player).toEqual(saved);

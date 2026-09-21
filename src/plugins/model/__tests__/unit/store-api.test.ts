@@ -77,12 +77,67 @@ describe("load", () => {
     });
   });
 
-  it("queues the whole document for a new player", async () => {
-    const { api, state } = setup();
+  it("hands the whole document to the provider for a new player", async () => {
+    const { api, provider, state } = setup();
 
     await api.load();
 
+    expect(provider.calls).toEqual([
+      { method: "load" },
+      {
+        method: "commit",
+        patches: [{ op: "replace", path: [], value: state.store.doc }],
+        version: 1
+      }
+    ]);
+    expect(state.store.pending).toEqual([]);
+  });
+
+  it("asks the provider only to load when the save needs no rewrite", async () => {
+    const provider = memory({ state: saveOf({ coins: 5 }, 42), version: 1 });
+    const { api } = setup({ provider });
+
+    await api.load();
+
+    expect(provider.calls).toEqual([{ method: "load" }]);
+  });
+
+  it("hands the migrated document to the provider", async () => {
+    const provider = memory({ state: saveOf({ coins: 5 }, 42), version: 1 });
+    const { api, state } = setup({
+      provider,
+      config: { schemaVersion: 2, migrations: [addStage] }
+    });
+
+    await api.load();
+
+    expect(provider.calls).toEqual([
+      { method: "load" },
+      {
+        method: "commit",
+        patches: [{ op: "replace", path: [], value: state.store.doc }],
+        version: 2
+      }
+    ]);
+  });
+
+  it("rejects when the first commit fails and keeps the document pending", async () => {
+    const failure = new Error("quota");
+    const provider: MemoryProvider = {
+      ...memory(),
+      commit: () => {
+        throw failure;
+      }
+    };
+    const { api, log, state } = setup({ provider });
+
+    await expect(api.load()).rejects.toBe(failure);
     expect(state.store.pending).toEqual([{ op: "replace", path: [], value: state.store.doc }]);
+    expect(state.store.loaded).toBe(false);
+    expect(log.error).toHaveBeenCalledWith("model:provider-failed", {
+      method: "commit",
+      error: failure
+    });
   });
 
   it("draws a seed once for a brand-new player", async () => {
@@ -138,7 +193,7 @@ describe("load", () => {
     expect(state.store.restPoint?.session).toBe(state.store.session);
   });
 
-  it("runs the migration chain and queues the whole document", async () => {
+  it("runs the migration chain", async () => {
     const provider = memory({ state: saveOf({ coins: 5 }, 42), version: 1 });
     const { api, state } = setup({
       provider,
@@ -148,8 +203,7 @@ describe("load", () => {
     await api.load();
 
     expect(record(api.snapshot().player).coins).toBe(5);
-    expect(state.store.pending).toHaveLength(1);
-    expect(state.store.pending[0]?.path).toEqual([]);
+    expect(state.store.pending).toEqual([]);
   });
 
   it("logs every migration step", async () => {
@@ -449,13 +503,16 @@ describe("markRest", () => {
   it("keeps the rest point and the pending patches when the provider throws", async () => {
     const failure = new Error("quota");
     const provider: MemoryProvider = {
-      ...memory(),
+      ...memory({ state: saveOf({ coins: 0 }), version: 1 }),
       commit: () => {
         throw failure;
       }
     };
     const { api, log, state } = setup({ provider });
     await api.load();
+    const transaction = api.begin();
+    record(transaction.player).coins = 5;
+    transaction.commit();
     const restPoint = state.store.restPoint;
     const pending = state.store.pending;
 
@@ -665,6 +722,9 @@ describe("flush", () => {
   it("calls the provider flush and keeps the pending patches", async () => {
     const { api, provider, state } = setup();
     await api.load();
+    const transaction = api.begin();
+    record(transaction.player).coins = 5;
+    transaction.commit();
 
     await api.flush();
 

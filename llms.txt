@@ -312,6 +312,7 @@ The stack of pause reasons. The game is paused while the stack is not empty.
 The `session` tree and the save document `{ player, rng }`. Modules `store` and `rng`.
 - `store`: `load()`, `snapshot(): { player, session, rng }` frozen, `begin(): Transaction`, `markRest()`, `markBarrier(txId)`, `rollback()`, `restore({ player, session?, rng? })`, `flush()`.
 - `rng`: `peek(id): number | undefined`.
+- `load()` hands the whole document to `provider.commit()` at once when it rewrote the save: a new player and a migrated save are stored before the first node runs. A save at the current version produces no commit.
 - A game reads `app.model.store.snapshot()`. The runner calls the rest. A node never calls the model.
 - Event `model:committed`: `{ roots: readonly ("player" | "session" | "rng")[]; cause: "edge" | "rollback" | "restore" | "load" }`.
 - Config: `playerProvider: PlayerStateProvider | undefined` default `undefined` which means in-memory, `initialPlayer: Json` default `{}`, `initialSession: Json` default `{}`, `seed: "from-save" | number` default `"from-save"`, `schemaVersion: number` default `1`, `migrations: readonly Migration[]` default `[]`.
@@ -353,13 +354,13 @@ A plugin that owns a resource registers a disposer with `teardown.register(ctx.g
 
 Exports of `@moku-labs/game/testing`: `createHeadless`, `runRepro`, `stepFrames`, `fakeClock`, `memory`, `saveOf`.
 
-- `createHeadless(app): Promise<HeadlessGame>`. Pass an app that is not started. It sets mode `"fast"`, awaits `app.start()` and starts `flow.run()` unless the app's `onStart` already did.
+- `createHeadless(app): Promise<HeadlessGame>`. Pass an app that is not started. It sets mode `"fast"`, awaits `app.start()`, starts `flow.run()` unless the app's `onStart` already did, and resolves when the loop rests for the first time: `game.state().path` already names the first rest node. A fatal error of `run()` rejects the call.
 - `HeadlessGame`: `walk(route): Promise<FlowState>`, `answer(answer): boolean`, `state()`, `history()`, `stop()`. `walk` and `stop` throw a fatal error of the loop again when the headless runner owns `run()`.
 - `Flow.RouteStep` is `{ at: string; intent: string; payload?: Json }` or `{ at: string; result: { outcome: string; payload?: Json } }`. `at` is the path of a rest node. The `result` form substitutes the result of a sub-flow at that path.
 - `runRepro(app, { player, session?, rng?, checkpoint?, route }): Promise<{ path: string[]; player; session }>`. The app keeps running. Stop it with `app.stop()`.
 - `stepFrames(app, count, deltaMs)` calls `app.time.step(deltaMs)` `count` times.
 - `fakeClock(start = 0)`: a `ClockSource` with `advance(ms)` and `set(moment)`. `advance` fires due timers synchronously.
-- `memory(fixture?)`: in-memory `PlayerStateProvider` with `calls`, the list of every call. `saveOf(player, seed = 1)` builds a `SaveDoc`.
+- `memory(fixture?)`: in-memory `PlayerStateProvider` with `calls`, the list of every call. It applies the patches it is committed to the document it holds, so a second app over the same instance reads what the first one wrote. `saveOf(player, seed = 1)` builds a `SaveDoc`.
 
 ```ts
 import type { Flow } from "@moku-labs/game";

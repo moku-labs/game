@@ -149,7 +149,8 @@ export const createGame = (seed: "from-save" | number = "from-save") =>
   });
 ```
 
-**5. Play it headless.** `createHeadless` returns a game object. Its `walk` method plays a route.
+**5. Play it headless.** `createHeadless` returns a game object once the graph rests at its first
+rest node. Its `walk` method plays a route.
 
 ```ts
 // game.test.ts
@@ -290,11 +291,11 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 
 | Export | Signature | Purpose |
 |---|---|---|
-| `createHeadless` | `(app: HeadlessApp) => Promise<HeadlessGame>` | Sets flow mode `"fast"`, starts the app, starts `flow.run()` unless the app already did |
+| `createHeadless` | `(app: HeadlessApp) => Promise<HeadlessGame>` | Sets flow mode `"fast"`, starts the app, starts `flow.run()` unless the app already did, and waits for the first rest point |
 | `runRepro` | `(app: HeadlessApp, repro: Repro) => Promise<ReproResult>` | Restores a state and a checkpoint, then walks a route |
 | `stepFrames` | `(app: HeadlessApp, count: number, deltaMs: number) => void` | Calls `app.time.step(deltaMs)` `count` times |
 | `fakeClock` | `(start = 0) => FakeClock` | A `ClockSource` with `advance(ms)` and `set(moment)` |
-| `memory` | `(fixture?: { state: SaveDoc; version: number }) => PlayerStateProvider & { calls: ProviderCall[] }` | In-memory save provider that records every call |
+| `memory` | `(fixture?: { state: SaveDoc; version: number }) => PlayerStateProvider & { calls: ProviderCall[] }` | In-memory save provider. It keeps what it was committed and records every call |
 | `saveOf` | `(player: Json, seed?: number) => SaveDoc` | Builds a save document for a fixture |
 
 A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`.
@@ -346,7 +347,7 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `time` | `maxFps` | `30 \| 60 \| 120` | `60` | Frame rate cap |
 | `time` | `maxDeltaMs` | `number` | `50` | Upper bound of one frame's delta in milliseconds |
 | `lifecycle` | none | | | The plugin has no config |
-| `model` | `playerProvider` | `PlayerStateProvider \| undefined` | `undefined` | The save seam. `undefined` means an in-memory provider. Nothing is persisted |
+| `model` | `playerProvider` | `PlayerStateProvider \| undefined` | `undefined` | The save seam. `undefined` means an in-memory provider: the save lives as long as the app does |
 | `model` | `initialPlayer` | `Json` | `{}` | Player state of a new player. Deep-cloned |
 | `model` | `initialSession` | `Json` | `{}` | Session state at every start. Deep-cloned |
 | `model` | `seed` | `"from-save" \| number` | `"from-save"` | `"from-save"`: a new player gets a random seed once. A number fixes it for tests |

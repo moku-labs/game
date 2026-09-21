@@ -168,12 +168,35 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
   };
 
   /**
+   * Hands everything pending to the provider and clears it. A throwing provider keeps the pending
+   * patches, so the next attempt still holds the whole transition.
+   *
+   * @throws {unknown} The error of a failing provider.
+   * @example
+   * ```ts
+   * commitPending();
+   * ```
+   */
+  const commitPending = (): void => {
+    try {
+      store.provider.commit(store.pending, ctx.config.schemaVersion);
+    } catch (error) {
+      fail("commit", error);
+    }
+
+    store.pending = [];
+  };
+
+  /**
    * Loads the save. A new player gets the initial player and a seed; a stored save runs through
    * the migration chain. Nothing is written until the document is complete, so a failure leaves
-   * the state exactly as it was and the app can show a clear screen.
+   * the state exactly as it was and the app can show a clear screen. A document the provider has
+   * no base for — a new player, a migrated save — is handed over at once: a player who leaves on
+   * the first screen is a saved player.
    *
    * @returns Resolves when the document is in place.
    * @throws {SaveUnreadableError} When the save cannot be read by this build.
+   * @throws {unknown} The error of a provider that refuses the first commit.
    * @example
    * ```ts
    * await app.model.store.load();
@@ -188,6 +211,9 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     store.restPoint = { doc: store.doc, session: store.session };
     // A new player and a migrated save have no base on the provider's side: send the document.
     store.pending = rewritten ? wholeDocument() : [];
+
+    if (rewritten) commitPending();
+
     store.loaded = true;
 
     emitCommitted(allRoots, "load");
@@ -333,14 +359,9 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
    * ```
    */
   const markRest = (): void => {
-    try {
-      store.provider.commit(store.pending, ctx.config.schemaVersion);
-    } catch (error) {
-      fail("commit", error);
-    }
+    commitPending();
 
     store.restPoint = { doc: store.doc, session: store.session };
-    store.pending = [];
   };
 
   /**

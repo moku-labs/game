@@ -144,7 +144,7 @@ describe("flow against model", () => {
     await game.walk([{ at: "home", intent: "save" }]);
 
     expect(app.model.store.snapshot().player).toMatchObject({ coins: 5 });
-    expect(provider.calls.map(call => call.method)).toEqual(["load", "commitDurable"]);
+    expect(provider.calls.map(call => call.method)).toEqual(["load", "commit", "commitDurable"]);
     expect(provider.calls.at(-1)).toMatchObject({ txId: expect.stringContaining("persist#") });
 
     await game.stop();

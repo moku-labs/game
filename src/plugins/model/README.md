@@ -30,7 +30,7 @@ transaction that drew it, so a kill of the app cannot re-roll a chest.
 
 | Method | Behaviour |
 |---|---|
-| `load(): Promise<void>` | Reads the save through the provider. A new player gets a clone of `initialPlayer` and a seed. A stored save runs through the migration chain. Marks the first rest point and emits `model:committed` with cause `"load"`. Throws `SaveUnreadableError` when the save cannot be read. On a failure the state stays exactly as it was. Called by `flow.run()`, not by `onStart`. |
+| `load(): Promise<void>` | Reads the save through the provider. A new player gets a clone of `initialPlayer` and a seed. A stored save runs through the migration chain. Marks the first rest point, hands the whole document to `provider.commit()` when it was rewritten — a new player, a migrated save — and emits `model:committed` with cause `"load"`. Throws `SaveUnreadableError` when the save cannot be read. On a failure the state stays exactly as it was. Called by `flow.run()`, not by `onStart`. |
 | `snapshot(): Snapshot` | The committed trees `{ player, session, rng }`, frozen. This is the only thing a view or a projection sees. Before `load()` it shows the initial player, never a half-read save. |
 | `begin(): Transaction` | Opens the drafts of one node run. One transaction at a time: a second `begin()` throws. |
 | `markRest(): void` | Marks a rest node. The provider gets `commit(pending, schemaVersion)`, then the rest point moves and `pending` is emptied. A throwing provider leaves both untouched. |
@@ -120,9 +120,10 @@ A `Patch` is `{ op: "add" | "remove" | "replace"; path: (string | number)[]; val
 start at the document root: `["player", "coins"]`, `["rng", "streams", "dice"]`. Session patches
 never reach the provider.
 
-When the provider has no base to apply patches to, `pending` starts with one whole-document patch
+When the provider has no base to apply patches to, the document is sent as one whole-document patch
 `{ op: "replace", path: [], value: doc }`. That happens for a new player, for a migrated save and
-after `restore()`.
+after `restore()`. `load()` commits that patch itself, so a player who leaves on the first screen is
+already saved; after `restore()` it waits in `pending` for the next rest node.
 
 ## Migrations
 
