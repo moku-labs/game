@@ -37,7 +37,7 @@ const framework = createCore(coreConfig, {
   plugins: [timePlugin, lifecyclePlugin, modelPlugin, clockPlugin, flowPlugin],
   // A hook threw. Core 1.7 hands the framework `onError` the core plugin APIs, which exist before the
   // event bus and are safe whenever a hook can fail (core spec/02 §3), so the error goes to the log.
-  onError: (error, core) => core.log.error("game: a hook failed", undefined, error)
+  onError: (error, { log }) => log.error("game: a hook failed", undefined, error)
 });
 
 // ─── Plugins + Types ──────────────────────────────────────────
