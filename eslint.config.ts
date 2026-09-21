@@ -152,6 +152,52 @@ export default [
     }
   },
 
+  // 6d. L7 — the public contract carries the docs and a scenario example. Only `types.ts` ships in
+  // the `.d.mts`, so a game reads the members of the `…Api` types, never the implementation. A member
+  // no game can call says so with `@remarks No example: <reason>`. Everywhere else an example is
+  // allowed, never required: a required example on a private function becomes a copy of its signature.
+  {
+    files: ["src/plugins/**/types.ts"],
+    rules: {
+      "jsdoc/require-jsdoc": [
+        "error",
+        {
+          require: { FunctionDeclaration: true, ClassDeclaration: true, MethodDefinition: true },
+          contexts: [
+            "TSInterfaceDeclaration",
+            "TSTypeAliasDeclaration",
+            "TSTypeAliasDeclaration[id.name=/Api$/] > TSTypeLiteral > TSMethodSignature"
+          ]
+        }
+      ],
+      "jsdoc/require-example": [
+        "error",
+        {
+          exemptedBy: ["remarks"],
+          contexts: ["TSTypeAliasDeclaration[id.name=/Api$/] > TSTypeLiteral > TSMethodSignature"]
+        }
+      ]
+    }
+  },
+
+  // 6e. L8 — no signature echo: an example whose whole body is one call with bare identifiers
+  // (`shut(gate);`, `const api = createClockApi(ctx);`) tells the reader nothing.
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "jsdoc/match-description": [
+        "error",
+        {
+          mainDescription: false,
+          tags: {
+            example:
+              "^(?!\\s*```ts\\n\\s*(?:(?:const|let) \\w+(?:: [\\w.<>\\[\\]]+)? = )?(?:await )?[\\w.]+\\((?:[\\w.]+(?:, [\\w.]+)*)?\\);?\\s*```\\s*$)[\\s\\S]+$"
+          }
+        }
+      ]
+    }
+  },
+
   // 6c. L2 + L5 — no static Pixi or Yoga import; no module-scope state.
   {
     files: ["src/**/*.ts"],

@@ -405,7 +405,9 @@ The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 | L3 | Determinism: no `Date.now`, `performance.now`, `new Date`, `Math.random`, `setTimeout`, `setInterval` | `model`, `flow`, `clock` except `clock/system.ts`, and the rules of the fixture game |
 | L4 | The rules of the fixture game import only their siblings | `tests/integration/merge-game/rules/` |
 | L5 | No module-scope state: no top-level `let`, no top-level `Map`, `Set`, `WeakMap`, `WeakSet`. No allowlist | `src/**` |
-| L6 | Plugin wiring files need no JSDoc on small inline arrows. Every other export needs JSDoc with description, params, returns and example | `src/plugins/*/index.ts` |
+| L6 | Plugin wiring files need no JSDoc on small inline arrows. Every function declaration and every exported type needs JSDoc with description, params and returns | `src/plugins/*/index.ts` |
+| L7 | The public contract carries the docs: every member of a `…Api` type in `types.ts` has JSDoc and a scenario `@example` (when a game calls it, literal arguments, the result), or `@remarks No example: <reason>` when no game can call it. The implementation of an API method has no JSDoc. Elsewhere an example is allowed, never required | `src/plugins/**/types.ts` |
+| L8 | No signature echo: an `@example` whose whole body is one call with bare identifiers is an error | `src/**` |
 
 ## Requirements
 
