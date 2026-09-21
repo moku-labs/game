@@ -2,12 +2,12 @@
  * @file flow/runner — the one loop: one turn, the loop, entering a position from outside.
  */
 import type { FlowCtx } from "../types";
-import { applyResult, finishNode, handleAbort, handleFailure } from "./edge";
+import { applyResult, arrive, finishNode, handleAbort, handleFailure } from "./edge";
 import { checkGraph, collectGraph, requireMainFlow } from "./graph";
 import type { Delivery, Location, Safe, Step, StepOutcome } from "./loop-types";
 import { noPayload } from "./loop-types";
 import { nodeInfo, nodeOutcome, runEnterCallbacks, stopped, waitForPointer } from "./node";
-import { pickContribution } from "./plan";
+import { describePlan, pickContribution } from "./plan";
 import { eventResult, framesOf, locateFrames } from "./position";
 import { findNode, framePath } from "./registry";
 import { loopSeam, notifyGateOpen, notifyRest, takeSubstitution } from "./seam";
@@ -166,7 +166,17 @@ function enterSlot(
     });
   }
 
-  state.stack = [...state.stack, { flow: next.flow.id, node: next.flow.start, input: noPayload }];
+  // The edge that led here is committed, so `when` saw the new state. A contribution that starts
+  // at a rest node is a rest point like any other: the save goes out and rollback returns here.
+  const plan = describePlan(ctx, [
+    ...state.stack,
+    { flow: next.flow.id, node: next.flow.start, input: noPayload }
+  ]);
+
+  if ("problem" in plan) throw new Error(plan.problem);
+  if (plan.rest) ctx.deps.model.store.markRest();
+
+  arrive(ctx, plan);
 
   return "continue";
 }
@@ -176,12 +186,13 @@ function enterSlot(
  * becomes the bookmark's path.
  *
  * @param ctx - Domain context of the flow plugin.
+ * @param modules - Injected sibling APIs; the features API resolves a path through a slot.
  * @param bookmark - The bookmark to enter.
  * @throws {Error} When the graph has no node at the bookmark's path.
  */
-function enterBookmark(ctx: FlowCtx, bookmark: Bookmark): void {
+function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void {
   const state = ctx.state.runner;
-  const location = findNode(requireMainFlow(ctx), bookmark.path);
+  const location = findNode(requireMainFlow(ctx), bookmark.path, modules.features.contributions);
 
   loopSeam(state).restoring = undefined;
 
@@ -228,7 +239,7 @@ async function advance(ctx: FlowCtx, modules: Modules, safe: Safe): Promise<Step
   const restoring = state.seam?.restoring;
 
   if (restoring !== undefined) {
-    enterBookmark(ctx, restoring);
+    enterBookmark(ctx, modules, restoring);
 
     return "continue";
   }

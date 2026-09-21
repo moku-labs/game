@@ -179,6 +179,35 @@ describe("findNode", () => {
     expect(findNode(mainFlow, "home/deeper")).toBeUndefined();
   });
 
+  it("descends through a slot into the contribution that has the next node", () => {
+    const location = findNode(mainFlow, "afterWin/give", features.contributions);
+
+    expect(location?.flow).toBe(rewardFlow);
+    expect(location?.trail).toEqual([
+      { flow: "main", node: "afterWin" },
+      { flow: "reward", node: "give" }
+    ]);
+  });
+
+  it("takes the first contribution in order when two have the same node name", () => {
+    const second = flow("bonus", { give: node() }, "give", { give: { done: "give" } });
+    const both = (): readonly Contribution[] => [
+      contribution,
+      { feature: "bonus", flow: second, order: 20 }
+    ];
+
+    expect(findNode(mainFlow, "afterWin/give", both)?.flow).toBe(rewardFlow);
+  });
+
+  it("looks at own node names only: an inherited key such as constructor names no node", () => {
+    expect(findNode(mainFlow, "afterWin/constructor", features.contributions)).toBeUndefined();
+  });
+
+  it("finds nothing behind a slot when no contribution has the node, or none was passed", () => {
+    expect(findNode(mainFlow, "afterWin/missing", features.contributions)).toBeUndefined();
+    expect(findNode(mainFlow, "afterWin/give")).toBeUndefined();
+  });
+
   it("finds nothing for an empty path", () => {
     expect(findNode(mainFlow, "")).toBeUndefined();
   });
@@ -196,9 +225,9 @@ describe("describeGraph", () => {
     expect(graph.flows.main?.start).toBe("home");
   });
 
-  it("renders the flags and the path of a node", () => {
+  it("renders the flags of a node and no path: a static description has no runtime position", () => {
+    expect(graph.flows.main?.nodes.home).not.toHaveProperty("path");
     expect(graph.flows.main?.nodes.home).toMatchObject({
-      path: "main/home",
       flow: "main",
       node: "home",
       rest: true,

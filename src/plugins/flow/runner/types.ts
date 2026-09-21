@@ -645,7 +645,7 @@ export type RouteStep =
  * const bookmark: Bookmark = {
  *   path: "board/awaitIntent", input: null,
  *   player: { coins: 7 }, session: { taps: 0 },
- *   rng: { seed: 42, streams: {} }, graph: "9bcf2186"
+ *   rng: { seed: 42, streams: {} }, graph: "fe4d257a"
  * };
  * ```
  */
@@ -708,19 +708,20 @@ export type FlowGraph = {
 
 /**
  * One node of `describe()`: its flags, its outcome names and, when it is one, the slot it opens,
- * the sub-flow it enters and the feature that brought it.
+ * the sub-flow it enters and the feature that brought it. It has no `path`: a static description
+ * has no runtime position, and `flow` plus `node` address it.
  *
  * @example
  * ```ts
  * // app.flow.describe().flows.main?.nodes.board: the sub-flow "board" used as a node of "main".
  * const node: GraphNode = {
- *   path: "main/board", flow: "main", node: "board",
+ *   flow: "main", node: "board",
  *   rest: false, over: false, checkpoint: false, barrier: false,
  *   outcomes: ["orderComplete", "left"], subFlow: "board"
  * };
  * ```
  */
-export type GraphNode = NodeInfo & {
+export type GraphNode = Omit<NodeInfo, "path"> & {
   outcomes: string[];
   slot?: string;
   subFlow?: string;

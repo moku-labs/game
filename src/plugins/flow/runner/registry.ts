@@ -83,19 +83,64 @@ export function framePath(stack: readonly Frame[]): string {
 }
 
 /**
+ * Picks the flow a path continues in after one entry: the sub-flow itself, or, behind a slot, the
+ * first contribution in order that has the next segment as a node. A path keeps node names only,
+ * so two contributions of one slot with the same node name cannot be told apart; `validateGraph`
+ * warns about that.
+ *
+ * @param entry - The entry the path just passed.
+ * @param next - The next segment of the path.
+ * @param contributionsOf - Reads the contributions of a slot, in order.
+ * @returns The flow to go on in, or `undefined` when the path ends here.
+ */
+function flowBehind(
+  entry: FlowEntry,
+  next: string,
+  contributionsOf: (slot: string) => readonly { flow: AnyFlow }[]
+): AnyFlow | undefined {
+  if (entry.kind === "flow") return entry;
+  if (entry.kind !== "slot") return undefined;
+
+  // Own keys only: `"constructor" in nodes` is true for every object.
+  return contributionsOf(entry.name).find(item => Object.hasOwn(item.flow.nodes, next))?.flow;
+}
+
+/**
+ * Reads no contributions: the default of `findNode` for a caller that has no features API.
+ *
+ * @returns An empty list.
+ * @example
+ * ```ts
+ * noContributions(); // []
+ * ```
+ */
+function noContributions(): readonly { flow: AnyFlow }[] {
+  return [];
+}
+
+/**
  * Finds the node, sub-flow or slot a path names, starting at the main flow. A path descends one
- * sub-flow per segment; a segment after a plain node finds nothing.
+ * sub-flow per segment, and through a slot into the contribution that has the next segment; a
+ * segment after a plain node finds nothing.
  *
  * @param main - The top-level flow.
  * @param path - A path as `framePath` renders it.
+ * @param contributionsOf - Reads the contributions of a slot, in order. Without it a path ends at
+ *   a slot.
  * @returns Where the path leads, or `undefined` when no such node exists.
  * @example
  * ```ts
  * findNode(mainFlow, "board/awaitIntent")?.trail;
  * // [{ flow: "main", node: "board" }, { flow: "board", node: "awaitIntent" }]
+ * findNode(mainFlow, "afterOrder/show", () => [{ flow: rewardFlow }])?.trail;
+ * // [{ flow: "main", node: "afterOrder" }, { flow: "rewardPopup", node: "show" }]
  * ```
  */
-export function findNode(main: AnyFlow, path: string): NodeLocation | undefined {
+export function findNode(
+  main: AnyFlow,
+  path: string,
+  contributionsOf: (slot: string) => readonly { flow: AnyFlow }[] = noContributions
+): NodeLocation | undefined {
   const names = path.split("/").filter(Boolean);
   const trail: { flow: string; node: string }[] = [];
   let flow = main;
@@ -108,9 +153,12 @@ export function findNode(main: AnyFlow, path: string): NodeLocation | undefined 
     trail.push({ flow: flow.id, node: name });
 
     if (step === names.length - 1) return { flow, name, entry, trail };
-    if (entry.kind !== "flow") return undefined;
 
-    flow = entry;
+    const behind = flowBehind(entry, names[step + 1] ?? "", contributionsOf);
+
+    if (behind === undefined) return undefined;
+
+    flow = behind;
   }
 
   return undefined;
@@ -185,7 +233,7 @@ function collectOwners(features: FeaturesApi): Map<object, string> {
  * @returns The entry as JSON.
  * @example
  * ```ts
- * describeNode(mainFlow, "home", home, undefined).path; // "main/home"
+ * describeNode(mainFlow, "home", home, undefined).rest; // true
  * describeNode(mainFlow, "board", boardFlow, "board").subFlow; // "board"
  * ```
  */
@@ -198,7 +246,6 @@ function describeNode(
   const node = entry.kind === "node" ? entry : undefined;
 
   return {
-    path: `${flow.id}/${name}`,
     flow: flow.id,
     node: name,
     rest: node?.rest ?? false,

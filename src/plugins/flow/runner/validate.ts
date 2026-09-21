@@ -398,19 +398,20 @@ function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: Features
  * after a failed retry, so it has to build its whole screen from state.
  *
  * @param config - Resolved flow config: `mainFlow`, `safeNode`.
+ * @param features - Features API, read for a safe node inside a slot contribution.
  * @returns One sentence, or none.
  * @example
  * ```ts
  * // config: { mainFlow, safeNode: "board/awaitIntent", … } of the merge game
- * safeNodeProblems(config); // one sentence: the safe node is not a checkpoint
+ * safeNodeProblems(config, features); // one sentence: the safe node is not a checkpoint
  * ```
  */
-function safeNodeProblems(config: Readonly<Config>): string[] {
+function safeNodeProblems(config: Readonly<Config>, features: FeaturesApi): string[] {
   const { mainFlow, safeNode } = config;
 
   if (!mainFlow || safeNode === undefined) return [];
 
-  const location = findNode(mainFlow, safeNode);
+  const location = findNode(mainFlow, safeNode, features.contributions);
 
   if (!location) {
     return [
@@ -423,6 +424,38 @@ function safeNodeProblems(config: Readonly<Config>): string[] {
   return [
     `[game] The safe node "${safeNode}" is not a checkpoint.\n  Mark it checkpoint: true or choose another rest node.`
   ];
+}
+
+/**
+ * Warns when two contributions of one slot have a node with the same name. A bookmark path keeps
+ * node names only, so `restore` cannot tell the two apart and enters the first one in order.
+ *
+ * @param flows - Every collected flow by id.
+ * @param features - Features API, read for the contributions of every slot.
+ * @returns One warning per slot, node name and pair of flows.
+ */
+function slotNameWarnings(flows: ReadonlyMap<string, AnyFlow>, features: FeaturesApi): string[] {
+  const warnings: string[] = [];
+
+  for (const slotName of slotNames(flows)) {
+    const owners = new Map<string, string>();
+
+    for (const { flow } of features.contributions(slotName)) {
+      for (const nodeName of Object.keys(flow.nodes)) {
+        const first = owners.get(nodeName);
+
+        if (first === undefined) {
+          owners.set(nodeName, flow.id);
+        } else if (first !== flow.id) {
+          warnings.push(
+            `[game] Slot "${slotName}": the flows "${first}" and "${flow.id}" both have a node "${nodeName}".\n  A bookmark path keeps node names only, so restore enters "${first}". Give the nodes different names.`
+          );
+        }
+      }
+    }
+  }
+
+  return warnings;
 }
 
 /**
@@ -478,10 +511,12 @@ export function validateGraph(
     warnings.push(...sizeWarnings(flow));
   }
 
+  warnings.push(...slotNameWarnings(flows, features));
+
   problems.push(
     ...flowIdProblems(flows),
     ...featureProblems(flows, features),
-    ...safeNodeProblems(config)
+    ...safeNodeProblems(config, features)
   );
 
   return { problems, warnings };

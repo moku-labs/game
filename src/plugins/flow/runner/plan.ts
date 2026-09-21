@@ -13,13 +13,15 @@ import type { AnyFlow, Frame, Modules, SlotNode } from "./types";
 
 /**
  * Describes where the frames now point and descends into a sub-flow until a node or a slot is
- * reached. A sub-flow a walk substituted is not entered.
+ * reached. A sub-flow a walk substituted is not entered. A slot is NOT descended here: its
+ * contribution is picked by `when` against the committed state, and a plan is made before the
+ * commit of the edge, so the loop enters the slot after the commit and plans from there.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param frames - The position being planned; mutated while descending.
  * @returns The plan, or the problem that stops it.
  */
-function describePlan(ctx: FlowCtx, frames: Frame[]): Plan {
+export function describePlan(ctx: FlowCtx, frames: Frame[]): Plan {
   for (let depth = 0; depth < maxDepth; depth += 1) {
     const location = locateFrames(ctx, frames);
 

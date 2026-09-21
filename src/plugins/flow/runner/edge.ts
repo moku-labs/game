@@ -5,12 +5,12 @@
 import type { Transaction } from "../../model/types";
 import type { FlowCtx } from "../types";
 import { compact, pushEntry } from "./journal";
-import type { AbortReason, Commit, Location, Safe, StepOutcome } from "./loop-types";
+import type { AbortReason, Arrival, Commit, Location, Safe, StepOutcome } from "./loop-types";
 import { planFrom } from "./plan";
 import { safeFrames } from "./position";
 import { framePath } from "./registry";
 import { notifyRest } from "./seam";
-import type { JournalEntry, Modules, Result } from "./types";
+import type { Frame, JournalEntry, Modules, Result } from "./types";
 
 /**
  * Commits the transaction of one node, releases its hints, journals the edge and emits
@@ -91,7 +91,8 @@ export function handleFailure(
   state.failures += 1;
 
   const retry = state.failures <= ctx.config.retries;
-  const target = retry ? (state.restFrame ?? safeFrames(ctx)) : safeFrames(ctx);
+  const safeTarget = (): Frame[] => safeFrames(ctx, modules.features.contributions);
+  const target = retry ? (state.restFrame ?? safeTarget()) : safeTarget();
 
   ctx.emit("flow:error", { path, error, rolledBackTo: framePath(target), retry });
 
@@ -124,6 +125,31 @@ export function handleAbort(
   modules.gate.close();
 
   return reason === "stop" ? "stop" : "continue";
+}
+
+/**
+ * Moves the position to a planned place and, when that place is a rest node, makes it the rest
+ * point of the loop: the frame rollback and `bookmark` return to, a zeroed failure count, a
+ * compacted journal at a checkpoint, `flow:rest` and the walk's rest listeners. The caller marks the
+ * rest point in the store first. Used by the edge, and by the loop when it enters a slot.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param plan - Where the loop stands now.
+ */
+export function arrive(ctx: FlowCtx, plan: Arrival): void {
+  const state = ctx.state.runner;
+
+  state.stack = plan.stack;
+
+  if (!plan.rest) return;
+
+  state.restFrame = [...plan.stack];
+  state.failures = 0;
+
+  if (plan.checkpoint) compact(state);
+
+  ctx.emit("flow:rest", { path: plan.next, checkpoint: plan.checkpoint });
+  notifyRest(state, plan.next);
 }
 
 /**
@@ -165,18 +191,8 @@ export async function finishNode(
     ctx.deps.model.store.markRest();
   }
 
-  state.stack = plan.stack;
+  arrive(ctx, plan);
   safe.inside = false;
-
-  if (plan.rest) {
-    state.restFrame = [...plan.stack];
-    state.failures = 0;
-
-    if (plan.checkpoint) compact(state);
-
-    ctx.emit("flow:rest", { path: plan.next, checkpoint: plan.checkpoint });
-    notifyRest(state, plan.next);
-  }
 
   return "continue";
 }

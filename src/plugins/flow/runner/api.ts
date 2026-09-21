@@ -85,7 +85,11 @@ function someCheckpoint(ctx: FlowCtx, modules: Modules): string {
  * @throws {Error} When the path is no rest node, or the graph changed since the bookmark.
  */
 function checkBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void {
-  const entry = findNode(mainFlow(ctx, "restore"), bookmark.path)?.entry;
+  const entry = findNode(
+    mainFlow(ctx, "restore"),
+    bookmark.path,
+    modules.features.contributions
+  )?.entry;
 
   if (entry === undefined || entry.kind !== "node" || !entry.rest) {
     throw new Error(
