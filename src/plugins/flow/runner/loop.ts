@@ -1,6 +1,5 @@
 /**
- * @file flow/runner — the one loop. The only place that calls `transaction.commit()`: state
- * changes on the edge, never inside a node.
+ * @file flow/runner — the one loop: one turn, the loop, entering a position from outside.
  */
 import type { FlowCtx } from "../types";
 import { applyResult, finishNode, handleAbort, handleFailure } from "./edge";
