@@ -70,7 +70,7 @@ would never let `app.start()` resolve.
 
 | Event | Payload | When |
 |---|---|---|
-| `flow:edge` | `{ flow, node, outcome, payload, next, patches, index, now }` | After the commit of an edge. |
+| `flow:edge` | `{ flow, node, outcome, payload, next, patches, index, now }` | After the commit of an edge. A slot emits its own `done` edge after its last contribution ended, also when it had none; each one is a journal entry. |
 | `flow:rest` | `{ path, checkpoint }` | On entering a rest node, also one that starts a slot contribution (`"afterOrder/show"`). The save goes to the provider and `bookmark()` names this node. |
 | `flow:error` | `{ path, error, rolledBackTo, retry }` | After a rollback. |
 

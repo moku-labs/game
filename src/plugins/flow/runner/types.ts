@@ -810,6 +810,8 @@ export type RunnerState = {
   stack: Frame[];
   /** The stack of the last rest node: the rollback target. */
   restFrame: Frame[] | undefined;
+  /** Inside a slot: the contribution the loop just finished. The slot continues after it. */
+  slotAfter: string | undefined;
   /** Edges since the last checkpoint. */
   journal: JournalEntry[];
   journalIndex: number;
