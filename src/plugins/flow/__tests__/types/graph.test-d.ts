@@ -1,4 +1,5 @@
 import { describe, expectTypeOf, it } from "vitest";
+import { createApp } from "../../../../index";
 import { defineFlow, defineNode, exit, to, type } from "../../runner/define";
 
 // The five author mistakes of the design context, proven in spikes/p3-graph-types/mistakes.ts.
@@ -112,6 +113,17 @@ describe("flow graph types", () => {
   it("keeps the helpers pure data", () => {
     expectTypeOf(exit("win")).toEqualTypeOf<{ readonly kind: "exit"; readonly outcome: "win" }>();
     expectTypeOf(correct.kind).toEqualTypeOf<"flow">();
+  });
+
+  it("gives the consumer onStart callback the flow API of the app", () => {
+    createApp({
+      onStart: context => {
+        expectTypeOf(context.flow.run).toEqualTypeOf<() => Promise<void>>();
+        expectTypeOf(context.flow.walk).toBeFunction();
+        expectTypeOf(context.flow.gate.answer).toBeFunction();
+        context.flow.run().catch(() => undefined);
+      }
+    });
   });
 
   it("checks every edge table of the five author mistakes", () => {
