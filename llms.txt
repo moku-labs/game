@@ -348,7 +348,7 @@ The graph. Modules `runner`, `gate`, `inbox`, `fx`, `features`. Runner methods s
 
 A game plugin is `createPlugin(name, { depends: [flowPlugin], hooks: ctx => ({ "flow:edge": payload => { ... } }) })`. The root README has the full example in its Events section.
 
-A plugin that owns a resource stores it in its state and frees it in `onStop: ({ state }) => …` (core 1.6: `onStop` receives `{ global, config, state }`). A throwing `onStop` makes `app.stop()` reject. A hook that throws is printed by the engine with `console.error("[game] A hook failed.", error)`; pass `onError: (error, ctx) => ctx.log.error("hook failed", undefined, error)` to `createApp` to get it into the log as well.
+A plugin that owns a resource stores it in its state and frees it in `onStop: ({ state }) => …` (core 1.6: `onStop` receives `{ global, config, state }`). A throwing `onStop` makes `app.stop()` reject. A hook that throws never stops the game: the engine writes the error entry `"game: a hook failed"` to the log (`app.log.trace()`), through the framework `onError(error, core)` of core 1.7. A game can pass its own `onError: (error, ctx) => …` to `createApp`; the kernel calls both.
 
 ## Testing entry
 

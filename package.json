@@ -71,8 +71,8 @@
     "vitest": "4.0.18"
   },
   "dependencies": {
-    "@moku-labs/common": "0.3.2",
-    "@moku-labs/core": "1.6.0",
+    "@moku-labs/common": "0.3.3",
+    "@moku-labs/core": "1.7.0",
     "immer": "11.1.18"
   },
   "publishConfig": {

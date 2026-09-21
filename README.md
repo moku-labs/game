@@ -149,7 +149,7 @@ export const createGame = (seed: "from-save" | number = "from-save") =>
   });
 ```
 
-A hook that throws never stops the game. The engine prints it with `console.error("[game] A hook failed.", error)`. Pass `onError: (error, ctx) => ctx.log.error("game: a hook failed", undefined, error)` to `createApp` to get it into the log as well.
+A hook that throws never stops the game. The engine writes it to the log as the error entry `"game: a hook failed"`; read it with `app.log.trace()`. A game can add its own `onError: (error, ctx) => …` to `createApp`; the kernel calls both.
 
 **5. Play it headless.** `createHeadless` returns a game object once the graph rests at its first
 rest node. Its `walk` method plays a route.

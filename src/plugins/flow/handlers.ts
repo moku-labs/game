@@ -46,13 +46,8 @@ export function createHandlers(ctx: KernelSlice): {
      * @param payload - What changed: the reason, the direction and whether the game resumed.
      */
     "lifecycle:changed": (payload: LifecycleChanged): void => {
-      // The framework `onError` has no ctx and prints to the console. This hook has `ctx.log`, so it
-      // reports its own failure there.
-      try {
-        reactToLifecycle(ctx, payload);
-      } catch (error) {
-        ctx.log.error("flow: lifecycle:changed hook failed", { error });
-      }
+      // A throw reaches the framework `onError`, which logs it as "game: a hook failed".
+      reactToLifecycle(ctx, payload);
     }
   };
 }
