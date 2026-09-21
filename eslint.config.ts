@@ -153,9 +153,10 @@ export default [
   },
 
   // 6d. L7 — the public contract carries the docs and a scenario example. Only `types.ts` ships in
-  // the `.d.mts`, so a game reads the members of the `…Api` types, never the implementation. A member
-  // no game can call says so with `@remarks No example: <reason>`. Everywhere else an example is
-  // allowed, never required: a required example on a private function becomes a copy of its signature.
+  // the `.d.mts`, so a game reads the members of the `…Api` types, never the implementation. API means
+  // public: a member another plugin calls gets an example from that plugin's point of view; a member
+  // nobody can write an honest example for leaves the API (a plain function) or is deleted. Everywhere
+  // else an example is allowed, never required: a required one becomes a copy of the signature.
   {
     files: ["src/plugins/**/types.ts"],
     rules: {
@@ -173,7 +174,6 @@ export default [
       "jsdoc/require-example": [
         "error",
         {
-          exemptedBy: ["remarks"],
           contexts: ["TSTypeAliasDeclaration[id.name=/Api$/] > TSTypeLiteral > TSMethodSignature"]
         }
       ]
@@ -189,6 +189,8 @@ export default [
         "error",
         {
           mainDescription: false,
+          // The default reads functions only: an echo on a member of an `Api` type would pass.
+          contexts: ["any"],
           tags: {
             example:
               "^(?!\\s*```ts\\n\\s*(?:(?:const|let) \\w+(?:: [\\w.<>\\[\\]]+)? = )?(?:await )?[\\w.]+\\((?:[\\w.]+(?:, [\\w.]+)*)?\\);?\\s*```\\s*$)[\\s\\S]+$"

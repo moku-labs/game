@@ -190,16 +190,6 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
       return running;
     },
 
-    register: (flow: AnyFlow): void => {
-      if (state.running !== undefined) {
-        throw new Error(
-          `[game] flow.register("${flow.id}") was called after flow.run().\n  Register every extra flow before the runner starts.`
-        );
-      }
-
-      if (!state.flows.has(flow.id)) state.flows.set(flow.id, flow);
-    },
-
     onEnter: (stage: Stage, callback: EnterCallback): (() => void) => {
       const callbacks = state.enterCallbacks[stage];
 
