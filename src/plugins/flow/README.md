@@ -94,8 +94,8 @@ loop itself never uses the event bus.
   wakes a pending pointer wait, awaits settle up to `settleTimeoutMs` of real time, with or without
   a frame loop, and discards an open transaction. `flow` stops before `model`, so `model` still
   flushes afterwards. The background flush started by the hook never rejects: the store logs its failure, and the flush in the `onStop` of `model` reports a lasting one. When the deadline wins, the stop stays on record, so a loop that wakes later still stops.
-- A throw inside the `lifecycle:changed` hook is reported with
-  `ctx.log.error("flow: lifecycle:changed hook failed", { error })`.
+- A throw inside the `lifecycle:changed` hook reaches the framework `onError`, which writes the
+  error entry `"game: a hook failed"` to the log.
 
 ## Dependencies
 
