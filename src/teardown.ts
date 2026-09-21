@@ -13,7 +13,6 @@
 export type Disposer = () => void | Promise<void>;
 
 // @no-module-state-check — onStop receives only { global } (spec/08 §2); plugins find their resources here.
-// biome-ignore lint/correctness/noUnusedVariables: used by the bodies that build wave 1 writes
 const registry = new WeakMap<object, Map<string, Disposer>>();
 
 /**
@@ -45,34 +44,48 @@ export function reportHookError(error: Error): void {
 }
 
 /**
- * Registers a disposer for one plugin of one app.
+ * Registers a disposer for one plugin of one app. A second call with the same key replaces the first.
  *
- * @param _global - The app's frozen global config object, used as identity.
- * @param _key - Plugin name.
- * @param _dispose - Function that frees the plugin's resources.
- * @throws {Error} Always, until the build implements it.
+ * @param global - The app's frozen global config object, used as identity.
+ * @param key - Plugin name.
+ * @param dispose - Function that frees the plugin's resources.
  * @example
  * ```ts
  * teardown.register(ctx.global, "time", stopLoop);
  * ```
  */
-function register(_global: object, _key: string, _dispose: Disposer): void {
-  throw new Error("not implemented");
+function register(global: object, key: string, dispose: Disposer): void {
+  const disposers = registry.get(global) ?? new Map<string, Disposer>();
+
+  disposers.set(key, dispose);
+  registry.set(global, disposers);
 }
 
 /**
- * Runs and removes the disposer of one plugin.
+ * Runs and removes the disposer of one plugin. A missing key is a no-op.
+ * A throwing disposer is reported and never rethrown, so one plugin cannot block the stop of the others.
  *
- * @param _global - The app's global config object.
- * @param _key - Plugin name.
- * @throws {Error} Always, until the build implements it.
+ * @param global - The app's global config object.
+ * @param key - Plugin name.
+ * @returns Resolves when the disposer has finished.
  * @example
  * ```ts
  * await teardown.run(global, "time");
  * ```
  */
-async function run(_global: object, _key: string): Promise<void> {
-  throw new Error("not implemented");
+async function run(global: object, key: string): Promise<void> {
+  const disposers = registry.get(global);
+  const dispose = disposers?.get(key);
+  if (!disposers || !dispose) return;
+
+  // Forget first: a second stop must not run the disposer again, even if it throws.
+  disposers.delete(key);
+
+  try {
+    await dispose();
+  } catch (error) {
+    reportError(`The disposer of "${key}" failed.`, error);
+  }
 }
 
 /**
