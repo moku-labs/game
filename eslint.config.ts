@@ -209,9 +209,13 @@ export default [
       "src/plugins/model/**/*.ts",
       "src/plugins/flow/**/*.ts",
       "src/plugins/clock/**/*.ts",
-      "src/merge/**/*.ts"
+      "tests/integration/merge-game/rules/**/*.ts"
     ],
-    ignores: ["src/plugins/clock/system.ts", "src/**/__tests__/**"],
+    ignores: [
+      "src/plugins/clock/system.ts",
+      "src/**/__tests__/**",
+      "tests/integration/merge-game/rules/__tests__/**"
+    ],
     rules: {
       "no-restricted-properties": [
         "error",
@@ -241,25 +245,19 @@ export default [
     }
   },
 
-  // 6f. L4 — the merge kit imports nothing from the engine.
+  // 6f. L4 — the rules of the fixture merge game import nothing but their siblings, so they stay
+  // a model of pure game rules.
   {
-    files: ["src/merge/**/*.ts"],
+    files: ["tests/integration/merge-game/rules/**/*.ts"],
+    ignores: ["tests/integration/merge-game/rules/__tests__/**"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              group: [
-                "../plugins/*",
-                "../../plugins/*",
-                "../kit",
-                "../config",
-                "@moku-labs/*",
-                "pixi.js",
-                "yoga-layout"
-              ],
-              message: "The merge kit is pure: it imports nothing outside src/merge."
+              regex: String.raw`^(\.\./|@moku-labs/|pixi\.js$|yoga-layout$)`,
+              message: "The fixture rules import only their siblings."
             }
           ]
         }
@@ -269,7 +267,7 @@ export default [
 
   // 7. Test files: relaxed rules
   {
-    files: ["tests/**/*.ts", "src/plugins/**/__tests__/**/*.ts", "src/merge/__tests__/**/*.ts"],
+    files: ["tests/**/*.ts", "src/plugins/**/__tests__/**/*.ts"],
     rules: {
       "jsdoc/require-jsdoc": "off",
       "jsdoc/require-description": "off",

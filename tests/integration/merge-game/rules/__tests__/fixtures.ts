@@ -1,4 +1,4 @@
-import type { Item, MergeState, Rng, Tables } from "../../types";
+import type { Item, MergeState, Rng, Tables } from "../types";
 
 /**
  * Deep-freezes a value so that any mutation attempted by a rule throws in strict mode.

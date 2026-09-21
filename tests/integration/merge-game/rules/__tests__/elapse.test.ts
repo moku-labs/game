@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyEnergyRegen, elapse, nextDue } from "../../elapse";
-import type { MergeState, Tables } from "../../types";
+import { applyEnergyRegen, elapse, nextDue } from "../elapse";
+import type { MergeState, Tables } from "../types";
 import { countedAt, deepFreeze, midGameState, tables } from "./fixtures";
 
 const regenMs = tables.energy.regenMs;

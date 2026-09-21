@@ -3,6 +3,9 @@
  */
 import { coreConfig, createCore } from "./config";
 import { clockPlugin, flowPlugin, lifecyclePlugin, modelPlugin, timePlugin } from "./plugins";
+import { defineFeature } from "./plugins/flow/feature";
+import { defineFlow, defineNode } from "./plugins/flow/runner/define";
+import type { GameTypes, Kit } from "./plugins/flow/types";
 import { reportHookError } from "./teardown";
 
 const framework = createCore(coreConfig, {
@@ -35,9 +38,28 @@ export const createApp = framework.createApp;
  */
 export const createPlugin = framework.createPlugin;
 
+/**
+ * Binds the authoring helpers to the types of one game: "createApp for a game". The binding is
+ * type-only; at run time these are the same functions the plugins export. One line per helper,
+ * no logic: anything a single plugin can own lives in that plugin.
+ *
+ * @returns The helpers typed with the game's `player` and `session`.
+ * @example
+ * ```ts
+ * export const { defineNode, defineFlow, defineFeature } = defineGame<{
+ *   player: Player;
+ *   session: Session;
+ *   assets: AssetKey;
+ *   strings: StringTable;
+ * }>();
+ * ```
+ */
+export function defineGame<Types extends GameTypes>(): Kit<Types> {
+  return { defineNode, defineFlow, defineFeature };
+}
+
 // ─── Helpers (explicit, never export *) ───────────────────────
-export { defineGame } from "./kit";
-export { rules } from "./merge";
+export { defineFeature } from "./plugins/flow/feature";
 export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
 export { exit, slot, to, type } from "./plugins/flow/runner/define";
 export { SaveUnreadableError } from "./plugins/model/store/types";

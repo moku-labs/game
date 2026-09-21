@@ -11,10 +11,6 @@
       "types": "./dist/index.d.mts",
       "default": "./dist/index.mjs"
     },
-    "./merge": {
-      "types": "./dist/merge.d.mts",
-      "default": "./dist/merge.mjs"
-    },
     "./testing": {
       "types": "./dist/testing.d.mts",
       "default": "./dist/testing.mjs"

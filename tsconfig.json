@@ -13,7 +13,11 @@
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
-    "types": ["bun"]
+    "types": ["bun"],
+    "paths": {
+      "@moku-labs/game": ["./src/index.ts"],
+      "@moku-labs/game/testing": ["./src/testing.ts"]
+    }
   },
   "include": ["src", "tests", "declarations.d.ts", "*.config.ts"]
 }

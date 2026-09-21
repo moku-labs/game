@@ -2,17 +2,18 @@
  * @file flow plugin — shared types of the plugin and its modules.
  */
 import type { Log } from "@moku-labs/common/browser";
-import type { PluginCtx } from "@moku-labs/core";
+import type { AnyPluginInstance, PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as ClockApi } from "../clock/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Patch } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
-import type { FeaturesApi, FeaturesState } from "./features/types";
+import type { FeatureDescription, FeaturesApi, FeaturesState } from "./features/types";
 import type { FxApi, FxState } from "./fx/types";
 import type { GateApi, GateState } from "./gate/types";
 import type { InboxApi, InboxState } from "./inbox/types";
-import type { AnyFlow, RunnerApi, RunnerState } from "./runner/types";
+import type { defineFlow } from "./runner/define";
+import type { AnyFlow, DefineNode, RunnerApi, RunnerState } from "./runner/types";
 
 /**
  * flow plugin events.
@@ -138,6 +139,48 @@ export type FlowCtx = KernelSlice & { readonly deps: Deps };
  * ```
  */
 export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
+
+/**
+ * The types of one game. `player` and `session` type the node context; `assets` and `strings`
+ * are accepted now and used from later milestones.
+ *
+ * @example
+ * ```ts
+ * type Types = { player: Player; session: Session; assets: AssetKey; strings: StringTable };
+ * ```
+ */
+export type GameTypes = {
+  player: Json;
+  session: Json;
+  assets: string;
+  strings: Record<string, unknown>;
+};
+
+/**
+ * A feature is an ordinary plugin with no API of its own; `AnyPluginInstance` is the kernel's
+ * widened type for plugin lists. `logicOnly` is the same plugin reduced to the V1 keys.
+ *
+ * @example
+ * ```ts
+ * createApp({ plugins: [boardFeature.logicOnly] });
+ * ```
+ */
+export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginInstance };
+
+/**
+ * The flow helpers returned by `defineGame`. `defineNode` sees `player` and `session` with the
+ * game's types; at run time they are the same functions the plugin exports.
+ *
+ * @example
+ * ```ts
+ * const kit: Kit<Types> = defineGame<Types>();
+ * ```
+ */
+export type Kit<Types extends GameTypes> = {
+  defineNode: DefineNode<{ player: Types["player"]; session: Types["session"] }>;
+  defineFlow: typeof defineFlow;
+  defineFeature: (name: string, description: FeatureDescription) => FeaturePlugin;
+};
 
 export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";
 export type { Descriptor, FxApi, FxHandler, GuideOptions, Hint, NodeFx } from "./fx/types";

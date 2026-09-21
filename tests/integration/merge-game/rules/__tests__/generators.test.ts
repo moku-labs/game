@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { drawWeighted, pickDrop, tapGenerator } from "../../generators";
-import type { GeneratorTable, MergeState, Tables } from "../../types";
+import { drawWeighted, pickDrop, tapGenerator } from "../generators";
+import type { GeneratorTable, MergeState, Tables } from "../types";
 import {
   countedAt,
   deepFreeze,

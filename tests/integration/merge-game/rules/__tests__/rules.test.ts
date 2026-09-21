@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addToWallet, isLegalMerge, merge, sell } from "../../rules";
-import type { MergeState } from "../../types";
+import { addToWallet, isLegalMerge, merge, sell } from "../rules";
+import type { MergeState } from "../types";
 import { deepFreeze, midGameState, tables } from "./fixtures";
 
 const frozenState = (): MergeState => deepFreeze(midGameState());

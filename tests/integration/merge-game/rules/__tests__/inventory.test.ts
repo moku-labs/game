@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { place, take } from "../../inventory";
-import type { Item, MergeState } from "../../types";
+import { place, take } from "../inventory";
+import type { Item, MergeState } from "../types";
 import { deepFreeze, emptySlots, filledItems, midGameState } from "./fixtures";
 
 const stateWith = (patch: Partial<MergeState>): MergeState =>

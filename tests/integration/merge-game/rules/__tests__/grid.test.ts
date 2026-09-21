@@ -7,8 +7,8 @@ import {
   replaceItem,
   withItem,
   withoutItem
-} from "../../grid";
-import type { Board } from "../../types";
+} from "../grid";
+import type { Board } from "../types";
 import { deepFreeze, filledItems, midGameState } from "./fixtures";
 
 const emptyBoard = (): Board => deepFreeze({ cols: 5, rows: 5, items: [] });

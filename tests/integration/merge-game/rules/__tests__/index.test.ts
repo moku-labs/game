@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { elapse, nextDue } from "../../elapse";
-import { pickDrop, tapGenerator } from "../../generators";
-import { findFreeCell, itemAt, neighbors } from "../../grid";
-import { rules } from "../../index";
-import { place, take } from "../../inventory";
-import { giveToOrder, isLegalOrderMatch } from "../../orders";
-import { isLegalMerge, merge, sell } from "../../rules";
+import { elapse, nextDue } from "../elapse";
+import { pickDrop, tapGenerator } from "../generators";
+import { findFreeCell, itemAt, neighbors } from "../grid";
+import { rules } from "../index";
+import { place, take } from "../inventory";
+import { giveToOrder, isLegalOrderMatch } from "../orders";
+import { isLegalMerge, merge, sell } from "../rules";
 import { countedAt, deepFreeze, midGameState, scriptedRng, tables } from "./fixtures";
 
 const implementations = {

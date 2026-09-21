@@ -3,8 +3,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: {
     index: "src/index.ts",
-    // Subpaths: pure merge rules usable without the engine, and the headless test helpers.
-    merge: "src/merge.ts",
+    // Subpath: the headless test helpers.
     testing: "src/testing.ts"
   },
   format: ["esm"],

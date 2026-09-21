@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { giveToOrder, isLegalOrderMatch } from "../../orders";
-import type { MergeState, Order } from "../../types";
+import { giveToOrder, isLegalOrderMatch } from "../orders";
+import type { MergeState, Order } from "../types";
 import { deepFreeze, midGameState, scriptedRng, tables } from "./fixtures";
 
 const woodOrder = (given: number[]): Order => ({
