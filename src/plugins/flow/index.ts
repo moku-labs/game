@@ -5,14 +5,14 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { teardown } from "../../teardown";
 import { clockPlugin } from "../clock";
 import { lifecyclePlugin } from "../lifecycle";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
 import { createFlowApi } from "./api";
 import { createHandlers } from "./handlers";
-import { connectFlow, registerFlowTeardown } from "./lifecycle";
+import { connectFlow } from "./lifecycle";
+import { stopRunner } from "./runner/loop";
 import { createFlowState } from "./state";
 import type { Config, Events } from "./types";
 
@@ -46,7 +46,6 @@ export const flowPlugin = /*#__PURE__*/ createPlugin("flow", {
   api: createFlowApi,
   hooks: createHandlers,
   onInit: connectFlow,
-  onStart: registerFlowTeardown,
   // @no-resource-check — onStop aborts the running node and awaits settle.
-  onStop: ({ global }) => teardown.run(global, "flow")
+  onStop: ({ config, state }) => stopRunner({ config, state })
 });

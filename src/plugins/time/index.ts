@@ -4,9 +4,8 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
-import { teardown } from "../../teardown";
 import { createTimeApi } from "./api";
-import { startLoop } from "./lifecycle";
+import { startLoop, stopLoop } from "./lifecycle";
 import { createTimeState } from "./state";
 import type { Config } from "./types";
 
@@ -26,5 +25,5 @@ export const timePlugin = /*#__PURE__*/ createPlugin("time", {
   api: createTimeApi,
   onStart: startLoop,
   // @no-resource-check — onStop cancels the requestAnimationFrame handle.
-  onStop: ({ global }) => teardown.run(global, "time")
+  onStop: ({ state }) => stopLoop(state)
 });

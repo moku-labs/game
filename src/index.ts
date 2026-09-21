@@ -31,7 +31,22 @@ import { clockPlugin, flowPlugin, lifecyclePlugin, modelPlugin, timePlugin } fro
 import { defineFeature } from "./plugins/flow/feature";
 import { defineFlow, defineNode } from "./plugins/flow/runner/define";
 import type { GameTypes, Kit } from "./plugins/flow/types";
-import { reportHookError } from "./teardown";
+
+/**
+ * Framework-level `onError`: a hook threw. It prints to the console on purpose: when a hook fails,
+ * the state of the kernel and of the plugins is unknown, and the log plugin may be the broken part.
+ * The kernel gives this handler no ctx either. Everywhere else errors go through `ctx.log`.
+ *
+ * @param error - The error thrown by a hook.
+ * @example
+ * ```ts
+ * createCore(coreConfig, { plugins, onError: reportHookError });
+ * ```
+ */
+function reportHookError(error: Error): void {
+  // @log-sink — the only console call in src, see the comment above.
+  console.error("[game] A hook failed.", error);
+}
 
 const framework = createCore(coreConfig, {
   // Dependency order (spec/11 §1.3, §1.5). The screen set is a list the game spreads in (later cycles).
@@ -88,4 +103,3 @@ export { defineFeature } from "./plugins/flow/feature";
 export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
 export { exit, slot, to, type } from "./plugins/flow/runner/define";
 export { SaveUnreadableError } from "./plugins/model/store/types";
-export { teardown } from "./teardown";

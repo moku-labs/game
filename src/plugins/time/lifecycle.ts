@@ -1,9 +1,8 @@
 /**
  * @file time plugin — the single frame loop of the real frame source.
  */
-import { teardown } from "../../teardown";
 import { tickFrame } from "./api";
-import type { TimeCtx } from "./types";
+import type { State, TimeCtx } from "./types";
 
 /**
  * Builds the frame function of the loop, once per app, so a frame allocates no closure. Each call
@@ -37,27 +36,27 @@ function createFrameFunction(ctx: TimeCtx): (timestamp: number) => void {
 }
 
 /**
- * Cancels the pending frame and forgets the frame source. The registered disposer of the plugin.
+ * Cancels the pending frame and forgets the frame source. The `onStop` of the plugin: since
+ * core 1.6 the kernel hands the plugin its own state at stop.
  *
- * @param ctx - Domain context of the time plugin.
+ * @param state - State of the time plugin.
  * @example
  * ```ts
- * teardown.register(ctx.global, "time", () => stopLoop(ctx));
+ * createPlugin("time", { onStop: ({ state }) => stopLoop(state) });
  * ```
  */
-function stopLoop(ctx: TimeCtx): void {
-  const { rafId } = ctx.state;
+export function stopLoop(state: State): void {
+  const { rafId } = state;
 
   if (rafId !== undefined) globalThis.cancelAnimationFrame(rafId);
 
-  ctx.state.rafId = undefined;
-  ctx.state.lastTimestamp = undefined;
-  ctx.state.running = false;
+  state.rafId = undefined;
+  state.lastTimestamp = undefined;
+  state.running = false;
 }
 
 /**
- * Starts the single `requestAnimationFrame` loop when the platform has one, and registers
- * the disposer that cancels it. In plain Bun the loop does not start and `isRunning` stays false.
+ * Starts the single `requestAnimationFrame` loop when the platform has one. In plain Bun the loop does not start and `isRunning` stays false.
  *
  * @param ctx - Domain context of the time plugin.
  * @example
@@ -70,5 +69,4 @@ export function startLoop(ctx: TimeCtx): void {
 
   ctx.state.running = true;
   ctx.state.rafId = globalThis.requestAnimationFrame(createFrameFunction(ctx));
-  teardown.register(ctx.global, "time", () => stopLoop(ctx));
 }

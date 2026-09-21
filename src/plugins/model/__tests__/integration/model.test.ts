@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { coreConfig, createCore, createPlugin } from "../../../../config";
 import { modelPlugin } from "../../index";
 import { memory } from "../../store/providers/memory";
@@ -93,6 +93,16 @@ describe("model plugin", () => {
     await app.stop();
 
     expect(provider.calls).toEqual([{ method: "flush" }]);
+  });
+
+  it("rejects app.stop() with the error of a failing provider flush", async () => {
+    const { app, provider } = createTestApp();
+    const failure = new Error("disk full");
+
+    vi.spyOn(provider, "flush").mockRejectedValue(failure);
+    await app.start();
+
+    await expect(app.stop()).rejects.toBe(failure);
   });
 
   it("keeps the drawn stream in the save document", async () => {

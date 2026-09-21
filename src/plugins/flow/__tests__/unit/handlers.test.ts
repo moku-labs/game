@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createHandlers } from "../../handlers";
 import { changed, createMockKernel } from "./mock-kernel";
 
@@ -63,7 +63,18 @@ describe("createHandlers", () => {
       onChanged(changed({ reason: "background", action: "push" }));
 
       expect(record.flushes).toBe(1);
-      expect(ctx.state.runner.flushing).toBe(record.flushResult);
+      expect(ctx.state.runner.flushing).toBeInstanceOf(Promise);
+    });
+
+    it("tracks a promise that never rejects, so a failed flush leaves nothing unhandled", async () => {
+      const { onChanged, record, ctx } = build();
+      const failed = Promise.reject(new Error("provider down"));
+
+      failed.catch(() => undefined);
+      record.flushResult = failed;
+      onChanged(changed({ reason: "background", action: "push" }));
+
+      await expect(ctx.state.runner.flushing).resolves.toBeUndefined();
     });
 
     it("does not flush for another pause reason", () => {
@@ -83,6 +94,24 @@ describe("createHandlers", () => {
       expect(record.flushes).toBe(0);
       expect(ctx.state.runner.flushing).toBeUndefined();
       expect(record.pokes).toBe(1);
+    });
+  });
+
+  describe("a failing hook", () => {
+    it("reports the failure through ctx.log.error and does not throw", () => {
+      const { onChanged, ctx, clock } = build();
+      const failure = new Error("poke failed");
+
+      vi.spyOn(clock, "poke").mockImplementation(() => {
+        throw failure;
+      });
+
+      expect(() =>
+        onChanged(changed({ action: "pop", paused: false, resumed: true }))
+      ).not.toThrow();
+      expect(ctx.log.error).toHaveBeenCalledWith("flow: lifecycle:changed hook failed", {
+        error: failure
+      });
     });
   });
 });

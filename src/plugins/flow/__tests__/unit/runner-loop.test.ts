@@ -1302,6 +1302,58 @@ describe("restorePosition", () => {
 // ─── stop deadline ────────────────────────────────────────────
 
 describe("stopRunner deadline", () => {
+  it("gives up after settleTimeoutMs without a frame loop, as in a headless game", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main, running: false });
+
+    harness.ctx.state.runner.enterCallbacks.load.push(() => new Promise<void>(() => undefined));
+    harness.start();
+    await tick();
+
+    vi.useFakeTimers();
+    try {
+      const stopping = stopRunner(harness.ctx);
+
+      await vi.advanceTimersByTimeAsync(harness.ctx.config.settleTimeoutMs);
+
+      await expect(stopping).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the stop on record when the deadline won, so a loop that wakes later still stops", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+
+    harness.ctx.state.runner.enterCallbacks.load.push(() => new Promise<void>(() => undefined));
+    harness.start();
+    await tick();
+
+    vi.useFakeTimers();
+    try {
+      const stopping = stopRunner(harness.ctx);
+
+      await vi.advanceTimersByTimeAsync(harness.ctx.config.settleTimeoutMs);
+      await stopping;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(harness.ctx.state.runner.abort?.signal.reason).toBe("stop");
+  });
+
+  it("forgets the stop record when the loop settled in time", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+    await stopRunner(harness.ctx);
+
+    expect(harness.ctx.state.runner.abort).toBeUndefined();
+  });
+
   it("gives up after settleTimeoutMs of real time when a callback ignores the abort and no frame runs", async () => {
     const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
     const harness = setup({ main });

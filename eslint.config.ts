@@ -152,7 +152,7 @@ export default [
   // 6c. L2 + L5 — no static Pixi or Yoga import; no module-scope state.
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/teardown.ts", "src/**/__tests__/**"],
+    ignores: ["src/**/__tests__/**"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -167,12 +167,12 @@ export default [
         "error",
         {
           selector: "Program > VariableDeclaration[kind='let']",
-          message: "No module-scope state. The only allowed registry is src/teardown.ts."
+          message: "No module-scope state."
         },
         {
           selector:
             "Program > :matches(VariableDeclaration, ExportNamedDeclaration) NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
-          message: "No module-scope collections. The only allowed registry is src/teardown.ts."
+          message: "No module-scope collections."
         }
       ]
     }
@@ -234,12 +234,12 @@ export default [
         { selector: "NewExpression[callee.name='Date']", message: "Use clock.now()." },
         {
           selector: "Program > VariableDeclaration[kind='let']",
-          message: "No module-scope state. The only allowed registry is src/teardown.ts."
+          message: "No module-scope state."
         },
         {
           selector:
             "Program > :matches(VariableDeclaration, ExportNamedDeclaration) NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
-          message: "No module-scope collections. The only allowed registry is src/teardown.ts."
+          message: "No module-scope collections."
         }
       ]
     }

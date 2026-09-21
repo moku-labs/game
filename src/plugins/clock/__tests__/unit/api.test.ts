@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
-import { createClockApi } from "../../api";
+import { cancelPending, createClockApi } from "../../api";
 import { fakeClock } from "../../fake";
 import type { ClockCtx, ClockSource, Elapsed, FakeClock, State } from "../../types";
 
@@ -415,5 +415,55 @@ describe("scheduleAt with a device clock that went back", () => {
 
     expect(seen).toEqual([{ now: 10_500 }]);
     expect(api.dueAt()).toBeUndefined();
+  });
+});
+
+const createStopState = (): { state: State; clock: FakeClock } => {
+  const clock = fakeClock(1000);
+
+  return {
+    clock,
+    state: { source: clock, last: 0, dueAt: undefined, handle: undefined, listeners: [] }
+  };
+};
+
+describe("cancelPending, the onStop of the plugin", () => {
+  it("clears the handle that exists at stop time", () => {
+    const { state, clock } = createStopState();
+    const clearTimer = vi.spyOn(clock, "clearTimer");
+    const handle = clock.setTimer(() => {}, 1000);
+
+    state.handle = handle;
+    cancelPending(state);
+
+    expect(clearTimer).toHaveBeenCalledWith(handle);
+  });
+
+  it("forgets the due moment and the handle, so dueAt() reports nothing after stop", () => {
+    const { state, clock } = createStopState();
+
+    state.handle = clock.setTimer(() => {}, 1000);
+    state.dueAt = 2000;
+    cancelPending(state);
+
+    expect(state.handle).toBeUndefined();
+    expect(state.dueAt).toBeUndefined();
+  });
+
+  it("stops the pending timer from firing", () => {
+    const { state, clock } = createStopState();
+    const fired = vi.fn();
+
+    state.handle = clock.setTimer(fired, 1000);
+    cancelPending(state);
+    clock.advance(5000);
+
+    expect(fired).not.toHaveBeenCalled();
+  });
+
+  it("is harmless when no timer was ever created", () => {
+    const { state } = createStopState();
+
+    expect(() => cancelPending(state)).not.toThrow();
   });
 });

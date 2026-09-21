@@ -1,7 +1,18 @@
 /**
- * @file flow/runner — teardown.
+ * @file flow/runner — stopping the runner, the `onStop` of the plugin.
  */
 import type { FlowCtx } from "../types";
+
+/**
+ * What a stop needs: the plugin's own config and state, exactly what `onStop` receives.
+ *
+ * @example
+ * ```ts
+ * const stopCtx: StopCtx = { config, state };
+ * ```
+ */
+export type StopCtx = Pick<FlowCtx, "config" | "state">;
+
 import { noop } from "./loop-types";
 import { abortReason } from "./node";
 
@@ -41,28 +52,23 @@ function startDeadline(timeoutMs: number): { reached: Promise<void>; cancel(): v
 }
 
 /**
- * Waits for the aborted loop to settle, at most `settleTimeoutMs` of real time. Without a running
- * frame loop the game is headless and the loop is simply awaited.
+ * Waits for the aborted loop to settle, at most `settleTimeoutMs` of real time, with or without a
+ * frame loop.
  *
- * @param ctx - Domain context of the flow plugin.
+ * @param ctx - Config and state of the flow plugin.
  * @param running - The promise of `run()`.
+ * @returns `true` when the loop settled, `false` when the deadline won and the loop still runs.
  * @example
  * ```ts
- * await settle(ctx, running);
+ * const settled = await settle(ctx, running);
  * ```
  */
-async function settle(ctx: FlowCtx, running: Promise<void>): Promise<void> {
+async function settle(ctx: StopCtx, running: Promise<void>): Promise<boolean> {
   const quiet = running.then(noop, noop);
-
-  if (!ctx.deps.time.isRunning()) {
-    await quiet;
-    return;
-  }
-
   const deadline = startDeadline(ctx.config.settleTimeoutMs);
 
   try {
-    await Promise.race([quiet, deadline.reached]);
+    return await Promise.race([quiet.then(() => true), deadline.reached.then(() => false)]);
   } finally {
     deadline.cancel();
   }
@@ -73,14 +79,14 @@ async function settle(ctx: FlowCtx, running: Promise<void>): Promise<void> {
  * `settleTimeoutMs` to settle, and a background flush that is still running is awaited. The loop
  * itself discards the open transaction and shuts the gate while it leaves the aborted node.
  *
- * @param ctx - Domain context of the flow plugin.
+ * @param ctx - Config and state of the flow plugin.
  * @returns A promise that resolves when the graph stands still.
  * @example
  * ```ts
- * teardown.register(ctx.global, "flow", () => stopRunner(flowCtx));
+ * createPlugin("flow", { onStop: ({ config, state }) => stopRunner({ config, state }) });
  * ```
  */
-export async function stopRunner(ctx: FlowCtx): Promise<void> {
+export async function stopRunner(ctx: StopCtx): Promise<void> {
   const state = ctx.state.runner;
   const running = state.running;
   const active = state.abort;
@@ -98,10 +104,11 @@ export async function stopRunner(ctx: FlowCtx): Promise<void> {
     state.abort = stop;
   }
 
-  if (running !== undefined) await settle(ctx, running);
+  const settled = running === undefined || (await settle(ctx, running));
 
+  // A loop that outlived the deadline must still see the stop when it wakes up.
   state.running = undefined;
-  state.abort = undefined;
+  if (settled) state.abort = undefined;
 
   const flushing = state.flushing;
 
