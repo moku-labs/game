@@ -33,10 +33,11 @@ export type NodeOutcome =
 /** What one turn of the loop decided: keep running, or end because `onStop` aborted. */
 export type StepOutcome = "continue" | "stop";
 
+/** A place the loop can arrive at: the frames, the path, and whether the node there rests. */
+export type Arrival = { stack: Frame[]; next: string; rest: boolean; checkpoint: boolean };
+
 /** Where the loop goes after one result, or the problem that stops it going anywhere. */
-export type Plan =
-  | { stack: Frame[]; next: string; rest: boolean; checkpoint: boolean }
-  | { problem: string };
+export type Plan = Arrival | { problem: string };
 
 /** One node run in progress. */
 export type Step = {

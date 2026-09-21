@@ -199,6 +199,10 @@ describe("findNode", () => {
     expect(findNode(mainFlow, "afterWin/give", both)?.flow).toBe(rewardFlow);
   });
 
+  it("looks at own node names only: an inherited key such as constructor names no node", () => {
+    expect(findNode(mainFlow, "afterWin/constructor", features.contributions)).toBeUndefined();
+  });
+
   it("finds nothing behind a slot when no contribution has the node, or none was passed", () => {
     expect(findNode(mainFlow, "afterWin/missing", features.contributions)).toBeUndefined();
     expect(findNode(mainFlow, "afterWin/give")).toBeUndefined();

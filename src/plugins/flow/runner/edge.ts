@@ -5,7 +5,7 @@
 import type { Transaction } from "../../model/types";
 import type { FlowCtx } from "../types";
 import { compact, pushEntry } from "./journal";
-import type { AbortReason, Commit, Location, Safe, StepOutcome } from "./loop-types";
+import type { AbortReason, Arrival, Commit, Location, Safe, StepOutcome } from "./loop-types";
 import { planFrom } from "./plan";
 import { safeFrames } from "./position";
 import { framePath } from "./registry";
@@ -91,7 +91,8 @@ export function handleFailure(
   state.failures += 1;
 
   const retry = state.failures <= ctx.config.retries;
-  const target = retry ? (state.restFrame ?? safeFrames(ctx)) : safeFrames(ctx);
+  const safeTarget = (): Frame[] => safeFrames(ctx, modules.features.contributions);
+  const target = retry ? (state.restFrame ?? safeTarget()) : safeTarget();
 
   ctx.emit("flow:error", { path, error, rolledBackTo: framePath(target), retry });
 
@@ -134,15 +135,8 @@ export function handleAbort(
  *
  * @param ctx - Domain context of the flow plugin.
  * @param plan - Where the loop stands now.
- * @param plan.stack - The frames of the new position.
- * @param plan.next - The path of the new position.
- * @param plan.rest - Whether the node there is a rest node.
- * @param plan.checkpoint - Whether the node there is a checkpoint.
  */
-export function arrive(
-  ctx: FlowCtx,
-  plan: { stack: Frame[]; next: string; rest: boolean; checkpoint: boolean }
-): void {
+export function arrive(ctx: FlowCtx, plan: Arrival): void {
   const state = ctx.state.runner;
 
   state.stack = plan.stack;

@@ -398,19 +398,20 @@ function featureProblems(flows: ReadonlyMap<string, AnyFlow>, features: Features
  * after a failed retry, so it has to build its whole screen from state.
  *
  * @param config - Resolved flow config: `mainFlow`, `safeNode`.
+ * @param features - Features API, read for a safe node inside a slot contribution.
  * @returns One sentence, or none.
  * @example
  * ```ts
  * // config: { mainFlow, safeNode: "board/awaitIntent", … } of the merge game
- * safeNodeProblems(config); // one sentence: the safe node is not a checkpoint
+ * safeNodeProblems(config, features); // one sentence: the safe node is not a checkpoint
  * ```
  */
-function safeNodeProblems(config: Readonly<Config>): string[] {
+function safeNodeProblems(config: Readonly<Config>, features: FeaturesApi): string[] {
   const { mainFlow, safeNode } = config;
 
   if (!mainFlow || safeNode === undefined) return [];
 
-  const location = findNode(mainFlow, safeNode);
+  const location = findNode(mainFlow, safeNode, features.contributions);
 
   if (!location) {
     return [
@@ -515,7 +516,7 @@ export function validateGraph(
   problems.push(
     ...flowIdProblems(flows),
     ...featureProblems(flows, features),
-    ...safeNodeProblems(config)
+    ...safeNodeProblems(config, features)
   );
 
   return { problems, warnings };

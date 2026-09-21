@@ -393,6 +393,24 @@ describe("validateGraph", () => {
     });
   });
 
+  it("accepts a safe node that is a checkpoint inside a slot contribution", () => {
+    const reward = flow(
+      "reward",
+      { give: node({ rest: true, checkpoint: true, outcomes: ["go"] }) },
+      "give",
+      { give: { go: "give" } }
+    );
+    const board = flow(
+      "board",
+      { afterWin: slotNode("afterWin"), home: node({ rest: true, outcomes: ["go"] }) },
+      "afterWin",
+      { afterWin: { done: "home" }, home: { go: "afterWin" } }
+    );
+    const features = featuresWith([{ feature: "coins", flow: reward, order: 10 }]);
+
+    expect(report(board, features, "afterWin/give").problems).toEqual([]);
+  });
+
   it("warns when two contributions of one slot have a node with the same name", () => {
     const coins = flow("coins", { give: node({ rest: true, outcomes: ["go"] }) }, "give", {
       give: { go: "give" }

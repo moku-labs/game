@@ -9,7 +9,7 @@ import { requireMainFlow } from "./graph";
 import type { Location } from "./loop-types";
 import { noPayload } from "./loop-types";
 import { findNode } from "./registry";
-import type { Frame, Result } from "./types";
+import type { AnyFlow, Frame, Result } from "./types";
 
 /**
  * Resolves what the deepest frame points at.
@@ -55,13 +55,17 @@ export function framesOf(trail: readonly { flow: string; node: string }[], input
  * Builds the frames of the safe node: the configured checkpoint, or the start of the main flow.
  *
  * @param ctx - Domain context of the flow plugin.
+ * @param contributionsOf - Reads the contributions of a slot, for a safe node inside one.
  * @returns The position of the safe node.
  * @throws {Error} When the configured safe node is not a node of the graph.
  */
-export function safeFrames(ctx: FlowCtx): Frame[] {
+export function safeFrames(
+  ctx: FlowCtx,
+  contributionsOf: (slot: string) => readonly { flow: AnyFlow }[]
+): Frame[] {
   const main = requireMainFlow(ctx);
   const path = ctx.config.safeNode ?? main.start;
-  const location = findNode(main, path);
+  const location = findNode(main, path, contributionsOf);
 
   if (location === undefined) {
     throw new Error(

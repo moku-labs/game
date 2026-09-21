@@ -101,7 +101,8 @@ function flowBehind(
   if (entry.kind === "flow") return entry;
   if (entry.kind !== "slot") return undefined;
 
-  return contributionsOf(entry.name).find(item => next in item.flow.nodes)?.flow;
+  // Own keys only: `"constructor" in nodes` is true for every object.
+  return contributionsOf(entry.name).find(item => Object.hasOwn(item.flow.nodes, next))?.flow;
 }
 
 /**
