@@ -1,6 +1,6 @@
 {
   "name": "@moku-labs/game",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "2D puzzle game engine on TypeScript and PixiJS, built on @moku-labs/core.",
   "type": "module",
   "sideEffects": false,
@@ -17,7 +17,11 @@
     }
   },
   "license": "MIT",
-  "files": ["dist", "LICENSE", "README.md"],
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/moku-labs/game.git"
