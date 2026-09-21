@@ -24,6 +24,8 @@ export type WorldEvent = { type: string; payload?: Json };
 export type InboxState = {
   /** Undelivered events, oldest first. One entry per `type`. */
   queue: WorldEvent[];
+  /** Callbacks woken by every `post`. Kept in state so every API instance over this state shares them. */
+  listeners: Array<() => void>;
 };
 
 /**

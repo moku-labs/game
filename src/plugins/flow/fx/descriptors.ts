@@ -1,51 +1,81 @@
 /**
- * @file flow/fx — descriptor helpers skeleton. Pure: they produce plain data.
+ * @file flow/fx — descriptor helpers. Pure: they produce plain data.
  */
 import type { Json } from "../../model/types";
+import type { Allow } from "../gate/types";
 import type { Descriptor, GuideOptions, Hint } from "./types";
+
+/**
+ * Copies one allowed answer into plain JSON. The `payload` key is absent when there is none, so
+ * the descriptor survives `JSON.stringify` unchanged.
+ *
+ * @param allow - The one answer a guide lets through.
+ * @returns The answer as plain JSON.
+ * @example
+ * ```ts
+ * const json = allowJson({ intent: "merge", payload: { from: "c2", to: "c3" } });
+ * ```
+ */
+function allowJson(allow: Allow): Json {
+  if (allow.payload === undefined) return { intent: allow.intent };
+
+  return { intent: allow.intent, payload: allow.payload };
+}
 
 /**
  * Creates a fire-and-forget cosmetic descriptor for `fx.emit`. It is dispatched only after the
  * commit of its transaction and dropped in fast mode.
  *
- * @param _kind - Effect kind a handler is registered for.
- * @param _payload - Plain JSON for the handler.
- * @throws {Error} Always, until the build implements it.
+ * @param kind - Effect kind a handler is registered for.
+ * @param payload - Plain JSON for the handler.
+ * @returns The hint as plain data.
  * @example
  * ```ts
  * fx.emit(hint("sparkle", { cell: "c3" }));
  * ```
  */
-export function hint(_kind: string, _payload?: Json): Hint {
-  throw new Error("not implemented");
+export function hint(kind: string, payload?: Json): Hint {
+  if (payload === undefined) return { kind, hint: true };
+
+  return { kind, payload, hint: true };
 }
 
 /**
  * Creates the awaited effect that asks the clock for one `elapsed` at this moment. `undefined`
- * means nothing is due. Its handler runs in fast mode too.
+ * means nothing is due and leaves the `moment` key out, so the descriptor stays plain JSON. Its
+ * handler runs in fast mode too.
  *
- * @param _moment - Epoch milliseconds of the next due timer, or `undefined`.
- * @throws {Error} Always, until the build implements it.
+ * @param moment - Epoch milliseconds of the next due timer, or `undefined`.
+ * @returns The descriptor a node awaits.
  * @example
  * ```ts
  * await fx(schedule(rules.nextDue(player, tables)));
  * ```
  */
-export function schedule(_moment: number | undefined): Descriptor {
-  throw new Error("not implemented");
+export function schedule(moment: number | undefined): Descriptor {
+  if (moment === undefined) return { kind: "schedule", payload: {} };
+
+  return { kind: "schedule", payload: { moment } };
 }
 
 /**
  * Creates the tutorial descriptor: it narrows the gate to one answer until the node exits. Its
- * visual part (highlight, hand, text) is handled by `ui` later.
+ * visual part (highlight, hand, text) is handled by `ui` later. The highlight list is copied, so
+ * a later change of the caller's array cannot reach the descriptor.
  *
- * @param _options - The allowed answer and the visual hints.
- * @throws {Error} Always, until the build implements it.
+ * @param options - The allowed answer and the visual hints.
+ * @returns The descriptor a node awaits.
  * @example
  * ```ts
  * await fx(guide({ allow: { intent: "merge", payload: { from: "c2", to: "c3" } }, hand: "drag" }));
  * ```
  */
-export function guide(_options: GuideOptions): Descriptor {
-  throw new Error("not implemented");
+export function guide(options: GuideOptions): Descriptor {
+  const payload: { [key: string]: Json } = { allow: allowJson(options.allow) };
+
+  if (options.highlight !== undefined) payload.highlight = [...options.highlight];
+  if (options.hand !== undefined) payload.hand = options.hand;
+  if (options.text !== undefined) payload.text = options.text;
+
+  return { kind: "guide", payload };
 }

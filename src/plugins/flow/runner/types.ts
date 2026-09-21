@@ -592,6 +592,16 @@ export type AnyNode = AnyWired & {
 };
 
 /**
+ * One entry of a flow's `nodes`: a node, a sub-flow or a slot. The `kind` field tells them apart.
+ *
+ * @example
+ * ```ts
+ * const entry: FlowEntry | undefined = flow.nodes[name];
+ * ```
+ */
+export type FlowEntry = AnyNode | AnyFlow | SlotNode;
+
+/**
  * Any flow as the runner holds it. Every typed `FlowDefinition` fits.
  *
  * @example
@@ -602,9 +612,29 @@ export type AnyNode = AnyWired & {
 export type AnyFlow = AnyWired & {
   readonly kind: "flow";
   readonly id: string;
-  readonly nodes: Readonly<Record<string, AnyNode | AnyFlow | SlotNode>>;
+  readonly nodes: Readonly<Record<string, FlowEntry>>;
   readonly start: string;
   readonly edges: Readonly<Record<string, Readonly<Record<string, Target>>>>;
+};
+
+/**
+ * Where a path leads: the entry, the flow that holds it and one `{ flow, node }` pair per level,
+ * outermost first. The loop turns the trail into frames.
+ *
+ * @example
+ * ```ts
+ * const { entry, trail } = findNode(mainFlow, "board/awaitIntent") ?? {};
+ * ```
+ */
+export type NodeLocation = {
+  /** The flow that holds the entry. */
+  flow: AnyFlow;
+  /** Name of the entry inside that flow. */
+  name: string;
+  /** The node, sub-flow or slot the path names. */
+  entry: FlowEntry;
+  /** One step per nesting level, outermost first. */
+  trail: readonly { flow: string; node: string }[];
 };
 
 /**
@@ -703,16 +733,40 @@ export type FlowGraph = {
   flows: Record<
     string,
     {
-      nodes: Record<
-        string,
-        NodeInfo & { outcomes: string[]; slot?: string; subFlow?: string; owner?: string }
-      >;
+      nodes: Record<string, GraphNode>;
       start: string;
       edges: Record<string, Record<string, string>>;
     }
   >;
   slots: Record<string, { feature: string; flow: string; order: number }[]>;
 };
+
+/**
+ * One node of `describe()`: its flags, its outcome names and, when it is one, the slot it opens,
+ * the sub-flow it enters and the feature that brought it.
+ *
+ * @example
+ * ```ts
+ * const node: GraphNode | undefined = app.flow.describe().flows.main?.nodes.board;
+ * ```
+ */
+export type GraphNode = NodeInfo & {
+  outcomes: string[];
+  slot?: string;
+  subFlow?: string;
+  owner?: string;
+};
+
+/**
+ * What `validateGraph` returns: problems that stop `run()`, and warnings the caller logs. A flow
+ * above fifteen nodes is a warning, never an error.
+ *
+ * @example
+ * ```ts
+ * const { problems, warnings } = validateGraph(flows, features, config);
+ * ```
+ */
+export type ValidationReport = { problems: string[]; warnings: string[] };
 
 /**
  * Inspection of the running graph.
@@ -754,6 +808,24 @@ export type EnterCallback = (
 ) => void | Promise<void>;
 
 /**
+ * The seam the fast walk and `restore` steer the running loop with. It stays absent while the
+ * game just runs: `walk.ts` and `restore` create it through `loopSeam` when they need it.
+ *
+ * @example
+ * ```ts
+ * loopSeam(ctx.state.runner).substitutions.set("level", { outcome: "win", payload: null });
+ * ```
+ */
+export type LoopSeam = {
+  /** Sub-flow results a walk substitutes, by path. The loop takes each one once. */
+  substitutions: Map<string, Result>;
+  /** Called with the path every time the loop enters a rest node. */
+  rest: ((path: string) => void)[];
+  /** The bookmark the loop enters at the next turn. */
+  restoring: Bookmark | undefined;
+};
+
+/**
  * runner module state.
  *
  * @example
@@ -780,6 +852,8 @@ export type RunnerState = {
   abort: AbortController | undefined;
   /** Failed transitions in a row. */
   failures: number;
+  /** How `walk` and `restore` steer the loop. Absent until one of them needs it. */
+  seam?: LoopSeam;
 };
 
 /**
