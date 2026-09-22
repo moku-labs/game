@@ -386,32 +386,20 @@ export type Events = {
 };
 
 /**
- * How the load site sends its event. The one narrowing of `tiers.ts`.
+ * How the plugin sends its two events: the one narrowing of `ctx.emit` in the plugin, made once
+ * by `emitOf` in `emit.ts` and used by the load site and the unload site.
  *
  * @example
  * ```ts
- * const emit: EmitLoaded = (name, payload) => bus.send(name, payload);
+ * const emit: EmitAssets = (name, payload) => bus.send(name, payload);
  * emit("assets:bundle-loaded", { bundle: "board", tier: "scene", mb: 3.5, reason: "enter" });
- * ```
- */
-export type EmitLoaded = (
-  name: "assets:bundle-loaded",
-  payload: Events["assets:bundle-loaded"]
-) => void;
-
-/**
- * How the unload site sends its event. The one narrowing of `budget.ts`.
- *
- * @example
- * ```ts
- * const emit: EmitUnloaded = (name, payload) => bus.send(name, payload);
  * emit("assets:bundle-unloaded", { bundle: "board", tier: "scene", mb: 3.5, reason: "budget" });
  * ```
  */
-export type EmitUnloaded = (
-  name: "assets:bundle-unloaded",
-  payload: Events["assets:bundle-unloaded"]
-) => void;
+export type EmitAssets = {
+  (name: "assets:bundle-loaded", payload: Events["assets:bundle-loaded"]): void;
+  (name: "assets:bundle-unloaded", payload: Events["assets:bundle-unloaded"]): void;
+};
 
 /**
  * assets plugin API, `app.assets`. Bundles of textures by key: the graph decides when they arrive,

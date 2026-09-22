@@ -25,17 +25,17 @@ describe("root index", () => {
     expect(kit.defineScene).toBe(engine.defineScene);
     expect(kit.Sprite).toBe(engine.Sprite);
     expect(kit.NineSlice).toBe(engine.NineSlice);
-    expect(Object.keys(kit)).toEqual([
-      "defineNode",
-      "defineFlow",
-      "defineFeature",
-      "projection",
-      "sprite",
-      "defineBundles",
-      "load",
-      "defineScene",
+    expect(Object.keys(kit).toSorted()).toEqual([
+      "NineSlice",
       "Sprite",
-      "NineSlice"
+      "defineBundles",
+      "defineFeature",
+      "defineFlow",
+      "defineNode",
+      "defineScene",
+      "load",
+      "projection",
+      "sprite"
     ]);
   });
 

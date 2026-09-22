@@ -2,7 +2,7 @@
  * @file renderer/sync — the hit test. Pure component math: Pixi updates its world matrices at
  * render time, one frame after the input phase asks.
  */
-import type { Entity } from "../../world/ecs/types";
+import type { Entity } from "../../world/types";
 import { Parent, Transform, type TransformValue } from "../components";
 import type { PixiContainer, Point } from "../types";
 import type { HitBox, SyncCtx } from "./types";

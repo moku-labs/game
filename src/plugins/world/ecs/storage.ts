@@ -206,7 +206,7 @@ export function writeComponent(ctx: WorldCtx, entity: Entity, name: string, patc
 
   if (stored === undefined || stored === true) {
     throw new Error(
-      `[game] Entity ${entity} carries no "${name}".\n` + "  Add the component before writing it."
+      `[game] Entity ${entity} carries no "${name}".\n  Add the component before writing it.`
     );
   }
 

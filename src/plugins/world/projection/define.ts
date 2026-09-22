@@ -35,3 +35,33 @@ export function projection<
 ): ProjectionSpec<Item, LayerName, LiftName, Player, Session> {
   return spec;
 }
+
+/**
+ * The projection helper bound to one game's `player` and `session`.
+ *
+ * @example
+ * ```ts
+ * const bound: ProjectionFor<{ coins: number }, {}> = projection;
+ * ```
+ */
+export type ProjectionFor<Player, Session> = <
+  const LayerName extends string,
+  const LiftName extends string,
+  Item
+>(
+  spec: ProjectionSpec<Item, LayerName, LiftName, Player, Session>
+) => ProjectionSpec<Item, LayerName, LiftName, Player, Session>;
+
+/**
+ * Binds `projection` to one game's `player` and `session`. Type-only: the same function.
+ *
+ * @returns `{ projection }` whose `from` reads the game's state types.
+ * @example
+ * ```ts
+ * const { projection } = projectionFor<{ board: { items: Item[] } }, {}>();
+ * projection({ name: "board.items", layer: "items", from: player => player.board.items, key: item => item.id, view: () => [] });
+ * ```
+ */
+export function projectionFor<Player, Session>(): { projection: ProjectionFor<Player, Session> } {
+  return { projection };
+}

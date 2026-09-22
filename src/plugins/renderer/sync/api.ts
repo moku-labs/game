@@ -3,7 +3,7 @@
  * engine creates, moves, sorts or destroys a Pixi node.
  */
 import { Layer, Order } from "../../world/ecs/define";
-import type { Entity } from "../../world/ecs/types";
+import type { Entity } from "../../world/types";
 import { Display, NineSlice, Parent, Sprite, Transform } from "../components";
 import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { hitTest } from "./hit-test";

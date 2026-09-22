@@ -3,7 +3,7 @@
  * teardown that empties the world.
  */
 import { flowPlugin } from "../flow";
-import type { FeatureDescription } from "../flow/features/types";
+import type { FeatureDescription } from "../flow/types";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
 import { createModules } from "./api";

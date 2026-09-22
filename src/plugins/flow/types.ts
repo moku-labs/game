@@ -4,21 +4,16 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { AnyPluginInstance, PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
-import type { DefineBundles, LoadBundles } from "../assets/types";
 import type { Api as ClockApi } from "../clock/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Patch } from "../model/types";
-import type { NineSliceValue, SpriteOptions, SpriteValue, sprite } from "../renderer/components";
-import type { DefineScene } from "../scenes/types";
 import type { Api as TimeApi } from "../time/types";
-import type { ComponentType } from "../world/ecs/types";
-import type { ProjectionSpec } from "../world/projection/types";
 import type { FeatureDescription, FeaturesApi, FeaturesState } from "./features/types";
 import type { FxApi, FxState } from "./fx/types";
 import type { GateApi, GateState } from "./gate/types";
 import type { InboxApi, InboxState } from "./inbox/types";
 import type { defineFlow } from "./runner/define";
-import type { AnyFlow, DefineNode, RunnerApi, RunnerState } from "./runner/types";
+import type { AnyFlow, DefineNode, GameState, RunnerApi, RunnerState } from "./runner/types";
 
 /**
  * flow plugin events.
@@ -97,7 +92,8 @@ export type State = {
 export type Api = RunnerApi & { gate: GateApi; inbox: InboxApi; fx: FxApi; features: FeaturesApi };
 
 /**
- * Resolved dependency APIs.
+ * The APIs flow requires from below (`time`, `model`, `clock`), resolved once in `onInit` and
+ * shared by the runner, gate, inbox and fx.
  */
 export type Deps = { time: TimeApi; model: ModelApi; clock: ClockApi };
 
@@ -128,8 +124,8 @@ export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
 
 /**
  * The types of one game. `player` and `session` type the node context; `assets` and `bundles`
- * are the generated key unions of the asset scanner (`string` when a game has none yet);
- * `strings` is used from V3.
+ * are the key unions the asset scanner generates (`string` while a game has none); `strings`
+ * is used from V3. Every plugin binds its own helpers to them through its `…For` binder.
  *
  * @example
  * ```ts
@@ -170,38 +166,19 @@ export type BundlesOf<Types extends GameTypes> = Types extends {
 export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginInstance };
 
 /**
- * The helpers returned by `defineGame`, bound to the game's types. `defineNode` and `projection`
- * see `player` and `session`; `defineBundles` and `load` see the bundle keys; `sprite` sees the
- * asset keys. At run time they are the same functions the plugins export.
+ * What `flowFor` binds to a game: the node helper with the game's `player` and `session`, and
+ * the flow and feature helpers, which take no game types.
  *
  * @example
  * ```ts
- * // kit.ts of a game: bound once, imported by every node, flow and view file.
- * export const { defineNode, defineFlow, defineFeature, projection, sprite, Sprite, defineBundles, load, defineScene } =
- *   defineGame<{
- *     player: Player;
- *     session: Session;
- *     assets: AssetKey;
- *     bundles: BundleKey;
- *     strings: Record<string, unknown>;
- *   }>();
+ * const { defineNode } = flowFor<{ player: Player; session: Session }>();
+ * defineNode({ rest: true, outcomes: { play: type() }, run: ({ player }) => player.coins }); // player: Player
  * ```
  */
-export type Kit<Types extends GameTypes> = {
-  defineNode: DefineNode<{ player: Types["player"]; session: Types["session"] }>;
+export type FlowKit<Game extends GameState> = {
+  defineNode: DefineNode<Game>;
   defineFlow: typeof defineFlow;
   defineFeature: (name: string, description: FeatureDescription) => FeaturePlugin;
-  projection: <const LayerName extends string, const LiftName extends string, Item>(
-    spec: ProjectionSpec<Item, LayerName, LiftName, Types["player"], Types["session"]>
-  ) => ProjectionSpec<Item, LayerName, LiftName, Types["player"], Types["session"]>;
-  sprite: (
-    options: Omit<SpriteOptions, "texture"> & { texture: Types["assets"] }
-  ) => ReturnType<typeof sprite>;
-  defineBundles: DefineBundles<BundlesOf<Types>>;
-  load: LoadBundles<BundlesOf<Types>>;
-  defineScene: DefineScene<Types["assets"], BundlesOf<Types>>;
-  Sprite: ComponentType<Omit<SpriteValue, "texture"> & { texture: Types["assets"] }>;
-  NineSlice: ComponentType<Omit<NineSliceValue, "texture"> & { texture: Types["assets"] }>;
 };
 
 export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";
@@ -224,6 +201,7 @@ export type {
   FlowState,
   GameState,
   GraphError,
+  GraphNode,
   JournalEntry,
   Mapped,
   NodeContext,

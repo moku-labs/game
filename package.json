@@ -15,9 +15,9 @@
       "types": "./dist/testing.d.mts",
       "default": "./dist/testing.mjs"
     },
-    "./assets-scan": {
-      "types": "./dist/assets-scan.d.mts",
-      "default": "./dist/assets-scan.mjs"
+    "./assets": {
+      "types": "./dist/assets.d.mts",
+      "default": "./dist/assets.mjs"
     }
   },
   "license": "MIT",

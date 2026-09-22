@@ -65,6 +65,7 @@ export type MotionHandle = { finish(): void; cancel(): void; active(): boolean }
  * const motion: Motion = undefined; // the hook called view.set and is already done
  * ```
  */
+// biome-ignore lint/suspicious/noConfusingVoidType: a hook may return nothing; `void` names that honestly
 export type Motion = MotionHandle | void;
 
 /**

@@ -4,8 +4,7 @@
  * that sorts a layer's children.
  */
 import { Order } from "../../world/ecs/define";
-import type { Entity } from "../../world/ecs/types";
-import type { LayerSort } from "../../world/projection/types";
+import type { Entity, LayerSort } from "../../world/types";
 import { Transform } from "../components";
 import type { PixiContainer } from "../types";
 import { detach } from "./pools";

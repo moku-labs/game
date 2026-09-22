@@ -2,7 +2,7 @@
  * @file renderer/sync — the one world system the renderer registers. It runs in phase `"sync"`,
  * which `world` runs in every mode, so a fast walk still sets the picture.
  */
-import type { AnySystem } from "../../world/ecs/types";
+import type { AnySystem } from "../../world/types";
 
 /** The name the system is registered under; it shows up in a world error message. */
 export const SYNC_SYSTEM_NAME = "renderer.sync";

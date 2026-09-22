@@ -4,7 +4,7 @@
  * to be registered.
  */
 import { component } from "../world/ecs/define";
-import type { ComponentValue, Entity } from "../world/ecs/types";
+import type { ComponentValue, Entity, Narrowed } from "../world/types";
 import type { Point } from "./types";
 
 /**
@@ -142,4 +142,39 @@ export function sprite(
       scale: options.scale ?? Transform.defaults.scale
     })
   ];
+}
+
+/**
+ * The display helpers bound to one game's asset keys: `texture` only takes a key the scanner
+ * generated. The component objects are the same; only the call signatures narrow.
+ *
+ * @example
+ * ```ts
+ * const kit: RendererKit<"board.cell"> = componentsFor<"board.cell">();
+ * kit.sprite({ texture: "board.cell", at: { x: 90, y: 90 } });
+ * ```
+ */
+export type RendererKit<Asset extends string> = {
+  sprite: (
+    options: Omit<SpriteOptions, "texture"> & { texture: Asset }
+  ) => ReturnType<typeof sprite>;
+  Sprite: Narrowed<SpriteValue, Partial<Omit<SpriteValue, "texture">> & { texture?: Asset }>;
+  NineSlice: Narrowed<
+    NineSliceValue,
+    Partial<Omit<NineSliceValue, "texture">> & { texture?: Asset }
+  >;
+};
+
+/**
+ * Binds `sprite`, `Sprite` and `NineSlice` to one game's asset keys. Type-only: the same objects.
+ *
+ * @returns The three helpers with `texture` narrowed to `Asset`.
+ * @example
+ * ```ts
+ * const { Sprite } = componentsFor<"board.cell" | "board.item-wood-1">();
+ * Sprite({ texture: "board.cell" }).value.texture; // "board.cell"
+ * ```
+ */
+export function componentsFor<Asset extends string>(): RendererKit<Asset> {
+  return { sprite, Sprite, NineSlice };
 }

@@ -1,3 +1,4 @@
+// biome-ignore-all assist/source/organizeImports: sectioned manifest (Framework API → Plugins → Helpers → Types) is house style
 /**
  * The `@moku-labs/game` package — 2D puzzle game engine on Moku Core.
  *
@@ -60,13 +61,12 @@ import {
   timePlugin,
   worldPlugin
 } from "./plugins";
-import { defineBundles, load } from "./plugins/assets/bundles";
-import { defineFeature } from "./plugins/flow/feature";
-import { defineFlow, defineNode } from "./plugins/flow/runner/define";
-import type { GameTypes, Kit } from "./plugins/flow/types";
-import { NineSlice, Sprite, sprite } from "./plugins/renderer/components";
-import { defineScene } from "./plugins/scenes/define";
-import { projection } from "./plugins/world/projection/define";
+import { bundlesFor } from "./plugins/assets/bundles";
+import { flowFor } from "./plugins/flow/feature";
+import type { BundlesOf, GameTypes } from "./plugins/flow/types";
+import { componentsFor } from "./plugins/renderer/components";
+import { scenesFor } from "./plugins/scenes/define";
+import { projectionFor } from "./plugins/world/projection/define";
 
 const framework = createCore(coreConfig, {
   // Dependency order (spec/11 §1.3, §1.5). The screen set is a list the game spreads in (later cycles).
@@ -75,9 +75,6 @@ const framework = createCore(coreConfig, {
   // event bus and are safe whenever a hook can fail (core spec/02 §3), so the error goes to the log.
   onError: (error, { log }) => log.error("game: a hook failed", undefined, error)
 });
-
-// ─── Plugins + Types ──────────────────────────────────────────
-export * from "./plugins";
 
 // ─── Framework API ────────────────────────────────────────────
 /**
@@ -109,74 +106,28 @@ export const createApp = framework.createApp;
 export const createPlugin = framework.createPlugin;
 
 /**
- * Binds the authoring helpers to the types of one game: "createApp for a game". The binding is
- * type-only; at run time these are the same functions the plugins export. One line per helper,
- * no logic: anything a single plugin can own lives in that plugin.
+ * Binds the authoring helpers to the types of one game: "createApp for a game". Each plugin binds
+ * its own helpers (`flowFor`, `projectionFor`, `componentsFor`, `bundlesFor`, `scenesFor`); this
+ * only spreads them, so the kit's type is inferred and never written by hand. At run time these
+ * are the same functions and component objects the plugins export.
  *
- * @returns The helpers typed with the game's `player` and `session`.
+ * @returns The helpers typed with the game's `player`, `session`, `assets` and `bundles`.
  * @example
  * ```ts
- * export const { defineNode, defineFlow, defineFeature } = defineGame<{
- *   player: Player;
- *   session: Session;
- *   assets: AssetKey;
- *   strings: StringTable;
- * }>();
+ * // kit.ts of a game: bound once, imported by every node, flow and view file.
+ * export const { defineNode, defineFlow, defineFeature, projection, sprite, Sprite, defineBundles, load, defineScene } =
+ *   defineGame<{ player: Player; session: Session; assets: AssetKey; bundles: BundleKey; strings: StringTable }>();
  * ```
  */
-export function defineGame<Types extends GameTypes>(): Kit<Types> {
+export function defineGame<Types extends GameTypes>() {
   return {
-    defineNode,
-    defineFlow,
-    defineFeature,
-    projection,
-    sprite,
-    defineBundles,
-    load,
-    defineScene,
-    // The same component objects; only the call signature narrows `texture` to the game's keys.
-    Sprite: Sprite as Kit<Types>["Sprite"],
-    NineSlice: NineSlice as Kit<Types>["NineSlice"]
+    ...flowFor<{ player: Types["player"]; session: Types["session"] }>(),
+    ...projectionFor<Types["player"], Types["session"]>(),
+    ...componentsFor<Types["assets"]>(),
+    ...bundlesFor<BundlesOf<Types>>(),
+    ...scenesFor<Types["assets"], BundlesOf<Types>>()
   };
 }
-
-export { defineBundles, load } from "./plugins/assets/bundles";
-// ─── Helpers (explicit, never export *) ───────────────────────
-export { defineFeature } from "./plugins/flow/feature";
-export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
-export { exit, slot, to, type } from "./plugins/flow/runner/define";
-export {
-  Draggable,
-  DropTarget,
-  Held,
-  Hovered,
-  Pointer,
-  Pressable,
-  Pressed,
-  Swipeable,
-  Tappable
-} from "./plugins/input/components";
-export { SaveUnreadableError } from "./plugins/model/store/types";
-export {
-  Display,
-  NineSlice,
-  Parent,
-  Sprite,
-  sprite,
-  Transform
-} from "./plugins/renderer/components";
-export { defineScene } from "./plugins/scenes/define";
-export {
-  component,
-  Exiting,
-  Layer,
-  mut,
-  Order,
-  resource,
-  system,
-  tag
-} from "./plugins/world/ecs/define";
-export { projection } from "./plugins/world/projection/define";
 
 // ─── Plugin sets ──────────────────────────────────────────────
 /**
@@ -195,3 +146,50 @@ export const screen = [
   assetsPlugin,
   scenesPlugin
 ] as const;
+
+// ─── Plugins + Types ──────────────────────────────────────────
+export * from "./plugins";
+
+// ─── Helpers (explicit, never export *) ───────────────────────
+// flow: nodes, flows, features, effect descriptors
+export { defineFeature } from "./plugins/flow/feature";
+export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
+export { exit, slot, to, type } from "./plugins/flow/runner/define";
+// model
+export { SaveUnreadableError } from "./plugins/model/store/types";
+// world: the ECS vocabulary and the projection
+export {
+  component,
+  Exiting,
+  Layer,
+  mut,
+  Order,
+  resource,
+  system,
+  tag
+} from "./plugins/world/ecs/define";
+export { projection } from "./plugins/world/projection/define";
+// renderer: the display components
+export {
+  Display,
+  NineSlice,
+  Parent,
+  Sprite,
+  sprite,
+  Transform
+} from "./plugins/renderer/components";
+// input: gestures as data
+export {
+  Draggable,
+  DropTarget,
+  Held,
+  Hovered,
+  Pointer,
+  Pressable,
+  Pressed,
+  Swipeable,
+  Tappable
+} from "./plugins/input/components";
+// assets and scenes: declarations
+export { defineBundles, load } from "./plugins/assets/bundles";
+export { defineScene } from "./plugins/scenes/define";

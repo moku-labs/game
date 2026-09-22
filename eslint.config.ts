@@ -203,7 +203,7 @@ export default [
   // 6b2. The asset scanner is build-time code: only its own entry file may import it.
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/assets-scan.ts", "src/plugins/assets/scan/**", "src/**/__tests__/**"],
+    ignores: ["src/assets.ts", "src/plugins/assets/scan/**", "src/**/__tests__/**"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -211,7 +211,7 @@ export default [
           patterns: [
             {
               group: ["**/assets/scan/**", "./scan/**", "../scan/**"],
-              message: "The asset scanner is node-only. Only src/assets-scan.ts imports it."
+              message: "The asset scanner is node-only. Only src/assets.ts imports it."
             }
           ]
         }
@@ -261,7 +261,8 @@ export default [
     files: [
       "src/plugins/model/*/**/*.ts",
       "src/plugins/flow/*/**/*.ts",
-      "src/plugins/world/*/**/*.ts"
+      "src/plugins/world/*/**/*.ts",
+      "src/plugins/renderer/*/**/*.ts"
     ],
     ignores: ["src/**/__tests__/**"],
     rules: {

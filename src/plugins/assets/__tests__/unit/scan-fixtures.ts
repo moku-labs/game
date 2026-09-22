@@ -98,7 +98,7 @@ export function webpUnknownChunkBytes(): Uint8Array {
 
 /** Writes a temp game tree and returns its root. Keys are POSIX paths, values bytes or text. */
 export async function makeTree(files: Record<string, string | Uint8Array>): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "moku-assets-scan-"));
+  const root = await mkdtemp(path.join(tmpdir(), "moku-assets-"));
 
   for (const [relative, content] of Object.entries(files)) {
     const target = path.join(root, ...relative.split("/"));

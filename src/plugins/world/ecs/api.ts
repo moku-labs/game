@@ -15,7 +15,7 @@ import type {
   AnyComponentType,
   AnyComponentValue,
   AnySystem,
-  ComponentType,
+  ComponentHandle,
   Entity,
   Owner,
   QueryTerm,
@@ -90,7 +90,7 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
 
     get: <Value extends object>(
       entity: Entity,
-      component: ComponentType<Value>
+      component: ComponentHandle<Value>
     ): Readonly<Value> | undefined => {
       registerType(ctx, component);
 
@@ -102,7 +102,7 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
 
     set: <Value extends object>(
       entity: Entity,
-      component: ComponentType<Value>,
+      component: ComponentHandle<Value>,
       patch: Partial<Value>
     ): void => {
       registerType(ctx, component);
@@ -143,7 +143,7 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
       resourceValue(state, resourceType),
 
     onAdded: <Value extends object>(
-      component: ComponentType<Value>,
+      component: ComponentHandle<Value>,
       fn: (entity: Entity, value: Readonly<Value>) => void
     ): (() => void) => {
       registerType(ctx, component);
@@ -154,7 +154,7 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
     },
 
     onRemoved: <Value extends object>(
-      component: ComponentType<Value>,
+      component: ComponentHandle<Value>,
       fn: (entity: Entity, value: Readonly<Value>) => void
     ): (() => void) => {
       registerType(ctx, component);

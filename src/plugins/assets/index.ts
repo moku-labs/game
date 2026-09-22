@@ -52,5 +52,3 @@ export const assetsPlugin = /*#__PURE__*/ createPlugin("assets", {
   // @no-resource-check — onStop destroys the textures and aborts the loads.
   onStop: ({ state }) => releaseAll(state)
 });
-
-export { defineBundles, load } from "./bundles";

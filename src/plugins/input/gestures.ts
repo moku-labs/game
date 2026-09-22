@@ -7,7 +7,7 @@
 import { Transform } from "../renderer/components";
 import type { Time } from "../time/types";
 import { Exiting } from "../world/ecs/define";
-import type { Entity } from "../world/ecs/types";
+import type { Entity } from "../world/types";
 import { submit, swipeAnswer, tapAnswer } from "./answers";
 import {
   Draggable,

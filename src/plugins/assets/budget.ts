@@ -2,8 +2,10 @@
  * @file assets plugin — texture memory: what is used, who leaves next and the eviction itself.
  * The LRU compares the use counter, never a clock.
  */
+
+import { emitOf } from "./emit";
 import { isPermanent } from "./tiers";
-import type { AssetsCtx, EmitUnloaded, State } from "./types";
+import type { AssetsCtx, State } from "./types";
 
 /** How many of the heaviest files the over-budget warning names. */
 const HEAVIEST = 5;
@@ -92,8 +94,7 @@ export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: "budget" | 
 
   ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
 
-  // The one narrowing of this file: see the note on `KernelSlice`. Only `emit` is cast.
-  const emit = ctx.emit as EmitUnloaded;
+  const emit = emitOf(ctx);
 
   emit("assets:bundle-unloaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
 }

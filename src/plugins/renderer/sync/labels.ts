@@ -2,7 +2,7 @@
  * @file renderer/sync — the label every display object carries: what it is, which entity it
  * belongs to and which projected item it came from. Visible in PixiJS DevTools.
  */
-import type { Entity } from "../../world/ecs/types";
+import type { Entity } from "../../world/types";
 import type { SyncCtx, ViewKind } from "./types";
 
 /**

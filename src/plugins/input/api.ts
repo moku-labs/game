@@ -3,7 +3,7 @@
  * answer with the very same functions of `answers.ts` and hands it to `flow.gate`. It moves
  * nothing — no coordinates, no frames, no `Held`, no `settle` — so it works headless.
  */
-import type { ComponentType } from "../world/ecs/types";
+import type { ComponentType } from "../world/types";
 import { dropAnswer, submit, swipeAnswer, tapAnswer } from "./answers";
 import {
   type CarryValue,

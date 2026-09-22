@@ -3,8 +3,7 @@
  * neighbourhood needs, and the background queue that fetches them one after another.
  */
 
-import type { GraphNode } from "../flow/runner/types";
-import type { FlowGraph, NodeInfo } from "../flow/types";
+import type { FlowGraph, GraphNode, NodeInfo } from "../flow/types";
 import { usedMb } from "./budget";
 import { ignoreFailure, isAbortError, loadBundle } from "./tiers";
 import type { AssetsCtx, PreloadQueue, State } from "./types";

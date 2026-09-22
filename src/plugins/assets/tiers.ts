@@ -3,6 +3,7 @@
  * every caller a waiter: the last one to leave aborts the fetches.
  */
 import { enforceBudget } from "./budget";
+import { emitOf } from "./emit";
 import {
   atlasProblem,
   fileUrl,
@@ -16,7 +17,6 @@ import type {
   AssetsIo,
   BundleMap,
   BundleRecord,
-  EmitLoaded,
   Inflight,
   LoadReason,
   Manifest,
@@ -224,8 +224,7 @@ function finish(
 
   ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
 
-  // The one narrowing of this file: see the note on `KernelSlice`. Only `emit` is cast.
-  const emit = ctx.emit as EmitLoaded;
+  const emit = emitOf(ctx);
 
   emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
   enforceBudget(ctx);

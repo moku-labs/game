@@ -191,5 +191,5 @@ for (const tile of written) {
 
 createBrandConsole().info(
   `placeholders: ${written.length} tiles written to features/board/assets. ` +
-    'Run "bun src/assets-scan.ts" next.'
+    'Run "bun src/assets.ts" next.'
 );

@@ -142,6 +142,36 @@ export type AnyComponentType = {
 };
 
 /**
+ * What the ECS needs from a component type to read and write its store: the name and the
+ * defaults, never the call signature. A component bound to a game's keys by a `…For` binder
+ * (`Narrowed`) is the same object with a narrower call, so it passes here unchanged.
+ *
+ * @example
+ * ```ts
+ * const ref: ComponentHandle<{ x: number }> = component("Pos", { x: 0 });
+ * ref.defaults; // { x: 0 }
+ * ```
+ */
+export type ComponentHandle<Value extends object> = {
+  readonly componentName: string;
+  readonly defaults: Readonly<Value>;
+  readonly kind: "component";
+};
+
+/**
+ * A component type whose call signature takes a narrower patch: the same object, the same
+ * store, the compiler refuses what the game's generated keys do not know.
+ *
+ * @example
+ * ```ts
+ * const Sprite: Narrowed<{ texture: string }, { texture?: "board.cell" }> = component("Sprite", { texture: "" });
+ * Sprite({ texture: "board.cell" }).value.texture; // "board.cell"
+ * ```
+ */
+export type Narrowed<Value extends object, Patch> = Omit<ComponentType<Value>, never> &
+  ((patch?: Patch) => ComponentValue<Value>);
+
+/**
  * A resource type made by `resource()`: one mutable object per world, created from a deep clone
  * of the defaults on first read.
  *
@@ -165,7 +195,10 @@ export type ResourceType<Value extends object> = {
  * written.kind; // "mut"
  * ```
  */
-export type Mut<Value extends object> = { readonly kind: "mut"; readonly of: ComponentType<Value> };
+export type Mut<Value extends object> = {
+  readonly kind: "mut";
+  readonly of: ComponentHandle<Value>;
+};
 
 /**
  * A `mut()` term with its data type erased, as the world stores it.
@@ -201,7 +234,7 @@ export type ValueOf<Term> =
     ? Value
     : Term extends TagType
       ? true
-      : Term extends ComponentType<infer Value>
+      : Term extends ComponentHandle<infer Value>
         ? Readonly<Value>
         : never;
 
@@ -446,7 +479,7 @@ export type EcsApi = {
    */
   get<Value extends object>(
     entity: Entity,
-    component: ComponentType<Value>
+    component: ComponentHandle<Value>
   ): Readonly<Value> | undefined;
 
   /**
@@ -467,7 +500,7 @@ export type EcsApi = {
    */
   set<Value extends object>(
     entity: Entity,
-    component: ComponentType<Value>,
+    component: ComponentHandle<Value>,
     patch: Partial<Value>
   ): void;
 
@@ -599,7 +632,7 @@ export type EcsApi = {
    * ```
    */
   onAdded<Value extends object>(
-    component: ComponentType<Value>,
+    component: ComponentHandle<Value>,
     fn: (entity: Entity, value: Readonly<Value>) => void
   ): () => void;
 
@@ -622,7 +655,7 @@ export type EcsApi = {
    * ```
    */
   onRemoved<Value extends object>(
-    component: ComponentType<Value>,
+    component: ComponentHandle<Value>,
     fn: (entity: Entity, value: Readonly<Value>) => void
   ): () => void;
 

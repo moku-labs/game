@@ -282,7 +282,7 @@ describe("screen-merge — the generated asset keys", () => {
     const { stdout } = await runCommand(
       "bun",
       [
-        "src/assets-scan.ts",
+        "src/assets.ts",
         "--root",
         gameRoot,
         "--manifest",

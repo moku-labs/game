@@ -4,7 +4,7 @@
  * already playing its exit.
  */
 import { Exiting } from "../world/ecs/define";
-import type { Entity } from "../world/ecs/types";
+import type { Entity } from "../world/types";
 import { Draggable, DropTarget, Pressable, Swipeable, Tappable } from "./components";
 import type { InputCtx, Target } from "./types";
 

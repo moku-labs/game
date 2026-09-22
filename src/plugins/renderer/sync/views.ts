@@ -3,7 +3,7 @@
  * hang it in its layer or under its parent, and give it back to the pool when it leaves.
  */
 import { Layer } from "../../world/ecs/define";
-import type { Entity } from "../../world/ecs/types";
+import type { Entity } from "../../world/types";
 import { Display, NineSlice, Parent, Sprite, Transform } from "../components";
 import type { PixiContainer, PixiTexture } from "../types";
 import { labelOf } from "./labels";

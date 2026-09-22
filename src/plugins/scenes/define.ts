@@ -3,7 +3,13 @@
  * does the layer check twice, once in the type and once for a caller that has no types.
  */
 import type { LayerSpec } from "../world/types";
-import type { AnySceneProjection, LayerMap, SceneDefinition, SceneSpec } from "./types";
+import type {
+  AnySceneProjection,
+  DefineScene,
+  LayerMap,
+  SceneDefinition,
+  SceneSpec
+} from "./types";
 
 /** The second line of both layer errors. */
 const FIX_LAYER = "  Declare it in layers or fix the name.";
@@ -122,4 +128,20 @@ export function defineScene<
     layers: Object.freeze(layers),
     projections: Object.freeze(namesOf(id, layers, projections))
   });
+}
+
+/**
+ * Binds `defineScene` to one game's asset and bundle keys. Type-only: the same function.
+ *
+ * @returns `{ defineScene }` whose `bundle` and textures are checked by the compiler.
+ * @example
+ * ```ts
+ * const { defineScene } = scenesFor<"board.cell", "board">();
+ * defineScene("board", { bundle: "board", layers: { items: {} }, projections: [] }).id; // "board"
+ * ```
+ */
+export function scenesFor<Asset extends string, Bundle extends string>(): {
+  defineScene: DefineScene<Asset, Bundle>;
+} {
+  return { defineScene };
 }

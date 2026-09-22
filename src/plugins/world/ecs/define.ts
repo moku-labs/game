@@ -3,6 +3,7 @@
  * registers itself in the world on first use, so nothing has to be declared twice.
  */
 import type {
+  ComponentHandle,
   ComponentType,
   ComponentValue,
   Mut,
@@ -94,7 +95,7 @@ export function resource<Value extends object>(name: string, defaults: Value): R
  * mut(Transform).kind; // "mut"
  * ```
  */
-export function mut<Value extends object>(componentType: ComponentType<Value>): Mut<Value> {
+export function mut<Value extends object>(componentType: ComponentHandle<Value>): Mut<Value> {
   return { kind: "mut", of: componentType };
 }
 

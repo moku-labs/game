@@ -8,8 +8,7 @@ import type { Require } from "../../config";
 import type { Api as FlowApi } from "../flow/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
-import type { Entity } from "../world/ecs/types";
-import type { Api as WorldApi } from "../world/types";
+import type { Entity, Api as WorldApi } from "../world/types";
 
 /**
  * A point in reference units, as `renderer.viewport.toReference` answers it.

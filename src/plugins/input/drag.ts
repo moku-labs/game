@@ -3,7 +3,7 @@
  * lifting, the muted position and the way home; a game writes no drag code.
  */
 import { Transform } from "../renderer/components";
-import type { Entity } from "../world/ecs/types";
+import type { Entity } from "../world/types";
 import { dropAnswer, submit } from "./answers";
 import { Draggable, DropTarget, Held, Hovered } from "./components";
 import { findDropTarget } from "./hit";

@@ -6,7 +6,7 @@ export default defineConfig({
     // Subpath: the headless test helpers.
     testing: "src/testing.ts",
     // Subpath: the build-time asset key scanner, node and bun only.
-    "assets-scan": "src/assets-scan.ts"
+    assets: "src/assets.ts"
   },
   format: ["esm"],
   dts: true,

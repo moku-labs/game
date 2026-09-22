@@ -3,7 +3,7 @@
  * imports them from the package root and a node writes `await fx(load("board.chains"))`.
  */
 import type { Descriptor } from "../flow/types";
-import type { BundleMap, BundleSpec } from "./types";
+import type { BundleMap, BundleSpec, DefineBundles, LoadBundles } from "./types";
 
 /**
  * Declares the bundles of one feature. The map is copied, so a later change of the caller's
@@ -55,4 +55,21 @@ export function load(bundle: string | readonly string[]): Descriptor {
   const bundles = typeof bundle === "string" ? [bundle] : [...bundle];
 
   return { kind: "load", payload: { bundles } };
+}
+
+/**
+ * Binds `defineBundles` and `load` to one game's bundle keys. Type-only: the same functions.
+ *
+ * @returns The two helpers whose keys are checked by the compiler.
+ * @example
+ * ```ts
+ * const { load } = bundlesFor<"board" | "board.chains">();
+ * load("board.chains"); // { kind: "load", payload: { bundles: ["board.chains"] } }
+ * ```
+ */
+export function bundlesFor<Bundle extends string>(): {
+  defineBundles: DefineBundles<Bundle>;
+  load: LoadBundles<Bundle>;
+} {
+  return { defineBundles, load };
 }

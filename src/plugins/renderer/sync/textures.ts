@@ -2,7 +2,7 @@
  * @file renderer/sync — the texture chain: the providers `assets` registers, the magenta
  * placeholder for a key nobody answers, and the two calls that make and free a Pixi texture.
  */
-import type { Entity } from "../../world/ecs/types";
+import type { Entity } from "../../world/types";
 import type { PixiTexture } from "../types";
 import type { CreateTextureOptions, SyncCtx, SyncState } from "./types";
 

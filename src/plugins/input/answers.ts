@@ -4,7 +4,7 @@
  */
 import type { Answer } from "../flow/types";
 import type { Json } from "../model/types";
-import type { Entity } from "../world/ecs/types";
+import type { Entity } from "../world/types";
 import type { CarryValue, IntentValue } from "./components";
 import type { Direction, InputCtx } from "./types";
 

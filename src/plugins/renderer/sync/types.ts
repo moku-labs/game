@@ -1,8 +1,7 @@
 /**
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
-import type { Entity } from "../../world/ecs/types";
-import type { LayerSort, LayerSpec } from "../../world/projection/types";
+import type { Entity, LayerSort, LayerSpec } from "../../world/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { PixiContainer, PixiTexture, RendererCtx } from "../types";
 import type { ViewportApi, ViewportInternal } from "../viewport/types";

@@ -35,7 +35,7 @@ V1 and V2 are built. Everything below V2 is a plan and may change.
 | Milestone | State | Scope | Exit criterion |
 |---|---|---|---|
 | V1 | built | `time`, `lifecycle`, `model`, `clock`, `flow`, the `@moku-labs/game/testing` entry | A fixture game is played to the end headless |
-| V2 | built | `world`, `renderer`, `input`, `assets`, `scenes`, the `@moku-labs/game/assets-scan` entry | A board is visible and items merge by drag; the same game still plays to the end headless |
+| V2 | built | `world`, `renderer`, `input`, `assets`, `scenes`, the `@moku-labs/game/assets` entry | A board is visible and items merge by drag; the same game still plays to the end headless |
 | V3 | planned | `anim`, `i18n`, `audio`, `text`, `ui` | Popup, HUD and buttons with sound |
 | V4 | planned | `/inspect` and `/control` entries | External tools can read and drive a game |
 | V5 | planned | `effects`, production mode of `assets`, visual test helpers | Not defined yet |
@@ -239,7 +239,7 @@ Seven plugins are on every app; the five screen plugins are the list `screen` a 
 | [`world`](./src/plugins/world/README.md) | Very Complex | A zero-dependency ECS (`ecs`) and the projection from committed state to entities (`projection`): keyed reconcile of one `view(item)` function, retarget motions, a despawn queue, named layers | `ecs.spawn(owner, components)`, `ecs.query(...Components)`, `ecs.system(def)`, `ecs.set(entity, Component, patch)`, `ecs.changed(Component)`, `ecs.snapshot()`, `ecs.mode()`, `projection.mount(names, owner)`, `projection.setLayers(list)`, `projection.settle(entity)`, `projection.keyOf(entity)`, `projection.entityOf(projection, key)` |
 | [`renderer`](./src/plugins/renderer/README.md) | Very Complex | The Pixi v8 host loaded lazily (`host`), one `sync` system that owns every display object, the reference viewport of short side 1080 (`viewport`) | `host.ready()`, `host.kind()`, `host.canvas()`, `sync.hitTest(x, y, accept)`, `sync.textures.provide(fn)`, `sync.displayOf(entity)`, `viewport.toReference(x, y)`, `viewport.size()` |
 | [`input`](./src/plugins/input/README.md) | Standard | Gestures as data components: `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`; the drop target names the intent that reaches `flow.gate` | `tap(target)`, `press(target)`, `drag(from, to)`, `swipe(target, direction)` |
-| [`assets`](./src/plugins/assets/README.md) | Complex | The manifest, five load tiers, graph-driven preload, a texture budget with LRU unload; typed keys from the `assets-scan` entry | `load(bundle)`, `unload(bundle)`, `isLoaded(bundle)`, `texture(key)`, `usage()` |
+| [`assets`](./src/plugins/assets/README.md) | Complex | The manifest, five load tiers, graph-driven preload, a texture budget with LRU unload; typed keys from the `assets` entry | `load(bundle)`, `unload(bundle)`, `isLoaded(bundle)`, `texture(key)`, `usage()` |
 | [`scenes`](./src/plugins/scenes/README.md) | Standard | A scene as a declaration: bundle, layers, projections. A node names its scene; the runner switches through `flow.onEnter` | `current()` |
 
 ```mermaid
