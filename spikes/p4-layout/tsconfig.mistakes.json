@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["mistakes.tsx", "ui/*.ts", "styles.ts"],
+  "exclude": ["node_modules"]
+}

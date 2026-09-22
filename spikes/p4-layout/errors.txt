@@ -1,0 +1,6 @@
+mistakes.tsx(9,6): error TS2741: Property 'style' is missing in type '{ key: string; }' but required in type 'BoxProps'.
+mistakes.tsx(11,47): error TS2322: Type 'number' is not assignable to type 'string'.
+mistakes.tsx(13,6): error TS2741: Property 'texture' is missing in type '{ key: string; style: { width: number; height: number; }; }' but required in type 'ImageProps'.
+mistakes.tsx(15,62): error TS2322: Type 'number' is not assignable to type 'string'.
+mistakes.tsx(17,44): error TS2322: Type '{ key: string; style: { grow: number; }; content: string; }' is not assignable to type 'ListProps'.
+  Property 'content' does not exist on type 'ListProps'.
