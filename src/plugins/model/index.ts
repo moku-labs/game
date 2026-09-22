@@ -4,6 +4,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { createRngApi, createRngView } from "./rng/api";
 import { createModelState } from "./state";
@@ -35,7 +36,8 @@ const config: Config = {
  */
 export const modelPlugin = /*#__PURE__*/ createPlugin("model", {
   config,
-  events: register => register.map<Events>({ "model:committed": "Committed state changed" }),
+  events: (register: RegisterFunction) =>
+    register.map<Events>({ "model:committed": "Committed state changed" }),
   createState: createModelState,
   api: ctx => ({ store: createStoreApi(ctx, { createRngView }), rng: createRngApi(ctx) }),
   // @no-resource-check — onStop flushes the player provider.

@@ -98,15 +98,11 @@ export type Api = RunnerApi & { gate: GateApi; inbox: InboxApi; fx: FxApi; featu
 export type Deps = { time: TimeApi; model: ModelApi; clock: ClockApi };
 
 /**
- * What the kernel context offers before the deps are attached.
- * `emit` is one plain method overload per event on purpose: `flow` has dependencies with events,
- * and both a property-typed and a generic `emit` break the kernel's event inference when a
- * factory is passed to `createPlugin` by direct reference (`api`, `hooks`, `onInit`, `onStart`).
+ * What the kernel context offers before the deps are attached. `emit` is the kernel's: `index.ts`
+ * writes `events` with an annotated `register` (core spec `14` row 8), so the own events reach a
+ * factory passed by direct reference (`api`, `hooks`, `onInit`, `onStart`).
  */
-export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(name: "flow:edge", payload: Events["flow:edge"]): void;
-  emit(name: "flow:rest", payload: Events["flow:rest"]): void;
-  emit(name: "flow:error", payload: Events["flow:error"]): void;
+export type KernelSlice = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;

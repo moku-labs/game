@@ -4,6 +4,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
@@ -40,7 +41,7 @@ const config: Config = {
 export const assetsPlugin = /*#__PURE__*/ createPlugin("assets", {
   depends: [flowPlugin, rendererPlugin, timePlugin],
   config,
-  events: register =>
+  events: (register: RegisterFunction) =>
     register.map<Events>({
       "assets:bundle-loaded": "Every file of a bundle is a texture now",
       "assets:bundle-unloaded": "The textures of a bundle were destroyed"

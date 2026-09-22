@@ -232,6 +232,48 @@ export default [
     }
   },
 
+  // 6b3. L9 — the JSX runtime module is reached only through the two entry files, and they
+  // import nothing else.
+  {
+    files: ["src/**/*.ts"],
+    ignores: [
+      "src/jsx-runtime.ts",
+      "src/jsx-dev-runtime.ts",
+      "src/plugins/ui/**",
+      "src/**/__tests__/**"
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/ui/jsx/runtime", "./runtime", "../jsx/runtime"],
+              message:
+                "The JSX runtime is reached through src/jsx-runtime.ts and src/jsx-dev-runtime.ts only."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    files: ["src/jsx-runtime.ts", "src/jsx-dev-runtime.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              regex: String.raw`^(?!\./plugins/ui/jsx/runtime$).*`,
+              message: "An entry file re-exports the runtime and nothing else."
+            }
+          ]
+        }
+      ]
+    }
+  },
+
   // 6c. L2 + L5 — no static Pixi or Yoga import; no module-scope state.
   {
     files: ["src/**/*.ts"],
@@ -276,7 +318,8 @@ export default [
       "src/plugins/flow/*/**/*.ts",
       "src/plugins/world/*/**/*.ts",
       "src/plugins/renderer/*/**/*.ts",
-      "src/plugins/anim/*/**/*.ts"
+      "src/plugins/anim/*/**/*.ts",
+      "src/plugins/ui/*/**/*.ts"
     ],
     ignores: ["src/**/__tests__/**"],
     rules: {
@@ -285,12 +328,12 @@ export default [
         {
           patterns: [
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline)/(?!types$)`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline|jsx|styles|layout)/(?!types$)`,
               message:
                 "Modules do not import each other's run-time code. index.ts injects sibling APIs."
             },
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline)/types$`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline|jsx|styles|layout)/types$`,
               allowTypeImports: true,
               message: "Import a sibling module's types with `import type` only."
             }
@@ -367,7 +410,7 @@ export default [
 
   // 7. Test files: relaxed rules
   {
-    files: ["tests/**/*.ts", "src/plugins/**/__tests__/**/*.ts"],
+    files: ["tests/**/*.{ts,tsx}", "src/plugins/**/__tests__/**/*.{ts,tsx}"],
     rules: {
       "jsdoc/require-jsdoc": "off",
       "jsdoc/require-description": "off",

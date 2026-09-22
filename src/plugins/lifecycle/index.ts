@@ -3,6 +3,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { timePlugin } from "../time";
 import { createLifecycleApi } from "./api";
@@ -23,7 +24,7 @@ import type { Events } from "./types";
  */
 export const lifecyclePlugin = /*#__PURE__*/ createPlugin("lifecycle", {
   depends: [timePlugin],
-  events: register =>
+  events: (register: RegisterFunction) =>
     register.map<Events>({ "lifecycle:changed": "The pause reason stack changed" }),
   createState: createLifecycleState,
   api: createLifecycleApi

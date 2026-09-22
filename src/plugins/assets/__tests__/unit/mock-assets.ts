@@ -353,9 +353,9 @@ export function createMockAssets(
   const ctx: KernelSlice = {
     config,
     state,
-    emit: ((name: string, payload: unknown): void => {
+    emit: (name: string, payload: unknown): void => {
       emitted.push({ name, payload });
-    }) as unknown as KernelSlice["emit"],
+    },
     global: {},
     log,
     require: ((plugin: { name: string }): unknown => apis[plugin.name]) as unknown as Require

@@ -17,6 +17,7 @@ export { rendererPlugin } from "./renderer";
 export { scenesPlugin } from "./scenes";
 export { textPlugin } from "./text";
 export { timePlugin } from "./time";
+export { uiPlugin } from "./ui";
 export { worldPlugin } from "./world";
 
 // ─── Plugin Types (namespace re-exports) ─────────────────────
@@ -34,4 +35,5 @@ export * as Scenes from "./scenes/types";
 // `Text` is the component exported from the root, so the type namespace takes a longer name.
 export * as TextTypes from "./text/types";
 export * as Time from "./time/types";
+export * as Ui from "./ui/types";
 export * as World from "./world/types";

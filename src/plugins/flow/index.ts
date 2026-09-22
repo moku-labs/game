@@ -4,6 +4,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { clockPlugin } from "../clock";
 import { lifecyclePlugin } from "../lifecycle";
@@ -42,7 +43,7 @@ export const flowPlugin = /*#__PURE__*/ createPlugin("flow", {
   // lifecyclePlugin: no API is required; the edge types the `lifecycle:changed` hook (spec/07 §5).
   depends: [timePlugin, lifecyclePlugin, modelPlugin, clockPlugin],
   config,
-  events: register =>
+  events: (register: RegisterFunction) =>
     register.map<Events>({
       "flow:edge": "An edge was taken and its state committed",
       "flow:rest": "The graph reached a rest node",

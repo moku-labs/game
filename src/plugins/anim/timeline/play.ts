@@ -97,7 +97,7 @@ function endTimeline(actx: AnimCtx, running: RunningTimeline, finished: boolean)
 
   for (const entity of running.entities) countPlaying(actx.deps.world.ecs, entity, -1);
 
-  if (finished) actx.send("anim:finished", { animation: running.animation });
+  if (finished) actx.emit("anim:finished", { animation: running.animation });
 
   running.resolve();
 }

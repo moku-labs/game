@@ -237,17 +237,6 @@ export type Events = {
 };
 
 /**
- * How this plugin sends its one event. The single emit site narrows the kernel's `emit` to it.
- *
- * @example
- * ```ts
- * const emit: EmitChanged = (name, payload) => bus.send(name, payload);
- * emit("scenes:changed", { from: "home", to: "board", music: "board.theme" });
- * ```
- */
-export type EmitChanged = (name: "scenes:changed", payload: Events["scenes:changed"]) => void;
-
-/**
  * scenes plugin API, `app.scenes`. A scene is switched by the graph, never by a call, so the
  * plugin answers one question and takes no orders.
  *
@@ -280,13 +269,11 @@ export type Deps = { flow: FlowApi; world: WorldApi; assets: AssetsApi; time: Ti
 /**
  * What the kernel context offers before the deps are attached.
  *
- * `emit` is declared as the kernel's own, unusable shape on purpose: core 1.7 leaves a plugin's
- * own events out of the context it hands the factories as soon as `depends` is declared, so a
- * scenes-typed `emit` here would make every factory unassignable. `switch.ts` narrows this one
- * member to `EmitChanged`; nothing else about the context is cast.
+ * `index.ts` writes `events` with an annotated `register` (core spec `14-EVENT-REGISTRATION.md`
+ * row 8), so the own event reaches the context the kernel hands the factories and `emit` is the
+ * kernel's own, scenes-typed one. No member of the context is cast.
  */
-export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(...args: never[]): void;
+export type KernelSlice = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;

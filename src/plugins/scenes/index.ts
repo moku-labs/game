@@ -4,6 +4,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
@@ -31,7 +32,8 @@ import type { Events } from "./types";
  */
 export const scenesPlugin = /*#__PURE__*/ createPlugin("scenes", {
   depends: [flowPlugin, worldPlugin, assetsPlugin, timePlugin],
-  events: register => register.map<Events>({ "scenes:changed": "The mounted scene changed" }),
+  events: (register: RegisterFunction) =>
+    register.map<Events>({ "scenes:changed": "The mounted scene changed" }),
   createState: createScenesState,
   api: createScenesApi,
   onStart: startScenes,

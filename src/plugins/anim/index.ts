@@ -5,6 +5,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
@@ -42,7 +43,7 @@ export const animPlugin = /*#__PURE__*/ createPlugin("anim", {
   // step writes and the `Transform` `at` reads belong to a plugin that is already there.
   depends: [timePlugin, flowPlugin, worldPlugin, rendererPlugin],
   config,
-  events: register =>
+  events: (register: RegisterFunction) =>
     register.map<Events>({
       "anim:mark": "A mark of a timeline was reached",
       "anim:finished": "A timeline ended"

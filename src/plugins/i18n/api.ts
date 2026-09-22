@@ -6,7 +6,7 @@
 import { createIntlKit } from "./intl";
 import { loadLocale, notLoaded, notRegistered } from "./lifecycle";
 import { mergeParts, missingParts, resolve } from "./messages";
-import type { EmitLocaleChanged, I18nApi, I18nCtx, IntlKit, Message, Part, State } from "./types";
+import type { I18nApi, I18nCtx, IntlKit, Message, Part, State } from "./types";
 
 /**
  * Answers the formatter kit of one locale, building it on first use.
@@ -111,11 +111,7 @@ async function setLocale(ctx: I18nCtx, locale: string): Promise<void> {
   const chain = runAfter(ctx.state.loading, async () => {
     await loadLocale(ctx.state, locale);
     ctx.state.locale = locale;
-
-    // The one narrowing of the plugin: see the note on `I18nCtx`. Only `emit` is cast.
-    const emit = ctx.emit as EmitLocaleChanged;
-
-    emit("i18n:locale-changed", { locale });
+    ctx.emit("i18n:locale-changed", { locale });
   });
 
   ctx.state.loading = chain.then(ignore, ignore);

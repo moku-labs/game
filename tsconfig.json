@@ -14,9 +14,13 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "types": ["bun"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "@moku-labs/game",
     "paths": {
       "@moku-labs/game": ["./src/index.ts"],
-      "@moku-labs/game/testing": ["./src/testing.ts"]
+      "@moku-labs/game/testing": ["./src/testing.ts"],
+      "@moku-labs/game/jsx-runtime": ["./src/jsx-runtime.ts"],
+      "@moku-labs/game/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
     }
   },
   "include": ["src", "tests", "declarations.d.ts", "*.config.ts"]

@@ -88,9 +88,9 @@ export function createMockI18n(config: Partial<Config> = {}): MockI18n {
   const ctx: I18nCtx = {
     config: configOf(config),
     state,
-    emit: ((name: string, payload: unknown): void => {
+    emit: (name: string, payload: unknown): void => {
       emitted.push({ name, payload });
-    }) as unknown as I18nCtx["emit"],
+    },
     global: {},
     log,
     require: ((plugin: { name: string }): unknown => apis[plugin.name]) as unknown as Require

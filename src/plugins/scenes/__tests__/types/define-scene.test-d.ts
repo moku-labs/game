@@ -3,7 +3,7 @@ import { createPlugin } from "../../../../config";
 import { projection } from "../../../../index";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
-import type { DefineScene, Events, SceneDefinition } from "../../types";
+import type { DefineScene, Events, KernelSlice, SceneDefinition } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -135,3 +135,14 @@ createPlugin("sceneMusic", {
     }
   })
 });
+
+// The own event reaches the plugin context: `emit` is the kernel's, typed with scenes' event map.
+declare const scenesCtx: KernelSlice;
+
+expectTypeOf(scenesCtx.emit).parameter(0).toEqualTypeOf<"scenes:changed">();
+
+// @ts-expect-error — an empty object is not a `scenes:changed` payload
+scenesCtx.emit("scenes:changed", {});
+
+// @ts-expect-error — `to` is a scene id, not a number
+scenesCtx.emit("scenes:changed", { from: "home", to: 7, music: undefined });

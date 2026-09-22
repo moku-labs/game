@@ -349,12 +349,9 @@ export type Deps = {
 /**
  * What the kernel context offers before the deps are attached.
  *
- * `emit` is declared as the kernel's own, unusable shape on purpose: `text` owns no event, and a
- * property-typed `emit` breaks the kernel's event inference when a factory is passed to
- * `createPlugin` by direct reference.
+ * `text` owns no event, so `emit` is the kernel's and never called here.
  */
-export type KernelSlice = Omit<PluginCtx<Config, State>, "emit"> & {
-  emit(...args: never[]): void;
+export type KernelSlice = PluginCtx<Config, State> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;

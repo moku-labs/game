@@ -74,31 +74,13 @@ export type Api = { ecs: EcsApi; projection: ProjectionApi };
 export type Deps = { time: TimeApi; model: ModelApi; flow: FlowApi };
 
 /**
- * How this plugin sends its one event. The single emit site narrows the kernel's `emit` to it.
- *
- * @example
- * ```ts
- * const emit: EmitReconciled = (name, payload) => bus.send(name, payload);
- * emit("world:reconciled", { mode: "play", projections: 1, entered: 0, changed: 1, exited: 1,
- *   revived: 0, queued: 1, hintsRouted: 1, hintsDropped: 0 });
- * ```
- */
-export type EmitReconciled = (
-  name: "world:reconciled",
-  payload: Events["world:reconciled"]
-) => void;
-
-/**
  * What the kernel context offers before the deps are attached.
  *
- * `emit` is declared as the kernel's own, unusable shape on purpose: core 1.7 leaves a plugin's
- * own event out of the context it hands the factories as soon as `depends` is declared, so
- * `MergedPluginEvents` carries the dependency events only and a world-typed `emit` here would make
- * every factory unassignable. `projection/reconcile.ts` narrows this one member to
- * `EmitReconciled`; nothing else about the context is cast.
+ * `index.ts` writes `events` with an annotated `register` (core spec `14-EVENT-REGISTRATION.md`
+ * row 8), so the own event reaches the context the kernel hands the factories and `emit` is the
+ * kernel's own, world-typed one. No member of the context is cast.
  */
-export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(...args: never[]): void;
+export type KernelSlice = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;

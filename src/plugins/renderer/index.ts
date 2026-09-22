@@ -5,6 +5,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
@@ -45,7 +46,7 @@ const config: Config = {
 export const rendererPlugin = /*#__PURE__*/ createPlugin("renderer", {
   depends: [timePlugin, lifecyclePlugin, worldPlugin],
   config,
-  events: register =>
+  events: (register: RegisterFunction) =>
     register.map<Events>({
       "renderer:device-lost": "The GPU device or context was lost; the game is paused"
     }),

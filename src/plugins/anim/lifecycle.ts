@@ -1,5 +1,5 @@
 /**
- * @file anim plugin — lifecycle functions: the dependency resolution and the narrowed `emit`, the
+ * @file anim plugin — lifecycle functions: the dependency resolution, the
  * runtime the timelines reach the engine through, the one frame step registered in `onInit`, the
  * driver and the `play` handler opened in `onStart`, and the teardown that closes exactly what
  * was opened.
@@ -24,7 +24,6 @@ import { createDriver, startStepTrack } from "./tween/driver";
 import type {
   AnimCtx,
   AnyAnimationDefinition,
-  EmitAnim,
   KernelSlice,
   SlotRecord,
   State,
@@ -65,8 +64,7 @@ function asError(error: unknown): Error {
 }
 
 /**
- * Resolves the dependency APIs `time`, `flow` and `world`, and narrows the kernel's `emit` to the
- * two events this plugin owns.
+ * Resolves the dependency APIs `time`, `flow` and `world` onto the kernel context.
  *
  * @param ctx - Kernel context of the anim plugin.
  * @returns The domain context of the anim plugin.
@@ -78,9 +76,7 @@ export function withDeps(ctx: KernelSlice): AnimCtx {
       time: ctx.require(timePlugin),
       flow: ctx.require(flowPlugin),
       world: ctx.require(worldPlugin)
-    },
-    // The one narrowing of the plugin: see the note on `KernelSlice`. Only `emit` is cast.
-    send: ctx.emit as EmitAnim
+    }
   };
 }
 
@@ -93,7 +89,7 @@ export function withDeps(ctx: KernelSlice): AnimCtx {
  * @param mark - Name of the mark.
  */
 function reportMark(actx: AnimCtx, animation: string, mark: string): void {
-  actx.send("anim:mark", { animation, mark });
+  actx.emit("anim:mark", { animation, mark });
 
   // eslint-disable-next-line unicorn/no-useless-spread -- a listener may remove itself
   for (const listener of [...actx.state.markListeners]) {

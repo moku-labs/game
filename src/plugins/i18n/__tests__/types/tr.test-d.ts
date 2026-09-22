@@ -2,7 +2,7 @@ import { expectTypeOf } from "vitest";
 import { createPlugin } from "../../../../config";
 import { i18nPlugin } from "../../index";
 import { i18nFor, tr as looseTr } from "../../tr";
-import type { ElementNode, Events, Message } from "../../types";
+import type { ElementNode, Events, I18nCtx, Message } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -64,6 +64,18 @@ tr("hud.coins", { n: 25 });
 
 expectTypeOf(looseTr("anything", { n: 3 })).toEqualTypeOf<Message>();
 looseTr("anything");
+
+// ─── the own event reaches the plugin context ─────────────────
+
+// `emit` is the kernel's, typed with i18n's event map: no narrowing, no cast.
+declare const i18nCtx: I18nCtx;
+
+expectTypeOf(i18nCtx.emit).parameter(0).toEqualTypeOf<"i18n:locale-changed">();
+
+i18nCtx.emit("i18n:locale-changed", { locale: "en" });
+
+// @ts-expect-error — the payload of "i18n:locale-changed" is { locale: string }, not a number.
+i18nCtx.emit("i18n:locale-changed", { locale: 1 });
 
 // ─── the event a plugin above hooks ───────────────────────────
 
