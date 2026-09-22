@@ -7,7 +7,7 @@
  * and a JSX element carries only what `ui` writes on it.
  */
 import type { Flow, World } from "@moku-labs/game";
-import { component, Text, Transform } from "@moku-labs/game";
+import { component, Order, Text, Transform } from "@moku-labs/game";
 import { projection } from "../../kit";
 import type { Player } from "../../state";
 import { barItemHeight, barPadding } from "./styles";
@@ -92,7 +92,9 @@ export const hudCoins = projection({
       bind: { component: "Counter", field: "value" },
       anchor: { x: 0, y: 0 }
     }),
-    Transform({ x: at.x, y: at.y })
+    Transform({ x: at.x, y: at.y }),
+    // Above the bar of the HUD, which shares the `ui` layer and is drawn after the counter spawns.
+    Order({ value: 1 })
   ],
   motion: { change: { Counter: rollCoins } }
 });

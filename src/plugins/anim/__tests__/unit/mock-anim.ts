@@ -78,7 +78,7 @@ function createMockLog(): Log.LogApi {
  */
 export function createMockAnim(options: Partial<Config> = {}): MockAnim {
   const config: Config = { maxTracks: 2000, ...options };
-  const state = createAnimState({ global: {}, config });
+  const state = createAnimState({ config });
   const log = createMockLog();
   const emitted: Array<{ name: string; payload: unknown }> = [];
   const dispatched: Array<Descriptor | Hint> = [];
@@ -140,7 +140,7 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
   } as unknown as FlowApi;
 
   const worldConfig = { settleMs: 350, reconciledEvent: false };
-  const worldState = createWorldState({ global: {}, config: worldConfig });
+  const worldState = createWorldState({ config: worldConfig });
   const worldApis: Record<string, unknown> = { time: timeApi, model: modelApi, flow: flowApi };
   const worldCtx: WorldKernelSlice = {
     config: worldConfig,

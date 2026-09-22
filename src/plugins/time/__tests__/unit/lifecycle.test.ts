@@ -4,7 +4,6 @@ import { createTimeState } from "../../state";
 import type { Config } from "../../types";
 
 const config: Config = { maxFps: 60, maxDeltaMs: 50, idleFps: 30, idleAfterMs: 2000 };
-const global = { orientation: "portrait", referenceSide: 1080 };
 
 // ─── stopLoop, the onStop of the plugin ───────────────────────
 
@@ -15,7 +14,7 @@ describe("stopLoop", () => {
 
   it("cancels the pending frame and forgets the frame source", () => {
     const cancel = vi.fn();
-    const state = createTimeState({ global, config });
+    const state = createTimeState({ config });
 
     vi.stubGlobal("cancelAnimationFrame", cancel);
     state.rafId = 7;
@@ -31,7 +30,7 @@ describe("stopLoop", () => {
 
   it("cancels nothing when the loop never started, as in plain Bun", () => {
     const cancel = vi.fn();
-    const state = createTimeState({ global, config });
+    const state = createTimeState({ config });
 
     vi.stubGlobal("cancelAnimationFrame", cancel);
     stopLoop(state);

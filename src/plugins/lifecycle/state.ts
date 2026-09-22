@@ -8,13 +8,9 @@ import type { Config, State } from "./types";
  * order without duplicates.
  *
  * @param _ctx - Minimal context.
- * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns A fresh state, owned by one app.
  */
-export function createLifecycleState(_ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createLifecycleState(_ctx: { readonly config: Readonly<Config> }): State {
   return { reasons: [] };
 }

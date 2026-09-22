@@ -370,6 +370,7 @@ export async function compileStrings(
   out: string,
   options: CompileOptions = {}
 ): Promise<CompileReport> {
+  // Collect every message from the string tables of every feature.
   const walk: Walk = {
     byLocale: emptyLocales(),
     owner: emptyOwners(),
@@ -393,13 +394,16 @@ export async function compileStrings(
     }
   }
 
+  // Fail once, with every problem the walk found.
   if (walk.problems.length > 0) throw collected(walk.problems);
 
+  // Derive the locales and the keys. Without a locale there is nothing to emit.
   const locales = [...walk.byLocale.keys()].toSorted();
   const keys = [...walk.owner.keys()].toSorted();
 
   if (locales.length === 0) return { changed: false, locales, keys, notes: [] };
 
+  // Build the types module and one module per locale.
   const write = options.check !== true;
   const outputs = [
     { file: path.join(out, "strings.ts"), text: emitTypes(typeEntries(walk)) },
@@ -410,6 +414,7 @@ export async function compileStrings(
   ];
   let changed = false;
 
+  // Write the modules whose text changed. A check run writes nothing.
   for (const output of outputs) {
     changed = (await writeIfChanged(output.file, output.text, write)) || changed;
   }

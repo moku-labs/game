@@ -21,17 +21,24 @@ import type {
  *
  * @param name - Storage name, unique per world.
  * @param defaults - Every field with its default value. Plain JSON only.
+ * @param options - The fields a plugin owns: a projection view neither writes nor corrects them.
+ * @param options.owned - Names of the owned fields.
  * @returns A callable component type.
  * @example
  * ```ts
  * const Item = component("Item", { kind: "", level: 1 });
  * Item({ level: 2 }); // { type: Item, value: { kind: "", level: 2 } }
  * Item({ level: 2 }).type.componentName; // "Item", the storage key
+ *
+ * // A caption whose drawn string is written by the plugin that draws it.
+ * const Caption = component("Caption", { text: "", shown: "" }, { owned: ["shown"] });
+ * Caption.owned; // ["shown"]
  * ```
  */
 export function component<Value extends object>(
   name: string,
-  defaults: Value
+  defaults: Value,
+  options: { owned?: ReadonlyArray<keyof Value & string> } = {}
 ): ComponentType<Value> {
   const frozenDefaults: Readonly<Value> = Object.freeze({ ...defaults });
 
@@ -41,7 +48,8 @@ export function component<Value extends object>(
   const componentType: ComponentType<Value> = Object.assign(make, {
     componentName: name,
     defaults: frozenDefaults,
-    kind: "component"
+    kind: "component",
+    owned: Object.freeze([...(options.owned ?? [])])
   } as const);
 
   return componentType;

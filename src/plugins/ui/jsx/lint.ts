@@ -2,7 +2,7 @@
  * @file ui/jsx — `lint()`: three rules read off the live screen. It never throws and answers an
  * empty list when nothing is mounted.
  */
-import type { Message } from "../../i18n/types";
+import type { Message, Part } from "../../i18n/types";
 import { Tappable } from "../../input/components";
 import { LocalWrite } from "../components";
 import type { UiCtx } from "../types";
@@ -49,7 +49,24 @@ function tapTarget(ctx: UiCtx, element: Element, scale: number): Finding | undef
 }
 
 /**
- * Measures a text in every registered locale and reports the widest one that does not fit.
+ * Formats a message in one locale, when that locale can be read now.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param message - The message of the text.
+ * @param locale - A registered locale.
+ * @returns The parts, or `undefined` while the locale is registered but not loaded yet.
+ */
+function formatIfLoaded(ctx: UiCtx, message: Message, locale: string): readonly Part[] | undefined {
+  try {
+    return ctx.deps.i18n.format(message, locale);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Measures a text in every loaded locale and reports the widest one that does not fit. A lazy
+ * locale the player has not picked yet cannot be measured, so it is skipped.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The text element.
@@ -64,7 +81,10 @@ function textOverflow(ctx: UiCtx, element: Element): Finding | undefined {
   if (typeof content !== "object" || content === null) return undefined;
 
   for (const locale of ctx.deps.i18n.locales()) {
-    const parts = ctx.deps.i18n.format(content as Message, locale);
+    const parts = formatIfLoaded(ctx, content as Message, locale);
+
+    if (parts === undefined) continue;
+
     const joined = parts.map(part => (part.kind === "text" ? part.text : "")).join("");
     const size = ctx.deps.text.measure(joined, style);
 

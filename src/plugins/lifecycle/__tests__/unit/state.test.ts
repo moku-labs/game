@@ -3,19 +3,18 @@ import { createLifecycleState } from "../../state";
 import type { Config } from "../../types";
 
 const config: Config = {};
-const global = { orientation: "portrait", referenceSide: 1080 };
 
 // ─── createLifecycleState ─────────────────────────────────────
 
 describe("createLifecycleState", () => {
   it("starts with an empty stack of pause reasons", () => {
-    const state = createLifecycleState({ global, config });
+    const state = createLifecycleState({ config });
 
     expect(state).toEqual({ reasons: [] });
   });
 
   it("hands out a writable stack, so the api can push onto it", () => {
-    const state = createLifecycleState({ global, config });
+    const state = createLifecycleState({ config });
 
     state.reasons.push("devtools");
 
@@ -23,8 +22,8 @@ describe("createLifecycleState", () => {
   });
 
   it("gives every app its own stack", () => {
-    const first = createLifecycleState({ global, config });
-    const second = createLifecycleState({ global, config });
+    const first = createLifecycleState({ config });
+    const second = createLifecycleState({ config });
 
     first.reasons.push("background");
 

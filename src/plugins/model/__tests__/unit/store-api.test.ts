@@ -40,7 +40,7 @@ const setup = (options: { provider?: MemoryProvider; config?: Partial<Config> } 
     migrations: [],
     ...options.config
   };
-  const state = createModelState({ global: {}, config });
+  const state = createModelState({ config });
   const emit = vi.fn();
   const log = createMockLog();
   const ctx: ModelCtx = { config, emit, global: {}, log, state };

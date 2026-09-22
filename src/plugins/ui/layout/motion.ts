@@ -38,11 +38,9 @@ export function restTransform(
  * icon, a nine-slice for a sliced panel, the text for a text, a rounded rectangle otherwise.
  *
  * @param element - The element whose rect is known.
- * @returns The component and the value to record, or `undefined` when the element draws nothing.
+ * @returns The component and the value to record.
  */
-function restVisual(
-  element: Element
-): { component: ComponentType<object>; value: object } | undefined {
+function restVisual(element: Element): { component: ComponentType<object>; value: object } {
   const { style, rect, type, node } = element;
   const alpha = style.alpha ?? 1;
 
@@ -67,15 +65,13 @@ function restVisual(
     };
   }
 
-  if (!drawsShape(element)) return undefined;
-
   return {
     component: Shape as unknown as ComponentType<object>,
     value: {
       ...Shape.defaults,
       w: rect.w,
       h: rect.h,
-      alpha,
+      alpha: showsShape(element) ? alpha : 0,
       fill: style.fill ?? Shape.defaults.fill,
       radius: style.radius ?? 0,
       stroke: style.stroke ?? Shape.defaults.stroke,
@@ -98,12 +94,13 @@ function textureOf(props: Record<string, unknown>): string {
 }
 
 /**
- * Tells whether an element is drawn as a rounded rectangle.
+ * Tells whether the rounded rectangle of an element is visible. A container with no fill and no
+ * stroke still carries one, invisible, so its children have a display object to hang under.
  *
  * @param element - The element to ask about.
  * @returns True for a button, a plain panel, a scroll container and a filled container.
  */
-function drawsShape(element: Element): boolean {
+function showsShape(element: Element): boolean {
   if (element.type === "button" || element.type === "panel" || element.type === "scroll") {
     return true;
   }
@@ -125,8 +122,6 @@ export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined
   projection.setRest(element.entity, Transform, restTransform(element.rect, parent));
 
   const visual = restVisual(element);
-
-  if (visual === undefined) return;
 
   projection.setRest(element.entity, visual.component, visual.value);
 }

@@ -379,7 +379,8 @@ export async function startUiApp() {
     ],
     pluginConfigs: {
       flow: { mainFlow: main },
-      i18n: { locale: "en", fallback: "en" },
+      // `de` is registered and never loaded: a lazy locale a game ships and the player never picks.
+      i18n: { locale: "en", fallback: "en", locales: { de: () => Promise.resolve(english) } },
       model: { initialPlayer: { coins: 7, tab: "audio" }, initialSession: { visits: 0 }, seed: 1 }
     }
   });

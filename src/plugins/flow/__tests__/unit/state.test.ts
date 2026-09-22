@@ -7,7 +7,7 @@ import { createTestConfig } from "./mock-kernel";
 // ---------------------------------------------------------------------------
 
 const build = (): ReturnType<typeof createFlowState> =>
-  createFlowState({ global: {}, config: createTestConfig() });
+  createFlowState({ config: createTestConfig() });
 
 describe("createFlowState", () => {
   it("composes one branch per module", () => {

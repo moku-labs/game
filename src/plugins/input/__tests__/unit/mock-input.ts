@@ -156,7 +156,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     swipeMaxMs: 300,
     ...options
   };
-  const state = createInputState({ global: {}, config });
+  const state = createInputState({ config });
   const log = createMockLog();
   const frames: FrameRegistration[] = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };

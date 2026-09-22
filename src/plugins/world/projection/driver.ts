@@ -16,6 +16,24 @@ function noFields(): Set<string> {
   return new Set();
 }
 
+/**
+ * Joins the fields a driver holds and the fields a plugin owns, for the same L5 reason.
+ *
+ * @param driven - The fields a running driver holds, if any.
+ * @param owned - The fields the component type gives to a plugin.
+ * @returns Both, as one set.
+ * @example
+ * ```ts
+ * joinFields(new Set(["x"]), ["resolved"]); // Set { "x", "resolved" }
+ * ```
+ */
+function joinFields(
+  driven: ReadonlySet<string> | undefined,
+  owned: readonly string[]
+): Set<string> {
+  return new Set([...(driven ?? []), ...owned]);
+}
+
 /** A handle for a motion that is already done. */
 const INERT: MotionHandle = {
   finish: (): void => {},
@@ -37,7 +55,8 @@ export function inertHandle(): MotionHandle {
 }
 
 /**
- * The fields another writer owns on one component of one entity.
+ * The fields another writer owns on one component of one entity: the fields a running driver
+ * holds, and the fields the component type gives to a plugin for good.
  *
  * @param pctx - Domain context of the projection module.
  * @param entity - The entity to ask about.
@@ -49,7 +68,12 @@ export function mutedFields(
   entity: Entity,
   name: string
 ): ReadonlySet<string> {
-  return pctx.ctx.state.projection.mutes.get(entity)?.get(name) ?? noFields();
+  const driven = pctx.ctx.state.projection.mutes.get(entity)?.get(name);
+  const owned = pctx.deps.ecs.typeOf(name)?.owned ?? [];
+
+  if (owned.length === 0) return driven ?? noFields();
+
+  return joinFields(driven, owned);
 }
 
 /**

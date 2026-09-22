@@ -11,8 +11,16 @@ import { boardCells, boardGenerators, boardItems } from "./projections";
 export const boardScene = defineScene("board", {
   bundle: "board",
   music: "board.theme",
-  layers: { background: {}, cells: {}, items: { sort: "y" }, lifted: {}, fx: {} },
-  // The `ui` layer is appended by `defineScene`, and the two HUD projections are mounted into it.
+  // The `ui` layer is declared, not appended, because it sorts by `Order`: the coin counter is its
+  // own projection and has to draw above the bar of the HUD, which is laid out after it.
+  layers: {
+    background: {},
+    cells: {},
+    items: { sort: "y" },
+    lifted: {},
+    fx: {},
+    ui: { sort: "order" }
+  },
   projections: [boardCells, boardItems, boardGenerators, hud, hudCoins]
 });
 

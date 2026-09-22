@@ -161,11 +161,11 @@ describe("screen-merge — the board as entities", () => {
       { name: "items", sort: "y" },
       { name: "lifted", sort: "none" },
       { name: "fx", sort: "none" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
-    // Nine cells, three items and the generator, which is drawn among the items, and the two
-    // projections of the HUD in the `ui` layer every scene carries.
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 2 });
+    // Nine cells, three items and the generator, which is drawn among the items. In the `ui` layer
+    // every scene carries: the two projections of the HUD and the root element of its markup.
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 3 });
     expect(app.world.projection.entityOf("board.cells", "c1_0")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
     expect(app.world.projection.entityOf("board.generators", generatorId)).toBeDefined();
@@ -223,7 +223,7 @@ describe("screen-merge — the board as entities", () => {
     expect(app.model.store.snapshot().player).toEqual(before);
     expect(app.world.projection.entityOf("board.items", "i2")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i3")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 2 });
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 3 });
 
     await app.stop();
   });
@@ -231,7 +231,7 @@ describe("screen-merge — the board as entities", () => {
   it("spawns one more item entity when the generator is tapped", async () => {
     const { app } = await startBoard(startingPlayer);
 
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 1, ui: 2 });
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 1, ui: 3 });
 
     const generator = app.world.projection.entityOf("board.generators", generatorId) ?? 0;
 
@@ -241,7 +241,7 @@ describe("screen-merge — the board as entities", () => {
     app.time.step(16);
 
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 2, ui: 2 });
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 2, ui: 3 });
 
     await app.stop();
   });

@@ -15,14 +15,10 @@ import type { Config, State } from "./types";
  *
  * @param _ctx - Minimal context. The flow state depends on nothing in it: the graph is entered by
  *   `run()`, not by the state factory.
- * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns The plugin state.
  */
-export function createFlowState(_ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createFlowState(_ctx: { readonly config: Readonly<Config> }): State {
   return {
     features: createFeaturesState(),
     fx: createFxState(),

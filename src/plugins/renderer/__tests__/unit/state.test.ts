@@ -16,7 +16,7 @@ const config: Config = {
 
 describe("renderer state", () => {
   it("starts with one empty branch per module", () => {
-    const state = createRendererState({ global: {}, config });
+    const state = createRendererState({ config });
 
     expect(state.host).toEqual({
       pixi: undefined,
@@ -41,8 +41,8 @@ describe("renderer state", () => {
   });
 
   it("gives every app its own collections", () => {
-    const first = createRendererState({ global: {}, config });
-    const second = createRendererState({ global: {}, config });
+    const first = createRendererState({ config });
+    const second = createRendererState({ config });
 
     first.sync.views.set(1, {
       object: {} as never,

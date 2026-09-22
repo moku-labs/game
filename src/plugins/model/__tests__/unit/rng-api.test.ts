@@ -30,7 +30,7 @@ const createMockCtx = (streams: Record<string, number>): ModelCtx => {
     schemaVersion: 1,
     migrations: []
   };
-  const state = createModelState({ global: {}, config });
+  const state = createModelState({ config });
   state.store.doc = { player: {}, rng: { seed: 7, streams } };
 
   return { config, emit: vi.fn(), global: {}, log: createMockLog(), state };

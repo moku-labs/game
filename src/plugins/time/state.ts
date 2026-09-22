@@ -8,14 +8,10 @@ import type { Config, State } from "./types";
  * with scale 1, not paused, not running, awake with an empty unscaled clock.
  *
  * @param _ctx - Minimal context.
- * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns A fresh state, owned by one app.
  */
-export function createTimeState(_ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createTimeState(_ctx: { readonly config: Readonly<Config> }): State {
   return {
     // The key order is the call order of a frame; `PHASES` in api.ts is the single source of it.
     callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },

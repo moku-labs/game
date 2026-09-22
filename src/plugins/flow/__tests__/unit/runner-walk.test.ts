@@ -149,7 +149,7 @@ const setup = (main: AnyFlow) => {
   const ctx: FlowCtx = {
     global: {},
     config,
-    state: createFlowState({ global: {}, config }),
+    state: createFlowState({ config }),
     emit: vi.fn(),
     log: createMockLog(),
     require: (plugin => {

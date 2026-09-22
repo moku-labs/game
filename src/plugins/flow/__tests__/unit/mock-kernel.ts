@@ -204,7 +204,7 @@ export function createMockKernel(): MockKernel {
 
   const ctx: KernelSlice = {
     config,
-    state: createFlowState({ global: {}, config }),
+    state: createFlowState({ config }),
     emit: vi.fn(),
     global: {},
     log: createMockLog(),
