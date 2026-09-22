@@ -3,17 +3,27 @@
  * engine creates, moves, sorts or destroys a Pixi node.
  */
 import { Layer, Order } from "../../world/ecs/define";
-import type { Entity } from "../../world/types";
-import { Display, NineSlice, Parent, Sprite, Transform } from "../components";
+import type { ComponentHandle, Entity } from "../../world/types";
+import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../components";
 import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
+import { provideDisplay, updateAdapterView } from "./adapters";
+import { installFont, isFontInstalled } from "./fonts";
 import { hitTest } from "./hit-test";
 import { clearLayers, resort, syncLayers } from "./layers";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { createSyncSystem } from "./system";
 import { createTexture, destroyTexture } from "./textures";
-import type { CreateTextureOptions, SyncCtx, SyncDeps, TextureProvider, View } from "./types";
+import type {
+  CreateTextureOptions,
+  DisplayAdapter,
+  SyncCtx,
+  SyncDeps,
+  TextureProvider,
+  View
+} from "./types";
 import {
   applyNineSlice,
+  applyShape,
   applySprite,
   applyTransform,
   attach,
@@ -24,6 +34,27 @@ import {
 
 /** Label of the container the viewport transform is written on. */
 const ROOT_LABEL = "renderer.root";
+
+/**
+ * Copies a change set, so a pass can clear it and still know what it took. It lives in its own
+ * non-exported function because lint rule L5 refuses a collection built inside an exported
+ * declaration.
+ *
+ * @param entities - The change set of the frame.
+ * @returns A copy of it.
+ */
+function copyOf(entities: ReadonlySet<Entity>): Set<Entity> {
+  return new Set(entities);
+}
+
+/**
+ * A fresh entity set, made in a function so the module-scope rule sees no collection literal.
+ *
+ * @returns An empty set.
+ */
+function emptyEntitySet(): Set<Entity> {
+  return new Set();
+}
 
 /**
  * Creates the sync module: the world hooks, the one system, the texture registry and the hit
@@ -70,43 +101,105 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Step 4: only the entities the frame really changed.
+   * Marks an entity whose view has to be built in the next pass. Nothing is collected while the
+   * renderer draws nothing, so an inert run keeps its change sets empty.
+   *
+   * @param entity - The entity a watched component appeared on.
    */
-  const applyChanges = (): void => {
+  const markAdded = (entity: Entity): void => {
+    if (state.root === undefined) return;
+
+    state.added.add(entity);
+  };
+
+  /**
+   * Marks an entity whose view has to go in the next pass.
+   *
+   * @param entity - The entity a watched component left.
+   */
+  const markRemoved = (entity: Entity): void => {
+    if (state.root === undefined) return;
+
+    state.removed.add(entity);
+  };
+
+  /**
+   * Step 4 for the components a plugin above draws its own way: one `update` per changed value.
+   *
+   * @param built - The entities this pass has just built, whose adapter wrote them already.
+   */
+  const applyAdapterChanges = (built: ReadonlySet<Entity>): void => {
     const ecs = ctx.deps.world.ecs;
 
+    for (const entry of state.adapters) {
+      for (const entity of ecs.changed(entry.component)) {
+        if (built.has(entity)) continue;
+
+        withView(entity, view => {
+          if (view.display === entry) updateAdapterView(sctx, entity, view);
+        });
+      }
+    }
+  };
+
+  /**
+   * Step 4: only the entities the frame really changed.
+   *
+   * @param built - The entities this pass has just built, which carry every value already.
+   */
+  const applyChanges = (built: ReadonlySet<Entity>): void => {
+    const ecs = ctx.deps.world.ecs;
+
+    /**
+     * Runs work on the view of an entity, unless this pass built it a moment ago.
+     *
+     * @param entity - The entity.
+     * @param work - What to do with its view.
+     */
+    const write = (entity: Entity, work: (view: View) => void): void => {
+      if (built.has(entity)) return;
+
+      withView(entity, work);
+    };
+
     for (const entity of ecs.changed(Transform)) {
-      withView(entity, view => {
+      write(entity, view => {
         applyTransform(sctx, entity, view);
         resort(sctx, entity, view);
       });
     }
 
     for (const entity of ecs.changed(Sprite)) {
-      withView(entity, view => applySprite(sctx, entity, view));
+      write(entity, view => applySprite(sctx, entity, view));
     }
 
     for (const entity of ecs.changed(NineSlice)) {
-      withView(entity, view => applyNineSlice(sctx, entity, view));
+      write(entity, view => applyNineSlice(sctx, entity, view));
     }
 
-    for (const entity of ecs.changed(Order)) withView(entity, view => resort(sctx, entity, view));
+    for (const entity of ecs.changed(Shape)) {
+      write(entity, view => applyShape(sctx, entity, view));
+    }
+
+    for (const entity of ecs.changed(Order)) write(entity, view => resort(sctx, entity, view));
 
     for (const entity of ecs.changed(Layer)) {
-      withView(entity, view => {
+      write(entity, view => {
         attach(sctx, entity, view);
         resort(sctx, entity, view);
       });
     }
 
     for (const entity of ecs.changed(Parent)) {
-      withView(entity, view => {
+      write(entity, view => {
         attach(sctx, entity, view);
         applyTransform(sctx, entity, view);
       });
     }
 
     for (const entity of ecs.changed(Display)) {
+      if (built.has(entity)) continue;
+
       guard(entity, () => {
         dropView(sctx, entity);
         createView(sctx, entity);
@@ -137,6 +230,19 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
+   * Takes the entities that are waiting to be built out of the change set.
+   *
+   * @returns The entities of this pass, so the change step skips what the build just wrote.
+   */
+  const takeAdded = (): ReadonlySet<Entity> => {
+    const built = copyOf(state.added);
+
+    state.added.clear();
+
+    return built;
+  };
+
+  /**
    * One pass: removed, layers, added, changed, invalidated.
    */
   const pass = (): void => {
@@ -145,10 +251,16 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     syncLayers(sctx);
 
-    for (const entity of state.added) guard(entity, () => createView(sctx, entity));
-    state.added.clear();
+    const built = emptyEntitySet();
 
-    applyChanges();
+    for (const entity of takeAdded()) {
+      guard(entity, () => {
+        if (createView(sctx, entity)) built.add(entity);
+      });
+    }
+
+    applyChanges(built);
+    applyAdapterChanges(built);
     applyInvalidated();
   };
 
@@ -235,6 +347,21 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       }
     },
 
+    displays: {
+      provide: <Value extends object>(
+        component: ComponentHandle<Value>,
+        adapter: DisplayAdapter<Value>
+      ): (() => void) =>
+        provideDisplay(sctx, component, adapter, { added: markAdded, removed: markRemoved })
+    },
+
+    fonts: {
+      install: (key: string, fnt: string, texture: PixiTexture): void =>
+        installFont(sctx, key, fnt, texture),
+
+      installed: (key: string): boolean => isFontInstalled(state, key)
+    },
+
     root: (): PixiContainer | undefined => state.root,
 
     rebuildAll,
@@ -247,19 +374,15 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       if (deps.host.stage() === undefined) return;
 
       const ecs = ctx.deps.world.ecs;
-      const markAdded = (entity: Entity): void => {
-        state.added.add(entity);
-      };
-      const markRemoved = (entity: Entity): void => {
-        state.removed.add(entity);
-      };
 
       state.cleanups.push(
         ecs.onAdded(Sprite, markAdded),
         ecs.onAdded(NineSlice, markAdded),
+        ecs.onAdded(Shape, markAdded),
         ecs.onAdded(Display, markAdded),
         ecs.onRemoved(Sprite, markRemoved),
         ecs.onRemoved(NineSlice, markRemoved),
+        ecs.onRemoved(Shape, markRemoved),
         ecs.onRemoved(Display, markRemoved),
         ecs.system(createSyncSystem(pass))
       );

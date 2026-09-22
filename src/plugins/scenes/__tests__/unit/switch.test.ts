@@ -255,7 +255,8 @@ describe("the synchronous block of the switch", () => {
     expect(mock.world.layers[1]).toEqual([
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
-      { name: "lifted", sort: "none" }
+      { name: "lifted", sort: "none" },
+      { name: "ui", sort: "none" }
     ]);
     expect(mock.world.unmounted[0]).toEqual([]);
     expect(mock.world.mounted[1]).toEqual({
@@ -277,6 +278,29 @@ describe("the synchronous block of the switch", () => {
     expect(mock.emitted).toEqual([
       { name: "scenes:changed", payload: { from: undefined, to: "home", music: "home.theme" } }
     ]);
+  });
+
+  it("wakes the frame loop, so the new scene is drawn at the full frame rate", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+
+    expect(mock.time.wakes).toBe(1);
+
+    await mock.enter({ scene: "board" });
+
+    expect(mock.time.wakes).toBe(2);
+  });
+
+  it("does not wake the loop when no scene changed", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "board" });
+    await mock.enter({ scene: "board" });
+    await mock.enter({ rest: true });
+    await mock.enter({ path: "main/popup", over: true });
+
+    expect(mock.time.wakes).toBe(1);
   });
 
   it("lets a failing mount reject, so flow rolls the node back", async () => {

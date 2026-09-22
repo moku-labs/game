@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { createInputApi } from "../../api";
-import { Draggable, DropTarget, Pressable, Swipeable, Tappable } from "../../components";
+import { Draggable, DropTarget, Pressable, Swipeable, Tappable, Touchable } from "../../components";
 import type { Direction, Target } from "../../types";
 import { createMockInput } from "./mock-input";
 
@@ -192,5 +192,91 @@ describe("the types of the door", () => {
     expectTypeOf(api.press).returns.toEqualTypeOf<boolean>();
     expectTypeOf(api.drag).returns.toEqualTypeOf<boolean>();
     expectTypeOf(api.swipe).returns.toEqualTypeOf<boolean>();
+  });
+});
+
+describe("app.input.onTap", () => {
+  it("calls the listeners in registration order, before the Tappable answer", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Tappable({ intent: "claim" })]);
+    const api = createInputApi(mock.ctx);
+    const seen: number[] = [];
+
+    api.onTap(tapped => {
+      seen.push(tapped);
+      mock.calls.push("first");
+    });
+    api.onTap(() => mock.calls.push("second"));
+
+    expect(api.tap(entity)).toBe(true);
+    expect(seen).toEqual([entity]);
+    expect(mock.calls).toEqual(["first", "second", "answer"]);
+  });
+
+  it("stops calling a listener its remover dropped", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Tappable({ intent: "claim" })]);
+    const api = createInputApi(mock.ctx);
+    const off = api.onTap(() => mock.calls.push("first"));
+
+    api.onTap(() => mock.calls.push("second"));
+    off();
+    api.tap(entity);
+
+    expect(mock.calls).toEqual(["second", "answer"]);
+  });
+
+  it("reaches the listeners of a Touchable button that answers nothing", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Touchable()]);
+    const api = createInputApi(mock.ctx);
+    const seen: number[] = [];
+
+    api.onTap(tapped => seen.push(tapped));
+
+    expect(api.tap(entity)).toBe(false);
+    expect(seen).toEqual([entity]);
+    expect(mock.answers).toEqual([]);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("logs a throwing listener with its entity and runs the rest and the answer", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Tappable({ intent: "claim" })]);
+    const api = createInputApi(mock.ctx);
+
+    api.onTap(() => {
+      throw new Error("boom");
+    });
+    api.onTap(() => mock.calls.push("second"));
+
+    expect(api.tap(entity)).toBe(true);
+    expect(mock.log.error).toHaveBeenCalledWith(
+      "input: an onTap listener threw",
+      expect.objectContaining({ entity })
+    );
+    expect(mock.calls).toEqual(["second", "answer"]);
+  });
+
+  it("calls no listener for a key no live view carries", () => {
+    const mock = createMockInput();
+    const api = createInputApi(mock.ctx);
+    const seen: number[] = [];
+
+    api.onTap(tapped => seen.push(tapped));
+
+    expect(api.tap({ projection: "hud", key: "gone" })).toBe(false);
+    expect(seen).toEqual([]);
+    expect(mock.log.warn).toHaveBeenCalledWith("input: target has no Tappable", {
+      target: { projection: "hud", key: "gone" }
+    });
+  });
+
+  it("hands out a remover and takes an entity listener", () => {
+    const mock = createMockInput();
+    const api = createInputApi(mock.ctx);
+
+    expectTypeOf(api.onTap).parameter(0).toEqualTypeOf<(entity: number) => void>();
+    expectTypeOf(api.onTap).returns.toEqualTypeOf<() => void>();
   });
 });

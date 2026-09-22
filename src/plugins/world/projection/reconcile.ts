@@ -78,6 +78,17 @@ function emptyCounts(): Counts {
 }
 
 /**
+ * The name of the one component the diff compares by identity: the `Tree` of a screen, whose node
+ * is a foreign object the world only carries.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @returns The component name.
+ */
+function treeName(pctx: ProjectionCtx): string {
+  return pctx.deps.components.Tree.componentName;
+}
+
+/**
  * Finds the hint of one entry and records that it was used.
  *
  * @param pctx - Domain context of the projection module.
@@ -162,7 +173,7 @@ function changeEntry(
   entry: { item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
 ): void {
   const next = collectView(pctx, spec, entry.item);
-  const { added, changed, removed } = diffComponents(view.rest, next);
+  const { added, changed, removed } = diffComponents(view.rest, next, treeName(pctx));
   const previous = view.item;
 
   for (const value of valuesOf(next, added)) writeValue(pctx, view.entity, value);
@@ -232,7 +243,7 @@ function reviveEntry(
   dequeueRevive(pctx, mounted, view, spec);
 
   const next = collectView(pctx, spec, entry.item);
-  const { added, removed } = diffComponents(view.rest, next);
+  const { added, removed } = diffComponents(view.rest, next, treeName(pctx));
 
   for (const value of valuesOf(next, added)) writeValue(pctx, view.entity, value);
   for (const value of valuesOf(view.rest, removed)) pctx.deps.ecs.remove(view.entity, value.type);
@@ -391,16 +402,35 @@ function keyedItems(
   const next = new Map<string, unknown>();
 
   try {
-    for (const item of spec.from(snapshot.player, snapshot.session)) {
-      const key = spec.key(item);
+    const source = spec.from(snapshot.player, snapshot.session);
 
-      if (next.has(key)) {
-        pctx.ctx.log.warn("world:duplicate-key", { projection: spec.name, key });
+    if (!Array.isArray(source)) {
+      // A screen: one plain object, drawn under the name of the projection.
+      if (source !== undefined && source !== null)
+        next.set(spec.key?.(source) ?? spec.name, source);
+
+      return next;
+    }
+
+    const key = spec.key;
+
+    if (key === undefined) {
+      throw new Error(
+        `[game] Projection "${spec.name}" reads a list but declares no key.\n` +
+          "  Add key(item), or let from return one object."
+      );
+    }
+
+    for (const item of source) {
+      const name = key(item);
+
+      if (next.has(name)) {
+        pctx.ctx.log.warn("world:duplicate-key", { projection: spec.name, key: name });
 
         continue;
       }
 
-      next.set(key, item);
+      next.set(name, item);
     }
   } catch (error) {
     pctx.ctx.log.error("world:projection-failed", { projection: spec.name }, asError(error));

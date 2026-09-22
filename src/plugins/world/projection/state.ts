@@ -14,8 +14,8 @@ function emptyMap<Key, Value>(): Map<Key, Value> {
 }
 
 /**
- * Creates the initial projection state: nothing registered, nothing mounted, no layer list and no
- * running track.
+ * Creates the initial projection state: nothing registered, nothing mounted, no layer list, no
+ * running track and no driver, so every motion is instant until `anim` installs one.
  *
  * @returns The projection branch of the plugin state.
  */
@@ -28,6 +28,10 @@ export function createProjectionState(): ProjectionState {
     dirty: undefined,
     hints: [],
     tracks: [],
+    driver: undefined,
+    rests: emptyMap(),
+    keys: emptyMap(),
+    keysByEntity: emptyMap(),
     mutes: emptyMap(),
     offHints: []
   };

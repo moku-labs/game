@@ -9,7 +9,7 @@ import { startLoop, stopLoop } from "./lifecycle";
 import { createTimeState } from "./state";
 import type { Config } from "./types";
 
-const config: Config = { maxFps: 60, maxDeltaMs: 50 };
+const config: Config = { maxFps: 60, maxDeltaMs: 50, idleFps: 30, idleAfterMs: 2000 };
 
 /**
  * Time plugin: `app.time.onFrame(phase, fn)`, `app.time.step(dt)`.

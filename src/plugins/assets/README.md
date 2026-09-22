@@ -19,6 +19,8 @@ the texture *type*.
 | `unload(bundle): void` | Destroys the textures through `io.destroyTexture`, calls `renderer.sync.textures.invalidate` with the keys of the bundle, emits `assets:bundle-unloaded` with reason `"request"`. A pinned bundle and the tiers `boot` and `core` are refused with a `ctx.log.warn`. A running load is aborted. |
 | `isLoaded(bundle): boolean` | `status === "loaded"`. Headless: `true` for every bundle of the manifest. |
 | `texture(key): Texture \| undefined` | The texture of a loaded key; touches the use counter of its bundle. A key of a bundle that is not loaded: `undefined`, one dev warning naming key and bundle, and a background `load` of that bundle. Headless: `undefined`. |
+| `font(key): { fnt, texture } \| undefined` | The `.fnt` file as text and the texture of its first page; touches the use counter. `text` installs it with `renderer.sync.fonts.install`. A bundle that is not loaded, another kind and headless: `undefined`, silently — no warning and no background load. |
+| `audio(key): ArrayBuffer \| undefined` | The bytes of a loaded `.mp3`, undecoded: `audio` decodes them once and drops them when `assets:bundle-unloaded` names the key. Same silent miss as `font`. |
 | `usage(): { textureMb, budgetMb, bundles }` | Loaded bundles only, sorted by name. `lastUsed` is the use counter, never a clock. |
 
 ```ts
@@ -72,7 +74,9 @@ createApp({
 ```
 
 `AssetsIo` is `fetch(url, { signal })`, `decode(blob)`, `createTexture(image, options?)` and
-`destroyTexture(texture)` — the same test seam as `clock.source`.
+`destroyTexture(texture)` — the same test seam as `clock.source`. The response it answers with
+carries the four readers this plugin uses: `json()` for the manifest, `blob()` for an image,
+`text()` for a `.fnt` file and `arrayBuffer()` for a sound. A real `Response` fits it as it is.
 
 ## The manifest
 
@@ -96,7 +100,9 @@ createApp({
 |---|---|
 | `version` | `1`. Any other value is refused: `[game] assets: manifest version 2 is not supported (expected 1).` |
 | `path` | POSIX, relative to the scan root. The URL is `baseUrl` + `path`. |
-| `mb` | Estimated texture memory: `width × height × 4 / 1 048 576`, rounded to 3 decimals. The bundle `mb` is the sum. No mipmaps. |
+| `kind` | `"font"` or `"audio"`. A file without a `kind` is a texture, so a manifest written before fonts and audio reads the same. |
+| `pages` | A font only: the page images of its `.fnt`, in declaration order, each with `path`, `width`, `height` and `mb`. A page has no key: it belongs to the font. |
+| `mb` | Estimated memory: `width × height × 4 / 1 048 576` for a texture, the sum of the pages for a font, the file size for audio. Rounded to 3 decimals; the bundle `mb` is the sum. No mipmaps. |
 | `nine` | Optional, always four numbers. Passed to `createTexture` as the tuple `[left, top, right, bottom]`. |
 | `atlas` | Reserved. A file that carries it fails its bundle with a message naming the file. |
 | Order | Bundles sorted by name, files sorted by key. Unknown fields are ignored. |
@@ -123,8 +129,13 @@ the reason of the caller that started the load — a later waiter changes nothin
 `signal` rejects only that caller with an `AbortError`; when the last waiter leaves, the shared
 controller aborts the fetches and the record goes back to `idle`.
 
-On success the textures are stored, `renderer.sync.textures.invalidate` is called with the keys of
-the bundle, the event goes out and the budget is enforced. On failure every texture made so far is
+A file is loaded by what the manifest says it is: a texture is fetched, decoded and uploaded; a
+font reads its `.fnt` as text and uploads every page it lists; an audio file is kept as the raw
+`ArrayBuffer` and is never decoded here.
+
+On success the assets are stored, `renderer.sync.textures.invalidate` is called with the keys of
+the bundle, the event goes out, `time.wake()` lifts the idle frame cap — the picture changes now —
+and the budget is enforced. On failure every texture made so far is
 destroyed, the record goes back to `idle`, `ctx.log.error("assets: bundle failed", { bundle, file,
 status })` is written and every waiter rejects with
 `[game] assets: bundle "board" failed at "features/board/assets/cell.png" (404).` An abort is not
@@ -151,7 +162,10 @@ naming the five heaviest loaded files — the cure is smaller art or a split bun
 | Event | Payload |
 |---|---|
 | `assets:bundle-loaded` | `{ bundle, tier, mb, reason: "boot" \| "enter" \| "request" \| "preload" }` |
-| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request" }` |
+| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request", keys }` |
+
+`keys` names every asset the bundle carried, so `text` drops the fonts it installed and `audio`
+drops the buffers it decoded, per key.
 
 `onStop` emits nothing: a teardown context has no `emit`.
 
@@ -169,18 +183,32 @@ work.
 | `index.ts` | The `createPlugin` call and the default config. |
 | `types.ts` | Config, State, Events, `Api`, `AssetsIo`, the manifest types and the authoring types. |
 | `state.ts` | `createAssetsState`. |
-| `api.ts` | `createAssetsApi` and `lookupTexture`, the function the texture provider stands on. |
+| `api.ts` | `createAssetsApi`, `lookupTexture` (the function the texture provider stands on) and the silent lookups behind `font` and `audio`. |
 | `handlers.ts` | The `flow:rest` hook. |
 | `lifecycle.ts` | `connectAssets` (onInit), `startAssets` (onStart), `releaseAll` (onStop), the enter callback and the `load` effect. |
 | `bundles.ts` | `defineBundles` and the `load` descriptor. |
-| `manifest.ts` | `parseManifest`, `indexKeys`, `resolveBaseUrl`, `fileUrl`, `nineOf`, `atlasProblem`. |
+| `manifest.ts` | `parseManifest`, `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, `atlasProblem`. |
 | `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
 | `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures`. |
+| `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
+
+## What the scanner reads
+
+| File | Becomes |
+|---|---|
+| `.png`, `.webp` | one texture per file |
+| `.fnt` with its `.png` pages | one font: the key is the `.fnt`'s, the pages are listed under it and are never keys of their own |
+| `.mp3` | one sound, sized by its bytes |
+| `.ogg`, `.wav`, `.ttf`, anything else | left out with a note. One audio format decodes on every target WebView, and text is drawn from bitmap fonts |
+
+`generated/assets.ts` carries `AssetKey` over every kind, plus the narrower `FontKey` and
+`AudioKey` next to it, so a text style takes only a font and a sound only an MP3.
 
 ## Dependencies
 
 - `flowPlugin` — `onEnter("load")`, `fx.handle("load", …, { runInFast: true })`, `features.all()`,
   `describe()`, `state()`.
 - `rendererPlugin` — `sync.textures.provide / create / destroy / invalidate`, `host.ready()`.
+- `timePlugin` — `wake()` when a load settles, so the idle frame cap lifts as the picture changes.

@@ -38,6 +38,30 @@ function file(key: string): ManifestFile {
   };
 }
 
+/** The `.fnt` file the fake io serves for the font of the lazy bundle. */
+const FNT = 'info face="body" size=32\npage id=0 file="body_0.png"\n';
+
+/** The font of the lazy bundle: one `.fnt` file with one 128x128 page. */
+const font: ManifestFile = {
+  key: "board.body",
+  path: "features/board/assets/body.fnt",
+  kind: "font",
+  width: 0,
+  height: 0,
+  mb: 0.063,
+  pages: [{ path: "features/board/assets/body_0.png", width: 128, height: 128, mb: 0.063 }]
+};
+
+/** The sound of the lazy bundle. */
+const sound: ManifestFile = {
+  key: "board.click",
+  path: "features/board/assets/click.mp3",
+  kind: "audio",
+  width: 0,
+  height: 0,
+  mb: 0.004
+};
+
 const manifest: Manifest = {
   version: 1,
   bundles: {
@@ -53,6 +77,8 @@ const manifest: Manifest = {
       mb: 0.063,
       files: [file("board.chain")]
     },
+    // Lazy: the graph never reaches for it, so only a `load` call brings the font and the sound.
+    "board.voices": { feature: "board", tier: "lazy", mb: 0.067, files: [font, sound] },
     boot: { feature: "board", tier: "boot", mb: 0.063, files: [file("board.logo")] },
     shop: { feature: "board", tier: "scene", mb: 0.063, files: [file("board.coin")] },
     ui: { feature: "board", tier: "scene", mb: 0.063, files: [file("board.panel")] }
@@ -256,7 +282,9 @@ describe("assets plugin integration — with an io seam", () => {
     app.assets.unload("ui");
 
     expect(app.assets.isLoaded("ui")).toBe(false);
-    expect(heard.unloaded).toEqual([{ bundle: "ui", tier: "scene", mb: 0.063, reason: "request" }]);
+    expect(heard.unloaded).toEqual([
+      { bundle: "ui", tier: "scene", mb: 0.063, reason: "request", keys: ["board.panel"] }
+    ]);
 
     // "board" is pinned by the node the graph stands on, and "boot" is a permanent tier.
     app.assets.unload("board");
@@ -265,6 +293,38 @@ describe("assets plugin integration — with an io seam", () => {
     expect(app.assets.isLoaded("board")).toBe(true);
     expect(app.assets.isLoaded("boot")).toBe(true);
     expect(heard.unloaded).toHaveLength(1);
+
+    await app.stop();
+  });
+
+  it("hands a font and the audio bytes to the plugins above, and takes them back", async () => {
+    const io = createFakeIo();
+
+    io.texts.set("/features/board/assets/body.fnt", FNT);
+
+    const app = await startApp(io);
+
+    await app.assets.load("board.voices");
+
+    const loaded = app.assets.font("board.body");
+
+    expect(loaded?.fnt).toBe(FNT);
+    expect(io.created).toContain(loaded?.texture);
+    expect(app.assets.audio("board.click")).toBeInstanceOf(ArrayBuffer);
+    // A page is part of its font: it is no texture key of its own.
+    expect(app.assets.texture("board.body")).toBeUndefined();
+
+    app.assets.unload("board.voices");
+
+    expect(app.assets.font("board.body")).toBeUndefined();
+    expect(app.assets.audio("board.click")).toBeUndefined();
+    expect(heard.unloaded.at(-1)).toEqual({
+      bundle: "board.voices",
+      tier: "lazy",
+      mb: 0.067,
+      reason: "request",
+      keys: ["board.body", "board.click"]
+    });
 
     await app.stop();
   });

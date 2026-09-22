@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Transform } from "../../../renderer/components";
 import { Exiting } from "../../../world/ecs/define";
-import { Draggable, DropTarget, Pressable, Swipeable, Tappable } from "../../components";
+import { Draggable, DropTarget, Pressable, Swipeable, Tappable, Touchable } from "../../components";
 import { acceptDrop, acceptPress, findDropTarget, findPressed, resolveTarget } from "../../hit";
 import { createMockInput } from "./mock-input";
 
@@ -115,5 +115,21 @@ describe("findPressed and findDropTarget", () => {
 
     expect(findDropTarget(mock.input, 50, 50, held)).toBe(cell);
     expect(findDropTarget(mock.input, 50, 50, undefined)).toBe(held);
+  });
+});
+
+describe("acceptPress and the Touchable tag", () => {
+  it("takes a view that only carries Touchable, the way a ui button does", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Touchable()]);
+
+    expect(acceptPress(mock.input, entity)).toBe(true);
+  });
+
+  it("refuses a Touchable view that plays its exit", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Touchable(), Exiting()]);
+
+    expect(acceptPress(mock.input, entity)).toBe(false);
   });
 });

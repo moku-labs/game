@@ -185,9 +185,64 @@ function enqueue(state: FxState, work: Promise<unknown>): Promise<unknown> {
 }
 
 /**
+ * Derives the signal one handler gets: a child of the node's signal that the gateway can end on
+ * its own. The node's abort reaches the child with its reason; what the child does never reaches
+ * the node. The forwarding listener is dropped with the child, so a node that shows many popups
+ * leaves nothing behind on its signal.
+ *
+ * @param signal - The node's abort signal.
+ * @returns The controller of the child signal.
+ */
+function childOf(signal: AbortSignal): AbortController {
+  const child = new AbortController();
+
+  if (signal.aborted) {
+    child.abort(signal.reason);
+
+    return child;
+  }
+
+  signal.addEventListener(
+    "abort",
+    () => {
+      child.abort(signal.reason);
+    },
+    { once: true, signal: child.signal }
+  );
+
+  return child;
+}
+
+/**
+ * Starts the signal of a `guide` handler and records it, so the runner can end every guide where
+ * it lifts the narrow. A guide the node's abort already ended takes itself off the list.
+ *
+ * @param state - fx module state.
+ * @param signal - The node's abort signal.
+ * @returns The signal the guide handler is called with.
+ */
+function beginGuide(state: FxState, signal: AbortSignal): AbortSignal {
+  const child = childOf(signal);
+
+  state.guides.push(child);
+  child.signal.addEventListener(
+    "abort",
+    () => {
+      const index = state.guides.indexOf(child);
+
+      if (index !== -1) state.guides.splice(index, 1);
+    },
+    { once: true }
+  );
+
+  return child.signal;
+}
+
+/**
  * Opens the gate for a descriptor that carries `answers` and resolves with the player's answer in
  * both modes. In live mode the handler is called as well: it only shows the UI, the answer comes
- * through the gate, so its failure is logged and does not block the node.
+ * through the gate, so its failure is logged and does not block the node. Its signal ends with the
+ * answer — that is how the popup layer knows to unmount what it showed.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param gate - Internal gate API.
@@ -205,9 +260,15 @@ function openForAnswers(
 ): Promise<Answer> {
   const answered = gate.open({ allowed: answers });
 
-  if (ctx.state.fx.mode === "live") invoke(ctx.state.fx, ctx.log, descriptor, signal);
+  if (ctx.state.fx.mode !== "live") return answered;
 
-  return answered;
+  const shown = childOf(signal);
+
+  invoke(ctx.state.fx, ctx.log, descriptor, shown.signal);
+
+  return answered.finally(() => {
+    shown.abort();
+  });
 }
 
 /**
@@ -270,7 +331,10 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
 
       if (answers !== undefined) return openForAnswers(ctx, deps.gate, descriptor, answers, signal);
 
-      const work = effectValue(state, descriptor, signal);
+      // A guide outlives its own `await`: it keeps the narrow and its visual until the node ends,
+      // so its handler gets a signal of its own instead of the node's.
+      const shown = descriptor.kind === "guide" ? beginGuide(state, signal) : signal;
+      const work = effectValue(state, descriptor, shown);
 
       if (state.mode === "fast" || !ctx.deps.time.isRunning()) return work;
 
@@ -304,6 +368,13 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
 
       state.settled = [];
       for (const entry of drained) entry();
+    },
+
+    endGuides: (): void => {
+      const shown = [...state.guides];
+
+      state.guides.length = 0;
+      for (const controller of shown) controller.abort();
     },
 
     setMode: (mode: "live" | "fast"): void => {

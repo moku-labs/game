@@ -5,7 +5,16 @@
 import { unloadBundle, usedMb } from "./budget";
 import { withDeps } from "./lifecycle";
 import { ignoreFailure, isPermanent, loadBundle, touch } from "./tiers";
-import type { Api, AssetsCtx, BundleUsage, KernelSlice, Texture, Usage } from "./types";
+import type {
+  Api,
+  AssetsCtx,
+  BundleRecord,
+  BundleUsage,
+  FontAsset,
+  KernelSlice,
+  Texture,
+  Usage
+} from "./types";
 
 /** The one message both refusals of `unload` carry. */
 const REFUSED = "assets: this bundle cannot be unloaded";
@@ -55,6 +64,30 @@ export function lookupTexture(ctx: AssetsCtx, key: string): Texture | undefined 
   }
 
   return undefined;
+}
+
+/**
+ * Finds the loaded bundle that carries one asset key and stamps it as used. A font and an audio
+ * file are asked for by the plugin that owns them, once per load, so a miss here is silent: no
+ * warning and no background load, unlike the texture path the sprites stand on.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param key - Asset key.
+ * @returns The record of its bundle, or `undefined` while the bundle is not loaded.
+ */
+function loadedRecord(ctx: AssetsCtx, key: string): BundleRecord | undefined {
+  const state = ctx.state;
+
+  if (state.io === undefined) return undefined;
+
+  const bundle = state.bundleOfKey.get(key);
+  const record = bundle === undefined ? undefined : state.records.get(bundle);
+
+  if (record?.status !== "loaded") return undefined;
+
+  touch(state, record);
+
+  return record;
 }
 
 /**
@@ -144,6 +177,8 @@ export function createAssetsApi(ctx: KernelSlice): Api {
     unload: (bundle: string): void => unload(assets, bundle),
     isLoaded: (bundle: string): boolean => isLoaded(assets, bundle),
     texture: (key: string): Texture | undefined => lookupTexture(assets, key),
+    font: (key: string): FontAsset | undefined => loadedRecord(assets, key)?.fonts.get(key),
+    audio: (key: string): ArrayBuffer | undefined => loadedRecord(assets, key)?.audio.get(key),
     usage: (): Usage => usage(assets)
   };
 }

@@ -7,6 +7,7 @@
 import { createPlugin } from "../../config";
 import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
+import { timePlugin } from "../time";
 import { createAssetsApi } from "./api";
 import { createHandlers } from "./handlers";
 import { connectAssets, releaseAll, startAssets } from "./lifecycle";
@@ -37,7 +38,7 @@ const config: Config = {
  * ```
  */
 export const assetsPlugin = /*#__PURE__*/ createPlugin("assets", {
-  depends: [flowPlugin, rendererPlugin],
+  depends: [flowPlugin, rendererPlugin, timePlugin],
   config,
   events: register =>
     register.map<Events>({

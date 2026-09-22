@@ -30,6 +30,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `NineSlice({ texture, width, height })` | `"", 0, 0` | Size in reference units; the borders come with the texture. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. |
+| `Shape({ w, h, fill, alpha, radius, stroke, strokeWidth, clip })` | `0, 0, 0xffffff, 1, 0, 0x000000, 0, false` | A filled rounded rectangle drawn with `Graphics`, anchored top left. `clip: true` masks the children of the entity to the rectangle. |
 
 ```ts
 sprite({ texture: "board.cell", at: { x: 540, y: 300 } });
@@ -37,8 +38,10 @@ sprite({ texture: "board.cell", at: { x: 540, y: 300 } });
 //  Transform({ x: 540, y: 300, rotation: 0, scale: 1 })]
 ```
 
-An entity has one visual: `Sprite`, `NineSlice` or `Display`. Two on one entity: the first in that
-order wins and `ctx.log.warn` names the entity. `Layer`, `Order` and `Exiting` belong to `world`.
+An entity has one visual: `Sprite`, `NineSlice`, `Shape`, `Display`, or a component a plugin above
+registered with `displays.provide`. Two on one entity: the first in that order wins and
+`ctx.log.warn` names the entity. A `Shape` is redrawn only when its value changed, never per frame.
+`Layer`, `Order` and `Exiting` belong to `world`.
 
 ## API
 
@@ -49,6 +52,7 @@ order wins and `ctx.log.warn` names the entity. `Layer`, `Order` and `Exiting` b
 | `ready(): boolean` | True after a successful init. False while inert, while the device is lost and on the unsupported screen. |
 | `kind(): "webgpu" \| "webgl" \| "none"` | The backend Pixi chose, read once after init. `"none"` while inert or unsupported. |
 | `canvas(): HTMLCanvasElement \| undefined` | A WebGPU restore makes a NEW canvas: a caller that holds listeners compares it with its own every frame. |
+| `pixi(): PixiModule \| undefined` | The lazily loaded Pixi module once `ready()`, so a plugin above draws with the same Pixi and imports none of it. `undefined` while inert, lost or unsupported. |
 
 ### `viewport` — `app.renderer.viewport`
 
@@ -66,9 +70,15 @@ order wins and `ctx.log.warn` names the entity. `Layer`, `Order` and `Exiting` b
 | `textures.create(image, { nine? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. Throws while the renderer does not draw. |
 | `textures.destroy(texture)` | `texture.destroy(true)`. Twice is a no-op. |
 | `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once. No-op while inert. |
+| `displays.provide(Component, adapter)` | A plugin above says how its own component becomes a display object: `create` on the first pass after it appeared, `update` on every change, `destroy` when it leaves. Stored while inert, never called there. Returns the remover. |
+| `fonts.install(key, fnt, texture)` | Installs a BMFont file (text, XML or JSON) and its page texture under an asset key. Throws while the renderer does not draw. |
+| `fonts.installed(key)` | Whether that font key is installed in this application. |
 | `displayOf(entity)` | The Pixi object of the entity, for debugging. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
+An adapter object is parented, sorted and freed like a sprite; its hit box is `getLocalBounds()`
+read at attach, as a `Display` object's is. A point outside the rectangle of a `clip: true` ancestor
+hits nothing inside it.
 
 ## Configuration
 

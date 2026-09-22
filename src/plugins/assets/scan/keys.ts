@@ -3,9 +3,13 @@
  * path inside `assets/` with every "/" turned into a dot; the extension and the `{tag=value}`
  * groups are dropped. Pure and free of the file system, so the editor applies the same rule later.
  */
-import type { NineSlice } from "../types";
+import type { AssetKind, NineSlice } from "../types";
 
-const EXTENSION = /\.(?:png|webp)$/i;
+const TEXTURE = /\.(?:png|webp)$/i;
+
+const FONT = /\.fnt$/i;
+
+const AUDIO = /\.mp3$/i;
 
 const TAG_GROUPS = /^(?:\{[^{}]*\})*$/;
 
@@ -32,11 +36,30 @@ function problem(message: string): Error {
 }
 
 /**
- * Tells whether the scanner reads this file. This version loads one texture per file, so PNG and
- * WebP are the whole list.
+ * Tells what the scanner makes of a file: one texture per PNG or WebP, one font per `.fnt` with
+ * the pages it names, one sound per MP3. Everything else is left out with a note.
  *
  * @param fileName - Name of the file, with its extension.
- * @returns True for a PNG or a WebP.
+ * @returns The kind of the asset, or `undefined` when the scanner reads no such file.
+ * @example
+ * ```ts
+ * assetKindOf("body.fnt"); // "font"
+ * assetKindOf("theme.ogg"); // undefined
+ * ```
+ */
+export function assetKindOf(fileName: string): AssetKind | undefined {
+  if (TEXTURE.test(fileName)) return "texture";
+  if (FONT.test(fileName)) return "font";
+  if (AUDIO.test(fileName)) return "audio";
+
+  return undefined;
+}
+
+/**
+ * Tells whether the scanner reads this file.
+ *
+ * @param fileName - Name of the file, with its extension.
+ * @returns True for a PNG, a WebP, a `.fnt` or an MP3.
  * @example
  * ```ts
  * isAssetFile("star-on.webp"); // true
@@ -44,7 +67,7 @@ function problem(message: string): Error {
  * ```
  */
 export function isAssetFile(fileName: string): boolean {
-  return EXTENSION.test(fileName);
+  return assetKindOf(fileName) !== undefined;
 }
 
 /**

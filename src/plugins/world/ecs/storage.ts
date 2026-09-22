@@ -6,6 +6,7 @@ import type { WorldCtx } from "../types";
 import { forgetChanges, markChanged } from "./changes";
 import { isAlive } from "./entities";
 import type {
+  AnyComponent,
   AnyComponentType,
   AnyComponentValue,
   EcsState,
@@ -37,6 +38,19 @@ function emptyStore(): Map<Entity, object | true> {
  */
 export function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * Reads a registered type as a component whose value shape is erased to a plain record: what a
+ * caller that knows the component only by its name can read and write. A tag stays honest, since
+ * `get` answers `undefined` for the `true` it stores.
+ *
+ * @param componentType - The registered type, or nothing.
+ * @returns The same object, typed for a record read.
+ */
+export function asComponent(componentType: AnyComponentType | undefined): AnyComponent | undefined {
+  // The object is the callable type `component()` built; only its value shape is erased here.
+  return componentType as AnyComponent | undefined;
 }
 
 /**

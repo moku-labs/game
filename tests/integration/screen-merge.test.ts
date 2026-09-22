@@ -157,7 +157,8 @@ describe("screen-merge — the board as entities", () => {
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
       { name: "lifted", sort: "none" },
-      { name: "fx", sort: "none" }
+      { name: "fx", sort: "none" },
+      { name: "ui", sort: "none" }
     ]);
     // Nine cells, three items and the generator, which is drawn among the items.
     expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4 });

@@ -3,7 +3,7 @@
  * render time, one frame after the input phase asks.
  */
 import type { Entity } from "../../world/types";
-import { Parent, Transform, type TransformValue } from "../components";
+import { Parent, Shape, Transform, type TransformValue } from "../components";
 import type { PixiContainer, Point } from "../types";
 import type { HitBox, SyncCtx } from "./types";
 
@@ -90,6 +90,39 @@ function inBox(box: HitBox, point: Point): boolean {
 }
 
 /**
+ * Tells whether a clipping ancestor hides the point: a `Shape` with `clip: true` shows its
+ * children only inside its own rectangle, so a point outside it reaches nothing below.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity being tested.
+ * @param x - Reference x.
+ * @param y - Reference y.
+ * @returns True when the point falls outside a clipping ancestor.
+ */
+function clippedOut(sctx: SyncCtx, entity: Entity, x: number, y: number): boolean {
+  const ecs = sctx.ctx.deps.world.ecs;
+  let current = ecs.get(entity, Parent)?.entity ?? 0;
+
+  for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
+    const shape = ecs.get(current, Shape);
+
+    if (shape?.clip === true) {
+      const box: HitBox = { x: 0, y: 0, width: shape.w, height: shape.h };
+
+      if (!inBox(box, localPoint(sctx, current, x, y))) return true;
+    }
+
+    const parent = ecs.get(current, Parent)?.entity ?? 0;
+
+    if (parent === current) break;
+
+    current = parent;
+  }
+
+  return false;
+}
+
+/**
  * The alpha a display object really draws with, and 0 when anything on its way to the root is
  * hidden or when it hangs in no tree at all.
  *
@@ -164,6 +197,7 @@ function pickIn(
     if (entity === undefined || view === undefined) continue;
     if (effectiveAlpha(object, root) <= MIN_ALPHA) continue;
     if (!inBox(view.hitBox, localPoint(sctx, entity, point.x, point.y))) continue;
+    if (clippedOut(sctx, entity, point.x, point.y)) continue;
     if (accept(entity)) return entity;
   }
 

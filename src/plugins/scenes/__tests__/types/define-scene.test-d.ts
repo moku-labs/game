@@ -90,6 +90,38 @@ defineGameScene("home", {
 // The loose export stays wide, so a plugin that does not know the game still compiles.
 defineScene("board", { bundle: "anything", layers: { cells: {} }, projections: [], music: "any" });
 
+// ─── music is narrowed to the audio keys of the game ──────────
+
+/** What the scanner generates for the `.mp3` files of that game; the textures stay out. */
+type AudioKey = "home.theme";
+
+const defineAudioScene: DefineScene<AudioKey, BundleKey> = defineScene;
+
+defineAudioScene("home", { bundle: "home", layers: {}, projections: [], music: "home.theme" });
+
+// @ts-expect-error — "board.cell" is a texture key, and music takes an audio key.
+defineAudioScene("home", { bundle: "home", layers: {}, projections: [], music: "board.cell" });
+
+// ─── the appended ui layer ────────────────────────────────────
+
+const hudPanel = projection({
+  name: "hud.panel",
+  layer: "ui",
+  from: (player: { items: Item[] }) => player.items,
+  key: (item: Item) => item.id,
+  view: () => []
+});
+
+// "ui" is appended to every scene, so a projection may name it without declaring it.
+defineGameScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: [boardCells, hudPanel]
+});
+
+// @ts-expect-error — "items" is neither declared nor the appended ui layer.
+defineGameScene("board", { bundle: "board", layers: { cells: {} }, projections: [boardItems] });
+
 // ─── the event a plugin above hooks ───────────────────────────
 
 createPlugin("sceneMusic", {

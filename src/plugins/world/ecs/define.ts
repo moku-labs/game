@@ -2,6 +2,7 @@
  * @file world/ecs — the authoring helpers. Pure: no ctx, no state, no world. A type made here
  * registers itself in the world on first use, so nothing has to be declared twice.
  */
+import type { DescriptionNode } from "../projection/types";
 import type {
   ComponentHandle,
   ComponentType,
@@ -140,3 +141,13 @@ export const Order = /*#__PURE__*/ component("Order", { value: 0 });
  * The view is in the despawn queue: still drawn, never hit-tested.
  */
 export const Exiting = /*#__PURE__*/ tag("Exiting");
+
+/** What a `Tree` holds before a projection wrote its first node. */
+const emptyNode: DescriptionNode = { type: "", props: {}, children: [] };
+
+/**
+ * The element description of a screen: a projection whose `view` returns one node gets it wrapped
+ * as this component, and `ui` reconciles the node into child entities. The node is a foreign
+ * object, so the world diffs it by identity and `snapshot()` leaves it out.
+ */
+export const Tree = /*#__PURE__*/ component("Tree", { node: emptyNode });

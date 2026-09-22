@@ -5,8 +5,10 @@
 import { flowPlugin } from "../flow";
 import type { Descriptor, Hint, NodeInfo } from "../flow/types";
 import { rendererPlugin } from "../renderer";
+import { timePlugin } from "../time";
 import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
+import { releaseAssets } from "./budget";
 import { bundlesOfNode } from "./preload";
 import { bootTiers, loadBundle } from "./tiers";
 import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "./types";
@@ -21,7 +23,11 @@ type RunContext = { mode: "live" | "fast"; signal: AbortSignal };
  * @returns The two dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
-  return { flow: ctx.require(flowPlugin), renderer: ctx.require(rendererPlugin) };
+  return {
+    flow: ctx.require(flowPlugin),
+    renderer: ctx.require(rendererPlugin),
+    time: ctx.require(timePlugin)
+  };
 }
 
 /**
@@ -245,12 +251,8 @@ export function releaseAll(state: State): void {
 
   for (const record of state.records.values()) {
     record.inflight?.controller.abort();
+    releaseAssets(state.io, record);
 
-    if (state.io !== undefined) {
-      for (const texture of record.textures.values()) state.io.destroyTexture(texture);
-    }
-
-    record.textures.clear();
     record.status = "idle";
     record.inflight = undefined;
   }

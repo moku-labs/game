@@ -1,17 +1,38 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { coreConfig, createCore } from "../../../../config";
 import { timePlugin } from "../../index";
-import type { Time } from "../../types";
+import type { Config, Time } from "../../types";
 
 // The engine's default plugins are not all built yet, so the test app is a bare framework
 // carrying the time plugin alone.
 const bare = createCore(coreConfig, { plugins: [] });
 
-function createTestApp(maxFps?: 30 | 60) {
-  return bare.createApp({
-    plugins: [timePlugin],
-    ...(maxFps ? { pluginConfigs: { time: { maxFps } } } : {})
+function createTestApp(time: Partial<Config> = {}) {
+  return bare.createApp({ plugins: [timePlugin], pluginConfigs: { time } });
+}
+
+function stubFrameSource(): FrameRequestCallback[] {
+  const frames: FrameRequestCallback[] = [];
+
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.push(callback);
+
+    return frames.length;
   });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+  return frames;
+}
+
+function driveFrames(frames: FrameRequestCallback[], from: number, count: number): number {
+  let timestamp = from;
+
+  for (let index = 0; index < count; index += 1) {
+    timestamp += 16;
+    frames[index]?.(timestamp);
+  }
+
+  return timestamp;
 }
 
 afterEach(() => {
@@ -94,13 +115,62 @@ describe("time plugin with requestAnimationFrame", () => {
     });
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
 
-    const app = createTestApp(30);
+    const app = createTestApp({ maxFps: 30 });
     await app.start();
 
     frames[0]?.(1000);
     frames[1]?.(1010);
 
     expect(app.time.snapshot()).toMatchObject({ frame: 1, delta: 1000 / 30 });
+
+    await app.stop();
+  });
+});
+
+// ─── the idle cap ─────────────────────────────────────────────
+
+describe("time plugin when nothing wakes the clock", () => {
+  it("skips the frames of a 60 Hz source once idle", async () => {
+    const frames = stubFrameSource();
+    const app = createTestApp({ idleAfterMs: 100 });
+    await app.start();
+
+    const last = driveFrames(frames, 1000, 7);
+
+    expect(app.time.snapshot().idle).toBe(true);
+
+    const idleAt = app.time.snapshot().frame;
+    frames[7]?.(last + 16);
+
+    expect(app.time.snapshot().frame).toBe(idleAt);
+
+    await app.stop();
+  });
+
+  it("runs every frame again after a wake", async () => {
+    const frames = stubFrameSource();
+    const app = createTestApp({ idleAfterMs: 100 });
+    await app.start();
+
+    const last = driveFrames(frames, 1000, 7);
+    const idleAt = app.time.snapshot().frame;
+
+    app.time.wake();
+    frames[7]?.(last + 16);
+
+    expect(app.time.snapshot()).toMatchObject({ frame: idleAt + 1, idle: false });
+
+    await app.stop();
+  });
+
+  it("keeps every frame when the idle cap is off", async () => {
+    const frames = stubFrameSource();
+    const app = createTestApp({ idleFps: 0, idleAfterMs: 100 });
+    await app.start();
+
+    driveFrames(frames, 1000, 12);
+
+    expect(app.time.snapshot()).toMatchObject({ frame: 12, idle: false });
 
     await app.stop();
   });
@@ -115,6 +185,7 @@ describe("time plugin types", () => {
 
     expectTypeOf(app.time.snapshot).returns.toEqualTypeOf<Readonly<Time>>();
     expectTypeOf(app.time.step).parameter(0).toEqualTypeOf<number>();
+    expectTypeOf(app.time.wake).toEqualTypeOf<() => void>();
     // @ts-expect-error — "foo" is not a frame phase
     expectTypeOf(app.time.onFrame).toBeCallableWith("foo", () => {});
 

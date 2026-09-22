@@ -14,6 +14,9 @@ import type {
 /** The second line of both layer errors. */
 const FIX_LAYER = "  Declare it in layers or fix the name.";
 
+/** The layer every scene gets on top of its own, where popups and the HUD are mounted. */
+const UI_LAYER = "ui";
+
 /**
  * Tells whether a key is an array index, which JavaScript lists before every other key.
  *
@@ -32,11 +35,13 @@ function isIntegerKey(name: string): boolean {
 }
 
 /**
- * Turns the `layers` object into the draw-order list `world.projection.setLayers` takes.
+ * Turns the `layers` object into the draw-order list `world.projection.setLayers` takes, with
+ * `ui` on top. A scene that declares `ui` itself keeps the place it wrote it in and gets no
+ * second one, so the HUD can sit under the layers a game wants over it.
  *
  * @param id - Id of the scene, for the error.
  * @param layers - The layers the scene declared, in the order they were written.
- * @returns One frozen entry per layer, bottom first.
+ * @returns One frozen entry per layer, bottom first, `ui` among them.
  * @throws {Error} For an integer-like layer name, whose place JavaScript does not keep.
  */
 function layersOf(id: string, layers: LayerMap): LayerSpec[] {
@@ -51,6 +56,10 @@ function layersOf(id: string, layers: LayerMap): LayerSpec[] {
     }
 
     list.push(Object.freeze({ name, sort: spec.sort ?? "none" }));
+  }
+
+  if (!list.some(layer => layer.name === UI_LAYER)) {
+    list.push(Object.freeze({ name: UI_LAYER, sort: "none" }));
   }
 
   return list;
@@ -95,8 +104,9 @@ function namesOf(
 
 /**
  * Declares a scene: a bundle, named layers in draw order, the projections it mounts and optional
- * music. The layer names come from the keys of `layers`, so a projection whose `layer` or `lift`
- * is not among them does not compile — and throws here for a caller without types.
+ * music. A layer `ui` is appended for the HUD and the popups unless the scene declares one. The
+ * layer names come from the keys of `layers` and that `ui`, so a projection whose `layer` or
+ * `lift` is not among them does not compile — and throws here for a caller without types.
  *
  * @param id - Id of the scene. A node names it with `defineNode({ scene: id })`.
  * @param scene - The bundle, the layers, the projections and the optional music key.
@@ -112,6 +122,7 @@ function namesOf(
  * });
  *
  * boardScene.layers[2]; // { name: "items", sort: "y" }
+ * boardScene.layers[4]; // { name: "ui", sort: "none" }, appended for the HUD
  * ```
  */
 export function defineScene<

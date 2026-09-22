@@ -15,14 +15,21 @@ import type { PluginCtx } from "@moku-labs/core";
 export type Phase = "input" | "animate" | "layout" | "sync" | "signals" | "render";
 
 /**
- * The Time resource, in scaled milliseconds.
+ * The Time resource, in scaled milliseconds. `idle` tells whether the loop currently runs at the
+ * lowered idle cap.
  *
  * @example
  * ```ts
- * const time: Time = { delta: 16, elapsed: 1600, scale: 1, frame: 100 };
+ * const time: Time = { delta: 16, elapsed: 1600, scale: 1, frame: 100, idle: false };
  * ```
  */
-export type Time = { delta: number; elapsed: number; scale: number; frame: number };
+export type Time = {
+  delta: number;
+  elapsed: number;
+  scale: number;
+  frame: number;
+  idle: boolean;
+};
 
 /**
  * Callback run once per frame in its phase.
@@ -52,6 +59,15 @@ export type Config = {
    * Upper bound of one frame's delta in milliseconds.
    */
   maxDeltaMs: number;
+  /**
+   * Frame rate cap of an idle screen, when nothing woke the clock for `idleAfterMs`. The default
+   * is 30; 0 turns the idle cap off and every frame runs at `maxFps`.
+   */
+  idleFps: 0 | 30;
+  /**
+   * Unscaled milliseconds without a `wake()` after which the loop drops to `idleFps`.
+   */
+  idleAfterMs: number;
 };
 
 /**
@@ -72,6 +88,19 @@ export type State = {
   stepping: boolean;
   rafId: number | undefined;
   lastTimestamp: number | undefined;
+  /**
+   * Elapsed time of the frame source in unscaled milliseconds, the clock of the idle timer: it
+   * keeps running while `scale` is 0.
+   */
+  unscaledElapsedMs: number;
+  /**
+   * Unscaled elapsed time of the last wake.
+   */
+  lastWakeMs: number;
+  /**
+   * True while the loop runs at `idleFps`.
+   */
+  idle: boolean;
 };
 
 /**
@@ -83,7 +112,8 @@ export type State = {
  * // Frame work is a callback in a phase. A test has no frame source: it drives the frames itself.
  * const off = app.time.onFrame("animate", time => counter.advance(time.delta));
  *
- * app.time.step(16); // the callback gets { delta: 16, elapsed: 16, scale: 1, frame: 1 }
+ * app.time.step(16);
+ * // the callback gets { delta: 16, elapsed: 16, scale: 1, frame: 1, idle: false }
  * off();
  * ```
  */
@@ -113,7 +143,7 @@ export type Api = {
    * ```ts
    * // Stamp the start of a combo window in game time, which stands still during a pause.
    * const startedAt = app.time.snapshot().elapsed; // 1600
-   * app.time.snapshot(); // { delta: 16, elapsed: 1600, scale: 1, frame: 100 }
+   * app.time.snapshot(); // { delta: 16, elapsed: 1600, scale: 1, frame: 100, idle: false }
    * ```
    */
   snapshot(): Readonly<Time>;
@@ -185,6 +215,22 @@ export type Api = {
   isRunning(): boolean;
 
   /**
+   * Resets the idle timer: the next frame runs at `maxFps` again, even after a long idle. Cheap,
+   * idempotent and safe inside a frame callback. Every plugin that gives the player something to
+   * look at calls it: a pointer sample, a starting animation, a flow edge, a finished load, a
+   * scene switch, a locale change, a reconcile.
+   *
+   * @example
+   * ```ts
+   * // The flow runner walked an edge, so the screen has work again and the cap goes back up.
+   * const time = ctx.require(timePlugin);
+   *
+   * time.wake(); // app.time.snapshot().idle is false from here on
+   * ```
+   */
+  wake(): void;
+
+  /**
    * Runs exactly one frame with the given unscaled delta, ignoring the fps cap, the pause
    * flag and `maxDeltaMs`. The time scale still applies. For tests and tools.
    *
@@ -195,7 +241,7 @@ export type Api = {
    * // A test plays two frames without a browser.
    * app.time.step(16);
    * app.time.step(4);
-   * app.time.snapshot(); // { delta: 4, elapsed: 20, scale: 1, frame: 2 }
+   * app.time.snapshot(); // { delta: 4, elapsed: 20, scale: 1, frame: 2, idle: false }
    * ```
    */
   step(deltaMs: number): void;

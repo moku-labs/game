@@ -67,6 +67,17 @@ export type RawSample = {
 export type GesturePhase = "idle" | "pressed" | "longPressed" | "dragging";
 
 /**
+ * What `onTap` hands a listener: the view the finger let go on, inside the tap slop.
+ *
+ * @example
+ * ```ts
+ * const tapped: Entity[] = [];
+ * const listener: TapListener = entity => tapped.push(entity);
+ * ```
+ */
+export type TapListener = (entity: Entity) => void;
+
+/**
  * input plugin config. Every distance is in reference px, every duration in milliseconds of
  * `time`, so a time scale and a pause apply to the gestures too.
  *
@@ -113,6 +124,10 @@ export type State = {
   canvas: HTMLCanvasElement | undefined;
   offFrame: (() => void) | undefined;
   detach: (() => void) | undefined;
+  /** Registered through `onTap`, called in this order on every tap. */
+  tapListeners: TapListener[];
+  /** `time.wake`, bound in `onInit`: every pointer sample leaves the idle frame rate. */
+  wake: (() => void) | undefined;
 };
 
 /**
@@ -186,6 +201,27 @@ export type InputApi = {
    * ```
    */
   swipe(target: Target, direction: Direction): boolean;
+
+  /**
+   * Registers a listener called on every tap — a press and a release inside `tapSlopPx` — on the
+   * topmost view the hit test accepted, before the `Tappable` answer. A view that carries only
+   * `Touchable` reaches the listeners and answers nothing. A listener that throws is logged with
+   * its entity, and the listeners after it still run.
+   *
+   * @param fn - What to run with the tapped entity.
+   * @returns The remover; call it to stop listening.
+   * @example
+   * ```ts
+   * // ui applies the local patch of the button the finger tapped.
+   * const off = ctx.require(inputPlugin).onTap(entity => {
+   *   const write = ctx.require(worldPlugin).ecs.get(entity, LocalWrite);
+   *
+   *   if (write !== undefined) applyLocal(entity, write.patch);
+   * });
+   * off(); // in onStop
+   * ```
+   */
+  onTap(fn: TapListener): () => void;
 };
 
 /**

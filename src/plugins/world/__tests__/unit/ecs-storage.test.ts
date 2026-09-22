@@ -106,4 +106,27 @@ describe("ecs storage", () => {
 
     expect(added).not.toHaveBeenCalled();
   });
+
+  it("answers a component type by its name once the world knows it", () => {
+    const world = createMockWorld();
+
+    expect(world.api.ecs.typeOf("Sprite")).toBeUndefined();
+
+    const entity = world.api.ecs.spawn(test, [Sprite({ texture: "a" })]);
+    const type = world.api.ecs.typeOf("Sprite");
+
+    expect(type).toBe(Sprite);
+    expect(type === undefined ? undefined : world.api.ecs.get(entity, type)).toEqual({
+      texture: "a"
+    });
+  });
+
+  it("answers a tag by its name and undefined for a name nobody used", () => {
+    const world = createMockWorld();
+
+    world.api.ecs.tag(world.api.ecs.spawn(test, []), Held);
+
+    expect(world.api.ecs.typeOf("Held")?.componentName).toBe("Held");
+    expect(world.api.ecs.typeOf("Nothing")).toBeUndefined();
+  });
 });

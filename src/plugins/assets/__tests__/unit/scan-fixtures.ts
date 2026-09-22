@@ -96,6 +96,34 @@ export function webpUnknownChunkBytes(): Uint8Array {
   return bytes;
 }
 
+/** A BMFont file in the text format, naming one page file per line. */
+export function bmfontText(...pages: string[]): string {
+  const lines = pages.map((page, id) => `page id=${id} file="${page}"`);
+
+  return ['info face="body" size=32', `common lineHeight=38 pages=${pages.length}`, ...lines].join(
+    "\n"
+  );
+}
+
+/** A BMFont file in the XML format. */
+export function bmfontXml(...pages: string[]): string {
+  const lines = pages.map((page, id) => `    <page id="${id}" file="${page}" />`);
+
+  return ['<?xml version="1.0"?>', "<font>", "  <pages>", ...lines, "  </pages>", "</font>"].join(
+    "\n"
+  );
+}
+
+/** A BMFont file in the JSON format, the shape a msdf exporter writes. */
+export function bmfontJson(...pages: string[]): string {
+  return JSON.stringify({ pages, chars: [] });
+}
+
+/** Bytes that stand in for an audio file: only their number matters to the scanner. */
+export function audioBytes(length: number): Uint8Array {
+  return new Uint8Array(length);
+}
+
 /** Writes a temp game tree and returns its root. Keys are POSIX paths, values bytes or text. */
 export async function makeTree(files: Record<string, string | Uint8Array>): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "moku-assets-"));

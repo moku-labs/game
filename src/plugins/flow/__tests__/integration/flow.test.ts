@@ -5,6 +5,7 @@ import {
   defineGame,
   exit,
   flowPlugin,
+  guide,
   schedule,
   type
 } from "../../../../index";
@@ -150,6 +151,69 @@ const createSceneGame = (mainFlow: AnyFlow, logicOnly: boolean) =>
     }
   });
 
+// ─── a game that shows a guide and a popup ────────────────────
+
+const teach = defineNode({
+  outcomes: { taught: type() },
+  run: async ({ fx, out }) => {
+    await fx(guide({ allow: { intent: "merge" }, target: { projection: "hud", key: "order" } }));
+    return out.taught();
+  }
+});
+
+const claim = defineNode({
+  outcomes: { claimed: type() },
+  run: async ({ fx, out }) => {
+    await fx({ kind: "popup", payload: { component: "RewardPopup" }, answers: ["claim"] });
+    return out.claimed();
+  }
+});
+
+const idle = defineNode({ rest: true, checkpoint: true, outcomes: { again: type() } });
+
+const guidedFlow = defineFlow("guided", {
+  nodes: { teach, claim, idle },
+  start: "teach",
+  edges: { teach: { taught: "claim" }, claim: { claimed: "idle" }, idle: { again: "teach" } }
+});
+
+/** What the two interface handlers were shown, and with which signal. */
+const capture = (): { guides: AbortSignal[]; popups: AbortSignal[]; targets: unknown[] } => ({
+  guides: [],
+  popups: [],
+  targets: []
+});
+
+const createGuidedGame = () =>
+  createApp({
+    pluginConfigs: {
+      model: {
+        playerProvider: memory(),
+        seed: 7,
+        initialPlayer: { coins: 0, merges: 0 },
+        initialSession: { popups: 0 }
+      },
+      clock: { source: fakeClock(1000) },
+      flow: { mainFlow: guidedFlow }
+    }
+  });
+
+const startGuidedGame = async (
+  game: ReturnType<typeof createGuidedGame>,
+  shown: ReturnType<typeof capture>
+): Promise<void> => {
+  await game.start();
+  game.flow.fx.handle("guide", (descriptor, { signal }) => {
+    shown.guides.push(signal);
+    shown.targets.push(descriptor.payload);
+  });
+  game.flow.fx.handle("popup", (_descriptor, { signal }) => {
+    shown.popups.push(signal);
+  });
+  game.flow.run().catch(() => undefined);
+  await tick();
+};
+
 const createGame = () => {
   const provider = memory();
   const clock = fakeClock(1000);
@@ -282,5 +346,58 @@ describe("flow plugin", () => {
 
     expect(game.app.flow.state().running).toBe(false);
     expect(game.provider.calls.map(call => call.method)).toContain("load");
+  });
+});
+
+// ─── the interface effects: a guide and a popup ───────────────
+
+describe("the signal of an interface effect", () => {
+  it("aborts the guide handler when the runner lifts the narrow", async () => {
+    const game = createGuidedGame();
+    const shown = capture();
+
+    await startGuidedGame(game, shown);
+
+    expect(shown.guides).toHaveLength(1);
+    expect(shown.targets[0]).toEqual({
+      allow: { intent: "merge" },
+      target: { projection: "hud", key: "order" }
+    });
+    expect(shown.guides[0]?.aborted).toBe(true);
+    expect(game.flow.gate.state().narrowed).toBe(false);
+
+    await game.stop();
+  });
+
+  it("aborts the popup handler when the answer arrives", async () => {
+    const game = createGuidedGame();
+    const shown = capture();
+
+    await startGuidedGame(game, shown);
+
+    expect(game.flow.state().path).toBe("claim");
+    expect(shown.popups[0]?.aborted).toBe(false);
+
+    game.flow.gate.answer({ intent: "claim" });
+    await tick();
+
+    expect(game.flow.state().path).toBe("idle");
+    expect(shown.popups[0]?.aborted).toBe(true);
+
+    await game.stop();
+  });
+
+  it("leaves the popup handler running while the node waits for the answer", async () => {
+    const game = createGuidedGame();
+    const shown = capture();
+
+    await startGuidedGame(game, shown);
+
+    expect(shown.popups).toHaveLength(1);
+    expect(shown.popups[0]?.aborted).toBe(false);
+
+    await game.stop();
+
+    expect(shown.popups[0]?.aborted).toBe(true);
   });
 });

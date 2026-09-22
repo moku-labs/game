@@ -8,6 +8,8 @@
  * |---|---|---|
  * | time | maxFps | 60 |
  * | time | maxDeltaMs | 50 |
+ * | time | idleFps | 30 |
+ * | time | idleAfterMs | 2000 |
  * | clock | source | undefined, the system source |
  * | model | playerProvider | undefined, in memory |
  * | model | initialPlayer | {} |
@@ -166,7 +168,8 @@ export {
   Order,
   resource,
   system,
-  tag
+  tag,
+  Tree
 } from "./plugins/world/ecs/define";
 export { projection } from "./plugins/world/projection/define";
 // renderer: the display components
@@ -174,6 +177,7 @@ export {
   Display,
   NineSlice,
   Parent,
+  Shape,
   Sprite,
   sprite,
   Transform
@@ -188,7 +192,8 @@ export {
   Pressable,
   Pressed,
   Swipeable,
-  Tappable
+  Tappable,
+  Touchable
 } from "./plugins/input/components";
 // assets and scenes: declarations
 export { defineBundles, load } from "./plugins/assets/bundles";

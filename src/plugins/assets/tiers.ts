@@ -2,12 +2,13 @@
  * @file assets plugin — loading one bundle and the boot sequence. One running load per bundle,
  * every caller a waiter: the last one to leave aborts the fetches.
  */
-import { enforceBudget } from "./budget";
+import { enforceBudget, releaseAssets } from "./budget";
 import { emitOf } from "./emit";
 import {
   atlasProblem,
   fileUrl,
   indexKeys,
+  kindOf,
   nineOf,
   parseManifest,
   resolveBaseUrl
@@ -17,7 +18,11 @@ import type {
   AssetsIo,
   BundleMap,
   BundleRecord,
+  FetchResponse,
+  FontPage,
   Inflight,
+  LoadedAssets,
+  LoadedFont,
   LoadReason,
   Manifest,
   ManifestBundle,
@@ -147,7 +152,7 @@ function recordOf(state: State, bundle: string): BundleRecord {
 
   const created: BundleRecord = {
     status: "idle",
-    textures: new Map(),
+    ...emptyAssets(),
     inflight: undefined,
     lastUsed: 0
   };
@@ -174,50 +179,172 @@ export function touch(state: State, record: BundleRecord): void {
 }
 
 /**
- * Fetches, decodes and uploads one file.
+ * Creates the three empty maps a bundle's assets live in. It is its own function because lint
+ * rule L5 refuses a collection built inside an exported declaration.
+ *
+ * @returns Empty maps for textures, fonts and audio.
+ */
+function emptyAssets(): LoadedAssets {
+  return { textures: new Map(), fonts: new Map(), audio: new Map() };
+}
+
+/**
+ * Fetches one file of a bundle.
+ *
+ * @param io - The I/O seam.
+ * @param bundle - Name of the bundle, for the failure message.
+ * @param path - Path of the file, relative to the scan root.
+ * @param base - Prefix of every file URL.
+ * @param signal - The signal of the running load.
+ * @returns The response.
+ * @throws {Error} When the response is not ok.
+ */
+async function fetchFile(
+  io: AssetsIo,
+  bundle: string,
+  path: string,
+  base: string,
+  signal: AbortSignal
+): Promise<FetchResponse> {
+  const response = await io.fetch(fileUrl(base, path), { signal });
+
+  if (!response.ok) throw failure(bundle, path, response.status);
+
+  return response;
+}
+
+/**
+ * Fetches, decodes and uploads one image.
+ *
+ * @param io - The I/O seam.
+ * @param bundle - Name of the bundle, for the failure message.
+ * @param image - The file or the font page to upload.
+ * @param base - Prefix of every file URL.
+ * @param signal - The signal of the running load.
+ * @returns The texture of the image.
+ * @throws {Error} When the response is not ok.
+ */
+async function loadImage(
+  io: AssetsIo,
+  bundle: string,
+  image: ManifestFile | FontPage,
+  base: string,
+  signal: AbortSignal
+): Promise<Texture> {
+  const response = await fetchFile(io, bundle, image.path, base, signal);
+  const options = "key" in image ? nineOf(image) : undefined;
+
+  return io.createTexture(await io.decode(await response.blob()), options);
+}
+
+/**
+ * Builds the error of a font the manifest lists without a page.
+ *
+ * @param bundle - Name of the bundle.
+ * @param path - Path of the `.fnt` file.
+ * @returns The error, with the command that fixes it.
+ */
+function pagelessFont(bundle: string, path: string): Error {
+  return new Error(
+    `[game] assets: font "${path}" of bundle "${bundle}" has no page.\n` +
+      '  Run "bun run assets:keys".'
+  );
+}
+
+/**
+ * Loads one font: the `.fnt` file as text and every page it names as a texture. The pages go up
+ * in parallel, the first one is what `text` installs.
+ *
+ * @param io - The I/O seam.
+ * @param bundle - Name of the bundle, for the failure message.
+ * @param file - The font file of the manifest.
+ * @param base - Prefix of every file URL.
+ * @param signal - The signal of the running load.
+ * @returns The font file and its page textures.
+ * @throws {Error} When a response is not ok, or the manifest lists no page.
+ */
+async function loadFont(
+  io: AssetsIo,
+  bundle: string,
+  file: ManifestFile,
+  base: string,
+  signal: AbortSignal
+): Promise<LoadedFont> {
+  const entries = file.pages ?? [];
+
+  if (entries.length === 0) throw pagelessFont(bundle, file.path);
+
+  const response = await fetchFile(io, bundle, file.path, base, signal);
+  const fnt = await response.text();
+  const pages = await Promise.all(entries.map(page => loadImage(io, bundle, page, base, signal)));
+  const [first] = pages;
+
+  if (first === undefined) throw pagelessFont(bundle, file.path);
+
+  return { fnt, texture: first, pages };
+}
+
+/**
+ * Loads one file into the maps of the running load, by what the manifest says it is.
  *
  * @param io - The I/O seam.
  * @param bundle - Name of the bundle, for the failure message.
  * @param file - The file to load.
  * @param base - Prefix of every file URL.
- * @param signal - The signal of the running load.
- * @returns The texture of the file.
- * @throws {Error} When the response is not ok.
+ * @param into - Where the result goes, keyed by the asset key.
+ * @param into.signal - The signal of the running load.
+ * @param into.assets - The three maps of the running load.
+ * @throws {Error} When the response is not ok, or a font lists no page.
  */
 async function loadFile(
   io: AssetsIo,
   bundle: string,
   file: ManifestFile,
   base: string,
-  signal: AbortSignal
-): Promise<Texture> {
-  const response = await io.fetch(fileUrl(base, file.path), { signal });
+  into: { signal: AbortSignal; assets: LoadedAssets }
+): Promise<void> {
+  const { signal, assets } = into;
+  const kind = kindOf(file);
 
-  if (!response.ok) throw failure(bundle, file.path, response.status);
+  if (kind === "font") {
+    assets.fonts.set(file.key, await loadFont(io, bundle, file, base, signal));
 
-  return io.createTexture(await io.decode(await response.blob()), nineOf(file));
+    return;
+  }
+
+  if (kind === "audio") {
+    const response = await fetchFile(io, bundle, file.path, base, signal);
+
+    assets.audio.set(file.key, await response.arrayBuffer());
+
+    return;
+  }
+
+  assets.textures.set(file.key, await loadImage(io, bundle, file, base, signal));
 }
 
 /**
- * Publishes a loaded bundle: the textures move into the record, `renderer` re-resolves the keys,
- * the event goes out and the budget is enforced.
+ * Publishes a loaded bundle: what was loaded moves into the record, `renderer` re-resolves the
+ * keys, the event goes out, the frame loop wakes and the budget is enforced.
  *
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
  * @param entry - Its manifest entry.
- * @param textures - Asset key to the texture that was uploaded.
+ * @param assets - The textures, fonts and audio bytes the load produced.
  * @param reason - Why the load was started.
  */
 function finish(
   ctx: AssetsCtx,
   bundle: string,
   entry: ManifestBundle,
-  textures: Map<string, Texture>,
+  assets: LoadedAssets,
   reason: LoadReason
 ): void {
   const record = recordOf(ctx.state, bundle);
 
-  record.textures = textures;
+  record.textures = assets.textures;
+  record.fonts = assets.fonts;
+  record.audio = assets.audio;
   record.status = "loaded";
   record.inflight = undefined;
   touch(ctx.state, record);
@@ -227,6 +354,8 @@ function finish(
   const emit = emitOf(ctx);
 
   emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
+  // The picture changes now: the sprites that waited for these keys resolve on the next frame.
+  ctx.deps.time.wake();
   enforceBudget(ctx);
 }
 
@@ -238,7 +367,7 @@ function finish(
  * @param io - The I/O seam.
  * @param bundle - Name of the bundle.
  * @param inflight - The running load.
- * @param textures - What was uploaded before the failure.
+ * @param assets - What was loaded before the failure.
  * @param error - What broke.
  */
 function fail(
@@ -246,13 +375,12 @@ function fail(
   io: AssetsIo,
   bundle: string,
   inflight: Inflight,
-  textures: Map<string, Texture>,
+  assets: LoadedAssets,
   error: unknown
 ): void {
   const record = recordOf(ctx.state, bundle);
 
-  for (const texture of textures.values()) io.destroyTexture(texture);
-  textures.clear();
+  releaseAssets(io, assets);
 
   record.status = "idle";
   record.inflight = undefined;
@@ -292,7 +420,7 @@ async function runLoad(
   inflight: Inflight,
   reason: LoadReason
 ): Promise<void> {
-  const textures = new Map<string, Texture>();
+  const assets = emptyAssets();
 
   try {
     const problem = atlasProblem(bundle, entry.files);
@@ -300,22 +428,21 @@ async function runLoad(
     if (problem !== undefined) throw new Error(problem);
 
     const base = resolveBaseUrl(ctx.config.baseUrl, ctx.config.manifest);
+    const into = { signal: inflight.controller.signal, assets };
     const results = await Promise.allSettled(
-      entry.files.map(async file => {
-        textures.set(file.key, await loadFile(io, bundle, file, base, inflight.controller.signal));
-      })
+      entry.files.map(file => loadFile(io, bundle, file, base, into))
     );
 
     for (const result of results) {
       if (result.status === "rejected") throw result.reason;
     }
   } catch (error) {
-    fail(ctx, io, bundle, inflight, textures, error);
+    fail(ctx, io, bundle, inflight, assets, error);
 
     return;
   }
 
-  finish(ctx, bundle, entry, textures, reason);
+  finish(ctx, bundle, entry, assets, reason);
 }
 
 /**

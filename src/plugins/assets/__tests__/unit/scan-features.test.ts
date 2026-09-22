@@ -124,7 +124,7 @@ describe("scanAssets", () => {
     const { manifest, notes } = await scan(root);
 
     expect(notes).toEqual([
-      'ignored "features/ui/assets/notes.md": the scanner reads .png and .webp only.'
+      'ignored "features/ui/assets/notes.md": the scanner reads .png, .webp, .fnt and .mp3 only.'
     ]);
     expect(manifest.bundles.ui?.files).toHaveLength(1);
   });

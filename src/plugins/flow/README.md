@@ -38,11 +38,42 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `gate.pointer(active): void` | While true, entering an `over` node waits: a popup never appears mid-drag. |
 | `gate.state()` | `{ open, allowed, narrowed }`. |
 | `inbox.post(event): void` | Queues a world event. It is delivered only to a rest node whose `inbox` lists the type. |
-| `fx.handle(kind, fn, options?)` | Registers the single handler of one effect kind. `{ runInFast: true }` makes it run in fast mode too. |
+| `fx.handle(kind, fn, options?)` | Registers the single handler of one effect kind. `{ runInFast: true }` makes it run in fast mode too. The handler's `signal` is the node's, with two exceptions: a descriptor with `answers` (a popup) and a `guide` get a signal of their own, so the handler knows when to take down what it showed. |
 | `fx.dispatch(descriptor): void` | Fire-and-forget delivery, `runInFast` handlers only in fast mode. Handler errors are logged, never thrown. |
 | `fx.onHint(listener): () => void` | Hears every released hint after the commit of its edge, in release order, next to any `handle` owner of the kind. Silent in fast mode. `world` routes hints to projection motions with it. |
 | `features.register(name, description)` | Called from a feature plugin's `onInit`. After `run()` it throws. |
 | `features.all()`, `features.contributions(slot)` | What the game brought, and the sub-flows of one slot in `order`. |
+
+## The signal of an effect handler
+
+A handler lives above the graph and usually shows something: a popup, a tutorial hand, a sound.
+It learns from its `signal` when that something has to go.
+
+| Descriptor | Signal | Aborted when |
+|---|---|---|
+| With `answers` (`popup`) | A child of the node's | The answer arrives, or the node is aborted |
+| `guide` | A child of the node's | The runner lifts the narrow on node exit, or the node is aborted |
+| Everything else (`play`, `load`, `sfx`) | The node's own | The node is aborted |
+
+A child signal never reaches back: a popup that ends leaves the node running, and the node walks
+on to its edge. The node's abort reason (`"stop"`, `"restore"`, `"inbox"`) is forwarded to the
+child, so a handler can tell a stop from an answer.
+
+```ts
+app.flow.fx.handle("popup", (descriptor, { signal }) => {
+  const root = mount(descriptor.payload);
+
+  signal.addEventListener("abort", () => unmount(root));
+});
+```
+
+## What a feature brings
+
+`features.register(name, description)` stores the description untouched. `nodes`, `flows` and
+`contribute` are the logic keys `logicOnly` keeps; `animations` (`anim`), `ui` (`ui`), `strings`
+(`i18n`) and `textStyles` (`text`) are the V3 interface keys, typed next to the V2 screen keys
+(`projections`, `systems`, `components`, `scenes`, `assets`). `logicOnly` drops every key that is
+not logic, so a headless test composes a feature without its screen set.
 
 ## Configuration
 
@@ -99,6 +130,7 @@ loop itself never uses the event bus.
 
 ## Dependencies
 
-`time` for the `signals` phase and `isRunning()`, `lifecycle` for the hook, `model` for the store,
-`clock` for `now`, `onElapsed`, `poke` and the `schedule` effect. A node never touches the clock: it
-writes `await fx(schedule(rules.nextDue(player, tables)))`.
+`time` for the `signals` phase, `isRunning()` and `wake()` on every edge (an edge is the moment the
+screen has something new to show, so the idle cap is lifted for it), `lifecycle` for the hook,
+`model` for the store, `clock` for `now`, `onElapsed`, `poke` and the `schedule` effect. A node
+never touches the clock: it writes `await fx(schedule(rules.nextDue(player, tables)))`.

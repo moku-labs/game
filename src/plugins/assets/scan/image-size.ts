@@ -170,3 +170,18 @@ export function readImageSize(head: Uint8Array, file: string): ImageSize {
 export function textureMb(width: number, height: number): number {
   return Math.round(((width * height * BYTES_PER_PIXEL) / BYTES_PER_MB) * 1000) / 1000;
 }
+
+/**
+ * What a file costs in memory when it is kept as it is: an audio file is held undecoded, so its
+ * bytes are the estimate. Rounded to three decimals, like every other number of the manifest.
+ *
+ * @param bytes - Size of the file in bytes.
+ * @returns The size in MB.
+ * @example
+ * ```ts
+ * bytesMb(8192); // 0.008
+ * ```
+ */
+export function bytesMb(bytes: number): number {
+  return Math.round((bytes / BYTES_PER_MB) * 1000) / 1000;
+}

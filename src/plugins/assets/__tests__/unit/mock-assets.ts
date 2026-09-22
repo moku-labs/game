@@ -4,7 +4,7 @@
  * `AssetsIo`, so nothing touches the network, a GPU or Pixi.
  */
 import type { Log } from "@moku-labs/common/browser";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { Frame } from "../../../flow/runner/types";
@@ -17,6 +17,7 @@ import type {
   Stage
 } from "../../../flow/types";
 import type { Api as RendererApi, TextureProvider } from "../../../renderer/types";
+import type { Api as TimeApi } from "../../../time/types";
 import { createAssetsApi } from "../../api";
 import { connectAssets, startAssets, withDeps } from "../../lifecycle";
 import { createAssetsState } from "../../state";
@@ -33,8 +34,8 @@ import type {
   Texture
 } from "../../types";
 
-/** A texture the fake io handed out. */
-export type FakeTexture = { id: string; nine: CreateTextureOptions["nine"] };
+/** A texture the fake io handed out. `from` is the URL its bytes came from. */
+export type FakeTexture = { id: string; from: string; nine: CreateTextureOptions["nine"] };
 
 /** One fetch the fake io is holding back. */
 export type Held = { url: string; resolve: () => void; reject: (error: unknown) => void };
@@ -46,6 +47,10 @@ export type FakeIo = AssetsIo & {
   fetched: string[];
   /** URL to the status the fake answers with. Missing means `200`. */
   status: Map<string, number>;
+  /** URL to the text a `.fnt` fetch answers with. Missing means the URL itself. */
+  texts: Map<string, string>;
+  /** URL to the bytes an `.mp3` fetch answers with. Missing means the URL as UTF-8. */
+  bodies: Map<string, ArrayBuffer>;
   /** While `gated` is true every fetch waits for `release`. */
   control: { gated: boolean };
   held: Held[];
@@ -77,6 +82,8 @@ export function createFakeIo(manifest?: unknown): FakeIo {
   const destroyed: FakeTexture[] = [];
   const fetched: string[] = [];
   const status = new Map<string, number>();
+  const texts = new Map<string, string>();
+  const bodies = new Map<string, ArrayBuffer>();
   const control = { gated: false };
   const held: Held[] = [];
 
@@ -85,6 +92,8 @@ export function createFakeIo(manifest?: unknown): FakeIo {
     destroyed,
     fetched,
     status,
+    texts,
+    bodies,
     control,
     held,
     release: (match: (url: string) => boolean): void => {
@@ -120,12 +129,19 @@ export function createFakeIo(manifest?: unknown): FakeIo {
         ok: code < 400,
         status: code,
         json: async () => manifest,
-        blob: async () => new Blob([url])
+        blob: async () => new Blob([url]),
+        text: async () => texts.get(url) ?? url,
+        arrayBuffer: async () => bodies.get(url) ?? new TextEncoder().encode(url).buffer
       };
     },
-    decode: async (blob: Blob): Promise<DecodedImage> => blob as unknown as DecodedImage,
-    createTexture: (_image: DecodedImage, options?: CreateTextureOptions): Texture => {
-      const texture: FakeTexture = { id: `t${created.length + 1}`, nine: options?.nine };
+    decode: async (blob: Blob): Promise<DecodedImage> =>
+      ({ url: await blob.text() }) as unknown as DecodedImage,
+    createTexture: (image: DecodedImage, options?: CreateTextureOptions): Texture => {
+      const texture: FakeTexture = {
+        id: `t${created.length + 1}`,
+        from: (image as unknown as { url?: string }).url ?? "",
+        nine: options?.nine
+      };
 
       created.push(texture);
 
@@ -146,6 +162,9 @@ export type FakeRenderer = {
   providers: TextureProvider[];
   api: RendererApi;
 };
+
+/** The fake `time`: the one member `assets` calls when a load settles. */
+export type FakeTime = { wake: Mock<() => void>; api: TimeApi };
 
 /** What the fake `flow` recorded and what it answers with. */
 export type FakeFlow = {
@@ -171,9 +190,21 @@ export type MockAssets = {
   emitted: Array<{ name: string; payload: unknown }>;
   flow: FakeFlow;
   renderer: FakeRenderer;
+  time: FakeTime;
   connect(): void;
   start(): Promise<void>;
 };
+
+/**
+ * Creates the fake `time`: `wake` is a spy, so a test sees that a settled load woke the loop.
+ *
+ * @returns The fake time and its spy.
+ */
+function createFakeTime(): FakeTime {
+  const wake: Mock<() => void> = vi.fn();
+
+  return { wake, api: { wake } as unknown as TimeApi };
+}
 
 /**
  * Creates the engine log as spies.
@@ -312,7 +343,12 @@ export function createMockAssets(
   const emitted: Array<{ name: string; payload: unknown }> = [];
   const flow = createFakeFlow();
   const renderer = createFakeRenderer(io);
-  const apis: Record<string, unknown> = { flow: flow.api, renderer: renderer.api };
+  const time = createFakeTime();
+  const apis: Record<string, unknown> = {
+    flow: flow.api,
+    renderer: renderer.api,
+    time: time.api
+  };
 
   const ctx: KernelSlice = {
     config,
@@ -335,6 +371,7 @@ export function createMockAssets(
     emitted,
     flow,
     renderer,
+    time,
     connect: (): void => connectAssets(ctx),
     start: (): Promise<void> => startAssets(ctx)
   };

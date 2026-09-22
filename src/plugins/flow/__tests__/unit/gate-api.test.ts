@@ -29,7 +29,7 @@ const createMockLog = (): Log.LogApi => ({
 });
 
 const createFakeTime = (): FakeTime => {
-  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 1 };
+  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 1, idle: false };
   const flags = { running: true };
 
   return {
@@ -38,6 +38,7 @@ const createFakeTime = (): FakeTime => {
     setScale: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
+    wake: vi.fn(),
     isPaused: () => false,
     isRunning: () => flags.running,
     step: vi.fn(),
@@ -82,7 +83,14 @@ const notRequired: Require = () => {
 
 const createTestState = (): State => ({
   features: { byName: new Map(), sealed: false },
-  fx: { handlers: new Map(), buffered: [], hintListeners: [], settled: [], mode: "live" },
+  fx: {
+    handlers: new Map(),
+    buffered: [],
+    hintListeners: [],
+    settled: [],
+    guides: [],
+    mode: "live"
+  },
   gate: createGateState(),
   inbox: createInboxState(),
   runner: {

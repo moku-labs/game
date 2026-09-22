@@ -4,7 +4,7 @@
  * `world` and `renderer`; frames are driven by calling the recorded phase callbacks.
  */
 import type { Log } from "@moku-labs/common/browser";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Answer, Api as FlowApi } from "../../../flow/types";
 import type { Api as RendererApi } from "../../../renderer/types";
@@ -50,6 +50,8 @@ export type MockInput = {
   log: Log.LogApi;
   frames: FrameRegistration[];
   time: Time;
+  /** The `time.wake` spy: `record` calls it for every pointer sample. */
+  wake: Mock<() => void>;
   /** Every call the plugin made into `world.projection`, `world.ecs` and `flow.gate`, in order. */
   calls: string[];
   answers: Answer[];
@@ -157,7 +159,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const state = createInputState({ global: {}, config });
   const log = createMockLog();
   const frames: FrameRegistration[] = [];
-  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0 };
+  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
   const stores = new Map<Entity, Map<string, object | true>>();
   const resources = new Map<string, object>();
   const keys = new Map<Entity, { projection: string; key: string }>();
@@ -167,6 +169,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const world = { mode: "live" as WorldMode };
   const boxes: StubBox[] = [];
   const canvas: { current: HTMLCanvasElement | undefined } = { current: undefined };
+  const wake: Mock<() => void> = vi.fn();
   let nextEntity = 1;
 
   const ecs = {
@@ -285,7 +288,8 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     resume: vi.fn(),
     isPaused: () => false,
     isRunning: () => false,
-    step: vi.fn()
+    step: vi.fn(),
+    wake
   } as unknown as TimeApi;
 
   const apis: Record<string, unknown> = {
@@ -312,6 +316,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     log,
     frames,
     time,
+    wake,
     calls,
     answers,
     gate,

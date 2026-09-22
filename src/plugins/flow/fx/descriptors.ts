@@ -64,21 +64,26 @@ export function schedule(moment: number | undefined): Descriptor {
 
 /**
  * Creates the tutorial descriptor: it narrows the gate to one answer until the node exits. Its
- * visual part (highlight, hand, text) is handled by `ui` later. The highlight list is copied, so
- * a later change of the caller's array cannot reach the descriptor.
+ * visual part (`target`, highlight, hand, text) is drawn by `ui`, which dims the screen and cuts
+ * a hole over the target element. The highlight list and the target are copied, so a later change
+ * of the caller's objects cannot reach the descriptor.
  *
  * @param options - The allowed answer and the visual hints.
  * @returns The descriptor a node awaits.
  * @example
  * ```ts
  * // A tutorial node: the popup lists two intents, the guide lets only "ok" through.
- * await fx(guide({ allow: { intent: "ok" }, hand: "tap", text: "Only this one" }));
+ * await fx(guide({ allow: { intent: "ok" }, target: { projection: "hud", key: "play" } }));
  * await fx({ kind: "popup", answers: ["ok", "cancel"] });
  * // app.flow.gate.answer({ intent: "cancel" }) is false until the node exits
  * ```
  */
 export function guide(options: GuideOptions): Descriptor {
   const payload: { [key: string]: Json } = { allow: allowJson(options.allow) };
+
+  if (options.target !== undefined) {
+    payload.target = { projection: options.target.projection, key: options.target.key };
+  }
 
   if (options.highlight !== undefined) payload.highlight = [...options.highlight];
   if (options.hand !== undefined) payload.hand = options.hand;

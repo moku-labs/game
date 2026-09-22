@@ -3,15 +3,15 @@
  * `projection`, and the one place that reduces both modules to their public half.
  */
 import { createEcsApi } from "./ecs/api";
-import { Exiting, Layer, Order } from "./ecs/define";
+import { Exiting, Layer, Order, Tree } from "./ecs/define";
 import type { EcsApi, WorldMode } from "./ecs/types";
 import { resolveDeps } from "./lifecycle";
 import { createProjectionApi } from "./projection/api";
 import type { ProjectionApi, WorldComponents } from "./projection/types";
 import type { Api, EcsModule, KernelSlice, ProjectionModule, WorldCtx } from "./types";
 
-/** The three components the projection writes; injected, never imported by the module. */
-export const WORLD_COMPONENTS: WorldComponents = { Layer, Order, Exiting };
+/** The four components the projection writes; injected, never imported by the module. */
+export const WORLD_COMPONENTS: WorldComponents = { Layer, Order, Exiting, Tree };
 
 /**
  * Builds both modules in the accepted injection order `ecs → projection`. Each keeps its data in
@@ -60,6 +60,7 @@ function exposeEcs(ecs: EcsModule, projection: ProjectionModule): EcsApi {
     onAdded: ecs.onAdded,
     onRemoved: ecs.onRemoved,
     changed: ecs.changed,
+    typeOf: ecs.typeOf,
     mode: ecs.mode,
     setMode: (mode: WorldMode): void => {
       ecs.setMode(mode);
@@ -88,6 +89,10 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     lift: projection.lift,
     keyOf: projection.keyOf,
     entityOf: projection.entityOf,
+    setDriver: projection.setDriver,
+    viewOf: projection.viewOf,
+    setRest: projection.setRest,
+    registerKey: projection.registerKey,
     rerunAll: projection.rerunAll
   };
 }

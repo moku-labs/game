@@ -16,6 +16,8 @@ import { connectWorld } from "../../lifecycle";
 import type { Cause } from "../../projection/types";
 import { createWorldState } from "../../state";
 import type { Api, Config, KernelSlice } from "../../types";
+import type { FakeDriver } from "./fake-driver";
+import { createFakeDriver } from "./fake-driver";
 
 const PHASE_ORDER: readonly Phase[] = ["input", "animate", "layout", "sync", "signals"];
 
@@ -35,6 +37,10 @@ export type MockWorld = {
   features: Array<{ name: string; description: FeatureDescription }>;
   frames: FrameRegistration[];
   time: Time;
+  /** The tween driver installed on the world, advanced by `frame`. */
+  driver: FakeDriver;
+  /** Takes the driver back, so the world writes every target at once. */
+  offDriver(): void;
   /** Fires the `model:committed` hook. */
   commit(cause?: Cause, roots?: readonly Root[]): void;
   /** Hands a hint to every `flow.fx.onHint` listener. */
@@ -80,7 +86,7 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
   const features: Array<{ name: string; description: FeatureDescription }> = [];
   const frames: FrameRegistration[] = [];
   const hintListeners: Array<(hint: Hint) => void> = [];
-  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0 };
+  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
 
   const timeApi = {
     onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {
@@ -144,6 +150,8 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
   };
 
   const api = createWorldApi(ctx);
+  const driver = createFakeDriver(api.ecs);
+  const removeDriver = api.projection.setDriver(driver);
 
   return {
     ctx,
@@ -155,6 +163,8 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
     features,
     frames,
     time,
+    driver,
+    offDriver: removeDriver,
     start: (): void => {
       connectWorld(ctx);
     },
@@ -170,6 +180,10 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
       time.elapsed += deltaMs;
 
       for (const phase of PHASE_ORDER) {
+        // `anim` registers its `time.onFrame("animate")` in onInit, before the world's callback:
+        // the tracks move first, the sweep of the world sees what ended.
+        if (phase === "animate" && api.ecs.mode() === "live") driver.step(deltaMs);
+
         for (const registration of frames) {
           if (registration.phase === phase) registration.callback({ ...time });
         }

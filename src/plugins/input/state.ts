@@ -29,6 +29,8 @@ export function createInputState(_ctx: {
     unmute: undefined,
     canvas: undefined,
     offFrame: undefined,
-    detach: undefined
+    detach: undefined,
+    tapListeners: [],
+    wake: undefined
   };
 }

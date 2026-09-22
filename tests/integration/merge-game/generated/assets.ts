@@ -7,6 +7,10 @@ export type AssetKey =
   | "board.item-wood-2"
   | "board.item-wood-3";
 
+export type FontKey = never;
+
+export type AudioKey = never;
+
 export type BundleKey =
   | "board";
 

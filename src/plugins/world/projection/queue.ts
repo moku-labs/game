@@ -2,6 +2,7 @@
  * @file world/projection — the despawn queue: an exited view stays drawn until its last motion
  * ends, and every flush empties it in the same call.
  */
+import { cancelTracks, forgetEndedTracks } from "./driver";
 import { checkConvergence, finishHandles, stillMoving } from "./motions";
 import type { AnyProjectionSpec, Mounted, ProjectionCtx, View } from "./types";
 import { writeLayer } from "./views";
@@ -52,8 +53,10 @@ export function despawnView(pctx: ProjectionCtx, mounted: Mounted, view: View): 
 
   for (const handle of view.handles) handle.cancel();
   view.handles = [];
+  cancelTracks(pctx, view.entity);
   pctx.ctx.state.projection.byEntity.delete(view.entity);
   pctx.ctx.state.projection.mutes.delete(view.entity);
+  pctx.ctx.state.projection.rests.delete(view.entity);
   pctx.deps.ecs.despawn(view.entity);
 }
 
@@ -90,6 +93,8 @@ export function dequeueRevive(
 export function sweepQueue(pctx: ProjectionCtx): void {
   const state = pctx.ctx.state.projection;
 
+  forgetEndedTracks(pctx);
+
   for (const [name, mounted] of state.mounted) {
     const spec = state.specs.get(name);
 
@@ -124,13 +129,18 @@ export function sweepQueue(pctx: ProjectionCtx): void {
  */
 export function flushMounted(pctx: ProjectionCtx, mounted: Mounted): void {
   // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-  for (const view of [...mounted.live.values()]) finishHandles(view);
+  for (const view of [...mounted.live.values()]) {
+    finishHandles(view);
+    cancelTracks(pctx, view.entity);
+  }
   // A copy: despawning splices the queue this loop walks.
   // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
   for (const view of [...mounted.queue]) {
     finishHandles(view);
     despawnView(pctx, mounted, view);
   }
+
+  forgetEndedTracks(pctx);
 }
 
 /**

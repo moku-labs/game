@@ -82,7 +82,8 @@ function targetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | und
 
 /**
  * Builds the scene in one synchronous block: the layers, then the projections of the old scene
- * out, then the ones of the new scene in, and only then the event.
+ * out, then the ones of the new scene in, then the frame loop out of its idle cap, and only then
+ * the event.
  *
  * @param ctx - Domain context of the plugin.
  * @param scene - The scene whose bundle is there.
@@ -99,6 +100,8 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
 
   projection.mount(scene.projections, state.owner);
   state.current = scene.id;
+  // A fresh picture is drawn at the full frame rate, even when the loop had gone idle.
+  ctx.deps.time.wake();
 
   // The one narrowing of the plugin: see the note on `KernelSlice`. Only `emit` is cast.
   const emit = ctx.emit as EmitChanged;

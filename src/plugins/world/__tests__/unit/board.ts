@@ -137,7 +137,7 @@ export function expectConverged(world: MockWorld, key: string): void {
 
   expect(view).toBeDefined();
   expect(view?.handles.some(handle => handle.active())).toBe(false);
-  expect(world.ctx.state.projection.tracks.some(track => !track.ended)).toBe(false);
+  expect(world.ctx.state.projection.tracks.some(track => track.handle.active())).toBe(false);
 
   for (const [name, rest] of view?.rest ?? []) {
     expect(storedOf(world, view?.entity ?? 0, name)).toEqual(rest.value);
@@ -167,6 +167,6 @@ export function settleFrames(world: MockWorld, deltaMs = 16, max = 200): void {
   for (let index = 0; index < max; index += 1) {
     world.frame(deltaMs);
 
-    if (!world.ctx.state.projection.tracks.some(track => !track.ended)) return;
+    if (world.driver.active() === 0) return;
   }
 }

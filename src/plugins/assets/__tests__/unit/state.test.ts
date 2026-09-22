@@ -32,6 +32,8 @@ describe("createAssetsState", () => {
     first.records.set("board", {
       status: "idle",
       textures: new Map(),
+      fonts: new Map(),
+      audio: new Map(),
       inflight: undefined,
       lastUsed: 0
     });

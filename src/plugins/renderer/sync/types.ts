@@ -1,20 +1,82 @@
 /**
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
-import type { Entity, LayerSort, LayerSpec } from "../../world/types";
+import type { ComponentHandle, Entity, LayerSort, LayerSpec } from "../../world/types";
 import type { HostApi, HostInternal } from "../host/types";
-import type { PixiContainer, PixiTexture, RendererCtx } from "../types";
+import type {
+  PixiBitmapFont,
+  PixiContainer,
+  PixiGraphics,
+  PixiModule,
+  PixiTexture,
+  RendererCtx
+} from "../types";
 import type { ViewportApi, ViewportInternal } from "../viewport/types";
 
 /**
- * Which component gave an entity its display object.
+ * Which component gave an entity its display object. `"adapter"` is a component a plugin above
+ * registered with `displays.provide`.
  *
  * @example
  * ```ts
  * const kind: ViewKind = "NineSlice";
  * ```
  */
-export type ViewKind = "Sprite" | "NineSlice" | "Display";
+export type ViewKind = "Sprite" | "NineSlice" | "Shape" | "Display" | "adapter";
+
+/**
+ * How a component of a plugin above becomes a display object. The renderer parents, orders and
+ * frees the object like a sprite; the plugin decides what it is.
+ *
+ * @example
+ * ```ts
+ * const adapter: DisplayAdapter<{ resolved: string }> = {
+ *   create: value => buildRuns(value.resolved),
+ *   update: (object, previous, next) => {
+ *     if (previous.resolved !== next.resolved) rebuild(object, next.resolved);
+ *   },
+ *   destroy: object => (object as Container).destroy({ children: true, texture: false })
+ * };
+ * ```
+ */
+export type DisplayAdapter<Value extends object = object> = {
+  /**
+   * Builds the display object of one entity. Called on the first pass after the component
+   * appeared, and never while the renderer is inert.
+   *
+   * @param value - The component value.
+   * @param entity - The entity it sits on.
+   * @returns A Pixi container.
+   */
+  create(value: Readonly<Value>, entity: Entity): unknown;
+
+  /**
+   * Writes a changed component value onto the object the adapter built.
+   *
+   * @param object - What `create` returned.
+   * @param previous - The value of the last pass.
+   * @param next - The value now.
+   */
+  update(object: unknown, previous: Readonly<Value>, next: Readonly<Value>): void;
+
+  /**
+   * Frees the object. Called when the component or the entity leaves, and when the renderer stops.
+   *
+   * @param object - What `create` returned.
+   */
+  destroy(object: unknown): void;
+};
+
+/**
+ * One registration of `displays.provide`: the component, its adapter and the world hooks that
+ * watch the component.
+ */
+export type DisplayEntry = {
+  component: ComponentHandle<object>;
+  adapter: DisplayAdapter;
+  /** The `onAdded` and `onRemoved` removers of this registration. */
+  removers: Array<() => void>;
+};
 
 /**
  * The rectangle a hit test checks, in the local space of the view: anchor already applied.
@@ -33,7 +95,8 @@ export type HitBox = { x: number; y: number; width: number; height: number };
  * ```ts
  * const view: View = {
  *   object: sprite, kind: "Sprite", poolKey: "Sprite:board.cell", layer: "items",
- *   textureKey: "board.cell", wrapper: undefined, placeholder: false,
+ *   textureKey: "board.cell", wrapper: undefined, placeholder: false, mask: undefined,
+ *   display: undefined, value: undefined,
  *   hitBox: { x: -32, y: -32, width: 64, height: 64 }
  * };
  * ```
@@ -50,6 +113,12 @@ export type View = {
   wrapper: PixiContainer | undefined;
   /** No provider answered: the view draws the 64x64 magenta square until a bundle arrives. */
   placeholder: boolean;
+  /** The rectangle a `clip: true` shape masks its children with. */
+  mask: PixiGraphics | undefined;
+  /** The registration that built the object, for a component a plugin above draws its own way. */
+  display: DisplayEntry | undefined;
+  /** A copy of the component value the adapter last saw, so `update` gets an honest `previous`. */
+  value: Readonly<object> | undefined;
   hitBox: HitBox;
 };
 
@@ -169,6 +238,92 @@ export type TexturesApi = {
 };
 
 /**
+ * The display registry a plugin above extends, `app.renderer.sync.displays`. `Sprite`,
+ * `NineSlice` and `Shape` are built in; everything else arrives as an adapter.
+ *
+ * @example
+ * ```ts
+ * // `text` teaches the renderer to draw its own component, and takes it back in onStop.
+ * const off = ctx.require(rendererPlugin).sync.displays.provide(Text, textAdapter);
+ * ```
+ */
+export type DisplaysApi = {
+  /**
+   * Registers how a component becomes a display object. The renderer calls `create` on the first
+   * pass after the component appeared, `update` on every change, and `destroy` when it leaves.
+   *
+   * @param component - The component the plugin owns.
+   * @param adapter - How that component is built, written and freed.
+   * @returns The remover; calling it twice is a no-op. The views built with it stay until their
+   *   entities leave or the renderer stops.
+   * @example
+   * ```ts
+   * // `text` draws its labels with BitmapText, and stops drawing them when it stops.
+   * const renderer = ctx.require(rendererPlugin);
+   * const off = renderer.sync.displays.provide(Text, createTextAdapter(ctx));
+   *
+   * off(); // `text` stops: the renderer builds no new label
+   * ```
+   */
+  provide<Value extends object>(
+    component: ComponentHandle<Value>,
+    adapter: DisplayAdapter<Value>
+  ): () => void;
+};
+
+/**
+ * The bitmap fonts of the one Pixi application, `app.renderer.sync.fonts`. `assets` loads the
+ * files, `text` hands them over, the renderer owns the installed font.
+ *
+ * @example
+ * ```ts
+ * // `text` installs the font of a bundle that just landed, once.
+ * const renderer = ctx.require(rendererPlugin);
+ * const font = ctx.require(assetsPlugin).font("hud.body");
+ *
+ * if (font !== undefined && !renderer.sync.fonts.installed("hud.body")) {
+ *   renderer.sync.fonts.install("hud.body", font.fnt, font.texture);
+ * }
+ * ```
+ */
+export type FontsApi = {
+  /**
+   * Installs a BMFont file and its page texture under an asset key, so a `BitmapText` with that
+   * key as its `fontFamily` draws with it.
+   *
+   * @param key - The asset key of the font.
+   * @param fnt - The `.fnt` file: BMFont text, BMFont XML or BMFont JSON.
+   * @param texture - The page texture `assets` uploaded.
+   * @throws {Error} When the renderer does not draw, which is every headless run.
+   * @example
+   * ```ts
+   * // `text` installs the boot font after the renderer came up.
+   * const renderer = ctx.require(rendererPlugin);
+   * const font = ctx.require(assetsPlugin).font("hud.body");
+   *
+   * if (renderer.host.ready() && font !== undefined) {
+   *   renderer.sync.fonts.install("hud.body", font.fnt, font.texture);
+   * }
+   * ```
+   */
+  install(key: string, fnt: string, texture: PixiTexture): void;
+
+  /**
+   * Tells whether a font key is installed in this application.
+   *
+   * @param key - The asset key of the font.
+   * @returns True when the font is there.
+   * @example
+   * ```ts
+   * // `text` measures with the real advance table only once the font is in the renderer.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.fonts.installed("hud.body"); // false before the boot bundle landed
+   * ```
+   */
+  installed(key: string): boolean;
+};
+
+/**
  * sync module API, `app.renderer.sync`. The one owner of every display object: it builds them
  * from components, sorts them inside the named layers of the scene and answers hit tests.
  *
@@ -201,6 +356,16 @@ export type SyncApi = {
    * The texture registry `assets` drives.
    */
   textures: TexturesApi;
+
+  /**
+   * The display registry a plugin above extends with its own component.
+   */
+  displays: DisplaysApi;
+
+  /**
+   * The bitmap fonts of the one application.
+   */
+  fonts: FontsApi;
 
   /**
    * The Pixi object of an entity, for debugging and for the plugins that draw their own thing.
@@ -267,6 +432,12 @@ export type SyncState = {
   pools: Map<string, PixiContainer[]>;
   pooled: number;
   providers: TextureProvider[];
+  /** The components a plugin above draws its own way, in registration order. */
+  adapters: DisplayEntry[];
+  /** The bitmap fonts installed in this application, by asset key. */
+  fonts: Map<string, PixiBitmapFont>;
+  /** The global Pixi cache the fonts were registered in, so `onStop` can take them out again. */
+  fontCache: PixiModule["Cache"] | undefined;
   /** Texture key to the entities that use it, for `invalidate`. */
   byKey: Map<string, Set<Entity>>;
   invalidated: Set<string>;

@@ -15,6 +15,7 @@ The drop TARGET names the intent. The engine owns the pointer capture, the lifti
 | `Draggable({ payload? })` | component | `{ payload: {} }` | The view can be carried. It names no intent |
 | `DropTarget({ intent, payload? })` | component | same as `Tappable` | A drop here answers THIS intent |
 | `Swipeable({ intent, payload? })` | component | same as `Tappable` | A swipe answers `{ intent, payload: { ...payload, direction } }` |
+| `Touchable` | tag | | Takes a press with no gesture component: a tap runs the `onTap` listeners and answers nothing. `ui` tags the buttons that write local state and name no intent |
 | `Held` | tag | | On the carried view, from grab to release |
 | `Hovered` | tag | | On the topmost drop target under the finger. At most one, never the held view |
 | `Pressed` | tag | | On the pressed view, until a tap, a long press, a grab, a swipe or a cancel |
@@ -41,8 +42,11 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed` and 
 | `press(target)` | The same with `Pressable` |
 | `drag(from, to)` | Reads `Draggable` of `from` and `DropTarget` of `to`, answers `{ intent: target.intent, payload: { ...draggable.payload, ...target.payload } }` |
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |
+| `onTap(fn)` | Registers a listener called with the tapped entity before the `Tappable` answer; returns the remover |
 
-Each returns what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
+`tap`, `press`, `drag` and `swipe` return what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
+
+`onTap` is the seam `ui` uses for a button that carries `LocalWrite` and no intent: the listeners run on every tap — the finger's and `app.input.tap`'s — in registration order, before the answer. A listener that throws is logged through `ctx.log.error` with its entity, and the listeners after it still run.
 
 ```ts
 // a view spawned by the last commit exists after the next reconcile
@@ -82,14 +86,16 @@ One active pointer. A sample of any other pointer is dropped while a pointer is 
 | `idle` | `down` | nothing under the finger | `pressed` with no entity |
 | `pressed` | `move` | `Draggable`, distance from `start` > `dragStartPx` | `dragging` |
 | `pressed` | frame | `Pressable`, `pressedMs` ≥ `longPressMs`, inside `tapSlopPx` | `longPressed`, answered |
-| `pressed` | `up` | `Tappable`, inside `tapSlopPx` | `idle`, answered |
+| `pressed` | `up` | inside `tapSlopPx` | `idle`: every `onTap` listener runs, then `Tappable` is answered. A `Touchable` view without `Tappable` answers nothing |
 | `pressed` | `up` | `Swipeable`, distance ≥ `swipeMinPx`, `pressedMs` ≤ `swipeMaxMs` | `idle`, answered |
 | `longPressed` | `up` | | `idle`: the release of a long press is not a tap |
 | `dragging` | `up` | | `idle`, released |
 | `dragging` | frame | the held view is `Exiting` or gone | `idle`, given up |
 | any but `idle` | `cancel` | `pointercancel` or a lost capture | `idle`, no answer |
 
-A view tagged `Exiting` — in the despawn queue, playing its exit — is never pressed, hovered or dropped on. A view with only a `DropTarget` takes no press.
+A view tagged `Exiting` — in the despawn queue, playing its exit — is never pressed, hovered or dropped on. A view with only a `DropTarget` takes no press; a view with only `Touchable` does.
+
+Every queued sample calls `time.wake()`, so a finger on the screen always runs at the full frame rate, whatever the idle cap says.
 
 ## The drag
 
@@ -127,7 +133,7 @@ None. An answer goes down to `flow.gate` as a direct call; pointer work never go
 
 | Plugin | Used for |
 |---|---|
-| `time` | `onFrame("input", fn)`, and `time.delta` of the callback |
+| `time` | `onFrame("input", fn)`, `time.delta` of the callback, and `wake()` on every pointer sample |
 | `flow` | `gate.answer`, `gate.pointer` |
 | `world` | `ecs.get/set/has/tag/untag/resource/mode`; `projection.mute/lift/settle/keyOf/entityOf`; the `Exiting` tag |
 | `renderer` | `sync.hitTest`, `viewport.toReference`, `host.canvas`, the `Transform` component |
@@ -136,7 +142,7 @@ No `pixi.js` import: the canvas is a DOM element and hit tests go through `rende
 
 ## Lifecycle
 
-`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel` and `lostpointercapture` on `renderer.host.canvas()` and sets `touch-action: none`. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the five listeners, the frame callback and a mute a drag still holds, and restores the touch action.
+`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel` and `lostpointercapture` on `renderer.host.canvas()` and sets `touch-action: none`. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the five listeners, the frame callback, the `onTap` listeners and a mute a drag still holds, and restores the touch action.
 
 ## Not in V2
 

@@ -5,7 +5,7 @@ import type { Config, State } from "./types";
 
 /**
  * Creates the initial time state: empty callback lists for the six phases, a zeroed `Time`
- * with scale 1, not paused, not running.
+ * with scale 1, not paused, not running, awake with an empty unscaled clock.
  *
  * @param _ctx - Minimal context.
  * @param _ctx.global - Global framework config.
@@ -20,11 +20,14 @@ export function createTimeState(_ctx: {
     // The key order is the call order of a frame; `PHASES` in api.ts is the single source of it.
     callbacks: { input: [], animate: [], layout: [], sync: [], signals: [], render: [] },
     captured: [],
-    time: { delta: 0, elapsed: 0, scale: 1, frame: 0 },
+    time: { delta: 0, elapsed: 0, scale: 1, frame: 0, idle: false },
     paused: false,
     running: false,
     stepping: false,
     rafId: undefined,
-    lastTimestamp: undefined
+    lastTimestamp: undefined,
+    unscaledElapsedMs: 0,
+    lastWakeMs: 0,
+    idle: false
   };
 }

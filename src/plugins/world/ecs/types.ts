@@ -703,6 +703,24 @@ export type EcsApi = {
   setMode(mode: WorldMode): void;
 
   /**
+   * The component type behind a name. A type registers itself on first use, so a name nobody
+   * wrote, read or queried yet is unknown.
+   *
+   * @param name - The storage name of the component.
+   * @returns The type, or `undefined` when the world never met it.
+   * @example
+   * ```ts
+   * // `text` resolves the component a label binds its number to.
+   * const world = ctx.require(worldPlugin);
+   * const type = world.ecs.typeOf("Coins"); // the Coins component, registered when it was written
+   * const pose = type === undefined ? undefined : world.ecs.get(counter, type);
+   *
+   * pose?.amount; // 120
+   * ```
+   */
+  typeOf(name: string): AnyComponent | undefined;
+
+  /**
    * The whole world as plain JSON, sorted by entity index. A component value that is not JSON is
    * left out and its name is listed in `skipped`.
    *
@@ -731,6 +749,15 @@ export type EcsInternal = {
    * @returns The remover.
    */
   onOwnerLeft(fn: (owner: Owner) => void): () => void;
+
+  /**
+   * The owner of an entity, which is also the liveness check: a stale id has none. `projection`
+   * asks before it hands out a view handle for an entity another plugin owns.
+   *
+   * @param entity - The entity to ask about.
+   * @returns The owner, or `undefined` when the id is stale.
+   */
+  ownerOf(entity: Entity): Owner | undefined;
 
   /**
    * Runs the systems of one phase, then flushes the command buffer.

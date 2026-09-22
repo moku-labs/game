@@ -18,7 +18,13 @@ vi.mock("../../runner/loop", () => ({
 const { connectFlow, resolveDeps } = await import("../../lifecycle");
 const { createMockKernel } = await import("./mock-kernel");
 
-const frameAt = (frame: number): Readonly<Time> => ({ delta: 16, elapsed: 0, scale: 1, frame });
+const frameAt = (frame: number): Readonly<Time> => ({
+  delta: 16,
+  elapsed: 0,
+  scale: 1,
+  frame,
+  idle: false
+});
 
 const noPayload = { kind: "schedule", payload: {} };
 

@@ -79,7 +79,14 @@ const createMockLog = (): Log.LogApi => ({
 
 const createMockState = (): State => ({
   features: { byName: new Map(), sealed: false },
-  fx: { handlers: new Map(), buffered: [], hintListeners: [], settled: [], mode: "live" },
+  fx: {
+    handlers: new Map(),
+    buffered: [],
+    hintListeners: [],
+    settled: [],
+    guides: [],
+    mode: "live"
+  },
   gate: {
     open: undefined,
     resolve: undefined,
@@ -142,6 +149,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
     release: vi.fn(),
     drop: vi.fn(),
     flushSettled: vi.fn(),
+    endGuides: vi.fn(),
     setMode: (mode: "live" | "fast"): void => {
       modeChanges.push(mode);
     }
@@ -160,10 +168,11 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
   const deps: Deps = {
     time: {
       onFrame: () => unregister,
-      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1, idle: false }),
       setScale: vi.fn(),
       pause: vi.fn(),
       resume: vi.fn(),
+      wake: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => false,
       step: vi.fn()

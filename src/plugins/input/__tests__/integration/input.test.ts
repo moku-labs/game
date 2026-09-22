@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createApp, defineGame, exit, screen, Transform, type } from "../../../../index";
 import { projection } from "../../../world/projection/define";
-import { Draggable, DropTarget, Pointer, Tappable } from "../../components";
+import { Draggable, DropTarget, Pointer, Tappable, Touchable } from "../../components";
 
 // ---------------------------------------------------------------------------
 // Integration: the real time, lifecycle, model, clock, flow, world, renderer
@@ -145,6 +145,24 @@ describe("input plugin integration", () => {
       justPressed: false,
       justReleased: false
     });
+
+    await app.stop();
+  });
+
+  it("reaches the onTap listeners of a Touchable button through app.input.tap", async () => {
+    const app = await startApp();
+    const button = app.world.ecs.spawn({ kind: "plugin", name: "test" }, [Touchable()]);
+    const seen: number[] = [];
+    const off = app.input.onTap(entity => seen.push(entity));
+
+    expect(app.input.tap(button)).toBe(false);
+    expect(seen).toEqual([button]);
+
+    off();
+    app.input.tap(button);
+
+    expect(seen).toEqual([button]);
+    expect(app.model.store.snapshot().session).toEqual({ merges: 0 });
 
     await app.stop();
   });

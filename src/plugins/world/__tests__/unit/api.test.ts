@@ -25,10 +25,11 @@ const ECS_MEMBERS = [
   "spawn",
   "system",
   "tag",
+  "typeOf",
   "untag"
 ];
 
-const ECS_INTERNALS = ["onOwnerLeft", "runPhase", "flush", "clearChanges", "clear"];
+const ECS_INTERNALS = ["onOwnerLeft", "ownerOf", "runPhase", "flush", "clearChanges", "clear"];
 
 const PROJECTION_MEMBERS = [
   "entityOf",
@@ -38,10 +39,14 @@ const PROJECTION_MEMBERS = [
   "mount",
   "mute",
   "register",
+  "registerKey",
   "rerunAll",
+  "setDriver",
   "setLayers",
+  "setRest",
   "settle",
-  "unmount"
+  "unmount",
+  "viewOf"
 ];
 
 const PROJECTION_INTERNALS = [
@@ -49,7 +54,7 @@ const PROJECTION_INTERNALS = [
   "reconcileIfDirty",
   "dropHints",
   "pushHint",
-  "advance",
+  "sweep",
   "flushAll",
   "ownerLeft",
   "clear"

@@ -4,6 +4,7 @@ import {
   emptyManifest,
   fileUrl,
   indexKeys,
+  kindOf,
   nineOf,
   parseManifest,
   resolveBaseUrl
@@ -41,6 +42,74 @@ const raw = {
 describe("emptyManifest", () => {
   it("is version 1 with no bundles", () => {
     expect(emptyManifest()).toEqual({ version: 1, bundles: {} });
+  });
+});
+
+describe("kinds", () => {
+  it("reads a font with its pages and an audio file", () => {
+    const manifest = parseManifest({
+      version: 1,
+      bundles: {
+        ui: {
+          feature: "ui",
+          tier: "core",
+          mb: 0.079,
+          files: [
+            {
+              key: "ui.body",
+              path: "features/ui/assets/body.fnt",
+              kind: "font",
+              mb: 0.063,
+              pages: [{ path: "features/ui/assets/body_0.png", width: 128, height: 128, mb: 0.063 }]
+            },
+            {
+              key: "ui.click",
+              path: "features/ui/assets/click.mp3",
+              kind: "audio",
+              mb: 0.016
+            }
+          ]
+        }
+      }
+    });
+    const [font, audio] = manifest.bundles.ui?.files ?? [];
+
+    expect(font?.kind).toBe("font");
+    expect(font?.pages).toEqual([
+      { path: "features/ui/assets/body_0.png", width: 128, height: 128, mb: 0.063 }
+    ]);
+    expect(kindOf(font as ManifestFile)).toBe("font");
+    expect(kindOf(audio as ManifestFile)).toBe("audio");
+  });
+
+  it("treats a file without a kind as a texture, so an older manifest still loads", () => {
+    const manifest = parseManifest(raw);
+    const file = manifest.bundles.ui?.files[0] as ManifestFile;
+
+    expect(file.kind).toBeUndefined();
+    expect(kindOf(file)).toBe("texture");
+  });
+
+  it("drops an unknown kind and a pages field that is not a list", () => {
+    const manifest = parseManifest({
+      version: 1,
+      bundles: {
+        ui: {
+          feature: "ui",
+          tier: "core",
+          mb: 0,
+          files: [{ key: "ui.a", path: "a.png", width: 1, height: 1, mb: 0, kind: "video" }]
+        }
+      }
+    });
+
+    expect(manifest.bundles.ui?.files[0]).toEqual({
+      key: "ui.a",
+      path: "a.png",
+      width: 1,
+      height: 1,
+      mb: 0
+    });
   });
 });
 

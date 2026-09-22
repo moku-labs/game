@@ -6,16 +6,34 @@
 import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { BundleSpec, Manifest, ManifestBundle, ManifestFile, NineSlice, Tier } from "../types";
+import type {
+  BundleSpec,
+  FontPage,
+  Manifest,
+  ManifestBundle,
+  ManifestFile,
+  NineSlice,
+  Tier
+} from "../types";
 import { emitKeys, emitManifest } from "./emit";
-import { HEADER_BYTES, type ImageSize, readImageSize, textureMb } from "./image-size";
-import { isAssetFile, keyOf, parseTags } from "./keys";
+import { pagesOfFont } from "./fonts";
+import { bytesMb, HEADER_BYTES, type ImageSize, readImageSize, textureMb } from "./image-size";
+import { assetKindOf, isAssetFile, keyOf, parseTags } from "./keys";
 
 const TIERS: readonly string[] = ["boot", "core", "scene", "feature", "lazy"];
 
 const PREFIX = "[game] assets: ";
 
 const ESCAPE = /[.+^${}()|[\]\\]/g;
+
+/** The formats a game brings instead of an MP3. One format decodes everywhere, so MP3 it is. */
+const OTHER_AUDIO = /\.(?:ogg|wav|m4a|aac|opus|flac)$/i;
+
+/** A vector font. The engine draws bitmap text, so a font arrives as a `.fnt` with its pages. */
+const OTHER_FONT = /\.(?:ttf|otf|woff2?)$/i;
+
+/** A page name that says "this folder". */
+const HERE = /^\.\//;
 
 /**
  * What one scan is told: where the features are and where the two generated files go.
@@ -55,6 +73,18 @@ type BundleDraft = { feature: string; tier: Tier; files: ManifestFile[] };
 
 /** One declared bundle that takes files out of the default bundle of its feature. */
 type Split = { name: string; patterns: readonly RegExp[] };
+
+/** The page images of every font of one feature, by the path of the `.fnt` inside `assets/`. */
+type FontPages = ReadonlyMap<string, readonly string[]>;
+
+/** What one feature's files are read with: everything the walk decided before it started. */
+type FeaturePass = {
+  feature: string;
+  assetsFolder: string;
+  splits: readonly Split[];
+  defaultTier: Tier;
+  fonts: FontPages;
+};
 
 /** Everything one scan collects. */
 type ScanState = {
@@ -400,34 +430,168 @@ function draftOf(scan: ScanState, name: string, feature: string, tier: Tier): Bu
 }
 
 /**
- * Reads one asset file into a manifest entry.
+ * Says in one line why a file of an `assets/` folder is not in the manifest. Nothing here stops
+ * a build: the note is read once, when the file was meant to be an asset.
+ *
+ * @param file - Path of the file from the scan root.
+ * @returns The note.
+ * @example
+ * ```ts
+ * ignoredNote("features/ui/assets/click.wav");
+ * // 'ignored "features/ui/assets/click.wav": audio is .mp3 only.'
+ * ```
+ */
+function ignoredNote(file: string): string {
+  if (OTHER_AUDIO.test(file)) return `ignored "${file}": audio is .mp3 only.`;
+  if (OTHER_FONT.test(file)) return `ignored "${file}": a font is a .fnt file with its .png pages.`;
+
+  return `ignored "${file}": the scanner reads .png, .webp, .fnt and .mp3 only.`;
+}
+
+/**
+ * Works out where a page of a font lives: page names are relative to the `.fnt` file.
+ *
+ * @param font - POSIX path of the `.fnt` file inside `assets/`.
+ * @param page - The page name the font declared.
+ * @returns The POSIX path of the page inside `assets/`.
+ * @example
+ * ```ts
+ * resolvePage("fonts/body.fnt", "body_0.png"); // "fonts/body_0.png"
+ * ```
+ */
+function resolvePage(font: string, page: string): string {
+  const cut = font.lastIndexOf("/");
+
+  return `${cut === -1 ? "" : font.slice(0, cut + 1)}${page.replace(HERE, "")}`;
+}
+
+/**
+ * Reads every `.fnt` of a feature before its files are described: a page image belongs to its
+ * font and never becomes an asset key of its own, so the walk has to know the pages first.
  *
  * @param scan - State of the scan.
- * @param feature - Name of the feature.
- * @param absolute - Absolute path of the file.
+ * @param assetsFolder - Absolute path of the feature's `assets/`.
+ * @param files - Every file of that folder, as POSIX paths inside it.
+ * @returns The pages of each font, in declaration order.
+ */
+async function readFonts(
+  scan: ScanState,
+  assetsFolder: string,
+  files: readonly string[]
+): Promise<FontPages> {
+  const fonts = new Map<string, readonly string[]>();
+  const known = new Set(files);
+
+  for (const relative of files) {
+    if (assetKindOf(relative) !== "font") continue;
+
+    const absolute = path.join(assetsFolder, ...relative.split("/"));
+    const file = toPosix(path.relative(scan.root, absolute));
+
+    try {
+      const pages: string[] = [];
+
+      for (const declared of pagesOfFont(await readFile(absolute, "utf8"), file)) {
+        const page = resolvePage(relative, declared);
+
+        if (known.has(page)) pages.push(page);
+        else {
+          scan.problems.push(
+            `the font "${file}" names the page "${declared}", which is not next to it.`
+          );
+        }
+      }
+
+      fonts.set(relative, pages);
+    } catch (error) {
+      scan.problems.push(detailOf(error));
+    }
+  }
+
+  return fonts;
+}
+
+/**
+ * Reads the pages of one font into manifest entries. The pages carry no key: they are listed
+ * under the `.fnt` file and loaded with it.
+ *
+ * @param scan - State of the scan.
+ * @param pass - What this feature is read with.
+ * @param relative - POSIX path of the `.fnt` file inside `assets/`.
+ * @returns The pages, in the order the font declares them.
+ * @throws {Error} When a page is not a PNG or a WebP the scanner reads.
+ */
+async function describePages(
+  scan: ScanState,
+  pass: FeaturePass,
+  relative: string
+): Promise<FontPage[]> {
+  const pages: FontPage[] = [];
+
+  for (const page of pass.fonts.get(relative) ?? []) {
+    const absolute = path.join(pass.assetsFolder, ...page.split("/"));
+    const file = toPosix(path.relative(scan.root, absolute));
+    const size = readImageSize(await readHead(absolute), file);
+
+    pages.push({
+      path: file,
+      width: size.width,
+      height: size.height,
+      mb: textureMb(size.width, size.height)
+    });
+  }
+
+  return pages;
+}
+
+/**
+ * Reads one asset file into a manifest entry: a texture by its pixels, a font with its pages, an
+ * audio file by its bytes.
+ *
+ * @param scan - State of the scan.
+ * @param pass - What this feature is read with.
  * @param relative - POSIX path of the file inside `assets/`.
  * @returns The entry.
  * @throws {Error} When the key, the tags, the header bytes or the nine-slice are wrong.
  */
 async function describeFile(
   scan: ScanState,
-  feature: string,
-  absolute: string,
+  pass: FeaturePass,
   relative: string
 ): Promise<ManifestFile> {
+  const absolute = path.join(pass.assetsFolder, ...relative.split("/"));
   const file = toPosix(path.relative(scan.root, absolute));
   const fileName = relative.slice(relative.lastIndexOf("/") + 1);
-  const key = keyOf(feature, relative, file);
+  const key = keyOf(pass.feature, relative, file);
   const owner = scan.keyOwner.get(key);
 
   if (owner !== undefined) {
     throw problem(`key "${key}" comes from two files: ${owner} and ${file}.`);
   }
 
+  const kind = assetKindOf(fileName);
+
+  if (kind === "font") {
+    const pages = await describePages(scan, pass, relative);
+
+    scan.keyOwner.set(key, file);
+
+    return { key, path: file, kind, width: 0, height: 0, mb: sumMb(pages), pages };
+  }
+
+  if (kind === "audio") {
+    const { size } = await stat(absolute);
+
+    scan.keyOwner.set(key, file);
+
+    return { key, path: file, kind, width: 0, height: 0, mb: bytesMb(size) };
+  }
+
   const { nine } = parseTags(fileName, file);
   const size = readImageSize(await readHead(absolute), file);
 
   checkNine(nine, size, file);
+  // The key is taken only by a file that passed its checks, so a broken image never owns one.
   scan.keyOwner.set(key, file);
 
   return {
@@ -444,41 +608,31 @@ async function describeFile(
  * Reads one file of a feature into the bundle that claims it.
  *
  * @param scan - State of the scan.
- * @param feature - Name of the feature.
- * @param assetsFolder - Absolute path of the feature's `assets/`.
+ * @param pass - What this feature is read with.
  * @param relative - POSIX path of the file inside `assets/`.
- * @param splits - The declared bundles that take files out of the default one.
- * @param defaultTier - Tier of the feature's default bundle.
  */
-async function addFile(
-  scan: ScanState,
-  feature: string,
-  assetsFolder: string,
-  relative: string,
-  splits: readonly Split[],
-  defaultTier: Tier
-): Promise<void> {
-  const absolute = path.join(assetsFolder, ...relative.split("/"));
+async function addFile(scan: ScanState, pass: FeaturePass, relative: string): Promise<void> {
+  const absolute = path.join(pass.assetsFolder, ...relative.split("/"));
   const file = toPosix(path.relative(scan.root, absolute));
 
   if (!isAssetFile(relative)) {
-    scan.notes.push(`ignored "${file}": the scanner reads .png and .webp only.`);
+    scan.notes.push(ignoredNote(file));
 
     return;
   }
 
   try {
-    const name = ownerOf(splits, relative, file) ?? feature;
-    const entry = await describeFile(scan, feature, absolute, relative);
+    const name = ownerOf(pass.splits, relative, file) ?? pass.feature;
+    const entry = await describeFile(scan, pass, relative);
 
-    draftOf(scan, name, feature, defaultTier).files.push(entry);
+    draftOf(scan, name, pass.feature, pass.defaultTier).files.push(entry);
   } catch (error) {
     scan.problems.push(detailOf(error));
   }
 }
 
 /**
- * Reads one feature: its description first, then every file of its `assets/`.
+ * Reads one feature: its description first, then its fonts, then every file of its `assets/`.
  *
  * @param scan - State of the scan.
  * @param feature - Name of the feature folder.
@@ -486,24 +640,35 @@ async function addFile(
 async function scanFeature(scan: ScanState, feature: string): Promise<void> {
   const specs = await readBundleSpecs(scan, feature);
   const assetsFolder = path.join(scan.featuresFolder, feature, "assets");
-  const defaultTier = specs.get(feature)?.tier ?? "feature";
 
   for (const [name, spec] of specs) draftOf(scan, name, feature, spec.tier);
 
-  const splits = splitsOf(specs);
+  const files = await walkAssets(assetsFolder, "");
+  const fonts = await readFonts(scan, assetsFolder, files);
+  const pages = new Set([...fonts.values()].flat());
+  const pass: FeaturePass = {
+    feature,
+    assetsFolder,
+    splits: splitsOf(specs),
+    defaultTier: specs.get(feature)?.tier ?? "feature",
+    fonts
+  };
 
-  for (const relative of await walkAssets(assetsFolder, "")) {
-    await addFile(scan, feature, assetsFolder, relative, splits, defaultTier);
+  for (const relative of files) {
+    // A page image is part of its font: it is neither a key nor a note.
+    if (pages.has(relative)) continue;
+
+    await addFile(scan, pass, relative);
   }
 }
 
 /**
- * Adds up the estimated texture memory of a bundle.
+ * Adds up what a list of files costs: the files of a bundle, or the pages of a font.
  *
- * @param files - Its files.
+ * @param files - Anything that carries an `mb`.
  * @returns The sum in MB, rounded to three decimals.
  */
-function sumMb(files: readonly ManifestFile[]): number {
+function sumMb(files: readonly { mb: number }[]): number {
   let total = 0;
 
   for (const file of files) total += file.mb;

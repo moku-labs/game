@@ -16,7 +16,9 @@ export default [
       "node_modules/**",
       // Throwaway prototypes: outside lint, coverage and the published package.
       "spikes/**",
-      "declarations.d.ts"
+      "declarations.d.ts",
+      // Tool output: the asset scanner and compileStrings write these files.
+      "**/generated/**"
     ]
   },
 
