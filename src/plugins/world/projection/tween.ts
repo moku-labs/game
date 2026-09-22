@@ -113,10 +113,10 @@ function startValues(
 ): Record<string, number> {
   const from: Record<string, number> = {};
 
-  for (const field of Object.keys(track.to)) {
+  for (const [field, target] of Object.entries(track.to)) {
     const value = current[field];
 
-    from[field] = typeof value === "number" ? value : (track.to[field] ?? 0);
+    from[field] = typeof value === "number" ? value : target;
   }
 
   return from;

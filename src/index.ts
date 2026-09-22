@@ -21,6 +21,15 @@
  * | flow | journalLimit | 500 |
  * | world | settleMs | 350 |
  * | world | reconciledEvent | false |
+ * | renderer | mount | undefined, inert without a mount |
+ * | renderer | background | 0x000000 |
+ * | renderer | antialias | false |
+ * | renderer | maxResolution | 2 |
+ * | renderer | preference | "webgpu", WebGL is Pixi's fallback |
+ * | renderer | aspect | { min: 4/3, max: 21/9 } |
+ * | renderer | poolLimit | 256 |
+ * | renderer | unsupportedMessage | "This device cannot run the game." |
+ * | renderer | loadPixi | () => import("pixi.js") |
  *
  * @file The package root: the composed framework and its public exports.
  * @example
@@ -34,6 +43,7 @@ import {
   flowPlugin,
   lifecyclePlugin,
   modelPlugin,
+  rendererPlugin,
   timePlugin,
   worldPlugin
 } from "./plugins";
@@ -107,6 +117,14 @@ export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
 export { exit, slot, to, type } from "./plugins/flow/runner/define";
 export { SaveUnreadableError } from "./plugins/model/store/types";
 export {
+  Display,
+  NineSlice,
+  Parent,
+  Sprite,
+  sprite,
+  Transform
+} from "./plugins/renderer/components";
+export {
   component,
   Exiting,
   Layer,
@@ -121,11 +139,11 @@ export { projection } from "./plugins/world/projection/define";
 // ─── Plugin sets ──────────────────────────────────────────────
 /**
  * The screen plugins, in dependency order. A game with a screen spreads them into `plugins`;
- * a headless test leaves them out. V2 carries `world`; renderer, input, assets and scenes join it wave by wave.
+ * a headless test leaves them out. V2 carries `world` and `renderer`; input, assets and scenes join it wave by wave.
  *
  * @example
  * ```ts
  * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { renderer: { mount: "#game" } } });
  * ```
  */
-export const screen = [worldPlugin] as const;
+export const screen = [worldPlugin, rendererPlugin] as const;

@@ -45,17 +45,17 @@ export const BOARD = "board.items";
  * Builds the fixture projection, with the motion hooks a test wants.
  *
  * @param motion - Motion hooks of this test, or none.
- * @param lift - Whether the projection declares the lift layer.
+ * @param lift - `"lifted"` declares the lift layer, `"none"` leaves the projection without one.
  * @returns The projection spec.
  */
 export function boardItems(
   motion?: ProjectionMotion<Item>,
-  lift: "lifted" | undefined = "lifted"
+  lift: "lifted" | "none" = "lifted"
 ): AnyProjectionSpec {
   return projection({
     name: BOARD,
     layer: "items",
-    ...(lift === undefined ? {} : { lift }),
+    ...(lift === "none" ? {} : { lift }),
     from: (player: Player) => player.items,
     key: (item: Item) => item.id,
     view: (item: Item) => [
@@ -72,13 +72,13 @@ export function boardItems(
  * @param world - The mock world.
  * @param items - The items the player starts with.
  * @param motion - Motion hooks of this test, or none.
- * @param lift - Whether the projection declares the lift layer.
+ * @param lift - `"lifted"` declares the lift layer, `"none"` leaves the projection without one.
  */
 export function mountBoard(
   world: MockWorld,
   items: Item[],
   motion?: ProjectionMotion<Item>,
-  lift: "lifted" | undefined = "lifted"
+  lift: "lifted" | "none" = "lifted"
 ): void {
   world.model.player = { items } as unknown as Player & Record<string, never>;
   world.api.projection.setLayers(LAYERS);

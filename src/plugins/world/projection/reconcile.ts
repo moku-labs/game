@@ -4,6 +4,7 @@
  */
 import type { Hint } from "../../flow/types";
 import type { Snapshot } from "../../model/types";
+import type { AnyComponentValue } from "../ecs/types";
 import type { EmitReconciled } from "../types";
 import { diffComponents } from "./diff";
 import { routeHint } from "./hints";
@@ -38,6 +39,24 @@ import { asError, collectView, createViewRecord, writeValue } from "./views";
  */
 function emptyHintSet(): Set<Hint> {
   return new Set();
+}
+
+/**
+ * Yields the component values behind a list of names, skipping a name the map does not hold.
+ *
+ * @param source - The component table to read.
+ * @param names - The names the diff produced.
+ * @yields {AnyComponentValue} One value per name the table holds.
+ */
+function* valuesOf(
+  source: ReadonlyMap<string, AnyComponentValue>,
+  names: readonly string[]
+): Generator<AnyComponentValue> {
+  for (const name of names) {
+    const value = source.get(name);
+
+    if (value !== undefined) yield value;
+  }
 }
 
 /**
@@ -146,17 +165,8 @@ function changeEntry(
   const { added, changed, removed } = diffComponents(view.rest, next);
   const previous = view.item;
 
-  for (const name of added) {
-    const value = next.get(name);
-
-    if (value !== undefined) writeValue(pctx, view.entity, value);
-  }
-
-  for (const name of removed) {
-    const value = view.rest.get(name);
-
-    if (value !== undefined) pctx.deps.ecs.remove(view.entity, value.type);
-  }
+  for (const value of valuesOf(next, added)) writeValue(pctx, view.entity, value);
+  for (const value of valuesOf(view.rest, removed)) pctx.deps.ecs.remove(view.entity, value.type);
 
   view.rest = next;
   view.item = entry.item;
@@ -224,17 +234,8 @@ function reviveEntry(
   const next = collectView(pctx, spec, entry.item);
   const { added, removed } = diffComponents(view.rest, next);
 
-  for (const name of added) {
-    const value = next.get(name);
-
-    if (value !== undefined) writeValue(pctx, view.entity, value);
-  }
-
-  for (const name of removed) {
-    const value = view.rest.get(name);
-
-    if (value !== undefined) pctx.deps.ecs.remove(view.entity, value.type);
-  }
+  for (const value of valuesOf(next, added)) writeValue(pctx, view.entity, value);
+  for (const value of valuesOf(view.rest, removed)) pctx.deps.ecs.remove(view.entity, value.type);
 
   view.rest = next;
   view.item = entry.item;

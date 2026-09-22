@@ -47,7 +47,8 @@ describe("connectWorld", () => {
     world.features.push({
       name: "broken",
       description: {
-        components: [Level, "Bobbing"],
+        // eslint-disable-next-line unicorn/no-null -- a feature description may hold anything
+        components: [Level, "Bobbing", null],
         systems: [{ name: "half" }, drift],
         projections: [{ name: "board.items" }]
       }

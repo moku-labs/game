@@ -205,12 +205,20 @@ export default [
     files: ["src/**/*.ts"],
     ignores: ["src/**/__tests__/**"],
     rules: {
-      "no-restricted-imports": [
+      "@typescript-eslint/no-restricted-imports": [
         "error",
         {
           paths: [
-            { name: "pixi.js", message: "Load Pixi lazily with import() in renderer onStart." },
-            { name: "yoga-layout", message: "Load Yoga lazily with import() in ui onStart." }
+            {
+              name: "pixi.js",
+              allowTypeImports: true,
+              message: "Load Pixi lazily with import() in renderer onStart. Types may be imported."
+            },
+            {
+              name: "yoga-layout",
+              allowTypeImports: true,
+              message: "Load Yoga lazily with import() in ui onStart. Types may be imported."
+            }
           ]
         }
       ],
@@ -243,12 +251,12 @@ export default [
         {
           patterns: [
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection)/(?!types$)`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport)/(?!types$)`,
               message:
                 "Modules do not import each other's run-time code. index.ts injects sibling APIs."
             },
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection)/types$`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport)/types$`,
               allowTypeImports: true,
               message: "Import a sibling module's types with `import type` only."
             }
@@ -264,6 +272,7 @@ export default [
       "src/plugins/model/**/*.ts",
       "src/plugins/flow/**/*.ts",
       "src/plugins/world/**/*.ts",
+      "src/plugins/renderer/**/*.ts",
       "src/plugins/clock/**/*.ts",
       "tests/integration/merge-game/rules/**/*.ts"
     ],
