@@ -265,7 +265,7 @@ export type PlaceResult =
  *
  * @example
  * ```ts
- * const result: TakeResult = rules.take(state, 0);
+ * const result: TakeResult = rules.take(state, 0, tables);
  * if (result.ok) showItem(result.item);
  * ```
  */

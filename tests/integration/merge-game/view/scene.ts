@@ -11,3 +11,6 @@ export const boardScene = defineScene("board", {
   layers: { background: {}, cells: {}, items: { sort: "y" }, lifted: {}, fx: {} },
   projections: [boardCells, boardItems, boardGenerators]
 });
+
+/** The menu scene: nothing to draw yet, so the start of a session names a scene and warns no more. */
+export const homeScene = defineScene("home", { bundle: "board", layers: {}, projections: [] });

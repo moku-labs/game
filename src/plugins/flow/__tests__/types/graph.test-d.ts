@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, it } from "vitest";
 import { createApp } from "../../../../index";
+import { flowFor } from "../../feature";
 import { defineFlow, defineNode, exit, to, type } from "../../runner/define";
 
 // The five author mistakes of the design context, proven in spikes/p3-graph-types/mistakes.ts.
@@ -131,5 +132,30 @@ describe("flow graph types", () => {
     expectTypeOf(unknownTarget.id).toBeString();
     expectTypeOf(wrongPayload.id).toBeString();
     expectTypeOf(missingSubFlowEdge.id).toBeString();
+  });
+});
+
+// A game that names its scene ids gets them checked on every node; a game that names none keeps `string`.
+describe("scene ids per game", () => {
+  it("refuses a scene id the game did not declare", () => {
+    const { defineNode: typedNode } = flowFor<{
+      player: {};
+      session: {};
+      scenes: "home" | "board";
+    }>();
+
+    const board = typedNode({ scene: "board", rest: true, outcomes: { play: type() } });
+
+    expectTypeOf(board.scene).toEqualTypeOf<string | undefined>(); // the definition stays loose for the runner
+    // @ts-expect-error — "shop" is not a scene of this game
+    typedNode({ scene: "shop", rest: true, outcomes: { play: type() } });
+  });
+
+  it("accepts any string when the game declares no scenes", () => {
+    const { defineNode: looseNode } = flowFor<{ player: {}; session: {} }>();
+
+    expectTypeOf(looseNode({ scene: "anything", rest: true, outcomes: {} })).toHaveProperty(
+      "scene"
+    );
   });
 });

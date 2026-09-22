@@ -21,5 +21,6 @@ export const {
   session: Session;
   assets: AssetKey;
   bundles: BundleKey;
+  scenes: "home" | "board";
   strings: Record<string, unknown>;
 }>();

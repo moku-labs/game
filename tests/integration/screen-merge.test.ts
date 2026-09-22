@@ -148,6 +148,10 @@ describe("screen-merge — the board as entities", () => {
     const { app } = await startBoard(preparedPlayer);
 
     expect(app.scenes.current()).toBe("board");
+    // The home node names its scene, so no rest node was ever entered without one.
+    expect(
+      app.log.trace().filter(item => item.event === "scenes: a rest node was entered with no scene")
+    ).toEqual([]);
     expect(app.world.projection.layers()).toEqual([
       { name: "background", sort: "none" },
       { name: "cells", sort: "none" },

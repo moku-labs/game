@@ -1,8 +1,9 @@
 /**
  * @file Merge kit — inventory rules. Fixed-size slots, `null` is an empty slot.
  */
+import { generatorCells } from "./generators";
 import { findFreeCell, itemById, withItem, withoutItem } from "./grid";
-import type { Item, ItemId, MergeState, PlaceResult, TakeResult } from "./types";
+import type { Item, ItemId, MergeState, PlaceResult, Tables, TakeResult } from "./types";
 
 /**
  * Returns the inventory with one slot replaced. The input list is not mutated.
@@ -63,22 +64,23 @@ export function place(state: MergeState, item: ItemId): PlaceResult {
 
 /**
  * Moves the item of an inventory slot back onto the board, into the first free cell in row-major
- * order. A slot outside the inventory reads as empty.
+ * order. A generator's cell is never free for it. A slot outside the inventory reads as empty.
  *
  * @param state - The rule state; it is not mutated.
  * @param slot - The zero-based index of the inventory slot.
+ * @param tables - The content tables, for the cells the generators stand on.
  * @returns `{ ok: false, reason }` with `"empty"` or `"boardFull"`, or the new state and the item.
  * @example
  * ```ts
- * const result = take(state, 0);
+ * const result = take(state, 0, tables);
  * if (result.ok) showItem(result.item);
  * ```
  */
-export function take(state: MergeState, slot: number): TakeResult {
+export function take(state: MergeState, slot: number, tables: Tables): TakeResult {
   const stored = state.inventory[slot];
   if (stored === undefined || stored === null) return { ok: false, reason: "empty" };
 
-  const cell = findFreeCell(state.board);
+  const cell = findFreeCell(state.board, undefined, generatorCells(tables));
   if (cell === undefined) return { ok: false, reason: "boardFull" };
 
   const item: Item = { ...stored, cell };

@@ -105,7 +105,7 @@ describe("one loop of the template game through the object", () => {
     if (!sold.ok) throw new Error("sell should succeed");
     expect(sold.coins).toBe(1);
 
-    const back = rules.take(sold.state, stored.slot);
+    const back = rules.take(sold.state, stored.slot, tables);
     if (!back.ok) throw new Error("take should succeed");
     expect(back.item.cell).toBe("c0_0");
     expect(rules.neighbors(back.state.board, "c0_0")).toContain("c1_0");

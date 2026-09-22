@@ -7,7 +7,7 @@ import { boardAssets } from "../features/board/assets";
 import { defineFeature } from "../kit";
 import { Highlighted, Item } from "./components";
 import { boardCells, boardGenerators, boardItems } from "./projections";
-import { boardScene } from "./scene";
+import { boardScene, homeScene } from "./scene";
 import { highlightLegal } from "./systems";
 
 /**
@@ -19,7 +19,7 @@ import { highlightLegal } from "./systems";
  * the board, so the screen half of the same feature is registered under its own name.
  */
 export const boardView = defineFeature("boardScreen", {
-  scenes: [boardScene],
+  scenes: [homeScene, boardScene],
   projections: [boardCells, boardItems, boardGenerators],
   systems: [highlightLegal],
   components: [Item, Highlighted],

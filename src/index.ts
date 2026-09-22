@@ -63,7 +63,7 @@ import {
 } from "./plugins";
 import { bundlesFor } from "./plugins/assets/bundles";
 import { flowFor } from "./plugins/flow/feature";
-import type { BundlesOf, GameTypes } from "./plugins/flow/types";
+import type { BundlesOf, GameTypes, SceneIdOf } from "./plugins/flow/types";
 import { componentsFor } from "./plugins/renderer/components";
 import { scenesFor } from "./plugins/scenes/define";
 import { projectionFor } from "./plugins/world/projection/define";
@@ -121,7 +121,7 @@ export const createPlugin = framework.createPlugin;
  */
 export function defineGame<Types extends GameTypes>() {
   return {
-    ...flowFor<{ player: Types["player"]; session: Types["session"] }>(),
+    ...flowFor<{ player: Types["player"]; session: Types["session"]; scenes: SceneIdOf<Types> }>(),
     ...projectionFor<Types["player"], Types["session"]>(),
     ...componentsFor<Types["assets"]>(),
     ...bundlesFor<BundlesOf<Types>>(),
