@@ -158,3 +158,61 @@ describe("enforceBudget", () => {
     expect(mock.log.warn).not.toHaveBeenCalled();
   });
 });
+
+describe("budget edge cases", () => {
+  it("ignores a record whose bundle left the manifest", async () => {
+    const mock = await loadAll();
+
+    mock.ctx.state.manifest = { version: 1, bundles: {} };
+
+    expect(usedMb(mock.ctx.state)).toBe(0);
+    expect(pickVictim(mock.ctx.state)).toBeUndefined();
+  });
+
+  it("skips a bundle that is still loading", async () => {
+    const mock = await loadAll();
+
+    unloadBundle(mock.assetsCtx, "alpha", "request");
+    mock.io.control.gated = true;
+
+    const running = loadBundle(mock.assetsCtx, "alpha", undefined, "request");
+    const record = mock.ctx.state.records.get("alpha");
+
+    expect(record?.status).toBe("loading");
+    expect(pickVictim(mock.ctx.state)).toBe("beta");
+
+    mock.io.releaseAll();
+    await running;
+  });
+
+  it("frees the record without an io when the plugin is already headless", async () => {
+    const mock = await loadAll();
+    const destroyed = mock.io.destroyed.length;
+
+    mock.ctx.state.io = undefined;
+    unloadBundle(mock.assetsCtx, "alpha", "request");
+
+    expect(mock.io.destroyed).toHaveLength(destroyed);
+    expect(mock.ctx.state.records.get("alpha")?.status).toBe("idle");
+    expect(mock.renderer.invalidated.at(-1)).toEqual(["alpha.one"]);
+  });
+
+  it("names the heaviest files by size and then by key", async () => {
+    const mock = await loadAll();
+
+    mock.ctx.state.pinned = new Set(["alpha", "beta", "gamma"]);
+    mock.config.textureBudgetMb = 0;
+    enforceBudget(mock.assetsCtx);
+
+    const warned = (mock.log.warn as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1);
+    const data = warned?.[1] as { heaviest: Array<{ key: string }>; usedMb: number };
+
+    expect(data.usedMb).toBe(0.252);
+    expect(data.heaviest.map(entry => entry.key)).toEqual([
+      "alpha.one",
+      "beta.one",
+      "gamma.one",
+      "ui.panel"
+    ]);
+  });
+});

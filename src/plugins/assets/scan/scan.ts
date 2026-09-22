@@ -1,0 +1,556 @@
+/**
+ * @file assets plugin, build time — the walk. `features/*` with an `assets/` folder becomes the
+ * manifest: one bundle per feature, split by the optional `assets.ts` that feature exports.
+ * Node and Bun only. Nothing under `src/` outside `scan/` imports it, so no game bundles it.
+ */
+import { open, readdir, stat } from "node:fs/promises";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import type { BundleSpec, Manifest, ManifestBundle, ManifestFile, NineSlice, Tier } from "../types";
+import { HEADER_BYTES, type ImageSize, readImageSize, textureMb } from "./image-size";
+import { isAssetFile, keyOf, parseTags } from "./keys";
+
+const TIERS: readonly string[] = ["boot", "core", "scene", "feature", "lazy"];
+
+const PREFIX = "[game] assets: ";
+
+const ESCAPE = /[.+^${}()|[\]\\]/g;
+
+/**
+ * What a scan may be told besides its root.
+ */
+export type ScanOptions = {
+  /** Name of the folder that holds the features. Default `"features"`. */
+  features?: string;
+};
+
+/**
+ * What a scan produced.
+ */
+export type ScanResult = {
+  /** The manifest, with bundles sorted by name and files sorted by key. */
+  manifest: Manifest;
+  /** One line per file the scan left out. Nothing here stops a build. */
+  notes: readonly string[];
+};
+
+/** One bundle while it is being filled. */
+type BundleDraft = { feature: string; tier: Tier; files: ManifestFile[] };
+
+/** One declared bundle that takes files out of the default bundle of its feature. */
+type Split = { name: string; patterns: readonly RegExp[] };
+
+/** Everything one scan collects. */
+type ScanState = {
+  root: string;
+  featuresFolder: string;
+  drafts: Map<string, BundleDraft>;
+  keyOwner: Map<string, string>;
+  problems: string[];
+  notes: string[];
+};
+
+/**
+ * Wraps a scanner problem in the message shape of the framework.
+ *
+ * @param message - One sentence naming the file or the bundle.
+ * @returns The error to throw.
+ */
+function problem(message: string): Error {
+  return new Error(`${PREFIX}${message}`);
+}
+
+/**
+ * Reads the message of anything that was thrown.
+ *
+ * @param failure - What the `catch` caught.
+ * @returns The message, without the framework prefix.
+ */
+function detailOf(failure: unknown): string {
+  const message = failure instanceof Error ? failure.message : String(failure);
+
+  return message.startsWith(PREFIX) ? message.slice(PREFIX.length) : message;
+}
+
+/**
+ * Creates the state of one scan. It is its own function because lint rule L5 refuses a collection
+ * built inside an exported declaration.
+ *
+ * @param root - Absolute or relative path of the game source root.
+ * @param features - Name of the features folder.
+ * @returns The empty state.
+ */
+function createState(root: string, features: string): ScanState {
+  return {
+    root,
+    featuresFolder: path.join(root, features),
+    drafts: new Map(),
+    keyOwner: new Map(),
+    problems: [],
+    notes: []
+  };
+}
+
+/**
+ * Turns a path of this machine into the POSIX path the manifest carries.
+ *
+ * @param value - A path as `node:path` built it.
+ * @returns The same path with forward slashes.
+ */
+function toPosix(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+/**
+ * Compares two names, so every list the scanner writes has one order.
+ *
+ * @param left - First name.
+ * @param right - Second name.
+ * @returns The sort order.
+ */
+function byName(left: string, right: string): number {
+  return left.localeCompare(right);
+}
+
+/**
+ * Lists the feature folders, sorted. A missing features folder is an empty game, not a problem.
+ *
+ * @param dir - The features folder.
+ * @returns The folder names.
+ */
+async function listFeatures(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+
+  return entries
+    .filter(entry => entry.isDirectory())
+    .map(entry => entry.name)
+    .toSorted(byName);
+}
+
+/**
+ * Walks one `assets/` folder.
+ *
+ * @param dir - The folder to read.
+ * @param prefix - POSIX path of that folder inside `assets/`.
+ * @returns The POSIX paths of every file below it, sorted.
+ */
+async function walkAssets(dir: string, prefix: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  const files: string[] = [];
+
+  for (const entry of entries.toSorted((left, right) => byName(left.name, right.name))) {
+    const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+
+    if (entry.isDirectory())
+      files.push(...(await walkAssets(path.join(dir, entry.name), relative)));
+    else files.push(relative);
+  }
+
+  return files;
+}
+
+/**
+ * Reads the first bytes of a file, which is all the size needs.
+ *
+ * @param file - Absolute path of the file.
+ * @returns The header bytes, fewer when the file is shorter.
+ */
+async function readHead(file: string): Promise<Uint8Array> {
+  const handle = await open(file, "r");
+
+  try {
+    const head = new Uint8Array(HEADER_BYTES);
+    const { bytesRead } = await handle.read(head, 0, HEADER_BYTES, 0);
+
+    return head.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Tells whether a value is a plain object.
+ *
+ * @param value - Anything a description exported.
+ * @returns True for an object that is not an array.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Imports the optional `assets.ts` of a feature. Node strips the types of a `.ts` file, so the
+ * description a game writes runs as it stands.
+ *
+ * @param file - Absolute path of the description.
+ * @returns Its exports, or `undefined` when the feature brought none.
+ * @throws {Error} When the file exists but cannot be imported.
+ */
+async function importDescription(file: string): Promise<Record<string, unknown> | undefined> {
+  const exists = await stat(file).then(
+    entry => entry.isFile(),
+    () => false
+  );
+
+  if (!exists) return undefined;
+
+  return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as Record<string, unknown>;
+}
+
+/**
+ * Reads one declared bundle into the specs of its feature.
+ *
+ * @param scan - State of the scan.
+ * @param feature - Name of the feature.
+ * @param name - Name of the bundle.
+ * @param raw - What the description carried under that name.
+ * @param specs - Where a valid bundle goes.
+ */
+function readSpec(
+  scan: ScanState,
+  feature: string,
+  name: string,
+  raw: unknown,
+  specs: Map<string, BundleSpec>
+): void {
+  if (name !== feature && !name.startsWith(`${feature}.`)) {
+    scan.problems.push(
+      `the feature "${feature}" declares the bundle "${name}", which is neither "${feature}" ` +
+        `nor a name starting with "${feature}.".`
+    );
+
+    return;
+  }
+
+  const tier = isRecord(raw) ? raw.tier : undefined;
+
+  if (typeof tier !== "string" || !TIERS.includes(tier)) {
+    scan.problems.push(
+      `the bundle "${name}" has the unknown tier "${String(tier)}". ` +
+        `Use one of ${TIERS.join(", ")}.`
+    );
+
+    return;
+  }
+
+  const files = isRecord(raw) && Array.isArray(raw.files) ? raw.files.map(String) : undefined;
+
+  specs.set(name, files === undefined ? { tier: tier as Tier } : { tier: tier as Tier, files });
+}
+
+/**
+ * Reads the bundles a feature declares. Every export that is a `defineBundles` result counts.
+ *
+ * @param scan - State of the scan.
+ * @param feature - Name of the feature.
+ * @returns The declared bundles, empty when the feature brought no description.
+ */
+async function readBundleSpecs(scan: ScanState, feature: string): Promise<Map<string, BundleSpec>> {
+  const specs = new Map<string, BundleSpec>();
+  const file = path.join(scan.featuresFolder, feature, "assets.ts");
+
+  try {
+    const loaded = await importDescription(file);
+
+    for (const value of Object.values(loaded ?? {})) {
+      if (!isRecord(value) || value.kind !== "bundles" || !isRecord(value.map)) continue;
+
+      for (const [name, raw] of Object.entries(value.map))
+        readSpec(scan, feature, name, raw, specs);
+    }
+  } catch (error) {
+    const relative = toPosix(path.relative(scan.root, file));
+
+    scan.problems.push(`the description "${relative}" could not be read: ${detailOf(error)}`);
+  }
+
+  return specs;
+}
+
+/**
+ * Turns one glob of a declared bundle into a matcher. `**` crosses folders, `*` and `?` do not.
+ *
+ * @param glob - The glob, relative to the feature's `assets/`.
+ * @returns The matcher.
+ */
+function globToRegExp(glob: string): RegExp {
+  const parts: string[] = [];
+  let index = 0;
+
+  while (index < glob.length) {
+    const rest = glob.slice(index);
+
+    if (rest.startsWith("**/")) {
+      parts.push("(?:.*/)?");
+      index += 3;
+    } else if (rest.startsWith("**")) {
+      parts.push(".*");
+      index += 2;
+    } else if (rest.startsWith("*")) {
+      parts.push("[^/]*");
+      index += 1;
+    } else if (rest.startsWith("?")) {
+      parts.push("[^/]");
+      index += 1;
+    } else {
+      parts.push(rest.slice(0, 1).replaceAll(ESCAPE, String.raw`\$&`));
+      index += 1;
+    }
+  }
+
+  return new RegExp(`^${parts.join("")}$`);
+}
+
+/**
+ * Builds the matchers of the declared bundles that take files out of the default bundle.
+ *
+ * @param specs - The declared bundles of one feature.
+ * @returns The splits, sorted by bundle name.
+ */
+function splitsOf(specs: Map<string, BundleSpec>): Split[] {
+  const splits: Split[] = [];
+
+  for (const [name, spec] of [...specs].toSorted((left, right) => byName(left[0], right[0]))) {
+    if (spec.files === undefined || spec.files.length === 0) continue;
+
+    splits.push({ name, patterns: spec.files.map(glob => globToRegExp(glob)) });
+  }
+
+  return splits;
+}
+
+/**
+ * Works out which declared bundle claims a file.
+ *
+ * @param splits - The splits of the feature.
+ * @param relative - POSIX path of the file inside `assets/`.
+ * @param file - Path of the file from the scan root, for the message.
+ * @returns The bundle name, or `undefined` when the file stays in the default bundle.
+ * @throws {Error} When two bundles claim the same file.
+ */
+function ownerOf(splits: readonly Split[], relative: string, file: string): string | undefined {
+  const matched = splits
+    .filter(split => split.patterns.some(pattern => pattern.test(relative)))
+    .map(split => split.name);
+
+  if (matched.length > 1) {
+    const [first, second] = matched;
+
+    throw problem(
+      `file "${file}" is claimed by the bundles "${String(first)}" and "${String(second)}".`
+    );
+  }
+
+  return matched[0];
+}
+
+/**
+ * Refuses a nine-slice border that does not fit in its image.
+ *
+ * @param nine - The borders of the file, when it carries a tag.
+ * @param size - The pixel size of the file.
+ * @param file - Path of the file, for the message.
+ * @throws {Error} When a border reaches half of a side.
+ */
+function checkNine(nine: NineSlice | undefined, size: ImageSize, file: string): void {
+  if (nine === undefined) return;
+  if (nine.left * 2 < size.width && nine.top * 2 < size.height) return;
+
+  throw problem(
+    `the nine-slice ${nine.left} of "${file}" must be smaller than half of ` +
+      `${size.width}×${size.height}.`
+  );
+}
+
+/**
+ * Finds or starts the draft of one bundle.
+ *
+ * @param scan - State of the scan.
+ * @param name - Name of the bundle.
+ * @param feature - Feature that owns it.
+ * @param tier - When it loads.
+ * @returns The draft.
+ */
+function draftOf(scan: ScanState, name: string, feature: string, tier: Tier): BundleDraft {
+  const found = scan.drafts.get(name);
+
+  if (found !== undefined) return found;
+
+  const draft: BundleDraft = { feature, tier, files: [] };
+
+  scan.drafts.set(name, draft);
+
+  return draft;
+}
+
+/**
+ * Reads one asset file into a manifest entry.
+ *
+ * @param scan - State of the scan.
+ * @param feature - Name of the feature.
+ * @param absolute - Absolute path of the file.
+ * @param relative - POSIX path of the file inside `assets/`.
+ * @returns The entry.
+ * @throws {Error} When the key, the tags, the header bytes or the nine-slice are wrong.
+ */
+async function describeFile(
+  scan: ScanState,
+  feature: string,
+  absolute: string,
+  relative: string
+): Promise<ManifestFile> {
+  const file = toPosix(path.relative(scan.root, absolute));
+  const fileName = relative.slice(relative.lastIndexOf("/") + 1);
+  const key = keyOf(feature, relative, file);
+  const owner = scan.keyOwner.get(key);
+
+  if (owner !== undefined) {
+    throw problem(`key "${key}" comes from two files: ${owner} and ${file}.`);
+  }
+
+  const { nine } = parseTags(fileName, file);
+  const size = readImageSize(await readHead(absolute), file);
+
+  checkNine(nine, size, file);
+  scan.keyOwner.set(key, file);
+
+  return {
+    key,
+    path: file,
+    width: size.width,
+    height: size.height,
+    mb: textureMb(size.width, size.height),
+    ...(nine === undefined ? {} : { nine })
+  };
+}
+
+/**
+ * Reads one file of a feature into the bundle that claims it.
+ *
+ * @param scan - State of the scan.
+ * @param feature - Name of the feature.
+ * @param assetsFolder - Absolute path of the feature's `assets/`.
+ * @param relative - POSIX path of the file inside `assets/`.
+ * @param splits - The declared bundles that take files out of the default one.
+ * @param defaultTier - Tier of the feature's default bundle.
+ */
+async function addFile(
+  scan: ScanState,
+  feature: string,
+  assetsFolder: string,
+  relative: string,
+  splits: readonly Split[],
+  defaultTier: Tier
+): Promise<void> {
+  const absolute = path.join(assetsFolder, ...relative.split("/"));
+  const file = toPosix(path.relative(scan.root, absolute));
+
+  if (!isAssetFile(relative)) {
+    scan.notes.push(`ignored "${file}": the scanner reads .png and .webp only.`);
+
+    return;
+  }
+
+  try {
+    const name = ownerOf(splits, relative, file) ?? feature;
+    const entry = await describeFile(scan, feature, absolute, relative);
+
+    draftOf(scan, name, feature, defaultTier).files.push(entry);
+  } catch (error) {
+    scan.problems.push(detailOf(error));
+  }
+}
+
+/**
+ * Reads one feature: its description first, then every file of its `assets/`.
+ *
+ * @param scan - State of the scan.
+ * @param feature - Name of the feature folder.
+ */
+async function scanFeature(scan: ScanState, feature: string): Promise<void> {
+  const specs = await readBundleSpecs(scan, feature);
+  const assetsFolder = path.join(scan.featuresFolder, feature, "assets");
+  const defaultTier = specs.get(feature)?.tier ?? "feature";
+
+  for (const [name, spec] of specs) draftOf(scan, name, feature, spec.tier);
+
+  const splits = splitsOf(specs);
+
+  for (const relative of await walkAssets(assetsFolder, "")) {
+    await addFile(scan, feature, assetsFolder, relative, splits, defaultTier);
+  }
+}
+
+/**
+ * Adds up the estimated texture memory of a bundle.
+ *
+ * @param files - Its files.
+ * @returns The sum in MB, rounded to three decimals.
+ */
+function sumMb(files: readonly ManifestFile[]): number {
+  let total = 0;
+
+  for (const file of files) total += file.mb;
+
+  return Math.round(total * 1000) / 1000;
+}
+
+/**
+ * Turns the drafts into the manifest, sorted for byte-identical output.
+ *
+ * @param scan - State of the scan.
+ * @returns The manifest.
+ */
+function toManifest(scan: ScanState): Manifest {
+  const bundles: Record<string, ManifestBundle> = {};
+
+  for (const [name, draft] of [...scan.drafts].toSorted((left, right) =>
+    byName(left[0], right[0])
+  )) {
+    const files = draft.files.toSorted((left, right) => byName(left.key, right.key));
+
+    bundles[name] = { feature: draft.feature, tier: draft.tier, mb: sumMb(files), files };
+  }
+
+  return { version: 1, bundles };
+}
+
+/**
+ * Collects every problem of a scan into one error, so a game fixes its assets in one round.
+ *
+ * @param problems - The problems, in scan order.
+ * @returns The error to reject with.
+ */
+function collected(problems: readonly string[]): Error {
+  const count = problems.length;
+  const lines = problems.map(text => `  ${text}`).join("\n");
+
+  return new Error(
+    `${PREFIX}the scan found ${count} problem${count === 1 ? "" : "s"}.\n${lines}\n` +
+      '  Fix them and run "bun run assets:keys" again.'
+  );
+}
+
+/**
+ * Walks the features of a game and builds the manifest: one bundle per feature, split by the
+ * optional `assets.ts` of that feature, every file keyed by the key rule.
+ *
+ * @param root - Path of the game source root, the folder that holds `features/`.
+ * @param options - Name of the features folder, when it is not `features`.
+ * @returns The manifest and the notes about files the scan left out.
+ * @throws {Error} One error that lists every problem the scan found.
+ * @example
+ * ```ts
+ * const { manifest, notes } = await scanFeatures("src");
+ * // manifest.bundles.ui.files[0].key: "ui.button.primary", notes: []
+ * ```
+ */
+export async function scanFeatures(root: string, options?: ScanOptions): Promise<ScanResult> {
+  const scan = createState(root, options?.features ?? "features");
+
+  for (const feature of await listFeatures(scan.featuresFolder)) await scanFeature(scan, feature);
+
+  if (scan.problems.length > 0) throw collected(scan.problems);
+
+  return { manifest: toManifest(scan), notes: scan.notes };
+}

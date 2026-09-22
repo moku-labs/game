@@ -53,3 +53,20 @@ describe("load", () => {
     expect(descriptor.payload).toEqual({ bundles: ["board"] });
   });
 });
+
+describe("defineBundles edge cases", () => {
+  it("drops a name whose spec is undefined", () => {
+    const map = Object.fromEntries([
+      ["board", { tier: "scene" }],
+      ["ui", undefined]
+    ]) as Partial<Record<"board" | "ui", BundleSpec>>;
+
+    expect(defineBundles(map)).toEqual({ kind: "bundles", map: { board: { tier: "scene" } } });
+  });
+});
+
+describe("load edge cases", () => {
+  it("accepts an empty list", () => {
+    expect(load([])).toEqual({ kind: "load", payload: { bundles: [] } });
+  });
+});

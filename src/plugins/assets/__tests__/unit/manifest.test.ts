@@ -186,3 +186,96 @@ describe("atlasProblem", () => {
     expect(atlasProblem("ui", parseManifest(raw).bundles.ui?.files ?? [])).toBeUndefined();
   });
 });
+
+describe("parseManifest tolerates broken entries", () => {
+  it("refuses a bundle that is not an object", () => {
+    expect(() => parseManifest({ version: 1, bundles: { ui: "nope" } })).toThrow(
+      '[game] assets: bundle "ui" of the manifest is not an object.'
+    );
+  });
+
+  it("drops a file entry that is not an object", () => {
+    const manifest = parseManifest({
+      version: 1,
+      bundles: { ui: { feature: "ui", tier: "core", mb: 0, files: ["nope", true, 7] } }
+    });
+
+    expect(manifest.bundles.ui?.files).toEqual([]);
+  });
+
+  it("treats a missing `bundles` key as no bundles", () => {
+    expect(parseManifest({ version: 1 }).bundles).toEqual({});
+  });
+
+  it("replaces a missing or broken field with a neutral value", () => {
+    const manifest = parseManifest({
+      version: 1,
+      bundles: {
+        ui: {
+          tier: "core",
+          files: [{ key: 4, path: undefined, width: "128", height: Number.NaN, mb: "0.5" }]
+        }
+      }
+    });
+
+    expect(manifest.bundles.ui?.feature).toBe("");
+    expect(manifest.bundles.ui?.mb).toBe(0);
+    expect(manifest.bundles.ui?.files[0]).toEqual({
+      key: "",
+      path: "",
+      width: 0,
+      height: 0,
+      mb: 0
+    });
+  });
+
+  it("ignores a `nine` and an `atlas` that are not objects", () => {
+    const manifest = parseManifest({
+      version: 1,
+      bundles: {
+        ui: {
+          feature: "ui",
+          tier: "core",
+          mb: 0,
+          files: [{ key: "ui.a", path: "a.png", width: 1, height: 1, mb: 0, nine: 48, atlas: "x" }]
+        }
+      }
+    });
+
+    expect(manifest.bundles.ui?.files[0]).toEqual({
+      key: "ui.a",
+      path: "a.png",
+      width: 1,
+      height: 1,
+      mb: 0
+    });
+  });
+
+  it("fills the missing fields of an atlas frame", () => {
+    const manifest = parseManifest({
+      version: 1,
+      bundles: {
+        ui: {
+          feature: "ui",
+          tier: "core",
+          mb: 0,
+          files: [{ key: "ui.a", path: "a.png", width: 1, height: 1, mb: 0, atlas: {} }]
+        }
+      }
+    });
+
+    expect(manifest.bundles.ui?.files[0]?.atlas).toEqual({
+      page: "",
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    });
+  });
+});
+
+describe("resolveBaseUrl without a folder", () => {
+  it("falls back to the root when the manifest URL has no slash", () => {
+    expect(resolveBaseUrl(undefined, "manifest.json")).toBe("/");
+  });
+});

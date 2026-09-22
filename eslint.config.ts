@@ -200,6 +200,25 @@ export default [
     }
   },
 
+  // 6b2. The asset scanner is build-time code: only its own entry file may import it.
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/assets-scan.ts", "src/plugins/assets/scan/**", "src/**/__tests__/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/assets/scan/**", "./scan/**", "../scan/**"],
+              message: "The asset scanner is node-only. Only src/assets-scan.ts imports it."
+            }
+          ]
+        }
+      ]
+    }
+  },
+
   // 6c. L2 + L5 — no static Pixi or Yoga import; no module-scope state.
   {
     files: ["src/**/*.ts"],

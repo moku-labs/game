@@ -299,3 +299,116 @@ describe("stopPreload", () => {
     await new Promise(resolve => setTimeout(resolve, 0));
   });
 });
+
+describe("the walk on a broken graph", () => {
+  it("gives nothing when the graph stands nowhere", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" });
+
+    mock.ctx.state.current = undefined;
+
+    expect(neighbourhood(mock.assetsCtx, 2)).toEqual([]);
+  });
+
+  it("gives nothing when the current node is not in the description", async () => {
+    const mock = await standingAt({ flow: "nowhere", node: "gone" });
+
+    expect(neighbourhood(mock.assetsCtx, 2)).toEqual([]);
+  });
+
+  it("stops at an exit with no parent frame", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, []);
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["board", "board.chains"]);
+  });
+
+  it("stops at an exit the parent has no edge for", async () => {
+    const mock = await standingAt({ flow: "reward", node: "show", scene: "reward" }, [
+      { flow: "board", node: "merge" },
+      { flow: "reward", node: "show" }
+    ]);
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["reward", "board.chains"]);
+  });
+
+  it("skips a sub-flow and a slot the description does not carry", async () => {
+    const mock = await standingAt({ flow: "main", node: "home", scene: "home" });
+
+    mock.flow.graph = {
+      main: "main",
+      flows: {
+        main: {
+          start: "home",
+          nodes: {
+            home: graphNode("main", "home", {
+              rest: true,
+              scene: "home",
+              subFlow: "gone",
+              slot: "empty"
+            })
+          },
+          edges: {}
+        }
+      },
+      slots: {}
+    };
+
+    expect(neighbourhood(mock.assetsCtx, 2)).toEqual(["home"]);
+  });
+
+  it("skips an edge target that names no node", async () => {
+    const mock = await standingAt({ flow: "main", node: "home", scene: "home" });
+
+    mock.flow.graph = {
+      main: "main",
+      flows: {
+        main: {
+          start: "home",
+          nodes: { home: graphNode("main", "home", { rest: true, scene: "home" }) },
+          edges: { home: { play: "gone" } }
+        }
+      },
+      slots: {}
+    };
+
+    expect(neighbourhood(mock.assetsCtx, 2)).toEqual(["home"]);
+  });
+});
+
+describe("the preload queue when a bundle breaks", () => {
+  it("logs the failure and loads the rest of the queue", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+
+    mock.io.status.set("/features/board/assets/cell.png", 500);
+    startPreload(mock.assetsCtx);
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(mock.log.warn).toHaveBeenCalledWith(
+      "assets: a preloaded bundle failed",
+      expect.objectContaining({ bundle: "board" })
+    );
+    expect(mock.ctx.state.records.get("reward")?.status).toBe("loaded");
+  });
+
+  it("stops the queue as soon as it is aborted", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+
+    mock.io.control.gated = true;
+    startPreload(mock.assetsCtx);
+
+    const queue = mock.ctx.state.queue;
+
+    stopPreload(mock.ctx.state);
+    mock.io.releaseAll();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(queue?.controller.signal.aborted).toBe(true);
+    expect(mock.ctx.state.records.get("reward")?.status).not.toBe("loaded");
+  });
+});

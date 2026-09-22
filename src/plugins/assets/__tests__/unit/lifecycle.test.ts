@@ -240,3 +240,65 @@ describe("releaseAll", () => {
     expect(await failed).toBe("AbortError");
   });
 });
+
+describe("reading the feature descriptions", () => {
+  it("ignores a key that is not a list and an entry of the wrong shape", async () => {
+    const mock = createMockAssets({ manifest });
+
+    mock.flow.features.push(
+      {
+        name: "board",
+        description: { scenes: { id: "board", bundle: "board" }, flows: "boardFlow" } as never
+      },
+      {
+        name: "other",
+        description: {
+          scenes: ["board", 7, { bundle: "board" }, { id: "shop" }],
+          flows: [7, { name: "x" }]
+        } as never
+      }
+    );
+
+    await mock.start();
+
+    expect(mock.ctx.state.bundleOfScene.size).toBe(0);
+    expect(mock.ctx.state.featureOfFlow.size).toBe(0);
+  });
+});
+
+describe("the load effect on a broken descriptor", () => {
+  it("ignores a payload that is not an object and a bundles key that is not a list", async () => {
+    const mock = createMockAssets({ manifest });
+
+    mock.connect();
+    await mock.start();
+
+    const handler = mock.flow.handlers.get("load");
+    const run = { signal: new AbortController().signal, mode: "live" as const };
+
+    await expect(handler?.run({ kind: "load", payload: 7 }, run)).resolves.toEqual({
+      loaded: [],
+      mb: 0
+    });
+    await expect(
+      handler?.run({ kind: "load", payload: { bundles: "board" } }, run)
+    ).resolves.toEqual({ loaded: [], mb: 0 });
+    await expect(
+      handler?.run({ kind: "load", payload: { bundles: [7, "board"] } }, run)
+    ).resolves.toEqual({ loaded: ["board"], mb: 0.063 });
+  });
+});
+
+describe("releaseAll when nothing was loaded", () => {
+  it("clears a headless plugin without asking for a texture", async () => {
+    const mock = createMockAssets({ manifest, io: undefined });
+
+    mock.connect();
+    await mock.start();
+    releaseAll(mock.ctx.state);
+
+    expect(mock.io.destroyed).toEqual([]);
+    expect(mock.flow.enter).toEqual([]);
+    expect(mock.ctx.state.bundleOfKey.size).toBe(0);
+  });
+});
