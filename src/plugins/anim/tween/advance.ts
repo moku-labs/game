@@ -1,0 +1,420 @@
+/**
+ * @file anim/tween — the one track table: starting a track, the retarget policy per field, the
+ * offsets accumulator of the additive tracks, the per-frame advance and the two ways out.
+ * Deterministic: the only clock is the `delta` a caller hands in.
+ */
+import type { AnyComponent } from "../../world/ecs/types";
+import type { Entity, TrackOptions } from "../../world/types";
+import { Animation, countPlaying } from "../components";
+import type { AnimCtx } from "../types";
+import { applyEase } from "./easing";
+import type { StepMotion, Track } from "./types";
+
+/**
+ * The key one field of one component of one entity is booked under.
+ *
+ * @param entity - The entity.
+ * @param component - Component name.
+ * @param field - Field name.
+ * @returns The key of the owner and offsets tables.
+ * @example
+ * ```ts
+ * fieldKey(1_048_576, "Transform", "x"); // "1048576:Transform:x"
+ * ```
+ */
+export function fieldKey(entity: Entity, component: string, field: string): string {
+  return `${entity}:${component}:${field}`;
+}
+
+/**
+ * Creates the offsets table of one field. It lives in its own function because lint rule L5
+ * refuses a collection built inside an exported declaration.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param key - The field key.
+ * @returns The table of track id to contributed delta.
+ */
+function offsetsOf(actx: AnimCtx, key: string): Map<number, number> {
+  const offsets = actx.state.offsets.get(key) ?? new Map<number, number>();
+
+  actx.state.offsets.set(key, offsets);
+
+  return offsets;
+}
+
+/**
+ * The sum of what every additive track contributes to one field.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param key - The field key.
+ * @returns The sum, `0` when no additive track drives the field.
+ */
+function sumOffsets(actx: AnimCtx, key: string): number {
+  let sum = 0;
+
+  for (const delta of actx.state.offsets.get(key)?.values() ?? []) sum += delta;
+
+  return sum;
+}
+
+/**
+ * Reads the start values of a track, once, when its delay has ended. The base of a field another
+ * track already drives is used, so an additive offset is never folded into a start value.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that is about to write.
+ * @param stored - The stored component value.
+ * @returns The start value per field.
+ */
+function readFrom(
+  actx: AnimCtx,
+  track: Track,
+  stored: Readonly<Record<string, unknown>>
+): Record<string, number> {
+  if (track.from !== undefined) return track.from;
+
+  const from: Record<string, number> = {};
+
+  for (const [field, target] of Object.entries(track.to)) {
+    const key = fieldKey(track.entity, track.component.componentName, field);
+    const base = actx.state.bases.get(key);
+    const current = stored[field];
+    const value = base ?? (typeof current === "number" ? current : target);
+
+    from[field] = value;
+    if (base === undefined) actx.state.bases.set(key, value);
+  }
+
+  track.from = from;
+
+  return from;
+}
+
+/**
+ * Writes one frame of a track: the eased value for an absolute track, the contributed delta for
+ * an additive one, and in both cases the base plus every offset of the field. A component the
+ * entity no longer carries ends the track silently.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track to write.
+ * @param fraction - Normalised time of the track.
+ * @param final - True on the last frame, which writes the exact target.
+ */
+function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boolean): void {
+  const ecs = actx.deps.world.ecs;
+  const stored = ecs.get(track.entity, track.component);
+
+  if (stored === undefined) {
+    endTrack(actx, track);
+
+    return;
+  }
+
+  const from = readFrom(actx, track, stored);
+  const owned = track.muted();
+  const eased = final ? 1 : applyEase(track.ease, fraction);
+  const patch: Record<string, number> = {};
+
+  for (const [field, target] of Object.entries(track.to)) {
+    if (owned.has(field)) continue;
+
+    const key = fieldKey(track.entity, track.component.componentName, field);
+    const start = from[field] ?? target;
+    const value = final ? target : start + (target - start) * eased;
+
+    if (track.additive) offsetsOf(actx, key).set(track.id, value - start);
+    else actx.state.bases.set(key, value);
+
+    patch[field] = (actx.state.bases.get(key) ?? start) + sumOffsets(actx, key);
+  }
+
+  if (Object.keys(patch).length > 0) ecs.set(track.entity, track.component, patch);
+}
+
+/**
+ * Releases the field bookkeeping of a track that is ending: the fields it owned, its own offsets
+ * and the base of a field nothing drives any more.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that ends.
+ * @returns The fields whose last additive track just left, with the base to write them back to.
+ */
+function releaseFields(actx: AnimCtx, track: Track): Record<string, number> {
+  const owned = track.muted();
+  const clean: Record<string, number> = {};
+
+  for (const field of Object.keys(track.to)) {
+    const key = fieldKey(track.entity, track.component.componentName, field);
+    const offsets = actx.state.offsets.get(key);
+    const base = actx.state.bases.get(key);
+
+    if (actx.state.owner.get(key) === track.id) actx.state.owner.delete(key);
+
+    if (offsets?.delete(track.id) === true && offsets.size === 0) {
+      actx.state.offsets.delete(key);
+      if (base !== undefined && !owned.has(field)) clean[field] = base;
+    }
+
+    if (!actx.state.owner.has(key) && !actx.state.offsets.has(key)) actx.state.bases.delete(key);
+  }
+
+  return clean;
+}
+
+/**
+ * Takes a track out of the table: it releases the fields it owned, drops its offsets, writes a
+ * field whose last additive track just left once more without offsets, and counts `Animation`
+ * down.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that ends.
+ */
+function endTrack(actx: AnimCtx, track: Track): void {
+  if (track.ended) return;
+
+  track.ended = true;
+  actx.state.tracks.delete(track.id);
+
+  const clean = releaseFields(actx, track);
+  const ecs = actx.deps.world.ecs;
+
+  if (Object.keys(clean).length > 0 && ecs.get(track.entity, track.component) !== undefined) {
+    ecs.set(track.entity, track.component, clean);
+  }
+
+  countPlaying(ecs, track.entity, -1);
+  if (actx.state.tracks.size <= actx.config.maxTracks) actx.state.overMaxTracks = false;
+}
+
+/**
+ * Drops one field from a track that lost it to a newer absolute writer. A track that loses every
+ * field ends where it stands.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The older owner.
+ * @param field - The field the newer track took.
+ */
+function dropField(actx: AnimCtx, track: Track, field: string): void {
+  delete track.to[field];
+  if (track.from !== undefined) delete track.from[field];
+  if (Object.keys(track.to).length === 0) endTrack(actx, track);
+}
+
+/**
+ * Books every field of an absolute track and cancels the older owner of each, field by field.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The new absolute track.
+ */
+function claimFields(actx: AnimCtx, track: Track): void {
+  const taken: Array<{ older: Track; field: string }> = [];
+
+  for (const field of Object.keys(track.to)) {
+    const key = fieldKey(track.entity, track.component.componentName, field);
+    const ownerId = actx.state.owner.get(key);
+    const older = ownerId === undefined ? undefined : actx.state.tracks.get(ownerId);
+
+    actx.state.owner.set(key, track.id);
+    if (older !== undefined) taken.push({ older, field });
+  }
+
+  for (const entry of taken) dropField(actx, entry.older, entry.field);
+}
+
+/**
+ * Reports once each time the table grows past `maxTracks`, so a leak is visible in development
+ * without one line per frame.
+ *
+ * @param actx - Domain context of the anim plugin.
+ */
+function warnIfCrowded(actx: AnimCtx): void {
+  const tracks = actx.state.tracks.size;
+
+  if (tracks <= actx.config.maxTracks) {
+    actx.state.overMaxTracks = false;
+
+    return;
+  }
+
+  if (actx.state.overMaxTracks) return;
+
+  actx.state.overMaxTracks = true;
+  actx.log.warn("anim:too-many-tracks", { tracks, maxTracks: actx.config.maxTracks });
+}
+
+/**
+ * Opens a new frame step. A track born from here on is not advanced by this step a second time.
+ *
+ * @param actx - Domain context of the anim plugin.
+ */
+export function beginFrame(actx: AnimCtx): void {
+  actx.state.frame += 1;
+}
+
+/**
+ * Starts one track. The start values are read when the delay ends, never here.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param entity - The entity to animate.
+ * @param component - The component to animate.
+ * @param to - The numeric target fields.
+ * @param options - Duration, easing, delay and the additive flag.
+ * @param muted - The fields another writer owns, read at every write.
+ * @param driven - True when a timeline step advances the track itself.
+ * @returns The track, already ended when there was nothing to drive.
+ */
+export function startTrack(
+  actx: AnimCtx,
+  entity: Entity,
+  component: AnyComponent,
+  to: Record<string, number>,
+  options: TrackOptions,
+  muted: () => ReadonlySet<string>,
+  driven = false
+): Track {
+  const track: Track = {
+    id: actx.state.nextId,
+    entity,
+    component,
+    to: { ...to },
+    ms: options.ms,
+    ease: options.ease ?? "out",
+    delayMs: options.delayMs ?? 0,
+    elapsed: 0,
+    from: undefined,
+    muted,
+    additive: options.additive === true,
+    driven,
+    bornFrame: actx.state.frame,
+    ended: Object.keys(to).length === 0
+  };
+
+  actx.state.nextId += 1;
+  if (track.ended) return track;
+
+  if (!track.additive) claimFields(actx, track);
+  actx.state.tracks.set(track.id, track);
+  countPlaying(actx.deps.world.ecs, entity, 1);
+  actx.deps.time.wake();
+  warnIfCrowded(actx);
+
+  return track;
+}
+
+/**
+ * Advances one track by one delta.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track to advance.
+ * @param deltaMs - Milliseconds of game time to consume.
+ * @returns The milliseconds left over past the end of the track.
+ */
+export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): number {
+  if (track.ended) return deltaMs;
+
+  track.elapsed += deltaMs;
+
+  const past = track.elapsed - track.delayMs;
+
+  if (past < 0) return 0;
+
+  const fraction = track.ms <= 0 ? 1 : Math.min(past / track.ms, 1);
+
+  writeFields(actx, track, fraction, fraction >= 1);
+  if (fraction < 1) return 0;
+
+  endTrack(actx, track);
+
+  return Math.max(0, past - track.ms);
+}
+
+/**
+ * Writes the exact target of a track and ends it. Muted fields are left alone here too.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track to finish.
+ */
+export function finishTrack(actx: AnimCtx, track: Track): void {
+  if (track.ended) return;
+
+  writeFields(actx, track, 1, true);
+  endTrack(actx, track);
+}
+
+/**
+ * Ends a track where it stands, writing nothing.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track to cancel.
+ */
+export function cancelTrack(actx: AnimCtx, track: Track): void {
+  endTrack(actx, track);
+}
+
+/**
+ * The motion handle of a track: the `MotionHandle` contract of `world`, plus the hand advance the
+ * timeline cursor drives a track it just started with.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track behind the handle.
+ * @returns The handle.
+ */
+export function handleOf(actx: AnimCtx, track: Track): StepMotion {
+  return {
+    finish: (): void => finishTrack(actx, track),
+    cancel: (): void => cancelTrack(actx, track),
+    active: (): boolean => !track.ended,
+    advance: (deltaMs: number): number => advanceTrack(actx, track, deltaMs)
+  };
+}
+
+/**
+ * Advances every track the frame step owns: the additive ones first, so the absolute owner of a
+ * field writes the sum of this frame's offsets and not the one of the frame before, then the
+ * absolute ones. Each pass keeps the insertion order of the table.
+ *
+ * A track a timeline step drives is left alone: its own step already handed it the delta, which
+ * is what lets the remainder past its end reach the next step of the same frame. A track born
+ * inside the running frame step is skipped for the same reason.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param deltaMs - Milliseconds of game time of the frame.
+ */
+export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
+  const open = [...actx.state.tracks.values()].filter(
+    track => !track.ended && !track.driven && track.bornFrame !== actx.state.frame
+  );
+
+  for (const track of open) {
+    if (track.additive) advanceTrack(actx, track, deltaMs);
+  }
+
+  for (const track of open) {
+    if (!track.additive) advanceTrack(actx, track, deltaMs);
+  }
+}
+
+/**
+ * Finishes every track of the table, in table order.
+ *
+ * @param actx - Domain context of the anim plugin.
+ */
+export function finishAllTracks(actx: AnimCtx): void {
+  // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
+  for (const track of [...actx.state.tracks.values()]) finishTrack(actx, track);
+}
+
+/**
+ * Ends every track of one entity, absolute and additive, and removes its `Animation`.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param entity - The entity whose tracks end.
+ */
+export function cancelTracksOf(actx: AnimCtx, entity: Entity): void {
+  // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
+  for (const track of [...actx.state.tracks.values()]) {
+    if (track.entity === entity) cancelTrack(actx, track);
+  }
+
+  actx.deps.world.ecs.remove(entity, Animation);
+}

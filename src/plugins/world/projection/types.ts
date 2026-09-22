@@ -701,6 +701,25 @@ export type ProjectionApi = {
   keyOf(entity: Entity): ProjectionKey | undefined;
 
   /**
+   * The rest value of one component of an entity: what a view holds when nothing animates it, or
+   * what `setRest` recorded for an element. Read-only and owner-free, so a plugin that owns no
+   * entity can aim at one.
+   *
+   * @param entity - A projection view or a registered element.
+   * @param component - The component whose rest value is asked.
+   * @returns The rest value, or `undefined` when the entity has none recorded.
+   * @example
+   * ```ts
+   * // `anim` builds a coin flight toward the counter: `at(target)` is the counter's rest pose.
+   * const world = ctx.require(worldPlugin);
+   * const counter = world.projection.entityOf("hud", "coins") ?? 0;
+   *
+   * world.projection.restOf(counter, Transform); // { x: 40, y: 120, rotation: 0, scale: 1 }
+   * ```
+   */
+  restOf<Value extends object>(entity: Entity, component: ComponentType<Value>): Value | undefined;
+
+  /**
    * The entity of one key of one projection: a live view, never the despawn queue, or an element
    * a plugin above registered under that key.
    *

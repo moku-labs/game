@@ -41,6 +41,7 @@ const PROJECTION_MEMBERS = [
   "register",
   "registerKey",
   "rerunAll",
+  "restOf",
   "setDriver",
   "setLayers",
   "setRest",

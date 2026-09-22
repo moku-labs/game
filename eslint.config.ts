@@ -202,10 +202,16 @@ export default [
     }
   },
 
-  // 6b2. The asset scanner is build-time code: only its own entry file may import it.
+  // 6b2. The asset scanner and the string compiler are build-time code: only the node door
+  // `src/assets.ts` (and the scanner's CLI, which chains the compiler) may import them (L10).
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/assets.ts", "src/plugins/assets/scan/**", "src/**/__tests__/**"],
+    ignores: [
+      "src/assets.ts",
+      "src/plugins/assets/scan/**",
+      "src/plugins/i18n/compile/**",
+      "src/**/__tests__/**"
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -214,6 +220,11 @@ export default [
             {
               group: ["**/assets/scan/**", "./scan/**", "../scan/**"],
               message: "The asset scanner is node-only. Only src/assets.ts imports it."
+            },
+            {
+              group: ["**/i18n/compile/**", "./compile/**", "../compile/**"],
+              message:
+                "The string compiler is node-only. Only src/assets.ts and the assets CLI import it."
             }
           ]
         }
@@ -264,7 +275,8 @@ export default [
       "src/plugins/model/*/**/*.ts",
       "src/plugins/flow/*/**/*.ts",
       "src/plugins/world/*/**/*.ts",
-      "src/plugins/renderer/*/**/*.ts"
+      "src/plugins/renderer/*/**/*.ts",
+      "src/plugins/anim/*/**/*.ts"
     ],
     ignores: ["src/**/__tests__/**"],
     rules: {
@@ -273,12 +285,12 @@ export default [
         {
           patterns: [
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport)/(?!types$)`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline)/(?!types$)`,
               message:
                 "Modules do not import each other's run-time code. index.ts injects sibling APIs."
             },
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport)/types$`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline)/types$`,
               allowTypeImports: true,
               message: "Import a sibling module's types with `import type` only."
             }
@@ -295,6 +307,7 @@ export default [
       "src/plugins/flow/**/*.ts",
       "src/plugins/world/**/*.ts",
       "src/plugins/renderer/**/*.ts",
+      "src/plugins/anim/**/*.ts",
       "src/plugins/clock/**/*.ts",
       "tests/integration/merge-game/rules/**/*.ts"
     ],

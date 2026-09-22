@@ -140,3 +140,17 @@ describe("projection viewOf", () => {
     expect(world.api.projection.viewOf(999, UI)).toBeUndefined();
   });
 });
+
+describe("projection restOf", () => {
+  it("answers the recorded rest of an element and undefined before setRest", () => {
+    const world = createMockWorld();
+    const entity = world.api.ecs.spawn(UI, [Transform()]);
+
+    expect(world.api.projection.restOf(entity, Transform)).toBeUndefined();
+
+    world.api.projection.setRest(entity, Transform, { x: 40, y: 120, scale: 1 });
+
+    expect(world.api.projection.restOf(entity, Transform)).toEqual({ x: 40, y: 120, scale: 1 });
+    expect(world.api.projection.restOf(999, Transform)).toBeUndefined();
+  });
+});

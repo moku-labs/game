@@ -92,6 +92,7 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     setDriver: projection.setDriver,
     viewOf: projection.viewOf,
     setRest: projection.setRest,
+    restOf: projection.restOf,
     registerKey: projection.registerKey,
     rerunAll: projection.rerunAll
   };

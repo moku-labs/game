@@ -4,9 +4,12 @@
  */
 
 // ─── Plugin Instances ────────────────────────────────────────
+export { animPlugin } from "./anim";
 export { assetsPlugin } from "./assets";
+export { audioPlugin } from "./audio";
 export { clockPlugin } from "./clock";
 export { flowPlugin } from "./flow";
+export { i18nPlugin } from "./i18n";
 export { inputPlugin } from "./input";
 export { lifecyclePlugin } from "./lifecycle";
 export { modelPlugin } from "./model";
@@ -16,9 +19,12 @@ export { timePlugin } from "./time";
 export { worldPlugin } from "./world";
 
 // ─── Plugin Types (namespace re-exports) ─────────────────────
+export * as Anim from "./anim/types";
 export * as Assets from "./assets/types";
+export * as Audio from "./audio/types";
 export * as Clock from "./clock/types";
 export * as Flow from "./flow/types";
+export * as I18n from "./i18n/types";
 export * as Input from "./input/types";
 export * as Lifecycle from "./lifecycle/types";
 export * as Model from "./model/types";

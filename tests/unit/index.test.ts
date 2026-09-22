@@ -25,17 +25,29 @@ describe("root index", () => {
     expect(kit.defineScene).toBe(engine.defineScene);
     expect(kit.Sprite).toBe(engine.Sprite);
     expect(kit.NineSlice).toBe(engine.NineSlice);
+    expect(kit.defineAnimation).toBe(engine.defineAnimation);
+    expect(kit.frames).toBe(engine.frames);
+    expect(kit.sfx).toBe(engine.sfx);
+    expect(kit.play).toBe(engine.play);
+    expect(kit.tr).toBe(engine.tr);
+    expect(kit.music).toBe(engine.music);
     expect(Object.keys(kit).toSorted()).toEqual([
       "NineSlice",
       "Sprite",
+      "defineAnimation",
       "defineBundles",
       "defineFeature",
       "defineFlow",
       "defineNode",
       "defineScene",
+      "frames",
       "load",
+      "music",
+      "play",
       "projection",
-      "sprite"
+      "sfx",
+      "sprite",
+      "tr"
     ]);
   });
 
