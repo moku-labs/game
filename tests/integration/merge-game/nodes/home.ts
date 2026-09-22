@@ -5,6 +5,7 @@ import { type } from "@moku-labs/game";
 import { defineNode } from "../kit";
 
 export const home = defineNode({
+  scene: "home",
   outcomes: { play: type() },
   rest: true,
   checkpoint: true

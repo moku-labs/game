@@ -137,6 +137,7 @@ export type GameTypes = {
   session: Json;
   assets: string;
   bundles?: string;
+  scenes?: string;
   strings: Record<string, unknown>;
 };
 
@@ -212,6 +213,7 @@ export type {
   Result,
   RouteStep,
   RunnerApi,
+  SceneIdOf,
   SlotNode,
   Stage,
   Target,

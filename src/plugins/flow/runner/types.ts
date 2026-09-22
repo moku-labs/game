@@ -60,7 +60,19 @@ export type PayloadOf<Tag> = Tag extends TypeTag<infer Payload> ? Payload : neve
  * const game: GameState = { player: { lives: 3 }, session: { visits: 0 } };
  * ```
  */
-export type GameState = { player: Json; session: Json };
+export type GameState = { player: Json; session: Json; scenes?: string };
+
+/**
+ * The scene ids a game declared, `string` when it declared none.
+ *
+ * @example
+ * ```ts
+ * type Ids = SceneIdOf<{ player: {}; session: {}; scenes: "home" | "board" }>; // "home" | "board"
+ * ```
+ */
+export type SceneIdOf<Game extends GameState> = Game extends { scenes: infer Ids extends string }
+  ? Ids
+  : string;
 
 /**
  * Whether a payload or input type is `void`: an outcome without data, a node without input.
@@ -209,7 +221,7 @@ export type NodeSpec<Game extends GameState, Input, Tags extends OutcomeTags> = 
   barrier?: boolean;
   inbox?: readonly (keyof Tags & string)[];
   /** Id of the scene this node is shown on. Without it the node keeps the current scene. */
-  scene?: string;
+  scene?: SceneIdOf<Game>;
 } & (
   | { rest: true; run?: NodeRun<Game, Input, Tags> }
   | { rest?: false; run: NodeRun<Game, Input, Tags> }
