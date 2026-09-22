@@ -6,17 +6,19 @@ import type { Hint } from "../../flow/types";
 import type { Root } from "../../model/types";
 import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
+import { cancelTracks, forgetEndedTracks } from "./driver";
 import {
   cancelHandles,
+  createViewHandle,
   finishHandles,
   looseComponents,
+  type Peers,
   playSettle,
   stillMoving,
   writeRestNow
 } from "./motions";
 import { clearMounted, flushQueues, sweepQueue } from "./queue";
 import { reconcile, restingPeers } from "./reconcile";
-import { advanceTracks } from "./tween";
 import type {
   AnyProjectionSpec,
   Cause,
@@ -24,7 +26,12 @@ import type {
   LayerSpec,
   Mounted,
   ProjectionCtx,
-  ProjectionDeps
+  ProjectionDeps,
+  ProjectionKey,
+  RestPose,
+  TweenDriver,
+  View,
+  ViewHandle
 } from "./types";
 import { writeLayer } from "./views";
 
@@ -83,6 +90,33 @@ function emptyDirty(): Dirty {
 }
 
 /**
+ * Creates the empty rest pose of one entity a plugin above owns.
+ *
+ * @returns An empty table of component name to value.
+ */
+function emptyRest(): RestPose {
+  return new Map();
+}
+
+/**
+ * Creates the empty key table of one projection.
+ *
+ * @returns An empty table of key to entity.
+ */
+function emptyKeys(): Map<string, Entity> {
+  return new Map();
+}
+
+/**
+ * Creates the peers of a handle that belongs to no projection: nothing to answer from.
+ *
+ * @returns Two empty item tables.
+ */
+function noPeers(): Peers {
+  return { next: new Map(), previous: new Map() };
+}
+
+/**
  * Checks that every layer a projection names is declared by the scene.
  *
  * @param pctx - Domain context of the projection module.
@@ -133,6 +167,22 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     state.hints.length = 0;
   };
+
+  const restOf = (entity: Entity): RestPose => state.rests.get(entity) ?? emptyRest();
+
+  // The view record a handle of a plugin-owned element runs on. It never reaches `byEntity`, so
+  // no reconcile ever meets it: the owner drives it and records its rest pose with `setRest`.
+  const elementView = (entity: Entity): View => ({
+    entity,
+    projection: state.keysByEntity.get(entity)?.projection ?? "",
+    key: state.keysByEntity.get(entity)?.key ?? "",
+    item: undefined,
+    rest: restOf(entity),
+    handles: [],
+    lifted: false,
+    dropWhenStill: false,
+    exiting: false
+  });
 
   const api: ProjectionModule = {
     register: (spec: AnyProjectionSpec): void => {
@@ -204,6 +254,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       if (spec === undefined || mounted === undefined) return;
 
       cancelHandles(view);
+      forgetEndedTracks(pctx);
 
       if (deps.ecs.mode() !== "live") {
         writeRestNow(pctx, view, [...view.rest.keys()]);
@@ -271,14 +322,70 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       writeLayer(pctx, entity, spec.layer);
     },
 
-    keyOf: (entity: Entity) => {
+    keyOf: (entity: Entity): ProjectionKey | undefined => {
       const view = state.byEntity.get(entity);
 
-      return view === undefined ? undefined : { projection: view.projection, key: view.key };
+      return view === undefined
+        ? state.keysByEntity.get(entity)
+        : { projection: view.projection, key: view.key };
     },
 
     entityOf: (projection: string, key: string): Entity | undefined =>
-      state.mounted.get(projection)?.live.get(key)?.entity,
+      state.mounted.get(projection)?.live.get(key)?.entity ?? state.keys.get(projection)?.get(key),
+
+    setDriver: (driver: TweenDriver): (() => void) => {
+      state.driver = driver;
+
+      return (): void => {
+        if (state.driver === driver) state.driver = undefined;
+      };
+    },
+
+    viewOf: (entity: Entity, owner: Owner): ViewHandle<unknown> | undefined => {
+      const known = deps.ecsInternal.ownerOf(entity);
+
+      if (known === undefined || known.kind !== "plugin") return undefined;
+      if (owner.kind !== known.kind || owner.name !== known.name) return undefined;
+
+      // The handle and a later `setRest` share one pose object; a despawn or the key remover drops it.
+      state.rests.set(entity, restOf(entity));
+
+      return createViewHandle(pctx, elementView(entity), noPeers());
+    },
+
+    setRest: <Value extends object>(
+      entity: Entity,
+      component: ComponentType<Value>,
+      value: Value
+    ): void => {
+      if (deps.ecsInternal.ownerOf(entity) === undefined) return;
+
+      const pose = restOf(entity);
+
+      pose.set(component.componentName, component(value));
+      state.rests.set(entity, pose);
+    },
+
+    registerKey: (projection: string, key: string, entity: Entity): (() => void) => {
+      if (state.mounted.get(projection)?.live.has(key) === true) {
+        throw new Error(
+          `[game] Key "${key}" of projection "${projection}" is already a live view.\n` +
+            "  Register the element under another key."
+        );
+      }
+
+      const byKey = state.keys.get(projection) ?? emptyKeys();
+
+      byKey.set(key, entity);
+      state.keys.set(projection, byKey);
+      state.keysByEntity.set(entity, { projection, key });
+
+      return (): void => {
+        if (byKey.get(key) === entity) byKey.delete(key);
+        if (state.keysByEntity.get(entity)?.key === key) state.keysByEntity.delete(entity);
+        state.rests.delete(entity);
+      };
+    },
 
     rerunAll: (): void => {
       const dirty = state.dirty ?? emptyDirty();
@@ -310,16 +417,20 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.hints.push(hint);
     },
 
-    advance: (deltaMs: number): void => {
+    sweep: (): void => {
       if (deps.ecs.mode() !== "live") return;
 
-      advanceTracks(pctx, deltaMs);
       sweepQueue(pctx);
     },
 
     flushAll: (): void => {
-      for (const view of state.byEntity.values()) finishHandles(view);
+      for (const view of state.byEntity.values()) {
+        finishHandles(view);
+        cancelTracks(pctx, view.entity);
+      }
+
       flushQueues(pctx);
+      forgetEndedTracks(pctx);
     },
 
     ownerLeft: (owner: Owner): void => {
@@ -337,6 +448,9 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.specs.clear();
       state.byEntity.clear();
       state.mutes.clear();
+      state.rests.clear();
+      state.keys.clear();
+      state.keysByEntity.clear();
       state.tracks.length = 0;
       state.hints.length = 0;
       state.dirty = undefined;

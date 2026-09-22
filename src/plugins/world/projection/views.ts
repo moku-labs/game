@@ -3,7 +3,7 @@
  * and how the layer is written.
  */
 import type { AnyComponent, AnyComponentType, AnyComponentValue, Entity } from "../ecs/types";
-import type { AnyProjectionSpec, ProjectionCtx, View } from "./types";
+import type { AnyProjectionSpec, DescriptionNode, ProjectionCtx, View, ViewOutput } from "./types";
 
 /**
  * Normalises a caught value into an `Error`, so the log always gets one.
@@ -42,8 +42,19 @@ export function asComponent(componentType: AnyComponentType): AnyComponent {
 }
 
 /**
- * Runs `view(item)` and collects its output by component name. `Layer` is the projection's own
- * component: a view that returns it is reported and that value ignored.
+ * Tells a single description node apart from a list of component values.
+ *
+ * @param output - What `view(item)` returned.
+ * @returns True when the projection described a screen instead of components.
+ */
+function isNode(output: ViewOutput): output is DescriptionNode {
+  return !Array.isArray(output);
+}
+
+/**
+ * Runs `view(item)` and collects its output by component name. A view that describes a screen
+ * returns one node, which becomes the `Tree` of the entity, and `ui` reconciles it from there.
+ * `Layer` is the projection's own component: a view that returns it is reported and ignored.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -57,8 +68,10 @@ export function collectView(
 ): Map<string, AnyComponentValue> {
   const values = emptyValues();
   const layerName = pctx.deps.components.Layer.componentName;
+  const output = spec.view(item);
+  const produced = isNode(output) ? [pctx.deps.components.Tree({ node: output })] : output;
 
-  for (const value of spec.view(item)) {
+  for (const value of produced) {
     if (value.type.componentName === layerName) {
       pctx.ctx.log.warn("world:view-returned-layer", { projection: spec.name });
 

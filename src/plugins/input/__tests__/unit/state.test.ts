@@ -44,3 +44,21 @@ describe("createInputState", () => {
     expect(first.start).not.toBe(second.start);
   });
 });
+
+describe("createInputState and the tap listeners", () => {
+  it("starts with no tap listener and no wake", () => {
+    const state = createInputState({ global: {}, config });
+
+    expect(state.tapListeners).toEqual([]);
+    expect(state.wake).toBeUndefined();
+  });
+
+  it("gives every app its own listener list", () => {
+    const first = createInputState({ global: {}, config });
+    const second = createInputState({ global: {}, config });
+
+    first.tapListeners.push(() => undefined);
+
+    expect(second.tapListeners).toEqual([]);
+  });
+});

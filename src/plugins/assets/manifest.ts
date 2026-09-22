@@ -3,8 +3,10 @@
  * functions over plain JSON, so the scanner, the plugin and the editor read the same contract.
  */
 import type {
+  AssetKind,
   AtlasFrame,
   CreateTextureOptions,
+  FontPage,
   Manifest,
   ManifestBundle,
   ManifestFile,
@@ -117,6 +119,36 @@ function parseAtlas(value: unknown): AtlasFrame | undefined {
 }
 
 /**
+ * Reads the kind of a file. Only `font` and `audio` are recorded: a texture is the default and
+ * says nothing, which is why a manifest written before fonts and audio still loads.
+ *
+ * @param value - What the `kind` field carried.
+ * @returns The kind, or `undefined` for a texture and for anything unknown.
+ */
+function parseKind(value: unknown): AssetKind | undefined {
+  return value === "font" || value === "audio" ? value : undefined;
+}
+
+/**
+ * Reads the page images a font file names.
+ *
+ * @param value - What the `pages` field carried.
+ * @returns The pages in the order the font declares them, or `undefined`.
+ */
+function parsePages(value: unknown): readonly FontPage[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  return value
+    .filter(entry => isRecord(entry))
+    .map(entry => ({
+      path: stringAt(entry, "path"),
+      width: numberAt(entry, "width"),
+      height: numberAt(entry, "height"),
+      mb: numberAt(entry, "mb")
+    }));
+}
+
+/**
  * Reads one file entry. Unknown fields are dropped.
  *
  * @param raw - One element of the `files` array.
@@ -125,6 +157,8 @@ function parseAtlas(value: unknown): AtlasFrame | undefined {
 function parseFile(raw: unknown): ManifestFile | undefined {
   if (!isRecord(raw)) return undefined;
 
+  const kind = parseKind(raw.kind);
+  const pages = parsePages(raw.pages);
   const nine = parseNine(raw.nine);
   const atlas = parseAtlas(raw.atlas);
   const file: ManifestFile = {
@@ -137,9 +171,26 @@ function parseFile(raw: unknown): ManifestFile | undefined {
 
   return {
     ...file,
+    ...(kind === undefined ? {} : { kind }),
+    ...(pages === undefined ? {} : { pages }),
     ...(nine === undefined ? {} : { nine }),
     ...(atlas === undefined ? {} : { atlas })
   };
+}
+
+/**
+ * Tells what one file of a bundle is. A file that names no kind is a texture, so a manifest of
+ * an older game reads the same way.
+ *
+ * @param file - One file of a bundle.
+ * @returns The kind of the file.
+ * @example
+ * ```ts
+ * kindOf({ key: "ui.panel", path: "p.png", width: 8, height: 8, mb: 0 }); // "texture"
+ * ```
+ */
+export function kindOf(file: ManifestFile): AssetKind {
+  return file.kind ?? "texture";
 }
 
 /**

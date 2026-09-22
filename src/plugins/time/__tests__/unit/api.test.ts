@@ -22,7 +22,13 @@ function createLogMock(): Log.LogApi {
 }
 
 function createCtx(overrides: Partial<Config> = {}): TimeCtx {
-  const config: Config = { maxFps: 60, maxDeltaMs: 50, ...overrides };
+  const config: Config = {
+    maxFps: 60,
+    maxDeltaMs: 50,
+    idleFps: 30,
+    idleAfterMs: 2000,
+    ...overrides
+  };
 
   return {
     global,
@@ -37,6 +43,17 @@ function createApi(overrides: Partial<Config> = {}): { api: Api; ctx: TimeCtx } 
   const ctx = createCtx(overrides);
 
   return { api: createTimeApi(ctx), ctx };
+}
+
+function driveFrames(ctx: TimeCtx, from: number, count: number, stepMs = 16): number {
+  let timestamp = from;
+
+  for (let index = 0; index < count; index += 1) {
+    timestamp += stepMs;
+    tickFrame(ctx, timestamp);
+  }
+
+  return timestamp;
 }
 
 // ─── onFrame ──────────────────────────────────────────────────
@@ -110,7 +127,7 @@ describe("onFrame", () => {
     api.onFrame("animate", time => seen.push({ ...time }));
     api.step(20);
 
-    expect(seen).toEqual([{ delta: 20, elapsed: 20, scale: 1, frame: 1 }]);
+    expect(seen).toEqual([{ delta: 20, elapsed: 20, scale: 1, frame: 1, idle: false }]);
   });
 });
 
@@ -123,7 +140,7 @@ describe("read", () => {
     api.step(16);
     api.step(4);
 
-    expect(api.snapshot()).toEqual({ delta: 4, elapsed: 20, scale: 1, frame: 2 });
+    expect(api.snapshot()).toEqual({ delta: 4, elapsed: 20, scale: 1, frame: 2, idle: false });
   });
 
   it("returns a snapshot, so a later frame does not change it", () => {
@@ -245,7 +262,7 @@ describe("step", () => {
 
     api.step(1000);
 
-    expect(api.snapshot()).toEqual({ delta: 1000, elapsed: 1000, scale: 1, frame: 1 });
+    expect(api.snapshot()).toEqual({ delta: 1000, elapsed: 1000, scale: 1, frame: 1, idle: false });
   });
 
   it("ignores the fps cap", () => {
@@ -371,6 +388,135 @@ describe("tickFrame", () => {
   });
 });
 
+// ─── the idle cap ─────────────────────────────────────────────
+
+describe("the idle cap", () => {
+  it("stays awake while the wakes keep coming", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+
+    driveFrames(ctx, 1000, 6);
+
+    expect(api.snapshot().idle).toBe(false);
+  });
+
+  it("goes idle after idleAfterMs of unscaled time without a wake", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+
+    driveFrames(ctx, 1000, 7);
+
+    expect(api.snapshot().idle).toBe(true);
+  });
+
+  it("skips the frames of a 60 Hz source down to idleFps once idle", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+    const last = driveFrames(ctx, 1000, 7);
+    const frames = api.snapshot().frame;
+
+    tickFrame(ctx, last + 16);
+
+    expect(api.snapshot().frame).toBe(frames);
+
+    tickFrame(ctx, last + 48);
+
+    expect(api.snapshot()).toMatchObject({ frame: frames + 1, delta: 48 });
+  });
+
+  it("runs at maxFps again after a wake", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+    const last = driveFrames(ctx, 1000, 7);
+    const frames = api.snapshot().frame;
+
+    api.wake();
+
+    expect(api.snapshot().idle).toBe(false);
+
+    tickFrame(ctx, last + 16);
+
+    expect(api.snapshot().frame).toBe(frames + 1);
+  });
+
+  it("goes idle again when the next wake stays away", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+    const last = driveFrames(ctx, 1000, 7);
+
+    api.wake();
+    driveFrames(ctx, last, 7);
+
+    expect(api.snapshot().idle).toBe(true);
+  });
+
+  it("never skips a frame when the idle cap is off", () => {
+    const { api, ctx } = createApi({ idleFps: 0, idleAfterMs: 100 });
+
+    driveFrames(ctx, 1000, 20);
+
+    expect(api.snapshot()).toMatchObject({ frame: 20, idle: false });
+  });
+
+  it("keeps the idle timer running while the time scale is zero", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+
+    api.setScale(0);
+    driveFrames(ctx, 1000, 7);
+
+    expect(api.snapshot()).toMatchObject({ elapsed: 0, idle: true });
+  });
+
+  it("counts a resume as a wake", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+
+    driveFrames(ctx, 1000, 7);
+    api.pause();
+    api.resume();
+
+    expect(api.snapshot().idle).toBe(false);
+  });
+
+  it("leaves step alone while idle", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+
+    driveFrames(ctx, 1000, 7);
+    const frames = api.snapshot().frame;
+
+    api.step(1);
+    api.step(1);
+
+    expect(api.snapshot().frame).toBe(frames + 2);
+  });
+});
+
+// ─── wake ─────────────────────────────────────────────────────
+
+describe("wake", () => {
+  it("is safe inside a frame callback", () => {
+    const { api } = createApi({ idleAfterMs: 100 });
+
+    api.onFrame("input", () => api.wake());
+
+    expect(() => api.step(16)).not.toThrow();
+    expect(api.snapshot().idle).toBe(false);
+  });
+
+  it("is idempotent", () => {
+    const { api, ctx } = createApi({ idleAfterMs: 100 });
+
+    driveFrames(ctx, 1000, 7);
+    api.wake();
+    api.wake();
+
+    expect(ctx.state.lastWakeMs).toBe(ctx.state.unscaledElapsedMs);
+    expect(api.snapshot().idle).toBe(false);
+  });
+
+  it("runs no frame of its own", () => {
+    const { api } = createApi({ idleAfterMs: 100 });
+
+    api.wake();
+
+    expect(api.snapshot().frame).toBe(0);
+  });
+});
+
 // ─── failing callbacks ────────────────────────────────────────
 
 describe("a throwing frame callback", () => {
@@ -447,6 +593,7 @@ describe("time api types", () => {
 
     expectTypeOf(api.onFrame).returns.toEqualTypeOf<() => void>();
     expectTypeOf(api.snapshot).returns.toEqualTypeOf<Readonly<Time>>();
+    expectTypeOf(api.wake).toEqualTypeOf<() => void>();
 
     expect(typeof api.onFrame("sync", () => {})).toBe("function");
   });

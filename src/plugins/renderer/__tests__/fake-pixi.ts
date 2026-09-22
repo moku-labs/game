@@ -105,6 +105,8 @@ export class FakeContainer {
   public scale = new FakePoint(1, 1);
   public children: FakeContainer[] = [];
   public parent: FakeContainer | null = null;
+  /** What clips this container's children, as Pixi's `mask` does. */
+  public mask: FakeContainer | null = null;
   /** How often `zIndex` was written with a different number. */
   public zIndexWrites = 0;
 
@@ -200,6 +202,211 @@ export class FakeNineSliceSprite extends FakeContainer {
     this.texture = options.texture;
   }
 }
+
+/** One path the fake graphics was asked to draw. */
+export type FakeDrawOp = {
+  op: "rect" | "roundRect";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  radius: number;
+};
+
+/** A fill or a stroke style the fake graphics recorded. */
+export type FakePaint = { color: number; width?: number };
+
+/** A fake Pixi graphics: it records what was drawn and how often it was cleared. */
+export class FakeGraphics extends FakeContainer {
+  public tint = 0xff_ff_ff;
+  /** How often the object was cleared, which is how often the renderer redrew it. */
+  public clears = 0;
+  public ops: FakeDrawOp[] = [];
+  public fills: FakePaint[] = [];
+  public strokes: FakePaint[] = [];
+
+  /**
+   * Drops every path, as a redraw does.
+   *
+   * @returns The same object, as Pixi's chainable API does.
+   */
+  public clear(): this {
+    this.clears += 1;
+    this.ops = [];
+    this.fills = [];
+    this.strokes = [];
+
+    return this;
+  }
+
+  /**
+   * Records a rectangle.
+   *
+   * @param x - Left edge.
+   * @param y - Top edge.
+   * @param width - Width of the rectangle.
+   * @param height - Height of the rectangle.
+   * @returns The same object.
+   */
+  public rect(x: number, y: number, width: number, height: number): this {
+    this.ops.push({ op: "rect", x, y, width, height, radius: 0 });
+
+    return this;
+  }
+
+  /**
+   * Records a rounded rectangle.
+   *
+   * @param x - Left edge.
+   * @param y - Top edge.
+   * @param width - Width of the rectangle.
+   * @param height - Height of the rectangle.
+   * @param radius - Corner radius.
+   * @returns The same object.
+   */
+  public roundRect(x: number, y: number, width: number, height: number, radius: number): this {
+    this.ops.push({ op: "roundRect", x, y, width, height, radius });
+
+    return this;
+  }
+
+  /**
+   * Records a fill of the last path.
+   *
+   * @param style - Colour of the fill.
+   * @returns The same object.
+   */
+  public fill(style: FakePaint): this {
+    this.fills.push(style);
+
+    return this;
+  }
+
+  /**
+   * Records a stroke of the last path.
+   *
+   * @param style - Colour and width of the stroke.
+   * @returns The same object.
+   */
+  public stroke(style: FakePaint): this {
+    this.strokes.push(style);
+
+    return this;
+  }
+}
+
+/** What a fake bitmap font was built from. */
+export type FakeFontData = {
+  chars: Record<string, unknown>;
+  pages: unknown[];
+  fontFamily?: string;
+};
+
+/** A fake Pixi bitmap font. */
+export class FakeBitmapFont {
+  /** Every font the fake module ever built, in creation order. */
+  public static readonly made: FakeBitmapFont[] = [];
+
+  public data: FakeFontData;
+  public textures: FakeTexture[];
+  public destroyed = false;
+
+  public constructor(options: { data: FakeFontData; textures: FakeTexture[] }) {
+    this.data = options.data;
+    this.textures = options.textures;
+    FakeBitmapFont.made?.push(this);
+  }
+
+  /** Frees the font. */
+  public destroy(): void {
+    this.destroyed = true;
+  }
+}
+
+/** The fake of Pixi's global asset cache, where a bitmap font is registered under its name. */
+export const fakeCache = {
+  /** Everything the renderer put into the cache. */
+  entries: new Map<string, unknown>(),
+
+  /**
+   * Tells whether a key is cached.
+   *
+   * @param key - The cache key.
+   * @returns True when something is stored under it.
+   */
+  has(key: string): boolean {
+    return fakeCache.entries.has(key);
+  },
+
+  /**
+   * Stores a value.
+   *
+   * @param key - The cache key.
+   * @param value - What to store.
+   */
+  set(key: string, value: unknown): void {
+    fakeCache.entries.set(key, value);
+  },
+
+  /**
+   * Drops a key.
+   *
+   * @param key - The cache key.
+   */
+  remove(key: string): void {
+    fakeCache.entries.delete(key);
+  }
+};
+
+/** The fake of Pixi's BMFont text parser: it reads the `info face=...` format. */
+export const fakeTextParser = {
+  /**
+   * Tells whether the string is in the BMFont text format.
+   *
+   * @param data - The file contents.
+   * @returns True for a file that starts with an `info` block.
+   */
+  test(data: string): boolean {
+    return typeof data === "string" && data.startsWith("info ");
+  },
+
+  /**
+   * Reads the font data out of a BMFont text file.
+   *
+   * @param text - The file contents.
+   * @returns The font data, with the face as its family.
+   */
+  parse(text: string): FakeFontData {
+    return {
+      chars: { text: true },
+      pages: ["page.png"],
+      fontFamily: (text.split("\n")[0] ?? "").slice(5)
+    };
+  }
+};
+
+/** The fake of Pixi's BMFont XML parser. */
+export const fakeXmlParser = {
+  /**
+   * Tells whether the string is BMFont XML.
+   *
+   * @param data - The file contents.
+   * @returns True for a file that starts with a tag.
+   */
+  test(data: string): boolean {
+    return typeof data === "string" && data.startsWith("<");
+  },
+
+  /**
+   * Reads the font data out of a BMFont XML file.
+   *
+   * @param xml - The file contents.
+   * @returns The font data, with the tag count as its page list.
+   */
+  parse(xml: string): FakeFontData {
+    return { chars: { xml: true }, pages: ["page.png"], fontFamily: xml.slice(0, 6) };
+  }
+};
 
 /** What the fake renderer recorded. */
 export type FakeRenderer = {
@@ -332,13 +539,20 @@ export function createFakePixi(
     kind: options.kind ?? "webgpu",
     failInit: options.failInit ?? false
   };
+  FakeBitmapFont.made.length = 0;
+  fakeCache.entries.clear();
 
   const module = {
     Application: FakeApplication,
     Container: FakeContainer,
     Sprite: FakeSprite,
     NineSliceSprite: FakeNineSliceSprite,
-    Texture: FakeTexture
+    Texture: FakeTexture,
+    Graphics: FakeGraphics,
+    BitmapFont: FakeBitmapFont,
+    Cache: fakeCache,
+    bitmapFontTextParser: fakeTextParser,
+    bitmapFontXMLStringParser: fakeXmlParser
   } as unknown as PixiModule;
 
   return {

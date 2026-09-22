@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Transform } from "../../../renderer/components";
 import { Exiting } from "../../../world/ecs/define";
+import { createInputApi } from "../../api";
 import {
   Draggable,
   DropTarget,
@@ -10,7 +11,8 @@ import {
   Pressable,
   Pressed,
   Swipeable,
-  Tappable
+  Tappable,
+  Touchable
 } from "../../components";
 import { direction, distance } from "../../gestures";
 import { record } from "../../pointer";
@@ -467,5 +469,106 @@ describe("the drop answer through the finger", () => {
     mock.frame();
 
     expect(mock.answers).toEqual([{ intent: "merge", payload: { from: "c2", to: "c3" } }]);
+  });
+});
+
+describe("Touchable and the onTap listeners", () => {
+  it("presses a view that only carries Touchable and answers nothing", () => {
+    const mock = createMockInput();
+    const entity = view(mock, [Touchable()]);
+    const seen: number[] = [];
+
+    createInputApi(mock.ctx).onTap(tapped => seen.push(tapped));
+
+    record(mock.state, down(50, 50));
+    mock.frame();
+
+    expect(mock.state.entity).toBe(entity);
+    expect(mock.has(entity, Pressed)).toBe(true);
+
+    record(mock.state, up(52, 52));
+    mock.frame();
+
+    expect(seen).toEqual([entity]);
+    expect(mock.answers).toEqual([]);
+    expect(mock.state.phase).toBe("idle");
+  });
+
+  it("calls the listeners before the Tappable answer, in registration order", () => {
+    const mock = createMockInput();
+    const entity = view(mock, [Tappable({ intent: "found" })]);
+    const api = createInputApi(mock.ctx);
+    const seen: number[] = [];
+
+    api.onTap(tapped => {
+      seen.push(tapped);
+      mock.calls.push("first");
+    });
+    api.onTap(() => mock.calls.push("second"));
+
+    record(mock.state, down(50, 50));
+    record(mock.state, up(52, 52));
+    mock.frame();
+
+    expect(seen).toEqual([entity]);
+    expect(mock.calls).toEqual(["tag:Pressed", "first", "second", "answer", "untag:Pressed"]);
+  });
+
+  it("calls no listener when the finger left the tap slop", () => {
+    const mock = createMockInput();
+
+    view(mock, [Tappable({ intent: "found" })]);
+
+    const seen: number[] = [];
+
+    createInputApi(mock.ctx).onTap(tapped => seen.push(tapped));
+
+    record(mock.state, down(50, 50));
+    record(mock.state, up(120, 50));
+    mock.frame();
+
+    expect(seen).toEqual([]);
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("logs a throwing listener and still answers the tap", () => {
+    const mock = createMockInput();
+
+    view(mock, [Tappable({ intent: "found" })]);
+
+    const api = createInputApi(mock.ctx);
+
+    api.onTap(() => {
+      throw new Error("boom");
+    });
+    api.onTap(() => mock.calls.push("second"));
+
+    record(mock.state, down(50, 50));
+    record(mock.state, up(50, 50));
+    mock.frame();
+
+    expect(mock.log.error).toHaveBeenCalledWith(
+      "input: an onTap listener threw",
+      expect.objectContaining({ entity: mock.boxes[0]?.entity })
+    );
+    expect(mock.answers).toEqual([{ intent: "found", payload: {} }]);
+  });
+
+  it("stops calling a listener its remover dropped", () => {
+    const mock = createMockInput();
+
+    view(mock, [Tappable({ intent: "found" })]);
+
+    const api = createInputApi(mock.ctx);
+    const seen: number[] = [];
+    const off = api.onTap(tapped => seen.push(tapped));
+
+    off();
+    record(mock.state, down(50, 50));
+    record(mock.state, up(50, 50));
+    mock.frame();
+
+    expect(seen).toEqual([]);
+    expect(mock.answers).toHaveLength(1);
   });
 });

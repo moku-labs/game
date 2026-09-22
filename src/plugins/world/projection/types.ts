@@ -1,10 +1,11 @@
 /**
  * @file world/projection — type definitions: layers, projection specs, views, motion hooks,
- * the minimal tween and the module API.
+ * the tween driver seam and the module API.
  */
 import type { Hint } from "../../flow/types";
 import type { Json, Root } from "../../model/types";
 import type {
+  AnyComponent,
   AnyComponentValue,
   ComponentType,
   EcsApi,
@@ -36,14 +37,25 @@ export type LayerSort = "none" | "y" | "order";
 export type LayerSpec = { name: string; sort: LayerSort };
 
 /**
- * Easing of a tween. A function gets the normalised time and returns the eased fraction.
+ * Easing of a tween: one of the named curves the driver knows, or a function that gets the
+ * normalised time and returns the eased fraction.
  *
  * @example
  * ```ts
- * const ease: Ease = "inOut";
+ * const ease: Ease = "outBack";
  * ```
  */
-export type Ease = "linear" | "in" | "out" | "inOut" | ((t: number) => number);
+export type Ease =
+  | "linear"
+  | "in"
+  | "out"
+  | "inOut"
+  | "inCubic"
+  | "outCubic"
+  | "inOutCubic"
+  | "inBack"
+  | "outBack"
+  | ((t: number) => number);
 
 /**
  * What every motion returns: it can be finished, cancelled and asked whether it still runs.
@@ -81,24 +93,108 @@ export type NumericFields<Value extends object> = {
 };
 
 /**
- * Options of `ViewHandle.tween`.
+ * Options of `ViewHandle.tween`. An additive tween adds its delta over the value the absolute
+ * writer of the field holds, instead of owning the field.
  *
  * @example
  * ```ts
  * const options: TweenOptions = { ms: 350, ease: "out", delayMs: 40 };
  * ```
  */
-export type TweenOptions = { ms: number; ease?: Ease; delayMs?: number };
+export type TweenOptions = { ms: number; ease?: Ease; delayMs?: number; additive?: boolean };
 
 /**
- * Options of `ViewHandle.toRest`. Defaults: the plugin's `settleMs` and ease `"out"`.
+ * Options of `ViewHandle.toRest`. Defaults: the plugin's `settleMs` and ease `"out"`. `delayMs`
+ * lets a hook wait, for example for a flight to land, before the view comes home.
  *
  * @example
  * ```ts
- * const options: RestOptions = { ms: 200 };
+ * const options: RestOptions = { ms: 200, delayMs: 120 };
  * ```
  */
-export type RestOptions = { ms?: number; ease?: Ease };
+export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number };
+
+/**
+ * What the driver is told about one track: how long it runs, how it eases, how long it waits and
+ * whether it adds to the field or owns it.
+ *
+ * @example
+ * ```ts
+ * const options: TrackOptions = { ms: 250, ease: "outBack", delayMs: 0, additive: false };
+ * ```
+ */
+export type TrackOptions = { ms: number; ease?: Ease; delayMs?: number; additive?: boolean };
+
+/**
+ * The tween engine behind `ViewHandle.tween`, `toRest` and `all`. `anim` installs one with
+ * `setDriver`; without it the world writes every target at once.
+ *
+ * A track reads its start values when its delay ends, writes the exact target on its last frame
+ * and goes through `ecs.set`, so `changed()` sees it. Muted fields are never written, also not on
+ * `finish()`.
+ *
+ * @example
+ * ```ts
+ * // `anim` hands the world its own tween core in `onStart`.
+ * const driver: TweenDriver = { track: startTrack, cancelAll: cancelTracksOf };
+ * const off = ctx.require(worldPlugin).projection.setDriver(driver);
+ *
+ * off(); // `anim` stopped: the world writes instantly again
+ * ```
+ */
+export type TweenDriver = {
+  /**
+   * Starts one track on one component of one entity.
+   *
+   * @param entity - The entity to animate.
+   * @param component - The component to animate.
+   * @param to - The numeric target fields.
+   * @param options - Duration, easing, delay and the additive flag.
+   * @param muted - The fields another writer owns, read at every write.
+   * @returns The motion handle of the track.
+   */
+  track(
+    entity: Entity,
+    component: AnyComponent,
+    to: Record<string, number>,
+    options: TrackOptions,
+    muted: () => ReadonlySet<string>
+  ): MotionHandle;
+
+  /**
+   * Ends every track of one entity. Called when a view despawns and on every flush.
+   *
+   * @param entity - The entity whose tracks end.
+   */
+  cancelAll(entity: Entity): void;
+};
+
+/**
+ * One node of an element description, as `ui` builds it. The world never imports `ui`: it knows
+ * the shape structurally, carries it in `Tree` and hands it back unchanged.
+ *
+ * @example
+ * ```ts
+ * const node: DescriptionNode = { type: "box", props: { gap: 8 }, children: [] };
+ * ```
+ */
+export type DescriptionNode = {
+  type: string;
+  key?: string;
+  props: object;
+  children: readonly unknown[];
+};
+
+/**
+ * What one `view(item)` call returns: the components of the item, or one description node that
+ * the world wraps as `Tree`.
+ *
+ * @example
+ * ```ts
+ * const components: ViewOutput = [Level({ level: 2 })];
+ * ```
+ */
+export type ViewOutput = readonly AnyComponentValue[] | DescriptionNode;
 
 /**
  * What a motion hook is handed: the one view it animates. A view never holds a reference to
@@ -216,9 +312,10 @@ export type ProjectionSpec<
   readonly name: string;
   readonly layer: LayerName;
   readonly lift?: LiftName;
-  from(player: Player, session: Session): readonly Item[];
-  key(item: Item): string;
-  view(item: Item): readonly AnyComponentValue[];
+  from(player: Player, session: Session): readonly Item[] | Item;
+  /** Omitted when `from` returns one plain object: the key is then the name of the projection. */
+  key?(item: Item): string;
+  view(item: Item): ViewOutput;
   readonly motion?: ProjectionMotion<Item>;
 };
 
@@ -240,9 +337,9 @@ export type AnyProjectionSpec = {
   readonly name: string;
   readonly layer: string;
   readonly lift?: string;
-  from(player: Json, session: Json): readonly unknown[];
-  key(item: unknown): string;
-  view(item: unknown): readonly AnyComponentValue[];
+  from(player: Json, session: Json): unknown;
+  key?(item: unknown): string;
+  view(item: unknown): ViewOutput;
   readonly motion?: AnyProjectionMotion;
 };
 
@@ -311,34 +408,33 @@ export type Mounted = {
 };
 
 /**
- * One running tween. `from` is read from the component when the delay ends, never stored earlier.
+ * One track the projection started on the driver. The world keeps the component name and the
+ * handle, so it knows which components are driven without knowing how the driver runs them.
  *
  * @example
  * ```ts
- * const track: Track = {
- *   entity: 1_048_576,
- *   component: Transform,
- *   to: { x: 100 },
- *   ms: 350,
- *   ease: "out",
- *   delayMs: 0,
- *   elapsed: 0,
- *   from: undefined,
- *   ended: false
- * };
+ * const track: Track = { entity: 1_048_576, component: "Transform", handle: flight };
+ * track.handle.active(); // true while the flight runs
  * ```
  */
-export type Track = {
-  entity: Entity;
-  component: ComponentType<Record<string, unknown>>;
-  to: Record<string, number>;
-  ms: number;
-  ease: Ease;
-  delayMs: number;
-  elapsed: number;
-  from: Record<string, number> | undefined;
-  ended: boolean;
-};
+export type Track = { entity: Entity; component: string; handle: MotionHandle };
+
+/**
+ * The rest pose of one entity, by component name: the last output of `view(item)` for a view, or
+ * what `setRest` recorded for an element another plugin owns.
+ */
+export type RestPose = Map<string, AnyComponentValue>;
+
+/**
+ * Where a keyed element lives: a plugin above registered it with `registerKey`, so `entityOf`
+ * and `keyOf` answer for it next to the views.
+ *
+ * @example
+ * ```ts
+ * const key: ProjectionKey = { projection: "hud", key: "coins" };
+ * ```
+ */
+export type ProjectionKey = { projection: string; key: string };
 
 /**
  * What the next reconcile has to do: why it runs, which roots changed and whether `view` is
@@ -361,7 +457,16 @@ export type ProjectionState = {
   byEntity: Map<Entity, View>;
   dirty: Dirty | undefined;
   hints: Hint[];
+  /** The tracks the projection started, with the handle that says whether they still run. */
   tracks: Track[];
+  /** The tween engine `anim` installed, or `undefined`: then every target is written at once. */
+  driver: TweenDriver | undefined;
+  /** The rest pose of an entity that is not a view, recorded by its owner through `setRest`. */
+  rests: Map<Entity, RestPose>;
+  /** Projection name to key to the entity a plugin above registered under it. */
+  keys: Map<string, Map<string, Entity>>;
+  /** The reverse of `keys`, so `keyOf` answers for a registered element too. */
+  keysByEntity: Map<Entity, ProjectionKey>;
   /** Entity to component name to the fields another writer owns. */
   mutes: Map<Entity, Map<string, Set<string>>>;
   offHints: Array<() => void>;
@@ -380,6 +485,7 @@ export type WorldComponents = {
   Layer: ComponentType<{ name: string }>;
   Order: ComponentType<{ value: number }>;
   Exiting: TagType;
+  Tree: ComponentType<{ node: DescriptionNode }>;
 };
 
 /**
@@ -580,10 +686,11 @@ export type ProjectionApi = {
   lift(entity: Entity, on: boolean): void;
 
   /**
-   * The projection and key of an entity. Also answers for a view in the despawn queue.
+   * The projection and key of an entity. Also answers for a view in the despawn queue and for an
+   * element registered with `registerKey`.
    *
    * @param entity - The entity to ask about.
-   * @returns The projection name and the model key, or `undefined`.
+   * @returns The projection name and the key, or `undefined`.
    * @example
    * ```ts
    * // `renderer.sync` labels its display objects for the inspector.
@@ -591,10 +698,11 @@ export type ProjectionApi = {
    * app.world.projection.keyOf(42); // undefined: not a view
    * ```
    */
-  keyOf(entity: Entity): { projection: string; key: string } | undefined;
+  keyOf(entity: Entity): ProjectionKey | undefined;
 
   /**
-   * The entity of one key of one projection. Live views only, never the despawn queue.
+   * The entity of one key of one projection: a live view, never the despawn queue, or an element
+   * a plugin above registered under that key.
    *
    * @param projection - Name of the projection.
    * @param key - The model key.
@@ -608,6 +716,84 @@ export type ProjectionApi = {
    * ```
    */
   entityOf(projection: string, key: string): Entity | undefined;
+
+  /**
+   * Installs the tween engine every `ViewHandle.tween`, `toRest` and `all` then runs on. Without
+   * one the world writes every target at once and hands back an inactive handle.
+   *
+   * @param driver - The engine that runs the tracks.
+   * @returns The remover; it puts the instant writes back.
+   * @example
+   * ```ts
+   * // `anim` installs its tween core when it starts and takes it back when it stops.
+   * const world = ctx.require(worldPlugin);
+   * ctx.state.removeDriver = world.projection.setDriver(createDriver(ctx, ctx.state));
+   *
+   * ctx.state.removeDriver(); // onStop: motions are instant again
+   * ```
+   */
+  setDriver(driver: TweenDriver): () => void;
+
+  /**
+   * A view handle for an entity that is not a projection view, so an element another plugin owns
+   * can be animated the same way. `set`, `get`, `tween`, `toRest` and `all` work; `rest` answers
+   * what `setRest` recorded; `peer` answers `undefined`.
+   *
+   * @param entity - The entity of the element.
+   * @param owner - Who is asking; without it only the kind of the owner is checked.
+   * @returns The handle, or `undefined` for a projection view and for a foreign entity.
+   * @example
+   * ```ts
+   * // `ui` plays the `motion` prop of an element it owns.
+   * const world = ctx.require(worldPlugin);
+   * const handle = world.projection.viewOf(button, { kind: "plugin", name: "ui" });
+   *
+   * handle?.tween(Transform, { scale: 1.1 }, { ms: 120, ease: "outBack" });
+   * ```
+   */
+  viewOf(entity: Entity, owner: Owner): ViewHandle<unknown> | undefined;
+
+  /**
+   * Records what one component of an element looks like at rest, so `toRest` knows where home is.
+   *
+   * @param entity - The entity of the element.
+   * @param component - The component whose rest value is recorded.
+   * @param value - The value the element holds when nothing animates.
+   * @example
+   * ```ts
+   * // `ui` laid the coin counter out and tells the world where it belongs.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.setRest(counter, Transform, { x: 40, y: 120, rotation: 0, scale: 1 });
+   *
+   * world.projection.viewOf(counter, { kind: "plugin", name: "ui" })?.rest(Transform); // { x: 40, y: 120, rotation: 0, scale: 1 }
+   * ```
+   */
+  setRest<Value extends object>(
+    entity: Entity,
+    component: ComponentType<Value>,
+    value: Value
+  ): void;
+
+  /**
+   * Gives an entity a projection and key of its own, so `entityOf` and `keyOf` answer for it next
+   * to the live views. That is how an element becomes a target for `anim`, `input` and `guide`.
+   *
+   * @param projection - Name the element is addressed under.
+   * @param key - Key the element is addressed under.
+   * @param entity - The entity of the element.
+   * @returns The remover; it drops the key again.
+   * @throws {Error} When a live view of that projection already holds the key.
+   * @example
+   * ```ts
+   * // `ui` publishes the coin counter of the HUD.
+   * const world = ctx.require(worldPlugin);
+   * const drop = world.projection.registerKey("hud", "coins", counter);
+   *
+   * world.projection.entityOf("hud", "coins"); // the entity of the counter
+   * drop(); // the element left the screen
+   * ```
+   */
+  registerKey(projection: string, key: string, entity: Entity): () => void;
 
   /**
    * Marks every mounted projection dirty and forces `view` for every item, so the next frame
@@ -653,11 +839,10 @@ export type ProjectionInternal = {
   pushHint(hint: Hint): void;
 
   /**
-   * Advances every track by the frame delta and sweeps the views whose motions ended.
-   *
-   * @param deltaMs - The frame delta in game milliseconds.
+   * Sweeps the views whose motions ended: the despawn queue, the convergence check and the
+   * pending drops. The tracks themselves are advanced by the driver.
    */
-  advance(deltaMs: number): void;
+  sweep(): void;
 
   /**
    * Finishes every motion and flushes every despawn queue. Called when the mode turns `fast`.

@@ -72,6 +72,8 @@ async function runNode(
 
   // eslint-disable-next-line unicorn/no-useless-undefined -- `undefined` lifts a running guide.
   modules.gate.narrow(undefined);
+  // The visual of a guide belongs to the narrow: both end where the node ends.
+  modules.fx.endGuides();
 
   if (outcome.kind === "failed") {
     return handleFailure(ctx, modules, step.transaction, outcome.error, path, safe);

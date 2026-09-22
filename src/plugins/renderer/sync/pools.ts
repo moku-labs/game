@@ -38,6 +38,24 @@ export function detach(object: PixiContainer): void {
 }
 
 /**
+ * Takes the clip rectangle off a view: the wrapper stops masking and the graphics goes.
+ *
+ * @param view - The view of a shape that clips, or of anything that does not.
+ */
+export function dropMask(view: View): void {
+  const mask = view.mask;
+
+  if (mask === undefined) return;
+
+  // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears a mask.
+  if (view.wrapper !== undefined) view.wrapper.mask = null;
+
+  detach(mask);
+  mask.destroy();
+  view.mask = undefined;
+}
+
+/**
  * The pool an object belongs to: its class and the texture it draws.
  *
  * @param kind - Which component gave the entity its display object.
@@ -104,6 +122,8 @@ function emptyPool(): PixiContainer[] {
 export function release(sctx: SyncCtx, view: View): void {
   const state = sctx.ctx.state.sync;
 
+  dropMask(view);
+
   if (view.wrapper !== undefined) {
     detach(view.wrapper);
     view.wrapper.destroy({ children: false });
@@ -112,6 +132,13 @@ export function release(sctx: SyncCtx, view: View): void {
 
   if (view.kind === "Display") {
     detach(view.object);
+
+    return;
+  }
+
+  if (view.kind === "adapter") {
+    detach(view.object);
+    view.display?.adapter.destroy(view.object);
 
     return;
   }

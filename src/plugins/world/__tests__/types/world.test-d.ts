@@ -2,6 +2,7 @@ import { expectTypeOf } from "vitest";
 import { component, mut, system, tag } from "../../ecs/define";
 import type { EcsApi, Entity, Owner, QueryTuple } from "../../ecs/types";
 import { projection } from "../../projection/define";
+import type { DescriptionNode, Ease } from "../../projection/types";
 import type { Events } from "../../types";
 
 type Position = { x: number; y: number };
@@ -63,6 +64,36 @@ const boardItems = projection({
 // `layer` and `lift` keep their literal types, so a scene can check them against its layer keys.
 expectTypeOf(boardItems.layer).toEqualTypeOf<"items">();
 expectTypeOf(boardItems.lift).toEqualTypeOf<"lifted" | undefined>();
+
+// The V3 eases sit next to the four short names and the function form.
+expectTypeOf<Ease>().toEqualTypeOf<
+  | "linear"
+  | "in"
+  | "out"
+  | "inOut"
+  | "inCubic"
+  | "outCubic"
+  | "inOutCubic"
+  | "inBack"
+  | "outBack"
+  | ((t: number) => number)
+>();
+
+// A screen: `from` returns one plain object, `key` is omitted and `view` returns one node.
+const hud = projection({
+  name: "hud",
+  layer: "ui",
+  from: (player: { hud: { coins: number } }) => player.hud,
+  view: item => {
+    expectTypeOf(item).toEqualTypeOf<{ coins: number }>();
+
+    const node: DescriptionNode = { type: "box", props: { coins: item.coins }, children: [] };
+
+    return node;
+  }
+});
+
+expectTypeOf(hud.layer).toEqualTypeOf<"ui">();
 
 // The event payload carries every count of one reconcile.
 expectTypeOf<Events["world:reconciled"]["mode"]>().toEqualTypeOf<"play" | "direct">();

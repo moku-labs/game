@@ -4,21 +4,23 @@
  */
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
+import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { enterScene } from "./switch";
 import type { Deps, KernelSlice, SceneDefinition, ScenesCtx, State } from "./types";
 
 /**
- * Resolves the dependency APIs `flow`, `world` and `assets` with `ctx.require`.
+ * Resolves the dependency APIs `flow`, `world`, `assets` and `time` with `ctx.require`.
  *
  * @param ctx - Kernel context of the scenes plugin.
- * @returns The three dependency APIs.
+ * @returns The four dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     flow: ctx.require(flowPlugin),
     world: ctx.require(worldPlugin),
-    assets: ctx.require(assetsPlugin)
+    assets: ctx.require(assetsPlugin),
+    time: ctx.require(timePlugin)
   };
 }
 

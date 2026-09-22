@@ -29,15 +29,24 @@ export const boardFeature = defineFeature("board", {
 | Key | Type | Meaning |
 |---|---|---|
 | `bundle` | `BundleKey` | The bundle the scene needs. Awaited before anything is mounted |
-| `layers` | `Record<string, { sort? }>` | Layer name to its sort rule. The order of the lines is draw order, bottom first |
-| `projections` | `ProjectionSpec[]` | The projections the scene mounts. Their `layer` and `lift` are checked against the keys of `layers` |
-| `music` | `AssetKey` | Optional. Carried in `scenes:changed`, so V3 `audio` needs no lookup |
+| `layers` | `Record<string, { sort? }>` | Layer name to its sort rule. The order of the lines is draw order, bottom first. A layer `ui` is appended |
+| `projections` | `ProjectionSpec[]` | The projections the scene mounts. Their `layer` and `lift` are checked against the keys of `layers` and `ui` |
+| `music` | `AudioKey` | Optional. The audio keys of the game (`G["assets"]`). Carried in `scenes:changed`, so `audio` needs no lookup |
 
 The layer names are inferred from the keys of `layers`, and `NoInfer` keeps `projections` out of that inference: a wrong `layer` or `lift` is an error on the projection that is wrong, with no generic at the call site. The same check runs at run time for a caller without types:
 
 ```
 [game] Scene "board": projection "board.items" names layer "itemz".
   Declare it in layers or fix the name.
+```
+
+## The appended `ui` layer
+
+Every scene gets `{ name: "ui", sort: "none" }` on top of the layers it declared, so the HUD and the popups always have a place to mount and a game never has to remember the line. A scene that declares `ui` itself keeps the place it wrote it in and gets no second one — that is how a game puts an `fx` layer over the HUD. The layer check runs after the append, so a projection may name `ui` as its `layer` or its `lift` without declaring it, and a name that is neither declared nor `ui` is still rejected, by the compiler and at run time.
+
+```ts
+defineScene("board", { bundle: "board", layers: { cells: {}, items: { sort: "y" } }, projections: [hudPanel] }).layers;
+// [{ name: "cells", sort: "none" }, { name: "items", sort: "y" }, { name: "ui", sort: "none" }]
 ```
 
 `sort` left out means `"none"`. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is plain frozen data, so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey>`.
@@ -64,7 +73,7 @@ Nothing else is public. A scene is switched by the graph, never by a call.
 | 6 | No such scene: throw `[game] Scene "bord" is not registered.` The static check of `flow` normally catches it first |
 | 7 | `await assets.load(scene.bundle)`, raced against the node's abort signal |
 | 8 | Aborted: return. Nothing was touched, the old scene is still there |
-| 9 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` → `scenes:changed` |
+| 9 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` → `time.wake()` → `scenes:changed` |
 
 | Case | Behaviour |
 |---|---|
@@ -95,17 +104,18 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 |---|---|---|
 | `scenes:changed` | `{ from, to, music }` | After the mounts, once per real switch |
 
-`music` is the new scene's key, so V3 `audio` needs no lookup API. Nobody answers the event.
+`music` is the new scene's key, so `audio` needs no lookup API: it fades the old track out and the new one in straight from the payload. A scene without music carries `undefined`. Nobody answers the event.
 
 ## Dependencies
 
-`flow`, `world`, `assets`. No edge to `renderer`: the layers go through `world.projection`, which `renderer.sync` reads.
+`flow`, `world`, `assets`, `time`. No edge to `renderer`: the layers go through `world.projection`, which `renderer.sync` reads.
 
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
 | `world` | `projection.setLayers`, `projection.mount`, `projection.unmount` |
 | `assets` | `load(bundle)` |
+| `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate |
 
 ## Lifecycle
 

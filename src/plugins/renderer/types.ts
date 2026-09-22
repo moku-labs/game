@@ -12,8 +12,10 @@ import type { SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
 /**
- * The five Pixi classes the renderer uses. The module object never arrives through a static
- * import: `config.loadPixi()` returns it, so a game without a screen carries no Pixi in its bundle.
+ * The part of Pixi the engine uses: the classes `sync` builds views from, the bitmap-font pieces
+ * `fonts.install` needs, and the `BitmapText` a plugin above builds through `host.pixi()`. The
+ * module object never arrives through a static import: `config.loadPixi()` returns it, so a game
+ * without a screen carries no Pixi in its bundle.
  *
  * @example
  * ```ts
@@ -23,7 +25,17 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  */
 export type PixiModule = Pick<
   typeof import("pixi.js"),
-  "Application" | "Container" | "Sprite" | "NineSliceSprite" | "Texture"
+  | "Application"
+  | "BitmapFont"
+  | "BitmapText"
+  | "Cache"
+  | "Container"
+  | "Graphics"
+  | "NineSliceSprite"
+  | "Sprite"
+  | "Texture"
+  | "bitmapFontTextParser"
+  | "bitmapFontXMLStringParser"
 >;
 
 /**
@@ -47,9 +59,24 @@ export type PixiSprite = InstanceType<PixiModule["Sprite"]>;
 export type PixiNineSliceSprite = InstanceType<PixiModule["NineSliceSprite"]>;
 
 /**
+ * A Pixi graphics object: what a `Shape` component is drawn with, and what clips its children.
+ */
+export type PixiGraphics = InstanceType<PixiModule["Graphics"]>;
+
+/**
  * A Pixi texture. `assets` owns its lifetime; the renderer only makes and destroys it on request.
  */
 export type PixiTexture = InstanceType<PixiModule["Texture"]>;
+
+/**
+ * A bitmap font the renderer installed for a font asset key. One per key.
+ */
+export type PixiBitmapFont = InstanceType<PixiModule["BitmapFont"]>;
+
+/**
+ * The parsed shape of a `.fnt` file: what `BitmapFont` is built from.
+ */
+export type BitmapFontData = ConstructorParameters<PixiModule["BitmapFont"]>[0]["data"];
 
 /**
  * Which backend the one application drew with, or `"none"` while it draws nothing.
@@ -204,6 +231,10 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 export type { HostApi, HostInternal, HostState } from "./host/types";
 export type {
   CreateTextureOptions,
+  DisplayAdapter,
+  DisplayEntry,
+  DisplaysApi,
+  FontsApi,
   HitBox,
   LayerEntry,
   NineBorders,

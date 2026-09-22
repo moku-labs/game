@@ -7,6 +7,7 @@ import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as AssetsApi } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
+import type { Api as TimeApi } from "../time/types";
 import type { LayerSort, LayerSpec, Owner, Api as WorldApi } from "../world/types";
 
 /**
@@ -29,6 +30,28 @@ export type SortRule = LayerSort;
  * ```
  */
 export type LayerMap = Record<string, { sort?: SortRule }>;
+
+/**
+ * The name of the layer every scene gets on top of the layers it declared, where popups and the
+ * HUD are mounted. A scene that declares it keeps the place it wrote it in.
+ *
+ * @example
+ * ```ts
+ * const layer: UiLayer = "ui";
+ * ```
+ */
+export type UiLayer = "ui";
+
+/**
+ * The layer names the projections of a scene may use: the keys the scene declared and the
+ * appended `ui`, which is there whether the scene wrote it or not.
+ *
+ * @example
+ * ```ts
+ * const layer: SceneLayer<{ cells: Record<never, never> }> = "ui"; // or "cells"
+ * ```
+ */
+export type SceneLayer<Layers extends LayerMap> = (keyof Layers & string) | UiLayer;
 
 /**
  * Any projection as a scene reads it. `projection()` widens `lift` to `string` when the author
@@ -96,9 +119,10 @@ export type CheckedProjections<Layer extends string, List> = {
 };
 
 /**
- * What the author passes to `defineScene`. The layer names come from the keys of `layers`;
- * `NoInfer` keeps `projections` out of that inference, so a wrong name is reported on the
- * projection and never widens the layer union.
+ * What the author passes to `defineScene`. The layer names come from the keys of `layers` plus
+ * the appended `ui`; `NoInfer` keeps `projections` out of that inference, so a wrong name is
+ * reported on the projection and never widens the layer union. `music` is an asset key of the
+ * game, narrowed to its audio keys once the scanner splits them.
  *
  * @example
  * ```ts
@@ -117,8 +141,7 @@ export type SceneSpec<
 > = {
   bundle: Bundle;
   layers: Layers;
-  projections: Projections &
-    CheckedProjections<NoInfer<keyof Layers & string>, NoInfer<Projections>>;
+  projections: Projections & CheckedProjections<NoInfer<SceneLayer<Layers>>, NoInfer<Projections>>;
   music?: Asset;
 };
 
@@ -146,7 +169,7 @@ export type DefineScene<Asset extends string, Bundle extends string> = <
  * ```ts
  * // What defineScene("board", { bundle: "board", layers: { items: { sort: "y" } }, projections: [] })
  * // returns: { id: "board", bundle: "board", music: undefined,
- * //   layers: [{ name: "items", sort: "y" }], projections: [] }
+ * //   layers: [{ name: "items", sort: "y" }, { name: "ui", sort: "none" }], projections: [] }
  * ```
  */
 export type SceneDefinition = {
@@ -252,7 +275,7 @@ export type ScenesApi = {
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { flow: FlowApi; world: WorldApi; assets: AssetsApi };
+export type Deps = { flow: FlowApi; world: WorldApi; assets: AssetsApi; time: TimeApi };
 
 /**
  * What the kernel context offers before the deps are attached.

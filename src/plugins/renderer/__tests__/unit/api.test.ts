@@ -10,13 +10,22 @@ describe("renderer api", () => {
     const mock = createMockRenderer({ dom: false });
 
     expect(Object.keys(mock.api).toSorted()).toEqual(["host", "sync", "viewport"]);
-    expect(Object.keys(mock.api.sync).toSorted()).toEqual(["displayOf", "hitTest", "textures"]);
+    expect(Object.keys(mock.api.host).toSorted()).toEqual(["canvas", "kind", "pixi", "ready"]);
+    expect(Object.keys(mock.api.sync).toSorted()).toEqual([
+      "displayOf",
+      "displays",
+      "fonts",
+      "hitTest",
+      "textures"
+    ]);
     expect(Object.keys(mock.api.sync.textures).toSorted()).toEqual([
       "create",
       "destroy",
       "invalidate",
       "provide"
     ]);
+    expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
+    expect(Object.keys(mock.api.sync.fonts).toSorted()).toEqual(["install", "installed"]);
   });
 
   it("answers nothing about a renderer that never started", () => {

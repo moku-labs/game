@@ -107,6 +107,13 @@ export const DropTarget = /*#__PURE__*/ component("DropTarget", intentDefaults()
 export const Swipeable = /*#__PURE__*/ component("Swipeable", intentDefaults());
 
 /**
+ * Takes a press without naming a gesture: the hit test accepts a view that carries only this tag,
+ * and a tap on it runs the `onTap` listeners and answers nothing. `ui` tags the buttons that
+ * write local state and name no intent.
+ */
+export const Touchable = /*#__PURE__*/ tag("Touchable");
+
+/**
  * On the carried view, from grab to release.
  */
 export const Held = /*#__PURE__*/ tag("Held");

@@ -7,6 +7,7 @@
 import { createPlugin } from "../../config";
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
+import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createScenesApi } from "./api";
 import { startScenes, stopScenes } from "./lifecycle";
@@ -29,7 +30,7 @@ import type { Events } from "./types";
  * ```
  */
 export const scenesPlugin = /*#__PURE__*/ createPlugin("scenes", {
-  depends: [flowPlugin, worldPlugin, assetsPlugin],
+  depends: [flowPlugin, worldPlugin, assetsPlugin, timePlugin],
   events: register => register.map<Events>({ "scenes:changed": "The mounted scene changed" }),
   createState: createScenesState,
   api: createScenesApi,

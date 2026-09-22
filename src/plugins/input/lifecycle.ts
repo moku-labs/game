@@ -37,7 +37,8 @@ export function withDeps(ctx: KernelSlice): InputCtx {
 }
 
 /**
- * Registers the one frame step in `onInit`, which runs before every `onStart`. `world` registers
+ * Registers the one frame step in `onInit`, which runs before every `onStart`, and binds
+ * `time.wake` so a pointer sample lifts the idle frame rate. `world` registers
  * its own `input` callback in its `onStart` and `time` runs the callbacks of a phase in
  * registration order, so the gestures are resolved before any game system of phase `input` runs.
  *
@@ -46,6 +47,7 @@ export function withDeps(ctx: KernelSlice): InputCtx {
 export function initInput(ctx: KernelSlice): void {
   const inputCtx = withDeps(ctx);
 
+  inputCtx.state.wake = (): void => inputCtx.deps.time.wake();
   inputCtx.state.offFrame = inputCtx.deps.time.onFrame("input", time =>
     stepGestures(inputCtx, time)
   );
@@ -83,4 +85,6 @@ export function stopInput(state: State): void {
   state.entity = undefined;
   state.key = undefined;
   state.hovered = undefined;
+  state.wake = undefined;
+  state.tapListeners = [];
 }

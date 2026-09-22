@@ -52,6 +52,9 @@ describe("renderer state", () => {
       textureKey: "x",
       wrapper: undefined,
       placeholder: false,
+      mask: undefined,
+      display: undefined,
+      value: undefined,
       hitBox: { x: 0, y: 0, width: 1, height: 1 }
     });
 

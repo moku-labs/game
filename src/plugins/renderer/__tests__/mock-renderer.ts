@@ -182,7 +182,7 @@ export function createMockRenderer(
   const emitted: Array<{ name: string; payload: unknown }> = [];
   const frames: FrameRegistration[] = [];
   const pauses: Array<{ action: "push" | "pop"; reason: PauseReason }> = [];
-  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0 };
+  const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
 
   const timeApi = {
     onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {

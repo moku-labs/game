@@ -49,6 +49,14 @@ const boardItems = projection({
   view: () => []
 });
 
+const hudPanel = projection({
+  name: "hud.panel",
+  layer: "ui",
+  from: (player: Player) => player.buttons,
+  key: (button: Button) => button.id,
+  view: () => []
+});
+
 const homeScene = defineScene("home", {
   bundle: "home",
   layers: { ui: {} },
@@ -59,7 +67,7 @@ const homeScene = defineScene("home", {
 const boardScene = defineScene("board", {
   bundle: "board",
   layers: { cells: {}, items: { sort: "y" }, lifted: {} },
-  projections: [boardCells, boardItems]
+  projections: [boardCells, boardItems, hudPanel]
 });
 
 const home = defineNode({
@@ -101,7 +109,7 @@ const main = defineFlow("main", {
 const boardFeature = defineFeature("board", {
   flows: [main],
   scenes: [homeScene, boardScene],
-  projections: [menuButtons, boardCells, boardItems]
+  projections: [menuButtons, boardCells, boardItems, hudPanel]
 });
 
 /** Every `scenes:changed` the probe plugin heard, in order. */
@@ -181,7 +189,8 @@ describe("scenes plugin integration — a live walk", () => {
     expect(app.world.projection.layers()).toEqual([
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
-      { name: "lifted", sort: "none" }
+      { name: "lifted", sort: "none" },
+      { name: "ui", sort: "none" }
     ]);
     expect(app.world.projection.entityOf("board.cells", "c1")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i5")).toBeDefined();
@@ -190,6 +199,17 @@ describe("scenes plugin integration — a live walk", () => {
       { from: undefined, to: "home", music: "home.theme" },
       { from: "home", to: "board", music: undefined }
     ]);
+
+    await app.stop();
+  });
+
+  it("mounts a HUD projection on the ui layer the scene never declared", async () => {
+    const app = await startApp();
+
+    expect(app.flow.gate.answer({ intent: "play" })).toBe(true);
+    await tick();
+
+    expect(app.world.projection.entityOf("hud.panel", "play")).toBeDefined();
 
     await app.stop();
   });

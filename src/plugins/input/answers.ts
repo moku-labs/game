@@ -6,7 +6,7 @@ import type { Answer } from "../flow/types";
 import type { Json } from "../model/types";
 import type { Entity } from "../world/types";
 import type { CarryValue, IntentValue } from "./components";
-import type { Direction, InputCtx } from "./types";
+import type { Direction, InputCtx, State, TapListener } from "./types";
 
 /**
  * Reads a component payload as a record. A payload that is not a plain JSON object is dropped:
@@ -75,6 +75,45 @@ export function dropAnswer(draggable: CarryValue, target: IntentValue): Answer {
  */
 export function swipeAnswer(gesture: IntentValue, direction: Direction): Answer {
   return { intent: gesture.intent, payload: { ...asRecord(gesture.payload), direction } };
+}
+
+/**
+ * Adds one `onTap` listener to the end of the list, so the listeners run in the order they were
+ * registered.
+ *
+ * @param state - State of the input plugin.
+ * @param fn - What to run with the tapped entity.
+ * @returns The remover; it drops that one listener and leaves the rest.
+ */
+export function addTapListener(state: State, fn: TapListener): () => void {
+  state.tapListeners.push(fn);
+
+  return (): void => {
+    const at = state.tapListeners.indexOf(fn);
+
+    if (at !== -1) state.tapListeners.splice(at, 1);
+  };
+}
+
+/**
+ * Runs every `onTap` listener with the tapped view, before any answer. A listener that throws is
+ * reported with its entity and the listeners after it still run: one broken button never takes
+ * the tap away from the rest of the screen. The list is copied first, so a listener may remove
+ * itself while it runs.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The view the finger let go on.
+ */
+export function notifyTap(ctx: InputCtx, entity: Entity): void {
+  const listeners = [...ctx.state.tapListeners];
+
+  for (const listener of listeners) {
+    try {
+      listener(entity);
+    } catch (error) {
+      ctx.log.error("input: an onTap listener threw", { entity, error });
+    }
+  }
 }
 
 /**

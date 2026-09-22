@@ -49,7 +49,7 @@ export function createHostApi(ctx: RendererCtx): HostModule {
     ready: (): boolean => state.ready,
     kind: (): RendererKind => state.kind,
     canvas: (): HTMLCanvasElement | undefined => state.canvas,
-    pixi: (): PixiModule | undefined => state.pixi,
+    pixi: (): PixiModule | undefined => (state.ready ? state.pixi : undefined),
     stage: (): PixiContainer | undefined => state.app?.stage,
     mount: (): HTMLElement | undefined => state.mount,
 

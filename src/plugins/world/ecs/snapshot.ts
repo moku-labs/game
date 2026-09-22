@@ -2,6 +2,7 @@
  * @file world/ecs — the world as plain JSON, for tests and the inspector.
  */
 import type { Json } from "../../model/types";
+import { Tree } from "./define";
 import { generationOf, indexOf } from "./entities";
 import type { EcsState, Entity, WorldMode } from "./types";
 
@@ -47,7 +48,10 @@ function componentsOf(
     const value = store.get(entity);
 
     if (value === undefined) continue;
-    if (value === true) {
+    // An element description belongs to `ui`, not to the save file: named, never serialised.
+    if (name === Tree.componentName) {
+      skipped.push(name);
+    } else if (value === true) {
       components[name] = true;
     } else if (isJson(value)) {
       components[name] = value;

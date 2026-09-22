@@ -5,7 +5,7 @@
  */
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
-import { Draggable, DropTarget, Pressable, Swipeable, Tappable } from "./components";
+import { Draggable, DropTarget, Pressable, Swipeable, Tappable, Touchable } from "./components";
 import type { InputCtx, Target } from "./types";
 
 /**
@@ -24,8 +24,8 @@ export function resolveTarget(ctx: InputCtx, target: Target): Entity | undefined
 }
 
 /**
- * Tells whether a view takes a press: it carries one of the four gesture components and is not on
- * its way out. A view with only a `DropTarget` takes no press.
+ * Tells whether a view takes a press: it carries one of the four gesture components or the
+ * `Touchable` tag, and is not on its way out. A view with only a `DropTarget` takes no press.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The candidate under the finger.
@@ -40,7 +40,8 @@ export function acceptPress(ctx: InputCtx, entity: Entity): boolean {
     ecs.has(entity, Tappable) ||
     ecs.has(entity, Pressable) ||
     ecs.has(entity, Draggable) ||
-    ecs.has(entity, Swipeable)
+    ecs.has(entity, Swipeable) ||
+    ecs.has(entity, Touchable)
   );
 }
 

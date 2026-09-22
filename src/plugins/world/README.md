@@ -14,7 +14,7 @@ app.world.projection.mount(["board.items"], { kind: "plugin", name: "scenes" });
 ```
 
 `projection` never imports the run-time code of `ecs`: `api.ts` injects the sibling module and the
-three world-owned components (`Layer`, `Order`, `Exiting`) into its factory.
+four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its factory.
 
 ## API
 
@@ -33,8 +33,9 @@ three world-owned components (`Layer`, `Order`, `Exiting`) into its factory.
 | `resource(Resource)` | The one mutable value per world, cloned from the defaults on first read. |
 | `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied. A throwing listener is logged; the others still run. |
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
+| `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
-| `snapshot()` | The world as plain JSON, sorted by index. A value that is not JSON is skipped and named. |
+| `snapshot()` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
 
 ### `projection` — `app.world.projection`
 
@@ -47,11 +48,18 @@ three world-owned components (`Layer`, `Order`, `Exiting`) into its factory.
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. |
-| `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. |
+| `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. |
+| `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. |
+| `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
+| `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home. |
+| `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. |
 | `rerunAll()` | Marks every mounted projection dirty and forces `view` for every item. |
 
 The authoring helpers are pure and exported from the package root:
-`component`, `tag`, `resource`, `mut`, `system`, `projection`, and `Layer`, `Order`, `Exiting`.
+`component`, `tag`, `resource`, `mut`, `system`, `projection`, and `Layer`, `Order`, `Exiting`,
+`Tree`. A projection whose `from` returns one plain object needs no `key`: it draws one item under
+the name of the projection, and a `view` that returns one description node instead of components is
+wrapped as `Tree({ node })`, which `ui` reconciles into child entities.
 
 ## Configuration
 
@@ -72,7 +80,7 @@ const app = createApp({
 | `time` phase | What `world` does, in order |
 |---|---|
 | `input` | reconcile when dirty → drop the hint buffer → systems of `input` → flush commands |
-| `animate` | advance tracks by `time.delta` → sweep ended motions → systems of `animate` → flush |
+| `animate` | sweep ended motions (the driver advanced its tracks first) → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
 | `signals` | clear every change set |
@@ -93,9 +101,12 @@ values (spike P5). Components the new hooks do not drive are brought to the rest
 every rest component is compared with the stored value, muted fields excluded; a difference is
 written and reported with `log.warn("world:view-corrected", …)`.
 
-`projection/tween.ts` and `easing.ts` are the minimal driver behind `ViewHandle.tween`, `toRest` and
-`all`. V3 `anim` replaces them; the hook signatures, the rest pose, the component diff, retarget,
-settle, hint routing, the cause table, the despawn queue, `mute` and `lift` stay.
+`ViewHandle.tween`, `toRest` and `all` run on the driver `anim` installs with `setDriver`
+(`projection/driver.ts`). A track reads its start values when its `delayMs` ends, writes the exact
+target on its last frame and goes through `ecs.set`; muted fields are never written, also not on
+`finish()`. Without a driver the instant default writes every target at once and hands back an
+inactive handle, so a composition without `anim` plays every motion instantly. A despawn and every
+flush call `driver.cancelAll(entity)`.
 
 ## Events
 
@@ -112,8 +123,8 @@ settle, hint routing, the cause table, the despawn queue, `mute` and `lift` stay
   `systems`, then `projections`, in feature order; registers the five `time.onFrame` callbacks, the
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
-- **onStop** `({ state }) => clearWorld(state)` calls the removers and drops tracks, views, the
-  despawn queue, entities and resources. No `onRemoved` fires: `renderer` stopped earlier.
+- **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
+  views, registered keys, recorded rest poses, the despawn queue, entities and resources. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Dependencies
 

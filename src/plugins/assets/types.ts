@@ -7,6 +7,7 @@ import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Descriptor, Api as FlowApi, NodeInfo } from "../flow/types";
 import type { PixiTexture, Api as RendererApi } from "../renderer/types";
+import type { Api as TimeApi } from "../time/types";
 
 /**
  * When a bundle is loaded. `boot` and `core` stay for the whole session, `scene` and `feature`
@@ -18,6 +19,18 @@ import type { PixiTexture, Api as RendererApi } from "../renderer/types";
  * ```
  */
 export type Tier = "boot" | "core" | "scene" | "feature" | "lazy";
+
+/**
+ * What one file of a bundle is. A `.fnt` with its `.png` pages is one `font`, an `.mp3` is
+ * `audio`, everything else is a `texture`. A file of an older manifest that names no kind is a
+ * texture.
+ *
+ * @example
+ * ```ts
+ * const kind: AssetKind = "font";
+ * ```
+ */
+export type AssetKind = "texture" | "font" | "audio";
 
 /**
  * A GPU texture. `assets` owns its lifetime and never imports Pixi: `renderer` makes and destroys
@@ -51,13 +64,17 @@ export type NineBorders = readonly [number, number, number, number];
 export type CreateTextureOptions = { nine?: NineBorders };
 
 /**
- * The part of a fetch response the plugin reads. The global `Response` fits it.
+ * The part of a fetch response the plugin reads: the manifest is `json`, a texture is a `blob`,
+ * a font file is `text` and an audio file stays the raw `arrayBuffer`. The global `Response`
+ * fits it.
  */
 export type FetchResponse = {
   ok: boolean;
   status: number;
   json(): Promise<unknown>;
   blob(): Promise<Blob>;
+  text(): Promise<string>;
+  arrayBuffer(): Promise<ArrayBuffer>;
 };
 
 /**
@@ -68,7 +85,14 @@ export type FetchResponse = {
  * ```ts
  * // A unit test serves two files from memory and counts the textures it handed out.
  * const io: AssetsIo = {
- *   fetch: async () => ({ ok: true, status: 200, json: async () => ({}), blob: async () => blob }),
+ *   fetch: async () => ({
+ *     ok: true,
+ *     status: 200,
+ *     json: async () => ({}),
+ *     blob: async () => blob,
+ *     text: async () => 'info face="body"',
+ *     arrayBuffer: async () => new ArrayBuffer(8)
+ *   }),
  *   decode: async () => bitmap,
  *   createTexture: () => ({ id: "t1" }) as unknown as Texture,
  *   destroyTexture: texture => destroyed.push(texture)
@@ -135,7 +159,25 @@ export type NineSlice = { left: number; top: number; right: number; bottom: numb
 export type AtlasFrame = { page: string; x: number; y: number; width: number; height: number };
 
 /**
- * One file of a bundle. `mb` is the estimated texture memory, `width × height × 4` bytes.
+ * One page image of a font. A page has no key of its own: it belongs to the `.fnt` file that
+ * names it, and is loaded and freed with it.
+ *
+ * @example
+ * ```ts
+ * const page: FontPage = {
+ *   path: "features/ui/assets/body_0.png",
+ *   width: 256,
+ *   height: 128,
+ *   mb: 0.125
+ * };
+ * ```
+ */
+export type FontPage = { path: string; width: number; height: number; mb: number };
+
+/**
+ * One file of a bundle. `mb` is what it costs: `width × height × 4` bytes for a texture, the sum
+ * of the pages for a font, the size of the file for audio. `kind` is absent for a texture, which
+ * is what every manifest written before fonts and audio carries.
  *
  * @example
  * ```ts
@@ -152,9 +194,11 @@ export type AtlasFrame = { page: string; x: number; y: number; width: number; he
 export type ManifestFile = {
   key: string;
   path: string;
+  kind?: AssetKind;
   width: number;
   height: number;
   mb: number;
+  pages?: readonly FontPage[];
   nine?: NineSlice;
   atlas?: AtlasFrame;
 };
@@ -274,12 +318,38 @@ export type Inflight = {
 };
 
 /**
+ * A loaded font: the `.fnt` file as text and the page textures it names. `text` installs the
+ * first page in the renderer; every page is destroyed with the bundle.
+ *
+ * @example
+ * ```ts
+ * const font: FontAsset = { fnt: 'info face="body" size=32', texture };
+ * ```
+ */
+export type FontAsset = { fnt: string; texture: Texture };
+
+/**
+ * What the plugin keeps for a loaded font: the public pair plus every page, because a font of
+ * two pages owns two textures.
+ */
+export type LoadedFont = FontAsset & { pages: readonly Texture[] };
+
+/**
+ * What one bundle brought, by asset key: textures, fonts with their pages, and the undecoded
+ * bytes of the audio files. A running load fills the same three maps before they are published.
+ */
+export type LoadedAssets = {
+  textures: Map<string, Texture>;
+  fonts: Map<string, LoadedFont>;
+  audio: Map<string, ArrayBuffer>;
+};
+
+/**
  * What the plugin knows about one bundle. `lastUsed` is the value of `useCounter` at the last
  * touch: a counter, never a clock.
  */
-export type BundleRecord = {
+export type BundleRecord = LoadedAssets & {
   status: "idle" | "loading" | "loaded";
-  textures: Map<string, Texture>;
   inflight: Inflight | undefined;
   lastUsed: number;
 };
@@ -376,12 +446,13 @@ export type Usage = { textureMb: number; budgetMb: number; bundles: readonly Bun
 export type Events = {
   /** Every file of a bundle is a texture now. */
   "assets:bundle-loaded": { bundle: string; tier: Tier; mb: number; reason: LoadReason };
-  /** The textures of a bundle were destroyed. */
+  /** The textures of a bundle were destroyed. `keys` names every asset that went with it. */
   "assets:bundle-unloaded": {
     bundle: string;
     tier: Tier;
     mb: number;
     reason: "budget" | "request";
+    keys: readonly string[];
   };
 };
 
@@ -393,7 +464,13 @@ export type Events = {
  * ```ts
  * const emit: EmitAssets = (name, payload) => bus.send(name, payload);
  * emit("assets:bundle-loaded", { bundle: "board", tier: "scene", mb: 3.5, reason: "enter" });
- * emit("assets:bundle-unloaded", { bundle: "board", tier: "scene", mb: 3.5, reason: "budget" });
+ * emit("assets:bundle-unloaded", {
+ *   bundle: "board",
+ *   tier: "scene",
+ *   mb: 3.5,
+ *   reason: "budget",
+ *   keys: ["board.cell"]
+ * });
  * ```
  */
 export type EmitAssets = {
@@ -473,6 +550,39 @@ export type Api = {
   texture(key: string): Texture | undefined;
 
   /**
+   * The font of a loaded asset key: the `.fnt` file as text and the texture of its first page.
+   * It touches the use counter of the bundle. A font of a bundle that is not loaded, a key of
+   * another kind and every headless run answer `undefined`.
+   *
+   * @param key - Asset key of a `.fnt` file, as `generated/assets.ts` types it in `FontKey`.
+   * @returns The font, or `undefined` while its bundle is not loaded.
+   * @example
+   * ```ts
+   * // `text` installs the font in the renderer when the bundle that carries it arrived.
+   * const font = app.assets.font("ui.body"); // { fnt: 'info face="body" size=32', texture }
+   *
+   * if (font !== undefined) app.renderer.sync.fonts.install("ui.body", font.fnt, font.texture);
+   * ```
+   */
+  font(key: string): FontAsset | undefined;
+
+  /**
+   * The bytes of a loaded audio file, exactly as they were fetched: this plugin never decodes
+   * them. It touches the use counter of the bundle. A bundle that is not loaded, a key of
+   * another kind and every headless run answer `undefined`.
+   *
+   * @param key - Asset key of an `.mp3` file, as `generated/assets.ts` types it in `AudioKey`.
+   * @returns The undecoded bytes, or `undefined` while its bundle is not loaded.
+   * @example
+   * ```ts
+   * // `audio` decodes a sound once and keeps it until the bundle is unloaded.
+   * const bytes = app.assets.audio("ui.click"); // the ArrayBuffer of click.mp3
+   * const buffer = bytes === undefined ? undefined : await context.decodeAudioData(bytes);
+   * ```
+   */
+  audio(key: string): ArrayBuffer | undefined;
+
+  /**
    * What the loaded bundles cost, sorted by name. `lastUsed` is the use counter, not a clock.
    *
    * @returns The used and allowed megabytes and one entry per loaded bundle.
@@ -489,7 +599,7 @@ export type Api = {
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { flow: FlowApi; renderer: RendererApi };
+export type Deps = { flow: FlowApi; renderer: RendererApi; time: TimeApi };
 
 /**
  * What the kernel context offers before the deps are attached.

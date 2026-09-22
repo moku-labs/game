@@ -25,6 +25,8 @@ import type { Frame, JournalEntry, Modules, Result } from "./types";
 function commitEdge(ctx: FlowCtx, modules: Modules, step: Commit, next: string): JournalEntry {
   const commit = step.transaction.commit();
 
+  // An edge is the moment the screen has something new to show: the idle cap is lifted after the commit.
+  ctx.deps.time.wake();
   modules.fx.release();
 
   const entry = pushEntry(

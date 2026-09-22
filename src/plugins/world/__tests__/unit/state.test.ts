@@ -50,6 +50,10 @@ describe("createWorldState", () => {
     expect(state.projection.byEntity.size).toBe(0);
     expect(state.projection.mutes.size).toBe(0);
     expect(state.projection.tracks).toEqual([]);
+    expect(state.projection.driver).toBeUndefined();
+    expect(state.projection.rests.size).toBe(0);
+    expect(state.projection.keys.size).toBe(0);
+    expect(state.projection.keysByEntity.size).toBe(0);
     expect(state.projection.hints).toEqual([]);
     expect(state.projection.dirty).toBeUndefined();
     expect(state.projection.offHints).toEqual([]);

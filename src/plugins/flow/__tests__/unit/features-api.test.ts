@@ -75,6 +75,7 @@ const createMockDeps = (): Deps => ({
     setScale: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
+    wake: vi.fn(),
     isPaused: vi.fn(),
     isRunning: vi.fn(() => false),
     step: vi.fn()

@@ -8,7 +8,7 @@ import { Transform } from "../renderer/components";
 import type { Time } from "../time/types";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
-import { submit, swipeAnswer, tapAnswer } from "./answers";
+import { notifyTap, submit, swipeAnswer, tapAnswer } from "./answers";
 import {
   Draggable,
   Pointer,
@@ -159,7 +159,9 @@ function onMove(ctx: InputCtx, point: Point): void {
 
 /**
  * Answers the release of a press: a tap when the finger stayed inside the slop, a swipe when it
- * went far enough and fast enough. Neither: nothing happened, and nothing has to be undone.
+ * went far enough and fast enough. Neither: nothing happened, and nothing has to be undone. Every
+ * release inside the slop runs the `onTap` listeners first, so a view that carries only
+ * `Touchable` is heard although it answers nothing.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The pressed view.
@@ -168,12 +170,17 @@ function onMove(ctx: InputCtx, point: Point): void {
 function answerRelease(ctx: InputCtx, entity: Entity, point: Point): void {
   const { ecs } = ctx.deps.world;
   const travelled = distance(ctx.state.start, point);
-  const tappable = ecs.get(entity, Tappable);
 
-  if (tappable !== undefined && travelled <= ctx.config.tapSlopPx) {
-    submit(ctx, entity, tapAnswer(tappable));
+  if (travelled <= ctx.config.tapSlopPx) {
+    notifyTap(ctx, entity);
 
-    return;
+    const tappable = ecs.get(entity, Tappable);
+
+    if (tappable !== undefined) {
+      submit(ctx, entity, tapAnswer(tappable));
+
+      return;
+    }
   }
 
   const swipeable = ecs.get(entity, Swipeable);

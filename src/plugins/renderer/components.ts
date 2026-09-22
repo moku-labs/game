@@ -60,6 +60,29 @@ export type ParentValue = { entity: Entity };
 export type DisplayValue = { object: unknown };
 
 /**
+ * A filled rounded rectangle, anchored at the top left of the `Transform`. `clip` masks the
+ * children of the entity to the rectangle, which is how `ui` draws a scroll and an overflow.
+ *
+ * @example
+ * ```ts
+ * const value: ShapeValue = {
+ *   w: 320, h: 96, fill: 0x101018, alpha: 1, radius: 16, stroke: 0x000000,
+ *   strokeWidth: 0, clip: false
+ * };
+ * ```
+ */
+export type ShapeValue = {
+  w: number;
+  h: number;
+  fill: number;
+  alpha: number;
+  radius: number;
+  stroke: number;
+  strokeWidth: number;
+  clip: boolean;
+};
+
+/**
  * What `sprite()` takes: the two things every visual needs, and the four that have defaults.
  *
  * @example
@@ -112,6 +135,21 @@ export const Parent = /*#__PURE__*/ component("Parent", { entity: 0 });
  * A display object the game owns. Never pooled, never destroyed by `sync`.
  */
 export const Display = /*#__PURE__*/ component("Display", displayDefaults);
+
+/**
+ * A filled rounded rectangle, drawn with Pixi `Graphics` and redrawn only when a field changed.
+ * `clip: true` masks the children of the entity to the rectangle.
+ */
+export const Shape = /*#__PURE__*/ component("Shape", {
+  w: 0,
+  h: 0,
+  fill: 0xff_ff_ff,
+  alpha: 1,
+  radius: 0,
+  stroke: 0x00_00_00,
+  strokeWidth: 0,
+  clip: false
+});
 
 /**
  * Bundles the two components every visual needs, so a projection `view` reads as one line.

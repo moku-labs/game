@@ -128,10 +128,11 @@ const setup = (main: AnyFlow) => {
   const deps: Deps = {
     time: {
       onFrame: () => unregister,
-      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1, idle: false }),
       setScale: vi.fn(),
       pause: vi.fn(),
       resume: vi.fn(),
+      wake: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => false,
       step: vi.fn()

@@ -102,7 +102,14 @@ const createMockLog = (): Log.LogApi => ({
 
 const createMockState = (): State => ({
   features: { byName: new Map(), sealed: false },
-  fx: { handlers: new Map(), buffered: [], hintListeners: [], settled: [], mode: "live" },
+  fx: {
+    handlers: new Map(),
+    buffered: [],
+    hintListeners: [],
+    settled: [],
+    guides: [],
+    mode: "live"
+  },
   gate: {
     open: undefined,
     resolve: undefined,
@@ -226,6 +233,8 @@ const createGateFake = (calls: string[]) => {
 const createFxFake = (calls: string[]) => {
   const values = new Map<string, unknown>();
   const descriptors: Descriptor[] = [];
+  // As in the real gateway: a guide shows something until the runner ends it, everything else does not.
+  const guides = { showing: 0 };
   const fx: FxApi & FxInternal = {
     handle: vi.fn(() => unregister),
     dispatch: vi.fn(),
@@ -233,6 +242,9 @@ const createFxFake = (calls: string[]) => {
     run: async (descriptor: Descriptor): Promise<unknown> => {
       descriptors.push(descriptor);
       calls.push(`fx:${descriptor.kind}`);
+
+      if (descriptor.kind === "guide") guides.showing += 1;
+
       return values.get(descriptor.kind);
     },
     buffer: (item: Hint): void => {
@@ -245,7 +257,13 @@ const createFxFake = (calls: string[]) => {
       calls.push("drop");
     },
     flushSettled: vi.fn(),
-    setMode: vi.fn()
+    setMode: vi.fn(),
+    endGuides: (): void => {
+      if (guides.showing === 0) return;
+
+      guides.showing = 0;
+      calls.push("endGuides");
+    }
   };
 
   return { fx, values, descriptors };
@@ -308,6 +326,7 @@ type SetupOptions = {
 
 const setup = (options: SetupOptions) => {
   const calls: string[] = [];
+  const wakes: string[] = [];
   const emitted: Array<{ name: string; payload: Record<string, Json | unknown> }> = [];
   const frameListeners: Array<() => void> = [];
   const clockNow = { value: 1000 };
@@ -320,7 +339,7 @@ const setup = (options: SetupOptions) => {
     time: {
       onFrame: (_phase, callback) => {
         const listener = (): void => {
-          callback({ delta: 16, elapsed: 0, scale: 1, frame: 1 });
+          callback({ delta: 16, elapsed: 0, scale: 1, frame: 1, idle: false });
         };
 
         frameListeners.push(listener);
@@ -331,13 +350,17 @@ const setup = (options: SetupOptions) => {
           if (index !== -1) frameListeners.splice(index, 1);
         };
       },
-      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+      snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1, idle: false }),
       setScale: vi.fn(),
       pause: vi.fn(),
       resume: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => options.running ?? true,
-      step: vi.fn()
+      step: vi.fn(),
+      // Recorded apart from `calls`, with the call it followed: the order is the assertion.
+      wake: (): void => {
+        wakes.push(calls.at(-1) ?? "start");
+      }
     },
     model: { store: model.store, rng: { peek: vi.fn() } },
     clock: {
@@ -379,6 +402,7 @@ const setup = (options: SetupOptions) => {
 
   return {
     calls,
+    wakes,
     ctx,
     emitted,
     featuresFake,
@@ -864,6 +888,95 @@ describe("runLoop", () => {
 
     expect(harness.gate.narrows).toEqual([{ intent: "merge" }, undefined]);
     expect(harness.fx.descriptors[0]?.kind).toBe("guide");
+    await stopRunner(harness.ctx);
+  });
+
+  it("ends the guide visual with the narrow it belongs to", async () => {
+    const main = flow(
+      "main",
+      {
+        teach: node({
+          run: async context => {
+            await context.fx({ kind: "guide", payload: { allow: { intent: "merge" } } });
+            return result("done");
+          }
+        }),
+        home: waiting("play")
+      },
+      "teach",
+      { teach: { done: "home" }, home: { play: "teach" } }
+    );
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    // The visual of a guide is removed by its handler's signal, which ends where the narrow does.
+    expect(harness.calls.filter(call => call === "endGuides")).toHaveLength(1);
+    expect(harness.calls.indexOf("endGuides")).toBeGreaterThan(harness.calls.indexOf("fx:guide"));
+    expect(harness.calls.indexOf("endGuides")).toBeLessThan(harness.calls.indexOf("commit"));
+    await stopRunner(harness.ctx);
+  });
+
+  it("wakes the frame loop on every edge", async () => {
+    const main = flow(
+      "main",
+      {
+        boot: node({ run: () => result("done") }),
+        second: node({ run: () => result("done") }),
+        home: waiting("play")
+      },
+      "boot",
+      { boot: { done: "second" }, second: { done: "home" }, home: { play: "boot" } }
+    );
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    expect(harness.calls.filter(call => call === "commit")).toHaveLength(2);
+    expect(harness.wakes).toHaveLength(2);
+    await stopRunner(harness.ctx);
+  });
+
+  it("wakes the frame loop after the commit, never before it", async () => {
+    const main = flow(
+      "main",
+      { boot: node({ run: () => result("done") }), home: waiting("play") },
+      "boot",
+      { boot: { done: "home" }, home: { play: "boot" } }
+    );
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+
+    // Every wake records the call it followed: an edge wakes the screen with its commit behind it.
+    expect(harness.wakes).toEqual(["commit"]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("does not wake the frame loop for a node that failed", async () => {
+    const main = flow(
+      "main",
+      {
+        boot: node({
+          run: () => {
+            throw new Error("no save");
+          }
+        }),
+        home: waiting("play")
+      },
+      "boot",
+      { boot: { done: "home" }, home: { play: "boot" } }
+    );
+    const harness = setup({ main, config: { retries: 0 }, contributions: {} });
+
+    harness.start();
+    await tick();
+
+    expect(harness.calls).toContain("rollback");
+    expect(harness.wakes).toEqual([]);
     await stopRunner(harness.ctx);
   });
 

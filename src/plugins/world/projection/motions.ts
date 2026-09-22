@@ -4,7 +4,7 @@
  */
 import type { AnyComponentValue, ComponentType, Entity } from "../ecs/types";
 import { deepEquals } from "./diff";
-import { inertHandle, mutedFields, startTrack } from "./tween";
+import { drivenComponents, inertHandle, mutedFields, startTrack } from "./driver";
 import type {
   AnyProjectionSpec,
   Motion,
@@ -17,17 +17,6 @@ import type {
   ViewHandle
 } from "./types";
 import { asComponent, asError, storedValue } from "./views";
-
-/**
- * Collects component names into a set. It lives in its own non-exported function because lint
- * rule L5 refuses a collection built inside an exported declaration.
- *
- * @param names - The component names.
- * @returns A set of them.
- */
-function namesOf(names: readonly string[]): Set<string> {
-  return new Set(names);
-}
 
 /** What `view.peer(key)` reads: the new items of the projection, then the old ones. */
 export type Peers = { next: ReadonlyMap<string, unknown>; previous: ReadonlyMap<string, unknown> };
@@ -131,7 +120,8 @@ export function createViewHandle(
       startTrack(pctx, view.entity, asComponent(component), numbersOf(to), {
         ms: options.ms,
         ease: options.ease ?? "out",
-        delayMs: options.delayMs ?? 0
+        delayMs: options.delayMs ?? 0,
+        additive: options.additive ?? false
       }),
 
     toRest: <Value extends object>(
@@ -149,7 +139,8 @@ export function createViewHandle(
       return startTrack(pctx, view.entity, asComponent(component), numeric, {
         ms: options?.ms ?? pctx.ctx.config.settleMs,
         ease: options?.ease ?? "out",
-        delayMs: 0
+        delayMs: options?.delayMs ?? 0,
+        additive: false
       });
     },
 
@@ -226,11 +217,7 @@ export function runHook(
  * @returns The names of the loose components.
  */
 export function looseComponents(pctx: ProjectionCtx, view: View): string[] {
-  const driven = namesOf(
-    pctx.ctx.state.projection.tracks
-      .filter(track => !track.ended && track.entity === view.entity)
-      .map(track => track.component.componentName)
-  );
+  const driven = drivenComponents(pctx, view.entity);
   const loose: string[] = [];
 
   for (const [name, value] of view.rest) {

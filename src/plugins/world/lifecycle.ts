@@ -166,7 +166,7 @@ export function connectWorld(ctx: KernelSlice): void {
       ecs.runPhase("input", frame);
     }),
     time.onFrame("animate", frame => {
-      projection.advance(frame.delta);
+      projection.sweep();
       ecs.runPhase("animate", frame);
     }),
     time.onFrame("layout", frame => ecs.runPhase("layout", frame)),
@@ -197,7 +197,11 @@ export function clearWorld(state: State): void {
   state.projection.mounted.clear();
   state.projection.byEntity.clear();
   state.projection.mutes.clear();
+  state.projection.rests.clear();
+  state.projection.keys.clear();
+  state.projection.keysByEntity.clear();
   state.projection.tracks.length = 0;
+  state.projection.driver = undefined;
   state.projection.hints.length = 0;
   state.projection.dirty = undefined;
   state.projection.layers = Object.freeze([]);

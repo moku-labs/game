@@ -9,6 +9,7 @@ import type { Require } from "../../../../config";
 import type { Api as AssetsApi } from "../../../assets/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { EnterCallback, Api as FlowApi, NodeInfo, Stage } from "../../../flow/types";
+import type { Api as TimeApi } from "../../../time/types";
 import type { LayerSpec, Owner, Api as WorldApi } from "../../../world/types";
 import { createScenesApi } from "../../api";
 import { startScenes, stopScenes, withDeps } from "../../lifecycle";
@@ -40,6 +41,13 @@ export type FakeWorld = {
   api: WorldApi;
 };
 
+/** What the fake `time` recorded. */
+export type FakeTime = {
+  /** How often the switch asked the loop to come back to the full frame rate. */
+  wakes: number;
+  api: TimeApi;
+};
+
 /** What the fake `flow` recorded and what it answers with. */
 export type FakeFlow = {
   features: Array<{ name: string; description: FeatureDescription }>;
@@ -58,6 +66,7 @@ export type MockScenes = {
   flow: FakeFlow;
   world: FakeWorld;
   assets: FakeAssets;
+  time: FakeTime;
   start(): void;
   stop(): void;
   /** Calls the registered `onEnter("scene")` callback, the way the runner does. */
@@ -187,6 +196,23 @@ function createFakeWorld(): FakeWorld {
 }
 
 /**
+ * Creates the fake `time`: the one member `scenes` calls, counting the wakes.
+ *
+ * @returns The fake time and its recording.
+ */
+function createFakeTime(): FakeTime {
+  const fake: FakeTime = { wakes: 0, api: undefined as unknown as TimeApi };
+
+  fake.api = {
+    wake: (): void => {
+      fake.wakes += 1;
+    }
+  } as unknown as TimeApi;
+
+  return fake;
+}
+
+/**
  * Creates the fake `flow`: the two members `scenes` calls, each backed by a field a test writes.
  *
  * @returns The fake flow and its recordings.
@@ -228,10 +254,12 @@ export function createMockScenes(): MockScenes {
   const flow = createFakeFlow();
   const world = createFakeWorld();
   const assets = createFakeAssets();
+  const time = createFakeTime();
   const apis: Record<string, unknown> = {
     flow: flow.api,
     world: world.api,
-    assets: assets.api
+    assets: assets.api,
+    time: time.api
   };
 
   const ctx: KernelSlice = {
@@ -255,6 +283,7 @@ export function createMockScenes(): MockScenes {
     flow,
     world,
     assets,
+    time,
     start: (): void => startScenes(ctx),
     stop: (): void => stopScenes({ state }),
     enter: async (node: Partial<NodeInfo>, run: Partial<RunContext> = {}): Promise<void> => {

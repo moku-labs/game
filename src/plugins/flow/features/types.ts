@@ -5,11 +5,58 @@ import type { Snapshot } from "../../model/types";
 import type { AnyFlow, AnyNode } from "../runner/types";
 
 /**
+ * One animation of a feature, as `defineAnimation` returns it. Structural on purpose: `flow`
+ * stores what the game brought and never imports `anim`, which reads the rest of the object.
+ *
+ * @example
+ * ```ts
+ * const coinsFly: FeatureAnimation = { id: "coinsFly" };
+ * ```
+ */
+export type FeatureAnimation = { readonly id: string };
+
+/**
+ * One interface component of a feature, as `defineComponent` returns it. Structural on purpose:
+ * `ui` reads the rest of the object, `flow` only carries it.
+ *
+ * @example
+ * ```ts
+ * const rewardPopup: FeatureComponent = { name: "RewardPopup" };
+ * ```
+ */
+export type FeatureComponent = { readonly name: string };
+
+/**
+ * The compiled messages of one locale: message key to what `compileStrings` wrote for it. The
+ * value stays opaque here because only `i18n` calls it; `flow` passes the module on untouched.
+ *
+ * @example
+ * ```ts
+ * const en: CompiledMessagesLike = { "board.title": () => [{ kind: "text", text: "Board" }] };
+ * ```
+ */
+export type CompiledMessagesLike = { readonly [key: string]: unknown };
+
+/**
+ * The text styles of a feature, as `defineTextStyles` returns them. Structural on purpose: `text`
+ * reads the fields of each style, `flow` only carries the map.
+ *
+ * @example
+ * ```ts
+ * const styles: FeatureTextStyles = { kind: "textStyles", map: { title: { size: 24 } } };
+ * ```
+ */
+export type FeatureTextStyles = {
+  readonly kind: "textStyles";
+  readonly map: Record<string, object>;
+};
+
+/**
  * What a feature brings to the game. The logic keys are typed here; the keys of later milestones
  * pass through the index signature until their plugin types them. `flow` stores them untouched,
- * and `logicOnly` drops them. The V2 screen plugins read five of them: `projections`, `systems`
- * and `components` (`world`), `scenes` (`scenes`, `assets`, and the scene-id check of `flow`) and
- * `assets` (`assets`).
+ * and `logicOnly` drops them. The V2 screen plugins read five of them through the index signature:
+ * `projections`, `systems` and `components` (`world`), `scenes` (`scenes`, `assets`, and the
+ * scene-id check of `flow`) and `assets` (`assets`). The V3 interface keys are typed below.
  *
  * @example
  * ```ts
@@ -29,6 +76,14 @@ export type FeatureDescription = {
     string,
     { flow: AnyFlow; order: number; when?: (snapshot: Snapshot) => boolean }
   >;
+  /** Animations the feature owns, read by `anim`. */
+  animations?: readonly FeatureAnimation[];
+  /** Interface components the feature owns, read by `ui`. `components` stays the ECS key. */
+  ui?: readonly FeatureComponent[];
+  /** Compiled messages per locale, ready or lazy, read by `i18n`. */
+  strings?: Record<string, CompiledMessagesLike | (() => Promise<unknown>)>;
+  /** Text styles the feature owns, read by `text`. */
+  textStyles?: FeatureTextStyles;
   [later: string]: unknown;
 };
 

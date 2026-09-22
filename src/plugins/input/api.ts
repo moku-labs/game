@@ -4,7 +4,7 @@
  * nothing — no coordinates, no frames, no `Held`, no `settle` — so it works headless.
  */
 import type { ComponentType } from "../world/types";
-import { dropAnswer, submit, swipeAnswer, tapAnswer } from "./answers";
+import { addTapListener, dropAnswer, notifyTap, submit, swipeAnswer, tapAnswer } from "./answers";
 import {
   type CarryValue,
   Draggable,
@@ -12,7 +12,8 @@ import {
   type IntentValue,
   Pressable,
   Swipeable,
-  Tappable
+  Tappable,
+  Touchable
 } from "./components";
 import { resolveTarget } from "./hit";
 import { withDeps } from "./lifecycle";
@@ -67,6 +68,39 @@ function answerIntent(
 }
 
 /**
+ * Taps a view the way the finger does: the `onTap` listeners run first, then the `Tappable` is
+ * answered. A view that carries only `Touchable` reaches the listeners and answers nothing, which
+ * is what a ui button with local state does, so it is not reported as a mistake.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param target - What the caller pointed at.
+ * @returns What `flow.gate.answer` returned.
+ */
+function answerTap(ctx: InputCtx, target: Target): boolean {
+  const entity = resolveTarget(ctx, target);
+
+  if (entity === undefined) {
+    ctx.log.warn("input: target has no Tappable", { target });
+
+    return false;
+  }
+
+  notifyTap(ctx, entity);
+
+  const tappable = ctx.deps.world.ecs.get(entity, Tappable);
+
+  if (tappable === undefined) {
+    if (!ctx.deps.world.ecs.has(entity, Touchable)) {
+      ctx.log.warn("input: target has no Tappable", { target });
+    }
+
+    return false;
+  }
+
+  return submit(ctx, entity, tapAnswer(tappable));
+}
+
+/**
  * Answers a drop: the source brings the payload, the destination names the intent.
  *
  * @param ctx - Domain context of the input plugin.
@@ -99,7 +133,7 @@ function answerSwipe(ctx: InputCtx, target: Target, direction: Direction): boole
 }
 
 /**
- * Creates the input API: `app.input.tap`, `.press`, `.drag` and `.swipe`.
+ * Creates the input API: `app.input.tap`, `.press`, `.drag`, `.swipe` and `.onTap`.
  *
  * @param ctx - Kernel context of the input plugin.
  * @returns The plugin API.
@@ -108,9 +142,10 @@ export function createInputApi(ctx: KernelSlice): InputApi {
   const inputCtx = withDeps(ctx);
 
   return {
-    tap: target => answerIntent(inputCtx, target, Tappable),
+    tap: target => answerTap(inputCtx, target),
     press: target => answerIntent(inputCtx, target, Pressable),
     drag: (from, to) => answerDrop(inputCtx, from, to),
-    swipe: (target, direction) => answerSwipe(inputCtx, target, direction)
+    swipe: (target, direction) => answerSwipe(inputCtx, target, direction),
+    onTap: fn => addTapListener(inputCtx.state, fn)
   };
 }

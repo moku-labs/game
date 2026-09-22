@@ -71,6 +71,7 @@ const createMockDeps = (isRunning: () => boolean): Deps => ({
     setScale: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
+    wake: vi.fn(),
     isPaused: vi.fn(),
     isRunning,
     step: vi.fn()
@@ -146,6 +147,17 @@ const setup = (options: { running?: boolean } = {}) => {
   };
 
   return { api: createFxApi(ctx, { gate: gateStub.gate }), ctx, gateStub, log, state };
+};
+
+/** Registers a handler for one kind and collects the signal every call was made with. */
+const captureSignals = (api: ReturnType<typeof setup>["api"], kind: string): AbortSignal[] => {
+  const seen: AbortSignal[] = [];
+
+  api.handle(kind, (_descriptor, handlerCtx) => {
+    seen.push(handlerCtx.signal);
+  });
+
+  return seen;
 };
 
 // ─── createFxState ────────────────────────────────────────────
@@ -498,6 +510,169 @@ describe("run with answers", () => {
 
     await expect(pending).resolves.toEqual({ intent: "again" });
     expect(log.error).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── run: the signal of a popup handler ───────────────────────
+
+describe("the signal of a handler with answers", () => {
+  it("hands the handler a signal of its own, not the node's", async () => {
+    const { api, gateStub } = setup();
+    const node = new AbortController();
+    const seen = captureSignals(api, "popup");
+
+    const pending = api.run({ kind: "popup", answers: ["claim"] }, node.signal);
+    await tick();
+    gateStub.reply({ intent: "claim" });
+    await pending;
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toBe(node.signal);
+  });
+
+  it("aborts the handler signal when the answer arrives", async () => {
+    const { api, gateStub } = setup();
+    const seen = captureSignals(api, "popup");
+
+    const pending = api.run({ kind: "popup", answers: ["claim"] }, signal());
+    await tick();
+
+    expect(seen[0]?.aborted).toBe(false);
+
+    gateStub.reply({ intent: "claim" });
+    await pending;
+
+    expect(seen[0]?.aborted).toBe(true);
+  });
+
+  it("leaves the node signal untouched when the answer arrives", async () => {
+    const { api, gateStub } = setup();
+    const node = new AbortController();
+
+    captureSignals(api, "popup");
+    const pending = api.run({ kind: "popup", answers: ["claim"] }, node.signal);
+    await tick();
+    gateStub.reply({ intent: "claim" });
+    await pending;
+
+    expect(node.signal.aborted).toBe(false);
+  });
+
+  it("aborts the handler signal when the node is aborted", async () => {
+    const { api } = setup();
+    const node = new AbortController();
+    const seen = captureSignals(api, "popup");
+
+    api.run({ kind: "popup", answers: ["claim"] }, node.signal).catch(() => undefined);
+    await tick();
+    node.abort("stop");
+
+    expect(seen[0]?.aborted).toBe(true);
+    expect(seen[0]?.reason).toBe("stop");
+  });
+
+  it("aborts the handler signal at once when the node was already aborted", async () => {
+    const { api } = setup();
+    const node = new AbortController();
+    const seen = captureSignals(api, "popup");
+
+    node.abort("restore");
+    api.run({ kind: "popup", answers: ["claim"] }, node.signal).catch(() => undefined);
+    await tick();
+
+    expect(seen[0]?.aborted).toBe(true);
+    expect(seen[0]?.reason).toBe("restore");
+  });
+
+  it("keeps the node signal for a descriptor without answers", async () => {
+    const { api } = setup();
+    const node = new AbortController();
+    const seen = captureSignals(api, "play");
+
+    await api.run({ kind: "play" }, node.signal);
+
+    expect(seen[0]).toBe(node.signal);
+  });
+});
+
+// ─── run: the signal of a guide handler ───────────────────────
+
+describe("the signal of a guide handler", () => {
+  it("hands the guide handler a signal of its own, not the node's", async () => {
+    const { api } = setup();
+    const node = new AbortController();
+    const seen = captureSignals(api, "guide");
+
+    await api.run(guide({ allow: { intent: "merge" } }), node.signal);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toBe(node.signal);
+    expect(seen[0]?.aborted).toBe(false);
+  });
+
+  it("aborts the guide signal when the narrow is lifted", async () => {
+    const { api } = setup();
+    const seen = captureSignals(api, "guide");
+
+    await api.run(guide({ allow: { intent: "merge" } }), signal());
+    api.endGuides();
+
+    expect(seen[0]?.aborted).toBe(true);
+  });
+
+  it("aborts the guide signal when the node is aborted", async () => {
+    const { api } = setup();
+    const node = new AbortController();
+    const seen = captureSignals(api, "guide");
+
+    await api.run(guide({ allow: { intent: "merge" } }), node.signal);
+    node.abort("stop");
+
+    expect(seen[0]?.aborted).toBe(true);
+    expect(seen[0]?.reason).toBe("stop");
+  });
+
+  it("ends two running guides with one lift", async () => {
+    const { api } = setup();
+    const seen = captureSignals(api, "guide");
+
+    await api.run(guide({ allow: { intent: "merge" } }), signal());
+    await api.run(guide({ allow: { intent: "sell" } }), signal());
+    api.endGuides();
+
+    expect(seen.map(item => item.aborted)).toEqual([true, true]);
+  });
+
+  it("leaves a guide that started after the lift running", async () => {
+    const { api } = setup();
+    const seen = captureSignals(api, "guide");
+
+    await api.run(guide({ allow: { intent: "merge" } }), signal());
+    api.endGuides();
+    await api.run(guide({ allow: { intent: "sell" } }), signal());
+
+    expect(seen.map(item => item.aborted)).toEqual([true, false]);
+  });
+
+  it("does nothing when no guide runs", () => {
+    const { api } = setup();
+
+    expect(() => api.endGuides()).not.toThrow();
+  });
+
+  it("forgets a guide the node abort ended, so a lift changes nothing", async () => {
+    const { api, state } = setup();
+    const node = new AbortController();
+
+    captureSignals(api, "guide");
+    await api.run(guide({ allow: { intent: "merge" } }), node.signal);
+    node.abort("stop");
+
+    expect(state.fx.guides).toEqual([]);
+
+    api.endGuides();
+
+    expect(state.fx.guides).toEqual([]);
   });
 });
 
@@ -872,5 +1047,37 @@ describe("guide", () => {
     highlight.push("c9");
 
     expect(descriptor.payload).toEqual({ allow: { intent: "merge" }, highlight: ["c2"] });
+  });
+
+  it("carries the target the visual hole is cut over", () => {
+    const descriptor = guide({
+      allow: { intent: "deliver" },
+      target: { projection: "hud", key: "order" }
+    });
+
+    expect(descriptor.payload).toEqual({
+      allow: { intent: "deliver" },
+      target: { projection: "hud", key: "order" }
+    });
+  });
+
+  it("leaves the target key out when there is none", () => {
+    expect(Object.keys(guide({ allow: { intent: "merge" } }).payload ?? {})).toEqual(["allow"]);
+  });
+
+  it("copies the target so the caller cannot change it later", () => {
+    const target = { projection: "hud", key: "order" };
+    const descriptor = guide({ allow: { intent: "deliver" }, target });
+
+    target.key = "coins";
+
+    expect(descriptor.payload).toEqual({
+      allow: { intent: "deliver" },
+      target: { projection: "hud", key: "order" }
+    });
+  });
+
+  it("never asks for an answer: the node continues at once", () => {
+    expect(guide({ allow: { intent: "merge" } }).answers).toBeUndefined();
   });
 });

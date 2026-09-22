@@ -33,7 +33,7 @@ export function createModules(ctx: RendererCtx): Modules {
  * @returns The public host API.
  */
 function exposeHost(host: HostModule): HostApi {
-  return { ready: host.ready, kind: host.kind, canvas: host.canvas };
+  return { ready: host.ready, kind: host.kind, canvas: host.canvas, pixi: host.pixi };
 }
 
 /**
@@ -44,7 +44,13 @@ function exposeHost(host: HostModule): HostApi {
  * @returns The public sync API.
  */
 function exposeSync(sync: SyncModule): SyncApi {
-  return { hitTest: sync.hitTest, textures: sync.textures, displayOf: sync.displayOf };
+  return {
+    hitTest: sync.hitTest,
+    textures: sync.textures,
+    displays: sync.displays,
+    fonts: sync.fonts,
+    displayOf: sync.displayOf
+  };
 }
 
 /**

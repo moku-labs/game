@@ -27,10 +27,11 @@ const createMockLog = (): Log.LogApi => ({
 
 const createMockTime = (): TimeApi => ({
   onFrame: vi.fn(() => noop),
-  snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1 }),
+  snapshot: () => ({ delta: 16, elapsed: 0, scale: 1, frame: 1, idle: false }),
   setScale: vi.fn(),
   pause: vi.fn(),
   resume: vi.fn(),
+  wake: vi.fn(),
   isPaused: () => false,
   isRunning: () => true,
   step: vi.fn()
@@ -68,7 +69,14 @@ const notRequired: Require = () => {
 
 const createTestState = (): State => ({
   features: { byName: new Map(), sealed: false },
-  fx: { handlers: new Map(), buffered: [], hintListeners: [], settled: [], mode: "live" },
+  fx: {
+    handlers: new Map(),
+    buffered: [],
+    hintListeners: [],
+    settled: [],
+    guides: [],
+    mode: "live"
+  },
   gate: createGateState(),
   inbox: createInboxState(),
   runner: {

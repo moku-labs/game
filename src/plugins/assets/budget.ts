@@ -5,7 +5,7 @@
 
 import { emitOf } from "./emit";
 import { isPermanent } from "./tiers";
-import type { AssetsCtx, State } from "./types";
+import type { AssetsCtx, AssetsIo, LoadedAssets, State } from "./types";
 
 /** How many of the heaviest files the over-budget warning names. */
 const HEAVIEST = 5;
@@ -63,6 +63,33 @@ export function pickVictim(state: State): string | undefined {
 }
 
 /**
+ * Frees what a bundle brought and empties its three maps: every texture and every font page goes
+ * back to the GPU, the audio bytes go to the garbage collector. Headless there is no io and
+ * nothing to destroy, so only the maps are emptied.
+ *
+ * @param io - The I/O seam, or `undefined` while headless.
+ * @param assets - The maps of a loaded bundle, or of a load that broke half way.
+ * @example
+ * ```ts
+ * // The load of the ui bundle failed after two of its four files were there.
+ * releaseAssets(io, assets); // both textures destroyed, every map empty
+ * ```
+ */
+export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): void {
+  if (io !== undefined) {
+    for (const texture of assets.textures.values()) io.destroyTexture(texture);
+
+    for (const font of assets.fonts.values()) {
+      for (const page of font.pages) io.destroyTexture(page);
+    }
+  }
+
+  assets.textures.clear();
+  assets.fonts.clear();
+  assets.audio.clear();
+}
+
+/**
  * Frees one loaded bundle: the textures are destroyed, `renderer` is told that its keys are gone
  * and the event goes out. A bundle that is not loaded is left alone.
  *
@@ -82,21 +109,19 @@ export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: "budget" | 
 
   if (record === undefined || entry === undefined || record.status !== "loaded") return;
 
-  const io = state.io;
+  releaseAssets(state.io, record);
 
-  if (io !== undefined) {
-    for (const texture of record.textures.values()) io.destroyTexture(texture);
-  }
-
-  record.textures.clear();
   record.status = "idle";
   record.lastUsed = 0;
 
-  ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
+  const keys = entry.files.map(file => file.key);
+
+  ctx.deps.renderer.sync.textures.invalidate(keys);
 
   const emit = emitOf(ctx);
 
-  emit("assets:bundle-unloaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
+  // `keys` is what `text` and `audio` release: each of them made something per key.
+  emit("assets:bundle-unloaded", { bundle, tier: entry.tier, mb: entry.mb, reason, keys });
 }
 
 /**

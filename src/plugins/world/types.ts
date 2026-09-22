@@ -149,13 +149,21 @@ export type {
   AnyProjectionSpec,
   Cause,
   ChangeHook,
+  DescriptionNode,
   Ease,
   LayerSort,
   LayerSpec,
   Motion,
   MotionHandle,
+  NumericFields,
   ProjectionApi,
+  ProjectionKey,
   ProjectionMotion,
   ProjectionSpec,
-  ViewHandle
+  RestOptions,
+  TrackOptions,
+  TweenDriver,
+  TweenOptions,
+  ViewHandle,
+  ViewOutput
 } from "./projection/types";

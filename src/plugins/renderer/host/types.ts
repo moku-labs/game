@@ -78,6 +78,22 @@ export type HostApi = {
    * ```
    */
   canvas(): HTMLCanvasElement | undefined;
+
+  /**
+   * The Pixi module the renderer loaded lazily, so a plugin above draws with the same Pixi and
+   * still imports none of it.
+   *
+   * @returns The module once `ready()`, `undefined` while inert, lost or unsupported.
+   * @example
+   * ```ts
+   * // `text` builds the display object of a label out of the module the renderer loaded.
+   * const pixi = ctx.require(rendererPlugin).host.pixi();
+   * if (pixi === undefined) return; // headless: nothing is drawn
+   *
+   * const line = new pixi.BitmapText({ text: "+5", style: { fontFamily: "hud.body" } });
+   * ```
+   */
+  pixi(): PixiModule | undefined;
 };
 
 /**
@@ -107,13 +123,6 @@ export type HostInternal = {
    * @param fn - Called before every `destroy` of a lost application.
    */
   onLoss(fn: () => void): void;
-
-  /**
-   * The Pixi module object, so the modules above never import Pixi themselves.
-   *
-   * @returns The module, or `undefined` while inert.
-   */
-  pixi(): PixiModule | undefined;
 
   /**
    * The stage of the application. `sync` hangs its root container here.

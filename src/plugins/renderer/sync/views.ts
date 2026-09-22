@@ -4,11 +4,30 @@
  */
 import { Layer } from "../../world/ecs/define";
 import type { Entity } from "../../world/types";
-import { Display, NineSlice, Parent, Sprite, Transform } from "../components";
-import type { PixiContainer, PixiTexture } from "../types";
+import {
+  Display,
+  NineSlice,
+  Parent,
+  Shape,
+  type ShapeValue,
+  Sprite,
+  Transform
+} from "../components";
+import type { PixiContainer, PixiGraphics, PixiTexture } from "../types";
+import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
+import { clearFonts } from "./fonts";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
-import { acquire, destroyPools, detach, isNineSlice, isSprite, poolKeyOf, release } from "./pools";
+import {
+  acquire,
+  destroyPools,
+  detach,
+  dropMask,
+  isNineSlice,
+  isSprite,
+  poolKeyOf,
+  release
+} from "./pools";
 import {
   PLACEHOLDER_SIZE,
   PLACEHOLDER_TINT,
@@ -18,7 +37,22 @@ import {
   untrackKey,
   warnMissing
 } from "./textures";
-import type { SyncCtx, SyncState, View, ViewKind } from "./types";
+import type { DisplayEntry, SyncCtx, SyncState, View, ViewKind } from "./types";
+
+/**
+ * Which component gives an entity its display object, and what it draws.
+ */
+type Visual = {
+  kind: ViewKind;
+  textureKey: string;
+  /** The registration behind an adapter view; `undefined` for a built-in one. */
+  display: DisplayEntry | undefined;
+};
+
+/**
+ * A display object and, for an adapter view, the component value it was built from.
+ */
+type BuiltObject = { object: PixiContainer; value: Readonly<object> | undefined };
 
 /**
  * Tells whether a value is a Pixi display object, so a `Display` component can be trusted.
@@ -30,6 +64,26 @@ function isDisplayObject(value: unknown): value is PixiContainer {
   return (
     typeof value === "object" && value !== null && "addChild" in value && "getLocalBounds" in value
   );
+}
+
+/**
+ * Tells whether a display object draws paths, so a `Shape` can be written onto it.
+ *
+ * @param object - The display object.
+ * @returns True for a graphics object.
+ */
+function isGraphics(object: PixiContainer): object is PixiGraphics {
+  return "roundRect" in object;
+}
+
+/**
+ * What a visual is called in a message and in a label: the component name.
+ *
+ * @param visual - The visual of an entity.
+ * @returns `"Sprite"`, `"Shape"`, or the name of the component an adapter draws.
+ */
+function nameOf(visual: Visual): string {
+  return visual.display?.component.componentName ?? visual.kind;
 }
 
 /**
@@ -67,23 +121,31 @@ function warnUnknownLayer(sctx: SyncCtx, entity: Entity, name: string): void {
  * @param entity - The entity.
  * @returns The kind and its texture key, or `undefined` when the entity draws nothing.
  */
-export function visualOf(
-  sctx: SyncCtx,
-  entity: Entity
-): { kind: ViewKind; textureKey: string } | undefined {
+export function visualOf(sctx: SyncCtx, entity: Entity): Visual | undefined {
   const ecs = sctx.ctx.deps.world.ecs;
-  const found: Array<{ kind: ViewKind; textureKey: string }> = [];
+  const found: Visual[] = [];
   const sprite = ecs.get(entity, Sprite);
   const nine = ecs.get(entity, NineSlice);
 
-  if (sprite !== undefined) found.push({ kind: "Sprite", textureKey: sprite.texture });
-  if (nine !== undefined) found.push({ kind: "NineSlice", textureKey: nine.texture });
-  if (ecs.has(entity, Display)) found.push({ kind: "Display", textureKey: "" });
+  if (sprite !== undefined) {
+    found.push({ kind: "Sprite", textureKey: sprite.texture, display: undefined });
+  }
+
+  if (nine !== undefined) {
+    found.push({ kind: "NineSlice", textureKey: nine.texture, display: undefined });
+  }
+
+  if (ecs.has(entity, Shape)) found.push({ kind: "Shape", textureKey: "", display: undefined });
+  if (ecs.has(entity, Display)) found.push({ kind: "Display", textureKey: "", display: undefined });
+
+  for (const entry of adaptersOn(sctx, entity)) {
+    found.push({ kind: "adapter", textureKey: "", display: entry });
+  }
 
   if (found.length > 1) {
     sctx.ctx.log.warn("renderer: entity has more than one visual", {
       entity,
-      kinds: found.map(entry => entry.kind)
+      kinds: found.map(visual => nameOf(visual))
     });
   }
 
@@ -182,6 +244,81 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
 }
 
 /**
+ * Draws the rectangle of a shape: one path, filled, with the corners the value asks for.
+ *
+ * @param object - The graphics to draw on.
+ * @param value - The shape value.
+ * @param fill - The fill colour.
+ */
+function drawRect(object: PixiGraphics, value: Readonly<ShapeValue>, fill: number): void {
+  object.clear();
+
+  if (value.radius > 0) {
+    object.roundRect(0, 0, value.w, value.h, value.radius);
+  } else {
+    object.rect(0, 0, value.w, value.h);
+  }
+
+  object.fill({ color: fill });
+}
+
+/**
+ * Keeps the clip rectangle of a shape in step with its value: a clipping shape gets a wrapper
+ * whose children are masked, and a shape that stopped clipping loses both mask and effect.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param value - The shape value.
+ */
+function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<ShapeValue>): void {
+  const pixi = sctx.deps.host.pixi();
+
+  if (!value.clip || pixi === undefined) {
+    dropMask(view);
+
+    return;
+  }
+
+  const wrapper = ensureWrapper(sctx, entity);
+
+  if (wrapper === undefined) return;
+
+  const mask = view.mask ?? new pixi.Graphics();
+
+  mask.label = `clip#${entity}`;
+  drawRect(mask, value, value.fill);
+
+  if (mask.parent !== wrapper) wrapper.addChild(mask);
+
+  wrapper.mask = mask;
+  view.mask = mask;
+}
+
+/**
+ * Writes the `Shape` component onto its graphics object and recomputes the hit box. The path is
+ * drawn here and nowhere else, so a still shape costs nothing per frame.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ */
+export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
+  const value = sctx.ctx.deps.world.ecs.get(entity, Shape);
+  const object = view.object;
+
+  if (value === undefined || !isGraphics(object)) return;
+
+  drawRect(object, value, value.fill);
+
+  if (value.strokeWidth > 0) object.stroke({ color: value.stroke, width: value.strokeWidth });
+
+  object.alpha = value.alpha;
+  view.hitBox = { x: 0, y: 0, width: value.w, height: value.h };
+  applyClip(sctx, entity, view, value);
+}
+
+/**
  * Reads the hit box of a `Display` object once, at attach time.
  *
  * @param view - The view.
@@ -208,6 +345,12 @@ export function writeVisual(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (view.kind === "NineSlice") {
     applyNineSlice(sctx, entity, view);
+
+    return;
+  }
+
+  if (view.kind === "Shape") {
+    applyShape(sctx, entity, view);
 
     return;
   }
@@ -334,23 +477,54 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
  * @param visual.textureKey - The asset key the object draws.
  * @returns The object, or `undefined` while inert.
  */
-function makeObject(
-  sctx: SyncCtx,
-  entity: Entity,
-  visual: { kind: ViewKind; textureKey: string }
-): PixiContainer | undefined {
-  if (visual.kind === "Display") return displayObjectOf(sctx, entity);
+function makeObject(sctx: SyncCtx, entity: Entity, visual: Visual): BuiltObject | undefined {
+  if (visual.kind === "Display") {
+    const object = displayObjectOf(sctx, entity);
+
+    return object === undefined ? undefined : { object, value: undefined };
+  }
 
   const pixi = sctx.deps.host.pixi();
 
   if (pixi === undefined) return undefined;
+  if (visual.display !== undefined) return adapterObject(sctx, entity, visual.display);
 
   const pooled = acquire(sctx.ctx.state.sync, poolKeyOf(visual.kind, visual.textureKey));
 
-  if (pooled !== undefined) return pooled;
-  if (visual.kind === "Sprite") return new pixi.Sprite(pixi.Texture.WHITE);
+  if (pooled !== undefined) return { object: pooled, value: undefined };
+  if (visual.kind === "Sprite")
+    return { object: new pixi.Sprite(pixi.Texture.WHITE), value: undefined };
+  if (visual.kind === "Shape") return { object: new pixi.Graphics(), value: undefined };
 
-  return new pixi.NineSliceSprite({ texture: pixi.Texture.WHITE });
+  return { object: new pixi.NineSliceSprite({ texture: pixi.Texture.WHITE }), value: undefined };
+}
+
+/**
+ * Asks an adapter for the display object of an entity, and checks what came back: a plugin above
+ * must hand over something the renderer can hang in the tree.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param entry - The registration that draws its component.
+ * @returns The object with the value it was built from, or `undefined` when it cannot be drawn.
+ */
+function adapterObject(
+  sctx: SyncCtx,
+  entity: Entity,
+  entry: DisplayEntry
+): BuiltObject | undefined {
+  const built = createAdapterObject(sctx, entity, entry);
+
+  if (built !== undefined && isDisplayObject(built.object)) {
+    return { object: built.object, value: built.value };
+  }
+
+  sctx.ctx.log.warn("renderer: adapter built no display object", {
+    entity,
+    component: entry.component.componentName
+  });
+
+  return undefined;
 }
 
 /**
@@ -358,20 +532,22 @@ function makeObject(
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
+ * @returns True when a view was built now; false when one exists or nothing is drawable.
  */
-export function createView(sctx: SyncCtx, entity: Entity): void {
+export function createView(sctx: SyncCtx, entity: Entity): boolean {
   const state = sctx.ctx.state.sync;
 
-  if (state.views.has(entity)) return;
+  if (state.views.has(entity)) return false;
 
   const visual = visualOf(sctx, entity);
 
-  if (visual === undefined) return;
+  if (visual === undefined) return false;
 
-  const object = makeObject(sctx, entity, visual);
+  const built = makeObject(sctx, entity, visual);
 
-  if (object === undefined) return;
+  if (built === undefined) return false;
 
+  const object = built.object;
   const view: View = {
     object,
     kind: visual.kind,
@@ -380,10 +556,13 @@ export function createView(sctx: SyncCtx, entity: Entity): void {
     textureKey: visual.textureKey,
     wrapper: undefined,
     placeholder: false,
+    mask: undefined,
+    display: visual.display,
+    value: built.value,
     hitBox: { x: 0, y: 0, width: 0, height: 0 }
   };
 
-  object.label = labelOf(sctx, visual.kind, entity);
+  object.label = labelOf(sctx, nameOf(visual), entity);
   state.views.set(entity, view);
   state.entityOf.set(object, entity);
   if (visual.textureKey !== "") trackKey(state, entity, visual.textureKey);
@@ -392,6 +571,8 @@ export function createView(sctx: SyncCtx, entity: Entity): void {
   applyTransform(sctx, entity, view);
   attach(sctx, entity, view);
   resort(sctx, entity, view);
+
+  return true;
 }
 
 /**
@@ -469,9 +650,18 @@ export function stopSync(state: SyncState): void {
 
   for (const view of state.views.values()) {
     if (view.kind === "Display") detach(view.object);
+
+    if (view.kind === "adapter") {
+      detach(view.object);
+      view.display?.adapter.destroy(view.object);
+    }
+
+    view.mask = undefined;
     view.wrapper = undefined;
   }
 
+  clearAdapters(state);
+  clearFonts(state);
   state.views.clear();
   state.entityOf.clear();
   state.byKey.clear();

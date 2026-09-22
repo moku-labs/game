@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { component, resource, tag } from "../../ecs/define";
+import { component, resource, Tree, tag } from "../../ecs/define";
 import type { Owner } from "../../ecs/types";
 import { createMockWorld } from "./mock-world";
 
@@ -42,6 +42,21 @@ describe("ecs snapshot", () => {
       ],
       resources: { Pointer: { x: 0, down: true } }
     });
+  });
+
+  it("skips the Tree of a screen and names it, JSON or not", () => {
+    const world = createMockWorld();
+    const entity = world.api.ecs.spawn(test, [
+      Tree({ node: { type: "box", props: {}, children: [] } }),
+      Position({ x: 3 })
+    ]);
+    const snapshot = world.api.ecs.snapshot() as {
+      entities: Array<{ components: Record<string, unknown>; skipped: string[] }>;
+    };
+
+    expect(entity).toBe(2 ** 20);
+    expect(snapshot.entities[0]?.components).toEqual({ Position: { x: 3, y: 0 } });
+    expect(snapshot.entities[0]?.skipped).toEqual(["Tree"]);
   });
 
   it("skips a component value that is not JSON and names it", () => {

@@ -9,7 +9,14 @@ import { despawnEntity, flushCommands, queueOrApply } from "./commands";
 import { reserveEntity } from "./entities";
 import { runQuery } from "./query";
 import { snapshotWorld } from "./snapshot";
-import { addHook, readComponent, registerType, resourceValue, writeComponent } from "./storage";
+import {
+  addHook,
+  asComponent,
+  readComponent,
+  registerType,
+  resourceValue,
+  writeComponent
+} from "./storage";
 import { effectiveMode, registerSystem, runPhase } from "./systems";
 import type {
   AnyComponentType,
@@ -176,7 +183,11 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
       state.mode = mode;
     },
 
+    typeOf: (name: string) => asComponent(state.types.get(name)),
+
     snapshot: () => snapshotWorld(state, effectiveMode(ctx)),
+
+    ownerOf: (entity: Entity): Owner | undefined => state.owners.get(entity),
 
     onOwnerLeft: (fn: (owner: Owner) => void): (() => void) => {
       state.ownerLeft.push(fn);

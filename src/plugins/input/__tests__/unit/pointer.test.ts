@@ -105,3 +105,33 @@ describe("attach and detach", () => {
     expect(mock.state.detach).toBeUndefined();
   });
 });
+
+describe("record and the idle cap", () => {
+  it("wakes time once per queued sample, so the loop leaves the idle rate", () => {
+    const mock = createMockInput();
+
+    mock.start();
+    record(mock.state, { kind: "down", pointerId: 1, clientX: 10, clientY: 10 });
+    record(mock.state, move(1, 20));
+
+    expect(mock.wake).toHaveBeenCalledTimes(2);
+  });
+
+  it("wakes time for a coalesced move too", () => {
+    const mock = createMockInput();
+
+    mock.start();
+    record(mock.state, move(1, 10));
+    record(mock.state, move(1, 20));
+
+    expect(mock.state.samples).toHaveLength(1);
+    expect(mock.wake).toHaveBeenCalledTimes(2);
+  });
+
+  it("queues a sample before the plugin started, with nothing to wake", () => {
+    const mock = createMockInput();
+
+    expect(() => record(mock.state, move(1, 10))).not.toThrow();
+    expect(mock.wake).not.toHaveBeenCalled();
+  });
+});

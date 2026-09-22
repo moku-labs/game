@@ -40,15 +40,30 @@ export function deepEquals(left: unknown, right: unknown): boolean {
 }
 
 /**
+ * Reads the node a `Tree` value carries. A tag stores `true` and carries none.
+ *
+ * @param value - The stored component value.
+ * @returns The node, compared by identity, or `undefined`.
+ */
+function nodeOf(value: AnyComponentValue): unknown {
+  const stored = value.value;
+
+  return stored !== true && "node" in stored ? stored.node : undefined;
+}
+
+/**
  * Names what changed between the rest pose of a view and the next output of `view(item)`.
  *
  * @param rest - The rest pose, by component name.
  * @param next - The new output of `view(item)`, by component name.
+ * @param byIdentity - Name of the component that is compared by identity, not structurally: the
+ *   `Tree` of a screen, whose node is a foreign object the world only carries.
  * @returns The component names that were added, changed and removed.
  */
 export function diffComponents(
   rest: ReadonlyMap<string, AnyComponentValue>,
-  next: ReadonlyMap<string, AnyComponentValue>
+  next: ReadonlyMap<string, AnyComponentValue>,
+  byIdentity?: string
 ): { added: string[]; changed: string[]; removed: string[] } {
   const added: string[] = [];
   const changed: string[] = [];
@@ -58,7 +73,9 @@ export function diffComponents(
     const before = rest.get(name);
 
     if (before === undefined) added.push(name);
-    else if (!deepEquals(before.value, value.value)) changed.push(name);
+    else if (name === byIdentity) {
+      if (nodeOf(before) !== nodeOf(value)) changed.push(name);
+    } else if (!deepEquals(before.value, value.value)) changed.push(name);
   }
 
   for (const name of rest.keys()) {

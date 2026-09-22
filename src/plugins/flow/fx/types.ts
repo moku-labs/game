@@ -31,22 +31,30 @@ export type Descriptor = {
 export type Hint = { kind: string; payload?: Json; hint: true };
 
 /**
- * Options of the `guide` descriptor: the one allowed answer and its visual part.
+ * Options of the `guide` descriptor: the one allowed answer and its visual part. `target` names
+ * the keyed element the visual hole of `ui` is cut over.
  *
  * @example
  * ```ts
- * const options: GuideOptions = { allow: { intent: "merge" }, hand: "drag", text: "Merge them" };
+ * const options: GuideOptions = {
+ *   allow: { intent: "merge" },
+ *   target: { projection: "board", key: "c3" },
+ *   hand: "drag"
+ * };
  * ```
  */
 export type GuideOptions = {
   allow: Allow;
+  target?: { projection: string; key: string };
   highlight?: readonly string[];
   hand?: "tap" | "drag";
   text?: string;
 };
 
 /**
- * Handler of one effect kind, registered by a plugin above `flow`.
+ * Handler of one effect kind, registered by a plugin above `flow`. `signal` is the node's abort
+ * signal, except for a descriptor with `answers` and for `guide`: those get a signal of their own,
+ * aborted when the answer arrives or the narrow is lifted, so the handler unmounts what it showed.
  *
  * @example
  * ```ts
@@ -91,6 +99,8 @@ export type FxState = {
   hintListeners: HintListener[];
   /** Completions waiting for the `signals` phase, in start order. */
   settled: Array<() => void>;
+  /** The child controllers of the `guide` handlers that are showing something right now. */
+  guides: AbortController[];
   mode: "live" | "fast";
 };
 
@@ -167,13 +177,21 @@ export type FxApi = {
 export type FxInternal = {
   /**
    * Runs one awaited effect. With `answers` the gate decides; without it the handler does, and
-   * while the frame loop runs the completion waits for the next `signals` phase.
+   * while the frame loop runs the completion waits for the next `signals` phase. A descriptor with
+   * `answers` and a `guide` reach their handler with a child of the node's signal, so what they
+   * showed can be taken down before the node ends.
    *
    * @param descriptor - The descriptor the node awaits.
-   * @param signal - The node's abort signal, handed to the handler.
+   * @param signal - The node's abort signal.
    * @returns The answer, the handler's value, or `undefined`.
    */
   run(descriptor: Descriptor, signal: AbortSignal): Promise<unknown>;
+
+  /**
+   * Aborts the signal of every `guide` handler that is showing something. Called by the runner
+   * where it lifts the narrow, so the visual of a guide leaves with the narrow that carried it.
+   */
+  endGuides(): void;
 
   /**
    * Buffers one hint of the open transaction. In fast mode the hint is dropped: a fast walk

@@ -21,6 +21,23 @@ const boardItems = projection({
   view: () => []
 });
 
+const hudPanel = projection({
+  name: "hud.panel",
+  layer: "ui",
+  from: (player: { items: Item[] }) => player.items,
+  key: (item: Item) => item.id,
+  view: () => []
+});
+
+const boardToast = projection({
+  name: "board.toast",
+  layer: "cells",
+  lift: "ui",
+  from: (player: { cells: Item[] }) => player.cells,
+  key: (item: Item) => item.id,
+  view: () => []
+});
+
 describe("defineScene", () => {
   it("keeps the layers in the order they were written and defaults sort to none", () => {
     const scene = defineScene("board", {
@@ -33,7 +50,8 @@ describe("defineScene", () => {
       { name: "background", sort: "none" },
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
-      { name: "lifted", sort: "none" }
+      { name: "lifted", sort: "none" },
+      { name: "ui", sort: "none" }
     ]);
   });
 
@@ -124,7 +142,7 @@ describe("defineScene", () => {
       projections: []
     });
 
-    expect(scene.layers.map(layer => layer.name)).toEqual(["01", "-1", "1.5"]);
+    expect(scene.layers.map(layer => layer.name)).toEqual(["01", "-1", "1.5", "ui"]);
   });
 
   it("throws for the layer name 0, the first integer key", () => {
@@ -144,5 +162,90 @@ describe("defineScene", () => {
     list.push(boardCells);
 
     expect(scene.projections).toEqual(["board.cells"]);
+  });
+});
+
+describe("defineScene and the ui layer", () => {
+  it("appends ui on top of the layers the scene declared", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {}, items: { sort: "y" } },
+      projections: []
+    });
+
+    expect(scene.layers).toEqual([
+      { name: "cells", sort: "none" },
+      { name: "items", sort: "y" },
+      { name: "ui", sort: "none" }
+    ]);
+  });
+
+  it("appends it to a scene that declares no layer at all", () => {
+    const scene = defineScene("boot", { bundle: "boot", layers: {}, projections: [] });
+
+    expect(scene.layers).toEqual([{ name: "ui", sort: "none" }]);
+  });
+
+  it("appends it once and not twice when the scene declares ui itself", () => {
+    const scene = defineScene("home", { bundle: "home", layers: { ui: {} }, projections: [] });
+
+    expect(scene.layers).toEqual([{ name: "ui", sort: "none" }]);
+  });
+
+  it("leaves a declared ui where it was written, under the layers above it", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {}, ui: {}, fx: {} },
+      projections: []
+    });
+
+    expect(scene.layers.map(layer => layer.name)).toEqual(["cells", "ui", "fx"]);
+  });
+
+  it("keeps the sort rule of a ui layer the scene declared", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { ui: { sort: "order" } },
+      projections: []
+    });
+
+    expect(scene.layers).toEqual([{ name: "ui", sort: "order" }]);
+  });
+
+  it("freezes the appended layer like the declared ones", () => {
+    const scene = defineScene("board", { bundle: "board", layers: { cells: {} }, projections: [] });
+
+    expect(Object.isFrozen(scene.layers[1])).toBe(true);
+  });
+
+  it("accepts a projection that names the appended ui layer", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {} },
+      projections: [boardCells, hudPanel]
+    });
+
+    expect(scene.projections).toEqual(["board.cells", "hud.panel"]);
+  });
+
+  it("accepts a projection lifted onto the appended ui layer", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {} },
+      projections: [boardToast]
+    });
+
+    expect(scene.projections).toEqual(["board.toast"]);
+  });
+
+  it("still rejects a projection whose layer is neither declared nor ui", () => {
+    expect(() =>
+      defineScene("board", {
+        bundle: "board",
+        layers: { cells: {} },
+        // @ts-expect-error — "items" is neither declared nor the appended ui layer.
+        projections: [boardItems]
+      })
+    ).toThrow('[game] Scene "board": projection "board.items" names layer "items".');
   });
 });

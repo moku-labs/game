@@ -87,10 +87,40 @@ function runFrame(ctx: TimeCtx, unscaledDeltaMs: number): void {
 }
 
 /**
+ * Resets the idle timer and lifts the idle cap at once, so the next frame runs at `maxFps`.
+ * Three assignments: safe to call from inside a frame, and safe to call on every pointer sample.
+ *
+ * @param ctx - Domain context of the time plugin.
+ */
+function wakeClock(ctx: TimeCtx): void {
+  ctx.state.lastWakeMs = ctx.state.unscaledElapsedMs;
+  ctx.state.idle = false;
+  ctx.state.time.idle = false;
+}
+
+/**
+ * Advances the unscaled clock of the idle timer by one frame of the frame source and decides
+ * whether the loop is idle: it is, when the idle cap is on and no wake arrived for `idleAfterMs`
+ * of unscaled time. The clock is unscaled on purpose, so `setScale(0)` does not stop the idle
+ * detection. `step` never touches it: a test drives its own frames and is never capped.
+ *
+ * @param ctx - Domain context of the time plugin.
+ * @param unscaledDeltaMs - Delta of this frame in milliseconds, before the time scale.
+ */
+function updateIdle(ctx: TimeCtx, unscaledDeltaMs: number): void {
+  const { idleFps, idleAfterMs } = ctx.config;
+
+  ctx.state.unscaledElapsedMs += unscaledDeltaMs;
+  ctx.state.idle = idleFps > 0 && ctx.state.unscaledElapsedMs - ctx.state.lastWakeMs >= idleAfterMs;
+  ctx.state.time.idle = ctx.state.idle;
+}
+
+/**
  * Runs one frame of the real frame source. A paused clock runs no phase. The first frame, and
  * the first frame after a `resume`, counts as one capped frame instead of the gap to a stale
- * timestamp. A frame that arrives before the fps cap allows it is skipped, and a long gap is
- * clamped at `maxDeltaMs` so a backgrounded tab does not produce a giant step.
+ * timestamp. A frame that arrives before the current cap allows it is skipped — the cap is
+ * `idleFps` while the screen is idle and `maxFps` otherwise — and a long gap is clamped at
+ * `maxDeltaMs` so a backgrounded tab does not produce a giant step.
  *
  * @param ctx - Domain context of the time plugin.
  * @param timestamp - Timestamp handed over by `requestAnimationFrame`, in milliseconds.
@@ -98,7 +128,7 @@ function runFrame(ctx: TimeCtx, unscaledDeltaMs: number): void {
 export function tickFrame(ctx: TimeCtx, timestamp: number): void {
   if (ctx.state.paused) return;
 
-  const frameMs = 1000 / ctx.config.maxFps;
+  const frameMs = 1000 / (ctx.state.idle ? ctx.config.idleFps : ctx.config.maxFps);
   const { lastTimestamp } = ctx.state;
   const rawDeltaMs = lastTimestamp === undefined ? frameMs : timestamp - lastTimestamp;
 
@@ -106,7 +136,11 @@ export function tickFrame(ctx: TimeCtx, timestamp: number): void {
   if (rawDeltaMs < frameMs - 1) return;
 
   ctx.state.lastTimestamp = timestamp;
-  runFrame(ctx, Math.min(rawDeltaMs, ctx.config.maxDeltaMs));
+
+  const unscaledDeltaMs = Math.min(rawDeltaMs, ctx.config.maxDeltaMs);
+
+  updateIdle(ctx, unscaledDeltaMs);
+  runFrame(ctx, unscaledDeltaMs);
 }
 
 /**
@@ -133,7 +167,7 @@ function addFrameCallback(ctx: TimeCtx, phase: Phase, callback: FrameCallback): 
 
 /**
  * Creates the time API: frame callbacks per phase, the `Time` resource, scale, pause and
- * resume, and `step` for tests and tools.
+ * resume, `wake` for the idle cap, and `step` for tests and tools.
  *
  * @param ctx - Domain context of the time plugin.
  * @returns The public API of the time plugin.
@@ -155,11 +189,15 @@ export function createTimeApi(ctx: TimeCtx): Api {
     resume: () => {
       ctx.state.paused = false;
       ctx.state.lastTimestamp = undefined;
+      // A resume is a wake: the screen comes back, so it comes back at the full frame rate.
+      wakeClock(ctx);
     },
 
     isPaused: () => ctx.state.paused,
 
     isRunning: () => ctx.state.running,
+
+    wake: () => wakeClock(ctx),
 
     step: deltaMs => {
       if (ctx.state.stepping) throw new Error(STEP_INSIDE_FRAME);

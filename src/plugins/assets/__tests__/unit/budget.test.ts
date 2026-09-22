@@ -85,7 +85,7 @@ describe("unloadBundle", () => {
     expect(mock.renderer.invalidated.at(-1)).toEqual(["alpha.one"]);
     expect(mock.emitted.at(-1)).toEqual({
       name: "assets:bundle-unloaded",
-      payload: { bundle: "alpha", tier: "scene", mb: 0.063, reason: "request" }
+      payload: { bundle: "alpha", tier: "scene", mb: 0.063, reason: "request", keys: ["alpha.one"] }
     });
     expect(mock.ctx.state.records.get("alpha")?.status).toBe("idle");
   });

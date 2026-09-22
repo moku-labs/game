@@ -244,7 +244,7 @@ describe("projection reconcile", () => {
     const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
 
     expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 300, y: 0, scale: 1 });
-    expect(world.ctx.state.projection.tracks.some(track => !track.ended)).toBe(false);
+    expect(world.ctx.state.projection.tracks.some(track => track.handle.active())).toBe(false);
   });
 
   it("keeps the mute remover safe after the entity left", () => {

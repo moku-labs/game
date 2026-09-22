@@ -18,13 +18,16 @@ const POINTER_EVENTS: ReadonlyArray<{
 ];
 
 /**
- * Queues one raw sample. A move replaces a trailing move of the same pointer, so a burst of
- * pointer events between two frames costs one entry instead of twenty.
+ * Queues one raw sample and wakes `time`: a finger on the screen always runs at the full frame
+ * rate, even when nothing moved for seconds. A move replaces a trailing move of the same pointer,
+ * so a burst of pointer events between two frames costs one entry instead of twenty.
  *
  * @param state - State of the input plugin.
  * @param sample - What the listener saw.
  */
 export function record(state: State, sample: RawSample): void {
+  state.wake?.();
+
   const last = state.samples.at(-1);
 
   if (sample.kind === "move" && last?.kind === "move" && last.pointerId === sample.pointerId) {

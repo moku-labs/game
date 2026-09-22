@@ -169,6 +169,38 @@ describe("logicOnly", () => {
     expect(Object.keys(calls[0]?.description ?? {})).toEqual(["nodes", "flows", "contribute"]);
   });
 
+  it("drops every key the V3 plugins read", () => {
+    const feature = defineFeature("board", {
+      ...description,
+      animations: [{ id: "coinsFly" }],
+      ui: [{ name: "RewardPopup" }],
+      strings: { en: { "board.title": () => [] } },
+      textStyles: { kind: "textStyles", map: { title: { size: 24 } } }
+    });
+
+    const calls = runInit(feature.logicOnly);
+
+    expect(Object.keys(calls[0]?.description ?? {})).toEqual(["nodes", "flows", "contribute"]);
+  });
+
+  it("registers the V3 keys through the feature itself", () => {
+    const feature = defineFeature("board", {
+      ...description,
+      animations: [{ id: "coinsFly" }],
+      ui: [{ name: "RewardPopup" }],
+      textStyles: { kind: "textStyles", map: { title: { size: 24 } } }
+    });
+
+    const calls = runInit(feature);
+
+    expect(calls[0]?.description.animations).toEqual([{ id: "coinsFly" }]);
+    expect(calls[0]?.description.ui).toEqual([{ name: "RewardPopup" }]);
+    expect(calls[0]?.description.textStyles).toEqual({
+      kind: "textStyles",
+      map: { title: { size: 24 } }
+    });
+  });
+
   it("keeps the V1 values by reference", () => {
     const calls = runInit(defineFeature("board", description).logicOnly);
 
