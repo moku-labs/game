@@ -139,7 +139,22 @@ export type GameTypes = {
   bundles?: string;
   scenes?: string;
   strings: Record<string, unknown>;
+  textStyles?: string;
 };
+
+/**
+ * The text style key union of a game, `string` when the game passed none.
+ *
+ * @example
+ * ```ts
+ * type Keys = TextStylesOf<{ player: {}; session: {}; assets: string; strings: {}; textStyles: "hud.digits" }>; // "hud.digits"
+ * ```
+ */
+export type TextStylesOf<Types extends GameTypes> = Types extends {
+  textStyles: infer Keys extends string;
+}
+  ? Keys
+  : string;
 
 /**
  * The bundle key union of a game, `string` when the game passed none.
