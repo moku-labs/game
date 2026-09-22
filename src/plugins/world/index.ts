@@ -4,6 +4,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
@@ -32,7 +33,7 @@ const config: Config = { settleMs: 350, reconciledEvent: false };
 export const worldPlugin = /*#__PURE__*/ createPlugin("world", {
   depends: [timePlugin, modelPlugin, flowPlugin],
   config,
-  events: register =>
+  events: (register: RegisterFunction) =>
     register.map<Events>({ "world:reconciled": "A reconcile finished (dev only)" }),
   createState: createWorldState,
   api: createWorldApi,

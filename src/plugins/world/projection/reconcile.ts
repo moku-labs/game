@@ -5,7 +5,6 @@
 import type { Hint } from "../../flow/types";
 import type { Snapshot } from "../../model/types";
 import type { AnyComponentValue } from "../ecs/types";
-import type { EmitReconciled } from "../types";
 import { diffComponents } from "./diff";
 import { routeHint } from "./hints";
 import {
@@ -514,10 +513,7 @@ export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void 
   counts.hintsDropped = state.hints.length - used.size;
 
   if (pctx.ctx.config.reconciledEvent) {
-    // The one narrowing of the plugin: see the note on `KernelSlice`. Only `emit` is cast.
-    const emit = pctx.ctx.emit as EmitReconciled;
-
-    emit("world:reconciled", { mode: options.direct ? "direct" : "play", ...counts });
+    pctx.ctx.emit("world:reconciled", { mode: options.direct ? "direct" : "play", ...counts });
   }
 }
 

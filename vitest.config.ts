@@ -9,6 +9,14 @@ export default defineConfig({
         find: "@moku-labs/game/testing",
         replacement: new URL("src/testing.ts", import.meta.url).pathname
       },
+      {
+        find: "@moku-labs/game/jsx-dev-runtime",
+        replacement: new URL("src/jsx-dev-runtime.ts", import.meta.url).pathname
+      },
+      {
+        find: "@moku-labs/game/jsx-runtime",
+        replacement: new URL("src/jsx-runtime.ts", import.meta.url).pathname
+      },
       { find: "@moku-labs/game", replacement: new URL("src/index.ts", import.meta.url).pathname }
     ]
   },
@@ -19,7 +27,10 @@ export default defineConfig({
         extends: true,
         test: {
           name: "unit",
-          include: ["tests/unit/**/*.test.ts", "src/plugins/**/__tests__/unit/**/*.test.ts"]
+          include: [
+            "tests/unit/**/*.test.{ts,tsx}",
+            "src/plugins/**/__tests__/unit/**/*.test.{ts,tsx}"
+          ]
         }
       },
       {
@@ -27,15 +38,15 @@ export default defineConfig({
         test: {
           name: "integration",
           include: [
-            "tests/integration/**/*.test.ts",
-            "src/plugins/**/__tests__/integration/**/*.test.ts"
+            "tests/integration/**/*.test.{ts,tsx}",
+            "src/plugins/**/__tests__/integration/**/*.test.{ts,tsx}"
           ]
         }
       }
     ],
     coverage: {
       provider: "istanbul",
-      include: ["src/**/*.ts"],
+      include: ["src/**/*.ts", "src/**/*.tsx"],
       exclude: ["src/**/types.ts", "src/**/types/**", "src/**/__tests__/**"],
       reporter: ["text", "lcov"],
       thresholds: { lines: 90, functions: 90, branches: 90, statements: 90 }

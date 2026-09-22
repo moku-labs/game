@@ -49,6 +49,8 @@
  * | i18n | locales | {} |
  * | text | fonts | { body: "ui.font-body", digits: "ui.font-digits" } |
  * | text | missingGlyph | "□" |
+ * | ui | tapTargetPt | 44 |
+ * | ui | breakpoints | { tall: 2, wide: 1.5 } |
  * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |
@@ -74,6 +76,7 @@ import {
   scenesPlugin,
   textPlugin,
   timePlugin,
+  uiPlugin,
   worldPlugin
 } from "./plugins";
 import { animFor } from "./plugins/anim/bind";
@@ -85,6 +88,7 @@ import { i18nFor } from "./plugins/i18n/tr";
 import { componentsFor } from "./plugins/renderer/components";
 import { scenesFor } from "./plugins/scenes/define";
 import { textFor } from "./plugins/text/components";
+import { uiFor } from "./plugins/ui/components";
 import { projectionFor } from "./plugins/world/projection/define";
 
 const framework = createCore(coreConfig, {
@@ -148,6 +152,7 @@ export function defineGame<Types extends GameTypes>() {
     ...animFor<Types["assets"]>(),
     ...i18nFor<Types["strings"]>(),
     ...textFor<TextStylesOf<Types>, Types["assets"]>(),
+    ...uiFor<Types["assets"], TextStylesOf<Types>, Extract<keyof Types["strings"], string>>(),
     ...audioFor<Types["assets"]>()
   };
 }
@@ -170,7 +175,8 @@ export const screen = [
   scenesPlugin,
   animPlugin,
   i18nPlugin,
-  textPlugin
+  textPlugin,
+  uiPlugin
 ] as const;
 
 // ─── Plugins + Types ──────────────────────────────────────────
@@ -246,5 +252,11 @@ export { tr } from "./plugins/i18n/tr";
 export type { DescriptionNode } from "./plugins/world/projection/types";
 // text: the Text component, board labels and text styles
 export { defineTextStyles, label, Text } from "./plugins/text/components";
+// ui: components, styles, tokens, the popup effect and the ui-owned components
+export { Box, LocalWrite, popup } from "./plugins/ui/components";
+export { defineComponent } from "./plugins/ui/jsx/component";
+export { defineStyle } from "./plugins/ui/styles/define";
+export { resolve } from "./plugins/ui/styles/resolve";
+export { defineTokens } from "./plugins/ui/styles/tokens";
 // audio: the music descriptor (sfx is anim's)
 export { music } from "./plugins/audio/descriptors";

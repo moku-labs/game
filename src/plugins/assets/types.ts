@@ -457,28 +457,6 @@ export type Events = {
 };
 
 /**
- * How the plugin sends its two events: the one narrowing of `ctx.emit` in the plugin, made once
- * by `emitOf` in `emit.ts` and used by the load site and the unload site.
- *
- * @example
- * ```ts
- * const emit: EmitAssets = (name, payload) => bus.send(name, payload);
- * emit("assets:bundle-loaded", { bundle: "board", tier: "scene", mb: 3.5, reason: "enter" });
- * emit("assets:bundle-unloaded", {
- *   bundle: "board",
- *   tier: "scene",
- *   mb: 3.5,
- *   reason: "budget",
- *   keys: ["board.cell"]
- * });
- * ```
- */
-export type EmitAssets = {
-  (name: "assets:bundle-loaded", payload: Events["assets:bundle-loaded"]): void;
-  (name: "assets:bundle-unloaded", payload: Events["assets:bundle-unloaded"]): void;
-};
-
-/**
  * assets plugin API, `app.assets`. Bundles of textures by key: the graph decides when they arrive,
  * the budget decides when they leave.
  *
@@ -604,13 +582,11 @@ export type Deps = { flow: FlowApi; renderer: RendererApi; time: TimeApi };
 /**
  * What the kernel context offers before the deps are attached.
  *
- * `emit` is declared as the kernel's own, unusable shape on purpose: core 1.7 leaves a plugin's
- * own events out of the context it hands the factories as soon as `depends` is declared, so an
- * assets-typed `emit` here would make every factory unassignable. `tiers.ts` and `budget.ts`
- * narrow this one member; nothing else about the context is cast.
+ * `index.ts` writes `events` with an annotated `register` (core spec `14-EVENT-REGISTRATION.md`
+ * row 8), so the two own events reach the context the kernel hands the factories and `emit` is the
+ * kernel's own, assets-typed one. No member of the context is cast.
  */
-export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(...args: never[]): void;
+export type KernelSlice = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;

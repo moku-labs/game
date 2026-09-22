@@ -3,7 +3,6 @@
  * The LRU compares the use counter, never a clock.
  */
 
-import { emitOf } from "./emit";
 import { isPermanent } from "./tiers";
 import type { AssetsCtx, AssetsIo, LoadedAssets, State } from "./types";
 
@@ -118,10 +117,8 @@ export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: "budget" | 
 
   ctx.deps.renderer.sync.textures.invalidate(keys);
 
-  const emit = emitOf(ctx);
-
   // `keys` is what `text` and `audio` release: each of them made something per key.
-  emit("assets:bundle-unloaded", { bundle, tier: entry.tier, mb: entry.mb, reason, keys });
+  ctx.emit("assets:bundle-unloaded", { bundle, tier: entry.tier, mb: entry.mb, reason, keys });
 }
 
 /**

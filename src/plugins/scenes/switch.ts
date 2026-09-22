@@ -4,7 +4,7 @@
  * sees a scene half built.
  */
 import type { NodeInfo } from "../flow/types";
-import type { EmitChanged, RunContext, SceneDefinition, ScenesCtx } from "./types";
+import type { RunContext, SceneDefinition, ScenesCtx } from "./types";
 
 /**
  * A promise that resolves when the node was aborted. Already aborted resolves at once.
@@ -103,10 +103,7 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
   // A fresh picture is drawn at the full frame rate, even when the loop had gone idle.
   ctx.deps.time.wake();
 
-  // The one narrowing of the plugin: see the note on `KernelSlice`. Only `emit` is cast.
-  const emit = ctx.emit as EmitChanged;
-
-  emit("scenes:changed", { from, to: scene.id, music: scene.music });
+  ctx.emit("scenes:changed", { from, to: scene.id, music: scene.music });
 }
 
 /**

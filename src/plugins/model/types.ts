@@ -81,13 +81,11 @@ export type State = { store: StoreState; rng: Record<string, never> };
 export type Api = { store: StoreApi; rng: RngApi };
 
 /**
- * Domain context shared by the modules.
- * `emit` is a method signature on purpose: a property-typed `emit` breaks the kernel's event
- * inference when a factory is passed to `createPlugin` by direct reference (`onStart`).
- *
+ * Domain context shared by the modules. `emit` is the kernel's: `index.ts` writes `events` with
+ * an annotated `register` (core spec `14` row 8), so the own event reaches a factory passed by
+ * direct reference.
  */
-export type ModelCtx = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit<Name extends keyof Events>(name: Name, payload: Events[Name]): void;
+export type ModelCtx = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
 };

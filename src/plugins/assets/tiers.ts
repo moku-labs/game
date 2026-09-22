@@ -3,7 +3,6 @@
  * every caller a waiter: the last one to leave aborts the fetches.
  */
 import { enforceBudget, releaseAssets } from "./budget";
-import { emitOf } from "./emit";
 import {
   atlasProblem,
   fileUrl,
@@ -351,9 +350,7 @@ function finish(
 
   ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
 
-  const emit = emitOf(ctx);
-
-  emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
+  ctx.emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
   // The picture changes now: the sprites that waited for these keys resolve on the next frame.
   ctx.deps.time.wake();
   enforceBudget(ctx);

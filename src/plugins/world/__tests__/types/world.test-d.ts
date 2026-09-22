@@ -3,7 +3,7 @@ import { component, mut, system, tag } from "../../ecs/define";
 import type { EcsApi, Entity, Owner, QueryTuple } from "../../ecs/types";
 import { projection } from "../../projection/define";
 import type { DescriptionNode, Ease } from "../../projection/types";
-import type { Events } from "../../types";
+import type { Events, KernelSlice } from "../../types";
 
 type Position = { x: number; y: number };
 type Sprite = { texture: string };
@@ -100,6 +100,14 @@ expectTypeOf<Events["world:reconciled"]["mode"]>().toEqualTypeOf<"play" | "direc
 
 // @ts-expect-error — an empty object is not a reconcile payload
 export const wrongPayload: Events["world:reconciled"] = {};
+
+// The own event reaches the plugin context: `emit` is the kernel's, typed with world's event map.
+declare const worldCtx: KernelSlice;
+
+expectTypeOf(worldCtx.emit).parameter(0).toEqualTypeOf<"world:reconciled">();
+
+// @ts-expect-error — an empty object is not a reconcile payload
+worldCtx.emit("world:reconciled", {});
 
 declare const ecs: EcsApi;
 

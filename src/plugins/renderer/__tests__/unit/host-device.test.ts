@@ -239,3 +239,25 @@ describe("host device loss", () => {
     expect(mock.pixi.applications).toHaveLength(1);
   });
 });
+
+describe("renderer:device-lost payload", () => {
+  it("accepts the declared payload on the kernel emit", () => {
+    const mock = createMockRenderer({ dom: false });
+
+    mock.ctx.emit("renderer:device-lost", { kind: "webgpu", reason: "destroyed" });
+
+    expect(mock.emitted[0]).toEqual({
+      name: "renderer:device-lost",
+      payload: { kind: "webgpu", reason: "destroyed" }
+    });
+  });
+
+  it("rejects a wrong payload on the kernel emit", () => {
+    const mock = createMockRenderer({ dom: false });
+
+    // @ts-expect-error — `kind` is "webgpu" | "webgl", never a number.
+    mock.ctx.emit("renderer:device-lost", { kind: 7, reason: "destroyed" });
+
+    expect(mock.emitted).toHaveLength(1);
+  });
+});

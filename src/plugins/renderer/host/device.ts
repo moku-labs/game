@@ -2,7 +2,7 @@
  * @file renderer/host — device loss and restore. WebGPU hands out a `device.lost` promise and
  * needs a new application; WebGL raises two canvas events and Pixi restores itself.
  */
-import type { EmitDeviceLost, RendererCtx } from "../types";
+import type { RendererCtx } from "../types";
 
 /**
  * Starts a loss: the renderer stops drawing, the game pauses and the event goes out. A loss
@@ -22,10 +22,7 @@ function beginLoss(ctx: RendererCtx, kind: "webgpu" | "webgl", reason: string): 
   state.restoring = true;
   ctx.deps.lifecycle.push("device-lost");
 
-  // The one narrowing of the plugin: see the note on `KernelSlice`. Only `emit` is cast.
-  const emit = ctx.emit as EmitDeviceLost;
-
-  emit("renderer:device-lost", { kind, reason });
+  ctx.emit("renderer:device-lost", { kind, reason });
 
   return true;
 }

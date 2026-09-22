@@ -187,20 +187,6 @@ export type Events = {
 };
 
 /**
- * How this plugin sends its one event. The single emit site narrows the kernel's `emit` to it.
- *
- * @example
- * ```ts
- * const emit: EmitLocaleChanged = (name, payload) => bus.send(name, payload);
- * emit("i18n:locale-changed", { locale: "en" });
- * ```
- */
-export type EmitLocaleChanged = (
-  name: "i18n:locale-changed",
-  payload: Events["i18n:locale-changed"]
-) => void;
-
-/**
  * i18n plugin API, `app.i18n`. Messages are data everywhere else in the game; this is the one
  * place a locale is read and a sentence becomes parts.
  *
@@ -314,13 +300,11 @@ export type I18nApi = {
 /**
  * What the kernel context offers this plugin.
  *
- * `emit` is declared as the kernel's own, unusable shape on purpose: core 1.7 leaves a plugin's
- * own events out of the context it hands the factories as soon as `depends` is declared, so an
- * i18n-typed `emit` here would make every factory unassignable. `api.ts` narrows this one member
- * to `EmitLocaleChanged`; nothing else about the context is cast.
+ * `index.ts` writes `events` with an annotated `register` (core spec `14-EVENT-REGISTRATION.md`
+ * row 8), so the own event reaches the context the kernel hands the factories and `emit` is the
+ * kernel's own, i18n-typed one. No member of the context is cast.
  */
-export type I18nCtx = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(...args: never[]): void;
+export type I18nCtx = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;

@@ -3,7 +3,7 @@ import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { defineMotion } from "../../motion";
 import { defineAnimation, mark, play, sequence, tween } from "../../timeline/steps";
-import type { AnimApi, EmitAnim, PlayHandle, Target } from "../../types";
+import type { AnimApi, KernelSlice, PlayHandle, Target } from "../../types";
 
 const card: Target = { projection: "hud", key: "order" };
 
@@ -56,15 +56,17 @@ defineMotion({
   on: { enter: "hidden" }
 });
 
-// The two events carry their payloads.
-declare const send: EmitAnim;
+// The own events reach the plugin context: `emit` is the kernel's, typed with anim's event map.
+declare const animCtx: KernelSlice;
 
-send("anim:mark", { animation: "orders.deliver", mark: "done" });
-send("anim:finished", { animation: "orders.deliver" });
+expectTypeOf(animCtx.emit).parameter(0).toEqualTypeOf<"anim:mark" | "anim:finished">();
+
+animCtx.emit("anim:mark", { animation: "orders.deliver", mark: "done" });
+animCtx.emit("anim:finished", { animation: "orders.deliver" });
 // @ts-expect-error — the mark payload needs both fields
-send("anim:mark", {});
+animCtx.emit("anim:mark", {});
 // @ts-expect-error — the plugin owns no other event
-send("anim:other", { animation: "orders.deliver" });
+animCtx.emit("anim:other", { animation: "orders.deliver" });
 
 // The API answers with the handle contract of `world`, plus `done` and `marks`.
 declare const api: AnimApi;

@@ -312,39 +312,22 @@ export type AnimApi = {
 export type Deps = { time: TimeApi; flow: FlowApi; world: WorldApi };
 
 /**
- * How this plugin sends its two events. The one narrowing site is `withDeps`.
- *
- * @example
- * ```ts
- * const send: EmitAnim = (name, payload) => bus.send(name, payload);
- * send("anim:finished", { animation: "hud.coinsFly" });
- * ```
- */
-export type EmitAnim = {
-  (name: "anim:mark", payload: Events["anim:mark"]): void;
-  (name: "anim:finished", payload: Events["anim:finished"]): void;
-};
-
-/**
  * What the kernel context offers before the deps are attached.
  *
- * `emit` is declared as the kernel's own, unusable shape on purpose: core 1.7 leaves a plugin's
- * own events out of the context it hands the factories as soon as `depends` is declared, so an
- * anim-typed `emit` here would make every factory unassignable. `withDeps` narrows this one
- * member to `EmitAnim`; nothing else about the context is cast.
+ * `index.ts` writes `events` with an annotated `register` (core spec `14-EVENT-REGISTRATION.md`
+ * row 8), so the own events reach the context the kernel hands the factories and `emit` is the
+ * kernel's own, anim-typed one. No member of the context is cast.
  */
-export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(...args: never[]): void;
+export type KernelSlice = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;
 };
 
 /**
- * Domain context of the anim plugin: the kernel slice, the three resolved dependencies and the
- * narrowed `emit`.
+ * Domain context of the anim plugin: the kernel slice and the three resolved dependencies.
  */
-export type AnimCtx = KernelSlice & { readonly deps: Deps; readonly send: EmitAnim };
+export type AnimCtx = KernelSlice & { readonly deps: Deps };
 
 export type {
   Cursor,

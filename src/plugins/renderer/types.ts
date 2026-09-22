@@ -170,29 +170,13 @@ export type Api = { host: HostApi; viewport: ViewportApi; sync: SyncApi };
 export type Deps = { time: TimeApi; lifecycle: LifecycleApi; world: WorldApi };
 
 /**
- * How this plugin sends its one event. The single emit site narrows the kernel's `emit` to it.
- *
- * @example
- * ```ts
- * const emit: EmitDeviceLost = (name, payload) => bus.send(name, payload);
- * emit("renderer:device-lost", { kind: "webgpu", reason: "destroyed" });
- * ```
- */
-export type EmitDeviceLost = (
-  name: "renderer:device-lost",
-  payload: Events["renderer:device-lost"]
-) => void;
-
-/**
  * What the kernel context offers before the deps are attached.
  *
- * `emit` is declared as the kernel's own, unusable shape on purpose: core 1.7 leaves a plugin's
- * own event out of the context it hands the factories as soon as `depends` is declared, so a
- * renderer-typed `emit` here would make every factory unassignable. `host/device.ts` narrows this
- * one member to `EmitDeviceLost`; nothing else about the context is cast.
+ * `emit` is the kernel's own: `index.ts` writes `events` with an annotated `register`
+ * (core spec `14-EVENT-REGISTRATION.md` row 8), so the plugin's own event reaches the pre-typed
+ * `api` factory and no member of this context is cast.
  */
-export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(...args: never[]): void;
+export type KernelSlice = PluginCtx<Config, State, Events> & {
   readonly global: Readonly<GameConfig>;
   readonly log: Log.LogApi;
   readonly require: Require;

@@ -4,6 +4,7 @@
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { flowPlugin } from "../flow";
 import { createI18nApi } from "./api";
@@ -29,7 +30,7 @@ const config: Config = { locale: "en", fallback: "en", locales: {} };
  */
 export const i18nPlugin = /*#__PURE__*/ createPlugin("i18n", {
   depends: [flowPlugin],
-  events: register =>
+  events: (register: RegisterFunction) =>
     register.map<Events>({
       "i18n:locale-changed": "The current locale changed and its messages are loaded"
     }),
