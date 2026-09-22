@@ -93,7 +93,7 @@ describe("moveHover", () => {
 });
 
 describe("release", () => {
-  it("answers the drop, unmutes and leaves the settle out when the gate took it", () => {
+  it("answers the drop, unmutes and still settles: the node may refuse with no state change", () => {
     const mock = createMockInput();
     const held = grabbed(mock, { x: 50, y: 50 }, { x: 50, y: 50 });
     const cell = mock.spawn([DropTarget({ intent: "merge", payload: { to: "c3" } })]);
@@ -104,7 +104,14 @@ describe("release", () => {
     release(mock.input, { x: 150, y: 50 });
 
     expect(mock.answers).toEqual([{ intent: "merge", payload: { from: "c2", to: "c3" } }]);
-    expect(mock.calls).toEqual(["answer", "unmute", "lift:false", "untag:Held", "pointer:false"]);
+    expect(mock.calls).toEqual([
+      "answer",
+      "unmute",
+      "settle",
+      "lift:false",
+      "untag:Held",
+      "pointer:false"
+    ]);
     expect(mock.has(held, Held)).toBe(false);
   });
 

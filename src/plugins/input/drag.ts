@@ -108,7 +108,9 @@ export function release(ctx: InputCtx, point?: Point): boolean {
 
   ctx.state.unmute?.();
   ctx.state.unmute = undefined;
-  if (!accepted) projection.settle(entity);
+  // Always home: an accepted answer may still be refused by the node with no state change. A
+  // commit that follows retargets the view from where it is; an exit motion cancels the settle.
+  projection.settle(entity);
   projection.lift(entity, false);
   ecs.untag(entity, Held);
   clearHover(ctx);
