@@ -203,6 +203,78 @@ describe("sync views", () => {
     );
   });
 
+  it("registers nothing and builds nothing while inert", async () => {
+    const mock = createMockRenderer({ dom: false });
+
+    await mock.start();
+    mock.modules.sync.start();
+    mock.modules.sync.rebuildAll();
+
+    expect(mock.ctx.state.sync.cleanups).toHaveLength(0);
+    expect(mock.ctx.state.sync.root).toBeUndefined();
+    expect(mock.ctx.state.sync.views.size).toBe(0);
+  });
+
+  it("draws a view that carries no Transform at the origin", async () => {
+    const mock = createMockRenderer();
+
+    await mock.start();
+    mock.world.projection.setLayers([{ name: "items", sort: "y" }]);
+    mock.modules.sync.pass();
+
+    const entity = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Sprite()]);
+
+    mock.modules.sync.pass();
+
+    const view = mock.ctx.state.sync.views.get(entity);
+
+    expect(view?.object.position.x).toBe(0);
+    expect(view?.object.zIndex).toBe(0);
+  });
+
+  it("reports the entity when building its view throws, and goes on", async () => {
+    const mock = await started();
+    const broken = new FakeContainer();
+
+    broken.getLocalBounds = (): never => {
+      throw new Error("no bounds");
+    };
+
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Display({ object: broken })
+    ]);
+    const healthy = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.log.error).toHaveBeenCalledWith(
+      "renderer: sync failed for an entity",
+      expect.objectContaining({ entity })
+    );
+    expect(mock.ctx.state.sync.views.has(healthy)).toBe(true);
+  });
+
+  it("follows a sprite that changes its texture key into another pool", async () => {
+    const mock = await started();
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "board.cell" })
+    ]);
+
+    mock.modules.sync.pass();
+    expect(mock.ctx.state.sync.byKey.get("board.cell")?.has(entity)).toBe(true);
+
+    mock.world.ecs.set(entity, Sprite, { texture: "board.chain" });
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(entity)?.poolKey).toBe("Sprite:board.chain");
+    expect(mock.ctx.state.sync.byKey.has("board.cell")).toBe(false);
+    expect(mock.ctx.state.sync.byKey.get("board.chain")?.has(entity)).toBe(true);
+  });
+
   it("draws nothing for a Display that holds no display object", async () => {
     const mock = await started();
     const entity = mock.world.ecs.spawn(owner, [

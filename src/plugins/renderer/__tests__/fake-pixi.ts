@@ -12,6 +12,9 @@ export type FakeSource = { width: number; height: number; destroyed: boolean };
 
 /** A fake Pixi texture. */
 export class FakeTexture {
+  /** Every texture the fake ever made, in creation order. */
+  public static readonly made: FakeTexture[] = [];
+
   /** The 1x1 white texture the placeholder is drawn with. */
   public static readonly WHITE = new FakeTexture({
     source: { width: 1, height: 1, destroyed: false }
@@ -28,6 +31,7 @@ export class FakeTexture {
   }) {
     this.source = options.source ?? { width: 64, height: 64, destroyed: false };
     this.defaultBorders = options.defaultBorders;
+    FakeTexture.made?.push(this);
   }
 
   /**
@@ -224,6 +228,7 @@ export class FakeApplication {
   public destroyed = false;
   public destroyArgs: unknown[] = [];
   private loseDevice: ((info: { reason: string }) => void) | undefined;
+  private failDevice: ((error: Error) => void) | undefined;
 
   public constructor() {
     FakeApplication.instances.push(this);
@@ -259,8 +264,9 @@ export class FakeApplication {
     if (FakeApplication.settings.kind === "webgpu") {
       renderer.gpu = {
         device: {
-          lost: new Promise<{ reason: string }>(resolve => {
+          lost: new Promise<{ reason: string }>((resolve, reject) => {
             this.loseDevice = resolve;
+            this.failDevice = reject;
           })
         }
       };
@@ -279,6 +285,15 @@ export class FakeApplication {
   }
 
   /**
+   * Rejects the `device.lost` promise, as a browser that cannot say what happened does.
+   *
+   * @param error - What went wrong.
+   */
+  public fail(error: Error): void {
+    this.failDevice?.(error);
+  }
+
+  /**
    * Frees the application.
    *
    * @param rendererOptions - Pixi's renderer destroy options.
@@ -287,6 +302,7 @@ export class FakeApplication {
   public destroy(rendererOptions?: unknown, options?: unknown): void {
     this.destroyed = true;
     this.destroyArgs = [rendererOptions, options];
+    this.stage.destroy({ children: true, texture: false });
     this.canvas.remove();
   }
 }

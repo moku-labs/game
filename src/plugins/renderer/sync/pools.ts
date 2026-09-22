@@ -110,9 +110,13 @@ export function release(sctx: SyncCtx, view: View): void {
     view.wrapper = undefined;
   }
 
-  resetObject(view.object);
+  if (view.kind === "Display") {
+    detach(view.object);
 
-  if (view.kind === "Display") return;
+    return;
+  }
+
+  resetObject(view.object);
 
   const pool = state.pools.get(view.poolKey) ?? emptyPool();
 

@@ -27,6 +27,9 @@ export function createHostApi(ctx: RendererCtx): HostModule {
 
     if (mount === undefined) return false;
 
+    // The tree is still alive here: this is where `sync` saves the objects the game owns.
+    for (const fn of state.onLoss) fn();
+
     destroyApplication(state);
 
     try {
@@ -56,6 +59,10 @@ export function createHostApi(ctx: RendererCtx): HostModule {
 
     onRestore: (fn: () => void): void => {
       state.onRestore.push(fn);
+    },
+
+    onLoss: (fn: () => void): void => {
+      state.onLoss.push(fn);
     },
 
     resize: (width: number, height: number): void => {

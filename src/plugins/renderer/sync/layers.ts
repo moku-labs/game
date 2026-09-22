@@ -66,10 +66,14 @@ export function writeZIndex(object: PixiContainer, value: number): void {
 export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
   const state = sctx.ctx.state.sync;
   const sort = sortOf(state, view.layer);
-
-  if (sort === "none") return;
-
   const target = view.wrapper ?? view.object;
+
+  if (sort === "none") {
+    // A depth left over from a sorted layer would decide the hit-test order here.
+    writeZIndex(target, 0);
+
+    return;
+  }
 
   if (sort === "y") {
     writeZIndex(target, sctx.ctx.deps.world.ecs.get(entity, Transform)?.y ?? 0);
@@ -94,12 +98,12 @@ export function syncLayers(sctx: SyncCtx): boolean {
 
   if (list === state.layerList) return false;
 
-  state.layerList = list;
-
   const root = state.root;
   const pixi = sctx.deps.host.pixi();
 
   if (root === undefined || pixi === undefined) return false;
+
+  state.layerList = list;
 
   const next = emptyLayers();
 

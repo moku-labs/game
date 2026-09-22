@@ -125,10 +125,15 @@ export function createTexture(
 
   if (nine === undefined) return base;
 
-  return new pixi.Texture({
+  const bordered = new pixi.Texture({
     source: base.source,
     defaultBorders: { left: nine[0], top: nine[1], right: nine[2], bottom: nine[3] }
   });
+
+  // Only the source of the wrapper is kept, so the wrapper itself goes; the source stays.
+  base.destroy(false);
+
+  return bordered;
 }
 
 /**

@@ -19,6 +19,7 @@ export function createHostState(): HostState {
     restoring: false,
     onReady: [],
     onRestore: [],
+    onLoss: [],
     cleanups: [],
     unsupported: undefined
   };

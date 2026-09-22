@@ -240,6 +240,12 @@ export type SyncInternal = {
   pass(): void;
 
   /**
+   * Lets go of the whole tree while it is still alive: the objects the game owns are detached,
+   * the pooled ones are destroyed. Called just before a lost application is destroyed.
+   */
+  forget(): void;
+
+  /**
    * The root container, so the plugin root can re-apply the viewport transform after a resize.
    *
    * @returns The root, or `undefined` while inert.

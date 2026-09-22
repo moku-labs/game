@@ -125,6 +125,39 @@ describe("sync layers", () => {
     expect(mock.ctx.state.sync.views.get(entity)?.object.zIndex).toBe(0);
   });
 
+  it("clears a stale depth when a lift lands on a layer that does not sort", async () => {
+    const mock = await started([
+      { name: "items", sort: "y" },
+      { name: "lift", sort: "none" }
+    ]);
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ y: 300 }),
+      Sprite()
+    ]);
+
+    mock.modules.sync.pass();
+
+    const object = mock.ctx.state.sync.views.get(entity)?.object;
+
+    expect(object?.zIndex).toBe(300);
+
+    mock.world.ecs.set(entity, Layer, { name: "lift" });
+    mock.modules.sync.pass();
+
+    expect(object?.zIndex).toBe(0);
+  });
+
+  it("records no layer list while nothing can draw", async () => {
+    const mock = createMockRenderer({ dom: false });
+
+    await mock.start();
+    mock.world.projection.setLayers([{ name: "items", sort: "none" }]);
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.layerList).toBeUndefined();
+  });
+
   it("moves the same display object when a lift changes the layer", async () => {
     const mock = await started([
       { name: "items", sort: "none" },

@@ -119,6 +119,7 @@ export function stopHost(state: HostState): void {
   state.unsupported = undefined;
   state.onReady.length = 0;
   state.onRestore.length = 0;
+  state.onLoss.length = 0;
   state.kind = "none";
   state.mount = undefined;
   state.pixi = undefined;

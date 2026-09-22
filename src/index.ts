@@ -30,6 +30,16 @@
  * | renderer | poolLimit | 256 |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
+ * | input | tapSlopPx | 12 |
+ * | input | longPressMs | 450 |
+ * | input | dragStartPx | 8 |
+ * | input | swipeMinPx | 48 |
+ * | input | swipeMaxMs | 300 |
+ * | assets | manifest | undefined, a URL or an inline manifest |
+ * | assets | textureBudgetMb | 192 |
+ * | assets | preloadDepth | 2 |
+ * | assets | baseUrl | undefined |
+ * | assets | io | undefined, the browser fetch and the renderer textures |
  *
  * @file The package root: the composed framework and its public exports.
  * @example
@@ -39,8 +49,10 @@
  */
 import { coreConfig, createCore } from "./config";
 import {
+  assetsPlugin,
   clockPlugin,
   flowPlugin,
+  inputPlugin,
   lifecyclePlugin,
   modelPlugin,
   rendererPlugin,
@@ -139,11 +151,11 @@ export { projection } from "./plugins/world/projection/define";
 // ─── Plugin sets ──────────────────────────────────────────────
 /**
  * The screen plugins, in dependency order. A game with a screen spreads them into `plugins`;
- * a headless test leaves them out. V2 carries `world` and `renderer`; input, assets and scenes join it wave by wave.
+ * a headless test leaves them out. V2 carries `world`, `renderer`, `input` and `assets`; scenes joins in wave 7.
  *
  * @example
  * ```ts
  * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { renderer: { mount: "#game" } } });
  * ```
  */
-export const screen = [worldPlugin, rendererPlugin] as const;
+export const screen = [worldPlugin, rendererPlugin, inputPlugin, assetsPlugin] as const;

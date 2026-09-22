@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
 import { Display, Sprite, Transform } from "../../components";
+import { withDeps } from "../../lifecycle";
+import { measureMount, watchResize } from "../../viewport/resize";
 import { FakeContainer } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
@@ -140,6 +142,48 @@ describe("renderer lifecycle", () => {
     mock.runPhase("render");
     expect(mock.pixi.last().renderer.resizes).toHaveLength(after);
     expect(after).toBeGreaterThan(before);
+  });
+
+  it("measures nothing and observes nothing while inert", () => {
+    const mock = createMockRenderer({ dom: false });
+    const vctx = { ctx: withDeps(mock.ctx), deps: { host: mock.modules.host } };
+
+    expect(measureMount(vctx)).toEqual({ width: 0, height: 0 });
+    watchResize(vctx);
+    expect(mock.ctx.state.viewport.cleanups).toHaveLength(0);
+
+    mock.ctx.state.viewport.resizePending = true;
+    expect(mock.modules.viewport.applyPending()).toBe(true);
+    expect(mock.ctx.state.viewport.frame).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+    expect(mock.ctx.state.viewport.safeArea).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+  });
+
+  it("observes nothing where the browser has no ResizeObserver", async () => {
+    const mock = createMockRenderer();
+
+    vi.stubGlobal("ResizeObserver", undefined);
+    await mock.start();
+
+    expect(mock.ctx.state.viewport.cleanups).toHaveLength(0);
+    expect(mock.dom?.observers).toHaveLength(0);
+    expect(mock.ctx.state.viewport.probe).toBeDefined();
+    expect(mock.ctx.state.host.ready).toBe(true);
+  });
+
+  it("draws a pending resize even when there is no root to move", async () => {
+    const { mock } = await startWithOneSprite();
+    const dom = mock.dom;
+
+    if (dom === undefined) throw new Error("the fake dom is missing");
+
+    mock.ctx.state.sync.root = undefined;
+    dom.mount.clientWidth = 900;
+    dom.mount.clientHeight = 1600;
+    dom.observers[0]?.fire();
+    mock.runPhase("render");
+
+    expect(mock.pixi.last().renderer.resizes.at(-1)).toEqual({ width: 900, height: 1600 });
+    expect(mock.pixi.last().renderer.renders).toBeGreaterThan(0);
   });
 
   it("stops cleanly when it never started", () => {

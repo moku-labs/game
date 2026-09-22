@@ -72,7 +72,13 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     );
   });
 
-  modules.host.onRestore(() => modules.sync.rebuildAll());
+  modules.host.onLoss(() => modules.sync.forget());
+
+  modules.host.onRestore(() => {
+    // The new canvas starts at Pixi's own size: measure the mount again before the next frame.
+    rendererCtx.state.viewport.resizePending = true;
+    modules.sync.rebuildAll();
+  });
 
   await modules.host.init();
 }

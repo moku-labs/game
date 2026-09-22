@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
-import { Sprite, Transform } from "../../components";
+import { Display, Sprite, Transform } from "../../components";
 import type { Config } from "../../types";
-import { FakeTexture } from "../fake-pixi";
+import { FakeContainer, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -96,6 +96,29 @@ describe("sync pools", () => {
     expect(pooled?.scale.x).toBe(1);
     expect(pooled?.visible).toBe(true);
     expect(pooled?.parent).toBeNull();
+  });
+
+  it("never resets an object the game owns", async () => {
+    const mock = await started();
+    const object = new FakeContainer();
+
+    object.alpha = 0.4;
+    object.visible = false;
+
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Display({ object })
+    ]);
+
+    mock.modules.sync.pass();
+    mock.world.ecs.despawn(entity);
+    mock.modules.sync.pass();
+
+    expect(object.alpha).toBe(0.4);
+    expect(object.visible).toBe(false);
+    expect(object.parent).toBeNull();
+    expect(mock.ctx.state.sync.pooled).toBe(0);
   });
 
   it("destroys the oldest pooled object over the limit, and keeps its texture", async () => {

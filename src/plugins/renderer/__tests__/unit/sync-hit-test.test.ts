@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Exiting, Layer, Order } from "../../../world/ecs/define";
 import { Parent, Sprite, Transform } from "../../components";
-import { FakeTexture } from "../fake-pixi";
+import { FakeContainer, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -163,6 +163,45 @@ describe("sync hit test", () => {
 
     expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(above);
     expect(mock.api.sync.hitTest(0, 0, live)).toBe(below);
+  });
+
+  it("treats a scale of zero as one, so a collapsed view is still reachable", async () => {
+    const mock = await started();
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 0, y: 0, scale: 0 }),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(entity);
+  });
+
+  it("stops a parent chain that points at itself", async () => {
+    const mock = await started();
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 10, y: 0 }),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+    mock.world.ecs.add(entity, Parent({ entity }));
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitTest(10, 0, anyEntity)).toBe(entity);
+  });
+
+  it("answers nothing for a tree that does not hang under the root", async () => {
+    const mock = await started();
+
+    mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite({ texture: "a" })]);
+    mock.modules.sync.pass();
+
+    mock.ctx.state.sync.root = new FakeContainer() as never;
+
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBeUndefined();
   });
 
   it("answers nothing before a layer list exists", async () => {

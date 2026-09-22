@@ -131,7 +131,7 @@ export type State = { host: HostState; viewport: ViewportState; sync: SyncState 
  * @example
  * ```ts
  * app.renderer.host.kind(); // "webgpu"
- * app.renderer.viewport.size().width; // 810
+ * app.renderer.viewport.size().width; // 1080, reference units
  * app.renderer.sync.hitTest(540, 300, () => true); // 1048576
  * ```
  */

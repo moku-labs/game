@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clipToFrame, readInsets } from "../../viewport/safe-area";
+import { clipToFrame, createSafeAreaProbe, readInsets } from "../../viewport/safe-area";
 import { installFakeDom } from "../fake-dom";
 
 afterEach(() => {
@@ -23,6 +23,21 @@ describe("viewport safe area", () => {
       bottom: 34,
       left: 0
     });
+  });
+
+  it("makes no probe where there is no document", () => {
+    expect(createSafeAreaProbe()).toBeUndefined();
+  });
+
+  it("reads zero when the browser answers nothing", () => {
+    const dom = installFakeDom();
+    const probe = dom.document.createElement("div");
+
+    vi.stubGlobal("getComputedStyle", () => ({}));
+    expect(readInsets(probe as unknown as HTMLElement)).toEqual(noInsets);
+
+    vi.stubGlobal("getComputedStyle", undefined);
+    expect(readInsets(probe as unknown as HTMLElement)).toEqual(noInsets);
   });
 
   it("reads zero when there is no probe", () => {

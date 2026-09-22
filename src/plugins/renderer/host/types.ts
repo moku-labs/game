@@ -21,6 +21,8 @@ export type HostState = {
   onReady: Array<() => void>;
   /** Run after a restore created a new application, where `onReady` must not run twice. */
   onRestore: Array<() => void>;
+  /** Run before the lost application is destroyed, while its display objects are still alive. */
+  onLoss: Array<() => void>;
   cleanups: Array<() => void>;
   unsupported: HTMLElement | undefined;
 };
@@ -97,6 +99,14 @@ export type HostInternal = {
    * @param fn - Called after every successful restore.
    */
   onRestore(fn: () => void): void;
+
+  /**
+   * Subscribes to the moment just before a lost application is destroyed. This is the last point
+   * at which a display object the game owns can be saved out of the tree.
+   *
+   * @param fn - Called before every `destroy` of a lost application.
+   */
+  onLoss(fn: () => void): void;
 
   /**
    * The Pixi module object, so the modules above never import Pixi themselves.

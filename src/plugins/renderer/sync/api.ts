@@ -8,7 +8,7 @@ import { Display, NineSlice, Parent, Sprite, Transform } from "../components";
 import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { hitTest } from "./hit-test";
 import { clearLayers, resort, syncLayers } from "./layers";
-import { detach, dropPooled } from "./pools";
+import { destroyPools, detach, dropPooled } from "./pools";
 import { createSyncSystem } from "./system";
 import { createTexture, destroyTexture } from "./textures";
 import type { CreateTextureOptions, SyncCtx, SyncDeps, TextureProvider, View } from "./types";
@@ -165,8 +165,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.views.clear();
     state.entityOf.clear();
     state.byKey.clear();
-    state.pools.clear();
-    state.pooled = 0;
+    destroyPools(state);
     clearLayers(state);
     state.root = undefined;
   };
@@ -241,6 +240,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     rebuildAll,
 
     pass,
+
+    forget: forgetTree,
 
     start: (): void => {
       if (deps.host.stage() === undefined) return;

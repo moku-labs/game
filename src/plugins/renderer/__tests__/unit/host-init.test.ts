@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { showUnsupported } from "../../host/unsupported";
+import { withDeps } from "../../lifecycle";
 import { createMockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -98,6 +100,20 @@ describe("host init", () => {
 
     expect(mock.api.host.ready()).toBe(false);
     expect(mock.dom?.mount.children.some(child => child.attributes.role === "alert")).toBe(true);
+  });
+
+  it("shows the unsupported screen once, however often it is asked", async () => {
+    const mock = createMockRenderer({ failInit: true });
+
+    await mock.start();
+
+    const mount = mock.dom?.mount;
+
+    if (mount === undefined) throw new Error("the fake dom is missing");
+
+    showUnsupported(withDeps(mock.ctx), mount as unknown as HTMLElement, new Error("again"));
+
+    expect(mount.children.filter(child => child.attributes.role === "alert")).toHaveLength(1);
   });
 
   it("draws only while it is ready", async () => {

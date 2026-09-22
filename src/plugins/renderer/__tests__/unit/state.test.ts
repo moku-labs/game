@@ -28,6 +28,7 @@ describe("renderer state", () => {
       restoring: false,
       onReady: [],
       onRestore: [],
+      onLoss: [],
       cleanups: [],
       unsupported: undefined
     });

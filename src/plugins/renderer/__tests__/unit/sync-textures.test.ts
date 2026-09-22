@@ -136,6 +136,26 @@ describe("sync textures", () => {
     expect(mock.ctx.state.sync.pooled).toBe(0);
   });
 
+  it("invalidates a key nothing uses without touching anything", async () => {
+    const mock = await started();
+
+    mock.api.sync.textures.invalidate(["nobody.uses.this"]);
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.invalidated.size).toBe(0);
+    expect(mock.ctx.state.sync.pools.size).toBe(0);
+  });
+
+  it("removes a provider that is no longer in the chain", async () => {
+    const mock = await started();
+    const off = mock.api.sync.textures.provide(() => undefined);
+
+    mock.ctx.state.sync.providers.length = 0;
+    off();
+
+    expect(mock.ctx.state.sync.providers).toHaveLength(0);
+  });
+
   it("makes a texture and writes the nine-slice borders", async () => {
     const mock = await started();
     const plain = mock.api.sync.textures.create({ width: 32, height: 32 } as never);
@@ -145,6 +165,20 @@ describe("sync textures", () => {
 
     expect(plain).toHaveProperty("source");
     expect(nine).toHaveProperty("defaultBorders", { left: 12, top: 10, right: 8, bottom: 6 });
+  });
+
+  it("frees the wrapper texture of a nine-slice and keeps its source", async () => {
+    const mock = await started();
+    const before = FakeTexture.made.length;
+    const nine = mock.api.sync.textures.create({ width: 64, height: 64 } as never, {
+      nine: [1, 2, 3, 4]
+    });
+    const wrapper = FakeTexture.made[before];
+
+    expect(wrapper?.destroyed).toBe(true);
+    expect(wrapper?.source.destroyed).toBe(false);
+    expect(nine).toHaveProperty("destroyed", false);
+    expect(nine.source).toBe(wrapper?.source);
   });
 
   it("refuses to make a texture while the device is lost", async () => {

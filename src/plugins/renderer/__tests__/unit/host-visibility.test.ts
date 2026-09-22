@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { watchVisibility } from "../../host/visibility";
+import { withDeps } from "../../lifecycle";
 import { createMockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -29,6 +31,15 @@ describe("host visibility", () => {
 
     await mock.start();
 
+    expect(mock.pauses).toHaveLength(0);
+  });
+
+  it("attaches nothing where there is no document", () => {
+    const mock = createMockRenderer({ dom: false });
+
+    watchVisibility(withDeps(mock.ctx));
+
+    expect(mock.ctx.state.host.cleanups).toHaveLength(0);
     expect(mock.pauses).toHaveLength(0);
   });
 
