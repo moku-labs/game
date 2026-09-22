@@ -47,6 +47,8 @@
  * | i18n | locale | "en" |
  * | i18n | fallback | "en" |
  * | i18n | locales | {} |
+ * | text | fonts | { body: "ui.font-body", digits: "ui.font-digits" } |
+ * | text | missingGlyph | "□" |
  * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |
@@ -70,6 +72,7 @@ import {
   modelPlugin,
   rendererPlugin,
   scenesPlugin,
+  textPlugin,
   timePlugin,
   worldPlugin
 } from "./plugins";
@@ -77,10 +80,11 @@ import { animFor } from "./plugins/anim/bind";
 import { bundlesFor } from "./plugins/assets/bundles";
 import { audioFor } from "./plugins/audio/descriptors";
 import { flowFor } from "./plugins/flow/feature";
-import type { BundlesOf, GameTypes, SceneIdOf } from "./plugins/flow/types";
+import type { BundlesOf, GameTypes, SceneIdOf, TextStylesOf } from "./plugins/flow/types";
 import { i18nFor } from "./plugins/i18n/tr";
 import { componentsFor } from "./plugins/renderer/components";
 import { scenesFor } from "./plugins/scenes/define";
+import { textFor } from "./plugins/text/components";
 import { projectionFor } from "./plugins/world/projection/define";
 
 const framework = createCore(coreConfig, {
@@ -143,6 +147,7 @@ export function defineGame<Types extends GameTypes>() {
     ...scenesFor<Types["assets"], BundlesOf<Types>>(),
     ...animFor<Types["assets"]>(),
     ...i18nFor<Types["strings"]>(),
+    ...textFor<TextStylesOf<Types>, Types["assets"]>(),
     ...audioFor<Types["assets"]>()
   };
 }
@@ -164,7 +169,8 @@ export const screen = [
   assetsPlugin,
   scenesPlugin,
   animPlugin,
-  i18nPlugin
+  i18nPlugin,
+  textPlugin
 ] as const;
 
 // ─── Plugins + Types ──────────────────────────────────────────
@@ -238,5 +244,7 @@ export {
 // i18n: messages as data
 export { tr } from "./plugins/i18n/tr";
 export type { DescriptionNode } from "./plugins/world/projection/types";
+// text: the Text component, board labels and text styles
+export { defineTextStyles, label, Text } from "./plugins/text/components";
 // audio: the music descriptor (sfx is anim's)
 export { music } from "./plugins/audio/descriptors";

@@ -280,6 +280,8 @@ describe("assets plugin integration — with an io seam", () => {
     expect(app.assets.texture("board.nothing")).toBeUndefined();
 
     app.assets.unload("ui");
+    // The kernel awaits every hook in order, so a listener after `text` runs a microtask later.
+    await tick();
 
     expect(app.assets.isLoaded("ui")).toBe(false);
     expect(heard.unloaded).toEqual([
@@ -289,6 +291,7 @@ describe("assets plugin integration — with an io seam", () => {
     // "board" is pinned by the node the graph stands on, and "boot" is a permanent tier.
     app.assets.unload("board");
     app.assets.unload("boot");
+    await tick();
 
     expect(app.assets.isLoaded("board")).toBe(true);
     expect(app.assets.isLoaded("boot")).toBe(true);
@@ -315,6 +318,7 @@ describe("assets plugin integration — with an io seam", () => {
     expect(app.assets.texture("board.body")).toBeUndefined();
 
     app.assets.unload("board.voices");
+    await tick();
 
     expect(app.assets.font("board.body")).toBeUndefined();
     expect(app.assets.audio("board.click")).toBeUndefined();
