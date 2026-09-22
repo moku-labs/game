@@ -1,6 +1,6 @@
 import { expectTypeOf } from "vitest";
 import { createPlugin } from "../../../../config";
-import { projection } from "../../../world/projection/define";
+import { projection } from "../../../../index";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
 import type { DefineScene, Events, SceneDefinition } from "../../types";

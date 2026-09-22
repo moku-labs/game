@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createApp, createPlugin, defineGame, screen, type } from "../../../../index";
-import { projection } from "../../../world/projection/define";
+import { createApp, createPlugin, defineGame, projection, screen, type } from "../../../../index";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
 import type { Events } from "../../types";

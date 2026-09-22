@@ -70,6 +70,16 @@ export function createGame(options: GameOptions = {}): Game {
   return { app, clock, provider };
 }
 
+/** The plugins of the game with its screen: the five screen plugins and both halves of the board. */
+const screenPlugins = [...screen, rewardFeature, boardView];
+
+/** The game with its screen and the two seams a test holds on to. */
+export type ScreenGame = {
+  app: ReturnType<typeof createApp<typeof screenPlugins>>;
+  clock: Clock;
+  provider: Provider;
+};
+
 /** What a test may pin when it creates the game with its screen. */
 export type ScreenGameOptions = GameOptions & {
   /** The manifest the assets plugin reads. A URL in the browser, the parsed file in a test. */
@@ -90,11 +100,11 @@ export type ScreenGameOptions = GameOptions & {
  * app.scenes.current(); // undefined: the graph rests on "home", which names no scene
  * ```
  */
-export function createScreenGame(options: ScreenGameOptions = {}) {
+export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
   const provider = options.provider ?? memory();
   const clock = options.clock ?? fakeClock(startMoment);
   const app = createApp({
-    plugins: [...screen, rewardFeature, boardView],
+    plugins: [...screenPlugins],
     pluginConfigs: {
       model: {
         playerProvider: provider,

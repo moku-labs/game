@@ -8,9 +8,10 @@ import type { DefineBundles, LoadBundles } from "../assets/types";
 import type { Api as ClockApi } from "../clock/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Patch } from "../model/types";
-import type { SpriteOptions, sprite } from "../renderer/components";
+import type { NineSliceValue, SpriteOptions, SpriteValue, sprite } from "../renderer/components";
 import type { DefineScene } from "../scenes/types";
 import type { Api as TimeApi } from "../time/types";
+import type { ComponentType } from "../world/ecs/types";
 import type { ProjectionSpec } from "../world/projection/types";
 import type { FeatureDescription, FeaturesApi, FeaturesState } from "./features/types";
 import type { FxApi, FxState } from "./fx/types";
@@ -176,7 +177,7 @@ export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginI
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
- * export const { defineNode, defineFlow, defineFeature, projection, sprite, defineBundles, load, defineScene } =
+ * export const { defineNode, defineFlow, defineFeature, projection, sprite, Sprite, defineBundles, load, defineScene } =
  *   defineGame<{
  *     player: Player;
  *     session: Session;
@@ -199,6 +200,8 @@ export type Kit<Types extends GameTypes> = {
   defineBundles: DefineBundles<BundlesOf<Types>>;
   load: LoadBundles<BundlesOf<Types>>;
   defineScene: DefineScene<Types["assets"], BundlesOf<Types>>;
+  Sprite: ComponentType<Omit<SpriteValue, "texture"> & { texture: Types["assets"] }>;
+  NineSlice: ComponentType<Omit<NineSliceValue, "texture"> & { texture: Types["assets"] }>;
 };
 
 export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";

@@ -64,7 +64,7 @@ import { defineBundles, load } from "./plugins/assets/bundles";
 import { defineFeature } from "./plugins/flow/feature";
 import { defineFlow, defineNode } from "./plugins/flow/runner/define";
 import type { GameTypes, Kit } from "./plugins/flow/types";
-import { sprite } from "./plugins/renderer/components";
+import { NineSlice, Sprite, sprite } from "./plugins/renderer/components";
 import { defineScene } from "./plugins/scenes/define";
 import { projection } from "./plugins/world/projection/define";
 
@@ -133,7 +133,10 @@ export function defineGame<Types extends GameTypes>(): Kit<Types> {
     sprite,
     defineBundles,
     load,
-    defineScene
+    defineScene,
+    // The same component objects; only the call signature narrows `texture` to the game's keys.
+    Sprite: Sprite as Kit<Types>["Sprite"],
+    NineSlice: NineSlice as Kit<Types>["NineSlice"]
   };
 }
 

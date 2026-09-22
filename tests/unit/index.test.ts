@@ -1,6 +1,5 @@
 import * as engine from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
-import { defineFeature } from "../../src/plugins/flow/feature";
 import { defineFlow, defineNode } from "../../src/plugins/flow/runner/define";
 
 describe("root index", () => {
@@ -18,12 +17,14 @@ describe("root index", () => {
 
     expect(kit.defineNode).toBe(defineNode);
     expect(kit.defineFlow).toBe(defineFlow);
-    expect(kit.defineFeature).toBe(defineFeature);
+    expect(kit.defineFeature).toBe(engine.defineFeature);
     expect(kit.projection).toBe(engine.projection);
     expect(kit.sprite).toBe(engine.sprite);
     expect(kit.defineBundles).toBe(engine.defineBundles);
     expect(kit.load).toBe(engine.load);
     expect(kit.defineScene).toBe(engine.defineScene);
+    expect(kit.Sprite).toBe(engine.Sprite);
+    expect(kit.NineSlice).toBe(engine.NineSlice);
     expect(Object.keys(kit)).toEqual([
       "defineNode",
       "defineFlow",
@@ -32,7 +33,9 @@ describe("root index", () => {
       "sprite",
       "defineBundles",
       "load",
-      "defineScene"
+      "defineScene",
+      "Sprite",
+      "NineSlice"
     ]);
   });
 
