@@ -233,13 +233,14 @@ function inputOf(element: Element): AnyComponentValue[] {
  */
 export function componentsOf(element: Element, parent: Rect | undefined): AnyComponentValue[] {
   const values: AnyComponentValue[] = [
-    Box(element.rect),
     Transform({ x: element.rect.x - (parent?.x ?? 0), y: element.rect.y - (parent?.y ?? 0) })
   ];
 
   if (element.parent !== undefined) values.push(Parent({ entity: element.parent }));
 
-  return [...values, ...visualOf(element), ...inputOf(element)];
+  // `Box` is last on purpose: the world applies a queued attach in call order and fires
+  // `onAdded` as it goes, so the hook on `Box` is the moment the whole entity exists.
+  return [...values, ...visualOf(element), ...inputOf(element), Box(element.rect)];
 }
 
 /**
@@ -344,6 +345,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
       children: [],
       instance,
       live: false,
+      entered: false,
       dropKey: undefined
     };
 
@@ -665,7 +667,6 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
 
       modules.layout.commit(element, parent);
       element.live = true;
-      modules.layout.enter(element);
     }
 
     element.moved = false;
@@ -675,6 +676,22 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
 
       if (childElement !== undefined) applyRects(childElement);
     }
+  }
+
+  /**
+   * Plays the enter hook of an element whose spawn has just been applied. The world calls it from
+   * the `Box` hook, at the flush of phase `layout`, so the entity carries every component and the
+   * first `sync` has not run: the element is never drawn at its rest pose by mistake.
+   *
+   * @param entity - The entity the `Box` was attached to.
+   */
+  function playEnter(entity: Entity): void {
+    const element = state.elements.get(entity);
+
+    if (element === undefined || element.entered) return;
+
+    element.entered = true;
+    modules.layout.enter(element);
   }
 
   /**
@@ -893,5 +910,5 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     writeLive(element);
   }
 
-  return { reconcile, solve, mountRoot, unmountRoot, markPressed, sweep };
+  return { reconcile, solve, mountRoot, unmountRoot, markPressed, playEnter, sweep };
 }

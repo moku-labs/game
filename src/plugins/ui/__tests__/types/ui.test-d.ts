@@ -18,6 +18,21 @@ const Reward = defineComponent("Reward", {
 
 const Plain = defineComponent("Plain", { view: () => ({ type: "row", props: {}, children: [] }) });
 
+const Settings = defineComponent("Settings", {
+  local: { tab: "audio" },
+  outcomes: { close: {} as { saved: boolean } },
+  view: (props: { volume: number }, local) => ({
+    type: "column",
+    props: { volume: props.volume, tab: local.tab },
+    children: []
+  })
+});
+
+const Stateless = defineComponent("Stateless", {
+  outcomes: { ok: {} },
+  view: () => ({ type: "panel", props: {}, children: [] })
+});
+
 describe("the ui API", () => {
   it("answers a snapshot, an entity and a list of findings", () => {
     expectTypeOf<UiApi["tree"]>().toEqualTypeOf<() => UiNode>();
@@ -29,6 +44,21 @@ describe("the ui API", () => {
 describe("popup", () => {
   it("takes a component with outcomes and answers a descriptor", () => {
     expectTypeOf(popup(Reward, { gold: 5 })).toEqualTypeOf<Descriptor>();
+  });
+
+  it("takes a component that keeps local state next to its outcomes", () => {
+    expectTypeOf(popup(Settings, { volume: 3 })).toEqualTypeOf<Descriptor>();
+    expectTypeOf(Settings.local).toEqualTypeOf<{ tab: string }>();
+  });
+
+  it("takes a component with outcomes and no local state", () => {
+    expectTypeOf(popup(Stateless, {})).toEqualTypeOf<Descriptor>();
+  });
+
+  it("refuses props a stateful component's view does not take", () => {
+    // @ts-expect-error — the view takes `volume`, not `loudness`.
+    popup(Settings, { loudness: 3 });
+    expectTypeOf(Settings.outcomes).toEqualTypeOf<{ close: { saved: boolean } }>();
   });
 
   it("refuses a component without outcomes", () => {

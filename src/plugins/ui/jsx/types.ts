@@ -95,18 +95,19 @@ export type ComponentDefinition<
 };
 
 /**
- * A component that names outcomes, which is what `popup` takes.
+ * A component that names outcomes, which is what `popup` takes. `Local` stays a parameter
+ * because the `local` argument of `view` is contravariant: pinned to `object` it would refuse
+ * every component that keeps local state.
  *
  * @example
  * ```ts
- * const reward: PopupComponent<{ gold: number }> = RewardPopup;
+ * const settings: PopupComponent<{ volume: number }, { tab: string }> = Settings;
  * ```
  */
-export type PopupComponent<Properties extends object> = ComponentDefinition<
-  Properties,
-  object,
-  Record<string, unknown>
->;
+export type PopupComponent<
+  Properties extends object,
+  Local extends object = object
+> = ComponentDefinition<Properties, Local, Record<string, unknown>>;
 
 /**
  * A component definition with its type arguments erased, as the registry stores it.
@@ -146,6 +147,7 @@ export type Element = {
   children: Entity[];
   instance: string | undefined;
   live: boolean;
+  entered: boolean;
   dropKey: (() => void) | undefined;
 };
 
@@ -259,4 +261,5 @@ export type JsxModule = {
   unmountRoot(entity: Entity): void;
   applyTap(entity: Entity): void;
   markPressed(entity: Entity, pressed: boolean): void;
+  playEnter(entity: Entity): void;
 };

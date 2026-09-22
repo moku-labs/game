@@ -3,12 +3,17 @@
  * canvas and a manifest fetched over HTTP.
  *
  * Serving: run `bun ./web/serve.ts` from `tests/integration/merge-game/`. It serves the bundled
- * page on `/` and the committed `manifest.json` and tiles under `/features/board/assets/` as
- * static files (`bun ./index.html` alone answers every path with the page).
+ * page on `/` and the committed `manifest.json` and every asset under `/features/` as static
+ * files (`bun ./index.html` alone answers every path with the page).
  */
-import { createApp, screen } from "@moku-labs/game";
+import { audioPlugin, createApp, screen } from "@moku-labs/game";
+import { hudFeature } from "../features/hud";
+import { ordersFeature } from "../features/orders";
+import { settingsFeature } from "../features/settings";
+import { settingsLocalePlugin } from "../features/settings/plugin";
 import { mainFlow } from "../flows/main";
 import { rewardFeature } from "../flows/reward";
+import { volumesOf } from "../game";
 import { startingPlayer, startingSession } from "../state";
 import { boardView } from "../view";
 
@@ -16,12 +21,23 @@ import { boardView } from "../view";
 const maxAttempts = 120;
 
 const app = createApp({
-  plugins: [...screen, rewardFeature, boardView],
+  plugins: [
+    ...screen,
+    audioPlugin,
+    rewardFeature,
+    boardView,
+    hudFeature,
+    ordersFeature,
+    settingsFeature,
+    settingsLocalePlugin
+  ],
   pluginConfigs: {
     renderer: { mount: "#game" },
     assets: { manifest: "/manifest.json" },
     model: { initialPlayer: startingPlayer, initialSession: startingSession, seed: 42 },
-    flow: { mainFlow, safeNode: "home" }
+    flow: { mainFlow, safeNode: "home" },
+    i18n: { locale: "ru", fallback: "ru" },
+    audio: { volumes: volumesOf }
   },
   onStart: ctx => {
     ctx.flow.run().catch((error: unknown) => {

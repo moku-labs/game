@@ -15,6 +15,8 @@ export const mainFlow = defineFlow("main", {
     boot: { ready: "home" },
     home: { play: "board" },
     board: { orderComplete: "afterOrder", left: "home" },
-    afterOrder: { done: "home" }
+    // Back onto the board: the reward is taken there, the coins fly onto the HUD counter, and the
+    // player keeps playing. "home" is reached by leaving the board.
+    afterOrder: { done: "board" }
   }
 });

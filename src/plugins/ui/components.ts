@@ -113,8 +113,8 @@ export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
  * // { kind: "popup", payload: { component: "Reward", props: { gold: 5 } }, answers: ["claim"] }
  * ```
  */
-export function popup<Properties extends object>(
-  component: PopupComponent<Properties>,
+export function popup<Properties extends object, Local extends object>(
+  component: PopupComponent<Properties, Local>,
   props: Properties
 ): Descriptor {
   return {
@@ -138,8 +138,8 @@ export type UiKit<Asset extends string, TextStyleKey extends string, StringKey e
   defineComponent: typeof defineComponent;
   defineStyle: typeof defineStyle;
   defineTokens: typeof defineTokens;
-  popup: <Properties extends object>(
-    component: PopupComponent<Properties>,
+  popup: <Properties extends object, Local extends object>(
+    component: PopupComponent<Properties, Local>,
     props: Properties
   ) => Descriptor;
   intrinsics: IntrinsicElementsFor<Asset, TextStyleKey, StringKey>;

@@ -3,14 +3,33 @@
  * screen and one with it. A shipped game adds `onStart: ctx => { ctx.flow.run().catch(showFatal); }`;
  * here the headless runner owns `run()`, so a fatal error reaches the test instead of a handler.
  */
-import type { Assets } from "@moku-labs/game";
-import { createApp, screen } from "@moku-labs/game";
+import type { Assets, Model } from "@moku-labs/game";
+import { audioPlugin, createApp, screen } from "@moku-labs/game";
 import { fakeClock, memory } from "@moku-labs/game/testing";
+import { hudFeature } from "./features/hud";
+import { ordersFeature } from "./features/orders";
+import { settingsFeature } from "./features/settings";
+import { settingsLocalePlugin } from "./features/settings/plugin";
 import { mainFlow } from "./flows/main";
 import { rewardFeature } from "./flows/reward";
 import type { Player } from "./state";
 import { startingPlayer, startingSession } from "./state";
 import { boardView } from "./view";
+
+/**
+ * Reads the volumes the player chose out of the committed save. `audio` calls it on every commit,
+ * which is why no node ever touches a gain.
+ *
+ * @param player - The committed player tree, as plain JSON.
+ * @returns The gain of every bus.
+ * @example
+ * ```ts
+ * volumesOf(startingPlayer as unknown as Model.Json); // { master: 1, music: 0.6, sfx: 1 }
+ * ```
+ */
+export function volumesOf(player: Model.Json): Player["settings"]["audio"] {
+  return (player as unknown as Player).settings.audio;
+}
 
 /** The save seam, recording every call it gets. */
 export type Provider = ReturnType<typeof memory>;
@@ -70,8 +89,20 @@ export function createGame(options: GameOptions = {}): Game {
   return { app, clock, provider };
 }
 
-/** The plugins of the game with its screen: the five screen plugins and both halves of the board. */
-const screenPlugins = [...screen, rewardFeature, boardView];
+/**
+ * The plugins of the game with its screen: the nine screen plugins, `audio`, which is opt-in, and
+ * every feature — the board, the reward, the HUD, the orders and the settings.
+ */
+const screenPlugins = [
+  ...screen,
+  audioPlugin,
+  rewardFeature,
+  boardView,
+  hudFeature,
+  ordersFeature,
+  settingsFeature,
+  settingsLocalePlugin
+];
 
 /** The game with its screen and the two seams a test holds on to. */
 export type ScreenGame = {
@@ -87,9 +118,9 @@ export type ScreenGameOptions = GameOptions & {
 };
 
 /**
- * Creates the same game with its screen composed: the five screen plugins and the view half of
- * the board feature. Without a document the renderer is inert and the assets plugin reads the
- * manifest only, so this runs in plain Bun exactly like the headless game.
+ * Creates the same game with its screen composed: the screen set, `audio` and the view half of
+ * every feature. Without a document the renderer is inert, the audio context stays locked and the
+ * assets plugin reads the manifest only, so this runs in plain Bun exactly like the headless game.
  *
  * @param options - The seams a test pins, plus the manifest.
  * @returns The app and the seams behind it.
@@ -114,7 +145,9 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       },
       clock: { source: clock },
       flow: { mainFlow, safeNode: "home" },
-      assets: { manifest: options.manifest }
+      assets: { manifest: options.manifest },
+      i18n: { locale: "ru", fallback: "ru" },
+      audio: { volumes: volumesOf }
     }
   });
 

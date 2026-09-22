@@ -5,20 +5,35 @@
 import type { MergeState } from "./rules";
 import { boardSize, generatorId, startingOrders, tables } from "./tables";
 
+/** What the settings screen writes: the three buses and the language of the interface. */
+export type Settings = {
+  /** Bus name to gain, 0..1. `audio` reads it back on every commit. */
+  audio: { master: number; music: number; sfx: number };
+  /** The locale the player chose. `i18n` is switched from the node that writes it. */
+  locale: string;
+};
+
 /** The saved player: the rule state plus what this game keeps beside it. */
 export type Player = {
   /** Everything the rules own: board, energy, generators, orders, wallet, inventory. */
   merge: MergeState;
   /** Reward ids the player took out of the reward popup, oldest first. */
   claimed: string[];
+  /**
+   * The reward waiting in the popup, `""` when none is pending. Saved, because the popup is an
+   * effect of a transit node and not a rest point: a reload has to find it again.
+   */
+  pendingReward: string;
+  /** The coins that order paid, held back until the player takes them out of the popup. */
+  pendingCoins: number;
+  /** What the settings screen last wrote. */
+  settings: Settings;
 };
 
 /** The session: what one run of the game keeps and never saves. */
 export type Session = {
   /** Generator taps in this session. */
   taps: number;
-  /** Reward waiting in the popup, `""` when none is pending. */
-  pendingReward: string;
 };
 
 /** The state of a new player. */
@@ -33,11 +48,14 @@ export const startingPlayer: Player = {
     inventory: [null, null, null],
     nextItemId: 1
   },
-  claimed: []
+  claimed: [],
+  pendingReward: "",
+  pendingCoins: 0,
+  settings: { audio: { master: 1, music: 0.6, sfx: 1 }, locale: "ru" }
 };
 
 /** The session at every start. */
-export const startingSession: Session = { taps: 0, pendingReward: "" };
+export const startingSession: Session = { taps: 0 };
 
 /**
  * Writes the state a rules function returned into the player draft. The rules are pure and build

@@ -5,6 +5,7 @@
  */
 import { createApp, defineGame, exit, guide, projection, Transform, type } from "../../../index";
 import { animPlugin } from "../../anim";
+import { defineMotion } from "../../anim/motion";
 import { assetsPlugin } from "../../assets";
 import { i18nPlugin } from "../../i18n";
 import type { CompiledMessages } from "../../i18n/types";
@@ -86,6 +87,13 @@ export const listProjection = projection({
   )
 });
 
+/** The motion a game writes with `defineMotion`, on a button of the screen. */
+export const buttonMotion = defineMotion({
+  states: { small: { Transform: { scale: 0.8 } } },
+  transition: { ms: 200, ease: "out" },
+  on: { enter: "small", change: ["Transform"] }
+});
+
 /** A screen whose one element carries the three motion hooks, so they are all exercised. */
 export const movedProjection = projection({
   name: "moved",
@@ -95,6 +103,12 @@ export const movedProjection = projection({
   view: () => (
     <column key="movedRoot" style={{ width: 300, height: 300 }}>
       <row key="thrower" style={{ width: 10, height: 10 }} motion={{ enter: throwingHook }} />
+      <button
+        key="animated"
+        intent="openSettings"
+        style={{ width: 80, height: 80 }}
+        motion={buttonMotion}
+      />
       <row
         key="mover"
         style={{ width: 100, height: 100, fill: 0x33_33_33 }}

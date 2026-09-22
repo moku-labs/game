@@ -13,7 +13,7 @@ import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { Layer, system, Tree } from "../world/ecs/define";
 import { createModules } from "./api";
-import { UI_OWNER } from "./components";
+import { Box, UI_OWNER } from "./components";
 import { asTagHandle } from "./errors";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import type { LayoutModule } from "./layout/types";
@@ -74,8 +74,8 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 }
 
 /**
- * Opens the two systems of phase `layout`, the four world hooks of `Tree` and `Pressed`, the two
- * effect handlers and the tap listener. Every remover goes into the state, so the teardown closes exactly these.
+ * Opens the two systems of phase `layout`, the five world hooks of `Tree`, `Box` and `Pressed`,
+ * the two effect handlers and the tap listener. Every remover goes into the state, so the teardown closes exactly these.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param jsx - The jsx module.
@@ -94,6 +94,7 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
       jsx.mountRoot(entity, place?.projection ?? "ui", ecs.get(entity, Layer)?.name ?? "ui");
     }),
     ecs.onRemoved(Tree, entity => jsx.unmountRoot(entity)),
+    ecs.onAdded(Box, entity => jsx.playEnter(entity)),
     ecs.onAdded(asTagHandle(Pressed), entity => jsx.markPressed(entity, true)),
     ecs.onRemoved(asTagHandle(Pressed), entity => jsx.markPressed(entity, false)),
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),

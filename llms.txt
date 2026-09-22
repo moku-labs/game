@@ -1,6 +1,6 @@
 # @moku-labs/game
 
-> 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state. V1 is the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry; V2 adds the screen plugins `world`, `renderer`, `input`, `assets`, `scenes` (the list `screen`), a Pixi v8 renderer loaded lazily, and the `@moku-labs/game/assets` entry that generates typed asset keys. The package is version 0.0.0 and is not published yet.
+> 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state. V1 is the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry; V2 adds the screen plugins `world`, `renderer`, `input`, `assets`, `scenes`, a Pixi v8 renderer loaded lazily, and the `@moku-labs/game/assets` entry that generates typed asset keys. V3 adds the interface plugins `anim`, `i18n`, `text`, `ui` (the list `screen` is now all nine) and the opt-in `audio`: choreographies as data, strings as data, text from MSDF fonts, screens in JSX laid out by Yoga, sound as an effect a node awaits. The package is version 0.0.0 and is not published yet.
 
 Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer dependency, no V1 code imports it. Node >= 24, Bun >= 1.3.14. TypeScript strict with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. The engine ships no genre rules: no merge, no match-3, no physics. A game brings its own pure rule functions.
 
@@ -8,14 +8,18 @@ Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer 
 
 - `@moku-labs/game`: everything a game imports.
 - `@moku-labs/game/testing`: headless play, repro runs, fake clock, in-memory save provider.
+- `@moku-labs/game/assets` (node and bun only): the asset key scanner and the string compiler.
+- `@moku-labs/game/jsx-runtime` and `@moku-labs/game/jsx-dev-runtime`: what `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand.
 
 Root exports:
 - Functions: `createApp`, `createPlugin`, `defineGame`, `defineFeature`, `type`, `exit`, `to`, `slot`, `schedule`, `guide`, `hint`.
 - Class: `SaveUnreadableError`.
-- Plugin instances: `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`, `worldPlugin`, `rendererPlugin`, `inputPlugin`, `assetsPlugin`, `scenesPlugin`; the list `screen`.
-- Screen helpers from the root: `component`, `tag`, `resource`, `mut`, `system`, `projection`, `Layer`, `Order`, `Exiting`, `Transform`, `Sprite`, `NineSlice`, `Parent`, `Display`, `sprite`, `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`, `Held`, `Hovered`, `Pressed`, `Pointer`, `defineBundles`, `load`, `defineScene`. `defineGame` returns `projection`, `sprite`, `Sprite`, `NineSlice`, `defineBundles`, `load`, `defineScene` typed by the game's `assets` and `bundles` keys.
-- `@moku-labs/game/assets` (node and bun only): `scanAssets(options)`, `runCli(argv)`; key = feature + "." + path inside `assets/`.
-- Type namespaces: `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`. Use `import type { Flow } from "@moku-labs/game"` and then `Flow.RouteStep`, `Flow.NodeContext`, `Model.Json`, `Model.PlayerStateProvider`, `Clock.ClockSource`, `Time.Phase`, `Lifecycle.PauseReason`.
+- Plugin instances: `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`, `worldPlugin`, `rendererPlugin`, `inputPlugin`, `assetsPlugin`, `scenesPlugin`, `animPlugin`, `i18nPlugin`, `textPlugin`, `uiPlugin`, `audioPlugin`; the list `screen` = `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`. `audio` is opt-in: `plugins: [...screen, audioPlugin]`.
+- Screen helpers from the root: `component`, `tag`, `resource`, `mut`, `system`, `projection`, `Layer`, `Order`, `Exiting`, `Tree`, `Transform`, `Sprite`, `NineSlice`, `Shape`, `Parent`, `Display`, `sprite`, `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`, `Touchable`, `Held`, `Hovered`, `Pressed`, `Pointer`, `defineBundles`, `load`, `defineScene`.
+- Interface helpers from the root (V3): `defineAnimation`, `sequence`, `parallel`, `stagger`, `tween`, `set`, `wait`, `mark`, `frames`, `sfx`, `haptic`, `use`, `play`, `external`, `defineMotion`, `Animation`; `tr`; `Text`, `label`, `defineTextStyles`; `defineComponent`, `popup`, `defineStyle`, `defineTokens`, `resolve`, `Box`, `LocalWrite`; `music`.
+- `defineGame<Types>()` returns, typed by the game's `player`, `session`, `assets`, `bundles`, `scenes`, `strings` and `textStyles`: `defineNode`, `defineFlow`, `defineFeature`, `projection`, `sprite`, `Sprite`, `NineSlice`, `defineBundles`, `load`, `defineScene`, `defineAnimation`, `frames`, `sfx`, `play`, `tr`, `label`, `defineTextStyles`, `defineComponent`, `defineStyle`, `defineTokens`, `popup`, `music`. `Types` is `{ player; session; assets: string; bundles?: string; scenes?: string; strings: Record<string, unknown>; textStyles?: string }`.
+- `@moku-labs/game/assets`: `scanAssets(options)`, `emitKeys`, `emitManifest`, `compileStrings(root, out, options?)`, `checkStrings`, `runCli(argv)`. Asset key = feature + "." + path inside `assets/`. `runCli` (a game's `bun run assets:keys`) scans the assets and compiles `features/*/strings/<locale>.json` into `generated/strings.ts` (the `Strings` type for `defineGame`) and one `generated/strings.<locale>.ts` per locale; `--check` fails when any output is out of date.
+- Type namespaces: `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`, `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`. Use `import type { Flow } from "@moku-labs/game"` and then `Flow.RouteStep`, `Flow.NodeContext`, `Model.Json`, `Model.PlayerStateProvider`, `Clock.ClockSource`, `Time.Phase`, `Lifecycle.PauseReason`, `Anim.Target`, `I18n.Message`. `Text` is the component, so the text types are `TextTypes`.
 - `defineNode` and `defineFlow` are NOT root exports. They come from `defineGame<Types>()`.
 
 ## Concepts
@@ -77,6 +81,11 @@ function defineFeature(name: string, description: FeatureDescription): FeaturePl
 //   nodes?: readonly AnyNode[];
 //   flows?: readonly AnyFlow[];
 //   contribute?: Record<string, { flow: AnyFlow; order: number; when?: (snapshot: Snapshot) => boolean }>;
+//   projections?, systems?, components?, scenes?, assets?;   // V2 keys, read by world, scenes and assets
+//   animations?: readonly AnimationDefinition[];              // V3, read by anim
+//   ui?: readonly ComponentDefinition[];                      // V3, read by ui (defineComponent results)
+//   strings?: Record<locale, CompiledMessages | (() => Promise<unknown>)>;   // V3, read by i18n
+//   textStyles?: ReturnType<typeof defineTextStyles>;         // V3, read by text
 // }
 
 function schedule(moment: number | undefined): Descriptor;  // awaited, asks the clock for one `elapsed`
@@ -291,14 +300,15 @@ A tutorial step is `await fx(guide({ allow: { intent: "roll" }, hand: "tap", tex
 
 ## Plugins
 
-Registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`. `log` and `env` from `@moku-labs/common` are on every context as `ctx.log` and `ctx.env`. Configure with `createApp({ pluginConfigs: { <name>: { ... } } })`. Global config: `createApp({ config: { orientation, referenceSide } })`, defaults `"portrait"` and `1080`.
+Registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; then the list `screen` a game spreads in: `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; then `audio` when the game adds it. `log` and `env` from `@moku-labs/common` are on every context as `ctx.log` and `ctx.env`. Configure with `createApp({ pluginConfigs: { <name>: { ... } } })`. Global config: `createApp({ config: { orientation, referenceSide } })`, defaults `"portrait"` and `1080`.
 
 ### time (Standard, no dependencies, no events)
 
 The single `requestAnimationFrame` loop. Six phases in this order: `input`, `animate`, `layout`, `sync`, `signals`, `render`.
-- API: `onFrame(phase, callback): () => void`, `snapshot(): Readonly<Time>`, `setScale(scale)`, `pause()`, `resume()`, `isPaused()`, `isRunning()`, `step(deltaMs)`.
-- `Time` is `{ delta, elapsed, scale, frame }` in scaled milliseconds.
-- Config: `maxFps: 30 | 60 | 120` default `60`, `maxDeltaMs: number` default `50`.
+- API: `onFrame(phase, callback): () => void`, `snapshot(): Readonly<Time>`, `setScale(scale)`, `pause()`, `resume()`, `isPaused()`, `isRunning()`, `step(deltaMs)`, `wake()`.
+- `Time` is `{ delta, elapsed, scale, frame, idle }` in scaled milliseconds.
+- Idle cap: after `idleAfterMs` unscaled milliseconds without a `wake()` the loop runs at `idleFps` and `snapshot().idle` is true. `wake()` lifts it at once; `input`, `anim`, `flow`, `assets`, `scenes`, `text` and `ui` call it. `step(deltaMs)` is never capped.
+- Config: `maxFps: 30 | 60 | 120` default `60`, `maxDeltaMs: number` default `50`, `idleFps: 0 | 30` default `30` (`0` turns the idle cap off), `idleAfterMs: number` default `2000`.
 - In plain Bun there is no frame source. `isRunning()` is false and tests drive frames with `step`.
 
 ### lifecycle (Standard, depends on time)
@@ -342,9 +352,86 @@ The graph. Modules `runner`, `gate`, `inbox`, `fx`, `features`. Runner methods s
 - Events: `flow:edge` `{ flow, node, outcome, payload, next, patches: { doc, session }, index, now }` after the commit of an edge. `flow:rest` `{ path, checkpoint }`. `flow:error` `{ path, error, rolledBackTo, retry }`.
 - Config: `mainFlow` default `undefined` and required before `run()`, `safeNode: string | undefined` default `undefined` which means the main flow's `start`, `retries` default `1`, `settleTimeoutMs` default `2000`, `journalLimit` default `500`.
 
+### Screen plugins (V2, built)
+
+`world`, `renderer`, `input`, `assets`, `scenes`. Each has a README at `src/plugins/<name>/README.md`; the root README lists their APIs, events and config. Rendering: WebGPU preferred, with Pixi's WebGL fallback.
+
+### Interface plugins (V3, built)
+
+A screen is a projection whose `view` returns JSX. The game's `tsconfig.json` sets `"jsx": "react-jsx"` and `"jsxImportSource": "@moku-labs/game"`; screens are `.tsx` files. There is no DOM and no React.
+
+- Tags: `screen`, `layer`, `row`, `column`, `stack`, `spacer`, `panel` (`nineSlice?`), `image` (`texture`), `icon` (`name`), `text` (`content: string | Message`, or `bind: { component, field }`; `style` is a text style key), `button` (`intent` + `payload`, or `local`, never both), `scroll` (`axis: "y"` only in V3). Common props: `key`, `style`, `state: { active?, disabled?, selected? }`, `motion`.
+- Style vocabulary (`defineStyle`, plain data): flow `direction`, `wrap`, `justify`, `align`, `alignSelf`, `gap`, `grow`, `shrink`; box `padding`, `margin`, `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `aspect`, `overflow`; position `position`, `left`, `top`, `right`, `bottom`, `reason`; visual `fill`, `stroke`, `strokeWidth`, `radius`, `alpha`; variants `is: { pressed?, disabled?, active?, selected? }` and `when: { portrait?, landscape?, tall?, wide? }`, each a partial style merged in when the flag holds. Lengths are reference units or `"safeArea.top" | "safeArea.right" | "safeArea.bottom" | "safeArea.left"`. No font size here: it comes from the text style.
+- `defineComponent(name, { local?, outcomes?, view(props, local) })`. A component with `outcomes` is a popup: `await fx(popup(Component, props))` opens the gate for its outcomes and resolves with `{ intent, payload }` of the pressed button. A button with `local` writes into the nearest component instance; it never reaches the graph.
+- `tr(key, params?)` returns a frozen `Message` `{ key, params }`; no locale is read at the call site. Strings live in `features/<feature>/strings/<locale>.json` as ICU MessageFormat 1 (`{n, plural, one {# order} other {# orders}}`, `select`, `selectordinal`, `number`, `date`, `time`; no skeletons, no `currency`). `bun run assets:keys` compiles them. `app.i18n`: `locale()`, `setLocale(locale)` (async, emits `i18n:locale-changed`), `format(message, locale?)` returns `Part[]`, `plain(message)` returns a string, `has(key)`, `locales()`. Config: `locale: "en"`, `fallback: "en"`, `locales: {}`.
+- Text: `Text` component, `label({ text, style, at, anchor? })` for board text in a projection view, `defineTextStyles({ "hud.digits": { font, size, fill, bold?, italic?, stroke?, strokeWidth?, letterSpacing?, align?, wrap?, digits? } })` under the feature's `textStyles` key. Tags inside a string: `<b>`, `<i>`, `<color=#rrggbb>`, `<icon=key>`, `\<`, `\n`. Built-in styles `body` and `digits` from config `fonts: { body: "ui.font-body", digits: "ui.font-digits" }`. `app.text.measure(content, style)` gives the same numbers in a browser and in Bun.
+- Animation is data: `defineAnimation(id, { slots: { name: type<Anim.Target>() }, build: (slots, { at }) => Step })`. Steps: `sequence(...)`, `parallel(...)`, `stagger(items, ms, item => Step)`, `tween(target, Component, to, { ms, ease?, delayMs?, additive? })`, `set(target, Component, patch)`, `wait(ms)`, `mark(name)`, `frames(target, { keys, fps, loop? })`, `sfx(key, { bus? })`, `haptic(kind)`, `use(animation, slots, tools?)`. A target is `{ projection, key }` or an entity. A node plays it with `await fx(play(animation, slots))`; in fast mode it finishes at once. `defineMotion({ states, transition?, on: { enter?, exit?, change? } })` builds the enter, exit and change hooks for a projection or the `motion` prop of a tag. Events `anim:mark` `{ animation, mark }` and `anim:finished` `{ animation }`. Config `maxTracks: 2000`.
+- Audio is opt-in: `plugins: [...screen, audioPlugin]`. `fx(sfx("orders.complete"))` resolves when the sound started. `await fx(music("board.theme"))` cross-fades; `music(null)` fades out; a scene's `music` key switches the track on `scenes:changed`. Buses `master`, `music`, `sfx`. Volumes come from the committed player: config `volumes: player => (player as Player).settings.audio`, applied on every `model:committed`. `app.audio`: `setVolume(bus, value)`, `volume(bus)`, `mute(bus, on)`, `unlocked()`. Config: `buses: { master: 1, music: 0.6, sfx: 1 }`, `musicFadeMs: 600`, `volumes`, `context`. Without `audio` every `sfx` and `music` effect resolves `undefined` at once, so the same node runs in a game with no sound.
+- `app.ui`: `tree()` the live screen as plain data, `find(key)` the entity of a keyed element, `lint()` tap targets under `tapTargetPt` (default `44`), text that overflows in some locale, absolute elements without `reason`. Config: `tapTargetPt: 44`, `breakpoints: { tall: 2, wide: 1.5 }`. `ui` emits nothing.
+
+```tsx
+// features/hud/view.tsx
+import type { Anim } from "@moku-labs/game";
+import { Transform, mark, sequence, sfx, tween, type } from "@moku-labs/game";
+import { defineAnimation, defineComponent, defineFeature, defineTextStyles, projection, tr } from "../../state";
+
+export const hud = projection({
+  name: "hud",
+  layer: "ui",
+  from: player => ({ coins: player.coins }),
+  view: hud => (
+    <row key="bar" style={{ gap: 16, padding: { top: "safeArea.top", left: 24, right: 24 }, width: "100%", height: 120 }}>
+      <text key="coins" style="hud.digits" content={tr("hud.coins", { n: hud.coins })} />
+      <button key="settings" intent="openSettings" style={{ width: 96, height: 96 }}><icon name="hud.gear" /></button>
+    </row>
+  )
+});
+
+export const RewardPopup = defineComponent("RewardPopup", {
+  outcomes: { claim: type<{ orderId: string }>() },
+  view: (props: { orderId: string; gold: number }) => (
+    <panel key="reward" nineSlice="ui.panel" style={{ direction: "column", gap: 16, padding: 32, width: 600, height: 400 }}>
+      <text key="gold" style="hud.digits" content={String(props.gold)} />
+      <button key="claim" intent="claim" payload={{ orderId: props.orderId }} style={{ width: 240, height: 88 }}>
+        <text content={tr("common.claim")} />
+      </button>
+    </panel>
+  )
+});
+
+export const popCoins = defineAnimation("hud.popCoins", {
+  slots: { coins: type<Anim.Target>() },
+  build: ({ coins }) => sequence(tween(coins, Transform, { scale: 1.2 }, { ms: 120 }), tween(coins, Transform, { scale: 1 }, { ms: 200 }), sfx("hud.coins"), mark("done"))
+});
+
+export const hudFeature = defineFeature("hud", {
+  projections: [hud],
+  ui: [RewardPopup],
+  animations: [popCoins],
+  textStyles: defineTextStyles({ "hud.digits": { font: "ui.font-digits", size: 40, fill: 0xffe082, digits: true } }),
+  strings: { en: () => import("../../generated/strings.en") }
+});
+
+// features/orders/deliver.ts — the popup and the choreography are effects the node awaits
+import { play, type } from "@moku-labs/game";
+import { defineNode, popup } from "../../state";
+import { popCoins, RewardPopup } from "../hud/view";
+
+export const deliver = defineNode({
+  outcomes: { claimed: type<{ orderId: string }>() },
+  run: async ({ player, fx, out }) => {
+    const answer = (await fx(popup(RewardPopup, { orderId: "o1", gold: 5 }))) as { intent: "claim"; payload: { orderId: string } };
+
+    player.coins += 5;
+    await fx(play(popCoins, { coins: { projection: "hud", key: "coins" } }));
+    return out.claimed({ orderId: answer.payload.orderId });
+  }
+});
+```
+
 ### Planned, not built
 
-`world`, `renderer`, `input`, `assets`, `scenes` in V2. `anim`, `i18n`, `text`, `ui`, `audio` in V3. `/inspect` and `/control` entries in V4. `effects` in V5. `platform` in V6. Do not import them and do not invent their API. The V2 rendering decision: WebGPU preferred, with Pixi's WebGL fallback.
+`/inspect` and `/control` entries in V4. `effects` in V5. `platform` in V6. Do not import them and do not invent their API.
 
 ## Game plugins and events
 
@@ -400,4 +487,4 @@ src/
 tests/            headless scenarios with createHeadless and walk
 ```
 
-This is the layout of the worked example in the engine repository: `tests/integration/merge-game/` with `kit.ts`, `state.ts`, `tables.ts`, `rules/`, `nodes/`, `flows/`, `game.ts`. It is an internal test fixture written on the public API only. It is not published. Its scenario is `tests/integration/template-merge.test.ts`. Each plugin has a README: `src/plugins/<name>/README.md` for `time`, `lifecycle`, `model`, `clock`, `flow`. Moku Core specification: https://github.com/moku-labs/core/tree/main/specification
+This is the layout of the worked example in the engine repository: `tests/integration/merge-game/` with `kit.ts`, `state.ts`, `tables.ts`, `rules/`, `nodes/`, `flows/`, `game.ts`. It is an internal test fixture written on the public API only. It is not published. Its scenario is `tests/integration/template-merge.test.ts`. A game with a screen adds `features/<name>/view.tsx` (projections and components), `features/<name>/animations.ts`, `features/<name>/strings/<locale>.json` and the `generated/` folder `bun run assets:keys` writes. Each plugin has a README: `src/plugins/<name>/README.md` for `time`, `lifecycle`, `model`, `clock`, `flow`, `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`, `audio`. Moku Core specification: https://github.com/moku-labs/core/tree/main/specification

@@ -63,6 +63,9 @@ const untilOrder: Flow.RouteStep[] = [
 /** The reward popup the finished order opened. */
 const claim: Flow.RouteStep = { at: "afterOrder/show", intent: "claim" };
 
+/** Leaving the board, which is where the reward hands the player back to. */
+const leave: Flow.RouteStep = { at: "board/awaitIntent", intent: "leave" };
+
 /** A board that already carries two equal items and one of the next level. */
 const preparedPlayer: Player = {
   ...startingPlayer,
@@ -160,8 +163,9 @@ describe("screen-merge — the board as entities", () => {
       { name: "fx", sort: "none" },
       { name: "ui", sort: "none" }
     ]);
-    // Nine cells, three items and the generator, which is drawn among the items.
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4 });
+    // Nine cells, three items and the generator, which is drawn among the items, and the two
+    // projections of the HUD in the `ui` layer every scene carries.
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 2 });
     expect(app.world.projection.entityOf("board.cells", "c1_0")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
     expect(app.world.projection.entityOf("board.generators", generatorId)).toBeDefined();
@@ -219,7 +223,7 @@ describe("screen-merge — the board as entities", () => {
     expect(app.model.store.snapshot().player).toEqual(before);
     expect(app.world.projection.entityOf("board.items", "i2")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i3")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4 });
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 2 });
 
     await app.stop();
   });
@@ -227,7 +231,7 @@ describe("screen-merge — the board as entities", () => {
   it("spawns one more item entity when the generator is tapped", async () => {
     const { app } = await startBoard(startingPlayer);
 
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 1 });
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 1, ui: 2 });
 
     const generator = app.world.projection.entityOf("board.generators", generatorId) ?? 0;
 
@@ -237,7 +241,7 @@ describe("screen-merge — the board as entities", () => {
     app.time.step(16);
 
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 2 });
+    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 2, ui: 2 });
 
     await app.stop();
   });
@@ -255,7 +259,7 @@ describe("screen-merge — the fast walk", () => {
     expect(board.path).toBe("afterOrder/show");
     expect(app.scenes.current()).toBe("board");
 
-    const home = await game.walk([claim]);
+    const home = await game.walk([claim, leave]);
 
     expect(home.path).toBe("home");
     expect(app.model.store.snapshot().player).toMatchObject({

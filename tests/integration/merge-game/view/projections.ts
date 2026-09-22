@@ -15,7 +15,7 @@ import { itemLevelUp, itemMergeInto, itemPopIn, itemSlideTo } from "./motions";
 
 /** The tile of every level of every chain. Generated keys, so a missing tile does not compile. */
 const itemTextures: Record<string, readonly AssetKey[]> = {
-  wood: ["board.item-wood-1", "board.item-wood-2", "board.item-wood-3"]
+  wood: ["board.item-wood-1", "board.item-wood-2", "board.item-wood-3", "board.item-wood-4"]
 };
 
 /** The generator table under the loose key type, so an id read from a save can be looked up. */

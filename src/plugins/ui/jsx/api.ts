@@ -58,6 +58,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     applyTap: (entity: Entity): void => applyTap(ctx, entity),
 
-    markPressed: frame.markPressed
+    markPressed: frame.markPressed,
+
+    playEnter: frame.playEnter
   };
 }

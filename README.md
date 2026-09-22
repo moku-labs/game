@@ -2,7 +2,7 @@
 
 **A 2D puzzle game engine where the game is a deterministic graph of business logic.**
 
-`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations.
+`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations. V3 adds the interface: choreographies as data, strings as data, text from MSDF fonts, screens written in JSX and laid out by Yoga, and sound as an effect a node awaits.
 
 <br/>
 
@@ -15,7 +15,7 @@
 
 <br/>
 
-[Why](#why-moku-labsgame) · [Status](#status) · [Install](#install) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Plugins](#plugins) · [Events](#events) · [Configuration](#configuration) · [Development](#development) · [Requirements](#requirements) · [Docs](#docs)
+[Why](#why-moku-labsgame) · [Status](#status) · [Install](#install) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Plugins](#plugins) · [Interface in JSX](#interface-in-jsx) · [Events](#events) · [Configuration](#configuration) · [Development](#development) · [Requirements](#requirements) · [Docs](#docs)
 
 ---
 
@@ -30,13 +30,13 @@
 
 ## Status
 
-V1 and V2 are built. Everything below V2 is a plan and may change.
+V1, V2 and V3 are built. Everything below V3 is a plan and may change.
 
 | Milestone | State | Scope | Exit criterion |
 |---|---|---|---|
 | V1 | built | `time`, `lifecycle`, `model`, `clock`, `flow`, the `@moku-labs/game/testing` entry | A fixture game is played to the end headless |
 | V2 | built | `world`, `renderer`, `input`, `assets`, `scenes`, the `@moku-labs/game/assets` entry | A board is visible and items merge by drag; the same game still plays to the end headless |
-| V3 | planned | `anim`, `i18n`, `audio`, `text`, `ui` | Popup, HUD and buttons with sound |
+| V3 | built | `anim`, `i18n`, `text`, `ui`, `audio`, the `@moku-labs/game/jsx-runtime` entry | Popup, HUD and buttons with sound; the same game still plays to the end headless |
 | V4 | planned | `/inspect` and `/control` entries | External tools can read and drive a game |
 | V5 | planned | `effects`, production mode of `assets`, visual test helpers | Not defined yet |
 | V6 | planned | `platform` | A template game runs on a phone |
@@ -53,7 +53,7 @@ bun add @moku-labs/game pixi.js
 > **Status: `0.0.0`, not published yet.** The package is not on npm. The command above is the intended install line. `pixi.js` `^8.0.0` is a peer dependency. No V1 code imports it.
 
 > [!IMPORTANT]
-> Bun only. ESM only. `"sideEffects": false`. There is no CJS build.
+> Bun only. ESM only. `"sideEffects": false`. There is no CJS build. `yoga-layout` is a dependency the `ui` plugin loads lazily; nothing imports it before `onStart`.
 
 ## Quick start
 
@@ -183,7 +183,7 @@ it("plays two rolls and a reset without a screen", async () => {
 In a live game the same answer comes from the screen: `app.flow.gate.answer({ intent: "roll" })`.
 
 > [!TIP]
-> Types reach a game through one namespace per plugin: `import type { Flow, Model, Clock, Lifecycle, Time } from "@moku-labs/game"`, then `Flow.RouteStep`, `Model.PlayerStateProvider`, `Time.Phase`.
+> Types reach a game through one namespace per plugin: `import type { Flow, Model, Clock, Lifecycle, Time } from "@moku-labs/game"`, then `Flow.RouteStep`, `Model.PlayerStateProvider`, `Time.Phase`. The screen and interface plugins follow the same rule: `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`. `Text` is the component, so its type namespace is `TextTypes`.
 
 > [!TIP]
 > A larger worked example lives in [`tests/integration/merge-game/`](./tests/integration/merge-game). It is a small game written on the public API only, with sub-flows, a slot, a feature and timers. It is an internal test fixture and is not published. Its scenario is [`tests/integration/template-merge.test.ts`](./tests/integration/template-merge.test.ts).
@@ -198,7 +198,7 @@ flowchart LR
   N --> E["Edge<br/>commit, journal, flow:edge"]
   E --> R
   E --> M["model<br/>committed state and save"]
-  M --> S["Screen<br/>projection, V2"]
+  M --> S["Screen<br/>projection, JSX"]
   classDef u fill:#0b7285,stroke:#08525f,color:#fff;
   classDef m fill:#1864ab,stroke:#0d3d6e,color:#fff;
   class P,W,S u
@@ -225,7 +225,7 @@ flowchart LR
 
 ## Plugins
 
-Seven plugins are on every app; the five screen plugins are the list `screen` a game spreads in. `log` and `env` come from [`@moku-labs/common`](https://github.com/moku-labs/common) and sit on every plugin context as `ctx.log` and `ctx.env`.
+Five logic plugins are on every app; the nine screen plugins are the list `screen` a game spreads in; `audio` is opt-in, `[...screen, audioPlugin]`. `log` and `env` come from [`@moku-labs/common`](https://github.com/moku-labs/common) and sit on every plugin context as `ctx.log` and `ctx.env`.
 
 ### Built
 
@@ -240,7 +240,12 @@ Seven plugins are on every app; the five screen plugins are the list `screen` a 
 | [`renderer`](./src/plugins/renderer/README.md) | Very Complex | The Pixi v8 host loaded lazily (`host`), one `sync` system that owns every display object, the reference viewport of short side 1080 (`viewport`) | `host.ready()`, `host.kind()`, `host.canvas()`, `sync.hitTest(x, y, accept)`, `sync.textures.provide(fn)`, `sync.displayOf(entity)`, `viewport.toReference(x, y)`, `viewport.size()` |
 | [`input`](./src/plugins/input/README.md) | Standard | Gestures as data components: `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`; the drop target names the intent that reaches `flow.gate` | `tap(target)`, `press(target)`, `drag(from, to)`, `swipe(target, direction)` |
 | [`assets`](./src/plugins/assets/README.md) | Complex | The manifest, five load tiers, graph-driven preload, a texture budget with LRU unload; typed keys from the `assets` entry | `load(bundle)`, `unload(bundle)`, `isLoaded(bundle)`, `texture(key)`, `usage()` |
-| [`scenes`](./src/plugins/scenes/README.md) | Standard | A scene as a declaration: bundle, layers, projections. A node names its scene; the runner switches through `flow.onEnter` | `current()` |
+| [`scenes`](./src/plugins/scenes/README.md) | Standard | A scene as a declaration: bundle, layers, projections, `music`. A node names its scene; the runner switches through `flow.onEnter` | `current()` |
+| [`anim`](./src/plugins/anim/README.md) | Complex | The one tween core, installed into `world.projection` as the `TweenDriver`; timelines as frozen data built from typed slots; `defineMotion` sugar for the enter, exit and change hooks | `play(animation, slots)`, `finishAll()`, `active()`, `onMark(fn)` |
+| [`i18n`](./src/plugins/i18n/README.md) | Complex | Strings as data: `tr(key, params)` is a `Message`, ICU MessageFormat compiled to plain functions by `compileStrings` on the `assets` door, `Part[]` at run time, never a joined string | `locale()`, `setLocale(locale)`, `format(message, locale?)`, `plain(message)`, `has(key)`, `locales()` |
+| [`text`](./src/plugins/text/README.md) | Complex | The `Text` component, `label()`, `defineTextStyles()`, the tags `<b> <i> <color=#hex> <icon=key>`, measurement from the font's advance table, BitmapText from the MSDF fonts of a bundle | `measure(content, style)`, `styles()` |
+| [`ui`](./src/plugins/ui/README.md) | Very Complex | A screen is a projection whose `view` returns JSX; the tree is reconciled by identity into entities, laid out by one Yoga solve per change, `Box` is the rest pose; `defineComponent` with `local` and `outcomes`, `popup` as an effect, `defineStyle`, `defineTokens` | `tree()`, `find(key)`, `lint()` |
+| [`audio`](./src/plugins/audio/README.md) | Standard | Opt-in. Buses `master`, `music`, `sfx`; `sfx()` descriptors of `anim` and `music()` descriptors handled here; the scene's `music`; volumes read from the committed player through `volumes` | `setVolume(bus, value)`, `volume(bus)`, `mute(bus, on)`, `unlocked()` |
 
 ```mermaid
 flowchart LR
@@ -264,15 +269,33 @@ flowchart LR
   S["scenes"] --> F
   S --> W
   S --> A
+  AN["anim"] --> F
+  AN --> W
+  AN --> R
+  N["i18n"] --> F
+  X["text"] --> W
+  X --> R
+  X --> A
+  X --> N
+  U["ui"] --> I
+  U --> AN
+  U --> X
+  AU["audio"] --> L
+  AU --> M
+  AU --> F
+  AU --> A
+  AU --> S
   classDef u fill:#0b7285,stroke:#08525f,color:#fff;
   classDef m fill:#1864ab,stroke:#0d3d6e,color:#fff;
   classDef s fill:#5c940d,stroke:#3d6208,color:#fff;
+  classDef v fill:#862e9c,stroke:#5f1f70,color:#fff;
   class G u
   class F,T,L,M,C m
   class W,R,I,A,S s
+  class AN,N,X,U,AU v
 ```
 
-An arrow means "depends on". `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`. Without a document the screen plugins are inert: the same app starts in plain Bun.
+An arrow means "depends on"; for the V3 plugins the edges to `time` and the edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants sound appends `audioPlugin`. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
 
 ### Planned
 
@@ -280,11 +303,6 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 
 | Plugin | Milestone | Tier | Depends on | Will own |
 |---|---|---|---|---|
-| `anim` | V3 | Complex | `flow`, `world` | Tweens and motion |
-| `i18n` | V3 | Standard | `flow`, `world`, `assets` | String tables per locale |
-| `text` | V3 | Complex | `world`, `renderer`, `assets`, `i18n` | Text rendering and the text field |
-| `ui` | V3 | Very Complex | `flow`, `world`, `renderer`, `anim`, `i18n`, `text` | JSX components, styles, layout |
-| `audio` | V3 | Standard | `lifecycle`, `flow`, `assets`, `scenes` | Audio context and unlock |
 | `effects` | V5 | Complex | `flow`, `world`, `renderer` | Particles, filters, frames |
 | `platform` | V6 | Standard | `lifecycle`, `flow` | The native provider: background, system dialogs |
 
@@ -294,13 +312,30 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 |---|---|---|
 | `createApp` | function | Creates a game application |
 | `createPlugin` | function | Creates a game plugin bound to the engine's config and events |
-| `defineGame` | function | Returns `{ defineNode, defineFlow, defineFeature }` typed with the game's `player` and `session` |
-| `defineFeature` | function | Turns a feature description into a plugin |
+| `defineGame` | function | Returns the authoring helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings` and `textStyles`: `defineNode`, `defineFlow`, `defineFeature`, `projection`, `sprite`, `Sprite`, `NineSlice`, `defineBundles`, `load`, `defineScene`, and from V3 `tr`, `label`, `defineTextStyles`, `defineComponent`, `defineStyle`, `defineTokens`, `popup`, `defineAnimation`, `frames`, `sfx`, `play`, `music` |
+| `defineFeature` | function | Turns a feature description into a plugin. V3 keys: `projections`, `animations`, `ui`, `strings`, `textStyles` |
 | `type`, `exit`, `to`, `slot` | functions | Type tag of a payload, and the three graph helpers for edge targets and slots |
 | `schedule`, `guide`, `hint` | functions | Effect descriptors: next due moment, tutorial narrowing of the gate, cosmetic hint |
 | `SaveUnreadableError` | class | Thrown by `model.store.load()` when the save cannot be read |
-| `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin` | plugin instances | For `depends` and `ctx.require` in game plugins |
-| `Time`, `Lifecycle`, `Model`, `Clock`, `Flow` | type namespaces | All public types of one plugin |
+| `component`, `tag`, `resource`, `mut`, `system`, `projection`, `Layer`, `Order`, `Exiting`, `Tree` | functions and components | The ECS vocabulary of `world` and the projection helper |
+| `Transform`, `Sprite`, `NineSlice`, `Shape`, `Parent`, `Display`, `sprite` | components | The display components of `renderer` |
+| `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`, `Touchable`, `Held`, `Hovered`, `Pressed`, `Pointer` | components | Gestures as data, from `input` |
+| `defineBundles`, `load`, `defineScene` | functions | Bundle and scene declarations |
+| `defineAnimation`, `sequence`, `parallel`, `stagger`, `tween`, `set`, `wait`, `mark`, `frames`, `sfx`, `haptic`, `use`, `play`, `external`, `defineMotion`, `Animation` | functions and a component | Choreography as frozen data. `play(animation, slots)` is the effect a node awaits; `sfx` and `haptic` are descriptors `audio` and `platform` handle; `external` throws until Spine arrives |
+| `tr` | function | `tr(key, params?)` builds a frozen `Message`; no locale is read at the call site |
+| `Text`, `label`, `defineTextStyles` | component and functions | Words on the screen and the text styles a feature registers |
+| `defineComponent`, `popup`, `defineStyle`, `defineTokens`, `resolve`, `Box`, `LocalWrite` | functions and components | Interface components, the popup effect, the style vocabulary, the rect of an element |
+| `music` | function | `music(key \| null, { fadeMs? })`, the awaited effect that switches the music track |
+| `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`, `worldPlugin`, `rendererPlugin`, `inputPlugin`, `assetsPlugin`, `scenesPlugin`, `animPlugin`, `i18nPlugin`, `textPlugin`, `uiPlugin`, `audioPlugin` | plugin instances | For `depends` and `ctx.require` in game plugins; `screen` is the list of the nine screen plugins |
+| `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`, `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio` | type namespaces | All public types of one plugin |
+
+### Other entries
+
+| Entry | Runs in | Exports |
+|---|---|---|
+| `@moku-labs/game/testing` | anywhere | The headless helpers, see below |
+| `@moku-labs/game/assets` | node and bun only | `scanAssets`, `emitKeys`, `emitManifest`, `compileStrings`, `checkStrings`, `runCli`. A game runs it as `bun run assets:keys`: it writes the manifest, the typed asset keys and, next to them, `generated/strings.ts` with one `strings.<locale>.ts` per locale; `--check` fails when any of them is out of date |
+| `@moku-labs/game/jsx-runtime`, `@moku-labs/game/jsx-dev-runtime` | anywhere | `jsx`, `jsxs`, `jsxDEV`, `Fragment` and the `JSX` namespace that `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand |
 
 ### Testing entry
 
@@ -317,6 +352,108 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 
 A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`.
 
+## Interface in JSX
+
+The interface is one more projection. A screen is a projection whose `view` returns JSX; `ui` reconciles the tree by identity into entities it owns and lays them out with one Yoga solve per change. There is no DOM and no React: the runtime builds plain description nodes, and `"jsxImportSource": "@moku-labs/game"` is the only setup.
+
+```jsonc
+// tsconfig.json of the game
+{ "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@moku-labs/game" } }
+```
+
+The tags are `screen`, `layer`, `row`, `column`, `stack`, `spacer`, `panel`, `image`, `icon`, `text`, `button` and `scroll`. A `button` either names an `intent` for the gate or writes `local` state of its nearest component, never both. A `text` takes a string or a `Message` from `tr`; its size comes from a text style key, not from the layout style.
+
+```tsx
+// features/hud/view.tsx — the HUD, a reward popup and the choreography they share
+import type { Anim } from "@moku-labs/game";
+import { Transform, mark, parallel, sequence, sfx, tween, type } from "@moku-labs/game";
+import { defineAnimation, defineComponent, defineFeature, defineTextStyles, projection, tr } from "../../state";
+
+export const hud = projection({
+  name: "hud",
+  layer: "ui",
+  from: player => ({ coins: player.coins }),
+  view: hud => (
+    <row key="bar" style={{ gap: 16, padding: { top: "safeArea.top", left: 24, right: 24 }, width: "100%", height: 120 }}>
+      <text key="coins" style="hud.digits" content={tr("hud.coins", { n: hud.coins })} />
+      <button key="settings" intent="openSettings" style={{ width: 96, height: 96 }}>
+        <icon name="hud.gear" />
+      </button>
+    </row>
+  )
+});
+
+export const RewardPopup = defineComponent("RewardPopup", {
+  outcomes: { claim: type<{ orderId: string }>() },
+  view: (props: { orderId: string; gold: number }) => (
+    <panel key="reward" nineSlice="ui.panel" style={{ direction: "column", gap: 16, padding: 32, width: 600, height: 400 }}>
+      <text key="title" content={tr("orders.complete")} />
+      <text key="gold" style="hud.digits" content={String(props.gold)} />
+      <button key="claim" intent="claim" payload={{ orderId: props.orderId }} style={{ width: 240, height: 88 }}>
+        <text content={tr("common.claim")} />
+      </button>
+    </panel>
+  )
+});
+
+export const popCoins = defineAnimation("hud.popCoins", {
+  slots: { coins: type<Anim.Target>() },
+  build: ({ coins }) =>
+    sequence(
+      tween(coins, Transform, { scale: 1.2 }, { ms: 120 }),
+      parallel(tween(coins, Transform, { scale: 1 }, { ms: 200, ease: "outCubic" }), sfx("hud.coins")),
+      mark("done")
+    )
+});
+
+export const hudFeature = defineFeature("hud", {
+  projections: [hud],
+  ui: [RewardPopup],
+  animations: [popCoins],
+  textStyles: defineTextStyles({ "hud.digits": { font: "ui.font-digits", size: 40, fill: 0xffe082, digits: true } }),
+  strings: { en: () => import("../../generated/strings.en") }
+});
+```
+
+A popup is an effect. The node awaits it, the gate opens for the outcomes of the component, and the promise resolves with the intent of the button the player pressed. The choreography is played the same way.
+
+```ts
+// features/orders/deliver.ts
+import { play, sfx, type } from "@moku-labs/game";
+import { defineNode, popup } from "../../state";
+import { popCoins, RewardPopup } from "../hud/view";
+
+export const deliver = defineNode({
+  outcomes: { claimed: type<{ orderId: string }>() },
+  run: async ({ player, fx, out }) => {
+    fx(sfx("orders.complete"));
+    const answer = (await fx(popup(RewardPopup, { orderId: "o1", gold: 5 }))) as { intent: "claim"; payload: { orderId: string } };
+
+    player.coins += 5;
+    await fx(play(popCoins, { coins: { projection: "hud", key: "coins" } }));
+    return out.claimed({ orderId: answer.payload.orderId });
+  }
+});
+```
+
+Headless the same node runs to the end: `popup` resolves through the gate, `play` finishes at once in fast mode, and `sfx` without `audio` resolves `undefined`. The strings behind `tr` come from `features/*/strings/<locale>.json`; `bun run assets:keys` compiles them next to the asset keys, and `strings: Strings` in `defineGame` makes a wrong key or a missing parameter a compile error.
+
+```ts
+// game.ts — sound is opt-in, the buses follow the committed player
+createApp({
+  plugins: [...screen, audioPlugin, hudFeature],
+  pluginConfigs: {
+    renderer: { mount: "#game" },
+    audio: { volumes: player => (player as Player).settings.audio }
+  }
+});
+```
+
+`volumes` receives the committed player as `Json`, so the game names its own type once. `player.settings.audio` is `{ master?, music?, sfx? }`, committed by a settings node like any other state and applied on every `model:committed`.
+
+> [!TIP]
+> `app.ui.tree()` answers the live screen as plain data, `app.ui.find(key)` the entity of a keyed element, and `app.ui.lint()` the tap targets under `tapTargetPt`, the text that overflows in some locale and the absolute elements without a `reason`. The example app of the `ui` tests, [`src/plugins/ui/__tests__/app.tsx`](./src/plugins/ui/__tests__/app.tsx), is a whole HUD with a settings component, a scrolling list and a popup, run in plain Bun.
+
 ## Events
 
 Global events are empty: every event belongs to a plugin. `time` and `clock` emit nothing.
@@ -332,6 +469,11 @@ Global events are empty: every event belongs to a plugin. `time` and `clock` emi
 | `renderer:device-lost` | `renderer` | `{ kind, reason }` | The GPU device or context was lost; `lifecycle` is pushed |
 | `assets:bundle-loaded`, `assets:bundle-unloaded` | `assets` | `{ bundle, tier, mb, reason }` | A bundle entered or left memory |
 | `scenes:changed` | `scenes` | `{ from, to, music }` | The scene switched on entering a node |
+| `anim:mark` | `anim` | `{ animation, mark }` | A `mark` step was reached, or jumped by `finish()` |
+| `anim:finished` | `anim` | `{ animation }` | A timeline ended or was finished. Never on `cancel()` |
+| `i18n:locale-changed` | `i18n` | `{ locale }` | The module of the new locale is loaded; `text` re-resolves. Never at start |
+
+`text`, `ui` and `audio` emit nothing.
 
 ```ts
 import { createPlugin, flowPlugin } from "@moku-labs/game";
@@ -367,6 +509,8 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 |---|---|---|---|---|
 | `time` | `maxFps` | `30 \| 60 \| 120` | `60` | Frame rate cap |
 | `time` | `maxDeltaMs` | `number` | `50` | Upper bound of one frame's delta in milliseconds |
+| `time` | `idleFps` | `0 \| 30` | `30` | Frame rate cap of an idle screen. `0` turns the idle cap off. Any plugin lifts it with `wake()` |
+| `time` | `idleAfterMs` | `number` | `2000` | Unscaled milliseconds without a `wake()` after which the loop drops to `idleFps` |
 | `lifecycle` | none | | | The plugin has no config |
 | `model` | `playerProvider` | `PlayerStateProvider \| undefined` | `undefined` | The save seam. `undefined` means an in-memory provider: the save lives as long as the app does |
 | `model` | `initialPlayer` | `Json` | `{}` | Player state of a new player. Deep-cloned |
@@ -390,13 +534,25 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `assets` | `textureBudgetMb` | `number` | `192` | Texture memory budget for the LRU unload |
 | `assets` | `preloadDepth` | `number` | `2` | Graph edges walked for the preload at a rest node |
 | `assets` | `baseUrl`, `io` | | `undefined` | The CDN seam and the fetch/decode/texture seam a test replaces |
+| `anim` | `maxTracks` | `number` | `2000` | Dev guard: one warning each time the running track count rises past it. Durations live in the steps, never here |
+| `i18n` | `locale` | `string` | `"en"` | The locale at start |
+| `i18n` | `fallback` | `string` | `"en"` | The locale a missing key is read from before it is reported missing |
+| `i18n` | `locales` | `Record<string, module \| loader>` | `{}` | Compiled modules outside features, per locale |
+| `text` | `fonts` | `{ body, digits }` | `{ body: "ui.font-body", digits: "ui.font-digits" }` | The two boot fonts behind the built-in styles `body` and `digits` |
+| `text` | `missingGlyph` | `string` | `"□"` | Drawn for a glyph the font lacks |
+| `ui` | `tapTargetPt` | `number` | `44` | The smallest tap target `lint()` accepts |
+| `ui` | `breakpoints` | `{ tall, wide }` | `{ tall: 2, wide: 1.5 }` | Aspect thresholds of the `when` style variants |
+| `audio` | `buses` | `{ master, music, sfx }` | `{ master: 1, music: 0.6, sfx: 1 }` | Start gain of each bus, 0..1 |
+| `audio` | `musicFadeMs` | `number` | `600` | Cross-fade of a music switch, in real milliseconds |
+| `audio` | `volumes` | `(player) => Partial<Record<Bus, number>> \| undefined` | `undefined` | Reads the player's choice from the committed player on every `model:committed`. Absent: the buses stay at `buses` |
+| `audio` | `context` | `() => AudioContext \| undefined` | `undefined` | The context factory, a test seam. Absent: `new AudioContext()` where the global exists |
 
 ## Development
 
 ### Scripts
 
 ```sh
-bun run build              # build with tsdown: dist/index.mjs and dist/testing.mjs
+bun run build              # build with tsdown: dist/index.mjs, testing.mjs, assets.mjs, jsx-runtime.mjs, jsx-dev-runtime.mjs
 bun run typecheck          # tsc --noEmit
 bun run lint               # biome check . && eslint .
 bun run lint:fix           # biome check --write . && eslint --fix .
@@ -424,7 +580,7 @@ bun run release            # moku-release
 
 Plugin tests never go into the root `tests/` folder. Coverage thresholds are 90% for lines, functions, branches and statements.
 
-### Lint rules L1 to L6
+### Lint rules L1 to L9
 
 The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 
@@ -438,12 +594,14 @@ The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 | L6 | Plugin wiring files need no JSDoc on small inline arrows. Every function declaration and every exported type needs JSDoc with description, params and returns | `src/plugins/*/index.ts` |
 | L7 | The public contract carries the docs: every member of a `…Api` type in `types.ts` has JSDoc and a scenario `@example` (when it is called, literal arguments, the result). A member another plugin calls is shown from that plugin's point of view; there is no private tier and no exemption. The implementation of an API method has no JSDoc. Elsewhere an example is allowed, never required | `src/plugins/**/types.ts` |
 | L8 | No signature echo: an `@example` whose whole body is one call with bare identifiers is an error | `src/**` |
+| L9 | The JSX runtime module is reached only through `src/jsx-runtime.ts` and `src/jsx-dev-runtime.ts`, and those two import nothing else | `src/**` outside `ui` |
 
 ## Requirements
 
 - **Node `>= 24`** and **Bun `>= 1.3.14`**. Use `bun` only, never npm, yarn or pnpm.
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
-- **`pixi.js` `^8.0.0`** as a peer dependency.
+- **`pixi.js` `^8.0.0`** as a peer dependency. **`yoga-layout`** is a dependency, loaded lazily by `ui`. The string compiler on the `assets` door uses `@formatjs/icu-messageformat-parser`; no parser ships to the browser.
+- **JSX**: `"jsx": "react-jsx"` and `"jsxImportSource": "@moku-labs/game"` in the game's `tsconfig.json`. Screens are `.tsx` files.
 - **[`@moku-labs/core`](https://github.com/moku-labs/core)** is the kernel: plugins, lifecycle, events. **[`@moku-labs/common`](https://github.com/moku-labs/common)** brings `log` and `env`.
 
 ## Docs
@@ -453,6 +611,12 @@ The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 - [`model`](./src/plugins/model/README.md): store, rng, provider seam, migrations
 - [`clock`](./src/plugins/clock/README.md): `now`, `scheduleAt`, `fakeClock`
 - [`flow`](./src/plugins/flow/README.md): runner, gate, inbox, fx, features
+- [`world`](./src/plugins/world/README.md), [`renderer`](./src/plugins/renderer/README.md), [`input`](./src/plugins/input/README.md), [`assets`](./src/plugins/assets/README.md), [`scenes`](./src/plugins/scenes/README.md): the screen
+- [`anim`](./src/plugins/anim/README.md): tracks, timelines, `defineMotion`, the driver
+- [`i18n`](./src/plugins/i18n/README.md): messages, parts, the compiler, supported ICU
+- [`text`](./src/plugins/text/README.md): styles, tags, measurement, fonts
+- [`ui`](./src/plugins/ui/README.md): the JSX runtime, components, styles, layout, popups
+- [`audio`](./src/plugins/audio/README.md): buses, the unlock, pause, memory
 - [`llms.txt`](./llms.txt): overview for an LLM that writes a game on this engine
 - [Moku Core specification](https://github.com/moku-labs/core/tree/main/specification)
 
