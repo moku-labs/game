@@ -8,6 +8,7 @@ import type { Entity, LayerSort } from "../../world/types";
 import { Transform } from "../components";
 import type { PixiContainer } from "../types";
 import { detach } from "./pools";
+import { parentOf } from "./pose";
 import type { LayerEntry, SyncCtx, SyncState, View } from "./types";
 
 /**
@@ -56,7 +57,8 @@ export function writeZIndex(object: PixiContainer, value: number): void {
 }
 
 /**
- * Writes the depth a view has under the sort rule of its layer.
+ * Writes the depth a view has under the sort rule of its layer. A parented view hangs in its
+ * parent's wrapper, which sorts by `Order` whatever layer the parent is in.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -64,8 +66,16 @@ export function writeZIndex(object: PixiContainer, value: number): void {
  */
 export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
   const state = sctx.ctx.state.sync;
-  const sort = sortOf(state, view.layer);
+  const ecs = sctx.ctx.deps.world.ecs;
   const target = view.wrapper ?? view.object;
+
+  if (parentOf(ecs, entity) !== 0) {
+    writeZIndex(target, ecs.get(entity, Order)?.value ?? 0);
+
+    return;
+  }
+
+  const sort = sortOf(state, view.layer);
 
   if (sort === "none") {
     // A depth left over from a sorted layer would decide the hit-test order here.
@@ -75,12 +85,12 @@ export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
   }
 
   if (sort === "y") {
-    writeZIndex(target, sctx.ctx.deps.world.ecs.get(entity, Transform)?.y ?? 0);
+    writeZIndex(target, ecs.get(entity, Transform)?.y ?? 0);
 
     return;
   }
 
-  writeZIndex(target, sctx.ctx.deps.world.ecs.get(entity, Order)?.value ?? 0);
+  writeZIndex(target, ecs.get(entity, Order)?.value ?? 0);
 }
 
 /**

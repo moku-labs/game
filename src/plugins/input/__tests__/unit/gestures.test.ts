@@ -7,6 +7,7 @@ import {
   DropTarget,
   Held,
   Pointer,
+  PointerOver,
   type PointerValue,
   Pressable,
   Pressed,
@@ -21,6 +22,7 @@ import { createMockInput, type MockInput } from "./mock-input";
 
 const down = (clientX: number, clientY: number, pointerId = 1): RawSample => ({
   kind: "down",
+  pointerType: "touch",
   pointerId,
   clientX,
   clientY
@@ -28,6 +30,7 @@ const down = (clientX: number, clientY: number, pointerId = 1): RawSample => ({
 
 const moved = (clientX: number, clientY: number, pointerId = 1): RawSample => ({
   kind: "move",
+  pointerType: "touch",
   pointerId,
   clientX,
   clientY
@@ -35,10 +38,19 @@ const moved = (clientX: number, clientY: number, pointerId = 1): RawSample => ({
 
 const up = (clientX: number, clientY: number, pointerId = 1): RawSample => ({
   kind: "up",
+  pointerType: "touch",
   pointerId,
   clientX,
   clientY
 });
+
+const sample = (
+  kind: RawSample["kind"],
+  pointerType: RawSample["pointerType"],
+  clientX: number,
+  clientY: number,
+  pointerId = 1
+): RawSample => ({ kind, pointerType, pointerId, clientX, clientY });
 
 const pointerOf = (mock: MockInput): PointerValue =>
   mock.input.deps.world.ecs.resource(Pointer) as PointerValue;
@@ -256,7 +268,13 @@ describe("the frame step", () => {
 
     record(mock.state, down(50, 50));
     mock.frame();
-    record(mock.state, { kind: "cancel", pointerId: 1, clientX: 50, clientY: 50 });
+    record(mock.state, {
+      kind: "cancel",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 50,
+      clientY: 50
+    });
     mock.frame();
 
     expect(mock.answers).toEqual([]);
@@ -570,5 +588,162 @@ describe("Touchable and the onTap listeners", () => {
 
     expect(seen).toEqual([]);
     expect(mock.answers).toHaveLength(1);
+  });
+});
+
+// A tappable button at (0..100, 0..100) and a draggable item at (300..400, 0..100).
+function twoViews(mock: MockInput): { button: number; item: number } {
+  const button = mock.spawn([Tappable({ intent: "found" })]);
+  const item = mock.spawn([Draggable({}), Transform({ x: 300, y: 0 })], {
+    projection: "board.items",
+    key: "i5"
+  });
+
+  mock.boxes.push(
+    { entity: button, x: 0, y: 0, width: 100, height: 100 },
+    { entity: item, x: 300, y: 0, width: 100, height: 100 }
+  );
+  mock.start();
+
+  return { button, item };
+}
+
+describe("PointerOver, the hover of a mouse or a pen", () => {
+  it("tags the view a press would take when a mouse moves over it with no press", () => {
+    const mock = createMockInput();
+    const { button } = twoViews(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(true);
+    expect(mock.state.pointerOver).toBe(button);
+    expect(pointerOf(mock)).toMatchObject({ x: 50, y: 50, down: false });
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("hovers with the filter of a press: a view with only a DropTarget is not hovered", () => {
+    const mock = createMockInput();
+    const cell = mock.spawn([DropTarget({ intent: "move" })]);
+
+    mock.boxes.push({ entity: cell, x: 0, y: 0, width: 100, height: 100 });
+    mock.start();
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.has(cell, PointerOver)).toBe(false);
+    expect(mock.state.pointerOver).toBeUndefined();
+  });
+
+  it("moves the tag from one view to the next, so at most one carries it", () => {
+    const mock = createMockInput();
+    const { button, item } = twoViews(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+    record(mock.state, sample("move", "mouse", 60, 60));
+    mock.frame();
+    record(mock.state, sample("move", "pen", 350, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.has(item, PointerOver)).toBe(true);
+    expect(mock.calls.filter(call => call === "tag:PointerOver")).toHaveLength(2);
+
+    record(mock.state, sample("move", "mouse", 900, 900));
+    mock.frame();
+
+    expect(mock.has(item, PointerOver)).toBe(false);
+    expect(mock.state.pointerOver).toBeUndefined();
+  });
+
+  it("never hovers with a touch, and a touch sample takes the tag away", () => {
+    const mock = createMockInput();
+    const { button } = twoViews(mock);
+
+    record(mock.state, sample("move", "touch", 50, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(true);
+
+    record(mock.state, sample("down", "touch", 900, 900, 2));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.state.pointerOver).toBeUndefined();
+  });
+
+  it("takes the tag away when the pointer leaves the canvas", () => {
+    const mock = createMockInput();
+    const { button } = twoViews(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+    record(mock.state, sample("leave", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.state.pointerOver).toBeUndefined();
+  });
+
+  it("takes the tag away on a pointer cancel and keeps it on the lost capture after a click", () => {
+    const mock = createMockInput();
+    const { button } = twoViews(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+    record(mock.state, sample("down", "mouse", 50, 50));
+    record(mock.state, sample("up", "mouse", 50, 50));
+    record(mock.state, sample("lost", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "found", payload: {} }]);
+    expect(mock.has(button, PointerOver)).toBe(true);
+
+    record(mock.state, sample("cancel", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+  });
+
+  it("takes the tag away while the world is paused", () => {
+    const mock = createMockInput();
+    const { button } = twoViews(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+    mock.world.mode = "paused";
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.state.pointerOver).toBeUndefined();
+  });
+
+  it("stays on its view while a press runs and follows the mouse again after the release", () => {
+    const mock = createMockInput();
+    const { button, item } = twoViews(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+    record(mock.state, sample("down", "mouse", 50, 50));
+    mock.frame();
+    record(mock.state, sample("move", "mouse", 350, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(true);
+    expect(mock.has(item, PointerOver)).toBe(false);
+
+    record(mock.state, sample("up", "mouse", 350, 50));
+    mock.frame();
+    record(mock.state, sample("move", "mouse", 351, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.has(item, PointerOver)).toBe(true);
   });
 });

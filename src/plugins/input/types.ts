@@ -43,14 +43,19 @@ export type Target = { projection: string; key: string } | Entity;
 
 /**
  * One pointer event as the DOM handlers queue it: no hit test, no reference units, no decision.
+ * `cancel` is a `pointercancel`, `lost` a lost pointer capture, `leave` the pointer leaving the
+ * canvas. `pointerType` is the device: only a mouse or a pen hovers.
  *
  * @example
  * ```ts
- * const sample: RawSample = { kind: "down", pointerId: 1, clientX: 320, clientY: 640 };
+ * const sample: RawSample = {
+ *   kind: "down", pointerType: "touch", pointerId: 1, clientX: 320, clientY: 640
+ * };
  * ```
  */
 export type RawSample = {
-  kind: "down" | "move" | "up" | "cancel";
+  kind: "down" | "move" | "up" | "cancel" | "lost" | "leave";
+  pointerType: "mouse" | "touch" | "pen";
   pointerId: number;
   clientX: number;
   clientY: number;
@@ -118,7 +123,12 @@ export type State = {
   grabOffset: Point;
   /** Sum of `time.delta` since pointer down. No device clock is ever read. */
   pressedMs: number;
+  /** The drop target that carries `Hovered` during a drag. */
   hovered: Entity | undefined;
+  /** The view that carries `PointerOver`: a press would take it, and a mouse or a pen is over it. */
+  pointerOver: Entity | undefined;
+  /** The `Parent` the held view had at the grab. It is hung back under it on the release. */
+  parent: Entity | undefined;
   /** The remover `world.projection.mute` returned, while a drag runs. */
   unmute: (() => void) | undefined;
   canvas: HTMLCanvasElement | undefined;

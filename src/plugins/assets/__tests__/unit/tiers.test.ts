@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { bootTiers, isPermanent, loadBundle } from "../../tiers";
-import type { AssetsCtx } from "../../types";
-import { createMockAssets, manifestOf } from "./mock-assets";
+import type { AssetsCtx, Manifest } from "../../types";
+import { createMockAssets, type MockAssets, manifestOf } from "./mock-assets";
 
 const boardManifest = manifestOf({
   board: { feature: "board", tier: "scene", keys: ["board.cell", "board.item"] }
@@ -12,6 +12,47 @@ const bootManifest = manifestOf({
   ui: { feature: "ui", tier: "core", keys: ["ui.panel"] }
 });
 
+/** A bundle with a font of two pages, a sound and a texture: three files, five fetches. */
+const mixedManifest: Manifest = {
+  version: 1,
+  bundles: {
+    ui: {
+      feature: "ui",
+      tier: "scene",
+      mb: 0.334,
+      files: [
+        {
+          key: "ui.body",
+          path: "features/ui/assets/body.fnt",
+          kind: "font",
+          width: 0,
+          height: 0,
+          mb: 0.25,
+          pages: [
+            { path: "features/ui/assets/body_0.png", width: 256, height: 128, mb: 0.125 },
+            { path: "features/ui/assets/body_1.png", width: 256, height: 128, mb: 0.125 }
+          ]
+        },
+        {
+          key: "ui.click",
+          path: "features/ui/assets/click.mp3",
+          kind: "audio",
+          width: 0,
+          height: 0,
+          mb: 0.021
+        },
+        {
+          key: "ui.panel",
+          path: "features/ui/assets/panel.png",
+          width: 128,
+          height: 128,
+          mb: 0.063
+        }
+      ]
+    }
+  }
+};
+
 /**
  * Lets the microtask queue run, so a started-but-not-awaited load reaches its first fetch.
  *
@@ -19,6 +60,18 @@ const bootManifest = manifestOf({
  */
 function tick(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+/**
+ * Reads the progress events a mock recorded, in the order they went out.
+ *
+ * @param mock - The mock plugin.
+ * @returns The payloads of every `assets:bundle-progress`.
+ */
+function progressOf(mock: MockAssets): unknown[] {
+  return mock.emitted
+    .filter(entry => entry.name === "assets:bundle-progress")
+    .map(entry => entry.payload);
 }
 
 describe("isPermanent", () => {
@@ -204,6 +257,106 @@ describe("loadBundle", () => {
     await expect(loadBundle(mock.assetsCtx, "ui", undefined, "request")).rejects.toThrow(
       "is packed in an atlas"
     );
+  });
+});
+
+describe("loadBundle progress", () => {
+  it("counts every settled file once, a font with its pages, and ends at the total", async () => {
+    const mock = createMockAssets({ manifest: mixedManifest });
+
+    await mock.start();
+    mock.io.control.gated = true;
+
+    const loading = loadBundle(mock.assetsCtx, "ui", undefined, "request");
+
+    // The texture settles first, then the sound: settle order, not manifest order.
+    await tick();
+    mock.io.release(url => url.endsWith("panel.png"));
+    await tick();
+    expect(progressOf(mock)).toEqual([{ bundle: "ui", loaded: 1, total: 3 }]);
+
+    mock.io.release(url => url.endsWith("click.mp3"));
+    await tick();
+    expect(progressOf(mock)).toHaveLength(2);
+
+    // The .fnt file alone is not the font: its two pages are still on the way.
+    mock.io.release(url => url.endsWith("body.fnt"));
+    await tick();
+    expect(mock.io.held.map(entry => entry.url)).toEqual([
+      "/features/ui/assets/body_0.png",
+      "/features/ui/assets/body_1.png"
+    ]);
+    expect(progressOf(mock)).toHaveLength(2);
+
+    mock.io.releaseAll();
+    await loading;
+
+    expect(progressOf(mock)).toEqual([
+      { bundle: "ui", loaded: 1, total: 3 },
+      { bundle: "ui", loaded: 2, total: 3 },
+      { bundle: "ui", loaded: 3, total: 3 }
+    ]);
+  });
+
+  it("sends the last progress before assets:bundle-loaded", async () => {
+    const mock = createMockAssets({ manifest: mixedManifest });
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "ui", undefined, "request");
+
+    expect(mock.emitted.map(entry => entry.name)).toEqual([
+      "assets:bundle-progress",
+      "assets:bundle-progress",
+      "assets:bundle-progress",
+      "assets:bundle-loaded"
+    ]);
+    expect(mock.emitted.at(-2)?.payload).toEqual({ bundle: "ui", loaded: 3, total: 3 });
+  });
+
+  it("counts a file that failed, and sends no bundle-loaded after it", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+
+    await mock.start();
+    mock.io.status.set("/features/board/assets/item.png", 404);
+
+    await expect(loadBundle(mock.assetsCtx, "board", undefined, "enter")).rejects.toThrow("(404)");
+
+    expect(progressOf(mock)).toEqual([
+      { bundle: "board", loaded: 1, total: 2 },
+      { bundle: "board", loaded: 2, total: 2 }
+    ]);
+    expect(mock.emitted.map(entry => entry.name)).not.toContain("assets:bundle-loaded");
+  });
+
+  it("sends nothing for the files of an aborted load", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+
+    await mock.start();
+    mock.io.control.gated = true;
+
+    const controller = new AbortController();
+    const only = loadBundle(mock.assetsCtx, "board", controller.signal, "preload");
+
+    await tick();
+    controller.abort();
+
+    await expect(only).rejects.toMatchObject({ name: "AbortError" });
+    await tick();
+
+    expect(progressOf(mock)).toEqual([]);
+  });
+
+  it("sends nothing for a bundle that is already loaded", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "board", undefined, "request");
+
+    const sent = mock.emitted.length;
+
+    await loadBundle(mock.assetsCtx, "board", undefined, "request");
+
+    expect(mock.emitted).toHaveLength(sent);
   });
 });
 

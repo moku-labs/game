@@ -714,7 +714,7 @@ export type ProjectionApi = {
    * const world = ctx.require(worldPlugin);
    * const counter = world.projection.entityOf("hud", "coins") ?? 0;
    *
-   * world.projection.restOf(counter, Transform); // { x: 40, y: 120, rotation: 0, scale: 1 }
+   * world.projection.restOf(counter, Transform); // { x: 40, y: 120, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
    * ```
    */
   restOf<Value extends object>(entity: Entity, component: ComponentType<Value>): Value | undefined;
@@ -735,6 +735,23 @@ export type ProjectionApi = {
    * ```
    */
   entityOf(projection: string, key: string): Entity | undefined;
+
+  /**
+   * The live view entities of a mounted projection, in the order of its model keys. A view that
+   * plays its exit is left out, and so is an element registered with `registerKey`. Every call
+   * hands out a new array.
+   *
+   * @param name - Name of the projection.
+   * @returns The entities, or `[]` when the projection is not mounted.
+   * @example
+   * ```ts
+   * // `ui` hosts the board inside a slot and parents every board item to it on reconcile.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.entitiesOf("board.items"); // [1048580, 1048581]
+   * world.projection.entitiesOf("shop.items"); // []: not mounted
+   * ```
+   */
+  entitiesOf(name: string): readonly Entity[];
 
   /**
    * Installs the tween engine every `ViewHandle.tween`, `toRest` and `all` then runs on. Without
@@ -782,9 +799,9 @@ export type ProjectionApi = {
    * ```ts
    * // `ui` laid the coin counter out and tells the world where it belongs.
    * const world = ctx.require(worldPlugin);
-   * world.projection.setRest(counter, Transform, { x: 40, y: 120, rotation: 0, scale: 1 });
+   * world.projection.setRest(counter, Transform, { x: 40, y: 120, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } });
    *
-   * world.projection.viewOf(counter, { kind: "plugin", name: "ui" })?.rest(Transform); // { x: 40, y: 120, rotation: 0, scale: 1 }
+   * world.projection.viewOf(counter, { kind: "plugin", name: "ui" })?.rest(Transform); // { x: 40, y: 120, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
    * ```
    */
   setRest<Value extends object>(

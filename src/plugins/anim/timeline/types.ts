@@ -3,7 +3,7 @@
  * it and the runtime the cursor reaches the world through.
  */
 import type { Json } from "../../model/types";
-import type { AnyComponent } from "../../world/ecs/types";
+import type { AnyComponent, AnyComponentValue } from "../../world/ecs/types";
 import type { Ease, Entity, TrackOptions } from "../../world/types";
 import type { StepMotion } from "../tween/types";
 import type { Target } from "../types";
@@ -74,7 +74,8 @@ export type PlayDescriptor = {
 
 /**
  * One step of a choreography: plain frozen data with no callback inside, so a step tree can be
- * read, logged and compared.
+ * read, logged and compared. A `spawn` step carries the component values of a temporary entity,
+ * made when the step is reached and despawned when the timeline ends.
  *
  * @example
  * ```ts
@@ -108,6 +109,13 @@ export type Step =
       readonly keys: readonly string[];
       readonly fps: number;
       readonly loop: boolean;
+    }
+  | {
+      readonly kind: "spawn";
+      readonly id: string;
+      readonly components: readonly AnyComponentValue[];
+      readonly layer: string;
+      readonly order: number;
     }
   | FxStep
   | { readonly kind: "use"; readonly id: string; readonly step: Step };
@@ -155,10 +163,20 @@ export type TimelineRuntime = {
   /**
    * Resolves a target to an entity.
    *
-   * @param target - The projection key or the entity a step names.
-   * @returns The entity, or `undefined` when no live view or element holds that key.
+   * @param target - The projection key, the entity or the spawned id a step names.
+   * @param spawned - The spawn table of the timeline that asks; a spawned id resolves only there.
+   * @returns The entity, or `undefined` when no live view, element or spawned entity holds it.
    */
-  entityOf(target: Target): Entity | undefined;
+  entityOf(target: Target, spawned?: ReadonlyMap<string, Entity>): Entity | undefined;
+
+  /**
+   * Spawns a temporary entity owned by `anim`. The timeline that spawned it despawns it when it
+   * ends, whichever way it ends.
+   *
+   * @param components - The component values the entity starts with, `Layer` and `Order` included.
+   * @returns The new entity.
+   */
+  spawn(components: readonly AnyComponentValue[]): Entity;
 
   /**
    * Reads a component of an entity, which is also the liveness check of a step.
@@ -217,17 +235,18 @@ export type TimelineRuntime = {
 
 /**
  * What the cursor functions carry down the tree: the runtime, the animation id marks are
- * reported under, and the list of marks reached so far.
+ * reported under, the list of marks reached so far and the entities the timeline spawned, by id.
  */
 export type CursorCtx = {
   readonly rt: TimelineRuntime;
   readonly animation: string;
   readonly marks: string[];
+  readonly spawned: Map<string, Entity>;
 };
 
 /**
- * One running timeline: its cursor, the marks it reached, the entities it counts on and the
- * resolver of its `done` promise.
+ * One running timeline: its cursor, the marks it reached, the entities it counts on, the entities
+ * it spawned and despawns at its end, and the resolver of its `done` promise.
  */
 export type RunningTimeline = {
   readonly id: number;
@@ -235,6 +254,8 @@ export type RunningTimeline = {
   readonly cursor: Cursor;
   readonly marks: string[];
   readonly entities: readonly Entity[];
+  /** The entities its `spawn` steps made, by spawn id. Despawned when the timeline ends. */
+  readonly spawned: Map<string, Entity>;
   readonly resolve: () => void;
   ended: boolean;
 };

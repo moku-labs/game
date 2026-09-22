@@ -50,16 +50,73 @@ describe("parseTags", () => {
     );
   });
 
-  it("refuses a tag that is not name=value", () => {
-    expect(() => parseTags("panel{nine}.png", "features/ui/assets/panel{nine}.png")).toThrow(
-      /malformed tag "\{nine\}"/
+  it("reads {nine=H,V} as left and right H, top and bottom V", () => {
+    expect(parseTags("bar{nine=24,12}.png", "features/ui/assets/bar{nine=24,12}.png")).toEqual({
+      stem: "bar",
+      nine: { left: 24, top: 12, right: 24, bottom: 12 },
+      note: undefined
+    });
+  });
+
+  it("reads {nine=L,T,R,B} in the order textures.create takes", () => {
+    expect(
+      parseTags("sign{nine=30,10,40,20}.webp", "features/ui/assets/sign{nine=30,10,40,20}.webp")
+    ).toEqual({
+      stem: "sign",
+      nine: { left: 30, top: 10, right: 40, bottom: 20 },
+      note: undefined
+    });
+  });
+
+  it("keeps the whole name of a nine tag with three numbers and adds one note", () => {
+    expect(parseTags("panel{nine=4,5,6}.png", "features/ui/assets/panel{nine=4,5,6}.png")).toEqual({
+      stem: "panel{nine=4,5,6}",
+      nine: undefined,
+      note:
+        'kept the whole name of "features/ui/assets/panel{nine=4,5,6}.png": the tag ' +
+        '"{nine=4,5,6}" is not {nine=N}, {nine=H,V} or {nine=L,T,R,B}.'
+    });
+  });
+
+  it("keeps the whole name of a tag that is not name=value", () => {
+    const parsed = parseTags("panel{nine}.png", "features/ui/assets/panel{nine}.png");
+
+    expect(parsed.stem).toBe("panel{nine}");
+    expect(parsed.nine).toBeUndefined();
+    expect(parsed.note).toContain('the tag "{nine}" is not');
+  });
+
+  it("keeps the whole name of a nine value that is not a number", () => {
+    const parsed = parseTags("panel{nine=wide}.png", "features/ui/assets/panel{nine=wide}.png");
+
+    expect(parsed.stem).toBe("panel{nine=wide}");
+    expect(parsed.nine).toBeUndefined();
+    expect(parsed.note).toContain('the tag "{nine=wide}" is not');
+  });
+
+  it("drops a good nine tag too when another tag of the name is malformed", () => {
+    const parsed = parseTags(
+      "panel{nine=8}{nine=1,2,3}.png",
+      "features/ui/assets/panel{nine=8}{nine=1,2,3}.png"
+    );
+
+    expect(parsed.stem).toBe("panel{nine=8}{nine=1,2,3}");
+    expect(parsed.nine).toBeUndefined();
+    expect(parsed.note).toContain('the tag "{nine=1,2,3}" is not');
+  });
+
+  it("refuses a fractional nine value and names the bad tag, not a fake folder", () => {
+    expect(() => parseTags("bar{nine=12.5}.png", "features/ui/assets/bar{nine=12.5}.png")).toThrow(
+      '[game] assets: "features/ui/assets/bar{nine=12.5}.png" has the malformed tag ' +
+        '"{nine=12.5}", whose "." cannot stay in a key. Use {nine=N}, {nine=H,V} or ' +
+        "{nine=L,T,R,B} with whole numbers."
     );
   });
 
-  it("refuses a nine value that is not a whole number", () => {
+  it("still names the fake folder when the dot stands before a malformed tag", () => {
     expect(() =>
-      parseTags("panel{nine=4.5}.png", "features/ui/assets/panel{nine=4.5}.png")
-    ).toThrow(/nine tag "4\.5"/);
+      parseTags("panel.v2{nine=x}.png", "features/ui/assets/panel.v2{nine=x}.png")
+    ).toThrow(/"\." in "panel\.v2", which would fake a folder/);
   });
 
   it("refuses a brace that is not a trailing tag group", () => {
@@ -113,6 +170,21 @@ describe("keyOf", () => {
   it("drops the tags", () => {
     expect(keyOf("ui", "panel{nine=48}.png", "features/ui/assets/panel{nine=48}.png")).toBe(
       "ui.panel"
+    );
+  });
+
+  it("drops the two-number and the four-number nine tags", () => {
+    expect(keyOf("ui", "bar{nine=24,12}.png", "features/ui/assets/bar{nine=24,12}.png")).toBe(
+      "ui.bar"
+    );
+    expect(
+      keyOf("ui", "sign{nine=30,10,40,20}.webp", "features/ui/assets/sign{nine=30,10,40,20}.webp")
+    ).toBe("ui.sign");
+  });
+
+  it("keeps the whole name when the tag is malformed", () => {
+    expect(keyOf("ui", "panel{nine=4,5,6}.png", "features/ui/assets/panel{nine=4,5,6}.png")).toBe(
+      "ui.panel{nine=4,5,6}"
     );
   });
 

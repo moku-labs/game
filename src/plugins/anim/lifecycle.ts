@@ -10,8 +10,8 @@ import type { Json } from "../model/types";
 import { timePlugin } from "../time";
 import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
-import type { AnyComponent } from "../world/ecs/types";
-import type { Entity, TrackOptions } from "../world/types";
+import type { AnyComponent, AnyComponentValue } from "../world/ecs/types";
+import type { Entity, Owner, TrackOptions } from "../world/types";
 import {
   advanceTimelines,
   finishAllTimelines,
@@ -29,6 +29,9 @@ import type {
   State,
   Target
 } from "./types";
+
+/** The owner of every entity a `spawn` step makes. */
+const ANIM_OWNER: Owner = Object.freeze({ kind: "plugin", name: "anim" });
 
 /** Message of the throw a descriptor that was not built by `play` gets. */
 const NO_ANIMATION_ID =
@@ -110,7 +113,11 @@ function reportMark(actx: AnimCtx, animation: string, mark: string): void {
  */
 export function createRuntime(actx: AnimCtx): TimelineRuntime {
   return {
-    entityOf: (target: Target): Entity | undefined => resolveTarget(actx, target),
+    entityOf: (target: Target, spawned?: ReadonlyMap<string, Entity>): Entity | undefined =>
+      resolveTarget(actx, target, spawned),
+
+    spawn: (components: readonly AnyComponentValue[]): Entity =>
+      actx.deps.world.ecs.spawn(ANIM_OWNER, components),
 
     read: (
       entity: Entity,
@@ -216,16 +223,19 @@ function registerAnimations(actx: AnimCtx): void {
  * Reads one target out of a `play` payload.
  *
  * @param entry - What the payload held under a slot name.
- * @returns The target, or `undefined` when it is neither an entity nor a projection key.
+ * @returns The target, or `undefined` when it is neither an entity, a projection key nor a
+ *   spawned id.
  */
 function readTarget(entry: unknown): Target | undefined {
   if (typeof entry === "number") return entry;
 
-  if (isRecord(entry) && typeof entry.projection === "string" && typeof entry.key === "string") {
+  if (!isRecord(entry)) return undefined;
+
+  if (typeof entry.projection === "string" && typeof entry.key === "string") {
     return { projection: entry.projection, key: entry.key };
   }
 
-  return undefined;
+  return typeof entry.spawned === "string" ? { spawned: entry.spawned } : undefined;
 }
 
 /**

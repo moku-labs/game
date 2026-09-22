@@ -41,10 +41,12 @@ export function createSyncState(): SyncState {
     fonts: emptyMap(),
     fontCache: undefined,
     byKey: emptyMap(),
+    frames: emptyMap(),
     invalidated: emptySet(),
     warned: emptySet(),
     added: emptySet(),
     removed: emptySet(),
+    reparented: emptySet(),
     cleanups: []
   };
 }

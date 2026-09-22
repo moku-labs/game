@@ -9,35 +9,76 @@ import type { Point } from "./types";
 
 /**
  * Where a view sits, in reference units and radians. Relative to the `Parent` when there is one.
+ * `pivot` is the local point the view turns and scales around, and `x`, `y` is where that point
+ * lands; the default pivot `{ x: 0, y: 0 }` is the view's own origin.
  *
  * @example
  * ```ts
- * const value: TransformValue = { x: 540, y: 300, rotation: 0, scale: 1 };
+ * // A 200 x 80 button that grows around its centre.
+ * const value: TransformValue = {
+ *   x: 640, y: 340, rotation: 0, scale: 1.1, pivot: { x: 100, y: 40 }
+ * };
  * ```
  */
-export type TransformValue = { x: number; y: number; rotation: number; scale: number };
+export type TransformValue = {
+  x: number;
+  y: number;
+  rotation: number;
+  scale: number;
+  pivot: Point;
+};
+
+/**
+ * How a sized sprite fills its box: `"fill"` stretches, `"contain"` scales uniformly inside the
+ * box and centres, `"cover"` scales uniformly over the box and crops the overflow.
+ *
+ * @example
+ * ```ts
+ * const fit: SpriteFit = "cover";
+ * ```
+ */
+export type SpriteFit = "fill" | "contain" | "cover";
 
 /**
  * One textured quad. `texture` is an asset key; `defineGame` narrows it to the game's keys.
+ * `width` and `height` are the box in reference units; 0 on an axis keeps the texture's own size
+ * there. `anchor` is the point of the box that sits on the `Transform`.
  *
  * @example
  * ```ts
  * const value: SpriteValue = {
- *   texture: "board.cell", tint: 0xffffff, alpha: 1, anchor: { x: 0.5, y: 0.5 }
+ *   texture: "board.bg-forest-meadow", tint: 0xffffff, alpha: 1, anchor: { x: 0, y: 0 },
+ *   width: 1080, height: 1920, fit: "cover"
  * };
  * ```
  */
-export type SpriteValue = { texture: string; tint: number; alpha: number; anchor: Point };
+export type SpriteValue = {
+  texture: string;
+  tint: number;
+  alpha: number;
+  anchor: Point;
+  width: number;
+  height: number;
+  fit: SpriteFit;
+};
 
 /**
  * A stretchable panel. The slice borders come with the texture, not with the component.
  *
  * @example
  * ```ts
- * const value: NineSliceValue = { texture: "ui.panel", width: 600, height: 320 };
+ * const value: NineSliceValue = {
+ *   texture: "ui.panel", width: 600, height: 320, alpha: 1, tint: 0xffffff
+ * };
  * ```
  */
-export type NineSliceValue = { texture: string; width: number; height: number };
+export type NineSliceValue = {
+  texture: string;
+  width: number;
+  height: number;
+  alpha: number;
+  tint: number;
+};
 
 /**
  * "Moves with its parent". It never decides draw order between layers.
@@ -101,30 +142,46 @@ export type SpriteOptions = {
 
 const displayDefaults: DisplayValue = { object: undefined };
 
-/**
- * Where a view sits: reference units, radians, uniform scale.
- */
-export const Transform = /*#__PURE__*/ component("Transform", {
+const transformDefaults: TransformValue = {
   x: 0,
   y: 0,
   rotation: 0,
-  scale: 1
-});
+  scale: 1,
+  pivot: { x: 0, y: 0 }
+};
 
-/**
- * One textured quad. `texture` is an asset key, resolved through the texture providers.
- */
-export const Sprite = /*#__PURE__*/ component("Sprite", {
+const spriteDefaults: SpriteValue = {
   texture: "",
   tint: 0xff_ff_ff,
   alpha: 1,
-  anchor: { x: 0.5, y: 0.5 }
-});
+  anchor: { x: 0.5, y: 0.5 },
+  width: 0,
+  height: 0,
+  fit: "fill"
+};
 
 /**
- * A stretchable panel, sized in reference units.
+ * Where a view sits: reference units, radians, uniform scale, and the local point it turns
+ * around.
  */
-export const NineSlice = /*#__PURE__*/ component("NineSlice", { texture: "", width: 0, height: 0 });
+export const Transform = /*#__PURE__*/ component("Transform", transformDefaults);
+
+/**
+ * One textured quad. `texture` is an asset key, resolved through the texture providers; a size
+ * and a `fit` draw it into a box.
+ */
+export const Sprite = /*#__PURE__*/ component("Sprite", spriteDefaults);
+
+/**
+ * A stretchable panel, sized in reference units, with its own alpha and tint.
+ */
+export const NineSlice = /*#__PURE__*/ component("NineSlice", {
+  texture: "",
+  width: 0,
+  height: 0,
+  alpha: 1,
+  tint: 0xff_ff_ff
+});
 
 /**
  * The entity this view moves with. `0` means no parent.
@@ -159,8 +216,9 @@ export const Shape = /*#__PURE__*/ component("Shape", {
  * @example
  * ```ts
  * sprite({ texture: "board.cell", at: { x: 540, y: 300 } });
- * // [Sprite({ texture: "board.cell", tint: 0xffffff, alpha: 1, anchor: { x: 0.5, y: 0.5 } }),
- * //  Transform({ x: 540, y: 300, rotation: 0, scale: 1 })]
+ * // [Sprite({ texture: "board.cell", tint: 0xffffff, alpha: 1, anchor: { x: 0.5, y: 0.5 },
+ * //   width: 0, height: 0, fit: "fill" }),
+ * //  Transform({ x: 540, y: 300, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } })]
  * ```
  */
 export function sprite(

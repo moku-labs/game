@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { Exiting } from "../../ecs/define";
 import type { Owner } from "../../ecs/types";
-import type { MotionHandle } from "../../projection/types";
-import { BOARD, mountBoard, Transform } from "./board";
+import type { MotionHandle, ProjectionMotion } from "../../projection/types";
+import type { Item } from "./board";
+import { BOARD, commitItems, mountBoard, Transform } from "./board";
+import type { MockWorld } from "./mock-world";
 import { createMockWorld } from "./mock-world";
 
 // ---------------------------------------------------------------------------
@@ -152,5 +155,107 @@ describe("projection restOf", () => {
 
     expect(world.api.projection.restOf(entity, Transform)).toEqual({ x: 40, y: 120, scale: 1 });
     expect(world.api.projection.restOf(999, Transform)).toBeUndefined();
+  });
+});
+
+/**
+ * Reads the entity of every given key of the board, in the given order.
+ *
+ * @param world - The mock world.
+ * @param keys - The model keys.
+ * @returns The entities, `0` for a key with no view.
+ */
+function entitiesOfKeys(world: MockWorld, keys: readonly string[]): number[] {
+  return keys.map(key => world.api.projection.entityOf(BOARD, key) ?? 0);
+}
+
+describe("projection entitiesOf", () => {
+  const flyAway: ProjectionMotion<Item> = {
+    exit: view => view.tween(Transform, { x: 900 }, { ms: 1000, ease: "linear" })
+  };
+
+  it("answers the live views of a mounted projection in the order of its keys", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [
+      { id: "a", level: 1, x: 0, y: 0 },
+      { id: "b", level: 1, x: 80, y: 0 }
+    ]);
+
+    expect(world.api.projection.entitiesOf(BOARD)).toEqual(entitiesOfKeys(world, ["a", "b"]));
+  });
+
+  it("lists a new item after a commit, at its place in the key order", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [
+      { id: "a", level: 1, x: 0, y: 0 },
+      { id: "b", level: 1, x: 80, y: 0 }
+    ]);
+    commitItems(world, [
+      { id: "c", level: 1, x: 160, y: 0 },
+      { id: "a", level: 1, x: 0, y: 0 },
+      { id: "b", level: 1, x: 80, y: 0 }
+    ]);
+    world.frame(16);
+
+    const listed = world.api.projection.entitiesOf(BOARD);
+
+    expect(listed).toHaveLength(3);
+    expect(listed).toEqual(entitiesOfKeys(world, ["c", "a", "b"]));
+  });
+
+  it("leaves out a view that is exiting while its exit motion still plays", () => {
+    const world = createMockWorld();
+
+    mountBoard(
+      world,
+      [
+        { id: "a", level: 1, x: 0, y: 0 },
+        { id: "b", level: 1, x: 80, y: 0 }
+      ],
+      flyAway
+    );
+
+    const [a, b] = entitiesOfKeys(world, ["a", "b"]);
+
+    commitItems(world, [{ id: "b", level: 1, x: 80, y: 0 }]);
+    world.frame(16);
+
+    expect(world.api.ecs.has(a ?? 0, Exiting)).toBe(true);
+    expect(world.api.projection.entitiesOf(BOARD)).toEqual([b]);
+  });
+
+  it("leaves out an element a plugin above registered under the projection name", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+
+    const element = world.api.ecs.spawn(UI, [Transform()]);
+
+    world.api.projection.registerKey(BOARD, "slot", element);
+
+    expect(world.api.projection.entitiesOf(BOARD)).toEqual(entitiesOfKeys(world, ["a"]));
+  });
+
+  it("answers an empty list after unmount and for a name that is not mounted", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+    world.api.projection.unmount([BOARD]);
+
+    expect(world.api.projection.entitiesOf(BOARD)).toEqual([]);
+    expect(world.api.projection.entitiesOf("board.unknown")).toEqual([]);
+  });
+
+  it("hands out a copy, so the caller cannot change the view table", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+
+    const first = world.api.projection.entitiesOf(BOARD);
+
+    expect(world.api.projection.entitiesOf(BOARD)).not.toBe(first);
+    expect(world.api.projection.entitiesOf(BOARD)).toEqual(first);
   });
 });

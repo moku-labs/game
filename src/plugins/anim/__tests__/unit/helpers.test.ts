@@ -158,7 +158,13 @@ describe("anim/timeline cancel over a tree", () => {
     handle.cancel();
 
     expect(mock.api.active()).toBe(0);
-    expect(mock.world.ecs.get(entity, Transform)).toEqual({ x: 25, y: 25, rotation: 0, scale: 1 });
+    expect(mock.world.ecs.get(entity, Transform)).toEqual({
+      x: 25,
+      y: 25,
+      rotation: 0,
+      scale: 1,
+      pivot: { x: 0, y: 0 }
+    });
   });
 
   it("finishes every child of a nested animation", () => {

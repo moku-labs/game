@@ -42,7 +42,13 @@ describe("label", () => {
       resolved: ""
     });
     expect(transform.type).toBe(Transform);
-    expect(transform.value).toEqual({ x: 90, y: 180, rotation: 0, scale: 1 });
+    expect(transform.value).toEqual({
+      x: 90,
+      y: 180,
+      rotation: 0,
+      scale: 1,
+      pivot: { x: 0, y: 0 }
+    });
   });
 
   it("takes the anchor the caller named", () => {
@@ -105,6 +111,43 @@ describe("defineTextStyles", () => {
     expect(styles.map["hud.title"]?.wrap).toBe(480);
   });
 
+  it("keeps a shadow and fills its alpha with 1", () => {
+    const styles = defineTextStyles({
+      "popup.title": {
+        font: "ui.font-display",
+        size: 56,
+        fill: 0xff_f3_d6,
+        shadow: { color: 0x5b_3a_1e, dx: 0, dy: 4 }
+      }
+    });
+
+    expect(styles.map["popup.title"]?.shadow).toEqual({
+      color: 0x5b_3a_1e,
+      dx: 0,
+      dy: 4,
+      alpha: 1
+    });
+  });
+
+  it("keeps the alpha a shadow names", () => {
+    const styles = defineTextStyles({
+      "popup.title": {
+        font: "ui.font-display",
+        size: 56,
+        fill: 0xff_f3_d6,
+        shadow: { color: 0, dx: 2, dy: 3, alpha: 0.4 }
+      }
+    });
+
+    expect(styles.map["popup.title"]?.shadow).toEqual({ color: 0, dx: 2, dy: 3, alpha: 0.4 });
+  });
+
+  it("leaves the shadow out of a style that names none", () => {
+    const styles = defineTextStyles({ "hud.title": { font: "ui.font-body", size: 40, fill: 1 } });
+
+    expect(styles.map["hud.title"]?.shadow).toBeUndefined();
+  });
+
   it("refuses a wrap that is neither a width nor none", () => {
     expect(() =>
       defineTextStyles({ "hud.title": { font: "ui.font-body", size: 32, fill: 0, wrap: 0 } })
@@ -134,6 +177,31 @@ describe("readStyle", () => {
     }).map;
 
     expect(readStyle("hud.title", map["hud.title"] ?? {})?.size).toBe(40);
+  });
+
+  it("reads the shadow of a registered style back", () => {
+    const map = defineTextStyles({
+      "popup.title": {
+        font: "ui.font-display",
+        size: 56,
+        fill: 1,
+        shadow: { color: 0x5b_3a_1e, dx: 1, dy: 4, alpha: 0.5 }
+      }
+    }).map;
+
+    expect(readStyle("popup.title", map["popup.title"] ?? {})?.shadow).toEqual({
+      color: 0x5b_3a_1e,
+      dx: 1,
+      dy: 4,
+      alpha: 0.5
+    });
+  });
+
+  it("drops a shadow that is not one and keeps the style", () => {
+    const style = readStyle("x", { font: "ui.font-body", size: 32, fill: 0, shadow: { dy: 4 } });
+
+    expect(style?.size).toBe(32);
+    expect(style?.shadow).toBeUndefined();
   });
 
   it("answers nothing for an entry that is not a style", () => {

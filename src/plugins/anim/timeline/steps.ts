@@ -4,6 +4,7 @@
  * only wraps the slots and the build function; `build` itself runs once per play.
  */
 import type { Json } from "../../model/types";
+import type { AnyComponentValue } from "../../world/ecs/types";
 import type { ComponentType, Ease, NumericFields } from "../../world/types";
 import { asComponent } from "../components";
 import type {
@@ -29,6 +30,9 @@ export const DEFAULT_EASE: Ease = "out";
 
 /** The bus a sound plays on when the author named nothing else. */
 const DEFAULT_BUS = "sfx";
+
+/** The layer a spawned entity is drawn in when the author named nothing else. */
+const DEFAULT_SPAWN_LAYER = "ui";
 
 /** The pose `at` answers with for a target nothing resolves. */
 const IDENTITY_POSE: Pose = Object.freeze({ x: 0, y: 0, rotation: 0, scale: 1 });
@@ -67,7 +71,7 @@ function numbersOf(to: object): Record<string, number> {
 /**
  * Turns one target into JSON, so a `play` descriptor survives the effects gateway.
  *
- * @param target - The entity or the projection key.
+ * @param target - The entity, the projection key or the spawned id.
  * @returns The same target as JSON.
  * @example
  * ```ts
@@ -75,7 +79,24 @@ function numbersOf(to: object): Record<string, number> {
  * ```
  */
 function targetJson(target: Target): Json {
-  return typeof target === "number" ? target : { projection: target.projection, key: target.key };
+  if (typeof target === "number") return target;
+
+  if ("spawned" in target) return { spawned: target.spawned };
+
+  return { projection: target.projection, key: target.key };
+}
+
+/**
+ * Copies one component value into frozen plain data, so the step never shares an object the
+ * author may still change.
+ *
+ * @param entry - The component value, as `Transform({ x: 40 })` built it.
+ * @returns A frozen copy with a frozen value.
+ */
+function frozenComponent(entry: AnyComponentValue): AnyComponentValue {
+  const value = entry.value === true ? true : Object.freeze({ ...entry.value });
+
+  return Object.freeze({ type: entry.type, value });
 }
 
 /**
@@ -267,6 +288,53 @@ export function frames(
     fps: options.fps,
     loop: options.loop === true
   });
+}
+
+/**
+ * Makes a temporary entity when the step is reached: a flying coin, a toast sign, a sparkle. The
+ * entity is owned by `anim`, drawn in `layer` at `order`, and despawned when the timeline ends, is
+ * finished or is cancelled. Later steps of the same timeline aim at it with `spawned(id)`.
+ *
+ * @param id - Name of the entity inside this timeline; one timeline spawns each id once.
+ * @param components - The component values the entity starts with, as `world.ecs.spawn` takes.
+ * @param options - Where the entity is drawn.
+ * @param options.layer - The layer; `"ui"` when omitted.
+ * @param options.order - The draw order inside the layer; `0` when omitted.
+ * @returns The spawn step.
+ * @example
+ * ```ts
+ * spawn("coin1", [Sprite({ texture: "ui.icon-coin" }), Transform({ x: 540, y: 900 })], { order: 50 });
+ * // { kind: "spawn", id: "coin1", components: [...], layer: "ui", order: 50 }
+ * ```
+ */
+export function spawn(
+  id: string,
+  components: readonly AnyComponentValue[],
+  options?: { layer?: string; order?: number }
+): Step {
+  return Object.freeze({
+    kind: "spawn" as const,
+    id,
+    components: Object.freeze(components.map(entry => frozenComponent(entry))),
+    layer: options?.layer ?? DEFAULT_SPAWN_LAYER,
+    order: options?.order ?? 0
+  });
+}
+
+/**
+ * Aims a later step at the entity a `spawn` step of the same timeline made. Before that step is
+ * reached nothing answers the id, so a step aimed at it ends silently.
+ *
+ * @param id - The id the `spawn` step was given.
+ * @returns The target.
+ * @example
+ * ```ts
+ * tween(spawned("coin1"), Transform, { x: 40, y: 120 }, { ms: 600, ease: "inCubic" });
+ * // { kind: "tween", target: { spawned: "coin1" }, ... }
+ * ```
+ */
+export function spawned(id: string): { spawned: string } {
+  return Object.freeze({ spawned: id });
 }
 
 /**

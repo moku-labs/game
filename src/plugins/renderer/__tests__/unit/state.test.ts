@@ -55,6 +55,8 @@ describe("renderer state", () => {
       mask: undefined,
       display: undefined,
       value: undefined,
+      drawScale: { x: 1, y: 1 },
+      frameKey: "",
       hitBox: { x: 0, y: 0, width: 1, height: 1 }
     });
 

@@ -23,6 +23,7 @@ function style(over: Partial<TextStyle> = {}): TextStyle {
     align: "left",
     wrap: "none",
     digits: false,
+    shadow: undefined,
     ...over
   };
 }
@@ -76,6 +77,14 @@ describe("layoutRuns — one line", () => {
     const layout = layoutRuns([text("12")], style(), tables(), options());
 
     expect(layout).toEqual({ lines: [{ runs: [text("12")], width: 36 }], width: 36, height: 40 });
+  });
+
+  it("answers the same lines and size for a style with a shadow", () => {
+    const shadow = { color: 0x5b_3a_1e, dx: 6, dy: 8, alpha: 1 };
+    const plain = layoutRuns([text("12"), text("A")], style(), tables(), options());
+    const shadowed = layoutRuns([text("12"), text("A")], style({ shadow }), tables(), options());
+
+    expect(shadowed).toEqual(plain);
   });
 
   it("scales both the advances and the line height by size over export size", () => {

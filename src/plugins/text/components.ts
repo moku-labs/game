@@ -7,7 +7,7 @@ import type { Message } from "../i18n/types";
 import { Transform, type TransformValue } from "../renderer/components";
 import { component } from "../world/ecs/define";
 import type { ComponentValue } from "../world/ecs/types";
-import type { Point, TextStyle, TextStyleInput, TextStyles, TextValue } from "./types";
+import type { Point, TextShadow, TextStyle, TextStyleInput, TextStyles, TextValue } from "./types";
 
 /** What a `Text` starts as. Its own const, because a component takes a typed defaults object. */
 const textDefaults: TextValue = {
@@ -68,6 +68,23 @@ export function label(
 }
 
 /**
+ * Fills the alpha of a shadow a game wrote. Its own function, so the stored shadow carries the
+ * four fields and nothing else.
+ *
+ * @param input - The shadow of a style, when it has one.
+ * @returns The shadow to draw with, or `undefined`.
+ * @example
+ * ```ts
+ * shadowOf({ color: 0, dx: 0, dy: 4 }); // { color: 0, dx: 0, dy: 4, alpha: 1 }
+ * ```
+ */
+function shadowOf(input: TextStyleInput["shadow"]): TextShadow | undefined {
+  if (input === undefined) return undefined;
+
+  return { color: input.color, dx: input.dx, dy: input.dy, alpha: input.alpha ?? 1 };
+}
+
+/**
  * Fills the defaults of one style and refuses a wrap that is neither a width nor `"none"`.
  *
  * @param name - The style name, for the error.
@@ -95,7 +112,8 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
     letterSpacing: input.letterSpacing ?? 0,
     align: input.align ?? "left",
     wrap,
-    digits: input.digits ?? false
+    digits: input.digits ?? false,
+    shadow: shadowOf(input.shadow)
   };
 }
 
@@ -111,7 +129,7 @@ function normalizeStyle(name: string, input: TextStyleInput): TextStyle {
  * defineTextStyles({ "hud.digits": { font: "ui.font-digits", size: 40, fill: 0xffe082 } });
  * // { kind: "textStyles", map: { "hud.digits": { font: "ui.font-digits", bold: undefined,
  * //   italic: undefined, size: 40, fill: 0xffe082, stroke: 0x000000, strokeWidth: 0,
- * //   letterSpacing: 0, align: "left", wrap: "none", digits: false } } }
+ * //   letterSpacing: 0, align: "left", wrap: "none", digits: false, shadow: undefined } } }
  * ```
  */
 export function defineTextStyles(map: Record<string, TextStyleInput>): TextStyles {
@@ -162,10 +180,34 @@ export function readStyle(name: string, value: object): TextStyle | undefined {
     letterSpacing: value.letterSpacing,
     align: value.align,
     wrap: value.wrap,
-    digits: value.digits
+    digits: value.digits,
+    shadow: readShadow(value.shadow)
   };
 
   return normalizeStyle(name, { ...input, ...pruned(optional) });
+}
+
+/**
+ * Reads the shadow of a registered style back. One that lacks a numeric colour or offset is not
+ * a shadow and is left out, so the style still draws.
+ *
+ * @param value - The `shadow` field of a stored style.
+ * @returns The shadow as a game writes it, or `undefined`.
+ * @example
+ * ```ts
+ * readShadow({ color: 0, dx: 0, dy: 4, alpha: 1 }); // { color: 0, dx: 0, dy: 4, alpha: 1 }
+ * ```
+ */
+function readShadow(value: unknown): TextStyleInput["shadow"] {
+  if (!isRecord(value)) return undefined;
+
+  const { color, dx, dy, alpha } = value;
+
+  if (typeof color !== "number" || typeof dx !== "number" || typeof dy !== "number") {
+    return undefined;
+  }
+
+  return typeof alpha === "number" ? { color, dx, dy, alpha } : { color, dx, dy };
 }
 
 /**

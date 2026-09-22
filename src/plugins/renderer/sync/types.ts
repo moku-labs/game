@@ -1,7 +1,7 @@
 /**
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
-import type { ComponentHandle, Entity, LayerSort, LayerSpec } from "../../world/types";
+import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type {
   PixiBitmapFont,
@@ -11,7 +11,7 @@ import type {
   PixiTexture,
   RendererCtx
 } from "../types";
-import type { ViewportApi, ViewportInternal } from "../viewport/types";
+import type { Point, ViewportApi, ViewportInternal } from "../viewport/types";
 
 /**
  * Which component gave an entity its display object. `"adapter"` is a component a plugin above
@@ -96,7 +96,7 @@ export type HitBox = { x: number; y: number; width: number; height: number };
  * const view: View = {
  *   object: sprite, kind: "Sprite", poolKey: "Sprite:board.cell", layer: "items",
  *   textureKey: "board.cell", wrapper: undefined, placeholder: false, mask: undefined,
- *   display: undefined, value: undefined,
+ *   display: undefined, value: undefined, drawScale: { x: 1, y: 1 }, frameKey: "",
  *   hitBox: { x: -32, y: -32, width: 64, height: 64 }
  * };
  * ```
@@ -119,8 +119,37 @@ export type View = {
   display: DisplayEntry | undefined;
   /** A copy of the component value the adapter last saw, so `update` gets an honest `previous`. */
   value: Readonly<object> | undefined;
+  /**
+   * How much the object is stretched from its texture to the box it draws, per axis: box over
+   * texture for a sized sprite, 64 for the 1x1 placeholder, 1 for everything else.
+   */
+  drawScale: Point;
+  /** The crop a `"cover"` sprite shows, as its `frames` key; `""` when it shows none. */
+  frameKey: string;
   hitBox: HitBox;
 };
+
+/**
+ * The crop of a `"cover"` sprite: a texture that shows the part of `base` covering one box.
+ * Cached by texture key and box size, shared by the entities in `users`, and freed when the last
+ * of them lets go or when its base is destroyed.
+ *
+ * @example
+ * ```ts
+ * const frame: CoverFrame = { base: meadow, texture: meadowCut, users: new Set([1_048_576]) };
+ * ```
+ */
+export type CoverFrame = { base: PixiTexture; texture: PixiTexture; users: Set<Entity> };
+
+/**
+ * The one world read the pose helpers need, so a caller passes `world.ecs` as it is.
+ *
+ * @example
+ * ```ts
+ * const reader: PoseReader = ctx.require(worldPlugin).ecs;
+ * ```
+ */
+export type PoseReader = Pick<EcsApi, "get">;
 
 /**
  * One layer of the scene: its container and the sort rule its children follow.
@@ -440,11 +469,15 @@ export type SyncState = {
   fontCache: PixiModule["Cache"] | undefined;
   /** Texture key to the entities that use it, for `invalidate`. */
   byKey: Map<string, Set<Entity>>;
+  /** The crops of `"cover"` sprites, by `key@widthxheight`. */
+  frames: Map<string, CoverFrame>;
   invalidated: Set<string>;
   /** Keys already reported missing, so one key warns once. */
   warned: Set<string>;
   added: Set<Entity>;
   removed: Set<Entity>;
+  /** Entities whose `Parent` was removed: `world` marks no change then, only `onRemoved` fires. */
+  reparented: Set<Entity>;
   cleanups: Array<() => void>;
 };
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer, Order } from "../../../world/ecs/define";
 import { Parent, Sprite, Transform } from "../../components";
+import { FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -215,5 +216,151 @@ describe("sync layers", () => {
     expect(wrapper?.parent).toBe(mock.ctx.state.sync.layers.get("items")?.container);
     expect(childObject?.parent).toBe(wrapper);
     expect(mock.ctx.state.sync.views.get(child)?.layer).toBe("");
+  });
+
+  it("sorts the children of a wrapper by their Order", async () => {
+    const mock = await started();
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+
+    mock.modules.sync.pass();
+
+    const high = mock.world.ecs.spawn(owner, [
+      Transform(),
+      Sprite(),
+      Parent({ entity: parent }),
+      Order({ value: 2 })
+    ]);
+    const low = mock.world.ecs.spawn(owner, [
+      Transform(),
+      Sprite(),
+      Parent({ entity: parent }),
+      Order({ value: 1 })
+    ]);
+    const plain = mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: parent })]);
+
+    mock.modules.sync.pass();
+
+    const wrapper = mock.ctx.state.sync.views.get(parent)?.wrapper;
+    const zOf = (entity: number): number | undefined =>
+      mock.ctx.state.sync.views.get(entity)?.object.zIndex;
+
+    expect(wrapper?.sortableChildren).toBe(true);
+    expect(zOf(high)).toBe(2);
+    expect(zOf(low)).toBe(1);
+    expect(zOf(plain)).toBe(0);
+    expect(mock.ctx.state.sync.views.get(parent)?.object.zIndex).toBe(0);
+
+    mock.world.ecs.set(low, Order, { value: 5 });
+    mock.modules.sync.pass();
+
+    expect(zOf(low)).toBe(5);
+  });
+
+  it("gives a child its Order when it is parented after it was drawn in a layer", async () => {
+    const mock = await started([{ name: "items", sort: "y" }]);
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    const child = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ y: 400 }),
+      Sprite(),
+      Order({ value: 3 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.zIndex).toBe(400);
+
+    mock.world.ecs.add(child, Parent({ entity: parent }));
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.zIndex).toBe(3);
+
+    mock.world.ecs.set(child, Transform, { y: 500 });
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.zIndex).toBe(3);
+  });
+
+  it("keeps the sort rule of a layer container for a wrapper that hangs in it", async () => {
+    const mock = await started([{ name: "items", sort: "order" }]);
+    const parent = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite(),
+      Order({ value: 4 })
+    ]);
+
+    mock.modules.sync.pass();
+    mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: parent })]);
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(parent)?.wrapper?.zIndex).toBe(4);
+    expect(mock.ctx.state.sync.layers.get("items")?.container?.sortableChildren).toBe(true);
+  });
+
+  it("hangs a view back in its layer at its own pose when its Parent is removed", async () => {
+    const mock = await started([{ name: "items", sort: "y" }]);
+
+    // A real texture, so the object is not stretched and its pivot reads in reference units.
+    mock.api.sync.textures.provide(() => new FakeTexture({}) as never);
+
+    const parent = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 100, y: 50 }),
+      Sprite()
+    ]);
+    const child = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 10, y: 400, pivot: { x: 4, y: 2 } }),
+      Sprite(),
+      Parent({ entity: parent }),
+      Order({ value: 3 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const object = mock.ctx.state.sync.views.get(child)?.object;
+    const wrapper = mock.ctx.state.sync.views.get(parent)?.wrapper;
+
+    expect(object?.parent).toBe(wrapper);
+    expect(object?.zIndex).toBe(3);
+
+    mock.world.clearChanges();
+    mock.world.ecs.remove(child, Parent);
+    mock.modules.sync.pass();
+
+    expect(object?.parent).toBe(mock.ctx.state.sync.layers.get("items")?.container);
+    expect(object?.position.x).toBe(10);
+    expect(object?.position.y).toBe(400);
+    expect(object?.pivot.x).toBe(4);
+    expect(object?.zIndex).toBe(400);
+    expect(mock.ctx.state.sync.views.get(child)?.layer).toBe("items");
+    expect(mock.ctx.state.sync.reparented.size).toBe(0);
+  });
+
+  it("forgets a removed Parent of an entity that left in the same frame", async () => {
+    const mock = await started();
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    const child = mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: parent })]);
+
+    mock.modules.sync.pass();
+    mock.world.ecs.despawn(child);
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.has(child)).toBe(false);
+    expect(mock.ctx.state.sync.reparented.size).toBe(0);
+    expect(mock.log.error).not.toHaveBeenCalled();
+  });
+
+  it("marks no removed Parent while nothing can draw", async () => {
+    const mock = createMockRenderer({ dom: false });
+
+    await mock.start();
+
+    const entity = mock.world.ecs.spawn(owner, [Transform(), Parent({ entity: 1 })]);
+
+    mock.world.ecs.remove(entity, Parent);
+
+    expect(mock.ctx.state.sync.reparented.size).toBe(0);
   });
 });

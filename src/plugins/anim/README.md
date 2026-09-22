@@ -26,7 +26,7 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 | Member | Behaviour |
 |---|---|
 | `play(animation, slots)` | Builds the step tree now and starts it. Returns a `PlayHandle`: the `MotionHandle` contract over the whole tree plus `done` and `marks()`. |
-| `finishAll()` | Every timeline ends at its own end and every track writes its exact target. Called by the frame step in world mode `"fast"`. |
+| `finishAll()` | Every timeline ends at its own end, every track writes its exact target and every spawned entity is despawned. Called by the frame step in world mode `"fast"`. |
 | `active()` | Tracks in the table, the delayed ones included. `0` when nothing moves. |
 | `onMark(fn)` | Direct subscription next to the event. Returns the remover. |
 
@@ -44,6 +44,8 @@ defineAnimation(id, { slots, build })   // slots: { name: type<Target>() | type<
 sequence(...steps)  parallel(...steps)  stagger(items, ms, item => Step)  wait(ms)  mark(name)
 tween(target, Component, to, { ms, ease?, delayMs?, additive? })   set(target, Component, patch)
 frames(target, { keys, fps, loop? })    // writes Sprite.texture, one key per frame
+spawn(id, components, { layer?, order? }) // a temporary entity, made when the step is reached
+spawned(id)                             // the target of an entity a spawn step of this timeline made
 sfx(key, { bus? })   haptic(kind)       // descriptors anim owns; audio and platform own the handlers
 use(animation, slots, tools?)           // nests one animation; pass the outer tools when it reads `at`
 play(animation, slots)                  // the fx descriptor a node awaits
@@ -51,9 +53,51 @@ external(player, clip)                  // reserved for Spine: always throws
 defineMotion({ states, transition?, on })
 ```
 
+A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.
+
 `build(slots, { at })` runs once per play, so the same animation may play twice at once. `at(target)`
-resolves the target through `world.projection.entityOf` and answers its `Transform`; a target
-nothing resolves gives `{ x: 0, y: 0, rotation: 0, scale: 1 }` and one warning.
+resolves the target through `world.projection.entityOf` and answers its **root pose**: the rest
+`Transform` composed through the `Parent` chain (`rootPoseOf` of `renderer`, every pivot applied), so
+a flight lands on a cell inside a scaled board slot. An entity without a parent answers its rest
+`Transform` as is. A target nothing resolves gives `{ x: 0, y: 0, rotation: 0, scale: 1 }` and one
+warning.
+
+## Spawned entities
+
+```ts
+const coinsFly = defineAnimation("hud.coinsFly", {
+  slots: { from: type<Target>(), to: type<Target>() },
+  build: ({ from, to }, { at }) =>
+    sequence(
+      spawn("coin1", [
+        Sprite({ texture: "ui.icon-coin", width: 64, height: 64, fit: "contain" }),
+        Transform({ x: at(from).x, y: at(from).y })
+      ], { order: 50 }),
+      tween(spawned("coin1"), Transform, { x: at(to).x, y: at(to).y }, { ms: 600, ease: "inCubic" }),
+      mark("landed")
+    )
+});
+```
+
+- `spawn(id, components, { layer?, order? })` is frozen plain data: the component values
+  `world.ecs.spawn` takes, the layer (`"ui"` by default) and the order (`0` by default). `build`
+  stays pure.
+- The entity is made when the step is reached, owned by `anim` (`{ kind: "plugin", name: "anim" }`),
+  with `Layer` and `Order` added from the options. Later steps aim at it with `spawned(id)`.
+- Every entity a timeline spawned is despawned when the timeline ends, is finished (`finish()`,
+  `finishAll()`, the abort of the node that played it) or is cancelled. Finishing a timeline
+  before a `spawn` step is reached spawns nothing.
+- A spawned id names one entity of one timeline: two plays of the same animation each spawn their
+  own. One timeline that spawns an id twice (nested `use` included) throws at build time:
+  `[game] Animation "hud.coinsFly" spawns "coin1" twice.` A step aimed at an id no `spawn` step
+  reached yet ends silently.
+- `at(spawned(id))` answers the current `Transform` of the spawned entity, composed through its
+  `Parent` chain. `build` runs before any step is reached, so inside `build` the id is not there
+  yet: `at` gives the identity pose and one warning.
+- Spawn ids are flat across nested `use`: an animation that spawns cannot be `use`d twice in one
+  timeline. Name each spawned entity (`sparkle1` … `sparkle12`) in the animation that makes it.
+- `Animation.playing` counts the tracks of a spawned entity, not its timeline: the entity lives
+  exactly as long as the timeline.
 
 ## Component
 
@@ -94,5 +138,6 @@ When the last additive track leaves, the field is written once more without offs
 ## Dependencies
 
 `time` (the frame step, `delta`, `wake()`), `flow` (`fx.handle`, `fx.dispatch`, `features.all()`),
-`world` (the driver seam, `projection.entityOf`, the ecs), `renderer` (its `Sprite` and `Transform`
-components; no API call).
+`world` (the driver seam, `projection.entityOf`, `restOf`, the ecs with `spawn` and `despawn`, the
+`Layer` and `Order` components), `renderer` (its `Sprite`, `Transform` and `Parent` components and
+the `rootPoseOf` pose helper of `sync/pose.ts`; no API call).

@@ -36,7 +36,7 @@ describe("startInput", () => {
     mock.start();
 
     expect(mock.state.canvas).toBe(canvas.element);
-    expect(canvas.names()).toHaveLength(5);
+    expect(canvas.names()).toHaveLength(6);
 
     canvas.dispatch("pointerdown", { pointerId: 1, clientX: 10, clientY: 10 });
     expect(mock.state.samples).toHaveLength(1);
@@ -55,7 +55,7 @@ describe("the frame step against a changing canvas", () => {
     mock.frame();
 
     expect(first.names()).toEqual([]);
-    expect(second.names()).toHaveLength(5);
+    expect(second.names()).toHaveLength(6);
     expect(mock.state.canvas).toBe(second.element);
   });
 
@@ -85,9 +85,21 @@ describe("the frame step against a changing canvas", () => {
     mock.canvas.current = canvas.element;
     mock.start();
 
-    record(mock.state, { kind: "down", pointerId: 1, clientX: 50, clientY: 50 });
+    record(mock.state, {
+      kind: "down",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 50,
+      clientY: 50
+    });
     mock.frame();
-    record(mock.state, { kind: "move", pointerId: 1, clientX: 90, clientY: 50 });
+    record(mock.state, {
+      kind: "move",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 90,
+      clientY: 50
+    });
     mock.frame();
 
     expect(mock.state.phase).toBe("dragging");
@@ -107,13 +119,25 @@ describe("the frame step against a changing canvas", () => {
     mock.start();
     mock.spawn([Tappable({ intent: "found" })]);
     canvas.flags.capturable = false;
-    record(mock.state, { kind: "down", pointerId: 7, clientX: 10, clientY: 10 });
+    record(mock.state, {
+      kind: "down",
+      pointerType: "touch",
+      pointerId: 7,
+      clientX: 10,
+      clientY: 10
+    });
 
     expect(() => mock.frame()).not.toThrow();
     expect(canvas.captured).toEqual([]);
 
     canvas.flags.capturable = true;
-    record(mock.state, { kind: "up", pointerId: 7, clientX: 10, clientY: 10 });
+    record(mock.state, {
+      kind: "up",
+      pointerType: "touch",
+      pointerId: 7,
+      clientX: 10,
+      clientY: 10
+    });
     mock.frame();
 
     expect(canvas.released).toEqual([7]);
@@ -136,6 +160,17 @@ describe("stopInput", () => {
     expect(mock.state.canvas).toBeUndefined();
     expect(mock.state.samples).toEqual([]);
     expect(mock.state.phase).toBe("idle");
+  });
+
+  it("forgets the hovered view and the parent of a carried view", () => {
+    const mock = createMockInput();
+
+    mock.state.pointerOver = 3;
+    mock.state.parent = 4;
+    stopInput(mock.state);
+
+    expect(mock.state.pointerOver).toBeUndefined();
+    expect(mock.state.parent).toBeUndefined();
   });
 
   it("is safe when the plugin stayed inert", () => {

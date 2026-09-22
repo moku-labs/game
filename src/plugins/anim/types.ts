@@ -13,18 +13,20 @@ import type { Track } from "./tween/types";
 
 /**
  * What a step and a slot are pointed at: the projection key of a live view or of an element a
- * plugin above registered with `registerKey`, or an entity. A node passes keys, never entities.
+ * plugin above registered with `registerKey`, an entity, or the id of an entity a `spawn` step of
+ * the same timeline made (`spawned(id)`). A node passes keys, never entities.
  *
  * @example
  * ```ts
- * const target: Target = { projection: "hud", key: "coins" };
+ * const counter: Target = { projection: "hud", key: "coins" };
+ * const flyingCoin: Target = spawned("coin1"); // { spawned: "coin1" }
  * ```
  */
-export type Target = { projection: string; key: string } | Entity;
+export type Target = { projection: string; key: string } | Entity | { spawned: string };
 
 /**
- * The pose `at(target)` answers with: the rest `Transform` of the target, or the identity pose
- * when nothing is there.
+ * The pose `at(target)` answers with: where the target rests in root (reference) space, its rest
+ * `Transform` composed through the `Parent` chain, or the identity pose when nothing is there.
  *
  * @example
  * ```ts
@@ -77,8 +79,9 @@ export type SlotValue<Tag> = Tag extends TypeTag<Target[]> ? Target[] : Target;
 export type SlotRecord = SlotValues<SlotTags>;
 
 /**
- * What `build` is handed next to the slots: `at` reads the rest `Transform` of a target at play
- * time, so a choreography can fly one element to where another one rests.
+ * What `build` is handed next to the slots: `at` reads where a target rests at play time, in root
+ * space (its rest `Transform` composed through the `Parent` chain, every pivot applied), so a
+ * choreography can fly one element to where another one rests, even inside a scaled slot.
  *
  * @example
  * ```ts
@@ -229,32 +232,60 @@ export type State = {
 
 /**
  * anim plugin API, `app.anim`: play a choreography, end everything, count what runs and listen
- * to the marks.
+ * to the marks. A choreography may spawn temporary entities; they live exactly as long as its
+ * timeline.
  *
  * @example
  * ```ts
- * // A test plays a choreography without a node and steps the frames itself.
- * const handle = app.anim.play(coinsFly, { from: purse, to: counter });
+ * // The board is full: a toast sign drops in, holds for 1.6 s and leaves. Nothing stays behind.
+ * const toastBoardFull = defineAnimation("board.toastBoardFull", {
+ *   slots: {},
+ *   build: () =>
+ *     sequence(
+ *       spawn("sign", [Text({ content: "Board is full", style: "title" }), Transform({ x: 540, y: -120 })]),
+ *       tween(spawned("sign"), Transform, { y: 300 }, { ms: 400, ease: "outBack" }),
+ *       wait(1600),
+ *       tween(spawned("sign"), Transform, { y: -120 }, { ms: 300, ease: "in" })
+ *     )
+ * });
+ * const handle = app.anim.play(toastBoardFull, {});
  *
- * app.time.step(16);
- * app.anim.active(); // 1: the first tween runs
+ * for (let frame = 0; frame < 150; frame += 1) app.time.step(16);
+ * handle.active(); // false: the timeline ended and despawned the sign
  * ```
  */
 export type AnimApi = {
   /**
    * Builds the step tree of an animation with the given targets and starts it. The tree runs
-   * from the next frame step on, in game time, so `time.setScale` and a pause apply to it.
+   * from the next frame step on, in game time, so `time.setScale` and a pause apply to it. `at`
+   * inside `build` answers where a target rests in root space, even inside a scaled slot.
    *
    * @param animation - What `defineAnimation` returned.
    * @param slots - One target, or a list of targets, per declared slot.
    * @returns The handle of the running timeline.
+   * @throws {Error} When the tree spawns one id twice.
    * @example
    * ```ts
-   * // A test plays the coin flight and waits for it without a browser.
-   * const handle = app.anim.play(coinsFly, { from: purse, to: counter });
+   * // The reward is claimed: a coin appears on the reward picture and flies to the HUD counter.
+   * const coinsFly = defineAnimation("hud.coinsFly", {
+   *   slots: { from: type<Target>(), to: type<Target>() },
+   *   build: ({ from, to }, { at }) =>
+   *     sequence(
+   *       spawn("coin1", [
+   *         Sprite({ texture: "ui.icon-coin", width: 64, height: 64, fit: "contain" }),
+   *         Transform({ x: at(from).x, y: at(from).y })
+   *       ], { order: 50 }),
+   *       tween(spawned("coin1"), Transform, { x: at(to).x, y: at(to).y }, { ms: 600, ease: "inCubic" }),
+   *       mark("landed")
+   *     )
+   * });
+   * const handle = app.anim.play(coinsFly, {
+   *   from: { projection: "reward", key: "picture" },
+   *   to: { projection: "hud", key: "coins" }
+   * });
    *
-   * for (let frame = 0; frame < 60; frame += 1) app.time.step(16);
-   * handle.marks(); // ["landed"]
+   * for (let frame = 0; frame < 40; frame += 1) app.time.step(16);
+   * handle.marks(); // ["landed"]: the coin reached the counter and was despawned
    * ```
    */
   play<Tags extends SlotTags>(
@@ -264,11 +295,15 @@ export type AnimApi = {
 
   /**
    * Ends every track and every timeline now: each writes its exact target, the marks of a
-   * running timeline are jumped in tree order and every pending `done` resolves.
+   * running timeline are jumped in tree order, every entity a timeline spawned is despawned and
+   * every pending `done` resolves.
    *
    * @example
    * ```ts
-   * // A /control tool skips the whole choreography and looks at the final picture.
+   * // A /control tool skips the board-full toast mid-flight: the sign is gone at once.
+   * app.anim.play(toastBoardFull, {});
+   * app.time.step(16);
+   *
    * app.anim.finishAll();
    * app.anim.active(); // 0
    * ```
@@ -307,7 +342,8 @@ export type AnimApi = {
 
 /**
  * Resolved dependency APIs. `renderer` is not among them: `anim` writes its `Sprite` and reads
- * its `Transform` through the component objects, which are plain data.
+ * its `Transform` through the component objects, which are plain data, and composes the root pose
+ * of `at` with the pure `rootPoseOf` of `renderer/sync/pose.ts`.
  */
 export type Deps = { time: TimeApi; flow: FlowApi; world: WorldApi };
 

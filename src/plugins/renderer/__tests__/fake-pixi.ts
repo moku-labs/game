@@ -10,6 +10,21 @@ import { createFakeElement, type FakeElement } from "./fake-dom";
 /** The source behind a fake texture. */
 export type FakeSource = { width: number; height: number; destroyed: boolean };
 
+/** A fake Pixi rectangle: what a texture frame is made of. */
+export class FakeRectangle {
+  public x: number;
+  public y: number;
+  public width: number;
+  public height: number;
+
+  public constructor(x = 0, y = 0, width = 0, height = 0) {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+  }
+}
+
 /** A fake Pixi texture. */
 export class FakeTexture {
   /** Every texture the fake ever made, in creation order. */
@@ -22,15 +37,23 @@ export class FakeTexture {
 
   public source: FakeSource;
   public defaultBorders: { left: number; top: number; right: number; bottom: number } | undefined;
+  /** The part of the source the texture shows. The whole source when no frame was given. */
+  public frame: FakeRectangle;
   public destroyed = false;
   public destroyCalls = 0;
+  /** What the last `destroy` was asked to do with the source. */
+  public destroyedSource: boolean | undefined;
+  private readonly framed: boolean;
 
   public constructor(options: {
     source?: FakeSource;
+    frame?: FakeRectangle;
     defaultBorders?: { left: number; top: number; right: number; bottom: number };
   }) {
     this.source = options.source ?? { width: 64, height: 64, destroyed: false };
     this.defaultBorders = options.defaultBorders;
+    this.framed = options.frame !== undefined;
+    this.frame = options.frame ?? new FakeRectangle(0, 0, this.source.width, this.source.height);
     FakeTexture.made?.push(this);
   }
 
@@ -48,14 +71,14 @@ export class FakeTexture {
     });
   }
 
-  /** Width of the texture. */
+  /** Width of the texture: its frame when it has one, else its source. */
   public get width(): number {
-    return this.source.width;
+    return this.framed ? this.frame.width : this.source.width;
   }
 
-  /** Height of the texture. */
+  /** Height of the texture: its frame when it has one, else its source. */
   public get height(): number {
-    return this.source.height;
+    return this.framed ? this.frame.height : this.source.height;
   }
 
   /**
@@ -66,6 +89,7 @@ export class FakeTexture {
   public destroy(destroySource?: boolean): void {
     this.destroyCalls += 1;
     this.destroyed = true;
+    this.destroyedSource = destroySource === true;
     if (destroySource === true) this.source.destroyed = true;
   }
 }
@@ -103,6 +127,8 @@ export class FakeContainer {
   public destroyed = false;
   public position = new FakePoint();
   public scale = new FakePoint(1, 1);
+  /** The local point that lands on `position`, as Pixi's `pivot` is. */
+  public pivot = new FakePoint();
   public children: FakeContainer[] = [];
   public parent: FakeContainer | null = null;
   /** What clips this container's children, as Pixi's `mask` does. */
@@ -548,6 +574,7 @@ export function createFakePixi(
     Sprite: FakeSprite,
     NineSliceSprite: FakeNineSliceSprite,
     Texture: FakeTexture,
+    Rectangle: FakeRectangle,
     Graphics: FakeGraphics,
     BitmapFont: FakeBitmapFont,
     Cache: fakeCache,

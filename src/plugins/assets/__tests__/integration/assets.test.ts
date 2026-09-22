@@ -116,14 +116,18 @@ const boardFeature = defineFeature("board", {
 /** Everything the probe plugin heard from `assets`. */
 const heard: {
   loaded: Events["assets:bundle-loaded"][];
+  progress: Events["assets:bundle-progress"][];
   unloaded: Events["assets:bundle-unloaded"][];
-} = { loaded: [], unloaded: [] };
+} = { loaded: [], progress: [], unloaded: [] };
 
 const probePlugin = createPlugin("assetsProbe", {
   depends: [assetsPlugin],
   hooks: () => ({
     "assets:bundle-loaded": (payload: Events["assets:bundle-loaded"]) => {
       heard.loaded.push(payload);
+    },
+    "assets:bundle-progress": (payload: Events["assets:bundle-progress"]) => {
+      heard.progress.push(payload);
     },
     "assets:bundle-unloaded": (payload: Events["assets:bundle-unloaded"]) => {
       heard.unloaded.push(payload);
@@ -148,6 +152,7 @@ async function tick(times = 80): Promise<void> {
  */
 async function startApp(io?: ReturnType<typeof createFakeIo>) {
   heard.loaded.length = 0;
+  heard.progress.length = 0;
   heard.unloaded.length = 0;
 
   const app = createApp({
@@ -329,6 +334,27 @@ describe("assets plugin integration — with an io seam", () => {
       reason: "request",
       keys: ["board.body", "board.click"]
     });
+
+    await app.stop();
+  });
+
+  it("tells a plugin above how far a load got, file by file", async () => {
+    const io = createFakeIo();
+
+    io.texts.set("/features/board/assets/body.fnt", FNT);
+
+    const app = await startApp(io);
+
+    heard.progress.length = 0;
+    await app.assets.load("board.voices");
+    await tick();
+
+    // A font with its page and a sound: two files, so two events, the last one at the total.
+    expect(heard.progress).toEqual([
+      { bundle: "board.voices", loaded: 1, total: 2 },
+      { bundle: "board.voices", loaded: 2, total: 2 }
+    ]);
+    expect(heard.loaded.at(-1)?.bundle).toBe("board.voices");
 
     await app.stop();
   });

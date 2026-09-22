@@ -89,6 +89,7 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     lift: projection.lift,
     keyOf: projection.keyOf,
     entityOf: projection.entityOf,
+    entitiesOf: projection.entitiesOf,
     setDriver: projection.setDriver,
     viewOf: projection.viewOf,
     setRest: projection.setRest,
