@@ -59,9 +59,12 @@ import {
   timePlugin,
   worldPlugin
 } from "./plugins";
+import { defineBundles, load } from "./plugins/assets/bundles";
 import { defineFeature } from "./plugins/flow/feature";
 import { defineFlow, defineNode } from "./plugins/flow/runner/define";
 import type { GameTypes, Kit } from "./plugins/flow/types";
+import { sprite } from "./plugins/renderer/components";
+import { projection } from "./plugins/world/projection/define";
 
 const framework = createCore(coreConfig, {
   // Dependency order (spec/11 §1.3, §1.5). The screen set is a list the game spreads in (later cycles).
@@ -120,13 +123,25 @@ export const createPlugin = framework.createPlugin;
  * ```
  */
 export function defineGame<Types extends GameTypes>(): Kit<Types> {
-  return { defineNode, defineFlow, defineFeature };
+  return { defineNode, defineFlow, defineFeature, projection, sprite, defineBundles, load };
 }
 
+export { defineBundles, load } from "./plugins/assets/bundles";
 // ─── Helpers (explicit, never export *) ───────────────────────
 export { defineFeature } from "./plugins/flow/feature";
 export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
 export { exit, slot, to, type } from "./plugins/flow/runner/define";
+export {
+  Draggable,
+  DropTarget,
+  Held,
+  Hovered,
+  Pointer,
+  Pressable,
+  Pressed,
+  Swipeable,
+  Tappable
+} from "./plugins/input/components";
 export { SaveUnreadableError } from "./plugins/model/store/types";
 export {
   Display,

@@ -13,13 +13,25 @@ describe("root index", () => {
     expect(engine.createPlugin).toBeTypeOf("function");
   });
 
-  it("defineGame returns the same functions the flow plugin exports", () => {
+  it("defineGame returns the same functions the plugins export", () => {
     const kit = engine.defineGame();
 
     expect(kit.defineNode).toBe(defineNode);
     expect(kit.defineFlow).toBe(defineFlow);
     expect(kit.defineFeature).toBe(defineFeature);
-    expect(Object.keys(kit)).toEqual(["defineNode", "defineFlow", "defineFeature"]);
+    expect(kit.projection).toBe(engine.projection);
+    expect(kit.sprite).toBe(engine.sprite);
+    expect(kit.defineBundles).toBe(engine.defineBundles);
+    expect(kit.load).toBe(engine.load);
+    expect(Object.keys(kit)).toEqual([
+      "defineNode",
+      "defineFlow",
+      "defineFeature",
+      "projection",
+      "sprite",
+      "defineBundles",
+      "load"
+    ]);
   });
 
   it("exports no genre rules", () => {

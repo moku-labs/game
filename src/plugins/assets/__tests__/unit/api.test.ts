@@ -161,6 +161,53 @@ describe("texture", () => {
     expect(mock.renderer.invalidated.at(-1)).toEqual(["board.cell", "board.item"]);
   });
 
+  it("asks again after a failed background load, and still warns only once", async () => {
+    const mock = createMockAssets({ manifest });
+
+    await mock.start();
+    mock.io.status.set("/features/board/assets/cell.png", 503);
+
+    expect(mock.api.texture("board.cell")).toBeUndefined();
+    await tick();
+
+    expect(mock.ctx.state.records.get("board")?.status).toBe("idle");
+
+    const attempts = mock.io.fetched.filter(url => url.endsWith("cell.png")).length;
+
+    mock.io.status.delete("/features/board/assets/cell.png");
+
+    expect(mock.api.texture("board.cell")).toBeUndefined();
+    await tick();
+
+    expect(mock.io.fetched.filter(url => url.endsWith("cell.png"))).toHaveLength(attempts + 1);
+    expect(mock.api.isLoaded("board")).toBe(true);
+    expect(mock.api.texture("board.cell")).toBeDefined();
+    expect(mock.log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("joins the running load instead of starting a second one", async () => {
+    const mock = createMockAssets({ manifest });
+
+    await mock.start();
+    mock.io.control.gated = true;
+
+    expect(mock.api.texture("board.cell")).toBeUndefined();
+    await tick();
+
+    const started = mock.io.fetched.length;
+
+    expect(mock.api.texture("board.cell")).toBeUndefined();
+    expect(mock.api.texture("board.item")).toBeUndefined();
+    await tick();
+
+    expect(mock.io.fetched).toHaveLength(started);
+
+    mock.io.releaseAll();
+    await tick();
+
+    expect(mock.api.isLoaded("board")).toBe(true);
+  });
+
   it("answers undefined for a key of no bundle", async () => {
     const mock = createMockAssets({ manifest });
 

@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { scanFeatures } from "../../scan/scan";
+import { type ScanResult, scanAssets } from "../../scan/scan";
 import { makeTree, pngBytes, removeTree, webpVp8Bytes } from "./scan-fixtures";
 
 const roots: string[] = [];
@@ -12,18 +14,39 @@ async function tree(files: Record<string, string | Uint8Array>): Promise<string>
   return root;
 }
 
+function manifestPath(root: string): string {
+  return path.join(root, "out", "manifest.json");
+}
+
+function keysPath(root: string): string {
+  return path.join(root, "out", "generated", "assets.ts");
+}
+
+async function scan(
+  root: string,
+  extra?: { features?: string; write?: boolean }
+): Promise<ScanResult> {
+  return await scanAssets({
+    root,
+    manifest: manifestPath(root),
+    keys: keysPath(root),
+    write: extra?.write ?? false,
+    ...(extra?.features === undefined ? {} : { features: extra.features })
+  });
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => removeTree(root)));
 });
 
-describe("scanFeatures", () => {
+describe("scanAssets", () => {
   it("makes one feature-tier bundle out of a feature without assets.ts", async () => {
     const root = await tree({
       "features/board/assets/item-a-1.png": pngBytes(64, 64),
       "features/board/assets/cell.png": pngBytes(64, 64)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(manifest.version).toBe(1);
     expect(manifest.bundles.board).toEqual({
@@ -55,7 +78,7 @@ describe("scanFeatures", () => {
       "features/reward-popup/assets/star-on.webp": webpVp8Bytes(32, 32)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(manifest.bundles.ui?.files[0]?.key).toBe("ui.button.primary");
     expect(manifest.bundles["reward-popup"]?.files[0]).toEqual({
@@ -72,7 +95,7 @@ describe("scanFeatures", () => {
       "features/ui/assets/panel{nine=48}.png": pngBytes(256, 128)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(manifest.bundles.ui?.files[0]).toEqual({
       key: "ui.panel",
@@ -87,7 +110,7 @@ describe("scanFeatures", () => {
   it("reads the features folder the options name", async () => {
     const root = await tree({ "parts/ui/assets/panel.png": pngBytes(16, 16) });
 
-    const { manifest } = await scanFeatures(root, { features: "parts" });
+    const { manifest } = await scan(root, { features: "parts" });
 
     expect(manifest.bundles.ui?.files[0]?.path).toBe("parts/ui/assets/panel.png");
   });
@@ -98,7 +121,7 @@ describe("scanFeatures", () => {
       "features/ui/assets/notes.md": "how the panel was drawn"
     });
 
-    const { manifest, notes } = await scanFeatures(root);
+    const { manifest, notes } = await scan(root);
 
     expect(notes).toEqual([
       'ignored "features/ui/assets/notes.md": the scanner reads .png and .webp only.'
@@ -109,7 +132,7 @@ describe("scanFeatures", () => {
   it("is empty when the features folder is missing", async () => {
     const root = await tree({ "readme.md": "no features yet" });
 
-    const { manifest, notes } = await scanFeatures(root);
+    const { manifest, notes } = await scan(root);
 
     expect(manifest).toEqual({ version: 1, bundles: {} });
     expect(notes).toEqual([]);
@@ -121,7 +144,7 @@ describe("scanFeatures", () => {
       "features/ui/assets/panel.png": pngBytes(16, 16)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(Object.keys(manifest.bundles)).toEqual(["ui"]);
   });
@@ -135,7 +158,7 @@ describe("scanFeatures", () => {
       "features/board/assets/chains/link.png": pngBytes(32, 32)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(Object.keys(manifest.bundles)).toEqual(["board", "board.chains"]);
     expect(manifest.bundles.board?.tier).toBe("scene");
@@ -164,7 +187,7 @@ describe("scanFeatures", () => {
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(Object.keys(manifest.bundles)).toEqual(["board", "board.chains"]);
     expect(manifest.bundles["board.chains"]).toEqual({
@@ -186,7 +209,7 @@ describe("scanFeatures", () => {
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(manifest.bundles["board.a"]?.files.map(file => file.key)).toEqual(["board.item-a"]);
     expect(manifest.bundles["board.b"]?.files.map(file => file.key)).toEqual([
@@ -202,21 +225,55 @@ describe("scanFeatures", () => {
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
 
-    const { manifest } = await scanFeatures(root);
+    const { manifest } = await scan(root);
 
     expect(Object.keys(manifest.bundles)).toEqual(["board", "ui"]);
     expect(manifest.bundles.ui?.files.map(file => file.key)).toEqual(["ui.a", "ui.z"]);
   });
 });
 
-describe("scanFeatures problems", () => {
+describe("scanAssets outputs", () => {
+  it("writes both files, makes their folders and reports the change", async () => {
+    const root = await tree({ "features/ui/assets/panel{nine=48}.png": pngBytes(256, 128) });
+
+    const { changed, keysSource } = await scan(root, { write: true });
+
+    expect(changed).toBe(true);
+    expect(keysSource).toContain('export type AssetKey =\n  | "ui.panel";');
+    expect(await readFile(manifestPath(root), "utf8")).toContain('"ui.panel"');
+    expect(await readFile(keysPath(root), "utf8")).toBe(keysSource);
+  });
+
+  it("writes the same bytes twice and reports no change on the second run", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+
+    const first = await scan(root, { write: true });
+    const written = await readFile(manifestPath(root), "utf8");
+    const second = await scan(root, { write: true });
+
+    expect(first.changed).toBe(true);
+    expect(second.changed).toBe(false);
+    expect(await readFile(manifestPath(root), "utf8")).toBe(written);
+  });
+
+  it("reports the change without writing when write is false", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+
+    const { changed } = await scan(root, { write: false });
+
+    expect(changed).toBe(true);
+    await expect(readFile(manifestPath(root), "utf8")).rejects.toThrow();
+  });
+});
+
+describe("scanAssets problems", () => {
   it("names both files of a duplicate key", async () => {
     const root = await tree({
       "features/ui/assets/panel.png": pngBytes(16, 16),
       "features/ui/assets/panel.webp": webpVp8Bytes(16, 16)
     });
 
-    await expect(scanFeatures(root)).rejects.toThrow(
+    await expect(scan(root)).rejects.toThrow(
       'key "ui.panel" comes from two files: features/ui/assets/panel.png and features/ui/assets/panel.webp.'
     );
   });
@@ -229,7 +286,7 @@ describe("scanFeatures problems", () => {
       "features/board/assets/chains/link.png": pngBytes(16, 16)
     });
 
-    await expect(scanFeatures(root)).rejects.toThrow(
+    await expect(scan(root)).rejects.toThrow(
       'file "features/board/assets/chains/link.png" is claimed by the bundles "board.a" and "board.b".'
     );
   });
@@ -241,7 +298,7 @@ describe("scanFeatures problems", () => {
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
 
-    await expect(scanFeatures(root)).rejects.toThrow(
+    await expect(scan(root)).rejects.toThrow(
       'the feature "board" declares the bundle "extra", which is neither "board" nor a name starting with "board.".'
     );
   });
@@ -253,9 +310,7 @@ describe("scanFeatures problems", () => {
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
 
-    await expect(scanFeatures(root)).rejects.toThrow(
-      'the bundle "board" has the unknown tier "screen".'
-    );
+    await expect(scan(root)).rejects.toThrow('the bundle "board" has the unknown tier "screen".');
   });
 
   it("refuses a bundle that is not an object", async () => {
@@ -264,7 +319,7 @@ describe("scanFeatures problems", () => {
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
 
-    await expect(scanFeatures(root)).rejects.toThrow(
+    await expect(scan(root)).rejects.toThrow(
       'the bundle "board" has the unknown tier "undefined".'
     );
   });
@@ -275,7 +330,7 @@ describe("scanFeatures problems", () => {
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
 
-    await expect(scanFeatures(root)).rejects.toThrow(
+    await expect(scan(root)).rejects.toThrow(
       /the description "features\/board\/assets\.ts" could not be read/
     );
   });
@@ -283,7 +338,7 @@ describe("scanFeatures problems", () => {
   it("refuses a nine border that does not fit in the image", async () => {
     const root = await tree({ "features/ui/assets/panel{nine=48}.png": pngBytes(64, 64) });
 
-    await expect(scanFeatures(root)).rejects.toThrow(
+    await expect(scan(root)).rejects.toThrow(
       'the nine-slice 48 of "features/ui/assets/panel{nine=48}.png" must be smaller than half of 64×64.'
     );
   });
@@ -291,13 +346,13 @@ describe("scanFeatures problems", () => {
   it("carries the problem of a broken file name", async () => {
     const root = await tree({ "features/ui/assets/panel.v2.png": pngBytes(16, 16) });
 
-    await expect(scanFeatures(root)).rejects.toThrow(/"\." in "panel\.v2"/);
+    await expect(scan(root)).rejects.toThrow(/"\." in "panel\.v2"/);
   });
 
   it("carries the problem of a file that is not really an image", async () => {
     const root = await tree({ "features/ui/assets/panel.png": "not a png at all, just text" });
 
-    await expect(scanFeatures(root)).rejects.toThrow(/is not a PNG or a WebP file/);
+    await expect(scan(root)).rejects.toThrow(/is not a PNG or a WebP file/);
   });
 
   it("lists every problem in one error", async () => {
@@ -306,17 +361,15 @@ describe("scanFeatures problems", () => {
       "features/ui/assets/logo.png": "text"
     });
 
-    await expect(scanFeatures(root)).rejects.toThrow("[game] assets: the scan found 2 problems.");
-    await expect(scanFeatures(root)).rejects.toThrow('"." in "panel.v2"');
-    await expect(scanFeatures(root)).rejects.toThrow("is not a PNG or a WebP file");
-    await expect(scanFeatures(root)).rejects.toThrow(
-      'Fix them and run "bun run assets:keys" again.'
-    );
+    await expect(scan(root)).rejects.toThrow("[game] assets: the scan found 2 problems.");
+    await expect(scan(root)).rejects.toThrow('"." in "panel.v2"');
+    await expect(scan(root)).rejects.toThrow("is not a PNG or a WebP file");
+    await expect(scan(root)).rejects.toThrow('Fix them and run "bun run assets:keys" again.');
   });
 
   it("counts a single problem in the singular", async () => {
     const root = await tree({ "features/ui/assets/logo.png": "text" });
 
-    await expect(scanFeatures(root)).rejects.toThrow("the scan found 1 problem.");
+    await expect(scan(root)).rejects.toThrow("the scan found 1 problem.");
   });
 });

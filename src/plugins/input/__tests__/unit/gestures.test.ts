@@ -4,6 +4,7 @@ import { Exiting } from "../../../world/ecs/define";
 import {
   Draggable,
   DropTarget,
+  Held,
   Pointer,
   type PointerValue,
   Pressable,
@@ -382,6 +383,61 @@ describe("the frame step in the other world modes", () => {
     expect(mock.state.phase).toBe("idle");
     expect(mock.calls).toEqual([]);
     expect(mock.answers).toEqual([]);
+  });
+
+  it("lets a running drag go when the mode turns fast, instead of leaking the hand", () => {
+    const mock = createMockInput();
+    const entity = view(mock, [Draggable({}), Transform({ x: 50, y: 50 })], {
+      projection: "board.items",
+      key: "i5"
+    });
+
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, moved(70, 50));
+    mock.frame();
+
+    expect(mock.state.phase).toBe("dragging");
+    expect(mock.has(entity, Held)).toBe(true);
+
+    mock.world.mode = "fast";
+    mock.calls.length = 0;
+    mock.frame();
+
+    expect(mock.state.phase).toBe("idle");
+    expect(mock.has(entity, Held)).toBe(false);
+    expect(mock.state.unmute).toBeUndefined();
+    expect(mock.calls).toEqual([
+      "unmute",
+      "settle",
+      "lift:false",
+      "untag:Held",
+      "pointer:false",
+      "untag:Pressed"
+    ]);
+    expect(mock.answers).toEqual([]);
+    expect(pointerOf(mock).down).toBe(false);
+  });
+
+  it("writes nothing more on the frames after a fast drag was let go", () => {
+    const mock = createMockInput();
+
+    view(mock, [Draggable({}), Transform({ x: 50, y: 50 })], {
+      projection: "board.items",
+      key: "i5"
+    });
+
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, moved(70, 50));
+    mock.frame();
+
+    mock.world.mode = "fast";
+    mock.frame();
+    mock.calls.length = 0;
+    mock.frame();
+
+    expect(mock.calls).toEqual([]);
   });
 });
 

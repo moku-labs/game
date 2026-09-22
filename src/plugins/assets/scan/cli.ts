@@ -1,18 +1,17 @@
 /**
  * @file assets plugin, build time — the command line of the scanner. It is the only file here
- * that touches the terminal: the scan and the two emitters are pure. Output goes through the
- * branded console of `@moku-labs/common`, and `main` returns the exit code instead of taking it.
+ * that touches the terminal: the scan, the emitters and the key rule are pure. Output goes
+ * through the branded console of `@moku-labs/common`, and `runCli` returns the exit code
+ * instead of taking it.
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createBrandConsole } from "@moku-labs/common/cli";
 import type { Manifest } from "../types";
-import { emitKeys, emitManifest } from "./emit";
-import { scanFeatures } from "./scan";
+import { scanAssets } from "./scan";
 
 const MANIFEST_FILE = "manifest.json";
 
-const KEYS_FILE = "generated/assets.ts";
+const KEYS_FILE = path.join("generated", "assets.ts");
 
 /**
  * The part of the branded console the scanner writes through. A `BrandConsole` fits it, and a
@@ -28,10 +27,10 @@ export type ScanUi = {
 };
 
 /** What the flags asked for. */
-type Options = { root: string; out: string; check: boolean };
+type Options = { root: string; manifest: string; keys: string; check: boolean };
 
-/** One output file: where it goes and what it should contain. */
-type Output = { name: string; text: string };
+/** The flags that take a path. */
+type PathFlag = "--root" | "--manifest" | "--keys";
 
 /**
  * Wraps a command line problem in the message shape of the framework.
@@ -54,15 +53,29 @@ function messageOf(failure: unknown): string {
 }
 
 /**
- * Reads the flags.
+ * Tells whether an argument is one of the flags that take a path.
+ *
+ * @param flag - The argument.
+ * @returns True for `--root`, `--manifest` and `--keys`.
+ */
+function isPathFlag(flag: string | undefined): flag is PathFlag {
+  return flag === "--root" || flag === "--manifest" || flag === "--keys";
+}
+
+/**
+ * Reads the flags. `--manifest` and `--keys` default to `manifest.json` and `generated/assets.ts`
+ * inside the root.
  *
  * @param argv - The arguments after the script name.
- * @returns The resolved folders and whether this is a check run.
+ * @returns The resolved paths and whether this is a check run.
  * @throws {Error} When an option is unknown or misses its value.
  */
 function parseArgv(argv: readonly string[]): Options {
-  let root = ".";
-  let out: string | undefined;
+  const given: Record<PathFlag, string | undefined> = {
+    "--root": undefined,
+    "--manifest": undefined,
+    "--keys": undefined
+  };
   let check = false;
   let index = 0;
 
@@ -75,18 +88,24 @@ function parseArgv(argv: readonly string[]): Options {
       continue;
     }
 
-    if (flag !== "--root" && flag !== "--out") throw problem(`unknown option "${String(flag)}".`);
+    if (!isPathFlag(flag)) throw problem(`unknown option "${String(flag)}".`);
 
     const value = argv[index + 1];
 
-    if (value === undefined || value.startsWith("--")) throw problem(`"${flag}" needs a folder.`);
-    if (flag === "--root") root = value;
-    else out = value;
+    if (value === undefined || value.startsWith("--")) throw problem(`"${flag}" needs a path.`);
 
+    given[flag] = value;
     index += 2;
   }
 
-  return { root: path.resolve(root), out: path.resolve(out ?? root), check };
+  const root = path.resolve(given["--root"] ?? ".");
+
+  return {
+    root,
+    manifest: path.resolve(given["--manifest"] ?? path.join(root, MANIFEST_FILE)),
+    keys: path.resolve(given["--keys"] ?? path.join(root, KEYS_FILE)),
+    check
+  };
 }
 
 /**
@@ -120,91 +139,53 @@ function summary(manifest: Manifest): string {
 }
 
 /**
- * Reads a file that may not exist yet.
+ * Names both output files, for the lines about them.
  *
- * @param file - Absolute path of the file.
- * @returns Its text, or `undefined` when it is not there.
+ * @param options - The resolved paths.
+ * @returns The two paths in one phrase.
  */
-async function readCurrent(file: string): Promise<string | undefined> {
-  try {
-    return await readFile(file, "utf8");
-  } catch {
-    return undefined;
-  }
+function outputNames(options: Options): string {
+  return `"${options.manifest}" and "${options.keys}"`;
 }
 
 /**
- * Writes the outputs that would change, or lists them when this is a check run.
- *
- * @param options - The resolved folders and the check flag.
- * @param outputs - The two output files.
- * @param ui - Where the lines go.
- * @returns The exit code.
- */
-async function apply(options: Options, outputs: readonly Output[], ui: ScanUi): Promise<number> {
-  const stale: string[] = [];
-
-  for (const output of outputs) {
-    const file = path.join(options.out, ...output.name.split("/"));
-
-    if ((await readCurrent(file)) === output.text) continue;
-
-    stale.push(output.name);
-
-    if (options.check) continue;
-
-    await mkdir(path.dirname(file), { recursive: true });
-    await writeFile(file, output.text);
-    ui.info(`wrote "${output.name}".`);
-  }
-
-  if (stale.length === 0) {
-    ui.info(`${outputs.map(output => output.name).join(" and ")} are up to date.`);
-
-    return 0;
-  }
-
-  if (!options.check) return 0;
-
-  ui.error(
-    `${stale.join(" and ")} would change.\n  Run "bun run assets:keys" and commit the result.`
-  );
-
-  return 1;
-}
-
-/**
- * Runs the asset key scanner: walk the features, write `manifest.json` and `generated/assets.ts`,
- * or check that both are current. Nothing here calls `process.exit`; the caller does.
+ * Runs the asset key scanner: walk the features, write the manifest and the key module, or check
+ * that both are current. Nothing here calls `process.exit`; the caller does.
  *
  * @param argv - The arguments after the script name.
  * @param ui - Where the lines go. The branded console by default.
  * @returns The exit code: `1` when the scan failed or `--check` found a difference, else `0`.
  * @example
  * ```ts
- * await main(["--root", "src", "--out", "public/assets", "--check"]);
- * // 1 when manifest.json is older than the files in src/features
+ * await runCli(["--root", "src", "--manifest", "public/assets/manifest.json", "--check"]);
+ * // 1 when public/assets/manifest.json is older than the files in src/features
  * ```
  */
-export async function main(argv: string[], ui: ScanUi = createBrandConsole()): Promise<number> {
+export async function runCli(argv: string[], ui: ScanUi = createBrandConsole()): Promise<number> {
   try {
     const options = parseArgv(argv);
-    const { manifest, notes } = await scanFeatures(options.root);
+    const { manifest, changed, notes } = await scanAssets({
+      root: options.root,
+      manifest: options.manifest,
+      keys: options.keys,
+      write: !options.check
+    });
 
     for (const note of notes) ui.warn(note);
 
-    const code = await apply(
-      options,
-      [
-        { name: MANIFEST_FILE, text: emitManifest(manifest) },
-        { name: KEYS_FILE, text: emitKeys(manifest) }
-      ],
-      ui
-    );
+    if (changed && options.check) {
+      ui.error(
+        `${outputNames(options)} are out of date.\n` +
+          '  Run "bun run assets:keys" and commit the result.'
+      );
 
-    if (code === 0) ui.info(summary(manifest));
+      return 1;
+    }
 
-    return code;
+    ui.info(changed ? `wrote ${outputNames(options)}.` : `${outputNames(options)} are up to date.`);
+    ui.info(summary(manifest));
+
+    return 0;
   } catch (error) {
     ui.error(messageOf(error));
 

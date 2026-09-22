@@ -70,7 +70,7 @@ Determinism: no `Date.now`, no `performance.now`, no `event.timeStamp`. Every du
 |---|---|
 | `live` | the five steps above |
 | `paused` | drops the queued samples; a running drag ends as a cancel and the view settles home; a press goes idle; `Pointer.down` becomes false |
-| `fast` | nothing: samples are dropped, no tag and no resource is written |
+| `fast` | samples are dropped. With nothing in the hand no tag and no resource is written at all; a gesture that was running when the mode turned is let go like a cancel, so `Held`, the mute, the lift and the pointer gate are never left behind |
 
 ## Gesture state machine
 

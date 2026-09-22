@@ -3,10 +3,11 @@
  * manifest: one bundle per feature, split by the optional `assets.ts` that feature exports.
  * Node and Bun only. Nothing under `src/` outside `scan/` imports it, so no game bundles it.
  */
-import { open, readdir, stat } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { BundleSpec, Manifest, ManifestBundle, ManifestFile, NineSlice, Tier } from "../types";
+import { emitKeys, emitManifest } from "./emit";
 import { HEADER_BYTES, type ImageSize, readImageSize, textureMb } from "./image-size";
 import { isAssetFile, keyOf, parseTags } from "./keys";
 
@@ -17,11 +18,19 @@ const PREFIX = "[game] assets: ";
 const ESCAPE = /[.+^${}()|[\]\\]/g;
 
 /**
- * What a scan may be told besides its root.
+ * What one scan is told: where the features are and where the two generated files go.
  */
 export type ScanOptions = {
+  /** Path of the game source root, the folder that holds the features. */
+  root: string;
   /** Name of the folder that holds the features. Default `"features"`. */
   features?: string;
+  /** Path of the `manifest.json` to write. */
+  manifest: string;
+  /** Path of the generated key module to write. */
+  keys: string;
+  /** False for a check run: nothing is written. Default true. */
+  write?: boolean;
 };
 
 /**
@@ -30,9 +39,16 @@ export type ScanOptions = {
 export type ScanResult = {
   /** The manifest, with bundles sorted by name and files sorted by key. */
   manifest: Manifest;
+  /** The text of the generated key module. */
+  keysSource: string;
+  /** True when an output on disk differs from what the scan produced. */
+  changed: boolean;
   /** One line per file the scan left out. Nothing here stops a build. */
   notes: readonly string[];
 };
+
+/** One output file: where it goes and what it should contain. */
+type Output = { file: string; text: string };
 
 /** One bundle while it is being filled. */
 type BundleDraft = { feature: string; tier: Tier; files: ManifestFile[] };
@@ -532,25 +548,78 @@ function collected(problems: readonly string[]): Error {
 }
 
 /**
- * Walks the features of a game and builds the manifest: one bundle per feature, split by the
- * optional `assets.ts` of that feature, every file keyed by the key rule.
+ * Reads an output file that may not exist yet.
  *
- * @param root - Path of the game source root, the folder that holds `features/`.
- * @param options - Name of the features folder, when it is not `features`.
- * @returns The manifest and the notes about files the scan left out.
+ * @param file - Path of the file.
+ * @returns Its text, or `undefined` when it is not there.
+ */
+async function readCurrent(file: string): Promise<string | undefined> {
+  try {
+    return await readFile(file, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Writes the outputs whose text changed, and tells whether any of them differed.
+ *
+ * @param outputs - Where each output goes and what it should contain.
+ * @param write - False for a check run: nothing is written.
+ * @returns True when an output on disk differs from what the scan produced.
+ */
+async function applyOutputs(outputs: readonly Output[], write: boolean): Promise<boolean> {
+  let changed = false;
+
+  for (const output of outputs) {
+    if ((await readCurrent(output.file)) === output.text) continue;
+
+    changed = true;
+
+    if (!write) continue;
+
+    await mkdir(path.dirname(output.file), { recursive: true });
+    await writeFile(output.file, output.text);
+  }
+
+  return changed;
+}
+
+/**
+ * Walks the features of a game and writes its two generated files: one bundle per feature, split
+ * by the optional `assets.ts` of that feature, every file keyed by the key rule. A check run
+ * (`write: false`) writes nothing and only reports whether something would change.
+ *
+ * @param options - The game source root, the two output paths and whether to write.
+ * @returns The manifest, the text of the key module and whether an output differed.
  * @throws {Error} One error that lists every problem the scan found.
  * @example
  * ```ts
- * const { manifest, notes } = await scanFeatures("src");
- * // manifest.bundles.ui.files[0].key: "ui.button.primary", notes: []
+ * const { manifest, changed } = await scanAssets({
+ *   root: "src",
+ *   manifest: "public/assets/manifest.json",
+ *   keys: "src/generated/assets.ts"
+ * });
+ * // manifest.bundles.ui.files[0].key: "ui.button.primary", changed: true on the first run
  * ```
  */
-export async function scanFeatures(root: string, options?: ScanOptions): Promise<ScanResult> {
-  const scan = createState(root, options?.features ?? "features");
+export async function scanAssets(options: ScanOptions): Promise<ScanResult> {
+  const scan = createState(options.root, options.features ?? "features");
 
   for (const feature of await listFeatures(scan.featuresFolder)) await scanFeature(scan, feature);
 
   if (scan.problems.length > 0) throw collected(scan.problems);
 
-  return { manifest: toManifest(scan), notes: scan.notes };
+  const manifest = toManifest(scan);
+  const manifestSource = emitManifest(manifest);
+  const keysSource = emitKeys(manifest);
+  const changed = await applyOutputs(
+    [
+      { file: options.manifest, text: manifestSource },
+      { file: options.keys, text: keysSource }
+    ],
+    options.write !== false
+  );
+
+  return { manifest, keysSource, changed, notes: scan.notes };
 }

@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { main } from "../../scan/cli";
+import { runCli } from "../../scan/cli";
 import { makeTree, pngBytes, removeTree } from "./scan-fixtures";
 
 const roots: string[] = [];
@@ -42,45 +42,47 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => removeTree(root)));
 });
 
-describe("main", () => {
+describe("runCli", () => {
   it("writes the manifest and the key module under the root", async () => {
     const root = await tree({ "features/ui/assets/panel{nine=48}.png": pngBytes(256, 128) });
     const ui = fakeUi();
 
-    const code = await main(["--root", root], ui);
+    const code = await runCli(["--root", root], ui);
 
     expect(code).toBe(0);
     expect(await readText(path.join(root, "manifest.json"))).toContain('"ui.panel"');
     expect(await readText(path.join(root, "generated", "assets.ts"))).toContain(
       'export type AssetKey =\n  | "ui.panel";'
     );
-    expect(ui.lines.join("\n")).toContain('wrote "manifest.json"');
+    expect(ui.lines.join("\n")).toContain("wrote");
   });
 
-  it("writes into the folder --out names and counts both bundles", async () => {
+  it("writes each output where its flag names it and counts both bundles", async () => {
     const root = await tree({
       "features/ui/assets/panel.png": pngBytes(16, 16),
       "features/board/assets/cell.png": pngBytes(16, 16)
     });
-    const out = path.join(root, "build");
+    const manifest = path.join(root, "public", "assets", "manifest.json");
+    const keys = path.join(root, "src", "generated", "assets.ts");
     const ui = fakeUi();
 
-    expect(await main(["--root", root, "--out", out], ui)).toBe(0);
-    expect(await readText(path.join(out, "manifest.json"))).toContain('"ui.panel"');
+    expect(await runCli(["--root", root, "--manifest", manifest, "--keys", keys], ui)).toBe(0);
+    expect(await readText(manifest)).toContain('"ui.panel"');
+    expect(await readText(keys)).toContain('| "board.cell"');
     expect(ui.lines.join("\n")).toContain("2 bundles, 2 files");
   });
 
   it("writes the same bytes twice and reports the second run as up to date", async () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
-    const manifestPath = path.join(root, "manifest.json");
-    const keysPath = path.join(root, "generated", "assets.ts");
+    const manifest = path.join(root, "manifest.json");
+    const keys = path.join(root, "generated", "assets.ts");
 
-    await main(["--root", root], fakeUi());
-    const first = [await readText(manifestPath), await readText(keysPath)];
+    await runCli(["--root", root], fakeUi());
+    const first = [await readText(manifest), await readText(keys)];
     const ui = fakeUi();
 
-    expect(await main(["--root", root], ui)).toBe(0);
-    expect([await readText(manifestPath), await readText(keysPath)]).toEqual(first);
+    expect(await runCli(["--root", root], ui)).toBe(0);
+    expect([await readText(manifest), await readText(keys)]).toEqual(first);
     expect(ui.lines.join("\n")).toContain("up to date");
     expect(ui.lines.join("\n")).not.toContain("wrote");
   });
@@ -88,10 +90,10 @@ describe("main", () => {
   it("passes --check on an up-to-date tree", async () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
 
-    await main(["--root", root], fakeUi());
+    await runCli(["--root", root], fakeUi());
     const ui = fakeUi();
 
-    expect(await main(["--root", root, "--check"], ui)).toBe(0);
+    expect(await runCli(["--root", root, "--check"], ui)).toBe(0);
     expect(ui.lines.join("\n")).toContain("up to date");
   });
 
@@ -99,23 +101,23 @@ describe("main", () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
     const ui = fakeUi();
 
-    const code = await main(["--root", root, "--check"], ui);
+    const code = await runCli(["--root", root, "--check"], ui);
 
     expect(code).toBe(1);
-    expect(ui.lines.join("\n")).toContain("manifest.json");
+    expect(ui.lines.join("\n")).toContain("are out of date");
     await expect(readText(path.join(root, "manifest.json"))).rejects.toThrow();
   });
 
   it("fails --check after an asset was added", async () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
 
-    await main(["--root", root], fakeUi());
+    await runCli(["--root", root], fakeUi());
     await writeFile(path.join(root, "features", "board", "assets", "gem.png"), pngBytes(16, 16));
 
     const ui = fakeUi();
 
-    expect(await main(["--root", root, "--check"], ui)).toBe(1);
-    expect(ui.lines.join("\n")).toContain("generated/assets.ts");
+    expect(await runCli(["--root", root, "--check"], ui)).toBe(1);
+    expect(ui.lines.join("\n")).toContain("assets.ts");
   });
 
   it("warns about an ignored file", async () => {
@@ -125,7 +127,7 @@ describe("main", () => {
     });
     const ui = fakeUi();
 
-    await main(["--root", root], ui);
+    await runCli(["--root", root], ui);
 
     expect(ui.lines.join("\n")).toContain('warn ignored "features/ui/assets/notes.md"');
   });
@@ -134,7 +136,7 @@ describe("main", () => {
     const root = await tree({ "features/ui/assets/panel.v2.png": pngBytes(16, 16) });
     const ui = fakeUi();
 
-    const code = await main(["--root", root], ui);
+    const code = await runCli(["--root", root], ui);
 
     expect(code).toBe(1);
     expect(ui.lines.join("\n")).toContain("error [game] assets: the scan found 1 problem.");
@@ -144,21 +146,28 @@ describe("main", () => {
   it("refuses an unknown flag", async () => {
     const ui = fakeUi();
 
-    expect(await main(["--sizes"], ui)).toBe(1);
+    expect(await runCli(["--sizes"], ui)).toBe(1);
     expect(ui.lines.join("\n")).toContain('error [game] assets: unknown option "--sizes".');
   });
 
   it("refuses an option without its value", async () => {
     const ui = fakeUi();
 
-    expect(await main(["--root"], ui)).toBe(1);
-    expect(ui.lines.join("\n")).toContain('"--root" needs a folder');
+    expect(await runCli(["--root", "--check"], ui)).toBe(1);
+    expect(ui.lines.join("\n")).toContain('"--root" needs a path');
+  });
+
+  it("refuses a trailing option without its value", async () => {
+    const ui = fakeUi();
+
+    expect(await runCli(["--keys"], ui)).toBe(1);
+    expect(ui.lines.join("\n")).toContain('"--keys" needs a path');
   });
 
   it("prints through the branded console when no console is passed", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    expect(await main(["--sizes"])).toBe(1);
+    expect(await runCli(["--sizes"])).toBe(1);
     expect(error).toHaveBeenCalled();
   });
 });

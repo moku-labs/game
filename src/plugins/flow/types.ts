@@ -4,10 +4,13 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { AnyPluginInstance, PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
+import type { DefineBundles, LoadBundles } from "../assets/types";
 import type { Api as ClockApi } from "../clock/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Patch } from "../model/types";
+import type { SpriteOptions, sprite } from "../renderer/components";
 import type { Api as TimeApi } from "../time/types";
+import type { ProjectionSpec } from "../world/projection/types";
 import type { FeatureDescription, FeaturesApi, FeaturesState } from "./features/types";
 import type { FxApi, FxState } from "./fx/types";
 import type { GateApi, GateState } from "./gate/types";
@@ -122,20 +125,36 @@ export type FlowCtx = KernelSlice & { readonly deps: Deps };
 export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
 
 /**
- * The types of one game. `player` and `session` type the node context; `assets` and `strings`
- * are accepted now and used from later milestones.
+ * The types of one game. `player` and `session` type the node context; `assets` and `bundles`
+ * are the generated key unions of the asset scanner (`string` when a game has none yet);
+ * `strings` is used from V3.
  *
  * @example
  * ```ts
- * type Types = { player: Player; session: Session; assets: AssetKey; strings: StringTable };
+ * type Types = { player: Player; session: Session; assets: AssetKey; bundles: BundleKey; strings: StringTable };
  * ```
  */
 export type GameTypes = {
   player: Json;
   session: Json;
   assets: string;
+  bundles?: string;
   strings: Record<string, unknown>;
 };
+
+/**
+ * The bundle key union of a game, `string` when the game passed none.
+ *
+ * @example
+ * ```ts
+ * type Keys = BundlesOf<{ player: {}; session: {}; assets: string; bundles: "board"; strings: {} }>; // "board"
+ * ```
+ */
+export type BundlesOf<Types extends GameTypes> = Types extends {
+  bundles: infer Keys extends string;
+}
+  ? Keys
+  : string;
 
 /**
  * A feature is an ordinary plugin with no API of its own; `AnyPluginInstance` is the kernel's
@@ -149,24 +168,35 @@ export type GameTypes = {
 export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginInstance };
 
 /**
- * The flow helpers returned by `defineGame`. `defineNode` sees `player` and `session` with the
- * game's types; at run time they are the same functions the plugin exports.
+ * The helpers returned by `defineGame`, bound to the game's types. `defineNode` and `projection`
+ * see `player` and `session`; `defineBundles` and `load` see the bundle keys; `sprite` sees the
+ * asset keys. At run time they are the same functions the plugins export.
  *
  * @example
  * ```ts
- * // kit.ts of a game: bound once, imported by every node and flow file.
- * export const { defineNode, defineFlow, defineFeature } = defineGame<{
- *   player: Player;
- *   session: Session;
- *   assets: string;
- *   strings: Record<string, unknown>;
- * }>();
+ * // kit.ts of a game: bound once, imported by every node, flow and view file.
+ * export const { defineNode, defineFlow, defineFeature, projection, sprite, defineBundles, load } =
+ *   defineGame<{
+ *     player: Player;
+ *     session: Session;
+ *     assets: AssetKey;
+ *     bundles: BundleKey;
+ *     strings: Record<string, unknown>;
+ *   }>();
  * ```
  */
 export type Kit<Types extends GameTypes> = {
   defineNode: DefineNode<{ player: Types["player"]; session: Types["session"] }>;
   defineFlow: typeof defineFlow;
   defineFeature: (name: string, description: FeatureDescription) => FeaturePlugin;
+  projection: <const LayerName extends string, const LiftName extends string, Item>(
+    spec: ProjectionSpec<Item, LayerName, LiftName, Types["player"], Types["session"]>
+  ) => ProjectionSpec<Item, LayerName, LiftName, Types["player"], Types["session"]>;
+  sprite: (
+    options: Omit<SpriteOptions, "texture"> & { texture: Types["assets"] }
+  ) => ReturnType<typeof sprite>;
+  defineBundles: DefineBundles<BundlesOf<Types>>;
+  load: LoadBundles<BundlesOf<Types>>;
 };
 
 export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";

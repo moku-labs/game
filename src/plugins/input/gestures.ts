@@ -369,6 +369,11 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
   if (mode === "fast") {
     ctx.state.samples = [];
 
+    // A gesture that was running when the mode turned fast is let go like a cancel. Leaving it
+    // would leak `Held`, the mute, the lift and a pointer the gate believes is still down. With
+    // nothing in the hand nothing at all is written, which is what fast mode promises.
+    if (ctx.state.phase !== "idle") pauseGestures(ctx);
+
     return;
   }
 

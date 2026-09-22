@@ -41,9 +41,16 @@ export function lookupTexture(ctx: AssetsCtx, key: string): Texture | undefined 
     return record.textures.get(key);
   }
 
+  // `warned` latches the log line only: one key says "not loaded yet" once, however many sprites
+  // and frames ask for it.
   if (!state.warned.has(key)) {
     state.warned.add(key);
     ctx.log.warn("assets: texture is not loaded yet", { key, bundle });
+  }
+
+  // The request itself is not latched. A load that failed left the record idle, so the next miss
+  // asks again; while one is running every caller joins it instead of starting a second.
+  if (record?.status !== "loading") {
     loadBundle(ctx, bundle, undefined, "request").catch(ignoreFailure);
   }
 
