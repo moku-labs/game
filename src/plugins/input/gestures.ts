@@ -20,6 +20,7 @@ import {
 } from "./components";
 import { abortDrag, grab, moveHeld, moveHover, release } from "./drag";
 import { findPressed } from "./hit";
+import { clearPointerOver, endsHover, isHover, movePointerOver } from "./hover";
 import { attach, detach, record } from "./pointer";
 import type { Direction, InputCtx, Point, RawSample } from "./types";
 
@@ -230,8 +231,10 @@ function onCancel(ctx: InputCtx, pointer: PointerValue): void {
 }
 
 /**
- * Feeds one raw sample to the machine. A sample of another pointer is dropped while a pointer is
- * active: the second finger is ignored.
+ * Feeds one raw sample to the hover and the machine. A touch, a cancel and a canvas leave end the
+ * hover whichever pointer sent them; a leave does nothing else. A sample of another pointer is
+ * dropped while a pointer is active: the second finger is ignored. A move of an idle mouse or pen
+ * moves the hover; a lost capture ends the gesture like a cancel.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -240,6 +243,8 @@ function onCancel(ctx: InputCtx, pointer: PointerValue): void {
 function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): void {
   const { pointerId } = ctx.state;
 
+  if (endsHover(sample)) clearPointerOver(ctx);
+  if (sample.kind === "leave") return;
   if (pointerId !== undefined && pointerId !== sample.pointerId) return;
 
   const point = ctx.deps.renderer.viewport.toReference(sample.clientX, sample.clientY);
@@ -253,7 +258,8 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
       break;
     }
     case "move": {
-      onMove(ctx, point);
+      if (isHover(ctx, pointer, sample)) movePointerOver(ctx, point);
+      else onMove(ctx, point);
       break;
     }
     case "up": {
@@ -333,6 +339,7 @@ function syncCanvas(ctx: InputCtx): void {
   if (ctx.state.phase !== "idle") {
     record(ctx.state, {
       kind: "cancel",
+      pointerType: "mouse",
       pointerId: ctx.state.pointerId ?? 0,
       clientX: 0,
       clientY: 0
@@ -344,8 +351,9 @@ function syncCanvas(ctx: InputCtx): void {
 }
 
 /**
- * The world stands still: the queued samples are dropped, a running drag ends as a cancel and the
- * pointer is reported up. A settle written in this mode lands as the rest pose at once.
+ * The world stands still: the queued samples are dropped, a running drag ends as a cancel, the
+ * hover goes and the pointer is reported up. A settle written in this mode lands as the rest pose
+ * at once.
  *
  * @param ctx - Domain context of the input plugin.
  */
@@ -353,6 +361,7 @@ function pauseGestures(ctx: InputCtx): void {
   const pointer = ctx.deps.world.ecs.resource(Pointer);
 
   ctx.state.samples = [];
+  clearPointerOver(ctx);
   if (ctx.state.phase === "dragging") release(ctx);
   pointer.down = false;
   pointer.justPressed = false;

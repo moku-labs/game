@@ -1,6 +1,6 @@
 /**
- * @file input plugin — behaviour as data: the five gesture components, the three tags a game
- * system reads and the `Pointer` resource. Pure: no ctx, no state, no DOM. Made with the
+ * @file input plugin — behaviour as data: the five gesture components, the tags a game system
+ * reads and the `Pointer` resource. Pure: no ctx, no state, no DOM. Made with the
  * `component()`, `tag()` and `resource()` helpers of `world`, so nothing has to be registered.
  */
 import type { Json } from "../model/types";
@@ -127,6 +127,14 @@ export const Hovered = /*#__PURE__*/ tag("Hovered");
  * On the pressed view, from pointer down until a tap, a long press, a grab, a swipe or a cancel.
  */
 export const Pressed = /*#__PURE__*/ tag("Pressed");
+
+/**
+ * On the topmost view a press would take, while a mouse or a pen moves over it with no press. At
+ * most one view carries it, and a touch never hovers. A touch sample, a pointer cancel, the pointer
+ * leaving the canvas and a paused world take it away. `ui` reads it as `is.hover`. It is not
+ * `Hovered`, which marks the drop target under a drag.
+ */
+export const PointerOver = /*#__PURE__*/ tag("PointerOver");
 
 /**
  * Where the one pointer is, in reference units. Written once per frame by the frame step.

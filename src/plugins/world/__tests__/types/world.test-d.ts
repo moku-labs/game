@@ -2,7 +2,7 @@ import { expectTypeOf } from "vitest";
 import { component, mut, system, tag } from "../../ecs/define";
 import type { EcsApi, Entity, Owner, QueryTuple } from "../../ecs/types";
 import { projection } from "../../projection/define";
-import type { DescriptionNode, Ease } from "../../projection/types";
+import type { DescriptionNode, Ease, ProjectionApi } from "../../projection/types";
 import type { Events, KernelSlice } from "../../types";
 
 type Position = { x: number; y: number };
@@ -118,3 +118,11 @@ ecs.spawn([Position()]);
 ecs.despawnOwnedBy();
 
 expectTypeOf(ecs.spawn).parameter(0).toEqualTypeOf<Owner>();
+
+declare const projectionApi: ProjectionApi;
+
+// The hosted list is read-only entities; the name is the only argument.
+expectTypeOf(projectionApi.entitiesOf).toEqualTypeOf<(name: string) => readonly Entity[]>();
+
+// @ts-expect-error — entitiesOf takes the projection name, not a key list
+projectionApi.entitiesOf(["board.items"]);

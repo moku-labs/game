@@ -103,7 +103,7 @@ carries the four readers this plugin uses: `json()` for the manifest, `blob()` f
 | `kind` | `"font"` or `"audio"`. A file without a `kind` is a texture, so a manifest written before fonts and audio reads the same. |
 | `pages` | A font only: the page images of its `.fnt`, in declaration order, each with `path`, `width`, `height` and `mb`. A page has no key: it belongs to the font. |
 | `mb` | Estimated memory: `width × height × 4 / 1 048 576` for a texture, the sum of the pages for a font, the file size for audio. Rounded to 3 decimals; the bundle `mb` is the sum. No mipmaps. |
-| `nine` | Optional, always four numbers. Passed to `createTexture` as the tuple `[left, top, right, bottom]`. |
+| `nine` | Optional, always four numbers, whichever of the three tag forms wrote them. Passed to `createTexture` as the tuple `[left, top, right, bottom]`. |
 | `atlas` | Reserved. A file that carries it fails its bundle with a message naming the file. |
 | Order | Bundles sorted by name, files sorted by key. Unknown fields are ignored. |
 
@@ -133,6 +133,12 @@ A file is loaded by what the manifest says it is: a texture is fetched, decoded 
 font reads its `.fnt` as text and uploads every page it lists; an audio file is kept as the raw
 `ArrayBuffer` and is never decoded here.
 
+Every file that settles, loaded or failed, sends `assets:bundle-progress` with `loaded` (the
+settled files so far) and `total` (the files of the bundle). A font counts once, when its `.fnt`
+and all its pages are there. The last one of a load has `loaded === total`, and
+`assets:bundle-loaded` comes after it. The files of an aborted load send nothing, so a loading bar
+never moves for a load that will not finish.
+
 On success the assets are stored, `renderer.sync.textures.invalidate` is called with the keys of
 the bundle, the event goes out, `time.wake()` lifts the idle frame cap — the picture changes now —
 and the budget is enforced. On failure every texture made so far is
@@ -161,8 +167,24 @@ naming the five heaviest loaded files — the cure is smaller art or a split bun
 
 | Event | Payload |
 |---|---|
+| `assets:bundle-progress` | `{ bundle, loaded, total }` |
 | `assets:bundle-loaded` | `{ bundle, tier, mb, reason: "boot" \| "enter" \| "request" \| "preload" }` |
 | `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request", keys }` |
+
+`assets:bundle-progress` is for the game: no engine plugin listens to it. A splash screen fills
+its loading bar from it.
+
+```ts
+createPlugin("loadingBar", {
+  depends: [assetsPlugin],
+  createState: () => ({ share: 0 }),
+  hooks: ctx => ({
+    "assets:bundle-progress": ({ loaded, total }) => {
+      ctx.state.share = loaded / total; // 0.25, 0.5, 0.75, 1 for a bundle of four files
+    }
+  })
+});
+```
 
 `keys` names every asset the bundle carried, so `text` drops the fonts it installed and `audio`
 drops the buffers it decoded, per key.
@@ -202,6 +224,20 @@ work.
 | `.fnt` with its `.png` pages | one font: the key is the `.fnt`'s, the pages are listed under it and are never keys of their own |
 | `.mp3` | one sound, sized by its bytes |
 | `.ogg`, `.wav`, `.ttf`, anything else | left out with a note. One audio format decodes on every target WebView, and text is drawn from bitmap fonts |
+
+A nine-slice texture carries its borders in the file name. The key drops the tag.
+
+| Tag | Borders | Example | Key |
+|---|---|---|---|
+| `{nine=N}` | every side `N` | `panel{nine=48}.png` | `ui.panel` |
+| `{nine=H,V}` | left and right `H`, top and bottom `V` | `bar{nine=24,12}.png` | `ui.bar` |
+| `{nine=L,T,R,B}` | left, top, right, bottom: the order `textures.create` takes | `sign{nine=30,10,40,20}.webp` | `ui.sign` |
+
+Left plus right and top plus bottom must stay below the sides of the image, or the scan fails.
+A malformed tag (`{nine=4,5,6}`, `{nine}`) is not a problem: the key keeps the whole name,
+`ui.panel{nine=4,5,6}`, and the scan adds one note for the file. An unknown tag
+(`{atlas=ui}`) is still a problem, and so is a fraction (`{nine=12.5}`): its `.` cannot stay in a
+key, so the scan fails with a message that names the malformed tag.
 
 `generated/assets.ts` carries `AssetKey` over every kind, plus the narrower `FontKey` and
 `AudioKey` next to it, so a text style takes only a font and a sound only an MP3.

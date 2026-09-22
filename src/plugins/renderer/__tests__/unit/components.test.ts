@@ -2,22 +2,37 @@ import { describe, expect, it } from "vitest";
 import { Display, NineSlice, Parent, Sprite, sprite, Transform } from "../../components";
 
 describe("renderer components", () => {
-  it("gives Transform the reference-space defaults", () => {
-    expect(Transform().value).toEqual({ x: 0, y: 0, rotation: 0, scale: 1 });
+  it("gives Transform the reference-space defaults, turning around its own origin", () => {
+    expect(Transform().value).toEqual({
+      x: 0,
+      y: 0,
+      rotation: 0,
+      scale: 1,
+      pivot: { x: 0, y: 0 }
+    });
     expect(Transform.componentName).toBe("Transform");
   });
 
-  it("gives Sprite a white tint, full alpha and a centred anchor", () => {
+  it("gives Sprite a white tint, full alpha, a centred anchor and the texture's own size", () => {
     expect(Sprite().value).toEqual({
       texture: "",
       tint: 0xff_ff_ff,
       alpha: 1,
-      anchor: { x: 0.5, y: 0.5 }
+      anchor: { x: 0.5, y: 0.5 },
+      width: 0,
+      height: 0,
+      fit: "fill"
     });
   });
 
-  it("gives NineSlice a zero size, because the scene decides it", () => {
-    expect(NineSlice().value).toEqual({ texture: "", width: 0, height: 0 });
+  it("gives NineSlice a zero size, full alpha and a white tint", () => {
+    expect(NineSlice().value).toEqual({
+      texture: "",
+      width: 0,
+      height: 0,
+      alpha: 1,
+      tint: 0xff_ff_ff
+    });
   });
 
   it("gives Parent entity 0, which means no parent", () => {
@@ -36,10 +51,13 @@ describe("renderer components", () => {
       texture: "board.cell",
       tint: 0xff_ff_ff,
       alpha: 1,
-      anchor: { x: 0.5, y: 0.5 }
+      anchor: { x: 0.5, y: 0.5 },
+      width: 0,
+      height: 0,
+      fit: "fill"
     });
     expect(place.type).toBe(Transform);
-    expect(place.value).toEqual({ x: 540, y: 300, rotation: 0, scale: 1 });
+    expect(place.value).toEqual({ x: 540, y: 300, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } });
   });
 
   it("takes the four optional values of sprite() over the defaults", () => {

@@ -211,4 +211,86 @@ describe("sync hit test", () => {
 
     expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBeUndefined();
   });
+
+  it("adds the pivot when it moves the point into local space, with rotation and scale", async () => {
+    const mock = await started();
+    // Turned a quarter, doubled, turning around the right edge of its 64 x 64 box.
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 100, y: 100, rotation: Math.PI / 2, scale: 2, pivot: { x: 32, y: 0 } }),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    // The box now covers x 36..164 and y -28..100.
+    expect(mock.api.sync.hitTest(100, 50, anyEntity)).toBe(entity);
+    expect(mock.api.sync.hitTest(40, -20, anyEntity)).toBe(entity);
+    expect(mock.api.sync.hitTest(100, 120, anyEntity)).toBeUndefined();
+  });
+
+  it("follows the pivots of a parent chain", async () => {
+    const mock = await started();
+    const parent = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 200, y: 0, pivot: { x: 50, y: 0 } }),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const child = mock.world.ecs.spawn(owner, [
+      Transform({ x: 50, y: 0, scale: 0.5, rotation: Math.PI, pivot: { x: 20, y: 0 } }),
+      Sprite({ texture: "a" }),
+      Parent({ entity: parent })
+    ]);
+
+    mock.modules.sync.pass();
+
+    // The parent draws around 150, the child's pivot lands on 200 and its box spans 194..226.
+    expect(mock.api.sync.hitTest(150, 0, anyEntity)).toBe(parent);
+    expect(mock.api.sync.hitTest(220, 0, anyEntity)).toBe(child);
+    expect(mock.api.sync.hitTest(250, 0, anyEntity)).toBeUndefined();
+  });
+
+  it("takes the child with the higher Order first inside a wrapper", async () => {
+    const mock = await started();
+    const parent = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const above = mock.world.ecs.spawn(owner, [
+      Transform(),
+      Sprite({ texture: "a" }),
+      Parent({ entity: parent }),
+      Order({ value: 1 })
+    ]);
+
+    mock.world.ecs.spawn(owner, [
+      Transform(),
+      Sprite({ texture: "a" }),
+      Parent({ entity: parent })
+    ]);
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(above);
+  });
+
+  it("tests the drawn box of a sized sprite", async () => {
+    const mock = await started();
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 500, y: 500 }),
+      Sprite({ texture: "a", width: 300, height: 100, fit: "contain", anchor: { x: 0, y: 0 } })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitTest(790, 590, anyEntity)).toBe(entity);
+    expect(mock.api.sync.hitTest(810, 550, anyEntity)).toBeUndefined();
+  });
 });

@@ -1,6 +1,7 @@
 /**
  * Complex tier — the art of the game: bundles of textures by key, a graph-driven preload and a
- * texture-memory budget. Emits `assets:bundle-loaded`, `assets:bundle-unloaded`.
+ * texture-memory budget. Emits `assets:bundle-progress`, `assets:bundle-loaded`,
+ * `assets:bundle-unloaded`.
  *
  * @see README.md
  */
@@ -44,6 +45,7 @@ export const assetsPlugin = /*#__PURE__*/ createPlugin("assets", {
   events: (register: RegisterFunction) =>
     register.map<Events>({
       "assets:bundle-loaded": "Every file of a bundle is a texture now",
+      "assets:bundle-progress": "One more file of a running bundle load settled",
       "assets:bundle-unloaded": "The textures of a bundle were destroyed"
     }),
   createState: createAssetsState,

@@ -34,7 +34,10 @@ export type StubCanvas = {
   element: HTMLCanvasElement;
   style: { touchAction: string };
   names(): string[];
-  dispatch(name: string, event: { pointerId: number; clientX: number; clientY: number }): void;
+  dispatch(
+    name: string,
+    event: { pointerType?: string; pointerId: number; clientX: number; clientY: number }
+  ): void;
   captured: number[];
   released: number[];
   /** False makes `setPointerCapture` throw, the way a browser does for a pointer that is gone. */
@@ -54,6 +57,8 @@ export type MockInput = {
   wake: Mock<() => void>;
   /** Every call the plugin made into `world.projection`, `world.ecs` and `flow.gate`, in order. */
   calls: string[];
+  /** The fields of every `world.projection.mute` call, in order. */
+  muted: Array<readonly string[]>;
   answers: Answer[];
   /** What `flow.gate.answer` returns. */
   gate: { open: boolean };
@@ -164,6 +169,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const resources = new Map<string, object>();
   const keys = new Map<Entity, { projection: string; key: string }>();
   const calls: string[] = [];
+  const muted: Array<readonly string[]> = [];
   const answers: Answer[] = [];
   const gate = { open: true };
   const world = { mode: "live" as WorldMode };
@@ -188,6 +194,14 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
 
       store.set(component.componentName, { ...current, ...patch });
       calls.push(`set:${component.componentName}`);
+    },
+    add: (entity: Entity, value: AnyComponentValue): void => {
+      stores.get(entity)?.set(value.type.componentName, value.value);
+      calls.push(`add:${value.type.componentName}`);
+    },
+    remove: (entity: Entity, component: AnyComponentType): void => {
+      stores.get(entity)?.delete(component.componentName);
+      calls.push(`remove:${component.componentName}`);
     },
     has: (entity: Entity, component: AnyComponentType): boolean =>
       stores.get(entity)?.has(component.componentName) ?? false,
@@ -222,8 +236,13 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
 
       return undefined;
     },
-    mute: (): (() => void) => {
+    mute: (
+      _entity: Entity,
+      _component: AnyComponentType,
+      fields: readonly string[]
+    ): (() => void) => {
       calls.push("mute");
+      muted.push(fields);
 
       return () => calls.push("unmute");
     },
@@ -318,6 +337,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     time,
     wake,
     calls,
+    muted,
     answers,
     gate,
     world,

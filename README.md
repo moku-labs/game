@@ -319,9 +319,9 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 | `SaveUnreadableError` | class | Thrown by `model.store.load()` when the save cannot be read |
 | `component`, `tag`, `resource`, `mut`, `system`, `projection`, `Layer`, `Order`, `Exiting`, `Tree` | functions and components | The ECS vocabulary of `world` and the projection helper |
 | `Transform`, `Sprite`, `NineSlice`, `Shape`, `Parent`, `Display`, `sprite` | components | The display components of `renderer` |
-| `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`, `Touchable`, `Held`, `Hovered`, `Pressed`, `Pointer` | components | Gestures as data, from `input` |
+| `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`, `Touchable`, `Held`, `Hovered`, `PointerOver`, `Pressed`, `Pointer` | components | Gestures as data, from `input`; `PointerOver` marks the view under an idle mouse or pen (the `hover` style state) |
 | `defineBundles`, `load`, `defineScene` | functions | Bundle and scene declarations |
-| `defineAnimation`, `sequence`, `parallel`, `stagger`, `tween`, `set`, `wait`, `mark`, `frames`, `sfx`, `haptic`, `use`, `play`, `external`, `defineMotion`, `Animation` | functions and a component | Choreography as frozen data. `play(animation, slots)` is the effect a node awaits; `sfx` and `haptic` are descriptors `audio` and `platform` handle; `external` throws until Spine arrives |
+| `defineAnimation`, `sequence`, `parallel`, `stagger`, `tween`, `set`, `wait`, `mark`, `frames`, `sfx`, `haptic`, `use`, `spawn`, `spawned`, `play`, `external`, `defineMotion`, `Animation` | functions and a component | Choreography as frozen data. `play(animation, slots)` is the effect a node awaits; `spawn` makes a temporary entity (flying coins, a toast sign) that the timeline despawns when it ends; `sfx` and `haptic` are descriptors `audio` and `platform` handle; `external` throws until Spine arrives |
 | `tr` | function | `tr(key, params?)` builds a frozen `Message`; no locale is read at the call site |
 | `Text`, `label`, `defineTextStyles` | component and functions | Words on the screen and the text styles a feature registers |
 | `defineComponent`, `popup`, `defineStyle`, `defineTokens`, `resolve`, `Box`, `LocalWrite` | functions and components | Interface components, the popup effect, the style vocabulary, the rect of an element |

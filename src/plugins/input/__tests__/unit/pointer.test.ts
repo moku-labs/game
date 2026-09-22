@@ -5,6 +5,7 @@ import { createMockInput, createStubCanvas } from "./mock-input";
 
 const move = (pointerId: number, clientX: number): RawSample => ({
   kind: "move",
+  pointerType: "touch",
   pointerId,
   clientX,
   clientY: 0
@@ -14,9 +15,21 @@ describe("record", () => {
   it("keeps every sample of different kinds in order", () => {
     const mock = createMockInput();
 
-    record(mock.state, { kind: "down", pointerId: 1, clientX: 10, clientY: 10 });
+    record(mock.state, {
+      kind: "down",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10
+    });
     record(mock.state, move(1, 20));
-    record(mock.state, { kind: "up", pointerId: 1, clientX: 30, clientY: 10 });
+    record(mock.state, {
+      kind: "up",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 30,
+      clientY: 10
+    });
 
     expect(mock.state.samples.map(sample => sample.kind)).toEqual(["down", "move", "up"]);
   });
@@ -43,7 +56,7 @@ describe("record", () => {
 });
 
 describe("attach and detach", () => {
-  it("adds the five pointer listeners and takes the browser gestures away", () => {
+  it("adds the six pointer listeners and takes the browser gestures away", () => {
     const mock = createMockInput();
     const canvas = createStubCanvas();
 
@@ -53,6 +66,7 @@ describe("attach and detach", () => {
       "lostpointercapture",
       "pointercancel",
       "pointerdown",
+      "pointerleave",
       "pointermove",
       "pointerup"
     ]);
@@ -64,24 +78,55 @@ describe("attach and detach", () => {
     const canvas = createStubCanvas();
 
     attach(canvas.element, mock.state);
-    canvas.dispatch("pointerdown", { pointerId: 3, clientX: 100, clientY: 200 });
+    canvas.dispatch("pointerdown", {
+      pointerType: "touch",
+      pointerId: 3,
+      clientX: 100,
+      clientY: 200
+    });
     canvas.dispatch("pointerup", { pointerId: 3, clientX: 100, clientY: 200 });
     canvas.dispatch("pointercancel", { pointerId: 3, clientX: 0, clientY: 0 });
     canvas.dispatch("lostpointercapture", { pointerId: 3, clientX: 0, clientY: 0 });
 
-    expect(mock.state.samples.map(sample => sample.kind)).toEqual([
-      "down",
-      "up",
-      "cancel",
-      "cancel"
-    ]);
+    expect(mock.state.samples.map(sample => sample.kind)).toEqual(["down", "up", "cancel", "lost"]);
     expect(mock.state.samples[0]).toEqual({
       kind: "down",
+      pointerType: "touch",
       pointerId: 3,
       clientX: 100,
       clientY: 200
     });
     expect(mock.calls).toEqual([]);
+  });
+
+  it("queues the device of the event: a mouse, a touch or a pen, and a mouse when it is unknown", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+
+    attach(canvas.element, mock.state);
+    canvas.dispatch("pointerdown", { pointerType: "pen", pointerId: 1, clientX: 0, clientY: 0 });
+    canvas.dispatch("pointerup", { pointerType: "touch", pointerId: 1, clientX: 0, clientY: 0 });
+    canvas.dispatch("pointerdown", { pointerType: "mouse", pointerId: 2, clientX: 0, clientY: 0 });
+    canvas.dispatch("pointerup", { pointerType: "", pointerId: 2, clientX: 0, clientY: 0 });
+
+    expect(mock.state.samples.map(sample => sample.pointerType)).toEqual([
+      "pen",
+      "touch",
+      "mouse",
+      "mouse"
+    ]);
+  });
+
+  it("turns the pointer leaving the canvas into a leave sample", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+
+    attach(canvas.element, mock.state);
+    canvas.dispatch("pointerleave", { pointerType: "mouse", pointerId: 1, clientX: 5, clientY: 6 });
+
+    expect(mock.state.samples).toEqual([
+      { kind: "leave", pointerType: "mouse", pointerId: 1, clientX: 5, clientY: 6 }
+    ]);
   });
 
   it("removes every listener and restores the touch action", () => {
@@ -111,7 +156,13 @@ describe("record and the idle cap", () => {
     const mock = createMockInput();
 
     mock.start();
-    record(mock.state, { kind: "down", pointerId: 1, clientX: 10, clientY: 10 });
+    record(mock.state, {
+      kind: "down",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10
+    });
     record(mock.state, move(1, 20));
 
     expect(mock.wake).toHaveBeenCalledTimes(2);

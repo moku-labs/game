@@ -391,21 +391,28 @@ function ownerOf(splits: readonly Split[], relative: string, file: string): stri
 }
 
 /**
- * Refuses a nine-slice border that does not fit in its image.
+ * Refuses nine-slice borders that leave no centre: left and right together, and top and bottom
+ * together, must stay below the sides of the image.
  *
  * @param nine - The borders of the file, when it carries a tag.
  * @param size - The pixel size of the file.
  * @param file - Path of the file, for the message.
- * @throws {Error} When a border reaches half of a side.
+ * @throws {Error} When the borders of one axis reach its side.
  */
 function checkNine(nine: NineSlice | undefined, size: ImageSize, file: string): void {
   if (nine === undefined) return;
-  if (nine.left * 2 < size.width && nine.top * 2 < size.height) return;
 
-  throw problem(
-    `the nine-slice ${nine.left} of "${file}" must be smaller than half of ` +
-      `${size.width}×${size.height}.`
-  );
+  const { left, top, right, bottom } = nine;
+  const hasCentre = left + right < size.width && top + bottom < size.height;
+
+  if (hasCentre) return;
+
+  const isUniform = left === top && top === right && right === bottom;
+  const rule = isUniform
+    ? `${left} of "${file}" must be smaller than half of`
+    : `${left},${top},${right},${bottom} of "${file}" must leave a centre inside`;
+
+  throw problem(`the nine-slice ${rule} ${size.width}×${size.height}.`);
 }
 
 /**
@@ -570,6 +577,9 @@ async function describeFile(
   }
 
   const kind = assetKindOf(fileName);
+  const { nine, note } = parseTags(fileName, file);
+
+  if (note !== undefined) scan.notes.push(note);
 
   if (kind === "font") {
     const pages = await describePages(scan, pass, relative);
@@ -587,7 +597,6 @@ async function describeFile(
     return { key, path: file, kind, width: 0, height: 0, mb: bytesMb(size) };
   }
 
-  const { nine } = parseTags(fileName, file);
   const size = readImageSize(await readHead(absolute), file);
 
   checkNine(nine, size, file);

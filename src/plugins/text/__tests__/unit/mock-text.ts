@@ -36,6 +36,8 @@ export type FakeObject = {
   width: number;
   height: number;
   skew: { x: number; y: number };
+  tint: number;
+  alpha: number;
   texture: PixiTexture | undefined;
   options: Record<string, unknown>;
   children: FakeObject[];
@@ -45,6 +47,16 @@ export type FakeObject = {
   removeChildren(): FakeObject[];
   destroy(options?: unknown): void;
 };
+
+/**
+ * Tells whether a value is a plain record, so the options of `destroy` can be read.
+ *
+ * @param value - What `destroy` was handed.
+ * @returns True for a plain object.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /**
  * Creates one display object of the fake Pixi module.
@@ -61,6 +73,8 @@ function makeObject(kind: string, options: Record<string, unknown> = {}): FakeOb
     width: 0,
     height: 0,
     skew: { x: 0, y: 0 },
+    tint: 0xff_ff_ff,
+    alpha: 1,
     texture: undefined,
     options,
     children: [],
@@ -75,6 +89,11 @@ function makeObject(kind: string, options: Record<string, unknown> = {}): FakeOb
     destroy: (destroyOptions?: unknown): void => {
       object.destroyed = true;
       object.destroyOptions = destroyOptions;
+
+      // Pixi frees the children too when asked to.
+      if (isRecord(destroyOptions) && destroyOptions.children === true) {
+        for (const child of object.children) child.destroy(destroyOptions);
+      }
     }
   };
 

@@ -85,11 +85,28 @@ export type TextAlign = "left" | "center" | "right";
 export type TextWrap = number | "none";
 
 /**
+ * The drop shadow of a style as the plugin stores it: a copy of every glyph run in `color`, at
+ * `alpha`, moved by `dx` and `dy` reference pixels.
+ *
+ * @example
+ * ```ts
+ * const shadow: TextShadow = { color: 0x5b3a1e, dx: 0, dy: 4, alpha: 1 };
+ * ```
+ */
+export type TextShadow = { color: number; dx: number; dy: number; alpha: number };
+
+/**
  * One style as a game writes it: the font and the size are required, the rest has defaults.
  *
  * @example
  * ```ts
- * const input: TextStyleInput = { font: "ui.font-digits", size: 40, fill: 0xffe082, digits: true };
+ * // A popup title: cream display glyphs over a brown shadow 4 px down.
+ * const title: TextStyleInput = {
+ *   font: "ui.font-display", size: 56, fill: 0xfff3d6, shadow: { color: 0x5b3a1e, dx: 0, dy: 4 }
+ * };
+ *
+ * defineTextStyles({ "popup.title": title }).map["popup.title"]?.shadow;
+ * // { color: 0x5b3a1e, dx: 0, dy: 4, alpha: 1 }
  * ```
  */
 export type TextStyleInput = {
@@ -104,17 +121,23 @@ export type TextStyleInput = {
   align?: TextAlign;
   wrap?: TextWrap;
   digits?: boolean;
+  /**
+   * A drop shadow under every glyph run, in reference px at the style size. `alpha` is 1 when
+   * left out. It never changes what `measure` answers.
+   */
+  shadow?: { color: number; dx: number; dy: number; alpha?: number };
 };
 
 /**
  * One style as the plugin stores it: every field filled, `bold` and `italic` only when the game
- * shipped those MSDF fonts.
+ * shipped those MSDF fonts, `shadow` only when the style has one.
  *
  * @example
  * ```ts
  * const style: TextStyle = {
  *   font: "ui.font-body", bold: undefined, italic: undefined, size: 32, fill: 0xffffff,
- *   stroke: 0x000000, strokeWidth: 0, letterSpacing: 0, align: "left", wrap: "none", digits: false
+ *   stroke: 0x000000, strokeWidth: 0, letterSpacing: 0, align: "left", wrap: "none",
+ *   digits: false, shadow: undefined
  * };
  * ```
  */
@@ -130,6 +153,7 @@ export type TextStyle = {
   align: TextAlign;
   wrap: TextWrap;
   digits: boolean;
+  shadow: TextShadow | undefined;
 };
 
 /**

@@ -12,10 +12,10 @@ import type { SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
 /**
- * The part of Pixi the engine uses: the classes `sync` builds views from, the bitmap-font pieces
- * `fonts.install` needs, and the `BitmapText` a plugin above builds through `host.pixi()`. The
- * module object never arrives through a static import: `config.loadPixi()` returns it, so a game
- * without a screen carries no Pixi in its bundle.
+ * The part of Pixi the engine uses: the classes `sync` builds views from (a `Rectangle` frames the
+ * crop of a `"cover"` sprite), the bitmap-font pieces `fonts.install` needs, and the `BitmapText`
+ * a plugin above builds through `host.pixi()`. The module object never arrives through a static
+ * import: `config.loadPixi()` returns it, so a game without a screen carries no Pixi in its bundle.
  *
  * @example
  * ```ts
@@ -32,6 +32,7 @@ export type PixiModule = Pick<
   | "Container"
   | "Graphics"
   | "NineSliceSprite"
+  | "Rectangle"
   | "Sprite"
   | "Texture"
   | "bitmapFontTextParser"
@@ -214,6 +215,7 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 
 export type { HostApi, HostInternal, HostState } from "./host/types";
 export type {
+  CoverFrame,
   CreateTextureOptions,
   DisplayAdapter,
   DisplayEntry,

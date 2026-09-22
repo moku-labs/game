@@ -107,6 +107,49 @@ describe("scanAssets", () => {
     });
   });
 
+  it("writes the four sides of a {nine=L,T,R,B} tag and fits them side by side", async () => {
+    // 40 + 10 is below the width 64, although 40 alone is more than half of it.
+    const root = await tree({
+      "features/ui/assets/sign{nine=40,4,10,6}.png": pngBytes(64, 32)
+    });
+
+    const { manifest } = await scan(root);
+
+    expect(manifest.bundles.ui?.files[0]).toMatchObject({
+      key: "ui.sign",
+      nine: { left: 40, top: 4, right: 10, bottom: 6 }
+    });
+  });
+
+  it("keeps a file with a malformed tag under its whole name and notes it once", async () => {
+    const root = await tree({
+      "features/ui/assets/panel{nine=4,5,6}.png": pngBytes(64, 64)
+    });
+
+    const { manifest, notes } = await scan(root);
+
+    expect(manifest.bundles.ui?.files[0]).toEqual({
+      key: "ui.panel{nine=4,5,6}",
+      path: "features/ui/assets/panel{nine=4,5,6}.png",
+      width: 64,
+      height: 64,
+      mb: 0.016
+    });
+    expect(notes).toEqual([
+      'kept the whole name of "features/ui/assets/panel{nine=4,5,6}.png": the tag ' +
+        '"{nine=4,5,6}" is not {nine=N}, {nine=H,V} or {nine=L,T,R,B}.'
+    ]);
+  });
+
+  it("notes a malformed tag on a sound as well", async () => {
+    const root = await tree({ "features/ui/assets/click{nine}.mp3": "ID3" });
+
+    const { manifest, notes } = await scan(root);
+
+    expect(manifest.bundles.ui?.files[0]?.key).toBe("ui.click{nine}");
+    expect(notes).toHaveLength(1);
+  });
+
   it("reads the features folder the options name", async () => {
     const root = await tree({ "parts/ui/assets/panel.png": pngBytes(16, 16) });
 
@@ -340,6 +383,16 @@ describe("scanAssets problems", () => {
 
     await expect(scan(root)).rejects.toThrow(
       'the nine-slice 48 of "features/ui/assets/panel{nine=48}.png" must be smaller than half of 64×64.'
+    );
+  });
+
+  it("refuses four nine sides that leave no centre", async () => {
+    // The left side alone fits in half of 64, but 10 + 60 is not below 64.
+    const root = await tree({ "features/ui/assets/sign{nine=10,4,60,4}.png": pngBytes(64, 32) });
+
+    await expect(scan(root)).rejects.toThrow(
+      'the nine-slice 10,4,60,4 of "features/ui/assets/sign{nine=10,4,60,4}.png" must leave a ' +
+        "centre inside 64×32."
     );
   });
 

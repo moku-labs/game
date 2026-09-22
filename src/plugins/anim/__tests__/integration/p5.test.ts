@@ -149,7 +149,8 @@ function expectAtRest(app: BoardApp, key: string, item: Item): void {
     x: item.x,
     y: item.y,
     rotation: 0,
-    scale: 1
+    scale: 1,
+    pivot: { x: 0, y: 0 }
   });
   expect(app.world.ecs.get(entity, Level)).toEqual({ level: item.level });
 }

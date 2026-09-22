@@ -49,6 +49,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. |
+| `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. |
 | `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
 | `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home. |

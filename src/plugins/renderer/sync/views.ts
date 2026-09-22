@@ -7,13 +7,13 @@ import type { Entity } from "../../world/types";
 import {
   Display,
   NineSlice,
-  Parent,
   Shape,
   type ShapeValue,
   Sprite,
+  type SpriteValue,
   Transform
 } from "../components";
-import type { PixiContainer, PixiGraphics, PixiTexture } from "../types";
+import type { PixiContainer, PixiGraphics, PixiSprite, PixiTexture, Point } from "../types";
 import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
 import { clearFonts } from "./fonts";
 import { labelOf } from "./labels";
@@ -28,10 +28,15 @@ import {
   poolKeyOf,
   release
 } from "./pools";
+import { parentOf } from "./pose";
+import { anchoredBox, boxOf, layoutSprite } from "./sizing";
 import {
+  clearFrames,
+  coverTexture,
   PLACEHOLDER_SIZE,
   PLACEHOLDER_TINT,
   placeholderTexture,
+  releaseCover,
   resolveTexture,
   trackKey,
   untrackKey,
@@ -190,7 +195,48 @@ function textureFor(
 }
 
 /**
- * Writes the `Sprite` component onto its display object and recomputes the hit box.
+ * Draws the magenta square of a sprite whose key nothing answers: the 1x1 white texture
+ * stretched to the box, 64 x 64 on an axis without a size.
+ *
+ * @param object - The sprite object.
+ * @param view - Its view.
+ * @param value - The sprite component.
+ * @param texture - The placeholder texture, or `undefined` while inert.
+ */
+function drawPlaceholder(
+  object: PixiSprite,
+  view: View,
+  value: Readonly<SpriteValue>,
+  texture: PixiTexture | undefined
+): void {
+  const box = boxOf({ width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE }, value);
+
+  if (texture !== undefined) object.texture = texture;
+  object.tint = PLACEHOLDER_TINT;
+  object.anchor.set(value.anchor.x, value.anchor.y);
+  view.drawScale = { x: box.width, y: box.height };
+  view.hitBox = anchoredBox(value.anchor, box);
+}
+
+/**
+ * Records the crop a view shows now, and lets go of the one it showed before, so a resized or
+ * re-keyed cover sprite never leaves a crop behind.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param frameKey - The `frames` key of the crop it shows now; `""` for none.
+ */
+function showCover(sctx: SyncCtx, entity: Entity, view: View, frameKey: string): void {
+  if (view.frameKey === frameKey) return;
+
+  releaseCover(sctx.ctx.state.sync, entity, view.frameKey);
+  view.frameKey = frameKey;
+}
+
+/**
+ * Writes the `Sprite` component onto its display object: the texture, or its crop for a `"cover"`
+ * sprite, the stretch into the box, and the box as the hit box, the anchor applied.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -207,15 +253,27 @@ export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
   const { texture, missing } = textureFor(sctx, value.texture);
 
   view.placeholder = missing;
-  if (texture !== undefined) object.texture = texture;
-  object.tint = missing ? PLACEHOLDER_TINT : value.tint;
   object.alpha = value.alpha;
-  object.anchor.set(value.anchor.x, value.anchor.y);
 
-  const width = missing ? PLACEHOLDER_SIZE : object.texture.width;
-  const height = missing ? PLACEHOLDER_SIZE : object.texture.height;
+  if (missing || texture === undefined) {
+    showCover(sctx, entity, view, "");
+    drawPlaceholder(object, view, value, texture);
 
-  view.hitBox = { x: -value.anchor.x * width, y: -value.anchor.y * height, width, height };
+    return;
+  }
+
+  const layout = layoutSprite({ width: texture.width, height: texture.height }, value);
+  const cover =
+    layout.crop === undefined
+      ? { texture, frameKey: "" }
+      : coverTexture(sctx, entity, value.texture, texture, layout.box, layout.crop);
+
+  object.texture = cover.texture;
+  showCover(sctx, entity, view, cover.frameKey);
+  object.tint = value.tint;
+  object.anchor.set(layout.anchor.x, layout.anchor.y);
+  view.drawScale = layout.drawScale;
+  view.hitBox = anchoredBox(value.anchor, layout.box);
 }
 
 /**
@@ -237,7 +295,8 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
 
   view.placeholder = missing;
   if (texture !== undefined) object.texture = texture;
-  object.tint = missing ? PLACEHOLDER_TINT : 0xff_ff_ff;
+  object.tint = missing ? PLACEHOLDER_TINT : value.tint;
+  object.alpha = value.alpha;
   object.width = value.width;
   object.height = value.height;
   view.hitBox = { x: 0, y: 0, width: value.width, height: value.height };
@@ -359,8 +418,10 @@ export function writeVisual(sctx: SyncCtx, entity: Entity, view: View): void {
 }
 
 /**
- * Writes the `Transform` component. A placeholder sprite is drawn 64 times its 1x1 texture, so
- * the magenta square is visible at the right size.
+ * Writes the `Transform` component: `position` is where the `pivot` lands. The stretch of the
+ * visual (a sized sprite, the 64 x 64 placeholder) is folded into the object's scale, so the
+ * pivot is written in the object's own units. A wrapper carries the pose instead, and the visual
+ * inside it keeps only its stretch.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -369,24 +430,31 @@ export function writeVisual(sctx: SyncCtx, entity: Entity, view: View): void {
 export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void {
   const value = sctx.ctx.deps.world.ecs.get(entity, Transform) ?? Transform.defaults;
   const target = view.wrapper ?? view.object;
-  const factor = view.kind === "Sprite" && view.placeholder ? PLACEHOLDER_SIZE : 1;
+  const stretch: Point = view.drawScale;
 
   target.position.set(value.x, value.y);
   target.rotation = value.rotation;
 
   if (view.wrapper === undefined) {
-    target.scale.set(value.scale * factor);
+    target.scale.set(value.scale * stretch.x, value.scale * stretch.y);
+    target.pivot.set(value.pivot.x / stretch.x, value.pivot.y / stretch.y);
 
     return;
   }
 
   target.scale.set(value.scale);
-  view.object.scale.set(factor);
+  target.pivot.set(value.pivot.x, value.pivot.y);
+  view.object.position.set(0, 0);
+  view.object.rotation = 0;
+  view.object.pivot.set(0, 0);
+  view.object.scale.set(stretch.x, stretch.y);
 }
 
 /**
  * Gives a parent entity the container its children hang in. A v8 sprite takes no children, so
- * the parent's own visual moves into the wrapper as child 0 and the transform moves with it.
+ * the parent's own visual moves into the wrapper as child 0 and the transform moves with it. The
+ * wrapper sorts its children by their `Order`; the visual is child 0 at depth 0, so a child with
+ * the same depth draws above it.
  *
  * @param sctx - Domain context of the sync module.
  * @param parentEntity - The entity named as a parent.
@@ -403,21 +471,17 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   const container = view.object.parent;
 
   wrapper.label = `parent#${parentEntity}`;
-  wrapper.position.set(view.object.position.x, view.object.position.y);
-  wrapper.rotation = view.object.rotation;
-  wrapper.scale.set(view.object.scale.x, view.object.scale.y);
+  wrapper.sortableChildren = true;
   wrapper.zIndex = view.object.zIndex;
 
   if (container !== null) {
     container.addChildAt(wrapper, Math.max(0, container.children.indexOf(view.object)));
   }
 
-  view.object.position.set(0, 0);
-  view.object.rotation = 0;
   view.object.zIndex = 0;
-  view.object.scale.set(view.kind === "Sprite" && view.placeholder ? PLACEHOLDER_SIZE : 1);
   wrapper.addChild(view.object);
   view.wrapper = wrapper;
+  applyTransform(sctx, parentEntity, view);
 
   return wrapper;
 }
@@ -432,9 +496,9 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
  */
 export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
   const state = sctx.ctx.state.sync;
-  const parentEntity = sctx.ctx.deps.world.ecs.get(entity, Parent)?.entity ?? 0;
+  const parentEntity = parentOf(sctx.ctx.deps.world.ecs, entity);
 
-  if (parentEntity !== 0 && parentEntity !== entity) {
+  if (parentEntity !== 0) {
     const wrapper = ensureWrapper(sctx, parentEntity);
 
     view.layer = "";
@@ -559,6 +623,8 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     mask: undefined,
     display: visual.display,
     value: built.value,
+    drawScale: { x: 1, y: 1 },
+    frameKey: "",
     hitBox: { x: 0, y: 0, width: 0, height: 0 }
   };
 
@@ -635,6 +701,15 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
   state.views.delete(entity);
   state.entityOf.delete(view.object);
   untrackKey(state, entity, view.textureKey);
+
+  if (view.frameKey !== "") {
+    const white = placeholderTexture(sctx);
+
+    // The pooled sprite must not keep a crop that the last user may be about to free.
+    if (white !== undefined && isSprite(view.object)) view.object.texture = white;
+    showCover(sctx, entity, view, "");
+  }
+
   release(sctx, view);
 }
 
@@ -662,6 +737,7 @@ export function stopSync(state: SyncState): void {
 
   clearAdapters(state);
   clearFonts(state);
+  clearFrames(state);
   state.views.clear();
   state.entityOf.clear();
   state.byKey.clear();
@@ -669,6 +745,7 @@ export function stopSync(state: SyncState): void {
   state.warned.clear();
   state.added.clear();
   state.removed.clear();
+  state.reparented.clear();
   state.providers.length = 0;
 
   clearLayers(state);

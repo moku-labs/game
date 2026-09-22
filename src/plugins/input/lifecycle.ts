@@ -67,7 +67,7 @@ export function startInput(ctx: KernelSlice): void {
 }
 
 /**
- * Closes what the plugin opened: the five DOM listeners, the frame callback and the mute a drag
+ * Closes what the plugin opened: the six DOM listeners, the frame callback and the mute a drag
  * still holds. The tags die with the world, which stops after `input`.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
@@ -85,6 +85,8 @@ export function stopInput(state: State): void {
   state.entity = undefined;
   state.key = undefined;
   state.hovered = undefined;
+  state.pointerOver = undefined;
+  state.parent = undefined;
   state.wake = undefined;
   state.tapListeners = [];
 }

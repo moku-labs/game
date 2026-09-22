@@ -8,6 +8,7 @@ import type { Entity } from "../../world/types";
 import { asComponent } from "../components";
 import type { StepMotion } from "../tween/types";
 import { frameIndexAt, framesDurationMs, writeFrame } from "./frames";
+import { spawnStep } from "./spawn";
 import type { Cursor, CursorCtx, Step, TimelineRuntime } from "./types";
 
 /** A `frames` cursor starts before its first key, so the first advance always writes one. */
@@ -60,19 +61,20 @@ function reportMark(cctx: CursorCtx, name: string): void {
 }
 
 /**
- * Resolves the target of a step to a live entity that carries the component.
+ * Resolves the target of a step to a live entity that carries the component. A spawned id is
+ * looked up in the spawn table of this timeline only.
  *
- * @param rt - The timeline runtime.
+ * @param cctx - What the cursor carries down the tree.
  * @param step - A step that names a target and a component.
  * @returns The entity, or `undefined` when the step has nothing to write.
  */
 function targetOf(
-  rt: TimelineRuntime,
+  cctx: CursorCtx,
   step: Extract<Step, { kind: "tween" | "set" }>
 ): Entity | undefined {
-  const entity = rt.entityOf(step.target);
+  const entity = cctx.rt.entityOf(step.target, cctx.spawned);
 
-  if (entity === undefined || rt.read(entity, step.component) === undefined) return undefined;
+  if (entity === undefined || cctx.rt.read(entity, step.component) === undefined) return undefined;
 
   return entity;
 }
@@ -80,17 +82,16 @@ function targetOf(
 /**
  * Resolves the target of a `frames` step to a live entity that carries a `Sprite`.
  *
- * @param rt - The timeline runtime.
+ * @param cctx - What the cursor carries down the tree.
  * @param step - The frames step.
  * @returns The entity, or `undefined`.
  */
-function spriteOf(
-  rt: TimelineRuntime,
-  step: Extract<Step, { kind: "frames" }>
-): Entity | undefined {
-  const entity = rt.entityOf(step.target);
+function spriteOf(cctx: CursorCtx, step: Extract<Step, { kind: "frames" }>): Entity | undefined {
+  const entity = cctx.rt.entityOf(step.target, cctx.spawned);
 
-  if (entity === undefined || rt.read(entity, asComponent(Sprite)) === undefined) return undefined;
+  if (entity === undefined || cctx.rt.read(entity, asComponent(Sprite)) === undefined) {
+    return undefined;
+  }
 
   return entity;
 }
@@ -106,7 +107,7 @@ function startTween(
   cctx: CursorCtx,
   step: Extract<Step, { kind: "tween" }>
 ): StepMotion | undefined {
-  const entity = targetOf(cctx.rt, step);
+  const entity = targetOf(cctx, step);
 
   if (entity === undefined) return undefined;
 
@@ -130,7 +131,7 @@ function writeStep(
   step: Extract<Step, { kind: "tween" | "set" }>,
   patch: Record<string, unknown>
 ): void {
-  const entity = targetOf(cctx.rt, step);
+  const entity = targetOf(cctx, step);
 
   if (entity !== undefined) cctx.rt.write(entity, step.component, patch);
 }
@@ -291,7 +292,7 @@ function advanceFrames(
   step: Extract<Step, { kind: "frames" }>,
   deltaMs: number
 ): number {
-  const entity = step.keys.length === 0 ? undefined : spriteOf(cctx.rt, step);
+  const entity = step.keys.length === 0 ? undefined : spriteOf(cctx, step);
 
   if (entity === undefined) {
     cursor.ended = true;
@@ -358,6 +359,10 @@ export function advanceCursor(cctx: CursorCtx, cursor: Cursor, deltaMs: number):
       writeStep(cctx, step, { ...step.patch });
       break;
     }
+    case "spawn": {
+      spawnStep(cctx, step);
+      break;
+    }
     default: {
       cctx.rt.dispatch(step);
       break;
@@ -371,7 +376,8 @@ export function advanceCursor(cctx: CursorCtx, cursor: Cursor, deltaMs: number):
 
 /**
  * Ends one step at its own end: a track writes its exact target, a step that never started writes
- * it at once, the marks are jumped in tree order and no effect is fired.
+ * it at once, the marks are jumped in tree order, no effect is fired and nothing is spawned: the
+ * timeline despawns its entities as it ends, so a skipped spawn would only flash.
  *
  * @param cctx - What the cursor carries down the tree.
  * @param cursor - The cursor of the step.
@@ -440,7 +446,7 @@ export function finishCursor(cctx: CursorCtx, cursor: Cursor): void {
  */
 function finishFrames(cctx: CursorCtx, step: Extract<Step, { kind: "frames" }>): void {
   const key = step.keys.at(-1);
-  const entity = key === undefined ? undefined : spriteOf(cctx.rt, step);
+  const entity = key === undefined ? undefined : spriteOf(cctx, step);
 
   if (entity !== undefined && key !== undefined) writeFrame(cctx.rt, entity, key);
 }

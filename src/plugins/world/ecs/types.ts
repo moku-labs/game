@@ -399,7 +399,7 @@ export type EcsState = {
  * ```ts
  * // A test owns its entities and reads them back.
  * const entity = app.world.ecs.spawn({ kind: "plugin", name: "test" }, [Transform({ x: 10 })]);
- * app.world.ecs.get(entity, Transform); // { x: 10, y: 0, rotation: 0, scale: 1 }
+ * app.world.ecs.get(entity, Transform); // { x: 10, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
  * ```
  */
 export type EcsApi = {
@@ -498,7 +498,7 @@ export type EcsApi = {
    * // `input` moves the held view with the finger.
    * const world = ctx.require(worldPlugin);
    * world.ecs.set(held, Transform, { x: 420, y: 810 });
-   * world.ecs.get(held, Transform); // { x: 420, y: 810, rotation: 0, scale: 1 }
+   * world.ecs.get(held, Transform); // { x: 420, y: 810, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
    * ```
    */
   set<Value extends object>(

@@ -25,18 +25,49 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 
 | Component | Defaults | Meaning |
 |---|---|---|
-| `Transform({ x, y, rotation, scale })` | `0, 0, 0, 1` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. |
-| `Sprite({ texture, tint, alpha, anchor })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }` | `texture` is an asset key. |
-| `NineSlice({ texture, width, height })` | `"", 0, 0` | Size in reference units; the borders come with the texture. |
+| `Transform({ x, y, rotation, scale, pivot })` | `0, 0, 0, 1, { x: 0, y: 0 }` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. `pivot` is the local point the view turns and scales around; `x`, `y` is where it lands. |
+| `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. |
+| `NineSlice({ texture, width, height, alpha, tint })` | `"", 0, 0, 1, 0xffffff` | Size in reference units; the borders come with the texture. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. |
 | `Shape({ w, h, fill, alpha, radius, stroke, strokeWidth, clip })` | `0, 0, 0xffffff, 1, 0, 0x000000, 0, false` | A filled rounded rectangle drawn with `Graphics`, anchored top left. `clip: true` masks the children of the entity to the rectangle. |
 
 ```ts
 sprite({ texture: "board.cell", at: { x: 540, y: 300 } });
-// [Sprite({ texture: "board.cell", tint: 0xffffff, alpha: 1, anchor: { x: 0.5, y: 0.5 } }),
-//  Transform({ x: 540, y: 300, rotation: 0, scale: 1 })]
+// [Sprite({ texture: "board.cell", tint: 0xffffff, alpha: 1, anchor: { x: 0.5, y: 0.5 },
+//   width: 0, height: 0, fit: "fill" }),
+//  Transform({ x: 540, y: 300, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } })]
 ```
+
+### Sprite size and fit
+
+A sprite without a size is drawn at its texture's size. With a box, `fit` decides how the texture
+fills it:
+
+| `fit` | Drawn |
+|---|---|
+| `"fill"` | Stretched to the box on both axes. |
+| `"contain"` | Scaled uniformly to fit inside the box, centred in it. |
+| `"cover"` | Scaled uniformly to cover the box; the overflow is cropped through a sub-frame texture, never stretched. |
+
+```ts
+// A full-bleed background: the box is the screen, the anchor its top left corner.
+Sprite({ texture: "board.bg-forest-meadow", anchor: { x: 0, y: 0 }, width: 1080, height: 1920, fit: "cover" });
+```
+
+`anchor` names a point of the box, and the hit box is the box, whatever part of it the picture
+covers. The crop of a `"cover"` sprite is cached by texture key and box size and shared by every
+sprite that shows it. It is freed when the last of them lets go (it leaves, or its key, box or
+`fit` changes), with its base texture (`textures.destroy`), or when the renderer stops. A resized
+cover sprite therefore keeps one crop, not one per size. A key without a texture draws the magenta
+placeholder at the box, 64 x 64 on an axis without a size.
+
+### Pivot
+
+`pivot` is in the view's own local units. The renderer writes it on the Pixi container, so
+`position` is where the pivot lands and rotation and scale turn around it. The default pivot keeps
+every pose as it was. A parent's wrapper carries the pivot; the parent's own visual sits unmoved
+inside it, and the children are placed in the wrapper's local space.
 
 An entity has one visual: `Sprite`, `NineSlice`, `Shape`, `Display`, or a component a plugin above
 registered with `displays.provide`. Two on one entity: the first in that order wins and
@@ -78,7 +109,27 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
 An adapter object is parented, sorted and freed like a sprite; its hit box is `getLocalBounds()`
 read at attach, as a `Display` object's is. A point outside the rectangle of a `clip: true` ancestor
-hits nothing inside it.
+hits nothing inside it. The hit test moves the point into the view's local space through the pose
+helpers below, pivot included.
+
+### Pose helpers (engine-internal)
+
+`sync/pose.ts` exports two pure functions over `world.ecs`. They are not root exports: `input`,
+`anim` and `ui` import them from `../renderer/sync/pose` and never walk the `Parent` chain
+themselves.
+
+| Function | Answers |
+|---|---|
+| `rootPoseOf(ecs, entity, own?)` | The entity's `Transform` composed through its `Parent` chain, every pivot applied: where it really is in reference space. `own` replaces its own `Transform` (the rest pose, for `anim.at`). The answer keeps the entity's pivot, so writing it into the `Transform` of an entity without a parent does not move the view. |
+| `localPoseOf(ecs, parent, root)` | The inverse: the local pose under `parent` that lands on `root`. `parent` 0 answers `root` itself. A parent collapsed to scale 0 counts as scale 1. |
+
+```ts
+// A board cell at (100, 200) inside a slot at (40, 60) scaled 0.5.
+const world = ctx.require(worldPlugin);
+rootPoseOf(world.ecs, cell); // { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { x: 0, y: 0 } }
+localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { x: 0, y: 0 } });
+// { x: 100, y: 200, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
+```
 
 ## Configuration
 
@@ -130,7 +181,12 @@ stays keeps its container and its views.
 order. A lift changes `Layer`; `sync` moves the SAME display object, with no pool round trip and no
 jump, because `Transform` is in reference space on every layer. The first time an entity is named as
 a parent it gets a wrapper `Container` (a v8 sprite takes no children); its own visual becomes child
-0 and the transform moves to the wrapper.
+0 and the transform moves to the wrapper. A wrapper sorts its children: a parented entity takes
+`zIndex` from its `Order` (0 without one) when it is attached and when `Order` changes, whatever
+layer its parent is in. The parent's own visual has depth 0, so a child with the same depth draws
+above it and a child with a negative `Order` below it. A layer container keeps its own sort rule.
+Removing `Parent` puts the view back in the layer its `Layer` names, at its own pose, in the same
+pass: `world` records no change for a removed component, so `sync` watches `onRemoved(Parent)`.
 
 ## Textures
 
@@ -138,7 +194,9 @@ a parent it gets a wrapper `Container` (a v8 sprite takes no children); its own 
 Nothing answers: the view draws `Texture.WHITE` at 64×64 with tint `0xff00ff`, and `ctx.log.warn`
 reports the key once. The key is not asked again per frame — only `invalidate(keys)` makes it
 resolve again. `assets` owns texture lifetime: it calls `create`, answers through its provider, and
-calls `invalidate` then `destroy` on unload. The renderer never destroys a texture by itself.
+calls `invalidate` then `destroy` on unload. The renderer never destroys a texture by itself; the
+crops it cuts for `"cover"` sprites share the base's source. A crop is freed when its last sprite
+lets go, with its base (`destroy`), when its key answers a new texture, and when the renderer stops.
 
 ## Device loss and the hidden tab
 

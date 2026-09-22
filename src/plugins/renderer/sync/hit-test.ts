@@ -3,8 +3,9 @@
  * render time, one frame after the input phase asks.
  */
 import type { Entity } from "../../world/types";
-import { Parent, Shape, Transform, type TransformValue } from "../components";
+import { Shape } from "../components";
 import type { PixiContainer, Point } from "../types";
+import { localPoseOf, parentOf } from "./pose";
 import type { HitBox, SyncCtx } from "./types";
 
 /** How deep a parent chain or a container tree is followed. */
@@ -14,28 +15,8 @@ const MAX_DEPTH = 32;
 const MIN_ALPHA = 0.01;
 
 /**
- * Moves a point out of one transform, into the local space below it.
- *
- * @param point - The point in the space above.
- * @param value - The transform to undo.
- * @returns The same point, one space lower.
- * @example
- * ```ts
- * untransform({ x: 20, y: 10 }, { x: 10, y: 10, rotation: 0, scale: 2 }); // { x: 5, y: 0 }
- * ```
- */
-function untransform(point: Point, value: Readonly<TransformValue>): Point {
-  const dx = point.x - value.x;
-  const dy = point.y - value.y;
-  const cos = Math.cos(-value.rotation);
-  const sin = Math.sin(-value.rotation);
-  const scale = value.scale === 0 ? 1 : value.scale;
-
-  return { x: (dx * cos - dy * sin) / scale, y: (dx * sin + dy * cos) / scale };
-}
-
-/**
- * Walks the `Parent` chain of an entity and brings a reference point into its local space.
+ * Brings a reference point into the local space of an entity: its root pose undone, the pivot
+ * added back. The point is posed as a child of the entity, so the pose helpers do the walk.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity whose box is tested.
@@ -44,29 +25,15 @@ function untransform(point: Point, value: Readonly<TransformValue>): Point {
  * @returns The point in the entity's own space.
  */
 function localPoint(sctx: SyncCtx, entity: Entity, x: number, y: number): Point {
-  const ecs = sctx.ctx.deps.world.ecs;
-  const chain: Array<Readonly<TransformValue>> = [];
-  let current = entity;
+  const local = localPoseOf(sctx.ctx.deps.world.ecs, entity, {
+    x,
+    y,
+    rotation: 0,
+    scale: 1,
+    pivot: { x: 0, y: 0 }
+  });
 
-  for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
-    chain.push(ecs.get(current, Transform) ?? Transform.defaults);
-
-    const parent = ecs.get(current, Parent)?.entity ?? 0;
-
-    if (parent === 0 || parent === current) break;
-
-    current = parent;
-  }
-
-  let point: Point = { x, y };
-
-  for (let index = chain.length - 1; index >= 0; index -= 1) {
-    const value = chain[index];
-
-    if (value !== undefined) point = untransform(point, value);
-  }
-
-  return point;
+  return { x: local.x, y: local.y };
 }
 
 /**
@@ -101,7 +68,7 @@ function inBox(box: HitBox, point: Point): boolean {
  */
 function clippedOut(sctx: SyncCtx, entity: Entity, x: number, y: number): boolean {
   const ecs = sctx.ctx.deps.world.ecs;
-  let current = ecs.get(entity, Parent)?.entity ?? 0;
+  let current = parentOf(ecs, entity);
 
   for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
     const shape = ecs.get(current, Shape);
@@ -112,11 +79,7 @@ function clippedOut(sctx: SyncCtx, entity: Entity, x: number, y: number): boolea
       if (!inBox(box, localPoint(sctx, current, x, y))) return true;
     }
 
-    const parent = ecs.get(current, Parent)?.entity ?? 0;
-
-    if (parent === current) break;
-
-    current = parent;
+    current = parentOf(ecs, current);
   }
 
   return false;

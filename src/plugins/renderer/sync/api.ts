@@ -12,7 +12,7 @@ import { hitTest } from "./hit-test";
 import { clearLayers, resort, syncLayers } from "./layers";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { createSyncSystem } from "./system";
-import { createTexture, destroyTexture } from "./textures";
+import { clearFrames, createTexture, destroyTexture } from "./textures";
 import type {
   CreateTextureOptions,
   DisplayAdapter,
@@ -124,6 +124,42 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
+   * Marks an entity whose `Parent` was removed. `world` records no change for a removed
+   * component, so without this the view would stay in the old parent's wrapper.
+   *
+   * @param entity - The entity that lost its parent.
+   */
+  const markReparented = (entity: Entity): void => {
+    if (state.root === undefined) return;
+
+    state.reparented.add(entity);
+  };
+
+  /**
+   * Step 4 for the views whose `Parent` was removed: back to the layer the entity names, at its
+   * own pose, sorted by that layer's rule. An entity that left has no view and is skipped.
+   *
+   * @param built - The entities this pass has just built, which hang in the right place already.
+   */
+  const applyReparented = (built: ReadonlySet<Entity>): void => {
+    if (state.reparented.size === 0) return;
+
+    const entities = copyOf(state.reparented);
+
+    state.reparented.clear();
+
+    for (const entity of entities) {
+      if (built.has(entity)) continue;
+
+      withView(entity, view => {
+        attach(sctx, entity, view);
+        applyTransform(sctx, entity, view);
+        resort(sctx, entity, view);
+      });
+    }
+  };
+
+  /**
    * Step 4 for the components a plugin above draws its own way: one `update` per changed value.
    *
    * @param built - The entities this pass has just built, whose adapter wrote them already.
@@ -170,7 +206,11 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     }
 
     for (const entity of ecs.changed(Sprite)) {
-      write(entity, view => applySprite(sctx, entity, view));
+      write(entity, view => {
+        applySprite(sctx, entity, view);
+        // A new size or fit changes the stretch the transform folds into the scale.
+        applyTransform(sctx, entity, view);
+      });
     }
 
     for (const entity of ecs.changed(NineSlice)) {
@@ -194,6 +234,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       write(entity, view => {
         attach(sctx, entity, view);
         applyTransform(sctx, entity, view);
+        resort(sctx, entity, view);
       });
     }
 
@@ -260,6 +301,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     }
 
     applyChanges(built);
+    applyReparented(built);
     applyAdapterChanges(built);
     applyInvalidated();
   };
@@ -277,6 +319,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.views.clear();
     state.entityOf.clear();
     state.byKey.clear();
+    // The views that showed the crops are gone; the rebuild cuts them again for its own views.
+    clearFrames(state);
     destroyPools(state);
     clearLayers(state);
     state.root = undefined;
@@ -307,6 +351,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     state.added.clear();
     state.removed.clear();
+    state.reparented.clear();
   };
 
   return {
@@ -337,7 +382,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         options?: CreateTextureOptions
       ): PixiTexture => createTexture(sctx, image, options),
 
-      destroy: (texture: PixiTexture): void => destroyTexture(texture),
+      destroy: (texture: PixiTexture): void => destroyTexture(state, texture),
 
       invalidate: (keys: readonly string[]): void => {
         if (state.root === undefined) return;
@@ -384,6 +429,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         ecs.onRemoved(NineSlice, markRemoved),
         ecs.onRemoved(Shape, markRemoved),
         ecs.onRemoved(Display, markRemoved),
+        ecs.onRemoved(Parent, markReparented),
         ecs.system(createSyncSystem(pass))
       );
 

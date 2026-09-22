@@ -1,19 +1,36 @@
 /**
  * @file text plugin — the screen half: the fonts handed to the renderer, and the display adapter
- * that turns one `Text` into one Pixi container of `BitmapText` runs and icon sprites. Pixi is
- * never imported here: the classes come from the module the renderer loaded.
+ * that turns one `Text` into one Pixi container of `BitmapText` runs, their shadows and icon
+ * sprites. Pixi is never imported here: the classes come from the module the renderer loaded.
  */
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiTexture } from "../renderer/types";
 import { fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
 import { layoutFor, markDirty, styleOf, warnFor } from "./resolve";
-import type { Line, Point, Run, TextCtx, TextLayout, TextRun, TextStyle, TextValue } from "./types";
+import type {
+  IconRun,
+  Line,
+  Point,
+  Run,
+  TextCtx,
+  TextLayout,
+  TextRun,
+  TextShadow,
+  TextStyle,
+  TextValue
+} from "./types";
 
 /** How much of the size a synthetic bold stroke is. */
 const SYNTHETIC_BOLD = 20;
 
 /** How far a synthetic italic run leans. */
 const SYNTHETIC_ITALIC = -0.2;
+
+/** What a shadow copy is painted with, so its tint alone gives it the shadow colour. */
+const WHITE = 0xff_ff_ff;
+
+/** The colours one glyph run is drawn in: the fill, and the stroke when there is one. */
+type Paint = { fill: number; stroke: { color: number; width: number } | undefined };
 
 /**
  * Reads the fonts of `fontKeys` that `assets` can answer for: the advance table first, then the
@@ -122,45 +139,59 @@ function strokeOf(
 }
 
 /**
- * Builds the Pixi object of one run and places it on the line.
+ * Builds the sprite of one inline icon, square at the line height.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
- * @param run - The run to draw.
+ * @param run - The icon to draw.
  * @param style - The style of the label.
- * @param at - Where the run starts, in the local space of the block.
- * @returns The display object.
+ * @param at - Where the icon starts, in the local space of the block.
+ * @returns The sprite.
  */
-function buildRun(
+function buildIcon(
   ctx: TextCtx,
   pixi: PixiModule,
-  run: Run,
+  run: IconRun,
   style: TextStyle,
   at: Point
 ): PixiContainer {
-  if (run.kind === "icon") {
-    const texture: PixiTexture = ctx.deps.assets.texture(run.key) ?? pixi.Texture.EMPTY;
-    const sprite = new pixi.Sprite(texture);
-    const side = lineHeightOf(style, ctx.state.tables);
+  const texture: PixiTexture = ctx.deps.assets.texture(run.key) ?? pixi.Texture.EMPTY;
+  const sprite = new pixi.Sprite(texture);
+  const side = lineHeightOf(style, ctx.state.tables);
 
-    sprite.width = side;
-    sprite.height = side;
-    sprite.x = at.x;
-    sprite.y = at.y;
+  sprite.width = side;
+  sprite.height = side;
+  sprite.x = at.x;
+  sprite.y = at.y;
 
-    return sprite;
-  }
+  return sprite;
+}
 
-  const fill = run.color ?? style.fill;
-  const stroke = strokeOf(style, run, fill);
+/**
+ * Builds the `BitmapText` of one glyph run in one paint and places it.
+ *
+ * @param pixi - The Pixi module the renderer loaded.
+ * @param run - The glyphs to draw.
+ * @param style - The style of the label.
+ * @param paint - The fill and the stroke.
+ * @param at - Where the run starts, in the local space of the block.
+ * @returns The display object.
+ */
+function buildGlyphs(
+  pixi: PixiModule,
+  run: TextRun,
+  style: TextStyle,
+  paint: Paint,
+  at: Point
+): PixiContainer {
   const line = new pixi.BitmapText({
     text: run.text,
     style: {
       fontFamily: fontOfRun(style, run),
       fontSize: style.size,
-      fill,
+      fill: paint.fill,
       letterSpacing: style.letterSpacing,
-      ...(stroke === undefined ? {} : { stroke })
+      ...(paint.stroke === undefined ? {} : { stroke: paint.stroke })
     }
   });
 
@@ -173,7 +204,68 @@ function buildRun(
 }
 
 /**
- * Fills a container with one object per run of the laid-out block, anchored by the component.
+ * Builds the shadow of one glyph run: the same glyphs and stroke in white, tinted with the shadow
+ * colour, at the shadow alpha, moved by its offset.
+ *
+ * @param pixi - The Pixi module the renderer loaded.
+ * @param run - The glyphs that cast the shadow.
+ * @param style - The style of the label.
+ * @param shadow - The shadow of the style.
+ * @param at - Where the run starts, in the local space of the block.
+ * @returns The display object, to be drawn under the run.
+ */
+function buildShadow(
+  pixi: PixiModule,
+  run: TextRun,
+  style: TextStyle,
+  shadow: TextShadow,
+  at: Point
+): PixiContainer {
+  const stroke = strokeOf(style, run, WHITE);
+  const paint: Paint = {
+    fill: WHITE,
+    stroke: stroke === undefined ? undefined : { color: WHITE, width: stroke.width }
+  };
+  const copy = buildGlyphs(pixi, run, style, paint, { x: at.x + shadow.dx, y: at.y + shadow.dy });
+
+  copy.tint = shadow.color;
+  copy.alpha = shadow.alpha;
+
+  return copy;
+}
+
+/**
+ * Builds the Pixi objects of one run, bottom first: an icon is one sprite, and a glyph run is its
+ * shadow, when the style has one, then the glyphs.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param pixi - The Pixi module the renderer loaded.
+ * @param run - The run to draw.
+ * @param style - The style of the label.
+ * @param at - Where the run starts, in the local space of the block.
+ * @returns The display objects in drawing order.
+ */
+function buildRun(
+  ctx: TextCtx,
+  pixi: PixiModule,
+  run: Run,
+  style: TextStyle,
+  at: Point
+): PixiContainer[] {
+  if (run.kind === "icon") return [buildIcon(ctx, pixi, run, style, at)];
+
+  const fill = run.color ?? style.fill;
+  const glyphs = buildGlyphs(pixi, run, style, { fill, stroke: strokeOf(style, run, fill) }, at);
+
+  if (style.shadow === undefined) return [glyphs];
+
+  return [buildShadow(pixi, run, style, style.shadow, at), glyphs];
+}
+
+/**
+ * Fills a container with the objects of every run of the laid-out block, anchored by the
+ * component. A shadow sits in the same container as its run, so it follows every update, reflow
+ * and destroy of it.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
@@ -197,7 +289,8 @@ function fill(
     let x = left + alignOffset(style, layout, line);
 
     for (const run of line.runs) {
-      container.addChild(buildRun(ctx, pixi, run, style, { x, y }));
+      for (const object of buildRun(ctx, pixi, run, style, { x, y })) container.addChild(object);
+
       x += measureRun(run, style, ctx.state.tables, options);
     }
 

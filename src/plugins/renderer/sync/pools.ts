@@ -82,6 +82,7 @@ export function resetObject(object: PixiContainer): void {
   object.rotation = 0;
   object.zIndex = 0;
   object.position.set(0, 0);
+  object.pivot.set(0, 0);
   object.scale.set(1);
   if (isSprite(object)) object.tint = 0xff_ff_ff;
 }

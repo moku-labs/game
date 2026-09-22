@@ -1,9 +1,11 @@
 /**
  * @file anim/timeline — one running timeline: the bookkeeping around a cursor. It builds the step
  * tree once per play, counts `Animation` on the entities the tree names, hands out the
- * `PlayHandle` and ends the timeline exactly once, whichever way it ended.
+ * `PlayHandle` and ends the timeline exactly once, whichever way it ended, despawning every
+ * entity its `spawn` steps made.
  */
 import { Transform } from "../../renderer/components";
+import { rootPoseOf } from "../../renderer/sync/pose";
 import type { Entity } from "../../world/types";
 import { countPlaying } from "../components";
 import type {
@@ -16,41 +18,59 @@ import type {
   Target
 } from "../types";
 import { advanceCursor, cancelCursor, createCursor, entitiesOf, finishCursor } from "./cursor";
+import { assertUniqueSpawns } from "./spawn";
 import type { CursorCtx, RunningTimeline, TimelineRuntime } from "./types";
 
 /**
  * Resolves a target to an entity: a projection key through `world.projection.entityOf`, which
- * also answers for an element a plugin above registered, and an entity as itself.
+ * also answers for an element a plugin above registered, an entity as itself, and a spawned id
+ * through the spawn table of the timeline that asks.
  *
  * @param actx - Domain context of the anim plugin.
- * @param target - The projection key or the entity.
- * @returns The entity, or `undefined` when no live view or element holds that key.
+ * @param target - The projection key, the entity or the spawned id.
+ * @param spawned - The spawn table of the asking timeline; without one a spawned id resolves to
+ *   nothing.
+ * @returns The entity, or `undefined` when no live view, element or spawned entity holds it.
  */
-export function resolveTarget(actx: AnimCtx, target: Target): Entity | undefined {
+export function resolveTarget(
+  actx: AnimCtx,
+  target: Target,
+  spawned?: ReadonlyMap<string, Entity>
+): Entity | undefined {
   if (typeof target === "number") return target;
+
+  if ("spawned" in target) return spawned?.get(target.spawned);
 
   return actx.deps.world.projection.entityOf(target.projection, target.key);
 }
 
 /**
- * What `at(target)` answers: the `Transform` the target rests at, which is what the picture holds
- * whenever nothing animates it. A target nothing resolves gives the identity pose and one
+ * What `at(target)` answers: where the target rests in root space, its rest `Transform` composed
+ * through the `Parent` chain by `rootPoseOf` of `renderer`. The rest pose is what the picture holds
+ * whenever nothing animates the target; an entity nothing projects answers its current
+ * `Transform`. Inside `build` no spawn step has run yet, so `at(spawned(id))` answers the identity
+ * pose and one warning. A target nothing resolves gives the identity pose and one
  * warning, so a choreography over a screen that is not there plays on instead of throwing.
  *
  * @param actx - Domain context of the anim plugin.
- * @param target - The projection key or the entity to read.
- * @returns The pose of the target.
+ * @param target - The projection key, the entity or the spawned id to read.
+ * @param spawned - The spawn table of the asking timeline.
+ * @returns The root pose of the target.
  */
-export function restPoseOf(actx: AnimCtx, target: Target): Pose {
-  const entity = resolveTarget(actx, target);
+export function restPoseOf(
+  actx: AnimCtx,
+  target: Target,
+  spawned?: ReadonlyMap<string, Entity>
+): Pose {
+  const entity = resolveTarget(actx, target, spawned);
+  const { ecs, projection } = actx.deps.world;
   // The rest pose when the world recorded one; the live value for an entity nothing projects.
-  const stored =
+  const own =
     entity === undefined
       ? undefined
-      : (actx.deps.world.projection.restOf(entity, Transform) ??
-        actx.deps.world.ecs.get(entity, Transform));
+      : (projection.restOf(entity, Transform) ?? ecs.get(entity, Transform));
 
-  if (stored === undefined) {
+  if (entity === undefined || own === undefined) {
     actx.log.warn(
       "anim:target-missing",
       typeof target === "number" ? { entity: target } : { ...target }
@@ -59,7 +79,9 @@ export function restPoseOf(actx: AnimCtx, target: Target): Pose {
     return { x: 0, y: 0, rotation: 0, scale: 1 };
   }
 
-  return { x: stored.x, y: stored.y, rotation: stored.rotation, scale: stored.scale };
+  const root = rootPoseOf(ecs, entity, own);
+
+  return { x: root.x, y: root.y, rotation: root.rotation, scale: root.scale };
 }
 
 /**
@@ -71,6 +93,16 @@ function noResolver(): void {
 }
 
 /**
+ * Creates the empty spawn table of one play. It lives in its own non-exported function because
+ * lint rule L5 refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty map from spawn id to entity.
+ */
+function emptySpawnTable(): Map<string, Entity> {
+  return new Map();
+}
+
+/**
  * What the cursor of one running timeline carries down its tree.
  *
  * @param rt - The timeline runtime.
@@ -78,12 +110,13 @@ function noResolver(): void {
  * @returns The cursor context.
  */
 function cursorCtxOf(rt: TimelineRuntime, running: RunningTimeline): CursorCtx {
-  return { rt, animation: running.animation, marks: running.marks };
+  return { rt, animation: running.animation, marks: running.marks, spawned: running.spawned };
 }
 
 /**
  * Ends one timeline exactly once: it leaves the table, `Animation` is counted down on every
- * entity it named, `anim:finished` is emitted unless it was cancelled, and `done` resolves.
+ * entity it named, every entity it spawned is despawned, `anim:finished` is emitted unless it was
+ * cancelled, and `done` resolves.
  *
  * @param actx - Domain context of the anim plugin.
  * @param running - The running timeline.
@@ -97,6 +130,11 @@ function endTimeline(actx: AnimCtx, running: RunningTimeline, finished: boolean)
 
   for (const entity of running.entities) countPlaying(actx.deps.world.ecs, entity, -1);
 
+  // What the timeline spawned is its own: it goes with the timeline, before anyone hears the end.
+  for (const entity of running.spawned.values()) actx.deps.world.ecs.despawn(entity);
+
+  running.spawned.clear();
+
   if (finished) actx.emit("anim:finished", { animation: running.animation });
 
   running.resolve();
@@ -104,13 +142,14 @@ function endTimeline(actx: AnimCtx, running: RunningTimeline, finished: boolean)
 
 /**
  * Builds the step tree of an animation with the given targets and starts it. The build runs here,
- * once per play, so the same animation may play twice at once.
+ * once per play, so the same animation may play twice at once, each play with its own spawn table.
  *
  * @param actx - Domain context of the anim plugin.
  * @param rt - The timeline runtime.
  * @param definition - What `defineAnimation` returned.
  * @param slots - One target, or a list of targets, per declared slot.
  * @returns The handle of the running timeline.
+ * @throws {Error} When the tree spawns one id twice; nothing has started then.
  */
 export function startTimeline<Tags extends SlotTags>(
   actx: AnimCtx,
@@ -118,11 +157,17 @@ export function startTimeline<Tags extends SlotTags>(
   definition: AnimationDefinition<Tags>,
   slots: SlotValues<Tags>
 ): PlayHandle {
+  const spawned = emptySpawnTable();
+  const step = definition.build(slots, {
+    at: (target: Target): Pose => restPoseOf(actx, target, spawned)
+  });
+
+  assertUniqueSpawns(definition.id, step);
+
   const id = actx.state.nextId;
 
   actx.state.nextId += 1;
 
-  const step = definition.build(slots, { at: (target: Target): Pose => restPoseOf(actx, target) });
   const cursor = createCursor(step);
   const entities = entitiesOf(rt, step);
 
@@ -138,6 +183,7 @@ export function startTimeline<Tags extends SlotTags>(
     cursor,
     marks: [],
     entities,
+    spawned,
     resolve: (): void => settle(),
     ended: false
   };

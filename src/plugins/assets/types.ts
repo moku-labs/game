@@ -138,8 +138,8 @@ export type AssetsIo = {
 };
 
 /**
- * Nine-slice metadata of one file, as the scanner writes it. Always four numbers, so a later
- * four-value tag needs no format change.
+ * Nine-slice metadata of one file, as the scanner writes it. Always four numbers: the tags
+ * `{nine=N}`, `{nine=H,V}` and `{nine=L,T,R,B}` all land here.
  *
  * @example
  * ```ts
@@ -441,11 +441,28 @@ export type Usage = { textureMb: number; budgetMb: number; bundles: readonly Bun
  *   depends: [assetsPlugin],
  *   hooks: ctx => ({ "assets:bundle-loaded": ({ bundle, mb }) => ctx.log.info("loaded", { bundle, mb }) })
  * }); // the board bundle logs { bundle: "board", mb: 3.5 }
+ *
+ * // A splash screen fills its loading bar file by file.
+ * createPlugin("loadingBar", {
+ *   depends: [assetsPlugin],
+ *   createState: () => ({ share: 0 }),
+ *   hooks: ctx => ({
+ *     "assets:bundle-progress": ({ loaded, total }) => {
+ *       ctx.state.share = loaded / total;
+ *     }
+ *   })
+ * }); // a board bundle of four files sets share to 0.25, 0.5, 0.75 and 1; bundle-loaded follows
  * ```
  */
 export type Events = {
   /** Every file of a bundle is a texture now. */
   "assets:bundle-loaded": { bundle: string; tier: Tier; mb: number; reason: LoadReason };
+  /**
+   * One more file of a running load settled. `loaded` counts the settled files (a font once, with
+   * its pages), `total` is the file count of the bundle; the last one of a load has
+   * `loaded === total` and comes before `assets:bundle-loaded`. An aborted load sends none.
+   */
+  "assets:bundle-progress": { bundle: string; loaded: number; total: number };
   /** The textures of a bundle were destroyed. `keys` names every asset that went with it. */
   "assets:bundle-unloaded": {
     bundle: string;

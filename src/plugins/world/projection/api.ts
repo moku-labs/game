@@ -108,6 +108,25 @@ function emptyKeys(): Map<string, Entity> {
 }
 
 /**
+ * The entities of the live views of a mounted projection, in the order of the model keys of its
+ * last reconcile. A view that plays its exit has already left `live`.
+ *
+ * @param mounted - The mounted projection.
+ * @returns A new array of entities.
+ */
+function liveEntities(mounted: Mounted): Entity[] {
+  const entities: Entity[] = [];
+
+  for (const key of mounted.items.keys()) {
+    const view = mounted.live.get(key);
+
+    if (view !== undefined && !view.exiting) entities.push(view.entity);
+  }
+
+  return entities;
+}
+
+/**
  * Creates the peers of a handle that belongs to no projection: nothing to answer from.
  *
  * @returns Two empty item tables.
@@ -342,6 +361,12 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
     entityOf: (projection: string, key: string): Entity | undefined =>
       state.mounted.get(projection)?.live.get(key)?.entity ?? state.keys.get(projection)?.get(key),
+
+    entitiesOf: (name: string): readonly Entity[] => {
+      const mounted = state.mounted.get(name);
+
+      return mounted === undefined ? [] : liveEntities(mounted);
+    },
 
     setDriver: (driver: TweenDriver): (() => void) => {
       state.driver = driver;

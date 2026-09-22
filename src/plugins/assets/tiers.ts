@@ -17,6 +17,7 @@ import type {
   AssetsIo,
   BundleMap,
   BundleRecord,
+  Events,
   FetchResponse,
   FontPage,
   Inflight,
@@ -33,6 +34,9 @@ import type {
 
 /** A load failure that knows which file of which bundle broke, for the log entry. */
 type BundleFailure = Error & { bundle: string; file: string; status: number };
+
+/** How far one running load got: the payload of the next `assets:bundle-progress`. */
+type Progress = Events["assets:bundle-progress"];
 
 /**
  * Tells whether a tier stays for the whole session. A permanent bundle is never evicted and
@@ -323,6 +327,21 @@ async function loadFile(
 }
 
 /**
+ * Counts one settled file of a running load and tells the game how far the bundle got. The files
+ * of an aborted load settle only because they were cancelled, so they report nothing.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param progress - The count of the running load, moved on by one.
+ * @param signal - The signal of the running load.
+ */
+function reportSettled(ctx: AssetsCtx, progress: Progress, signal: AbortSignal): void {
+  if (signal.aborted) return;
+
+  progress.loaded += 1;
+  ctx.emit("assets:bundle-progress", { ...progress });
+}
+
+/**
  * Publishes a loaded bundle: what was loaded moves into the record, `renderer` re-resolves the
  * keys, the event goes out, the frame loop wakes and the budget is enforced.
  *
@@ -400,7 +419,8 @@ function fail(
 
 /**
  * Runs one load to its end. It never rejects: the error is stored on the inflight record, so a
- * load nobody waits for any more cannot become an unhandled rejection.
+ * load nobody waits for any more cannot become an unhandled rejection. Every settled file sends
+ * `assets:bundle-progress`; the last one comes before `assets:bundle-loaded`.
  *
  * @param ctx - Domain context of the plugin.
  * @param io - The I/O seam.
@@ -424,10 +444,16 @@ async function runLoad(
 
     if (problem !== undefined) throw new Error(problem);
 
+    // Load every file in parallel; each one that settles moves the progress on.
     const base = resolveBaseUrl(ctx.config.baseUrl, ctx.config.manifest);
     const into = { signal: inflight.controller.signal, assets };
+    const progress: Progress = { bundle, loaded: 0, total: entry.files.length };
     const results = await Promise.allSettled(
-      entry.files.map(file => loadFile(io, bundle, file, base, into))
+      entry.files.map(file =>
+        loadFile(io, bundle, file, base, into).finally(() =>
+          reportSettled(ctx, progress, into.signal)
+        )
+      )
     );
 
     for (const result of results) {

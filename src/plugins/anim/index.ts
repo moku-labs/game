@@ -40,7 +40,7 @@ const config: Config = { maxTracks: 2000 };
  */
 export const animPlugin = /*#__PURE__*/ createPlugin("anim", {
   // rendererPlugin: no API is required; the edge orders the plugins, so the `Sprite` a `frames`
-  // step writes and the `Transform` `at` reads belong to a plugin that is already there.
+  // step writes and the `Transform` and `rootPoseOf` `at` reads belong to a plugin already there.
   depends: [timePlugin, flowPlugin, worldPlugin, rendererPlugin],
   config,
   events: (register: RegisterFunction) =>

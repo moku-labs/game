@@ -282,7 +282,13 @@ describe("screen-merge — the fast walk", () => {
 
     // The drop lands on c1_0, next to the generator. The enter motion would start the view at
     // scale 0 on the generator; fast mode skips it.
-    expect(app.world.ecs.get(item, Transform)).toEqual({ x: 540, y: 720, rotation: 0, scale: 1 });
+    expect(app.world.ecs.get(item, Transform)).toEqual({
+      x: 540,
+      y: 720,
+      rotation: 0,
+      scale: 1,
+      pivot: { x: 0, y: 0 }
+    });
 
     await game.stop();
   });

@@ -38,7 +38,13 @@ describe("createInputState", () => {
     const first = createInputState({ config });
     const second = createInputState({ config });
 
-    first.samples.push({ kind: "down", pointerId: 1, clientX: 0, clientY: 0 });
+    first.samples.push({
+      kind: "down",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 0,
+      clientY: 0
+    });
 
     expect(second.samples).toEqual([]);
     expect(first.start).not.toBe(second.start);

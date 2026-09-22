@@ -119,7 +119,7 @@ describe("input plugin integration", () => {
 
     expect(app.model.store.snapshot().session).toEqual({ merges: 1 });
     expect(app.world.projection.entityOf("board.items", "i5")).toBeUndefined();
-    expect(before).toEqual({ x: 100, y: 100, rotation: 0, scale: 1 });
+    expect(before).toEqual({ x: 100, y: 100, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } });
 
     await app.stop();
   });

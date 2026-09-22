@@ -22,6 +22,8 @@ export function createInputState(_ctx: { readonly config: Readonly<Config> }): S
     grabOffset: { x: 0, y: 0 },
     pressedMs: 0,
     hovered: undefined,
+    pointerOver: undefined,
+    parent: undefined,
     unmute: undefined,
     canvas: undefined,
     offFrame: undefined,

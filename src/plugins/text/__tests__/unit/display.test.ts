@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PixiTexture } from "../../../renderer/types";
-import { Text } from "../../components";
+import { defineTextStyles, Text } from "../../components";
 import type { TextStyle, TextStyles, TextValue } from "../../types";
 import { miniFontJson } from "../fixtures/mini-font";
 import { createMockText, type FakeObject, type MockText } from "./mock-text";
@@ -28,7 +28,8 @@ const styles: TextStyles = {
       letterSpacing: 0,
       align: "left",
       wrap: "none",
-      digits: false
+      digits: false,
+      shadow: undefined
     }
   }
 };
@@ -48,7 +49,8 @@ const centred: TextStyle = {
   letterSpacing: 0,
   align: "center",
   wrap: "none",
-  digits: false
+  digits: false,
+  shadow: undefined
 };
 
 /** A started plugin whose renderer draws. */
@@ -76,6 +78,16 @@ function build(mock: MockText, text: TextValue): FakeObject {
   if (entry === undefined) throw new Error("no adapter was registered");
 
   return entry.adapter.create(text, 1) as FakeObject;
+}
+
+/** The text a BitmapText was built with. */
+function textOf(object: FakeObject | undefined): unknown {
+  return object?.options.text;
+}
+
+/** The Pixi style a BitmapText was built with. */
+function styleOfObject(object: FakeObject | undefined): Record<string, unknown> {
+  return object?.options.style as Record<string, unknown>;
 }
 
 describe("the display adapter", () => {
@@ -201,6 +213,143 @@ describe("the display adapter", () => {
 
     expect(object.destroyed).toBe(true);
     expect(object.destroyOptions).toEqual({ children: true, texture: false });
+  });
+});
+
+describe("the shadow of a style", () => {
+  /** The shadow of `hud.title`; `hud.solid` has the same one with the alpha left out. */
+  const shadow = { color: 0x5b_3a_1e, dx: 2, dy: 4, alpha: 0.5 };
+
+  /** A started plugin whose renderer draws, with a shadowed style, its twin, and a solid one. */
+  function shadowed(): MockText {
+    const mock = createMockText({
+      features: [
+        {
+          name: "popup",
+          description: {
+            textStyles: defineTextStyles({
+              "hud.title": { font: "ui.font-body", size: 32, fill: 0xff_f3_d6, shadow },
+              "hud.plain": { font: "ui.font-body", size: 32, fill: 0xff_f3_d6 },
+              "hud.solid": {
+                font: "ui.font-body",
+                size: 32,
+                fill: 0xff_f3_d6,
+                shadow: { color: 0, dx: 0, dy: 3 }
+              }
+            })
+          }
+        }
+      ]
+    });
+
+    mock.renderer.ready = true;
+    mock.assets.textures.set("hud.coin", coinTexture);
+    mock.start();
+
+    return mock;
+  }
+
+  it("draws two BitmapText objects per run, the shadow first", () => {
+    const mock = shadowed();
+    const object = build(mock, value({ resolved: "a<b>b</b>", style: "hud.title" }));
+
+    expect(object.children.map(child => child.kind)).toEqual([
+      "BitmapText",
+      "BitmapText",
+      "BitmapText",
+      "BitmapText"
+    ]);
+    expect(object.children.map(child => textOf(child))).toEqual(["a", "a", "b", "b"]);
+    expect(object.children.map(child => child.tint)).toEqual([
+      0x5b_3a_1e, 0xff_ff_ff, 0x5b_3a_1e, 0xff_ff_ff
+    ]);
+  });
+
+  it("draws one BitmapText per run for a style with no shadow", () => {
+    const mock = shadowed();
+    const object = build(mock, value({ resolved: "a<b>b</b>", style: "hud.plain" }));
+
+    expect(object.children.map(child => textOf(child))).toEqual(["a", "b"]);
+  });
+
+  it("moves the shadow by dx and dy from the run", () => {
+    const mock = shadowed();
+    const object = build(mock, value({ resolved: "12", style: "hud.title" }));
+    const [under, over] = object.children;
+
+    expect(under?.x).toBeCloseTo((over?.x ?? 0) + 2, 5);
+    expect(under?.y).toBeCloseTo((over?.y ?? 0) + 4, 5);
+  });
+
+  it("tints a white copy of the run with the shadow colour, at the shadow alpha", () => {
+    const mock = shadowed();
+    const object = build(mock, value({ resolved: "<color=#ff0000>x</color>", style: "hud.title" }));
+    const [under, over] = object.children;
+
+    expect(styleOfObject(under).fill).toBe(0xff_ff_ff);
+    expect(under?.tint).toBe(0x5b_3a_1e);
+    expect(under?.alpha).toBe(0.5);
+    expect(styleOfObject(over).fill).toBe(0xff_00_00);
+    expect(over?.alpha).toBe(1);
+  });
+
+  it("draws the shadow opaque when the style left the alpha out", () => {
+    const mock = shadowed();
+    const object = build(mock, value({ resolved: "12", style: "hud.solid" }));
+
+    expect(object.children[0]?.alpha).toBe(1);
+    expect(object.children[0]?.tint).toBe(0);
+  });
+
+  it("gives the shadow the synthetic bold and italic of its run", () => {
+    const mock = shadowed();
+    const bold = build(mock, value({ resolved: "<b>b</b>", style: "hud.title" }));
+    const italic = build(mock, value({ resolved: "<i>i</i>", style: "hud.title" }));
+
+    expect(styleOfObject(bold.children[0]).stroke).toEqual({ color: 0xff_ff_ff, width: 1.6 });
+    expect(italic.children[0]?.skew.x).toBe(-0.2);
+  });
+
+  it("draws an icon once: a shadow is cast by glyphs only", () => {
+    const mock = shadowed();
+    const object = build(mock, value({ resolved: "<icon=hud.coin>", style: "hud.title" }));
+
+    expect(object.children.map(child => child.kind)).toEqual(["Sprite"]);
+  });
+
+  it("rebuilds the shadow with the run when the content changes", () => {
+    const mock = shadowed();
+    const entry = mock.renderer.provided[0];
+    const object = build(mock, value({ resolved: "12", style: "hud.title" }));
+    const before = [...object.children];
+
+    entry?.adapter.update(
+      object,
+      value({ resolved: "12", style: "hud.title" }),
+      value({ resolved: "7", style: "hud.title" })
+    );
+
+    expect(before.map(child => child.destroyed)).toEqual([true, true]);
+    expect(object.children.map(child => textOf(child))).toEqual(["7", "7"]);
+    expect(object.children[0]?.tint).toBe(0x5b_3a_1e);
+  });
+
+  it("frees the shadow with the run", () => {
+    const mock = shadowed();
+    const entry = mock.renderer.provided[0];
+    const object = build(mock, value({ resolved: "12", style: "hud.title" }));
+    const children = [...object.children];
+
+    entry?.adapter.destroy(object);
+
+    expect(children).toHaveLength(2);
+    expect(children.map(child => child.destroyed)).toEqual([true, true]);
+  });
+
+  it("measures a shadowed style like the same style without one", () => {
+    const mock = shadowed();
+
+    expect(mock.api.measure("a\nbc", "hud.title")).toEqual(mock.api.measure("a\nbc", "hud.plain"));
   });
 });
 
