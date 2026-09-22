@@ -23,6 +23,7 @@ describe("root index", () => {
     expect(kit.sprite).toBe(engine.sprite);
     expect(kit.defineBundles).toBe(engine.defineBundles);
     expect(kit.load).toBe(engine.load);
+    expect(kit.defineScene).toBe(engine.defineScene);
     expect(Object.keys(kit)).toEqual([
       "defineNode",
       "defineFlow",
@@ -30,7 +31,8 @@ describe("root index", () => {
       "projection",
       "sprite",
       "defineBundles",
-      "load"
+      "load",
+      "defineScene"
     ]);
   });
 

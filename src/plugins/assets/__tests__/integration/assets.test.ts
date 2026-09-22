@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createApp, createPlugin, defineGame, screen, type } from "../../../../index";
+import { defineScene } from "../../../scenes/define";
 import { assetsPlugin } from "../../index";
 import type { Events, Manifest, ManifestFile } from "../../types";
 import { createFakeIo } from "../unit/mock-assets";
@@ -78,10 +79,11 @@ const main = defineFlow("main", {
 
 const boardFeature = defineFeature("board", {
   flows: [main],
+  // Real scene definitions: `scenes` is part of `screen` and mounts them on every switch.
   scenes: [
-    { id: "home", bundle: "ui" },
-    { id: "board", bundle: "board" },
-    { id: "shop", bundle: "shop" }
+    defineScene("home", { bundle: "ui", layers: {}, projections: [] }),
+    defineScene("board", { bundle: "board", layers: {}, projections: [] }),
+    defineScene("shop", { bundle: "shop", layers: {}, projections: [] })
   ]
 });
 

@@ -56,6 +56,7 @@ import {
   lifecyclePlugin,
   modelPlugin,
   rendererPlugin,
+  scenesPlugin,
   timePlugin,
   worldPlugin
 } from "./plugins";
@@ -64,6 +65,7 @@ import { defineFeature } from "./plugins/flow/feature";
 import { defineFlow, defineNode } from "./plugins/flow/runner/define";
 import type { GameTypes, Kit } from "./plugins/flow/types";
 import { sprite } from "./plugins/renderer/components";
+import { defineScene } from "./plugins/scenes/define";
 import { projection } from "./plugins/world/projection/define";
 
 const framework = createCore(coreConfig, {
@@ -123,7 +125,16 @@ export const createPlugin = framework.createPlugin;
  * ```
  */
 export function defineGame<Types extends GameTypes>(): Kit<Types> {
-  return { defineNode, defineFlow, defineFeature, projection, sprite, defineBundles, load };
+  return {
+    defineNode,
+    defineFlow,
+    defineFeature,
+    projection,
+    sprite,
+    defineBundles,
+    load,
+    defineScene
+  };
 }
 
 export { defineBundles, load } from "./plugins/assets/bundles";
@@ -151,6 +162,7 @@ export {
   sprite,
   Transform
 } from "./plugins/renderer/components";
+export { defineScene } from "./plugins/scenes/define";
 export {
   component,
   Exiting,
@@ -166,11 +178,17 @@ export { projection } from "./plugins/world/projection/define";
 // ─── Plugin sets ──────────────────────────────────────────────
 /**
  * The screen plugins, in dependency order. A game with a screen spreads them into `plugins`;
- * a headless test leaves them out. V2 carries `world`, `renderer`, `input` and `assets`; scenes joins in wave 7.
+ * a headless test leaves them out. V2: `world`, `renderer`, `input`, `assets`, `scenes`. V3 appends `anim`, `i18n`, `text`, `ui`.
  *
  * @example
  * ```ts
  * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { renderer: { mount: "#game" } } });
  * ```
  */
-export const screen = [worldPlugin, rendererPlugin, inputPlugin, assetsPlugin] as const;
+export const screen = [
+  worldPlugin,
+  rendererPlugin,
+  inputPlugin,
+  assetsPlugin,
+  scenesPlugin
+] as const;

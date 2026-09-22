@@ -9,6 +9,7 @@ import type { Api as ClockApi } from "../clock/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Patch } from "../model/types";
 import type { SpriteOptions, sprite } from "../renderer/components";
+import type { DefineScene } from "../scenes/types";
 import type { Api as TimeApi } from "../time/types";
 import type { ProjectionSpec } from "../world/projection/types";
 import type { FeatureDescription, FeaturesApi, FeaturesState } from "./features/types";
@@ -175,7 +176,7 @@ export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginI
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
- * export const { defineNode, defineFlow, defineFeature, projection, sprite, defineBundles, load } =
+ * export const { defineNode, defineFlow, defineFeature, projection, sprite, defineBundles, load, defineScene } =
  *   defineGame<{
  *     player: Player;
  *     session: Session;
@@ -197,6 +198,7 @@ export type Kit<Types extends GameTypes> = {
   ) => ReturnType<typeof sprite>;
   defineBundles: DefineBundles<BundlesOf<Types>>;
   load: LoadBundles<BundlesOf<Types>>;
+  defineScene: DefineScene<Types["assets"], BundlesOf<Types>>;
 };
 
 export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";
