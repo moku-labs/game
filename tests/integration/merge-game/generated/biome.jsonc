@@ -1,0 +1,8 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+  // Nested config: the asset scanner owns every byte in this folder, so the formatter keeps its
+  // hands off. Biome would fold a one-member union onto one line, and the next `--check` run of
+  // the scanner would call the committed file out of date.
+  "root": false,
+  "formatter": { "enabled": false }
+}

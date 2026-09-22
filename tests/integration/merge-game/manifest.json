@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "bundles": {
+    "board": {
+      "feature": "board",
+      "tier": "scene",
+      "mb": 0.486,
+      "files": [
+        {
+          "key": "board.cell",
+          "path": "features/board/assets/cell.png",
+          "width": 192,
+          "height": 192,
+          "mb": 0.141
+        },
+        {
+          "key": "board.generator",
+          "path": "features/board/assets/generator.png",
+          "width": 168,
+          "height": 168,
+          "mb": 0.108
+        },
+        {
+          "key": "board.item-wood-1",
+          "path": "features/board/assets/item-wood-1.png",
+          "width": 144,
+          "height": 144,
+          "mb": 0.079
+        },
+        {
+          "key": "board.item-wood-2",
+          "path": "features/board/assets/item-wood-2.png",
+          "width": 144,
+          "height": 144,
+          "mb": 0.079
+        },
+        {
+          "key": "board.item-wood-3",
+          "path": "features/board/assets/item-wood-3.png",
+          "width": 144,
+          "height": 144,
+          "mb": 0.079
+        }
+      ]
+    }
+  }
+}
