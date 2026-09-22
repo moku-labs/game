@@ -27,7 +27,14 @@
  * ```
  */
 import { coreConfig, createCore } from "./config";
-import { clockPlugin, flowPlugin, lifecyclePlugin, modelPlugin, timePlugin } from "./plugins";
+import {
+  clockPlugin,
+  flowPlugin,
+  lifecyclePlugin,
+  modelPlugin,
+  timePlugin,
+  worldPlugin
+} from "./plugins";
 import { defineFeature } from "./plugins/flow/feature";
 import { defineFlow, defineNode } from "./plugins/flow/runner/define";
 import type { GameTypes, Kit } from "./plugins/flow/types";
@@ -97,3 +104,26 @@ export { defineFeature } from "./plugins/flow/feature";
 export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
 export { exit, slot, to, type } from "./plugins/flow/runner/define";
 export { SaveUnreadableError } from "./plugins/model/store/types";
+export {
+  component,
+  Exiting,
+  Layer,
+  mut,
+  Order,
+  resource,
+  system,
+  tag
+} from "./plugins/world/ecs/define";
+export { projection } from "./plugins/world/projection/define";
+
+// ─── Plugin sets ──────────────────────────────────────────────
+/**
+ * The screen plugins, in dependency order. A game with a screen spreads them into `plugins`;
+ * a headless test leaves them out. V2 carries `world`; renderer, input, assets and scenes join it wave by wave.
+ *
+ * @example
+ * ```ts
+ * createApp({ plugins: [...screen, boardFeature], pluginConfigs: { renderer: { mount: "#game" } } });
+ * ```
+ */
+export const screen = [worldPlugin] as const;

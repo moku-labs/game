@@ -231,7 +231,11 @@ export default [
 
   // 6d. L1 — a module of model or flow imports a sibling module only as `import type` from its types.ts.
   {
-    files: ["src/plugins/model/*/**/*.ts", "src/plugins/flow/*/**/*.ts"],
+    files: [
+      "src/plugins/model/*/**/*.ts",
+      "src/plugins/flow/*/**/*.ts",
+      "src/plugins/world/*/**/*.ts"
+    ],
     ignores: ["src/**/__tests__/**"],
     rules: {
       "@typescript-eslint/no-restricted-imports": [
@@ -239,12 +243,12 @@ export default [
         {
           patterns: [
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner)/(?!types$)`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection)/(?!types$)`,
               message:
                 "Modules do not import each other's run-time code. index.ts injects sibling APIs."
             },
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner)/types$`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection)/types$`,
               allowTypeImports: true,
               message: "Import a sibling module's types with `import type` only."
             }
@@ -259,6 +263,7 @@ export default [
     files: [
       "src/plugins/model/**/*.ts",
       "src/plugins/flow/**/*.ts",
+      "src/plugins/world/**/*.ts",
       "src/plugins/clock/**/*.ts",
       "tests/integration/merge-game/rules/**/*.ts"
     ],

@@ -9,6 +9,7 @@ export { flowPlugin } from "./flow";
 export { lifecyclePlugin } from "./lifecycle";
 export { modelPlugin } from "./model";
 export { timePlugin } from "./time";
+export { worldPlugin } from "./world";
 
 // ─── Plugin Types (namespace re-exports) ─────────────────────
 export * as Clock from "./clock/types";
@@ -16,3 +17,4 @@ export * as Flow from "./flow/types";
 export * as Lifecycle from "./lifecycle/types";
 export * as Model from "./model/types";
 export * as Time from "./time/types";
+export * as World from "./world/types";
