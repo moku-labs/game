@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { popup } from "../../components";
 import { defineComponent } from "../../jsx/component";
 import { FRAGMENT, flatten, textNode } from "../../jsx/flatten";
 import { identityOf, isFlagsOf } from "../../jsx/reconcile";
@@ -85,6 +86,25 @@ describe("defineComponent", () => {
 
   it("leaves outcomes undefined when the component names none", () => {
     expect(defineComponent("Plain", { view: () => jsx("row", {}) }).outcomes).toBeUndefined();
+  });
+});
+
+// ─── popup of a component that keeps local state ──────────────
+
+describe("popup", () => {
+  it("names the outcomes of a component that also keeps local state", () => {
+    const Settings = defineComponent("Settings", {
+      local: { tab: "audio" },
+      outcomes: { close: {}, reset: {} },
+      view: (props: { volume: number }, local) =>
+        jsx("column", { children: `${local.tab}:${props.volume}` })
+    });
+
+    expect(popup(Settings, { volume: 3 })).toEqual({
+      kind: "popup",
+      payload: { component: "Settings", props: { volume: 3 } },
+      answers: ["close", "reset"]
+    });
   });
 });
 

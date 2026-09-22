@@ -5,13 +5,26 @@ export type AssetKey =
   | "board.generator"
   | "board.item-wood-1"
   | "board.item-wood-2"
-  | "board.item-wood-3";
+  | "board.item-wood-3"
+  | "board.item-wood-4"
+  | "board.theme"
+  | "orders.complete"
+  | "ui.click"
+  | "ui.font-body"
+  | "ui.font-digits";
 
-export type FontKey = never;
+export type FontKey =
+  | "ui.font-body"
+  | "ui.font-digits";
 
-export type AudioKey = never;
+export type AudioKey =
+  | "board.theme"
+  | "orders.complete"
+  | "ui.click";
 
 export type BundleKey =
-  | "board";
+  | "board"
+  | "orders"
+  | "ui";
 
 export const nineSlice = {} as const;

@@ -54,6 +54,7 @@ function elementOf(patch: Partial<Element>): Element {
     children: [],
     instance: undefined,
     live: true,
+    entered: true,
     dropKey: undefined,
     ...patch
   };

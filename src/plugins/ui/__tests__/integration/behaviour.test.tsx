@@ -4,7 +4,7 @@ import { NineSlice, Parent, Shape, Sprite, Transform } from "../../../renderer/c
 import { Text } from "../../../text/components";
 import { Exiting } from "../../../world/ecs/define";
 import { Box, Scroll, UiCounters } from "../../components";
-import { startUiApp, tick } from "../app";
+import { enterOffset, startUiApp, tick } from "../app";
 
 // ---------------------------------------------------------------------------
 // The behaviours that need the whole screen set: scroll, motion, the errors of
@@ -83,8 +83,11 @@ describe("element motion", () => {
 
     const mover = app.ui.find("mover") ?? 0;
 
-    expect(app.world.ecs.get(mover, Transform)?.y).toBeGreaterThan(0);
-    expect(app.world.projection.restOf(mover, Transform)?.y).toBe(app.world.ecs.get(mover, Box)?.y);
+    const rest = app.world.projection.restOf(mover, Transform)?.y ?? 0;
+
+    expect(rest).toBe(app.world.ecs.get(mover, Box)?.y);
+    expect(app.world.ecs.get(mover, Transform)?.y).toBeGreaterThanOrEqual(enterOffset);
+    expect(app.world.ecs.get(mover, Transform)?.y).toBeLessThan(rest);
 
     for (let frame = 0; frame < 40; frame += 1) app.time.step(16);
 
@@ -410,6 +413,7 @@ describe("what the frame ignores", () => {
     const foreign = app.world.ecs.spawn({ kind: "plugin", name: "test" }, [Transform({ x: 0 })]);
 
     app.world.ecs.tag(foreign, Pressed);
+    app.world.ecs.add(foreign, Box({ x: 0, y: 0, w: 1, h: 1 }));
     app.time.step(16);
     app.world.ecs.untag(foreign, Pressed);
     app.time.step(16);
@@ -441,6 +445,25 @@ describe("a text with a style key and a button that names nothing", () => {
     expect(app.world.ecs.get(styled, Box)?.w).toBeGreaterThan(0);
     expect(app.world.ecs.has(plain, Touchable)).toBe(true);
     expect(app.world.ecs.get(plain, Tappable)).toBeUndefined();
+
+    await app.stop();
+  });
+});
+
+describe("a motion written with defineMotion", () => {
+  it("runs on the entity once its spawn applied, instead of failing on a missing Transform", async () => {
+    const app = await startUiApp();
+
+    mount(app, "moved");
+
+    const animated = app.ui.find("animated") ?? 0;
+
+    expect(app.world.ecs.get(animated, Transform)?.scale).toBeLessThan(1);
+    expect(app.world.ecs.get(animated, Transform)?.scale).toBeGreaterThanOrEqual(0.8);
+
+    for (let frame = 0; frame < 40; frame += 1) app.time.step(16);
+
+    expect(app.world.ecs.get(animated, Transform)?.scale).toBe(1);
 
     await app.stop();
   });

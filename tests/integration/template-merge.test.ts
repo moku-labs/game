@@ -42,6 +42,9 @@ const untilOrder: Flow.RouteStep[] = [
 /** The reward popup the finished order opened. */
 const claim: Flow.RouteStep = { at: "afterOrder/show", intent: "claim" };
 
+/** Leaving the board, which is where the reward hands the player back to. */
+const leave: Flow.RouteStep = { at: "board/awaitIntent", intent: "leave" };
+
 /** The journal as a list of readable edges, for an assertion that reads like the game. */
 const edgesOf = (entries: readonly { path: string; outcome: string }[]): string[] =>
   entries.map(entry => `${entry.path} -${entry.outcome}->`);
@@ -57,8 +60,10 @@ describe("template-merge", () => {
 
     await game.walk(untilOrder.slice(1));
 
+    // `show` is a transit node with a popup effect since V3: the graph waits inside it, and the
+    // last rest point (the bookmark) stays the board.
     expect(game.state().path).toBe("afterOrder/show");
-    expect(app.flow.bookmark().path).toBe("afterOrder/show");
+    expect(app.flow.bookmark().path).toBe("board/awaitIntent");
     expect(provider.calls.filter(call => call.method === "commit").length).toBeGreaterThan(
       commitsOnTheBoard
     );
@@ -79,8 +84,8 @@ describe("template-merge", () => {
     await app.flow.restore(bookmark);
     await tick();
 
-    expect(game.state().path).toBe("afterOrder/show");
-    expect(app.flow.gate.state().allowed).toContain("claim");
+    // A restore lands on the rest point before the delivery: the popup is not a rest node.
+    expect(game.state().path).toBe("board/awaitIntent");
 
     await game.stop();
   });
@@ -113,9 +118,16 @@ describe("template-merge", () => {
       "board/awaitIntent -give->",
       "board/giveToOrder -orderComplete->"
     ]);
-    expect(app.model.store.snapshot().session).toMatchObject({ taps: 4, pendingReward: "planks" });
+    expect(app.model.store.snapshot().session).toMatchObject({ taps: 4 });
+    // The reward waits in the save, not in the session: the popup is an effect of a transit node,
+    // so a reload has to find the reward again.
+    expect(app.model.store.snapshot().player).toMatchObject({
+      pendingReward: "planks",
+      pendingCoins: 25,
+      merge: { wallet: { coins: 0 } }
+    });
 
-    const home = await game.walk([claim]);
+    const home = await game.walk([claim, leave]);
 
     expect(home.path).toBe("home");
     // `home` is a checkpoint: the journal is compacted when the graph reaches it.
@@ -127,11 +139,11 @@ describe("template-merge", () => {
         wallet: { coins: 25 },
         energy: { value: tables.energy.max - 4 },
         generators: { sawmill: { charges: 0 } },
-        orders: [{ id: 2, given: [] }, { id: 1 }],
+        orders: [{ id: 3, given: [] }, { id: 1 }, { id: 2 }],
         nextItemId: 5
       }
     });
-    expect(app.model.store.snapshot().session).toMatchObject({ pendingReward: "" });
+    expect(app.model.store.snapshot().player).toMatchObject({ pendingReward: "", pendingCoins: 0 });
 
     await game.stop();
   });

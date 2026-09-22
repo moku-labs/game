@@ -1,0 +1,5 @@
+{
+  "orders.done": "Заказ выполнен",
+  "orders.reward": "{coins, plural, one {# монета} few {# монеты} other {# монет}}",
+  "orders.claim": "Забрать"
+}

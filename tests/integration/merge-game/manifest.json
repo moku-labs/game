@@ -4,7 +4,7 @@
     "board": {
       "feature": "board",
       "tier": "scene",
-      "mb": 0.486,
+      "mb": 0.573,
       "files": [
         {
           "key": "board.cell",
@@ -40,6 +40,73 @@
           "width": 144,
           "height": 144,
           "mb": 0.079
+        },
+        {
+          "key": "board.item-wood-4",
+          "path": "features/board/assets/item-wood-4.png",
+          "width": 144,
+          "height": 144,
+          "mb": 0.079
+        },
+        {
+          "key": "board.theme",
+          "path": "features/board/assets/theme.mp3",
+          "kind": "audio",
+          "mb": 0.008
+        }
+      ]
+    },
+    "orders": {
+      "feature": "orders",
+      "tier": "core",
+      "mb": 0.002,
+      "files": [
+        {
+          "key": "orders.complete",
+          "path": "features/orders/assets/complete.mp3",
+          "kind": "audio",
+          "mb": 0.002
+        }
+      ]
+    },
+    "ui": {
+      "feature": "ui",
+      "tier": "boot",
+      "mb": 0.627,
+      "files": [
+        {
+          "key": "ui.click",
+          "path": "features/ui/assets/click.mp3",
+          "kind": "audio",
+          "mb": 0.001
+        },
+        {
+          "key": "ui.font-body",
+          "path": "features/ui/assets/font-body.fnt",
+          "kind": "font",
+          "mb": 0.563,
+          "pages": [
+            {
+              "path": "features/ui/assets/font-body_0.png",
+              "width": 512,
+              "height": 288,
+              "mb": 0.563
+            }
+          ]
+        },
+        {
+          "key": "ui.font-digits",
+          "path": "features/ui/assets/font-digits.fnt",
+          "kind": "font",
+          "mb": 0.063,
+          "pages": [
+            {
+              "path": "features/ui/assets/font-digits_0.png",
+              "width": 512,
+              "height": 32,
+              "mb": 0.063
+            }
+          ]
         }
       ]
     }

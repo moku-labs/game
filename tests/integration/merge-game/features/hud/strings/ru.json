@@ -1,0 +1,6 @@
+{
+  "hud.order": "Заказ",
+  "hud.deliver": "Отдать",
+  "hud.settings": "Настройки",
+  "hud.need": "{chain} {level}"
+}
