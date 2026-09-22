@@ -6,6 +6,7 @@
  */
 import path from "node:path";
 import { createBrandConsole } from "@moku-labs/common/cli";
+import { type CompileReport, compileStrings } from "../../i18n/compile/compile";
 import type { Manifest } from "../types";
 import { scanAssets } from "./scan";
 
@@ -149,12 +150,27 @@ function outputNames(options: Options): string {
 }
 
 /**
- * Runs the asset key scanner: walk the features, write the manifest and the key module, or check
- * that both are current. Nothing here calls `process.exit`; the caller does.
+ * One line about the compiled strings.
+ *
+ * @param report - What the compile produced.
+ * @returns The line for the console.
+ * @example
+ * ```ts
+ * stringsSummary({ changed: false, locales: ["en", "ru"], keys: ["a", "b"], notes: [] }); // "2 strings in 2 locales (en, ru)."
+ * ```
+ */
+function stringsSummary(report: CompileReport): string {
+  return `${report.keys.length} strings in ${report.locales.length} locales (${report.locales.join(", ")}).`;
+}
+
+/**
+ * Runs the asset key scanner: walk the features, write the manifest and the key module, then
+ * compile the feature strings next to the key module, or check that all of it is current.
+ * Nothing here calls `process.exit`; the caller does.
  *
  * @param argv - The arguments after the script name.
  * @param ui - Where the lines go. The branded console by default.
- * @returns The exit code: `1` when the scan failed or `--check` found a difference, else `0`.
+ * @returns The exit code: `1` when the scan or the compile failed or `--check` found a difference, else `0`.
  * @example
  * ```ts
  * await runCli(["--root", "src", "--manifest", "public/assets/manifest.json", "--check"]);
@@ -171,11 +187,16 @@ export async function runCli(argv: string[], ui: ScanUi = createBrandConsole()):
       write: !options.check
     });
 
-    for (const note of notes) ui.warn(note);
+    // The strings live next to the key module: one generated folder per game.
+    const strings = await compileStrings(options.root, path.dirname(options.keys), {
+      check: options.check
+    });
 
-    if (changed && options.check) {
+    for (const note of [...notes, ...strings.notes]) ui.warn(note);
+
+    if ((changed || strings.changed) && options.check) {
       ui.error(
-        `${outputNames(options)} are out of date.\n` +
+        `${changed ? outputNames(options) : "the generated strings"} are out of date.\n` +
           '  Run "bun run assets:keys" and commit the result.'
       );
 
@@ -184,6 +205,7 @@ export async function runCli(argv: string[], ui: ScanUi = createBrandConsole()):
 
     ui.info(changed ? `wrote ${outputNames(options)}.` : `${outputNames(options)} are up to date.`);
     ui.info(summary(manifest));
+    if (strings.keys.length > 0) ui.info(stringsSummary(strings));
 
     return 0;
   } catch (error) {

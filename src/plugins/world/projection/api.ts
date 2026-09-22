@@ -243,6 +243,16 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       }
     },
 
+    restOf: <Value extends object>(
+      entity: Entity,
+      component: ComponentType<Value>
+    ): Value | undefined => {
+      const rest = state.byEntity.get(entity)?.rest ?? state.rests.get(entity);
+      const stored = rest?.get(component.componentName);
+
+      return stored === undefined ? undefined : (stored.value as Value);
+    },
+
     settle: (entity: Entity): void => {
       const view = state.byEntity.get(entity);
 

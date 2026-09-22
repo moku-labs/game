@@ -43,6 +43,14 @@
  * | assets | preloadDepth | 2 |
  * | assets | baseUrl | undefined |
  * | assets | io | undefined, the browser fetch and the renderer textures |
+ * | anim | maxTracks | 2000 |
+ * | i18n | locale | "en" |
+ * | i18n | fallback | "en" |
+ * | i18n | locales | {} |
+ * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
+ * | audio | musicFadeMs | 600 |
+ * | audio | volumes | undefined, the buses stay at `buses` |
+ * | audio | context | undefined, the real AudioContext |
  *
  * @file The package root: the composed framework and its public exports.
  * @example
@@ -52,9 +60,11 @@
  */
 import { coreConfig, createCore } from "./config";
 import {
+  animPlugin,
   assetsPlugin,
   clockPlugin,
   flowPlugin,
+  i18nPlugin,
   inputPlugin,
   lifecyclePlugin,
   modelPlugin,
@@ -63,9 +73,12 @@ import {
   timePlugin,
   worldPlugin
 } from "./plugins";
+import { animFor } from "./plugins/anim/bind";
 import { bundlesFor } from "./plugins/assets/bundles";
+import { audioFor } from "./plugins/audio/descriptors";
 import { flowFor } from "./plugins/flow/feature";
 import type { BundlesOf, GameTypes, SceneIdOf } from "./plugins/flow/types";
+import { i18nFor } from "./plugins/i18n/tr";
 import { componentsFor } from "./plugins/renderer/components";
 import { scenesFor } from "./plugins/scenes/define";
 import { projectionFor } from "./plugins/world/projection/define";
@@ -113,7 +126,7 @@ export const createPlugin = framework.createPlugin;
  * only spreads them, so the kit's type is inferred and never written by hand. At run time these
  * are the same functions and component objects the plugins export.
  *
- * @returns The helpers typed with the game's `player`, `session`, `assets` and `bundles`.
+ * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles` and `strings`.
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
@@ -127,14 +140,17 @@ export function defineGame<Types extends GameTypes>() {
     ...projectionFor<Types["player"], Types["session"]>(),
     ...componentsFor<Types["assets"]>(),
     ...bundlesFor<BundlesOf<Types>>(),
-    ...scenesFor<Types["assets"], BundlesOf<Types>>()
+    ...scenesFor<Types["assets"], BundlesOf<Types>>(),
+    ...animFor<Types["assets"]>(),
+    ...i18nFor<Types["strings"]>(),
+    ...audioFor<Types["assets"]>()
   };
 }
 
 // ─── Plugin sets ──────────────────────────────────────────────
 /**
  * The screen plugins, in dependency order. A game with a screen spreads them into `plugins`;
- * a headless test leaves them out. V2: `world`, `renderer`, `input`, `assets`, `scenes`. V3 appends `anim`, `i18n`, `text`, `ui`.
+ * a headless test leaves them out. V2: `world`, `renderer`, `input`, `assets`, `scenes`. V3 appends `anim`, `i18n`, `text`, `ui`; `audio` stays opt-in: `[...screen, audioPlugin]`.
  *
  * @example
  * ```ts
@@ -146,7 +162,9 @@ export const screen = [
   rendererPlugin,
   inputPlugin,
   assetsPlugin,
-  scenesPlugin
+  scenesPlugin,
+  animPlugin,
+  i18nPlugin
 ] as const;
 
 // ─── Plugins + Types ──────────────────────────────────────────
@@ -198,3 +216,27 @@ export {
 // assets and scenes: declarations
 export { defineBundles, load } from "./plugins/assets/bundles";
 export { defineScene } from "./plugins/scenes/define";
+// anim: choreography as data, the motion sugar, the Animation component
+export { Animation } from "./plugins/anim/components";
+export { defineMotion } from "./plugins/anim/motion";
+export {
+  defineAnimation,
+  external,
+  frames,
+  haptic,
+  mark,
+  parallel,
+  play,
+  sequence,
+  set,
+  sfx,
+  stagger,
+  tween,
+  use,
+  wait
+} from "./plugins/anim/timeline/steps";
+// i18n: messages as data
+export { tr } from "./plugins/i18n/tr";
+export type { DescriptionNode } from "./plugins/world/projection/types";
+// audio: the music descriptor (sfx is anim's)
+export { music } from "./plugins/audio/descriptors";
