@@ -200,17 +200,44 @@ export default [
     }
   },
 
+  // 6b2. The asset scanner is build-time code: only its own entry file may import it.
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/assets.ts", "src/plugins/assets/scan/**", "src/**/__tests__/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/assets/scan/**", "./scan/**", "../scan/**"],
+              message: "The asset scanner is node-only. Only src/assets.ts imports it."
+            }
+          ]
+        }
+      ]
+    }
+  },
+
   // 6c. L2 + L5 — no static Pixi or Yoga import; no module-scope state.
   {
     files: ["src/**/*.ts"],
     ignores: ["src/**/__tests__/**"],
     rules: {
-      "no-restricted-imports": [
+      "@typescript-eslint/no-restricted-imports": [
         "error",
         {
           paths: [
-            { name: "pixi.js", message: "Load Pixi lazily with import() in renderer onStart." },
-            { name: "yoga-layout", message: "Load Yoga lazily with import() in ui onStart." }
+            {
+              name: "pixi.js",
+              allowTypeImports: true,
+              message: "Load Pixi lazily with import() in renderer onStart. Types may be imported."
+            },
+            {
+              name: "yoga-layout",
+              allowTypeImports: true,
+              message: "Load Yoga lazily with import() in ui onStart. Types may be imported."
+            }
           ]
         }
       ],
@@ -231,7 +258,12 @@ export default [
 
   // 6d. L1 — a module of model or flow imports a sibling module only as `import type` from its types.ts.
   {
-    files: ["src/plugins/model/*/**/*.ts", "src/plugins/flow/*/**/*.ts"],
+    files: [
+      "src/plugins/model/*/**/*.ts",
+      "src/plugins/flow/*/**/*.ts",
+      "src/plugins/world/*/**/*.ts",
+      "src/plugins/renderer/*/**/*.ts"
+    ],
     ignores: ["src/**/__tests__/**"],
     rules: {
       "@typescript-eslint/no-restricted-imports": [
@@ -239,12 +271,12 @@ export default [
         {
           patterns: [
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner)/(?!types$)`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport)/(?!types$)`,
               message:
                 "Modules do not import each other's run-time code. index.ts injects sibling APIs."
             },
             {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner)/types$`,
+              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport)/types$`,
               allowTypeImports: true,
               message: "Import a sibling module's types with `import type` only."
             }
@@ -259,6 +291,8 @@ export default [
     files: [
       "src/plugins/model/**/*.ts",
       "src/plugins/flow/**/*.ts",
+      "src/plugins/world/**/*.ts",
+      "src/plugins/renderer/**/*.ts",
       "src/plugins/clock/**/*.ts",
       "tests/integration/merge-game/rules/**/*.ts"
     ],

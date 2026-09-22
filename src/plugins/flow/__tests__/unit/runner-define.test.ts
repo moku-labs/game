@@ -51,6 +51,18 @@ describe("defineNode", () => {
     expect(node.inbox).toEqual(["elapsed"]);
   });
 
+  it("keeps the scene the author named", () => {
+    const node = defineNode({ scene: "board", rest: true, outcomes: { play: type() } });
+
+    expect(node.scene).toBe("board");
+  });
+
+  it("leaves the scene key out when the author named none", () => {
+    const node = defineNode({ rest: true, outcomes: { play: type() } });
+
+    expect("scene" in node).toBe(false);
+  });
+
   it("gives a node without an input tag a tag of its own", () => {
     const node = defineNode({ rest: true, outcomes: { play: type() } });
 

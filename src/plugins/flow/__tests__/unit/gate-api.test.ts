@@ -82,7 +82,7 @@ const notRequired: Require = () => {
 
 const createTestState = (): State => ({
   features: { byName: new Map(), sealed: false },
-  fx: { handlers: new Map(), buffered: [], settled: [], mode: "live" },
+  fx: { handlers: new Map(), buffered: [], hintListeners: [], settled: [], mode: "live" },
   gate: createGateState(),
   inbox: createInboxState(),
   runner: {

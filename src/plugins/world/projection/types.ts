@@ -1,0 +1,678 @@
+/**
+ * @file world/projection — type definitions: layers, projection specs, views, motion hooks,
+ * the minimal tween and the module API.
+ */
+import type { Hint } from "../../flow/types";
+import type { Json, Root } from "../../model/types";
+import type {
+  AnyComponentValue,
+  ComponentType,
+  EcsApi,
+  EcsInternal,
+  Entity,
+  Owner,
+  TagType
+} from "../ecs/types";
+import type { WorldCtx } from "../types";
+
+/**
+ * How a layer orders the entities drawn in it.
+ *
+ * @example
+ * ```ts
+ * const sort: LayerSort = "y";
+ * ```
+ */
+export type LayerSort = "none" | "y" | "order";
+
+/**
+ * One named layer of a scene. The order of the list is draw order.
+ *
+ * @example
+ * ```ts
+ * const layer: LayerSpec = { name: "items", sort: "y" };
+ * ```
+ */
+export type LayerSpec = { name: string; sort: LayerSort };
+
+/**
+ * Easing of a tween. A function gets the normalised time and returns the eased fraction.
+ *
+ * @example
+ * ```ts
+ * const ease: Ease = "inOut";
+ * ```
+ */
+export type Ease = "linear" | "in" | "out" | "inOut" | ((t: number) => number);
+
+/**
+ * What every motion returns: it can be finished, cancelled and asked whether it still runs.
+ * V3 `anim` hands out the same shape.
+ *
+ * @example
+ * ```ts
+ * const handle: MotionHandle = view.toRest(Transform);
+ * handle.active(); // true until the last frame wrote the exact target
+ * ```
+ */
+export type MotionHandle = { finish(): void; cancel(): void; active(): boolean };
+
+/**
+ * What a motion hook returns. `void` means the hook wrote the component directly.
+ *
+ * @example
+ * ```ts
+ * const motion: Motion = undefined; // the hook called view.set and is already done
+ * ```
+ */
+// biome-ignore lint/suspicious/noConfusingVoidType: a hook may return nothing; `void` names that honestly
+export type Motion = MotionHandle | void;
+
+/**
+ * Only the numeric fields of a component value: what a tween can interpolate.
+ *
+ * @example
+ * ```ts
+ * type Numbers = NumericFields<{ x: number; texture: string }>; // { x: number }
+ * ```
+ */
+export type NumericFields<Value extends object> = {
+  [Key in keyof Value as Value[Key] extends number ? Key : never]: Value[Key];
+};
+
+/**
+ * Options of `ViewHandle.tween`.
+ *
+ * @example
+ * ```ts
+ * const options: TweenOptions = { ms: 350, ease: "out", delayMs: 40 };
+ * ```
+ */
+export type TweenOptions = { ms: number; ease?: Ease; delayMs?: number };
+
+/**
+ * Options of `ViewHandle.toRest`. Defaults: the plugin's `settleMs` and ease `"out"`.
+ *
+ * @example
+ * ```ts
+ * const options: RestOptions = { ms: 200 };
+ * ```
+ */
+export type RestOptions = { ms?: number; ease?: Ease };
+
+/**
+ * What a motion hook is handed: the one view it animates. A view never holds a reference to
+ * another view — `peer` answers with the other key's item, never with its entity.
+ *
+ * @example
+ * ```ts
+ * const enter = (view: ViewHandle<Item>, item: Item): Motion => {
+ *   view.set(Transform, { scale: 0 });
+ *   return view.toRest(Transform, { ms: 250 });
+ * };
+ * ```
+ */
+export type ViewHandle<Item> = {
+  readonly entity: Entity;
+  readonly key: string;
+  get<Value extends object>(component: ComponentType<Value>): Readonly<Value> | undefined;
+  rest<Value extends object>(component: ComponentType<Value>): Readonly<Value> | undefined;
+  set<Value extends object>(component: ComponentType<Value>, patch: Partial<Value>): void;
+  tween<Value extends object>(
+    component: ComponentType<Value>,
+    to: Partial<NumericFields<Value>>,
+    options: TweenOptions
+  ): MotionHandle;
+  toRest<Value extends object>(
+    component: ComponentType<Value>,
+    options?: RestOptions
+  ): MotionHandle;
+  all(handles: readonly Motion[]): MotionHandle;
+  peer(key: string): Item | undefined;
+};
+
+/**
+ * One `motion.change` hook, keyed by component name. `previous` and `next` are both passed, so a
+ * rollback that lowers a level can pick another motion than a level-up.
+ *
+ * @example
+ * ```ts
+ * const slide: ChangeHook<Item> = view => view.toRest(Transform, { ms: 350 });
+ * ```
+ */
+export type ChangeHook<Item> = (
+  view: ViewHandle<Item>,
+  previous: Item,
+  next: Item,
+  hint?: Hint
+) => Motion;
+
+/**
+ * The `change` table of a projection: one hook per component name.
+ *
+ * @example
+ * ```ts
+ * const change: ChangeHooks<Item> = { Transform: view => view.toRest(Transform) };
+ * ```
+ */
+export type ChangeHooks<Item> = { readonly [component: string]: ChangeHook<Item> };
+
+/**
+ * The motion hooks of a projection. Every one is optional; without a hook the component diff is
+ * written directly.
+ *
+ * @example
+ * ```ts
+ * const motion: ProjectionMotion<Item> = {
+ *   change: { Transform: view => view.toRest(Transform, { ms: 350 }) }
+ * };
+ * ```
+ */
+export type ProjectionMotion<Item> = {
+  enter?(view: ViewHandle<Item>, item: Item, hint?: Hint): Motion;
+  exit?(view: ViewHandle<Item>, item: Item, hint?: Hint): Motion;
+  readonly change?: ChangeHooks<Item>;
+  settle?(view: ViewHandle<Item>, components: readonly string[]): Motion;
+};
+
+/**
+ * The motion hooks with the item type erased, as the world stores them.
+ *
+ * @example
+ * ```ts
+ * const stored: AnyProjectionMotion = { change: {} };
+ * ```
+ */
+export type AnyProjectionMotion = {
+  enter?(view: ViewHandle<unknown>, item: unknown, hint?: Hint): Motion;
+  exit?(view: ViewHandle<unknown>, item: unknown, hint?: Hint): Motion;
+  readonly change?: ChangeHooks<never>;
+  settle?(view: ViewHandle<unknown>, components: readonly string[]): Motion;
+};
+
+/**
+ * One projection: keyed items of the model turned into entities. `Item` is inferred from the
+ * return of `from`; `layer` and `lift` keep their literal types so a scene can check them.
+ *
+ * @example
+ * ```ts
+ * const spec: ProjectionSpec<Item, "items", "lifted", Player, Session> = {
+ *   name: "board.items",
+ *   layer: "items",
+ *   lift: "lifted",
+ *   from: player => player.board.items,
+ *   key: item => item.id,
+ *   view: item => [Item({ level: item.level })]
+ * };
+ * ```
+ */
+export type ProjectionSpec<
+  Item,
+  LayerName extends string,
+  LiftName extends string,
+  Player,
+  Session
+> = {
+  readonly name: string;
+  readonly layer: LayerName;
+  readonly lift?: LiftName;
+  from(player: Player, session: Session): readonly Item[];
+  key(item: Item): string;
+  view(item: Item): readonly AnyComponentValue[];
+  readonly motion?: ProjectionMotion<Item>;
+};
+
+/**
+ * A projection spec with its item and layer types erased, as the world stores it.
+ *
+ * @example
+ * ```ts
+ * const stored: AnyProjectionSpec = {
+ *   name: "board.items",
+ *   layer: "items",
+ *   from: () => [],
+ *   key: () => "",
+ *   view: () => []
+ * };
+ * ```
+ */
+export type AnyProjectionSpec = {
+  readonly name: string;
+  readonly layer: string;
+  readonly lift?: string;
+  from(player: Json, session: Json): readonly unknown[];
+  key(item: unknown): string;
+  view(item: unknown): readonly AnyComponentValue[];
+  readonly motion?: AnyProjectionMotion;
+};
+
+/**
+ * Why a reconcile runs. Merged over the frame; the cause table decides play or direct.
+ *
+ * @example
+ * ```ts
+ * const cause: Cause = "edge";
+ * ```
+ */
+export type Cause = "edge" | "rollback" | "restore" | "load" | "mount" | "rerun";
+
+/**
+ * One live or exiting view: the entity of one key of one projection, its rest pose and the
+ * motions that still run on it.
+ *
+ * @example
+ * ```ts
+ * const view: View = {
+ *   entity: 1_048_576,
+ *   projection: "board.items",
+ *   key: "i7",
+ *   item: { id: "i7" },
+ *   rest: new Map(),
+ *   handles: [],
+ *   lifted: false,
+ *   dropWhenStill: false,
+ *   exiting: false
+ * };
+ * ```
+ */
+export type View = {
+  entity: Entity;
+  projection: string;
+  key: string;
+  item: unknown;
+  /** The last output of `view(item)`, by component name: what the picture equals at rest. */
+  rest: Map<string, AnyComponentValue>;
+  handles: MotionHandle[];
+  lifted: boolean;
+  /** `lift(false)` is waiting for the last motion to end. */
+  dropWhenStill: boolean;
+  exiting: boolean;
+};
+
+/**
+ * One mounted projection: its owner, the live views by key, the despawn queue and the items of
+ * the last reconcile.
+ *
+ * @example
+ * ```ts
+ * const mounted: Mounted = {
+ *   owner: { kind: "projection", name: "board.items" },
+ *   live: new Map(),
+ *   queue: [],
+ *   items: new Map()
+ * };
+ * ```
+ */
+export type Mounted = {
+  owner: Owner;
+  live: Map<string, View>;
+  queue: View[];
+  items: Map<string, unknown>;
+};
+
+/**
+ * One running tween. `from` is read from the component when the delay ends, never stored earlier.
+ *
+ * @example
+ * ```ts
+ * const track: Track = {
+ *   entity: 1_048_576,
+ *   component: Transform,
+ *   to: { x: 100 },
+ *   ms: 350,
+ *   ease: "out",
+ *   delayMs: 0,
+ *   elapsed: 0,
+ *   from: undefined,
+ *   ended: false
+ * };
+ * ```
+ */
+export type Track = {
+  entity: Entity;
+  component: ComponentType<Record<string, unknown>>;
+  to: Record<string, number>;
+  ms: number;
+  ease: Ease;
+  delayMs: number;
+  elapsed: number;
+  from: Record<string, number> | undefined;
+  ended: boolean;
+};
+
+/**
+ * What the next reconcile has to do: why it runs, which roots changed and whether `view` is
+ * forced for every item.
+ *
+ * @example
+ * ```ts
+ * const dirty: Dirty = { causes: ["edge"], roots: new Set(["player"]), force: false };
+ * ```
+ */
+export type Dirty = { causes: Cause[]; roots: Set<Root>; force: boolean };
+
+/**
+ * projection module state.
+ */
+export type ProjectionState = {
+  specs: Map<string, AnyProjectionSpec>;
+  layers: readonly LayerSpec[];
+  mounted: Map<string, Mounted>;
+  byEntity: Map<Entity, View>;
+  dirty: Dirty | undefined;
+  hints: Hint[];
+  tracks: Track[];
+  /** Entity to component name to the fields another writer owns. */
+  mutes: Map<Entity, Map<string, Set<string>>>;
+  offHints: Array<() => void>;
+};
+
+/**
+ * The world-owned components the projection writes. Injected, because a module never imports a
+ * sibling module's run-time code.
+ *
+ * @example
+ * ```ts
+ * const injected: WorldComponents = { Layer, Order, Exiting };
+ * ```
+ */
+export type WorldComponents = {
+  Layer: ComponentType<{ name: string }>;
+  Order: ComponentType<{ value: number }>;
+  Exiting: TagType;
+};
+
+/**
+ * What `index.ts` injects into the projection factory: the sibling module and the world-owned
+ * components, because a module never imports a sibling's run-time code.
+ */
+export type ProjectionDeps = {
+  ecs: EcsApi;
+  ecsInternal: EcsInternal;
+  components: WorldComponents;
+};
+
+/**
+ * Domain context of the projection module: the plugin context and the injected sibling.
+ */
+export type ProjectionCtx = { readonly ctx: WorldCtx; readonly deps: ProjectionDeps };
+
+/**
+ * The counters of one reconcile, without the mode.
+ *
+ * @example
+ * ```ts
+ * const counts: Counts = {
+ *   projections: 1,
+ *   entered: 0,
+ *   changed: 1,
+ *   exited: 1,
+ *   revived: 0,
+ *   queued: 1,
+ *   hintsRouted: 1,
+ *   hintsDropped: 0
+ * };
+ * ```
+ */
+export type Counts = {
+  projections: number;
+  entered: number;
+  changed: number;
+  exited: number;
+  revived: number;
+  queued: number;
+  hintsRouted: number;
+  hintsDropped: number;
+};
+
+/**
+ * What one reconcile run is asked to do.
+ *
+ * @example
+ * ```ts
+ * const options: ReconcileOptions = { direct: true, force: false };
+ * ```
+ */
+export type ReconcileOptions = {
+  names?: readonly string[];
+  direct: boolean;
+  force: boolean;
+};
+
+/**
+ * projection module API, `app.world.projection`: the bridge from the model to entities.
+ *
+ * @example
+ * ```ts
+ * // A test mounts the board and asks which entity carries one model key.
+ * app.world.projection.mount(["board.items"], { kind: "plugin", name: "test" });
+ * app.world.projection.entityOf("board.items", "i7"); // 1048576
+ * ```
+ */
+export type ProjectionApi = {
+  /**
+   * Stores a projection spec. Nothing is drawn until `mount`.
+   *
+   * @param spec - The projection, built with `projection()`.
+   * @throws {Error} When a projection of that name is already registered.
+   * @example
+   * ```ts
+   * // A test registers one projection by hand instead of composing a feature.
+   * app.world.projection.register(boardItems);
+   * app.world.projection.entityOf("board.items", "i7"); // undefined: nothing is mounted yet
+   * ```
+   */
+  register(spec: AnyProjectionSpec): void;
+
+  /**
+   * Stores the layer list of the scene. The order of the list is draw order; every call stores a
+   * new frozen array.
+   *
+   * @param list - The layers, in draw order.
+   * @example
+   * ```ts
+   * // `scenes` switches to the board scene.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.setLayers([
+   *   { name: "board", sort: "none" },
+   *   { name: "items", sort: "y" },
+   *   { name: "lifted", sort: "none" }
+   * ]);
+   * ```
+   */
+  setLayers(list: ReadonlyArray<LayerSpec>): void;
+
+  /**
+   * The current layer list, empty before the first `setLayers`. A new list is a new reference, so
+   * a reader compares by identity.
+   *
+   * @returns The layers, in draw order.
+   * @example
+   * ```ts
+   * // `renderer.sync` rebuilds its containers only when the scene really changed.
+   * const current = app.world.projection.layers();
+   * if (current !== lastLayers) rebuildContainers(current); // [{ name: "board", sort: "none" }, ...]
+   * ```
+   */
+  layers(): ReadonlyArray<LayerSpec>;
+
+  /**
+   * Marks projections mounted under an owner and reconciles them at once, direct: a scene brings
+   * its own transition. Nothing is mounted when the call throws.
+   *
+   * @param names - Names of the projections to mount.
+   * @param owner - Who owns the entities of these projections.
+   * @throws {Error} For an unknown name, or a `layer` or `lift` the scene does not declare.
+   * @example
+   * ```ts
+   * // `scenes` mounts the projections of the board scene it just switched to.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.mount(["board.cells", "board.items"], { kind: "plugin", name: "scenes" });
+   * world.projection.entityOf("board.items", "i7"); // 1048576, the picture is already there
+   * ```
+   */
+  mount(names: readonly string[], owner: Owner): void;
+
+  /**
+   * Unmounts projections: every motion of their views is finished, and the live views and the
+   * despawn queue are despawned in the same call.
+   *
+   * @param names - Names of the projections to unmount.
+   * @example
+   * ```ts
+   * // `scenes` leaves the board scene.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.unmount(["board.cells", "board.items"]);
+   * world.projection.entityOf("board.items", "i7"); // undefined
+   * ```
+   */
+  unmount(names: readonly string[]): void;
+
+  /**
+   * A drop with no commit: cancels the view's motions and plays settle for every loose component.
+   * In mode `paused` or `fast` the rest pose is written at once. No-op for an entity that is not
+   * a live view.
+   *
+   * @param entity - The entity of the view that was dropped.
+   * @example
+   * ```ts
+   * // `input` released the finger over nothing, so the gate refused the answer.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.settle(held); // the item glides back to its cell over settleMs
+   * ```
+   */
+  settle(entity: Entity): void;
+
+  /**
+   * Hands a set of fields to another writer. Tracks never write them, also not on `finish()`.
+   *
+   * @param entity - The entity of the view.
+   * @param component - The component whose fields are taken over.
+   * @param fields - The field names the caller owns.
+   * @returns The remover; safe after the entity left, and a no-op when called twice.
+   * @example
+   * ```ts
+   * // `input` owns the position of the held view while the finger drags it.
+   * const world = ctx.require(worldPlugin);
+   * const release = world.projection.mute(held, Transform, ["x", "y"]);
+   *
+   * release(); // the finger let go
+   * ```
+   */
+  mute(entity: Entity, component: ComponentType<object>, fields: readonly string[]): () => void;
+
+  /**
+   * Moves a view into or out of its projection's `lift` layer. `lift(entity, false)` on a view
+   * that still moves takes effect when its last motion ends, so a settling view stays above the
+   * board until it is home.
+   *
+   * @param entity - The entity of the view.
+   * @param on - True to lift, false to drop back.
+   * @example
+   * ```ts
+   * // `input` lifts the item the finger picked up so it draws above the board.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.lift(held, true);
+   *
+   * world.projection.lift(held, false); // on release: takes effect when the settle motion ends
+   * ```
+   */
+  lift(entity: Entity, on: boolean): void;
+
+  /**
+   * The projection and key of an entity. Also answers for a view in the despawn queue.
+   *
+   * @param entity - The entity to ask about.
+   * @returns The projection name and the model key, or `undefined`.
+   * @example
+   * ```ts
+   * // `renderer.sync` labels its display objects for the inspector.
+   * app.world.projection.keyOf(1_048_576); // { projection: "board.items", key: "i7" }
+   * app.world.projection.keyOf(42); // undefined: not a view
+   * ```
+   */
+  keyOf(entity: Entity): { projection: string; key: string } | undefined;
+
+  /**
+   * The entity of one key of one projection. Live views only, never the despawn queue.
+   *
+   * @param projection - Name of the projection.
+   * @param key - The model key.
+   * @returns The entity, or `undefined`.
+   * @example
+   * ```ts
+   * // `input` resolves the target of a scripted drag.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.entityOf("board.items", "i7"); // 1048576
+   * world.projection.entityOf("board.items", "gone"); // undefined
+   * ```
+   */
+  entityOf(projection: string, key: string): Entity | undefined;
+
+  /**
+   * Marks every mounted projection dirty and forces `view` for every item, so the next frame
+   * rebuilds the picture directly.
+   *
+   * @example
+   * ```ts
+   * // `i18n` switched the locale: every label has to be projected again.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.rerunAll(); // the next frame writes the new strings with no motion
+   * ```
+   */
+  rerunAll(): void;
+};
+
+/**
+ * projection methods the plugin root drives from the frame and the hooks. Not public.
+ */
+export type ProjectionInternal = {
+  /**
+   * Records a commit. In fast mode it reconciles at once, direct.
+   *
+   * @param roots - The state roots the commit touched.
+   * @param cause - Why the commit happened.
+   */
+  markDirty(roots: readonly Root[], cause: Cause): void;
+
+  /**
+   * Reconciles when the world is dirty. Runs at the start of `time` phase `input`.
+   */
+  reconcileIfDirty(): void;
+
+  /**
+   * Empties the hint buffer. Runs once per frame, reconcile or not.
+   */
+  dropHints(): void;
+
+  /**
+   * Buffers one released hint.
+   *
+   * @param hint - The hint `flow.fx` released after a commit.
+   */
+  pushHint(hint: Hint): void;
+
+  /**
+   * Advances every track by the frame delta and sweeps the views whose motions ended.
+   *
+   * @param deltaMs - The frame delta in game milliseconds.
+   */
+  advance(deltaMs: number): void;
+
+  /**
+   * Finishes every motion and flushes every despawn queue. Called when the mode turns `fast`.
+   */
+  flushAll(): void;
+
+  /**
+   * Drops the views of a projection whose owner despawned its entities.
+   *
+   * @param owner - The owner that left.
+   */
+  ownerLeft(owner: Owner): void;
+
+  /**
+   * Drops every view, track, mute and spec.
+   */
+  clear(): void;
+};

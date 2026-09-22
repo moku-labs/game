@@ -61,12 +61,13 @@ describe("one loop of the template game through the object", () => {
 
     const tapped = rules.tapGenerator(start, "sawmill", countedAt, tables, scriptedRng([0]));
     if (!tapped.ok) throw new Error(`tap should succeed, got ${tapped.reason}`);
-    expect(rules.itemAt(tapped.state.board, "c2_2")?.id).toBe("i6");
+    // The generator stands on c2_2, so the drop lands next to it.
+    expect(rules.itemAt(tapped.state.board, "c1_1")?.id).toBe("i6");
 
-    expect(rules.isLegalMerge(tapped.state, "c0_0", "c2_2", tables)).toBe(true);
-    const merged = rules.merge(tapped.state, "c0_0", "c2_2", tables);
+    expect(rules.isLegalMerge(tapped.state, "c0_0", "c1_1", tables)).toBe(true);
+    const merged = rules.merge(tapped.state, "c0_0", "c1_1", tables);
     if (!merged.legal) throw new Error(`merge should be legal, got ${merged.reason}`);
-    expect(merged.item).toEqual({ id: "i6", chain: "wood", level: 2, cell: "c2_2" });
+    expect(merged.item).toEqual({ id: "i6", chain: "wood", level: 2, cell: "c1_1" });
 
     expect(rules.isLegalOrderMatch(merged.state, "i6", 7)).toBe(true);
     const first = rules.giveToOrder(

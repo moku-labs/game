@@ -13,7 +13,7 @@ import type { FxApi, FxState } from "./fx/types";
 import type { GateApi, GateState } from "./gate/types";
 import type { InboxApi, InboxState } from "./inbox/types";
 import type { defineFlow } from "./runner/define";
-import type { AnyFlow, DefineNode, RunnerApi, RunnerState } from "./runner/types";
+import type { AnyFlow, DefineNode, GameState, RunnerApi, RunnerState } from "./runner/types";
 
 /**
  * flow plugin events.
@@ -92,7 +92,8 @@ export type State = {
 export type Api = RunnerApi & { gate: GateApi; inbox: InboxApi; fx: FxApi; features: FeaturesApi };
 
 /**
- * Resolved dependency APIs.
+ * The APIs flow requires from below (`time`, `model`, `clock`), resolved once in `onInit` and
+ * shared by the runner, gate, inbox and fx.
  */
 export type Deps = { time: TimeApi; model: ModelApi; clock: ClockApi };
 
@@ -122,20 +123,36 @@ export type FlowCtx = KernelSlice & { readonly deps: Deps };
 export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
 
 /**
- * The types of one game. `player` and `session` type the node context; `assets` and `strings`
- * are accepted now and used from later milestones.
+ * The types of one game. `player` and `session` type the node context; `assets` and `bundles`
+ * are the key unions the asset scanner generates (`string` while a game has none); `strings`
+ * is used from V3. Every plugin binds its own helpers to them through its `…For` binder.
  *
  * @example
  * ```ts
- * type Types = { player: Player; session: Session; assets: AssetKey; strings: StringTable };
+ * type Types = { player: Player; session: Session; assets: AssetKey; bundles: BundleKey; strings: StringTable };
  * ```
  */
 export type GameTypes = {
   player: Json;
   session: Json;
   assets: string;
+  bundles?: string;
   strings: Record<string, unknown>;
 };
+
+/**
+ * The bundle key union of a game, `string` when the game passed none.
+ *
+ * @example
+ * ```ts
+ * type Keys = BundlesOf<{ player: {}; session: {}; assets: string; bundles: "board"; strings: {} }>; // "board"
+ * ```
+ */
+export type BundlesOf<Types extends GameTypes> = Types extends {
+  bundles: infer Keys extends string;
+}
+  ? Keys
+  : string;
 
 /**
  * A feature is an ordinary plugin with no API of its own; `AnyPluginInstance` is the kernel's
@@ -149,22 +166,17 @@ export type GameTypes = {
 export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginInstance };
 
 /**
- * The flow helpers returned by `defineGame`. `defineNode` sees `player` and `session` with the
- * game's types; at run time they are the same functions the plugin exports.
+ * What `flowFor` binds to a game: the node helper with the game's `player` and `session`, and
+ * the flow and feature helpers, which take no game types.
  *
  * @example
  * ```ts
- * // kit.ts of a game: bound once, imported by every node and flow file.
- * export const { defineNode, defineFlow, defineFeature } = defineGame<{
- *   player: Player;
- *   session: Session;
- *   assets: string;
- *   strings: Record<string, unknown>;
- * }>();
+ * const { defineNode } = flowFor<{ player: Player; session: Session }>();
+ * defineNode({ rest: true, outcomes: { play: type() }, run: ({ player }) => player.coins }); // player: Player
  * ```
  */
-export type Kit<Types extends GameTypes> = {
-  defineNode: DefineNode<{ player: Types["player"]; session: Types["session"] }>;
+export type FlowKit<Game extends GameState> = {
+  defineNode: DefineNode<Game>;
   defineFlow: typeof defineFlow;
   defineFeature: (name: string, description: FeatureDescription) => FeaturePlugin;
 };
@@ -189,6 +201,7 @@ export type {
   FlowState,
   GameState,
   GraphError,
+  GraphNode,
   JournalEntry,
   Mapped,
   NodeContext,

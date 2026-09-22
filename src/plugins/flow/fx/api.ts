@@ -4,13 +4,35 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { Answer, GateInternal } from "../gate/types";
 import type { FlowCtx } from "../types";
-import type { Descriptor, FxApi, FxHandler, FxInternal, FxState, Hint } from "./types";
+import type {
+  Descriptor,
+  FxApi,
+  FxHandler,
+  FxInternal,
+  FxState,
+  Hint,
+  HintListener
+} from "./types";
 
 /** One registered handler with its fast-mode flag. */
 type HandlerEntry = { run: FxHandler; runInFast: boolean };
 
 /** A completion waiting for the `signals` phase. `ready` turns true when the effect settled. */
 type Pending = { ready: boolean; value: unknown; failure: Error | undefined };
+
+/**
+ * Turns whatever an effect handler or a hint listener failed with into an error the log takes.
+ *
+ * @param error - The thrown value or the rejection reason.
+ * @returns The value itself when it is an error, its text otherwise.
+ * @example
+ * ```ts
+ * asError("no audio device").message; // "no audio device"
+ * ```
+ */
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
 
 /**
  * Logs a handler failure. An effect handler lives above the graph, so its failure is never the
@@ -21,11 +43,29 @@ type Pending = { ready: boolean; value: unknown; failure: Error | undefined };
  * @param error - What the handler threw or rejected with.
  */
 function reportFailure(log: Log.LogApi, kind: string, error: unknown): void {
-  log.error(
-    "flow:fx-handler-failed",
-    { kind },
-    error instanceof Error ? error : new Error(String(error))
-  );
+  log.error("flow:fx-handler-failed", { kind }, asError(error));
+}
+
+/**
+ * Hands one released hint to every `onHint` listener, in registration order. A listener lives
+ * above the graph and the hint is out after the commit, so a failing listener is logged and the
+ * next one is still served.
+ *
+ * @param state - fx module state.
+ * @param log - The engine log.
+ * @param item - The hint that was just released.
+ */
+function notifyHint(state: FxState, log: Log.LogApi, item: Hint): void {
+  // A copy: a listener that removes itself while it runs must not make the loop skip the next one.
+  const listeners = [...state.hintListeners];
+
+  for (const listener of listeners) {
+    try {
+      listener(item);
+    } catch (error) {
+      log.error("flow:hint-listener-failed", { kind: item.kind }, asError(error));
+    }
+  }
 }
 
 /**
@@ -172,9 +212,9 @@ function openForAnswers(
 
 /**
  * Creates the effects gateway: `handle` registers one handler per kind, `dispatch` delivers
- * fire-and-forget, the internal `run` awaits a descriptor (through the gate when it has
- * `answers`), hints are buffered with the transaction and released after its commit, and
- * completions resolve in start order in the `signals` phase.
+ * fire-and-forget, `onHint` listens to the released hints, the internal `run` awaits a descriptor
+ * (through the gate when it has `answers`), hints are buffered with the transaction and released
+ * after its commit, and completions resolve in start order in the `signals` phase.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param deps - Injected sibling APIs.
@@ -205,6 +245,26 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       invoke(state, ctx.log, descriptor, new AbortController().signal);
     },
 
+    onHint: (listener: HintListener): (() => void) => {
+      /**
+       * Calls the listener. The wrapper is this registration's identity, so the remover below
+       * removes this one and never another registration of the same function.
+       *
+       * @param item - The released hint.
+       */
+      const entry: HintListener = (item: Hint): void => {
+        listener(item);
+      };
+
+      state.hintListeners.push(entry);
+
+      return () => {
+        const index = state.hintListeners.indexOf(entry);
+
+        if (index !== -1) state.hintListeners.splice(index, 1);
+      };
+    },
+
     run: (descriptor: Descriptor, signal: AbortSignal): Promise<unknown> => {
       const answers = descriptor.answers;
 
@@ -227,7 +287,10 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       const hints = [...state.buffered];
 
       state.buffered.length = 0;
-      for (const item of hints) invoke(state, ctx.log, item, new AbortController().signal);
+      for (const item of hints) {
+        invoke(state, ctx.log, item, new AbortController().signal);
+        notifyHint(state, ctx.log, item);
+      }
     },
 
     drop: (): void => {

@@ -32,9 +32,10 @@ const untilOrder: Flow.RouteStep[] = [
   tap,
   tap,
   tap,
-  mergeStep("c0_0", "c1_0"),
-  mergeStep("c0_1", "c1_1"),
-  mergeStep("c1_0", "c1_1"),
+  // The four drops land on the ring around the generator (c0_0): c1_0, c0_1, c1_1, c2_0.
+  mergeStep("c1_0", "c0_1"),
+  mergeStep("c1_1", "c2_0"),
+  mergeStep("c0_1", "c2_0"),
   { at: "board/awaitIntent", intent: "give", payload: { item: "i4", order: 0 } }
 ];
 
@@ -143,7 +144,7 @@ describe("template-merge", () => {
 
     const before = app.model.store.snapshot().player;
 
-    await game.walk([mergeStep("c0_0", "c2_2")]);
+    await game.walk([mergeStep("c1_0", "c2_2")]);
 
     expect(app.model.store.snapshot().player).toEqual(before);
     expect(game.state().path).toBe("board/awaitIntent");
@@ -151,10 +152,10 @@ describe("template-merge", () => {
       { outcome: "rejected", payload: { reason: "empty" } }
     ]);
 
-    await game.walk([mergeStep("c0_0", "c1_0")]);
+    await game.walk([mergeStep("c1_0", "c0_1")]);
 
     expect(app.model.store.snapshot().player).toMatchObject({
-      merge: { board: { items: [{ id: "i2", level: 2, cell: "c1_0" }] } }
+      merge: { board: { items: [{ id: "i2", level: 2, cell: "c0_1" }] } }
     });
 
     await game.stop();

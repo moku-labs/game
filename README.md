@@ -2,7 +2,7 @@
 
 **A 2D puzzle game engine where the game is a deterministic graph of business logic.**
 
-`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. Today it is the logic half only. The screen arrives in V2.
+`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations.
 
 <br/>
 
@@ -25,23 +25,23 @@
 - **State commits only on edges.** A node works on drafts. The runner commits them when the node returns an outcome. A node that throws changes nothing.
 - **Position is data.** Node path, input and state describe the whole game. That gives checkpoints, rollback, bookmarks, fast walk and repro runs.
 - **Input and world events are answers.** A rest node waits. A player answer comes through the gate, a world event comes through the inbox. Nothing else moves the graph.
-- **The screen is a projection, not the game.** Rendering reads committed state and never owns it. The projection arrives in V2. V1 plays whole games headless.
+- **The screen is a projection, not the game.** Rendering reads committed state and never owns it. A projection is one pure `view(item)` function; the engine diffs the components and plays enter, exit, change and settle motions. The same game plays whole headless.
 - **Deterministic by construction.** Time is an input named `now`. Randomness is a persisted `rng` stream. Lint rule L3 refuses `Date.now` and `Math.random` in the logic set.
 
 ## Status
 
-Only V1 exists. Everything else in this table is a plan and may change.
+V1 and V2 are built. Everything below V2 is a plan and may change.
 
 | Milestone | State | Scope | Exit criterion |
 |---|---|---|---|
 | V1 | built | `time`, `lifecycle`, `model`, `clock`, `flow`, the `@moku-labs/game/testing` entry | A fixture game is played to the end headless |
-| V2 | planned | `world`, `renderer`, `input`, `assets`, `scenes` | A board is visible and items move by drag |
+| V2 | built | `world`, `renderer`, `input`, `assets`, `scenes`, the `@moku-labs/game/assets` entry | A board is visible and items merge by drag; the same game still plays to the end headless |
 | V3 | planned | `anim`, `i18n`, `audio`, `text`, `ui` | Popup, HUD and buttons with sound |
 | V4 | planned | `/inspect` and `/control` entries | External tools can read and drive a game |
 | V5 | planned | `effects`, production mode of `assets`, visual test helpers | Not defined yet |
 | V6 | planned | `platform` | A template game runs on a phone |
 
-Rendering decision for V2: WebGPU is preferred, with Pixi's WebGL fallback.
+Rendering: WebGPU is preferred, with Pixi's WebGL fallback and an honest "unsupported device" screen when neither exists.
 
 ## Install
 
@@ -225,7 +225,7 @@ flowchart LR
 
 ## Plugins
 
-Seven plugins are on every app today. `log` and `env` come from [`@moku-labs/common`](https://github.com/moku-labs/common) and sit on every plugin context as `ctx.log` and `ctx.env`.
+Seven plugins are on every app; the five screen plugins are the list `screen` a game spreads in. `log` and `env` come from [`@moku-labs/common`](https://github.com/moku-labs/common) and sit on every plugin context as `ctx.log` and `ctx.env`.
 
 ### Built
 
@@ -236,6 +236,11 @@ Seven plugins are on every app today. `log` and `env` come from [`@moku-labs/com
 | [`model`](./src/plugins/model/README.md) | Very Complex | The `session` tree and the save document `{ player, rng }`, transactions, rest-point rollback, rng streams | `store.load()`, `store.snapshot()`, `store.begin()`, `store.markRest()`, `store.markBarrier(txId)`, `store.rollback()`, `store.restore(input)`, `store.flush()`, `rng.peek(id)` |
 | [`clock`](./src/plugins/clock/README.md) | Standard | Trusted time as an input: monotonic `now()` and one `elapsed` signal at the next due moment | `now()`, `scheduleAt(moment)`, `onElapsed(listener)`, `poke()`, `dueAt()` |
 | [`flow`](./src/plugins/flow/README.md) | Very Complex | The graph: runner, gate, inbox, effects gateway, features registry | `run()`, `onEnter(stage, callback)`, `walk(route, options?)`, `bookmark()`, `restore(bookmark)`, `describe()`, `state()`, `history()`, `setMode(mode)`, `gate.answer(answer)`, `gate.pointer(active)`, `gate.state()`, `inbox.post(event)`, `fx.handle(kind, handler, options?)`, `fx.dispatch(descriptor)`, `features.register(name, description)`, `features.all()`, `features.contributions(slotName)` |
+| [`world`](./src/plugins/world/README.md) | Very Complex | A zero-dependency ECS (`ecs`) and the projection from committed state to entities (`projection`): keyed reconcile of one `view(item)` function, retarget motions, a despawn queue, named layers | `ecs.spawn(owner, components)`, `ecs.query(...Components)`, `ecs.system(def)`, `ecs.set(entity, Component, patch)`, `ecs.changed(Component)`, `ecs.snapshot()`, `ecs.mode()`, `projection.mount(names, owner)`, `projection.setLayers(list)`, `projection.settle(entity)`, `projection.keyOf(entity)`, `projection.entityOf(projection, key)` |
+| [`renderer`](./src/plugins/renderer/README.md) | Very Complex | The Pixi v8 host loaded lazily (`host`), one `sync` system that owns every display object, the reference viewport of short side 1080 (`viewport`) | `host.ready()`, `host.kind()`, `host.canvas()`, `sync.hitTest(x, y, accept)`, `sync.textures.provide(fn)`, `sync.displayOf(entity)`, `viewport.toReference(x, y)`, `viewport.size()` |
+| [`input`](./src/plugins/input/README.md) | Standard | Gestures as data components: `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`; the drop target names the intent that reaches `flow.gate` | `tap(target)`, `press(target)`, `drag(from, to)`, `swipe(target, direction)` |
+| [`assets`](./src/plugins/assets/README.md) | Complex | The manifest, five load tiers, graph-driven preload, a texture budget with LRU unload; typed keys from the `assets` entry | `load(bundle)`, `unload(bundle)`, `isLoaded(bundle)`, `texture(key)`, `usage()` |
+| [`scenes`](./src/plugins/scenes/README.md) | Standard | A scene as a declaration: bundle, layers, projections. A node names its scene; the runner switches through `flow.onEnter` | `current()` |
 
 ```mermaid
 flowchart LR
@@ -245,13 +250,29 @@ flowchart LR
   F --> M["model"]
   F --> C["clock"]
   L --> T
+  W["world"] --> T
+  W --> M
+  W --> F
+  R["renderer"] --> T
+  R --> L
+  R --> W
+  I["input"] --> F
+  I --> W
+  I --> R
+  A["assets"] --> F
+  A --> R
+  S["scenes"] --> F
+  S --> W
+  S --> A
   classDef u fill:#0b7285,stroke:#08525f,color:#fff;
   classDef m fill:#1864ab,stroke:#0d3d6e,color:#fff;
+  classDef s fill:#5c940d,stroke:#3d6208,color:#fff;
   class G u
   class F,T,L,M,C m
+  class W,R,I,A,S s
 ```
 
-An arrow means "depends on". `time`, `model` and `clock` depend on nothing. The plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`.
+An arrow means "depends on". `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`. Without a document the screen plugins are inert: the same app starts in plain Bun.
 
 ### Planned
 
@@ -259,11 +280,6 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 
 | Plugin | Milestone | Tier | Depends on | Will own |
 |---|---|---|---|---|
-| `world` | V2 | Very Complex | `time`, `model`, `flow` | ECS world and the projections of the model |
-| `renderer` | V2 | Very Complex | `time`, `lifecycle`, `world` | The Pixi host, sync and viewport. Pixi is loaded lazily |
-| `input` | V2 | Standard | `time`, `flow`, `world`, `renderer` | Pointer listeners on the canvas |
-| `assets` | V2 | Complex | `flow`, `renderer` | Manifest, tiers, preload, budget |
-| `scenes` | V2 | Standard | `flow`, `world`, `assets` | Scenes as data, switched through `flow.onEnter` |
 | `anim` | V3 | Complex | `flow`, `world` | Tweens and motion |
 | `i18n` | V3 | Standard | `flow`, `world`, `assets` | String tables per locale |
 | `text` | V3 | Complex | `world`, `renderer`, `assets`, `i18n` | Text rendering and the text field |
@@ -312,6 +328,10 @@ Global events are empty: every event belongs to a plugin. `time` and `clock` emi
 | `flow:edge` | `flow` | `{ flow: string; node: string; outcome: string; payload: Json; next: string; patches: { doc: Patch[]; session: Patch[] }; index: number; now: number }` | After the commit of an edge |
 | `flow:rest` | `flow` | `{ path: string; checkpoint: boolean }` | The graph entered a rest node |
 | `flow:error` | `flow` | `{ path: string; error: unknown; rolledBackTo: string; retry: boolean }` | A node failed and the graph rolled back |
+| `world:reconciled` | `world` | counts per reconcile | Dev only, behind `reconciledEvent` |
+| `renderer:device-lost` | `renderer` | `{ kind, reason }` | The GPU device or context was lost; `lifecycle` is pushed |
+| `assets:bundle-loaded`, `assets:bundle-unloaded` | `assets` | `{ bundle, tier, mb, reason }` | A bundle entered or left memory |
+| `scenes:changed` | `scenes` | `{ from, to, music }` | The scene switched on entering a node |
 
 ```ts
 import { createPlugin, flowPlugin } from "@moku-labs/game";
@@ -360,6 +380,16 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `flow` | `retries` | `number` | `1` | Retries of a failed transition before `safeNode` |
 | `flow` | `settleTimeoutMs` | `number` | `2000` | How long `onStop` waits for the active node to settle after abort |
 | `flow` | `journalLimit` | `number` | `500` | Journal entries kept between checkpoints |
+| `world` | `settleMs` | `number` | `350` | Length of the default settle motion |
+| `world` | `reconciledEvent` | `boolean` | `false` | Emit `world:reconciled` after every reconcile (dev tools) |
+| `renderer` | `mount` | `string \| undefined` | `undefined` | Selector of the mount element. `undefined` keeps the renderer inert |
+| `renderer` | `preference` | `"webgpu" \| "webgl"` | `"webgpu"` | Preferred backend; Pixi falls back to WebGL |
+| `renderer` | `background`, `antialias`, `maxResolution`, `aspect`, `poolLimit`, `unsupportedMessage`, `loadPixi` | | see the plugin README | Host, viewport and pool settings; `loadPixi` is the lazy loader, a test passes a fake |
+| `input` | `tapSlopPx`, `longPressMs`, `dragStartPx`, `swipeMinPx`, `swipeMaxMs` | `number` | `12`, `450`, `8`, `48`, `300` | Gesture thresholds in reference px and ms |
+| `assets` | `manifest` | `string \| Manifest \| undefined` | `undefined` | Manifest URL, or the parsed file in a test |
+| `assets` | `textureBudgetMb` | `number` | `192` | Texture memory budget for the LRU unload |
+| `assets` | `preloadDepth` | `number` | `2` | Graph edges walked for the preload at a rest node |
+| `assets` | `baseUrl`, `io` | | `undefined` | The CDN seam and the fetch/decode/texture seam a test replaces |
 
 ## Development
 

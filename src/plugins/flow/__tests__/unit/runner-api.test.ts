@@ -79,7 +79,7 @@ const createMockLog = (): Log.LogApi => ({
 
 const createMockState = (): State => ({
   features: { byName: new Map(), sealed: false },
-  fx: { handlers: new Map(), buffered: [], settled: [], mode: "live" },
+  fx: { handlers: new Map(), buffered: [], hintListeners: [], settled: [], mode: "live" },
   gate: {
     open: undefined,
     resolve: undefined,
@@ -136,6 +136,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
   const fx: FxApi & FxInternal = {
     handle: vi.fn(() => unregister),
     dispatch: vi.fn(),
+    onHint: vi.fn(() => unregister),
     run: () => Promise.resolve(undefined),
     buffer: vi.fn(),
     release: vi.fn(),

@@ -14,6 +14,10 @@
     "./testing": {
       "types": "./dist/testing.d.mts",
       "default": "./dist/testing.mjs"
+    },
+    "./assets": {
+      "types": "./dist/assets.d.mts",
+      "default": "./dist/assets.mjs"
     }
   },
   "license": "MIT",

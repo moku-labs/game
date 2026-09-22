@@ -27,6 +27,7 @@ type NodeOptions = {
   checkpoint?: boolean;
   barrier?: boolean;
   inbox?: readonly string[];
+  scene?: string;
 };
 
 const node = (options: NodeOptions = {}): AnyNode => ({
@@ -37,7 +38,8 @@ const node = (options: NodeOptions = {}): AnyNode => ({
   over: options.over ?? false,
   checkpoint: options.checkpoint ?? false,
   barrier: options.barrier ?? false,
-  inbox: options.inbox ?? []
+  inbox: options.inbox ?? [],
+  ...(options.scene === undefined ? {} : { scene: options.scene })
 });
 
 const slotNode = (name: string): SlotNode => ({
@@ -235,6 +237,18 @@ describe("describeGraph", () => {
       checkpoint: true,
       barrier: false
     });
+  });
+
+  it("names the scene of a node that has one", () => {
+    const lobby = node({ rest: true, outcomes: ["go"], scene: "lobby" });
+    const scened = flow("scened", { lobby }, "lobby", { lobby: { go: "lobby" } });
+    const described = describeGraph(collectFlows(scened, []), noFeatures);
+
+    expect(described.flows.scened?.nodes.lobby?.scene).toBe("lobby");
+  });
+
+  it("leaves the scene out for a node that names none", () => {
+    expect(graph.flows.main?.nodes.home).not.toHaveProperty("scene");
   });
 
   it("lists the outcomes of a node", () => {

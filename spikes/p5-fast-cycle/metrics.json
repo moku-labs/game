@@ -1,0 +1,729 @@
+{
+  "seed": 20260922,
+  "runs": [
+    {
+      "policy": "A",
+      "easing": "spec",
+      "movesPerSecond": 5,
+      "scriptMs": 42800,
+      "maxJumpPx": 603.68,
+      "maxScaleJump": 0.33,
+      "snapCount": 30,
+      "overlapCount": 68,
+      "snapRatio": 0.44,
+      "cutMotions": 10,
+      "cutRatio": 0.15,
+      "crossFieldFinishes": 5,
+      "maxSpeedJump": 6576.52,
+      "speedJumpP99": 2203.05,
+      "lagMs": {
+        "p50": 350,
+        "p95": 550,
+        "max": 766.67
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 150,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 20,
+          "snaps": 10,
+          "maxPx": 58,
+          "maxScale": 0
+        },
+        "levelUp": {
+          "finished": 32,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0.11
+        },
+        "exitInto": {
+          "finished": 5,
+          "snaps": 5,
+          "maxPx": 604,
+          "maxScale": 0.33
+        },
+        "enterArc": {
+          "finished": 16,
+          "snaps": 15,
+          "maxPx": 42,
+          "maxScale": 0.11
+        },
+        "defaultExit": {
+          "finished": 5,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0.09
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "B",
+      "easing": "spec",
+      "movesPerSecond": 5,
+      "scriptMs": 42800,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 68,
+      "snapRatio": 0,
+      "cutMotions": 10,
+      "cutRatio": 0.15,
+      "crossFieldFinishes": 5,
+      "maxSpeedJump": 6576.52,
+      "speedJumpP99": 1470.55,
+      "lagMs": {
+        "p50": 350,
+        "p95": 550,
+        "max": 766.67
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 150,
+      "jumpsByMotion": {},
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "C",
+      "easing": "spec",
+      "movesPerSecond": 5,
+      "scriptMs": 42800,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 76,
+      "snapRatio": 0,
+      "cutMotions": 10,
+      "cutRatio": 0.13,
+      "crossFieldFinishes": 6,
+      "maxSpeedJump": 6576.52,
+      "speedJumpP99": 1281.14,
+      "lagMs": {
+        "p50": 350,
+        "p95": 700,
+        "max": 1050
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 500,
+        "max": 650
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 1
+      },
+      "convergence": true,
+      "settledAfterEndMs": 150,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 10,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "A",
+      "easing": "linear",
+      "movesPerSecond": 5,
+      "scriptMs": 42800,
+      "maxJumpPx": 318.07,
+      "maxScaleJump": 0.48,
+      "snapCount": 63,
+      "overlapCount": 68,
+      "snapRatio": 0.93,
+      "cutMotions": 10,
+      "cutRatio": 0.15,
+      "crossFieldFinishes": 5,
+      "maxSpeedJump": 19084.09,
+      "speedJumpP99": 8464.87,
+      "lagMs": {
+        "p50": 350,
+        "p95": 550,
+        "max": 766.67
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 150,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 20,
+          "snaps": 10,
+          "maxPx": 318,
+          "maxScale": 0
+        },
+        "levelUp": {
+          "finished": 32,
+          "snaps": 32,
+          "maxPx": 0,
+          "maxScale": 0.21
+        },
+        "exitInto": {
+          "finished": 5,
+          "snaps": 5,
+          "maxPx": 318,
+          "maxScale": 0.17
+        },
+        "enterArc": {
+          "finished": 16,
+          "snaps": 16,
+          "maxPx": 269,
+          "maxScale": 0.48
+        },
+        "defaultExit": {
+          "finished": 5,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0.09
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "B",
+      "easing": "linear",
+      "movesPerSecond": 5,
+      "scriptMs": 42800,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 68,
+      "snapRatio": 0,
+      "cutMotions": 10,
+      "cutRatio": 0.15,
+      "crossFieldFinishes": 5,
+      "maxSpeedJump": 3437.21,
+      "speedJumpP99": 2108.55,
+      "lagMs": {
+        "p50": 350,
+        "p95": 550,
+        "max": 766.67
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 150,
+      "jumpsByMotion": {},
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "C",
+      "easing": "linear",
+      "movesPerSecond": 5,
+      "scriptMs": 42800,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 76,
+      "snapRatio": 0,
+      "cutMotions": 10,
+      "cutRatio": 0.13,
+      "crossFieldFinishes": 6,
+      "maxSpeedJump": 3299.13,
+      "speedJumpP99": 2120.45,
+      "lagMs": {
+        "p50": 350,
+        "p95": 700,
+        "max": 1050
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 500,
+        "max": 650
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 1
+      },
+      "convergence": true,
+      "settledAfterEndMs": 150,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 10,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "A",
+      "easing": "spec",
+      "movesPerSecond": 3.003003003003003,
+      "scriptMs": 71262,
+      "maxJumpPx": 101.05,
+      "maxScaleJump": 0.05,
+      "snapCount": 5,
+      "overlapCount": 68,
+      "snapRatio": 0.07,
+      "cutMotions": 10,
+      "cutRatio": 0.15,
+      "crossFieldFinishes": 5,
+      "maxSpeedJump": 6576.52,
+      "speedJumpP99": 1281.14,
+      "lagMs": {
+        "p50": 350,
+        "p95": 683.33,
+        "max": 1016.67
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 4.67,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 20,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0
+        },
+        "levelUp": {
+          "finished": 32,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0
+        },
+        "exitInto": {
+          "finished": 5,
+          "snaps": 5,
+          "maxPx": 101,
+          "maxScale": 0.05
+        },
+        "enterArc": {
+          "finished": 16,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0
+        },
+        "defaultExit": {
+          "finished": 5,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0.02
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "B",
+      "easing": "spec",
+      "movesPerSecond": 3.003003003003003,
+      "scriptMs": 71262,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 68,
+      "snapRatio": 0,
+      "cutMotions": 10,
+      "cutRatio": 0.15,
+      "crossFieldFinishes": 5,
+      "maxSpeedJump": 10723.92,
+      "speedJumpP99": 1470.55,
+      "lagMs": {
+        "p50": 350,
+        "p95": 683.33,
+        "max": 1016.67
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 4.67,
+      "jumpsByMotion": {},
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "C",
+      "easing": "spec",
+      "movesPerSecond": 3.003003003003003,
+      "scriptMs": 71262,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 68,
+      "snapRatio": 0,
+      "cutMotions": 10,
+      "cutRatio": 0.15,
+      "crossFieldFinishes": 5,
+      "maxSpeedJump": 6576.52,
+      "speedJumpP99": 1281.14,
+      "lagMs": {
+        "p50": 350,
+        "p95": 700,
+        "max": 1050
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 366.67,
+        "max": 400
+      },
+      "queueDepthMax": {
+        "despawn": 3,
+        "motion": 1
+      },
+      "convergence": true,
+      "settledAfterEndMs": 4.67,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 10,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "A",
+      "easing": "spec",
+      "movesPerSecond": 8,
+      "scriptMs": 29250,
+      "maxJumpPx": 701.13,
+      "maxScaleJump": 0.39,
+      "snapCount": 68,
+      "overlapCount": 85,
+      "snapRatio": 0.8,
+      "cutMotions": 78,
+      "cutRatio": 0.92,
+      "crossFieldFinishes": 7,
+      "maxSpeedJump": 13200.73,
+      "speedJumpP99": 5288.46,
+      "lagMs": {
+        "p50": 350,
+        "p95": 600,
+        "max": 850
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 4,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 116.67,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 22,
+          "snaps": 11,
+          "maxPx": 220,
+          "maxScale": 0
+        },
+        "levelUp": {
+          "finished": 38,
+          "snaps": 32,
+          "maxPx": 0,
+          "maxScale": 0.25
+        },
+        "exitInto": {
+          "finished": 5,
+          "snaps": 5,
+          "maxPx": 701,
+          "maxScale": 0.39
+        },
+        "enterArc": {
+          "finished": 23,
+          "snaps": 20,
+          "maxPx": 175,
+          "maxScale": 0.3
+        },
+        "defaultExit": {
+          "finished": 5,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0.13
+        },
+        "defaultEnter": {
+          "finished": 2,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0.02
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "B",
+      "easing": "spec",
+      "movesPerSecond": 8,
+      "scriptMs": 29250,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 85,
+      "snapRatio": 0,
+      "cutMotions": 79,
+      "cutRatio": 0.93,
+      "crossFieldFinishes": 8,
+      "maxSpeedJump": 6576.52,
+      "speedJumpP99": 2149.75,
+      "lagMs": {
+        "p50": 350,
+        "p95": 600,
+        "max": 850
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 350,
+        "max": 350
+      },
+      "queueDepthMax": {
+        "despawn": 4,
+        "motion": 0
+      },
+      "convergence": true,
+      "settledAfterEndMs": 116.67,
+      "jumpsByMotion": {},
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    },
+    {
+      "policy": "C",
+      "easing": "spec",
+      "movesPerSecond": 8,
+      "scriptMs": 29250,
+      "maxJumpPx": 0,
+      "maxScaleJump": 0,
+      "snapCount": 0,
+      "overlapCount": 112,
+      "snapRatio": 0,
+      "cutMotions": 10,
+      "cutRatio": 0.09,
+      "crossFieldFinishes": 9,
+      "maxSpeedJump": 6576.52,
+      "speedJumpP99": 1281.14,
+      "lagMs": {
+        "p50": 350,
+        "p95": 800,
+        "max": 1400
+      },
+      "lagFromLastCommitMs": {
+        "p50": 350,
+        "p95": 583.33,
+        "max": 900
+      },
+      "queueDepthMax": {
+        "despawn": 4,
+        "motion": 2
+      },
+      "convergence": true,
+      "settledAfterEndMs": 116.67,
+      "jumpsByMotion": {
+        "slide": {
+          "finished": 10,
+          "snaps": 0,
+          "maxPx": 0,
+          "maxScale": 0
+        }
+      },
+      "caseCounts": {
+        "1": 10,
+        "2": 10,
+        "3": 10,
+        "4": 10,
+        "5": 10,
+        "6": 10,
+        "7": 10,
+        "8": 10
+      }
+    }
+  ],
+  "baseline": {
+    "policy": "A",
+    "easing": "spec",
+    "movesPerSecond": 1,
+    "scriptMs": 204000,
+    "maxJumpPx": 0,
+    "maxScaleJump": 0,
+    "snapCount": 0,
+    "overlapCount": 0,
+    "snapRatio": 0,
+    "cutMotions": 10,
+    "cutRatio": 10,
+    "crossFieldFinishes": 0,
+    "maxSpeedJump": 6576.52,
+    "speedJumpP99": 1260.28,
+    "lagMs": {
+      "p50": 350,
+      "p95": 350,
+      "max": 350
+    },
+    "lagFromLastCommitMs": {
+      "p50": 350,
+      "p95": 350,
+      "max": 350
+    },
+    "queueDepthMax": {
+      "despawn": 2,
+      "motion": 0
+    },
+    "convergence": true,
+    "settledAfterEndMs": 16.67,
+    "jumpsByMotion": {
+      "slide": {
+        "finished": 10,
+        "snaps": 0,
+        "maxPx": 0,
+        "maxScale": 0
+      }
+    },
+    "caseCounts": {
+      "1": 10,
+      "2": 10,
+      "3": 10,
+      "4": 10,
+      "5": 10,
+      "6": 10,
+      "7": 10,
+      "8": 10
+    }
+  }
+}

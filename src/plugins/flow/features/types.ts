@@ -5,8 +5,11 @@ import type { Snapshot } from "../../model/types";
 import type { AnyFlow, AnyNode } from "../runner/types";
 
 /**
- * What a feature brings to the game. V1 keys only; keys of later milestones pass through the
- * index signature until their plugin types them.
+ * What a feature brings to the game. The logic keys are typed here; the keys of later milestones
+ * pass through the index signature until their plugin types them. `flow` stores them untouched,
+ * and `logicOnly` drops them. The V2 screen plugins read five of them: `projections`, `systems`
+ * and `components` (`world`), `scenes` (`scenes`, `assets`, and the scene-id check of `flow`) and
+ * `assets` (`assets`).
  *
  * @example
  * ```ts

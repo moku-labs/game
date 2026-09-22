@@ -1,6 +1,5 @@
 import * as engine from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
-import { defineFeature } from "../../src/plugins/flow/feature";
 import { defineFlow, defineNode } from "../../src/plugins/flow/runner/define";
 
 describe("root index", () => {
@@ -13,13 +12,31 @@ describe("root index", () => {
     expect(engine.createPlugin).toBeTypeOf("function");
   });
 
-  it("defineGame returns the same functions the flow plugin exports", () => {
+  it("defineGame returns the same functions the plugins export", () => {
     const kit = engine.defineGame();
 
     expect(kit.defineNode).toBe(defineNode);
     expect(kit.defineFlow).toBe(defineFlow);
-    expect(kit.defineFeature).toBe(defineFeature);
-    expect(Object.keys(kit)).toEqual(["defineNode", "defineFlow", "defineFeature"]);
+    expect(kit.defineFeature).toBe(engine.defineFeature);
+    expect(kit.projection).toBe(engine.projection);
+    expect(kit.sprite).toBe(engine.sprite);
+    expect(kit.defineBundles).toBe(engine.defineBundles);
+    expect(kit.load).toBe(engine.load);
+    expect(kit.defineScene).toBe(engine.defineScene);
+    expect(kit.Sprite).toBe(engine.Sprite);
+    expect(kit.NineSlice).toBe(engine.NineSlice);
+    expect(Object.keys(kit).toSorted()).toEqual([
+      "NineSlice",
+      "Sprite",
+      "defineBundles",
+      "defineFeature",
+      "defineFlow",
+      "defineNode",
+      "defineScene",
+      "load",
+      "projection",
+      "sprite"
+    ]);
   });
 
   it("exports no genre rules", () => {

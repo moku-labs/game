@@ -182,6 +182,8 @@ export type NodeDefinition<
   readonly checkpoint: boolean;
   readonly barrier: boolean;
   readonly inbox: readonly (keyof Tags & string)[];
+  /** Id of the scene the node is shown on. Absent: the node keeps the current scene. */
+  readonly scene?: string;
   readonly run?: NodeRun<Game, Input, Tags>;
 };
 
@@ -194,6 +196,7 @@ export type NodeDefinition<
  * const spec: NodeSpec<Game, void, { play: TypeTag<void> }> = {
  *   rest: true,
  *   checkpoint: true,
+ *   scene: "home",
  *   outcomes: { play: type() }
  * };
  * ```
@@ -205,6 +208,8 @@ export type NodeSpec<Game extends GameState, Input, Tags extends OutcomeTags> = 
   checkpoint?: boolean;
   barrier?: boolean;
   inbox?: readonly (keyof Tags & string)[];
+  /** Id of the scene this node is shown on. Without it the node keeps the current scene. */
+  scene?: string;
 } & (
   | { rest: true; run?: NodeRun<Game, Input, Tags> }
   | { rest?: false; run: NodeRun<Game, Input, Tags> }
@@ -549,6 +554,8 @@ export type AnyNode = AnyWired & {
   readonly checkpoint: boolean;
   readonly barrier: boolean;
   readonly inbox: readonly string[];
+  /** Id of the scene the node is shown on. Absent: the node keeps the current scene. */
+  readonly scene?: string;
   run?(ctx: AnyNodeContext): Result | Promise<Result>;
 };
 
@@ -666,7 +673,7 @@ export type Bookmark = {
  * // The rest node "awaitIntent" of the sub-flow "board" is being entered.
  * const node: NodeInfo = {
  *   path: "board/awaitIntent", flow: "board", node: "awaitIntent",
- *   rest: true, over: false, checkpoint: false, barrier: false
+ *   rest: true, over: false, checkpoint: false, barrier: false, scene: "board"
  * };
  * ```
  */
@@ -678,6 +685,8 @@ export type NodeInfo = {
   over: boolean;
   checkpoint: boolean;
   barrier: boolean;
+  /** Id of the scene the node is shown on: `scenes` switches on it, `assets` pins its bundle. */
+  scene?: string;
 };
 
 /**
@@ -707,9 +716,9 @@ export type FlowGraph = {
 };
 
 /**
- * One node of `describe()`: its flags, its outcome names and, when it is one, the slot it opens,
- * the sub-flow it enters and the feature that brought it. It has no `path`: a static description
- * has no runtime position, and `flow` plus `node` address it.
+ * One node of `describe()`: its flags, its scene, its outcome names and, when it is one, the slot
+ * it opens, the sub-flow it enters and the feature that brought it. It has no `path`: a static
+ * description has no runtime position, and `flow` plus `node` address it.
  *
  * @example
  * ```ts

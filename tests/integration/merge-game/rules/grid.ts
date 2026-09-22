@@ -138,8 +138,8 @@ function rowMajorCells(board: Board): CellId[] {
  * const taken = occupiedCells(state.board);
  * ```
  */
-function occupiedCells(board: Board): Set<CellId> {
-  return new Set(board.items.map(item => item.cell));
+function occupiedCells(board: Board, blocked: readonly CellId[] = []): Set<CellId> {
+  return new Set([...board.items.map(item => item.cell), ...blocked]);
 }
 
 /**
@@ -165,19 +165,25 @@ export function neighbors(board: Board, cell: CellId): CellId[] {
  * Finds a free cell on the board. The scan order is fixed, so the result is deterministic:
  * with `near` it walks the nearest Chebyshev ring first (ring 0 is `near` itself) and row-major
  * inside each ring; without `near`, or when `near` is not a cell address, it walks the whole
- * board row-major from the top-left. Only items on the board occupy a cell.
+ * board row-major from the top-left. Items on the board occupy a cell, and so do the `blocked`
+ * cells: a generator stands on one, and a drop must never cover it.
  *
  * @param board - The board to scan.
  * @param near - Optional cell to search around first; it may lie outside the board.
+ * @param blocked - Cells that count as taken although no item stands there.
  * @returns The first free cell in scan order, or `undefined` when the board is full.
  * @example
  * ```ts
- * const cell = findFreeCell(state.board, "c3_4");
+ * const cell = findFreeCell(state.board, "c3_4", ["c3_4"]);
  * if (cell === undefined) showBoardFull();
  * ```
  */
-export function findFreeCell(board: Board, near?: CellId): CellId | undefined {
-  const taken = occupiedCells(board);
+export function findFreeCell(
+  board: Board,
+  near?: CellId,
+  blocked: readonly CellId[] = []
+): CellId | undefined {
+  const taken = occupiedCells(board, blocked);
   const origin = near === undefined ? undefined : parseCell(near);
 
   // No usable anchor: one plain row-major sweep from the top-left.

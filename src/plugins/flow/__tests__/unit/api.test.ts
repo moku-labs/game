@@ -114,7 +114,7 @@ describe("createFlowApi", () => {
     it("exposes only the public fx methods", () => {
       const { flow } = build();
 
-      expect(Object.keys(flow.fx).toSorted()).toEqual(["dispatch", "handle"]);
+      expect(Object.keys(flow.fx).toSorted()).toEqual(["dispatch", "handle", "onHint"]);
     });
 
     it("exposes only the public features methods", () => {

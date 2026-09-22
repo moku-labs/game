@@ -1,0 +1,579 @@
+/**
+ * @file assets plugin — loading one bundle and the boot sequence. One running load per bundle,
+ * every caller a waiter: the last one to leave aborts the fetches.
+ */
+import { enforceBudget } from "./budget";
+import { emitOf } from "./emit";
+import {
+  atlasProblem,
+  fileUrl,
+  indexKeys,
+  nineOf,
+  parseManifest,
+  resolveBaseUrl
+} from "./manifest";
+import type {
+  AssetsCtx,
+  AssetsIo,
+  BundleMap,
+  BundleRecord,
+  Inflight,
+  LoadReason,
+  Manifest,
+  ManifestBundle,
+  ManifestFile,
+  State,
+  Texture,
+  Tier
+} from "./types";
+
+/** A load failure that knows which file of which bundle broke, for the log entry. */
+type BundleFailure = Error & { bundle: string; file: string; status: number };
+
+/**
+ * Tells whether a tier stays for the whole session. A permanent bundle is never evicted and
+ * `unload` refuses it.
+ *
+ * @param tier - Tier of a bundle.
+ * @returns True for `boot` and `core`.
+ * @example
+ * ```ts
+ * isPermanent("core"); // true
+ * ```
+ */
+export function isPermanent(tier: Tier): boolean {
+  return tier === "boot" || tier === "core";
+}
+
+/**
+ * Tells whether an error is an abort. An abort is a decision, not a failure: it is never logged.
+ *
+ * @param error - What a load rejected with.
+ * @returns True for an `AbortError`.
+ */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+/**
+ * Swallows the rejection of a load the caller does not wait for: a `core` bundle started at boot,
+ * the background load behind a texture miss, a preloaded bundle. What broke was logged where it
+ * broke, so there is nothing left to do here.
+ *
+ * @example
+ * ```ts
+ * loadBundle(ctx, "ui", undefined, "boot").catch(ignoreFailure); // the game starts either way
+ * ```
+ */
+export function ignoreFailure(): void {
+  // Deliberately empty: `fail` already wrote the log entry.
+}
+
+/**
+ * Builds the error a cancelled caller rejects with.
+ *
+ * @returns An error whose `name` is `"AbortError"`.
+ */
+function abortError(): Error {
+  const error = new Error("[game] assets: the load was aborted.");
+
+  error.name = "AbortError";
+
+  return error;
+}
+
+/**
+ * Builds the error of a bundle the manifest does not carry.
+ *
+ * @param bundle - The name the caller used.
+ * @returns The error, with the command that fixes it.
+ * @example
+ * ```ts
+ * unknownBundle("bord").message;
+ * // '[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".'
+ * ```
+ */
+export function unknownBundle(bundle: string): Error {
+  return new Error(
+    `[game] assets: no bundle "${bundle}" in the manifest.\n  Run "bun run assets:keys".`
+  );
+}
+
+/**
+ * Builds the error every waiter of a broken bundle rejects with.
+ *
+ * @param bundle - Name of the bundle.
+ * @param file - Path of the file that broke.
+ * @param status - HTTP status the response carried.
+ * @returns The error, carrying the three fields for the log entry.
+ */
+function failure(bundle: string, file: string, status: number): BundleFailure {
+  const error = new Error(
+    `[game] assets: bundle "${bundle}" failed at "${file}" (${status}).`
+  ) as BundleFailure;
+
+  error.bundle = bundle;
+  error.file = file;
+  error.status = status;
+
+  return error;
+}
+
+/**
+ * Reads the three fields of a load failure, when the error carries them.
+ *
+ * @param error - What the load rejected with.
+ * @returns The bundle, the file and the status, or `undefined`.
+ */
+function failureDetail(error: unknown): BundleFailure | undefined {
+  if (error instanceof Error && typeof (error as BundleFailure).file === "string") {
+    return error as BundleFailure;
+  }
+
+  return undefined;
+}
+
+/**
+ * Reads the record of a bundle, creating an idle one on the first touch.
+ *
+ * @param state - The plugin state.
+ * @param bundle - Name of the bundle.
+ * @returns The record.
+ */
+function recordOf(state: State, bundle: string): BundleRecord {
+  const existing = state.records.get(bundle);
+
+  if (existing !== undefined) return existing;
+
+  const created: BundleRecord = {
+    status: "idle",
+    textures: new Map(),
+    inflight: undefined,
+    lastUsed: 0
+  };
+
+  state.records.set(bundle, created);
+
+  return created;
+}
+
+/**
+ * Stamps a bundle with the next value of the use counter. That counter, never a clock, is what
+ * the LRU compares.
+ *
+ * @param state - The plugin state.
+ * @param record - Record of the bundle that was used.
+ * @example
+ * ```ts
+ * touch(state, record); // state.useCounter goes from 11 to 12 and record.lastUsed becomes 12
+ * ```
+ */
+export function touch(state: State, record: BundleRecord): void {
+  state.useCounter += 1;
+  record.lastUsed = state.useCounter;
+}
+
+/**
+ * Fetches, decodes and uploads one file.
+ *
+ * @param io - The I/O seam.
+ * @param bundle - Name of the bundle, for the failure message.
+ * @param file - The file to load.
+ * @param base - Prefix of every file URL.
+ * @param signal - The signal of the running load.
+ * @returns The texture of the file.
+ * @throws {Error} When the response is not ok.
+ */
+async function loadFile(
+  io: AssetsIo,
+  bundle: string,
+  file: ManifestFile,
+  base: string,
+  signal: AbortSignal
+): Promise<Texture> {
+  const response = await io.fetch(fileUrl(base, file.path), { signal });
+
+  if (!response.ok) throw failure(bundle, file.path, response.status);
+
+  return io.createTexture(await io.decode(await response.blob()), nineOf(file));
+}
+
+/**
+ * Publishes a loaded bundle: the textures move into the record, `renderer` re-resolves the keys,
+ * the event goes out and the budget is enforced.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param bundle - Name of the bundle.
+ * @param entry - Its manifest entry.
+ * @param textures - Asset key to the texture that was uploaded.
+ * @param reason - Why the load was started.
+ */
+function finish(
+  ctx: AssetsCtx,
+  bundle: string,
+  entry: ManifestBundle,
+  textures: Map<string, Texture>,
+  reason: LoadReason
+): void {
+  const record = recordOf(ctx.state, bundle);
+
+  record.textures = textures;
+  record.status = "loaded";
+  record.inflight = undefined;
+  touch(ctx.state, record);
+
+  ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
+
+  const emit = emitOf(ctx);
+
+  emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
+  enforceBudget(ctx);
+}
+
+/**
+ * Rolls one failed load back: what was uploaded is destroyed, the record goes idle and the error
+ * waits on the inflight record for every waiter.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param io - The I/O seam.
+ * @param bundle - Name of the bundle.
+ * @param inflight - The running load.
+ * @param textures - What was uploaded before the failure.
+ * @param error - What broke.
+ */
+function fail(
+  ctx: AssetsCtx,
+  io: AssetsIo,
+  bundle: string,
+  inflight: Inflight,
+  textures: Map<string, Texture>,
+  error: unknown
+): void {
+  const record = recordOf(ctx.state, bundle);
+
+  for (const texture of textures.values()) io.destroyTexture(texture);
+  textures.clear();
+
+  record.status = "idle";
+  record.inflight = undefined;
+  inflight.error = error;
+
+  if (isAbortError(error)) return;
+
+  const detail = failureDetail(error);
+
+  if (detail === undefined)
+    ctx.log.error("assets: bundle failed", { bundle, error: String(error) });
+  else {
+    ctx.log.error("assets: bundle failed", {
+      bundle: detail.bundle,
+      file: detail.file,
+      status: detail.status
+    });
+  }
+}
+
+/**
+ * Runs one load to its end. It never rejects: the error is stored on the inflight record, so a
+ * load nobody waits for any more cannot become an unhandled rejection.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param io - The I/O seam.
+ * @param bundle - Name of the bundle.
+ * @param entry - Its manifest entry.
+ * @param inflight - The running load.
+ * @param reason - Why the load was started.
+ */
+async function runLoad(
+  ctx: AssetsCtx,
+  io: AssetsIo,
+  bundle: string,
+  entry: ManifestBundle,
+  inflight: Inflight,
+  reason: LoadReason
+): Promise<void> {
+  const textures = new Map<string, Texture>();
+
+  try {
+    const problem = atlasProblem(bundle, entry.files);
+
+    if (problem !== undefined) throw new Error(problem);
+
+    const base = resolveBaseUrl(ctx.config.baseUrl, ctx.config.manifest);
+    const results = await Promise.allSettled(
+      entry.files.map(async file => {
+        textures.set(file.key, await loadFile(io, bundle, file, base, inflight.controller.signal));
+      })
+    );
+
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason;
+    }
+  } catch (error) {
+    fail(ctx, io, bundle, inflight, textures, error);
+
+    return;
+  }
+
+  finish(ctx, bundle, entry, textures, reason);
+}
+
+/**
+ * Starts the one load of a bundle and records it.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param io - The I/O seam.
+ * @param bundle - Name of the bundle.
+ * @param entry - Its manifest entry.
+ * @param reason - Why this caller wants it.
+ * @returns The running load.
+ */
+function begin(
+  ctx: AssetsCtx,
+  io: AssetsIo,
+  bundle: string,
+  entry: ManifestBundle,
+  reason: LoadReason
+): Inflight {
+  const record = recordOf(ctx.state, bundle);
+  const inflight: Inflight = {
+    promise: Promise.resolve(),
+    controller: new AbortController(),
+    waiters: 0,
+    error: undefined
+  };
+
+  record.status = "loading";
+  record.inflight = inflight;
+  inflight.promise = runLoad(ctx, io, bundle, entry, inflight, reason);
+
+  return inflight;
+}
+
+/**
+ * Waits for a promise, or for the caller's own signal, whichever comes first.
+ *
+ * @param promise - The running load, which never rejects.
+ * @param signal - The caller's signal, or `undefined` when it cannot be cancelled.
+ * @returns A promise that rejects with an `AbortError` when the signal fires.
+ */
+function race(promise: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (signal === undefined) return promise;
+  if (signal.aborted) return Promise.reject(abortError());
+
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => reject(abortError());
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/**
+ * Joins a running load as one more waiter. When the last waiter leaves while the load still runs,
+ * the fetches are aborted and the bundle goes back to idle.
+ *
+ * @param record - Record of the bundle.
+ * @param inflight - The running load.
+ * @param signal - The caller's signal.
+ * @throws {Error} With the caller's `AbortError`, or with the failure of the load.
+ */
+async function waitFor(
+  record: BundleRecord,
+  inflight: Inflight,
+  signal: AbortSignal | undefined
+): Promise<void> {
+  inflight.waiters += 1;
+
+  try {
+    await race(inflight.promise, signal);
+  } finally {
+    inflight.waiters -= 1;
+
+    if (inflight.waiters === 0 && record.status === "loading") inflight.controller.abort();
+  }
+
+  if (inflight.error !== undefined) throw inflight.error;
+}
+
+/**
+ * Loads every file of one bundle. A second caller joins the running load instead of fetching
+ * again; the reason of the event stays the reason of the caller that started it.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param bundle - Name of a bundle of the manifest.
+ * @param signal - The caller's signal, or `undefined`.
+ * @param reason - Why this caller wants the bundle.
+ * @returns A promise that resolves when every texture of the bundle exists.
+ * @throws {Error} When the manifest has no such bundle, when a file fails and on an abort.
+ * @example
+ * ```ts
+ * // The enter callback of a node, cancelled when the graph leaves it again.
+ * await loadBundle(ctx, "board", enter.signal, "enter");
+ * ```
+ */
+export async function loadBundle(
+  ctx: AssetsCtx,
+  bundle: string,
+  signal: AbortSignal | undefined,
+  reason: LoadReason
+): Promise<void> {
+  const state = ctx.state;
+  const io = state.io;
+
+  if (io === undefined) return;
+
+  const entry = state.manifest.bundles[bundle];
+
+  if (entry === undefined) throw unknownBundle(bundle);
+
+  const record = recordOf(state, bundle);
+
+  if (record.status === "loaded") {
+    touch(state, record);
+
+    return;
+  }
+
+  await waitFor(record, record.inflight ?? begin(ctx, io, bundle, entry, reason), signal);
+}
+
+/**
+ * Lists the bundles of one tier, in manifest order.
+ *
+ * @param manifest - The parsed manifest.
+ * @param tier - The tier to collect.
+ * @returns The bundle names.
+ */
+function bundlesOfTier(manifest: Manifest, tier: Tier): string[] {
+  return Object.entries(manifest.bundles)
+    .filter(([, entry]) => entry.tier === tier)
+    .map(([name]) => name);
+}
+
+/**
+ * Reads the bundle maps a feature description carries under the key `assets`.
+ *
+ * @param value - What the feature put there.
+ * @returns Every bundle map it brought.
+ */
+function bundleMapsOf(value: unknown): BundleMap[] {
+  const entries = Array.isArray(value) ? value : [value];
+
+  return entries.filter(
+    (entry): entry is BundleMap =>
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { kind?: unknown }).kind === "bundles"
+  );
+}
+
+/**
+ * Compares what the composed features declare with what the manifest carries. A disagreement is
+ * one warning per bundle, never a failure: the game still runs on the manifest.
+ *
+ * @param ctx - Domain context of the plugin.
+ */
+function checkDeclaredBundles(ctx: AssetsCtx): void {
+  for (const feature of ctx.deps.flow.features.all()) {
+    for (const bundles of bundleMapsOf(feature.description.assets)) {
+      for (const [name, spec] of Object.entries(bundles.map)) {
+        const entry = ctx.state.manifest.bundles[name];
+        const declared = (spec as { tier?: string } | undefined)?.tier;
+
+        if (entry === undefined) {
+          ctx.log.warn("assets: bundle is not in the manifest", {
+            feature: feature.name,
+            bundle: name,
+            fix: 'Run "bun run assets:keys".'
+          });
+        } else if (declared !== undefined && declared !== entry.tier) {
+          ctx.log.warn("assets: bundle tier disagrees with the manifest", {
+            feature: feature.name,
+            bundle: name,
+            declared,
+            manifest: entry.tier
+          });
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Fetches the manifest. Headless there is no io, so the global `fetch` is used: a headless test
+ * that points at a file still reads it.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param url - Where the manifest lives.
+ * @returns The parsed JSON.
+ * @throws {Error} When the response is not ok.
+ */
+async function fetchManifest(ctx: AssetsCtx, url: string): Promise<unknown> {
+  const controller = new AbortController();
+  const io = ctx.state.io;
+  const response =
+    io === undefined
+      ? await fetch(url, { signal: controller.signal })
+      : await io.fetch(url, { signal: controller.signal });
+
+  if (!response.ok) {
+    throw new Error(
+      `[game] assets: the manifest at "${url}" could not be read (${response.status}).\n` +
+        '  Run "bun run assets:keys" and publish the file.'
+    );
+  }
+
+  return response.json();
+}
+
+/**
+ * Reads the manifest into the state and builds the key index.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @throws {Error} In a browser, when the manifest cannot be read.
+ */
+async function readManifest(ctx: AssetsCtx): Promise<void> {
+  const source = ctx.config.manifest;
+
+  if (source === undefined) return;
+
+  try {
+    const raw = typeof source === "string" ? await fetchManifest(ctx, source) : source;
+
+    ctx.state.manifest = parseManifest(raw);
+    ctx.state.bundleOfKey = indexKeys(ctx.state.manifest);
+  } catch (error) {
+    if (ctx.state.io !== undefined) throw error;
+
+    ctx.log.warn("assets: the manifest could not be read", { error: String(error) });
+  }
+}
+
+/**
+ * The boot sequence of `onStart`: read the manifest, check what the features declared, await the
+ * `boot` tier and start the `core` tier without awaiting it, so a loading screen can show real
+ * progress by joining the same loads.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns A promise that resolves once the manifest and the `boot` tier are there.
+ * @throws {Error} In a browser, when the manifest or a boot bundle cannot be read.
+ * @example
+ * ```ts
+ * // What `startAssets` awaits before the game's first node runs.
+ * await bootTiers(ctx);
+ * ctx.state.manifest.bundles.boot; // the boot bundle, loaded
+ * ```
+ */
+export async function bootTiers(ctx: AssetsCtx): Promise<void> {
+  await readManifest(ctx);
+  checkDeclaredBundles(ctx);
+
+  await Promise.all(
+    bundlesOfTier(ctx.state.manifest, "boot").map(name => loadBundle(ctx, name, undefined, "boot"))
+  );
+
+  for (const name of bundlesOfTier(ctx.state.manifest, "core")) {
+    loadBundle(ctx, name, undefined, "boot").catch(ignoreFailure);
+  }
+}

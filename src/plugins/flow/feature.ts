@@ -5,7 +5,9 @@ import type { AnyPluginInstance } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import type { FeatureDescription } from "./features/types";
 import { flowPlugin } from "./index";
-import type { FeaturePlugin } from "./types";
+import { defineFlow, defineNode } from "./runner/define";
+import type { GameState } from "./runner/types";
+import type { FeaturePlugin, FlowKit } from "./types";
 
 /**
  * Names a feature may not take. A feature shares the namespace with plugins: the 17 engine
@@ -130,4 +132,19 @@ export function defineFeature(name: string, description: FeatureDescription): Fe
   return Object.assign(featurePluginOf(name, description), {
     logicOnly: featurePluginOf(name, logicKeysOf(description))
   });
+}
+
+/**
+ * Binds the flow helpers to one game's `player` and `session`. The binding is type-only: at run
+ * time these are the plugin's own functions. `defineGame` spreads it into the game's kit.
+ *
+ * @returns `defineNode` typed with the game, plus `defineFlow` and `defineFeature`.
+ * @example
+ * ```ts
+ * const { defineNode } = flowFor<{ player: { coins: number }; session: {} }>();
+ * const home = defineNode({ rest: true, outcomes: { play: type() }, run: ({ player }) => player.coins });
+ * ```
+ */
+export function flowFor<Game extends GameState>(): FlowKit<Game> {
+  return { defineNode, defineFlow, defineFeature };
 }

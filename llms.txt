@@ -1,6 +1,6 @@
 # @moku-labs/game
 
-> 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state and arrives in milestone V2. Today only V1 exists: the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry. The package is version 0.0.0 and is not published yet.
+> 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state. V1 is the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry; V2 adds the screen plugins `world`, `renderer`, `input`, `assets`, `scenes` (the list `screen`), a Pixi v8 renderer loaded lazily, and the `@moku-labs/game/assets` entry that generates typed asset keys. The package is version 0.0.0 and is not published yet.
 
 Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer dependency, no V1 code imports it. Node >= 24, Bun >= 1.3.14. TypeScript strict with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. The engine ships no genre rules: no merge, no match-3, no physics. A game brings its own pure rule functions.
 
@@ -12,7 +12,9 @@ Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer 
 Root exports:
 - Functions: `createApp`, `createPlugin`, `defineGame`, `defineFeature`, `type`, `exit`, `to`, `slot`, `schedule`, `guide`, `hint`.
 - Class: `SaveUnreadableError`.
-- Plugin instances: `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`.
+- Plugin instances: `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`, `worldPlugin`, `rendererPlugin`, `inputPlugin`, `assetsPlugin`, `scenesPlugin`; the list `screen`.
+- Screen helpers from the root: `component`, `tag`, `resource`, `mut`, `system`, `projection`, `Layer`, `Order`, `Exiting`, `Transform`, `Sprite`, `NineSlice`, `Parent`, `Display`, `sprite`, `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable`, `Held`, `Hovered`, `Pressed`, `Pointer`, `defineBundles`, `load`, `defineScene`. `defineGame` returns `projection`, `sprite`, `Sprite`, `NineSlice`, `defineBundles`, `load`, `defineScene` typed by the game's `assets` and `bundles` keys.
+- `@moku-labs/game/assets` (node and bun only): `scanAssets(options)`, `runCli(argv)`; key = feature + "." + path inside `assets/`.
 - Type namespaces: `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`. Use `import type { Flow } from "@moku-labs/game"` and then `Flow.RouteStep`, `Flow.NodeContext`, `Model.Json`, `Model.PlayerStateProvider`, `Clock.ClockSource`, `Time.Phase`, `Lifecycle.PauseReason`.
 - `defineNode` and `defineFlow` are NOT root exports. They come from `defineGame<Types>()`.
 

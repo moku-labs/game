@@ -223,8 +223,8 @@ function collectOwners(features: FeaturesApi): Map<object, string> {
 }
 
 /**
- * Describes one entry of a flow: its flags, its outcome names, and the slot, sub-flow or owning
- * feature when it has one.
+ * Describes one entry of a flow: its flags, its scene, its outcome names, and the slot, sub-flow
+ * or owning feature when it has one.
  *
  * @param flow - The flow that holds the entry.
  * @param name - Name of the entry inside that flow.
@@ -253,6 +253,7 @@ function describeNode(
     checkpoint: node?.checkpoint ?? false,
     barrier: node?.barrier ?? false,
     outcomes: Object.keys(entry.outcomes),
+    ...(node?.scene === undefined ? {} : { scene: node.scene }),
     ...(entry.kind === "slot" ? { slot: entry.name } : {}),
     ...(entry.kind === "flow" ? { subFlow: entry.id } : {}),
     ...(owner === undefined ? {} : { owner })
