@@ -3,7 +3,7 @@
  */
 import { applyEnergyRegen } from "./elapse";
 import { findFreeCell, withItem } from "./grid";
-import type { GeneratorTable, Item, MergeState, Rng, Tables, TapResult } from "./types";
+import type { CellId, GeneratorTable, Item, MergeState, Rng, Tables, TapResult } from "./types";
 
 /**
  * Adds up the weights of a table.
@@ -80,6 +80,20 @@ export function drawWeighted<T>(
  * const spec = generatorSpec(tables, "sawmill");
  * ```
  */
+/**
+ * The cells the generators of the table stand on. No item may be placed there.
+ *
+ * @param tables - The content tables.
+ * @returns One cell per generator.
+ * @example
+ * ```ts
+ * generatorCells(tables); // ["c0_0"]
+ * ```
+ */
+export function generatorCells(tables: Tables): CellId[] {
+  return Object.values(tables.generators).map(spec => spec.cell);
+}
+
 function generatorSpec(tables: Tables, generatorId: string): GeneratorTable[string] {
   const spec = tables.generators[generatorId];
 
@@ -184,7 +198,8 @@ export function tapGenerator(
   const energy = applyEnergyRegen(state.energy, now, tables.energy);
   if (energy.value < spec.energyCost) return { ok: false, reason: "noEnergy" };
 
-  const cell = findFreeCell(state.board, spec.cell);
+  // The generator's own cell is never a drop target: the next tap must still reach it.
+  const cell = findFreeCell(state.board, spec.cell, generatorCells(tables));
   if (cell === undefined) return { ok: false, reason: "boardFull" };
 
   const drop = pickDrop(spec.drops, rng);

@@ -10,8 +10,8 @@
     </style>
   </head>
   <body>
-    <!-- Run `bun ./web/index.html` from tests/integration/merge-game/: the web root is that
-         folder, so /manifest.json and /features/board/assets/*.png are served next to this page. -->
+    <!-- Run `bun ./web/serve.ts` from tests/integration/merge-game/: it serves this page on /
+         and /manifest.json plus /features/board/assets/*.png as static files. -->
     <div id="game"></div>
     <script type="module" src="./main.ts"></script>
   </body>

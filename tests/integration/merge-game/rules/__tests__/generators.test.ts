@@ -105,11 +105,20 @@ describe("tapGenerator", () => {
     const result = tapGenerator(state, "sawmill", countedAt, tables, scriptedRng([0]));
 
     if (!result.ok) throw new Error(`tap should succeed, got ${result.reason}`);
-    expect(result.item).toEqual({ id: "i6", chain: "wood", level: 1, cell: "c2_2" });
+    // The generator stands on c2_2; the drop lands on the nearest free ring cell, never on it.
+    expect(result.item).toEqual({ id: "i6", chain: "wood", level: 1, cell: "c1_1" });
     expect(result.state.energy.value).toBe(3);
     expect(result.state.generators.sawmill).toEqual({ readyAt: 0, charges: 2 });
     expect(result.state.nextItemId).toBe(7);
     expect(result.state.board.items).toHaveLength(6);
+  });
+
+  it("never drops onto the generator's own cell, so the next tap still reaches it", () => {
+    const state = stateWith({ board: { ...midGameState().board, items: [] } });
+    const result = tapGenerator(state, "sawmill", countedAt, tables, scriptedRng([0]));
+
+    if (!result.ok) throw new Error(`tap should succeed, got ${result.reason}`);
+    expect(result.item.cell).not.toBe(tables.generators.sawmill?.cell);
   });
 
   it("leaves the frozen input state untouched", () => {
@@ -265,6 +274,6 @@ describe("tapGenerator", () => {
 
     if (!result.ok) throw new Error("tap should succeed");
     expect(result.state.energy.value).toBe(0);
-    expect(result.item).toEqual({ id: "i6", chain: "stone", level: 2, cell: "c0_1" });
+    expect(result.item).toEqual({ id: "i6", chain: "stone", level: 2, cell: "c1_1" });
   });
 });

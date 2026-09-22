@@ -2,9 +2,9 @@
  * @file The dev page of the fixture game: the same composition as `createScreenGame`, with a real
  * canvas and a manifest fetched over HTTP.
  *
- * Serving: run `bun ./web/index.html` from `tests/integration/merge-game/`. Bun's dev server
- * bundles this module and serves the folder it was started in as the web root, so `/manifest.json`
- * and the tiles under `/features/board/assets/` are the committed files of the fixture.
+ * Serving: run `bun ./web/serve.ts` from `tests/integration/merge-game/`. It serves the bundled
+ * page on `/` and the committed `manifest.json` and tiles under `/features/board/assets/` as
+ * static files (`bun ./index.html` alone answers every path with the page).
  */
 import { createApp, screen } from "@moku-labs/game";
 import { mainFlow } from "../flows/main";

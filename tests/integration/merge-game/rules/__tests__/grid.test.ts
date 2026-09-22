@@ -61,6 +61,10 @@ describe("findFreeCell", () => {
     expect(findFreeCell(boardOf())).toBe("c0_1");
   });
 
+  it("treats a blocked cell as taken although no item stands there", () => {
+    expect(findFreeCell(emptyBoard(), "c0_0", ["c0_0"])).toBe("c1_0");
+  });
+
   it("returns the anchor itself when it is free", () => {
     expect(findFreeCell(boardOf(), "c3_3")).toBe("c3_3");
   });

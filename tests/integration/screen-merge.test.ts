@@ -53,9 +53,10 @@ const untilOrder: Flow.RouteStep[] = [
   tap,
   tap,
   tap,
-  mergeStep("c0_0", "c1_0"),
-  mergeStep("c0_1", "c1_1"),
-  mergeStep("c1_0", "c1_1"),
+  // The four drops land on the ring around the generator (c0_0): c1_0, c0_1, c1_1, c2_0.
+  mergeStep("c1_0", "c0_1"),
+  mergeStep("c1_1", "c2_0"),
+  mergeStep("c0_1", "c2_0"),
   { at: "board/awaitIntent", intent: "give", payload: { item: "i4", order: 0 } }
 ];
 
@@ -270,8 +271,9 @@ describe("screen-merge — the fast walk", () => {
 
     const item = app.world.projection.entityOf("board.items", "i1") ?? 0;
 
-    // The enter motion would start the view at scale 0 on the generator; fast mode skips it.
-    expect(app.world.ecs.get(item, Transform)).toEqual({ x: 300, y: 720, rotation: 0, scale: 1 });
+    // The drop lands on c1_0, next to the generator. The enter motion would start the view at
+    // scale 0 on the generator; fast mode skips it.
+    expect(app.world.ecs.get(item, Transform)).toEqual({ x: 540, y: 720, rotation: 0, scale: 1 });
 
     await game.stop();
   });
