@@ -9,6 +9,7 @@ import {
   mountBoard,
   restOfName,
   settleFrames,
+  storedOf,
   Transform
 } from "./board";
 import { createMockWorld } from "./mock-world";
@@ -140,6 +141,44 @@ describe("projection motions — the spike cases", () => {
     world.api.projection.settle(entity);
 
     expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 0, y: 0, scale: 1 });
+  });
+
+  it("settle: a paused world keeps a view the finger still holds lifted", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    world.api.projection.lift(entity, true);
+    world.api.ecs.setMode("paused");
+    world.api.ecs.set(entity, Transform, { x: 77 });
+    world.api.projection.settle(entity);
+
+    expect(storedOf(world, entity, "Layer")).toEqual({ name: "lifted" });
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 0, y: 0, scale: 1 });
+  });
+
+  it("settle: a paused world applies a lift(false) that was waiting for the last motion", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: { Transform: view => view.toRest(Transform, { ms: 400 }) }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    world.api.projection.lift(entity, true);
+    commitItems(world, [{ id: "a", level: 1, x: 90, y: 0 }]);
+    world.frame(16);
+    world.api.projection.lift(entity, false);
+
+    expect(storedOf(world, entity, "Layer")).toEqual({ name: "lifted" });
+
+    world.api.ecs.setMode("paused");
+    world.api.projection.settle(entity);
+
+    expect(storedOf(world, entity, "Layer")).toEqual({ name: "items" });
   });
 
   it("settle: an entity that is not a live view is a no-op", () => {

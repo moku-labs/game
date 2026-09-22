@@ -23,7 +23,8 @@ import type {
  * @example
  * ```ts
  * const Item = component("Item", { kind: "", level: 1 });
- * Item({ level: 2 }); // { type: "Item", value: { kind: "", level: 2 } }
+ * Item({ level: 2 }); // { type: Item, value: { kind: "", level: 2 } }
+ * Item({ level: 2 }).type.componentName; // "Item", the storage key
  * ```
  */
 export function component<Value extends object>(
@@ -52,7 +53,8 @@ export function component<Value extends object>(
  * @example
  * ```ts
  * const Held = tag("Held");
- * Held(); // { type: "Held", value: true }
+ * Held(); // { type: Held, value: true }
+ * Held().type.componentName; // "Held"
  * ```
  */
 export function tag(name: string): TagType {

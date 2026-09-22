@@ -4,6 +4,7 @@
  */
 import type { Hint } from "../../flow/types";
 import type { Snapshot } from "../../model/types";
+import type { EmitReconciled } from "../types";
 import { diffComponents } from "./diff";
 import { routeHint } from "./hints";
 import {
@@ -161,8 +162,10 @@ function changeEntry(
   view.item = entry.item;
 
   if (entry.direct) {
+    // Every rest key, not only the changed ones: a load during a motion has to converge in this
+    // frame, so a component a cancelled motion left off its rest pose is written too.
     finishHandles(view);
-    writeRestNow(pctx, view, changed);
+    writeRestNow(pctx, view, [...next.keys()]);
 
     return;
   }
@@ -480,10 +483,10 @@ export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void 
   counts.hintsDropped = state.hints.length - used.size;
 
   if (pctx.ctx.config.reconciledEvent) {
-    pctx.ctx.emit("world:reconciled", {
-      mode: options.direct ? "direct" : "play",
-      ...counts
-    });
+    // The one narrowing of the plugin: see the note on `KernelSlice`. Only `emit` is cast.
+    const emit = pctx.ctx.emit as EmitReconciled;
+
+    emit("world:reconciled", { mode: options.direct ? "direct" : "play", ...counts });
   }
 }
 

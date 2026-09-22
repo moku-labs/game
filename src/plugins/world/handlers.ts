@@ -3,7 +3,7 @@
  */
 import { createModules } from "./api";
 import { withDeps } from "./lifecycle";
-import type { KernelInput, ModelCommitted } from "./types";
+import type { KernelSlice, ModelCommitted } from "./types";
 
 /**
  * Creates the hook handlers. `model:committed` only records the cause and the roots: the reconcile
@@ -18,9 +18,11 @@ import type { KernelInput, ModelCommitted } from "./types";
  * @param ctx - Kernel context of the world plugin.
  * @returns The one hook of the plugin.
  */
-export function createHandlers(ctx: KernelInput): {
+export function createHandlers(ctx: KernelSlice): {
   "model:committed": (payload: ModelCommitted) => void;
 } {
+  let modules: ReturnType<typeof createModules> | undefined;
+
   return {
     /**
      * Records a commit for the next reconcile.
@@ -28,8 +30,12 @@ export function createHandlers(ctx: KernelInput): {
      * @param payload - The roots the commit touched and why it happened.
      */
     "model:committed": (payload: ModelCommitted): void => {
+      // Built on the first commit, not in this factory: the kernel registers hooks before the
+      // plugin APIs exist, so nothing is resolvable while the factory runs.
+      modules ??= createModules(withDeps(ctx));
+
       // A throw reaches the framework `onError`, which logs it as "game: a hook failed".
-      createModules(withDeps(ctx)).projection.markDirty(payload.roots, payload.cause);
+      modules.projection.markDirty(payload.roots, payload.cause);
     }
   };
 }

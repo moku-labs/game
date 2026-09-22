@@ -178,6 +178,33 @@ describe("projection reconcile", () => {
     expectConverged(world, "a");
   });
 
+  it("brings a view home in one frame on a load, also a component no diff names", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view => view.tween(Transform, { scale: 1.4 }, { ms: 400, ease: "linear" })
+      }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 1, x: 200, y: 0 }]);
+    world.frame(16);
+    world.frame(100);
+
+    expect(world.api.ecs.get(entity, Transform)?.scale).toBeGreaterThan(1);
+    expect(world.api.ecs.get(entity, Transform)?.x).toBe(0);
+
+    world.model.player = { items: [{ id: "a", level: 1, x: 200, y: 0 }] };
+    world.commit("load", ["player"]);
+    world.frame(16);
+
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 200, y: 0, scale: 1 });
+    expect(world.log.warn).not.toHaveBeenCalledWith("world:view-corrected", expect.anything());
+    expectConverged(world, "a");
+  });
+
   it("rerunAll forces the view of every item and writes directly", () => {
     const world = createMockWorld();
     let label = "one";

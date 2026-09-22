@@ -207,9 +207,13 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       if (deps.ecs.mode() !== "live") {
         writeRestNow(pctx, view, [...view.rest.keys()]);
-        view.dropWhenStill = false;
-        view.lifted = false;
-        writeLayer(pctx, entity, spec.layer);
+
+        // Only a pending `lift(false)` drops the view. A view the finger still holds stays lifted.
+        if (view.dropWhenStill) {
+          view.dropWhenStill = false;
+          view.lifted = false;
+          writeLayer(pctx, entity, spec.layer);
+        }
 
         return;
       }

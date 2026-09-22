@@ -74,24 +74,35 @@ export type Api = { ecs: EcsApi; projection: ProjectionApi };
 export type Deps = { time: TimeApi; model: ModelApi; flow: FlowApi };
 
 /**
+ * How this plugin sends its one event. The single emit site narrows the kernel's `emit` to it.
+ *
+ * @example
+ * ```ts
+ * const emit: EmitReconciled = (name, payload) => bus.send(name, payload);
+ * emit("world:reconciled", { mode: "play", projections: 1, entered: 0, changed: 1, exited: 1,
+ *   revived: 0, queued: 1, hintsRouted: 1, hintsDropped: 0 });
+ * ```
+ */
+export type EmitReconciled = (
+  name: "world:reconciled",
+  payload: Events["world:reconciled"]
+) => void;
+
+/**
  * What the kernel context offers before the deps are attached.
- * `emit` is one plain method overload on purpose: `world` has dependencies with events, and both a
- * property-typed and a generic `emit` break the kernel's event inference when a factory is passed
- * to `createPlugin` by direct reference (`api`, `hooks`, `onStart`).
+ *
+ * `emit` is declared as the kernel's own, unusable shape on purpose: core 1.7 leaves a plugin's
+ * own event out of the context it hands the factories as soon as `depends` is declared, so
+ * `MergedPluginEvents` carries the dependency events only and a world-typed `emit` here would make
+ * every factory unassignable. `projection/reconcile.ts` narrows this one member to
+ * `EmitReconciled`; nothing else about the context is cast.
  */
 export type KernelSlice = Omit<PluginCtx<Config, State, Events>, "emit"> & {
-  emit(name: "world:reconciled", payload: Events["world:reconciled"]): void;
+  emit(...args: never[]): void;
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;
 };
-
-/**
- * What the kernel really hands a factory of this plugin. Core 1.7 does not merge a plugin's own
- * event into that context once the plugin declares `depends`, so its `emit` accepts the
- * dependency events only. The factories take this shape and narrow it once, in `lifecycle.ts`.
- */
-export type KernelInput = Omit<KernelSlice, "emit"> & { emit(...args: never[]): void };
 
 /**
  * Domain context shared by the two modules.

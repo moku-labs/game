@@ -19,6 +19,8 @@
  * | flow | retries | 1 |
  * | flow | settleTimeoutMs | 2000 |
  * | flow | journalLimit | 500 |
+ * | world | settleMs | 350 |
+ * | world | reconciledEvent | false |
  *
  * @file The package root: the composed framework and its public exports.
  * @example

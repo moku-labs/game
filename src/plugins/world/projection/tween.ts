@@ -182,7 +182,8 @@ export function startTrack(
  * @param deltaMs - The frame delta in game milliseconds.
  */
 export function advanceTracks(pctx: ProjectionCtx, deltaMs: number): void {
-  for (const track of pctx.ctx.state.projection.tracks) {
+  // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
+  for (const track of [...pctx.ctx.state.projection.tracks]) {
     if (track.ended) continue;
 
     track.elapsed += deltaMs;

@@ -5,10 +5,10 @@
 import { createEcsApi } from "./ecs/api";
 import { Exiting, Layer, Order } from "./ecs/define";
 import type { EcsApi, WorldMode } from "./ecs/types";
-import { kernelSlice, resolveDeps } from "./lifecycle";
+import { resolveDeps } from "./lifecycle";
 import { createProjectionApi } from "./projection/api";
 import type { ProjectionApi, WorldComponents } from "./projection/types";
-import type { Api, EcsModule, KernelInput, ProjectionModule, WorldCtx } from "./types";
+import type { Api, EcsModule, KernelSlice, ProjectionModule, WorldCtx } from "./types";
 
 /** The three components the projection writes; injected, never imported by the module. */
 export const WORLD_COMPONENTS: WorldComponents = { Layer, Order, Exiting };
@@ -98,9 +98,8 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
  * @param ctx - Kernel context of the world plugin.
  * @returns The plugin API.
  */
-export function createWorldApi(ctx: KernelInput): Api {
-  const slice = kernelSlice(ctx);
-  const worldCtx: WorldCtx = { ...slice, deps: resolveDeps(slice) };
+export function createWorldApi(ctx: KernelSlice): Api {
+  const worldCtx: WorldCtx = { ...ctx, deps: resolveDeps(ctx) };
   const { ecs, projection } = createModules(worldCtx);
 
   return { ecs: exposeEcs(ecs, projection), projection: exposeProjection(projection) };

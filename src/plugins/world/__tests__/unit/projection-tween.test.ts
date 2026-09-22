@@ -119,6 +119,31 @@ describe("projection tween", () => {
     expect(world.api.ecs.get(entity, Transform)?.y).toBe(50);
   });
 
+  it("advances every track of a frame, also the one after a track that ends", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view =>
+          view.all([
+            view.tween(Transform, { x: 100 }, { ms: 100, ease: "linear" }),
+            view.tween(Transform, { y: 50 }, { ms: 100, ease: "linear" })
+          ])
+      }
+    });
+    commitItems(world, [{ id: "a", level: 1, x: 100, y: 50 }]);
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    world.frame(16);
+    expect(world.ctx.state.projection.tracks).toHaveLength(2);
+
+    world.frame(100);
+
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 100, y: 50, scale: 1 });
+    expect(world.ctx.state.projection.tracks).toEqual([]);
+  });
+
   it("ends silently when the entity died", () => {
     const world = createMockWorld();
     const read = tweenOnChange(world, { ms: 1000, ease: "linear" });
