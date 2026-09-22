@@ -28,14 +28,10 @@ function emptySet<Value>(): Set<Value> {
  * retarget policy and the offsets accumulator, no timeline and no animation.
  *
  * @param _ctx - Minimal context. The anim state depends on nothing in it.
- * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns The plugin state.
  */
-export function createAnimState(_ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createAnimState(_ctx: { readonly config: Readonly<Config> }): State {
   return {
     tracks: emptyMap(),
     nextId: 1,

@@ -10,13 +10,9 @@ import type { Config, State } from "./types";
  * factories. The world starts empty; `onStart` fills it from the feature descriptions.
  *
  * @param _ctx - Minimal context. The world state depends on nothing in it.
- * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns The plugin state.
  */
-export function createWorldState(_ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createWorldState(_ctx: { readonly config: Readonly<Config> }): State {
   return { ecs: createEcsState(), projection: createProjectionState() };
 }

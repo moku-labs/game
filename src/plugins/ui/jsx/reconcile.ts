@@ -6,7 +6,7 @@ import { Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
 import { NineSlice, Parent, Shape, Sprite, Transform } from "../../renderer/components";
 import { Text } from "../../text/components";
-import { Order, Tree as WORLD_TREE } from "../../world/ecs/define";
+import { Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
 import type { AnyComponentValue, Entity } from "../../world/types";
 import { Box, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
@@ -40,7 +40,7 @@ export function childrenOf(node: DescriptionNode): readonly DescriptionNode[] {
 }
 
 /**
- * Tells whether a tag draws nothing of its own, so it takes a `Shape` only when its style fills.
+ * Tells whether a tag draws nothing of its own, so its `Shape` is invisible unless its style fills.
  *
  * @param type - The intrinsic tag.
  * @returns True for the six container tags.
@@ -140,10 +140,12 @@ function checkTag(node: DescriptionNode): void {
 }
 
 /**
- * The visual component of an element: a nine-slice, a sprite, a text or a rounded rectangle.
+ * The visual component of an element: a nine-slice, a sprite, a text or a rounded rectangle. A
+ * container with no fill and no stroke gets an invisible rectangle: the renderer hangs children
+ * under the display object of their parent, so every parent needs one.
  *
  * @param element - The element to draw.
- * @returns The component values, empty for a container with no fill.
+ * @returns The component values.
  */
 function visualOf(element: Element): AnyComponentValue[] {
   const { style, type, node } = element;
@@ -179,15 +181,14 @@ function visualOf(element: Element): AnyComponentValue[] {
   }
 
   const filled = style.fill !== undefined || style.stroke !== undefined;
-
-  if (isContainer(type) && !filled) return [];
+  const invisible = isContainer(type) && !filled;
 
   return [
     Shape({
       w: element.rect.w,
       h: element.rect.h,
       fill: style.fill ?? Shape.defaults.fill,
-      alpha: style.alpha ?? 1,
+      alpha: invisible ? 0 : (style.alpha ?? 1),
       radius: style.radius ?? 0,
       stroke: style.stroke ?? Shape.defaults.stroke,
       strokeWidth: style.strokeWidth ?? 0,
@@ -226,17 +227,29 @@ function inputOf(element: Element): AnyComponentValue[] {
 
 /**
  * Everything an entering element gets at once, so a display object never exists without a rect.
+ * A child draws with its parent; the root element draws in the layer of its root, at its order.
  *
  * @param element - The element whose rect is known.
  * @param parent - The rect of its parent, or nothing for a root element.
+ * @param root - The layer and the order of the root the element belongs to.
+ * @param root.layer - The layer the root draws in.
+ * @param root.order - The order of the root inside that layer.
  * @returns The component values the entity is filled with.
  */
-export function componentsOf(element: Element, parent: Rect | undefined): AnyComponentValue[] {
+export function componentsOf(
+  element: Element,
+  parent: Rect | undefined,
+  root: { layer: string; order: number }
+): AnyComponentValue[] {
   const values: AnyComponentValue[] = [
     Transform({ x: element.rect.x - (parent?.x ?? 0), y: element.rect.y - (parent?.y ?? 0) })
   ];
 
-  if (element.parent !== undefined) values.push(Parent({ entity: element.parent }));
+  if (element.parent === undefined) {
+    values.push(Layer({ name: root.layer }), Order({ value: root.order }));
+  } else {
+    values.push(Parent({ entity: element.parent }));
+  }
 
   // `Box` is last on purpose: the world applies a queued attach in call order and fires
   // `onAdded` as it goes, so the hook on `Box` is the moment the whole entity exists.
@@ -663,7 +676,9 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
         modules.layout.change(element, element.previous);
       }
     } else {
-      for (const value of componentsOf(element, parent)) ecs.add(element.entity, value);
+      const root = state.roots.get(element.root) ?? { layer: "ui", order: 0 };
+
+      for (const value of componentsOf(element, parent, root)) ecs.add(element.entity, value);
 
       modules.layout.commit(element, parent);
       element.live = true;
@@ -743,38 +758,47 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
   }
 
   /**
+   * Reconciles one dirty root: reads its current tree and projection name, then diffs it. The root
+   * stays dirty while the layout engine is not loaded, and a failure is logged for this root only.
+   *
+   * @param root - A root with work this frame.
+   */
+  function reconcileDirtyRoot(root: Root): void {
+    // Take the tree and the name the projection holds now.
+    const tree = ecs.get(root.entity, WORLD_TREE);
+    const place = ctx.deps.world.projection.keyOf(root.entity);
+
+    if (place !== undefined) root.name = place.projection;
+    if (tree !== undefined) root.tree = tree.node as DescriptionNode;
+
+    // Without the layout engine the root stays dirty and waits for a later frame.
+    root.dirty = !modules.layout.loaded();
+
+    if (root.dirty) return;
+
+    // A failing root is logged and the other roots still reconcile.
+    try {
+      reconcileRoot(root);
+    } catch (error) {
+      ctx.log.error("ui:root-failed", { root: root.name }, asError(error));
+    }
+  }
+
+  /**
    * The first of the two systems of phase `layout`: the sweep, the viewport, the dirty roots and
    * the scroll offsets.
    */
   function reconcile(): void {
+    // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
 
+    // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());
 
-    for (const root of dirtyRoots(viewportChanged)) {
-      const tree = ecs.get(root.entity, WORLD_TREE);
-      const place = ctx.deps.world.projection.keyOf(root.entity);
+    for (const root of dirtyRoots(viewportChanged)) reconcileDirtyRoot(root);
 
-      if (place !== undefined) root.name = place.projection;
-
-      if (tree !== undefined) root.tree = tree.node as DescriptionNode;
-
-      root.dirty = false;
-
-      if (!modules.layout.loaded()) {
-        root.dirty = true;
-
-        continue;
-      }
-
-      try {
-        reconcileRoot(root);
-      } catch (error) {
-        ctx.log.error("ui:root-failed", { root: root.name }, asError(error));
-      }
-    }
-
+    // Move the scroll containers with the finger, then publish the frame's counters.
     modules.layout.scroll(scrollContainers(), lookup);
     writeCounters();
   }

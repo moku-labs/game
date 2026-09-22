@@ -23,7 +23,7 @@ const textDefaults: TextValue = {
  * resolved out of it. A game writes `content`, `style`, `bind` and `anchor`; `resolved` is
  * engine-owned and `ui` and the tests read it.
  */
-export const Text = /*#__PURE__*/ component("Text", textDefaults);
+export const Text = /*#__PURE__*/ component("Text", textDefaults, { owned: ["resolved"] });
 
 /**
  * What `label` takes: the two things every label needs, and the anchor that has a default.

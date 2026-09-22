@@ -10,18 +10,14 @@ import type { Config, State } from "./types";
  * Creates the initial ui state. Nothing is mounted and Yoga is not loaded: `onStart` fills both.
  *
  * @param _ctx - Minimal context. The ui state depends on nothing in it.
- * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns The plugin state.
  * @example
  * ```ts
- * createUiState({ global: {}, config: { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } } })
+ * createUiState({ config: { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } } })
  *   .layout.nodes; // 0
  * ```
  */
-export function createUiState(_ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createUiState(_ctx: { readonly config: Readonly<Config> }): State {
   return { jsx: createJsxState(), styles: createStylesState(), layout: createLayoutState() };
 }

@@ -5,8 +5,6 @@ import { createLifecycleApi } from "../../api";
 import { createLifecycleState } from "../../state";
 import type { Api, Config, Events, LifecycleCtx, PauseReason } from "../../types";
 
-const global = { orientation: "portrait", referenceSide: 1080 };
-
 type EmitSpy = Mock<(name: "lifecycle:changed", payload: Events["lifecycle:changed"]) => void>;
 
 type Harness = {
@@ -22,7 +20,7 @@ function createHarness(): Harness {
   const emit: EmitSpy = vi.fn();
   const ctx: LifecycleCtx = {
     config,
-    state: createLifecycleState({ global, config }),
+    state: createLifecycleState({ config }),
     emit,
     // Partial mock of the kernel's generic `require`: the lifecycle api resolves `timePlugin` only.
     require: (() => time) as unknown as Require

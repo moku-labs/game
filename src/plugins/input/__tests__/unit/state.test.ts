@@ -12,7 +12,7 @@ const config: Config = {
 
 describe("createInputState", () => {
   it("starts idle with an empty sample queue and no pointer", () => {
-    const state = createInputState({ global: {}, config });
+    const state = createInputState({ config });
 
     expect(state.samples).toEqual([]);
     expect(state.phase).toBe("idle");
@@ -24,7 +24,7 @@ describe("createInputState", () => {
   });
 
   it("starts with a zeroed start point and grab offset and no resources held", () => {
-    const state = createInputState({ global: {}, config });
+    const state = createInputState({ config });
 
     expect(state.start).toEqual({ x: 0, y: 0 });
     expect(state.grabOffset).toEqual({ x: 0, y: 0 });
@@ -35,8 +35,8 @@ describe("createInputState", () => {
   });
 
   it("gives every app its own state", () => {
-    const first = createInputState({ global: {}, config });
-    const second = createInputState({ global: {}, config });
+    const first = createInputState({ config });
+    const second = createInputState({ config });
 
     first.samples.push({ kind: "down", pointerId: 1, clientX: 0, clientY: 0 });
 
@@ -47,15 +47,15 @@ describe("createInputState", () => {
 
 describe("createInputState and the tap listeners", () => {
   it("starts with no tap listener and no wake", () => {
-    const state = createInputState({ global: {}, config });
+    const state = createInputState({ config });
 
     expect(state.tapListeners).toEqual([]);
     expect(state.wake).toBeUndefined();
   });
 
   it("gives every app its own listener list", () => {
-    const first = createInputState({ global: {}, config });
-    const second = createInputState({ global: {}, config });
+    const first = createInputState({ config });
+    const second = createInputState({ config });
 
     first.tapListeners.push(() => undefined);
 

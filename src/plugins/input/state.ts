@@ -8,14 +8,10 @@ import type { Config, State } from "./types";
  * duration starts at zero; the plugin never reads a device clock.
  *
  * @param _ctx - Minimal context.
- * @param _ctx.global - Global framework config.
  * @param _ctx.config - Resolved plugin config.
  * @returns A fresh state, owned by one app.
  */
-export function createInputState(_ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createInputState(_ctx: { readonly config: Readonly<Config> }): State {
   return {
     samples: [],
     phase: "idle",

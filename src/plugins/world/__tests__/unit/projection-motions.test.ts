@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { MotionHandle } from "../../projection/types";
-import type { Item } from "./board";
+import { component } from "../../ecs/define";
+import { projection } from "../../projection/define";
+import type { AnyProjectionSpec, MotionHandle } from "../../projection/types";
+import type { Item, Player } from "./board";
 import {
   BOARD,
   commitItems,
   expectConverged,
+  LAYERS,
   Level,
+  MOUNT_OWNER,
   mountBoard,
   restOfName,
   settleFrames,
@@ -290,6 +294,42 @@ describe("projection motions — the spike cases", () => {
     expect(world.log.warn).toHaveBeenCalledWith(
       "world:view-corrected",
       expect.objectContaining({ projection: BOARD, key: "a", component: "Level" })
+    );
+  });
+
+  it("leaves a field another plugin owns when a view comes to rest or changes", () => {
+    const world = createMockWorld();
+    // `shown` is written by the plugin that draws the caption, never by a view.
+    const Caption = component("Caption", { text: "", shown: "" }, { owned: ["shown"] });
+
+    world.model.player = { items: [{ id: "a", level: 1, x: 0, y: 0 }] } as unknown as Player &
+      Record<string, never>;
+    world.api.projection.setLayers(LAYERS);
+    world.api.projection.register(
+      projection({
+        name: "captions",
+        layer: "board",
+        from: (player: Player) => player.items,
+        key: (item: Item) => item.id,
+        view: (item: Item) => [Caption({ text: String(item.level) }), Level({ level: item.level })],
+        motion: {
+          change: { Level: view => view.tween(Level, { level: 5 }, { ms: 50, ease: "linear" }) }
+        }
+      }) as AnyProjectionSpec
+    );
+    world.start();
+    world.api.projection.mount(["captions"], MOUNT_OWNER);
+
+    const entity = world.api.projection.entityOf("captions", "a") ?? 0;
+
+    world.api.ecs.set(entity, Caption, { shown: "one" });
+    commitItems(world, [{ id: "a", level: 2, x: 0, y: 0 }]);
+    settleFrames(world);
+
+    expect(world.api.ecs.get(entity, Caption)).toEqual({ text: "2", shown: "one" });
+    expect(world.log.warn).not.toHaveBeenCalledWith(
+      "world:view-corrected",
+      expect.objectContaining({ component: "Caption" })
     );
   });
 });

@@ -33,7 +33,7 @@ function createCtx(overrides: Partial<Config> = {}): TimeCtx {
   return {
     global,
     config,
-    state: createTimeState({ global, config }),
+    state: createTimeState({ config }),
     emit: vi.fn(),
     log: createLogMock()
   };

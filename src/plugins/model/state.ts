@@ -11,13 +11,9 @@ import type { Config, State } from "./types";
  * and rolls back together with the transaction that drew it.
  *
  * @param ctx - Minimal context.
- * @param ctx.global - Global framework config.
  * @param ctx.config - Resolved plugin config.
  * @returns The plugin state.
  */
-export function createModelState(ctx: {
-  readonly global: Readonly<Record<string, unknown>>;
-  readonly config: Readonly<Config>;
-}): State {
+export function createModelState(ctx: { readonly config: Readonly<Config> }): State {
   return { store: createStoreState(ctx.config), rng: createRngState() };
 }

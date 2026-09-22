@@ -78,7 +78,7 @@ function createMockLog(): Log.LogApi {
  */
 export function createMockWorld(options: Partial<Config> = {}): MockWorld {
   const config: Config = { settleMs: 350, reconciledEvent: false, ...options };
-  const state = createWorldState({ global: {}, config });
+  const state = createWorldState({ config });
   const log = createMockLog();
   const emitted: Array<{ name: string; payload: unknown }> = [];
   const model: { player: Json; session: Json } = { player: {}, session: {} };

@@ -112,7 +112,7 @@ function createWorld(timeApi: TimeApi, log: Log.LogApi): WorldApi & { clearChang
   const config = { settleMs: 350, reconciledEvent: false };
   const kernel = {
     config,
-    state: createWorldState({ global: {}, config }),
+    state: createWorldState({ config }),
     emit: () => undefined,
     global: {},
     log,
@@ -177,7 +177,7 @@ export function createMockRenderer(
     loadPixi: () => Promise.resolve(pixi.module),
     ...options.config
   };
-  const state = createRendererState({ global: {}, config });
+  const state = createRendererState({ config });
   const log = createMockLog();
   const emitted: Array<{ name: string; payload: unknown }> = [];
   const frames: FrameRegistration[] = [];

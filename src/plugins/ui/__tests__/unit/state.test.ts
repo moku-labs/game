@@ -9,7 +9,7 @@ const config: Config = { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } };
 
 describe("createUiState", () => {
   it("composes one branch per module", () => {
-    const state = createUiState({ global: {}, config });
+    const state = createUiState({ config });
 
     expect(state.jsx.roots.size).toBe(0);
     expect(state.styles.viewport).toBeUndefined();
@@ -17,8 +17,8 @@ describe("createUiState", () => {
   });
 
   it("gives every app its own maps", () => {
-    const first = createUiState({ global: {}, config });
-    const second = createUiState({ global: {}, config });
+    const first = createUiState({ config });
+    const second = createUiState({ config });
 
     first.jsx.byKey.set(1, new Map([["coins", 1]]));
 

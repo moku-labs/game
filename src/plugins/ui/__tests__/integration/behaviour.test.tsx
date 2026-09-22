@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Pointer, Pressed, Tappable, Touchable } from "../../../input/components";
 import { NineSlice, Parent, Shape, Sprite, Transform } from "../../../renderer/components";
 import { Text } from "../../../text/components";
-import { Exiting } from "../../../world/ecs/define";
+import { Exiting, Layer, Order } from "../../../world/ecs/define";
 import { Box, Scroll, UiCounters } from "../../components";
 import { enterOffset, startUiApp, tick } from "../app";
 
@@ -299,7 +299,7 @@ describe("the rich screen", () => {
     await app.stop();
   });
 
-  it("reports a small tap target and a text that overflows in a registered locale", async () => {
+  it("reports a small tap target and a text that overflows in a loaded locale, and skips the rest", async () => {
     const app = await startUiApp();
 
     mount(app, "rich");
@@ -358,13 +358,15 @@ describe("the rest pose of the visual", () => {
     await app.stop();
   });
 
-  it("gives a container a shape when the style names a stroke and none when it names neither", async () => {
+  it("gives a container a visible shape for a stroke and an invisible one when it names neither", async () => {
     const app = await startUiApp();
 
     mount(app, "rich");
 
     expect(app.world.ecs.get(app.ui.find("strokeOnly") ?? 0, Shape)?.stroke).toBe(0x44_44_44);
-    expect(app.world.ecs.has(app.ui.find("pinned") ?? 0, Shape)).toBe(false);
+    // The renderer hangs children under the display object of their parent, so a container
+    // with nothing to draw still carries a shape: sized to its rect, never drawn.
+    expect(app.world.ecs.get(app.ui.find("pinned") ?? 0, Shape)).toMatchObject({ alpha: 0 });
 
     await app.stop();
   });
@@ -402,6 +404,41 @@ describe("root order", () => {
     app.time.step(16);
 
     expect(app.ui.find("coins")).toBe(hudCoins);
+
+    await app.stop();
+  });
+
+  it("puts a root element in the layer of its root, and only the root element", async () => {
+    const app = await startUiApp();
+    const bar = app.world.projection.entityOf("hud", app.ui.tree().key ?? "") ?? 0;
+    const coins = app.ui.find("coins") ?? 0;
+
+    expect(app.world.ecs.get(bar, Layer)).toEqual({ name: "ui" });
+    expect(app.world.ecs.get(bar, Parent)).toBeUndefined();
+    expect(app.world.ecs.get(coins, Layer)).toBeUndefined();
+    expect(app.world.ecs.get(coins, Parent)).toEqual({ entity: bar });
+
+    await app.stop();
+  });
+
+  it("draws a popup root element above the screen roots", async () => {
+    const app = await startUiApp();
+
+    expect(app.flow.gate.answer({ intent: "reward" })).toBe(true);
+    await tick();
+    app.time.step(16);
+    app.time.step(16);
+
+    const reward = app.world.projection.entityOf(
+      "RewardPopup",
+      app.ui.tree().children[0]?.key ?? ""
+    );
+    const bar = app.world.projection.entityOf("hud", app.ui.tree().children[1]?.key ?? "");
+
+    expect(app.world.ecs.get(reward ?? 0, Layer)).toEqual({ name: "ui" });
+    expect(app.world.ecs.get(reward ?? 0, Order)?.value).toBeGreaterThan(
+      app.world.ecs.get(bar ?? 0, Order)?.value ?? 0
+    );
 
     await app.stop();
   });

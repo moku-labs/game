@@ -104,6 +104,7 @@ export type AnyComponent = ComponentType<Record<string, unknown>>;
  *   level: 1
  * });
  * Item({ level: 2 }); // { type: Item, value: { kind: "", level: 2 } }
+ * Item.owned; // []: a projection view writes every field
  * ```
  */
 export type ComponentType<Value extends object> = {
@@ -111,6 +112,8 @@ export type ComponentType<Value extends object> = {
   readonly componentName: string;
   readonly defaults: Readonly<Value>;
   readonly kind: "component";
+  /** Fields a plugin writes and a projection view never does, so a view never corrects them. */
+  readonly owned: readonly string[];
 };
 
 /**

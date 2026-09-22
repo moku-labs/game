@@ -8,7 +8,7 @@ import type { Config } from "../../types";
 
 const config: Config = { settleMs: 350, reconciledEvent: false };
 
-const build = (): ReturnType<typeof createWorldState> => createWorldState({ global: {}, config });
+const build = (): ReturnType<typeof createWorldState> => createWorldState({ config });
 
 describe("createWorldState", () => {
   it("composes one branch per module", () => {
