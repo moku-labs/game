@@ -44,6 +44,14 @@ export const uiStyles = defineTextStyles({
     shadow: { color: ink, dx: 0, dy: 3 }
   },
   "ui.name": { font: "ui.font-display", size: 42, fill: ink, align: "center" },
+  // A label drawn straight on the painted scene ("Подарок дня", "Загрузка…"): cream with a shadow.
+  "ui.caption": {
+    font: "ui.font-display",
+    size: 42,
+    fill: cream,
+    align: "center",
+    shadow: { color: ink, dx: 0, dy: 3 }
+  },
   "ui.body": { font: "ui.font-body", size: 44, fill: ink, align: "center" },
   // The body of a popup: the same voice, wrapped to the width of the parchment.
   "ui.paragraph": { font: "ui.font-body", size: 44, fill: ink, align: "center", wrap: 560 },

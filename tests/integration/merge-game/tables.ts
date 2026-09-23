@@ -24,7 +24,15 @@ export const tables = {
   },
   orders: [
     { needs: [{ chain: "wood", level: 3 }], rewardId: "planks", reward: { coins: 25 }, weight: 1 },
-    { needs: [{ chain: "wood", level: 2 }], rewardId: "logs", reward: { coins: 8 }, weight: 1 },
+    {
+      needs: [
+        { chain: "wood", level: 2 },
+        { chain: "wood", level: 2 }
+      ],
+      rewardId: "logs",
+      reward: { coins: 8 },
+      weight: 1
+    },
     { needs: [{ chain: "wood", level: 4 }], rewardId: "beams", reward: { coins: 60 }, weight: 1 }
   ],
   // Ten minutes per energy point: the generator cooldown is always the nearer timer.
@@ -34,7 +42,15 @@ export const tables = {
 /** The three order slots a new player starts with. The last one reaches the top of the chain. */
 export const startingOrders: Order[] = [
   { id: 0, needs: [{ chain: "wood", level: 3 }], given: [], rewardId: "planks" },
-  { id: 1, needs: [{ chain: "wood", level: 2 }], given: [], rewardId: "logs" },
+  {
+    id: 1,
+    needs: [
+      { chain: "wood", level: 2 },
+      { chain: "wood", level: 2 }
+    ],
+    given: [],
+    rewardId: "logs"
+  },
   { id: 2, needs: [{ chain: "wood", level: 4 }], given: [], rewardId: "beams" }
 ];
 

@@ -96,7 +96,7 @@ export const splashScreen = projection({
         <row key="loadingTrack" style={trackStyle}>
           <row key="loadingFill" style={fillStyle(item.loading)} />
         </row>
-        <text key="loadingLabel" style="ui.body" content={tr("splash.loading")} />
+        <text key="loadingLabel" style="ui.caption" content={tr("splash.loading")} />
       </column>
     </screen>
   )

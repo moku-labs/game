@@ -127,14 +127,14 @@ export function visualOf(element: Element): AnyComponentValue[] {
 
   const filled = style.fill !== undefined || style.stroke !== undefined;
   const invisible = isContainer(type) && !filled;
-  const strokeOnly = style.fill === undefined && style.stroke !== undefined;
 
   return [
     Shape({
       w: rect.w,
       h: rect.h,
       fill: style.fill ?? Shape.defaults.fill,
-      fillAlpha: strokeOnly ? 0 : Shape.defaults.fillAlpha,
+      // No `fill` paints nothing inside: a stroke-only ring, or a button whose label is all it shows.
+      fillAlpha: style.fill === undefined ? 0 : Shape.defaults.fillAlpha,
       alpha: invisible ? 0 : alpha,
       radius: style.radius ?? 0,
       stroke: style.stroke ?? Shape.defaults.stroke,

@@ -271,7 +271,7 @@ function pillStyle(width: number) {
 }
 
 /** The two pills of the HUD: the coins take more room than the energy. */
-const pillStyles = { wide: pillStyle(300), narrow: pillStyle(250) } as const;
+const pillStyles = { wide: pillStyle(320), narrow: pillStyle(300) } as const;
 
 /** What a HUD pill takes. */
 export type HudPillProps = {
@@ -422,7 +422,7 @@ function hungRopeStyle(side: "left" | "right", width: number) {
 const closeStyle = defineStyle({
   position: "absolute",
   top: -40,
-  right: -40,
+  right: -20,
   width: 112,
   height: 112,
   radius: 56,

@@ -27,23 +27,23 @@ export const tabStyle = defineStyle({
 export const volumeRow = defineStyle({
   direction: "row",
   align: "center",
-  gap: 10,
+  gap: 8,
   height: 140
 });
 
 /** The note or the speaker at the left of a row. */
-export const rowIcon = defineStyle({ width: 64, height: 64 });
+export const rowIcon = defineStyle({ width: 56, height: 56 });
 
 /** The name of the bus, one fixed width, so the bars of both rows line up. */
-export const rowName = defineStyle({ width: 190, height: 60, justify: "center" });
+export const rowName = defineStyle({ width: 220, height: 60, justify: "center" });
 
 /** The percent at the right end of a row, one fixed width for the same reason. */
-export const rowPercent = defineStyle({ width: 140, height: 60, justify: "center" });
+export const rowPercent = defineStyle({ width: 116, height: 60, justify: "center" });
 
 /** The − and the + of a row: small square planks with the states of every control. */
 export const stepStyle = defineStyle({
-  width: 104,
-  height: 104,
+  width: 88,
+  height: 88,
   align: "center",
   justify: "center",
   nineSlice: "ui.button-wood",
@@ -60,14 +60,14 @@ export const barTrack = defineStyle({
   align: "center",
   justify: "center",
   gap: 4,
-  width: 216,
+  width: 184,
   height: 64,
   nineSlice: "ui.bar-track"
 });
 
 /** One segment of the bar: honey when lit, walnut when not. */
 const segment = {
-  width: 14,
+  width: 12,
   height: 36,
   radius: 4,
   stroke: theme.color.ink,
