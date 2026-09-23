@@ -11,6 +11,8 @@
  */
 import "./dev";
 import { createApp } from "@moku-labs/game";
+import { commands, run } from "@moku-labs/game/control";
+import { read, sources, watch } from "@moku-labs/game/inspect";
 import { mainFlow } from "../flows/main";
 import { screenPlugins, volumesOf } from "../game";
 import { startingSession } from "../state";
@@ -55,6 +57,9 @@ const app = createApp({
 
 // The e2e station drives the page through this handle: `game.input.drag(...)`, `game.flow.state()`.
 Reflect.set(globalThis, "game", app);
+
+// The editor reaches the game through the doors; e2e scripts use the same handle.
+Reflect.set(globalThis, "doors", { read, watch, sources, run, commands });
 
 // Reduced motion follows the system setting, also when the player changes it while the page runs.
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
