@@ -60,6 +60,20 @@ export function applyGive(player: Player, input: GiveInput, rng: Rng): GiveOutco
 }
 
 /**
+ * The item a give delivers, as an animation target: it flies from its cell into the card.
+ *
+ * @param input - The give.
+ * @returns The view of the item on the board.
+ * @example
+ * ```ts
+ * deliveredItemOf({ item: "i1", order: 0 }); // { projection: "board.items", key: "i1" }
+ * ```
+ */
+export function deliveredItemOf(input: GiveInput): Anim.Target {
+  return { projection: "board.items", key: input.item };
+}
+
+/**
  * The order card that shows an order, as an animation target: the "Готово!" stamp lands on it.
  * Read before the give, because a finished order hands its slot to the next one.
  *

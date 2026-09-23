@@ -8,12 +8,12 @@ import { toastBoardFull } from "../features/board/toast";
 import { defineFeature } from "../kit";
 import { mergeBurst, sawmillTap } from "./animations";
 import { Highlighted, Item } from "./components";
-import { boardCells, boardGenerators, boardItems } from "./projections";
+import { boardCells, boardGenerators, boardItems, boardSelection } from "./projections";
 import { boardScene } from "./scene";
 import { highlightLegal } from "./systems";
 
 /**
- * The board on the screen: one scene, three projections, one system, two components, the
+ * The board on the screen: one scene, four projections, one system, two components, the
  * animations of the board, and the bundle that carries their pictures. A game composes it next to `...screen`; a headless test
  * leaves it out and the same graph plays on.
  *
@@ -22,7 +22,7 @@ import { highlightLegal } from "./systems";
  */
 export const boardView = defineFeature("boardScreen", {
   scenes: [boardScene],
-  projections: [boardCells, boardItems, boardGenerators],
+  projections: [boardCells, boardSelection, boardItems, boardGenerators],
   systems: [highlightLegal],
   components: [Item, Highlighted],
   animations: [toastBoardFull, mergeBurst, sawmillTap],

@@ -1,25 +1,31 @@
 /**
- * @file The three projections of the board: the grid, the items and the generator. Each turns
- * keyed rows of the save into entities, and every gesture is a component of the view — the drop
- * target names the intent, so this game writes no drag code.
+ * @file The four projections of the board: the grid, the selection ring, the items and the
+ * generator. Each turns keyed rows of the save or the session into entities, and every gesture is
+ * a component of the view — the drop target names the intent, so this game writes no drag code.
  *
- * The board slot of the HUD hosts all three, so every view is drawn in the slot's own space
- * (0..970) and scales with it. `Order` sorts them inside the slot: cells, then the generator, then
- * the items.
+ * The board slot of the HUD hosts all four, so every view is drawn in the slot's own space
+ * (0..970) and scales with it. `Order` sorts them inside the slot: cells, then the selection ring,
+ * then the generator, then the items.
  */
-import { Draggable, DropTarget, Order, Tappable, Transform } from "@moku-labs/game";
+import { Draggable, DropTarget, Order, Shape, Tappable, Transform } from "@moku-labs/game";
 import type { AssetKey } from "../generated/assets";
 import { NineSlice, projection, Sprite } from "../kit";
 import type { CellId, GeneratorTable } from "../rules";
-import type { Player } from "../state";
+import type { Player, Session } from "../state";
 import { tables } from "../tables";
 import { Item } from "./components";
 import { pictureOf } from "./items";
+import type { BoardCell } from "./layout";
 import { cellBox, cellsOf, itemSize } from "./layout";
 import { itemLevelUp, itemMergeInto, itemPopIn, itemSlideTo } from "./motions";
 
-/** Draw order inside the board slot: the grass under the generator, the generator under the items. */
-const depth = { cells: 0, generators: 1, items: 2 } as const;
+/**
+ * Draw order inside the board slot: the grass, the selection ring on it, the generator, the items.
+ */
+const depth = { cells: 0, selection: 1, generators: 2, items: 3 } as const;
+
+/** The selection ring (design §6 F9): a honey stroke along the rim of the cell, round like the grass. */
+const ring = { color: 0xff_c2_33, width: 6, radius: 36 } as const;
 
 /** The generator table under the loose key type, so an id read from a save can be looked up. */
 const generatorTable: GeneratorTable = tables.generators;
@@ -90,6 +96,34 @@ export const boardCells = projection({
       NineSlice({ texture: "board.cell", width: box.size, height: box.size }),
       Transform({ x: box.x, y: box.y }),
       Order({ value: depth.cells })
+    ];
+  }
+});
+
+/**
+ * The selection ring (design §6 F9): a honey stroke around the cell of the thing the player
+ * selected, none while nothing is. The fill is not drawn, so the grass shows through the ring.
+ */
+export const boardSelection = projection({
+  name: "board.selection",
+  layer: "cells",
+  from: (_player: Player, session: Session): BoardCell[] =>
+    session.selected === "" ? [] : [{ id: session.selected }],
+  key: cell => cell.id,
+  view: cell => {
+    const box = cellBox(cell.id);
+
+    return [
+      Shape({
+        w: box.size,
+        h: box.size,
+        fillAlpha: 0,
+        stroke: ring.color,
+        strokeWidth: ring.width,
+        radius: ring.radius
+      }),
+      Transform({ x: box.x, y: box.y }),
+      Order({ value: depth.selection })
     ];
   }
 });

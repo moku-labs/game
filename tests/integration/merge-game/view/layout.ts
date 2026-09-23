@@ -1,7 +1,7 @@
 /**
  * @file Where a cell sits inside the board slot. The rules address a cell as `c<col>_<row>` and
  * know nothing about pixels; this file turns an address into a box of the slot's own space. The
- * slot is a ui element that hosts the three board projections, so these are local units (0..970):
+ * slot is a ui element that hosts the four board projections, so these are local units (0..970):
  * `ui` lays the slot out on the screen and scales it to fit, and nothing here knows the screen.
  */
 import type { Board, CellId } from "../rules";

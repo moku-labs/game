@@ -245,7 +245,9 @@ describe("screen-merge — the board as entities", () => {
     app.time.step(16);
 
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 2 });
+    // The tap also selects the sawmill: its honey ring is one more view of the cells layer.
+    expect(app.world.projection.entitiesOf("board.selection")).toHaveLength(1);
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9 + 1, items: 2 });
 
     await app.stop();
   });
