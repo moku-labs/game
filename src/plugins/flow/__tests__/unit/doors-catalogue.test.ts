@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { commands, sources } from "../../doors/catalogue";
+import { commands } from "../../doors/commands";
+import { sources } from "../../doors/sources";
 
 // ---------------------------------------------------------------------------
 // Unit test: the base catalogue of the doors — every descriptor is listed

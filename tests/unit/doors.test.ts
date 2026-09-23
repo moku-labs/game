@@ -2,7 +2,8 @@ import * as engine from "@moku-labs/game";
 import * as control from "@moku-labs/game/control";
 import * as inspect from "@moku-labs/game/inspect";
 import { describe, expect, it } from "vitest";
-import { commands, sources } from "../../src/plugins/flow/doors/catalogue";
+import { commands } from "../../src/plugins/flow/doors/commands";
+import { sources } from "../../src/plugins/flow/doors/sources";
 
 // ---------------------------------------------------------------------------
 // Unit test: the two editor doors resolve by their package subpaths and

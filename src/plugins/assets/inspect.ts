@@ -7,7 +7,8 @@ import type { HeadlessApp } from "../flow/headless";
 import type { Api } from "./types";
 
 /**
- * The texture memory in use, the budget and one entry per loaded bundle, sorted by name.
+ * The texture memory in use, the budget and one entry per loaded bundle, sorted by name. Read
+ * every frame: a bundle loads asynchronously, without a model commit.
  *
  * @example
  * ```ts
@@ -20,6 +21,6 @@ export const assetsSource = defineSource({
   id: "game.assets",
   title: "Assets",
   input: {},
-  changes: "commit",
+  changes: "frame",
   read: (app: HeadlessApp & { readonly assets: Api }) => app.assets.usage()
 });
