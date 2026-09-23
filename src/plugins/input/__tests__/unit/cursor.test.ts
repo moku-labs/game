@@ -50,7 +50,6 @@ describe("the cursor over a control", () => {
   });
 
   it.each([
-    ["LocalWrite", [Touchable(), LocalWrite({ patch: { tab: "audio" } })]],
     ["Draggable", [Draggable({})]],
     ["Pressable", [Pressable({ intent: "info" })]],
     ["Swipeable", [Swipeable({ intent: "swap" })]]
@@ -60,6 +59,53 @@ describe("the cursor over a control", () => {
     hover(mock, 50, 50);
 
     expect(canvas.style.cursor).toBe("pointer");
+  });
+
+  it("counts a view with a component another plugin registered as a control", () => {
+    const { mock, canvas } = screen([Touchable(), LocalWrite({ patch: { tab: "audio" } })]);
+
+    createInputApi(mock.ctx).controls.add(LocalWrite);
+    hover(mock, 50, 50);
+
+    expect(canvas.style.cursor).toBe("pointer");
+  });
+
+  it("does not count a component nobody registered as a control", () => {
+    const { mock, canvas } = screen([Touchable(), LocalWrite({ patch: { tab: "audio" } })]);
+
+    hover(mock, 50, 50);
+
+    expect(mock.state.pointerOver).toBeDefined();
+    expect(canvas.style.cursor).toBe("crosshair");
+  });
+
+  it("stops counting a registered component once its remover ran", () => {
+    const { mock, canvas } = screen([Touchable(), LocalWrite({ patch: { tab: "audio" } })]);
+    const off = createInputApi(mock.ctx).controls.add(LocalWrite);
+
+    hover(mock, 50, 50);
+    off();
+    mock.frame();
+
+    expect(canvas.style.cursor).toBe("");
+  });
+
+  it("keeps a component registered twice until both removers ran", () => {
+    const { mock, canvas } = screen([Touchable(), LocalWrite({ patch: { tab: "audio" } })]);
+    const { controls } = createInputApi(mock.ctx);
+    const first = controls.add(LocalWrite);
+    const second = controls.add(LocalWrite);
+
+    first();
+    first();
+    hover(mock, 50, 50);
+
+    expect(canvas.style.cursor).toBe("pointer");
+
+    second();
+    mock.frame();
+
+    expect(canvas.style.cursor).toBe("");
   });
 
   it("keeps the page cursor over a view that is only Touchable", () => {

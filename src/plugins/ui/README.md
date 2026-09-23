@@ -20,6 +20,7 @@ rect from one Yoga solve per change.
 Config: `{ tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } }`. Emits nothing, listens to
 nothing. Depends on `time`, `flow`, `world`, `renderer`, `input`, `anim`, `i18n`, `text`.
 Yoga arrives through `await import("yoga-layout/load")` in `onStart`; nothing solves before it.
+`onStart` also registers `LocalWrite` through `input.controls.add`, so the cursor shows a hand over a local-state button; `onStop` removes it.
 
 ## What an element is drawn with
 

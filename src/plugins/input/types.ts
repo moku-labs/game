@@ -8,7 +8,7 @@ import type { Require } from "../../config";
 import type { Api as FlowApi } from "../flow/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
-import type { Entity, Api as WorldApi } from "../world/types";
+import type { AnyComponentType, Entity, Api as WorldApi } from "../world/types";
 
 /**
  * A point in reference units, as `renderer.viewport.toReference` answers it.
@@ -117,8 +117,9 @@ export type Config = {
   heldScale: number;
   /**
    * CSS cursors of the canvas. `control` shows while a mouse or a pen rests on a view that
-   * carries `Tappable`, `LocalWrite`, `Draggable`, `Pressable` or `Swipeable`; `idle` shows
-   * everywhere else. `""` hands the cursor back to the page's own style.
+   * carries `Tappable`, `Draggable`, `Pressable`, `Swipeable` or a component another plugin
+   * registered through `controls.add`, such as ui's `LocalWrite`; `idle` shows everywhere else.
+   * `""` hands the cursor back to the page's own style.
    */
   cursor: { control: string; idle: string };
 };
@@ -161,6 +162,8 @@ export type State = {
   wake: (() => void) | undefined;
   /** The cursor last written on the attached canvas; `undefined` while nothing was written. */
   cursor: string | undefined;
+  /** Component types other plugins registered through `controls.add`, once per registration. */
+  controls: AnyComponentType[];
 };
 
 /**
@@ -270,6 +273,28 @@ export type InputApi = {
    * ```
    */
   cursor(): string;
+
+  /**
+   * The components that make a view a control besides input's own: the cursor shows
+   * `config.cursor.control` over a view that carries one of them.
+   */
+  controls: {
+    /**
+     * Registers a component type of another plugin as a control. A type registered twice stays
+     * a control until both removers ran.
+     *
+     * @param component - The component or tag type that makes a view answer a press.
+     * @returns The remover; call it to take the registration back.
+     * @example
+     * ```ts
+     * // ui counts its local-state buttons as controls, so the mouse over a tab shows a hand.
+     * const off = ctx.require(inputPlugin).controls.add(LocalWrite);
+     * app.input.cursor(); // "pointer" while the mouse rests on the Audio tab
+     * off(); // in onStop
+     * ```
+     */
+    add(component: AnyComponentType): () => void;
+  };
 };
 
 /**

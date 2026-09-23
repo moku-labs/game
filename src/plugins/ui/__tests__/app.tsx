@@ -518,12 +518,12 @@ export async function tick(times = 60): Promise<void> {
 }
 
 /**
- * Starts the screen set plus `ui` headless and mounts the HUD.
+ * Builds the screen set plus `ui` with the fixture's configs, not started yet.
  *
- * @returns The started app, one frame in.
+ * @returns The app, before `start()`.
  */
-export async function startUiApp() {
-  const app = createApp({
+export function createUiApp() {
+  return createApp({
     plugins: [
       worldPlugin,
       rendererPlugin,
@@ -544,6 +544,15 @@ export async function startUiApp() {
       model: { initialPlayer: { coins: 7, tab: "audio" }, initialSession: { visits: 0 }, seed: 1 }
     }
   });
+}
+
+/**
+ * Starts the screen set plus `ui` headless and mounts the HUD.
+ *
+ * @returns The started app, one frame in.
+ */
+export async function startUiApp() {
+  const app = createUiApp();
 
   await app.start();
   app.flow.run().catch(() => undefined);

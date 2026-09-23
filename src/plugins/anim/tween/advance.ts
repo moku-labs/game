@@ -50,9 +50,13 @@ function offsetsOf(actx: AnimCtx, key: string): Map<number, number> {
  * @returns The sum, `0` when no additive track drives the field.
  */
 function sumOffsets(actx: AnimCtx, key: string): number {
+  const offsets = actx.state.offsets.get(key);
+
+  if (offsets === undefined) return 0;
+
   let sum = 0;
 
-  for (const delta of actx.state.offsets.get(key)?.values() ?? []) sum += delta;
+  for (const delta of offsets.values()) sum += delta;
 
   return sum;
 }
