@@ -240,6 +240,13 @@ export type Line = { runs: Run[]; width: number };
 export type TextLayout = { lines: Line[]; width: number; height: number };
 
 /**
+ * What one label container was last filled from: the style object and the laid-out block. An
+ * update with the same style object, the same anchor and the same lines and runs writes the new
+ * text and positions into the objects already there.
+ */
+export type DrawnLabel = { style: TextStyle; layout: TextLayout };
+
+/**
  * A dev warning that is written once per key. Pure modules take it as an argument, so nothing
  * below the plugin context reaches the log itself.
  *
@@ -312,6 +319,8 @@ export type State = {
   measured: Map<Entity, Size>;
   /** Layout per `style + resolved`, oldest dropped first. */
   cache: Map<string, TextLayout>;
+  /** What every live label container was last filled from, by container. */
+  drawn: WeakMap<object, DrawnLabel>;
   /** Entities to re-resolve in the next layout phase. */
   dirty: Set<Entity>;
   /** Warning keys already written, so a style, a tag, a glyph or a font warns once. */

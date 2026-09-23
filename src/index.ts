@@ -63,7 +63,7 @@
  * | text | missingGlyph | "□" |
  * | ui | tapTargetPt | 44 |
  * | ui | breakpoints | { tall: 2, wide: 1.5 } |
- * | ui | focusRing | { stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 } |
+ * | ui | focusRing | { stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }; shallow merge: a game that sets `focusRing` gives all six fields |
  * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |

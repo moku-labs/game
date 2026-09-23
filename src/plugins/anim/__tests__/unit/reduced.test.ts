@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type } from "../../../flow/runner/define";
 import { Transform } from "../../../renderer/components";
 import { defineMotion } from "../../motion";
@@ -76,10 +76,13 @@ describe("anim reduced motion — the switch", () => {
 
     expect(off.api.reducedMotion()).toBe(false);
     expect(on.api.reducedMotion()).toBe(true);
-    expect(on.api.reducedMotion(false)).toBe(false);
+    expect(on.api.setReducedMotion(false)).toBeUndefined();
     expect(on.api.reducedMotion()).toBe(false);
     expect(on.state.reducedMotion).toBe(false);
-    expect(off.api.reducedMotion(true)).toBe(true);
+
+    off.api.setReducedMotion(true);
+
+    expect(off.api.reducedMotion()).toBe(true);
   });
 
   it("keeps the live value in state, seeded from the config", () => {
@@ -201,7 +204,7 @@ describe("anim reduced motion — loops", () => {
 
     expect(poseOf(probe).rotation).toBeCloseTo(0, 6);
 
-    probe.mock.api.reducedMotion(true);
+    probe.mock.api.setReducedMotion(true);
     stepProbe(probe, 16);
 
     expect(poseOf(probe).rotation).toBe(0.1);
@@ -210,7 +213,7 @@ describe("anim reduced motion — loops", () => {
 
     expect(poseOf(probe).rotation).toBe(0.1);
 
-    probe.mock.api.reducedMotion(false);
+    probe.mock.api.setReducedMotion(false);
     stepProbe(probe, 250);
 
     expect(poseOf(probe).rotation).toBeCloseTo(0, 6);
@@ -225,11 +228,75 @@ describe("anim reduced motion — loops", () => {
     const entity = spawnTestEntity(mock, [Transform()]);
 
     driver.track(entity, Transform, { x: 100 }, { ms: 100, ease: "linear" }, open);
-    mock.api.reducedMotion(true);
+    mock.api.setReducedMotion(true);
     driver.track(entity, Transform, { y: 100 }, { ms: 100, ease: "linear" }, open);
     mock.frame(50);
 
     expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 50, y: 100 });
     expect(mock.api.active()).toBe(1);
+  });
+});
+
+describe("anim reduced motion — a held loop writes once", () => {
+  it("writes its first key when the hold begins, not every frame, and again after it walked", () => {
+    const mock = createMockAnim({ reducedMotion: true });
+    const driver = createDriver(mock.actx);
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const set = vi.spyOn(mock.world.ecs, "set");
+    const writes = (): number => set.mock.calls.filter(([target]) => target === entity).length;
+
+    mock.start();
+    driver.track(
+      entity,
+      Transform,
+      { x: 100 },
+      { ms: 400, ease: "linear", repeat: "forever" },
+      open
+    );
+
+    for (let frame = 0; frame < 5; frame += 1) mock.frame(16);
+
+    expect(writes()).toBe(1);
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(0);
+
+    // Off: the loop walks from its first key and writes every frame.
+    mock.api.setReducedMotion(false);
+    mock.frame(100);
+    mock.frame(100);
+
+    expect(writes()).toBe(3);
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(50);
+
+    // On again: one write back to the first key, then nothing.
+    mock.api.setReducedMotion(true);
+
+    for (let frame = 0; frame < 5; frame += 1) mock.frame(16);
+
+    expect(writes()).toBe(4);
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(0);
+    expect(mock.api.active()).toBe(1);
+  });
+
+  it("still ends a held loop whose entity died", () => {
+    const mock = createMockAnim({ reducedMotion: true });
+    const driver = createDriver(mock.actx);
+    const entity = spawnTestEntity(mock, [Transform()]);
+
+    mock.start();
+
+    const handle = driver.track(
+      entity,
+      Transform,
+      { x: 100 },
+      { ms: 400, ease: "linear", repeat: "forever" },
+      open
+    );
+
+    mock.frame(16);
+    mock.world.ecs.despawn(entity);
+    mock.frame(16);
+
+    expect(handle.active()).toBe(false);
+    expect(mock.api.active()).toBe(0);
   });
 });

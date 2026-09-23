@@ -131,11 +131,11 @@ input.onTap((key: string) => key.length);
 
 expectTypeOf<KeyInput>().toEqualTypeOf<{ key: string; shift: boolean }>();
 expectTypeOf(input.onKey).toEqualTypeOf<(fn: KeyListener) => () => void>();
-expectTypeOf(input.key("Tab", { shift: true })).toEqualTypeOf<boolean>();
+expectTypeOf(input.pressKey("Tab", { shift: true })).toEqualTypeOf<boolean>();
 
 input.onKey(key => key.key === "Escape");
 input.onKey(() => undefined);
-input.key("Enter");
+input.pressKey("Enter");
 
 // @ts-expect-error — shift is a flag, not a key name
-input.key("Tab", { shift: "Shift" });
+input.pressKey("Tab", { shift: "Shift" });

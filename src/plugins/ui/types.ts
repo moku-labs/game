@@ -66,7 +66,10 @@ export type Config = {
   tapTargetPt: number;
   /** `when` flags: `tall` when height / width is at least `tall`, `wide` the other way round. */
   breakpoints: { tall: number; wide: number };
-  /** The ring drawn around the control the keyboard focused. */
+  /**
+   * The ring drawn around the control the keyboard focused. Shallow merge: a game that sets
+   * `focusRing` gives all six fields.
+   */
   focusRing: FocusRing;
 };
 

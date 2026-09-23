@@ -1,7 +1,7 @@
 /**
  * @file input plugin — the keyboard. One `keydown` listener on `window` while the canvas is
  * attached turns a DOM key into a `KeyInput` and hands it to the `onKey` listeners. Input knows
- * no focus and no key meaning; `app.input.key` runs the very same listeners headless.
+ * no focus and no key meaning; `app.input.pressKey` runs the very same listeners headless.
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { KeyInput, KeyListener, State } from "./types";

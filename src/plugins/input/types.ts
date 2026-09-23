@@ -95,7 +95,7 @@ export type KeyInput = { key: string; shift: boolean };
 
 /**
  * What `onKey` registers. Returning `true` marks the key handled: input then calls
- * `preventDefault()` on the DOM event, and `app.input.key` answers `true`.
+ * `preventDefault()` on the DOM event, and `app.input.pressKey` answers `true`.
  *
  * @example
  * ```ts
@@ -318,12 +318,12 @@ export type InputApi = {
    * @example
    * ```ts
    * // A headless test walks the settings popup backwards and closes it.
-   * app.input.key("Tab", { shift: true }); // true: ui moved the focus to the previous control
-   * app.input.key("Escape"); // true: ui tapped the popup's close button
-   * app.input.key("q"); // false: no listener handles it
+   * app.input.pressKey("Tab", { shift: true }); // true: ui moved the focus to the previous control
+   * app.input.pressKey("Escape"); // true: ui tapped the popup's close button
+   * app.input.pressKey("q"); // false: no listener handles it
    * ```
    */
-  key(key: string, options?: { shift?: boolean }): boolean;
+  pressKey(key: string, options?: { shift?: boolean }): boolean;
 
   /**
    * The CSS cursor input set on the canvas: `config.cursor.control` while a mouse or a pen rests

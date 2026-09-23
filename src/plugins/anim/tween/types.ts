@@ -13,9 +13,10 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
  * @example
  * ```ts
  * const track: Track = {
- *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 }, ms: 350, ease: "out",
- *   delayMs: 0, elapsed: 0, from: undefined, muted: () => new Set(), additive: false,
- *   driven: false, bornFrame: 4, ended: false, segments: undefined, repeatsLeft: 0
+ *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 },
+ *   keys: { x: "1048576:Transform:x" }, ms: 350, ease: "out", delayMs: 0, elapsed: 0,
+ *   from: undefined, muted: () => new Set(), additive: false, driven: false, bornFrame: 4,
+ *   ended: false, segments: undefined, repeatsLeft: 0, held: false
  * };
  * ```
  */
@@ -25,6 +26,11 @@ export type Track = {
   readonly component: AnyComponent;
   /** The target fields. Retarget deletes the fields a newer absolute track took over. */
   to: Record<string, number>;
+  /**
+   * The key of the owner, bases and offsets tables per field, built once when the track starts.
+   * It keeps a field `to` lost, which nothing reads again.
+   */
+  readonly keys: Readonly<Record<string, string>>;
   readonly ms: number;
   readonly ease: Ease;
   readonly delayMs: number;
@@ -48,6 +54,11 @@ export type Track = {
    * for a loop (`repeat: "forever"`), which never ends by itself.
    */
   repeatsLeft: number;
+  /**
+   * True while a loop stands on its first key and has written it: the hold writes once, and the
+   * walk clears it, so the next hold writes the first key again.
+   */
+  held: boolean;
 };
 
 /**

@@ -1,7 +1,7 @@
 /**
  * @file The keyboard of Timber Town, headless (design §4): Escape closes a dismissable popup
  * (Settings, Out of energy, Daily gift) and never Reward or Confirm; Tab walks the controls of
- * the top popup and Enter taps the focused one. Keys go in through `app.input.key`, the same
+ * the top popup and Enter taps the focused one. Keys go in through `app.input.pressKey`, the same
  * listeners a `keydown` on the page reaches.
  */
 
@@ -38,7 +38,7 @@ const emptyBar: Player = {
  * @returns Whether a listener handled the key.
  */
 async function press(game: Game, key: string, shift = false): Promise<boolean> {
-  const handled = game.app.input.key(key, { shift });
+  const handled = game.app.input.pressKey(key, { shift });
 
   await tick();
   await frames(game, 30);

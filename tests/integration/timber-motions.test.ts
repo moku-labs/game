@@ -351,13 +351,13 @@ describe("timber-motions — the cards on the rope (F10)", () => {
     const game = await startOnBoard(player);
 
     await frames(game, 20);
-    game.app.anim.reducedMotion(true);
+    game.app.anim.setReducedMotion(true);
 
     const still = await tiltsOf(game, swingFrames);
 
     expect(still.map(tilts => widest(tilts))).toEqual([0, 0, 0]);
 
-    game.app.anim.reducedMotion(false);
+    game.app.anim.setReducedMotion(false);
 
     const moving = await tiltsOf(game, swingFrames);
 

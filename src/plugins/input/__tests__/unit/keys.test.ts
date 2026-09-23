@@ -165,7 +165,7 @@ describe("the key listener lifecycle", () => {
   });
 });
 
-describe("app.input.onKey and app.input.key", () => {
+describe("app.input.onKey and app.input.pressKey", () => {
   it("runs the same listeners headless and reports whether one handled the key", () => {
     const mock = createMockInput();
     const api = createInputApi(mock.ctx);
@@ -176,8 +176,8 @@ describe("app.input.onKey and app.input.key", () => {
       return key.key === "Enter";
     });
 
-    expect(api.key("Enter")).toBe(true);
-    expect(api.key("Tab", { shift: true })).toBe(false);
+    expect(api.pressKey("Enter")).toBe(true);
+    expect(api.pressKey("Tab", { shift: true })).toBe(false);
     expect(seen).toEqual([
       { key: "Enter", shift: false },
       { key: "Tab", shift: true }
@@ -185,6 +185,6 @@ describe("app.input.onKey and app.input.key", () => {
 
     off();
 
-    expect(api.key("Enter")).toBe(false);
+    expect(api.pressKey("Enter")).toBe(false);
   });
 });

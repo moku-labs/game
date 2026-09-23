@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Transform } from "../../../renderer/components";
 import type { Entity, TweenDriver } from "../../../world/types";
 import { Animation } from "../../components";
-import { advanceTracks, beginFrame } from "../../tween/advance";
+import { advanceTracks, beginFrame, fieldKey, startTrack } from "../../tween/advance";
 import { createDriver } from "../../tween/driver";
 import type { MockAnim } from "./mock-anim";
 import { createMockAnim, spawnTestEntity } from "./mock-anim";
@@ -215,6 +215,23 @@ describe("anim/tween driver", () => {
 
     expect(mock.log.warn).toHaveBeenCalledTimes(1);
     expect(mock.log.warn).toHaveBeenCalledWith("anim:too-many-tracks", { tracks: 2, maxTracks: 1 });
+  });
+
+  it("books the key of every field once, when the track starts", () => {
+    const { mock, entity } = setup();
+    const track = startTrack(
+      mock.actx,
+      entity,
+      Transform,
+      { x: 10 },
+      { ms: 100, segments: [{ at: 1, to: { y: 5 } }] },
+      open
+    );
+
+    expect(track.keys).toEqual({
+      x: fieldKey(entity, "Transform", "x"),
+      y: fieldKey(entity, "Transform", "y")
+    });
   });
 
   it("hands back an inactive handle for a target with no numeric field", () => {

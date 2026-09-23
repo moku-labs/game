@@ -20,7 +20,7 @@ const config: Config = { maxTracks: 2000, reducedMotion: false };
 
 /**
  * Anim plugin: `app.anim.play(animation, slots)`, `app.anim.finishAll()`,
- * `app.anim.reducedMotion(on)`.
+ * `app.anim.setReducedMotion(on)`.
  *
  * @example
  * ```ts

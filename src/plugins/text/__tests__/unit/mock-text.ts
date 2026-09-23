@@ -39,11 +39,14 @@ export type FakeObject = {
   tint: number;
   alpha: number;
   texture: PixiTexture | undefined;
+  /** What a BitmapText shows: the `text` it was built with, then what an update wrote. */
+  text: unknown;
   options: Record<string, unknown>;
   children: FakeObject[];
   destroyed: boolean;
   destroyOptions: unknown;
   addChild(child: FakeObject): FakeObject;
+  getChildAt(index: number): FakeObject;
   removeChildren(): FakeObject[];
   destroy(options?: unknown): void;
 };
@@ -76,12 +79,21 @@ function makeObject(kind: string, options: Record<string, unknown> = {}): FakeOb
     tint: 0xff_ff_ff,
     alpha: 1,
     texture: undefined,
+    text: options.text,
     options,
     children: [],
     destroyed: false,
     destroyOptions: undefined,
     addChild: (child: FakeObject): FakeObject => {
       object.children.push(child);
+
+      return child;
+    },
+    getChildAt: (index: number): FakeObject => {
+      const child = object.children[index];
+
+      // Pixi throws on an index past the children too.
+      if (child === undefined) throw new RangeError(`getChildAt: index ${index} does not exist.`);
 
       return child;
     },

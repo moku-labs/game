@@ -229,7 +229,7 @@ export type Config = {
   maxTracks: number;
   /**
    * Start value of reduced motion: every track but a loop takes 0 ms and every loop stands on
-   * its first key. `app.anim.reducedMotion(on)` switches it while the game runs.
+   * its first key. `app.anim.setReducedMotion(on)` switches it while the game runs.
    */
   reducedMotion: boolean;
 };
@@ -370,22 +370,33 @@ export type AnimApi = {
   active(): number;
 
   /**
-   * Reads, and with an argument sets, reduced motion. While it is on, every track started from
-   * then on takes 0 ms: enter and exit, state changes, change and settle motions, drag returns
-   * and timeline tweens land on their target at the next frame, and their marks and sounds still
-   * fire. Every loop stands on its first key, a running one at once.
+   * Whether reduced motion is on. It starts at `Config.reducedMotion` and `setReducedMotion`
+   * switches it.
    *
-   * @param on - The new value; left out, the value is only read.
-   * @returns The value after the call.
+   * @returns True while every new track takes 0 ms and every loop stands on its first key.
    * @example
    * ```ts
-   * // The device asks for less motion: web/main.ts follows the system setting.
+   * // A settings popup shows the switch as the player left it.
    * app.anim.reducedMotion(); // false: the start value of Config.reducedMotion
-   * app.anim.reducedMotion(true); // true: a popup opened now stands in its rest pose next frame
-   * app.anim.reducedMotion(); // true
    * ```
    */
-  reducedMotion(on?: boolean): boolean;
+  reducedMotion(): boolean;
+
+  /**
+   * Switches reduced motion. While it is on, every track started from then on takes 0 ms: enter
+   * and exit, state changes, change and settle motions, drag returns and timeline tweens land on
+   * their target at the next frame, and their marks and sounds still fire. Every loop stands on
+   * its first key, a running one at once. Tracks already running keep their length.
+   *
+   * @param on - True for less motion, false for the full motion.
+   * @example
+   * ```ts
+   * // The player turns on "Less motion" in the settings popup.
+   * app.anim.setReducedMotion(true);
+   * app.anim.reducedMotion(); // true: a popup opened now stands in its rest pose next frame
+   * ```
+   */
+  setReducedMotion(on: boolean): void;
 
   /**
    * Registers a listener called for every mark a timeline reaches, next to the `anim:mark`
