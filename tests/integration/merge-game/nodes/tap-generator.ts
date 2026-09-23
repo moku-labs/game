@@ -7,14 +7,10 @@
  */
 import { play, schedule, type } from "@moku-labs/game";
 import { defineNode } from "../kit";
-import type { GeneratorTable } from "../rules";
 import { rules } from "../rules";
 import { applyRules } from "../state";
 import { tables } from "../tables";
 import { sawmillTap } from "../view/animations";
-
-/** The generator table under the loose key type, so the id a tap carries can be looked up. */
-const generatorTable: GeneratorTable = tables.generators;
 
 export const tapGenerator = defineNode({
   input: type<{ generatorId: string }>(),
@@ -25,7 +21,7 @@ export const tapGenerator = defineNode({
     rejected: type<{ reason: string }>()
   },
   run: async ({ input, player, session, rng, now, fx, out }) => {
-    session.selected = generatorTable[input.generatorId]?.cell ?? "";
+    session.selected = input.generatorId;
 
     const result = rules.tapGenerator(
       player.merge,

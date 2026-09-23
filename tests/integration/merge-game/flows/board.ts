@@ -1,5 +1,6 @@
 /**
  * @file The board as a sub-flow: one rest node the player answers, and one transit node per move.
+ * A tap on an item selects it through `select`, which writes the session and comes straight back.
  * It is left with `orderComplete` when an order was filled, or with `left`. A refused tap of the
  * sawmill says why: `energy` shows the Out of energy popup, `toast` the "board is full" sign. The
  * settings sub-flow hangs off the same rest node, because the gear sits in the HUD of the board.
@@ -13,6 +14,7 @@ import { deliver } from "../nodes/deliver";
 import { energy } from "../nodes/energy";
 import { giveToOrder } from "../nodes/give-to-order";
 import { merge } from "../nodes/merge";
+import { select } from "../nodes/select";
 import { tapGenerator } from "../nodes/tap-generator";
 import { toast } from "../nodes/toast";
 
@@ -20,6 +22,7 @@ export const boardFlow = defineFlow("board", {
   nodes: {
     awaitIntent,
     tapGenerator,
+    select,
     merge,
     giveToOrder,
     deliver,
@@ -33,6 +36,7 @@ export const boardFlow = defineFlow("board", {
   edges: {
     awaitIntent: {
       tap: "tapGenerator",
+      select: "select",
       merge: "merge",
       give: "giveToOrder",
       deliver: "deliver",
@@ -46,6 +50,7 @@ export const boardFlow = defineFlow("board", {
       boardFull: "toast",
       rejected: "awaitIntent"
     },
+    select: { done: "awaitIntent" },
     energy: { watch: "awaitIntent", later: "awaitIntent" },
     toast: { done: "awaitIntent" },
     merge: { done: "awaitIntent", rejected: "awaitIntent" },

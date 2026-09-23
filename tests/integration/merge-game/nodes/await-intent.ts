@@ -3,8 +3,10 @@
  * answer the gate takes names the outcome, and `elapsed` arrives the same way from the clock. It
  * is the node the board scene is shown on; a headless game without the screen ignores the name.
  *
- * `give` is the drag onto an order, `deliver` the order card of the HUD, and `openSettings` the
- * gear next to it: a button of the interface answers this gate like any other gesture.
+ * `select` is the tap on an item, `give` the drag onto an order, `deliver` the order card of the
+ * HUD, and `openSettings` the gear next to it: a button of the interface answers this gate like
+ * any other gesture. An item answers both a tap and a drag: the finger that stays put selects it,
+ * the finger that moves carries it.
  */
 import { type } from "@moku-labs/game";
 import { defineNode } from "../kit";
@@ -14,6 +16,7 @@ export const awaitIntent = defineNode({
   scene: "board",
   outcomes: {
     tap: type<{ generatorId: string }>(),
+    select: type<{ id: string }>(),
     merge: type<{ from: string; to: string }>(),
     give: type<GiveInput>(),
     deliver: type<GiveInput>(),

@@ -38,7 +38,10 @@ export type Session = {
   taps: number;
   /** How far the splash has loaded the bundles Home and the board need, 0..1. */
   loading: number;
-  /** The cell of the thing the player selected on the board, `""` while nothing is. */
+  /**
+   * The id of the thing the player selected on the board, a generator id or an item id, `""`
+   * while nothing is. An id, not a cell: the selection follows an item that rises in a merge.
+   */
   selected: string;
 };
 

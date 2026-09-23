@@ -1,9 +1,9 @@
 /**
  * @file The popups of Timber Town, headless: Settings from Home and from the board, two volume
- * steps on one popup root, Confirm stacked over Settings with Cancel and Reset, the Out of energy
- * popup and its refill, the board-full toast, the daily gift and the reward claim with the coins
- * that fly to the counter. Plain Bun: the renderer is inert, Yoga lays out the real rects, the
- * flow runner and `anim` run for real.
+ * steps on one popup root, the swing in, Confirm stacked over Settings with the recede, Cancel and
+ * Reset, the Out of energy popup with its refill and Later, the board-full toast, the daily gift
+ * and the reward claim with the coins that fly to the counter. Plain Bun: the renderer is inert,
+ * Yoga lays out the real rects, the flow runner and `anim` run for real.
  */
 
 import { NineSlice, Sprite, Tappable, Transform } from "@moku-labs/game";
@@ -100,6 +100,50 @@ describe("timber-popups — Settings", () => {
 
     await game.app.stop();
   });
+
+  it("takes two volume steps from the board on the same popup root", async () => {
+    const game = await startOnBoard(player);
+
+    await tap(game, "settings");
+
+    const root = elementOf(game, "settingsScreen");
+
+    await tap(game, "musicUp");
+    await tap(game, "musicUp");
+
+    expect(playerOf(game).settings.audio.music).toBe(0.8);
+    expect(game.app.flow.state().path).toBe("board/settings/open");
+    expect(elementOf(game, "settingsScreen")).toBe(root);
+    expect(resolvedOf(game, "musicPercent")).toBe("80 %");
+
+    await game.app.stop();
+  });
+
+  it("swings the signboard in from its tilted, small pose to its fitted rest", async () => {
+    const game = await startOnHome(player);
+
+    expect(game.app.input.tap(elementOf(game, "homeSettings"))).toBe(true);
+    await tick();
+    await frames(game, 1);
+
+    const board = elementOf(game, "settingsBoard");
+    const tilts: number[] = [];
+
+    for (let frame = 0; frame < 40; frame += 1) {
+      tilts.push(game.app.world.ecs.get(board, Transform)?.rotation ?? 0);
+      await frames(game, 1);
+    }
+
+    // It starts turned back by up to 0.12 rad around its top edge and comes to rest upright.
+    expect(Math.min(...tilts)).toBeLessThan(-0.06);
+    expect(Math.min(...tilts)).toBeGreaterThanOrEqual(-0.12);
+    expect(game.app.world.ecs.get(board, Transform)).toMatchObject({
+      rotation: 0,
+      scale: nodeOf(game.app.ui.tree(), "settingsBoard")?.fitScale ?? 1
+    });
+
+    await game.app.stop();
+  });
 });
 
 describe("timber-popups — Confirm over Settings", () => {
@@ -126,6 +170,36 @@ describe("timber-popups — Confirm over Settings", () => {
     expect(elementOf(game, "settingsScreen")).toBe(root);
     expect(popupNodes(game, "settingsScreen").some(node => node.state.covered)).toBe(false);
     expect(shows(game, "confirmScreen")).toBe(false);
+
+    await game.app.stop();
+  });
+
+  it("recedes the covered signboard and hides its ropes and X, and its planks answer nothing", async () => {
+    const game = await startOnHome(player);
+
+    await tap(game, "homeSettings");
+    await tap(game, "settingsReset");
+    await frames(game, 30);
+
+    // Smaller, a little higher and darker (design §6 F2).
+    expect(nodeOf(game.app.ui.tree(), "settingsBoard")?.style).toMatchObject({
+      scale: 0.84,
+      offsetY: -8,
+      tint: 0x6b_6b_6b
+    });
+    expect(
+      ["settingsBoardRopeLeft", "settingsBoardRopeRight", "settingsBoardClose"].map(
+        key => nodeOf(game.app.ui.tree(), key)?.style.alpha
+      )
+    ).toEqual([0, 0, 0]);
+    // A volume plank of the covered popup is still enabled, yet only the top popup answers.
+    expect(game.app.input.tap(elementOf(game, "musicDown"))).toBe(false);
+
+    await tick();
+    await frames(game);
+
+    expect(game.app.flow.state().path).toBe("settings/confirm");
+    expect(playerOf(game).settings.audio.music).toBe(0.6);
 
     await game.app.stop();
   });
@@ -195,6 +269,23 @@ describe("timber-popups — the sawmill says why", () => {
 
     expect(game.app.flow.state().path).toBe("board/awaitIntent");
     expect(playerOf(game).merge.energy.value).toBe(0);
+
+    await game.app.stop();
+  });
+
+  it("goes back to the board with the bar still empty on Later", async () => {
+    const game = await startOnBoard(emptyBar);
+    const sawmill = game.app.world.projection.entityOf("board.generators", generatorId) ?? 0;
+
+    game.app.input.tap(sawmill);
+    await tick();
+    await frames(game);
+    await tap(game, "energyLater");
+    await frames(game, 30);
+
+    expect(game.app.flow.state().path).toBe("board/awaitIntent");
+    expect(playerOf(game).merge.energy.value).toBe(0);
+    expect(shows(game, "energyScreen")).toBe(false);
 
     await game.app.stop();
   });

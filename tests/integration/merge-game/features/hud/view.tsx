@@ -6,9 +6,9 @@
  * shrink with it on a short phone. No layout arithmetic anywhere: Yoga places every element.
  */
 import { projection } from "../../kit";
-import type { Player } from "../../state";
-import type { SawmillView } from "../board/info-bar";
-import { InfoBar, sawmillOf } from "../board/info-bar";
+import type { Player, Session } from "../../state";
+import type { InfoView } from "../board/info-bar";
+import { InfoBar, infoOf } from "../board/info-bar";
 import type { OrderCardView } from "../orders/strip";
 import { OrderStrip, orderCardsOf } from "../orders/strip";
 import { fullBleed, safeScreen } from "../ui/kit";
@@ -29,23 +29,25 @@ export type HudView = {
   id: string;
   energy: EnergyView;
   orders: OrderCardView[];
-  sawmill: SawmillView;
+  info: InfoView;
 };
 
 /**
- * Reads the board screen out of the save: the energy, the three order cards and the sawmill.
+ * Reads the board screen out of the save and the session: the energy, the three order cards and
+ * what the info bar names, the selected item or the sawmill.
  *
  * @param player - The saved player.
+ * @param session - The session, which keeps the selected id.
  * @returns The one row the screen projects.
  */
-function hudOf(player: Player): HudView {
+function hudOf(player: Player, session: Session): HudView {
   const state = player.merge;
 
   return {
     id: "hud",
     energy: { value: state.energy.value, max: state.energy.max },
     orders: orderCardsOf(state),
-    sawmill: sawmillOf(player)
+    info: infoOf(player, session)
   };
 }
 
@@ -56,7 +58,7 @@ function hudOf(player: Player): HudView {
 export const hud = projection({
   name: "hud",
   layer: "ui",
-  from: (player: Player): HudView[] => [hudOf(player)],
+  from: (player: Player, session: Session): HudView[] => [hudOf(player, session)],
   key: item => item.id,
   view: item => (
     <screen key="boardScreen" style={safeScreen}>
@@ -66,7 +68,7 @@ export const hud = projection({
       <column key="boardArea" style={boardArea}>
         <stack key="boardSlot" hosts={boardProjections} style={boardSlot} />
       </column>
-      <InfoBar sawmill={item.sawmill} />
+      <InfoBar info={item.info} />
     </screen>
   )
 });
