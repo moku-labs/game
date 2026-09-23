@@ -132,7 +132,11 @@ helpers below, pivot included.
   phase `input` to the end of `render`. The clock is the `clock` plugin's: lint L3 keeps the device
   clock out of the renderer. `clock.now()` is whole milliseconds, so one frame reads 3 or 4 ms and
   the mean over a second is exact enough.
-- `textures` is Pixi's `renderer.texture.managedTextures.length`, on WebGPU and WebGL alike.
+- `textures` counts the live sources in Pixi's `renderer.texture.managedTextures`, on WebGPU and
+  WebGL alike. Pixi 8.21 builds that list with `Object.values` of a `GCManagedHash`, which keeps a
+  `null` slot for every unloaded source, so the `null` slots are skipped for the count and the bytes.
+- `managedTextures` is deprecated since Pixi 8.15. Pixi 8.21 has no public replacement: the
+  `GCSystem` keeps its resource hashes private.
   `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
   level, in MiB.
 - `views` and `pooled` are read from the `sync` state.
