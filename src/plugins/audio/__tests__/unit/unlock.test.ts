@@ -105,6 +105,24 @@ describe("installUnlock", () => {
     expect(context.sources).toHaveLength(1);
     expect(mock.state.music?.source).toBeDefined();
   });
+
+  it("starts the remembered track once when the tap also enters a scene with the same track", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    mock.hooks["scenes:changed"]({ from: undefined, to: "home", music: "ui.theme" });
+    fakeWindow.dispatch("pointerdown");
+
+    while (!mock.state.unlocked) await Promise.resolve();
+
+    mock.hooks["scenes:changed"]({ from: "home", to: "board", music: "ui.theme" });
+    await tick();
+
+    expect(context.sources).toHaveLength(1);
+    expect(mock.state.music?.key).toBe("ui.theme");
+  });
 });
 
 /** Builds the `sfx` descriptor `anim` hands the handler. */

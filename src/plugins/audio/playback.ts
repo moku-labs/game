@@ -5,7 +5,14 @@
 import type { Descriptor, Hint } from "../flow/types";
 import type { Json } from "../model/types";
 import { isBus, ramp } from "./graph";
-import type { AudioCtx, MusicRequest, SfxRequest, State } from "./types";
+import type {
+  AudioContextLike,
+  AudioCtx,
+  MusicRequest,
+  MusicSwitch,
+  SfxRequest,
+  State
+} from "./types";
 
 /** The bus a sound goes to when the descriptor names none. */
 const DEFAULT_BUS = "sfx";
@@ -207,9 +214,58 @@ function fadeOut(state: State, seconds: number): void {
 }
 
 /**
+ * Tells whether a key is the track that really plays, not one only remembered for the unlock.
+ *
+ * @param state - The plugin state.
+ * @param key - The asset key a switch asks for.
+ * @returns True when a source of that key is running.
+ */
+function isPlaying(state: State, key: string): boolean {
+  return state.music?.key === key && state.music.source !== undefined;
+}
+
+/**
+ * Cross-fades from the track that plays to a new looping source of the decoded buffer.
+ *
+ * @param state - The plugin state.
+ * @param context - The running audio context.
+ * @param track - The key, its decoded buffer and the length of the fade in seconds.
+ * @param track.key - Asset key of the new track.
+ * @param track.buffer - The decoded buffer of that key.
+ * @param track.seconds - Length of the cross-fade, in seconds of the context clock.
+ */
+function startTrack(
+  state: State,
+  context: AudioContextLike,
+  track: { key: string; buffer: AudioBuffer; seconds: number }
+): void {
+  const bus = state.buses.music.gain;
+
+  if (bus === undefined) return;
+
+  fadeOut(state, track.seconds);
+
+  const gain = context.createGain();
+  const source = context.createBufferSource();
+
+  gain.gain.value = 0;
+  gain.connect(bus);
+  source.buffer = track.buffer;
+  source.loop = true;
+  source.connect(gain);
+  ramp(gain, 1, track.seconds, context.currentTime);
+  source.start();
+
+  state.music = { key: track.key, source, gain };
+}
+
+/**
  * Switches the music: the handler of the kind `"music"` and what `scenes:changed` calls. The same
  * key does nothing, a new key cross-fades, `null` fades out. While the context is locked the key
- * is only remembered; the first touch starts it.
+ * is only remembered; the first touch starts it. A key that is still decoding counts as the same
+ * key, and every other request replaces it: the replaced switch starts nothing when its buffer
+ * arrives, so one tap that unlocks the context and enters a scene with the same track starts it
+ * once.
  *
  * @param ctx - Domain context of the plugin.
  * @param request - The key to play and the length of the cross-fade.
@@ -218,9 +274,10 @@ export async function playMusic(ctx: AudioCtx, request: MusicRequest): Promise<v
   const state = ctx.state;
   const key = request.key;
   const seconds = request.fadeMs / 1000;
-  const current = state.music;
 
-  if (key !== null && current?.key === key && current.source !== undefined) return;
+  if (key !== null && state.musicPending?.key === key) return;
+
+  state.musicPending = undefined;
 
   if (key === null) {
     fadeOut(state, seconds);
@@ -228,6 +285,8 @@ export async function playMusic(ctx: AudioCtx, request: MusicRequest): Promise<v
 
     return;
   }
+
+  if (isPlaying(state, key)) return;
 
   const context = state.context;
 
@@ -237,37 +296,33 @@ export async function playMusic(ctx: AudioCtx, request: MusicRequest): Promise<v
     return;
   }
 
+  const pending: MusicSwitch = { key };
+
+  state.musicPending = pending;
+
   const buffer = await bufferOf(ctx, key);
-  const bus = state.buses.music.gain;
+
+  // A later request replaced this switch: it neither starts nor fades anything.
+  if (state.musicPending !== pending) return;
+
+  state.musicPending = undefined;
 
   // A key without a file changes nothing: the track that plays keeps playing.
-  if (buffer === undefined || bus === undefined) return;
+  if (buffer === undefined) return;
 
-  fadeOut(state, seconds);
-
-  const gain = context.createGain();
-  const source = context.createBufferSource();
-
-  gain.gain.value = 0;
-  gain.connect(bus);
-  source.buffer = buffer;
-  source.loop = true;
-  source.connect(gain);
-  ramp(gain, 1, seconds, context.currentTime);
-  source.start();
-
-  state.music = { key, source, gain };
+  startTrack(state, context, { key, buffer, seconds });
 }
 
 /**
- * Stops the music at once and forgets the track. `onStop` runs it: a teardown has no time for a
- * fade, and the context is closed right after.
+ * Stops the music at once and forgets the track and the switch still decoding. `onStop` runs it: a
+ * teardown has no time for a fade, and the context is closed right after.
  *
  * @param state - The plugin state.
  */
 export function stopMusic(state: State): void {
   state.music?.source?.stop();
   state.music = undefined;
+  state.musicPending = undefined;
 }
 
 /**
