@@ -158,7 +158,9 @@ defineMotion({
 });
 
 expectTypeOf(api.reducedMotion()).toEqualTypeOf<boolean>();
-expectTypeOf(api.reducedMotion(true)).toEqualTypeOf<boolean>();
+expectTypeOf(api.setReducedMotion(true)).toEqualTypeOf<void>();
+// @ts-expect-error — the reader takes no argument
+api.reducedMotion(true);
 // @ts-expect-error — the switch takes a boolean
-api.reducedMotion("on");
+api.setReducedMotion("on");
 expectTypeOf<Config["reducedMotion"]>().toEqualTypeOf<boolean>();

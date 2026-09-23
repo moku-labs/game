@@ -405,3 +405,50 @@ describe("the component registry", () => {
     expect(jsx.tree().type).toBe("screen");
   });
 });
+
+// ─── the layer names the readers sort by ──────────────────────
+
+describe("the layer names of tree, find and the focus", () => {
+  it("are read once per layer list the scene set, not on every call", async () => {
+    const { createJsxApi } = await import("../../jsx/api");
+    const first = [{ name: "board", sort: "none" }];
+    const second = [{ name: "ui", sort: "none" }];
+    const firstMap = vi.spyOn(first, "map");
+    const secondMap = vi.spyOn(second, "map");
+    let current = first;
+    const ctx = {
+      state: { jsx: createJsxState() },
+      log: { warn: vi.fn(), error: vi.fn() },
+      deps: {
+        world: {
+          ecs: { changed: () => [], resource: () => ({}) },
+          projection: { layers: () => current }
+        },
+        renderer: { viewport: { size: () => ({ scale: 1 }) } },
+        time: { wake: () => undefined }
+      }
+    } as unknown as UiCtx;
+    const jsx = createJsxApi(ctx, {
+      styles: {
+        flagsOf: vi.fn(),
+        resolveElement: vi.fn(),
+        viewport: vi.fn(),
+        useViewport: vi.fn()
+      },
+      layout: { counters: () => ({ nodes: 0, measured: 0, solves: 0 }) } as never
+    } as never);
+
+    jsx.tree();
+    jsx.find("claim");
+    jsx.tree();
+
+    expect(firstMap).toHaveBeenCalledOnce();
+
+    current = second;
+    jsx.find("claim");
+    jsx.tree();
+
+    expect(firstMap).toHaveBeenCalledOnce();
+    expect(secondMap).toHaveBeenCalledOnce();
+  });
+});

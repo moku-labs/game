@@ -15,7 +15,7 @@ import type { Rect } from "../layout/types";
 import type { FocusRing, UiCtx } from "../types";
 import { visualRectOf } from "../visual";
 import { sortedRoots } from "./tree";
-import type { Element, JsxState, PointerFlag, Root } from "./types";
+import type { DrawnRing, Element, JsxState, PointerFlag, Root } from "./types";
 
 /** Where the halo draws inside the layer of the focused root: above the root, under the next. */
 const HALO_ORDER = 0.5;
@@ -63,6 +63,26 @@ export function focusRoot(state: JsxState, layers: readonly string[]): Root | un
 }
 
 /**
+ * Tells whether the ring already stands where it would be drawn now.
+ *
+ * @param drawn - Where it was drawn last, or nothing while it is hidden.
+ * @param next - Where it would be drawn now.
+ * @returns True when every field matches.
+ */
+function standsAt(drawn: DrawnRing | undefined, next: DrawnRing): boolean {
+  return (
+    drawn !== undefined &&
+    drawn.layer === next.layer &&
+    drawn.order === next.order &&
+    drawn.x === next.x &&
+    drawn.y === next.y &&
+    drawn.w === next.w &&
+    drawn.h === next.h &&
+    drawn.radius === next.radius
+  );
+}
+
+/**
  * The four components of one part of the ring: where it is, the layer and order it draws at, and
  * the stroked rectangle.
  *
@@ -104,21 +124,19 @@ function partOf(
  *
  * @param ctx - Domain context of the ui plugin.
  * @param mark - Sets the `focus` flag of an element and re-resolves its style.
+ * @param layerNames - The layer names of the scene in draw order, shared with `tree` and `find`.
  * @returns The key listener, the pointer tap and the frame step.
  */
 export function createFocus(
   ctx: UiCtx,
-  mark: (entity: Entity, flag: PointerFlag, on: boolean) => void
+  mark: (entity: Entity, flag: PointerFlag, on: boolean) => void,
+  layerNames: () => readonly string[]
 ): Focus {
   const state: JsxState = ctx.state.jsx;
   const focus = state.focus;
   const ecs = ctx.deps.world.ecs;
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
-  const topRoot = (): Root | undefined =>
-    focusRoot(
-      state,
-      ctx.deps.world.projection.layers().map(layer => layer.name)
-    );
+  const topRoot = (): Root | undefined => focusRoot(state, layerNames());
   const usable = (element: Element): boolean => element.live && !state.exiting.has(element.entity);
 
   /**
@@ -173,19 +191,21 @@ export function createFocus(
     if (root === undefined) return;
 
     const look: FocusRing = ctx.config.focusRing;
-    const drawn = visualRectOf(element, lookup);
-    const rect = {
-      x: drawn.x - look.offset,
-      y: drawn.y - look.offset,
-      w: drawn.w + 2 * look.offset,
-      h: drawn.h + 2 * look.offset
-    };
+    const box = visualRectOf(element, lookup);
     const radius = (element.style.radius ?? 0) + look.offset;
-    const signature = [root.layer, root.order, rect.x, rect.y, rect.w, rect.h, radius].join("|");
+    const rect: DrawnRing = {
+      layer: root.layer,
+      order: root.order,
+      x: box.x - look.offset,
+      y: box.y - look.offset,
+      w: box.w + 2 * look.offset,
+      h: box.h + 2 * look.offset,
+      radius
+    };
 
-    if (signature === focus.drawn) return;
+    if (standsAt(focus.drawn, rect)) return;
 
-    focus.drawn = signature;
+    focus.drawn = rect;
     focus.ring = {
       halo: writePart(
         focus.ring?.halo,

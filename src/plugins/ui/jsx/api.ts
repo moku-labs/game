@@ -3,7 +3,7 @@
  * registers and the keyboard focus. Built last, with `styles` and `layout` injected.
  */
 import type { KeyInput } from "../../input/types";
-import type { Entity } from "../../world/types";
+import type { Entity, LayerSpec } from "../../world/types";
 import type { UiCtx } from "../types";
 import { createFocus } from "./focus";
 import { releaseHosted } from "./hosts";
@@ -15,6 +15,29 @@ import { readTree, sortedRoots } from "./tree";
 import type { AnyComponentDefinition, Finding, JsxModule, PopupLink, UiNode } from "./types";
 
 /**
+ * The layer names of the scene in draw order, mapped again only when the scene set a new layer
+ * list: `projection.layers()` answers the same frozen array until then.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @returns The reader `tree`, `find` and the focus share.
+ */
+function layerNamesOf(ctx: UiCtx): () => readonly string[] {
+  let seen: readonly LayerSpec[] | undefined;
+  let names: readonly string[] = [];
+
+  return (): readonly string[] => {
+    const layers = ctx.deps.world.projection.layers();
+
+    if (layers !== seen) {
+      seen = layers;
+      names = layers.map(layer => layer.name);
+    }
+
+    return names;
+  };
+}
+
+/**
  * Builds the jsx module.
  *
  * @param ctx - Domain context of the ui plugin.
@@ -24,8 +47,8 @@ import type { AnyComponentDefinition, Finding, JsxModule, PopupLink, UiNode } fr
 export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const state = ctx.state.jsx;
   const frame = createReconciler(ctx, modules);
-  const focus = createFocus(ctx, frame.markPointer);
-  const layerNames = (): string[] => ctx.deps.world.projection.layers().map(layer => layer.name);
+  const layerNames = layerNamesOf(ctx);
+  const focus = createFocus(ctx, frame.markPointer, layerNames);
 
   return {
     tree: (): UiNode => readTree(state, layerNames()),

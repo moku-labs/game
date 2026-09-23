@@ -239,14 +239,28 @@ export type Root = {
 };
 
 /**
- * The keyboard focus: the focused element, the two entities of the ring drawn around it, what
- * the ring was last drawn at, and whether ui itself is tapping, so its own Enter tap does not
- * read as a pointer tap that clears the focus.
+ * Where the focus ring was last drawn: the layer and order of its root, the rect grown by the
+ * ring offset, and the corner radius.
+ */
+export type DrawnRing = {
+  layer: string;
+  order: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  radius: number;
+};
+
+/**
+ * The keyboard focus: the focused element, the two entities of the ring drawn around it, where
+ * the ring was last drawn, and whether ui itself is tapping, so its own Enter tap does not read
+ * as a pointer tap that clears the focus.
  */
 export type FocusState = {
   entity: Entity | undefined;
   ring: { halo: Entity; ring: Entity } | undefined;
-  drawn: string | undefined;
+  drawn: DrawnRing | undefined;
   tapping: boolean;
 };
 

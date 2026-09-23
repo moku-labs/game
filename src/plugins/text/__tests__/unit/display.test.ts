@@ -80,9 +80,9 @@ function build(mock: MockText, text: TextValue): FakeObject {
   return entry.adapter.create(text, 1) as FakeObject;
 }
 
-/** The text a BitmapText was built with. */
+/** The text a BitmapText shows. */
 function textOf(object: FakeObject | undefined): unknown {
-  return object?.options.text;
+  return object?.text;
 }
 
 /** The Pixi style a BitmapText was built with. */
@@ -208,17 +208,90 @@ describe("the display adapter", () => {
     expect(object.children[0]?.x).toBeCloseTo(19.2, 5);
   });
 
-  it("rebuilds on a changed resolved string", () => {
+  it("rebuilds on a changed resolved string whose runs changed", () => {
     const mock = drawing();
     const entry = mock.renderer.provided[0];
     const object = build(mock, value({ resolved: "12" }));
     const before = object.children[0];
 
-    entry?.adapter.update(object, value({ resolved: "12" }), value({ resolved: "1" }));
+    entry?.adapter.update(object, value({ resolved: "12" }), value({ resolved: "1<b>2</b>" }));
 
     expect(before?.destroyed).toBe(true);
-    expect(object.children).toHaveLength(1);
+    expect(object.children).toHaveLength(10);
     expect(object.children[0]).not.toBe(before);
+  });
+
+  it("rebuilds when a line is added, or the anchor or the style changed", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+    const cases: Array<[TextValue, TextValue]> = [
+      [value({ resolved: "12" }), value({ resolved: "1\n2" })],
+      [value({ resolved: "12" }), value({ resolved: "13", anchor: zero })],
+      [value({ resolved: "12" }), value({ resolved: "13", style: "hud.rich" })],
+      [value({ resolved: "<b>1</b>" }), value({ resolved: "2" })],
+      [value({ resolved: "<i>1</i>" }), value({ resolved: "2" })],
+      [value({ resolved: "<color=#ff0000>1</color>" }), value({ resolved: "2" })],
+      [value({ resolved: "<icon=hud.coin>" }), value({ resolved: "<icon=hud.gem>" })],
+      [value({ resolved: "<icon=hud.coin>" }), value({ resolved: "2" })]
+    ];
+
+    for (const [previous, next] of cases) {
+      const object = build(mock, previous);
+      const before = object.children[0];
+
+      entry?.adapter.update(object, previous, next);
+
+      expect(before?.destroyed).toBe(true);
+    }
+  });
+
+  it("keeps the child objects on a counter tick and writes the new text in place", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+    const object = build(mock, value({ resolved: "<icon=hud.coin>12<b>x</b>" }));
+    const before = [...object.children];
+
+    entry?.adapter.update(
+      object,
+      value({ resolved: "<icon=hud.coin>12<b>x</b>" }),
+      value({ resolved: "<icon=hud.coin>13<b>y</b>" })
+    );
+
+    expect(object.children).toEqual(before);
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+    expect(before.map(child => child.destroyed)).toEqual(before.map(() => false));
+    // The icon, the digits, then the bold run: eight copies in the fill and the run.
+    expect(object.children).toHaveLength(11);
+    expect(object.children.slice(1).map(child => textOf(child))).toEqual([
+      "13",
+      ...Array.from({ length: 9 }, () => "y")
+    ]);
+    expect(object.children[0]?.texture).toBe(coinTexture);
+  });
+
+  it("moves the runs in place when the lines change width", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+
+    mock.state.styles.set("centred", centred);
+
+    const previous = value({ resolved: "1\n12", style: "centred", anchor: zero });
+    const object = build(mock, previous);
+    const [top, bottom] = object.children;
+
+    entry?.adapter.update(
+      object,
+      previous,
+      value({ resolved: "12\n1", style: "centred", anchor: zero })
+    );
+
+    expect(object.children).toHaveLength(2);
+    expect(object.children[0]).toBe(top);
+    expect(object.children[1]).toBe(bottom);
+    expect(top?.x).toBe(0);
+    expect(bottom?.x).toBeCloseTo(9.6, 5);
+    expect(bottom?.y).toBeCloseTo(38.4, 5);
+    expect([textOf(top), textOf(bottom)]).toEqual(["12", "1"]);
   });
 
   it("does nothing when the value that matters did not change", () => {
@@ -347,7 +420,7 @@ describe("the shadow of a style", () => {
     expect(object.children.map(child => child.kind)).toEqual(["Sprite"]);
   });
 
-  it("rebuilds the shadow with the run when the content changes", () => {
+  it("writes the new content into the shadow with the run, in place", () => {
     const mock = shadowed();
     const entry = mock.renderer.provided[0];
     const object = build(mock, value({ resolved: "12", style: "hud.title" }));
@@ -359,9 +432,12 @@ describe("the shadow of a style", () => {
       value({ resolved: "7", style: "hud.title" })
     );
 
-    expect(before.map(child => child.destroyed)).toEqual([true, true]);
+    expect(before.map(child => child.destroyed)).toEqual([false, false]);
+    expect(object.children).toEqual(before);
     expect(object.children.map(child => textOf(child))).toEqual(["7", "7"]);
     expect(object.children[0]?.tint).toBe(0x5b_3a_1e);
+    expect(object.children[0]?.x).toBeCloseTo((object.children[1]?.x ?? 0) + 2, 5);
+    expect(object.children[0]?.y).toBeCloseTo((object.children[1]?.y ?? 0) + 4, 5);
   });
 
   it("frees the shadow with the run", () => {
@@ -501,6 +577,33 @@ describe("the outline of a style", () => {
 
     expect(object.children.map(child => child.skew.x)).toEqual(
       Array.from({ length: 9 }, () => -0.2)
+    );
+  });
+
+  it("keeps the outline and the bold copies of a ticking counter, their ring around the run", () => {
+    const mock = outlined();
+    const entry = mock.renderer.provided[0];
+    const previous = value({ resolved: "<b>12</b>", style: "hud.outlined", anchor: zero });
+    const object = build(mock, previous);
+    const before = [...object.children];
+
+    entry?.adapter.update(
+      object,
+      previous,
+      value({ resolved: "<b>13</b>", style: "hud.outlined", anchor: zero })
+    );
+
+    const run = object.children[16];
+
+    expect(object.children).toHaveLength(17);
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+    expect(object.children.map(child => textOf(child))).toEqual(
+      Array.from({ length: 17 }, () => "13")
+    );
+    expect(offsetsOf(object.children.slice(0, 8), run)).toEqual(ring(8, 4));
+    expect(offsetsOf(object.children.slice(8, 16), run)).toEqual(ring(8, 1.6));
+    expect(object.children.map(child => child.tint).slice(0, 8)).toEqual(
+      Array.from({ length: 8 }, () => 0x3b_2a_1e)
     );
   });
 

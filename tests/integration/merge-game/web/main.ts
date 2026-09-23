@@ -55,8 +55,8 @@ Reflect.set(globalThis, "game", app);
 // Reduced motion follows the system setting, also when the player changes it while the page runs.
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
-app.anim.reducedMotion(reducedMotion.matches);
-reducedMotion.addEventListener("change", event => app.anim.reducedMotion(event.matches));
+app.anim.setReducedMotion(reducedMotion.matches);
+reducedMotion.addEventListener("change", event => app.anim.setReducedMotion(event.matches));
 
 // The page opens on the splash, which moves to Home by itself once Home and the board are loaded.
 // Play is the player's own tap.

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Shape, Transform } from "../../../renderer/components";
 import { Text as TextComponent } from "../../../text/components";
 import { Layer, Order } from "../../../world/ecs/define";
@@ -9,7 +9,7 @@ import { type StackApp, settle, startStackApp } from "../stack-app";
 // Delta 6, B5: the keyboard focus ui owns. Tab and Shift+Tab walk the controls
 // of the top root in reading order, Enter and Space tap the focused one, Escape
 // taps the `escape` button of the top root, a pointer tap clears the focus, and
-// a ring of two shapes follows the focused rect. `app.input.key` presses keys.
+// a ring of two shapes follows the focused rect. `app.input.pressKey` presses keys.
 // ---------------------------------------------------------------------------
 
 /** The ring colour and the halo colour of the default `focusRing`. */
@@ -72,7 +72,7 @@ function tabs(app: StackApp, times: number, shift = false): (string | undefined)
   const keys: (string | undefined)[] = [];
 
   for (let press = 0; press < times; press += 1) {
-    expect(app.input.key("Tab", { shift })).toBe(true);
+    expect(app.input.pressKey("Tab", { shift })).toBe(true);
     keys.push(focused(app));
   }
 
@@ -157,9 +157,9 @@ describe("Tab and Shift+Tab", () => {
 
     mount(app, ["slotScreen"]);
 
-    expect(app.input.key("Tab")).toBe(false);
-    expect(app.input.key("Enter")).toBe(false);
-    expect(app.input.key("q")).toBe(false);
+    expect(app.input.pressKey("Tab")).toBe(false);
+    expect(app.input.pressKey("Enter")).toBe(false);
+    expect(app.input.pressKey("q")).toBe(false);
     expect(focused(app)).toBeUndefined();
     expect(ringParts(app)).toEqual({ halo: undefined, ring: undefined });
 
@@ -228,6 +228,31 @@ describe("the focus look", () => {
     await app.stop();
   });
 
+  it("writes nothing to a ring that stands still, and moves it with the focus", async () => {
+    const app = await startStackApp();
+
+    mount(app, ["focusScreen"]);
+    tabs(app, 1);
+    app.time.step(16);
+
+    const { halo, ring } = ringParts(app);
+    const set = vi.spyOn(app.world.ecs, "set");
+    const ringWrites = (): number =>
+      set.mock.calls.filter(([entity]) => entity === halo || entity === ring).length;
+
+    for (let frame = 0; frame < 5; frame += 1) app.time.step(16);
+
+    expect(ringWrites()).toBe(0);
+
+    tabs(app, 1);
+
+    expect(ringWrites()).toBeGreaterThan(0);
+    expect(app.world.ecs.get(ring ?? 0, Transform)).toMatchObject({ x: 101, y: -9 });
+
+    set.mockRestore();
+    await app.stop();
+  });
+
   it("clears the focus and hides the ring on a pointer tap", async () => {
     const app = await startStackApp();
 
@@ -259,7 +284,7 @@ describe("the focus look", () => {
     for (let frame = 0; frame < 4; frame += 1) app.time.step(16);
 
     expect(app.world.ecs.get(ringParts(app).ring ?? 0, Shape)?.alpha).toBe(0);
-    expect(app.input.key("Enter")).toBe(false);
+    expect(app.input.pressKey("Enter")).toBe(false);
 
     await app.stop();
   });
@@ -275,7 +300,7 @@ describe("Enter and Space", () => {
 
     tabs(app, 2);
 
-    expect(app.input.key("Enter")).toBe(true);
+    expect(app.input.pressKey("Enter")).toBe(true);
     expect(tapped).toEqual([app.ui.find("second")]);
     expect(focused(app)).toBe("second");
 
@@ -286,7 +311,7 @@ describe("Enter and Space", () => {
     const app = await openSettings();
 
     expect(tabs(app, 1)).toEqual(["tabVideo"]);
-    expect(app.input.key(" ")).toBe(true);
+    expect(app.input.pressKey(" ")).toBe(true);
     app.time.step(16);
     app.time.step(16);
 
@@ -310,13 +335,13 @@ describe("Escape", () => {
     const no = app.ui.find("no");
 
     expect(no).toBeDefined();
-    expect(app.input.key("Escape")).toBe(true);
+    expect(app.input.pressKey("Escape")).toBe(true);
     expect(tapped.at(-1)).toBe(no);
 
     await settle(app, 3);
 
     // The confirm is gone: Escape now closes the settings.
-    expect(app.input.key("Escape")).toBe(true);
+    expect(app.input.pressKey("Escape")).toBe(true);
     expect(tapped.at(-1)).toBe(app.ui.find("close"));
 
     await app.stop();
@@ -327,7 +352,7 @@ describe("Escape", () => {
 
     mount(app, ["focusScreen"]);
 
-    expect(app.input.key("Escape")).toBe(false);
+    expect(app.input.pressKey("Escape")).toBe(false);
 
     await app.stop();
   });
@@ -340,7 +365,7 @@ describe("a covered root", () => {
     // `close` is marked `escape` and has no children: no Tab stop, the focus wraps past it.
     expect(tabs(app, 4)).toEqual(["tabVideo", "louder", "reset", "tabVideo"]);
     expect(tabs(app, 1, true)).toEqual(["reset"]);
-    expect(app.input.key("Enter")).toBe(true);
+    expect(app.input.pressKey("Enter")).toBe(true);
     await settle(app, 3);
 
     expect(nodeOf(app, "reset")?.state.focus).toBe(false);
@@ -361,7 +386,7 @@ describe("a backdrop", () => {
     const tapped = recordTaps(app);
 
     expect(tabs(app, 3)).toEqual(["closeX", "okButton", "closeX"]);
-    expect(app.input.key("Escape")).toBe(true);
+    expect(app.input.pressKey("Escape")).toBe(true);
     expect(tapped).toEqual([app.ui.find("backdrop")]);
 
     await app.stop();

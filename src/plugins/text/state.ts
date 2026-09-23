@@ -24,6 +24,15 @@ function emptySet<Value>(): Set<Value> {
 }
 
 /**
+ * Creates one empty weak table, for the same reason as `emptyMap`.
+ *
+ * @returns An empty weak map.
+ */
+function emptyWeakMap<Key extends object, Value>(): WeakMap<Key, Value> {
+  return new WeakMap();
+}
+
+/**
  * Creates the initial text state: no style, no font, no label, nothing measured.
  *
  * @returns The plugin state.
@@ -39,6 +48,7 @@ export function createTextState(): State {
     bindTypes: emptyMap(),
     measured: emptyMap(),
     cache: emptyMap(),
+    drawn: emptyWeakMap(),
     dirty: emptySet(),
     warned: emptySet(),
     removers: []

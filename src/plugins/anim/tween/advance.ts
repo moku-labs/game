@@ -27,6 +27,41 @@ export function fieldKey(entity: Entity, component: string, field: string): stri
 }
 
 /**
+ * The key of every field of a new track, built once so a frame writes without building strings.
+ *
+ * @param entity - The entity.
+ * @param component - Component name.
+ * @param fields - The target fields of the track.
+ * @returns The key per field.
+ * @example
+ * ```ts
+ * keysOf(1_048_576, "Transform", { x: 10 }); // { x: "1048576:Transform:x" }
+ * ```
+ */
+function keysOf(
+  entity: Entity,
+  component: string,
+  fields: Record<string, number>
+): Record<string, string> {
+  const keys: Record<string, string> = {};
+
+  for (const field of Object.keys(fields)) keys[field] = fieldKey(entity, component, field);
+
+  return keys;
+}
+
+/**
+ * The key a track books one of its fields under: the one `startTrack` built.
+ *
+ * @param track - The track.
+ * @param field - One of its fields.
+ * @returns The key of the owner, bases and offsets tables.
+ */
+function keyOf(track: Track, field: string): string {
+  return track.keys[field] ?? fieldKey(track.entity, track.component.componentName, field);
+}
+
+/**
  * Creates the offsets table of one field. It lives in its own function because lint rule L5
  * refuses a collection built inside an exported declaration.
  *
@@ -80,7 +115,7 @@ function readFrom(
   const from: Record<string, number> = {};
 
   for (const [field, target] of Object.entries(track.to)) {
-    const key = fieldKey(track.entity, track.component.componentName, field);
+    const key = keyOf(track, field);
     const base = actx.state.bases.get(key);
     const current = stored[field];
     const value = base ?? (typeof current === "number" ? current : target);
@@ -197,7 +232,7 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
   for (const [field, target] of Object.entries(track.to)) {
     if (owned.has(field)) continue;
 
-    const key = fieldKey(track.entity, track.component.componentName, field);
+    const key = keyOf(track, field);
     const start = from[field] ?? target;
     const origin = walksOffsets ? 0 : start;
     const value = final ? target : fieldValue(track, field, origin, target, fraction);
@@ -224,7 +259,7 @@ function releaseFields(actx: AnimCtx, track: Track): Record<string, number> {
   const clean: Record<string, number> = {};
 
   for (const field of Object.keys(track.to)) {
-    const key = fieldKey(track.entity, track.component.componentName, field);
+    const key = keyOf(track, field);
     const offsets = actx.state.offsets.get(key);
     const base = actx.state.bases.get(key);
 
@@ -290,7 +325,7 @@ function claimFields(actx: AnimCtx, track: Track): void {
   const taken: Array<{ older: Track; field: string }> = [];
 
   for (const field of Object.keys(track.to)) {
-    const key = fieldKey(track.entity, track.component.componentName, field);
+    const key = keyOf(track, field);
     const ownerId = actx.state.owner.get(key);
     const older = ownerId === undefined ? undefined : actx.state.tracks.get(ownerId);
 
@@ -402,6 +437,7 @@ export function startTrack(
     entity,
     component,
     to: target,
+    keys: keysOf(entity, component.componentName, target),
     ms: instant ? 0 : options.ms,
     ease: options.ease ?? "out",
     delayMs: instant ? 0 : (options.delayMs ?? 0),
@@ -413,7 +449,8 @@ export function startTrack(
     bornFrame: actx.state.frame,
     ended: Object.keys(target).length === 0,
     segments: options.segments,
-    repeatsLeft: instant ? 0 : repeats
+    repeatsLeft: instant ? 0 : repeats,
+    held: false
   };
 
   actx.state.nextId += 1;
@@ -462,6 +499,24 @@ function wrapRuns(track: Track, past: number): number {
 }
 
 /**
+ * Keeps a loop on its first key: the first frame of the hold writes it, the frames after write
+ * nothing, and a loop whose component left ends like any track.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The loop that holds.
+ */
+function holdFirstKey(actx: AnimCtx, track: Track): void {
+  track.elapsed = track.delayMs;
+
+  if (!track.held) {
+    track.held = true;
+    writeFields(actx, track, 0, false);
+  } else if (actx.deps.world.ecs.get(track.entity, track.component) === undefined) {
+    endTrack(actx, track);
+  }
+}
+
+/**
  * Advances one track by one delta. A repeating track walks again from its first segment when a
  * run ends and ends after its last run; a loop never ends and, while it holds, stands on its
  * first key with its clock kept at the start, so it walks on from there once released.
@@ -481,11 +536,12 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
   if (past < 0) return 0;
 
   if (holdsFirstKey(actx, track)) {
-    track.elapsed = track.delayMs;
-    writeFields(actx, track, 0, false);
+    holdFirstKey(actx, track);
 
     return 0;
   }
+
+  track.held = false;
 
   const run = wrapRuns(track, past);
   const fraction = track.ms <= 0 ? 1 : Math.min(run / track.ms, 1);

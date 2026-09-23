@@ -339,7 +339,7 @@ describe("timber-screens — the splash", () => {
     expect(ecs.get(blade, Transform)?.rotation).not.toBe(first);
 
     // Under reduced motion the blade stands on its rest pose.
-    game.app.anim.reducedMotion(true);
+    game.app.anim.setReducedMotion(true);
     await frames(game, 2);
 
     const held = ecs.get(blade, Transform)?.rotation;
@@ -506,7 +506,7 @@ describe("timber-screens — the keyboard focus ring (design §4)", () => {
     const game = await start(createScreenGame({ manifest: await readManifest() }));
 
     await frames(game);
-    expect(game.app.input.key("Tab")).toBe(true);
+    expect(game.app.input.pressKey("Tab")).toBe(true);
     await frames(game);
 
     const focused = focusedIn(game.app.ui.tree());

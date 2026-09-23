@@ -167,7 +167,7 @@ describe("input plugin integration", () => {
     await app.stop();
   });
 
-  it("delivers a headless key to the onKey listeners through app.input.key", async () => {
+  it("delivers a headless key to the onKey listeners through app.input.pressKey", async () => {
     const app = await startApp();
     const seen: string[] = [];
     const off = app.input.onKey(key => {
@@ -176,13 +176,13 @@ describe("input plugin integration", () => {
       return key.key === "Escape";
     });
 
-    expect(app.input.key("Escape")).toBe(true);
-    expect(app.input.key("Tab", { shift: true })).toBe(false);
+    expect(app.input.pressKey("Escape")).toBe(true);
+    expect(app.input.pressKey("Tab", { shift: true })).toBe(false);
     expect(seen).toEqual(["Escape:false", "Tab:true"]);
 
     off();
 
-    expect(app.input.key("Escape")).toBe(false);
+    expect(app.input.pressKey("Escape")).toBe(false);
 
     await app.stop();
   });
