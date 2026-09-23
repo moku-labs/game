@@ -216,6 +216,7 @@ work.
 | `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
 | `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`. |
+| `inspect.ts` | The `game.assets` source of the `/inspect` door. |
 | `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures`. |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
 
@@ -244,6 +245,12 @@ key, so the scan fails with a message that names the malformed tag.
 
 `generated/assets.ts` carries `AssetKey` over every kind, plus the narrower `FontKey` and
 `AudioKey` next to it, so a text style takes only a font and a sound only an MP3.
+
+## Doors
+
+`inspect.ts` holds `game.assets` (key `assets` in `sources`) of the editor's read door,
+`@moku-labs/game/inspect`, safe in a production build. No input. It reads `usage()` and is read
+again every frame (`changes: "frame"`), because a bundle loads without a model commit.
 
 ## Dependencies
 

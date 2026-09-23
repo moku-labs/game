@@ -48,10 +48,19 @@ The settings node commits `player.settings.audio`; on every `model:committed` th
 | `musicFadeMs` | `600` | Cross-fade of a music switch, in real milliseconds |
 | `volumes` | `undefined` | Reads the player's choice from the committed player. Absent: the buses stay at `buses` |
 | `context` | `undefined` | Context factory, the test seam. Absent: `new AudioContext()` where the global exists |
+| `journal` | `0` | How many started sounds `journal()` keeps. `0`: off |
 
 ## The graph and the clock
 
-`master` goes into `context.destination`, `music` and `sfx` into `master`, and a music track has its own gain into `music`. Every change is `gain.setValueAtTime(current, now)` then `gain.linearRampToValueAtTime(target, now + seconds)` on the **context** clock, never on `time`: a paused game must not freeze a fade-out, and a fade is not game state. The plugin has no edge to `time`.
+`master` goes into `context.destination`, `music` and `sfx` into `master`, and a music track has its own gain into `music`. Every change is `gain.setValueAtTime(current, now)` then `gain.linearRampToValueAtTime(target, now + seconds)` on the **context** clock, never on `time`: a paused game must not freeze a fade-out, and a fade is not game state. The one edge to `time` is the stamp of the journal.
+
+## The journal
+
+With `journal` above 0 every sound that started is kept in a ring of that size: each `sfx` play and each music track that began, as `{ key, bus, kind, at }`, where `at` is `app.time.snapshot().elapsed`. A sound dropped before the unlock, a missing file and a switch to the track that already plays leave no entry. `app.audio.journal()` returns a copy, oldest first; `onStop` clears it. Tests and the dev page set `journal: 200`.
+
+```ts
+app.audio.journal(); // [{ key: "orders.complete", bus: "sfx", kind: "sfx", at: 1600 }]
+```
 
 ## The unlock
 
@@ -68,6 +77,13 @@ A browser starts every context suspended. `onStart` puts one `pointerdown` and o
 ## Headless
 
 Without a context (plain Bun, no `AudioContext`) both handlers are still registered, so every `await fx(sfx(…))` resolves at once. Every member keeps its state and does nothing: `setVolume` stores, `volume` reads it back, `mute` stores the flag, `unlocked()` is `false`. The hooks write state only — `model:committed` still updates the stored volumes, and the scene's music key is still remembered.
+
+## Doors
+
+`inspect.ts` holds `game.sounds` (key `sounds` in `sources`) of the editor's read door,
+`@moku-labs/game/inspect`, safe in a production build. Input `{ last: "number?" }`: it reads
+`journal()`, all of it or the last `last` entries, and is read again every frame
+(`changes: "frame"`). Empty unless `journal` is above 0.
 
 ## Events
 

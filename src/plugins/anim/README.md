@@ -276,6 +276,12 @@ additive track leaves, the field is written once more without offsets.
 - **onStop** — finishes everything, so every pending `done` resolves, then removes the driver, the
   frame callback and the handler and clears the tables.
 
+## Doors
+
+`control.ts` holds `game.reducedMotion` (key `reducedMotion` in `commands`) of the editor's write
+door, `@moku-labs/game/control`, dev builds only. Input `{ on: "boolean" }`: it calls
+`setReducedMotion(on)` and answers `reducedMotion()`. Effect `cosmetic`.
+
 ## Dependencies
 
 `time` (the frame step, `delta`, `wake()`), `flow` (`fx.handle`, `fx.dispatch`, `features.all()`),

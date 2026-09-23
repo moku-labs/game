@@ -172,6 +172,17 @@ createApp({ plugins: [...screen], pluginConfigs: { input: { longPressMs: 300 } }
 
 None. An answer goes down to `flow.gate` as a direct call; pointer work never goes through the event bus. Game systems read the tags and the resource.
 
+## Doors
+
+`control.ts` holds three commands of the editor's write door, `@moku-labs/game/control`, dev builds
+only. Each goes through `app.input`, so the gate decides and the session stays clean (effect `route`).
+
+| Key in `commands` | id | Input | Does |
+|---|---|---|---|
+| `tap` | `game.tap` | `{ key: "string?", target: "json?" }`, exactly one | `input.tap` on the ui element with that `key` (through `ui.find`, which needs `ui`) or on the view `target: { projection, key }` |
+| `drag` | `game.drag` | `{ from: "json", to: "json" }` | `input.drag(from, to)`, both `{ projection, key }` |
+| `key` | `game.key` | `{ key: "string", shift: "boolean?" }` | `input.pressKey(key, { shift })` |
+
 ## Dependencies
 
 `time`, `flow`, `world`, `renderer`.
@@ -191,4 +202,4 @@ No `pixi.js` import: the canvas is a DOM element and hit tests go through `rende
 
 ## Not in V2
 
-Keyboard (desktop development only), pinch, gamepad, a second pointer, a dragged stack of cards (`Draggable({ carry })`) and a gesture through many entities.
+Pinch, gamepad, a second pointer, a dragged stack of cards (`Draggable({ carry })`) and a gesture through many entities.

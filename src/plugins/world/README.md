@@ -35,7 +35,27 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
 | `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
-| `snapshot()` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
+| `snapshot(): WorldSnapshot` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
+
+`snapshot()` is typed. Both types reach a game as `World.WorldSnapshot` and `World.EntitySnapshot`.
+
+| Type | Field | Holds |
+|---|---|---|
+| `WorldSnapshot` | `mode` | The effective mode, as `mode()` answers it |
+| | `entities` | `EntitySnapshot[]`, sorted by index |
+| | `resources` | Resource name to value, the values that are JSON |
+| `EntitySnapshot` | `id` | The `Entity` |
+| | `index`, `generation` | The two halves of the id |
+| | `owner` | `{ kind, name }`, the owner `spawn` named |
+| | `components` | Component name to value, the values that are plain JSON. A tag reads `true` |
+| | `skipped` | The names of the components that are not JSON, and `Tree` |
+
+```ts
+// A test asserts what the board holds after the first reconcile.
+app.world.ecs.snapshot().entities[0];
+// { id: 1048576, index: 0, generation: 1, owner: { kind: "projection", name: "board.items" },
+//   components: { Layer: { name: "items" } }, skipped: [] }
+```
 
 ### `projection` — `app.world.projection`
 
@@ -142,6 +162,24 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
   views, registered keys, recorded rest poses, the despawn queue, entities and resources. No `onRemoved` fires: `renderer` stopped earlier.
+
+## Doors
+
+`inspect.ts` holds the two world sources of the editor's read door, `@moku-labs/game/inspect`.
+Both only read, so they are safe in a production build.
+
+| Key in `sources` | id | Input | Changes | Reads |
+|---|---|---|---|---|
+| `entities` | `game.entities` | `{ owner: "string?", component: "string?" }` | frame | `ecs.snapshot().entities`: all of them, the ones whose owner has the name `owner`, the ones that carry `component`, or both. A component counts when it is in `components` or in `skipped` |
+| `projections` | `game.projections` | none | commit | Projection name to key to entity: every entity of the snapshot for which `projection.keyOf` answers. That includes a view in the despawn queue and a key registered with `registerKey` |
+
+```ts
+import { read, sources } from "@moku-labs/game/inspect";
+
+// Which views does the board show, and which entity is item i5?
+read(app, sources.entities, { owner: "board.items" }); // EntitySnapshot[] of that projection
+read(app, sources.projections)["board.items"]?.i5; // its Entity, or undefined
+```
 
 ## Dependencies
 

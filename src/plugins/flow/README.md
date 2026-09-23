@@ -31,7 +31,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `bookmark(): Bookmark` | The current rest point as serialisable data. |
 | `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. |
 | `describe(): FlowGraph` | The whole graph as JSON, built without running the game. |
-| `state(): FlowState` | `{ running, path, stack, pending, mode }`. |
+| `state(): FlowState` | `{ running, path, stack, pending, mode }`, frozen. The same object comes back while the graph did not move: no edge, no gate opened or closed, no mode switch. |
 | `history(): readonly JournalEntry[]` | Edges since the last checkpoint. |
 | `setMode(mode): void` | `"live"` or `"fast"`. Legal before `run()` and while the loop rests. |
 | `gate.answer(answer): boolean` | The one entry of player answers. The gate closes before the answer is handed on, so a double tap hits a closed door. |
@@ -43,6 +43,71 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `fx.onHint(listener): () => void` | Hears every released hint after the commit of its edge, in release order, next to any `handle` owner of the kind. Silent in fast mode. `world` routes hints to projection motions with it. |
 | `features.register(name, description)` | Called from a feature plugin's `onInit`. After `run()` it throws. |
 | `features.all()`, `features.contributions(slot)` | What the game brought, and the sub-flows of one slot in `order`. |
+
+## Doors for the editor
+
+The editor, MCP tools and e2e scripts reach a running game through two doors: `/inspect` reads,
+`/control` writes in dev builds only. Flow hosts the machinery in `doors/`, because it owns the
+graph, the journal and the taint. A source or a command is data: an id, a title, an input schema
+and one function. Each lives with the plugin that owns its data, in that plugin's `inspect.ts` and
+`control.ts`.
+
+| Function | Door | Behaviour |
+|---|---|---|
+| `defineSource(source)` | `/inspect` | Checks the id (`game.position`: camelCase words joined by dots) and freezes the descriptor. |
+| `read(app, source, input?)` | `/inspect` | Calls the source's `read` once. Never changes the game. The input may be left out when every field of the schema is optional. |
+| `watch(app, source, input, fn)` | `/inspect` | Reads on the first `signals` phase, then again when the source's change key moved: `"frame"` every frame, `"commit"` when `model.store.snapshot()` is a new object, `"edge"` when `flow.state()` is. Both are memoised, so an unchanged frame allocates nothing. Returns the stop function. |
+| `defineCommand(command)` | `/control` | Checks the id and freezes the descriptor. |
+| `run(app, command, input?)` | `/control` | Throws `[game] Control commands run in dev builds only.` unless `__MOKU_GAME_DEV__` is `true`. Resolves `{ value, state }`, where `state` is the envelope `{ path, frame, tainted }` read after the command. |
+
+An input schema maps field names to `"string"`, `"number"`, `"boolean"` or `"json"`; a kind with a
+trailing `?` is optional. The command reads its input already typed:
+
+```ts
+export const jumpToLevel = defineCommand({
+  id: "timber.jumpToLevel",
+  title: "Go to level",
+  input: { level: "number" },
+  effect: "route",
+  run: (app, { level }) => {
+    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    return app.flow.walk([{ at: "home", intent: "play", payload: { level } }]);
+  }
+});
+```
+
+**The dev flag.** `__MOKU_GAME_DEV__` is a global the engine never replaces; undefined means
+production. A dev build defines it `true` in the bundler, or sets `globalThis.__MOKU_GAME_DEV__ =
+true` before the engine runs. `isDev()` reads it at call time. Bun does not inline `isDev()` across
+modules, so every command body writes the guard inline, as above: a `define` of `false` folds the
+condition and the minifier drops the body. Every body logs the debug entry `moku:dev`, and a Bun
+build test proves the marker is gone from `src/plugins/flow/control.ts` with `false` and present
+with `true`. Bun does not tree-shake a second time after it drops a body, so a module-level helper
+that only a dropped body called (the JSON readers, `reproBookmark`) stays in the bundle, unreachable.
+
+**Effects and taint.** `route` goes through the graph and keeps the session clean. `cheat` and
+`raw` taint the session of that app and are journaled `{ id, input, frame }` before they run, the
+last 500 kept. Both live per app object, so two apps in one process never share them.
+
+Flow sources:
+
+| id | Input | Output | Changes |
+|---|---|---|---|
+| `game.graph` | — | `flow.describe()` | edge |
+| `game.position` | — | `{ path, flow, node, waiting }` | edge |
+| `game.history` | `{ last: "number?" }` | the journal, or its last entries | edge |
+| `game.tainted` | — | whether a cheat or raw command ran | frame |
+| `game.cheats` | — | the cheat journal, frozen | frame |
+| `game.log` | `{ level: "string?" }` | `log.trace()`: every entry, or the entries at `level` and above. Another level than `debug`, `info`, `warn`, `error` throws | frame |
+
+Flow commands:
+
+| id | Input | Effect | Does |
+|---|---|---|---|
+| `game.answer` | `{ intent: "string", payload: "json?" }` | route | `flow.gate.answer` |
+| `game.walk` | `{ route: "json" }` | route | `flow.walk` with the route read from JSON |
+| `game.bookmark` | — | read | `flow.bookmark()` |
+| `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `flow.restore(bookmark)`, or `flow.restore(reproBookmark(app, repro))` then `flow.walk(repro.route)` |
 
 ## The signal of an effect handler
 
