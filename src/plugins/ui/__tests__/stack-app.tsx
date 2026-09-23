@@ -6,6 +6,7 @@
  */
 import { createApp, defineGame, guide, projection, Sprite, Transform, type } from "../../../index";
 import { animPlugin } from "../../anim";
+import { defineMotion } from "../../anim/motion";
 import { assetsPlugin } from "../../assets";
 import type { Answer } from "../../flow/gate/types";
 import { i18nPlugin } from "../../i18n";
@@ -87,7 +88,9 @@ export const ConfirmPopup = defineComponent("Confirm", {
   view: () => (
     <panel key="confirmPanel" style={{ width: 400, height: 300 }} motion={countedMotion}>
       <button key="yes" intent="confirm" style={{ width: 100, height: 60 }} />
-      <button key="no" intent="cancel" escape style={{ width: 100, height: 60 }} />
+      <button key="no" intent="cancel" escape style={{ width: 100, height: 60 }}>
+        <text key="noLabel" style={{ width: 80, height: 40 }} content="cancel" />
+      </button>
     </panel>
   )
 });
@@ -304,6 +307,96 @@ export const orderScreen = projection({
   )
 });
 
+/**
+ * A popup-like screen: a full-screen backdrop that Escape taps, a close button with a label and
+ * an OK button. The backdrop has no children, so it is no Tab stop.
+ */
+export const backdropScreen = projection({
+  name: "backdropScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "backdropScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => (
+    <stack key="backdropRoot" style={{ width: 1080, height: 1080 }}>
+      <button
+        key="backdrop"
+        intent="go"
+        escape
+        style={{ position: "absolute", top: 0, left: 0, width: 1080, height: 1080, reason: "dim" }}
+      />
+      <button
+        key="closeX"
+        intent="go"
+        style={{ position: "absolute", top: 40, left: 900, width: 100, height: 100, reason: "x" }}
+      >
+        <text key="closeLabel" style={{ width: 40, height: 40 }} content="x" />
+      </button>
+      <button
+        key="okButton"
+        intent="go"
+        style={{ position: "absolute", top: 500, left: 400, width: 200, height: 100, reason: "ok" }}
+      />
+    </stack>
+  )
+});
+
+/**
+ * A sway of one second: out to `peak` radians and home, as offsets over the rest pose.
+ *
+ * @param peak - The widest turn of the sway.
+ * @returns The motion, with the sway as its loop.
+ */
+function swayOf(peak: number) {
+  return defineMotion({
+    keyframes: {
+      sway: [
+        { at: 0, Transform: { rotation: 0 } },
+        { at: 0.5, ease: "linear", Transform: { rotation: peak } },
+        { at: 1, ease: "linear", Transform: { rotation: 0 } }
+      ]
+    },
+    transition: { ms: 1000 },
+    loop: { track: "sway" },
+    on: {}
+  });
+}
+
+/** The two sways of the card: gentle while it waits, wide once it is ready. */
+export const sways = { gentle: swayOf(0.1), wide: swayOf(0.3) } as const;
+
+/**
+ * The motion of the card in one mode.
+ *
+ * @param mode - The local mode of the card.
+ * @returns The wide sway, the gentle one, or no motion at all.
+ */
+function swayFor(mode: string) {
+  if (mode === "still") return undefined;
+
+  return mode === "wide" ? sways.wide : sways.gentle;
+}
+
+/** A card whose motion prop follows its local mode: gentle, wide, or none at all. */
+export const Swayer = defineComponent("Swayer", {
+  local: { mode: "gentle" },
+  view: (_props: object, local) => (
+    <column key="swayRoot" style={{ width: 600, height: 600 }}>
+      <row key="card" style={{ width: 200, height: 200 }} motion={swayFor(local.mode)} />
+      <button key="toWide" local={{ mode: "wide" }} style={{ width: 100, height: 100 }} />
+      <button key="toStill" local={{ mode: "still" }} style={{ width: 100, height: 100 }} />
+    </column>
+  )
+});
+
+/** A screen with the swaying card. */
+export const swayScreen = projection({
+  name: "swayScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "swayScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => <Swayer key="swayer" />
+});
+
 /** What the `hold` effect of the closing node waits for. */
 export const hold = { release: (): void => undefined };
 
@@ -402,9 +495,11 @@ export const stackFeature = defineFeature("stack", {
     listScreen,
     clippedScreen,
     focusScreen,
-    orderScreen
+    orderScreen,
+    backdropScreen,
+    swayScreen
   ],
-  ui: [SettingsPopup, ConfirmPopup, Toggle],
+  ui: [SettingsPopup, ConfirmPopup, Toggle, Swayer],
   strings: { en: english }
 });
 

@@ -111,7 +111,8 @@ function hintFor(
 
 /**
  * A key that is new: spawn the entity with the view components and the projection's layer, then
- * play the `enter` hook when the reconcile plays motions.
+ * play the `enter` hook and the `loop` hook when the reconcile plays motions. The loop is not
+ * kept with the view's handles: a change cancels those, and the loop runs until the view dies.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -140,14 +141,20 @@ function enterEntry(
   pctx.ctx.state.projection.byEntity.set(entity, view);
 
   const hook = spec.motion?.enter;
+  const loop = spec.motion?.loop;
 
-  if (entry.direct || hook === undefined) return;
+  if (entry.direct || (hook === undefined && loop === undefined)) return;
 
   const handle = createViewHandle(pctx, view, entry.peers);
-  const hint = hintFor(pctx, spec.name, entry.key, entry.used);
-  const played = runHook(pctx, view, "enter", () => hook(handle, entry.item, hint));
 
-  if (played?.motion !== undefined) view.handles.push(played.motion);
+  if (hook !== undefined) {
+    const hint = hintFor(pctx, spec.name, entry.key, entry.used);
+    const played = runHook(pctx, view, "enter", () => hook(handle, entry.item, hint));
+
+    if (played?.motion !== undefined) view.handles.push(played.motion);
+  }
+
+  if (loop !== undefined) runHook(pctx, view, "loop", () => loop(handle));
 
   playSettle(pctx, view, spec, entry.peers, looseComponents(pctx, view));
 }

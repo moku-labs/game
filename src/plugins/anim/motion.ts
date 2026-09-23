@@ -270,26 +270,17 @@ function hookOf(
 }
 
 /**
- * The enter hook with the loop: the enter `on.enter` names, if any, and next to it the loop,
- * which is left out of the motion the hook returns.
+ * The loop hook: it starts the loop on a view and answers its motion, which never ends on its own.
  *
- * @param enter - The hook `on.enter` builds, if any.
  * @param loop - The resolved loop, if any.
- * @returns The hook, or `undefined` when there is neither an enter nor a loop.
+ * @returns The hook, or `undefined` when the motion names no loop.
  */
-function withLoop(
-  enter: ((view: ViewHandle<unknown>) => Motion) | undefined,
+function loopHook(
   loop: MotionLoop | undefined
 ): ((view: ViewHandle<unknown>) => Motion) | undefined {
-  if (loop === undefined) return enter;
+  if (loop === undefined) return undefined;
 
-  return view => {
-    const motion = enter?.(view);
-
-    playLoop(view, loop.keys, loop.ms);
-
-    return motion;
-  };
+  return view => playLoop(view, loop.keys, loop.ms);
 }
 
 /**
@@ -355,15 +346,16 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
 /**
  * Builds the projection motion hooks of an element from named poses and keyframe tracks. The
  * transition is resolved and every name is checked here, at definition time, so every track it
- * starts carries a concrete duration and a wrong name fails where it is written. A `loop` makes
- * the `enter` hook even without `on.enter`: the loop starts where enter plays, so a projection
- * view loops once it entered with motion, never after a direct reconcile. One cycle of the loop
- * is `loop.ms`, or `transition.ms` when it is left out.
+ * starts carries a concrete duration and a wrong name fails where it is written. A `loop` builds
+ * the `loop` hook: `world` and `ui` play it wherever they play `enter`, so a projection view loops
+ * once it entered with motion, never after a direct reconcile, and `ui` swaps it when the motion
+ * prop of an element changes. One cycle of the loop is `loop.ms`, or `transition.ms` when it is
+ * left out.
  *
  * @param spec - The named poses, the keyframe tracks, the transition, the loop and the hooks to
  *   build.
- * @returns The `enter`, `exit` and `change` hooks. `settle` is left out: the default of `world`
- *   applies.
+ * @returns The `enter`, `loop`, `exit` and `change` hooks. `settle` is left out: the default of
+ *   `world` applies.
  * @throws {Error} When a track is invalid, a name is both a state and a track, `on` names
  *   neither, `loop.track` names no track, `loop.ms` is not a finite number above 0, or the loop
  *   ends somewhere else than it starts.
@@ -384,12 +376,14 @@ export function defineMotion(spec: MotionSpec): ProjectionMotion<unknown> {
     ms: spec.transition?.ms ?? DEFAULT_TRANSITION_MS,
     ease: spec.transition?.ease ?? DEFAULT_TRANSITION_EASE
   };
-  const enter = withLoop(hookOf(spec, "enter", transition), loopOf(spec, transition.ms));
+  const enter = hookOf(spec, "enter", transition);
+  const loop = loopHook(loopOf(spec, transition.ms));
   const exit = hookOf(spec, "exit", transition);
   const changed = spec.on.change ?? [];
 
   return {
     ...(enter === undefined ? {} : { enter }),
+    ...(loop === undefined ? {} : { loop }),
     ...(exit === undefined ? {} : { exit }),
     ...(changed.length === 0 ? {} : { change: changeHooks(changed, transition) })
   };

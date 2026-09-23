@@ -7,7 +7,14 @@
 import type { TransformValue } from "../renderer/components";
 import { NineSlice, Shape, Sprite, Transform } from "../renderer/components";
 import type { AnyComponent } from "../world/ecs/types";
-import type { ComponentType, Ease, Motion, TrackSegment, ViewHandle } from "../world/types";
+import type {
+  ComponentType,
+  Ease,
+  Motion,
+  MotionHandle,
+  TrackSegment,
+  ViewHandle
+} from "../world/types";
 import { asComponent } from "./components";
 import type { MotionKeyframe } from "./types";
 
@@ -85,11 +92,41 @@ function flatPose(key: MotionKeyframe): Record<string, number> {
   return pose;
 }
 
+/** One whole turn, in radians. */
+const TURN = 2 * Math.PI;
+
+/** How far a rotation seam may miss a whole number of turns, in radians. */
+const TURN_TOLERANCE = 1e-9;
+
+/**
+ * Tells whether a loop field closes on itself: the end equals the start, or, for the rotation,
+ * differs from it by whole turns, so the restart at the start looks the same.
+ *
+ * @param field - The flat field name.
+ * @param start - Where the field stands at the first key, `undefined` when no start is known.
+ * @param end - Where it stands at the last key.
+ * @returns True when the cycle closes without a jump.
+ * @example
+ * ```ts
+ * closesOnItself("Transform.rotation", 0, 2 * Math.PI); // true
+ * closesOnItself("Transform.rotation", 0, Math.PI); // false
+ * ```
+ */
+function closesOnItself(field: string, start: number | undefined, end: number): boolean {
+  if (start === end) return true;
+  if (start === undefined || field !== "Transform.rotation") return false;
+
+  const turns = (end - start) / TURN;
+
+  return Math.abs(end - start - Math.round(turns) * TURN) <= TURN_TOLERANCE;
+}
+
 /**
  * Checks the seam of a loop at definition time: every field the track names stands at its last
- * key where it stood at its first key, so a cycle closes without a jump. A Transform field the
- * first key leaves out starts at no offset; an alpha the first key leaves out has no start a
- * definition can know, so a loop that names it later is refused.
+ * key where it stood at its first key, so a cycle closes without a jump. The rotation may end
+ * whole turns away from its start, which is how a blade spins. A Transform field the first key
+ * leaves out starts at no offset; an alpha the first key leaves out has no start a definition can
+ * know, so a loop that names it later is refused.
  *
  * @param name - The track name, for the error.
  * @param keys - The keys of the track, already checked by `checkTrack`.
@@ -104,7 +141,7 @@ export function checkLoop(name: string, keys: readonly MotionKeyframe[]): void {
   for (const [field, value] of Object.entries(held)) {
     const start = first[field] ?? (field.startsWith("Transform.") ? 0 : undefined);
 
-    if (start !== value) {
+    if (!closesOnItself(field, start, value)) {
       throw new Error(
         `[game] Motion loop "${name}" ends somewhere else than it starts.\n  Give its last key the pose of its first key.`
       );
@@ -348,21 +385,22 @@ function loopLanesOf(view: ViewHandle<unknown>): Lane[] {
  * @param lane - The lane.
  * @param keys - The checked keys of the loop.
  * @param ms - The length of one cycle.
+ * @returns The handle of the walk, or `undefined` when the lane moves nothing.
  */
 function loopLane(
   view: ViewHandle<unknown>,
   lane: Lane,
   keys: readonly MotionKeyframe[],
   ms: number
-): void {
+): MotionHandle | undefined {
   const segments = segmentsOf(lane, keys);
   const target = lastValues(segments);
   const first = segments[0];
 
-  if (first === undefined || Object.keys(target).length === 0) return;
+  if (first === undefined || Object.keys(target).length === 0) return undefined;
   if (first.at > 0) segments.unshift({ at: 0, to: first.to });
 
-  view.tween(lane.component, target, {
+  return view.tween(lane.component, target, {
     ms,
     ease: KEY_EASE,
     additive: true,
@@ -373,18 +411,28 @@ function loopLane(
 
 /**
  * Starts a loop on a view: one additive walk per component the keys name, repeated forever. The
- * walks belong to no motion: they run until the view dies, `flushAll` or `finishAll`.
+ * walks run until the view dies, `flushAll`, `finishAll`, or the returned motion is cancelled,
+ * which is how `ui` swaps the loop of an element whose motion changed.
  *
  * @param view - The view handle the hook was given.
  * @param keys - The checked keys of the loop.
  * @param ms - The length of one cycle: `loop.ms`, or `transition.ms` when it is left out.
+ * @returns One motion over every walk; it never ends on its own.
  */
 export function playLoop(
   view: ViewHandle<unknown>,
   keys: readonly MotionKeyframe[],
   ms: number
-): void {
-  for (const lane of loopLanesOf(view)) loopLane(view, lane, keys, ms);
+): Motion {
+  const walks: MotionHandle[] = [];
+
+  for (const lane of loopLanesOf(view)) {
+    const walk = loopLane(view, lane, keys, ms);
+
+    if (walk !== undefined) walks.push(walk);
+  }
+
+  return view.all(walks);
 }
 
 /**

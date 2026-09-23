@@ -182,7 +182,7 @@ describe("anim reduced motion — loops", () => {
   it("stands a loop on its first key and keeps it running", () => {
     const probe = createViewProbe({ reducedMotion: true });
 
-    wiggling.enter?.(probe.view, {});
+    wiggling.loop?.(probe.view);
     stepProbe(probe, 16);
 
     expect(poseOf(probe).rotation).toBe(0.1);
@@ -196,7 +196,7 @@ describe("anim reduced motion — loops", () => {
   it("stops a running loop at once and lets it move again from its first key", () => {
     const probe = createViewProbe();
 
-    wiggling.enter?.(probe.view, {});
+    wiggling.loop?.(probe.view);
     stepProbe(probe, 250);
 
     expect(poseOf(probe).rotation).toBeCloseTo(0, 6);

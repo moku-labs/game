@@ -337,7 +337,8 @@ describe("a covered root", () => {
   it("loses its focus, and Tab walks the popup over it", async () => {
     const app = await openSettings();
 
-    expect(tabs(app, 4)).toEqual(["tabVideo", "louder", "reset", "close"]);
+    // `close` is marked `escape` and has no children: no Tab stop, the focus wraps past it.
+    expect(tabs(app, 4)).toEqual(["tabVideo", "louder", "reset", "tabVideo"]);
     expect(tabs(app, 1, true)).toEqual(["reset"]);
     expect(app.input.key("Enter")).toBe(true);
     await settle(app, 3);
@@ -346,6 +347,22 @@ describe("a covered root", () => {
     expect(focused(app)).toBeUndefined();
     expect(app.world.ecs.get(ringParts(app).ring ?? 0, Shape)?.alpha).toBe(0);
     expect(tabs(app, 2)).toEqual(["yes", "no"]);
+
+    await app.stop();
+  });
+});
+
+describe("a backdrop", () => {
+  it("is no Tab stop, and Escape still taps it", async () => {
+    const app = await startStackApp();
+
+    mount(app, ["backdropScreen"]);
+
+    const tapped = recordTaps(app);
+
+    expect(tabs(app, 3)).toEqual(["closeX", "okButton", "closeX"]);
+    expect(app.input.key("Escape")).toBe(true);
+    expect(tapped).toEqual([app.ui.find("backdrop")]);
 
     await app.stop();
   });

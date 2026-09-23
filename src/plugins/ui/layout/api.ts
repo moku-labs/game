@@ -10,7 +10,7 @@ import { applyStyleToNode, layoutChanged } from "./apply";
 import { beginExit, canDespawn } from "./exit";
 import { createGuideHandler } from "./guide";
 import { installMeasure, markMeasured } from "./measure";
-import { play, repose, writeRest } from "./motion";
+import { play, repose, startLoop, writeRest } from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
 import { stepScroll } from "./scroll";
@@ -80,7 +80,10 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
       const hook = element.motion?.enter;
 
       play(ctx, element, hook === undefined ? undefined : view => hook(view, element.node));
+      startLoop(ctx, element);
     },
+
+    loop: (element: Element): void => startLoop(ctx, element),
 
     change: (element: Element, previous: Rect): boolean => {
       const hook = element.motion?.change?.Box;
