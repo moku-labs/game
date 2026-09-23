@@ -1,7 +1,7 @@
 import { expectTypeOf } from "vitest";
 import type { Events as ScenesEvents } from "../../../scenes/types";
 import { audioFor, music } from "../../descriptors";
-import type { AudioApi, Bus, Config, MusicDescriptor, Volumes } from "../../types";
+import type { AudioApi, Bus, Config, MusicDescriptor, SoundEntry, Volumes } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -31,6 +31,9 @@ const api = {} as AudioApi;
 expectTypeOf(api.setVolume).parameter(0).toEqualTypeOf<Bus>();
 expectTypeOf(api.volume("music")).toEqualTypeOf<number>();
 expectTypeOf(api.unlocked()).toEqualTypeOf<boolean>();
+expectTypeOf(api.journal()).toEqualTypeOf<readonly SoundEntry[]>();
+expectTypeOf<SoundEntry["kind"]>().toEqualTypeOf<"sfx" | "music">();
+expectTypeOf<Config["journal"]>().toEqualTypeOf<number>();
 
 // @ts-expect-error — "voice" is not one of the three buses.
 api.setVolume("voice", 1);

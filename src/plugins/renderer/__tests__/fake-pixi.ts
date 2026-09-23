@@ -502,12 +502,22 @@ export const fakeXmlParser = {
   }
 };
 
+/** A texture source the fake GPU holds, with the fields the memory estimate reads. */
+export type FakeManagedSource = { pixelWidth: number; pixelHeight: number; mipLevelCount: number };
+
+/** The PNG data URL the fake extract answers: the base64 of the PNG signature. */
+export const FAKE_PNG = "data:image/png;base64,iVBORw0KGgo=";
+
 /** What the fake renderer recorded. */
 export type FakeRenderer = {
   name: "webgpu" | "webgl";
   renders: number;
   resizes: Array<{ width: number; height: number }>;
   gpu?: { device: { lost: Promise<{ reason: string }> } };
+  /** The GPU texture sources, as Pixi's `renderer.texture.managedTextures`. */
+  texture: { managedTextures: FakeManagedSource[] };
+  /** Pixi's extract system: `base64` records its options and answers `FAKE_PNG`. */
+  extract: { calls: unknown[]; base64(options: unknown): Promise<string> };
   render(stage: FakeContainer): void;
   resize(width: number, height: number): void;
 };
@@ -523,6 +533,8 @@ export class FakeApplication {
   public static instances: FakeApplication[] = [];
 
   public stage = new FakeContainer();
+  /** The CSS-pixel rectangle of the canvas, as Pixi's `app.screen`. */
+  public screen = new FakeRectangle(0, 0, 1080, 1920);
   public canvas: FakeElement = createFakeElement("canvas");
   public renderer!: FakeRenderer;
   public initOptions: Record<string, unknown> | undefined;
@@ -554,6 +566,15 @@ export class FakeApplication {
       name: FakeApplication.settings.kind,
       renders: 0,
       resizes: [],
+      texture: { managedTextures: [] },
+      extract: {
+        calls: [],
+        base64: (options: unknown) => {
+          renderer.extract.calls.push(options);
+
+          return Promise.resolve(FAKE_PNG);
+        }
+      },
       render: () => {
         renderer.renders += 1;
       },

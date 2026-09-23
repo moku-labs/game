@@ -97,7 +97,18 @@ export type HostApi = {
 };
 
 /**
- * host methods injected into `viewport` and `sync`, and driven by the plugin root. Not public.
+ * The textures the GPU holds: how many sources, and their estimated bytes.
+ *
+ * @example
+ * ```ts
+ * const usage: TextureUsage = { count: 2, bytes: 5_242_880 };
+ * ```
+ */
+export type TextureUsage = { count: number; bytes: number };
+
+/**
+ * host methods injected into `viewport`, `sync` and `monitor`, and driven by the plugin root. Not
+ * public.
  */
 export type HostInternal = {
   /**
@@ -150,6 +161,20 @@ export type HostInternal = {
    * Draws one frame. A no-op while nothing draws, so a lost device costs nothing.
    */
   render(): void;
+
+  /**
+   * Draws the stage into a PNG over the whole canvas. A failed read is logged.
+   *
+   * @returns A PNG data URL, or `undefined` while nothing draws or when Pixi could not read it.
+   */
+  extract(): Promise<string | undefined>;
+
+  /**
+   * The texture sources the GPU holds and their estimated memory, read at call time.
+   *
+   * @returns The usage; zero while nothing draws.
+   */
+  textures(): TextureUsage;
 
   /**
    * Runs the init sequence: resolve the mount, load Pixi, create the application, append the

@@ -6,7 +6,8 @@ const config: Config = {
   buses: { master: 1, music: 0.6, sfx: 1 },
   musicFadeMs: 600,
   volumes: undefined,
-  context: undefined
+  context: undefined,
+  journal: 0
 };
 
 describe("createAudioState", () => {
@@ -30,6 +31,7 @@ describe("createAudioState", () => {
     expect(state.decoded.size).toBe(0);
     expect(state.warned.size).toBe(0);
     expect(state.removers).toEqual([]);
+    expect(state.journal).toEqual([]);
   });
 
   it("gives every app its own maps", () => {

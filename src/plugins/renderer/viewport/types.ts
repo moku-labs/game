@@ -117,6 +117,24 @@ export type ViewportApi = {
   toReference(clientX: number, clientY: number): Point;
 
   /**
+   * Maps a point in reference units to client CSS pixels, the coordinates of `event.clientX`:
+   * `canvas rect + frame offset + point × scale`. The inverse of `toReference`; the canvas
+   * rectangle is read at call time.
+   *
+   * @param point - A point in reference units.
+   * @returns The point in client CSS pixels, a fresh object. Inert: the same numbers, reference
+   *   units, since there is no canvas to place them on.
+   * @example
+   * ```ts
+   * // The `game.rect` source of the editor places Home's Play plank on the page. A 390x844
+   * // phone, the canvas at the top left: the scale is 390 / 1080.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.viewport.toScreen({ x: 540, y: 960 }); // { x: 195, y: 346.666… }
+   * ```
+   */
+  toScreen(point: Point): Point;
+
+  /**
    * The drawn frame in reference units, as a fresh object.
    *
    * @returns Width, height, scale, designed orientation and the safe area.

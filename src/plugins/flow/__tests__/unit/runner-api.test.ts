@@ -546,3 +546,69 @@ describe("createRunnerApi", () => {
     ).rejects.toThrow("needs a running graph");
   });
 });
+
+describe("state() memo", () => {
+  it("hands out the same frozen state while nothing moved", () => {
+    const harness = setup(restingGraph());
+    const first = harness.api.state();
+
+    expect(harness.api.state()).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.stack)).toBe(true);
+    expect(Object.isFrozen(first.pending)).toBe(true);
+  });
+
+  it("builds a new state when the gate opens or closes", () => {
+    const harness = setup(restingGraph());
+    const closed = harness.api.state();
+
+    harness.ctx.state.gate.open = { allowed: ["play"] };
+    const open = harness.api.state();
+
+    expect(open).not.toBe(closed);
+    expect(open.pending).toEqual({ gate: ["play"] });
+    expect(Object.isFrozen(open.pending.gate)).toBe(true);
+
+    harness.ctx.state.gate.open = undefined;
+
+    expect(harness.api.state()).not.toBe(open);
+  });
+
+  it("builds a new state when the stack, the top frame, the mode, run or the journal moved", () => {
+    const harness = setup(restingGraph());
+    const runner = harness.ctx.state.runner;
+    const home = { flow: "main", node: "home", input: noPayload };
+    const moves: Array<() => void> = [
+      () => {
+        runner.stack = [home];
+      },
+      () => {
+        runner.stack = [home, { flow: "board", node: "awaitIntent", input: noPayload }];
+      },
+      () => {
+        runner.stack = [home, { flow: "board", node: "merge", input: noPayload }];
+      },
+      () => {
+        harness.ctx.state.fx.mode = "fast";
+      },
+      () => {
+        runner.running = new Promise<void>(() => undefined);
+      },
+      () => {
+        runner.journalIndex += 1;
+      }
+    ];
+    let previous = harness.api.state();
+
+    for (const move of moves) {
+      move();
+      const next = harness.api.state();
+
+      expect(next).not.toBe(previous);
+      expect(harness.api.state()).toBe(next);
+      previous = next;
+    }
+
+    expect(previous).toMatchObject({ running: true, path: "home/merge", mode: "fast" });
+  });
+});

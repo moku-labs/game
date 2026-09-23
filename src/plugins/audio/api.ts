@@ -1,10 +1,10 @@
 /**
- * @file audio plugin — API factory. Four members: three buses and the unlock flag. Nothing here
+ * @file audio plugin — API factory. Three buses, the unlock flag and the journal of started sounds. Nothing here
  * is persisted; a game keeps the player's choice in the player state and `config.volumes` applies
  * it on the next commit.
  */
 import { applyGain, isBus } from "./graph";
-import type { AudioApi, Bus, KernelSlice, State } from "./types";
+import type { AudioApi, Bus, KernelSlice, SoundEntry, State } from "./types";
 
 /**
  * Brings a value into 0..1. `NaN`, which is what a slider divided by zero produces, becomes 0.
@@ -53,7 +53,7 @@ export function setBusVolume(state: State, bus: Bus, value: number): void {
 }
 
 /**
- * Creates the audio API: the three buses and the unlock flag.
+ * Creates the audio API: the three buses, the unlock flag and the journal.
  *
  * @param ctx - Kernel context of the audio plugin.
  * @returns The plugin API.
@@ -70,6 +70,7 @@ export function createAudioApi(ctx: KernelSlice): AudioApi {
       state.buses[checked].muted = on;
       applyGain(state, checked);
     },
-    unlocked: (): boolean => state.unlocked
+    unlocked: (): boolean => state.unlocked,
+    journal: (): readonly SoundEntry[] => [...state.journal]
   };
 }

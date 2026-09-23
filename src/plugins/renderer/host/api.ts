@@ -5,6 +5,8 @@
 import type { HostModule, PixiContainer, PixiModule, RendererCtx, RendererKind } from "../types";
 import { watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
+import { extractStage, textureUsage } from "./readback";
+import type { TextureUsage } from "./types";
 import { showUnsupported } from "./unsupported";
 import { watchVisibility } from "./visibility";
 
@@ -75,6 +77,22 @@ export function createHostApi(ctx: RendererCtx): HostModule {
       if (!state.ready || app === undefined) return;
 
       app.renderer.render(app.stage);
+    },
+
+    extract: async (): Promise<string | undefined> => {
+      const app = state.app;
+
+      if (!state.ready || app === undefined) return undefined;
+
+      return extractStage(ctx, app);
+    },
+
+    textures: (): TextureUsage => {
+      const app = state.app;
+
+      if (!state.ready || app === undefined) return { count: 0, bytes: 0 };
+
+      return textureUsage(app);
     },
 
     init: async (): Promise<void> => {

@@ -17,6 +17,7 @@ import type {
   CreateTextureOptions,
   DebugSwitches,
   DisplayAdapter,
+  SyncCounts,
   SyncCtx,
   SyncDeps,
   TextureProvider,
@@ -437,6 +438,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     },
 
     root: (): PixiContainer | undefined => state.root,
+
+    counts: (): SyncCounts => ({ views: state.views.size, pooled: state.pooled }),
 
     rebuildAll,
 

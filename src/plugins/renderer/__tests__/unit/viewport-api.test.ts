@@ -62,3 +62,44 @@ describe("viewport size: both sides fit", () => {
     expect(size.scale).toBeCloseTo(390 / 1080, 6);
   });
 });
+
+describe("viewport toScreen: reference units to client CSS pixels", () => {
+  it("scales a point of a 390x844 phone into the page", async () => {
+    const mock = await started({ width: 390, height: 844 });
+    const point = mock.api.viewport.toScreen({ x: 540, y: 960 });
+
+    expect(point.x).toBeCloseTo(195, 6);
+    expect(point.y).toBeCloseTo(346.6667, 4);
+  });
+
+  it("adds the frame offset of the bars and the place of the canvas on the page", async () => {
+    // A portrait game in a 1920x1080 window: an 810x1080 frame, 555 px of bar on the left.
+    const mock = await started({ width: 1920, height: 1080 });
+
+    mock.pixi.last().canvas.rect = { left: 10, top: 20, width: 1920, height: 1080 };
+
+    expect(mock.api.viewport.toScreen({ x: 0, y: 0 })).toEqual({ x: 565, y: 20 });
+    expect(mock.api.viewport.toScreen({ x: 720, y: 960 })).toEqual({ x: 970, y: 560 });
+  });
+
+  it("is the inverse of toReference", async () => {
+    const mock = await started({ width: 1920, height: 1080 });
+
+    mock.pixi.last().canvas.rect = { left: 10, top: 20, width: 1920, height: 1080 };
+
+    const screen = mock.api.viewport.toScreen({ x: 312, y: 1480 });
+    const back = mock.api.viewport.toReference(screen.x, screen.y);
+
+    expect(back.x).toBeCloseTo(312, 9);
+    expect(back.y).toBeCloseTo(1480, 9);
+  });
+
+  it("is the identity over reference units while inert, as a fresh object", () => {
+    const mock = createMockRenderer({ dom: false });
+    const point = { x: 120, y: 340 };
+    const screen = mock.api.viewport.toScreen(point);
+
+    expect(screen).toEqual({ x: 120, y: 340 });
+    expect(screen).not.toBe(point);
+  });
+});

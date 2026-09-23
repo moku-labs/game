@@ -5,7 +5,7 @@ import { component, Layer, system } from "../../../world/ecs/define";
 import { Sprite, sprite, Transform } from "../../components";
 import { rendererPlugin } from "../../index";
 import { installFakeDom } from "../fake-dom";
-import { createFakePixi, FakeTexture } from "../fake-pixi";
+import { createFakePixi, FAKE_PNG, FakeTexture } from "../fake-pixi";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -92,6 +92,55 @@ describe("renderer plugin integration", () => {
     app.time.step(16);
 
     expect(app.renderer.sync.displayOf(1)).toBeUndefined();
+    expect(app.renderer.viewport.toScreen({ x: 540, y: 960 })).toEqual({ x: 540, y: 960 });
+    expect(app.renderer.stats()).toEqual({
+      fps: 0,
+      frameMs: 0,
+      textures: 0,
+      textureMb: 0,
+      views: 0,
+      pooled: 0
+    });
+
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    await expect(app.renderer.capture()).resolves.toBeUndefined();
+
+    await app.stop();
+  });
+
+  it("counts its views and hands a dev build a PNG of the next frame", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    installFakeDom({ width: 390, height: 844 });
+    const pixi = createFakePixi();
+
+    const app = createApp({
+      plugins: [worldPlugin, rendererPlugin, boardFeature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        model: {
+          initialPlayer: { items: [{ id: "a", level: 1, x: 0 }] },
+          initialSession: { moves: 0 },
+          seed: 1
+        },
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+      }
+    });
+
+    await app.start();
+    app.renderer.sync.textures.provide(() => new FakeTexture({}) as never);
+    app.world.projection.setLayers([{ name: "items", sort: "y" }]);
+    app.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Layer({ name: "items" }),
+      ...sprite({ texture: "board.cell", at: { x: 540, y: 300 } })
+    ]);
+
+    const capture = app.renderer.capture();
+
+    app.time.step(16);
+
+    await expect(capture).resolves.toBe(FAKE_PNG);
+    expect(app.renderer.stats()).toMatchObject({ views: 1, pooled: 0 });
+    expect(app.renderer.viewport.toScreen({ x: 1080, y: 0 }).x).toBeCloseTo(390, 6);
 
     await app.stop();
   });

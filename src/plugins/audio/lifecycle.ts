@@ -5,23 +5,26 @@
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
+import { timePlugin } from "../time";
 import { applyAllGains, buildGraph } from "./graph";
 import { musicOf, playMusic, playSfx, stopMusic } from "./playback";
 import type { AudioContextLike, AudioCtx, Config, Deps, KernelSlice, State } from "./types";
 import { installUnlock, removeUnlock } from "./unlock";
 
 /**
- * Resolves the dependency APIs `flow`, `assets` and `model` with `ctx.require`. `lifecycle` and
- * `scenes` are dependencies too, but only for their typed hooks: the plugin calls neither.
+ * Resolves the dependency APIs `flow`, `assets`, `model` and `time` with `ctx.require`.
+ * `lifecycle` and `scenes` are dependencies too, but only for their typed hooks: the plugin calls
+ * neither.
  *
  * @param ctx - Kernel context of the audio plugin.
- * @returns The three dependency APIs.
+ * @returns The four dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     flow: ctx.require(flowPlugin),
     assets: ctx.require(assetsPlugin),
-    model: ctx.require(modelPlugin)
+    model: ctx.require(modelPlugin),
+    time: ctx.require(timePlugin)
   };
 }
 
@@ -93,7 +96,7 @@ export function startAudio(ctx: KernelSlice): void {
 
 /**
  * Frees everything `onStart` opened: the two handler registrations, the two window listeners, the
- * music source and the context itself. A browser caps how many contexts a page may hold, so the
+ * music source, the journal and the context itself. A browser caps how many contexts a page may hold, so the
  * close is the point of this teardown.
  *
  * @param state - The plugin state, all a teardown context carries.
@@ -105,6 +108,7 @@ export async function stopAudio(state: State): Promise<void> {
   removeUnlock(state);
   stopMusic(state);
   state.decoded.clear();
+  state.journal.length = 0;
   state.unlocked = false;
 
   const context = state.context;

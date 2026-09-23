@@ -8,7 +8,8 @@ const config: Config = {
   buses: { master: 1, music: 0.6, sfx: 1 },
   musicFadeMs: 600,
   volumes: undefined,
-  context: undefined
+  context: undefined,
+  journal: 0
 };
 
 /** A state with a live graph on the fake context. */

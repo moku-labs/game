@@ -2,6 +2,7 @@
  * @file renderer plugin — state factory.
  */
 import { createHostState } from "./host/state";
+import { createMonitorState } from "./monitor/state";
 import { createSyncState } from "./sync/state";
 import type { Config, State } from "./types";
 import { createViewportState } from "./viewport/state";
@@ -19,6 +20,7 @@ export function createRendererState(ctx: { readonly config: Readonly<Config> }):
   return {
     host: createHostState(),
     viewport: createViewportState(),
-    sync: createSyncState(ctx.config.debug)
+    sync: createSyncState(ctx.config.debug),
+    monitor: createMonitorState()
   };
 }

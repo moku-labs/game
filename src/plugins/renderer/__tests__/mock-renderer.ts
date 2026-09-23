@@ -6,6 +6,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../config";
+import type { Api as ClockApi } from "../../clock/types";
 import type { Api as FlowApi } from "../../flow/types";
 import type { Api as LifecycleApi, PauseReason } from "../../lifecycle/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../model/types";
@@ -36,6 +37,10 @@ export type MockRenderer = {
   frames: FrameRegistration[];
   /** Every `lifecycle.push` and `lifecycle.pop`, in call order. */
   pauses: Array<{ action: "push" | "pop"; reason: PauseReason }>;
+  /** Sets what the fake `clock.now()` answers, in milliseconds. */
+  setNow(ms: number): void;
+  /** Sets what the fake `time.isPaused()` answers. */
+  setPaused(paused: boolean): void;
   /** Runs `onStart`. */
   start(): Promise<void>;
   /** Runs every callback of one phase. */
@@ -186,6 +191,7 @@ export function createMockRenderer(
   const frames: FrameRegistration[] = [];
   const pauses: Array<{ action: "push" | "pop"; reason: PauseReason }> = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
+  const clock = { now: 0, paused: false };
 
   const timeApi = {
     onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {
@@ -203,10 +209,12 @@ export function createMockRenderer(
     setScale: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
-    isPaused: () => false,
+    isPaused: () => clock.paused,
     isRunning: () => false,
     step: vi.fn()
   } as unknown as TimeApi;
+
+  const clockApi = { now: () => clock.now } as unknown as ClockApi;
 
   const lifecycleApi = {
     push: (reason: PauseReason) => pauses.push({ action: "push", reason }),
@@ -216,7 +224,12 @@ export function createMockRenderer(
   } as unknown as LifecycleApi;
 
   const world = createWorld(timeApi, log);
-  const apis: Record<string, unknown> = { time: timeApi, lifecycle: lifecycleApi, world };
+  const apis: Record<string, unknown> = {
+    time: timeApi,
+    lifecycle: lifecycleApi,
+    world,
+    clock: clockApi
+  };
 
   const ctx: KernelSlice = {
     config,
@@ -246,6 +259,12 @@ export function createMockRenderer(
     dom,
     frames,
     pauses,
+    setNow: (ms: number): void => {
+      clock.now = ms;
+    },
+    setPaused: (paused: boolean): void => {
+      clock.paused = paused;
+    },
     start: () => startRenderer(ctx),
     runPhase: (phase: Phase): void => {
       time.frame += 1;

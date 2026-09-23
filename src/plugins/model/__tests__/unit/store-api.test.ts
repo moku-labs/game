@@ -281,6 +281,57 @@ describe("snapshot", () => {
     expectTypeOf(api.snapshot()).toEqualTypeOf<Snapshot>();
     expectTypeOf(api.snapshot().rng.seed).toEqualTypeOf<number>();
   });
+
+  it("hands out the same frozen object while the document and the session are unchanged", async () => {
+    const { api } = setup();
+    await api.load();
+
+    const first = api.snapshot();
+
+    expect(api.snapshot()).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+  });
+
+  it("builds a new object after a commit, a rollback and a restore", async () => {
+    const { api } = setup();
+    await api.load();
+    api.markRest();
+
+    const loaded = api.snapshot();
+    const transaction = api.begin();
+
+    record(transaction.player).coins = 5;
+
+    expect(api.snapshot()).toBe(loaded);
+
+    transaction.commit();
+    const committed = api.snapshot();
+
+    expect(committed).not.toBe(loaded);
+    expect(record(committed.player).coins).toBe(5);
+
+    api.rollback();
+    const rolledBack = api.snapshot();
+
+    expect(rolledBack).not.toBe(committed);
+    expect(record(rolledBack.player).coins).toBe(0);
+
+    api.restore({ player: { coins: 9 }, session: { screen: "board" } });
+
+    expect(api.snapshot()).not.toBe(rolledBack);
+    expect(api.snapshot().session).toEqual({ screen: "board" });
+  });
+
+  it("keeps the object when a discarded transaction changed nothing", async () => {
+    const { api } = setup();
+    await api.load();
+
+    const before = api.snapshot();
+
+    api.begin().discard();
+
+    expect(api.snapshot()).toBe(before);
+  });
 });
 
 // ─── transactions ────────────────────────────────────────────

@@ -148,7 +148,7 @@ async function tick(times = 120): Promise<void> {
 }
 
 /** Starts the screen set plus `audio`, with or without the fake context. */
-async function startApp(context?: FakeContext) {
+async function startApp(context?: FakeContext, journal = 0) {
   const app = createApp({
     plugins: [...screen, audioPlugin, boardFeature],
     pluginConfigs: {
@@ -161,6 +161,7 @@ async function startApp(context?: FakeContext) {
       assets: { manifest, io: createIo() },
       audio: {
         volumes: (player: Json) => (player as unknown as Player).settings.audio,
+        journal,
         ...(context === undefined ? {} : { context: () => context })
       }
     }
@@ -213,6 +214,32 @@ describe("audio plugin integration — a live walk with a context", () => {
     expect(context.decodes.some(text => text.includes("theme.mp3"))).toBe(true);
 
     await app.stop();
+  });
+
+  it("journals the sound and the track that started, stamped with the game time", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const app = await startApp(context, 200);
+
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+
+    const at = app.time.snapshot().elapsed;
+
+    expect(app.flow.gate.answer({ intent: "play" })).toBe(true);
+    await tick();
+
+    expect(app.audio.journal()).toEqual(
+      expect.arrayContaining([
+        { key: "orders.complete", bus: "sfx", kind: "sfx", at },
+        { key: "board.theme", bus: "music", kind: "music", at }
+      ])
+    );
+    expect(app.audio.journal()).toHaveLength(2);
+
+    await app.stop();
+
+    expect(app.audio.journal()).toEqual([]);
   });
 
   it("follows the volume the node committed to the player state", async () => {

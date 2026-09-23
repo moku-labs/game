@@ -506,7 +506,24 @@ export type SyncInternal = {
    * @returns The root, or `undefined` while inert.
    */
   root(): PixiContainer | undefined;
+
+  /**
+   * How many display objects `sync` holds, for the counters of `monitor`.
+   *
+   * @returns The views of entities and the objects waiting in the pools.
+   */
+  counts(): SyncCounts;
 };
+
+/**
+ * The display objects `sync` holds: views of entities and pooled objects.
+ *
+ * @example
+ * ```ts
+ * const counts: SyncCounts = { views: 180, pooled: 24 };
+ * ```
+ */
+export type SyncCounts = { views: number; pooled: number };
 
 /**
  * sync module state.
