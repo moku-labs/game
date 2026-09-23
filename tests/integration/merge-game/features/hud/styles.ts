@@ -1,62 +1,46 @@
 /**
- * @file The look of the HUD: the design tokens of the game and the layout styles of the top bar.
- * Styles are data, so the HUD markup reads as structure and nothing else. The text styles are
- * shared by every screen and live in `features/ui/styles.ts`.
+ * @file The look of the board screen around the board: the HUD row, the board area with its
+ * slot, and the design tokens the reward popup and the settings still read until they move onto
+ * the signboard. Styles are data, so the markup reads as structure and nothing else. The numbers
+ * are the layout rules of design §5, in reference units.
  */
 import { defineStyle, defineTokens } from "../../kit";
+import { slot } from "../../view/layout";
 
-/** The design table of this game: four spaces, four colours, two radii. */
+/** The V3 table the reward popup and the settings are still drawn with. */
 export const tokens = defineTokens({
   space: { xs: 8, sm: 16, md: 24 },
   color: { bar: 0x1b_22_30, card: 0x2a_33_42, accent: 0xc9_8b_2e, text: 0xff_e0_82 },
   radius: { card: 16 }
 });
 
-/** The top bar: one row across the reference width, its children spread over it. */
-export const topBar = defineStyle({
+/** The HUD row: 40 units under the top safe edge, 144 tall, its four controls spread across. */
+export const hudRow = defineStyle({
   direction: "row",
   align: "center",
   justify: "between",
-  gap: tokens.space.sm,
-  padding: tokens.space.sm,
-  width: 1080,
-  height: 140,
-  fill: tokens.color.bar
+  alignSelf: "stretch",
+  height: 144,
+  margin: { top: 40 },
+  padding: { left: 24, right: 24 }
 });
 
-/** The order card: the button a delivered order is given through. */
-export const orderCard = defineStyle({
-  direction: "column",
+/** What is left between the order strip and the info bar: the board shrinks into it. */
+export const boardArea = defineStyle({
+  grow: 1,
+  alignSelf: "stretch",
   align: "center",
   justify: "center",
-  gap: tokens.space.xs,
-  width: 420,
-  height: 108,
-  radius: tokens.radius.card,
-  fill: tokens.color.card,
-  is: {
-    disabled: { alpha: 0.4 },
-    pressed: { fill: tokens.color.accent }
-  }
+  padding: 12
 });
 
-/** The square button that opens the settings. */
-export const iconButton = defineStyle({
-  direction: "column",
-  align: "center",
-  justify: "center",
-  width: 180,
-  height: 108,
-  radius: tokens.radius.card,
-  fill: tokens.color.card,
-  is: { pressed: { fill: tokens.color.accent } }
+/**
+ * The board slot: the wooden tray, square at its natural 970 units, scaled down to fit the board
+ * area and never past its natural size. It hosts the cells, the generator and the items.
+ */
+export const boardSlot = defineStyle({
+  width: slot.size,
+  height: slot.size,
+  fit: "contain",
+  nineSlice: "board.board-tray"
 });
-
-/** How far the top bar keeps its children from its edge. The coin counter reads it too. */
-export const barPadding = tokens.space.sm;
-
-/** How tall a button of the bar is. The coin slot matches it, so the row stays even. */
-export const barItemHeight = 108;
-
-/** The space the coin counter is drawn into. The counter is its own projection. */
-export const coinSlot = defineStyle({ width: 220, height: barItemHeight });

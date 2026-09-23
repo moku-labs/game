@@ -1,13 +1,13 @@
 /**
  * @file The headless half of the V3 exit criterion: the fixture merge game with its interface.
- * The HUD is laid out into entities, the gear answers the gate, the order card delivers an order
- * through the reward popup, the coin counter arrives at the committed sum, and a language switch
- * re-resolves the labels. Plain Bun: the renderer is inert, the audio context is locked, and Yoga
+ * The HUD is laid out into entities, the gear answers the gate, the Deliver of an order card
+ * delivers an order through the reward popup, the coin counter arrives at the committed sum, and
+ * a language switch re-resolves the labels. Plain Bun: the renderer is inert, the audio context is locked, and Yoga
  * lays the same rects out as it would in the browser.
  */
 
 import { readFile } from "node:fs/promises";
-import type { Assets } from "@moku-labs/game";
+import type { Assets, Ui } from "@moku-labs/game";
 import { Text } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { createScreenGame } from "./merge-game/game";
@@ -71,7 +71,9 @@ async function stepFrames(game: Interface, frames = 30): Promise<void> {
 }
 
 /**
- * Starts the game with its interface and walks it onto the board.
+ * Starts the game with its interface and walks it onto the board: the loading plugin lets the
+ * splash through to Home at once (headless, every bundle counts as loaded), and Home answers
+ * `play`.
  *
  * @param player - The player a new save starts from.
  * @returns The started game, resting on `board/awaitIntent`.
@@ -88,6 +90,7 @@ async function startBoard(player: Player) {
 
   if (loop.failure !== undefined) throw loop.failure;
 
+  expect(game.app.flow.state().path).toBe("home");
   expect(game.app.flow.gate.answer({ intent: "play" })).toBe(true);
   await tick();
   game.app.time.step(16);
@@ -110,6 +113,25 @@ function elementOf(game: Interface, key: string): number {
 }
 
 /**
+ * Finds a keyed node in the snapshot of the screen.
+ *
+ * @param node - The snapshot to search.
+ * @param key - The key of the node.
+ * @returns The node, or `undefined`.
+ */
+function nodeOf(node: Ui.UiNode, key: string): Ui.UiNode | undefined {
+  if (node.key === key) return node;
+
+  for (const child of node.children) {
+    const found = nodeOf(child, key);
+
+    if (found !== undefined) return found;
+  }
+
+  return undefined;
+}
+
+/**
  * The string a label resolved to.
  *
  * @param game - The running game.
@@ -121,12 +143,17 @@ function resolvedOf(game: Interface, entity: number): string {
 }
 
 describe("interface-merge — the HUD on the board", () => {
-  it("lays the top bar out into entities with rects", async () => {
+  it("lays the HUD row out into entities with rects", async () => {
     const game = await startBoard(readyPlayer);
     const tree = game.app.ui.tree();
-    const bar = tree.children.find(child => child.key === "bar") ?? tree;
+    const bar = nodeOf(tree, "hudRow") ?? tree;
 
-    expect(bar.children.map(child => child.key)).toEqual(["coinSlot", "order", "settings"]);
+    expect(bar.children.map(child => child.key)).toEqual([
+      "home",
+      "coinPill",
+      "energyPill",
+      "settings"
+    ]);
     expect(bar.rect.w).toBe(1080);
     expect(bar.children.every(child => child.rect.w > 0 && child.rect.h > 0)).toBe(true);
     expect(game.app.world.projection.entityOf("hud", "settings")).toBe(elementOf(game, "settings"));
@@ -190,7 +217,7 @@ describe("interface-merge — the HUD on the board", () => {
     expect(game.app.i18n.locale()).toBe("en");
     expect(game.app.model.store.snapshot().player).toMatchObject({ settings: { locale: "en" } });
     expect(game.app.flow.state().path).toBe("board/awaitIntent");
-    expect(resolvedOf(game, elementOf(game, "orderTitle"))).toBe("Order");
+    expect(resolvedOf(game, elementOf(game, "card0Title"))).toBe("Order #1");
 
     await game.app.stop();
   });
@@ -207,10 +234,10 @@ describe("interface-merge — the HUD on the board", () => {
 describe("interface-merge — the order delivered through the HUD", () => {
   it("delivers the order, claims the reward and shows the coins on the counter", async () => {
     const game = await startBoard(readyPlayer);
-    const card = elementOf(game, "order");
+    const deliver = elementOf(game, "deliver0");
 
-    expect(game.app.world.ecs.get(card, Text)).toBeUndefined();
-    expect(game.app.input.tap(card)).toBe(true);
+    expect(game.app.world.ecs.get(deliver, Text)).toBeUndefined();
+    expect(game.app.input.tap(deliver)).toBe(true);
     // The node plays the delivery before it opens the popup, and the label of an element that
     // arrived this frame is resolved by `text` in the next one.
     await stepFrames(game, 40);
@@ -247,7 +274,7 @@ describe("interface-merge — the order delivered through the HUD", () => {
     });
     // The reward hands the player back to the board, so the HUD is still there to show the coins.
     expect(game.app.flow.state().path).toBe("board/awaitIntent");
-    expect(elementOf(game, "order")).toBeGreaterThan(0);
+    expect(elementOf(game, "card0")).toBeGreaterThan(0);
 
     await game.app.stop();
   });
@@ -256,15 +283,15 @@ describe("interface-merge — the order delivered through the HUD", () => {
 describe("interface-merge — the language", () => {
   it("re-resolves every label when the locale changes", async () => {
     const game = await startBoard(readyPlayer);
-    const order = elementOf(game, "orderTitle");
+    const order = elementOf(game, "card0Title");
 
-    expect(resolvedOf(game, order)).toBe("Заказ");
+    expect(resolvedOf(game, order)).toBe("Заказ #1");
 
     await game.app.i18n.setLocale("en");
     await stepFrames(game, 2);
 
     expect(game.app.i18n.locale()).toBe("en");
-    expect(resolvedOf(game, order)).toBe("Order");
+    expect(resolvedOf(game, order)).toBe("Order #1");
 
     await game.app.stop();
   });

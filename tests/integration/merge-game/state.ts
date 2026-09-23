@@ -28,12 +28,16 @@ export type Player = {
   pendingCoins: number;
   /** What the settings screen last wrote. */
   settings: Settings;
+  /** Whether the daily gift of Home was taken. The gift button shows its "1" badge until it is. */
+  giftClaimed: boolean;
 };
 
 /** The session: what one run of the game keeps and never saves. */
 export type Session = {
   /** Generator taps in this session. */
   taps: number;
+  /** How far the splash has loaded the bundles Home and the board need, 0..1. */
+  loading: number;
 };
 
 /** The state of a new player. */
@@ -51,11 +55,12 @@ export const startingPlayer: Player = {
   claimed: [],
   pendingReward: "",
   pendingCoins: 0,
-  settings: { audio: { master: 1, music: 0.6, sfx: 1 }, locale: "ru" }
+  settings: { audio: { master: 1, music: 0.6, sfx: 1 }, locale: "ru" },
+  giftClaimed: false
 };
 
 /** The session at every start. */
-export const startingSession: Session = { taps: 0 };
+export const startingSession: Session = { taps: 0, loading: 0 };
 
 /**
  * Writes the state a rules function returned into the player draft. The rules are pure and build

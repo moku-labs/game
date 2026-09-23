@@ -9,14 +9,27 @@ import { play, sfx, type } from "@moku-labs/game";
 import { coinsFly } from "../features/hud/animations";
 import { deliverOrder } from "../features/orders/animations";
 import { RewardPopup } from "../features/orders/reward";
+import { cardKey } from "../features/orders/strip";
 import { defineNode, popup } from "../kit";
 import type { Player } from "../state";
 
-/** The order card of the HUD: where the goods go and where the coins start from. */
-const card: Anim.Target = { projection: "hud", key: "order" };
-
 /** The coin counter of the HUD: where the coins land. */
 const counter: Anim.Target = { projection: "hud.coins", key: "coins" };
+
+/**
+ * The card of the order that was just filled: where the goods go and where the coins start from.
+ * The rules put the next order into the freed slot, and a new order takes the highest id, so the
+ * slot that holds it is the slot that was delivered.
+ *
+ * @param player - The saved player.
+ * @returns The card element of that slot, as an animation target.
+ */
+function deliveredCard(player: Player): Anim.Target {
+  const orders = player.merge.orders;
+  const newest = Math.max(...orders.map(order => order.id));
+
+  return { projection: "hud", key: cardKey(orders.findIndex(order => order.id === newest)) };
+}
 
 /**
  * The items still on the board, as animation targets. A target is a projection key, so this
@@ -33,6 +46,8 @@ export const show = defineNode({
   outcomes: { claim: type() },
   over: true,
   run: async ({ player, fx, out }) => {
+    const card = deliveredCard(player);
+
     await fx(play(deliverOrder, { items: itemTargets(player), card }));
     void fx(sfx("orders.complete"));
 

@@ -1,28 +1,39 @@
 /**
- * @file Where the board sits on the screen. The rules address a cell as `c<col>_<row>` and know
- * nothing about pixels; this file is the one place that turns an address into a point of the
- * reference resolution (1080 wide, portrait).
+ * @file Where a cell sits inside the board slot. The rules address a cell as `c<col>_<row>` and
+ * know nothing about pixels; this file turns an address into a box of the slot's own space. The
+ * slot is a ui element that hosts the three board projections, so these are local units (0..970):
+ * `ui` lays the slot out on the screen and scales it to fit, and nothing here knows the screen.
  */
 import type { Board, CellId } from "../rules";
 
-/** Edge length of one cell in reference units. */
-const cellSize = 240;
+/** The board slot: a square of 970 units, the tray drawn over all of it (design §5.5). */
+export const slot = { size: 970, inset: 55, gap: 10 } as const;
 
-/** Reference x of the left edge of the board: three columns of 240, centred in 1080. */
-const boardLeft = 180;
+/** Edge length of one cell: three cells and two gaps fill the tray inside its inset. */
+export const cellSize = (slot.size - 2 * slot.inset - 2 * slot.gap) / 3;
 
-/** Reference y of the top edge of the board. */
-const boardTop = 600;
+/** Edge length of the box an item or the generator is drawn into: the cell less its grass rim. */
+export const itemSize = Math.round(cellSize * 0.82);
 
 /**
- * A point of the reference resolution.
+ * A point of the slot's own space.
  *
  * @example
  * ```ts
- * const at: Point = { x: 300, y: 720 };
+ * const at: Point = { x: 485, y: 195 };
  * ```
  */
 export type Point = { x: number; y: number };
+
+/**
+ * The box of one cell in the slot's own space: its top-left corner, its size and its middle.
+ *
+ * @example
+ * ```ts
+ * const box: CellBox = { x: 345, y: 55, size: 280, middle: { x: 485, y: 195 } };
+ * ```
+ */
+export type CellBox = { x: number; y: number; size: number; middle: Point };
 
 /**
  * One cell of the board as the view reads it. A cell has nothing but its address; what stands on
@@ -58,22 +69,22 @@ function coordinatesOf(cell: CellId): { col: number; row: number } {
 }
 
 /**
- * The centre of a cell in reference units: where a sprite of that cell is drawn.
+ * The box of a cell in the slot's own space: a cell nine-slice is drawn from its corner, an item
+ * sprite on its middle.
  *
  * @param cell - The address of the cell.
- * @returns The point the sprite sits on.
+ * @returns The corner, the size and the middle of the cell.
  * @example
  * ```ts
- * cellCenter("c0_0"); // { x: 300, y: 720 }
+ * cellBox("c1_0"); // { x: 345, y: 55, size: 280, middle: { x: 485, y: 195 } }
  * ```
  */
-export function cellCenter(cell: CellId): Point {
+export function cellBox(cell: CellId): CellBox {
   const { col, row } = coordinatesOf(cell);
+  const x = slot.inset + col * (cellSize + slot.gap);
+  const y = slot.inset + row * (cellSize + slot.gap);
 
-  return {
-    x: boardLeft + col * cellSize + cellSize / 2,
-    y: boardTop + row * cellSize + cellSize / 2
-  };
+  return { x, y, size: cellSize, middle: { x: x + cellSize / 2, y: y + cellSize / 2 } };
 }
 
 /**

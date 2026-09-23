@@ -25,9 +25,22 @@ const mergeStep = (from: string, to: string): Flow.RouteStep => ({
   payload: { from, to }
 });
 
-/** Open the board, spend the generator's four charges, merge them up to one level-3 item, give it. */
+/**
+ * The splash lets the game go once Home and the board are loaded. Without the screen no plugin
+ * posts `loaded` into the inbox, so the route answers it through the gate.
+ */
+const pastSplash: Flow.RouteStep = { at: "splash", intent: "loaded" };
+
+/** Play, on Home. */
+const play: Flow.RouteStep = { at: "home", intent: "play" };
+
+/**
+ * Pass the splash, open the board, spend the generator's four charges, merge them up to one
+ * level-3 item, give it.
+ */
 const untilOrder: Flow.RouteStep[] = [
-  { at: "home", intent: "play" },
+  pastSplash,
+  play,
   tap,
   tap,
   tap,
@@ -54,11 +67,11 @@ describe("template-merge", () => {
     const { app, provider } = createGame();
     const game = await createHeadless(app);
 
-    await game.walk([{ at: "home", intent: "play" }]);
+    await game.walk([pastSplash, play]);
 
     const commitsOnTheBoard = provider.calls.filter(call => call.method === "commit").length;
 
-    await game.walk(untilOrder.slice(1));
+    await game.walk(untilOrder.slice(2));
 
     // `show` is a transit node with a popup effect since V3: the graph waits inside it, and the
     // last rest point (the bookmark) stays the board.
@@ -94,7 +107,8 @@ describe("template-merge", () => {
     const { app } = createGame();
     const game = await createHeadless(app);
 
-    expect(game.state().path).toBe("home");
+    // The splash is the first rest node; `home` is the checkpoint behind it.
+    expect(game.state().path).toBe("splash");
 
     const board = await game.walk(untilOrder);
 
@@ -152,7 +166,7 @@ describe("template-merge", () => {
     const { app } = createGame();
     const game = await createHeadless(app);
 
-    await game.walk([{ at: "home", intent: "play" }, tap, tap]);
+    await game.walk([pastSplash, play, tap, tap]);
 
     const before = app.model.store.snapshot().player;
 
@@ -177,7 +191,7 @@ describe("template-merge", () => {
     const { app, clock } = createGame();
     const game = await createHeadless(app);
 
-    await game.walk([{ at: "home", intent: "play" }, tap, tap, tap, tap]);
+    await game.walk([pastSplash, play, tap, tap, tap, tap]);
 
     expect(app.model.store.snapshot().player).toMatchObject({
       merge: { generators: { sawmill: { charges: 0, readyAt: startMoment + 60_000 } } }
@@ -241,7 +255,8 @@ describe("template-merge", () => {
     const second = createGame({ provider: first.provider });
     const secondGame = await createHeadless(second.app);
 
-    expect(secondGame.state().path).toBe("home");
+    // A new run boots again and waits on the splash, with the save the first run wrote.
+    expect(secondGame.state().path).toBe("splash");
     expect(second.app.model.store.snapshot().player).toEqual(saved);
 
     await secondGame.stop();
@@ -254,7 +269,7 @@ describe("template-merge", () => {
       player: startingPlayer,
       session: startingSession,
       checkpoint: "home",
-      route: [{ at: "home", intent: "play" }, tap, tap]
+      route: [play, tap, tap]
     });
 
     expect(result.path).toEqual(["board", "awaitIntent"]);
