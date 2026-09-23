@@ -303,3 +303,18 @@ import { read, sources } from "@moku-labs/game/inspect";
 read(app, sources.rect, { key: "play" }); // { x, y, w, h } in CSS px
 read(app, sources.rect, { key: "nothing" }); // undefined: no live element has this key
 ```
+
+`control.ts` holds the ui command of the editor's write door, `@moku-labs/game/control`, dev
+builds only. It goes through `app.input`, so the gate decides and the session stays clean (effect
+`route`). It needs an app with `input` and `ui`.
+
+| Key in `commands` | id | Input | Does |
+|---|---|---|---|
+| `tap` | `game.tap` | `{ key: "string?", target: "json?" }`, exactly one | `input.tap` on the ui element with that `key` (through `ui.find`) or on the view `target: { projection, key }` |
+
+```ts
+import { commands, run } from "@moku-labs/game/control";
+
+// An e2e script taps the Play plank of Home.
+(await run(app, commands.tap, { key: "play" })).value; // true
+```
