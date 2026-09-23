@@ -336,7 +336,38 @@ describe("timber-motions — the cards on the rope (F10)", () => {
     await game.app.stop();
   });
 
-  it("glows a card honey the moment its order can be filled, and swings it wider", async () => {
+  it("keeps swinging a card that waits while the board screen is up", async () => {
+    const game = await startOnBoard(twoTwigs);
+    const tilts = await tiltsOf(game, swingFrames * 3);
+
+    // The loop never ends: the third swing reaches as far as the first.
+    expect(widest(tilts[1]?.slice(swingFrames * 2))).toBeCloseTo(reach.waiting, 2);
+    expect(widest(tilts[0]?.slice(swingFrames * 2))).toBeCloseTo(reach.waiting, 2);
+
+    await game.app.stop();
+  });
+
+  it("stands every card still under reduced motion, and swings them again when it is off", async () => {
+    const game = await startOnBoard(player);
+
+    await frames(game, 20);
+    game.app.anim.reducedMotion(true);
+
+    const still = await tiltsOf(game, swingFrames);
+
+    expect(still.map(tilts => widest(tilts))).toEqual([0, 0, 0]);
+
+    game.app.anim.reducedMotion(false);
+
+    const moving = await tiltsOf(game, swingFrames);
+
+    expect(widest(moving[0])).toBeCloseTo(reach.ready, 2);
+    expect(widest(moving[1])).toBeCloseTo(reach.waiting, 2);
+
+    await game.app.stop();
+  });
+
+  it("glows a card honey the moment its order can be filled", async () => {
     const game = await startOnBoard(twoTwigs);
 
     expect(nodeOf(game.app.ui.tree(), "card1")?.state.selected).toBe(false);
@@ -355,12 +386,28 @@ describe("timber-motions — the cards on the rope (F10)", () => {
       style: { stroke: 0xf2_b4_3d }
     });
 
-    // The swing it is in ends as it began; the next ones are the wide swing of a ready card.
-    const tilts = await tiltsOf(game, swingFrames * 3);
-
-    expect(widest(tilts[1]?.slice(swingFrames * 2))).toBeCloseTo(reach.ready, 2);
-
     await game.app.stop();
+  });
+
+  // Engine gap: `ui` starts the loop of the motion an element entered with and never swaps it,
+  // so a card that turns ready on the screen keeps the gentle swing until the board comes back.
+  it("swings a card wider the moment its order can be filled", async () => {
+    const game = await startOnBoard(twoTwigs);
+
+    game.app.input.drag(
+      { projection: "board.items", key: "i1" },
+      { projection: "board.items", key: "i2" }
+    );
+    await tick();
+    await frames(game, 3);
+
+    const tilts = await tiltsOf(game, swingFrames * 2);
+
+    try {
+      expect(widest(tilts[1]?.slice(swingFrames))).toBeCloseTo(reach.ready, 2);
+    } finally {
+      await game.app.stop();
+    }
   });
 });
 

@@ -24,7 +24,19 @@ const app = createApp({
     flow: { mainFlow, safeNode: "home" },
     i18n: { locale: "ru", fallback: "ru" },
     audio: { volumes: volumesOf },
-    input: { heldScale: 1.08 }
+    input: { heldScale: 1.08 },
+    // The keyboard focus ring of design §4: a dashed ink ring over a cream halo, 9 px of the
+    // 390-wide design outside the control.
+    ui: {
+      focusRing: {
+        stroke: 0x3a_22_12,
+        strokeWidth: 4,
+        dash: 10,
+        offset: 25,
+        halo: 0xff_f3_d6,
+        haloWidth: 12
+      }
+    }
   },
   onStart: ctx => {
     ctx.flow.run().catch((error: unknown) => {
@@ -39,6 +51,12 @@ const app = createApp({
 
 // The e2e station drives the page through this handle: `game.input.drag(...)`, `game.flow.state()`.
 Reflect.set(globalThis, "game", app);
+
+// Reduced motion follows the system setting, also when the player changes it while the page runs.
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+app.anim.reducedMotion(reducedMotion.matches);
+reducedMotion.addEventListener("change", event => app.anim.reducedMotion(event.matches));
 
 // The page opens on the splash, which moves to Home by itself once Home and the board are loaded.
 // Play is the player's own tap.

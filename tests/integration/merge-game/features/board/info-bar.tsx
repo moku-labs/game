@@ -35,7 +35,10 @@ export type InfoView =
   | ({ kind: "sawmill" } & SawmillView)
   | { kind: "item"; chain: string; level: number };
 
-/** The bar: a light plank 830 wide and 160 tall, 24 units under the tray (design p2). */
+/**
+ * The bar: a light plank 830 wide and 160 tall, 66 units under the tray. The order cards hang
+ * over the tray, which rises 42 units under the strip; the bar keeps its place in p2.
+ */
 const barStyle = defineStyle({
   direction: "row",
   align: "center",
@@ -43,7 +46,7 @@ const barStyle = defineStyle({
   gap: 24,
   width: 830,
   height: 160,
-  margin: { top: 24 },
+  margin: { top: 66 },
   padding: { left: 40, right: 48, bottom: 8 },
   nineSlice: "ui.button-wood"
 });

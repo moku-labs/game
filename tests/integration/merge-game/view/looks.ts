@@ -1,14 +1,14 @@
 /**
- * @file The looks of the board screen that play by themselves. Under the pointer (design §4): an
- * item or the sawmill under an idle mouse lifts, a pressed one squashes, and both go back when the
- * pointer lets go. The input plugin writes the tags (`PointerOver`, `Pressed`, `Held`); a system
- * reads them every frame and plays a short anim tween when the look they ask for changes. On the
- * rope (design §6 F10): every order card sways, the ready one wider (`features/orders/motions.ts`).
+ * @file The look of the board under the pointer (design §4): an item or the sawmill under an idle
+ * mouse lifts, a pressed one squashes, and both go back when the pointer lets go. The input plugin
+ * writes the tags (`PointerOver`, `Pressed`, `Held`); a system reads them every frame and plays a
+ * short anim tween when the look they ask for changes.
  *
- * Both systems are registered by a plugin, not listed in the board feature, because they play
+ * The system is registered by a plugin, not listed in the board feature, because it plays
  * animations: a system's own context holds the world, the resources, the snapshot and the time,
  * never `anim`, so the plugin hands it `anim` when it starts. The glows of the cells are written at
- * once and need no tween, so they are an ordinary system of the feature (`glowCells`).
+ * once and need no tween, so they are an ordinary system of the feature (`glowCells`). The order
+ * cards sway by a loop motion of their element (`features/orders/motions.ts`).
  *
  * The look never interrupts another motion of the view: while the view slides, rises a level,
  * flies home after a drop or plays a node's animation, the look waits until it is still. The view
@@ -26,7 +26,6 @@ import {
   system,
   worldPlugin
 } from "@moku-labs/game";
-import { orderSway } from "../features/orders/motions";
 import type { Look } from "./animations";
 import { lookAnimations } from "./animations";
 import { Generator, Item } from "./components";
@@ -43,17 +42,15 @@ import { Generator, Item } from "./components";
 type Shown = { look: Look | "held"; handle?: Anim.PlayHandle };
 
 /**
- * The state of the plugin: what every view of the board shows, the running swing of every order
- * card by slot, and the removers of the two systems.
+ * The state of the plugin: what every view of the board shows, and the remover of its system.
  *
  * @example
  * ```ts
- * const state: LookState = { shown: new Map(), swings: new Map(), off: [] };
+ * const state: LookState = { shown: new Map(), off: [] };
  * ```
  */
 type LookState = {
   shown: Map<World.Entity, Shown>;
-  swings: Map<number, Anim.PlayHandle>;
   off: (() => void)[];
 };
 
@@ -145,25 +142,20 @@ function lookSystem(shown: Map<World.Entity, Shown>, anim: Anim.AnimApi) {
 }
 
 /**
- * Shows the looks of the board screen: things under the pointer, and the order cards swaying on
- * their rope. `onStart` registers both systems with the anim API in hand; `onStop` removes them.
+ * Shows the look of the things on the board under the pointer. `onStart` registers the system
+ * with the anim API in hand; `onStop` removes it.
  */
 export const boardLookPlugin = createPlugin("boardLook", {
   depends: [worldPlugin, animPlugin],
-  createState: (): LookState => ({ shown: new Map(), swings: new Map(), off: [] }),
+  createState: (): LookState => ({ shown: new Map(), off: [] }),
   onStart: ctx => {
-    const { ecs, projection } = ctx.require(worldPlugin);
-    const anim = ctx.require(animPlugin);
+    const { ecs } = ctx.require(worldPlugin);
 
-    ctx.state.off = [
-      ecs.system(lookSystem(ctx.state.shown, anim)),
-      ecs.system(orderSway(ctx.state.swings, anim, projection))
-    ];
+    ctx.state.off = [ecs.system(lookSystem(ctx.state.shown, ctx.require(animPlugin)))];
   },
   onStop: ({ state }) => {
     for (const off of state.off) off();
     state.off = [];
     state.shown.clear();
-    state.swings.clear();
   }
 });

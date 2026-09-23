@@ -148,5 +148,11 @@ export const homeBottom = defineStyle({
   padding: { left: 60 }
 });
 
+/** The width of the round gift button. */
+export const GIFT_SIZE = 260;
+
 /** The gift button, a round wood button 260 units wide, with its label under it. */
 export const giftCorner = defineStyle({ direction: "column", align: "center", gap: 12 });
+
+/** The element the gift button wobbles in: the button's own square, turning on its middle. */
+export const giftWobbleStyle = defineStyle({ width: GIFT_SIZE, height: GIFT_SIZE });
