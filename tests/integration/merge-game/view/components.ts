@@ -27,3 +27,9 @@ export const Generator = component("Generator", { id: "", cell: "" });
  * The cell a glow lies on. `glowCells` finds the glow of a cell through it.
  */
 export const Glow = component("Glow", { cell: "" });
+
+/**
+ * The marching ring around the selected cell. `marchRing` finds the ring through it and swaps its
+ * picture to the next dash phase.
+ */
+export const SelectionRing = tag("SelectionRing");

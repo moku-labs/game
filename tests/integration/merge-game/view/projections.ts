@@ -16,15 +16,16 @@ import { NineSlice, projection, Sprite } from "../kit";
 import type { CellId, GeneratorTable } from "../rules";
 import type { Player, Session } from "../state";
 import { tables } from "../tables";
-import { Generator, Glow, Item } from "./components";
+import { Generator, Glow, Item, SelectionRing } from "./components";
 import { pictureOf } from "./items";
 import type { BoardCell } from "./layout";
 import { cellBox, cellsOf, depth, itemSize } from "./layout";
 import { itemLevelUp, itemMergeInto, itemPopIn, itemSlideTo } from "./motions";
+import { ringFrames, ringSize } from "./ring";
 import { selectedOf } from "./selection";
 
-/** The selection ring (design §6 F9): a honey stroke along the rim of the cell, round like the grass. */
-const ring = { color: 0xff_c2_33, width: 6, radius: 36 } as const;
+/** The corner radius of a glow: round like the grass of the cell. */
+const glowRadius = 36;
 
 /** The colours a generator is drawn in: its own, or greyed while it cannot give (design §6 F11). */
 const generatorTint = { ready: 0xff_ff_ff, disabled: 0x9a_9a_9a } as const;
@@ -125,7 +126,7 @@ export const boardGlows = projection({
 
     return [
       Glow({ cell: cell.id }),
-      Shape({ w: box.size, h: box.size, radius: ring.radius, fillAlpha: 0, alpha: 0 }),
+      Shape({ w: box.size, h: box.size, radius: glowRadius, fillAlpha: 0, alpha: 0 }),
       Transform({ x: box.x, y: box.y }),
       Order({ value: depth.glows })
     ];
@@ -133,7 +134,7 @@ export const boardGlows = projection({
 });
 
 /**
- * The cell the ring goes on: the cell of the selected thing, none while nothing is selected.
+ * The cell the ring goes on: the cell of the selected thing, none for a save without the sawmill.
  *
  * @param player - The saved player.
  * @param session - The session, which keeps the selected id.
@@ -146,9 +147,10 @@ function selectedCells(player: Player, session: Session): BoardCell[] {
 }
 
 /**
- * The selection ring (design §6 F9): a honey stroke around the cell of the thing the player
- * selected, the sawmill or an item, none while nothing is. The fill is not drawn, so the grass
- * shows through the ring.
+ * The selection ring (design §6 F9): marching cream dashes around the cell of the thing the
+ * player selected, the sawmill or an item. Nothing selected means the sawmill, as in the info
+ * bar. The picture is centred on the cell and 14 units larger on every side, so the dashes lie in
+ * the gap between the cells; `marchRing` walks them.
  */
 export const boardSelection = projection({
   name: "board.selection",
@@ -156,18 +158,12 @@ export const boardSelection = projection({
   from: selectedCells,
   key: cell => cell.id,
   view: cell => {
-    const box = cellBox(cell.id);
+    const { middle } = cellBox(cell.id);
 
     return [
-      Shape({
-        w: box.size,
-        h: box.size,
-        fillAlpha: 0,
-        stroke: ring.color,
-        strokeWidth: ring.width,
-        radius: ring.radius
-      }),
-      Transform({ x: box.x, y: box.y }),
+      Sprite({ texture: ringFrames[0], width: ringSize, height: ringSize }),
+      SelectionRing(),
+      Transform({ x: middle.x, y: middle.y }),
       Order({ value: depth.selection })
     ];
   }

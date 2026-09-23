@@ -20,16 +20,17 @@ export const cellSize = (slot.size - 2 * slot.inset - 2 * slot.gap) / 3;
 export const itemSize = Math.round(cellSize * 0.82);
 
 /**
- * Draw order inside the board slot: the grass, the glow on it, the selection ring, the generator,
- * the three parts of its charges plate, the four parts of its clock badge, the items, and the
- * check badge over the item a ready order takes.
+ * Draw order inside the board slot: the grass, the glow on it, the generator, the three parts of
+ * its charges plate, the selection ring (over the plate, which hangs over the rim of the cell, as
+ * in design p2), the four parts of the clock badge, the items, and the check badge over the item
+ * a ready order takes.
  */
 export const depth = {
   cells: 0,
   glows: 1,
-  selection: 2,
-  generators: 3,
-  charges: 4,
+  generators: 2,
+  charges: 3,
+  selection: 6,
   clock: 7,
   items: 11,
   check: 12
