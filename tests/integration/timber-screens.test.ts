@@ -1,9 +1,9 @@
 /**
  * @file The screens of Timber Town, headless: the splash fills its loading bar from the asset
  * events and moves on to Home by itself, Play on Home opens the board, the board slot hosts every
- * cell, the sawmill and every item, the three order cards enable only the Deliver the rules
- * accept, and the HUD shows the energy of the save. Plain Bun: the renderer is inert and Yoga
- * lays out the same rects as in the browser.
+ * cell, the sawmill and every item, before and after a drag merges two of them, the three order
+ * cards enable only the Deliver the rules accept, and the HUD shows the energy of the save. Plain
+ * Bun: the renderer is inert and Yoga lays out the same rects as in the browser.
  */
 
 import { readFile } from "node:fs/promises";
@@ -338,6 +338,74 @@ describe("timber-screens — the board screen", () => {
     await until(game, () => ecs.get(elementOf(game, "infoCharges"), Text)?.resolved === "3/4");
 
     expect(ecs.get(elementOf(game, "energyPillText"), Text)?.resolved).toBe("6/10");
+
+    await game.app.stop();
+  });
+
+  // Engine gap, expected to fail until it is fixed. `ui` `writeLive`
+  // (src/plugins/ui/jsx/reconcile.ts:433) sets the whole `Text` value again, `resolved: ""`
+  // included, although `resolved` is the owned field of `text`. `text` `isStale`
+  // (src/plugins/text/resolve.ts:306) sees the same string content and never resolves it again.
+  // A message label comes back one frame later, a flicker; a plain-string label stays blank.
+  // Flip `it.fails` to `it` when the engine is fixed.
+  it.fails("keeps the plain-string labels of the HUD when the board screen is patched", async () => {
+    const game = await startOnBoard(readyPlayer);
+    const ecs = game.app.world.ecs;
+
+    expect(ecs.get(elementOf(game, "card2Coins"), Text)?.resolved).toBe("60");
+
+    // Selecting an item changes only the info bar; the rest of the board screen is patched as is.
+    expect(game.app.input.tap({ projection: "board.items", key: "i2" })).toBe(true);
+    await tick();
+    await frames(game, 6);
+
+    expect(ecs.get(elementOf(game, "card2Coins"), Text)?.resolved).toBe("60");
+    expect(ecs.get(elementOf(game, "energyPillText"), Text)?.resolved).toBe("7/10");
+
+    await game.app.stop();
+  });
+
+  it("keeps every board entity in the slot after a drag merges two items", async () => {
+    const twigs: Player = {
+      ...readyPlayer,
+      merge: {
+        ...readyPlayer.merge,
+        board: {
+          ...readyPlayer.merge.board,
+          items: [
+            { id: "i1", chain: "wood", level: 1, cell: "c1_0" },
+            { id: "i2", chain: "wood", level: 1, cell: "c2_0" }
+          ]
+        }
+      }
+    };
+    const game = await startOnBoard(twigs);
+    const slot = elementOf(game, "boardSlot");
+    const projection = game.app.world.projection;
+
+    expect(
+      game.app.input.drag(
+        { projection: "board.items", key: "i1" },
+        { projection: "board.items", key: "i2" }
+      )
+    ).toBe(true);
+    await tick();
+    await frames(game, 30);
+
+    expect((game.app.model.store.snapshot().player as unknown as Player).merge.board.items).toEqual(
+      [{ id: "i2", chain: "wood", level: 2, cell: "c2_0" }]
+    );
+
+    const hosted = [
+      ...projection.entitiesOf("board.cells"),
+      ...projection.entitiesOf("board.generators"),
+      ...projection.entitiesOf("board.items")
+    ];
+
+    expect(hosted).toHaveLength(9 + 1 + 1);
+    expect(hosted.map(entity => game.app.world.ecs.get(entity, Parent)?.entity)).toEqual(
+      hosted.map(() => slot)
+    );
 
     await game.app.stop();
   });

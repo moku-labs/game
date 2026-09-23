@@ -1,14 +1,16 @@
 /**
- * @file The transient moments of the board, headless (design §6 F4, F5, F6, F9, F10): the flight
- * of the delivered item into its card and the "Готово!" stamp on a finished order, the merge
- * burst, the sawmill squash, the twig's arc out of the sawmill, the honey ring on the selected
- * cell, and the sway and glow of an order card that becomes ready. Every spawned entity is checked
+ * @file The transient moments of the board, headless (design §6 F4, F5, F6, F7, F9, F10): the
+ * flight of the delivered item into its card and the "Готово!" stamp on a finished order, the
+ * merge burst, the legal targets marked while an item is held, the sawmill squash, the twig's arc
+ * out of the sawmill, the honey ring on the selected sawmill or item with the info bar that names
+ * it, and the sway and glow of an order card that becomes ready. Every spawned entity is checked
  * to leave with its timeline.
  */
 
-import { NineSlice, Order, Parent, Shape, Text, Transform } from "@moku-labs/game";
+import { Held, NineSlice, Order, Parent, Shape, Sprite, Text, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { generatorId } from "./merge-game/tables";
+import { Highlighted } from "./merge-game/view/components";
 import { cellBox } from "./merge-game/view/layout";
 import {
   elementOf,
@@ -16,6 +18,7 @@ import {
   nodeOf,
   player,
   playerOf,
+  resolvedOf,
   shows,
   spawnedByAnim,
   startOnBoard,
@@ -182,6 +185,38 @@ describe("timber-motions — the merge burst (F4)", () => {
   });
 });
 
+describe("timber-motions — the drag feedback (F7)", () => {
+  it("marks every item the carried one may merge with while it is held, and none after", async () => {
+    const game = await startOnBoard(
+      withItems([
+        { id: "i1", chain: "wood", level: 1, cell: "c1_0" },
+        { id: "i2", chain: "wood", level: 1, cell: "c2_0" },
+        { id: "i3", chain: "wood", level: 2, cell: "c0_1" }
+      ])
+    );
+    const projection = game.app.world.projection;
+    const ecs = game.app.world.ecs;
+    const marked = () =>
+      ["i1", "i2", "i3"].filter(key =>
+        ecs.has(projection.entityOf("board.items", key) ?? 0, Highlighted)
+      );
+
+    // `Held` is the tag the input plugin writes from grab to release.
+    ecs.tag(projection.entityOf("board.items", "i1") ?? 0, Held);
+    await frames(game, 1);
+
+    // Only the other twig is a legal target: not the carried twig itself, not the log.
+    expect(marked()).toEqual(["i2"]);
+
+    ecs.untag(projection.entityOf("board.items", "i1") ?? 0, Held);
+    await frames(game, 1);
+
+    expect(marked()).toEqual([]);
+
+    await game.app.stop();
+  });
+});
+
 describe("timber-motions — the sawmill tap (F5)", () => {
   it("squashes the sawmill about its middle and springs it back", async () => {
     const game = await startOnBoard(player);
@@ -303,6 +338,106 @@ describe("timber-motions — the selection (F9)", () => {
 
     expect(depth).toBeGreaterThan(cellDepth);
     expect(depth).toBeLessThan(ecs.get(sawmill, Order)?.value ?? 0);
+
+    await game.app.stop();
+  });
+
+  it("moves the ring to a tapped item, names it in the info bar and gives it back to the sawmill", async () => {
+    const game = await startOnBoard(player);
+    const projection = game.app.world.projection;
+    const ecs = game.app.world.ecs;
+    const plankCell = cellBox("c1_0");
+    const sawmillCell = cellBox("c0_0");
+
+    expect(game.app.input.tap({ projection: "board.items", key: "i1" })).toBe(true);
+    await tick();
+    await frames(game, 3);
+
+    // The select answer went through a transit node and the board rests again.
+    expect(game.app.flow.state().path).toBe("board/awaitIntent");
+    expect(projection.entitiesOf("board.selection")).toHaveLength(1);
+    expect(ecs.get(projection.entitiesOf("board.selection")[0] ?? 0, Transform)).toMatchObject({
+      x: plankCell.x,
+      y: plankCell.y
+    });
+    expect(resolvedOf(game, "infoName")).toBe("Доска");
+    expect(resolvedOf(game, "infoLevel")).toBe("Уровень 3");
+    expect(ecs.get(elementOf(game, "infoIcon"), Sprite)?.texture).toBe("board.item-wood-3");
+    // An item has no charges: the pips and the count of the sawmill are not drawn.
+    expect(shows(game, "infoPips")).toBe(false);
+    expect(shows(game, "infoCharges")).toBe(false);
+    // Selecting spends nothing.
+    expect(playerOf(game).merge.energy.value).toBe(7);
+
+    const sawmill = projection.entityOf("board.generators", generatorId) ?? 0;
+
+    expect(game.app.input.tap(sawmill)).toBe(true);
+    await tick();
+    await frames(game, 3);
+
+    expect(ecs.get(projection.entitiesOf("board.selection")[0] ?? 0, Transform)).toMatchObject({
+      x: sawmillCell.x,
+      y: sawmillCell.y
+    });
+    expect(resolvedOf(game, "infoName")).toBe("Лесопилка");
+    expect(resolvedOf(game, "infoCharges")).toBe("3/4");
+    expect(ecs.get(elementOf(game, "infoIcon"), Sprite)?.texture).toBe("board.generator");
+    expect(shows(game, "infoLevel")).toBe(false);
+
+    await game.app.stop();
+  });
+
+  it("keeps a selected item draggable, and the selection follows the item that rose", async () => {
+    const game = await startOnBoard(twoTwigs);
+    const ecs = game.app.world.ecs;
+    const target = cellBox("c2_0");
+
+    expect(game.app.input.tap({ projection: "board.items", key: "i2" })).toBe(true);
+    await tick();
+    await frames(game, 3);
+
+    expect(resolvedOf(game, "infoName")).toBe("Щепка");
+
+    // The same view that answered the tap is carried: a drag onto it still merges.
+    expect(
+      game.app.input.drag(
+        { projection: "board.items", key: "i1" },
+        { projection: "board.items", key: "i2" }
+      )
+    ).toBe(true);
+    await tick();
+    await frames(game, 3);
+
+    expect(playerOf(game).merge.board.items).toEqual([
+      { id: "i2", chain: "wood", level: 2, cell: "c2_0" }
+    ]);
+    expect(
+      ecs.get(game.app.world.projection.entitiesOf("board.selection")[0] ?? 0, Transform)
+    ).toMatchObject({ x: target.x, y: target.y });
+    expect(resolvedOf(game, "infoName")).toBe("Бревно");
+    expect(resolvedOf(game, "infoLevel")).toBe("Уровень 2");
+
+    await game.app.stop();
+  });
+
+  it("lets the selection go with the item it named", async () => {
+    const game = await startOnBoard(twoTwigs);
+
+    expect(game.app.input.tap({ projection: "board.items", key: "i1" })).toBe(true);
+    await tick();
+    await frames(game, 3);
+
+    // The selected twig is the one carried away: it merges into the other and leaves the board.
+    game.app.input.drag(
+      { projection: "board.items", key: "i1" },
+      { projection: "board.items", key: "i2" }
+    );
+    await tick();
+    await frames(game, 3);
+
+    expect(game.app.world.projection.entitiesOf("board.selection")).toEqual([]);
+    expect(resolvedOf(game, "infoName")).toBe("Лесопилка");
+    expect(shows(game, "infoLevel")).toBe(false);
 
     await game.app.stop();
   });

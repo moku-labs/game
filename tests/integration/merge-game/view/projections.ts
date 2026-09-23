@@ -3,6 +3,9 @@
  * generator. Each turns keyed rows of the save or the session into entities, and every gesture is
  * a component of the view — the drop target names the intent, so this game writes no drag code.
  *
+ * An item answers a tap too: a finger that stays put selects it (`select`), a finger that moves
+ * carries it, and the input plugin tells the two apart.
+ *
  * The board slot of the HUD hosts all four, so every view is drawn in the slot's own space
  * (0..970) and scales with it. `Order` sorts them inside the slot: cells, then the selection ring,
  * then the generator, then the items.
@@ -18,6 +21,7 @@ import { pictureOf } from "./items";
 import type { BoardCell } from "./layout";
 import { cellBox, cellsOf, itemSize } from "./layout";
 import { itemLevelUp, itemMergeInto, itemPopIn, itemSlideTo } from "./motions";
+import { selectedOf } from "./selection";
 
 /**
  * Draw order inside the board slot: the grass, the selection ring on it, the generator, the items.
@@ -101,14 +105,27 @@ export const boardCells = projection({
 });
 
 /**
+ * The cell the ring goes on: the cell of the selected thing, none while nothing is selected.
+ *
+ * @param player - The saved player.
+ * @param session - The session, which keeps the selected id.
+ * @returns One cell, or none.
+ */
+function selectedCells(player: Player, session: Session): BoardCell[] {
+  const selected = selectedOf(player, session);
+
+  return selected === undefined ? [] : [{ id: selected.cell }];
+}
+
+/**
  * The selection ring (design §6 F9): a honey stroke around the cell of the thing the player
- * selected, none while nothing is. The fill is not drawn, so the grass shows through the ring.
+ * selected, the sawmill or an item, none while nothing is. The fill is not drawn, so the grass
+ * shows through the ring.
  */
 export const boardSelection = projection({
   name: "board.selection",
   layer: "cells",
-  from: (_player: Player, session: Session): BoardCell[] =>
-    session.selected === "" ? [] : [{ id: session.selected }],
+  from: selectedCells,
   key: cell => cell.id,
   view: cell => {
     const box = cellBox(cell.id);
@@ -130,7 +147,8 @@ export const boardSelection = projection({
 
 /**
  * The items. Every one can be carried and every one is a drop target that answers `merge`, so the
- * payload of a drop is `{ from, to }` — exactly the input of the `merge` node.
+ * payload of a drop is `{ from, to }` — exactly the input of the `merge` node. A tap answers
+ * `select` with the item's id, the input of the `select` node.
  */
 export const boardItems = projection({
   name: "board.items",
@@ -141,6 +159,7 @@ export const boardItems = projection({
   view: item => [
     Item({ chain: item.chain, level: item.level, cell: item.cell }),
     ...onCell(pictureOf(item.chain, item.level), item.cell, depth.items),
+    Tappable({ intent: "select", payload: { id: item.id } }),
     Draggable({ payload: { from: item.cell } }),
     DropTarget({ intent: "merge", payload: { to: item.cell } })
   ],
