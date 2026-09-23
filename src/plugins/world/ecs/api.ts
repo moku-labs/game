@@ -149,26 +149,27 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
     resource: <Value extends object>(resourceType: ResourceType<Value>): Value =>
       resourceValue(state, resourceType),
 
+    // One body serves both overloads: a tag listener takes the entity and ignores the stored `true`.
     onAdded: <Value extends object>(
-      component: ComponentHandle<Value>,
+      watched: ComponentHandle<Value> | TagType,
       fn: (entity: Entity, value: Readonly<Value>) => void
     ): (() => void) => {
-      registerType(ctx, component);
+      registerType(ctx, watched);
 
       const hook: StructuralHook = (entity, value) => fn(entity, value as Readonly<Value>);
 
-      return addHook(state.added, component.componentName, hook);
+      return addHook(state.added, watched.componentName, hook);
     },
 
     onRemoved: <Value extends object>(
-      component: ComponentHandle<Value>,
+      watched: ComponentHandle<Value> | TagType,
       fn: (entity: Entity, value: Readonly<Value>) => void
     ): (() => void) => {
-      registerType(ctx, component);
+      registerType(ctx, watched);
 
       const hook: StructuralHook = (entity, value) => fn(entity, value as Readonly<Value>);
 
-      return addHook(state.removed, component.componentName, hook);
+      return addHook(state.removed, watched.componentName, hook);
     },
 
     changed: (component: AnyComponentType): Iterable<Entity> => {

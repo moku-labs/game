@@ -19,7 +19,8 @@ const config: Config = {
   longPressMs: 450,
   dragStartPx: 8,
   swipeMinPx: 48,
-  swipeMaxMs: 300
+  swipeMaxMs: 300,
+  heldScale: 1
 };
 
 /**

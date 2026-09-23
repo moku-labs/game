@@ -126,3 +126,20 @@ expectTypeOf(projectionApi.entitiesOf).toEqualTypeOf<(name: string) => readonly 
 
 // @ts-expect-error — entitiesOf takes the projection name, not a key list
 projectionApi.entitiesOf(["board.items"]);
+
+// The structural hooks watch a tag as well as a component: a tag listener gets the entity only.
+ecs.onAdded(Held, entity => {
+  expectTypeOf(entity).toEqualTypeOf<Entity>();
+});
+ecs.onRemoved(Held, entity => {
+  expectTypeOf(entity).toEqualTypeOf<Entity>();
+});
+
+// A component listener still gets the stored value, typed from the defaults.
+ecs.onAdded(Sprite, (entity, sprite) => {
+  expectTypeOf(entity).toEqualTypeOf<Entity>();
+  expectTypeOf(sprite).toEqualTypeOf<Readonly<Sprite>>();
+});
+
+// @ts-expect-error — a tag carries no value, so its listener takes the entity alone
+ecs.onAdded(Held, (_entity: Entity, _value: Readonly<Sprite>) => undefined);

@@ -1,6 +1,7 @@
 /**
- * @file The components this game adds to the world. Both are declared once and listed in the
- * feature description, so the world knows their storage before the first frame.
+ * @file The components this game adds to the world. Each is declared once and listed in the
+ * feature description, so the world knows its storage before the first frame. They carry what a
+ * game system reads without a model lookup: the item, the generator and the cell a glow lies on.
  */
 import { component, tag } from "@moku-labs/game";
 
@@ -15,3 +16,14 @@ export const Item = component("Item", { chain: "", level: 1, cell: "" });
  * taken off again as soon as it is not legal any more.
  */
 export const Highlighted = tag("Highlighted");
+
+/**
+ * The generator a view draws, and the cell it stands on: the look of the board reads it next to
+ * `Item`, so the sawmill lifts, squashes and glows like an item.
+ */
+export const Generator = component("Generator", { id: "", cell: "" });
+
+/**
+ * The cell a glow lies on. `glowCells` finds the glow of a cell through it.
+ */
+export const Glow = component("Glow", { cell: "" });

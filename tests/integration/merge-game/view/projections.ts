@@ -1,14 +1,14 @@
 /**
- * @file The four projections of the board: the grid, the selection ring, the items and the
- * generator. Each turns keyed rows of the save or the session into entities, and every gesture is
- * a component of the view — the drop target names the intent, so this game writes no drag code.
+ * @file The projections of the board: the grid, the glows over it, the selection ring, the items
+ * and the generator. Each turns keyed rows of the save or the session into entities, and every
+ * gesture is a component of the view — the drop target names the intent, so this game writes no
+ * drag code.
  *
  * An item answers a tap too: a finger that stays put selects it (`select`), a finger that moves
  * carries it, and the input plugin tells the two apart.
  *
- * The board slot of the HUD hosts all four, so every view is drawn in the slot's own space
- * (0..970) and scales with it. `Order` sorts them inside the slot: cells, then the selection ring,
- * then the generator, then the items.
+ * The board slot of the HUD hosts them all, so every view is drawn in the slot's own space
+ * (0..970) and scales with it. `Order` sorts them inside the slot (`depth` of `layout.ts`).
  */
 import { Draggable, DropTarget, Order, Shape, Tappable, Transform } from "@moku-labs/game";
 import type { AssetKey } from "../generated/assets";
@@ -16,33 +16,32 @@ import { NineSlice, projection, Sprite } from "../kit";
 import type { CellId, GeneratorTable } from "../rules";
 import type { Player, Session } from "../state";
 import { tables } from "../tables";
-import { Item } from "./components";
+import { Generator, Glow, Item } from "./components";
 import { pictureOf } from "./items";
 import type { BoardCell } from "./layout";
-import { cellBox, cellsOf, itemSize } from "./layout";
+import { cellBox, cellsOf, depth, itemSize } from "./layout";
 import { itemLevelUp, itemMergeInto, itemPopIn, itemSlideTo } from "./motions";
 import { selectedOf } from "./selection";
 
-/**
- * Draw order inside the board slot: the grass, the selection ring on it, the generator, the items.
- */
-const depth = { cells: 0, selection: 1, generators: 2, items: 3 } as const;
-
 /** The selection ring (design §6 F9): a honey stroke along the rim of the cell, round like the grass. */
 const ring = { color: 0xff_c2_33, width: 6, radius: 36 } as const;
+
+/** The colours a generator is drawn in: its own, or greyed while it cannot give (design §6 F11). */
+const generatorTint = { ready: 0xff_ff_ff, disabled: 0x9a_9a_9a } as const;
 
 /** The generator table under the loose key type, so an id read from a save can be looked up. */
 const generatorTable: GeneratorTable = tables.generators;
 
 /**
- * One generator as the view reads it: where it stands and whether it still has charges.
+ * One generator as the view reads it: where it stands and whether a tap can make it give: it has
+ * a charge left and the bar holds the energy a tap costs.
  *
  * @example
  * ```ts
- * const generator: GeneratorView = { id: "sawmill", cell: "c0_0", charges: 4 };
+ * const generator: GeneratorView = { id: "sawmill", cell: "c0_0", ready: true };
  * ```
  */
-export type GeneratorView = { id: string; cell: CellId; charges: number };
+export type GeneratorView = { id: string; cell: CellId; ready: boolean };
 
 /**
  * Lists the generators of the save that the content tables still know. A generator the tables
@@ -51,13 +50,20 @@ export type GeneratorView = { id: string; cell: CellId; charges: number };
  * @param player - The saved player.
  * @returns One entry per generator on the board.
  */
-function generatorsOf(player: Player): GeneratorView[] {
+export function generatorsOf(player: Player): GeneratorView[] {
   const list: GeneratorView[] = [];
+  const energy = player.merge.energy.value;
 
   for (const [id, state] of Object.entries(player.merge.generators)) {
     const entry = generatorTable[id];
 
-    if (entry !== undefined) list.push({ id, cell: entry.cell, charges: state.charges });
+    if (entry === undefined) continue;
+
+    list.push({
+      id,
+      cell: entry.cell,
+      ready: state.charges > 0 && energy >= entry.energyCost
+    });
   }
 
   return list;
@@ -70,14 +76,14 @@ function generatorsOf(player: Player): GeneratorView[] {
  * @param texture - The asset key of the picture.
  * @param cell - The cell it stands on.
  * @param level - Its depth inside the slot.
- * @param alpha - How opaque it is drawn.
+ * @param tint - The colour it is drawn in.
  * @returns The `Sprite`, the `Transform` and the `Order`.
  */
-function onCell(texture: AssetKey, cell: CellId, level: number, alpha = 1) {
+function onCell(texture: AssetKey, cell: CellId, level: number, tint = 0xff_ff_ff) {
   const { middle } = cellBox(cell);
 
   return [
-    Sprite({ texture, width: itemSize, height: itemSize, fit: "contain", alpha }),
+    Sprite({ texture, width: itemSize, height: itemSize, fit: "contain", tint }),
     Transform({ x: middle.x, y: middle.y }),
     Order({ value: level })
   ] as const;
@@ -100,6 +106,28 @@ export const boardCells = projection({
       NineSlice({ texture: "board.cell", width: box.size, height: box.size }),
       Transform({ x: box.x, y: box.y }),
       Order({ value: depth.cells })
+    ];
+  }
+});
+
+/**
+ * The glow over every cell (design §4, §6 F7): drawn over the grass and under the ring, and not
+ * drawn at rest. The `glowCells` system lights it: cream along the rim of the cell under the
+ * mouse, gold and pulsing on a legal target of the item in the hand.
+ */
+export const boardGlows = projection({
+  name: "board.glows",
+  layer: "glows",
+  from: player => cellsOf(player.merge.board),
+  key: cell => cell.id,
+  view: cell => {
+    const box = cellBox(cell.id);
+
+    return [
+      Glow({ cell: cell.id }),
+      Shape({ w: box.size, h: box.size, radius: ring.radius, fillAlpha: 0, alpha: 0 }),
+      Transform({ x: box.x, y: box.y }),
+      Order({ value: depth.glows })
     ];
   }
 });
@@ -173,7 +201,9 @@ export const boardItems = projection({
 
 /**
  * The generator, drawn in the items layer under the items. A tap answers `tap` with the id the
- * `tapGenerator` node takes; an empty generator is drawn dim.
+ * `tapGenerator` node takes; a generator with no charge or no energy is greyed and still answers
+ * (design §6 F11). It is a drop target too: an item dropped on it answers `merge`, which the rules
+ * refuse, so the sawmill shakes (design §4).
  */
 export const boardGenerators = projection({
   name: "board.generators",
@@ -181,7 +211,14 @@ export const boardGenerators = projection({
   from: player => generatorsOf(player),
   key: generator => generator.id,
   view: generator => [
-    ...onCell("board.generator", generator.cell, depth.generators, generator.charges > 0 ? 1 : 0.4),
-    Tappable({ intent: "tap", payload: { generatorId: generator.id } })
+    Generator({ id: generator.id, cell: generator.cell }),
+    ...onCell(
+      "board.generator",
+      generator.cell,
+      depth.generators,
+      generator.ready ? generatorTint.ready : generatorTint.disabled
+    ),
+    Tappable({ intent: "tap", payload: { generatorId: generator.id } }),
+    DropTarget({ intent: "merge", payload: { to: generator.cell } })
   ]
 });

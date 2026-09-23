@@ -6,6 +6,7 @@ import {
   Draggable,
   DropTarget,
   Held,
+  Hovered,
   Pointer,
   PointerOver,
   type PointerValue,
@@ -744,6 +745,119 @@ describe("PointerOver, the hover of a mouse or a pen", () => {
     mock.frame();
 
     expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.has(item, PointerOver)).toBe(true);
+  });
+});
+
+// A board item that is both tapped (select) and dragged (merge) at (0..60, 0..100), and a drop
+// cell at (60..160, 0..100) under it in the draw order.
+function boardItem(mock: MockInput): { item: number; cell: number } {
+  const item = mock.spawn(
+    [
+      Tappable({ intent: "select", payload: { id: "i5" } }),
+      Draggable({ payload: { from: "c2" } }),
+      Transform({ x: 30, y: 50 })
+    ],
+    { projection: "board.items", key: "i5" }
+  );
+  const cell = mock.spawn([DropTarget({ intent: "merge", payload: { to: "c3" } })], {
+    projection: "board.cells",
+    key: "c3"
+  });
+
+  mock.boxes.push(
+    { entity: cell, x: 60, y: 0, width: 100, height: 100 },
+    { entity: item, x: 0, y: 0, width: 60, height: 100 }
+  );
+  mock.start();
+
+  return { item, cell };
+}
+
+describe("a view that carries both Tappable and Draggable", () => {
+  it("answers the tap and starts no drag on a press and release without movement", () => {
+    const mock = createMockInput();
+    const { item } = boardItem(mock);
+    const seen: number[] = [];
+
+    createInputApi(mock.ctx).onTap(tapped => seen.push(tapped));
+    record(mock.state, down(50, 50));
+    mock.frame();
+
+    expect(mock.state.phase).toBe("pressed");
+
+    record(mock.state, up(50, 50));
+    mock.frame();
+
+    expect(seen).toEqual([item]);
+    expect(mock.answers).toEqual([{ intent: "select", payload: { id: "i5" } }]);
+    expect(mock.calls).not.toContain("tag:Held");
+    expect(mock.calls).not.toContain("mute");
+    expect(mock.calls).not.toContain("pointer:true");
+    expect(mock.has(item, Pressed)).toBe(false);
+    expect(mock.state.phase).toBe("idle");
+  });
+
+  it("answers the drop and not the tap after a 20 px move released over a DropTarget", () => {
+    const mock = createMockInput();
+    const { item, cell } = boardItem(mock);
+    const seen: number[] = [];
+
+    createInputApi(mock.ctx).onTap(tapped => seen.push(tapped));
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, moved(70, 50));
+    mock.frame();
+
+    expect(mock.state.phase).toBe("dragging");
+    expect(mock.has(item, Held)).toBe(true);
+    expect(mock.has(cell, Hovered)).toBe(true);
+
+    record(mock.state, up(70, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "merge", payload: { from: "c2", to: "c3" } }]);
+    expect(seen).toEqual([]);
+    expect(mock.has(item, Held)).toBe(false);
+    expect(mock.state.phase).toBe("idle");
+  });
+
+  it("answers the tap after a 6 px move, under dragStartPx and inside tapSlopPx", () => {
+    const mock = createMockInput();
+    const { item } = boardItem(mock);
+
+    record(mock.state, down(50, 50));
+    mock.frame();
+    record(mock.state, moved(56, 50));
+    mock.frame();
+
+    expect(mock.state.phase).toBe("pressed");
+    expect(mock.has(item, Held)).toBe(false);
+
+    record(mock.state, up(56, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "select", payload: { id: "i5" } }]);
+    expect(mock.calls).not.toContain("mute");
+    expect(mock.state.phase).toBe("idle");
+  });
+
+  it("is hovered by a mouse with no press and still answers the click", () => {
+    const mock = createMockInput();
+    const { item } = boardItem(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.has(item, PointerOver)).toBe(true);
+    expect(mock.state.pointerOver).toBe(item);
+    expect(mock.answers).toEqual([]);
+
+    record(mock.state, sample("down", "mouse", 50, 50));
+    record(mock.state, sample("up", "mouse", 50, 50));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "select", payload: { id: "i5" } }]);
     expect(mock.has(item, PointerOver)).toBe(true);
   });
 });

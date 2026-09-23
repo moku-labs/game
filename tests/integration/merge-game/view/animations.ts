@@ -1,11 +1,14 @@
 /**
- * @file The two animations of the board (design §6 F4, F5). The merge burst spawns twelve
+ * @file The animations of the board (design §4, §6 F4, F5, F7). The merge burst spawns twelve
  * sparkles and leaves on the merged item that fly out and fade; they are despawned when the
  * timeline ends. The sawmill squashes about its middle when it is tapped: its sprite is anchored
- * on its middle, so a scale tween of its `Transform` keeps it standing where it stands.
+ * on its middle, so a scale tween of its `Transform` keeps it standing where it stands. A target
+ * the rules refuse shakes. The three looks bring a thing on the board to its pose under the
+ * pointer: at rest, lifted under the mouse, squashed under the finger.
  *
- * Both aim at views hosted by the board slot. `at()` answers the root pose — the slot's scale
- * included — so the burst is drawn at the size of the board on every phone.
+ * All aim at views hosted by the board slot. `at()` answers the root pose — the slot's scale
+ * included — so the burst is drawn at the size of the board on every phone, and a lift of six
+ * units is six units of the slot.
  */
 import type { Anim } from "@moku-labs/game";
 import { parallel, sequence, spawn, spawned, Transform, tween, type } from "@moku-labs/game";
@@ -84,3 +87,81 @@ export const sawmillTap = defineAnimation("board.sawmillTap", {
       tween(generator, Transform, { scale: 1 }, { ms: squash.backMs, ease: "outBack" })
     )
 });
+
+/** How far a refused target swings to either side, in the board slot's units, one step each. */
+const shake = { swings: [14, -12, 9, -6, 3, 0], stepMs: 50 } as const;
+
+/**
+ * The shake of a target the rules refused (design §4, §6 F7): an item of another level or a crate
+ * on a crate under a dropped item, the sawmill under a dropped item, and a sawmill tapped when it
+ * cannot give. The target swings left and right around its rest pose and ends on it.
+ */
+export const refuseShake = defineAnimation("board.refuse", {
+  slots: { target: type<Anim.Target>() },
+  build: ({ target }, { at }) => {
+    const rest = at(target);
+
+    return sequence(
+      ...shake.swings.map(swing =>
+        tween(
+          target,
+          Transform,
+          { x: rest.x + swing * rest.scale, y: rest.y },
+          { ms: shake.stepMs, ease: "inOut", space: "root" }
+        )
+      )
+    );
+  }
+});
+
+/**
+ * The pose of a thing on the board under the pointer (design §4), in the board slot's units: how
+ * far it rises, how much it grows and how long the way there takes.
+ */
+const looks = {
+  rest: { lift: 0, scale: 1, ms: 120 },
+  hover: { lift: 6, scale: 1.05, ms: 120 },
+  pressed: { lift: 0, scale: 0.94, ms: 70 }
+} as const;
+
+/**
+ * One look of a thing on the board: at rest, under an idle mouse, or under the finger.
+ *
+ * @example
+ * ```ts
+ * const look: Look = "hover";
+ * ```
+ */
+export type Look = keyof typeof looks;
+
+/**
+ * Builds the animation that brings a thing on the board to one look, from wherever it stands. The
+ * target is its rest pose in root space, raised and scaled by the look.
+ *
+ * @param look - The look to bring the thing to.
+ * @returns The animation, with one slot: the thing.
+ */
+function lookAnimation(look: Look) {
+  const { lift, scale, ms } = looks[look];
+
+  return defineAnimation(`board.look.${look}`, {
+    slots: { thing: type<Anim.Target>() },
+    build: ({ thing }, { at }) => {
+      const rest = at(thing);
+
+      return tween(
+        thing,
+        Transform,
+        { x: rest.x, y: rest.y - lift * rest.scale, scale: rest.scale * scale },
+        { ms, ease: "out", space: "root" }
+      );
+    }
+  });
+}
+
+/** The animation of every look, by name. */
+export const lookAnimations = {
+  rest: lookAnimation("rest"),
+  hover: lookAnimation("hover"),
+  pressed: lookAnimation("pressed")
+} as const;

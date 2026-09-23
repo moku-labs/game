@@ -69,6 +69,8 @@ export type MockInput = {
   spawn(values: readonly AnyComponentValue[], key?: { projection: string; key: string }): Entity;
   /** Gives an existing entity one more component, the way a commit or a reconcile would. */
   attachTo(entity: Entity, value: AnyComponentValue): void;
+  /** Records what `world.projection.restOf` answers for one component of an entity. */
+  setRest(entity: Entity, value: AnyComponentValue): void;
   kill(entity: Entity): void;
   read(entity: Entity, component: AnyComponentType): object | true | undefined;
   has(entity: Entity, component: AnyComponentType): boolean;
@@ -159,6 +161,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     dragStartPx: 8,
     swipeMinPx: 48,
     swipeMaxMs: 300,
+    heldScale: 1,
     ...options
   };
   const state = createInputState({ config });
@@ -168,6 +171,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const stores = new Map<Entity, Map<string, object | true>>();
   const resources = new Map<string, object>();
   const keys = new Map<Entity, { projection: string; key: string }>();
+  const rests = new Map<Entity, Map<string, object>>();
   const calls: string[] = [];
   const muted: Array<readonly string[]> = [];
   const answers: Answer[] = [];
@@ -251,7 +255,9 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     },
     settle: (): void => {
       calls.push("settle");
-    }
+    },
+    restOf: (entity: Entity, component: AnyComponentType): object | undefined =>
+      rests.get(entity)?.get(component.componentName)
   };
 
   const worldApi = { ecs, projection } as unknown as WorldApi;
@@ -356,6 +362,12 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     },
     attachTo: (entity, value) => {
       stores.get(entity)?.set(value.type.componentName, value.value);
+    },
+    setRest: (entity, value) => {
+      const table = rests.get(entity) ?? new Map<string, object>();
+
+      table.set(value.type.componentName, value.value as object);
+      rests.set(entity, table);
     },
     kill: entity => {
       stores.delete(entity);

@@ -2,7 +2,7 @@
  * @file ui plugin — the two conversions every module needs before it reaches the log or the ECS.
  * Pure: no ctx, no state.
  */
-import type { AnyComponentType, ComponentHandle, TagType } from "../world/types";
+import type { AnyComponentType, ComponentHandle } from "../world/types";
 
 /**
  * Turns whatever was thrown into the `Error` the log takes as its third argument.
@@ -31,20 +31,4 @@ export function asError(thrown: unknown): Error {
  */
 export function asHandle(componentType: AnyComponentType): ComponentHandle<object> {
   return componentType as ComponentHandle<object>;
-}
-
-/**
- * Reads a tag as the handle `onAdded` and `onRemoved` take. A tag has no defaults, so the type
- * asks for a component; the world fires the same hooks for a tag, which is how `ui` follows the
- * `Pressed` tag of `input`.
- *
- * @param tagType - The tag to watch.
- * @returns The same object, typed as a handle.
- * @example
- * ```ts
- * asTagHandle(Pressed).componentName; // "Pressed"
- * ```
- */
-export function asTagHandle(tagType: TagType): ComponentHandle<object> {
-  return tagType as unknown as ComponentHandle<object>;
 }

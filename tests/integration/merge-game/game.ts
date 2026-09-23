@@ -20,6 +20,7 @@ import { rewardFeature } from "./flows/reward";
 import type { Player } from "./state";
 import { startingPlayer, startingSession } from "./state";
 import { boardView } from "./view";
+import { boardLookPlugin } from "./view/looks";
 
 /**
  * Reads the volumes the player chose out of the committed save. `audio` calls it on every commit,
@@ -97,8 +98,8 @@ export function createGame(options: GameOptions = {}): Game {
 /**
  * The plugins of the game with its screen: the nine screen plugins, `audio`, which is opt-in,
  * every feature — the splash, Home, the board, the reward, the HUD, the orders, the settings, the
- * energy and the daily gift — and the two plugins the game writes: the loading of the splash and
- * the language switch.
+ * energy and the daily gift — and the three plugins the game writes: the loading of the splash,
+ * the language switch and the look of the board under the pointer.
  */
 export const screenPlugins = [
   ...screen,
@@ -113,7 +114,8 @@ export const screenPlugins = [
   energyFeature,
   giftFeature,
   settingsLocalePlugin,
-  loadingPlugin
+  loadingPlugin,
+  boardLookPlugin
 ];
 
 /** The game with its screen and the two seams a test holds on to. */
@@ -166,7 +168,8 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       assets: { manifest: options.manifest, io: options.io },
       text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
       i18n: { locale: "ru", fallback: "ru" },
-      audio: { volumes: volumesOf }
+      audio: { volumes: volumesOf },
+      input: { heldScale: 1.08 }
     }
   });
 

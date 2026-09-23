@@ -2,15 +2,16 @@
  * @file Transit node `tapGenerator`: one tap on the generator. The tapped generator becomes the
  * selected thing of the board, whatever the tap answers (design §6 F9). The item, the energy it
  * cost and the charge it spent are granted together, on this edge, and the cabin squashes (design
- * §6 F5). A refused tap says why (design §4): an empty bar opens the Out of energy popup, a full
- * board shows the toast, and a sawmill that is still cooling down answers `rejected`.
+ * §6 F5). A refused tap shakes the cabin and says why (design §4): an empty bar opens the Out of
+ * energy popup, a full board shows the toast, and a sawmill that is still cooling down answers
+ * `rejected`.
  */
 import { play, schedule, type } from "@moku-labs/game";
 import { defineNode } from "../kit";
 import { rules } from "../rules";
 import { applyRules } from "../state";
 import { tables } from "../tables";
-import { sawmillTap } from "../view/animations";
+import { refuseShake, sawmillTap } from "../view/animations";
 
 export const tapGenerator = defineNode({
   input: type<{ generatorId: string }>(),
@@ -31,9 +32,16 @@ export const tapGenerator = defineNode({
       rng.stream("drop")
     );
 
-    if (!result.ok && result.reason === "noEnergy") return out.noEnergy();
-    if (!result.ok && result.reason === "boardFull") return out.boardFull();
-    if (!result.ok) return out.rejected({ reason: result.reason });
+    if (!result.ok) {
+      void fx(
+        play(refuseShake, { target: { projection: "board.generators", key: input.generatorId } })
+      );
+
+      if (result.reason === "noEnergy") return out.noEnergy();
+      if (result.reason === "boardFull") return out.boardFull();
+
+      return out.rejected({ reason: result.reason });
+    }
 
     applyRules(player, result.state);
     session.taps += 1;

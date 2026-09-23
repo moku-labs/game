@@ -22,6 +22,12 @@ import { asComponent, asError, storedValue } from "./views";
 export type Peers = { next: ReadonlyMap<string, unknown>; previous: ReadonlyMap<string, unknown> };
 
 /**
+ * How far a numeric field may sit from its rest value and still count as at rest, in reference
+ * units. A root-space tween that ends through a `localPoseOf` round trip lands about 1e-13 off.
+ */
+const REST_TOLERANCE = 1e-6;
+
+/**
  * Splits a component value into the numeric fields a tween can drive and the rest.
  *
  * @param value - The stored rest value.
@@ -323,8 +329,30 @@ export function stillMoving(view: View): boolean {
 }
 
 /**
+ * Tells whether a stored field is at its rest value. Two numbers match within `REST_TOLERANCE`,
+ * anything else must be deeply equal.
+ *
+ * @param stored - The field as the entity carries it.
+ * @param rest - The field of the rest pose.
+ * @returns True when the field needs no correction.
+ * @example
+ * ```ts
+ * atRest(195.000_000_000_000_06, 195); // true
+ * atRest(195.01, 195); // false
+ * ```
+ */
+function atRest(stored: unknown, rest: unknown): boolean {
+  if (typeof stored === "number" && typeof rest === "number") {
+    return Math.abs(stored - rest) <= REST_TOLERANCE;
+  }
+
+  return deepEquals(stored, rest);
+}
+
+/**
  * The convergence check of the last motion: every rest component is compared with the stored
- * value, muted fields excluded. A difference is written and reported.
+ * value, muted fields excluded, numbers within `REST_TOLERANCE`. A difference is written and
+ * reported.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view that came to rest.
@@ -341,7 +369,7 @@ export function checkConvergence(pctx: ProjectionCtx, view: View): void {
     const patch: Record<string, unknown> = {};
 
     for (const [field, entry] of Object.entries(value.value as Record<string, unknown>)) {
-      if (!muted.has(field) && !deepEquals(stored[field], entry)) patch[field] = entry;
+      if (!muted.has(field) && !atRest(stored[field], entry)) patch[field] = entry;
     }
 
     if (Object.keys(patch).length === 0) continue;

@@ -297,6 +297,36 @@ describe("projection motions — the spike cases", () => {
     );
   });
 
+  it("accepts a rest pose reached within float noise and corrects a real miss", () => {
+    const world = createMockWorld();
+    // A root-space tween back to the rest pose lands a hair off after the `localPoseOf` round trip.
+    const landing = { value: 195.000_000_000_000_06 };
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view => view.tween(Transform, { x: landing.value }, { ms: 50, ease: "linear" })
+      }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 1, x: 195, y: 0 }]);
+    settleFrames(world);
+
+    expect(world.api.ecs.get(entity, Transform)?.x).toBe(195.000_000_000_000_06);
+    expect(world.log.warn).not.toHaveBeenCalledWith("world:view-corrected", expect.anything());
+
+    landing.value = 195.01;
+    commitItems(world, [{ id: "a", level: 1, x: 195, y: 10 }]);
+    settleFrames(world);
+
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 195, y: 10, scale: 1 });
+    expect(world.log.warn).toHaveBeenCalledWith(
+      "world:view-corrected",
+      expect.objectContaining({ projection: BOARD, key: "a", component: "Transform" })
+    );
+  });
+
   it("leaves a field another plugin owns when a view comes to rest or changes", () => {
     const world = createMockWorld();
     // `shown` is written by the plugin that draws the caption, never by a view.

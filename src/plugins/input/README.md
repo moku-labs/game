@@ -33,7 +33,7 @@ view: item => [
 ]
 ```
 
-Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `PointerOver` and `Pointer`: highlight legal cells, tilt the held item, light the item under the mouse.
+Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `PointerOver` and `Pointer`: highlight legal cells, tilt the held item, light the item under the mouse. The lifted size of the held item is config: `heldScale`.
 
 ## API
 
@@ -117,15 +117,26 @@ Every queued sample calls `time.wake()`, so a finger on the screen always runs a
 
 | Step | What happens |
 |---|---|
-| grab | tag `Held`; a view with a `Parent` leaves it (below); `world.projection.mute(entity, Transform, ["x", "y"])`; `lift(entity, true)`; `flow.gate.pointer(true)`; the offset to the finger is read last, so a view that is still sliding is picked up with no jump |
+| grab | tag `Held`; the rest scale is read; a view with a `Parent` leaves it (below); the scale becomes rest scale × `heldScale` (below); `world.projection.mute(entity, Transform, ["x", "y"])`, plus `"scale"` when `heldScale` is not 1; `lift(entity, true)`; `flow.gate.pointer(true)`; the offset to the finger is read last, so a view that is still sliding is picked up with no jump |
 | move | `world.ecs.set(entity, Transform, …)` once per frame, from the last sample |
 | hover | the topmost drop target under the finger gets `Hovered`; the old one loses it |
-| release | both components read NOW; a view that left a parent is hung back under it; with a target: `flow.gate.answer(dropAnswer(...))`. Then always, in this order: `unmute()`; `settle(entity)`, always: an accepted answer may still be refused by the node with no state change, and a commit that follows retargets from where the view is; `lift(entity, false)`; the tags go; `flow.gate.pointer(false)` |
-| abort | the held view is `Exiting` or gone: `unmute()`, a view that left a parent and still exists is hung back under it, the tags go, `flow.gate.pointer(false)`. No answer, no `settle`, no `lift(false)`: the exit motion and its layer belong to the projection |
+| release | both components read NOW; the rest scale is written back; a view that left a parent is hung back under it; with a target: `flow.gate.answer(dropAnswer(...))`. Then always, in this order: `unmute()`; `settle(entity)`, always: an accepted answer may still be refused by the node with no state change, and a commit that follows retargets from where the view is; `lift(entity, false)`; the tags go; `flow.gate.pointer(false)` |
+| abort | the held view is `Exiting` or gone: `unmute()`, a view that still exists gets the rest scale back and, when it left a parent, is hung back under it, the tags go, `flow.gate.pointer(false)`. No answer, no `settle`, no `lift(false)`: the exit motion and its layer belong to the projection |
 
 ### A view with a parent
 
 A view hosted inside another entity, such as a board inside a `ui` slot, is carried in root space. At the grab the parent is remembered, the root pose (`rootPoseOf` of `renderer`) is written into the `Transform` and the `Parent` is removed. The finger then moves the view 1:1 whatever the scale of the slot, and `lift` reaches the lift layer, which `renderer` ignores under a `Parent`. The mute covers `x`, `y`, `rotation` and `scale`, so no motion writes a parent-local value into the root pose. On the release, the cancel and the abort, the `Parent` comes back with `localPoseOf(parent, current root pose)`, so the motion home starts under the finger. A parent that left the world meanwhile is forgotten and the view keeps its root pose. `Held` stays on the view for the whole drag: `ui` does not re-host a held view.
+
+### The lifted look
+
+`heldScale` draws the view in the hand bigger: its rest scale in root space times `heldScale`, from the grab to the release. The rest scale is `world.projection.restOf(entity, Transform)` composed through the `Parent` chain, read before the view leaves its parent. So a board item resting at 0.5 on screen with `heldScale: 1.08` is carried at 0.54, also when a press squashed it to 0.94 just before the drag. A view with no recorded rest starts from its scale at the grab. `scale` is muted with the position, so no projection motion writes over it while the view is carried. The release, the cancel and the abort write the rest scale back before the view is hung back under its parent, so the local pose is unscaled and the way home starts at the view's own size.
+
+A timeline step of `anim` does not read the mute. A game whose look tween may still run at the grab cancels it when the view gets `Held`. The default `1` writes no scale, and a view that keeps its place mutes only `x` and `y`.
+
+```ts
+// a merge game: the item in the hand is 8% bigger
+createApp({ plugins: [...screen], pluginConfigs: { input: { heldScale: 1.08 } } });
+```
 
 The grab never reads the gate: a gate that closes for a moment on a transit node does not cancel a running drag. `unmute()` comes before `settle`, otherwise the settle motion could not write the position. A release at a closed gate returns `false` and the view starts to settle; when the gate opens inside that frame and takes the answer, the projection retargets the motion from the current values, so the item is not lost and nothing jumps. `flow.gate.pointer(true)` lasts from grab to release, so an `over` node never appears mid-drag.
 
@@ -138,6 +149,7 @@ The grab never reads the gate: a gate that closes for a moment on a transit node
 | `dragStartPx` | `number` | `8` | Move, in reference px, that turns a press on a `Draggable` into a drag |
 | `swipeMinPx` | `number` | `48` | Shortest swipe, in reference px |
 | `swipeMaxMs` | `number` | `300` | Longest swipe, in ms of `time`, from pointer down to pointer up |
+| `heldScale` | `number` | `1` | How much bigger than its rest size the view in the hand is drawn, from the grab to the release. `1` changes nothing |
 
 ```ts
 createApp({ plugins: [...screen], pluginConfigs: { input: { longPressMs: 300 } } });
@@ -155,7 +167,7 @@ None. An answer goes down to `flow.gate` as a direct call; pointer work never go
 |---|---|
 | `time` | `onFrame("input", fn)`, `time.delta` of the callback, and `wake()` on every pointer sample |
 | `flow` | `gate.answer`, `gate.pointer` |
-| `world` | `ecs.get/set/add/remove/has/tag/untag/resource/mode`; `projection.mute/lift/settle/keyOf/entityOf`; the `Exiting` tag |
+| `world` | `ecs.get/set/add/remove/has/tag/untag/resource/mode`; `projection.mute/lift/settle/keyOf/entityOf/restOf`; the `Exiting` tag |
 | `renderer` | `sync.hitTest`, `viewport.toReference`, `host.canvas`, the `Transform` and `Parent` components, the pose helpers `rootPoseOf` and `localPoseOf` of `renderer/sync/pose` |
 
 No `pixi.js` import: the canvas is a DOM element and hit tests go through `renderer`.

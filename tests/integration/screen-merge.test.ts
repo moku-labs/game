@@ -162,6 +162,7 @@ describe("screen-merge — the board as entities", () => {
     // `ui` sits under `lifted`: the item in the hand leaves the board slot and draws over the screen.
     expect(app.world.projection.layers()).toEqual([
       { name: "cells", sort: "none" },
+      { name: "glows", sort: "none" },
       { name: "items", sort: "y" },
       { name: "ui", sort: "order" },
       { name: "lifted", sort: "none" },

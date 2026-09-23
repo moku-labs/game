@@ -640,6 +640,25 @@ export type EcsApi = {
   ): () => void;
 
   /**
+   * Registers a listener for the moment a tag is added: `tag` on an entity without it, or a spawn
+   * that carries it. A tag has no value, so the listener gets the entity only.
+   *
+   * @param tagType - The tag type to watch.
+   * @param fn - Called with the entity that got the tag.
+   * @returns The remover; calling it twice is a no-op.
+   * @example
+   * ```ts
+   * // `ui` shows the pressed look while `input` holds the `Pressed` tag on a button.
+   * const world = ctx.require(worldPlugin);
+   * const off = world.ecs.onAdded(Pressed, entity => markPointer(entity, "pressed", true));
+   *
+   * world.ecs.tag(button, Pressed); // markPointer(button, "pressed", true)
+   * off(); // ui stops
+   * ```
+   */
+  onAdded(tagType: TagType, fn: (entity: Entity) => void): () => void;
+
+  /**
    * Registers a listener for the moment a component is removed.
    *
    * @param component - The component type to watch.
@@ -661,6 +680,25 @@ export type EcsApi = {
     component: ComponentHandle<Value>,
     fn: (entity: Entity, value: Readonly<Value>) => void
   ): () => void;
+
+  /**
+   * Registers a listener for the moment a tag is removed: `untag` on an entity that had it, or a
+   * despawn. The listener gets the entity only.
+   *
+   * @param tagType - The tag type to watch.
+   * @param fn - Called with the entity that lost the tag.
+   * @returns The remover; calling it twice is a no-op.
+   * @example
+   * ```ts
+   * // `ui` drops the pressed look when `input` releases the button.
+   * const world = ctx.require(worldPlugin);
+   * const off = world.ecs.onRemoved(Pressed, entity => markPointer(entity, "pressed", false));
+   *
+   * world.ecs.untag(button, Pressed); // markPointer(button, "pressed", false)
+   * off(); // ui stops
+   * ```
+   */
+  onRemoved(tagType: TagType, fn: (entity: Entity) => void): () => void;
 
   /**
    * The coarse change set of the frame, cleared in `time` phase `signals` after every `sync`

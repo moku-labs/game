@@ -38,6 +38,7 @@
  * | input | dragStartPx | 8 |
  * | input | swipeMinPx | 48 |
  * | input | swipeMaxMs | 300 |
+ * | input | heldScale | 1 |
  * | assets | manifest | undefined, a URL or an inline manifest |
  * | assets | textureBudgetMb | 192 |
  * | assets | preloadDepth | 2 |
