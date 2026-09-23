@@ -77,6 +77,6 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     musicPending,
     unlock: undefined,
     removers: [],
-    journal: []
+    journal: Object.freeze([])
   };
 }

@@ -71,6 +71,6 @@ export function createAudioApi(ctx: KernelSlice): AudioApi {
       applyGain(state, checked);
     },
     unlocked: (): boolean => state.unlocked,
-    journal: (): readonly SoundEntry[] => [...state.journal]
+    journal: (): readonly SoundEntry[] => state.journal
   };
 }

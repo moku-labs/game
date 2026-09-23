@@ -7,8 +7,9 @@ import type { InputOf, InputSchema } from "./types";
 const noInput = Object.freeze({});
 
 /**
- * Hands the given input on, or an empty one. `InputArgs` and `WatchInput` let a call leave the
- * input out only when every field of the schema is optional, so `{}` is an input of that schema.
+ * Hands the given input on, or an empty one. `InputArguments` and `WatchInput` let a call leave
+ * the input out only when every field of the schema is optional, so `{}` is an input of that
+ * schema.
  *
  * @param input - The input of the call, if any.
  * @returns The input to pass to the descriptor.
@@ -18,5 +19,6 @@ const noInput = Object.freeze({});
  * ```
  */
 export function inputOrEmpty<S extends InputSchema>(input: InputOf<S> | undefined): InputOf<S> {
+  // `{}` fits here: InputArguments and WatchInput omit input only when every field is optional.
   return input ?? (noInput as InputOf<S>);
 }

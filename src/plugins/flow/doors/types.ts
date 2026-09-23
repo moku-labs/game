@@ -149,7 +149,10 @@ export type Source<S extends InputSchema, O, App = HeadlessApp> = {
  *   title: "Go to level",
  *   input: { level: "number" },
  *   effect: "route",
- *   run: (app, { level }) => app.flow.walk([{ at: "home", intent: "play", payload: { level } }])
+ *   run: (app, { level }) => {
+ *     if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+ *     return app.flow.walk([{ at: "home", intent: "play", payload: { level } }]);
+ *   }
  * });
  * (await run(app, jumpToLevel, { level: 3 })).state.path; // "board/awaitIntent"
  * ```

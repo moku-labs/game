@@ -32,6 +32,7 @@ describe("createAudioState", () => {
     expect(state.warned.size).toBe(0);
     expect(state.removers).toEqual([]);
     expect(state.journal).toEqual([]);
+    expect(Object.isFrozen(state.journal)).toBe(true);
   });
 
   it("gives every app its own maps", () => {
