@@ -4,7 +4,7 @@
     "board": {
       "feature": "board",
       "tier": "scene",
-      "mb": 8.862,
+      "mb": 8.854,
       "files": [
         {
           "key": "board.bg-forest-meadow",
@@ -85,12 +85,6 @@
           "path": "features/board/assets/spawn.mp3",
           "kind": "audio",
           "mb": 0.003
-        },
-        {
-          "key": "board.theme",
-          "path": "features/board/assets/theme.mp3",
-          "kind": "audio",
-          "mb": 0.008
         }
       ]
     },
@@ -125,7 +119,7 @@
     "orders": {
       "feature": "orders",
       "tier": "core",
-      "mb": 0.261,
+      "mb": 0.673,
       "files": [
         {
           "key": "orders.card-order",
@@ -145,6 +139,13 @@
           "path": "features/orders/assets/complete.mp3",
           "kind": "audio",
           "mb": 0.016
+        },
+        {
+          "key": "orders.rope",
+          "path": "features/orders/assets/rope.webp",
+          "width": 1080,
+          "height": 100,
+          "mb": 0.412
         }
       ]
     },

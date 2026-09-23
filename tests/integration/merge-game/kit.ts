@@ -25,13 +25,20 @@ export type TextStyleKey =
   | "digits"
   | "ui.title"
   | "ui.button"
+  | "ui.button-small"
+  | "ui.plank"
   | "ui.number"
+  | "ui.amount"
+  | "ui.tab"
   | "ui.name"
+  | "ui.caption"
   | "ui.body"
   | "ui.paragraph"
   | "ui.link"
   | "ui.small"
-  | "ui.badge";
+  | "ui.badge"
+  | "ui.logo"
+  | "ui.sign";
 
 export const {
   defineNode,

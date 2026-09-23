@@ -6,9 +6,10 @@
  * nothing paid. A gift already taken opens nothing.
  */
 import type { Flow } from "@moku-labs/game";
-import { hint, play, sfx, type } from "@moku-labs/game";
+import { hint, play, type } from "@moku-labs/game";
 import { DailyGift } from "../features/gift/daily-gift";
 import { coinsFlyGift, FLIGHT_MS } from "../features/hud/animations";
+import { showPopup } from "../features/ui/popup";
 import { defineNode, popup } from "../kit";
 import { giftCoins } from "../tables";
 
@@ -17,14 +18,15 @@ export const dailyGift = defineNode({
   run: async ({ player, fx, out }) => {
     if (player.giftClaimed) return out.close();
 
-    const answered = (await fx(popup(DailyGift, { coins: giftCoins }))) as Flow.Answer | undefined;
+    const answered = (await showPopup(fx, popup(DailyGift, { coins: giftCoins }))) as
+      | Flow.Answer
+      | undefined;
 
     if (answered?.intent !== "claim") return out.close();
 
     player.merge.wallet.coins = (player.merge.wallet.coins ?? 0) + giftCoins;
     player.giftClaimed = true;
 
-    void fx(sfx("ui.click"));
     void fx(
       play(coinsFlyGift, {
         from: { projection: "DailyGift", key: "giftPrize" },

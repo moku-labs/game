@@ -1,9 +1,10 @@
 /**
- * @file The order strip of the board (design §6 B2): three paper tags on clothespins along one
- * rope. Each card shows what its order wants — the picture with its level, "×2" when two are
- * needed, the name and the coins it pays — and its own Deliver button. The rules decide whether a
- * card is ready: its Deliver answers `deliver` with exactly the give the node applies, and it is
- * the grey plank while nothing on the board fits.
+ * @file The order strip of the board (design §6 B2, p2): three paper tags on clothespins along one
+ * sagging rope. Each card shows what its order wants — the picture with its level badge on the
+ * lower right and, when two are needed, the "×2" badge on the lower left, the name and the coins
+ * it pays — and its own Deliver button. The rules decide whether a card is ready: its Deliver
+ * answers `deliver` with exactly the give the node applies, and it is the grey plank while nothing
+ * on the board fits. A ready card glows honey; every card sways on the rope (`motions.ts`).
  */
 import { tr } from "../../kit";
 import type { GiveInput, MergeState, Order } from "../../rules";
@@ -11,13 +12,13 @@ import { rules } from "../../rules";
 import { tables } from "../../tables";
 import { nameOf, pictureOf } from "../../view/items";
 import { PlankButton } from "../ui/kit";
-import { orderCardMotion } from "./motions";
 import {
+  cardGlow,
   cardPicture,
+  countBadge,
   levelBadge,
   levelDisc,
-  nameRow,
-  orderCard,
+  orderCardStyle,
   orderStrip,
   pictureFrame,
   pinStyle,
@@ -126,6 +127,21 @@ export function orderCardsOf(state: MergeState): OrderCardView[] {
 }
 
 /**
+ * The items the ready orders take: for every ready card, the item its Deliver would give. The
+ * board draws the check badge on them.
+ *
+ * @param state - The rule state of the save.
+ * @returns The ids of those items, left to right, without repeats.
+ */
+export function acceptedItemsOf(state: MergeState): string[] {
+  const ids = orderCardsOf(state)
+    .filter(card => card.ready)
+    .map(card => card.item);
+
+  return [...new Set(ids)];
+}
+
+/**
  * The key of the card in one slot. The reward animation aims at it, so it is written once.
  *
  * @param slot - The position on the rope.
@@ -150,9 +166,40 @@ function deliverOf(card: OrderCardView): GiveInput {
 }
 
 /**
- * One order card: the paper tag on its clothespin. A ready card is selected, which gives it the
- * honey glow of its style and one sway as it becomes ready; a waiting one fades only its picture,
- * so its words stay readable.
+ * The picture of a card: the wanted item in its round frame, the level badge on the lower right
+ * and, when the order asks for more than one, the "×2" badge on the lower left.
+ *
+ * @param props - The card to draw.
+ * @param props.card - The card as `orderCardsOf` read it.
+ * @returns The stack element of the frame.
+ */
+function CardPicture(props: { card: OrderCardView }) {
+  const card = props.card;
+  const id = cardKey(card.slot);
+
+  return (
+    <stack key={`${id}Picture`} style={pictureFrame}>
+      <image
+        key={`${id}Item`}
+        texture={pictureOf(card.chain, card.level)}
+        style={card.ready ? cardPicture : waitingPicture}
+      />
+      {card.count > 1 ? (
+        <stack key={`${id}Count`} style={countBadge}>
+          <text key={`${id}CountLabel`} style="ui.badge" content={`×${card.count}`} />
+        </stack>
+      ) : undefined}
+      <stack key={`${id}Level`} style={levelBadge}>
+        <image key={`${id}LevelDisc`} texture="ui.badge-level" style={levelDisc} />
+        <text key={`${id}LevelNumber`} style="ui.badge" content={String(card.level)} />
+      </stack>
+    </stack>
+  );
+}
+
+/**
+ * One order card: the paper tag on its clothespin. A ready card is selected and glows honey; a
+ * waiting one fades only its picture, so its words stay readable.
  *
  * @param props - The card to draw.
  * @param props.card - The card as `orderCardsOf` read it.
@@ -163,34 +210,20 @@ export function OrderCard(props: { card: OrderCardView }) {
   const id = cardKey(card.slot);
 
   return (
-    <column key={id} state={{ selected: card.ready }} style={orderCard} motion={orderCardMotion}>
+    <column key={id} state={{ selected: card.ready }} style={orderCardStyle(card.slot)}>
+      {card.ready ? <stack key={`${id}Glow`} style={cardGlow} /> : undefined}
       <image key={`${id}Pin`} texture="ui.decor-clothespin" style={pinStyle} />
       <text
         key={`${id}Title`}
         style="ui.small"
         content={tr("orders.title", { number: card.slot + 1 })}
       />
-      <stack key={`${id}Picture`} style={pictureFrame}>
-        <image
-          key={`${id}Item`}
-          texture={pictureOf(card.chain, card.level)}
-          style={card.ready ? cardPicture : waitingPicture}
-        />
-        <stack key={`${id}Level`} style={levelBadge}>
-          <image key={`${id}LevelDisc`} texture="ui.badge-level" style={levelDisc} />
-          <text key={`${id}LevelNumber`} style="ui.badge" content={String(card.level)} />
-        </stack>
-      </stack>
-      <row key={`${id}Need`} style={nameRow}>
-        <text
-          key={`${id}Name`}
-          style="ui.name"
-          content={tr("board.item", { item: nameOf(card.level) })}
-        />
-        {card.count > 1 ? (
-          <text key={`${id}Count`} style="ui.name" content={`×${card.count}`} />
-        ) : undefined}
-      </row>
+      <CardPicture card={card} />
+      <text
+        key={`${id}Name`}
+        style="ui.name"
+        content={tr("board.item", { item: nameOf(card.level) })}
+      />
       <row key={`${id}Reward`} style={rewardRow}>
         <icon key={`${id}Coin`} name="ui.icon-coin" style={rewardIcon} />
         <text key={`${id}Coins`} style="ui.name" content={String(card.reward)} />
@@ -209,7 +242,7 @@ export function OrderCard(props: { card: OrderCardView }) {
 }
 
 /**
- * The order strip: one rope across the screen, the three cards pinned to it.
+ * The order strip: one sagging rope across the screen, the three cards pinned to it.
  *
  * @param props - The cards to draw.
  * @param props.cards - One card per order slot, left to right.
@@ -218,7 +251,7 @@ export function OrderCard(props: { card: OrderCardView }) {
 export function OrderStrip(props: { cards: readonly OrderCardView[] }) {
   return (
     <row key="orders" style={orderStrip}>
-      <row key="ordersRope" style={ropeStyle} />
+      <image key="ordersRope" texture="orders.rope" fit="fill" style={ropeStyle} />
       {props.cards.map(card => (
         <OrderCard key={cardKey(card.slot)} card={card} />
       ))}

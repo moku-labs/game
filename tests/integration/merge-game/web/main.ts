@@ -14,6 +14,8 @@ import { playerFor } from "./scenarios";
 
 const app = createApp({
   plugins: [...screenPlugins],
+  // The board column is 2084 units tall: a wide screen scales the whole interface down together.
+  config: { referenceLong: 2100 },
   pluginConfigs: {
     renderer: { mount: "#game" },
     assets: { manifest: "/manifest.json" },

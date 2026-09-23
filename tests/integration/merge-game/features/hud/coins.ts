@@ -72,7 +72,7 @@ export function rollCoins(
 /**
  * The coin counter: one entity that carries the number and the label bound to it. The label
  * resolves to the rounded value every frame, so the roll is drawn without a single string being
- * built. It starts after the icon of the pill that hosts it and sits on its middle line.
+ * built. It is centred on the bar of the pill that hosts it, right of the icon.
  */
 export const hudCoins = projection({
   name: "hud.coins",
@@ -84,7 +84,7 @@ export const hudCoins = projection({
     Text({
       style: "ui.number",
       bind: { component: "Counter", field: "value" },
-      anchor: { x: 0, y: 0.5 }
+      anchor: { x: 0.5, y: 0.5 }
     }),
     Transform({ x: pillNumberAt.x, y: pillNumberAt.y }),
     // Above the pill's own nine-slice, which is the hosting element's visual at depth 0.

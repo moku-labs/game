@@ -32,7 +32,7 @@ export default {
   "energy.title": () => [{ kind: "text", text: "Out of energy" }],
   "energy.watch": () => [{ kind: "text", text: "Watch & refill" }],
   "gift.claim": () => [{ kind: "text", text: "Claim" }],
-  "gift.reward": (p, intl) => [{ kind: "text", text: `+${(intl.plural().select((p.coins as number)) === "one" ? `${intl.number().format((p.coins as number))} coin` : `${intl.number().format((p.coins as number))} coins`)}` }],
+  "gift.coins": (p, intl) => [{ kind: "text", text: (intl.plural().select((p.coins as number)) === "one" ? "coin" : "coins") }],
   "gift.title": () => [{ kind: "text", text: "Daily gift" }],
   "home.play": () => [{ kind: "text", text: "Play" }],
   "hud.deliver": () => [{ kind: "text", text: "Deliver" }],

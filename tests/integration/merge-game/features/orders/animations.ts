@@ -7,6 +7,8 @@
  *
  * The item is hosted by the board slot, so its `Transform` is slot-local, and `at(card)` is a root
  * pose. The flight names the root space, and `anim` turns the card's pose into the slot's units.
+ * A card turns around its clothespin, so its pose is the middle of its top edge: the middle of the
+ * card is half a card below it.
  */
 import type { Anim } from "@moku-labs/game";
 import {
@@ -21,6 +23,7 @@ import {
   wait
 } from "@moku-labs/game";
 import { defineAnimation, NineSlice, tr } from "../../kit";
+import { orderCardSize } from "./styles";
 
 /** The stamp: a berry plank, turned like a hand-pressed stamp. */
 const stamp = { width: 290, height: 116, rotation: -0.2 } as const;
@@ -43,7 +46,8 @@ const STAMP_ORDER = 1000;
 export const deliverStamp = defineAnimation("orders.deliverStamp", {
   slots: { item: type<Anim.Target>(), card: type<Anim.Target>() },
   build: ({ item, card }, { at }) => {
-    const middle = at(card);
+    const pin = at(card);
+    const middle = { ...pin, y: pin.y + (orderCardSize.height / 2) * pin.scale };
     const pose = { x: middle.x, y: middle.y, rotation: stamp.rotation, scale: 0 };
 
     return sequence(

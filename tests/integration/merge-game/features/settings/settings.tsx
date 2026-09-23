@@ -1,7 +1,8 @@
 /**
- * @file The settings popup (design §6 E2, D1): the header "Настройки", the X, two folder tabs, and
- * the pane under them — Music and Effects with −, a 10-segment level bar, + and the percent, or
- * the two language planks with a check on the current one — and the "Сбросить прогресс" link.
+ * @file The settings popup (design §6 E2, D1): the plaque "Настройки", the X, two folder tabs that
+ * stand on the parchment, and the pane under them — Music and Effects on two lines each (the name
+ * and the percent, then −, a 10-segment level bar and +), or the two language planks with a check
+ * on the current one — and the "Сбросить прогресс" link with its wave.
  *
  * Which tab is open is local state of the component: the save never hears about it and no node
  * runs when the player looks around. The buttons that change something name the four outcomes;
@@ -14,16 +15,25 @@ import { Parchment, PlankButton, Signboard } from "../ui/kit";
 import { PopupScreen } from "../ui/popup";
 import {
   barTrack,
+  glyphAcross,
+  glyphDown,
+  glyphJoin,
   languageColumn,
   linkStyle,
+  linkWave,
   rowIcon,
   rowName,
   rowPercent,
   segmentOff,
   segmentOn,
+  settingsTop,
+  stepGlyph,
   stepStyle,
+  tabIdle,
+  tabOpen,
   tabRow,
-  tabStyle,
+  volumeControls,
+  volumeLine,
   volumeRow
 } from "./styles";
 
@@ -81,8 +91,8 @@ function litOf(volume: number): number {
 }
 
 /**
- * One folder tab. It writes the tab into the local state of the popup; the paper tab is the one
- * on show.
+ * One folder tab. It writes the tab into the local state of the popup; the open one is the paper
+ * tab that reaches down over the border of the parchment.
  *
  * @param props - The tab and whether it is on show.
  * @param props.tab - The tab.
@@ -93,13 +103,39 @@ function TabButton(props: { tab: Tab; open: boolean }) {
   const key = props.tab === "audio" ? "tabSound" : "tabLanguage";
 
   return (
-    <button key={key} local={{ tab: props.tab }} state={{ selected: props.open }} style={tabStyle}>
+    <button
+      key={key}
+      local={{ tab: props.tab }}
+      state={{ selected: props.open }}
+      style={props.open ? tabOpen : tabIdle}
+    >
       <text
         key={`${key}Label`}
-        style={props.open ? "ui.name" : "ui.button"}
+        style={props.open ? "ui.tab" : "ui.button"}
         content={tr("settings.tab", { tab: props.tab })}
       />
     </button>
+  );
+}
+
+/**
+ * The bold cream − or + of a step button, drawn as bars with an ink outline (design §6 E2). The
+ * plus lays the cream of its horizontal bar over the crossing once more, so it has one outline.
+ *
+ * @param props - The glyph.
+ * @param props.id - The key of the button; the glyph is keyed `<id>Glyph`.
+ * @param props.plus - Whether it is the plus.
+ * @returns The stack element.
+ */
+function StepGlyph(props: { id: string; plus: boolean }) {
+  const key = `${props.id}Glyph`;
+
+  return (
+    <stack key={key} style={stepGlyph}>
+      <stack key={`${key}Across`} style={glyphAcross} />
+      {props.plus ? <stack key={`${key}Down`} style={glyphDown} /> : undefined}
+      {props.plus ? <stack key={`${key}Join`} style={glyphJoin} /> : undefined}
+    </stack>
   );
 }
 
@@ -122,51 +158,55 @@ function StepButton(props: { id: string; bus: Bus; delta: number; disabled: bool
       state={{ disabled: props.disabled }}
       style={stepStyle}
     >
-      <text key={`${props.id}Label`} style="ui.button" content={props.delta < 0 ? "-" : "+"} />
+      <StepGlyph id={props.id} plus={props.delta > 0} />
     </button>
   );
 }
 
 /**
- * One sound row (design §6 E2): the icon, the name, −, the level bar, + and the percent. − is
- * disabled at 0 %, + at 100 %.
+ * One sound row (design §6 E2) on two lines: the icon and the name with the percent at the right
+ * end, then −, the level bar that fills the rest, and +. − is disabled at 0 %, + at 100 %.
  *
  * @param props - The bus and its volume.
  * @param props.bus - The bus.
  * @param props.icon - The icon of the bus.
  * @param props.volume - Its gain, 0..1.
- * @returns The row element, keyed `<bus>Row`.
+ * @returns The column element, keyed `<bus>Row`.
  */
 function VolumeRow(props: { bus: Bus; icon: AssetKey; volume: number }) {
   const { bus } = props;
   const lit = litOf(props.volume);
 
   return (
-    <row key={`${bus}Row`} style={volumeRow}>
-      <icon key={`${bus}Icon`} name={props.icon} style={rowIcon} />
-      <column key={`${bus}Name`} style={rowName}>
-        <text key={`${bus}Label`} style="ui.name" content={tr("settings.bus", { bus })} />
-      </column>
-      <StepButton id={`${bus}Down`} bus={bus} delta={-VOLUME_STEP} disabled={lit <= 0} />
-      <row key={`${bus}Bar`} style={barTrack}>
-        {segments.map(index => (
-          <stack key={`${bus}Segment${index}`} style={index < lit ? segmentOn : segmentOff} />
-        ))}
+    <column key={`${bus}Row`} style={volumeRow}>
+      <row key={`${bus}Line`} style={volumeLine}>
+        <row key={`${bus}Name`} style={rowName}>
+          <icon key={`${bus}Icon`} name={props.icon} style={rowIcon} />
+          <text key={`${bus}Label`} style="ui.body" content={tr("settings.bus", { bus })} />
+        </row>
+        <column key={`${bus}PercentBox`} style={rowPercent}>
+          <text
+            key={`${bus}Percent`}
+            style="ui.tab"
+            content={tr("settings.percent", { percent: lit * (100 / SEGMENTS) })}
+          />
+        </column>
       </row>
-      <StepButton id={`${bus}Up`} bus={bus} delta={VOLUME_STEP} disabled={lit >= SEGMENTS} />
-      <column key={`${bus}PercentBox`} style={rowPercent}>
-        <text
-          key={`${bus}Percent`}
-          style="ui.name"
-          content={tr("settings.percent", { percent: lit * (100 / SEGMENTS) })}
-        />
-      </column>
-    </row>
+      <row key={`${bus}Controls`} style={volumeControls}>
+        <StepButton id={`${bus}Down`} bus={bus} delta={-VOLUME_STEP} disabled={lit <= 0} />
+        <row key={`${bus}Bar`} style={barTrack}>
+          {segments.map(index => (
+            <stack key={`${bus}Segment${index}`} style={index < lit ? segmentOn : segmentOff} />
+          ))}
+        </row>
+        <StepButton id={`${bus}Up`} bus={bus} delta={VOLUME_STEP} disabled={lit >= SEGMENTS} />
+      </row>
+    </column>
   );
 }
 
 /**
- * The language pane: one plank per language, the current one green with a check.
+ * The language pane: one plank per language across the paper, the current one green with a check.
  *
  * @param props - The current language.
  * @param props.locale - The locale the save holds.
@@ -181,7 +221,7 @@ function LanguagePane(props: { locale: string }) {
           intent="setLocale"
           payload={{ locale: language.locale }}
           look="wood"
-          size="large"
+          size="full"
           selected={props.locale === language.locale}
           label={language.label}
         />
@@ -203,16 +243,12 @@ export const Settings = defineComponent("Settings", {
       <Signboard
         id="settingsBoard"
         title={tr("settings.title")}
-        width={1000}
-        height={1040}
+        width={950}
+        height={1060}
+        top={settingsTop}
         hung
         close="close"
       >
-        <row key="settingsTabs" style={tabRow}>
-          {tabs.map(tab => (
-            <TabButton tab={tab} open={local.tab === tab} />
-          ))}
-        </row>
         <Parchment id="settingsPane">
           {local.tab === "audio" ? (
             buses.map(entry => (
@@ -225,9 +261,15 @@ export const Settings = defineComponent("Settings", {
           ) : (
             <LanguagePane locale={props.locale} />
           )}
+          <row key="settingsTabs" style={tabRow}>
+            {tabs.map(tab => (
+              <TabButton tab={tab} open={local.tab === tab} />
+            ))}
+          </row>
         </Parchment>
         <button key="settingsReset" intent="reset" style={linkStyle}>
           <text key="settingsResetLabel" style="ui.link" content={tr("settings.reset")} />
+          <image key="settingsResetWave" texture="ui.link-wave" fit="fill" style={linkWave} />
         </button>
       </Signboard>
     </PopupScreen>

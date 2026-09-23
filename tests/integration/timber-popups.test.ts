@@ -6,7 +6,7 @@
  * Yoga lays out the real rects, the flow runner and `anim` run for real.
  */
 
-import { NineSlice, Sprite, Tappable, Transform } from "@moku-labs/game";
+import { NineSlice, Sprite, Tappable, Text, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { TOAST_HOLD_MS } from "./merge-game/features/board/toast";
 import { hudRowHeight } from "./merge-game/features/hud/styles";
@@ -119,7 +119,7 @@ describe("timber-popups — Settings", () => {
     await game.app.stop();
   });
 
-  it("swings the signboard in from its tilted, small pose to its fitted rest", async () => {
+  it("drops the signboard from above the screen, overshoots with a turn and wobbles to rest", async () => {
     const game = await startOnHome(player);
 
     expect(game.app.input.tap(elementOf(game, "homeSettings"))).toBe(true);
@@ -127,20 +127,30 @@ describe("timber-popups — Settings", () => {
     await frames(game, 1);
 
     const board = elementOf(game, "settingsBoard");
-    const tilts: number[] = [];
+    const poses: { y: number; rotation: number }[] = [];
 
-    for (let frame = 0; frame < 40; frame += 1) {
-      tilts.push(game.app.world.ecs.get(board, Transform)?.rotation ?? 0);
+    for (let frame = 0; frame < 70; frame += 1) {
+      const pose = game.app.world.ecs.get(board, Transform);
+
+      poses.push({ y: pose?.y ?? 0, rotation: pose?.rotation ?? 0 });
       await frames(game, 1);
     }
 
-    // It starts turned back by up to 0.12 rad around its top edge and comes to rest upright.
-    expect(Math.min(...tilts)).toBeLessThan(-0.06);
-    expect(Math.min(...tilts)).toBeGreaterThanOrEqual(-0.12);
-    expect(game.app.world.ecs.get(board, Transform)).toMatchObject({
+    const rest = game.app.world.ecs.get(board, Transform);
+    const turns = poses.map(pose => pose.rotation);
+
+    // It starts high above its rest (the key at 0 is 780 units up) ...
+    expect((poses[0]?.y ?? 0) - (rest?.y ?? 0)).toBeLessThan(-600);
+    // ... swings past upright to +5° on the overshoot and back to −3.2° in the wobble ...
+    expect(Math.max(...turns)).toBeGreaterThan(4 * (Math.PI / 180));
+    expect(Math.max(...turns)).toBeLessThanOrEqual(5 * (Math.PI / 180) + 1e-9);
+    expect(Math.min(...turns)).toBeLessThan(-3 * (Math.PI / 180));
+    // ... and ends upright at its fitted rest, turning around the rope point above it.
+    expect(rest).toMatchObject({
       rotation: 0,
       scale: nodeOf(game.app.ui.tree(), "settingsBoard")?.fitScale ?? 1
     });
+    expect(nodeOf(game.app.ui.tree(), "settingsBoard")?.style.origin).toEqual({ x: 0.5, y: -0.5 });
 
     await game.app.stop();
   });
@@ -181,17 +191,23 @@ describe("timber-popups — Confirm over Settings", () => {
     await tap(game, "settingsReset");
     await frames(game, 30);
 
-    // Smaller, a little higher and darker (design §6 F2).
+    // Smaller, a little higher and darker (design §6 F2). The board turns around the rope point
+    // half its height above it, so the shrink alone would lift it by 16 % of its 1060 units; the
+    // offset gives that back, and the board shrinks around its middle and rises 8.
     expect(nodeOf(game.app.ui.tree(), "settingsBoard")?.style).toMatchObject({
       scale: 0.84,
-      offsetY: -8,
+      offsetY: Math.round(0.16 * 1060) - 8,
       tint: 0x6b_6b_6b
     });
     expect(
-      ["settingsBoardRopeLeft", "settingsBoardRopeRight", "settingsBoardClose"].map(
-        key => nodeOf(game.app.ui.tree(), key)?.style.alpha
-      )
-    ).toEqual([0, 0, 0]);
+      [
+        "settingsBoardRopeLeft",
+        "settingsBoardRopeLeft0",
+        "settingsBoardRopeRight",
+        "settingsBoardRopeRight2",
+        "settingsBoardClose"
+      ].map(key => nodeOf(game.app.ui.tree(), key)?.style.alpha)
+    ).toEqual([0, 0, 0, 0, 0]);
     // A volume plank of the covered popup is still enabled, yet only the top popup answers.
     expect(game.app.input.tap(elementOf(game, "musicDown"))).toBe(false);
 
@@ -245,7 +261,8 @@ describe("timber-popups — the sawmill says why", () => {
     await frames(game);
 
     expect(game.app.flow.state().path).toBe("board/energy");
-    expect(resolvedOf(game, "energyRefill")).toBe("Пополнится через 10:00");
+    // The wait sits on its own line of the parchment chip (design §6 E4).
+    expect(resolvedOf(game, "energyRefill")).toBe("Пополнится через\n10:00");
 
     await tap(game, "energyWatch");
     await frames(game, 30);
@@ -332,7 +349,9 @@ describe("timber-popups — the daily gift", () => {
     await tap(game, "gift");
 
     expect(game.app.flow.state().path).toBe("dailyGift");
-    expect(resolvedOf(game, "giftReward")).toBe("+50 монет");
+    // The big "+50" and the word after it (design §6 E5).
+    expect(resolvedOf(game, "giftReward")).toBe("+50");
+    expect(resolvedOf(game, "giftRewardUnit")).toBe("монет");
 
     await tap(game, "giftClaim");
 
@@ -374,6 +393,186 @@ describe("timber-popups — the reward", () => {
     expect(coinsInFlight(game)).toBe(0);
     expect(counterOf(game)).toBe("25");
     expect(game.app.flow.state().path).toBe("board/awaitIntent");
+
+    await game.app.stop();
+  });
+});
+
+/**
+ * The natural rect of one keyed element, failing the test when it is not on the screen.
+ *
+ * @param game - The running game.
+ * @param key - The key of the element.
+ * @returns Its rect in root space.
+ */
+function rectOf(game: Awaited<ReturnType<typeof startOnHome>>, key: string) {
+  const node = nodeOf(game.app.ui.tree(), key);
+
+  expect(node, key).toBeDefined();
+
+  return node?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+}
+
+describe("timber-popups — the look of a popup board", () => {
+  it("centres a title plaque on the top edge of every board, half of it above", async () => {
+    const game = await startOnBoard(emptyBar);
+    const plaques: { board: string; header: string }[] = [];
+
+    await tap(game, "settings");
+    plaques.push({ board: "settingsBoard", header: "settingsBoardHeader" });
+    await tap(game, "settingsReset");
+    plaques.push({ board: "confirmBoard", header: "confirmBoardHeader" });
+
+    for (const { board, header } of plaques) {
+      const panel = rectOf(game, board);
+      const plaque = rectOf(game, header);
+
+      // 150 units tall, centred on the top edge: half of it above the board, half on it.
+      expect(plaque.h, header).toBe(150);
+      expect(plaque.y + plaque.h / 2, header).toBe(panel.y);
+      expect(plaque.x + plaque.w / 2, header).toBe(panel.x + panel.w / 2);
+      // As wide as its title and 80 units on each side, never under 420.
+      expect(plaque.w, header).toBeGreaterThanOrEqual(420);
+      expect(plaque.w, header).toBe(Math.max(420, rectOf(game, `${board}Title`).w + 160));
+    }
+
+    await game.app.stop();
+  });
+
+  it("hangs the board on two ropes from far above the screen, 18 % in from each side", async () => {
+    const game = await startOnHome(player);
+
+    await tap(game, "gift");
+
+    const board = rectOf(game, "giftBoard");
+    const left = rectOf(game, "giftBoardRopeLeft");
+    const right = rectOf(game, "giftBoardRopeRight");
+
+    // The ropes end on the top edge of the board and reach far past the top of the screen.
+    expect(left.y + left.h).toBe(board.y);
+    expect(right.y + right.h).toBe(board.y);
+    expect(left.y).toBeLessThan(-1000);
+    expect(left.x + left.w / 2 - board.x).toBeCloseTo(board.w * 0.18, 0);
+    expect(board.x + board.w - (right.x + right.w / 2)).toBeCloseTo(board.w * 0.18, 0);
+
+    await game.app.stop();
+  });
+
+  it("shows a reward on its rays with no disc, and the amount in the big number voice", async () => {
+    const game = await startOnBoard(player);
+
+    await tap(game, "deliver0");
+    await until(game, () => shows(game, "rewardClaim"));
+    await frames(game);
+
+    expect(shows(game, "rewardPrizeRays")).toBe(true);
+    expect(shows(game, "rewardPrizeDisc")).toBe(false);
+    expect(game.app.world.ecs.get(elementOf(game, "rewardCoins"), Text)?.style).toBe("ui.amount");
+    expect(rectOf(game, "rewardClaim")).toMatchObject({ w: 554, h: 150 });
+
+    await game.app.stop();
+  });
+
+  it("writes the refill on a parchment chip and gives Watch the full width and a play glyph", async () => {
+    const game = await startOnBoard(emptyBar);
+    const sawmill = game.app.world.projection.entityOf("board.generators", generatorId) ?? 0;
+
+    game.app.input.tap(sawmill);
+    await tick();
+    await frames(game);
+
+    const board = rectOf(game, "energyBoard");
+    const watch = rectOf(game, "energyWatch");
+
+    expect(nodeOf(game.app.ui.tree(), "energyTimer")?.style.nineSlice).toBe("ui.panel-parchment");
+    expect(nodeOf(game.app.ui.tree(), "energyTimer")?.children.map(child => child.key)).toEqual([
+      "energyRefill"
+    ]);
+    // The board's inner width: 840 less 72 on each side.
+    expect(watch).toMatchObject({ x: board.x + 72, w: 840 - 2 * 72, h: 200 });
+    expect(shows(game, "energyWatchPlay")).toBe(true);
+    expect(rectOf(game, "energyLater")).toMatchObject({ w: 554, h: 150 });
+
+    await game.app.stop();
+  });
+
+  it("gives the Reset and the Cancel of the confirm the same width", async () => {
+    const game = await startOnHome(player);
+
+    await tap(game, "homeSettings");
+    await tap(game, "settingsReset");
+
+    const reset = rectOf(game, "confirmReset");
+    const cancel = rectOf(game, "confirmCancel");
+
+    expect(reset.w).toBe(cancel.w);
+    expect(reset.w).toBeGreaterThan(300);
+    expect(nodeOf(game.app.ui.tree(), "confirmBody")?.style.nineSlice).toBe("ui.panel-parchment");
+
+    await game.app.stop();
+  });
+});
+
+describe("timber-popups — the settings pane", () => {
+  it("stands the tabs on the parchment: the open tab reaches down over its border", async () => {
+    const game = await startOnHome(player);
+
+    await tap(game, "homeSettings");
+
+    const pane = rectOf(game, "settingsPane");
+    const open = rectOf(game, "tabSound");
+    const idle = rectOf(game, "tabLanguage");
+
+    // No gap: the open tab ends 12 units inside the paper, the idle one on its edge.
+    expect(open.y + open.h).toBe(pane.y + 12);
+    expect(idle.y + idle.h).toBe(pane.y);
+    expect(open.h).toBeGreaterThan(idle.h);
+    expect(nodeOf(game.app.ui.tree(), "tabSound")?.style.nineSlice).toBe("ui.tab-active");
+    expect(nodeOf(game.app.ui.tree(), "tabLanguage")?.style.nineSlice).toBe("ui.tab-idle");
+
+    await game.app.stop();
+  });
+
+  it("draws each sound row on two lines, the bar filling what − and + leave", async () => {
+    const game = await startOnHome(player);
+
+    await tap(game, "homeSettings");
+
+    const row = nodeOf(game.app.ui.tree(), "musicRow");
+
+    expect(row?.children.map(child => child.key)).toEqual(["musicLine", "musicControls"]);
+
+    const controls = rectOf(game, "musicControls");
+    const down = rectOf(game, "musicDown");
+    const bar = rectOf(game, "musicBar");
+    const up = rectOf(game, "musicUp");
+
+    expect([down.w, down.h, up.w, up.h]).toEqual([120, 120, 120, 120]);
+    expect(down.x).toBe(controls.x);
+    expect(up.x + up.w).toBe(controls.x + controls.w);
+    expect(bar.w).toBe(controls.w - 2 * 120 - 2 * 24);
+    // The percent sits at the right end of the first line.
+    const line = rectOf(game, "musicLine");
+    const percent = rectOf(game, "musicPercentBox");
+
+    expect(percent.x + percent.w).toBe(line.x + line.w);
+
+    await game.app.stop();
+  });
+
+  it("draws the wave of the reset link as wide as its words", async () => {
+    const game = await startOnHome(player);
+
+    await tap(game, "homeSettings");
+
+    const words = rectOf(game, "settingsResetLabel");
+    const wave = rectOf(game, "settingsResetWave");
+
+    // Yoga rounds the edges of the link and of its words to whole units apart.
+    expect(Math.abs(wave.x - words.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(wave.w - words.w)).toBeLessThanOrEqual(2);
+    expect(wave.h).toBe(16);
+    expect(wave.y).toBeGreaterThan(words.y + words.h - 1);
 
     await game.app.stop();
   });

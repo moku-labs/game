@@ -18,7 +18,7 @@ import { Generator, Glow, Highlighted, Item } from "./components";
  * @param snapshot - The frozen model snapshot of the frame.
  * @returns The player tree.
  */
-function playerOf(snapshot: Model.Snapshot): Player {
+export function playerOf(snapshot: Model.Snapshot): Player {
   return snapshot.player as unknown as Player;
 }
 

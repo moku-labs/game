@@ -1,6 +1,6 @@
 /**
- * @file The sawmill info bar (design §6 B4, §7): a wooden pill anchored above the bottom safe edge
- * that names the selected thing. For the sawmill, and while nothing is selected: its icon, its
+ * @file The sawmill info bar (design §6 B4, §7, p2): a light wooden plank right under the tray
+ * that names the selected thing in ink. For the sawmill, and while nothing is selected: its icon, its
  * name, one pip per charge and the count, "3/4". The charges come from the save and the maximum
  * from the generator table, so the bar says what a tap would find. For a selected item: its
  * picture, its name and its level, "Доска · Уровень 3".
@@ -35,33 +35,33 @@ export type InfoView =
   | ({ kind: "sawmill" } & SawmillView)
   | { kind: "item"; chain: string; level: number };
 
-/** The bar: 160 tall, 40 units above the bottom safe edge (design §5.6). */
+/** The bar: a light plank 830 wide and 160 tall, 24 units under the tray (design p2). */
 const barStyle = defineStyle({
   direction: "row",
   align: "center",
   justify: "center",
-  gap: 20,
-  width: 760,
+  gap: 24,
+  width: 830,
   height: 160,
-  margin: { bottom: 40 },
-  padding: { left: 32, right: 40 },
-  nineSlice: "ui.hud-pill"
+  margin: { top: 24 },
+  padding: { left: 40, right: 48, bottom: 8 },
+  nineSlice: "ui.button-wood"
 });
 
 /** The sawmill picture at the left end of the bar. */
-const iconStyle = defineStyle({ width: 112, height: 112 });
+const iconStyle = defineStyle({ width: 120, height: 120 });
 
 /** The row of charge pips. */
-const pipsStyle = defineStyle({ direction: "row", align: "center", gap: 8 });
+const pipsStyle = defineStyle({ direction: "row", align: "center", gap: 10 });
 
 /** One pip: a small disc with an ink rim. */
-const pip = { width: 30, height: 30, radius: 15, stroke: theme.color.ink, strokeWidth: 3 } as const;
+const pip = { width: 24, height: 24, radius: 12, stroke: theme.color.ink, strokeWidth: 3 } as const;
 
 /** A charge the sawmill still has: honey. */
 const fullPip = defineStyle({ ...pip, fill: theme.color.honey });
 
-/** A charge it spent: walnut. */
-const emptyPip = defineStyle({ ...pip, fill: theme.color.walnut });
+/** A charge it spent: parchment, only the rim shows. */
+const emptyPip = defineStyle({ ...pip, fill: theme.color.parchment });
 
 /**
  * Reads the sawmill out of the save.
@@ -103,13 +103,13 @@ function sawmillWords(sawmill: SawmillView) {
   const { charges, max } = sawmill;
 
   return [
-    <text key="infoName" style="ui.button" content={tr("board.sawmill")} />,
+    <text key="infoName" style="ui.tab" content={tr("board.sawmill")} />,
     <row key="infoPips" style={pipsStyle}>
       {Array.from({ length: max }, (_unused, index) => (
         <stack key={`infoPip${index}`} style={index < charges ? fullPip : emptyPip} />
       ))}
     </row>,
-    <text key="infoCharges" style="ui.number" content={`${charges}/${max}`} />
+    <text key="infoCharges" style="ui.tab" content={`${charges}/${max}`} />
   ];
 }
 
@@ -121,8 +121,8 @@ function sawmillWords(sawmill: SawmillView) {
  */
 function itemWords(level: number) {
   return [
-    <text key="infoName" style="ui.button" content={tr("board.item", { item: nameOf(level) })} />,
-    <text key="infoLevel" style="ui.button" content={tr("board.level", { level })} />
+    <text key="infoName" style="ui.tab" content={tr("board.item", { item: nameOf(level) })} />,
+    <text key="infoLevel" style="ui.tab" content={tr("board.level", { level })} />
   ];
 }
 

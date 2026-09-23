@@ -1,6 +1,6 @@
 /**
- * @file The HUD row of the board (design §6 B1): the home button, the coin pill, the energy pill
- * and the gear, spread across one row under the top safe edge. The coin pill hosts the counter
+ * @file The HUD row of the board (design §6 B1, F4): the round home button, the coin pill, the
+ * energy pill and the round gear, spread across one row under the top safe edge. The coin pill hosts the counter
  * projection, so its number rolls in place; the energy is plain words, "7/10".
  */
 import { HudPill, RoundButton } from "../ui/kit";

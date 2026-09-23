@@ -4,10 +4,11 @@
  * the grey plank that neither lifts nor answers, a plank turns grey and back as the rules allow,
  * and the current language is the green plank with a check. The mouse is the `PointerOver` tag and
  * the finger the `Pressed` tag the input plugin writes; `ui` reads both as `is.hover` and
- * `is.pressed`.
+ * `is.pressed`. The HUD row draws its round buttons at 120 units and its pills at the ratio of
+ * their art, the icon hanging over the left end (design §6 B1, F4).
  */
 
-import { NineSlice, PointerOver, Pressed, Tappable, Transform } from "@moku-labs/game";
+import { NineSlice, PointerOver, Pressed, Tappable, Text, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import type { Game } from "./timber-helpers";
 import {
@@ -187,6 +188,37 @@ describe("timber-controls — selected", () => {
     expect(ecs.get(elementOf(game, "languageEnglish"), NineSlice)?.texture).toBe("ui.button-wood");
     expect(shows(game, "languageRussianCheck")).toBe(true);
     expect(shows(game, "languageEnglishCheck")).toBe(false);
+
+    await game.app.stop();
+  });
+});
+
+describe("timber-controls — the HUD row", () => {
+  it("draws home and gear as 120-unit round buttons and the pills at the ratio of their art", async () => {
+    const game = await startOnBoard(player);
+    const tree = game.app.ui.tree();
+    const rect = (key: string) => nodeOf(tree, key)?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+
+    expect([rect("home").w, rect("home").h, rect("settings").w, rect("settings").h]).toEqual([
+      120, 120, 120, 120
+    ]);
+
+    for (const key of ["coinPill", "energyPill"]) {
+      const bar = rect(key);
+      const icon = rect(`${key}Icon`);
+
+      // The bar keeps the height ratio of its 300×63 art; the 110-unit icon hangs over its left end.
+      expect(bar.h, key).toBe(76);
+      expect([icon.w, icon.h], key).toEqual([110, 110]);
+      expect(icon.x, key).toBe(bar.x - 36);
+      expect(icon.y + icon.h / 2, key).toBe(bar.y + bar.h / 2);
+    }
+
+    // The coin counter sits in the middle of the bar right of the icon, in the pill's own units.
+    const counter = game.app.world.projection.entityOf("hud.coins", "coins") ?? 0;
+
+    expect(game.app.world.ecs.get(counter, Text)?.anchor).toEqual({ x: 0.5, y: 0.5 });
+    expect(game.app.world.ecs.get(counter, Transform)).toMatchObject({ x: 175, y: 38 });
 
     await game.app.stop();
   });

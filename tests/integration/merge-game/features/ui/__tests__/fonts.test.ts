@@ -46,7 +46,10 @@ async function allMessages(): Promise<string[]> {
 describe("the fonts of Timber Town", () => {
   it("has a glyph for every character of every string, in both fonts", async () => {
     const messages = await allMessages();
-    const characters = new Set(messages.flatMap(message => [...message]));
+    // A line break is not drawn: `text` breaks the line there ("Смотреть и\nпополнить").
+    const characters = new Set(
+      messages.flatMap(message => [...message]).filter(character => character !== "\n")
+    );
 
     for (const stem of fontStems) {
       const fnt = await fontFile(stem);

@@ -1,8 +1,10 @@
 /**
- * @file The four nodes of the settings sub-flow. `open` shows the popup and rests there, so a
- * volume step or a language switch goes out through a transit node that commits and comes back to
- * the same popup: the engine keeps its root while the flow is in transit. `confirmReset` asks
- * before the save starts over, with the confirm stacked on the settings.
+ * @file The five nodes of the settings sub-flow. `enter` plays the swing sound of the popup once,
+ * as the flow comes in. `open` shows the popup and rests there, so a volume step or a language
+ * switch goes out through a transit node that commits and comes back to the same popup: the
+ * engine keeps its root while the flow is in transit, and nothing swings in again, so nothing
+ * sounds. `confirmReset` asks before the save starts over, with the confirm stacked on the
+ * settings.
  *
  * A node has no audio and no i18n in its context: the volume is committed and `audio` reads it
  * back on the commit, and the language goes out as an effect the feature's own plugin handles.
@@ -13,6 +15,7 @@ import { defineNode, popup } from "../../kit";
 import { rules } from "../../rules";
 import { startProgressOver } from "../../state";
 import { tables } from "../../tables";
+import { popupSound, showPopup } from "../ui/popup";
 import { Confirm } from "./confirm";
 import type { LocaleInput, VolumeInput } from "./settings";
 import { Settings } from "./settings";
@@ -64,6 +67,19 @@ function localeOf(payload: unknown): LocaleInput {
 
   return { locale: typeof answer?.locale === "string" ? answer.locale : "en" };
 }
+
+/**
+ * Transit node `enter`: the settings come in, so their board swings in with its sound. The popup
+ * of `open` is taken back after every step, so `open` itself plays nothing.
+ */
+export const enter = defineNode({
+  outcomes: { done: type() },
+  run: ({ fx, out }) => {
+    void fx(popupSound);
+
+    return out.done();
+  }
+});
 
 /**
  * Rest node `open`: shows the settings popup and waits. A tab press is local state of the
@@ -132,7 +148,7 @@ export const setLocale = defineNode({
 export const confirmReset = defineNode({
   outcomes: { reset: type(), cancel: type() },
   run: async ({ player, fx, out }) => {
-    const answered = (await fx(popup(Confirm, {}, { over: "Settings" }))) as
+    const answered = (await showPopup(fx, popup(Confirm, {}, { over: "Settings" }))) as
       | Flow.Answer
       | undefined;
 

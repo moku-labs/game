@@ -101,7 +101,9 @@ async function readManifest(): Promise<Assets.Manifest> {
 }
 
 /**
- * Counts the entities of the world by the layer the projection put them in.
+ * Counts the entities of the world by the layer the projection put them in. The badges on the
+ * board (the charges plate and the checks) are decorations of the things counted here, so they
+ * are left out.
  *
  * @param snapshot - What `world.ecs.snapshot()` answered.
  * @returns How many entities each layer carries.
@@ -110,6 +112,8 @@ function countByLayer(snapshot: Model.Json): Record<string, number> {
   const counts: Record<string, number> = {};
 
   for (const entity of (snapshot as unknown as WorldSnapshot).entities) {
+    if (entity.owner.name === "board.badges") continue;
+
     const layer = entity.components.Layer;
 
     if (typeof layer !== "object" || layer === null || Array.isArray(layer)) continue;
@@ -290,10 +294,10 @@ describe("screen-merge — the fast walk", () => {
     // The drop lands on c1_0, next to the generator, at the middle of that cell in the board
     // slot's own space. The enter motion would start the view small on the generator; fast mode
     // skips it.
-    expect(cellBox("c1_0").middle).toEqual({ x: 485, y: 195 });
+    expect(cellBox("c1_0").middle).toEqual({ x: 485, y: 191 });
     expect(app.world.ecs.get(item, Transform)).toEqual({
       x: 485,
-      y: 195,
+      y: 191,
       rotation: 0,
       scale: 1,
       pivot: { x: 0, y: 0 }

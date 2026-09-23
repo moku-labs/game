@@ -15,6 +15,7 @@ import { settingsFeature } from "./features/settings";
 import { settingsLocalePlugin } from "./features/settings/plugin";
 import { splashFeature } from "./features/splash";
 import { loadingPlugin } from "./features/splash/plugin";
+import { soundsPlugin } from "./features/ui/sounds";
 import { mainFlow } from "./flows/main";
 import { rewardFeature } from "./flows/reward";
 import type { Player } from "./state";
@@ -80,6 +81,7 @@ export function createGame(options: GameOptions = {}): Game {
   const clock = options.clock ?? fakeClock(startMoment);
   const app = createApp({
     plugins: [rewardFeature.logicOnly],
+    config: { referenceLong: 2100 },
     pluginConfigs: {
       model: {
         playerProvider: provider,
@@ -98,8 +100,8 @@ export function createGame(options: GameOptions = {}): Game {
 /**
  * The plugins of the game with its screen: the nine screen plugins, `audio`, which is opt-in,
  * every feature — the splash, Home, the board, the reward, the HUD, the orders, the settings, the
- * energy and the daily gift — and the three plugins the game writes: the loading of the splash,
- * the language switch and the look of the board under the pointer.
+ * energy and the daily gift — and the four plugins the game writes: the loading of the splash,
+ * the language switch, the look of the board under the pointer and the click of every control.
  */
 export const screenPlugins = [
   ...screen,
@@ -115,7 +117,8 @@ export const screenPlugins = [
   giftFeature,
   settingsLocalePlugin,
   loadingPlugin,
-  boardLookPlugin
+  boardLookPlugin,
+  soundsPlugin
 ];
 
 /** The game with its screen and the two seams a test holds on to. */
@@ -156,6 +159,8 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
   const clock = options.clock ?? fakeClock(startMoment);
   const app = createApp({
     plugins: [...screenPlugins],
+    // The board column is 2084 units tall: a wide screen scales the whole interface down together.
+    config: { referenceLong: 2100 },
     pluginConfigs: {
       model: {
         playerProvider: provider,
