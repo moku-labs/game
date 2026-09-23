@@ -45,7 +45,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |
 | `onTap(fn)` | Registers a listener called with the tapped entity before the `Tappable` answer; returns the remover |
 | `onKey(fn)` | Registers a listener called with `{ key, shift }` on every key; returning `true` marks it handled; returns the remover |
-| `key(key, { shift })` | Runs the `onKey` listeners headless, the way a DOM `keydown` does; returns whether one handled the key |
+| `pressKey(key, { shift })` | Runs the `onKey` listeners headless, the way a DOM `keydown` does; returns whether one handled the key |
 | `cursor()` | The CSS cursor input last wrote on the canvas (`"pointer"` over a control, `""` elsewhere) |
 | `controls.add(component)` | Counts a component type of another plugin as a control for the cursor; returns the remover. `ui` registers `LocalWrite` in `onStart` and removes it in `onStop` |
 
@@ -53,7 +53,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 
 `onTap` is the seam `ui` uses for a button that carries `LocalWrite` and no intent: the listeners run on every tap — the finger's and `app.input.tap`'s — in registration order, before the answer. A listener that throws is logged through `ctx.log.error` with its entity, and the listeners after it still run.
 
-`onKey` is the seam `ui` uses for keyboard focus; input itself knows no focus and no key meaning. While the canvas is attached, one `keydown` listener on `window` hands `{ key: event.key, shift: event.shiftKey }` to every listener in registration order. A listener that returns `true` marks the key handled and input calls `preventDefault()`, so Tab stays on the canvas. A listener that throws is logged through `ctx.log.error` with its key, and the rest still run. `app.input.key("Escape")` runs the same listeners without a keyboard.
+`onKey` is the seam `ui` uses for keyboard focus; input itself knows no focus and no key meaning. While the canvas is attached, one `keydown` listener on `window` hands `{ key: event.key, shift: event.shiftKey }` to every listener in registration order. A listener that returns `true` marks the key handled and input calls `preventDefault()`, so Tab stays on the canvas. A listener that throws is logged through `ctx.log.error` with its key, and the rest still run. `app.input.pressKey("Escape")` runs the same listeners without a keyboard.
 
 ```ts
 // a view spawned by the last commit exists after the next reconcile
