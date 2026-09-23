@@ -101,14 +101,21 @@ export type ParentValue = { entity: Entity };
 export type DisplayValue = { object: unknown };
 
 /**
- * A filled rounded rectangle, anchored at the top left of the `Transform`. `clip` masks the
- * children of the entity to the rectangle, which is how `ui` draws a scroll and an overflow.
+ * A filled rounded rectangle, anchored at the top left of the `Transform`. `fillAlpha` is the
+ * alpha of the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape. `clip`
+ * masks the children of the entity to the rectangle, which is how `ui` draws a scroll and an
+ * overflow.
  *
  * @example
  * ```ts
  * const value: ShapeValue = {
- *   w: 320, h: 96, fill: 0x101018, alpha: 1, radius: 16, stroke: 0x000000,
+ *   w: 320, h: 96, fill: 0x101018, fillAlpha: 1, alpha: 1, radius: 16, stroke: 0x000000,
  *   strokeWidth: 0, clip: false
+ * };
+ * // The honey ring on a selected cell: a stroke and no fill.
+ * const ring: ShapeValue = {
+ *   w: 140, h: 140, fill: 0xffffff, fillAlpha: 0, alpha: 1, radius: 24, stroke: 0xffc233,
+ *   strokeWidth: 6, clip: false
  * };
  * ```
  */
@@ -116,6 +123,7 @@ export type ShapeValue = {
   w: number;
   h: number;
   fill: number;
+  fillAlpha: number;
   alpha: number;
   radius: number;
   stroke: number;
@@ -195,12 +203,14 @@ export const Display = /*#__PURE__*/ component("Display", displayDefaults);
 
 /**
  * A filled rounded rectangle, drawn with Pixi `Graphics` and redrawn only when a field changed.
- * `clip: true` masks the children of the entity to the rectangle.
+ * `fillAlpha: 0` draws only the stroke. `clip: true` masks the children of the entity to the
+ * rectangle.
  */
 export const Shape = /*#__PURE__*/ component("Shape", {
   w: 0,
   h: 0,
   fill: 0xff_ff_ff,
+  fillAlpha: 1,
   alpha: 1,
   radius: 0,
   stroke: 0x00_00_00,

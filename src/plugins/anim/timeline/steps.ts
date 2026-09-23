@@ -5,7 +5,7 @@
  */
 import type { Json } from "../../model/types";
 import type { AnyComponentValue } from "../../world/ecs/types";
-import type { ComponentType, Ease, NumericFields } from "../../world/types";
+import type { ComponentHandle, Ease, NumericFields } from "../../world/types";
 import { asComponent } from "../components";
 import type {
   AnimationDefinition,
@@ -201,28 +201,57 @@ export function mark(name: string): Step {
 }
 
 /**
- * Moves the numeric fields of one component of one target to an exact target value.
+ * Moves the numeric fields of one component of one target to an exact target value. The component
+ * is any handle `world.ecs` takes, so the kit's `Sprite` and `NineSlice` of `defineGame` pass as
+ * they are.
+ *
+ * By default the fields are local: they are written into the target's own `Transform`. With
+ * `space: "root"` the `x`, `y`, `rotation` and `scale` of a `Transform` are a root pose, the space
+ * `at()` answers in, and are turned into the space of the target's `Parent` when the track starts.
+ * That aims a hosted view, such as a board item inside the board slot, at another element. A
+ * field the step does not name stays where it is, so under a turned parent name `x` and `y`
+ * together. A target without a parent, and a component other than `Transform`, move as in the
+ * local space.
  *
  * @param target - The projection key or the entity to animate.
  * @param component - The component to animate.
  * @param to - The numeric target fields.
- * @param options - Duration, easing, delay and the additive flag.
+ * @param options - Duration, easing, delay, the additive flag and the space of the fields.
  * @param options.ms - Duration in game milliseconds.
  * @param options.ease - Easing curve; `"out"` when omitted.
  * @param options.delayMs - How long the track waits before it reads its start values.
  * @param options.additive - `true` adds an offset instead of owning the fields.
+ * @param options.space - `"root"` reads the `Transform` fields as a root pose; `"local"` when
+ *   omitted.
  * @returns The tween step.
  * @example
  * ```ts
- * tween({ projection: "hud", key: "coins" }, Transform, { scale: 1.2 }, { ms: 120 });
- * // { kind: "tween", ms: 120, ease: "out", delayMs: 0, additive: false, ... }
+ * // An order is delivered: the board item flies out of the scaled board slot onto the order card.
+ * const deliverFly = defineAnimation("orders.deliverFly", {
+ *   slots: { item: type<Target>(), card: type<Target>() },
+ *   build: ({ item, card }, { at }) =>
+ *     tween(item, Transform, { x: at(card).x, y: at(card).y, scale: at(card).scale }, {
+ *       ms: 400, ease: "inCubic", space: "root"
+ *     })
+ * });
+ * app.anim.play(deliverFly, {
+ *   item: { projection: "board.items", key: "i1" },
+ *   card: { projection: "hud", key: "card0" }
+ * });
+ * // 400 ms later the item covers the card at the card's size; its Transform stays slot-local
  * ```
  */
 export function tween<Value extends object>(
   target: Target,
-  component: ComponentType<Value>,
+  component: ComponentHandle<Value>,
   to: Partial<NumericFields<Value>>,
-  options: { ms: number; ease?: Ease; delayMs?: number; additive?: boolean }
+  options: {
+    ms: number;
+    ease?: Ease;
+    delayMs?: number;
+    additive?: boolean;
+    space?: "local" | "root";
+  }
 ): Step {
   return Object.freeze({
     kind: "tween" as const,
@@ -232,12 +261,14 @@ export function tween<Value extends object>(
     ms: options.ms,
     ease: options.ease ?? DEFAULT_EASE,
     delayMs: options.delayMs ?? 0,
-    additive: options.additive === true
+    additive: options.additive === true,
+    space: options.space ?? "local"
   });
 }
 
 /**
- * Writes a component patch at once. Any field may be written, not only the numeric ones.
+ * Writes a component patch at once. Any field may be written, not only the numeric ones. The
+ * component is any handle `world.ecs` takes, the kit's `Sprite` and `NineSlice` included.
  *
  * @param target - The projection key or the entity to write.
  * @param component - The component to write.
@@ -251,7 +282,7 @@ export function tween<Value extends object>(
  */
 export function set<Value extends object>(
   target: Target,
-  component: ComponentType<Value>,
+  component: ComponentHandle<Value>,
   patch: Partial<Value>
 ): Step {
   return Object.freeze({

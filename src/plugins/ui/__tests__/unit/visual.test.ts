@@ -99,6 +99,27 @@ describe("visualOf", () => {
     expect(scroll?.value).toMatchObject({ clip: true });
     expect(plain?.value).toMatchObject({ clip: false, alpha: 0 });
   });
+
+  it("draws only the stroke of a style that names a stroke and no fill", () => {
+    const ring = visualOf(
+      elementOf({ type: "button", style: { stroke: 0xff_c2_33, strokeWidth: 6 } })
+    )[0];
+    const framed = visualOf(elementOf({ style: { stroke: 0xff_c2_33 } }))[0];
+    const filled = visualOf(
+      elementOf({ type: "button", style: { fill: 0x10_20_30, stroke: 0xff_c2_33 } })
+    )[0];
+    const plain = visualOf(elementOf({ type: "button" }))[0];
+
+    expect(ring?.value).toMatchObject({
+      fillAlpha: 0,
+      alpha: 1,
+      stroke: 0xff_c2_33,
+      strokeWidth: 6
+    });
+    expect(framed?.value).toMatchObject({ fillAlpha: 0, alpha: 1 });
+    expect(filled?.value).toMatchObject({ fillAlpha: 1, fill: 0x10_20_30 });
+    expect(plain?.value).toMatchObject({ fillAlpha: 1, fill: 0xff_ff_ff, alpha: 1 });
+  });
 });
 
 // ─── the rest transform ───────────────────────────────────────

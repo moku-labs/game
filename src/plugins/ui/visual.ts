@@ -79,9 +79,10 @@ function contentOf(props: Record<string, unknown>): string {
 /**
  * The visual component of an element: a sprite for an image or an icon, the text for a text, the
  * nine-slice of its style, or a rounded rectangle. A clipping element (`scroll`, `overflow:
- * "hidden"`) keeps the rectangle, which carries the clip. A container with no fill and no stroke
- * gets an invisible rectangle: the renderer hangs children under the display object of their
- * parent, so every parent needs one.
+ * "hidden"`) keeps the rectangle, which carries the clip. A style with a stroke and no fill draws
+ * only the stroke, a ring. A container with no fill and no stroke gets an invisible rectangle:
+ * the renderer hangs children under the display object of their parent, so every parent needs
+ * one.
  *
  * @param element - The element to draw, with its rect known.
  * @returns The component values: one visual.
@@ -126,12 +127,14 @@ export function visualOf(element: Element): AnyComponentValue[] {
 
   const filled = style.fill !== undefined || style.stroke !== undefined;
   const invisible = isContainer(type) && !filled;
+  const strokeOnly = style.fill === undefined && style.stroke !== undefined;
 
   return [
     Shape({
       w: rect.w,
       h: rect.h,
       fill: style.fill ?? Shape.defaults.fill,
+      fillAlpha: strokeOnly ? 0 : Shape.defaults.fillAlpha,
       alpha: invisible ? 0 : alpha,
       radius: style.radius ?? 0,
       stroke: style.stroke ?? Shape.defaults.stroke,

@@ -30,7 +30,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `NineSlice({ texture, width, height, alpha, tint })` | `"", 0, 0, 1, 0xffffff` | Size in reference units; the borders come with the texture. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. |
-| `Shape({ w, h, fill, alpha, radius, stroke, strokeWidth, clip })` | `0, 0, 0xffffff, 1, 0, 0x000000, 0, false` | A filled rounded rectangle drawn with `Graphics`, anchored top left. `clip: true` masks the children of the entity to the rectangle. |
+| `Shape({ w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, clip })` | `0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, false` | A filled rounded rectangle drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape. `clip: true` masks the children of the entity to the rectangle; the mask is always filled. |
 
 ```ts
 sprite({ texture: "board.cell", at: { x: 540, y: 300 } });

@@ -240,7 +240,7 @@ export type FakeDrawOp = {
 };
 
 /** A fill or a stroke style the fake graphics recorded. */
-export type FakePaint = { color: number; width?: number };
+export type FakePaint = { color: number; alpha?: number; width?: number };
 
 /** A fake Pixi graphics: it records what was drawn and how often it was cleared. */
 export class FakeGraphics extends FakeContainer {

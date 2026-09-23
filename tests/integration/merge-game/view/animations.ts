@@ -8,16 +8,7 @@
  * included — so the burst is drawn at the size of the board on every phone.
  */
 import type { Anim } from "@moku-labs/game";
-import {
-  parallel,
-  Sprite as SpriteComponent,
-  sequence,
-  spawn,
-  spawned,
-  Transform,
-  tween,
-  type
-} from "@moku-labs/game";
+import { parallel, sequence, spawn, spawned, Transform, tween, type } from "@moku-labs/game";
 import { defineAnimation, Sprite } from "../kit";
 
 /** How many pieces a merge bursts into (design §6 F4). */
@@ -71,7 +62,7 @@ export const mergeBurst = defineAnimation("board.mergeBurst", {
               },
               { ms: burst.ms, ease: "out" }
             ),
-            tween(spawned(piece.id), SpriteComponent, { alpha: 0 }, { ms: burst.ms, ease: "in" })
+            tween(spawned(piece.id), Sprite, { alpha: 0 }, { ms: burst.ms, ease: "in" })
           )
         )
       )

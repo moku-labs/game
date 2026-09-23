@@ -96,6 +96,8 @@ export type Step =
       readonly ease: Ease;
       readonly delayMs: number;
       readonly additive: boolean;
+      /** `"root"`: the `Transform` fields are a root pose, turned local when the track starts. */
+      readonly space: "local" | "root";
     }
   | {
       readonly kind: "set";
@@ -195,6 +197,21 @@ export type TimelineRuntime = {
    * @param patch - The fields to overwrite.
    */
   write(entity: Entity, component: AnyComponent, patch: Record<string, unknown>): void;
+
+  /**
+   * Turns the root-space target of a `tween` step into the local target under the entity's
+   * parent, through `localPoseOf` of `renderer`.
+   *
+   * @param entity - The entity the step moves.
+   * @param component - The component the step drives; only `Transform` is converted.
+   * @param to - The numeric target fields, in root space.
+   * @returns The target fields in the space of the entity's parent.
+   */
+  toLocal(
+    entity: Entity,
+    component: AnyComponent,
+    to: Readonly<Record<string, number>>
+  ): Record<string, number>;
 
   /**
    * Starts one track on the tween core.

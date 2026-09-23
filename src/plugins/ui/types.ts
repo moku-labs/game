@@ -130,4 +130,4 @@ export type UiApi = {
   lint(): readonly Finding[];
 };
 
-export type { Finding, UiNode } from "./jsx/types";
+export type { ElementChange, ElementMotion, Finding, UiNode } from "./jsx/types";

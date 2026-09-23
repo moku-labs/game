@@ -6,13 +6,12 @@
  *
  * A coin flies on a curve: its x and its y are two tweens with different eases. Each tween reads
  * its start from the coin's own `Transform` when it begins, and `at()` of the target gives the end.
- * The coins are built with the kit's `Sprite`, which checks the texture key; a step that names
- * the component takes the engine's own `Sprite`, the same component object.
+ * The coins are built with the kit's `Sprite`, which checks the texture key, and the steps name
+ * the same kit `Sprite`.
  */
 import type { Anim } from "@moku-labs/game";
 import {
   parallel,
-  Sprite as SpriteComponent,
   sequence,
   set,
   spawn,
@@ -117,7 +116,7 @@ function coinFlight(id: string, count: number) {
               tween(spawned(coin), Transform, { scale: 0.7 }, { ms: FLIGHT_MS, ease: "in" })
             ),
             // Landed: the coin is gone from sight at once, its entity leaves with the timeline.
-            set(spawned(coin), SpriteComponent, { alpha: 0 })
+            set(spawned(coin), Sprite, { alpha: 0 })
           )
         )
       );
