@@ -132,7 +132,7 @@ without focus.
 <button key="close" intent="close" escape style={{ is: { focus: { scale: 1.05 } } }} />
 ```
 
-A headless test presses keys through `app.input.key("Tab", { shift: true })`.
+A headless test presses keys through `app.input.pressKey("Tab", { shift: true })`.
 
 ## Visual transform styles
 

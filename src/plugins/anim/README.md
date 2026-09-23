@@ -17,7 +17,7 @@ is the only way out.
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `maxTracks` | `number` | `2000` | Dev guard. One `ctx.log.warn` each time the running track count rises past it. |
-| `reducedMotion` | `boolean` | `false` | Start value of reduced motion (see below). The live value is state; `reducedMotion(on)` switches it. |
+| `reducedMotion` | `boolean` | `false` | Start value of reduced motion (see below). The live value is state; `setReducedMotion(on)` switches it. |
 
 Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), never in the config:
 `toRest` keeps world's `settleMs`.
@@ -30,7 +30,8 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 | `finishAll()` | Every timeline ends at its own end, every track writes its exact target and every spawned entity is despawned. Called by the frame step in world mode `"fast"`. |
 | `active()` | Tracks in the table, the delayed ones and the running loops included. `0` when nothing moves; a screen at rest with loops counts one track per loop lane. |
 | `onMark(fn)` | Direct subscription next to the event. Returns the remover. |
-| `reducedMotion(on?)` | Reads reduced motion and, given a boolean, sets it. Returns the value after the call. |
+| `reducedMotion()` | Whether reduced motion is on. |
+| `setReducedMotion(on)` | Switches reduced motion on or off for every track started afterwards. |
 
 ## Events
 
@@ -142,6 +143,7 @@ const orderCard = defineMotion({
 - It is one additive track per component the keys name, with `repeat: "forever"`, so it layers over
   the rest pose, enter, change and settle motions: a new rest pose carries the loop along.
 - It dies with its view, on `flushAll` (fast mode) and on `finishAll()`. `active()` counts it.
+- A loop does not keep the clock awake: two seconds after the last `wake()` it steps at `time.idleFps`.
 - `loop.ms` is one cycle; left out, it is `transition.ms`. A `loop.ms` that is not a finite number above 0 throws
   `[game] Motion loop "<name>" has ms <ms>.` A `loop.track` that names no keyframe track throws too.
 
@@ -154,19 +156,19 @@ the time past its last run back like any other track.
 
 ## Reduced motion
 
-`app.anim.reducedMotion(true)` (or `Config.reducedMotion: true` to start with it) makes every track
+`app.anim.setReducedMotion(true)` (or `Config.reducedMotion: true` to start with it) makes every track
 started afterwards take 0 ms, its delay and repeats dropped: enter and exit, state changes, change and
 settle motions, drag returns and timeline tweens land on their target at the next frame step. Marks,
 sounds and `wait` steps of a timeline are untouched. Every loop stands on its first key, a running
-one at once, and walks on from its first key when the switch goes off. Tracks already running keep
-their length.
+one at once, and walks on from its first key when the switch goes off. A loop that stands writes its
+first key once, not every frame. Tracks already running keep their length.
 
 ```ts
 // web/main.ts follows the system setting
 const query = matchMedia("(prefers-reduced-motion: reduce)");
 
-app.anim.reducedMotion(query.matches);
-query.addEventListener("change", event => app.anim.reducedMotion(event.matches));
+app.anim.setReducedMotion(query.matches);
+query.addEventListener("change", event => app.anim.setReducedMotion(event.matches));
 ```
 
 ## Tween space
