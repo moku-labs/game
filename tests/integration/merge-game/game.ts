@@ -3,7 +3,7 @@
  * screen and one with it. A shipped game adds `onStart: ctx => { ctx.flow.run().catch(showFatal); }`;
  * here the headless runner owns `run()`, so a fatal error reaches the test instead of a handler.
  */
-import type { Assets, Model } from "@moku-labs/game";
+import type { Assets, Audio, Model } from "@moku-labs/game";
 import { audioPlugin, createApp, screen } from "@moku-labs/game";
 import { fakeClock, memory } from "@moku-labs/game/testing";
 import { energyFeature } from "./features/energy";
@@ -137,6 +137,12 @@ export type ScreenGameOptions = GameOptions & {
    * every bundle counts as loaded at once. A test passes one to watch the splash really load.
    */
   io?: Assets.AssetsIo;
+  /**
+   * The audio seams: the context, and how many started sounds the journal keeps. Left out, the
+   * runtime's own `AudioContext` is used, none in a test, and the journal is off. A test passes a
+   * fake context to hear the game.
+   */
+  audio?: { context: () => Audio.AudioContextLike; journal: number };
 };
 
 /**
@@ -173,7 +179,7 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       assets: { manifest: options.manifest, io: options.io },
       text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
       i18n: { locale: "ru", fallback: "ru" },
-      audio: { volumes: volumesOf },
+      audio: { volumes: volumesOf, ...options.audio },
       input: { heldScale: 1.08 },
       // The keyboard focus ring of design §4: a dashed ink ring over a cream halo, 9 px of the
       // 390-wide design outside the control.
