@@ -48,7 +48,7 @@ export const homeScreen = projection({
             icon="ui.icon-gift"
             badge={item.giftWaiting ? 1 : undefined}
           />
-          <text key="giftLabel" style="ui.name" content={tr("gift.title")} />
+          <text key="giftLabel" style="ui.caption" content={tr("gift.title")} />
         </column>
       </row>
     </screen>

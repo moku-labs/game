@@ -203,7 +203,7 @@ export const Settings = defineComponent("Settings", {
       <Signboard
         id="settingsBoard"
         title={tr("settings.title")}
-        width={1080}
+        width={1000}
         height={1040}
         hung
         close="close"

@@ -27,7 +27,8 @@ import {
 /** Two twigs side by side: a drag merges them into the log the second order asks for. */
 const twoTwigs = withItems([
   { id: "i1", chain: "wood", level: 1, cell: "c1_0" },
-  { id: "i2", chain: "wood", level: 1, cell: "c2_0" }
+  { id: "i2", chain: "wood", level: 1, cell: "c2_0" },
+  { id: "i3", chain: "wood", level: 2, cell: "c2_2" }
 ]);
 
 /**
@@ -154,7 +155,7 @@ describe("timber-controls — disabled", () => {
 
     expect(ecs.get(elementOf(game, "deliver1"), NineSlice)?.texture).toBe("ui.button-disabled");
 
-    // Two twigs make the log the second order asks for.
+    // Two twigs make the second log the second order asks for; the first already lies on c2_2.
     game.app.input.drag(
       { projection: "board.items", key: "i1" },
       { projection: "board.items", key: "i2" }

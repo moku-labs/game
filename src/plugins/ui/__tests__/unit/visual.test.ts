@@ -100,7 +100,7 @@ describe("visualOf", () => {
     expect(plain?.value).toMatchObject({ clip: false, alpha: 0 });
   });
 
-  it("draws only the stroke of a style that names a stroke and no fill", () => {
+  it("paints nothing inside a style with no fill: a ring, a frame, a bare button", () => {
     const ring = visualOf(
       elementOf({ type: "button", style: { stroke: 0xff_c2_33, strokeWidth: 6 } })
     )[0];
@@ -118,7 +118,8 @@ describe("visualOf", () => {
     });
     expect(framed?.value).toMatchObject({ fillAlpha: 0, alpha: 1 });
     expect(filled?.value).toMatchObject({ fillAlpha: 1, fill: 0x10_20_30 });
-    expect(plain?.value).toMatchObject({ fillAlpha: 1, fill: 0xff_ff_ff, alpha: 1 });
+    // A text link is a button with no fill: its label is all it shows, never a white box.
+    expect(plain?.value).toMatchObject({ fillAlpha: 0, alpha: 1 });
   });
 });
 

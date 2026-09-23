@@ -87,8 +87,8 @@ function rewardOf(order: Order): number {
 }
 
 /**
- * Reads one card out of the rule state. It is the rules that answer whether a board item fits,
- * so the card is ready exactly when the `deliver` node would accept the give.
+ * Reads one card out of the rule state. It is the rules that answer whether a board item fits;
+ * the card is ready when the board holds as many fitting items as the order still asks for.
  *
  * @param state - The rule state of the save.
  * @param order - The order in the slot.
@@ -99,7 +99,8 @@ function cardOf(state: MergeState, order: Order, slot: number): OrderCardView {
   const open = openNeeds(order);
   const need = open[0] ?? { chain: "", level: 0 };
   const count = open.filter(each => each.chain === need.chain && each.level === need.level).length;
-  const fit = state.board.items.find(item => rules.isLegalOrderMatch(state, item.id, order.id));
+  const fits = state.board.items.filter(item => rules.isLegalOrderMatch(state, item.id, order.id));
+  const fit = fits[0];
 
   return {
     slot,
@@ -109,7 +110,8 @@ function cardOf(state: MergeState, order: Order, slot: number): OrderCardView {
     count,
     item: fit?.id ?? "",
     reward: rewardOf(order),
-    ready: fit !== undefined
+    // Design §7: ready only while the board holds every item still open, "×2" asks for two.
+    ready: fit !== undefined && fits.length >= count
   };
 }
 

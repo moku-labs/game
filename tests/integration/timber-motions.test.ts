@@ -32,7 +32,8 @@ import {
 /** Two twigs side by side: a drag merges them into the log the second order asks for. */
 const twoTwigs = withItems([
   { id: "i1", chain: "wood", level: 1, cell: "c1_0" },
-  { id: "i2", chain: "wood", level: 1, cell: "c2_0" }
+  { id: "i2", chain: "wood", level: 1, cell: "c2_0" },
+  { id: "i3", chain: "wood", level: 2, cell: "c2_2" }
 ]);
 
 /** The two cells next to the sawmill are taken, so the next twig lands on the diagonal, c1_1. */
@@ -272,7 +273,7 @@ describe("timber-motions — the ready order card (F10)", () => {
 
     expect(nodeOf(game.app.ui.tree(), "card1")?.state.selected).toBe(false);
 
-    // Two twigs make the log the second order asks for.
+    // Two twigs make the second log the second order asks for; the first already lies on c2_2.
     game.app.input.drag(
       { projection: "board.items", key: "i1" },
       { projection: "board.items", key: "i2" }
@@ -409,7 +410,8 @@ describe("timber-motions — the selection (F9)", () => {
     await frames(game, 3);
 
     expect(playerOf(game).merge.board.items).toEqual([
-      { id: "i2", chain: "wood", level: 2, cell: "c2_0" }
+      { id: "i2", chain: "wood", level: 2, cell: "c2_0" },
+      { id: "i3", chain: "wood", level: 2, cell: "c2_2" }
     ]);
     expect(
       ecs.get(game.app.world.projection.entitiesOf("board.selection")[0] ?? 0, Transform)

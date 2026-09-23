@@ -9,7 +9,8 @@
 import { createApp } from "@moku-labs/game";
 import { mainFlow } from "../flows/main";
 import { screenPlugins, volumesOf } from "../game";
-import { startingPlayer, startingSession } from "../state";
+import { startingSession } from "../state";
+import { playerFor } from "./scenarios";
 
 const app = createApp({
   plugins: [...screenPlugins],
@@ -17,7 +18,7 @@ const app = createApp({
     renderer: { mount: "#game" },
     assets: { manifest: "/manifest.json" },
     text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
-    model: { initialPlayer: startingPlayer, initialSession: startingSession, seed: 42 },
+    model: { initialPlayer: playerFor(location.search), initialSession: startingSession, seed: 42 },
     flow: { mainFlow, safeNode: "home" },
     i18n: { locale: "ru", fallback: "ru" },
     audio: { volumes: volumesOf },
