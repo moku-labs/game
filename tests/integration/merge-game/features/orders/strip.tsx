@@ -11,6 +11,7 @@ import { rules } from "../../rules";
 import { tables } from "../../tables";
 import { nameOf, pictureOf } from "../../view/items";
 import { PlankButton } from "../ui/kit";
+import { orderCardMotion } from "./motions";
 import {
   cardPicture,
   levelBadge,
@@ -148,7 +149,8 @@ function deliverOf(card: OrderCardView): GiveInput {
 
 /**
  * One order card: the paper tag on its clothespin. A ready card is selected, which gives it the
- * honey glow of its style; a waiting one fades only its picture, so its words stay readable.
+ * honey glow of its style and one sway as it becomes ready; a waiting one fades only its picture,
+ * so its words stay readable.
  *
  * @param props - The card to draw.
  * @param props.card - The card as `orderCardsOf` read it.
@@ -159,7 +161,7 @@ export function OrderCard(props: { card: OrderCardView }) {
   const id = cardKey(card.slot);
 
   return (
-    <column key={id} state={{ selected: card.ready }} style={orderCard}>
+    <column key={id} state={{ selected: card.ready }} style={orderCard} motion={orderCardMotion}>
       <image key={`${id}Pin`} texture="ui.decor-clothespin" style={pinStyle} />
       <text
         key={`${id}Title`}

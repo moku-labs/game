@@ -1,33 +1,35 @@
 /**
- * @file The three nodes of the settings: the one that shows the screen and waits for an answer,
- * and the two that write what the player chose into the save. A node has no audio and no i18n in
- * its context — the volume is committed and `audio` reads it back on the commit, and the language
- * goes out as an effect the feature's own plugin handles.
+ * @file The four nodes of the settings sub-flow. `open` shows the popup and rests there, so a
+ * volume step or a language switch goes out through a transit node that commits and comes back to
+ * the same popup: the engine keeps its root while the flow is in transit. `confirmReset` asks
+ * before the save starts over, with the confirm stacked on the settings.
+ *
+ * A node has no audio and no i18n in its context: the volume is committed and `audio` reads it
+ * back on the commit, and the language goes out as an effect the feature's own plugin handles.
  */
 import type { Flow } from "@moku-labs/game";
-import { type } from "@moku-labs/game";
+import { schedule, type } from "@moku-labs/game";
 import { defineNode, popup } from "../../kit";
+import { rules } from "../../rules";
+import { startProgressOver } from "../../state";
+import { tables } from "../../tables";
+import { Confirm } from "./confirm";
+import type { LocaleInput, VolumeInput } from "./settings";
 import { Settings } from "./settings";
 
-/** The quietest and the loudest a bus can be set to from the screen. */
+/** The quietest and the loudest a bus can be set to from the popup. */
 const range = { min: 0, max: 1 };
-
-/** The intent that changes a bus, and what it carries. */
-export type VolumeInput = { bus: string; delta: number };
-
-/** The intent that switches the language. */
-export type LocaleInput = { locale: string };
 
 /**
  * Keeps a volume inside its range and on two decimals, so a save never holds the rounding error
- * of a step: 0.6 minus 0.2 is 0.4 in the file the player carries around.
+ * of a step: 0.6 minus 0.1 is 0.5 in the file the player carries around.
  *
  * @param value - The volume after the step was added.
  * @returns The volume the save takes.
  * @example
  * ```ts
- * clamp(0.6 - 0.2); // 0.4
- * clamp(1.2); // 1
+ * clamp(0.6 - 0.1); // 0.5
+ * clamp(1.1); // 1
  * ```
  */
 function clamp(value: number): number {
@@ -37,7 +39,7 @@ function clamp(value: number): number {
 }
 
 /**
- * Reads the volume change out of the answer of the screen.
+ * Reads the volume change out of the answer of the popup.
  *
  * @param payload - What the button carried.
  * @returns The bus and the step, `music` and nothing when the answer carried neither.
@@ -52,7 +54,7 @@ function volumeOf(payload: unknown): VolumeInput {
 }
 
 /**
- * Reads the locale out of the answer of the screen.
+ * Reads the locale out of the answer of the popup.
  *
  * @param payload - What the button carried.
  * @returns The locale, `en` when the answer carried none.
@@ -64,24 +66,26 @@ function localeOf(payload: unknown): LocaleInput {
 }
 
 /**
- * Transit node `openSettings`: shows the settings screen and waits. The gate is open for the
- * three outcomes of the component while the popup is up, so a tab press — which is local state —
- * never reaches this node.
+ * Rest node `open`: shows the settings popup and waits. A tab press is local state of the
+ * component and never reaches this node; the backdrop and the X answer `close`.
  */
-export const openSettings = defineNode({
+export const open = defineNode({
+  rest: true,
   outcomes: {
     volume: type<VolumeInput>(),
     setLocale: type<LocaleInput>(),
+    reset: type(),
     close: type()
   },
   run: async ({ player, fx, out }) => {
-    const audio = player.settings.audio;
-    const answered = (await fx(popup(Settings, { music: audio.music, sfx: audio.sfx }))) as
+    const { audio, locale } = player.settings;
+    const answered = (await fx(popup(Settings, { music: audio.music, sfx: audio.sfx, locale }))) as
       | Flow.Answer
       | undefined;
 
     if (answered?.intent === "volume") return out.volume(volumeOf(answered.payload));
     if (answered?.intent === "setLocale") return out.setLocale(localeOf(answered.payload));
+    if (answered?.intent === "reset") return out.reset();
 
     return out.close();
   }
@@ -117,5 +121,26 @@ export const setLocale = defineNode({
     await fx({ kind: "locale", payload: { locale: input.locale } });
 
     return out.done();
+  }
+});
+
+/**
+ * Transit node `confirmReset`: the confirm stacked on the settings. Cancel goes back to the same
+ * settings popup; Reset writes a fresh save — board, coins, orders and the gift start over, the
+ * volumes and the language stay — and arms the clock for it.
+ */
+export const confirmReset = defineNode({
+  outcomes: { reset: type(), cancel: type() },
+  run: async ({ player, fx, out }) => {
+    const answered = (await fx(popup(Confirm, {}, { over: "Settings" }))) as
+      | Flow.Answer
+      | undefined;
+
+    if (answered?.intent !== "reset") return out.cancel();
+
+    startProgressOver(player);
+    await fx(schedule(rules.nextDue(player.merge, tables)));
+
+    return out.reset();
   }
 });

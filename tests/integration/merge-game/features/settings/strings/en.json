@@ -1,11 +1,7 @@
 {
   "settings.title": "Settings",
   "settings.tab": "{tab, select, audio {Sound} language {Language} other {More}}",
-  "settings.volume": "{bus, select, music {Music} sfx {Effects} other {Volume}}: {percent}",
-  "settings.louder": "Louder",
-  "settings.quieter": "Quieter",
   "settings.english": "English",
-  "settings.close": "Close",
   "settings.bus": "{bus, select, music {Music} sfx {Effects} other {Volume}}",
   "settings.percent": "{percent}%",
   "settings.russian": "Русский",

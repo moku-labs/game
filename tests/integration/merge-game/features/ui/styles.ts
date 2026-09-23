@@ -17,10 +17,10 @@ const ink = 0x3a_22_12;
 /** Soft ink: the small lines on paper, one step lighter than the body. */
 const softInk = 0x5b_3a_20;
 
-/** The pale yellow of the V3 interface, kept by its three style keys until the views move on. */
-const paleHoney = 0xff_e0_82;
+/** Berry: danger, and the text link that resets the progress. */
+const berry = 0x8f_23_34;
 
-/** The seven styles of the design, plus the three V3 keys the current views still use. */
+/** The styles of the design: seven voices, the wrapped popup body and the text link. */
 export const uiStyles = defineTextStyles({
   "ui.title": {
     font: "ui.font-display",
@@ -45,6 +45,10 @@ export const uiStyles = defineTextStyles({
   },
   "ui.name": { font: "ui.font-display", size: 42, fill: ink, align: "center" },
   "ui.body": { font: "ui.font-body", size: 44, fill: ink, align: "center" },
+  // The body of a popup: the same voice, wrapped to the width of the parchment.
+  "ui.paragraph": { font: "ui.font-body", size: 44, fill: ink, align: "center", wrap: 560 },
+  // The text link of design §6 G: Pangolin in berry ("Сбросить прогресс").
+  "ui.link": { font: "ui.font-body", size: 44, fill: berry, align: "center" },
   "ui.small": { font: "ui.font-body", size: 36, fill: softInk },
   // The number on a level badge and on the red "1" of the gift: small cream digits on a disc.
   "ui.badge": {
@@ -53,9 +57,5 @@ export const uiStyles = defineTextStyles({
     fill: cream,
     align: "center",
     shadow: { color: ink, dx: 0, dy: 2 }
-  },
-  // The three keys the V3 views still draw with: their sizes and colours, on the new fonts.
-  "hud.digits": { font: "ui.font-display", size: 48, fill: paleHoney, digits: true },
-  "hud.label": { font: "ui.font-body", size: 28, fill: 0xff_ff_ff, align: "center" },
-  "hud.title": { font: "ui.font-display", size: 40, fill: paleHoney, align: "center" }
+  }
 });

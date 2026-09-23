@@ -4,9 +4,11 @@
  *
  * The rules pay a finished order where it is earned. This game holds that payout back: the coins
  * go into `pendingCoins` and the wallet stays as it was until the player takes the reward out of
- * the popup. That is what lets the coins fly from the card to the counter — a number already in
+ * the popup. That is what lets the coins fly from the popup to the counter — a number already in
  * the wallet has nowhere to travel from.
  */
+import type { Anim } from "@moku-labs/game";
+import { cardKey } from "../features/orders/strip";
 import type { GiveInput, Rng } from "../rules";
 import { rules } from "../rules";
 import type { Player } from "../state";
@@ -55,4 +57,18 @@ export function applyGive(player: Player, input: GiveInput, rng: Rng): GiveOutco
   player.pendingReward = rewardId;
 
   return { kind: "orderComplete", rewardId };
+}
+
+/**
+ * The order card that shows an order, as an animation target: the "Готово!" stamp lands on it.
+ * Read before the give, because a finished order hands its slot to the next one.
+ *
+ * @param player - The player draft, before the give.
+ * @param orderId - The order the item goes to.
+ * @returns The card element of the order's slot, the first card when no slot holds it.
+ */
+export function orderCardOf(player: Player, orderId: number): Anim.Target {
+  const slot = player.merge.orders.findIndex(order => order.id === orderId);
+
+  return { projection: "hud", key: cardKey(Math.max(0, slot)) };
 }
