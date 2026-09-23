@@ -44,6 +44,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 | `drag(from, to)` | Reads `Draggable` of `from` and `DropTarget` of `to`, answers `{ intent: target.intent, payload: { ...draggable.payload, ...target.payload } }` |
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |
 | `onTap(fn)` | Registers a listener called with the tapped entity before the `Tappable` answer; returns the remover |
+| `cursor()` | The CSS cursor input last wrote on the canvas (`"pointer"` over a control, `""` elsewhere) |
 
 `tap`, `press`, `drag` and `swipe` return what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
 
@@ -113,6 +114,10 @@ The hit test runs once per frame, at the last hover move of the frame. A clear t
 
 At most one view carries `PointerOver`. It is not `Hovered`: that one marks the drop target under a drag.
 
+### The cursor
+
+After the frame's hover hit test, input writes `canvas.style.cursor`: `cursor.control` (`"pointer"`) while the view under the mouse is a control — it carries `Tappable`, `LocalWrite` (ui's local-state button, found by name through `world.ecs.typeOf`), `Draggable`, `Pressable` or `Swipeable` — and `cursor.idle` (`""`, the page's own cursor) everywhere else, on leave, on a touch and while the world is paused. A disabled or covered ui control has lost its `Tappable`, so it shows `idle`. The style is written only when it changes, and detach puts back what the canvas had. `app.input.cursor()` reads what is set.
+
 Every queued sample calls `time.wake()`, so a finger on the screen always runs at the full frame rate, whatever the idle cap says.
 
 ## The drag
@@ -151,6 +156,7 @@ The grab never reads the gate: a gate that closes for a moment on a transit node
 | `dragStartPx` | `number` | `8` | Move, in reference px, that turns a press on a `Draggable` into a drag |
 | `swipeMinPx` | `number` | `48` | Shortest swipe, in reference px |
 | `swipeMaxMs` | `number` | `300` | Longest swipe, in ms of `time`, from pointer down to pointer up |
+| `cursor` | `{ control: string; idle: string }` | `{ control: "pointer", idle: "" }` | CSS cursor over a control and everywhere else |
 | `heldScale` | `number` | `1` | How much bigger than its rest size the view in the hand is drawn, from the grab to the release. `1` changes nothing |
 
 ```ts

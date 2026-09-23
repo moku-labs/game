@@ -27,7 +27,7 @@ Yoga arrives through `await import("yoga-layout/load")` in `onStart`; nothing so
 |---|---|---|
 | `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
 | `text` | `Text`; a string `style` is the text style key | none |
-| any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint` | as below |
+| any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug` | as below |
 | any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke; with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
@@ -53,6 +53,15 @@ nine-slice on the parent instead; `lint()` reports the dropped one as `nine-slic
 
 Migration (delta 4): `<panel nineSlice="k">` becomes `<panel style={{ nineSlice: "k" }}>`.
 
+`style.debug: true` outlines the nine-slice of that element: its bounds and the four slice lines,
+cyan, red when the corners overlap or the texture is missing. It is written into `NineSlice.debug`
+(`false` by default) and `lint()` ignores it. To outline every nine-slice at once, use the
+renderer: `app.renderer.sync.debug.nineSlice(true)` or `pluginConfigs.renderer.debug.nineSlice`.
+
+```tsx
+<panel key="board" style={{ nineSlice: "ui.panel-signboard", padding: 72, debug: true }} />
+```
+
 ## State flags
 
 `is` variants merge in the order `disabled`, `active`, `selected`, `hover`, `pressed`,
@@ -71,7 +80,9 @@ swapping between a rectangle and a nine-slice trades the one component for the o
 ## Visual transform styles
 
 `offsetX`, `offsetY` (reference units), `scale` (uniform) and `origin` (`"center"` default,
-`"top"`, `"topLeft"`, or `{ x, y }` in fractions of the box) never change a rect. They are written
+`"top"`, `"topLeft"`, or `{ x, y }` in fractions of the box, any fraction: `{ x: 0.5, y: -0.5 }`
+hangs the pivot half the height above the top edge, where a popup's ropes meet) never change a
+rect. They are written
 into the rest `Transform`: `pivot` is the origin on the box, and the position is where the pivot
 lands, so the unscaled element sits on its rect.
 
@@ -95,6 +106,24 @@ const cardMotion: Ui.ElementMotion = {
         : view.toRest(Transform, { ms: 240 })
   }
 };
+```
+
+A keyframed `defineMotion` works on any element as it is: the keys walk around the element's
+pivot, so a popup that swings on its ropes names the rope point as its origin.
+
+```tsx
+const swing = defineMotion({
+  keyframes: {
+    dropIn: [
+      { at: 0, Transform: { dy: -780, rotation: -0.035, scale: 0.8 } },
+      { at: 0.42, ease: "out", Transform: { dy: 14, rotation: 0.087, scale: 1.04 } }
+    ]
+  },
+  transition: { ms: 1000 },
+  on: { enter: "dropIn" }
+});
+
+<panel key="board" style={{ width: 600, height: 400, origin: { x: 0.5, y: -0.5 } }} motion={swing} />;
 ```
 
 Breaking (delta 4): every ui motion with `scale` or `rotation` now turns around the element's

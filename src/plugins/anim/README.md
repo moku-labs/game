@@ -50,7 +50,7 @@ sfx(key, { bus? })   haptic(kind)       // descriptors anim owns; audio and plat
 use(animation, slots, tools?)           // nests one animation; pass the outer tools when it reads `at`
 play(animation, slots)                  // the fx descriptor a node awaits
 external(player, clip)                  // reserved for Spine: always throws
-defineMotion({ states, transition?, on })
+defineMotion({ states?, keyframes?, transition?, on })
 ```
 
 A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.
@@ -65,6 +65,42 @@ resolves the target through `world.projection.entityOf` and answers its **root p
 a flight lands on a cell inside a scaled board slot. An entity without a parent answers its rest
 `Transform` as is. A target nothing resolves gives `{ x: 0, y: 0, rotation: 0, scale: 1 }` and one
 warning.
+
+## Keyframe motions
+
+`defineMotion` takes keyframe tracks next to its states. `on.enter` and `on.exit` name either one.
+
+```ts
+const swing = defineMotion({
+  keyframes: {
+    swingIn: [
+      { at: 0, Transform: { dy: -780, rotation: -0.035, scale: 0.8 } },
+      { at: 0.42, Transform: { dy: 14, rotation: 0.087, scale: 1.04 } }
+    ], // the missing last key is the rest pose
+    swingOut: [
+      { at: 0.25, Transform: { dy: 10, rotation: -0.035 } },
+      { at: 1, Transform: { dy: -840, rotation: 0.052, scale: 0.9 } }
+    ]
+  },
+  transition: { ms: 1000 },
+  on: { enter: "swingIn", exit: "swingOut" }
+});
+```
+
+- A key (`Anim.MotionKeyframe`): `at` 0..1, `ease?`, `Transform?: { dx, dy, rotation, scale }`,
+  `Shape | Sprite | NineSlice?: { alpha }`. `dx`/`dy` are offsets from the rest pose in reference
+  units; rotation (radians), scale and alpha are absolute. A field a key leaves out holds the
+  previous key's value.
+- `transition.ms` is the whole track. Each segment eases by the key it ends on, default `"inOut"`;
+  `transition.ease` does not apply to a track.
+- Enter: the view is set to the first key (held until its `at`) and walks the keys to the rest pose
+  at `at: 1`. A key at `at: 1` only gives that last segment its curve.
+- Exit: from where the view is, through the keys, ending on the last key; a last key before `at: 1`
+  holds to the end.
+- One tween with segments per component, composed with `view.all`, so the walk runs on one clock and
+  owns its fields for the whole track. A component the view does not carry is left alone.
+- Definition-time errors: a track with no key, an `at` outside 0..1, keys not strictly ascending, a
+  name that is both a state and a track, and an `on.enter`/`on.exit` that names neither.
 
 ## Tween space
 

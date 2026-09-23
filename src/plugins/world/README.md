@@ -110,6 +110,13 @@ target on its last frame and goes through `ecs.set`; muted fields are never writ
 inactive handle, so a composition without `anim` plays every motion instantly. A despawn and every
 flush call `driver.cancelAll(entity)`.
 
+`TweenOptions.segments` (and `TrackOptions.segments` on the driver) turns one tween into a keyframe
+walk: `[{ at, ease?, to }]`, each segment ending at `at` (0..1 of `ms`) with its own curve (the
+tween's `ease` when left out), all on one clock. A field a segment does not name holds; the track's
+`to` is where the last segment ends, and the track owns every field a segment names for the whole
+walk. `motions.ts` passes `segments` to the driver unchanged; the instant default writes the last
+value of every segment field at once.
+
 ## Events
 
 | Event | Payload | When |

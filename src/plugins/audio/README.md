@@ -55,7 +55,7 @@ The settings node commits `player.settings.audio`; on every `model:committed` th
 
 ## The unlock
 
-A browser starts every context suspended. `onStart` puts one `pointerdown` and one `touchend` listener on `window` (`once`, `passive`); the first of them removes both and resumes the context. `unlocked()` turns true only when the context really reached `"running"`, and a refused resume warns once and puts the listeners back, so the next gesture tries again. The listeners sit on `window`, not on the canvas: the gesture may as well be a button of the game's loading page, which `input` never sees. Music a scene declared while the context was locked is remembered and started by that first gesture.
+A browser starts every context suspended. `onStart` puts one `pointerdown` and one `touchend` listener on `window` (`once`, `passive`); the first of them removes both and resumes the context. `unlocked()` turns true only when the context really reached `"running"`, and a refused resume warns once and puts the listeners back, so the next gesture tries again. The listeners sit on `window`, not on the canvas: the gesture may as well be a button of the game's loading page, which `input` never sees. Music a scene declared while the context was locked is remembered and started by that first gesture. A sound effect requested while that resume is still pending — the click of the very button that unlocks the context — is queued, one per key, and played as soon as the context runs; a refused resume drops the queue.
 
 ## Pause and iOS
 
