@@ -5,7 +5,8 @@
 
 Three modules do the work and the plugin root composes them, in the injection order
 `host → viewport → sync`: `host` creates the application and survives a lost device and a hidden
-tab; `viewport` maps the window to the reference space whose short side is `referenceSide`; `sync`
+tab; `viewport` maps the window to the reference space, fitting `referenceSide` across and
+`referenceLong` along inside the safe area; `sync`
 is the ONE system that builds display objects from components, puts them in the named layers that
 `world.projection.layers()` lists, pools them, labels them and answers hit tests.
 
@@ -27,7 +28,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 |---|---|---|
 | `Transform({ x, y, rotation, scale, pivot })` | `0, 0, 0, 1, { x: 0, y: 0 }` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. `pivot` is the local point the view turns and scales around; `x`, `y` is where it lands. |
 | `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. |
-| `NineSlice({ texture, width, height, alpha, tint })` | `"", 0, 0, 1, 0xffffff` | Size in reference units; the borders come with the texture. |
+| `NineSlice({ texture, width, height, alpha, tint, debug })` | `"", 0, 0, 1, 0xffffff, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. |
 | `Shape({ w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, clip })` | `0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, false` | A filled rounded rectangle drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape. `clip: true` masks the children of the entity to the rectangle; the mask is always filled. |
@@ -90,7 +91,7 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | Method | Behaviour |
 |---|---|
 | `toReference(clientX, clientY)` | `(client − canvas rect − frame offset) / scale`. The rectangle is read at call time. Inert: the input unchanged. |
-| `size()` | Reference units, a fresh object. The short side is always `referenceSide`. Inert: the `aspect.min` frame, `scale: 1`, zero safe area. |
+| `size()` | Reference units, a fresh object. `scale = min(short / referenceSide, (long − safe insets) / referenceLong)`: the short side is at least `referenceSide` and grows on a wide screen, the long side inside the safe area is at least `referenceLong`. Inert: the `aspect.min` frame, `scale: 1`, zero safe area. |
 
 ### `sync` — `app.renderer.sync`
 
@@ -105,6 +106,8 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `fonts.install(key, fnt, texture)` | Installs a BMFont file (text, XML or JSON) and its page texture under an asset key. Throws while the renderer does not draw. |
 | `fonts.installed(key)` | Whether that font key is installed in this application. |
 | `displayOf(entity)` | The Pixi object of the entity, for debugging. |
+| `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
+| `debug.state()` | `{ nineSlice }`, a fresh object. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
 An adapter object is parented, sorted and freed like a sprite; its hit box is `getLocalBounds()`
@@ -144,6 +147,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `poolLimit` | `number` | `256` | Display objects kept in all pools together. |
 | `unsupportedMessage` | `string` | `"This device cannot run the game."` | Text of the unsupported-device screen. |
 | `loadPixi` | `() => Promise<PixiModule>` | `() => import("pixi.js")` | Loader seam. Tests pass a fake module. |
+| `debug` | `{ nineSlice }` | `{ nineSlice: false }` | Debug drawing at start; `sync.debug.nineSlice(on)` switches it at run time. |
 
 ```ts
 const app = createApp({
@@ -152,7 +156,9 @@ const app = createApp({
 });
 ```
 
-`orientation` and `referenceSide` are read from the framework config, not from here.
+`orientation`, `referenceSide` and `referenceLong` are read from the framework config, not from
+here. `referenceLong` (default 1920) is the long side the layout needs inside the safe area: a
+768×1024 tablet then gets 1440×1920 units instead of 1080×1440, so the whole UI scales together.
 
 ## The frame
 
@@ -197,6 +203,25 @@ resolve again. `assets` owns texture lifetime: it calls `create`, answers throug
 calls `invalidate` then `destroy` on unload. The renderer never destroys a texture by itself; the
 crops it cuts for `"cover"` sprites share the base's source. A crop is freed when its last sprite
 lets go, with its base (`destroy`), when its key answers a new texture, and when the renderer stops.
+
+### Nine-slice borders and the debug outline
+
+Pixi reads a texture's `defaultBorders` only in the `NineSliceSprite` constructor, so every write
+of a `NineSlice` copies them into `leftWidth`, `topHeight`, `rightWidth` and `bottomHeight`, divided
+by `source.resolution` when it is not 1. A texture without borders gets 0, never Pixi's 10.
+
+With `NineSlice.debug` or the global switch on, the view's wrapper gets a `Graphics` child at the top
+`zIndex` (label `outline#<entity>`, `pixelLine: true`). It strokes the bounds and the four cut lines
+at `L·s`, `w − R·s`, `T·s`, `h − B·s`, where `s = min(1, w / (L + R), h / (T + B))` is the factor Pixi
+shrinks overlapping corners by. Cyan normally, red when `s < 1` or the texture is missing. It is
+destroyed when debug goes off, when the view returns to the pool and when the renderer stops.
+
+### Bitmap-font baseline
+
+A BMFont `yoffset` is measured from the line top, but Pixi v8 draws a line `lineHeight − base` lower
+and then centres it by `(lineHeight − fontMetrics.fontSize) / 2`. `fonts.install` sets
+`baseLineOffset = 0` and `fontMetrics.fontSize = lineHeight`, so glyphs are drawn in the box `text`
+measures (the fixture's display font was 12.9 u low at 54 u without it; both lines are needed).
 
 ## Device loss and the hidden tab
 
