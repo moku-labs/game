@@ -146,6 +146,7 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       clock: { source: clock },
       flow: { mainFlow, safeNode: "home" },
       assets: { manifest: options.manifest },
+      text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
       i18n: { locale: "ru", fallback: "ru" },
       audio: { volumes: volumesOf }
     }

@@ -1,0 +1,5 @@
+{
+  "gift.title": "Daily gift",
+  "gift.reward": "+{coins, plural, one {# coin} other {# coins}}",
+  "gift.claim": "Claim"
+}

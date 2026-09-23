@@ -1,9 +1,17 @@
 {
   "settings.title": "Настройки",
   "settings.tab": "{tab, select, audio {Звук} language {Язык} other {Ещё}}",
-  "settings.volume": "{bus, select, music {Музыка} sfx {Звуки} other {Громкость}}: {percent}",
+  "settings.volume": "{bus, select, music {Музыка} sfx {Эффекты} other {Громкость}}: {percent}",
   "settings.louder": "Громче",
   "settings.quieter": "Тише",
   "settings.english": "English",
-  "settings.close": "Закрыть"
+  "settings.close": "Закрыть",
+  "settings.bus": "{bus, select, music {Музыка} sfx {Эффекты} other {Громкость}}",
+  "settings.percent": "{percent} %",
+  "settings.russian": "Русский",
+  "settings.reset": "Сбросить прогресс",
+  "settings.confirmTitle": "Сбросить всё?",
+  "settings.confirmBody": "Доски, монеты и заказы начнутся заново.",
+  "settings.confirmReset": "Сбросить",
+  "settings.confirmCancel": "Отмена"
 }

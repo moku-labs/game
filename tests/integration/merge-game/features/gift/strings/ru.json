@@ -1,0 +1,5 @@
+{
+  "gift.title": "Подарок дня",
+  "gift.reward": "+{coins, plural, one {# монета} few {# монеты} other {# монет}}",
+  "gift.claim": "Забрать"
+}

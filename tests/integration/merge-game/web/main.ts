@@ -34,6 +34,7 @@ const app = createApp({
   pluginConfigs: {
     renderer: { mount: "#game" },
     assets: { manifest: "/manifest.json" },
+    text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
     model: { initialPlayer: startingPlayer, initialSession: startingSession, seed: 42 },
     flow: { mainFlow, safeNode: "home" },
     i18n: { locale: "ru", fallback: "ru" },

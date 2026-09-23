@@ -1,9 +1,9 @@
 /**
- * @file The look of the HUD: the design tokens of the game, the layout styles of the top bar and
- * the three text styles the interface draws with. Styles are data, so the HUD markup reads as
- * structure and nothing else.
+ * @file The look of the HUD: the design tokens of the game and the layout styles of the top bar.
+ * Styles are data, so the HUD markup reads as structure and nothing else. The text styles are
+ * shared by every screen and live in `features/ui/styles.ts`.
  */
-import { defineStyle, defineTextStyles, defineTokens } from "../../kit";
+import { defineStyle, defineTokens } from "../../kit";
 
 /** The design table of this game: four spaces, four colours, two radii. */
 export const tokens = defineTokens({
@@ -60,10 +60,3 @@ export const barItemHeight = 108;
 
 /** The space the coin counter is drawn into. The counter is its own projection. */
 export const coinSlot = defineStyle({ width: 220, height: barItemHeight });
-
-/** The three text styles of the interface. `body` and `digits` stay as the engine built them. */
-export const hudStyles = defineTextStyles({
-  "hud.digits": { font: "ui.font-digits", size: 48, fill: tokens.color.text, digits: true },
-  "hud.label": { font: "ui.font-body", size: 28, fill: 0xff_ff_ff, align: "center" },
-  "hud.title": { font: "ui.font-body", size: 40, fill: tokens.color.text, align: "center" }
-});

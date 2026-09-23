@@ -5,5 +5,13 @@
   "settings.louder": "Louder",
   "settings.quieter": "Quieter",
   "settings.english": "English",
-  "settings.close": "Close"
+  "settings.close": "Close",
+  "settings.bus": "{bus, select, music {Music} sfx {Effects} other {Volume}}",
+  "settings.percent": "{percent}%",
+  "settings.russian": "Русский",
+  "settings.reset": "Reset progress",
+  "settings.confirmTitle": "Reset everything?",
+  "settings.confirmBody": "Board, coins and orders start over.",
+  "settings.confirmReset": "Reset",
+  "settings.confirmCancel": "Cancel"
 }

@@ -12,14 +12,26 @@ import type { Player, Session } from "./state";
 
 /**
  * Every text style this game draws with: the two the engine brings (`body` and `digits`, built
- * from the fonts of the `text` config) and the ones the features declare with `defineTextStyles`.
+ * from the fonts of the `text` config) and the ones `features/ui/styles.ts` declares with
+ * `defineTextStyles`.
  *
  * @example
  * ```ts
- * const style: TextStyleKey = "hud.digits";
+ * const style: TextStyleKey = "ui.title";
  * ```
  */
-export type TextStyleKey = "body" | "digits" | "hud.digits" | "hud.label" | "hud.title";
+export type TextStyleKey =
+  | "body"
+  | "digits"
+  | "ui.title"
+  | "ui.button"
+  | "ui.number"
+  | "ui.name"
+  | "ui.body"
+  | "ui.small"
+  | "hud.digits"
+  | "hud.label"
+  | "hud.title";
 
 export const {
   defineNode,
