@@ -24,6 +24,8 @@ export type ButtonIntent = string & Brand<"ButtonIntent">;
 export type ButtonPayload = Json & Brand<"ButtonPayload">;
 /** The patch a button writes into the local state of its nearest component. */
 export type ButtonLocal = Record<string, unknown> & Brand<"ButtonLocal">;
+/** Makes a button the control the Escape key taps while its root is the top one. */
+export type ButtonEscape = boolean & Brand<"ButtonEscape">;
 /** What a text draws: a plain string, or a message of the game's string table. */
 export type TextContent = (string | Message) & Brand<"TextContent">;
 /** The component field a text follows instead of a content. */
@@ -72,15 +74,17 @@ export type HostProps = CommonProperties & { hosts?: HostedProjections };
 
 /**
  * What a button takes. `intent` and `local` exclude each other: a button either answers the gate
- * or writes local state.
+ * or writes local state. `escape` marks the control the Escape key taps: the close button or the
+ * backdrop of a dismissable popup.
  *
  * @example
  * ```ts
  * const props: ButtonTagProps = { intent: "claim", payload: { orderId: "o1" } };
+ * // The close button of the settings popup: Escape taps it while the popup is on top.
+ * const close: ButtonTagProps = { intent: "close", escape: true };
  * ```
  */
-export type ButtonTagProps = CommonProperties &
-  (
+export type ButtonTagProps = CommonProperties & { escape?: ButtonEscape } & (
     | { intent?: ButtonIntent; payload?: ButtonPayload; local?: never }
     | { intent?: never; payload?: never; local?: ButtonLocal }
   );

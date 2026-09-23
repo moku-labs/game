@@ -90,6 +90,29 @@ function styleOfObject(object: FakeObject | undefined): Record<string, unknown> 
   return object?.options.style as Record<string, unknown>;
 }
 
+/** A point rounded to four decimals, so offsets compare with `toEqual`. */
+function rounded(x: number, y: number): { x: number; y: number } {
+  // `+ 0` folds -0 into 0, which `toEqual` tells apart.
+  return { x: Math.round(x * 10_000) / 10_000 + 0, y: Math.round(y * 10_000) / 10_000 + 0 };
+}
+
+/** The offsets of copies from the run they surround. */
+function offsetsOf(
+  copies: readonly FakeObject[],
+  run: FakeObject | undefined
+): Array<{ x: number; y: number }> {
+  return copies.map(copy => rounded(copy.x - (run?.x ?? 0), copy.y - (run?.y ?? 0)));
+}
+
+/** Where `count` copies sit on a circle of `radius`, starting to the right, clockwise on screen. */
+function ring(count: number, radius: number): Array<{ x: number; y: number }> {
+  return Array.from({ length: count }, (_, index) => {
+    const angle = (index / count) * Math.PI * 2;
+
+    return rounded(Math.cos(angle) * radius, Math.sin(angle) * radius);
+  });
+}
+
 describe("the display adapter", () => {
   it("is registered for the Text component", () => {
     const mock = drawing();
@@ -114,13 +137,18 @@ describe("the display adapter", () => {
     expect(style.stroke).toBeUndefined();
   });
 
-  it("strokes a bold run in the fill colour when the style names no bold font", () => {
+  it("thickens a bold run with copies in the fill colour when the style names no bold font", () => {
     const mock = drawing();
     const object = build(mock, value({ resolved: "<b>b</b>" }));
-    const style = object.children[0]?.options.style as Record<string, unknown>;
+    const styles = object.children.map(child => styleOfObject(child));
 
-    expect(style.fontFamily).toBe("ui.font-body");
-    expect(style.stroke).toEqual({ color: 0xff_ff_ff, width: 1.6 });
+    expect(object.children).toHaveLength(9);
+    expect(styles.map(style => style.fontFamily)).toEqual(
+      Array.from({ length: 9 }, () => "ui.font-body")
+    );
+    expect(styles.map(style => style.fill)).toEqual(Array.from({ length: 9 }, () => 0xff_ff_ff));
+    expect(styles.map(style => style.stroke)).toEqual(Array.from({ length: 9 }, () => undefined));
+    expect(offsetsOf(object.children.slice(0, 8), object.children[8])).toEqual(ring(8, 1.6));
   });
 
   it("skews an italic run when the style names no italic font", () => {
@@ -251,7 +279,7 @@ describe("the shadow of a style", () => {
 
   it("draws two BitmapText objects per run, the shadow first", () => {
     const mock = shadowed();
-    const object = build(mock, value({ resolved: "a<b>b</b>", style: "hud.title" }));
+    const object = build(mock, value({ resolved: "a<i>b</i>", style: "hud.title" }));
 
     expect(object.children.map(child => child.kind)).toEqual([
       "BitmapText",
@@ -267,7 +295,7 @@ describe("the shadow of a style", () => {
 
   it("draws one BitmapText per run for a style with no shadow", () => {
     const mock = shadowed();
-    const object = build(mock, value({ resolved: "a<b>b</b>", style: "hud.plain" }));
+    const object = build(mock, value({ resolved: "a<i>b</i>", style: "hud.plain" }));
 
     expect(object.children.map(child => textOf(child))).toEqual(["a", "b"]);
   });
@@ -306,7 +334,9 @@ describe("the shadow of a style", () => {
     const bold = build(mock, value({ resolved: "<b>b</b>", style: "hud.title" }));
     const italic = build(mock, value({ resolved: "<i>i</i>", style: "hud.title" }));
 
-    expect(styleOfObject(bold.children[0]).stroke).toEqual({ color: 0xff_ff_ff, width: 1.6 });
+    expect(bold.children).toHaveLength(10);
+    expect(bold.children[0]?.tint).toBe(0x5b_3a_1e);
+    expect(styleOfObject(bold.children[0]).stroke).toBeUndefined();
     expect(italic.children[0]?.skew.x).toBe(-0.2);
   });
 
@@ -350,6 +380,140 @@ describe("the shadow of a style", () => {
     const mock = shadowed();
 
     expect(mock.api.measure("a\nbc", "hud.title")).toEqual(mock.api.measure("a\nbc", "hud.plain"));
+  });
+});
+
+describe("the outline of a style", () => {
+  /** The shadow of `hud.shadowed`. */
+  const shadow = { color: 0x5b_3a_1e, dx: 0, dy: 4, alpha: 0.5 };
+
+  /** A started plugin whose renderer draws, with outlined styles thin and wide, and a plain one. */
+  function outlined(): MockText {
+    const base = { font: "ui.font-body", size: 32, fill: 0xff_f3_d6, stroke: 0x3b_2a_1e };
+    const mock = createMockText({
+      features: [
+        {
+          name: "popup",
+          description: {
+            textStyles: defineTextStyles({
+              "hud.outlined": { ...base, strokeWidth: 4 },
+              "hud.wide": { ...base, strokeWidth: 6 },
+              "hud.shadowed": { ...base, strokeWidth: 4, shadow },
+              "hud.bolded": { ...base, strokeWidth: 4, bold: "ui.font-bold" },
+              "hud.plain": { ...base }
+            })
+          }
+        }
+      ]
+    });
+
+    mock.renderer.ready = true;
+    mock.start();
+
+    return mock;
+  }
+
+  it("draws 8 white copies around the run, tinted with the stroke, the run last", () => {
+    const mock = outlined();
+    const object = build(mock, value({ resolved: "12", style: "hud.outlined", anchor: zero }));
+    const copies = object.children.slice(0, 8);
+    const run = object.children[8];
+
+    expect(object.children).toHaveLength(9);
+    expect(copies.map(copy => textOf(copy))).toEqual(Array.from({ length: 8 }, () => "12"));
+    expect(copies.map(copy => styleOfObject(copy).fill)).toEqual(
+      Array.from({ length: 8 }, () => 0xff_ff_ff)
+    );
+    expect(copies.map(copy => copy.tint)).toEqual(Array.from({ length: 8 }, () => 0x3b_2a_1e));
+    expect(copies.map(copy => copy.alpha)).toEqual(Array.from({ length: 8 }, () => 1));
+    expect(offsetsOf(copies, run)).toEqual(ring(8, 4));
+    expect(styleOfObject(run).fill).toBe(0xff_f3_d6);
+    expect(run?.tint).toBe(0xff_ff_ff);
+  });
+
+  it("draws 12 copies when the stroke is 6 wide or more", () => {
+    const mock = outlined();
+    const object = build(mock, value({ resolved: "12", style: "hud.wide", anchor: zero }));
+
+    expect(object.children).toHaveLength(13);
+    expect(offsetsOf(object.children.slice(0, 12), object.children[12])).toEqual(ring(12, 6));
+  });
+
+  it("draws no copies when the stroke width is 0", () => {
+    const mock = outlined();
+    const object = build(mock, value({ resolved: "12", style: "hud.plain" }));
+
+    expect(object.children).toHaveLength(1);
+  });
+
+  it("hands no stroke to BitmapText", () => {
+    const mock = outlined();
+    const object = build(mock, value({ resolved: "a<b>b</b>", style: "hud.shadowed" }));
+
+    expect(object.children.map(child => styleOfObject(child).stroke)).toEqual(
+      object.children.map(() => undefined)
+    );
+  });
+
+  it("puts the shadow under the outline, and the outline under the run", () => {
+    const mock = outlined();
+    const object = build(mock, value({ resolved: "12", style: "hud.shadowed" }));
+    const tints = object.children.map(child => child.tint);
+
+    expect(object.children).toHaveLength(10);
+    expect(tints[0]).toBe(0x5b_3a_1e);
+    expect(object.children[0]?.alpha).toBe(0.5);
+    expect(tints.slice(1, 9)).toEqual(Array.from({ length: 8 }, () => 0x3b_2a_1e));
+    expect(tints[9]).toBe(0xff_ff_ff);
+  });
+
+  it("draws a synthetic bold run as outline copies, then bold copies in the fill, then the run", () => {
+    const mock = outlined();
+    const object = build(
+      mock,
+      value({ resolved: "<b>b</b>", style: "hud.outlined", anchor: zero })
+    );
+    const run = object.children[16];
+    const outline = object.children.slice(0, 8);
+    const bold = object.children.slice(8, 16);
+
+    expect(object.children).toHaveLength(17);
+    expect(outline.map(copy => copy.tint)).toEqual(Array.from({ length: 8 }, () => 0x3b_2a_1e));
+    expect(offsetsOf(outline, run)).toEqual(ring(8, 4));
+    expect(bold.map(copy => styleOfObject(copy).fill)).toEqual(
+      Array.from({ length: 8 }, () => 0xff_ff_ff)
+    );
+    expect(bold.map(copy => copy.tint)).toEqual(Array.from({ length: 8 }, () => 0xff_f3_d6));
+    expect(offsetsOf(bold, run)).toEqual(ring(8, 1.6));
+  });
+
+  it("draws a run of the bold font with the outline only", () => {
+    const mock = outlined();
+    const object = build(mock, value({ resolved: "<b>b</b>", style: "hud.bolded" }));
+
+    expect(object.children).toHaveLength(9);
+    expect(styleOfObject(object.children[8]).fontFamily).toBe("ui.font-bold");
+  });
+
+  it("leans the copies of an italic run with it", () => {
+    const mock = outlined();
+    const object = build(mock, value({ resolved: "<i>i</i>", style: "hud.outlined" }));
+
+    expect(object.children.map(child => child.skew.x)).toEqual(
+      Array.from({ length: 9 }, () => -0.2)
+    );
+  });
+
+  it("keeps the box: the run sits where it sits without an outline, and measure is the same", () => {
+    const mock = outlined();
+    const withOutline = build(mock, value({ resolved: "12", style: "hud.outlined" }));
+    const without = build(mock, value({ resolved: "12", style: "hud.plain" }));
+
+    expect(withOutline.children[8]?.x).toBe(without.children[0]?.x);
+    expect(withOutline.children[8]?.y).toBe(without.children[0]?.y);
+    expect(mock.api.measure("a\nbc", "hud.outlined")).toEqual(
+      mock.api.measure("a\nbc", "hud.plain")
+    );
   });
 });
 

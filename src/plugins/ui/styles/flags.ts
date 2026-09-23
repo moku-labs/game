@@ -39,7 +39,7 @@ export function flagsOf(
 /**
  * The state flags of an element that declared none.
  *
- * @returns Six false flags.
+ * @returns Seven false flags.
  * @example
  * ```ts
  * noFlags().hover; // false
@@ -49,6 +49,7 @@ export function noFlags(): IsFlags {
   return {
     pressed: false,
     hover: false,
+    focus: false,
     disabled: false,
     active: false,
     selected: false,

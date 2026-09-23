@@ -440,6 +440,8 @@ describe("fit contain", () => {
     // The centre of the board sits on the centre of the slot's content box.
     expect(rest?.x).toBeCloseTo(expected.slot.w / 2, 5);
     expect(rest?.y).toBeCloseTo(expected.slot.h / 2, 5);
+    // The new rest is a 0 ms rest track (delta 6): it lands on the next frame step.
+    app.time.step(16);
     expect(app.world.ecs.get(board, Transform)).toEqual(rest);
 
     // The slot's own rectangle follows its new rect.

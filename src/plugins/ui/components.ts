@@ -77,6 +77,13 @@ export const Scroll = /*#__PURE__*/ component("Scroll", { axis: "y", offset: 0, 
 export const Covered = /*#__PURE__*/ tag("Covered");
 
 /**
+ * On a button with the `escape` prop: the control the Escape key taps while its root is the top
+ * one, meant for the close button or the backdrop of a dismissable popup. Internal to `ui`: the
+ * game writes the prop, never the tag.
+ */
+export const Escapable = /*#__PURE__*/ tag("Escapable");
+
+/**
  * What the acceptance cases of the spike count. Internal to `ui`: the numbers are written once
  * per frame step and read by the tests through `world.ecs.resource`, never by a game.
  *

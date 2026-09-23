@@ -2,7 +2,13 @@ import { expectTypeOf } from "vitest";
 import { component, mut, system, tag } from "../../ecs/define";
 import type { EcsApi, Entity, Owner, QueryTuple } from "../../ecs/types";
 import { projection } from "../../projection/define";
-import type { DescriptionNode, Ease, ProjectionApi } from "../../projection/types";
+import type {
+  DescriptionNode,
+  Ease,
+  ProjectionApi,
+  TrackOptions,
+  TweenOptions
+} from "../../projection/types";
 import type { Events, KernelSlice } from "../../types";
 
 type Position = { x: number; y: number };
@@ -143,3 +149,11 @@ ecs.onAdded(Sprite, (entity, sprite) => {
 
 // @ts-expect-error — a tag carries no value, so its listener takes the entity alone
 ecs.onAdded(Held, (_entity: Entity, _value: Readonly<Sprite>) => undefined);
+
+// A tween and a track repeat a number of extra runs or forever, nothing else.
+expectTypeOf<TweenOptions["repeat"]>().toEqualTypeOf<number | "forever" | undefined>();
+expectTypeOf<TrackOptions["repeat"]>().toEqualTypeOf<number | "forever" | undefined>();
+// @ts-expect-error — repeat is a count or "forever", not a flag.
+const looping: TweenOptions = { ms: 100, repeat: true };
+
+expectTypeOf(looping).toEqualTypeOf<TweenOptions>();

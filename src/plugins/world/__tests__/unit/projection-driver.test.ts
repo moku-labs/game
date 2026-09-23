@@ -271,6 +271,83 @@ describe("projection driver slot", () => {
     expect(seen).toEqual([{ x: 100, y: 40, scale: 1 }]);
   });
 
+  it("passes the repeat of a tween to the driver like the segments", () => {
+    const world = createMockWorld();
+    const segments = [
+      { at: 0.5, to: { x: 140 } },
+      { at: 1, to: { x: 100 } }
+    ] as const;
+
+    tweenOnChange(world, { ms: 800, ease: "inOut", additive: true, segments, repeat: "forever" });
+    world.frame(0);
+
+    expect(world.driver.started[0]?.options).toEqual({
+      ms: 800,
+      ease: "inOut",
+      delayMs: 0,
+      additive: true,
+      segments,
+      repeat: "forever"
+    });
+  });
+
+  it("passes a counted repeat to the driver unchanged", () => {
+    const world = createMockWorld();
+
+    tweenOnChange(world, { ms: 100, repeat: 2 });
+    world.frame(0);
+
+    expect(world.driver.started[0]?.options.repeat).toBe(2);
+    expect(world.driver.started[0]?.options.segments).toBeUndefined();
+  });
+
+  it("names no repeat when the tween has none", () => {
+    const world = createMockWorld();
+
+    tweenOnChange(world, { ms: 100, segments: [{ at: 1, to: { x: 100 } }] });
+    world.frame(0);
+
+    expect(Object.keys(world.driver.started[0]?.options ?? {})).not.toContain("repeat");
+  });
+
+  it("writes the end pose once and ends at once without a driver, whatever the repeat", () => {
+    const world = createMockWorld();
+    const handles: MotionHandle[] = [];
+    const seen: Array<Record<string, unknown>> = [];
+
+    world.offDriver();
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view => {
+          const handle = view.tween(
+            Transform,
+            { x: 100 },
+            {
+              ms: 500,
+              repeat: "forever",
+              segments: [
+                { at: 0.5, to: { x: 300, y: 40 } },
+                { at: 1, to: { x: 100 } }
+              ]
+            }
+          );
+
+          handles.push(handle);
+          seen.push({ ...view.get(Transform) });
+
+          return handle;
+        }
+      }
+    });
+    commitItems(world, [{ id: "a", level: 1, x: 100, y: 0 }]);
+    world.frame(16);
+    world.frame(1000);
+
+    expect(seen).toEqual([{ x: 100, y: 40, scale: 1 }]);
+    expect(handles).toHaveLength(1);
+    expect(handles[0]?.active()).toBe(false);
+  });
+
   it("passes the delayMs of toRest on, so the motion starts after the delay", () => {
     const world = createMockWorld();
 

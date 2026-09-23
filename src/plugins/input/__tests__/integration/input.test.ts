@@ -167,6 +167,26 @@ describe("input plugin integration", () => {
     await app.stop();
   });
 
+  it("delivers a headless key to the onKey listeners through app.input.key", async () => {
+    const app = await startApp();
+    const seen: string[] = [];
+    const off = app.input.onKey(key => {
+      seen.push(`${key.key}:${String(key.shift)}`);
+
+      return key.key === "Escape";
+    });
+
+    expect(app.input.key("Escape")).toBe(true);
+    expect(app.input.key("Tab", { shift: true })).toBe(false);
+    expect(seen).toEqual(["Escape:false", "Tab:true"]);
+
+    off();
+
+    expect(app.input.key("Escape")).toBe(false);
+
+    await app.stop();
+  });
+
   it("stays inert without a DOM and leaves nothing behind on stop", async () => {
     const app = await startApp();
 

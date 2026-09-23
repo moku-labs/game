@@ -98,6 +98,8 @@ export type BoxStyle = {
  * @example
  * ```ts
  * const pinned: PositionStyle = { position: "absolute", top: 0, right: 0, reason: "badge" };
+ * // The order strip of the board drawn over the tray that follows it.
+ * const strip: PositionStyle = { zIndex: 1 };
  * ```
  */
 export type PositionStyle = {
@@ -107,6 +109,12 @@ export type PositionStyle = {
   right?: Length;
   bottom?: Length;
   reason?: string;
+  /**
+   * The draw order among the siblings, an integer: a higher one draws over a lower one, and a
+   * sibling without it draws at 0 in markup order. Ignored on a root element, which `lint()`
+   * reports; a root draws at the order of its layer.
+   */
+  zIndex?: number;
 };
 
 /**
@@ -119,6 +127,9 @@ export type PositionStyle = {
  * const visual: VisualStyle = { nineSlice: "ui.button-wood", alpha: 1, tint: 0xffffff };
  * // The popup board while its insets are checked: the slice lines drawn over it.
  * const checked: VisualStyle = { nineSlice: "ui.panel-signboard", debug: true };
+ * // The play glyph of the Watch button, and a dashed ring around a slot.
+ * const play: VisualStyle = { shape: "triangle", fill: 0xfffbe8 };
+ * const slot: VisualStyle = { stroke: 0x3a2212, strokeWidth: 4, dash: 10, radius: 24 };
  * ```
  */
 export type VisualStyle<Asset extends string = string> = {
@@ -127,6 +138,14 @@ export type VisualStyle<Asset extends string = string> = {
   strokeWidth?: number;
   radius?: number;
   alpha?: number;
+  /**
+   * The shape of the rectangle an element without a nine-slice is drawn with: `"rect"` (the
+   * default) or `"triangle"`, which fills the box pointing right and ignores `radius`. Turn the
+   * element with `rotation` for another direction.
+   */
+  shape?: "rect" | "triangle";
+  /** The dash length of the stroke in reference units, with gaps of half a dash; 0 is solid. */
+  dash?: number;
   /**
    * The asset key of a nine-slice drawn at the rect instead of the rounded rectangle. Any tag
    * but `image`, `icon` and `text` takes it; a clipping element (`scroll`, `overflow: "hidden"`)
@@ -162,6 +181,8 @@ export type Origin = "center" | "top" | "topLeft" | { x: number; y: number };
  * ```ts
  * // A button that lifts under the mouse.
  * const lift: TransformStyle = { offsetY: -6, scale: 1.05, origin: "center" };
+ * // The title plaque of a popup, tilted by 1.5 degrees around the middle of its top edge.
+ * const plaque: TransformStyle = { rotation: -0.026, origin: "top" };
  * ```
  */
 export type TransformStyle = {
@@ -171,6 +192,8 @@ export type TransformStyle = {
   offsetY?: number;
   /** Uniform scale around the origin. */
   scale?: number;
+  /** Turns the drawn element around the origin, in radians, clockwise; 0 by default. */
+  rotation?: number;
   /** The point the element scales and turns around; the centre by default. */
   origin?: Origin;
 };
@@ -190,14 +213,15 @@ export type BaseStyle<Asset extends string = string> = FlowStyle &
   TransformStyle;
 
 /**
- * The six state variants of a style, applied in the order disabled, active, selected, hover,
- * pressed, covered. While `disabled` is true, `hover` and `pressed` are not applied.
+ * The seven state variants of a style, applied in the order disabled, active, selected, hover,
+ * focus, pressed, covered. While `disabled` is true, `hover` and `pressed` are not applied.
  *
  * @example
  * ```ts
  * // One rule set for every control: lift on hover, sink when pressed, swap the texture when off.
  * const variants: IsVariants = {
  *   hover: { offsetY: -6, scale: 1.05 },
+ *   focus: { scale: 1.05 },
  *   pressed: { offsetY: 4, scale: 0.95 },
  *   disabled: { nineSlice: "ui.button-disabled" }
  * };
@@ -210,6 +234,8 @@ export type IsVariants<Asset extends string = string> = {
   selected?: BaseStyle<Asset>;
   /** The mouse or pen is over the element. Touch never hovers. */
   hover?: BaseStyle<Asset>;
+  /** The keyboard focus is on the element: Tab moved it there, and no pointer tapped since. */
+  focus?: BaseStyle<Asset>;
   /** The popup the element belongs to is kept under another one. */
   covered?: BaseStyle<Asset>;
 };
@@ -276,18 +302,21 @@ export type WhenFlags = { portrait: boolean; landscape: boolean; tall: boolean; 
 
 /**
  * The state flags of an element: what the markup declared (`disabled`, `active`, `selected`),
- * `pressed` and `hover` from the pointer, and `covered` from the root it belongs to.
+ * `pressed` and `hover` from the pointer, `focus` from the keyboard, and `covered` from the root
+ * it belongs to.
  *
  * @example
  * ```ts
  * const flags: IsFlags = {
- *   pressed: false, hover: true, disabled: false, active: true, selected: false, covered: false
+ *   pressed: false, hover: true, focus: false, disabled: false, active: true, selected: false,
+ *   covered: false
  * };
  * ```
  */
 export type IsFlags = {
   pressed: boolean;
   hover: boolean;
+  focus: boolean;
   disabled: boolean;
   active: boolean;
   selected: boolean;

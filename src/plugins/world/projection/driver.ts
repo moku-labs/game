@@ -133,7 +133,8 @@ function withSegmentFields(
 
 /**
  * Creates the default driver: every track is over before it began. It is what a world plays
- * without `anim` — a unit test of the projection, a headless run, a `logicOnly` composition.
+ * without `anim` — a unit test of the projection, a headless run, a `logicOnly` composition. A
+ * track's `repeat` is ignored: the end pose is written once.
  *
  * @param pctx - Domain context of the projection module.
  * @returns The instant driver.

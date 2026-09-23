@@ -15,7 +15,7 @@ import {
 import { Text } from "../../text/components";
 import { Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
 import type { AnyComponentType, AnyComponentValue, Entity } from "../../world/types";
-import { Box, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
+import { Box, Escapable, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, Style, StylesModule } from "../styles/types";
@@ -40,16 +40,20 @@ export type JsxModules = { styles: StylesModule; layout: LayoutModule };
 /** The four components an element may be drawn with; a state change can trade one for another. */
 const VISUALS: readonly AnyComponentType[] = [Sprite, NineSlice, Shape, Text];
 
-/** The four input components of an element; a disabled or covered button drops the answering one. */
-const INPUTS: readonly AnyComponentType[] = [Tappable, Touchable, LocalWrite, Scroll];
+/**
+ * The input components of an element and the Escape marker; a disabled or covered button drops
+ * the answering one and the marker.
+ */
+const INPUTS: readonly AnyComponentType[] = [Tappable, Touchable, LocalWrite, Scroll, Escapable];
 
 /** The style of a scroll's content: one object, so a render never reads as a new style. */
 const CONTENT_STYLE: Style = Object.freeze({ origin: "topLeft" });
 
 /**
- * The state flags that do not come from the markup: the pointer's two, and the root's one.
+ * The state flags that do not come from the markup: the pointer's two, the keyboard's one and
+ * the root's one.
  */
-type LiveFlags = Pick<IsFlags, "pressed" | "hover" | "covered">;
+type LiveFlags = Pick<IsFlags, "pressed" | "hover" | "focus" | "covered">;
 
 /**
  * The children one element is diffed against. A scroll container holds exactly one of them: the
@@ -106,20 +110,23 @@ export function withKey(node: DescriptionNode, key: string | undefined): Descrip
 }
 
 /**
- * The state flags of an element: what the markup declared, the two flags the pointer set, and
- * the covered flag of the root it belongs to. `hover` and `covered` never come from the markup.
+ * The state flags of an element: what the markup declared, the two flags the pointer set, the
+ * keyboard focus, and the covered flag of the root it belongs to. `hover`, `focus` and `covered`
+ * never come from the markup.
  *
  * @param node - The node being placed.
- * @param live - Whether the pointer presses it or is over it, and whether its root is covered.
+ * @param live - Whether the pointer presses it or is over it, whether the keyboard focused it,
+ *   and whether its root is covered.
  * @param live.pressed - The pointer is down on it.
  * @param live.hover - An idle mouse or pen is over it.
+ * @param live.focus - The keyboard focus is on it.
  * @param live.covered - Its root is kept under another popup.
- * @returns The six flags.
+ * @returns The seven flags.
  * @example
  * ```ts
  * isFlagsOf(
  *   { type: "button", props: { state: { active: true } }, children: [] },
- *   { pressed: false, hover: true, covered: false }
+ *   { pressed: false, hover: true, focus: false, covered: false }
  * ).hover; // true
  * ```
  */
@@ -129,6 +136,7 @@ export function isFlagsOf(node: DescriptionNode, live: LiveFlags): IsFlags {
   return {
     pressed: live.pressed,
     hover: live.hover,
+    focus: live.focus,
     disabled: declared?.disabled === true,
     active: declared?.active === true,
     selected: declared?.selected === true,
@@ -168,7 +176,8 @@ function checkTag(node: DescriptionNode): void {
  * The input components of an element: a button answers the gate, writes local state, or only
  * swallows the tap; a panel swallows the tap too, so nothing under it answers; a scroll
  * container takes the press that moves its content. A button of a covered popup answers nothing,
- * so only the top popup answers the gate.
+ * so only the top popup answers the gate. A button with the `escape` prop that answers also
+ * carries `Escapable`, the control the Escape key taps.
  *
  * @param element - The element to make touchable.
  * @returns The component values.
@@ -181,6 +190,19 @@ function inputOf(element: Element): AnyComponentValue[] {
   if (type !== "button") return [];
   if (is.disabled || is.covered) return [Touchable()];
 
+  const answering = answerOf(node);
+
+  return node.props.escape === true ? [...answering, Escapable()] : answering;
+}
+
+/**
+ * What a button that answers carries: `Tappable` with its intent, or `Touchable` and
+ * `LocalWrite` with its patch, or `Touchable` alone when it names neither.
+ *
+ * @param node - The node of the button.
+ * @returns The component values.
+ */
+function answerOf(node: DescriptionNode): AnyComponentValue[] {
   const intent = node.props.intent;
   const local = node.props.local;
 
@@ -197,7 +219,8 @@ function inputOf(element: Element): AnyComponentValue[] {
 
 /**
  * Everything an entering element gets at once, so a display object never exists without a rect.
- * A child draws with its parent; the root element draws in the layer of its root, at its order.
+ * A child draws with its parent, at the `zIndex` of its style among its siblings when it sets
+ * one; the root element draws in the layer of its root, at its order, and ignores `zIndex`.
  *
  * @param element - The element whose rect and rest pose are known.
  * @param root - The layer and the order of the root the element belongs to.
@@ -215,6 +238,8 @@ export function componentsOf(
     values.push(Layer({ name: root.layer }), Order({ value: root.order }));
   } else {
     values.push(Parent({ entity: element.parent }));
+
+    if (element.style.zIndex !== undefined) values.push(Order({ value: element.style.zIndex }));
   }
 
   // `Box` is last on purpose: the world applies a queued attach in call order and fires
@@ -332,7 +357,12 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     checkTag(node);
 
     const entity = ecs.spawn(UI_OWNER, []);
-    const is = isFlagsOf(node, { pressed: false, hover: false, covered: root.covered });
+    const is = isFlagsOf(node, {
+      pressed: false,
+      hover: false,
+      focus: false,
+      covered: root.covered
+    });
     const element: Element = {
       entity,
       identity,
@@ -387,6 +417,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     const is = isFlagsOf(node, {
       pressed: element.is.pressed,
       hover: element.is.hover,
+      focus: element.is.focus,
       covered: root.covered
     });
     const style = modules.styles.resolveElement(styleOf(node), is);
@@ -425,6 +456,28 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
   }
 
   /**
+   * Writes the draw order of a live child again: the `zIndex` of its style, or 0 once a child
+   * that had one dropped it, so `renderer` sorts the siblings again. A child that never set one
+   * carries no `Order`; a root keeps the order of its root.
+   *
+   * @param element - The element that changed.
+   */
+  function writeOrder(element: Element): void {
+    if (element.parent === undefined) return;
+
+    const current = ecs.get(element.entity, Order);
+    const value = element.style.zIndex ?? 0;
+
+    if (current === undefined) {
+      if (element.style.zIndex !== undefined) ecs.add(element.entity, Order({ value }));
+
+      return;
+    }
+
+    if (current.value !== value) ecs.set(element.entity, Order, { value });
+  }
+
+  /**
    * Writes the visual and input components of a live element again. A visual or an input the
    * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
    * back, and a button that became disabled stops answering the gate. `Scroll` is only ever added:
@@ -433,6 +486,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
    * @param element - The element that changed.
    */
   function writeLive(element: Element): void {
+    writeOrder(element);
+
     const values = [...visualOf(element), ...inputOf(element)];
 
     for (const type of [...VISUALS, ...INPUTS]) {
@@ -949,12 +1004,12 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
   }
 
   /**
-   * Re-resolves the style of one element whose pointer flag changed: a press, a release, the
-   * mouse coming over it or leaving it. A new rect waits for the solve; a new look and a new
-   * rest pose apply now.
+   * Re-resolves the style of one element whose pointer or focus flag changed: a press, a release,
+   * the mouse coming over it or leaving it, the keyboard focus arriving or leaving. A new rect
+   * waits for the solve; a new look and a new rest pose apply now.
    *
    * @param entity - The element entity.
-   * @param flag - Which pointer flag changed.
+   * @param flag - Which flag changed.
    * @param on - Its value now.
    */
   function markPointer(entity: Entity, flag: PointerFlag, on: boolean): void {

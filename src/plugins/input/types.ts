@@ -83,6 +83,29 @@ export type GesturePhase = "idle" | "pressed" | "longPressed" | "dragging";
 export type TapListener = (entity: Entity) => void;
 
 /**
+ * One key press as `onKey` hands it to a listener: the DOM `KeyboardEvent.key` and whether Shift
+ * was held.
+ *
+ * @example
+ * ```ts
+ * const backTab: KeyInput = { key: "Tab", shift: true };
+ * ```
+ */
+export type KeyInput = { key: string; shift: boolean };
+
+/**
+ * What `onKey` registers. Returning `true` marks the key handled: input then calls
+ * `preventDefault()` on the DOM event, and `app.input.key` answers `true`.
+ *
+ * @example
+ * ```ts
+ * const closeOnEscape: KeyListener = key => key.key === "Escape";
+ * ```
+ */
+// biome-ignore lint/suspicious/noConfusingVoidType: a listener that ignores the key returns nothing; `void` names that honestly
+export type KeyListener = (key: KeyInput) => boolean | void;
+
+/**
  * input plugin config. Every distance is in reference px, every duration in milliseconds of
  * `time`, so a time scale and a pause apply to the gestures too.
  *
@@ -158,6 +181,10 @@ export type State = {
   detach: (() => void) | undefined;
   /** Registered through `onTap`, called in this order on every tap. */
   tapListeners: TapListener[];
+  /** Registered through `onKey`, called in this order on every key. */
+  keyListeners: KeyListener[];
+  /** Takes the one `keydown` listener off `window`; set while a canvas is attached. */
+  detachKeys: (() => void) | undefined;
   /** `time.wake`, bound in `onInit`: every pointer sample leaves the idle frame rate. */
   wake: (() => void) | undefined;
   /** The cursor last written on the attached canvas; `undefined` while nothing was written. */
@@ -258,6 +285,45 @@ export type InputApi = {
    * ```
    */
   onTap(fn: TapListener): () => void;
+
+  /**
+   * Registers a listener called on every key pressed while the canvas is attached, and on every
+   * `key` call. Listeners run in registration order, all of them, each time. A listener that
+   * returns `true` marks the key handled, and input calls `preventDefault()` on the DOM event. A
+   * listener that throws is logged with its key, and the listeners after it still run.
+   *
+   * @param fn - What to run with the key; return `true` when it handled it.
+   * @returns The remover; call it to stop listening.
+   * @example
+   * ```ts
+   * // ui moves the keyboard focus on Tab and keeps the browser from leaving the canvas.
+   * const off = ctx.require(inputPlugin).onKey(key => {
+   *   if (key.key !== "Tab") return false;
+   *   moveFocus(key.shift ? -1 : 1);
+   *
+   *   return true;
+   * });
+   * off(); // in onStop
+   * ```
+   */
+  onKey(fn: KeyListener): () => void;
+
+  /**
+   * Presses a key without a keyboard: runs the `onKey` listeners exactly as a DOM `keydown` does.
+   *
+   * @param key - The DOM `KeyboardEvent.key`, such as `"Tab"`, `"Enter"`, `" "` or `"Escape"`.
+   * @param options - How the key is pressed.
+   * @param options.shift - True presses it with Shift held; the default is `false`.
+   * @returns True when a listener handled the key.
+   * @example
+   * ```ts
+   * // A headless test walks the settings popup backwards and closes it.
+   * app.input.key("Tab", { shift: true }); // true: ui moved the focus to the previous control
+   * app.input.key("Escape"); // true: ui tapped the popup's close button
+   * app.input.key("q"); // false: no listener handles it
+   * ```
+   */
+  key(key: string, options?: { shift?: boolean }): boolean;
 
   /**
    * The CSS cursor input set on the canvas: `config.cursor.control` while a mouse or a pen rests

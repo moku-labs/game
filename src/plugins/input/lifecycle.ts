@@ -8,6 +8,7 @@ import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { stepGestures } from "./gestures";
+import { attachKeys, detachKeys } from "./keys";
 import { attach, detach } from "./pointer";
 import type { Deps, InputCtx, KernelSlice, State } from "./types";
 
@@ -54,8 +55,9 @@ export function initInput(ctx: KernelSlice): void {
 }
 
 /**
- * Opens the pointer listeners on the canvas the renderer created. Without a DOM the renderer has
- * no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate.
+ * Opens the pointer listeners on the canvas the renderer created and the one `keydown` listener
+ * on `window`. Without a DOM the renderer has no canvas: nothing is attached, the plugin is
+ * inert, and `app.input.*` still answers the gate.
  *
  * @param ctx - Kernel context of the input plugin.
  */
@@ -63,17 +65,21 @@ export function startInput(ctx: KernelSlice): void {
   const canvas = ctx.require(rendererPlugin).host.canvas();
 
   ctx.state.canvas = canvas;
-  if (canvas !== undefined) attach(canvas, ctx.state);
+  if (canvas === undefined) return;
+
+  attach(canvas, ctx.state);
+  attachKeys(ctx);
 }
 
 /**
- * Closes what the plugin opened: the six DOM listeners, the frame callback and the mute a drag
+ * Closes what the plugin opened: the six pointer listeners, the key listener, the frame callback and the mute a drag
  * still holds. The tags die with the world, which stops after `input`.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
  */
 export function stopInput(state: State): void {
   detach(state);
+  detachKeys(state);
   state.offFrame?.();
   state.offFrame = undefined;
   state.unmute?.();
@@ -90,4 +96,5 @@ export function stopInput(state: State): void {
   state.restScale = undefined;
   state.wake = undefined;
   state.tapListeners = [];
+  state.keyListeners = [];
 }

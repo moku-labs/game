@@ -1,5 +1,5 @@
 /**
- * @file ui/jsx — `lint()`: four rules read off the live screen. It never throws and answers an
+ * @file ui/jsx — `lint()`: five rules read off the live screen. It never throws and answers an
  * empty list when nothing is mounted.
  */
 import type { Message, Part } from "../../i18n/types";
@@ -136,7 +136,29 @@ export function nineSliceClipped(element: Element): Finding | undefined {
 }
 
 /**
- * Runs the four rules over every live element.
+ * Reports a root element whose style sets a `zIndex`: a root draws at the order of its layer,
+ * so the value is ignored.
+ *
+ * @param element - The element to check.
+ * @returns The finding, or `undefined`.
+ * @example
+ * ```ts
+ * zIndexOnRoot({ key: "board", parent: undefined, style: { zIndex: 2 } } as Element);
+ * // { rule: "z-index-on-root", key: "board", detail: "zIndex 2" }
+ * ```
+ */
+export function zIndexOnRoot(element: Element): Finding | undefined {
+  if (element.parent !== undefined || element.style.zIndex === undefined) return undefined;
+
+  return {
+    rule: "z-index-on-root",
+    key: nameOf(element),
+    detail: `zIndex ${element.style.zIndex}`
+  };
+}
+
+/**
+ * Runs the five rules over every live element.
  *
  * @param ctx - Domain context of the ui plugin.
  * @returns One finding per rule and element, in element order.
@@ -152,7 +174,8 @@ export function runLint(ctx: UiCtx): readonly Finding[] {
       tapTarget(ctx, element, scale),
       textOverflow(ctx, element),
       absoluteWithoutReason(element),
-      nineSliceClipped(element)
+      nineSliceClipped(element),
+      zIndexOnRoot(element)
     ]) {
       if (finding !== undefined) findings.push(finding);
     }

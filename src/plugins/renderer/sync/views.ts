@@ -31,6 +31,7 @@ import {
   release
 } from "./pools";
 import { parentOf } from "./pose";
+import { drawShapePath, strokeShape } from "./shape-path";
 import { anchoredBox, boxOf, layoutSprite } from "./sizing";
 import {
   clearFrames,
@@ -341,29 +342,6 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
 }
 
 /**
- * Draws the rectangle of a shape: one path with the corners the value asks for, filled in the
- * colour of the value at the alpha given. At alpha 0 the path stays unfilled, so only a stroke
- * shows.
- *
- * @param object - The graphics to draw on.
- * @param value - The shape value.
- * @param fillAlpha - The alpha of the fill: the value's own for the shape, 1 for a clip mask.
- */
-function drawRect(object: PixiGraphics, value: Readonly<ShapeValue>, fillAlpha: number): void {
-  object.clear();
-
-  if (value.radius > 0) {
-    object.roundRect(0, 0, value.w, value.h, value.radius);
-  } else {
-    object.rect(0, 0, value.w, value.h);
-  }
-
-  if (fillAlpha <= 0) return;
-
-  object.fill(fillAlpha < 1 ? { color: value.fill, alpha: fillAlpha } : { color: value.fill });
-}
-
-/**
  * Keeps the clip rectangle of a shape in step with its value: a clipping shape gets a wrapper
  * whose children are masked, and a shape that stopped clipping loses both mask and effect.
  *
@@ -388,7 +366,7 @@ function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<Sh
   const mask = view.mask ?? new pixi.Graphics();
 
   mask.label = `clip#${entity}`;
-  drawRect(mask, value, 1);
+  drawShapePath(mask, value, 1);
 
   if (mask.parent !== wrapper) wrapper.addChild(mask);
 
@@ -410,9 +388,8 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (value === undefined || !isGraphics(object)) return;
 
-  drawRect(object, value, value.fillAlpha);
-
-  if (value.strokeWidth > 0) object.stroke({ color: value.stroke, width: value.strokeWidth });
+  drawShapePath(object, value, value.fillAlpha);
+  strokeShape(object, value);
 
   object.alpha = value.alpha;
   view.hitBox = { x: 0, y: 0, width: value.w, height: value.h };

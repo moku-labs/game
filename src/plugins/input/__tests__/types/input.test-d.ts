@@ -3,7 +3,15 @@ import { LocalWrite } from "../../../ui/components";
 import type { AnyComponentType, EcsApi, Entity, TagType } from "../../../world/types";
 import type { PointerValue } from "../../components";
 import { PointerOver } from "../../components";
-import type { Config, InputApi, RawSample, TapListener, Target } from "../../types";
+import type {
+  Config,
+  InputApi,
+  KeyInput,
+  KeyListener,
+  RawSample,
+  TapListener,
+  Target
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -118,3 +126,16 @@ expectTypeOf(off).toEqualTypeOf<() => void>();
 
 // @ts-expect-error — a tap listener gets the entity, not a projection key
 input.onTap((key: string) => key.length);
+
+// ─── the keyboard ─────────────────────────────────────────────
+
+expectTypeOf<KeyInput>().toEqualTypeOf<{ key: string; shift: boolean }>();
+expectTypeOf(input.onKey).toEqualTypeOf<(fn: KeyListener) => () => void>();
+expectTypeOf(input.key("Tab", { shift: true })).toEqualTypeOf<boolean>();
+
+input.onKey(key => key.key === "Escape");
+input.onKey(() => undefined);
+input.key("Enter");
+
+// @ts-expect-error — shift is a flag, not a key name
+input.key("Tab", { shift: "Shift" });

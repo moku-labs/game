@@ -5,6 +5,7 @@
  */
 
 import type { Hint } from "../../flow/types";
+import type { KeyInput } from "../../input/types";
 import type { Json } from "../../model/types";
 import type { TransformValue } from "../../renderer/components";
 import type {
@@ -236,6 +237,18 @@ export type Root = {
 };
 
 /**
+ * The keyboard focus: the focused element, the two entities of the ring drawn around it, what
+ * the ring was last drawn at, and whether ui itself is tapping, so its own Enter tap does not
+ * read as a pointer tap that clears the focus.
+ */
+export type FocusState = {
+  entity: Entity | undefined;
+  ring: { halo: Entity; ring: Entity } | undefined;
+  drawn: string | undefined;
+  tapping: boolean;
+};
+
+/**
  * jsx module state. `hosts` holds the elements with a `hosts` prop; `hosted` maps a world view to
  * the element that hosts it.
  */
@@ -251,6 +264,7 @@ export type JsxState = {
   hosts: Set<Entity>;
   hosted: Map<Entity, Entity>;
   reconciles: number;
+  focus: FocusState;
 };
 
 /**
@@ -264,7 +278,10 @@ export type JsxState = {
  * const node: UiNode = {
  *   key: "boardSlot", type: "stack", rect: { x: 55, y: 223, w: 970, h: 970 },
  *   style: { width: 970, height: 970, fit: "contain" },
- *   state: { pressed: false, hover: false, disabled: false, active: false, selected: false, covered: false },
+ *   state: {
+ *     pressed: false, hover: false, focus: false, disabled: false, active: false, selected: false,
+ *     covered: false
+ *   },
  *   fitScale: 0.8,
  *   children: []
  * };
@@ -290,7 +307,12 @@ export type UiNode = {
  * ```
  */
 export type Finding = {
-  rule: "tap-target" | "text-overflow" | "absolute-without-reason" | "nine-slice-clipped";
+  rule:
+    | "tap-target"
+    | "text-overflow"
+    | "absolute-without-reason"
+    | "nine-slice-clipped"
+    | "z-index-on-root";
   key: string;
   detail: string;
 };
@@ -313,23 +335,25 @@ export type CommonProps = {
 
 /**
  * The payload a button sends to the gate, or the patch it writes into the nearest instance.
+ * `escape` makes it the control the Escape key taps while its root is the top one.
  *
  * @example
  * ```ts
  * const props: ButtonProps = { intent: "claim", payload: { orderId: "o1" } };
+ * const close: ButtonProps = { intent: "close", escape: true };
  * ```
  */
-export type ButtonProps = CommonProps &
-  (
+export type ButtonProps = CommonProps & { escape?: boolean } & (
     | { intent?: string; payload?: Json; local?: never }
     | { intent?: never; payload?: never; local?: Record<string, unknown> }
   );
 
 /**
- * The two state flags the pointer sets on an element: `input` tags it `Pressed` from down to up,
- * and `PointerOver` while an idle mouse or pen is over it.
+ * The three state flags set on an element from outside the markup: `input` tags it `Pressed`
+ * from down to up and `PointerOver` while an idle mouse or pen is over it, and the keyboard
+ * focus sets `focus`.
  */
-export type PointerFlag = "pressed" | "hover";
+export type PointerFlag = "pressed" | "hover" | "focus";
 
 /**
  * jsx module shape, injected onto the plugin API. `tree`, `find` and `lint` are the public half.
@@ -350,4 +374,6 @@ export type JsxModule = {
   applyTap(entity: Entity): void;
   markPointer(entity: Entity, flag: PointerFlag, on: boolean): void;
   playEnter(entity: Entity): void;
+  key(input: KeyInput): boolean;
+  blur(): void;
 };

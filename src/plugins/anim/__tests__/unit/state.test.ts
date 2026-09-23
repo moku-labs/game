@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createAnimState } from "../../state";
 
-const ctx = { config: { maxTracks: 2000 } };
+const ctx = { config: { maxTracks: 2000, reducedMotion: false } };
 
 describe("createAnimState", () => {
   it("starts with an empty track table, no timeline, no animation and no listener", () => {

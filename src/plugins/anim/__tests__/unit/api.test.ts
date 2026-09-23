@@ -12,10 +12,16 @@ const flight = defineAnimation("hud.coinsFly", {
 });
 
 describe("anim api", () => {
-  it("exposes play, finishAll, active and onMark", () => {
+  it("exposes play, finishAll, active, onMark and reducedMotion", () => {
     const mock = createMockAnim();
 
-    expect(Object.keys(mock.api).toSorted()).toEqual(["active", "finishAll", "onMark", "play"]);
+    expect(Object.keys(mock.api).toSorted()).toEqual([
+      "active",
+      "finishAll",
+      "onMark",
+      "play",
+      "reducedMotion"
+    ]);
   });
 
   it("counts the running tracks in active and ends them all with finishAll", () => {

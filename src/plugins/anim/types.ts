@@ -191,6 +191,10 @@ export type Events = {
  * An enter walk starts on the first key and ends on the rest pose at `at: 1`; an exit walk starts
  * where the view is and ends on the last key, the pose the element leaves in.
  *
+ * In a loop (`loop: { track }`) every Transform field is an offset added to the rest pose: `dx`, `dy`, `rotation`
+ * and `scale` (`scale: 0.05` grows a scale-1 view to 1.05). `alpha` stays absolute. The loop
+ * stands on its first key until that key's `at`, and its last key repeats its first one.
+ *
  * @example
  * ```ts
  * // A popup board at 42 % of its swing: 14 u below its rest, tilted 5°, slightly larger.
@@ -217,12 +221,17 @@ export type MotionKeyframe = {
  *
  * @example
  * ```ts
- * createApp({ plugins: [...screen], pluginConfigs: { anim: { maxTracks: 500 } } });
+ * createApp({ plugins: [...screen], pluginConfigs: { anim: { maxTracks: 500, reducedMotion: true } } });
  * ```
  */
 export type Config = {
   /** Dev guard: one warning each time the running track count rises past this number. */
   maxTracks: number;
+  /**
+   * Start value of reduced motion: every track but a loop takes 0 ms and every loop stands on
+   * its first key. `app.anim.reducedMotion(on)` switches it while the game runs.
+   */
+  reducedMotion: boolean;
 };
 
 /**
@@ -250,6 +259,8 @@ export type State = {
   frame: number;
   /** True while the track count is over `maxTracks`, so the warning is one per crossing. */
   overMaxTracks: boolean;
+  /** The live reduced-motion switch. The frozen `Config.reducedMotion` only seeds it. */
+  reducedMotion: boolean;
   /** Remover of `world.projection.setDriver`. */
   removeDriver: (() => void) | undefined;
   /** Remover of `time.onFrame("animate")`. */
@@ -343,16 +354,38 @@ export type AnimApi = {
   finishAll(): void;
 
   /**
-   * How many tracks are in the table, the delayed ones included.
+   * How many tracks are in the table, the delayed ones and the running loops included. A loop
+   * never ends by itself, so a screen at rest counts one track per loop lane it shows.
    *
    * @returns The number of running tracks.
    * @example
    * ```ts
    * // The assertion every motion test ends with: the screen came to rest.
    * app.anim.active(); // 0
+   *
+   * // Two order cards sway on their pins (a `loop` of rotation keys): at rest, two loops run.
+   * app.anim.active(); // 2
    * ```
    */
   active(): number;
+
+  /**
+   * Reads, and with an argument sets, reduced motion. While it is on, every track started from
+   * then on takes 0 ms: enter and exit, state changes, change and settle motions, drag returns
+   * and timeline tweens land on their target at the next frame, and their marks and sounds still
+   * fire. Every loop stands on its first key, a running one at once.
+   *
+   * @param on - The new value; left out, the value is only read.
+   * @returns The value after the call.
+   * @example
+   * ```ts
+   * // The device asks for less motion: web/main.ts follows the system setting.
+   * app.anim.reducedMotion(); // false: the start value of Config.reducedMotion
+   * app.anim.reducedMotion(true); // true: a popup opened now stands in its rest pose next frame
+   * app.anim.reducedMotion(); // true
+   * ```
+   */
+  reducedMotion(on?: boolean): boolean;
 
   /**
    * Registers a listener called for every mark a timeline reaches, next to the `anim:mark`

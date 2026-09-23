@@ -74,10 +74,11 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 
 /**
  * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
- * `PointerOver`, the two effect handlers, the tap listener and `LocalWrite` as an input control,
- * so the cursor shows a hand over a local-state button. Every remover goes into the state,
- * so the teardown closes exactly these, and gives every hosted view its layer back before the ui
- * entities go.
+ * `PointerOver`, the two effect handlers, the two tap listeners (the `LocalWrite` patch, and the
+ * pointer tap that clears the keyboard focus), the key listener of the focus and `LocalWrite` as
+ * an input control, so the cursor shows a hand over a local-state button. Every remover goes into
+ * the state, so the teardown closes exactly these, and gives every hosted view its layer back
+ * before the ui entities go.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param jsx - The jsx module.
@@ -104,6 +105,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.input.onTap(jsx.applyTap),
+    ctx.deps.input.onTap(() => jsx.blur()),
+    ctx.deps.input.onKey(jsx.key),
     ctx.deps.input.controls.add(LocalWrite),
     () => jsx.releaseHosted(),
     () => ecs.despawnOwnedBy(UI_OWNER)
@@ -165,5 +168,9 @@ export function stopUi(state: State): void {
   state.jsx.removing.clear();
   state.jsx.hosts.clear();
   state.jsx.hosted.clear();
+  // The ring entities went with the ui owner above.
+  state.jsx.focus.entity = undefined;
+  state.jsx.focus.ring = undefined;
+  state.jsx.focus.drawn = undefined;
   state.styles.viewport = undefined;
 }

@@ -25,13 +25,14 @@ function emptySet<Value>(): Set<Value> {
 
 /**
  * Creates the initial anim state: an empty track table, the empty field bookkeeping of the
- * retarget policy and the offsets accumulator, no timeline and no animation.
+ * retarget policy and the offsets accumulator, no timeline and no animation, and reduced motion
+ * at its configured start value.
  *
- * @param _ctx - Minimal context. The anim state depends on nothing in it.
- * @param _ctx.config - Resolved plugin config.
+ * @param ctx - Minimal context.
+ * @param ctx.config - Resolved plugin config.
  * @returns The plugin state.
  */
-export function createAnimState(_ctx: { readonly config: Readonly<Config> }): State {
+export function createAnimState(ctx: { readonly config: Readonly<Config> }): State {
   return {
     tracks: emptyMap(),
     nextId: 1,
@@ -43,6 +44,7 @@ export function createAnimState(_ctx: { readonly config: Readonly<Config> }): St
     markListeners: emptySet(),
     frame: 0,
     overMaxTracks: false,
+    reducedMotion: ctx.config.reducedMotion,
     removeDriver: undefined,
     offFrame: undefined,
     offPlay: undefined,

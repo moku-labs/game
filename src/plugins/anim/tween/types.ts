@@ -7,14 +7,15 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
 
 /**
  * One running track: the numeric fields of one component of one entity moving from the values
- * read at the end of the delay to the exact target, straight or through keyframe segments.
+ * read at the end of the delay to the exact target, straight or through keyframe segments. A
+ * track with repeats walks again from its first segment each time a run ends.
  *
  * @example
  * ```ts
  * const track: Track = {
  *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 }, ms: 350, ease: "out",
  *   delayMs: 0, elapsed: 0, from: undefined, muted: () => new Set(), additive: false,
- *   driven: false, bornFrame: 4, ended: false, segments: undefined
+ *   driven: false, bornFrame: 4, ended: false, segments: undefined, repeatsLeft: 0
  * };
  * ```
  */
@@ -42,6 +43,11 @@ export type Track = {
    * segment without an ease runs on the track's `ease`.
    */
   readonly segments: readonly TrackSegment[] | undefined;
+  /**
+   * The runs still to go after the one that plays: `0` for a track that runs once, `Infinity`
+   * for a loop (`repeat: "forever"`), which never ends by itself.
+   */
+  repeatsLeft: number;
 };
 
 /**

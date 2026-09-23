@@ -16,10 +16,11 @@ import { initAnim, startAnim, stopAnim } from "./lifecycle";
 import { createAnimState } from "./state";
 import type { Config, Events } from "./types";
 
-const config: Config = { maxTracks: 2000 };
+const config: Config = { maxTracks: 2000, reducedMotion: false };
 
 /**
- * Anim plugin: `app.anim.play(animation, slots)`, `app.anim.finishAll()`.
+ * Anim plugin: `app.anim.play(animation, slots)`, `app.anim.finishAll()`,
+ * `app.anim.reducedMotion(on)`.
  *
  * @example
  * ```ts

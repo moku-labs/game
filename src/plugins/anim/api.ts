@@ -16,7 +16,7 @@ import type {
 } from "./types";
 
 /**
- * Creates the anim API: `app.anim.play`, `finishAll`, `active` and `onMark`.
+ * Creates the anim API: `app.anim.play`, `finishAll`, `active`, `onMark` and `reducedMotion`.
  *
  * @param ctx - Kernel context of the anim plugin.
  * @returns The plugin API.
@@ -41,6 +41,12 @@ export function createAnimApi(ctx: KernelSlice): AnimApi {
       return (): void => {
         actx.state.markListeners.delete(fn);
       };
+    },
+
+    reducedMotion: (on?: boolean): boolean => {
+      if (on !== undefined) actx.state.reducedMotion = on;
+
+      return actx.state.reducedMotion;
     }
   };
 }

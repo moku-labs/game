@@ -121,9 +121,10 @@ describe("identity", () => {
   it("reads the state prop of the markup plus the pressed flag", () => {
     const node = { type: "button", props: { state: { active: true } }, children: [] };
 
-    expect(isFlagsOf(node, { pressed: true, hover: false, covered: false })).toEqual({
+    expect(isFlagsOf(node, { pressed: true, hover: false, focus: false, covered: false })).toEqual({
       pressed: true,
       hover: false,
+      focus: false,
       disabled: false,
       active: true,
       selected: false,
@@ -138,9 +139,12 @@ describe("identity", () => {
       children: []
     };
 
-    expect(isFlagsOf(node, { pressed: false, hover: true, covered: true })).toMatchObject({
+    expect(
+      isFlagsOf(node, { pressed: false, hover: true, focus: true, covered: true })
+    ).toMatchObject({
       disabled: true,
       hover: true,
+      focus: true,
       covered: true
     });
   });

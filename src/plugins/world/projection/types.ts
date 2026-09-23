@@ -112,12 +112,15 @@ export type TrackSegment = { at: number; ease?: Ease; to: Record<string, number>
  * Options of `ViewHandle.tween`. An additive tween adds its delta over the value the absolute
  * writer of the field holds, instead of owning the field. `segments` turns the tween into a
  * keyframe walk: the segments run one after another over `ms` on one clock, and `to` is where the
- * last one ends.
+ * last one ends. `repeat` runs the walk again from its first segment when it ends: a number
+ * counts the extra runs, `"forever"` never ends. The world passes it to the driver unchanged;
+ * without a driver the target is written once.
  *
  * @example
  * ```ts
  * const options: TweenOptions = { ms: 350, ease: "out", delayMs: 40 };
  * const walk: TweenOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
+ * const sway: TweenOptions = { ms: 2400, additive: true, repeat: "forever", segments: [{ at: 0.5, to: { rotation: 0.05 } }, { at: 1, to: { rotation: 0 } }] };
  * ```
  */
 export type TweenOptions = {
@@ -126,6 +129,7 @@ export type TweenOptions = {
   delayMs?: number;
   additive?: boolean;
   segments?: readonly TrackSegment[];
+  repeat?: number | "forever";
 };
 
 /**
@@ -143,12 +147,15 @@ export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number };
  * What the driver is told about one track: how long it runs, how it eases, how long it waits,
  * whether it adds to the field or owns it, and the keyframe segments it walks. A track with
  * segments walks them over `ms` on one clock and claims every field a segment names; its target
- * `to` is the last segment's target.
+ * `to` is the last segment's target. A track with `repeat` starts its walk again when it ends
+ * (a number counts the extra runs, `"forever"` never ends); the instant driver ignores it and
+ * writes the end pose once.
  *
  * @example
  * ```ts
  * const options: TrackOptions = { ms: 250, ease: "outBack", delayMs: 0, additive: false };
  * const walk: TrackOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
+ * const twice: TrackOptions = { ms: 400, ease: "inOut", delayMs: 0, additive: true, repeat: 1 };
  * ```
  */
 export type TrackOptions = {
@@ -157,6 +164,7 @@ export type TrackOptions = {
   delayMs?: number;
   additive?: boolean;
   segments?: readonly TrackSegment[];
+  repeat?: number | "forever";
 };
 
 /**

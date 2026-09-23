@@ -126,6 +126,131 @@ describe("sync shapes", () => {
     expect(graphics.fills).toEqual([{ color: 0x10_20_30 }]);
   });
 
+  it("draws a triangle pointing right that fills its box, whatever the radius", async () => {
+    const mock = await started();
+    const glyph = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ kind: "triangle", w: 60, h: 40, radius: 12, fill: 0xff_ff_ff })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, glyph);
+
+    expect(graphics.ops.map(({ op, x, y }) => ({ op, x, y }))).toEqual([
+      { op: "moveTo", x: 0, y: 0 },
+      { op: "lineTo", x: 60, y: 20 },
+      { op: "lineTo", x: 0, y: 40 },
+      { op: "closePath", x: 0, y: 0 }
+    ]);
+    expect(graphics.fills).toEqual([{ color: 0xff_ff_ff }]);
+    expect(mock.ctx.state.sync.views.get(glyph)?.hitBox).toEqual({
+      x: 0,
+      y: 0,
+      width: 60,
+      height: 40
+    });
+  });
+
+  it("strokes a dashed rectangle as dash segments on a new path after the fill", async () => {
+    const mock = await started();
+    const box = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 100, h: 50, fill: 0x10_20_30, stroke: 0x3a_22_12, strokeWidth: 4, dash: 10 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, box);
+    const starts = graphics.ops.filter(entry => entry.op === "moveTo");
+
+    expect(graphics.ops.slice(0, 2).map(entry => entry.op)).toEqual(["rect", "beginPath"]);
+    expect(graphics.fills).toEqual([{ color: 0x10_20_30 }]);
+    expect(graphics.strokes).toEqual([{ color: 0x3a_22_12, width: 4 }]);
+    expect(starts).toHaveLength(20);
+    expect(graphics.ops.slice(2, 4).map(({ op, x, y }) => ({ op, x, y }))).toEqual([
+      { op: "moveTo", x: 0, y: 0 },
+      { op: "lineTo", x: 10, y: 0 }
+    ]);
+    expect(starts.at(-1)).toMatchObject({ x: 0, y: 15 });
+  });
+
+  it("walks the sampled corners of a dashed rounded rectangle", async () => {
+    const mock = await started();
+    const ring = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({
+        w: 100,
+        h: 60,
+        radius: 10,
+        fillAlpha: 0,
+        stroke: 0x3a_22_12,
+        strokeWidth: 4,
+        dash: 10
+      })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, ring);
+    const moves = graphics.ops.flatMap((entry, index) => (entry.op === "moveTo" ? [index] : []));
+    const sixth = graphics.ops.slice(moves[5], moves[6]);
+
+    expect(graphics.ops[0]).toEqual({
+      op: "roundRect",
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 60,
+      radius: 10
+    });
+    expect(graphics.ops[1]?.op).toBe("beginPath");
+    expect(graphics.fills).toEqual([]);
+    expect(graphics.strokes).toEqual([{ color: 0x3a_22_12, width: 4 }]);
+    expect(moves).toHaveLength(21);
+    expect(sixth[0]).toMatchObject({ op: "moveTo", x: 85, y: 0 });
+    expect(sixth[1]).toMatchObject({ op: "lineTo", x: 90, y: 0 });
+    expect(sixth.length).toBeGreaterThan(3);
+
+    for (const point of sixth.slice(2)) {
+      expect(Math.hypot(point.x - 90, point.y - 10)).toBeCloseTo(10, 0);
+    }
+  });
+
+  it("draws no dashes when a dashed shape has no stroke width", async () => {
+    const mock = await started();
+    const plain = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 100, h: 50, dash: 10 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(graphicsOf(mock, plain).ops.map(entry => entry.op)).toEqual(["rect"]);
+    expect(graphicsOf(mock, plain).strokes).toEqual([]);
+  });
+
+  it("keeps the clip mask of a dashed shape solid", async () => {
+    const mock = await started();
+    const panel = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 100, h: 50, clip: true, stroke: 0x3a_22_12, strokeWidth: 4, dash: 10 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const mask = mock.ctx.state.sync.views.get(panel)?.mask as unknown as FakeGraphics | undefined;
+
+    expect(mask?.ops).toEqual([{ op: "rect", x: 0, y: 0, width: 100, height: 50, radius: 0 }]);
+    expect(mask?.fills).toEqual([{ color: 0xff_ff_ff }]);
+    expect(mask?.strokes).toEqual([]);
+  });
+
   it("puts the hit box at the transform, anchored top left", async () => {
     const mock = await started();
     const entity = mock.world.ecs.spawn(owner, [
