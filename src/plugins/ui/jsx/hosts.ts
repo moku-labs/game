@@ -51,29 +51,54 @@ export function trackHost(state: JsxState, element: Element): void {
 }
 
 /**
- * The host element of every live view a mounted host names: the first host wins a view. Only the
- * host elements are walked, never the whole screen.
+ * The element of a host entity while it hosts: mounted, live and not leaving.
+ *
+ * @param state - The jsx state.
+ * @param host - An entity of the host set.
+ * @returns The element, or `undefined` while it hosts nothing.
+ */
+function liveHost(state: JsxState, host: Entity): Element | undefined {
+  const element = state.elements.get(host);
+
+  return element === undefined || !element.live || state.exiting.has(host) ? undefined : element;
+}
+
+/**
+ * The host that owns the views of a projection: the first live host that names it. A view
+ * belongs to one projection, so the first host wins each of its views.
+ *
+ * @param state - The jsx state.
+ * @param name - The projection name.
+ * @returns The owning host, `undefined` when no live host names the projection.
+ */
+function ownerOf(state: JsxState, name: string): Entity | undefined {
+  for (const host of state.hosts) {
+    const element = liveHost(state, host);
+
+    if (element !== undefined && hostsOf(element.node).includes(name)) return host;
+  }
+
+  return undefined;
+}
+
+/**
+ * Gives the host as parent to every view of one projection that has no parent and is not held
+ * by a drag. The parent is queued while the phase runs, so ownership is decided by name first.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The jsx state.
- * @returns The host entity per view entity.
+ * @param name - The projection the host owns.
+ * @param host - The owning host.
  */
-function wantedHosts(ctx: UiCtx, state: JsxState): Map<Entity, Entity> {
-  const wanted = new Map<Entity, Entity>();
+function parentViews(ctx: UiCtx, state: JsxState, name: string, host: Entity): void {
+  const ecs = ctx.deps.world.ecs;
 
-  for (const host of state.hosts) {
-    const element = state.elements.get(host);
+  for (const view of ctx.deps.world.projection.entitiesOf(name)) {
+    if (ecs.has(view, Held) || ecs.has(view, Parent)) continue;
 
-    if (element === undefined || !element.live || state.exiting.has(host)) continue;
-
-    for (const name of hostsOf(element.node)) {
-      for (const view of ctx.deps.world.projection.entitiesOf(name)) {
-        if (!wanted.has(view)) wanted.set(view, host);
-      }
-    }
+    ecs.add(view, Parent({ entity: host }));
+    state.hosted.set(view, host);
   }
-
-  return wanted;
 }
 
 /**
@@ -118,8 +143,6 @@ function unparent(ctx: UiCtx, view: Entity, host: Entity): void {
 export function hostViews(ctx: UiCtx, state: JsxState): void {
   if (state.hosts.size === 0 && state.hosted.size === 0) return;
 
-  const ecs = ctx.deps.world.ecs;
-
   for (const [view, host] of state.hosted) {
     if (stillHosts(ctx, state, view, host)) continue;
 
@@ -127,11 +150,19 @@ export function hostViews(ctx: UiCtx, state: JsxState): void {
     unparent(ctx, view, host);
   }
 
-  for (const [view, host] of wantedHosts(ctx, state)) {
-    if (ecs.has(view, Held) || ecs.has(view, Parent)) continue;
+  // Only the host elements are walked, never the whole screen; a name listed twice counts once.
+  for (const host of state.hosts) {
+    const element = liveHost(state, host);
 
-    ecs.add(view, Parent({ entity: host }));
-    state.hosted.set(view, host);
+    if (element === undefined) continue;
+
+    const names = hostsOf(element.node);
+
+    for (const [index, name] of names.entries()) {
+      if (names.indexOf(name) === index && ownerOf(state, name) === host) {
+        parentViews(ctx, state, name, host);
+      }
+    }
   }
 }
 

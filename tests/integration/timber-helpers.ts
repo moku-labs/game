@@ -26,6 +26,48 @@ export type WorldEntity = {
 type WorldSnapshot = { entities: WorldEntity[] };
 
 /**
+ * Tells a plain object from the other JSON values.
+ *
+ * @param value - A JSON value.
+ * @returns True for an object that is not an array.
+ * @example
+ * ```ts
+ * isRecord({ a: 1 }); // true
+ * ```
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Checks the committed player has the shape the tests read: the rules' state and the settings.
+ *
+ * @param value - The player root of the model snapshot.
+ * @returns True when it can be read as the fixture's `Player`.
+ */
+function isPlayer(value: unknown): value is Player {
+  return isRecord(value) && isRecord(value.merge) && isRecord(value.settings);
+}
+
+/**
+ * Checks the world snapshot lists entities with an id, an owner and components.
+ *
+ * @param value - What `world.ecs.snapshot()` answered.
+ * @returns True when it can be read as a `WorldSnapshot`.
+ */
+function isWorldSnapshot(value: unknown): value is WorldSnapshot {
+  if (!isRecord(value) || !Array.isArray(value.entities)) return false;
+
+  return value.entities.every(
+    entity =>
+      isRecord(entity) &&
+      typeof entity.id === "number" &&
+      isRecord(entity.owner) &&
+      isRecord(entity.components)
+  );
+}
+
+/**
  * A player with a plank on the board, which the first order takes, and a twig; seven of ten
  * energy counted at the start moment, so `boot` has nothing to catch up.
  */
@@ -266,7 +308,11 @@ export function popupNodes(game: Game, key: string): Ui.UiNode[] {
  * @returns The player tree.
  */
 export function playerOf(game: Game): Player {
-  return game.app.model.store.snapshot().player as unknown as Player;
+  const player: unknown = game.app.model.store.snapshot().player;
+
+  if (!isPlayer(player)) throw new Error("the committed player is not the fixture's Player");
+
+  return player;
 }
 
 /**
@@ -276,7 +322,9 @@ export function playerOf(game: Game): Player {
  * @returns Their snapshots.
  */
 export function spawnedByAnim(game: Game): WorldEntity[] {
-  const snapshot = game.app.world.ecs.snapshot() as unknown as WorldSnapshot;
+  const snapshot: unknown = game.app.world.ecs.snapshot();
+
+  if (!isWorldSnapshot(snapshot)) throw new Error("the world snapshot lists no readable entities");
 
   return snapshot.entities.filter(
     entity => entity.owner.kind === "plugin" && entity.owner.name === "anim"

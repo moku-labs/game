@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { StringsCompiler } from "../../scan/cli";
 import { runCli } from "../../scan/cli";
 import { makeTree, pngBytes, removeTree } from "./scan-fixtures";
 
@@ -33,6 +34,26 @@ function fakeUi(): { lines: string[]; info(m: string): void; warn(m: string): vo
   };
 }
 
+/** A strings compiler for tests that need no strings: nothing changed, no keys. */
+const noStrings: StringsCompiler = () =>
+  Promise.resolve({ changed: false, locales: [], keys: [], notes: [] });
+
+/** A compile that wrote two keys in two locales and has one note. */
+const twoLocales: StringsCompiler = () =>
+  Promise.resolve({
+    changed: true,
+    locales: ["en", "ru"],
+    keys: ["board.title", "board.score"],
+    notes: ['"ru" lacks "board.score"']
+  });
+
+/** A compile whose outputs differ from the disk. */
+const staleStrings: StringsCompiler = () =>
+  Promise.resolve({ changed: true, locales: ["en"], keys: ["board.title"], notes: [] });
+
+/** A compile that throws. */
+const brokenStrings: StringsCompiler = () => Promise.reject(new Error("[game] i18n: bad message."));
+
 async function readText(file: string): Promise<string> {
   return await readFile(file, "utf8");
 }
@@ -47,7 +68,7 @@ describe("runCli", () => {
     const root = await tree({ "features/ui/assets/panel{nine=48}.png": pngBytes(256, 128) });
     const ui = fakeUi();
 
-    const code = await runCli(["--root", root], ui);
+    const code = await runCli(["--root", root], noStrings, ui);
 
     expect(code).toBe(0);
     expect(await readText(path.join(root, "manifest.json"))).toContain('"ui.panel"');
@@ -66,7 +87,9 @@ describe("runCli", () => {
     const keys = path.join(root, "src", "generated", "assets.ts");
     const ui = fakeUi();
 
-    expect(await runCli(["--root", root, "--manifest", manifest, "--keys", keys], ui)).toBe(0);
+    expect(
+      await runCli(["--root", root, "--manifest", manifest, "--keys", keys], noStrings, ui)
+    ).toBe(0);
     expect(await readText(manifest)).toContain('"ui.panel"');
     expect(await readText(keys)).toContain('| "board.cell"');
     expect(ui.lines.join("\n")).toContain("2 bundles, 2 files");
@@ -77,11 +100,11 @@ describe("runCli", () => {
     const manifest = path.join(root, "manifest.json");
     const keys = path.join(root, "generated", "assets.ts");
 
-    await runCli(["--root", root], fakeUi());
+    await runCli(["--root", root], noStrings, fakeUi());
     const first = [await readText(manifest), await readText(keys)];
     const ui = fakeUi();
 
-    expect(await runCli(["--root", root], ui)).toBe(0);
+    expect(await runCli(["--root", root], noStrings, ui)).toBe(0);
     expect([await readText(manifest), await readText(keys)]).toEqual(first);
     expect(ui.lines.join("\n")).toContain("up to date");
     expect(ui.lines.join("\n")).not.toContain("wrote");
@@ -90,10 +113,10 @@ describe("runCli", () => {
   it("passes --check on an up-to-date tree", async () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
 
-    await runCli(["--root", root], fakeUi());
+    await runCli(["--root", root], noStrings, fakeUi());
     const ui = fakeUi();
 
-    expect(await runCli(["--root", root, "--check"], ui)).toBe(0);
+    expect(await runCli(["--root", root, "--check"], noStrings, ui)).toBe(0);
     expect(ui.lines.join("\n")).toContain("up to date");
   });
 
@@ -101,7 +124,7 @@ describe("runCli", () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
     const ui = fakeUi();
 
-    const code = await runCli(["--root", root, "--check"], ui);
+    const code = await runCli(["--root", root, "--check"], noStrings, ui);
 
     expect(code).toBe(1);
     expect(ui.lines.join("\n")).toContain("are out of date");
@@ -111,12 +134,12 @@ describe("runCli", () => {
   it("fails --check after an asset was added", async () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
 
-    await runCli(["--root", root], fakeUi());
+    await runCli(["--root", root], noStrings, fakeUi());
     await writeFile(path.join(root, "features", "board", "assets", "gem.png"), pngBytes(16, 16));
 
     const ui = fakeUi();
 
-    expect(await runCli(["--root", root, "--check"], ui)).toBe(1);
+    expect(await runCli(["--root", root, "--check"], noStrings, ui)).toBe(1);
     expect(ui.lines.join("\n")).toContain("assets.ts");
   });
 
@@ -127,7 +150,7 @@ describe("runCli", () => {
     });
     const ui = fakeUi();
 
-    await runCli(["--root", root], ui);
+    await runCli(["--root", root], noStrings, ui);
 
     expect(ui.lines.join("\n")).toContain('warn ignored "features/ui/assets/notes.md"');
   });
@@ -136,7 +159,7 @@ describe("runCli", () => {
     const root = await tree({ "features/ui/assets/panel.v2.png": pngBytes(16, 16) });
     const ui = fakeUi();
 
-    const code = await runCli(["--root", root], ui);
+    const code = await runCli(["--root", root], noStrings, ui);
 
     expect(code).toBe(1);
     expect(ui.lines.join("\n")).toContain("error [game] assets: the scan found 1 problem.");
@@ -146,28 +169,68 @@ describe("runCli", () => {
   it("refuses an unknown flag", async () => {
     const ui = fakeUi();
 
-    expect(await runCli(["--sizes"], ui)).toBe(1);
+    expect(await runCli(["--sizes"], noStrings, ui)).toBe(1);
     expect(ui.lines.join("\n")).toContain('error [game] assets: unknown option "--sizes".');
   });
 
   it("refuses an option without its value", async () => {
     const ui = fakeUi();
 
-    expect(await runCli(["--root", "--check"], ui)).toBe(1);
+    expect(await runCli(["--root", "--check"], noStrings, ui)).toBe(1);
     expect(ui.lines.join("\n")).toContain('"--root" needs a path');
   });
 
   it("refuses a trailing option without its value", async () => {
     const ui = fakeUi();
 
-    expect(await runCli(["--keys"], ui)).toBe(1);
+    expect(await runCli(["--keys"], noStrings, ui)).toBe(1);
     expect(ui.lines.join("\n")).toContain('"--keys" needs a path');
+  });
+
+  it("compiles the strings next to the key module and passes the check flag", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+    const keys = path.join(root, "src", "generated", "assets.ts");
+    const compile = vi.fn(noStrings);
+
+    await runCli(["--root", root, "--keys", keys, "--check"], compile, fakeUi());
+
+    expect(compile).toHaveBeenCalledWith(path.resolve(root), path.join(root, "src", "generated"), {
+      check: true
+    });
+  });
+
+  it("warns with the notes of the compile and counts its strings", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+    const ui = fakeUi();
+
+    expect(await runCli(["--root", root], twoLocales, ui)).toBe(0);
+    expect(ui.lines).toContain('warn "ru" lacks "board.score"');
+    expect(ui.lines).toContain("info 2 strings in 2 locales (en, ru).");
+  });
+
+  it("fails --check when only the generated strings are out of date", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+
+    await runCli(["--root", root], noStrings, fakeUi());
+
+    const ui = fakeUi();
+
+    expect(await runCli(["--root", root, "--check"], staleStrings, ui)).toBe(1);
+    expect(ui.lines.join("\n")).toContain("error the generated strings are out of date.");
+  });
+
+  it("reports a failed compile as a failed run", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+    const ui = fakeUi();
+
+    expect(await runCli(["--root", root], brokenStrings, ui)).toBe(1);
+    expect(ui.lines).toContain("error [game] i18n: bad message.");
   });
 
   it("prints through the branded console when no console is passed", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    expect(await runCli(["--sizes"])).toBe(1);
+    expect(await runCli(["--sizes"], noStrings)).toBe(1);
     expect(error).toHaveBeenCalled();
   });
 });

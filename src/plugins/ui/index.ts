@@ -36,6 +36,8 @@ const config: Config = { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } };
  * ```
  */
 export const uiPlugin = /*#__PURE__*/ createPlugin("ui", {
+  // animPlugin: no API is required; the edge orders the plugins, so the tween driver behind every
+  // motion handle is installed before ui plays its first motion.
   depends: [
     timePlugin,
     flowPlugin,

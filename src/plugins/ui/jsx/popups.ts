@@ -158,6 +158,32 @@ function coveredByLive(state: JsxState, root: Root): boolean {
 }
 
 /**
+ * Tells whether a root waits for the settle step: released or covered, and not leaving yet.
+ *
+ * @param state - The jsx state.
+ * @param root - A mounted root.
+ * @returns True when the settle step has to look at it.
+ */
+function waits(state: JsxState, root: Root): boolean {
+  return (root.popup?.released === true || root.covered) && !state.removing.has(root.entity);
+}
+
+/**
+ * Tells whether any root waits for the settle step. Allocates nothing, so a frame without a
+ * released or covered popup costs one scan.
+ *
+ * @param state - The jsx state.
+ * @returns True when at least one root waits.
+ */
+function anyWaits(state: JsxState): boolean {
+  for (const root of state.roots.values()) {
+    if (waits(state, root)) return true;
+  }
+
+  return false;
+}
+
+/**
  * The step at the top of every reconcile: released popup roots leave once the flow rests, the
  * newest first, so a coverer goes before the popup beneath it; a covered root waits for its
  * coverer; a covered root whose coverer is gone and whose own effect still runs is uncovered.
@@ -167,12 +193,9 @@ function coveredByLive(state: JsxState, root: Root): boolean {
  * @param unmount - Starts the exit of a root.
  */
 export function settlePopups(ctx: UiCtx, state: JsxState, unmount: (entity: Entity) => void): void {
-  const waiting = [...state.roots.values()].filter(
-    root => (root.popup?.released === true || root.covered) && !state.removing.has(root.entity)
-  );
+  if (!anyWaits(state)) return;
 
-  if (waiting.length === 0) return;
-
+  const waiting = [...state.roots.values()].filter(root => waits(state, root));
   const rests = flowRests(ctx.deps.flow.state());
 
   waiting.sort((first, second) => second.order - first.order);

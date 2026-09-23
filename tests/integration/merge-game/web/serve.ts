@@ -3,6 +3,7 @@
  * tiles as static files. Bun's `bun ./index.html` serves the page only, so the assets need this
  * one route. Run from `tests/integration/merge-game/`: `bun ./web/serve.ts`.
  */
+import { createBrandConsole } from "@moku-labs/common/cli";
 import { file } from "bun";
 import index from "./index.html";
 
@@ -25,4 +26,4 @@ const server = Bun.serve({
   }
 });
 
-console.log(`merge-game on ${server.url}`);
+createBrandConsole().info(`merge-game on ${server.url}`);

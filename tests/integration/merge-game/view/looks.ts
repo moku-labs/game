@@ -86,7 +86,8 @@ function showLook(
 ): void {
   const wanted = wantedLook(world, entity);
   const before = shown.get(entity) ?? { look: "rest" };
-  const last = before.look === "held" && wanted !== "held" ? { look: "rest" as const } : before;
+  const justReleased = before.look === "held" && wanted !== "held";
+  const last = justReleased ? { look: "rest" as const } : before;
 
   if (wanted === undefined || wanted === last.look) {
     if (last !== before) shown.set(entity, last);
