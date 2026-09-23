@@ -146,11 +146,11 @@ helpers below, pivot included.
   The rest is read only when `stats()` is called.
 - `capture()` guards with `typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__` inline,
   not with `isDev()`: Bun does not inline a function across modules, and the inline guard folds under
-  a production `define`, so the capture code leaves the bundle. The dev branch logs
-  `"moku:dev renderer.capture"` at debug level. `renderer.extract.base64` exists on the shared
-  systems of both backends (8.21); it draws the stage into a texture over `app.screen`, cleared with
-  `config.background`. All captures waiting for one frame share one extract. `onStop` answers a
-  capture still waiting with `undefined`.
+  a production `define`, so the capture code leaves the bundle. The dev branch logs `"moku:dev"`
+  with `{ command: "renderer.capture" }` at debug level. `renderer.extract.base64` exists on the
+  shared systems of both backends (8.21); it draws the stage into a texture over `app.screen`,
+  cleared with `config.background`. All captures waiting for one frame share one extract.
+  `onStop` answers a capture still waiting with `undefined`.
 
 ### Pose helpers (engine-internal)
 

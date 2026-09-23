@@ -174,12 +174,13 @@ None. An answer goes down to `flow.gate` as a direct call; pointer work never go
 
 ## Doors
 
-`control.ts` holds three commands of the editor's write door, `@moku-labs/game/control`, dev builds
+`control.ts` holds two commands of the editor's write door, `@moku-labs/game/control`, dev builds
 only. Each goes through `app.input`, so the gate decides and the session stays clean (effect `route`).
+The tap command, `game.tap`, lives in ui, since it finds an element by its ui key; it reads a
+projection target with `readTarget` of this file.
 
 | Key in `commands` | id | Input | Does |
 |---|---|---|---|
-| `tap` | `game.tap` | `{ key: "string?", target: "json?" }`, exactly one | `input.tap` on the ui element with that `key` (through `ui.find`, which needs `ui`) or on the view `target: { projection, key }` |
 | `drag` | `game.drag` | `{ from: "json", to: "json" }` | `input.drag(from, to)`, both `{ projection, key }` |
 | `key` | `game.key` | `{ key: "string", shift: "boolean?" }` | `input.pressKey(key, { shift })` |
 

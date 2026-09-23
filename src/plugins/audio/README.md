@@ -56,7 +56,7 @@ The settings node commits `player.settings.audio`; on every `model:committed` th
 
 ## The journal
 
-With `journal` above 0 every sound that started is kept in a ring of that size: each `sfx` play and each music track that began, as `{ key, bus, kind, at }`, where `at` is `app.time.snapshot().elapsed`. A sound dropped before the unlock, a missing file and a switch to the track that already plays leave no entry. `app.audio.journal()` returns a copy, oldest first; `onStop` clears it. Tests and the dev page set `journal: 200`.
+With `journal` above 0 every sound that started is kept in a ring of that size: each `sfx` play and each music track that began, as `{ key, bus, kind, at }`, where `at` is `app.time.snapshot().elapsed`. A sound dropped before the unlock, a missing file and a switch to the track that already plays leave no entry. `app.audio.journal()` returns the list itself, oldest first: it is frozen, and every new sound replaces it with a new frozen list, so a list read earlier never changes. `onStop` resets it to a frozen empty list. Tests and the dev page set `journal: 200`.
 
 ```ts
 app.audio.journal(); // [{ key: "orders.complete", bus: "sfx", kind: "sfx", at: 1600 }]
