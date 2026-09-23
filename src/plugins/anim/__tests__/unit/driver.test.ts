@@ -224,3 +224,127 @@ describe("anim/tween driver", () => {
     expect(mock.api.active()).toBe(0);
   });
 });
+
+describe("anim/tween driver — keyframe segments", () => {
+  it("walks the segments of a track on one clock, each with its own ease", () => {
+    const { mock, driver, entity } = setup();
+    const segments = [
+      { at: 0.5, ease: "linear", to: { x: 100 } },
+      { at: 1, ease: "in", to: { x: 50 } }
+    ] as const;
+
+    driver.track(entity, Transform, { x: 50 }, { ms: 200, ease: "linear", segments }, open);
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(50);
+
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
+
+    // Halfway through the second segment, eased "in": 100 + (50 − 100) × 0.25.
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(87.5);
+
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(50);
+    expect(mock.api.active()).toBe(0);
+  });
+
+  it("eases a segment that names no curve with the curve of the track", () => {
+    const { mock, driver, entity } = setup();
+
+    driver.track(
+      entity,
+      Transform,
+      { x: 100 },
+      { ms: 100, ease: "in", segments: [{ at: 1, to: { x: 100 } }] },
+      open
+    );
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(25);
+  });
+
+  it("holds a field a segment does not name where the segment before left it", () => {
+    const { mock, driver, entity } = setup();
+    const segments = [
+      { at: 0.5, ease: "linear", to: { x: 100 } },
+      { at: 1, ease: "linear", to: { y: 40 } }
+    ] as const;
+
+    driver.track(entity, Transform, { x: 100, y: 40 }, { ms: 100, segments }, open);
+    step(mock, 25);
+
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 50, y: 0 });
+
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 20 });
+
+    step(mock, 25);
+
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 40 });
+  });
+
+  it("claims every field a segment names, so an older owner of that field loses it", () => {
+    const { mock, driver, entity } = setup();
+    const older = driver.track(entity, Transform, { y: 300 }, { ms: 1000 }, open);
+    const walk = driver.track(
+      entity,
+      Transform,
+      { x: 10 },
+      {
+        ms: 100,
+        segments: [
+          { at: 0.5, to: { y: 50 } },
+          { at: 1, to: { x: 10 } }
+        ]
+      },
+      open
+    );
+
+    expect(older.active()).toBe(false);
+
+    walk.finish();
+
+    // The target was filled with the last value each segment field reached.
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 10, y: 50 });
+    expect(mock.api.active()).toBe(0);
+  });
+
+  it("holds the last target once the time is past the last segment", () => {
+    const { mock, driver, entity } = setup();
+    const walk = driver.track(
+      entity,
+      Transform,
+      { x: 100 },
+      { ms: 100, segments: [{ at: 0.5, ease: "linear", to: { x: 100 } }] },
+      open
+    );
+
+    step(mock, 75);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
+    expect(walk.active()).toBe(true);
+
+    step(mock, 25);
+
+    expect(walk.active()).toBe(false);
+  });
+
+  it("jumps to a segment that ends at 0 on the first frame", () => {
+    const { mock, driver, entity } = setup();
+    const segments = [
+      { at: 0, to: { x: 80 } },
+      { at: 1, ease: "linear", to: { x: 0 } }
+    ] as const;
+
+    driver.track(entity, Transform, { x: 0 }, { ms: 100, segments }, open);
+    step(mock, 25);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(60);
+  });
+});

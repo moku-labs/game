@@ -127,7 +127,8 @@ export function createViewHandle(
         ms: options.ms,
         ease: options.ease ?? "out",
         delayMs: options.delayMs ?? 0,
-        additive: options.additive ?? false
+        additive: options.additive ?? false,
+        ...(options.segments === undefined ? {} : { segments: options.segments })
       }),
 
     toRest: <Value extends object>(

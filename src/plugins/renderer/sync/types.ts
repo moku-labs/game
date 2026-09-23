@@ -97,7 +97,7 @@ export type HitBox = { x: number; y: number; width: number; height: number };
  *   object: sprite, kind: "Sprite", poolKey: "Sprite:board.cell", layer: "items",
  *   textureKey: "board.cell", wrapper: undefined, placeholder: false, mask: undefined,
  *   display: undefined, value: undefined, drawScale: { x: 1, y: 1 }, frameKey: "",
- *   hitBox: { x: -32, y: -32, width: 64, height: 64 }
+ *   outline: undefined, hitBox: { x: -32, y: -32, width: 64, height: 64 }
  * };
  * ```
  */
@@ -126,6 +126,8 @@ export type View = {
   drawScale: Point;
   /** The crop a `"cover"` sprite shows, as its `frames` key; `""` when it shows none. */
   frameKey: string;
+  /** The debug outline of a nine-slice, in its wrapper; `undefined` while debug is off. */
+  outline: PixiGraphics | undefined;
   hitBox: HitBox;
 };
 
@@ -353,6 +355,61 @@ export type FontsApi = {
 };
 
 /**
+ * The debug switches of the renderer.
+ *
+ * @example
+ * ```ts
+ * const switches: DebugSwitches = { nineSlice: true };
+ * ```
+ */
+export type DebugSwitches = { nineSlice: boolean };
+
+/**
+ * The debug drawing of the renderer, `app.renderer.sync.debug`. The switch outlines every
+ * nine-slice at once; a single panel asks for its own outline with `NineSlice.debug` (`ui`:
+ * `style.debug`).
+ *
+ * @example
+ * ```ts
+ * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
+ * app.renderer.sync.debug.nineSlice(true);
+ * app.renderer.sync.debug.state(); // { nineSlice: true }
+ * ```
+ */
+export type DebugApi = {
+  /**
+   * Turns the outline of every nine-slice on or off. The outline strokes the bounds of the panel
+   * and the four lines Pixi cuts its texture at: cyan, red when the corners overlap or the texture
+   * is missing. A nine-slice whose own `debug` is true keeps its outline while the switch is off.
+   * The views are drawn again on the next pass.
+   *
+   * @param on - True to outline every nine-slice.
+   * @example
+   * ```ts
+   * // A dev build binds a key: "d" shows where the settings popup cuts its parchment and tabs.
+   * globalThis.addEventListener("keydown", event => {
+   *   if (event.key === "d") app.renderer.sync.debug.nineSlice(true);
+   * });
+   * // After the next frame the parchment 1000x1040 with insets 72/76 shows lines at x 72 and
+   * // 928, y 76 and 964.
+   * ```
+   */
+  nineSlice(on: boolean): void;
+
+  /**
+   * What the debug switches are set to, as a fresh object.
+   *
+   * @returns The switches.
+   * @example
+   * ```ts
+   * // An e2e test makes sure no outline is drawn before it compares a screenshot.
+   * app.renderer.sync.debug.state(); // { nineSlice: false }
+   * ```
+   */
+  state(): DebugSwitches;
+};
+
+/**
  * sync module API, `app.renderer.sync`. The one owner of every display object: it builds them
  * from components, sorts them inside the named layers of the scene and answers hit tests.
  *
@@ -395,6 +452,11 @@ export type SyncApi = {
    * The bitmap fonts of the one application.
    */
   fonts: FontsApi;
+
+  /**
+   * The debug drawing: the nine-slice outline.
+   */
+  debug: DebugApi;
 
   /**
    * The Pixi object of an entity, for debugging and for the plugins that draw their own thing.
@@ -478,6 +540,10 @@ export type SyncState = {
   removed: Set<Entity>;
   /** Entities whose `Parent` was removed: `world` marks no change then, only `onRemoved` fires. */
   reparented: Set<Entity>;
+  /** The debug switches, from `config.debug` and `debug.nineSlice`. */
+  debug: DebugSwitches;
+  /** The nine-slice switch moved: the next pass writes every nine-slice again. */
+  outlinesStale: boolean;
   cleanups: Array<() => void>;
 };
 

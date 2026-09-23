@@ -4,7 +4,7 @@
  * Deterministic: the only clock is the `delta` a caller hands in.
  */
 import type { AnyComponent } from "../../world/ecs/types";
-import type { Entity, TrackOptions } from "../../world/types";
+import type { Ease, Entity, TrackOptions, TrackSegment } from "../../world/types";
 import { Animation, countPlaying } from "../components";
 import type { AnimCtx } from "../types";
 import { applyEase } from "./easing";
@@ -91,6 +91,77 @@ function readFrom(
 }
 
 /**
+ * Walks the keyframe segments of a track to one normalised time of the whole track. Each segment
+ * eases, with its own curve or the track's, from where the segment before left the field; a
+ * segment that does not name the field holds it, and past the last segment the field holds too.
+ *
+ * @param segments - The segments of the track, in order.
+ * @param ease - The curve of a segment that names none.
+ * @param field - The field to read.
+ * @param start - The value the track started from.
+ * @param fraction - Normalised time of the whole track.
+ * @returns The value of the field.
+ * @example
+ * ```ts
+ * walkValue([{ at: 0.5, to: { x: 100 } }, { at: 1, to: { x: 50 } }], "linear", "x", 0, 0.75); // 75
+ * ```
+ */
+function walkValue(
+  segments: readonly TrackSegment[],
+  ease: Ease,
+  field: string,
+  start: number,
+  fraction: number
+): number {
+  let from = start;
+  let fromAt = 0;
+
+  for (const segment of segments) {
+    const target = segment.to[field] ?? from;
+
+    if (fraction <= segment.at) {
+      const span = segment.at - fromAt;
+      const t = span <= 0 ? 1 : (fraction - fromAt) / span;
+
+      // On the key itself the value is the key's, exactly: no float drift from `from + Δ × 1`.
+      if (t >= 1) return target;
+
+      return from + (target - from) * applyEase(segment.ease ?? ease, t);
+    }
+
+    from = target;
+    fromAt = segment.at;
+  }
+
+  return from;
+}
+
+/**
+ * The value one field of a track takes at one normalised time: eased straight from the start to
+ * the target, or along the keyframe segments.
+ *
+ * @param track - The track.
+ * @param field - The field to read.
+ * @param start - The value the track started from.
+ * @param target - The value the track ends on.
+ * @param fraction - Normalised time of the whole track.
+ * @returns The value of the field.
+ */
+function fieldValue(
+  track: Track,
+  field: string,
+  start: number,
+  target: number,
+  fraction: number
+): number {
+  if (track.segments === undefined) {
+    return start + (target - start) * applyEase(track.ease, fraction);
+  }
+
+  return walkValue(track.segments, track.ease, field, start, fraction);
+}
+
+/**
  * Writes one frame of a track: the eased value for an absolute track, the contributed delta for
  * an additive one, and in both cases the base plus every offset of the field. A component the
  * entity no longer carries ends the track silently.
@@ -112,7 +183,6 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
 
   const from = readFrom(actx, track, stored);
   const owned = track.muted();
-  const eased = final ? 1 : applyEase(track.ease, fraction);
   const patch: Record<string, number> = {};
 
   for (const [field, target] of Object.entries(track.to)) {
@@ -120,7 +190,7 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
 
     const key = fieldKey(track.entity, track.component.componentName, field);
     const start = from[field] ?? target;
-    const value = final ? target : start + (target - start) * eased;
+    const value = final ? target : fieldValue(track, field, start, target, fraction);
 
     if (track.additive) offsetsOf(actx, key).set(track.id, value - start);
     else actx.state.bases.set(key, value);
@@ -252,13 +322,37 @@ export function beginFrame(actx: AnimCtx): void {
 }
 
 /**
- * Starts one track. The start values are read when the delay ends, never here.
+ * The target of a new track: the fields the caller passed, plus every field a keyframe segment
+ * names at the last value a segment gives it, so `claimFields` books the whole walk at once.
+ *
+ * @param to - The numeric target fields the caller passed.
+ * @param segments - The keyframe segments of the track, if any.
+ * @returns A new target record the track owns.
+ * @example
+ * ```ts
+ * targetOf({ x: 10 }, [{ at: 0.5, to: { y: 50 } }, { at: 1, to: { x: 10 } }]); // { y: 50, x: 10 }
+ * ```
+ */
+function targetOf(
+  to: Record<string, number>,
+  segments: readonly TrackSegment[] | undefined
+): Record<string, number> {
+  const target: Record<string, number> = {};
+
+  for (const segment of segments ?? []) Object.assign(target, segment.to);
+
+  return Object.assign(target, to);
+}
+
+/**
+ * Starts one track. The start values are read when the delay ends, never here. A track with
+ * keyframe segments walks them over `ms` and books every field they name.
  *
  * @param actx - Domain context of the anim plugin.
  * @param entity - The entity to animate.
  * @param component - The component to animate.
  * @param to - The numeric target fields.
- * @param options - Duration, easing, delay and the additive flag.
+ * @param options - Duration, easing, delay, the additive flag and the keyframe segments.
  * @param muted - The fields another writer owns, read at every write.
  * @param driven - True when a timeline step advances the track itself.
  * @returns The track, already ended when there was nothing to drive.
@@ -272,11 +366,12 @@ export function startTrack(
   muted: () => ReadonlySet<string>,
   driven = false
 ): Track {
+  const target = targetOf(to, options.segments);
   const track: Track = {
     id: actx.state.nextId,
     entity,
     component,
-    to: { ...to },
+    to: target,
     ms: options.ms,
     ease: options.ease ?? "out",
     delayMs: options.delayMs ?? 0,
@@ -286,7 +381,8 @@ export function startTrack(
     additive: options.additive === true,
     driven,
     bornFrame: actx.state.frame,
-    ended: Object.keys(to).length === 0
+    ended: Object.keys(target).length === 0,
+    segments: options.segments
   };
 
   actx.state.nextId += 1;

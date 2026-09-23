@@ -2,7 +2,7 @@
  * @file audio plugin — state factory. The buses start at the configured volumes, so a headless
  * run answers `volume()` with the same numbers a run with a context does.
  */
-import type { Bus, BusState, Config, MusicTrack, State } from "./types";
+import type { Bus, BusState, Config, MusicTrack, SfxRequest, State } from "./types";
 
 /**
  * Creates the decode cache. Its own function because lint rule L5 refuses a collection built
@@ -21,6 +21,15 @@ function emptyCache(): Map<string, Promise<AudioBuffer>> {
  */
 function emptyWarned(): Set<string> {
   return new Set();
+}
+
+/**
+ * Creates the queue of sounds fired while the unlock is pending.
+ *
+ * @returns An empty queue, keyed by asset key.
+ */
+function emptyPending(): Map<string, SfxRequest> {
+  return new Map();
 }
 
 /**
@@ -58,6 +67,8 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     buses,
     paused: false,
     unlocked: false,
+    resuming: false,
+    pendingSfx: emptyPending(),
     decoded: emptyCache(),
     warned: emptyWarned(),
     warnedVolumes: false,

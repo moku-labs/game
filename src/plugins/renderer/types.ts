@@ -8,7 +8,7 @@ import type { Api as LifecycleApi } from "../lifecycle/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Api as WorldApi } from "../world/types";
 import type { HostApi, HostInternal, HostState } from "./host/types";
-import type { SyncApi, SyncInternal, SyncState } from "./sync/types";
+import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
 /**
@@ -125,6 +125,8 @@ export type AspectRange = { min: number; max: number };
  *   plugins: [...screen],
  *   pluginConfigs: { renderer: { mount: "#game", background: 0x101018, maxResolution: 2 } }
  * });
+ * // A debug build of the fixture outlines every nine-slice from the first frame.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", debug: { nineSlice: true } } } });
  * ```
  */
 export type Config = {
@@ -146,6 +148,8 @@ export type Config = {
   unsupportedMessage: string;
   /** Loader seam. Tests pass a fake module. */
   loadPixi: () => Promise<PixiModule>;
+  /** Debug drawing at start. `app.renderer.sync.debug` switches it while the game runs. */
+  debug: DebugSwitches;
 };
 
 /**
@@ -217,6 +221,8 @@ export type { HostApi, HostInternal, HostState } from "./host/types";
 export type {
   CoverFrame,
   CreateTextureOptions,
+  DebugApi,
+  DebugSwitches,
   DisplayAdapter,
   DisplayEntry,
   DisplaysApi,

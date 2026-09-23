@@ -135,7 +135,8 @@ describe("renderer lifecycle", () => {
     expect(mock.pixi.last().renderer.resizes.at(-1)).toEqual({ width: 1920, height: 1080 });
     expect(mock.ctx.state.viewport.frame).toEqual({ x: 555, y: 0, width: 810, height: 1080 });
     expect(mock.ctx.state.sync.root?.position.x).toBe(555);
-    expect(mock.ctx.state.sync.root?.scale.x).toBe(0.75);
+    // The 810x1080 frame fits the 1920 reference long side: 1080 / 1920.
+    expect(mock.ctx.state.sync.root?.scale.x).toBe(0.5625);
 
     const after = mock.pixi.last().renderer.resizes.length;
 

@@ -82,16 +82,17 @@ export function readInsets(probe: HTMLElement | undefined): SafeArea {
 }
 
 /**
- * Cuts the insets down to the part that overlaps the drawn frame and converts them to reference
- * units. A bar already covers the notch: then nothing is left for the game to avoid.
+ * Cuts the insets down to the part that overlaps the drawn frame, still in CSS pixels. A bar
+ * already covers the notch: then nothing is left for the game to avoid. The viewport scale is fit
+ * to what is left, so this runs before the scale exists.
  *
- * @param options - Insets, frame, canvas origin, window size and the scale.
- * @returns The safe area in reference units.
+ * @param options - Insets, frame, canvas origin and window size.
+ * @returns The insets that cover the frame, in CSS pixels.
  */
-export function clipToFrame(options: ClipOptions): SafeArea {
-  const { insets, frame, canvas, scale } = options;
+export function clipInsets(options: Omit<ClipOptions, "scale">): SafeArea {
+  const { insets, frame, canvas } = options;
 
-  if (scale <= 0 || frame.width <= 0 || frame.height <= 0) return { ...NONE };
+  if (frame.width <= 0 || frame.height <= 0) return { ...NONE };
 
   const left = canvas.left + frame.x;
   const top = canvas.top + frame.y;
@@ -99,9 +100,31 @@ export function clipToFrame(options: ClipOptions): SafeArea {
   const bottom = top + frame.height;
 
   return {
-    top: Math.max(0, insets.top - top) / scale,
-    right: Math.max(0, right - (options.window.width - insets.right)) / scale,
-    bottom: Math.max(0, bottom - (options.window.height - insets.bottom)) / scale,
-    left: Math.max(0, insets.left - left) / scale
+    top: Math.max(0, insets.top - top),
+    right: Math.max(0, right - (options.window.width - insets.right)),
+    bottom: Math.max(0, bottom - (options.window.height - insets.bottom)),
+    left: Math.max(0, insets.left - left)
+  };
+}
+
+/**
+ * Cuts the insets down to the part that overlaps the drawn frame and converts them to reference
+ * units.
+ *
+ * @param options - Insets, frame, canvas origin, window size and the scale.
+ * @returns The safe area in reference units.
+ */
+export function clipToFrame(options: ClipOptions): SafeArea {
+  const { scale } = options;
+
+  if (scale <= 0) return { ...NONE };
+
+  const clipped = clipInsets(options);
+
+  return {
+    top: clipped.top / scale,
+    right: clipped.right / scale,
+    bottom: clipped.bottom / scale,
+    left: clipped.left / scale
   };
 }

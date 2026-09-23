@@ -60,9 +60,18 @@ describe("visualOf", () => {
         width: 200,
         height: 100,
         alpha: 0.5,
-        tint: 0x80_80_80
+        tint: 0x80_80_80,
+        debug: false
       });
     }
+  });
+
+  it("passes debug of the style into the nine-slice, so the renderer outlines its slices", () => {
+    const [outlined] = visualOf(elementOf({ style: { nineSlice: "ui.card", debug: true } }));
+    const [plain] = visualOf(elementOf({ style: { nineSlice: "ui.card" } }));
+
+    expect(outlined?.value).toMatchObject({ texture: "ui.card", debug: true });
+    expect(plain?.value).toMatchObject({ debug: false });
   });
 
   it("sizes an image to its rect with the fit of its prop, contain by default", () => {
@@ -155,6 +164,15 @@ describe("restTransform", () => {
       x: 25,
       y: 60
     });
+  });
+
+  it("hangs the pivot above the box for a negative origin y and keeps the box on its rect", () => {
+    const pose = restTransform(rect, parent, { origin: { x: 0.5, y: -0.5 } }, 1);
+
+    // The rope anchor of a popup: half the height above the top edge, in the middle.
+    expect(pose).toEqual({ x: 80, y: 30, rotation: 0, scale: 1, pivot: { x: 50, y: -30 } });
+    // The unscaled box still sits on its rect, relative to the parent: (30, 60).
+    expect({ x: pose.x - pose.pivot.x, y: pose.y - pose.pivot.y }).toEqual({ x: 30, y: 60 });
   });
 
   it("adds the offsets and the scale of the style", () => {

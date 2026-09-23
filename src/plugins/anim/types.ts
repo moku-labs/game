@@ -7,7 +7,7 @@ import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as FlowApi, TypeTag } from "../flow/types";
 import type { Api as TimeApi } from "../time/types";
-import type { Entity, MotionHandle, Api as WorldApi } from "../world/types";
+import type { Ease, Entity, MotionHandle, Api as WorldApi } from "../world/types";
 import type { RunningTimeline, Step } from "./timeline/types";
 import type { Track } from "./tween/types";
 
@@ -180,6 +180,35 @@ export type Events = {
   "anim:mark": { animation: string; mark: string };
   /** A timeline ended or was finished. Not emitted on `cancel()`. */
   "anim:finished": { animation: string };
+};
+
+/**
+ * One key of a keyframe track in `defineMotion`: where on the track it sits (`at`, 0..1 of
+ * `transition.ms`), the curve of the segment that ends on it (default `"inOut"`) and the pose.
+ * `dx` and `dy` are offsets from the rest pose in reference units; `rotation` (radians), `scale`
+ * and `alpha` are absolute. A field the key leaves out holds the previous key's value.
+ *
+ * An enter walk starts on the first key and ends on the rest pose at `at: 1`; an exit walk starts
+ * where the view is and ends on the last key, the pose the element leaves in.
+ *
+ * @example
+ * ```ts
+ * // A popup board at 42 % of its swing: 14 u below its rest, tilted 5°, slightly larger.
+ * const key: MotionKeyframe = { at: 0.42, ease: "out", Transform: { dy: 14, rotation: 0.087, scale: 1.04 } };
+ * ```
+ */
+export type MotionKeyframe = {
+  readonly at: number;
+  readonly ease?: Ease;
+  readonly Transform?: {
+    readonly dx?: number;
+    readonly dy?: number;
+    readonly rotation?: number;
+    readonly scale?: number;
+  };
+  readonly Shape?: { readonly alpha?: number };
+  readonly Sprite?: { readonly alpha?: number };
+  readonly NineSlice?: { readonly alpha?: number };
 };
 
 /**

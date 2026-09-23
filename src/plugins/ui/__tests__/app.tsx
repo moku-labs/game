@@ -346,6 +346,45 @@ export const fittedProjection = projection({
   )
 });
 
+/** How far above its rest the swinging board starts, in reference units. */
+export const swingDrop = 780;
+
+/** A popup swing written as keyframes: it drops in from above, overshoots and settles. */
+export const swingMotion = defineMotion({
+  keyframes: {
+    dropIn: [
+      { at: 0, Transform: { dy: -swingDrop, rotation: -0.035, scale: 0.8 } },
+      { at: 0.42, ease: "out", Transform: { dy: 14, rotation: 0.087, scale: 1.04 } },
+      { at: 0.86, Transform: { dy: 0, rotation: -0.012, scale: 1 } }
+    ]
+  },
+  transition: { ms: 1000 },
+  on: { enter: "dropIn" }
+});
+
+/** A board that swings in on its ropes around a pivot above it, and a panel with its slices outlined. */
+export const keyframedProjection = projection({
+  name: "keyframed",
+  layer: "ui",
+  from: (player: Player): { id: string; coins: number }[] => [
+    { id: "keyframed", coins: player.coins }
+  ],
+  key: (item: { id: string }) => item.id,
+  view: () => (
+    <column key="keyRoot" style={{ width: 1080, height: 1200, gap: 10 }}>
+      <panel
+        key="swinging"
+        style={{ width: 600, height: 400, fill: 0x10_10_18, origin: { x: 0.5, y: -0.5 } }}
+        motion={swingMotion}
+      />
+      <panel
+        key="outlined"
+        style={{ width: 300, height: 200, nineSlice: "ui.card", debug: true }}
+      />
+    </column>
+  )
+});
+
 /** The reward popup: its one outcome is the intent the node resolves with. */
 export const RewardPopup = defineComponent("RewardPopup", {
   outcomes: { claim: type<{ orderId: string }>() },
@@ -462,7 +501,8 @@ export const hudFeature = defineFeature("hud", {
     oddProjection,
     richProjection,
     showcaseProjection,
-    fittedProjection
+    fittedProjection,
+    keyframedProjection
   ],
   // The fourth entry is not a `defineComponent` result: `ui` skips what it cannot register.
   ui: [Settings, RewardPopup, Broken, { name: "NotAComponent" } as never],

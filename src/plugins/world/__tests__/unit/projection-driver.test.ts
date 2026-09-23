@@ -205,6 +205,72 @@ describe("projection driver slot", () => {
     ]);
   });
 
+  it("passes the keyframe segments of a tween to the driver unchanged", () => {
+    const world = createMockWorld();
+    const segments = [
+      { at: 0.4, ease: "out", to: { x: 140 } },
+      { at: 1, to: { x: 100 } }
+    ] as const;
+
+    tweenOnChange(world, { ms: 500, ease: "linear", segments });
+    world.frame(0);
+
+    expect(world.driver.started[0]?.options.segments).toBe(segments);
+    expect(world.driver.started[0]?.options).toEqual({
+      ms: 500,
+      ease: "linear",
+      delayMs: 0,
+      additive: false,
+      segments
+    });
+  });
+
+  it("names no segments when the tween has none", () => {
+    const world = createMockWorld();
+
+    tweenOnChange(world, { ms: 100 });
+    world.frame(0);
+
+    expect(Object.keys(world.driver.started[0]?.options ?? {})).toEqual([
+      "ms",
+      "ease",
+      "delayMs",
+      "additive"
+    ]);
+  });
+
+  it("writes the last value of every segment field at once without a driver", () => {
+    const world = createMockWorld();
+    const seen: Array<Record<string, unknown>> = [];
+
+    world.offDriver();
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view => {
+          const handle = view.tween(
+            Transform,
+            { x: 100 },
+            {
+              ms: 500,
+              segments: [
+                { at: 0.5, to: { x: 300, y: 40 } },
+                { at: 1, to: { x: 100 } }
+              ]
+            }
+          );
+
+          seen.push({ ...view.get(Transform) });
+
+          return handle;
+        }
+      }
+    });
+    commitItems(world, [{ id: "a", level: 1, x: 100, y: 0 }]);
+    world.frame(16);
+
+    expect(seen).toEqual([{ x: 100, y: 40, scale: 1 }]);
+  });
+
   it("passes the delayMs of toRest on, so the motion starts after the delay", () => {
     const world = createMockWorld();
 

@@ -49,6 +49,7 @@ function exposeSync(sync: SyncModule): SyncApi {
     textures: sync.textures,
     displays: sync.displays,
     fonts: sync.fonts,
+    debug: sync.debug,
     displayOf: sync.displayOf
   };
 }

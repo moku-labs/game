@@ -138,6 +138,10 @@ export type State = {
   /** A lifecycle push is in force: every bus is held at zero. */
   paused: boolean;
   unlocked: boolean;
+  /** A gesture called `resume()` and it has not settled yet. */
+  resuming: boolean;
+  /** Sounds fired while `resuming`, one per key; played when the context runs, dropped when it does not. */
+  pendingSfx: Map<string, SfxRequest>;
   /** Per key, evicted per key on `assets:bundle-unloaded`. */
   decoded: Map<string, Promise<AudioBuffer>>;
   /** Asset keys that already got their one warning. */

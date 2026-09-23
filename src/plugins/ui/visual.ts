@@ -78,7 +78,7 @@ function contentOf(props: Record<string, unknown>): string {
 
 /**
  * The visual component of an element: a sprite for an image or an icon, the text for a text, the
- * nine-slice of its style, or a rounded rectangle. A clipping element (`scroll`, `overflow:
+ * nine-slice of its style (outlined when the style sets `debug`), or a rounded rectangle. A clipping element (`scroll`, `overflow:
  * "hidden"`) keeps the rectangle, which carries the clip. A style with a stroke and no fill draws
  * only the stroke, a ring. A container with no fill and no stroke gets an invisible rectangle:
  * the renderer hangs children under the display object of their parent, so every parent needs
@@ -122,7 +122,16 @@ export function visualOf(element: Element): AnyComponentValue[] {
   const clip = type === "scroll" || style.overflow === "hidden";
 
   if (style.nineSlice !== undefined && !clip) {
-    return [NineSlice({ texture: style.nineSlice, width: rect.w, height: rect.h, alpha, tint })];
+    return [
+      NineSlice({
+        texture: style.nineSlice,
+        width: rect.w,
+        height: rect.h,
+        alpha,
+        tint,
+        debug: style.debug ?? false
+      })
+    ];
   }
 
   const filled = style.fill !== undefined || style.stroke !== undefined;

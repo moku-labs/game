@@ -20,7 +20,8 @@ const config: Config = {
   dragStartPx: 8,
   swipeMinPx: 48,
   swipeMaxMs: 300,
-  heldScale: 1
+  heldScale: 1,
+  cursor: { control: "pointer", idle: "" }
 };
 
 /**

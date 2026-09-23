@@ -1,7 +1,7 @@
 /**
- * @file anim plugin — `defineMotion`: the sugar that turns named poses into the three projection
- * motion hooks of `world`. Pure, no ctx: it only builds hooks that call `ViewHandle`, so a UI
- * element and a projection view play the same way through the same driver.
+ * @file anim plugin — `defineMotion`: the sugar that turns named poses and keyframe tracks into
+ * the three projection motion hooks of `world`. Pure, no ctx: it only builds hooks that call
+ * `ViewHandle`, so a UI element and a projection view play the same way through the same driver.
  */
 import type {
   NineSliceValue,
@@ -21,6 +21,8 @@ import type {
   ViewHandle
 } from "../world/types";
 import { asComponent } from "./components";
+import { checkTrack, playKeyframes } from "./keyframes";
+import type { MotionKeyframe } from "./types";
 
 /** What a motion transition runs for when the author named nothing else. */
 const DEFAULT_TRANSITION_MS = 250;
@@ -70,20 +72,23 @@ export type MotionState = {
 export type MotionTransition = { readonly ms: number; readonly ease: Ease };
 
 /**
- * What `defineMotion` is given: the named poses, how long the way between them takes, and which
- * hooks to build.
+ * What `defineMotion` is given: the named poses, the keyframe tracks, how long the way takes, and
+ * which hooks to build. `on.enter` and `on.exit` name a state or a track. For a track,
+ * `transition.ms` is the whole walk and each segment eases by its key, not by `transition.ease`.
  *
  * @example
  * ```ts
  * const spec: MotionSpec = {
  *   states: { hidden: { Transform: { scale: 0.8 } } },
- *   transition: { ms: 150, ease: "out" },
- *   on: { enter: "hidden", exit: "hidden", change: ["Transform"] }
+ *   keyframes: { dropIn: [{ at: 0, Transform: { dy: -780, scale: 0.8 } }, { at: 0.42, Transform: { dy: 14 } }] },
+ *   transition: { ms: 1000 },
+ *   on: { enter: "dropIn", exit: "hidden", change: ["Transform"] }
  * };
  * ```
  */
 export type MotionSpec = {
-  readonly states: Readonly<Record<string, MotionState>>;
+  readonly states?: Readonly<Record<string, MotionState>>;
+  readonly keyframes?: Readonly<Record<string, readonly MotionKeyframe[]>>;
   readonly transition?: { readonly ms?: number; readonly ease?: Ease };
   readonly on: {
     readonly enter?: string;
@@ -132,14 +137,84 @@ function posesOf(state: MotionState): Array<[AnyComponent, Record<string, number
 }
 
 /**
- * Reads one named pose off the spec.
+ * Reads one own entry of a record, so a name such as `"toString"` never reaches the prototype.
+ *
+ * @param record - The states or the keyframe tracks, if any.
+ * @param name - The name to look up.
+ * @returns The entry, or `undefined` when the record has no own entry of that name.
+ * @example
+ * ```ts
+ * ownEntry({ hidden: {} }, "hidden"); // {}
+ * ownEntry({ hidden: {} }, "toString"); // undefined
+ * ```
+ */
+function ownEntry<Value>(
+  record: Readonly<Record<string, Value>> | undefined,
+  name: string
+): Value | undefined {
+  return record !== undefined && Object.hasOwn(record, name) ? record[name] : undefined;
+}
+
+/**
+ * Checks a motion at definition time: every keyframe track, no name that is both a state and a
+ * track, and an `on.enter` / `on.exit` that names one of them.
  *
  * @param spec - What `defineMotion` was given.
- * @param name - Name of the state, or nothing.
- * @returns The pose, or `undefined` when no state was named.
+ * @throws {Error} With the name at fault, in the house format.
  */
-function stateOf(spec: MotionSpec, name: string | undefined): MotionState | undefined {
-  return name === undefined ? undefined : spec.states[name];
+function checkMotion(spec: MotionSpec): void {
+  for (const [name, keys] of Object.entries(spec.keyframes ?? {})) {
+    checkTrack(name, keys);
+
+    if (ownEntry(spec.states, name) !== undefined) {
+      throw new Error(
+        `[game] Motion "${name}" is both a state and a keyframe track.\n  Give one of them another name.`
+      );
+    }
+  }
+
+  for (const hook of ["enter", "exit"] as const) {
+    const name = spec.on[hook];
+
+    if (name === undefined) continue;
+    if (ownEntry(spec.states, name) !== undefined) continue;
+    if (ownEntry(spec.keyframes, name) !== undefined) continue;
+
+    throw new Error(
+      `[game] Motion names "${name}" in on.${hook}, but no state or track has it.\n  Define it in states or keyframes.`
+    );
+  }
+}
+
+/**
+ * Builds the enter or exit hook for the name `on` gave it: a state is reached with tweens, a
+ * keyframe track is walked.
+ *
+ * @param spec - What `defineMotion` was given, already checked.
+ * @param hook - Which hook to build.
+ * @param transition - The resolved transition.
+ * @returns The hook, or `undefined` when `on` names nothing for it.
+ */
+function hookOf(
+  spec: MotionSpec,
+  hook: "enter" | "exit",
+  transition: MotionTransition
+): ((view: ViewHandle<unknown>) => Motion) | undefined {
+  const name = spec.on[hook];
+
+  if (name === undefined) return undefined;
+
+  const state = ownEntry(spec.states, name);
+
+  if (state !== undefined) {
+    return hook === "enter"
+      ? view => playEnter(view, state, transition)
+      : view => playExit(view, state, transition);
+  }
+
+  const keys = ownEntry(spec.keyframes, name);
+
+  return keys === undefined ? undefined : view => playKeyframes(view, keys, transition.ms, hook);
 }
 
 /**
@@ -203,12 +278,15 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
 }
 
 /**
- * Builds the projection motion hooks of an element from named poses. The transition is resolved
- * here, at definition time, so every track it starts carries a concrete duration.
+ * Builds the projection motion hooks of an element from named poses and keyframe tracks. The
+ * transition is resolved and every name is checked here, at definition time, so every track it
+ * starts carries a concrete duration and a wrong name fails where it is written.
  *
- * @param spec - The named poses, the transition and the hooks to build.
+ * @param spec - The named poses, the keyframe tracks, the transition and the hooks to build.
  * @returns The `enter`, `exit` and `change` hooks. `settle` is left out: the default of `world`
  *   applies.
+ * @throws {Error} When a track is invalid, a name is both a state and a track, or `on` names
+ *   neither.
  * @example
  * ```ts
  * const buttonMotion = defineMotion({
@@ -220,21 +298,19 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
  * ```
  */
 export function defineMotion(spec: MotionSpec): ProjectionMotion<unknown> {
+  checkMotion(spec);
+
   const transition: MotionTransition = {
     ms: spec.transition?.ms ?? DEFAULT_TRANSITION_MS,
     ease: spec.transition?.ease ?? DEFAULT_TRANSITION_EASE
   };
-  const enterState = stateOf(spec, spec.on.enter);
-  const exitState = stateOf(spec, spec.on.exit);
+  const enter = hookOf(spec, "enter", transition);
+  const exit = hookOf(spec, "exit", transition);
   const changed = spec.on.change ?? [];
 
   return {
-    ...(enterState === undefined
-      ? {}
-      : { enter: (view: ViewHandle<unknown>): Motion => playEnter(view, enterState, transition) }),
-    ...(exitState === undefined
-      ? {}
-      : { exit: (view: ViewHandle<unknown>): Motion => playExit(view, exitState, transition) }),
+    ...(enter === undefined ? {} : { enter }),
+    ...(exit === undefined ? {} : { exit }),
     ...(changed.length === 0 ? {} : { change: changeHooks(changed, transition) })
   };
 }

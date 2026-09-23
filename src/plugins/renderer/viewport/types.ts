@@ -72,7 +72,10 @@ export type ViewportState = {
   frame: Rect;
   /** CSS pixels per reference unit. */
   scale: number;
-  /** The frame in reference units. The short side is always `referenceSide`. */
+  /**
+   * The frame in reference units: the short side is at least `referenceSide`, the long side inside
+   * the safe area at least `referenceLong`.
+   */
   reference: { width: number; height: number };
   safeArea: SafeArea;
   /** The observer saw a new size; the `render` callback applies it before drawing. */
@@ -84,13 +87,15 @@ export type ViewportState = {
 
 /**
  * viewport module API, `app.renderer.viewport`. The map between the window and the reference
- * space whose short side is always `referenceSide`.
+ * space. Both sides fit: the short side holds `referenceSide`, the long side inside the safe area
+ * holds `referenceLong`, and the smaller scale wins, so a wide screen gets a wider reference space.
  *
  * @example
  * ```ts
- * // A portrait game in a 1920x1080 window: an 810x1080 frame with bars left and right.
- * app.renderer.viewport.size(); // { width: 1080, height: 1440, scale: 0.75, ... }
- * app.renderer.viewport.toReference(960, 540); // { x: 540, y: 720 }
+ * // A portrait game in a 1920x1080 window: an 810x1080 frame with bars left and right, and the
+ * // 1920 reference long side decides the scale.
+ * app.renderer.viewport.size(); // { width: 1440, height: 1920, scale: 0.5625, ... }
+ * app.renderer.viewport.toReference(960, 540); // { x: 720, y: 960 }
  * ```
  */
 export type ViewportApi = {

@@ -3,7 +3,7 @@
  * the scale to reference units and the reference size of that rectangle.
  */
 import type { AspectRange } from "../types";
-import type { Orientation, Rect } from "./types";
+import type { Orientation, Rect, SafeArea } from "./types";
 
 const EMPTY: Rect = { x: 0, y: 0, width: 0, height: 0 };
 
@@ -60,35 +60,58 @@ export function fitFrame(
 }
 
 /**
- * CSS pixels per reference unit: the short side of the frame, in the designed orientation,
- * divided by the reference short side.
+ * CSS pixels per reference unit. Both sides fit: the short side of the frame, in the designed
+ * orientation, holds `referenceSide`, and the long side between its safe insets holds
+ * `referenceLong`. The smaller of the two scales wins, so on a wide screen the reference short side
+ * grows above `referenceSide`.
  *
  * @param frame - The drawn rectangle.
  * @param orientation - The orientation the game is designed for.
  * @param referenceSide - Short side of the reference resolution.
+ * @param referenceLong - Long side the layout needs inside the safe area; 0 fits the short side
+ *   alone.
+ * @param safe - The insets that cover the frame, in CSS pixels: top and bottom are read for a
+ *   portrait game, left and right for a landscape one.
  * @returns The scale. An empty frame answers 1, so nothing ever divides by zero.
  * @example
  * ```ts
- * scaleOf({ x: 555, y: 0, width: 810, height: 1080 }, "portrait", 1080); // 0.75
+ * const none = { top: 0, right: 0, bottom: 0, left: 0 };
+ * scaleOf({ x: 0, y: 0, width: 390, height: 844 }, "portrait", 1080, 1920, none); // 0.3611, the width wins
+ * scaleOf({ x: 0, y: 0, width: 768, height: 1024 }, "portrait", 1080, 1920, none); // 0.5333, the height wins
  * ```
  */
-export function scaleOf(frame: Rect, orientation: Orientation, referenceSide: number): number {
-  const short = orientation === "portrait" ? frame.width : frame.height;
+export function scaleOf(
+  frame: Rect,
+  orientation: Orientation,
+  referenceSide: number,
+  referenceLong: number,
+  safe: SafeArea
+): number {
+  const portrait = orientation === "portrait";
+  const short = portrait ? frame.width : frame.height;
 
   if (short <= 0 || referenceSide <= 0) return 1;
 
-  return short / referenceSide;
+  const byShort = short / referenceSide;
+  const long = portrait
+    ? frame.height - safe.top - safe.bottom
+    : frame.width - safe.left - safe.right;
+
+  if (referenceLong <= 0 || long <= 0) return byShort;
+
+  return Math.min(byShort, long / referenceLong);
 }
 
 /**
- * The frame in reference units. Its short side is always `referenceSide`.
+ * The frame in reference units: the short side is at least `referenceSide`, the long side inside
+ * the safe area at least `referenceLong`.
  *
  * @param frame - The drawn rectangle in CSS pixels.
  * @param scale - CSS pixels per reference unit.
  * @returns The same rectangle in reference units.
  * @example
  * ```ts
- * referenceOf({ x: 555, y: 0, width: 810, height: 1080 }, 0.75); // { width: 1080, height: 1440 }
+ * referenceOf({ x: 555, y: 0, width: 810, height: 1080 }, 0.5625); // { width: 1440, height: 1920 }
  * ```
  */
 export function referenceOf(frame: Rect, scale: number): { width: number; height: number } {

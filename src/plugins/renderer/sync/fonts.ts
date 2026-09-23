@@ -10,6 +10,29 @@ import type { SyncCtx, SyncState } from "./types";
 const CACHE_SUFFIX = "-bitmap";
 
 /**
+ * The three numbers of a Pixi bitmap font that decide where a line of glyphs is drawn. Pixi types
+ * them read-only; the fields are plain data, and this is the one place that writes them.
+ */
+type LineMetrics = {
+  baseLineOffset: number;
+  lineHeight: number;
+  fontMetrics: { fontSize: number };
+};
+
+/**
+ * Makes Pixi draw each glyph where the BMFont file puts it. The file measures `yoffset` from the
+ * line top, but Pixi v8 starts the line `lineHeight - base` lower (`baseLineOffset`) and, once that
+ * offset is 0, centres it by `(lineHeight - fontMetrics.fontSize) / 2`. Both go to 0, so a glyph
+ * lands at `yoffset` and `text` draws in the same box it measures.
+ *
+ * @param font - The font just built from the file.
+ */
+function drawFromLineTop(font: LineMetrics): void {
+  font.baseLineOffset = 0;
+  font.fontMetrics.fontSize = font.lineHeight;
+}
+
+/**
  * Tells whether a parsed JSON file carries the two tables a BMFont needs.
  *
  * @param value - What `JSON.parse` returned.
@@ -65,6 +88,9 @@ export function installFont(sctx: SyncCtx, key: string, fnt: string, texture: Pi
 
   const state = sctx.ctx.state.sync;
   const font = new pixi.BitmapFont({ data: parseFont(pixi, key, fnt), textures: [texture] });
+
+  drawFromLineTop(font);
+
   const cacheKey = `${key}${CACHE_SUFFIX}`;
 
   if (pixi.Cache.has(cacheKey)) pixi.Cache.remove(cacheKey);

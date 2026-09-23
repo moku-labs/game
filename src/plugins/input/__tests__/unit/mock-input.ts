@@ -32,7 +32,7 @@ export type StubBox = { entity: Entity; x: number; y: number; width: number; hei
 /** A canvas stub: five listener slots, a style object and the two capture methods. */
 export type StubCanvas = {
   element: HTMLCanvasElement;
-  style: { touchAction: string };
+  style: { touchAction: string; cursor: string };
   names(): string[];
   dispatch(
     name: string,
@@ -106,7 +106,7 @@ function createMockLog(): Log.LogApi {
  */
 export function createStubCanvas(): StubCanvas {
   const listeners = new Map<string, Array<(event: unknown) => void>>();
-  const style = { touchAction: "auto" };
+  const style = { touchAction: "auto", cursor: "" };
   const captured: number[] = [];
   const released: number[] = [];
   const flags = { capturable: true };
@@ -162,6 +162,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     swipeMinPx: 48,
     swipeMaxMs: 300,
     heldScale: 1,
+    cursor: { control: "pointer", idle: "" },
     ...options
   };
   const state = createInputState({ config });
@@ -169,6 +170,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const frames: FrameRegistration[] = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
   const stores = new Map<Entity, Map<string, object | true>>();
+  const types = new Map<string, AnyComponentType>();
   const resources = new Map<string, object>();
   const keys = new Map<Entity, { projection: string; key: string }>();
   const rests = new Map<Entity, Map<string, object>>();
@@ -228,7 +230,8 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
 
       return fresh;
     },
-    mode: () => world.mode
+    mode: () => world.mode,
+    typeOf: (name: string): AnyComponentType | undefined => types.get(name)
   };
 
   const projection = {
@@ -354,7 +357,10 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
       const store = new Map<string, object | true>();
 
       nextEntity += 1;
-      for (const value of values) store.set(value.type.componentName, value.value);
+      for (const value of values) {
+        store.set(value.type.componentName, value.value);
+        types.set(value.type.componentName, value.type);
+      }
       stores.set(entity, store);
       if (key !== undefined) keys.set(entity, key);
 
@@ -362,6 +368,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     },
     attachTo: (entity, value) => {
       stores.get(entity)?.set(value.type.componentName, value.value);
+      types.set(value.type.componentName, value.type);
     },
     setRest: (entity, value) => {
       const table = rests.get(entity) ?? new Map<string, object>();

@@ -4,7 +4,7 @@
  * once, so a composition without `anim` plays every motion instantly.
  */
 import type { AnyComponent, Entity } from "../ecs/types";
-import type { MotionHandle, ProjectionCtx, TrackOptions, TweenDriver } from "./types";
+import type { MotionHandle, ProjectionCtx, TrackOptions, TrackSegment, TweenDriver } from "./types";
 
 /**
  * The empty field set of an unmuted component. It lives in its own non-exported function because
@@ -106,6 +106,32 @@ function writeNow(
 }
 
 /**
+ * The target of a track with every field its segments name: a field the caller left out of `to`
+ * takes the last value a segment gave it, so the instant driver ends where `anim` ends.
+ *
+ * @param to - The numeric target fields the caller passed.
+ * @param segments - The keyframe segments of the track, if any.
+ * @returns The target the track ends on.
+ * @example
+ * ```ts
+ * withSegmentFields({ x: 100 }, [{ at: 0.5, to: { x: 300, y: 40 } }, { at: 1, to: { x: 100 } }]);
+ * // { x: 100, y: 40 }
+ * ```
+ */
+function withSegmentFields(
+  to: Record<string, number>,
+  segments: readonly TrackSegment[] | undefined
+): Record<string, number> {
+  if (segments === undefined) return to;
+
+  const filled: Record<string, number> = {};
+
+  for (const segment of segments) Object.assign(filled, segment.to);
+
+  return Object.assign(filled, to);
+}
+
+/**
  * Creates the default driver: every track is over before it began. It is what a world plays
  * without `anim` — a unit test of the projection, a headless run, a `logicOnly` composition.
  *
@@ -118,10 +144,10 @@ export function createInstantDriver(pctx: ProjectionCtx): TweenDriver {
       entity: Entity,
       component: AnyComponent,
       to: Record<string, number>,
-      _options: TrackOptions,
+      options: TrackOptions,
       muted: () => ReadonlySet<string>
     ): MotionHandle => {
-      writeNow(pctx, entity, component, to, muted);
+      writeNow(pctx, entity, component, withSegmentFields(to, options.segments), muted);
 
       return INERT;
     },

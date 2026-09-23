@@ -8,12 +8,17 @@ import { createViewportState } from "./viewport/state";
 
 /**
  * Creates the initial renderer state: one branch per module, composed from the module state
- * factories. Nothing is created here; `onStart` fills it when a DOM and a mount exist.
+ * factories. Nothing is created here; `onStart` fills it when a DOM and a mount exist. The debug
+ * switches start from the config.
  *
- * @param _ctx - Minimal context. The renderer state depends on nothing in it.
- * @param _ctx.config - Resolved plugin config.
+ * @param ctx - Minimal context.
+ * @param ctx.config - Resolved plugin config.
  * @returns The plugin state.
  */
-export function createRendererState(_ctx: { readonly config: Readonly<Config> }): State {
-  return { host: createHostState(), viewport: createViewportState(), sync: createSyncState() };
+export function createRendererState(ctx: { readonly config: Readonly<Config> }): State {
+  return {
+    host: createHostState(),
+    viewport: createViewportState(),
+    sync: createSyncState(ctx.config.debug)
+  };
 }

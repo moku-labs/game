@@ -12,6 +12,7 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api).toSorted()).toEqual(["host", "sync", "viewport"]);
     expect(Object.keys(mock.api.host).toSorted()).toEqual(["canvas", "kind", "pixi", "ready"]);
     expect(Object.keys(mock.api.sync).toSorted()).toEqual([
+      "debug",
       "displayOf",
       "displays",
       "fonts",
@@ -26,6 +27,7 @@ describe("renderer api", () => {
     ]);
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
     expect(Object.keys(mock.api.sync.fonts).toSorted()).toEqual(["install", "installed"]);
+    expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual(["nineSlice", "state"]);
   });
 
   it("answers nothing about a renderer that never started", () => {

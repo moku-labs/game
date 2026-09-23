@@ -8,7 +8,8 @@ const config: Config = {
   dragStartPx: 8,
   swipeMinPx: 48,
   swipeMaxMs: 300,
-  heldScale: 1
+  heldScale: 1,
+  cursor: { control: "pointer", idle: "" }
 };
 
 describe("createInputState", () => {
@@ -34,6 +35,7 @@ describe("createInputState", () => {
     expect(state.canvas).toBeUndefined();
     expect(state.offFrame).toBeUndefined();
     expect(state.detach).toBeUndefined();
+    expect(state.cursor).toBeUndefined();
   });
 
   it("gives every app its own state", () => {

@@ -18,11 +18,13 @@ import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
 import { clearFonts } from "./fonts";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
+import { bordersOf, drawOutline, type OutlineShape } from "./outline";
 import {
   acquire,
   destroyPools,
   detach,
   dropMask,
+  dropOutline,
   isNineSlice,
   isSprite,
   poolKeyOf,
@@ -277,7 +279,32 @@ export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
 }
 
 /**
- * Writes the `NineSlice` component onto its display object and recomputes the hit box.
+ * Keeps the debug outline of a nine-slice in step: drawn into its wrapper while the component or
+ * the global switch asks for it, gone otherwise.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param view - The view of the nine-slice.
+ * @param shape - What the outline is drawn from.
+ * @param debug - The component's own `debug`.
+ */
+function applyOutline(sctx: SyncCtx, view: View, shape: OutlineShape, debug: boolean): void {
+  const pixi = sctx.deps.host.pixi();
+
+  if (!(debug || sctx.ctx.state.sync.debug.nineSlice) || pixi === undefined) {
+    dropOutline(view);
+
+    return;
+  }
+
+  const wrapper = ensureWrapper(sctx, shape.entity);
+
+  if (wrapper !== undefined) drawOutline(pixi, wrapper, view, shape);
+}
+
+/**
+ * Writes the `NineSlice` component onto its display object and recomputes the hit box. Pixi reads
+ * a texture's borders only in the constructor, so they are copied here on every write: a pooled
+ * object, a new key and a reloaded bundle all get the insets of the texture they draw now.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -292,14 +319,25 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
   retargetKey(sctx.ctx.state.sync, entity, view, value.texture);
 
   const { texture, missing } = textureFor(sctx, value.texture);
+  const borders = bordersOf(texture);
 
   view.placeholder = missing;
   if (texture !== undefined) object.texture = texture;
+  object.leftWidth = borders.left;
+  object.topHeight = borders.top;
+  object.rightWidth = borders.right;
+  object.bottomHeight = borders.bottom;
   object.tint = missing ? PLACEHOLDER_TINT : value.tint;
   object.alpha = value.alpha;
   object.width = value.width;
   object.height = value.height;
   view.hitBox = { x: 0, y: 0, width: value.width, height: value.height };
+  applyOutline(
+    sctx,
+    view,
+    { entity, width: value.width, height: value.height, borders, missing },
+    value.debug
+  );
 }
 
 /**
@@ -629,6 +667,7 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     value: built.value,
     drawScale: { x: 1, y: 1 },
     frameKey: "",
+    outline: undefined,
     hitBox: { x: 0, y: 0, width: 0, height: 0 }
   };
 
@@ -736,6 +775,8 @@ export function stopSync(state: SyncState): void {
     }
 
     view.mask = undefined;
+    // A live view is left detached with its layer, so its outline is freed here.
+    dropOutline(view);
     view.wrapper = undefined;
   }
 

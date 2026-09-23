@@ -93,6 +93,8 @@ export type TapListener = (entity: Entity) => void;
  * // screen is drawn at 0.54 from the grab to the drop, even after a press squashed it, then
  * // flies home at 0.5.
  * createApp({ plugins: [...screen], pluginConfigs: { input: { heldScale: 1.08 } } });
+ * // A game with its own cursors: the config merges shallowly, so both values are given.
+ * createApp({ plugins: [...screen], pluginConfigs: { input: { cursor: { control: "grab", idle: "default" } } } });
  * ```
  */
 export type Config = {
@@ -113,6 +115,12 @@ export type Config = {
    * the rest scale back, so the way home starts at the view's own size. `1` changes nothing.
    */
   heldScale: number;
+  /**
+   * CSS cursors of the canvas. `control` shows while a mouse or a pen rests on a view that
+   * carries `Tappable`, `LocalWrite`, `Draggable`, `Pressable` or `Swipeable`; `idle` shows
+   * everywhere else. `""` hands the cursor back to the page's own style.
+   */
+  cursor: { control: string; idle: string };
 };
 
 /**
@@ -151,6 +159,8 @@ export type State = {
   tapListeners: TapListener[];
   /** `time.wake`, bound in `onInit`: every pointer sample leaves the idle frame rate. */
   wake: (() => void) | undefined;
+  /** The cursor last written on the attached canvas; `undefined` while nothing was written. */
+  cursor: string | undefined;
 };
 
 /**
@@ -245,6 +255,21 @@ export type InputApi = {
    * ```
    */
   onTap(fn: TapListener): () => void;
+
+  /**
+   * The CSS cursor input set on the canvas: `config.cursor.control` while a mouse or a pen rests
+   * on a control, `config.cursor.idle` otherwise and whenever nothing is attached.
+   *
+   * @returns The cursor value.
+   * @example
+   * ```ts
+   * // An e2e check: the mouse rests on the Play button of the home screen.
+   * app.input.cursor(); // "pointer"
+   * // The mouse moves to the empty sky above it.
+   * app.input.cursor(); // ""
+   * ```
+   */
+  cursor(): string;
 };
 
 /**

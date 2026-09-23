@@ -9,7 +9,7 @@ import { createCoreConfig } from "@moku-labs/core";
  *
  * @example
  * ```ts
- * createApp({ config: { orientation: "portrait", referenceSide: 1080 } });
+ * createApp({ config: { orientation: "portrait", referenceSide: 1080, referenceLong: 2100 } });
  * ```
  */
 export type Config = {
@@ -17,6 +17,18 @@ export type Config = {
   orientation: "portrait" | "landscape";
   /** Short side of the reference resolution in pixels. */
   referenceSide: number;
+  /**
+   * The long side, in reference units, the layout needs inside the safe area. The viewport scale
+   * fits both sides, so a wide screen gives the layout more width instead of less height.
+   *
+   * @example
+   * ```ts
+   * // A board column of 2084 u: on a 768x1024 tablet the scale is 1024 / 2100 = 0.488 and the
+   * // reference width grows to 1575 u, so the whole column fits and nothing shrinks alone.
+   * createApp({ config: { referenceLong: 2100 } });
+   * ```
+   */
+  referenceLong: number;
 };
 
 /**
@@ -56,7 +68,7 @@ export type Require = <
   plugin: Plugin
 ) => ApiOf<Plugin>;
 
-const config: Config = { orientation: "portrait", referenceSide: 1080 };
+const config: Config = { orientation: "portrait", referenceSide: 1080, referenceLong: 1920 };
 
 /**
  * Core config of the engine: `log` and `env` on every plugin context.

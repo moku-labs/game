@@ -142,6 +142,7 @@ function createWorld(timeApi: TimeApi, log: Log.LogApi): WorldApi & { clearChang
  * @param options.height - CSS height of the fake mount.
  * @param options.mountElement - True to pass the element itself instead of a selector.
  * @param options.orientation - The orientation the game is designed for.
+ * @param options.referenceLong - The long side the layout needs inside the safe area.
  * @returns The context, the modules, the fakes and the drivers.
  */
 export function createMockRenderer(
@@ -154,6 +155,7 @@ export function createMockRenderer(
     height?: number;
     mountElement?: boolean;
     orientation?: "portrait" | "landscape";
+    referenceLong?: number;
   } = {}
 ): MockRenderer {
   const pixi = createFakePixi({
@@ -175,6 +177,7 @@ export function createMockRenderer(
     poolLimit: 256,
     unsupportedMessage: "This device cannot run the game.",
     loadPixi: () => Promise.resolve(pixi.module),
+    debug: { nineSlice: false },
     ...options.config
   };
   const state = createRendererState({ config });
@@ -221,7 +224,11 @@ export function createMockRenderer(
     emit: (name: string, payload: unknown): void => {
       emitted.push({ name, payload });
     },
-    global: { orientation: options.orientation ?? "portrait", referenceSide: 1080 },
+    global: {
+      orientation: options.orientation ?? "portrait",
+      referenceSide: 1080,
+      referenceLong: options.referenceLong ?? 1920
+    },
     log,
     require: ((plugin: { name: string }): unknown => apis[plugin.name]) as unknown as Require
   } as unknown as KernelSlice;

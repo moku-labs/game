@@ -133,7 +133,7 @@ function answerSwipe(ctx: InputCtx, target: Target, direction: Direction): boole
 }
 
 /**
- * Creates the input API: `app.input.tap`, `.press`, `.drag`, `.swipe` and `.onTap`.
+ * Creates the input API: `app.input.tap`, `.press`, `.drag`, `.swipe`, `.onTap` and `.cursor`.
  *
  * @param ctx - Kernel context of the input plugin.
  * @returns The plugin API.
@@ -146,6 +146,7 @@ export function createInputApi(ctx: KernelSlice): InputApi {
     press: target => answerIntent(inputCtx, target, Pressable),
     drag: (from, to) => answerDrop(inputCtx, from, to),
     swipe: (target, direction) => answerSwipe(inputCtx, target, direction),
-    onTap: fn => addTapListener(inputCtx.state, fn)
+    onTap: fn => addTapListener(inputCtx.state, fn),
+    cursor: () => inputCtx.state.cursor ?? inputCtx.config.cursor.idle
   };
 }
