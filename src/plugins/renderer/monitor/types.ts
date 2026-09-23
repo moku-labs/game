@@ -24,7 +24,7 @@ export type RenderStats = {
    * renderer's callback in phase `input` to the end of `render`.
    */
   frameMs: number;
-  /** Texture sources on the GPU: Pixi's `renderer.texture.managedTextures`. */
+  /** Live texture sources on the GPU: Pixi's `renderer.texture.managedTextures`, empty slots skipped. */
   textures: number;
   /** Estimated GPU memory of those sources in MiB: 4 bytes per pixel, every mip level. */
   textureMb: number;
