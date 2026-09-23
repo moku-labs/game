@@ -76,6 +76,14 @@ describe("host init", () => {
     expect(mock.api.host.canvas()).toBe(mock.pixi.last().canvas);
   });
 
+  it("lays the canvas out as a block, so no line gap makes the page scroll", async () => {
+    const mock = createMockRenderer({ kind: "webgpu" });
+
+    await mock.start();
+
+    expect(mock.pixi.last().canvas.style.display).toBe("block");
+  });
+
   it("shows the unsupported-device screen when init rejects", async () => {
     const mock = createMockRenderer({ failInit: true });
 

@@ -82,6 +82,9 @@ export async function createApplication(ctx: RendererCtx, mount: HTMLElement): P
   state.canvas = app.canvas;
   state.mount = mount;
   state.kind = app.renderer.name === "webgpu" ? "webgpu" : "webgl";
+  // A canvas is inline by default and leaves a line gap under it: the page grows past the window
+  // and scrolls. Block layout keeps it exactly the size of its mount.
+  app.canvas.style.display = "block";
   mount.append(app.canvas);
 }
 
