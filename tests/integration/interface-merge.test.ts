@@ -71,6 +71,19 @@ async function stepFrames(game: Interface, frames = 30): Promise<void> {
 }
 
 /**
+ * Runs frames until a condition holds, for what waits on real I/O (a language module import) and
+ * so takes a varying number of frames. Fails the test when it never holds.
+ *
+ * @param game - The running game.
+ * @param done - The condition to wait for.
+ */
+async function stepUntil(game: Interface, done: () => boolean): Promise<void> {
+  for (let frame = 0; frame < 200 && !done(); frame += 1) await stepFrames(game, 1);
+
+  expect(done()).toBe(true);
+}
+
+/**
  * Starts the game with its interface and walks it onto the board: the loading plugin lets the
  * splash through to Home at once (headless, every bundle counts as loaded), and Home answers
  * `play`.
@@ -212,8 +225,13 @@ describe("interface-merge — the HUD on the board", () => {
     expect(resolvedOf(game, elementOf(game, "languageEnglishLabel"))).toBe("English");
 
     expect(game.app.input.tap(elementOf(game, "languageEnglish"))).toBe(true);
-    // The language module is fetched, so the node waits for a real import before it commits.
-    await stepFrames(game, 20);
+    // The language module is fetched, so the node waits for a real import before it commits: the
+    // number of frames that takes varies, so the test waits for the commit, then lets labels settle.
+    await stepUntil(
+      game,
+      () => game.app.i18n.locale() === "en" && game.app.flow.state().path === "board/settings/open"
+    );
+    await stepFrames(game, 6);
 
     expect(game.app.i18n.locale()).toBe("en");
     expect(game.app.model.store.snapshot().player).toMatchObject({ settings: { locale: "en" } });

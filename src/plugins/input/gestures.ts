@@ -231,21 +231,21 @@ function onCancel(ctx: InputCtx, pointer: PointerValue): void {
 }
 
 /**
- * Feeds one raw sample to the hover and the machine. A touch, a cancel and a canvas leave end the
- * hover whichever pointer sent them; a leave does nothing else. A sample of another pointer is
+ * Feeds one raw sample to the machine. A leave does nothing here. A sample of another pointer is
  * dropped while a pointer is active: the second finger is ignored. A move of an idle mouse or pen
- * moves the hover; a lost capture ends the gesture like a cancel.
+ * hit-tests nothing: its point is returned, so the drain moves the hover once per frame. A lost
+ * capture ends the gesture like a cancel.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
  * @param sample - The raw sample.
+ * @returns The hover point of an idle move, otherwise `undefined`.
  */
-function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): void {
+function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): Point | undefined {
   const { pointerId } = ctx.state;
 
-  if (endsHover(sample)) clearPointerOver(ctx);
-  if (sample.kind === "leave") return;
-  if (pointerId !== undefined && pointerId !== sample.pointerId) return;
+  if (sample.kind === "leave") return undefined;
+  if (pointerId !== undefined && pointerId !== sample.pointerId) return undefined;
 
   const point = ctx.deps.renderer.viewport.toReference(sample.clientX, sample.clientY);
 
@@ -258,8 +258,8 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
       break;
     }
     case "move": {
-      if (isHover(ctx, pointer, sample)) movePointerOver(ctx, point);
-      else onMove(ctx, point);
+      if (isHover(ctx, pointer, sample)) return point;
+      onMove(ctx, point);
       break;
     }
     case "up": {
@@ -270,6 +270,32 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
       onCancel(ctx, pointer);
     }
   }
+
+  return undefined;
+}
+
+/**
+ * Feeds the queued samples of one frame to the machine, in order. A touch, a cancel and a canvas
+ * leave end the hover whichever pointer sent them, and drop the hover point seen so far. Only the
+ * last hover point of the frame is hit-tested: a fast mouse or pen queues several moves per frame
+ * and only the last one is visible.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param pointer - The `Pointer` resource of this frame.
+ * @param queue - The samples queued since the last frame.
+ */
+function drainSamples(ctx: InputCtx, pointer: PointerValue, queue: readonly RawSample[]): void {
+  let hover: Point | undefined;
+
+  for (const sample of queue) {
+    if (endsHover(sample)) {
+      clearPointerOver(ctx);
+      hover = undefined;
+    }
+    hover = handleSample(ctx, pointer, sample) ?? hover;
+  }
+
+  if (hover !== undefined) movePointerOver(ctx, hover);
 }
 
 /**
@@ -405,7 +431,7 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
   pointer.justPressed = false;
   pointer.justReleased = false;
   ctx.state.samples = [];
-  for (const sample of queue) handleSample(ctx, pointer, sample);
+  drainSamples(ctx, pointer, queue);
 
   advanceTime(ctx, pointer, time.delta);
   if (ctx.state.phase === "dragging") followDrag(ctx, pointer);

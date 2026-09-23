@@ -6,17 +6,18 @@
  * the one door to them in `src/`.
  */
 import { runCli } from "./plugins/assets/scan/cli";
+import { compileStrings } from "./plugins/i18n/compile/compile";
 
-export type { ScanUi } from "./plugins/assets/scan/cli";
+export type { ScanUi, StringsCompiler, StringsReport } from "./plugins/assets/scan/cli";
 export { emitKeys, emitManifest } from "./plugins/assets/scan/emit";
 export type { ScanOptions, ScanResult } from "./plugins/assets/scan/scan";
 export { scanAssets } from "./plugins/assets/scan/scan";
 export type { CompileOptions, CompileReport } from "./plugins/i18n/compile/compile";
-export { checkStrings, compileStrings } from "./plugins/i18n/compile/compile";
-// eslint-disable-next-line unicorn/prefer-export-from -- the script block below needs the local binding
-export { runCli };
+export { checkStrings } from "./plugins/i18n/compile/compile";
+// eslint-disable-next-line unicorn/prefer-export-from -- the script block below needs the local bindings
+export { compileStrings, runCli };
 
 // Run as a script: `bun src/assets.ts --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts` or the built `dist/assets.mjs`.
 if (import.meta.main) {
-  process.exitCode = await runCli(process.argv.slice(2));
+  process.exitCode = await runCli(process.argv.slice(2), compileStrings);
 }

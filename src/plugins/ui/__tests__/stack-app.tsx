@@ -138,6 +138,20 @@ export const slotScreen = projection({
   )
 });
 
+/** A screen with two slots that both name the tokens: the first slot hosts them. */
+export const twinSlotScreen = projection({
+  name: "twinSlotScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "twinSlotScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => (
+    <column key="twinRoot" style={{ width: 1080, height: 1080 }}>
+      <stack key="slotA" hosts={["tokens", "tokens"]} style={{ width: 500, height: 500 }} />
+      <stack key="slotB" hosts={["tokens"]} style={{ width: 500, height: 500 }} />
+    </column>
+  )
+});
+
 /** A screen with the toggle. */
 export const toggleScreen = projection({
   name: "toggleScreen",
@@ -310,6 +324,7 @@ export const stackFeature = defineFeature("stack", {
   projections: [
     tokens,
     slotScreen,
+    twinSlotScreen,
     toggleScreen,
     sizedTokens,
     fitSlotScreen,

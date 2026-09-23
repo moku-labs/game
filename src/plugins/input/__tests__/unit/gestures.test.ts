@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Transform } from "../../../renderer/components";
 import { Exiting } from "../../../world/ecs/define";
 import { createInputApi } from "../../api";
@@ -746,6 +746,56 @@ describe("PointerOver, the hover of a mouse or a pen", () => {
 
     expect(mock.has(button, PointerOver)).toBe(false);
     expect(mock.has(item, PointerOver)).toBe(true);
+  });
+
+  it("hit-tests once per frame, at the last of several idle mouse moves", () => {
+    const mock = createMockInput();
+    const { button, item } = twoViews(mock);
+    const hitTest = vi.spyOn(mock.input.deps.renderer.sync, "hitTest");
+
+    // Pushed past `record`, which folds only a trailing move of the same pointer.
+    mock.state.samples.push(
+      sample("move", "mouse", 50, 50),
+      sample("lost", "mouse", 60, 50),
+      sample("move", "mouse", 200, 50),
+      sample("move", "mouse", 350, 50)
+    );
+    mock.frame();
+
+    expect(hitTest).toHaveBeenCalledTimes(1);
+    expect(hitTest).toHaveBeenCalledWith(350, 50, expect.any(Function));
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.has(item, PointerOver)).toBe(true);
+    expect(pointerOf(mock)).toMatchObject({ x: 350, y: 50 });
+  });
+
+  it("ends with no hover when a leave follows the moves in the same frame", () => {
+    const mock = createMockInput();
+    const { button } = twoViews(mock);
+    const hitTest = vi.spyOn(mock.input.deps.renderer.sync, "hitTest");
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    record(mock.state, sample("leave", "mouse", 50, 50));
+    mock.frame();
+
+    expect(hitTest).not.toHaveBeenCalled();
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.state.pointerOver).toBeUndefined();
+  });
+
+  it("hovers again when a move follows a clear in the same frame", () => {
+    const mock = createMockInput();
+    const { button, item } = twoViews(mock);
+
+    record(mock.state, sample("move", "mouse", 50, 50));
+    mock.frame();
+    record(mock.state, sample("move", "touch", 50, 50, 2));
+    record(mock.state, sample("move", "pen", 350, 50));
+    mock.frame();
+
+    expect(mock.has(button, PointerOver)).toBe(false);
+    expect(mock.has(item, PointerOver)).toBe(true);
+    expect(mock.calls.filter(call => call === "untag:PointerOver")).toHaveLength(1);
   });
 });
 

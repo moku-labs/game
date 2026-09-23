@@ -2,11 +2,11 @@
  * @file assets plugin, build time — the command line of the scanner. It is the only file here
  * that touches the terminal: the scan, the emitters and the key rule are pure. Output goes
  * through the branded console of `@moku-labs/common`, and `runCli` returns the exit code
- * instead of taking it.
+ * instead of taking it. The string compiler of i18n comes in as a parameter: i18n sits above
+ * assets, so the door `src/assets.ts` hands it over instead of this file importing it.
  */
 import path from "node:path";
 import { createBrandConsole } from "@moku-labs/common/cli";
-import { type CompileReport, compileStrings } from "../../i18n/compile/compile";
 import type { Manifest } from "../types";
 import { scanAssets } from "./scan";
 
@@ -26,6 +26,28 @@ export type ScanUi = {
   /** Writes one error line. */
   error(message: string, cause?: unknown): void;
 };
+
+/** What one strings compile reports back. `CompileReport` of i18n has this shape. */
+export type StringsReport = {
+  /** True when an output on disk differs from what the compile produced. */
+  changed: boolean;
+  /** Every locale a feature brought a file for, sorted. */
+  locales: readonly string[];
+  /** Every message key, sorted. */
+  keys: readonly string[];
+  /** One line per key a locale lacks. Nothing here stops a build. */
+  notes: readonly string[];
+};
+
+/**
+ * Compiles the feature strings of a root into a folder, or checks them in a check run.
+ * `compileStrings` of i18n fits it, and a test passes a stub instead.
+ */
+export type StringsCompiler = (
+  root: string,
+  out: string,
+  options: { check: boolean }
+) => Promise<StringsReport>;
 
 /** What the flags asked for. */
 type Options = { root: string; manifest: string; keys: string; check: boolean };
@@ -159,7 +181,7 @@ function outputNames(options: Options): string {
  * stringsSummary({ changed: false, locales: ["en", "ru"], keys: ["a", "b"], notes: [] }); // "2 strings in 2 locales (en, ru)."
  * ```
  */
-function stringsSummary(report: CompileReport): string {
+function stringsSummary(report: StringsReport): string {
   return `${report.keys.length} strings in ${report.locales.length} locales (${report.locales.join(", ")}).`;
 }
 
@@ -169,15 +191,20 @@ function stringsSummary(report: CompileReport): string {
  * Nothing here calls `process.exit`; the caller does.
  *
  * @param argv - The arguments after the script name.
+ * @param compile - The strings compiler, `compileStrings` of i18n.
  * @param ui - Where the lines go. The branded console by default.
  * @returns The exit code: `1` when the scan or the compile failed or `--check` found a difference, else `0`.
  * @example
  * ```ts
- * await runCli(["--root", "src", "--manifest", "public/assets/manifest.json", "--check"]);
+ * await runCli(["--root", "src", "--manifest", "public/assets/manifest.json", "--check"], compileStrings);
  * // 1 when public/assets/manifest.json is older than the files in src/features
  * ```
  */
-export async function runCli(argv: string[], ui: ScanUi = createBrandConsole()): Promise<number> {
+export async function runCli(
+  argv: string[],
+  compile: StringsCompiler,
+  ui: ScanUi = createBrandConsole()
+): Promise<number> {
   try {
     const options = parseArgv(argv);
     const { manifest, changed, notes } = await scanAssets({
@@ -188,7 +215,7 @@ export async function runCli(argv: string[], ui: ScanUi = createBrandConsole()):
     });
 
     // The strings live next to the key module: one generated folder per game.
-    const strings = await compileStrings(options.root, path.dirname(options.keys), {
+    const strings = await compile(options.root, path.dirname(options.keys), {
       check: options.check
     });
 

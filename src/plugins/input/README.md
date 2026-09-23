@@ -109,6 +109,8 @@ Every raw sample carries its device: `pointerType` is `"mouse"`, `"touch"` or `"
 | lost capture | nothing: the browser sends one after every click |
 | world mode `paused` | the tag goes |
 
+The hit test runs once per frame, at the last hover move of the frame. A clear that comes after it in the same frame wins; a hover move after a clear wins.
+
 At most one view carries `PointerOver`. It is not `Hovered`: that one marks the drop target under a drag.
 
 Every queued sample calls `time.wake()`, so a finger on the screen always runs at the full frame rate, whatever the idle cap says.

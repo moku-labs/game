@@ -96,6 +96,37 @@ describe("hosts", () => {
     await app.stop();
   });
 
+  it("gives the views to the first of two slots that name them, once", async () => {
+    const app = await startStackApp();
+
+    mount(app, ["tokens", "twinSlotScreen"]);
+
+    const slotA = app.ui.find("slotA");
+
+    expect(slotA).toBeDefined();
+    expect(parentsOfTokens(app)).toEqual([slotA, slotA]);
+
+    await app.stop();
+  });
+
+  it("hangs a hosted view back under its slot when something else takes the parent", async () => {
+    const app = await startStackApp();
+
+    mount(app, ["tokens", "twinSlotScreen"]);
+
+    const slotA = app.ui.find("slotA");
+    const [first] = app.world.projection.entitiesOf("tokens");
+    const view = first ?? 0;
+
+    app.world.ecs.remove(view, Parent);
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(view, Parent)).toEqual({ entity: slotA });
+
+    await app.stop();
+  });
+
   it("leaves a projection alone that no slot names", async () => {
     const app = await startStackApp();
 
