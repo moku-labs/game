@@ -6,7 +6,7 @@
 import { flowPlugin } from "../flow";
 import { i18nPlugin } from "../i18n";
 import { inputPlugin } from "../input";
-import { Pressed } from "../input/components";
+import { PointerOver, Pressed } from "../input/components";
 import { rendererPlugin } from "../renderer";
 import { textPlugin } from "../text";
 import { timePlugin } from "../time";
@@ -74,8 +74,10 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 }
 
 /**
- * Opens the two systems of phase `layout`, the five world hooks of `Tree`, `Box` and `Pressed`,
- * the two effect handlers and the tap listener. Every remover goes into the state, so the teardown closes exactly these.
+ * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
+ * `PointerOver`, the two effect handlers and the tap listener. Every remover goes into the state,
+ * so the teardown closes exactly these, and gives every hosted view its layer back before the ui
+ * entities go.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param jsx - The jsx module.
@@ -95,11 +97,14 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     }),
     ecs.onRemoved(Tree, entity => jsx.unmountRoot(entity)),
     ecs.onAdded(Box, entity => jsx.playEnter(entity)),
-    ecs.onAdded(asTagHandle(Pressed), entity => jsx.markPressed(entity, true)),
-    ecs.onRemoved(asTagHandle(Pressed), entity => jsx.markPressed(entity, false)),
+    ecs.onAdded(asTagHandle(Pressed), entity => jsx.markPointer(entity, "pressed", true)),
+    ecs.onRemoved(asTagHandle(Pressed), entity => jsx.markPointer(entity, "pressed", false)),
+    ecs.onAdded(asTagHandle(PointerOver), entity => jsx.markPointer(entity, "hover", true)),
+    ecs.onRemoved(asTagHandle(PointerOver), entity => jsx.markPointer(entity, "hover", false)),
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.input.onTap(jsx.applyTap),
+    () => jsx.releaseHosted(),
     () => ecs.despawnOwnedBy(UI_OWNER)
   );
 }
@@ -157,5 +162,7 @@ export function stopUi(state: State): void {
   state.jsx.instances.clear();
   state.jsx.exiting.clear();
   state.jsx.removing.clear();
+  state.jsx.hosts.clear();
+  state.jsx.hosted.clear();
   state.styles.viewport = undefined;
 }

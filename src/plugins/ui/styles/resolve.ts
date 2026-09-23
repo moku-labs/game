@@ -12,7 +12,7 @@ import type { BaseStyle, Edges, IsFlags, Length, ResolvedStyle, Style, WhenFlags
  * ```ts
  * const flags: StyleFlags = {
  *   portrait: true, landscape: false, tall: false, wide: false,
- *   pressed: false, disabled: false, active: true, selected: false
+ *   pressed: false, hover: false, disabled: false, active: true, selected: false, covered: false
  * };
  * ```
  */
@@ -22,7 +22,7 @@ export type StyleFlags = WhenFlags & IsFlags;
 const WHEN_ORDER = ["portrait", "landscape", "tall", "wide"] as const;
 
 /** The `is` variants in the order they are merged. */
-const IS_ORDER = ["disabled", "active", "selected", "pressed"] as const;
+const IS_ORDER = ["disabled", "active", "selected", "hover", "pressed", "covered"] as const;
 
 /** The four tokens a length may be instead of a number. */
 const SAFE_AREA = {
@@ -127,7 +127,8 @@ function withSafeArea(merged: Record<string, unknown>, viewport: ViewportSize): 
  * Resolves one style against the flags of the frame and the viewport.
  *
  * @param style - The style a game wrote, or nothing.
- * @param flags - The four viewport flags and the four state flags.
+ * @param flags - The four viewport flags and the six state flags. While `disabled` is true the
+ *   `hover` and `pressed` variants are skipped.
  * @param viewport - What `renderer.viewport.size()` answered, for the safe-area tokens.
  * @returns The frozen style the layout and the visual are written from.
  * @example
@@ -135,7 +136,7 @@ function withSafeArea(merged: Record<string, unknown>, viewport: ViewportSize): 
  * resolve(
  *   { gap: 8, is: { pressed: { gap: 4 } } },
  *   { portrait: true, landscape: false, tall: false, wide: false,
- *     pressed: true, disabled: false, active: false, selected: false },
+ *     pressed: true, hover: false, disabled: false, active: false, selected: false, covered: false },
  *   { width: 1080, height: 1920, scale: 1, orientation: "portrait",
  *     safeArea: { top: 0, right: 0, bottom: 0, left: 0 } }
  * ).gap; // 4
@@ -154,7 +155,14 @@ export function resolve(
     merge(merged, base);
 
     for (const name of WHEN_ORDER) if (flags[name]) merge(merged, when?.[name]);
-    for (const name of IS_ORDER) if (flags[name]) merge(merged, is?.[name]);
+    for (const name of IS_ORDER) {
+      // A disabled element answers no pointer, so it never shows hover or pressed.
+      const pointer = name === "hover" || name === "pressed";
+
+      if (!flags[name] || (flags.disabled && pointer)) continue;
+
+      merge(merged, is?.[name]);
+    }
   }
 
   return Object.freeze(withSafeArea(merged, viewport));

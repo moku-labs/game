@@ -43,6 +43,8 @@ export function createJsxState(): JsxState {
     instances: emptyMap(),
     exiting: emptySet(),
     removing: emptySet(),
+    hosts: emptySet(),
+    hosted: emptyMap(),
     reconciles: 0
   };
 }

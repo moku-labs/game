@@ -81,6 +81,19 @@ describe("defineStyle", () => {
     expectTypeOf(defineStyle({ direction: "row" }).direction).toEqualTypeOf<"row">();
   });
 
+  it("takes the visual fields of delta 4 and refuses an origin outside its union", () => {
+    expectTypeOf(
+      defineStyle({ nineSlice: "ui.panel", fit: "contain" }).fit
+    ).toEqualTypeOf<"contain">();
+    expectTypeOf(
+      defineStyle({ is: { hover: { scale: 1.05 } } }).is.hover.scale
+    ).toEqualTypeOf<1.05>();
+    // @ts-expect-error — `origin` is "center", "top", "topLeft" or a point in fractions.
+    defineStyle({ origin: "bottom" });
+    // @ts-expect-error — the only fit a style takes is "contain".
+    defineStyle({ fit: "cover" });
+  });
+
   it("refuses a field outside the vocabulary", () => {
     // @ts-expect-error — text size comes from the text style key, never from the layout style.
     defineStyle({ fontSize: 24 });
@@ -93,11 +106,30 @@ describe("uiFor", () => {
     const kit = uiFor<"ui.coin" | "ui.panel", "digits", "hud.coins">();
 
     expectTypeOf(kit.intrinsics.image.texture).toEqualTypeOf<"ui.coin" | "ui.panel">();
-    expectTypeOf(kit.intrinsics.panel.nineSlice).toEqualTypeOf<
-      "ui.coin" | "ui.panel" | undefined
+    expectTypeOf(kit.intrinsics.image.fit).toEqualTypeOf<
+      "contain" | "cover" | "fill" | undefined
     >();
+    // @ts-expect-error — the nine-slice moved into the style (delta 4): a panel has no such prop.
+    expectTypeOf(kit.intrinsics.panel.nineSlice).toBeString();
     expectTypeOf(kit.intrinsics.text.style).toEqualTypeOf<
-      "digits" | import("../../styles/types").Style | undefined
+      "digits" | import("../../styles/types").Style<"ui.coin" | "ui.panel"> | undefined
     >();
+  });
+
+  it("narrows the nine-slice of a style to the game's asset keys", () => {
+    const kit = uiFor<"ui.coin" | "ui.panel", "digits", "hud.coins">();
+
+    expectTypeOf(kit.defineStyle({ nineSlice: "ui.panel" }).nineSlice).toEqualTypeOf<"ui.panel">();
+    // @ts-expect-error — "ui.pane" is not an asset key of this game.
+    kit.defineStyle({ nineSlice: "ui.pane" });
+    // @ts-expect-error — a state variant takes the game's keys too.
+    kit.defineStyle({ is: { disabled: { nineSlice: "ui.off" } } });
+
+    const panelStyle: typeof kit.intrinsics.panel.style = { nineSlice: "ui.panel" };
+    // @ts-expect-error — the style prop of a tag takes the game's keys.
+    const wrongStyle: typeof kit.intrinsics.row.style = { nineSlice: "ui.pane" };
+
+    expectTypeOf(panelStyle).not.toBeUndefined();
+    expectTypeOf(wrongStyle).not.toBeUndefined();
   });
 });

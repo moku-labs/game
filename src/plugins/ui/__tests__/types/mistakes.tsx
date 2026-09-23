@@ -52,3 +52,22 @@ export const wrongComponentProp = (
     volume={3}
   />
 );
+
+/** A panel given the nine-slice as a prop, which moved into the style in delta 4. */
+export const panelNineSlice = (
+  <panel
+    key="g"
+    // @ts-expect-error — `nineSlice` is a style field now: `style={{ nineSlice: "ui.panel" }}`.
+    nineSlice="ui.panel"
+  />
+);
+
+/** An image given a fit the sprite does not know. */
+export const wrongFit = (
+  <image
+    key="h"
+    texture="ui.coin"
+    // @ts-expect-error — `fit` is "contain", "cover" or "fill".
+    fit="stretch"
+  />
+);

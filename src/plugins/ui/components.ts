@@ -5,12 +5,13 @@
  */
 import type { Descriptor } from "../flow/fx/types";
 import type { Json } from "../model/types";
-import { component, resource } from "../world/ecs/define";
+import { component, resource, tag } from "../world/ecs/define";
 import { defineComponent } from "./jsx/component";
 import type { IntrinsicElementsFor } from "./jsx/intrinsics";
 import type { PopupComponent } from "./jsx/types";
 import { defineStyle } from "./styles/define";
 import { defineTokens } from "./styles/tokens";
+import type { Style } from "./styles/types";
 
 /**
  * The rect of a ui element in root coordinates, in reference units. Its `x` and `y` are the rest
@@ -70,6 +71,12 @@ export const LocalWrite = /*#__PURE__*/ component("LocalWrite", localWriteDefaul
 export const Scroll = /*#__PURE__*/ component("Scroll", { axis: "y", offset: 0, min: 0 });
 
 /**
+ * On the root entity of a popup kept beneath another popup (`popup(..., { over })`). Internal to
+ * `ui`: not exported from the package root. Every element of that root resolves `is.covered`.
+ */
+export const Covered = /*#__PURE__*/ tag("Covered");
+
+/**
  * What the acceptance cases of the spike count. Internal to `ui`: the numbers are written once
  * per frame step and read by the tests through `world.ecs.resource`, never by a game.
  *
@@ -98,10 +105,13 @@ export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
 
 /**
  * Builds the effect a node awaits to show a popup. The gate opens for the outcomes of the
- * component, so the node resolves with the intent one of its buttons answered.
+ * component, so the node resolves with the intent one of its buttons answered. `over` names the
+ * component of a popup that stays mounted beneath this one, drawn covered, until this one is gone.
  *
  * @param component - A component declared with `outcomes`.
  * @param props - What its view is called with.
+ * @param options - How the popup stands to the others.
+ * @param options.over - The component name of the popup kept beneath this one.
  * @returns The descriptor `fx()` takes.
  * @example
  * ```ts
@@ -112,21 +122,36 @@ export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
  * popup(Reward, { gold: 5 });
  * // { kind: "popup", payload: { component: "Reward", props: { gold: 5 } }, answers: ["claim"] }
  * ```
+ * @example
+ * ```ts
+ * // The settings node asks before a reset; the settings stay beneath, covered.
+ * const Confirm = defineComponent("Confirm", {
+ *   outcomes: { reset: {}, cancel: {} },
+ *   view: () => ({ type: "panel", props: {}, children: [] })
+ * });
+ * popup(Confirm, {}, { over: "Settings" });
+ * // { kind: "popup", payload: { component: "Confirm", props: {}, over: "Settings" },
+ * //   answers: ["reset", "cancel"] }
+ * ```
  */
 export function popup<Properties extends object, Local extends object>(
   component: PopupComponent<Properties, Local>,
-  props: Properties
+  props: Properties,
+  options?: { over?: string }
 ): Descriptor {
-  return {
-    kind: "popup",
-    payload: { component: component.name, props: props as Json },
-    answers: Object.keys(component.outcomes)
-  };
+  const over = options?.over;
+  const payload =
+    over === undefined
+      ? { component: component.name, props: props as Json }
+      : { component: component.name, props: props as Json, over };
+
+  return { kind: "popup", payload, answers: Object.keys(component.outcomes) };
 }
 
 /**
- * The ui helpers bound to one game's asset keys, text style keys and message keys. `intrinsics`
- * carries no value: it is the type of the tags this game writes its screens with.
+ * The ui helpers bound to one game's asset keys, text style keys and message keys. `defineStyle`
+ * takes a nine-slice of the game's asset keys only. `intrinsics` carries no value: it is the type
+ * of the tags this game writes its screens with.
  *
  * @example
  * ```ts
@@ -136,11 +161,12 @@ export function popup<Properties extends object, Local extends object>(
  */
 export type UiKit<Asset extends string, TextStyleKey extends string, StringKey extends string> = {
   defineComponent: typeof defineComponent;
-  defineStyle: typeof defineStyle;
+  defineStyle: <const Given extends Style<Asset>>(style: Given) => Readonly<Given>;
   defineTokens: typeof defineTokens;
   popup: <Properties extends object, Local extends object>(
     component: PopupComponent<Properties, Local>,
-    props: Properties
+    props: Properties,
+    options?: { over?: string }
   ) => Descriptor;
   intrinsics: IntrinsicElementsFor<Asset, TextStyleKey, StringKey>;
 };

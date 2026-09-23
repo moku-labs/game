@@ -85,7 +85,8 @@ describe("element motion", () => {
 
     const rest = app.world.projection.restOf(mover, Transform)?.y ?? 0;
 
-    expect(rest).toBe(app.world.ecs.get(mover, Box)?.y);
+    // The rest lands the centre pivot (delta 4): the top of the rect plus half its height.
+    expect(rest).toBe((app.world.ecs.get(mover, Box)?.y ?? 0) + 50);
     expect(app.world.ecs.get(mover, Transform)?.y).toBeGreaterThanOrEqual(enterOffset);
     expect(app.world.ecs.get(mover, Transform)?.y).toBeLessThan(rest);
 

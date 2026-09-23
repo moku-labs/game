@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Pressed } from "../../../input/components";
+import { NineSlice, Sprite, Transform } from "../../../renderer/components";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { Box, LocalWrite } from "../../components";
 import { asError, asHandle, asTagHandle } from "../../errors";
@@ -32,10 +33,19 @@ function elementOf(patch: Partial<Element> = {}): Element {
     root: 0,
     node: { type: "row", props: {}, children: [] },
     style: {},
-    is: { pressed: false, disabled: false, active: false, selected: false },
+    is: {
+      pressed: false,
+      hover: false,
+      disabled: false,
+      active: false,
+      selected: false,
+      covered: false
+    },
     rect: { x: 0, y: 0, w: 0, h: 0 },
     previous: { x: 0, y: 0, w: 0, h: 0 },
     moved: false,
+    fit: 1,
+    rest: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
     handles: [],
     motion: undefined,
     parent: undefined,
@@ -172,21 +182,23 @@ describe("rectOfTarget", () => {
 
   it("reads the transform and the size of a panel", () => {
     const ctx = ctxWith({
-      Transform: { x: 10, y: 20 },
-      NineSlice: { texture: "ui.panel", width: 30, height: 40 }
+      Transform: { ...Transform.defaults, x: 10, y: 20 },
+      NineSlice: { ...NineSlice.defaults, texture: "ui.panel", width: 30, height: 40 }
     });
 
     expect(rectOfTarget(ctx, 1)).toEqual({ x: 10, y: 20, w: 30, h: 40 });
   });
 
   it("reads the transform of a sprite and answers nothing for a view with no size", () => {
-    expect(rectOfTarget(ctxWith({ Transform: { x: 5, y: 6 }, Sprite: {} }), 1)).toEqual({
+    const at = { ...Transform.defaults, x: 5, y: 6 };
+
+    expect(rectOfTarget(ctxWith({ Transform: at, Sprite: { ...Sprite.defaults } }), 1)).toEqual({
       x: 5,
       y: 6,
       w: 0,
       h: 0
     });
-    expect(rectOfTarget(ctxWith({ Transform: { x: 5, y: 6 } }), 1)).toBeUndefined();
+    expect(rectOfTarget(ctxWith({ Transform: at }), 1)).toBeUndefined();
     expect(rectOfTarget(ctxWith({}), 1)).toBeUndefined();
   });
 });
@@ -247,7 +259,14 @@ describe("applyTap", () => {
       tapCtx(
         elementOf({
           type: "button",
-          is: { pressed: false, disabled: true, active: false, selected: false }
+          is: {
+            pressed: false,
+            hover: false,
+            disabled: true,
+            active: false,
+            selected: false,
+            covered: false
+          }
         }),
         { patch: {} },
         warn

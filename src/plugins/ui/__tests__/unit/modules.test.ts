@@ -24,6 +24,7 @@ function rootOf(patch: Partial<Root>): Root {
     needsSolve: false,
     element: undefined,
     popup: undefined,
+    covered: false,
     ...patch
   };
 }
@@ -44,10 +45,19 @@ function elementOf(patch: Partial<Element>): Element {
     root: 0,
     node: { type: "scroll", props: {}, children: [] },
     style: {},
-    is: { pressed: false, disabled: false, active: false, selected: false },
+    is: {
+      pressed: false,
+      hover: false,
+      disabled: false,
+      active: false,
+      selected: false,
+      covered: false
+    },
     rect: { x: 0, y: 0, w: 100, h: 100 },
     previous: { x: 0, y: 0, w: 0, h: 0 },
     moved: false,
+    fit: 1,
+    rest: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
     handles: [],
     motion: undefined,
     parent: undefined,

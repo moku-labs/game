@@ -4,11 +4,13 @@
  */
 import type { Entity } from "../../world/types";
 import type { UiCtx } from "../types";
+import { releaseHosted } from "./hosts";
 import { runLint } from "./lint";
+import { coverPopup, reclaimPopup, releasePopup } from "./popups";
 import { createReconciler, type JsxModules } from "./reconcile";
 import { applyTap } from "./tap";
 import { readTree, sortedRoots } from "./tree";
-import type { AnyComponentDefinition, Finding, JsxModule, UiNode } from "./types";
+import type { AnyComponentDefinition, Finding, JsxModule, PopupLink, UiNode } from "./types";
 
 /**
  * Builds the jsx module.
@@ -56,9 +58,18 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     unmountRoot: frame.unmountRoot,
 
+    reclaimPopup: (component: string, props: object, link: PopupLink): Entity | undefined =>
+      reclaimPopup(ctx, state, component, props, link),
+
+    coverPopup: (over: string, coverer: Entity): void => coverPopup(ctx, state, over, coverer),
+
+    releasePopup: (entity: Entity, link: PopupLink): void => releasePopup(ctx, state, entity, link),
+
+    releaseHosted: (): void => releaseHosted(ctx, state),
+
     applyTap: (entity: Entity): void => applyTap(ctx, entity),
 
-    markPressed: frame.markPressed,
+    markPointer: frame.markPointer,
 
     playEnter: frame.playEnter
   };

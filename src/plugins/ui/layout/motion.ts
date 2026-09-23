@@ -1,116 +1,96 @@
 /**
- * @file ui/layout — `Box` as the rest pose. Before every hook the rest is written through
- * `world.projection.setRest`, and the hook plays on the `ViewHandle` the projection hands out
- * for a ui-owned entity. Nothing but a track writes the pose between hooks.
+ * @file ui/layout — `Box` plus the transform styles as the rest pose. Before every hook the rest
+ * is written through `world.projection.setRest`, and the hook plays on the `ViewHandle` the
+ * projection hands out for a ui-owned entity. Nothing but a track writes the pose between hooks.
  */
-import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
-import { Text } from "../../text/components";
+import { Transform, type TransformValue } from "../../renderer/components";
+import type { Point } from "../../renderer/types";
 import type { Motion, ViewHandle } from "../../world/projection/types";
 import type { ComponentType } from "../../world/types";
 import { UI_OWNER } from "../components";
 import { asError } from "../errors";
 import type { Element } from "../jsx/types";
+import type { Origin, ResolvedStyle } from "../styles/types";
 import type { UiCtx } from "../types";
+import { CONTENT, samePose, visualOf } from "../visual";
 import type { Rect } from "./types";
 
 /**
- * The rest pose of the `Transform` of an element: its rect, relative to its parent. A root
- * element has no parent, so its rest is its rect.
+ * The local point an element turns and scales around, from the `origin` of its style.
+ *
+ * @param origin - What the style wrote; the centre when it wrote nothing.
+ * @param width - The width of the box.
+ * @param height - The height of the box.
+ * @returns The pivot in the element's own units.
+ * @example
+ * ```ts
+ * pivotOf("top", 200, 80); // { x: 100, y: 0 }
+ * ```
+ */
+function pivotOf(origin: Origin | undefined, width: number, height: number): Point {
+  if (origin === undefined || origin === "center") return { x: width / 2, y: height / 2 };
+  if (origin === "top") return { x: width / 2, y: 0 };
+  if (origin === "topLeft") return { x: 0, y: 0 };
+
+  return { x: origin.x * width, y: origin.y * height };
+}
+
+/**
+ * The rest pose of the `Transform` of an element. The pivot is the origin of the style on the
+ * box; the position is where the pivot lands, chosen so the unscaled element sits on its rect,
+ * relative to its parent. The offsets and the scale of the style come on top. A fitted element
+ * is scaled by its fit about the centre of its box, so its centre stays where the solve put it.
  *
  * @param rect - The rect of the element in root coordinates.
- * @param parent - The rect of its parent, or nothing.
+ * @param parent - The rect of its parent, or nothing for a root element.
+ * @param style - The resolved style, for `origin`, `offsetX`, `offsetY` and `scale`.
+ * @param fit - The element's own fit scale, 1 without `fit: "contain"`.
  * @returns The rest transform.
+ * @example
+ * ```ts
+ * restTransform({ x: 40, y: 80, w: 10, h: 10 }, undefined);
+ * // { x: 45, y: 85, rotation: 0, scale: 1, pivot: { x: 5, y: 5 } }
+ * ```
  */
 export function restTransform(
   rect: Rect,
-  parent: Rect | undefined
-): { x: number; y: number; rotation: number; scale: number } {
+  parent: Rect | undefined,
+  style: ResolvedStyle = {},
+  fit = 1
+): TransformValue {
+  const pivot = pivotOf(style.origin, rect.w, rect.h);
+  const centre = { x: rect.w / 2, y: rect.h / 2 };
+  const local = { x: rect.x - (parent?.x ?? 0), y: rect.y - (parent?.y ?? 0) };
+
   return {
-    x: rect.x - (parent?.x ?? 0),
-    y: rect.y - (parent?.y ?? 0),
+    x: local.x + centre.x + fit * (pivot.x + (style.offsetX ?? 0) - centre.x),
+    y: local.y + centre.y + fit * (pivot.y + (style.offsetY ?? 0) - centre.y),
     rotation: 0,
-    scale: 1
+    scale: fit * (style.scale ?? 1),
+    pivot
   };
 }
 
 /**
- * The rest value of the visual that is actually on the element: a sprite for an image or an
- * icon, a nine-slice for a sliced panel, the text for a text, a rounded rectangle otherwise.
+ * The rest value of the visual that is actually on the element: the same value the entity is
+ * drawn with, so a motion returns to exactly that.
  *
  * @param element - The element whose rect is known.
- * @returns The component and the value to record.
+ * @returns The component and the value to record, or `undefined` for an element with no visual.
  */
-function restVisual(element: Element): { component: ComponentType<object>; value: object } {
-  const { style, rect, type, node } = element;
-  const alpha = style.alpha ?? 1;
+function restVisual(
+  element: Element
+): { component: ComponentType<object>; value: object } | undefined {
+  const [visual] = visualOf(element);
 
-  if (type === "image" || type === "icon") {
-    return {
-      component: Sprite as unknown as ComponentType<object>,
-      value: { ...Sprite.defaults, texture: textureOf(node.props), alpha, anchor: { x: 0, y: 0 } }
-    };
-  }
+  if (visual === undefined || visual.value === true) return undefined;
 
-  if (type === "text") {
-    return {
-      component: Text as unknown as ComponentType<object>,
-      value: { ...Text.defaults, ...(node.props as object), anchor: { x: 0, y: 0 } }
-    };
-  }
-
-  if (type === "panel" && typeof node.props.nineSlice === "string") {
-    return {
-      component: NineSlice as unknown as ComponentType<object>,
-      value: { texture: node.props.nineSlice, width: rect.w, height: rect.h }
-    };
-  }
-
-  return {
-    component: Shape as unknown as ComponentType<object>,
-    value: {
-      ...Shape.defaults,
-      w: rect.w,
-      h: rect.h,
-      alpha: showsShape(element) ? alpha : 0,
-      fill: style.fill ?? Shape.defaults.fill,
-      radius: style.radius ?? 0,
-      stroke: style.stroke ?? Shape.defaults.stroke,
-      strokeWidth: style.strokeWidth ?? 0,
-      clip: type === "scroll"
-    }
-  };
+  return { component: visual.type as ComponentType<object>, value: visual.value };
 }
 
 /**
- * Reads the asset key of an image or an icon out of its props.
- *
- * @param props - The props of the element.
- * @returns The texture key, empty when the markup named none.
- */
-function textureOf(props: Record<string, unknown>): string {
-  const key = props.texture ?? props.name;
-
-  return typeof key === "string" ? key : "";
-}
-
-/**
- * Tells whether the rounded rectangle of an element is visible. A container with no fill and no
- * stroke still carries one, invisible, so its children have a display object to hang under.
- *
- * @param element - The element to ask about.
- * @returns True for a button, a plain panel, a scroll container and a filled container.
- */
-function showsShape(element: Element): boolean {
-  if (element.type === "button" || element.type === "panel" || element.type === "scroll") {
-    return true;
-  }
-
-  return element.style.fill !== undefined || element.style.stroke !== undefined;
-}
-
-/**
- * Records the rest pose of one element before a hook runs: the transform from `Box`, and the
- * visual the element is actually drawn with.
+ * Records the rest pose of one element before a hook runs: the transform from `Box` and the
+ * style, and the visual the element is actually drawn with.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element that entered or moved.
@@ -119,11 +99,15 @@ function showsShape(element: Element): boolean {
 export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined): void {
   const projection = ctx.deps.world.projection;
 
-  projection.setRest(element.entity, Transform, restTransform(element.rect, parent));
+  projection.setRest(
+    element.entity,
+    Transform,
+    restTransform(element.rect, parent, element.style, element.fit)
+  );
 
   const visual = restVisual(element);
 
-  projection.setRest(element.entity, visual.component, visual.value);
+  if (visual !== undefined) projection.setRest(element.entity, visual.component, visual.value);
 }
 
 /**
@@ -182,4 +166,43 @@ export function play(
  */
 export function still(element: Element): boolean {
   return element.handles.every(handle => !handle.active());
+}
+
+/**
+ * Moves the rest `Transform` of an element to where its rect, style and fit put it now. A live
+ * element plays its `change.Transform` motion when it has one, else takes the pose at once; an
+ * element that has not spawned yet only records it, and so does one whose `change.Box` motion
+ * already played. The content of a scroll keeps its `Transform`: the scroll step owns it.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element whose rect, style or fit may have changed.
+ * @param parent - The rect of its parent, or nothing.
+ * @param hooked - Whether a `change.Box` motion already played for this change.
+ */
+export function repose(
+  ctx: UiCtx,
+  element: Element,
+  parent: Rect | undefined,
+  hooked: boolean
+): void {
+  const next = restTransform(element.rect, parent, element.style, element.fit);
+
+  if (samePose(element.rest, next)) return;
+
+  const previous = element.rest;
+
+  element.rest = next;
+  ctx.deps.world.projection.setRest(element.entity, Transform, next);
+
+  if (!element.live || hooked) return;
+
+  const hook = element.motion?.change?.Transform;
+
+  if (hook !== undefined) {
+    play(ctx, element, view => hook(view, previous, next));
+
+    return;
+  }
+
+  if (element.type !== CONTENT) ctx.deps.world.ecs.set(element.entity, Transform, next);
 }

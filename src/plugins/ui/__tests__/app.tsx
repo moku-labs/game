@@ -236,7 +236,7 @@ export const richProjection = projection({
       />
       <image key="pic" texture="ui.coin" style={{ width: 20, height: 20 }} />
       <icon key="ic" name="ui.gear" style={{ width: 20, height: 20 }} />
-      <panel key="pan" nineSlice="ui.panel" style={{ width: 40, height: 40 }} />
+      <panel key="pan" style={{ width: 40, height: 40, nineSlice: "ui.panel" }} />
       <button key="off" state={{ disabled: true }} style={{ width: 60, height: 60 }} />
       <button
         key="held"
@@ -247,6 +247,101 @@ export const richProjection = projection({
       <icon key="autoIcon" name="ui.gear" />
       <text key="styled" style="body" content="a style key carries the size" />
       <button key="plain" style={{ width: 50, height: 50 }} />
+    </column>
+  )
+});
+
+/** The look every sliced button of the showcase shares: a texture per state, a lift on hover. */
+const slicedButton = {
+  width: 300,
+  height: 120,
+  nineSlice: "ui.button",
+  alpha: 0.9,
+  tint: 0xff_ee_dd,
+  is: {
+    hover: { nineSlice: "ui.button-hover", offsetY: -6, scale: 1.05 },
+    pressed: { nineSlice: "ui.button-pressed", offsetY: 4, scale: 0.95 },
+    disabled: { nineSlice: "ui.button-off" }
+  }
+} as const;
+
+/** A screen of the delta-4 looks: nine-slices in the style, image fits, clip, transforms. */
+export const showcaseProjection = projection({
+  name: "showcase",
+  layer: "ui",
+  from: (player: Player): { id: string; coins: number }[] => [
+    { id: "showcase", coins: player.coins }
+  ],
+  key: (item: { id: string }) => item.id,
+  view: () => (
+    <column key="showRoot" style={{ width: 1080, height: 1800, gap: 10 }}>
+      <button key="sliced" intent="openSettings" style={slicedButton} />
+      <button
+        key="offButton"
+        intent="openSettings"
+        state={{ disabled: true }}
+        style={slicedButton}
+      />
+      <row key="slicedRow" style={{ width: 400, height: 80, nineSlice: "ui.strip" }} />
+      <stack key="slicedStack" style={{ width: 200, height: 200, nineSlice: "ui.card" }} />
+      <image
+        key="cover"
+        texture="ui.bg"
+        fit="cover"
+        style={{ width: 300, height: 200, tint: 0xaa_aa_aa }}
+      />
+      <image key="contained" texture="ui.coin" style={{ width: 64, height: 64 }} />
+      <icon key="filled" name="ui.gear" fit="fill" style={{ width: 48, height: 48 }} />
+      <panel key="card" style={{ width: 300, height: 200, fill: 0x22_22_22 }} />
+      <column key="clipper" style={{ width: 200, height: 200, overflow: "hidden" }} />
+      <row
+        key="lifted"
+        style={{ width: 100, height: 100, offsetX: 10, offsetY: -20, scale: 1.5, origin: "top" }}
+      />
+      <row key="corner" style={{ width: 100, height: 100, origin: "topLeft" }} />
+      <row
+        key="swapper"
+        style={{
+          width: 100,
+          height: 60,
+          fill: 0x11_11_11,
+          is: { hover: { nineSlice: "ui.strip" } }
+        }}
+      />
+      <button
+        key="bouncy"
+        intent="openSettings"
+        style={{ width: 100, height: 100, is: { hover: { scale: 1.2 } } }}
+        motion={buttonMotion}
+      />
+    </column>
+  )
+});
+
+/** The top bar and the bottom bar around the fitted slot, in reference units. */
+export const fitBars = { top: 300, bottom: 800, padding: 20 } as const;
+
+/** A board-like slot: a 970 u stack with `fit: "contain"` in whatever height the bars leave. */
+export const fittedProjection = projection({
+  name: "fitted",
+  layer: "ui",
+  from: (player: Player): { id: string; coins: number }[] => [
+    { id: "fitted", coins: player.coins }
+  ],
+  key: (item: { id: string }) => item.id,
+  view: () => (
+    <column key="fitScreen" style={{ width: 1080, height: "100%" }}>
+      <row key="fitTop" style={{ height: fitBars.top }} />
+      <column key="slot" style={{ grow: 1, padding: fitBars.padding }}>
+        <stack key="board" style={{ width: 970, height: 970, fit: "contain" }}>
+          <button
+            key="cell"
+            intent="openSettings"
+            style={{ left: 100, top: 100, width: 140, height: 140 }}
+          />
+        </stack>
+      </column>
+      <row key="fitBottom" style={{ height: fitBars.bottom }} />
     </column>
   )
 });
@@ -288,13 +383,29 @@ export const hud = projection({
 
 const home = defineNode({
   rest: true,
-  outcomes: { openSettings: type(), reward: type(), teach: type(), teachBlind: type() }
+  outcomes: {
+    openSettings: type(),
+    reward: type(),
+    teach: type(),
+    teachBlind: type(),
+    teachFit: type()
+  }
 });
 
 const teach = defineNode({
   outcomes: { ok: type() },
   async run({ fx, out }) {
     await fx(guide({ allow: { intent: "ok" }, target: { projection: "hud", key: "settings" } }));
+    await fx({ kind: "pause", answers: ["ok"] });
+
+    return out.ok();
+  }
+});
+
+const teachFit = defineNode({
+  outcomes: { ok: type() },
+  async run({ fx, out }) {
+    await fx(guide({ allow: { intent: "ok" }, target: { projection: "fitted", key: "cell" } }));
     await fx({ kind: "pause", answers: ["ok"] });
 
     return out.ok();
@@ -321,14 +432,21 @@ const deliver = defineNode({
 });
 
 const main = defineFlow("main", {
-  nodes: { home, deliver, teach, teachBlind },
+  nodes: { home, deliver, teach, teachBlind, teachFit },
   start: "home",
   outcomes: { over: type() },
   edges: {
-    home: { openSettings: "home", reward: "deliver", teach: "teach", teachBlind: "teachBlind" },
+    home: {
+      openSettings: "home",
+      reward: "deliver",
+      teach: "teach",
+      teachBlind: "teachBlind",
+      teachFit: "teachFit"
+    },
     deliver: { done: exit("over") },
     teach: { ok: "home" },
-    teachBlind: { ok: "home" }
+    teachBlind: { ok: "home" },
+    teachFit: { ok: "home" }
   }
 });
 
@@ -342,7 +460,9 @@ export const hudFeature = defineFeature("hud", {
     inputProjection,
     sidewaysProjection,
     oddProjection,
-    richProjection
+    richProjection,
+    showcaseProjection,
+    fittedProjection
   ],
   // The fourth entry is not a `defineComponent` result: `ui` skips what it cannot register.
   ui: [Settings, RewardPopup, Broken, { name: "NotAComponent" } as never],
