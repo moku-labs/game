@@ -28,7 +28,7 @@ Yoga arrives through `await import("yoga-layout/load")` in `onStart`; nothing so
 | `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
 | `text` | `Text`; a string `style` is the text style key | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint` | as below |
-| any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke | as below |
+| any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke; a style with a `stroke` and no `fill` draws only the stroke (`fillAlpha: 0`), a ring | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
 | `scroll` | `Shape` with `clip` | `Touchable`, `Scroll` |
@@ -77,6 +77,25 @@ lands, so the unscaled element sits on its rect.
 
 When a state change moves the rest pose, the element plays its `change.Transform` motion when it
 has one, else the pose applies at once. A new rect plays `change.Box` when there is one.
+
+The `motion` prop is a `Ui.ElementMotion`. Its two `change` hooks get typed values: `Transform`
+the rest poses before and after, `Box` the rects. A hook for any other component name is
+accepted, so every `defineMotion` result fits, and `ui` never plays it. One hook alone is a
+`Ui.ElementChange<Value>`.
+
+```ts
+const cardMotion: Ui.ElementMotion = {
+  change: {
+    Transform: (view, previous, next) =>
+      next.scale > previous.scale
+        ? view.all([
+            view.toRest(Transform, { ms: 240 }),
+            view.tween(Transform, { rotation: 0.12 }, { ms: 520, additive: true })
+          ])
+        : view.toRest(Transform, { ms: 240 })
+  }
+};
+```
 
 Breaking (delta 4): every ui motion with `scale` or `rotation` now turns around the element's
 centre. `origin: "topLeft"` keeps the old pivot.

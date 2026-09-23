@@ -85,6 +85,47 @@ describe("sync shapes", () => {
     expect(graphicsOf(mock, outlined).strokes).toEqual([{ color: 0xff_00_00, width: 4 }]);
   });
 
+  it("draws only the stroke of a shape whose fill alpha is 0", async () => {
+    const mock = await started();
+    const ring = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 140, h: 140, radius: 24, fillAlpha: 0, stroke: 0xff_c2_33, strokeWidth: 6 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, ring);
+
+    expect(graphics.ops).toEqual([
+      { op: "roundRect", x: 0, y: 0, width: 140, height: 140, radius: 24 }
+    ]);
+    expect(graphics.fills).toEqual([]);
+    expect(graphics.strokes).toEqual([{ color: 0xff_c2_33, width: 6 }]);
+    expect(graphics.alpha).toBe(1);
+  });
+
+  it("fills with the fill alpha, apart from the alpha of the whole shape", async () => {
+    const mock = await started();
+    const glass = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 64, h: 32, fill: 0x10_20_30, fillAlpha: 0.5, alpha: 0.8 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, glass);
+
+    expect(graphics.fills).toEqual([{ color: 0x10_20_30, alpha: 0.5 }]);
+    expect(graphics.alpha).toBe(0.8);
+
+    mock.world.ecs.set(glass, Shape, { fillAlpha: 1 });
+    mock.modules.sync.pass();
+
+    expect(graphics.fills).toEqual([{ color: 0x10_20_30 }]);
+  });
+
   it("puts the hit box at the transform, anchored top left", async () => {
     const mock = await started();
     const entity = mock.world.ecs.spawn(owner, [
@@ -131,6 +172,22 @@ describe("sync shapes", () => {
 
     expect(view?.wrapper?.position.x).toBe(42);
     expect(mask?.parent).toBe(view?.wrapper);
+  });
+
+  it("fills the mask of a clipping shape whole, even when the shape draws only its stroke", async () => {
+    const mock = await started();
+    const frame = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 100, h: 100, clip: true, fillAlpha: 0, stroke: 0xff_c2_33, strokeWidth: 4 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const mask = mock.ctx.state.sync.views.get(frame)?.mask as unknown as FakeGraphics | undefined;
+
+    expect(graphicsOf(mock, frame).fills).toEqual([]);
+    expect(mask?.fills).toEqual([{ color: 0xff_ff_ff }]);
   });
 
   it("drops the mask when clip is turned off", async () => {

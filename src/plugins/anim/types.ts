@@ -81,7 +81,8 @@ export type SlotRecord = SlotValues<SlotTags>;
 /**
  * What `build` is handed next to the slots: `at` reads where a target rests at play time, in root
  * space (its rest `Transform` composed through the `Parent` chain, every pivot applied), so a
- * choreography can fly one element to where another one rests, even inside a scaled slot.
+ * choreography can fly one element to where another one rests, even inside a scaled slot. A view
+ * that has a `Parent` itself is aimed at that pose with a `tween` in `space: "root"`.
  *
  * @example
  * ```ts
@@ -258,7 +259,9 @@ export type AnimApi = {
   /**
    * Builds the step tree of an animation with the given targets and starts it. The tree runs
    * from the next frame step on, in game time, so `time.setScale` and a pause apply to it. `at`
-   * inside `build` answers where a target rests in root space, even inside a scaled slot.
+   * inside `build` answers where a target rests in root space, even inside a scaled slot. A
+   * `tween` with `space: "root"` lands a hosted view on such a pose: a board item inside the board
+   * slot flies onto an order card of the HUD.
    *
    * @param animation - What `defineAnimation` returned.
    * @param slots - One target, or a list of targets, per declared slot.
@@ -342,8 +345,9 @@ export type AnimApi = {
 
 /**
  * Resolved dependency APIs. `renderer` is not among them: `anim` writes its `Sprite` and reads
- * its `Transform` through the component objects, which are plain data, and composes the root pose
- * of `at` with the pure `rootPoseOf` of `renderer/sync/pose.ts`.
+ * its `Transform` through the component objects, which are plain data, composes the root pose
+ * of `at` with the pure `rootPoseOf` of `renderer/sync/pose.ts`, and turns the target of a
+ * `tween` in `space: "root"` local with the pure `localPoseOf` of the same module.
  */
 export type Deps = { time: TimeApi; flow: FlowApi; world: WorldApi };
 

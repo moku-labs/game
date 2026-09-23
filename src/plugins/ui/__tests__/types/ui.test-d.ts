@@ -1,11 +1,14 @@
 import { describe, expectTypeOf, it } from "vitest";
+import { defineMotion } from "../../../anim/motion";
 import type { Descriptor } from "../../../flow/fx/types";
-import type { Entity } from "../../../world/types";
+import { Transform, type TransformValue } from "../../../renderer/components";
+import type { Entity, Motion, ViewHandle } from "../../../world/types";
+import type { BoxValue } from "../../components";
 import { popup, uiFor } from "../../components";
 import { defineComponent } from "../../jsx/component";
 import type { Finding, UiNode } from "../../jsx/types";
 import { defineStyle } from "../../styles/define";
-import type { UiApi } from "../../types";
+import type { ElementChange, ElementMotion, UiApi } from "../../types";
 
 const Reward = defineComponent("Reward", {
   outcomes: { claim: {} as { orderId: string } },
@@ -131,5 +134,49 @@ describe("uiFor", () => {
 
     expectTypeOf(panelStyle).not.toBeUndefined();
     expectTypeOf(wrongStyle).not.toBeUndefined();
+  });
+});
+
+/** A change.Transform hook that names the rest poses it is handed. */
+const sway = (view: ViewHandle<unknown>, previous: TransformValue, next: TransformValue): Motion =>
+  next.scale > previous.scale ? view.toRest(Transform, { ms: 240 }) : undefined;
+
+/** A change.Box hook typed through `ElementChange`. */
+const slide: ElementChange<BoxValue> = (view, previous, next) =>
+  next.y === previous.y ? undefined : view.toRest(Transform, { ms: 200 });
+
+/** A hook that takes a string where `ui` hands a rest pose. */
+const wrong = (view: ViewHandle<unknown>, previous: string): Motion =>
+  previous === "" ? undefined : view.toRest(Transform);
+
+describe("element motion", () => {
+  type Changes = NonNullable<ElementMotion["change"]>;
+
+  it("hands a change.Transform hook the two rest poses, and a change.Box hook the two rects", () => {
+    const card: ElementMotion = { change: { Transform: sway, Box: slide } };
+
+    expectTypeOf(card).toExtend<ElementMotion>();
+    expectTypeOf<
+      Parameters<NonNullable<Changes["Transform"]>>[1]
+    >().toEqualTypeOf<TransformValue>();
+    expectTypeOf<Parameters<NonNullable<Changes["Box"]>>[2]>().toEqualTypeOf<BoxValue>();
+  });
+
+  it("refuses a change.Transform hook that takes something other than a rest pose", () => {
+    // @ts-expect-error — `ui` hands a change.Transform hook rest poses, not strings.
+    const card: ElementMotion = { change: { Transform: wrong } };
+
+    expectTypeOf(card).not.toBeUndefined();
+  });
+
+  it("takes a defineMotion result as the motion prop of a tag, whatever components it names", () => {
+    const kit = uiFor<"ui.coin", "digits", "hud.coins">();
+    const pop = defineMotion({
+      states: { hidden: { Transform: { scale: 0.8 }, Shape: { alpha: 0 } } },
+      on: { enter: "hidden", exit: "hidden", change: ["Transform", "Shape"] }
+    });
+
+    expectTypeOf(pop).toExtend<ElementMotion>();
+    expectTypeOf(pop).toExtend<typeof kit.intrinsics.column.motion>();
   });
 });

@@ -111,29 +111,56 @@ function startTween(
 
   if (entity === undefined) return undefined;
 
-  return cctx.rt.start(
-    entity,
-    step.component,
-    { ...step.to },
-    { ms: step.ms, ease: step.ease, delayMs: step.delayMs, additive: step.additive }
-  );
+  return cctx.rt.start(entity, step.component, tweenTargetOf(cctx, entity, step), {
+    ms: step.ms,
+    ease: step.ease,
+    delayMs: step.delayMs,
+    additive: step.additive
+  });
 }
 
 /**
- * Writes the patch of a `set` step, or the target of a `tween` step that never started.
+ * The target fields of a `tween` step for one entity: as written in the local space, turned into
+ * the space of the entity's parent in the root space.
  *
  * @param cctx - What the cursor carries down the tree.
- * @param step - The step to write.
- * @param patch - The fields to write.
+ * @param entity - The entity the step moves.
+ * @param step - The tween step.
+ * @returns The fields the track or the write aims at.
  */
-function writeStep(
+function tweenTargetOf(
   cctx: CursorCtx,
-  step: Extract<Step, { kind: "tween" | "set" }>,
-  patch: Record<string, unknown>
-): void {
+  entity: Entity,
+  step: Extract<Step, { kind: "tween" }>
+): Record<string, number> {
+  if (step.space === "root") return cctx.rt.toLocal(entity, step.component, step.to);
+
+  return { ...step.to };
+}
+
+/**
+ * Writes the target of a `tween` step that never started, in the space the step names.
+ *
+ * @param cctx - What the cursor carries down the tree.
+ * @param step - The tween step.
+ */
+function writeTween(cctx: CursorCtx, step: Extract<Step, { kind: "tween" }>): void {
   const entity = targetOf(cctx, step);
 
-  if (entity !== undefined) cctx.rt.write(entity, step.component, patch);
+  if (entity !== undefined)
+    cctx.rt.write(entity, step.component, tweenTargetOf(cctx, entity, step));
+}
+
+/**
+ * Writes the patch of a `set` step.
+ *
+ * @param cctx - What the cursor carries down the tree.
+ * @param step - The set step.
+ */
+function writeSet(cctx: CursorCtx, step: Extract<Step, { kind: "set" }>): void {
+  const entity = targetOf(cctx, step);
+
+  if (entity !== undefined) cctx.rt.write(entity, step.component, { ...step.patch });
 }
 
 /**
@@ -356,7 +383,7 @@ export function advanceCursor(cctx: CursorCtx, cursor: Cursor, deltaMs: number):
       break;
     }
     case "set": {
-      writeStep(cctx, step, { ...step.patch });
+      writeSet(cctx, step);
       break;
     }
     case "spawn": {
@@ -416,12 +443,12 @@ export function finishCursor(cctx: CursorCtx, cursor: Cursor): void {
     }
     case "tween": {
       if (cursor.started) cursor.motion?.finish();
-      else writeStep(cctx, step, { ...step.to });
+      else writeTween(cctx, step);
 
       break;
     }
     case "set": {
-      writeStep(cctx, step, { ...step.patch });
+      writeSet(cctx, step);
 
       break;
     }

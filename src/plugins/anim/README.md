@@ -42,7 +42,7 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 ```ts
 defineAnimation(id, { slots, build })   // slots: { name: type<Target>() | type<Target[]>() }
 sequence(...steps)  parallel(...steps)  stagger(items, ms, item => Step)  wait(ms)  mark(name)
-tween(target, Component, to, { ms, ease?, delayMs?, additive? })   set(target, Component, patch)
+tween(target, Component, to, { ms, ease?, delayMs?, additive?, space? })   set(target, Component, patch)
 frames(target, { keys, fps, loop? })    // writes Sprite.texture, one key per frame
 spawn(id, components, { layer?, order? }) // a temporary entity, made when the step is reached
 spawned(id)                             // the target of an entity a spawn step of this timeline made
@@ -55,12 +55,46 @@ defineMotion({ states, transition?, on })
 
 A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.
 
+`Component` in `tween` and `set` is any component handle `world.ecs` takes: the root `Transform`
+and `Sprite`, and the kit's `Sprite` and `NineSlice` that `defineGame` narrows to the game's asset
+keys. The kit component passes as it is: `tween(target, Sprite, { alpha: 0 }, { ms: 100 })`.
+
 `build(slots, { at })` runs once per play, so the same animation may play twice at once. `at(target)`
 resolves the target through `world.projection.entityOf` and answers its **root pose**: the rest
 `Transform` composed through the `Parent` chain (`rootPoseOf` of `renderer`, every pivot applied), so
 a flight lands on a cell inside a scaled board slot. An entity without a parent answers its rest
 `Transform` as is. A target nothing resolves gives `{ x: 0, y: 0, rotation: 0, scale: 1 }` and one
 warning.
+
+## Tween space
+
+A `tween` writes the target's own `Transform`, which is local to its `Parent`. `at()` answers a root
+pose. To aim a hosted view at another element, name the root space:
+
+```ts
+// An order is delivered: the board item flies out of the scaled board slot onto the order card.
+const deliverFly = defineAnimation("orders.deliverFly", {
+  slots: { item: type<Target>(), card: type<Target>() },
+  build: ({ item, card }, { at }) =>
+    tween(item, Transform, { x: at(card).x, y: at(card).y, scale: at(card).scale }, {
+      ms: 400, ease: "inCubic", space: "root"
+    })
+});
+app.anim.play(deliverFly, {
+  item: { projection: "board.items", key: "i1" },
+  card: { projection: "hud", key: "card0" }
+});
+// 400 ms later the item covers the card at the card's size; its Transform stays slot-local
+```
+
+- `space: "local"` is the default: the fields are written into the `Transform` as they are.
+- `space: "root"`: the `x`, `y`, `rotation` and `scale` of a `Transform` are a root pose. When the
+  track starts, or when a finished timeline writes a step that never started, they are turned into
+  the space of the target's `Parent` with `localPoseOf` of `renderer`.
+- A field the step does not name stays where it is. Under a turned parent, name `x` and `y`
+  together.
+- A target without a `Parent`, and a component other than `Transform`, move as in the local space.
+- The step data carries the space: `{ kind: "tween", ..., space: "root" }`.
 
 ## Spawned entities
 
@@ -140,4 +174,4 @@ When the last additive track leaves, the field is written once more without offs
 `time` (the frame step, `delta`, `wake()`), `flow` (`fx.handle`, `fx.dispatch`, `features.all()`),
 `world` (the driver seam, `projection.entityOf`, `restOf`, the ecs with `spawn` and `despawn`, the
 `Layer` and `Order` components), `renderer` (its `Sprite`, `Transform` and `Parent` components and
-the `rootPoseOf` pose helper of `sync/pose.ts`; no API call).
+the `rootPoseOf`, `localPoseOf` and `parentOf` pose helpers of `sync/pose.ts`; no API call).

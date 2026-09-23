@@ -52,6 +52,13 @@ describe("anim/timeline step builders", () => {
     expect(step).toMatchObject({ ms: 80, ease: "inBack", delayMs: 40, additive: true });
   });
 
+  it("carries the space of a tween: local by default, root when the step names it", () => {
+    expect(tween(card, Transform, { x: 10 }, { ms: 80 })).toMatchObject({ space: "local" });
+    expect(tween(card, Transform, { x: 10 }, { ms: 80, space: "root" })).toMatchObject({
+      space: "root"
+    });
+  });
+
   it("builds a set step and a frames step with its loop default", () => {
     const patch = set(card, Sprite, { texture: "hud.card" });
 

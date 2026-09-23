@@ -372,6 +372,24 @@ describe("the rest pose of the visual", () => {
     await app.stop();
   });
 
+  it("draws a style with a stroke and no fill as a ring, and keeps the fill of a filled one", async () => {
+    const app = await startUiApp();
+
+    mount(app, "rich");
+
+    expect(app.world.ecs.get(app.ui.find("strokeOnly") ?? 0, Shape)).toMatchObject({
+      fillAlpha: 0,
+      stroke: 0x44_44_44
+    });
+    expect(app.world.ecs.get(app.ui.find("richRoot") ?? 0, Shape)).toMatchObject({
+      fillAlpha: 1,
+      fill: 0x11_11_11,
+      stroke: 0x22_22_22
+    });
+
+    await app.stop();
+  });
+
   it("sizes an icon with no style to the line height of the text next to it", async () => {
     const app = await startUiApp();
 

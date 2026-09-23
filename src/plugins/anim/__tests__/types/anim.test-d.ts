@@ -1,8 +1,9 @@
 import { expectTypeOf } from "vitest";
+import { defineGame } from "../../../../index";
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { defineMotion } from "../../motion";
-import { defineAnimation, mark, play, sequence, tween } from "../../timeline/steps";
+import { defineAnimation, mark, play, sequence, set, tween } from "../../timeline/steps";
 import type { AnimApi, KernelSlice, PlayHandle, Target } from "../../types";
 
 const card: Target = { projection: "hud", key: "order" };
@@ -15,6 +16,27 @@ tween(card, Sprite, { texture: 1 }, { ms: 100 });
 tween(card, Transform, { x: "a" }, { ms: 100 });
 // @ts-expect-error — `ms` is required
 tween(card, Transform, { x: 10 }, {});
+
+// A tween names the space of its target: local by default, root to aim a hosted view.
+tween(card, Transform, { x: 540, y: 300 }, { ms: 100, space: "root" });
+tween(card, Transform, { x: 540, y: 300 }, { ms: 100, space: "local" });
+// @ts-expect-error — the space is local or root, nothing else
+tween(card, Transform, { x: 540 }, { ms: 100, space: "world" });
+
+// The components a game gets from `defineGame` pass unchanged, as `world.ecs` takes them.
+const kit = defineGame<{
+  player: { coins: number };
+  session: { open: boolean };
+  assets: "ui.icon-coin" | "ui.button-berry";
+  bundles: "boot";
+  strings: { "hud.coins": string };
+}>();
+
+tween(card, kit.Sprite, { alpha: 0 }, { ms: 100 });
+set(card, kit.NineSlice, { alpha: 1 });
+set(card, kit.Sprite, { texture: "ui.icon-coin" });
+// @ts-expect-error — a numeric field of the kit's Sprite still takes a number
+tween(card, kit.Sprite, { alpha: "a" }, { ms: 100 });
 
 const deliverOrder = defineAnimation("orders.deliver", {
   slots: { items: type<Target[]>(), card: type<Target>() },

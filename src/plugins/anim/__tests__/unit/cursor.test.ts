@@ -232,6 +232,21 @@ describe("anim/timeline cursor", () => {
     expect(mock.api.active()).toBe(0);
   });
 
+  it("ends a set step whose key has no live view without writing", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const handle = playOn(mock, { projection: "hud", key: "ghost" }, it =>
+      set(it, Sprite, { alpha: 0 })
+    );
+
+    mock.frame(16);
+
+    expect(handle.active()).toBe(false);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
   it("ends a step whose entity died", () => {
     const mock = createMockAnim();
 

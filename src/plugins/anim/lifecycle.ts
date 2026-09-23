@@ -18,6 +18,7 @@ import {
   resolveTarget,
   startTimeline
 } from "./timeline/play";
+import { localTargetOf } from "./timeline/space";
 import type { FxStep, TimelineRuntime } from "./timeline/types";
 import { advanceTracks, beginFrame, finishAllTracks } from "./tween/advance";
 import { createDriver, startStepTrack } from "./tween/driver";
@@ -127,6 +128,12 @@ export function createRuntime(actx: AnimCtx): TimelineRuntime {
     write: (entity: Entity, component: AnyComponent, patch: Record<string, unknown>): void => {
       actx.deps.world.ecs.set(entity, component, patch);
     },
+
+    toLocal: (
+      entity: Entity,
+      component: AnyComponent,
+      to: Readonly<Record<string, number>>
+    ): Record<string, number> => localTargetOf(actx.deps.world.ecs, entity, component, to),
 
     start: (
       entity: Entity,

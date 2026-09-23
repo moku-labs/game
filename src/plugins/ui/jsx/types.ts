@@ -8,7 +8,7 @@ import type { Hint } from "../../flow/types";
 import type { Json } from "../../model/types";
 import type { TransformValue } from "../../renderer/components";
 import type {
-  ChangeHooks,
+  ChangeHook,
   Motion,
   MotionHandle,
   ProjectionMotion,
@@ -70,18 +70,36 @@ export type ElementChange<Value> = (
 
 /**
  * The motion hooks of one element: the hook triple of `world.projection`, which `defineMotion`
- * of `anim` returns. The two `change` hooks `ui` plays itself are typed with the values it hands
- * them: `Box` gets the rects, `Transform` the rest poses.
+ * of `anim` returns. `ui` plays two `change` hooks itself and hands them typed values: `Box` gets
+ * the rects, `Transform` the rest poses. A hook for any other component name is accepted, so every
+ * `defineMotion` result fits, and `ui` never plays it.
  *
  * @example
  * ```ts
- * const motion: ElementMotion = { enter: view => view.toRest(Transform, { ms: 250 }) };
+ * // An order card that grows into its ready pose sways once on the way.
+ * const cardMotion: ElementMotion = {
+ *   change: {
+ *     Transform: (view, previous, next) =>
+ *       next.scale > previous.scale
+ *         ? view.all([
+ *             view.toRest(Transform, { ms: 240 }),
+ *             view.tween(Transform, { rotation: 0.12 }, { ms: 520, additive: true })
+ *           ])
+ *         : view.toRest(Transform, { ms: 240 })
+ *   }
+ * };
  * ```
  */
 export type ElementMotion = Omit<ProjectionMotion<unknown>, "change"> & {
-  readonly change?: ChangeHooks<unknown> & {
-    readonly Box?: ElementChange<BoxValue>;
-    readonly Transform?: ElementChange<TransformValue>;
+  readonly change?: {
+    readonly [component: string]: ChangeHook<never>;
+    Box?(view: ViewHandle<unknown>, previous: BoxValue, next: BoxValue, hint?: Hint): Motion;
+    Transform?(
+      view: ViewHandle<unknown>,
+      previous: TransformValue,
+      next: TransformValue,
+      hint?: Hint
+    ): Motion;
   };
 };
 

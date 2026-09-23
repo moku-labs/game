@@ -303,13 +303,15 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
 }
 
 /**
- * Draws the rectangle of a shape: one path, filled, with the corners the value asks for.
+ * Draws the rectangle of a shape: one path with the corners the value asks for, filled in the
+ * colour of the value at the alpha given. At alpha 0 the path stays unfilled, so only a stroke
+ * shows.
  *
  * @param object - The graphics to draw on.
  * @param value - The shape value.
- * @param fill - The fill colour.
+ * @param fillAlpha - The alpha of the fill: the value's own for the shape, 1 for a clip mask.
  */
-function drawRect(object: PixiGraphics, value: Readonly<ShapeValue>, fill: number): void {
+function drawRect(object: PixiGraphics, value: Readonly<ShapeValue>, fillAlpha: number): void {
   object.clear();
 
   if (value.radius > 0) {
@@ -318,7 +320,9 @@ function drawRect(object: PixiGraphics, value: Readonly<ShapeValue>, fill: numbe
     object.rect(0, 0, value.w, value.h);
   }
 
-  object.fill({ color: fill });
+  if (fillAlpha <= 0) return;
+
+  object.fill(fillAlpha < 1 ? { color: value.fill, alpha: fillAlpha } : { color: value.fill });
 }
 
 /**
@@ -346,7 +350,7 @@ function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<Sh
   const mask = view.mask ?? new pixi.Graphics();
 
   mask.label = `clip#${entity}`;
-  drawRect(mask, value, value.fill);
+  drawRect(mask, value, 1);
 
   if (mask.parent !== wrapper) wrapper.addChild(mask);
 
@@ -368,7 +372,7 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (value === undefined || !isGraphics(object)) return;
 
-  drawRect(object, value, value.fill);
+  drawRect(object, value, value.fillAlpha);
 
   if (value.strokeWidth > 0) object.stroke({ color: value.stroke, width: value.strokeWidth });
 
