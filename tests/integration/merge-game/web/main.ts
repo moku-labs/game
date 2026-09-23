@@ -5,7 +5,11 @@
  * Serving: run `bun ./web/serve.ts` from `tests/integration/merge-game/`. It serves the bundled
  * page on `/` and the committed `manifest.json` and every asset under `/features/` as static
  * files (`bun ./index.html` alone answers every path with the page).
+ *
+ * The page is a dev build: `./dev` sets the dev flag before anything else runs, and the audio
+ * journal keeps the last 200 sounds, so the editor and the e2e station can read what was heard.
  */
+import "./dev";
 import { createApp } from "@moku-labs/game";
 import { mainFlow } from "../flows/main";
 import { screenPlugins, volumesOf } from "../game";
@@ -23,7 +27,7 @@ const app = createApp({
     model: { initialPlayer: playerFor(location.search), initialSession: startingSession, seed: 42 },
     flow: { mainFlow, safeNode: "home" },
     i18n: { locale: "ru", fallback: "ru" },
-    audio: { volumes: volumesOf },
+    audio: { volumes: volumesOf, journal: 200 },
     input: { heldScale: 1.08 },
     // The keyboard focus ring of design §4: a dashed ink ring over a cream halo, 9 px of the
     // 390-wide design outside the control.
