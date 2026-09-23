@@ -172,9 +172,10 @@ describe("screen-merge — the board as entities", () => {
       { name: "lifted", sort: "none" },
       { name: "fx", sort: "none" }
     ]);
-    // Nine cells, three items and the generator, which is drawn in the items layer. The slot of
-    // the board screen hosts them, and they keep their layer to fall back to.
-    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 4 });
+    // Nine cells and the ring on the sawmill, selected while nothing else is; three items and the
+    // generator, which is drawn in the items layer. The slot of the board screen hosts them, and
+    // they keep their layer to fall back to.
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9 + 1, items: 4 });
     expect(app.world.projection.entityOf("board.cells", "c1_0")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
     expect(app.world.projection.entityOf("board.generators", generatorId)).toBeDefined();
@@ -210,7 +211,7 @@ describe("screen-merge — the board as entities", () => {
     const survivor = app.world.projection.entityOf("board.items", "i2") ?? 0;
 
     expect(app.world.ecs.get(survivor, Item)).toEqual({ chain: "wood", level: 2, cell: "c2_0" });
-    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9 });
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9 + 1 });
 
     await app.stop();
   });
@@ -232,7 +233,7 @@ describe("screen-merge — the board as entities", () => {
     expect(app.model.store.snapshot().player).toEqual(before);
     expect(app.world.projection.entityOf("board.items", "i2")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i3")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 4 });
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9 + 1, items: 4 });
 
     await app.stop();
   });
@@ -240,7 +241,7 @@ describe("screen-merge — the board as entities", () => {
   it("spawns one more item entity when the generator is tapped", async () => {
     const { app } = await startBoard(startingPlayer);
 
-    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 1 });
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9 + 1, items: 1 });
 
     const generator = app.world.projection.entityOf("board.generators", generatorId) ?? 0;
 
@@ -250,7 +251,7 @@ describe("screen-merge — the board as entities", () => {
     app.time.step(16);
 
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
-    // The tap also selects the sawmill: its honey ring is one more view of the cells layer.
+    // The ring stays on the sawmill, which the tap selected: still one view of the cells layer.
     expect(app.world.projection.entitiesOf("board.selection")).toHaveLength(1);
     expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9 + 1, items: 2 });
 

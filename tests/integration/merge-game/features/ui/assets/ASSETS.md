@@ -87,6 +87,13 @@ key drops the tag.
   > Use case: ui-mockup. Generate one 1024x1024 PNG game UI asset with a genuinely transparent alpha background. Style: hand-drawn storybook cartoon for the cozy casual forest lumber village mobile merge game Timber Town. Confident dark-brown #3a2212 ink outlines 5-7 px at 1024 px, slightly wobbly hand-inked character while preserving straight scalable edge middles. Flat cel colours, soft watercolor-like shading, gentle top-left light, subtle fine paper/wood grain. Chunky friendly toy-like proportions readable at 64 px. Palette: ink #3a2212, warm wood #d8a062, light wood #efcd94, dark wood #9c6031, walnut #6e4121, honey gold #f2b43d and #c7841c, parchment #fbeed2. 9-slice UI requirements: fixed-size rounded corners, perfectly straight uniform middle edges on every side, plain stretchable centre with only fine repeating texture. No text, letters, numbers, watermark, icons, ornaments, central decoration, decoration along middle edges, external drop shadow, or ground plane. Front-on orthographic flat UI shape. Shape centered horizontally and vertically, about 4% canvas margin left and right; vertical transparent margins follow the specified object aspect ratio. Do not stretch the shape to square. Subject: one active folder tab made of light parchment #fbeed2, warm #efcd94 subtle inner-edge shading. Shape about 2:1, approximately 942 px wide by 471 px tall, rounded top corners of roughly 48 px radius, straight vertical sides, perfectly flat straight bottom with square bottom corners. One tiny white highlight confined near the upper-left rounded corner. Plain uninterrupted parchment center.
 CRITICAL CANVAS: The output image itself MUST be SQUARE, exactly 1024 pixels wide and 1024 pixels tall. Large empty transparent space above and below the subject is intentional. Draw ONLY the tab itself as a simple rectangle with two rounded upper corners and square lower corners. The entire top edge is ONE horizontal straight line connecting the two upper rounded corners at equal height. NO stepped silhouette, NO projecting folder flap, NO notch, NO full folder. Object bounds x=41 to 983, y=276 to 748.
 
+- Bottom edge repainted with ImageMagick on 2026-09-23, so the open tab joins the parchment
+  pane instead of lying on it. The two ink rows and the shading at the bottom (rows 96 to 104)
+  are replaced by rows 87 to 95 of the inner parchment, stretched over the full width. The side
+  outlines now end at row 95, where the ink edge of the pane meets them. The tab reaches 12 units
+  over the pane, so it hides the pane's 3-unit ink edge. Same file name and insets:
+  `magick tab-active.webp ( -clone 0 -crop 256x96+0+0 +repage ) ( -clone 0 -crop 232x9+12+87 +repage -resize 256x9! ) -delete 0 -append -define webp:lossless=true tab-active.webp`.
+
 ### `ui.tab-idle`
 
 - File: `features/ui/assets/tab-idle{nine=24,20,24,20}.webp`, 256 × 101 px, 9-slice left 24, top 20, right 24, bottom 20.
@@ -360,6 +367,17 @@ Subject: A speaker with exactly two sound waves, drawn as two clear curved arcs 
 - File: `features/orders/assets/rope.webp`, 1080 × 100 px: the rope of the order strip, a quadratic
   Bézier that sags 42 u, ink `#3a2212` 18 px with `#dcaa66` dashes 7 px (19 on, 8 off).
 - Drawn with ImageMagick, not by Astra.
+
+### `board.selection-ring-0` to `board.selection-ring-3`
+
+- Files: `features/board/assets/selection-ring-0.webp` to `selection-ring-3.webp`, 300 × 300 px
+  each: the marching outline of the selected cell (design §6 F9). The cell is 272 px plus 14 on
+  every side. The outline is a rounded square with its centreline 6 px in from the edge and a
+  corner radius of 44. It has 32 dashes of 22 px, stroke 9, in parchment `#fbeed2` with a 1.5 px
+  ink `#3a2212` edge. Phase `n` starts the dashes `n` quarters of a period further clockwise, and
+  `marchRing` shows the phases in turn every 250 ms.
+- Drawn with ImageMagick (`roundrectangle` with `stroke-dasharray`, 4× supersampled), not by
+  Astra.
 
 ## Fonts
 

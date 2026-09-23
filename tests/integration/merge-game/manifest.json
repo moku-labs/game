@@ -4,7 +4,7 @@
     "board": {
       "feature": "board",
       "tier": "scene",
-      "mb": 8.854,
+      "mb": 10.226,
       "files": [
         {
           "key": "board.bg-forest-meadow",
@@ -79,6 +79,34 @@
           "path": "features/board/assets/merge.mp3",
           "kind": "audio",
           "mb": 0.007
+        },
+        {
+          "key": "board.selection-ring-0",
+          "path": "features/board/assets/selection-ring-0.webp",
+          "width": 300,
+          "height": 300,
+          "mb": 0.343
+        },
+        {
+          "key": "board.selection-ring-1",
+          "path": "features/board/assets/selection-ring-1.webp",
+          "width": 300,
+          "height": 300,
+          "mb": 0.343
+        },
+        {
+          "key": "board.selection-ring-2",
+          "path": "features/board/assets/selection-ring-2.webp",
+          "width": 300,
+          "height": 300,
+          "mb": 0.343
+        },
+        {
+          "key": "board.selection-ring-3",
+          "path": "features/board/assets/selection-ring-3.webp",
+          "width": 300,
+          "height": 300,
+          "mb": 0.343
         },
         {
           "key": "board.spawn",

@@ -2,18 +2,19 @@
  * @file The transient moments of the board, headless (design §6 F4, F5, F6, F7, F9, F10): the
  * flight of the delivered item into its card and the "Готово!" stamp on a finished order, the
  * merge burst, the legal targets marked while an item is held, the sawmill squash, the twig's arc
- * out of the sawmill, the honey ring on the selected sawmill or item with the info bar that names
- * it, and the cards swaying on the rope, the ready one wider and glowing. Every spawned entity is
+ * out of the sawmill, the marching ring on the selected sawmill or item with the info bar that
+ * names it, and the cards swaying on the rope, the ready one wider and glowing. Every spawned entity is
  * checked to leave with its timeline.
  */
 
-import { Held, NineSlice, Order, Parent, Shape, Sprite, Text, Transform } from "@moku-labs/game";
+import { Held, NineSlice, Order, Parent, Sprite, Text, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { SWAY_MS } from "./merge-game/features/orders/motions";
 import { orderCardSize } from "./merge-game/features/orders/styles";
 import { generatorId } from "./merge-game/tables";
 import { Highlighted } from "./merge-game/view/components";
 import { cellBox } from "./merge-game/view/layout";
+import { ringFrameAt, ringFrames, ringSize, ringStepMs } from "./merge-game/view/ring";
 import {
   elementOf,
   frames,
@@ -364,41 +365,71 @@ describe("timber-motions — the cards on the rope (F10)", () => {
 });
 
 describe("timber-motions — the selection (F9)", () => {
-  it("draws a honey stroke ring on the selected cell", async () => {
+  it("draws the marching ring on the sawmill while nothing else is selected", async () => {
     const game = await startOnBoard(player);
     const projection = game.app.world.projection;
     const ecs = game.app.world.ecs;
-    const sawmill = projection.entityOf("board.generators", generatorId) ?? 0;
     const cell = cellBox("c0_0");
 
-    // Nothing is selected before the first tap.
-    expect(projection.entitiesOf("board.selection")).toEqual([]);
-
-    expect(game.app.input.tap(sawmill)).toBe(true);
-    await tick();
-    await frames(game, 3);
+    // The info bar names the sawmill before the first tap, so the ring is on the sawmill too.
+    expect(resolvedOf(game, "infoName")).toBe("Лесопилка");
 
     const rings = projection.entitiesOf("board.selection");
     const ring = rings[0] ?? 0;
 
     expect(rings).toHaveLength(1);
-    // A ring, not a tile: the fill is not drawn, so the grass shows through.
-    expect(ecs.get(ring, Shape)).toMatchObject({
-      w: cell.size,
-      h: cell.size,
-      fillAlpha: 0,
-      stroke: 0xff_c2_33,
-      strokeWidth: 6
-    });
-    expect(ecs.get(ring, Transform)).toMatchObject({ x: cell.x, y: cell.y });
-    // Hosted by the board slot, over the grass and under the sawmill.
+    // A picture of dashes 14 units larger than the cell on every side, centred on the cell.
+    expect(ecs.get(ring, Sprite)).toMatchObject({ width: ringSize, height: ringSize });
+    expect(ringFrames).toContain(ecs.get(ring, Sprite)?.texture);
+    expect(ringSize).toBe(cell.size + 28);
+    expect(ecs.get(ring, Transform)).toMatchObject({ x: cell.middle.x, y: cell.middle.y });
+    // Hosted by the board slot, over the grass and the charges plate of the sawmill (design p2),
+    // under the items.
     expect(ecs.get(ring, Parent)?.entity).toBe(elementOf(game, "boardSlot"));
 
+    const depthOf = (name: string, key: string) =>
+      ecs.get(projection.entityOf(name, key) ?? 0, Order)?.value ?? 0;
     const depth = ecs.get(ring, Order)?.value ?? 0;
-    const cellDepth = ecs.get(projection.entityOf("board.cells", "c0_0") ?? 0, Order)?.value ?? 0;
 
-    expect(depth).toBeGreaterThan(cellDepth);
-    expect(depth).toBeLessThan(ecs.get(sawmill, Order)?.value ?? 0);
+    expect(depth).toBeGreaterThan(depthOf("board.cells", "c0_0"));
+    expect(depth).toBeGreaterThan(depthOf("board.badges", `${generatorId}.count`));
+    expect(depth).toBeLessThan(depthOf("board.items", "i1"));
+
+    // A tap on the sawmill keeps it selected: the ring stays on its cell.
+    expect(game.app.input.tap({ projection: "board.generators", key: generatorId })).toBe(true);
+    await tick();
+    await frames(game, 3);
+
+    expect(projection.entitiesOf("board.selection")).toHaveLength(1);
+    expect(ecs.get(projection.entitiesOf("board.selection")[0] ?? 0, Transform)).toMatchObject({
+      x: cell.middle.x,
+      y: cell.middle.y
+    });
+
+    await game.app.stop();
+  });
+
+  it("walks the dashes: the ring shows the four phases in turn, one every 250 ms", async () => {
+    const game = await startOnBoard(player);
+    const ecs = game.app.world.ecs;
+    const textureNow = () =>
+      ecs.get(game.app.world.projection.entitiesOf("board.selection")[0] ?? 0, Sprite)?.texture;
+    const seen: string[] = [];
+
+    // 16 frames of 16 ms are 256 ms: one phase further every block.
+    for (let block = 0; block < ringFrames.length; block += 1) {
+      await frames(game, 16);
+      seen.push(textureNow() ?? "");
+    }
+
+    const first = ringFrames.indexOf(seen[0] as (typeof ringFrames)[number]);
+
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(seen).toEqual(
+      ringFrames.map((_frame, index) => ringFrames[(first + index) % ringFrames.length])
+    );
+    expect(ringFrameAt(0)).toBe("board.selection-ring-0");
+    expect(ringFrameAt(ringStepMs * 5)).toBe("board.selection-ring-1");
 
     await game.app.stop();
   });
@@ -418,8 +449,8 @@ describe("timber-motions — the selection (F9)", () => {
     expect(game.app.flow.state().path).toBe("board/awaitIntent");
     expect(projection.entitiesOf("board.selection")).toHaveLength(1);
     expect(ecs.get(projection.entitiesOf("board.selection")[0] ?? 0, Transform)).toMatchObject({
-      x: plankCell.x,
-      y: plankCell.y
+      x: plankCell.middle.x,
+      y: plankCell.middle.y
     });
     expect(resolvedOf(game, "infoName")).toBe("Доска");
     expect(resolvedOf(game, "infoLevel")).toBe("Уровень 3");
@@ -437,8 +468,8 @@ describe("timber-motions — the selection (F9)", () => {
     await frames(game, 3);
 
     expect(ecs.get(projection.entitiesOf("board.selection")[0] ?? 0, Transform)).toMatchObject({
-      x: sawmillCell.x,
-      y: sawmillCell.y
+      x: sawmillCell.middle.x,
+      y: sawmillCell.middle.y
     });
     expect(resolvedOf(game, "infoName")).toBe("Лесопилка");
     expect(resolvedOf(game, "infoCharges")).toBe("3/4");
@@ -475,7 +506,7 @@ describe("timber-motions — the selection (F9)", () => {
     ]);
     expect(
       ecs.get(game.app.world.projection.entitiesOf("board.selection")[0] ?? 0, Transform)
-    ).toMatchObject({ x: target.x, y: target.y });
+    ).toMatchObject({ x: target.middle.x, y: target.middle.y });
     expect(resolvedOf(game, "infoName")).toBe("Бревно");
     expect(resolvedOf(game, "infoLevel")).toBe("Уровень 2");
 
@@ -497,7 +528,15 @@ describe("timber-motions — the selection (F9)", () => {
     await tick();
     await frames(game, 3);
 
-    expect(game.app.world.projection.entitiesOf("board.selection")).toEqual([]);
+    // Nothing named any more means the sawmill: the ring and the info bar go back to it together.
+    const sawmillCell = cellBox("c0_0");
+    const rings = game.app.world.projection.entitiesOf("board.selection");
+
+    expect(rings).toHaveLength(1);
+    expect(game.app.world.ecs.get(rings[0] ?? 0, Transform)).toMatchObject({
+      x: sawmillCell.middle.x,
+      y: sawmillCell.middle.y
+    });
     expect(resolvedOf(game, "infoName")).toBe("Лесопилка");
     expect(shows(game, "infoLevel")).toBe(false);
 

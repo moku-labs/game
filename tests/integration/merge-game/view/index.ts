@@ -10,13 +10,14 @@ import { defineFeature } from "../kit";
 import { lookAnimations, mergeBurst, refuseShake, sawmillTap } from "./animations";
 import { boardBadges } from "./badges";
 import { boardClock } from "./clock";
-import { Generator, Glow, Highlighted, Item } from "./components";
+import { Generator, Glow, Highlighted, Item, SelectionRing } from "./components";
 import { boardCells, boardGenerators, boardGlows, boardItems, boardSelection } from "./projections";
+import { marchRing } from "./ring";
 import { boardScene } from "./scene";
 import { glowCells, highlightLegal } from "./systems";
 
 /**
- * The board on the screen: one scene, its seven projections, two systems, four components, the
+ * The board on the screen: one scene, its seven projections, three systems, five components, the
  * animations of the board, and the bundle that carries their pictures. A game composes it next to
  * `...screen`; a headless test leaves it out and the same graph plays on.
  *
@@ -34,8 +35,8 @@ export const boardView = defineFeature("boardScreen", {
     boardClock,
     boardBadges
   ],
-  systems: [highlightLegal, glowCells],
-  components: [Item, Highlighted, Generator, Glow],
+  systems: [highlightLegal, glowCells, marchRing],
+  components: [Item, Highlighted, Generator, Glow, SelectionRing],
   animations: [
     toastBoardFull,
     mergeBurst,
