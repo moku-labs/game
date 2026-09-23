@@ -4,7 +4,7 @@
  * throws and their types. Every command runs in dev builds only: a game's production build
  * defines `__MOKU_GAME_DEV__` as `false` and the bundler drops the command bodies.
  */
-export { commands } from "./plugins/flow/doors/catalogue";
+export { commands } from "./plugins/flow/doors/commands";
 export { defineCommand } from "./plugins/flow/doors/define";
 export { controlRefused } from "./plugins/flow/doors/dev";
 export { run } from "./plugins/flow/doors/run";

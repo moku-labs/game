@@ -15,9 +15,9 @@ const manifest = manifestOf({
 });
 
 describe("game.assets", () => {
-  it("is a commit source", () => {
+  it("is a frame source: a bundle loads asynchronously, with no commit", () => {
     expect(assetsSource.id).toBe("game.assets");
-    expect(assetsSource.changes).toBe("commit");
+    expect(assetsSource.changes).toBe("frame");
     expect(assetsSource.input).toEqual({});
   });
 

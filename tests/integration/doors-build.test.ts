@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { commands } from "../../src/plugins/flow/doors/catalogue";
+import { commands } from "../../src/plugins/flow/doors/commands";
 
 // ---------------------------------------------------------------------------
 // Integration: a production bundle of the doors carries none of the /control
-// command bodies (D1, D7)
+// command bodies (D1, D7), and an /inspect bundle no command at all
 // ---------------------------------------------------------------------------
 
 /** Every dev branch of a command logs this marker, so a bundle that has it kept a body. */
@@ -73,5 +73,14 @@ describe("the dev flag in a Bun build of src/inspect.ts", () => {
 
     expect(code).toContain("game.position");
     expect(code).not.toContain(marker);
+  });
+
+  it("carries no command descriptor, whether __MOKU_GAME_DEV__ is defined false or true", () => {
+    for (const dev of ["false", "true"] as const) {
+      const code = bundle("inspect.ts", dev);
+
+      expect(code).toContain("game.assets");
+      for (const command of Object.values(commands)) expect(code).not.toContain(command.id);
+    }
   });
 });
