@@ -69,7 +69,8 @@ export type FlowStyle = {
  *
  * @example
  * ```ts
- * const box: BoxStyle = { padding: 16, width: "100%", height: 96 };
+ * // The board slot: 970 u of cells, scaled down on a short phone.
+ * const box: BoxStyle = { width: 970, height: 970, fit: "contain" };
  * ```
  */
 export type BoxStyle = {
@@ -82,7 +83,13 @@ export type BoxStyle = {
   maxWidth?: Extent;
   maxHeight?: Extent;
   aspect?: number;
+  /** `"hidden"` clips the children to the rect, as a scroll container does. */
   overflow?: "visible" | "hidden" | "scroll";
+  /**
+   * `"contain"`: the element keeps its own size and leaves the flow, then is scaled down to fit
+   * the content box of its parent and centred in it. Its children keep their natural rects.
+   */
+  fit?: "contain";
 };
 
 /**
@@ -108,40 +115,96 @@ export type PositionStyle = {
  *
  * @example
  * ```ts
- * const visual: VisualStyle = { fill: 0x101018, radius: 16, alpha: 1 };
+ * // A wooden button: the nine-slice of the style, greyed while disabled.
+ * const visual: VisualStyle = { nineSlice: "ui.button-wood", alpha: 1, tint: 0xffffff };
  * ```
  */
-export type VisualStyle = {
+export type VisualStyle<Asset extends string = string> = {
   fill?: number;
   stroke?: number;
   strokeWidth?: number;
   radius?: number;
   alpha?: number;
+  /**
+   * The asset key of a nine-slice drawn at the rect instead of the rounded rectangle. Any tag
+   * but `image`, `icon` and `text` takes it; a clipping element (`scroll`, `overflow: "hidden"`)
+   * keeps its rectangle, which carries the clip.
+   */
+  nineSlice?: Asset;
+  /** Multiplies the colour of a nine-slice or an image. */
+  tint?: number;
 };
 
 /**
- * Everything but the variants: the four groups of the vocabulary.
+ * Where an element turns and scales: its centre, the middle of its top edge, its top-left
+ * corner, or a point given in fractions of its box.
+ *
+ * @example
+ * ```ts
+ * // A sign that hangs from its ropes swings around the middle of its top edge.
+ * const origin: Origin = "top";
+ * ```
+ */
+export type Origin = "center" | "top" | "topLeft" | { x: number; y: number };
+
+/**
+ * The transform group: how an element is drawn, never where it is laid out. Written into the
+ * rest `Transform`, so a hover lift or a pressed sink never moves a sibling.
+ *
+ * @example
+ * ```ts
+ * // A button that lifts under the mouse.
+ * const lift: TransformStyle = { offsetY: -6, scale: 1.05, origin: "center" };
+ * ```
+ */
+export type TransformStyle = {
+  /** Moves the drawn element right, in reference units. */
+  offsetX?: number;
+  /** Moves the drawn element down, in reference units. */
+  offsetY?: number;
+  /** Uniform scale around the origin. */
+  scale?: number;
+  /** The point the element scales and turns around; the centre by default. */
+  origin?: Origin;
+};
+
+/**
+ * Everything but the variants: the five groups of the vocabulary.
  *
  * @example
  * ```ts
  * const base: BaseStyle = { direction: "row", gap: 8, fill: 0x101018 };
  * ```
  */
-export type BaseStyle = FlowStyle & BoxStyle & PositionStyle & VisualStyle;
+export type BaseStyle<Asset extends string = string> = FlowStyle &
+  BoxStyle &
+  PositionStyle &
+  VisualStyle<Asset> &
+  TransformStyle;
 
 /**
- * The four state variants of a style, applied in the order disabled, active, selected, pressed.
+ * The six state variants of a style, applied in the order disabled, active, selected, hover,
+ * pressed, covered. While `disabled` is true, `hover` and `pressed` are not applied.
  *
  * @example
  * ```ts
- * const variants: IsVariants = { pressed: { alpha: 0.7 } };
+ * // One rule set for every control: lift on hover, sink when pressed, swap the texture when off.
+ * const variants: IsVariants = {
+ *   hover: { offsetY: -6, scale: 1.05 },
+ *   pressed: { offsetY: 4, scale: 0.95 },
+ *   disabled: { nineSlice: "ui.button-disabled" }
+ * };
  * ```
  */
-export type IsVariants = {
-  pressed?: BaseStyle;
-  disabled?: BaseStyle;
-  active?: BaseStyle;
-  selected?: BaseStyle;
+export type IsVariants<Asset extends string = string> = {
+  pressed?: BaseStyle<Asset>;
+  disabled?: BaseStyle<Asset>;
+  active?: BaseStyle<Asset>;
+  selected?: BaseStyle<Asset>;
+  /** The mouse or pen is over the element. Touch never hovers. */
+  hover?: BaseStyle<Asset>;
+  /** The popup the element belongs to is kept under another one. */
+  covered?: BaseStyle<Asset>;
 };
 
 /**
@@ -152,22 +215,26 @@ export type IsVariants = {
  * const variants: WhenVariants = { landscape: { direction: "row" } };
  * ```
  */
-export type WhenVariants = {
-  portrait?: BaseStyle;
-  landscape?: BaseStyle;
-  tall?: BaseStyle;
-  wide?: BaseStyle;
+export type WhenVariants<Asset extends string = string> = {
+  portrait?: BaseStyle<Asset>;
+  landscape?: BaseStyle<Asset>;
+  tall?: BaseStyle<Asset>;
+  wide?: BaseStyle<Asset>;
 };
 
 /**
- * One style as a game writes it: the base vocabulary plus the two variant tables.
+ * One style as a game writes it: the base vocabulary plus the two variant tables. `Asset` is the
+ * game's asset key union: `uiFor` narrows `nineSlice` to it, the way it narrows `texture`.
  *
  * @example
  * ```ts
  * const topBar: Style = { direction: "row", gap: 12, when: { landscape: { justify: "end" } } };
  * ```
  */
-export type Style = BaseStyle & { is?: IsVariants; when?: WhenVariants };
+export type Style<Asset extends string = string> = BaseStyle<Asset> & {
+  is?: IsVariants<Asset>;
+  when?: WhenVariants<Asset>;
+};
 
 /**
  * What `resolve` answers with: the base vocabulary with every safe-area token replaced by a
@@ -201,14 +268,24 @@ export type ResolvedStyle = Omit<
 export type WhenFlags = { portrait: boolean; landscape: boolean; tall: boolean; wide: boolean };
 
 /**
- * The state flags of an element: what the markup declared plus `pressed` from the pointer.
+ * The state flags of an element: what the markup declared (`disabled`, `active`, `selected`),
+ * `pressed` and `hover` from the pointer, and `covered` from the root it belongs to.
  *
  * @example
  * ```ts
- * const flags: IsFlags = { pressed: false, disabled: false, active: true, selected: false };
+ * const flags: IsFlags = {
+ *   pressed: false, hover: true, disabled: false, active: true, selected: false, covered: false
+ * };
  * ```
  */
-export type IsFlags = { pressed: boolean; disabled: boolean; active: boolean; selected: boolean };
+export type IsFlags = {
+  pressed: boolean;
+  hover: boolean;
+  disabled: boolean;
+  active: boolean;
+  selected: boolean;
+  covered: boolean;
+};
 
 /**
  * A flat table of design tokens a game reads in its styles.

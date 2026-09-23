@@ -121,11 +121,27 @@ describe("identity", () => {
   it("reads the state prop of the markup plus the pressed flag", () => {
     const node = { type: "button", props: { state: { active: true } }, children: [] };
 
-    expect(isFlagsOf(node, true)).toEqual({
+    expect(isFlagsOf(node, { pressed: true, hover: false, covered: false })).toEqual({
       pressed: true,
+      hover: false,
       disabled: false,
       active: true,
-      selected: false
+      selected: false,
+      covered: false
+    });
+  });
+
+  it("takes hover from the pointer and covered from the root, never from the markup", () => {
+    const node = {
+      type: "button",
+      props: { state: { disabled: true, hover: false, covered: false } },
+      children: []
+    };
+
+    expect(isFlagsOf(node, { pressed: false, hover: true, covered: true })).toMatchObject({
+      disabled: true,
+      hover: true,
+      covered: true
     });
   });
 });

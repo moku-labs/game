@@ -58,7 +58,8 @@ export type LayoutModule = {
   solve(rootElement: Element, size: Rect, lookup: ElementLookup): boolean;
   commit(element: Element, parent: Rect | undefined): void;
   enter(element: Element): void;
-  change(element: Element, previous: Rect): void;
+  change(element: Element, previous: Rect): boolean;
+  repose(element: Element, parent: Rect | undefined, hooked: boolean): void;
   exit(element: Element): void;
   settled(element: Element): boolean;
   scroll(containers: readonly Element[], lookup: ElementLookup): void;

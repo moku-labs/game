@@ -386,7 +386,7 @@ export const hud = projection({
 export const RewardPopup = defineComponent("RewardPopup", {
   outcomes: { claim: type<{ orderId: string }>() },
   view: (props: { orderId: string; gold: number }) => (
-    <panel key="reward" nineSlice="ui.panel" style={{ direction: "column", gap: 16, padding: 32, width: 600, height: 400 }}>
+    <panel key="reward" style={{ nineSlice: "ui.panel", direction: "column", gap: 16, padding: 32, width: 600, height: 400, fit: "contain" }}>
       <text key="title" content={tr("orders.complete")} />
       <text key="gold" style="hud.digits" content={String(props.gold)} />
       <button key="claim" intent="claim" payload={{ orderId: props.orderId }} style={{ width: 240, height: 88 }}>

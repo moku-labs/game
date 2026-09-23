@@ -4,27 +4,57 @@
  */
 import { Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
-import { NineSlice, Parent, Shape, Sprite, Transform } from "../../renderer/components";
+import {
+  NineSlice,
+  Parent,
+  Shape,
+  Sprite,
+  Transform,
+  type TransformValue
+} from "../../renderer/components";
 import { Text } from "../../text/components";
 import { Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
-import type { AnyComponentValue, Entity } from "../../world/types";
+import type { AnyComponentType, AnyComponentValue, Entity } from "../../world/types";
 import { Box, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
+import { CONTENT, visualOf } from "../visual";
+import { hostViews, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
-import type { DescriptionNode, Element, ElementMotion, JsxState, Root } from "./types";
+import { settlePopups } from "./popups";
+import type {
+  DescriptionNode,
+  Element,
+  ElementMotion,
+  JsxState,
+  PointerFlag,
+  PopupLink,
+  Root
+} from "./types";
 
 /** What the modules injected into `jsx` are. */
 export type JsxModules = { styles: StylesModule; layout: LayoutModule };
 
-/** The tag of the one child a scroll container holds: everything inside it moves as one. */
-export const CONTENT = "content";
+/** The four components an element may be drawn with; a state change can trade one for another. */
+const VISUALS: readonly AnyComponentType[] = [Sprite, NineSlice, Shape, Text];
+
+/** The four input components of an element; a disabled or covered button drops the answering one. */
+const INPUTS: readonly AnyComponentType[] = [Tappable, Touchable, LocalWrite, Scroll];
+
+/** The style of a scroll's content: one object, so a render never reads as a new style. */
+const CONTENT_STYLE: Style = Object.freeze({ origin: "topLeft" });
+
+/**
+ * The state flags that do not come from the markup: the pointer's two, and the root's one.
+ */
+type LiveFlags = Pick<IsFlags, "pressed" | "hover" | "covered">;
 
 /**
  * The children one element is diffed against. A scroll container holds exactly one of them: the
- * content the finger moves, which keeps the rects of its own children and carries them along.
+ * content the finger moves, which keeps the rects of its own children and carries them along. Its
+ * pivot is its top-left corner, so the scroll step writes its offset straight into `y`.
  *
  * @param node - The node the markup wrote.
  * @returns The children of the element.
@@ -36,21 +66,7 @@ export const CONTENT = "content";
 export function childrenOf(node: DescriptionNode): readonly DescriptionNode[] {
   if (node.type !== "scroll") return node.children;
 
-  return [{ type: CONTENT, props: {}, children: node.children }];
-}
-
-/**
- * Tells whether a tag draws nothing of its own, so its `Shape` is invisible unless its style fills.
- *
- * @param type - The intrinsic tag.
- * @returns True for the six container tags.
- * @example
- * ```ts
- * isContainer("row"); // true
- * ```
- */
-export function isContainer(type: string): boolean {
-  return ["screen", "layer", "row", "column", "stack", "spacer", CONTENT].includes(type);
+  return [{ type: CONTENT, props: { style: CONTENT_STYLE }, children: node.children }];
 }
 
 /**
@@ -90,24 +106,33 @@ export function withKey(node: DescriptionNode, key: string | undefined): Descrip
 }
 
 /**
- * The state flags of an element: what the markup declared plus the pressed flag it already had.
+ * The state flags of an element: what the markup declared, the two flags the pointer set, and
+ * the covered flag of the root it belongs to. `hover` and `covered` never come from the markup.
  *
  * @param node - The node being placed.
- * @param pressed - Whether the pointer is on it.
- * @returns The four flags.
+ * @param live - Whether the pointer presses it or is over it, and whether its root is covered.
+ * @param live.pressed - The pointer is down on it.
+ * @param live.hover - An idle mouse or pen is over it.
+ * @param live.covered - Its root is kept under another popup.
+ * @returns The six flags.
  * @example
  * ```ts
- * isFlagsOf({ type: "button", props: { state: { active: true } }, children: [] }, false).active; // true
+ * isFlagsOf(
+ *   { type: "button", props: { state: { active: true } }, children: [] },
+ *   { pressed: false, hover: true, covered: false }
+ * ).hover; // true
  * ```
  */
-export function isFlagsOf(node: DescriptionNode, pressed: boolean): IsFlags {
-  const declared = node.props.state as IsFlags | undefined;
+export function isFlagsOf(node: DescriptionNode, live: LiveFlags): IsFlags {
+  const declared = node.props.state as Partial<IsFlags> | undefined;
 
   return {
-    pressed,
+    pressed: live.pressed,
+    hover: live.hover,
     disabled: declared?.disabled === true,
     active: declared?.active === true,
-    selected: declared?.selected === true
+    selected: declared?.selected === true,
+    covered: live.covered
   };
 }
 
@@ -140,66 +165,10 @@ function checkTag(node: DescriptionNode): void {
 }
 
 /**
- * The visual component of an element: a nine-slice, a sprite, a text or a rounded rectangle. A
- * container with no fill and no stroke gets an invisible rectangle: the renderer hangs children
- * under the display object of their parent, so every parent needs one.
- *
- * @param element - The element to draw.
- * @returns The component values.
- */
-function visualOf(element: Element): AnyComponentValue[] {
-  const { style, type, node } = element;
-  const sliced = typeof node.props.nineSlice === "string";
-
-  if (type === "image" || type === "icon") {
-    const texture = (node.props.texture ?? node.props.name ?? "") as string;
-
-    return [Sprite({ texture, alpha: style.alpha ?? 1, anchor: { x: 0, y: 0 } })];
-  }
-
-  if (type === "text") {
-    const styleKey = typeof node.props.style === "string" ? node.props.style : "body";
-
-    return [
-      Text({
-        content: (node.props.content ?? "") as string,
-        style: styleKey,
-        bind: node.props.bind as undefined,
-        anchor: { x: 0, y: 0 }
-      })
-    ];
-  }
-
-  if (type === "panel" && sliced) {
-    return [
-      NineSlice({
-        texture: node.props.nineSlice as string,
-        width: element.rect.w,
-        height: element.rect.h
-      })
-    ];
-  }
-
-  const filled = style.fill !== undefined || style.stroke !== undefined;
-  const invisible = isContainer(type) && !filled;
-
-  return [
-    Shape({
-      w: element.rect.w,
-      h: element.rect.h,
-      fill: style.fill ?? Shape.defaults.fill,
-      alpha: invisible ? 0 : (style.alpha ?? 1),
-      radius: style.radius ?? 0,
-      stroke: style.stroke ?? Shape.defaults.stroke,
-      strokeWidth: style.strokeWidth ?? 0,
-      clip: type === "scroll"
-    })
-  ];
-}
-
-/**
  * The input components of an element: a button answers the gate, writes local state, or only
- * swallows the tap; a scroll container takes the press that moves its content.
+ * swallows the tap; a panel swallows the tap too, so nothing under it answers; a scroll
+ * container takes the press that moves its content. A button of a covered popup answers nothing,
+ * so only the top popup answers the gate.
  *
  * @param element - The element to make touchable.
  * @returns The component values.
@@ -208,8 +177,9 @@ function inputOf(element: Element): AnyComponentValue[] {
   const { type, node, is } = element;
 
   if (type === "scroll") return [Touchable(), Scroll({ axis: "y" })];
+  if (type === "panel") return [Touchable()];
   if (type !== "button") return [];
-  if (is.disabled) return [Touchable()];
+  if (is.disabled || is.covered) return [Touchable()];
 
   const intent = node.props.intent;
   const local = node.props.local;
@@ -229,8 +199,7 @@ function inputOf(element: Element): AnyComponentValue[] {
  * Everything an entering element gets at once, so a display object never exists without a rect.
  * A child draws with its parent; the root element draws in the layer of its root, at its order.
  *
- * @param element - The element whose rect is known.
- * @param parent - The rect of its parent, or nothing for a root element.
+ * @param element - The element whose rect and rest pose are known.
  * @param root - The layer and the order of the root the element belongs to.
  * @param root.layer - The layer the root draws in.
  * @param root.order - The order of the root inside that layer.
@@ -238,12 +207,9 @@ function inputOf(element: Element): AnyComponentValue[] {
  */
 export function componentsOf(
   element: Element,
-  parent: Rect | undefined,
   root: { layer: string; order: number }
 ): AnyComponentValue[] {
-  const values: AnyComponentValue[] = [
-    Transform({ x: element.rect.x - (parent?.x ?? 0), y: element.rect.y - (parent?.y ?? 0) })
-  ];
+  const values: AnyComponentValue[] = [Transform(element.rest)];
 
   if (element.parent === undefined) {
     values.push(Layer({ name: root.layer }), Order({ value: root.order }));
@@ -274,6 +240,15 @@ function keyMap(): Map<string, Entity> {
  */
 function isElement(element: Element | undefined): element is Element {
   return element !== undefined;
+}
+
+/**
+ * The pose a new element starts from before its first solve.
+ *
+ * @returns The identity transform.
+ */
+function identityPose(): TransformValue {
+  return { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } };
 }
 
 /**
@@ -338,7 +313,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     checkTag(node);
 
     const entity = ecs.spawn(UI_OWNER, []);
-    const is = isFlagsOf(node, false);
+    const is = isFlagsOf(node, { pressed: false, hover: false, covered: root.covered });
     const element: Element = {
       entity,
       identity,
@@ -352,6 +327,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
       rect: { x: 0, y: 0, w: 0, h: 0 },
       previous: { x: 0, y: 0, w: 0, h: 0 },
       moved: true,
+      fit: 1,
+      rest: identityPose(),
       handles: [],
       motion: node.props.motion as ElementMotion | undefined,
       parent: parent?.entity,
@@ -364,6 +341,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
 
     state.elements.set(entity, element);
     state.byIdentity.set(identity, entity);
+    trackHost(state, element);
     registerKey(root, element);
     modules.layout.attach(element);
     diffChildren(root, element, childrenOf(node), instance);
@@ -387,7 +365,11 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     instance: string | undefined
   ): void {
     const previousNode = element.node;
-    const is = isFlagsOf(node, element.is.pressed);
+    const is = isFlagsOf(node, {
+      pressed: element.is.pressed,
+      hover: element.is.hover,
+      covered: root.covered
+    });
     const style = modules.styles.resolveElement(styleOf(node), is);
     const moved = modules.layout.affectsRect(element.style, style);
     const contentChanged =
@@ -399,6 +381,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     element.style = style;
     element.motion = node.props.motion as ElementMotion | undefined;
     element.instance = instance;
+    trackHost(state, element);
 
     if (moved || contentChanged) {
       modules.layout.applyStyle(element);
@@ -406,24 +389,49 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     }
 
     if (element.live) writeLive(element);
+    // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
+    if (element.live && !moved) modules.layout.repose(element, parentRect(element), false);
 
     diffChildren(root, element, childrenOf(node), instance);
   }
 
   /**
-   * Writes the visual and input components of a live element again.
+   * The rect of the parent of an element.
+   *
+   * @param element - The element.
+   * @returns The rect, or `undefined` for a root element.
+   */
+  function parentRect(element: Element): Rect | undefined {
+    return element.parent === undefined ? undefined : lookup(element.parent)?.rect;
+  }
+
+  /**
+   * Writes the visual and input components of a live element again. A visual or an input the
+   * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
+   * back, and a button that became disabled stops answering the gate. `Scroll` is only ever added:
+   * its offset belongs to the finger, and a new look or a new rect never resets it.
    *
    * @param element - The element that changed.
    */
   function writeLive(element: Element): void {
-    for (const value of [...visualOf(element), ...inputOf(element)]) {
+    const values = [...visualOf(element), ...inputOf(element)];
+
+    for (const type of [...VISUALS, ...INPUTS]) {
+      const carried = values.some(value => value.type === type);
+
+      if (!carried && ecs.has(element.entity, type)) ecs.remove(element.entity, type);
+    }
+
+    for (const value of values) {
       if (!ecs.has(element.entity, value.type)) {
         ecs.add(element.entity, value);
 
         continue;
       }
 
-      if (value.value !== true) ecs.set(element.entity, asHandle(value.type), value.value);
+      if (value.value !== true && value.type !== Scroll) {
+        ecs.set(element.entity, asHandle(value.type), value.value);
+      }
     }
   }
 
@@ -561,6 +569,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
    * @param element - The element that leaves, or one of its children.
    */
   function exitSubtree(element: Element): void {
+    state.hosts.delete(element.entity);
     modules.layout.exit(element);
 
     for (const child of element.children) {
@@ -624,6 +633,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     }
 
     modules.layout.free(element);
+    state.hosts.delete(element.entity);
     state.exiting.delete(element.entity);
     state.elements.delete(element.entity);
     ecs.despawn(element.entity);
@@ -663,24 +673,33 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
   }
 
   /**
-   * Gives every element of a solved root its components, its rest pose and its motion.
+   * Gives every element of a solved root its components, its rest pose and its motion. A live
+   * element whose rect moved gets its `Box`, its visual size and its `change.Box` motion; one
+   * whose rest pose moved (a new rect, a new fit scale) plays `change.Transform` or takes it.
    *
    * @param element - The element to apply.
    */
   function applyRects(element: Element): void {
-    const parent = element.parent === undefined ? undefined : lookup(element.parent)?.rect;
+    const parent = parentRect(element);
 
     if (element.live) {
+      let hooked = false;
+
       if (element.moved) {
         modules.layout.commit(element, parent);
-        modules.layout.change(element, element.previous);
+        writeLive(element);
+        hooked = modules.layout.change(element, element.previous);
       }
+
+      modules.layout.repose(element, parent, hooked);
     } else {
       const root = state.roots.get(element.root) ?? { layer: "ui", order: 0 };
 
-      for (const value of componentsOf(element, parent, root)) ecs.add(element.entity, value);
-
       modules.layout.commit(element, parent);
+      modules.layout.repose(element, parent, true);
+
+      for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
+
       element.live = true;
     }
 
@@ -785,18 +804,24 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
   }
 
   /**
-   * The first of the two systems of phase `layout`: the sweep, the viewport, the dirty roots and
-   * the scroll offsets.
+   * The first of the two systems of phase `layout`: the sweep, the popups that may leave, the
+   * viewport, the dirty roots, the hosted views and the scroll offsets.
    */
   function reconcile(): void {
     // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
 
+    // A released popup leaves once the flow rests on a node that shows none of its component.
+    settlePopups(ctx, state, unmountRoot);
+
     // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());
 
     for (const root of dirtyRoots(viewportChanged)) reconcileDirtyRoot(root);
+
+    // Give the views a slot hosts their parent, and take it back where the slot left.
+    hostViews(ctx, state);
 
     // Move the scroll containers with the finger, then publish the frame's counters.
     modules.layout.scroll(scrollContainers(), lookup);
@@ -849,15 +874,10 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
    * @param entity - The entity that carries `Tree`.
    * @param name - The projection name, or the component name of a popup.
    * @param layer - The layer it draws in.
-   * @param popup - What to call when a popup root is gone.
-   * @param popup.close - Resolves the promise of the popup handler.
+   * @param popup - The popup side of the handler that shows it: what to call when the root is
+   *   gone, whether its effect ended, and the root it was opened over.
    */
-  function mountRoot(
-    entity: Entity,
-    name: string,
-    layer: string,
-    popup?: { close: () => void }
-  ): void {
+  function mountRoot(entity: Entity, name: string, layer: string, popup?: PopupLink): void {
     const known = state.roots.get(entity);
 
     if (known !== undefined) {
@@ -882,7 +902,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
       dirty: true,
       needsSolve: true,
       element: undefined,
-      popup
+      popup,
+      covered: false
     });
   }
 
@@ -907,32 +928,40 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
   }
 
   /**
-   * Marks the style of one element dirty, which is what a press and a release do.
+   * Re-resolves the style of one element whose pointer flag changed: a press, a release, the
+   * mouse coming over it or leaving it. A new rect waits for the solve; a new look and a new
+   * rest pose apply now.
    *
    * @param entity - The element entity.
-   * @param pressed - Whether the pointer is on it now.
+   * @param flag - Which pointer flag changed.
+   * @param on - Its value now.
    */
-  function markPressed(entity: Entity, pressed: boolean): void {
+  function markPointer(entity: Entity, flag: PointerFlag, on: boolean): void {
     const element = state.elements.get(entity);
 
     if (element === undefined) return;
 
-    element.is = { ...element.is, pressed };
+    element.is = { ...element.is, [flag]: on };
 
     const style = modules.styles.resolveElement(styleOf(element.node), element.is);
     const root = state.roots.get(element.root);
+    const moved = modules.layout.affectsRect(element.style, style);
 
-    if (modules.layout.affectsRect(element.style, style)) {
-      element.style = style;
+    element.style = style;
+
+    if (moved) {
       modules.layout.applyStyle(element);
 
       if (root !== undefined) root.needsSolve = true;
-    } else element.style = style;
+    }
 
     if (root !== undefined) root.dirty = true;
+    if (!element.live) return;
 
     writeLive(element);
+
+    if (!moved) modules.layout.repose(element, parentRect(element), false);
   }
 
-  return { reconcile, solve, mountRoot, unmountRoot, markPressed, playEnter, sweep };
+  return { reconcile, solve, mountRoot, unmountRoot, markPointer, playEnter, sweep };
 }

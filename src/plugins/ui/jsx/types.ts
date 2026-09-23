@@ -3,9 +3,19 @@
  * @file ui/jsx — type definitions: the description node the runtime builds, what
  * `defineComponent` returns, the records the reconcile keeps and the module shape.
  */
+
+import type { Hint } from "../../flow/types";
 import type { Json } from "../../model/types";
-import type { MotionHandle, ProjectionMotion } from "../../world/projection/types";
+import type { TransformValue } from "../../renderer/components";
+import type {
+  ChangeHooks,
+  Motion,
+  MotionHandle,
+  ProjectionMotion,
+  ViewHandle
+} from "../../world/projection/types";
 import type { Entity } from "../../world/types";
+import type { BoxValue } from "../components";
 import type { IsFlags, ResolvedStyle, Style } from "../styles/types";
 
 /**
@@ -43,15 +53,37 @@ export type JsxChild =
   | readonly JsxChild[];
 
 /**
+ * One `change` hook of a ui element: its handle, the value before and the value after.
+ *
+ * @example
+ * ```ts
+ * const moved: ElementChange<BoxValue> = (view, previous, next) =>
+ *   next.y > previous.y ? view.toRest(Transform, { ms: 200 }) : undefined;
+ * ```
+ */
+export type ElementChange<Value> = (
+  view: ViewHandle<unknown>,
+  previous: Value,
+  next: Value,
+  hint?: Hint
+) => Motion;
+
+/**
  * The motion hooks of one element: the hook triple of `world.projection`, which `defineMotion`
- * of `anim` returns.
+ * of `anim` returns. The two `change` hooks `ui` plays itself are typed with the values it hands
+ * them: `Box` gets the rects, `Transform` the rest poses.
  *
  * @example
  * ```ts
  * const motion: ElementMotion = { enter: view => view.toRest(Transform, { ms: 250 }) };
  * ```
  */
-export type ElementMotion = ProjectionMotion<unknown>;
+export type ElementMotion = Omit<ProjectionMotion<unknown>, "change"> & {
+  readonly change?: ChangeHooks<unknown> & {
+    readonly Box?: ElementChange<BoxValue>;
+    readonly Transform?: ElementChange<TransformValue>;
+  };
+};
 
 /**
  * What a game hands `defineComponent`: the local state one instance starts with, the outcomes a
@@ -127,6 +159,9 @@ export type Instance = {
 
 /**
  * One live element: the entity, the Yoga node, the resolved style and the place in the tree.
+ * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit`
+ * is the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform`
+ * last written for it.
  */
 export type Element = {
   entity: Entity;
@@ -141,6 +176,8 @@ export type Element = {
   rect: { x: number; y: number; w: number; h: number };
   previous: { x: number; y: number; w: number; h: number };
   moved: boolean;
+  fit: number;
+  rest: TransformValue;
   handles: MotionHandle[];
   motion: ElementMotion | undefined;
   parent: Entity | undefined;
@@ -152,7 +189,20 @@ export type Element = {
 };
 
 /**
+ * The popup side of a root: the handler that shows it now and the root it was opened over.
+ * `released` turns true when that handler's effect ended (answered, or its node aborted): the
+ * root then stays until the flow rests on a node that shows no popup of its component.
+ */
+export type PopupLink = {
+  close: () => void;
+  released?: boolean;
+  over?: Entity;
+};
+
+/**
  * One reconciled tree: a projection view or a popup, with the flags the frame step reads.
+ * `covered` is true while the root is kept under another popup; every element of the root then
+ * resolves `is.covered`.
  */
 export type Root = {
   entity: Entity;
@@ -163,11 +213,13 @@ export type Root = {
   dirty: boolean;
   needsSolve: boolean;
   element: Entity | undefined;
-  popup: { close: () => void } | undefined;
+  popup: PopupLink | undefined;
+  covered: boolean;
 };
 
 /**
- * jsx module state.
+ * jsx module state. `hosts` holds the elements with a `hosts` prop; `hosted` maps a world view to
+ * the element that hosts it.
  */
 export type JsxState = {
   components: Map<string, AnyComponentDefinition>;
@@ -178,17 +230,24 @@ export type JsxState = {
   instances: Map<string, Instance>;
   exiting: Set<Entity>;
   removing: Set<Entity>;
+  hosts: Set<Entity>;
+  hosted: Map<Entity, Entity>;
   reconciles: number;
 };
 
 /**
- * One node of the snapshot `tree()` answers with.
+ * One node of the snapshot `tree()` answers with. `rect` is natural: under a `fit` ancestor it
+ * is the rect before that ancestor's scale. An element with `fit: "contain"` adds `fitScale`,
+ * the scale it is drawn at.
  *
  * @example
  * ```ts
+ * // The board slot of a merge game on an iPhone SE.
  * const node: UiNode = {
- *   key: "coins", type: "text", rect: { x: 0, y: 0, w: 80, h: 40 },
- *   style: {}, state: { pressed: false, disabled: false, active: false, selected: false },
+ *   key: "boardSlot", type: "stack", rect: { x: 55, y: 223, w: 970, h: 970 },
+ *   style: { width: 970, height: 970, fit: "contain" },
+ *   state: { pressed: false, hover: false, disabled: false, active: false, selected: false, covered: false },
+ *   fitScale: 0.8,
  *   children: []
  * };
  * ```
@@ -200,6 +259,7 @@ export type UiNode = {
   style: ResolvedStyle;
   state: IsFlags;
   local?: Record<string, unknown>;
+  fitScale?: number;
   children: UiNode[];
 };
 
@@ -212,7 +272,7 @@ export type UiNode = {
  * ```
  */
 export type Finding = {
-  rule: "tap-target" | "text-overflow" | "absolute-without-reason";
+  rule: "tap-target" | "text-overflow" | "absolute-without-reason" | "nine-slice-clipped";
   key: string;
   detail: string;
 };
@@ -248,6 +308,12 @@ export type ButtonProps = CommonProps &
   );
 
 /**
+ * The two state flags the pointer sets on an element: `input` tags it `Pressed` from down to up,
+ * and `PointerOver` while an idle mouse or pen is over it.
+ */
+export type PointerFlag = "pressed" | "hover";
+
+/**
  * jsx module shape, injected onto the plugin API. `tree`, `find` and `lint` are the public half.
  */
 export type JsxModule = {
@@ -257,9 +323,13 @@ export type JsxModule = {
   reconcile(): void;
   solve(): void;
   register(definition: AnyComponentDefinition): void;
-  mountRoot(entity: Entity, name: string, layer: string, popup?: { close: () => void }): void;
+  mountRoot(entity: Entity, name: string, layer: string, popup?: PopupLink): void;
   unmountRoot(entity: Entity): void;
+  reclaimPopup(component: string, props: object, link: PopupLink): Entity | undefined;
+  coverPopup(over: string, coverer: Entity): void;
+  releasePopup(entity: Entity, link: PopupLink): void;
+  releaseHosted(): void;
   applyTap(entity: Entity): void;
-  markPressed(entity: Entity, pressed: boolean): void;
+  markPointer(entity: Entity, flag: PointerFlag, on: boolean): void;
   playEnter(entity: Entity): void;
 };

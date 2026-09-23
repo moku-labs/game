@@ -26,10 +26,19 @@ function elementOf(patch: Partial<Element> = {}): Element {
     root: 0,
     node: { type: "text", props: {}, children: [] },
     style: {},
-    is: { pressed: false, disabled: false, active: false, selected: false },
+    is: {
+      pressed: false,
+      hover: false,
+      disabled: false,
+      active: false,
+      selected: false,
+      covered: false
+    },
     rect: { x: 0, y: 0, w: 0, h: 0 },
     previous: { x: 0, y: 0, w: 0, h: 0 },
     moved: false,
+    fit: 1,
+    rest: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
     handles: [],
     motion: undefined,
     parent: undefined,
@@ -51,7 +60,14 @@ describe("tree", () => {
       type: "screen",
       rect: { x: 0, y: 0, w: 0, h: 0 },
       style: {},
-      state: { pressed: false, disabled: false, active: false, selected: false },
+      state: {
+        pressed: false,
+        hover: false,
+        disabled: false,
+        active: false,
+        selected: false,
+        covered: false
+      },
       children: []
     });
   });
@@ -101,18 +117,20 @@ describe("measure", () => {
 // ─── the rest pose ────────────────────────────────────────────
 
 describe("restTransform", () => {
-  it("is the rect of a root element and the offset of a child", () => {
+  it("is the rect of a root element and the offset of a child, plus the centre pivot", () => {
     expect(restTransform({ x: 40, y: 80, w: 10, h: 10 }, undefined)).toEqual({
-      x: 40,
-      y: 80,
+      x: 45,
+      y: 85,
       rotation: 0,
-      scale: 1
+      scale: 1,
+      pivot: { x: 5, y: 5 }
     });
     expect(restTransform({ x: 40, y: 80, w: 10, h: 10 }, { x: 10, y: 20, w: 0, h: 0 })).toEqual({
-      x: 30,
-      y: 60,
+      x: 35,
+      y: 65,
       rotation: 0,
-      scale: 1
+      scale: 1,
+      pivot: { x: 5, y: 5 }
     });
   });
 });

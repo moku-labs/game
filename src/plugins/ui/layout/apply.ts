@@ -25,6 +25,7 @@ const LAYOUT_FIELDS = [
   "maxHeight",
   "aspect",
   "overflow",
+  "fit",
   "position",
   "left",
   "top",
@@ -187,7 +188,8 @@ function applyBox(yoga: Yoga, node: YogaNode, style: ResolvedStyle): void {
 
 /**
  * Writes the position group onto a node. A child of a `stack` is absolute unless it says
- * otherwise, which is what makes a stack a stack.
+ * otherwise, which is what makes a stack a stack. A fitted element is absolute too: it keeps its
+ * own size and never stretches its parent, and the solve centres it in the parent's content box.
  *
  * @param yoga - The loaded Yoga module.
  * @param node - The node of the element.
@@ -195,7 +197,10 @@ function applyBox(yoga: Yoga, node: YogaNode, style: ResolvedStyle): void {
  * @param stacked - Whether the parent tag is a `stack`.
  */
 function applyPosition(yoga: Yoga, node: YogaNode, style: ResolvedStyle, stacked: boolean): void {
-  const absolute = style.position === "absolute" || (stacked && style.position === undefined);
+  const absolute =
+    style.position === "absolute" ||
+    style.fit === "contain" ||
+    (stacked && style.position === undefined);
 
   node.setPositionType(absolute ? yoga.POSITION_TYPE_ABSOLUTE : yoga.POSITION_TYPE_RELATIVE);
   node.setPosition(yoga.EDGE_LEFT, style.left);

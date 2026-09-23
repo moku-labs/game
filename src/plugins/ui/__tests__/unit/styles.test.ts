@@ -115,3 +115,84 @@ describe("resolve", () => {
     expect(resolve(undefined, flags(), viewportOf())).toEqual({});
   });
 });
+
+// ─── delta 4: hover, covered and the visual transform styles ──
+
+describe("the state variants of delta 4", () => {
+  const style = defineStyle({
+    fill: 1,
+    is: {
+      disabled: { fill: 2, nineSlice: "ui.off" },
+      active: { fill: 3 },
+      selected: { fill: 4 },
+      hover: { fill: 5, offsetY: -6 },
+      pressed: { fill: 6, offsetY: 4 },
+      covered: { fill: 7, scale: 0.84 }
+    }
+  });
+
+  it("merges hover after selected and pressed after hover", () => {
+    expect(resolve(style, flags({ selected: true, hover: true }), viewportOf()).fill).toBe(5);
+    expect(resolve(style, flags({ hover: true, pressed: true }), viewportOf())).toMatchObject({
+      fill: 6,
+      offsetY: 4
+    });
+  });
+
+  it("merges covered after pressed", () => {
+    expect(resolve(style, flags({ pressed: true, covered: true }), viewportOf())).toMatchObject({
+      fill: 7,
+      offsetY: 4,
+      scale: 0.84
+    });
+  });
+
+  it("applies neither hover nor pressed while disabled", () => {
+    const resolved = resolve(
+      style,
+      flags({ disabled: true, hover: true, pressed: true }),
+      viewportOf()
+    );
+
+    expect(resolved.fill).toBe(2);
+    expect(resolved.offsetY).toBeUndefined();
+    expect(resolved.nineSlice).toBe("ui.off");
+  });
+
+  it("starts every element with the six state flags off", () => {
+    expect(noFlags()).toEqual({
+      pressed: false,
+      hover: false,
+      disabled: false,
+      active: false,
+      selected: false,
+      covered: false
+    });
+  });
+});
+
+describe("the visual fields of delta 4", () => {
+  it("resolve offset, scale, origin, tint, nine-slice and fit like any other field", () => {
+    const style = defineStyle({
+      offsetX: 4,
+      offsetY: -8,
+      scale: 1.1,
+      origin: "top",
+      tint: 0xff_00_00,
+      nineSlice: "ui.panel",
+      fit: "contain",
+      when: { tall: { origin: { x: 0.5, y: 1 } } }
+    });
+
+    expect(resolve(style, flags(), viewportOf())).toEqual({
+      offsetX: 4,
+      offsetY: -8,
+      scale: 1.1,
+      origin: "top",
+      tint: 0xff_00_00,
+      nineSlice: "ui.panel",
+      fit: "contain"
+    });
+    expect(resolve(style, flags({ tall: true }), viewportOf()).origin).toEqual({ x: 0.5, y: 1 });
+  });
+});

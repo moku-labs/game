@@ -10,7 +10,7 @@ import { applyStyleToNode, layoutChanged } from "./apply";
 import { beginExit, canDespawn } from "./exit";
 import { createGuideHandler } from "./guide";
 import { installMeasure, markMeasured } from "./measure";
-import { play, writeRest } from "./motion";
+import { play, repose, writeRest } from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
 import { stepScroll } from "./scroll";
@@ -82,13 +82,18 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
       play(ctx, element, hook === undefined ? undefined : view => hook(view, element.node));
     },
 
-    change: (element: Element, previous: Rect): void => {
+    change: (element: Element, previous: Rect): boolean => {
       const hook = element.motion?.change?.Box;
 
-      if (hook === undefined) return;
+      if (hook === undefined) return false;
 
-      play(ctx, element, view => hook(view as never, previous as never, element.rect as never));
+      play(ctx, element, view => hook(view, previous, element.rect));
+
+      return true;
     },
+
+    repose: (element: Element, parent: Rect | undefined, hooked: boolean): void =>
+      repose(ctx, element, parent, hooked),
 
     exit: (element: Element): void => beginExit(ctx, state, element),
 

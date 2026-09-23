@@ -10,12 +10,20 @@ const EMPTY: UiNode = {
   type: "screen",
   rect: { x: 0, y: 0, w: 0, h: 0 },
   style: {},
-  state: { pressed: false, disabled: false, active: false, selected: false },
+  state: {
+    pressed: false,
+    hover: false,
+    disabled: false,
+    active: false,
+    selected: false,
+    covered: false
+  },
   children: []
 };
 
 /**
- * Turns one element and its subtree into snapshot nodes.
+ * Turns one element and its subtree into snapshot nodes. The rect is natural; a fitted element
+ * adds the scale it is drawn at.
  *
  * @param state - The jsx state.
  * @param element - The element to read.
@@ -40,8 +48,9 @@ function nodeOf(state: JsxState, element: Element): UiNode {
     state: { ...element.is },
     children
   };
+  const fitted = element.style.fit === "contain" ? { ...node, fitScale: element.fit } : node;
 
-  return local === undefined ? node : { ...node, local: { ...local } };
+  return local === undefined ? fitted : { ...fitted, local: { ...local } };
 }
 
 /**

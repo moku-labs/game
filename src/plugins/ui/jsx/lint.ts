@@ -1,11 +1,12 @@
 /**
- * @file ui/jsx — `lint()`: three rules read off the live screen. It never throws and answers an
+ * @file ui/jsx — `lint()`: four rules read off the live screen. It never throws and answers an
  * empty list when nothing is mounted.
  */
 import type { Message, Part } from "../../i18n/types";
 import { Tappable } from "../../input/components";
 import { LocalWrite } from "../components";
 import type { UiCtx } from "../types";
+import { fitScaleOf } from "../visual";
 import type { Element, Finding } from "./types";
 
 /**
@@ -23,7 +24,8 @@ export function nameOf(element: Element): string {
 }
 
 /**
- * Checks the smallest side of a tappable element against the config.
+ * Checks the smallest side of a tappable element against the config, at the size it is drawn:
+ * a `fit: "contain"` on the element or above it shrinks the target.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element to check.
@@ -36,8 +38,9 @@ function tapTarget(ctx: UiCtx, element: Element, scale: number): Finding | undef
 
   if (!tappable) return undefined;
 
-  const width = element.rect.w * scale;
-  const height = element.rect.h * scale;
+  const drawn = scale * fitScaleOf(element, entity => ctx.state.jsx.elements.get(entity));
+  const width = element.rect.w * drawn;
+  const height = element.rect.h * drawn;
 
   if (width >= ctx.config.tapTargetPt && height >= ctx.config.tapTargetPt) return undefined;
 
@@ -114,7 +117,26 @@ function absoluteWithoutReason(element: Element): Finding | undefined {
 }
 
 /**
- * Runs the three rules over every live element.
+ * Reports a clipping element (`scroll`, `overflow: "hidden"`) whose style names a nine-slice. The
+ * clip is carried by the rectangle, so the nine-slice is never drawn: put it on the parent.
+ *
+ * @param element - The element to check.
+ * @returns The finding, or `undefined`.
+ * @example
+ * ```ts
+ * nineSliceClipped({ key: "list", type: "scroll", style: { nineSlice: "ui.strip" } } as Element);
+ * // { rule: "nine-slice-clipped", key: "list", detail: "scroll" }
+ * ```
+ */
+export function nineSliceClipped(element: Element): Finding | undefined {
+  if (element.style.nineSlice === undefined) return undefined;
+  if (element.type !== "scroll" && element.style.overflow !== "hidden") return undefined;
+
+  return { rule: "nine-slice-clipped", key: nameOf(element), detail: element.type };
+}
+
+/**
+ * Runs the four rules over every live element.
  *
  * @param ctx - Domain context of the ui plugin.
  * @returns One finding per rule and element, in element order.
@@ -129,7 +151,8 @@ export function runLint(ctx: UiCtx): readonly Finding[] {
     for (const finding of [
       tapTarget(ctx, element, scale),
       textOverflow(ctx, element),
-      absoluteWithoutReason(element)
+      absoluteWithoutReason(element),
+      nineSliceClipped(element)
     ]) {
       if (finding !== undefined) findings.push(finding);
     }

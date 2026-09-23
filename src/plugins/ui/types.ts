@@ -81,13 +81,17 @@ export type UiCtx = KernelSlice & { readonly deps: Deps };
 export type UiApi = {
   /**
    * The live screen as plain data: every root in layer order, every element in child order, with
-   * its rect in root coordinates, its resolved style and its state flags. Works headless.
+   * its rect in root coordinates, its resolved style and its six state flags. A rect is natural:
+   * under a `fit: "contain"` element it is the rect before that scale, and the fitted element
+   * adds `fitScale`. Works headless.
    *
    * @returns The root node; several roots come back under one `screen` node.
    * @example
    * ```ts
    * // A snapshot test reads the HUD without a browser.
    * app.ui.tree().children.map(child => child.key); // ["coins", "settings", "order"]
+   * // On an iPhone SE the board slot is drawn at 0.8 of its 970 u.
+   * app.ui.tree().children[3]?.fitScale; // 0.8
    * ```
    */
   tree(): UiNode;
@@ -108,15 +112,19 @@ export type UiApi = {
   find(key: string): Entity | undefined;
 
   /**
-   * Reads the live screen against the three rules: a tap target under `tapTargetPt`, a text that
-   * does not fit its box in some registered locale, an absolute element with no `reason`.
-   * Never throws; empty when nothing is mounted.
+   * Reads the live screen against the four rules: a tap target under `tapTargetPt` at the size
+   * it is drawn (a `fit: "contain"` on it or above it shrinks it), a text that does not fit its
+   * box in some registered locale, an absolute element with no `reason`, and a clipping element
+   * (`scroll`, `overflow: "hidden"`) whose style names a nine-slice it never draws. Never throws;
+   * empty when nothing is mounted.
    *
    * @returns One finding per rule and element.
    * @example
    * ```ts
-   * // A game test keeps the HUD honest on every screen it supports.
-   * app.ui.lint(); // [{ rule: "tap-target", key: "settings", detail: "36 x 36 pt" }]
+   * // A game test keeps the board honest on an iPhone SE: a 140 u cell in the 0.8 slot.
+   * app.ui.lint(); // [{ rule: "tap-target", key: "cell", detail: "39 x 39 pt" }]
+   * // A list styled with a nine-slice: the clip keeps it from drawing.
+   * app.ui.lint(); // [{ rule: "nine-slice-clipped", key: "orders", detail: "scroll" }]
    * ```
    */
   lint(): readonly Finding[];
