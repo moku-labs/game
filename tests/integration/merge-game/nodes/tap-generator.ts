@@ -1,15 +1,20 @@
 /**
- * @file Transit node `tapGenerator`: one tap on the generator. The item, the energy it cost and
- * the charge it spent are granted together, on this edge, and the cabin squashes (design §6 F5).
- * A refused tap says why (design §4): an empty bar opens the Out of energy popup, a full board
- * shows the toast, and a sawmill that is still cooling down answers `rejected`.
+ * @file Transit node `tapGenerator`: one tap on the generator. The tapped generator becomes the
+ * selected thing of the board, whatever the tap answers (design §6 F9). The item, the energy it
+ * cost and the charge it spent are granted together, on this edge, and the cabin squashes (design
+ * §6 F5). A refused tap says why (design §4): an empty bar opens the Out of energy popup, a full
+ * board shows the toast, and a sawmill that is still cooling down answers `rejected`.
  */
 import { play, schedule, type } from "@moku-labs/game";
 import { defineNode } from "../kit";
+import type { GeneratorTable } from "../rules";
 import { rules } from "../rules";
 import { applyRules } from "../state";
 import { tables } from "../tables";
 import { sawmillTap } from "../view/animations";
+
+/** The generator table under the loose key type, so the id a tap carries can be looked up. */
+const generatorTable: GeneratorTable = tables.generators;
 
 export const tapGenerator = defineNode({
   input: type<{ generatorId: string }>(),
@@ -20,6 +25,8 @@ export const tapGenerator = defineNode({
     rejected: type<{ reason: string }>()
   },
   run: async ({ input, player, session, rng, now, fx, out }) => {
+    session.selected = generatorTable[input.generatorId]?.cell ?? "";
+
     const result = rules.tapGenerator(
       player.merge,
       input.generatorId,

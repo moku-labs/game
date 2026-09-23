@@ -38,6 +38,8 @@ export type Session = {
   taps: number;
   /** How far the splash has loaded the bundles Home and the board need, 0..1. */
   loading: number;
+  /** The cell of the thing the player selected on the board, `""` while nothing is. */
+  selected: string;
 };
 
 /** The state of a new player. */
@@ -60,7 +62,7 @@ export const startingPlayer: Player = {
 };
 
 /** The session at every start. */
-export const startingSession: Session = { taps: 0, loading: 0 };
+export const startingSession: Session = { taps: 0, loading: 0, selected: "" };
 
 /**
  * Writes the state a rules function returned into the player draft. The rules are pure and build

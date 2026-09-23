@@ -1,8 +1,12 @@
 /**
- * @file The "Готово!" stamp (design §6 F6): when a delivery finishes an order, a berry stamp with
- * the word on it hits the order card before the reward popup opens. The stamp is two entities the
- * animation spawns — the berry sign and its words — scaled in together around the middle of the
- * card, held for a moment, and despawned when the timeline ends.
+ * @file The "Готово!" stamp (design §6 F6): when a delivery finishes an order, the delivered item
+ * flies into the order card, then a berry stamp with the word on it hits the card before the
+ * reward popup opens. The stamp is two entities the animation spawns — the berry sign and its
+ * words — scaled in together around the middle of the card, held for a moment, and despawned when
+ * the timeline ends.
+ *
+ * The item is hosted by the board slot, so its `Transform` is slot-local, and `at(card)` is a root
+ * pose. The flight names the root space, and `anim` turns the card's pose into the slot's units.
  */
 import type { Anim } from "@moku-labs/game";
 import {
@@ -21,23 +25,34 @@ import { defineAnimation, NineSlice, tr } from "../../kit";
 /** The stamp: a berry plank, turned like a hand-pressed stamp. */
 const stamp = { width: 290, height: 116, rotation: -0.2 } as const;
 
-/** How long the stamp takes to hit the card, and how long it stays before the popup opens. */
-const timing = { hitMs: 260, holdMs: 450 } as const;
+/**
+ * How long the item takes into the card, how long the stamp takes to hit it, and how long the stamp
+ * stays before the popup opens.
+ */
+const timing = { flyMs: 300, hitMs: 260, holdMs: 450 } as const;
 
 /** Above the board screen in the `ui` layer, like the coins. */
 const STAMP_ORDER = 1000;
 
 /**
- * The stamp: the sign and its words appear at nothing on the middle of the card, scale in with an
- * overshoot, and hold. The slot is the card element, so the stamp lands on it on every phone.
+ * The flight and the stamp: the item speeds up from its cell onto the middle of the card and
+ * takes the card's size; then the sign and its words appear at nothing on the same middle, scale
+ * in with an overshoot, and hold. The card slot is the card element, so both land on it on every
+ * phone.
  */
 export const deliverStamp = defineAnimation("orders.deliverStamp", {
-  slots: { card: type<Anim.Target>() },
-  build: ({ card }, { at }) => {
+  slots: { item: type<Anim.Target>(), card: type<Anim.Target>() },
+  build: ({ item, card }, { at }) => {
     const middle = at(card);
     const pose = { x: middle.x, y: middle.y, rotation: stamp.rotation, scale: 0 };
 
     return sequence(
+      tween(
+        item,
+        Transform,
+        { x: middle.x, y: middle.y, scale: middle.scale },
+        { ms: timing.flyMs, ease: "inCubic", space: "root" }
+      ),
       spawn(
         "stampSign",
         [

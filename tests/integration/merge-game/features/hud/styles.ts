@@ -31,7 +31,8 @@ export const boardArea = defineStyle({
 
 /**
  * The board slot: the wooden tray, square at its natural 970 units, scaled down to fit the board
- * area and never past its natural size. It hosts the cells, the generator and the items.
+ * area and never past its natural size. It hosts the cells, the selection ring, the generator
+ * and the items.
  */
 export const boardSlot = defineStyle({
   width: slot.size,

@@ -1,9 +1,9 @@
 /**
  * @file The board screen around the board: one projection whose view is markup. A `screen` root
  * padded with the safe-area tokens holds the full-bleed meadow, the HUD row, the order strip, the
- * board slot and the sawmill info bar (design §5, §6 A3). The slot hosts the three board
- * projections, so the cells, the sawmill and the items are drawn inside it and shrink with it on
- * a short phone. No layout arithmetic anywhere: Yoga places every element.
+ * board slot and the sawmill info bar (design §5, §6 A3). The slot hosts the four board
+ * projections, so the cells, the selection ring, the sawmill and the items are drawn inside it and
+ * shrink with it on a short phone. No layout arithmetic anywhere: Yoga places every element.
  */
 import { projection } from "../../kit";
 import type { Player } from "../../state";
@@ -17,7 +17,12 @@ import { HudRow } from "./row";
 import { boardArea, boardSlot } from "./styles";
 
 /** The projections the board slot draws inside itself. */
-const boardProjections = ["board.cells", "board.generators", "board.items"] as const;
+const boardProjections = [
+  "board.cells",
+  "board.selection",
+  "board.generators",
+  "board.items"
+] as const;
 
 /** The board screen as the view reads it: one row of the save. */
 export type HudView = {
