@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sourceBytes } from "../../host/readback";
+import { sourceBytes, textureUsage } from "../../host/readback";
 import { createMonitorState } from "../../monitor/state";
 import { beginFrame, endFrame } from "../../monitor/window";
+import type { PixiApplication } from "../../types";
 import { FAKE_PNG } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
@@ -130,6 +131,29 @@ describe("renderer stats", () => {
     mock.ctx.state.sync.pooled = 3;
 
     expect(mock.api.stats()).toMatchObject({ views: 2, pooled: 3 });
+  });
+
+  it("skips the empty slots Pixi keeps for unloaded texture sources", () => {
+    // Pixi 8.21 GpuTextureSystem and GlTextureSystem answer `Object.values` of a GCManagedHash,
+    // which keeps `null` where a source was unloaded.
+    // eslint-disable-next-line unicorn/no-null -- Pixi's empty slot is `null`, the bug is about it
+    const emptySlot = null;
+    const app = {
+      renderer: {
+        texture: {
+          managedTextures: [
+            emptySlot,
+            { pixelWidth: 4, pixelHeight: 4, mipLevelCount: 1 },
+            undefined,
+            { pixelWidth: 2, pixelHeight: 2, mipLevelCount: 1 },
+            emptySlot
+          ]
+        }
+      }
+    } as unknown as PixiApplication;
+
+    // (16 + 4) pixels * 4 bytes.
+    expect(textureUsage(app)).toEqual({ count: 2, bytes: 80 });
   });
 
   it("estimates the bytes of one texture source", () => {

@@ -43,7 +43,9 @@ export function sourceBytes(source: {
 /**
  * Counts the texture sources the GPU holds and sums their estimated bytes. Pixi's
  * `managedTextures` exists on the WebGPU and the WebGL texture system alike (checked in 8.21);
- * Pixi's canvas renderer keeps no GPU texture and answers zero.
+ * Pixi's canvas renderer keeps no GPU texture and answers zero. Both systems answer
+ * `Object.values` of a `GCManagedHash`, which keeps a `null` slot for every unloaded source, so
+ * only the live sources are counted.
  *
  * @param app - The application that draws.
  * @returns The count and the bytes.
@@ -53,7 +55,8 @@ export function textureUsage(app: PixiApplication): TextureUsage {
 
   if (!("managedTextures" in system)) return { count: 0, bytes: 0 };
 
-  const sources = system.managedTextures;
+  // Pixi's type says `TextureSource[]`, but an unloaded source leaves `null` in the list.
+  const sources = system.managedTextures.filter(Boolean);
   let bytes = 0;
 
   for (const source of sources) bytes += sourceBytes(source);
