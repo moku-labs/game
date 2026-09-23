@@ -6,21 +6,30 @@ rect from one Yoga solve per change.
 
 | Module | Owns |
 |---|---|
-| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the `onTap` application of `LocalWrite`, `tree()`, `find()`, `lint()` |
+| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the `onTap` application of `LocalWrite`, the keyboard focus, `tree()`, `find()`, `lint()` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
 | `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, scroll, the `popup` and `guide` handlers |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, six state flags, local, `fitScale` on a fitted element, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
-| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size, text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`) |
+| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size, text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
 
-Config: `{ tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } }`. Emits nothing, listens to
-nothing. Depends on `time`, `flow`, `world`, `renderer`, `input`, `anim`, `i18n`, `text`.
-Yoga arrives through `await import("yoga-layout/load")` in `onStart`; nothing solves before it.
-`onStart` also registers `LocalWrite` through `input.controls.add`, so the cursor shows a hand over a local-state button; `onStop` removes it.
+Config:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `tapTargetPt` | `44` | the smallest tap target `lint()` accepts, in CSS px |
+| `breakpoints` | `{ tall: 2, wide: 1.5 }` | the ratios of the `tall` and `wide` flags |
+| `focusRing` | `{ stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }` | the keyboard focus ring: a dashed ring `offset` outside the control, over a solid halo of `haloWidth` on the same path |
+
+Emits nothing, listens to nothing. Depends on `time`, `flow`, `world`, `renderer`, `input`,
+`anim`, `i18n`, `text`. Yoga arrives through `await import("yoga-layout/load")` in `onStart`;
+nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
+the cursor shows a hand over a local-state button, and one `input.onKey` listener for the focus;
+`onStop` removes both.
 
 ## What an element is drawn with
 
@@ -29,8 +38,8 @@ Yoga arrives through `await import("yoga-layout/load")` in `onStart`; nothing so
 | `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
 | `text` | `Text`; a string `style` is the text style key | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug` | as below |
-| any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke; with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label | as below |
-| `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing |
+| any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke; with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash) | as below |
+| `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
 | `scroll` | `Shape` with `clip` | `Touchable`, `Scroll` |
 
@@ -63,9 +72,25 @@ renderer: `app.renderer.sync.debug.nineSlice(true)` or `pluginConfigs.renderer.d
 <panel key="board" style={{ nineSlice: "ui.panel-signboard", padding: 72, debug: true }} />
 ```
 
+## Draw order
+
+A child draws with its parent, over the siblings before it. `zIndex` (an integer) changes that:
+it is written as the child's `Order`, so `renderer` sorts the siblings by it; a sibling without
+it draws at 0 in markup order. A new value from a variant or a new render updates the `Order`;
+a child that drops its `zIndex` goes back to 0. The views a slot hosts keep their own `Order`.
+A root element ignores `zIndex` (it draws at the order of its root in its layer), and `lint()`
+reports it as `z-index-on-root`.
+
+```tsx
+<column key="board">
+  <row key="orders" style={{ zIndex: 1 }}>{cards}</row>
+  <panel key="tray" style={{ margin: { top: -40 } }}>{items}</panel>
+</column>
+```
+
 ## State flags
 
-`is` variants merge in the order `disabled`, `active`, `selected`, `hover`, `pressed`,
+`is` variants merge in the order `disabled`, `active`, `selected`, `hover`, `focus`, `pressed`,
 `covered`. While `disabled` is true, `hover` and `pressed` are not applied.
 
 | Flag | From |
@@ -73,22 +98,59 @@ renderer: `app.renderer.sync.debug.nineSlice(true)` or `pluginConfigs.renderer.d
 | `disabled`, `active`, `selected` | the `state` prop of the markup |
 | `pressed` | `input`'s `Pressed` tag, from down to up |
 | `hover` | `input`'s `PointerOver` tag: an idle mouse or pen over the element; touch never hovers. Never from `Hovered`, the drop target under a drag |
+| `focus` | the keyboard focus, see below |
 | `covered` | the root: every element of a root kept under another popup |
 
 A variant may swap anything, the nine-slice included (`is: { disabled: { nineSlice: "ui.button-off" } }`);
 swapping between a rectangle and a nine-slice trades the one component for the other.
 
+## Keyboard focus
+
+For desktop development and keyboard players. `input` delivers the keys (`onKey`); `ui` owns the
+focus, because it knows the roots and the layout.
+
+- **The root the keyboard works in:** the top uncovered popup; with no popup, the screen root in
+  the top layer.
+- **Tab / Shift+Tab** move the focus through the controls of that root (the elements with
+  `Tappable` or `LocalWrite`) in reading order: the upper rect first, then the left one. Both
+  wrap. With no control, Tab does nothing and the browser keeps the key. A button with `escape`
+  and no children is a popup's backdrop, not a Tab stop: Escape and a tap still reach it.
+- **Enter / Space** tap the focused control through `input.tap`, the same door a finger uses:
+  the intent is answered, or the `local` patch is written. The focus stays.
+- **Escape** taps the button with the `escape` prop in that root: the close button or the
+  backdrop of a dismissable popup. Nothing without one.
+- **A pointer tap** clears the focus: the ring shows only after a key (focus-visible).
+- The focus drops when its element leaves, or its root gets covered or another root comes over
+  it.
+
+The focused element resolves `is.focus`. Around it `ui` draws one overlay it owns: a solid halo
+under a dashed ring (`config.focusRing`), `offset` outside the drawn rect with a corner radius of
+the element's `radius` plus `offset`, in the layer of its root, above its elements. Hidden
+without focus.
+
+```tsx
+<button key="close" intent="close" escape style={{ is: { focus: { scale: 1.05 } } }} />
+```
+
+A headless test presses keys through `app.input.key("Tab", { shift: true })`.
+
 ## Visual transform styles
 
-`offsetX`, `offsetY` (reference units), `scale` (uniform) and `origin` (`"center"` default,
+`offsetX`, `offsetY` (reference units), `scale` (uniform), `rotation` (radians) and `origin` (`"center"` default,
 `"top"`, `"topLeft"`, or `{ x, y }` in fractions of the box, any fraction: `{ x: 0.5, y: -0.5 }`
 hangs the pivot half the height above the top edge, where a popup's ropes meet) never change a
 rect. They are written
 into the rest `Transform`: `pivot` is the origin on the box, and the position is where the pivot
 lands, so the unscaled element sits on its rect.
 
+`rotation` turns the element around its origin; it works in `is:` variants like `scale`, and
+`lint()` ignores it. A popup plaque tilted by 1.5 degrees: `{ rotation: -0.026, origin: "top" }`.
+
 When a state change moves the rest pose, the element plays its `change.Transform` motion when it
-has one, else the pose applies at once. A new rect plays `change.Box` when there is one.
+has one, else the pose applies through a 0 ms rest track (delta 6): it lands on the next frame
+step, and an additive loop running on the element re-bases on the new rest. A headless test
+steps once after a variant change before it reads the drawn `Transform`. A new rect plays
+`change.Box` when there is one.
 
 The `motion` prop is a `Ui.ElementMotion`. Its two `change` hooks get typed values: `Transform`
 the rest poses before and after, `Box` the rects. A hook for any other component name is
@@ -107,6 +169,16 @@ const cardMotion: Ui.ElementMotion = {
         : view.toRest(Transform, { ms: 240 })
   }
 };
+```
+
+A motion with a `loop` hook (a `defineMotion` with `loop`) starts it when the element enters,
+next to `enter`, and keeps its motion apart: the exit sweep never waits for it. When the motion
+prop of a live element names another `loop`, the running loop is cancelled and the new one
+starts; a motion without a loop, or no motion, stops it. Keep a motion a module constant: a
+`defineMotion` called inside a view builds a new loop every render and restarts it.
+
+```tsx
+<row key="card" motion={order.ready ? swayWide : swayGentle} />
 ```
 
 A keyframed `defineMotion` works on any element as it is: the keys walk around the element's

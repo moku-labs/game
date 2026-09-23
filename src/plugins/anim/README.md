@@ -17,6 +17,7 @@ is the only way out.
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `maxTracks` | `number` | `2000` | Dev guard. One `ctx.log.warn` each time the running track count rises past it. |
+| `reducedMotion` | `boolean` | `false` | Start value of reduced motion (see below). The live value is state; `reducedMotion(on)` switches it. |
 
 Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), never in the config:
 `toRest` keeps world's `settleMs`.
@@ -27,8 +28,9 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 |---|---|
 | `play(animation, slots)` | Builds the step tree now and starts it. Returns a `PlayHandle`: the `MotionHandle` contract over the whole tree plus `done` and `marks()`. |
 | `finishAll()` | Every timeline ends at its own end, every track writes its exact target and every spawned entity is despawned. Called by the frame step in world mode `"fast"`. |
-| `active()` | Tracks in the table, the delayed ones included. `0` when nothing moves. |
+| `active()` | Tracks in the table, the delayed ones and the running loops included. `0` when nothing moves; a screen at rest with loops counts one track per loop lane. |
 | `onMark(fn)` | Direct subscription next to the event. Returns the remover. |
+| `reducedMotion(on?)` | Reads reduced motion and, given a boolean, sets it. Returns the value after the call. |
 
 ## Events
 
@@ -50,7 +52,7 @@ sfx(key, { bus? })   haptic(kind)       // descriptors anim owns; audio and plat
 use(animation, slots, tools?)           // nests one animation; pass the outer tools when it reads `at`
 play(animation, slots)                  // the fx descriptor a node awaits
 external(player, clip)                  // reserved for Spine: always throws
-defineMotion({ states?, keyframes?, transition?, on })
+defineMotion({ states?, keyframes?, transition?, loop?, on })
 ```
 
 A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.
@@ -101,6 +103,71 @@ const swing = defineMotion({
   owns its fields for the whole track. A component the view does not carry is left alone.
 - Definition-time errors: a track with no key, an `at` outside 0..1, keys not strictly ascending, a
   name that is both a state and a track, and an `on.enter`/`on.exit` that names neither.
+
+## Loops
+
+`loop: { track, ms? }` names a keyframe track that plays forever from the moment the element enters: an idle sway, a
+spinning blade, a wobbling gift.
+
+```ts
+const orderCard = defineMotion({
+  states: { small: { Transform: { scale: 0.8 } } },
+  keyframes: {
+    sway: [
+      { at: 0, Transform: { rotation: 0 } },
+      { at: 0.25, Transform: { rotation: 0.026 } },
+      { at: 0.75, Transform: { rotation: -0.026 } },
+      { at: 1, Transform: { rotation: 0 } }
+    ]
+  },
+  transition: { ms: 250 }, // the pop-in
+  loop: { track: "sway", ms: 2400 }, // one swing; ms defaults to transition.ms
+  on: { enter: "small" }
+});
+```
+
+- Every Transform key of a loop is an **offset added to the rest pose**: `dx`, `dy`, `rotation` and
+  `scale` (`scale: 0.05` grows a scale-1 view to 1.05). `alpha` keys stay absolute. Enter and exit
+  tracks keep their own rules above.
+- The last key must repeat the first one, field by field; a Transform field the first key leaves out
+  starts at no offset, an alpha it leaves out may not appear later. Otherwise `defineMotion` throws
+  `[game] Motion loop "<name>" ends somewhere else than it starts.` A first key after `at: 0` is held
+  from 0, so the cycle closes on the pose it opens with.
+- `rotation` may end whole turns away from its start (a blade spins `0 → 2π`, or `0 → −2π` the other
+  way; a tolerance of 1e-9 rad): the next cycle restarts at the start, which looks the same.
+- `defineMotion` builds a separate `loop` hook; `enter` no longer starts it. `world` plays `loop`
+  wherever it plays `enter`, outside the view's handles, so enter still resolves and the loop runs on.
+  On a projection view it starts only when enter plays, never on a direct reconcile (mount, load,
+  restore, fast mode); a UI element always plays it, and a changed `motion` prop swaps the loop.
+- It is one additive track per component the keys name, with `repeat: "forever"`, so it layers over
+  the rest pose, enter, change and settle motions: a new rest pose carries the loop along.
+- It dies with its view, on `flushAll` (fast mode) and on `finishAll()`. `active()` counts it.
+- `loop.ms` is one cycle; left out, it is `transition.ms`. A `loop.ms` that is not a finite number above 0 throws
+  `[game] Motion loop "<name>" has ms <ms>.` A `loop.track` that names no keyframe track throws too.
+
+## Repeat
+
+A track with `repeat` (from `ViewHandle.tween`) walks again from its first segment when a run ends: a
+number counts the extra runs, `"forever"` never ends and its motion never resolves until it is
+cancelled or finished. Time past the end of a run carries into the next run; a counted track hands
+the time past its last run back like any other track.
+
+## Reduced motion
+
+`app.anim.reducedMotion(true)` (or `Config.reducedMotion: true` to start with it) makes every track
+started afterwards take 0 ms, its delay and repeats dropped: enter and exit, state changes, change and
+settle motions, drag returns and timeline tweens land on their target at the next frame step. Marks,
+sounds and `wait` steps of a timeline are untouched. Every loop stands on its first key, a running
+one at once, and walks on from its first key when the switch goes off. Tracks already running keep
+their length.
+
+```ts
+// web/main.ts follows the system setting
+const query = matchMedia("(prefers-reduced-motion: reduce)");
+
+app.anim.reducedMotion(query.matches);
+query.addEventListener("change", event => app.anim.reducedMotion(event.matches));
+```
 
 ## Tween space
 
@@ -194,7 +261,9 @@ timers, no `pixi.js` import.
 A new absolute track on a field cancels the older owner **of that field**; a track that loses every
 field ends where it stands. An additive track never owns a field: it contributes
 `(to − from) × ease(t)` to the field's offsets, and every write of that field is `base + Σ offsets`.
-When the last additive track leaves, the field is written once more without offsets.
+An additive track with keyframe segments names its offsets directly: it starts at no offset and each
+segment's value is the delta it adds, so it keeps its shape whatever pose it starts on. When the last
+additive track leaves, the field is written once more without offsets.
 
 ## Lifecycle
 
