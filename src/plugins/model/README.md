@@ -31,7 +31,7 @@ transaction that drew it, so a kill of the app cannot re-roll a chest.
 | Method | Behaviour |
 |---|---|
 | `load(): Promise<void>` | Reads the save through the provider. A new player gets a clone of `initialPlayer` and a seed. A stored save runs through the migration chain. Marks the first rest point, hands the whole document to `provider.commit()` when it was rewritten — a new player, a migrated save — and emits `model:committed` with cause `"load"`. Throws `SaveUnreadableError` when the save cannot be read. On a failure the state stays exactly as it was. Called by `flow.run()`, not by `onStart`. |
-| `snapshot(): Snapshot` | The committed trees `{ player, session, rng }`, frozen. This is the only thing a view or a projection sees. Before `load()` it shows the initial player, never a half-read save. |
+| `snapshot(): Snapshot` | The committed trees `{ player, session, rng }`, frozen. This is the only thing a view or a projection sees. Before `load()` it shows the initial player, never a half-read save. The same object comes back while the document and the session are unchanged, so the editor's `watch` compares identities instead of trees. |
 | `begin(): Transaction` | Opens the drafts of one node run. One transaction at a time: a second `begin()` throws. |
 | `markRest(): void` | Marks a rest node. The provider gets `commit(pending, schemaVersion)`, then the rest point moves and `pending` is emptied. A throwing provider leaves both untouched. |
 | `markBarrier(txId: string): Promise<void>` | Marks a barrier node. The rest point moves first, because rollback cannot cross a barrier. Then the provider gets `commitDurable(pending, txId, schemaVersion)`. `pending` is emptied only after it resolves. |
@@ -240,6 +240,12 @@ expect(provider.calls.map(call => call.method)).toEqual(["load", "commit", "flus
 - **onStop** is `({ state }) => state.store.provider.flush()`. `flow` stops before `model`, so
   unwritten patches still reach the provider. A rejecting flush makes `app.stop()` reject with that
   error.
+
+## Doors
+
+`inspect.ts` holds `game.model` (key `model` in `sources`) of the editor's read door,
+`@moku-labs/game/inspect`, safe in a production build. No input. It reads `store.snapshot()` and
+is read again on every commit (`changes: "commit"`): `watch` compares the snapshot by identity.
 
 ## Dependencies
 

@@ -2,7 +2,7 @@
 
 **A 2D puzzle game engine where the game is a deterministic graph of business logic.**
 
-`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations. V3 adds the interface: choreographies as data, strings as data, text from MSDF fonts, screens written in JSX and laid out by Yoga, and sound as an effect a node awaits.
+`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations. V3 adds the interface: choreographies as data, strings as data, text from MSDF fonts, screens written in JSX and laid out by Yoga, and sound as an effect a node awaits. V4 adds two doors for the editor: sources that read a running game and dev-only commands that drive it.
 
 <br/>
 
@@ -15,7 +15,7 @@
 
 <br/>
 
-[Why](#why-moku-labsgame) · [Status](#status) · [Install](#install) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Plugins](#plugins) · [Interface in JSX](#interface-in-jsx) · [Events](#events) · [Configuration](#configuration) · [Development](#development) · [Requirements](#requirements) · [Docs](#docs)
+[Why](#why-moku-labsgame) · [Status](#status) · [Install](#install) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Plugins](#plugins) · [Interface in JSX](#interface-in-jsx) · [Doors for the editor](#doors-for-the-editor) · [Events](#events) · [Configuration](#configuration) · [Development](#development) · [Requirements](#requirements) · [Docs](#docs)
 
 ---
 
@@ -30,14 +30,14 @@
 
 ## Status
 
-V1, V2 and V3 are built. Everything below V3 is a plan and may change.
+V1, V2 and V3 are built. V4 has its engine side: the two doors described in [Doors for the editor](#doors-for-the-editor). The editor that uses them is a separate package. Everything after V4 is a plan and may change.
 
 | Milestone | State | Scope | Exit criterion |
 |---|---|---|---|
 | V1 | built | `time`, `lifecycle`, `model`, `clock`, `flow`, the `@moku-labs/game/testing` entry | A fixture game is played to the end headless |
 | V2 | built | `world`, `renderer`, `input`, `assets`, `scenes`, the `@moku-labs/game/assets` entry | A board is visible and items merge by drag; the same game still plays to the end headless |
 | V3 | built | `anim`, `i18n`, `text`, `ui`, `audio`, the `@moku-labs/game/jsx-runtime` entry | Popup, HUD and buttons with sound; the same game still plays to the end headless |
-| V4 | planned | `/inspect` and `/control` entries | External tools can read and drive a game |
+| V4 | doors built | `/inspect` and `/control` entries | External tools can read and drive a game |
 | V5 | planned | `effects`, production mode of `assets`, visual test helpers | Not defined yet |
 | V6 | planned | `platform` | A template game runs on a phone |
 
@@ -335,6 +335,8 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 |---|---|---|
 | `@moku-labs/game/testing` | anywhere | The headless helpers, see below |
 | `@moku-labs/game/assets` | node and bun only | `scanAssets`, `emitKeys`, `emitManifest`, `compileStrings`, `checkStrings`, `runCli`. A game runs it as `bun run assets:keys`: it writes the manifest, the typed asset keys and, next to them, `generated/strings.ts` with one `strings.<locale>.ts` per locale; `--check` fails when any of them is out of date |
+| `@moku-labs/game/inspect` | anywhere, production included | `read`, `watch`, `defineSource`, the catalogue `sources` and the types `Source`, `InputSchema`, `InputOf`. See [Doors for the editor](#doors-for-the-editor) |
+| `@moku-labs/game/control` | dev builds only | `run`, `defineCommand`, `controlRefused`, the catalogue `commands` and the types `Command`, `Ran`. See [Doors for the editor](#doors-for-the-editor) |
 | `@moku-labs/game/jsx-runtime`, `@moku-labs/game/jsx-dev-runtime` | anywhere | `jsx`, `jsxs`, `jsxDEV`, `Fragment` and the `JSX` namespace that `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand |
 
 ### Testing entry
@@ -454,6 +456,191 @@ createApp({
 > [!TIP]
 > `app.ui.tree()` answers the live screen as plain data, `app.ui.find(key)` the entity of a keyed element, and `app.ui.lint()` the tap targets under `tapTargetPt`, the text that overflows in some locale and the absolute elements without a `reason`. The example app of the `ui` tests, [`src/plugins/ui/__tests__/app.tsx`](./src/plugins/ui/__tests__/app.tsx), is a whole HUD with a settings component, a scrolling list and a popup, run in plain Bun.
 
+## Doors for the editor
+
+The editor, MCP tools and e2e scripts reach a running game through two subpaths. Neither is on the root.
+
+| Subpath | Exports | In a production build |
+|---|---|---|
+| `@moku-labs/game/inspect` | `read`, `watch`, `defineSource`, the catalogue `sources`, the types `Source`, `InputSchema`, `InputOf` | Safe. Every source only reads. The door reaches no command module, so its bundle carries no command |
+| `@moku-labs/game/control` | `run`, `defineCommand`, `controlRefused`, the catalogue `commands`, the types `Command`, `Ran` | Dev only. `run` throws unless the dev flag is `true`, and a `define` of `false` drops every command body |
+
+A source or a command is data: an id, a title, an input schema and one function. `sources` and `commands` are frozen objects keyed by a short name, so an editor registers `Object.values(sources)` and `Object.values(commands)`. Each descriptor lives in the plugin that owns its data, in that plugin's `inspect.ts` or `control.ts`; the machinery lives in `flow`, see its [README](./src/plugins/flow/README.md#doors-for-the-editor).
+
+The dice game of the [Quick start](#quick-start), driven through both doors:
+
+```ts
+// dice.test.ts
+import { commands, run } from "@moku-labs/game/control";
+import { read, sources, watch } from "@moku-labs/game/inspect";
+import { createHeadless } from "@moku-labs/game/testing";
+import { it, vi } from "vitest";
+import { createGame } from "./game";
+
+it("rolls, bookmarks and restores through the doors", async () => {
+  vi.stubGlobal("__MOKU_GAME_DEV__", true);
+  const app = createGame(42);
+  const game = await createHeadless(app);
+
+  read(app, sources.position); // { path: "home", flow: "main", node: "home", waiting: ["roll", "reset"] }
+
+  const seen: string[] = [];
+  const stop = watch(app, sources.position, undefined, position => {
+    seen.push(position.path);
+  });
+  app.time.step(16);
+  seen; // ["home"]: a headless watch reads on the frames a test steps
+
+  const walked = await run(app, commands.walk, { route: [{ at: "home", intent: "roll" }] });
+  walked.value.path; // "home"
+  walked.state; // { path: "home", frame: 1, tainted: false }: a walk goes through the graph
+  read(app, sources.model).session; // { rolls: 1 }
+
+  const { value: mark } = await run(app, commands.bookmark);
+  await run(app, commands.restore, { bookmark: mark });
+  read(app, sources.tainted); // true: a restore replaces the state outside the graph
+  read(app, sources.cheats); // [{ id: "game.restore", input: { bookmark: { path: "home", ... } }, frame: 1 }]
+
+  stop();
+  await game.stop();
+});
+```
+
+- **Input.** A schema maps field names to `"string"`, `"number"`, `"boolean"` or `"json"`. A kind with a trailing `?` is optional. The input may be left out when every field is optional. The descriptor function gets it typed.
+- **`read(app, source, input?)`** calls the source once and returns what it reads.
+- **`watch(app, source, input, fn)`** reads on the first frame, in the `signals` phase, and again when the source's change key moved: `frame` every frame, `commit` when `model.store.snapshot()` is a new object, `edge` when `flow.state()` is. It returns the stop function. It runs on the frame loop, so a headless test steps frames with `app.time.step(16)`.
+- **`run(app, command, input?)`** resolves `{ value, state }`. `value` is what the command returned. `state` is the envelope `{ path, frame, tainted }`, read after the command.
+- **Screen sources need the screen.** `Source` and `Command` name the app they need. `read(app, sources.rect, { key: "play" })` on an app without `ui` and `renderer` is a compile error.
+
+### Base sources
+
+From `@moku-labs/game/inspect`. `Changes` is when `watch` reads the source again.
+
+| Key in `sources` | id | Input | Changes | Reads |
+|---|---|---|---|---|
+| `graph` | `game.graph` | none | edge | `flow.describe()`: flows, nodes with their flags and outcomes, edges, slots |
+| `position` | `game.position` | none | edge | `{ path, flow, node, waiting }` from `flow.state()`. `waiting` lists the intents the gate waits for |
+| `history` | `game.history` | `{ last: "number?" }` | edge | `flow.history()`, the edges since the last checkpoint: all of them, or the last `last` |
+| `tainted` | `game.tainted` | none | frame | Whether a `cheat` or `raw` command ran on this app |
+| `cheats` | `game.cheats` | none | frame | The journal of `cheat` and `raw` commands, `{ id, input, frame }`, oldest first, the last 500 |
+| `model` | `game.model` | none | commit | `model.store.snapshot()`: the committed `{ player, session, rng }` |
+| `entities` | `game.entities` | `{ owner: "string?", component: "string?" }` | frame | `world.ecs.snapshot().entities`: all, the ones whose owner has that name, the ones that carry that component, or both |
+| `projections` | `game.projections` | none | commit | Projection name to key to entity, through `world.projection.keyOf` |
+| `ui` | `game.ui` | none | frame | `ui.tree()`: the live screen as plain data |
+| `rect` | `game.rect` | `{ key: "string" }` | frame | Where the element with that `key` is on the page, in CSS px; in reference units while the renderer is inert. `undefined` when it is not on screen |
+| `render` | `game.render` | none | frame | `renderer.stats()`: `{ fps, frameMs, textures, textureMb, views, pooled }` |
+| `sounds` | `game.sounds` | `{ last: "number?" }` | frame | `audio.journal()`: all, or the last `last`. Empty unless `pluginConfigs.audio.journal` is above 0 |
+| `assets` | `game.assets` | none | frame | `assets.usage()`: `{ textureMb, budgetMb, bundles }` |
+| `log` | `game.log` | `{ level: "string?" }` | frame | `log.trace()`: every entry, or the entries at `level` and above. A level other than `debug`, `info`, `warn`, `error` throws |
+
+### Base commands
+
+From `@moku-labs/game/control`. Every command runs in dev builds only and leaves a `moku:dev` debug entry in the log.
+
+| Key in `commands` | id | Input | Effect | Does |
+|---|---|---|---|---|
+| `answer` | `game.answer` | `{ intent: "string", payload: "json?" }` | route | `flow.gate.answer({ intent, payload })`. Value: whether the gate took the answer |
+| `tap` | `game.tap` | `{ key: "string?", target: "json?" }`, exactly one | route | `input.tap` on the ui element with that `key`, or on the view `target: { projection, key }`. Value: whether the gate took the answer |
+| `drag` | `game.drag` | `{ from: "json", to: "json" }` | route | `input.drag(from, to)`, both `{ projection, key }`. Value: whether the gate took the answer |
+| `key` | `game.key` | `{ key: "string", shift: "boolean?" }` | route | `input.pressKey(key, { shift })`. Value: whether a listener handled the key |
+| `walk` | `game.walk` | `{ route: "json" }` | route | `flow.walk(route)`. Value: the flow state after the walk |
+| `bookmark` | `game.bookmark` | none | read | `flow.bookmark()`. Value: the bookmark, plain JSON |
+| `restore` | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `flow.restore(bookmark)`, or a `/testing` repro: its state at its checkpoint, then `flow.walk(repro.route)`. Value: the flow state |
+| `step` | `game.step` | `{ frames: "number", deltaMs: "number?" }` | cosmetic | `time.step(deltaMs)` `frames` times, also while paused. `deltaMs` is 1000/60 by default. Value: `time.snapshot()` |
+| `pause` | `game.pause` | none | cosmetic | `lifecycle.push("devtools")`. Value: `lifecycle.isPaused()` |
+| `resume` | `game.resume` | none | cosmetic | `lifecycle.pop("devtools")`. Value: `lifecycle.isPaused()`, still true while another reason holds |
+| `capture` | `game.capture` | none | read | `renderer.capture()`: a PNG data URL of the canvas after the next drawn frame. `undefined` while the renderer is inert |
+| `debug` | `game.debug` | `{ nineSlice: "boolean" }` | cosmetic | `renderer.sync.debug.nineSlice(on)`. Value: the debug switches |
+| `reducedMotion` | `game.reducedMotion` | `{ on: "boolean" }` | cosmetic | `anim.setReducedMotion(on)`. Value: `anim.reducedMotion()` |
+
+### Effects, taint and the cheat journal
+
+| Effect | Means |
+|---|---|
+| `read` | Takes something out of the game and changes nothing |
+| `route` | Goes through the graph or the input, the way a player does. The session stays clean |
+| `cosmetic` | Changes how the game runs or looks. The session stays clean |
+| `cheat` | Changes the state outside the rules. Taints the session and is journaled |
+| `raw` | Replaces the state outside the graph. Taints the session and is journaled |
+
+`run` journals a `cheat` or `raw` command as `{ id, input, frame }` before it runs, so a failing one still counts. The session and the journal belong to one app object: two apps in one process never share them. Read them with `sources.tainted` and `sources.cheats` (`game.cheats`), and in `state.tainted` of every `run`. Of the base commands only `game.restore` is `raw`; none is `cheat`.
+
+### Turn the dev build on
+
+`__MOKU_GAME_DEV__` is a global the engine reads and never sets. Only `true` turns the dev build on; undefined means production, and `run` throws `[game] Control commands run in dev builds only.` The package ships its declaration, `var __MOKU_GAME_DEV__: boolean | undefined`. A game never re-declares it.
+
+**Preferred: a bundler `define`**, `true` in dev and `false` in production.
+
+```ts
+// build.ts of the game
+const production = Bun.argv.includes("--production");
+
+await Bun.build({
+  entrypoints: ["web/main.ts"],
+  outdir: "dist",
+  minify: true,
+  define: { __MOKU_GAME_DEV__: production ? "false" : "true" }
+});
+```
+
+**Or set the global** in a module the dev entry imports before the engine. The fixture page does this in [`tests/integration/merge-game/web/dev.ts`](./tests/integration/merge-game/web/dev.ts):
+
+```ts
+// web/dev.ts, the first import of web/main.ts
+globalThis.__MOKU_GAME_DEV__ = true;
+```
+
+A test sets it with `vi.stubGlobal("__MOKU_GAME_DEV__", true)`.
+
+**What the `define` strips.** Every command body starts with the inline guard `if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();`. A `define` of `false` folds the condition, and the minifier drops the body behind it. [`tests/integration/doors-build.test.ts`](./tests/integration/doors-build.test.ts) proves it with a minified Bun build of each door: with `false` no command body of `/control` is left, with `true` every body is there, and an `/inspect` bundle carries no command id at all. The descriptors stay, so an editor can still list the commands. Without a `define` the bodies stay in the bundle, and `run` still refuses them while the flag is undefined.
+
+### A game's own sources and commands
+
+`defineSource` and `defineCommand` take the same shape as the base catalogue. The id is camelCase words joined by dots, at least two (`dice.rolls`); any other id throws. Keep them in `.dev` modules that only the dev entry and the tests import, so a production bundle never reaches them. `defineCommand` adds no guard: a command writes the inline guard itself, because Bun does not inline a guard function across modules.
+
+```ts
+// dice.dev.ts
+import { controlRefused, defineCommand } from "@moku-labs/game/control";
+import { defineSource } from "@moku-labs/game/inspect";
+import type { createGame } from "./game";
+
+export const rolls = defineSource({
+  id: "dice.rolls",
+  title: "Rolls",
+  input: {},
+  changes: "commit",
+  read: (app: ReturnType<typeof createGame>) => app.model.store.snapshot().session
+});
+
+export const rollTwice = defineCommand({
+  id: "dice.rollTwice",
+  title: "Roll twice",
+  input: {},
+  effect: "route",
+  run: app => {
+    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    return app.flow.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]);
+  }
+});
+
+export const giveCoins = defineCommand({
+  id: "dice.giveCoins",
+  title: "Give coins",
+  input: { coins: "number" },
+  effect: "cheat",
+  run: (app, { coins }) => {
+    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    return app.flow.restore({ ...app.flow.bookmark(), player: { coins, lastRoll: 0 } });
+  }
+});
+
+// On a fresh headless game, before any frame:
+// (await run(app, rollTwice)).state; // { path: "home", frame: 0, tainted: false }
+// read(app, rolls); // { rolls: 2 }
+// (await run(app, giveCoins, { coins: 100 })).state.tainted; // true
+// read(app, sources.cheats); // [{ id: "dice.giveCoins", input: { coins: 100 }, frame: 0 }]
+```
+
 ## Events
 
 Global events are empty: every event belongs to a plugin. `time` and `clock` emit nothing.
@@ -555,7 +742,7 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 ### Scripts
 
 ```sh
-bun run build              # build with tsdown: dist/index.mjs, testing.mjs, assets.mjs, jsx-runtime.mjs, jsx-dev-runtime.mjs
+bun run build              # build with tsdown: dist/index.mjs, testing.mjs, assets.mjs, inspect.mjs, control.mjs, jsx-runtime.mjs, jsx-dev-runtime.mjs
 bun run typecheck          # tsc --noEmit
 bun run lint               # biome check . && eslint .
 bun run lint:fix           # biome check --write . && eslint --fix .
@@ -613,7 +800,7 @@ The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 - [`lifecycle`](./src/plugins/lifecycle/README.md): pause reasons
 - [`model`](./src/plugins/model/README.md): store, rng, provider seam, migrations
 - [`clock`](./src/plugins/clock/README.md): `now`, `scheduleAt`, `fakeClock`
-- [`flow`](./src/plugins/flow/README.md): runner, gate, inbox, fx, features
+- [`flow`](./src/plugins/flow/README.md): runner, gate, inbox, fx, features, the door machinery
 - [`world`](./src/plugins/world/README.md), [`renderer`](./src/plugins/renderer/README.md), [`input`](./src/plugins/input/README.md), [`assets`](./src/plugins/assets/README.md), [`scenes`](./src/plugins/scenes/README.md): the screen
 - [`anim`](./src/plugins/anim/README.md): tracks, timelines, `defineMotion`, the driver
 - [`i18n`](./src/plugins/i18n/README.md): messages, parts, the compiler, supported ICU

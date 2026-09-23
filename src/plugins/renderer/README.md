@@ -3,21 +3,23 @@
 > Very Complex plugin — pixels. One Pixi v8 application on one canvas. Game code never touches
 > Pixi: it writes components, and this plugin owns every display object.
 
-Three modules do the work and the plugin root composes them, in the injection order
-`host → viewport → sync`: `host` creates the application and survives a lost device and a hidden
+Four modules do the work and the plugin root composes them, in the injection order
+`host → viewport → sync → monitor`: `host` creates the application and survives a lost device and a hidden
 tab; `viewport` maps the window to the reference space, fitting `referenceSide` across and
 `referenceLong` along inside the safe area; `sync`
 is the ONE system that builds display objects from components, puts them in the named layers that
-`world.projection.layers()` lists, pools them, labels them and answers hit tests.
+`world.projection.layers()` lists, pools them, labels them and answers hit tests; `monitor` keeps
+the frame counters and takes a picture of a frame for the editor.
 
 ```ts
 app.renderer.host.canvas();                      // host
 app.renderer.viewport.toReference(960, 540);     // viewport
 app.renderer.sync.hitTest(540, 300, isLive);     // sync
+app.renderer.stats();                            // monitor
 ```
 
-No module imports a sibling's run-time code: `api.ts` injects `host` into `viewport`, and both into
-`sync`. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
+No module imports a sibling's run-time code: `api.ts` injects `host` into `viewport`, both into
+`sync`, and `host` and `sync` into `monitor`. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
 and lives in `state.host.pixi`, so a game without `...screen` carries no Pixi in its bundle.
 
 ## Components
@@ -91,6 +93,7 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | Method | Behaviour |
 |---|---|
 | `toReference(clientX, clientY)` | `(client − canvas rect − frame offset) / scale`. The rectangle is read at call time. Inert: the input unchanged. |
+| `toScreen({ x, y })` | The inverse: reference units to client CSS pixels, `canvas rect + frame offset + point × scale`. The `game.rect` source places an element on the page with it. Inert: the same numbers, a fresh object. |
 | `size()` | Reference units, a fresh object. `scale = min(short / referenceSide, (long − safe insets) / referenceLong)`: the short side is at least `referenceSide` and grows on a wide screen, the long side inside the safe area is at least `referenceLong`. Inert: the `aspect.min` frame, `scale: 1`, zero safe area. |
 
 ### `sync` — `app.renderer.sync`
@@ -114,6 +117,40 @@ An adapter object is parented, sorted and freed like a sprite; its hit box is `g
 read at attach, as a `Display` object's is. A point outside the rectangle of a `clip: true` ancestor
 hits nothing inside it. The hit test moves the point into the view's local space through the pose
 helpers below, pivot included.
+
+### `monitor` — `app.renderer.stats()`, `app.renderer.capture()`
+
+| Method | Behaviour |
+|---|---|
+| `stats()` | `{ fps, frameMs, textures, textureMb, views, pooled }`, a fresh object. Inert: all 0. |
+| `capture()` | Dev builds only. A PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). |
+
+- `fps` counts frame starts over one second of `clock` time; 0 before the first full second and
+  when no frame was drawn in the last second. A gap over one second, a pause or a hidden tab,
+  restarts the window instead of reading as one slow frame.
+- `frameMs` is the mean CPU work of a frame over the same second: from the renderer's callback in
+  phase `input` to the end of `render`. The clock is the `clock` plugin's: lint L3 keeps the device
+  clock out of the renderer. `clock.now()` is whole milliseconds, so one frame reads 3 or 4 ms and
+  the mean over a second is exact enough.
+- `textures` is Pixi's `renderer.texture.managedTextures.length`, on WebGPU and WebGL alike.
+  `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
+  level, in MiB.
+- `views` and `pooled` are read from the `sync` state.
+- `drawCalls` is not counted, and the field is absent. Checked in Pixi 8.21: under WebGPU the
+  batcher and the graphics adaptor draw straight on the native pass encoder
+  (`GpuBatchAdaptor` and `GpuGraphicsAdaptor` call `encoder.renderPassEncoder.drawIndexed`). They do
+  not pass `renderer.encoder.draw`, which only meshes, tiling sprites, particles and filters use.
+  Wrapping it would undercount. Counting every draw would mean patching every native
+  `GPURenderPassEncoder` the frame begins.
+- The frame timing costs two `clock.now()` calls and a few number writes per frame; no allocation.
+  The rest is read only when `stats()` is called.
+- `capture()` guards with `typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__` inline,
+  not with `isDev()`: Bun does not inline a function across modules, and the inline guard folds under
+  a production `define`, so the capture code leaves the bundle. The dev branch logs
+  `"moku:dev renderer.capture"` at debug level. `renderer.extract.base64` exists on the shared
+  systems of both backends (8.21); it draws the stage into a texture over `app.screen`, cleared with
+  `config.background`. All captures waiting for one frame share one extract. `onStop` answers a
+  capture still waiting with `undefined`.
 
 ### Pose helpers (engine-internal)
 
@@ -165,7 +202,8 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 | `time` phase | What `renderer` does |
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
-| `render` | A pending resize is applied, then `app.renderer.render(app.stage)` when `ready`. |
+| `input` | `monitor` marks the frame start for `stats()`. |
+| `render` | A pending resize is applied, then `app.renderer.render(app.stage)` when `ready`, then `monitor` closes the frame and hands it to a waiting `capture()`. |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -249,17 +287,33 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
   resize observer, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
   `render` frame callback is registered. Inert without a document or without a mount: nothing is
   created and nothing is registered.
-- **onStop** `({ config, state }) => stopRenderer({ config, state })` runs the cleanups of `sync`,
+- **onStop** `({ config, state }) => stopRenderer({ config, state })` answers a waiting capture
+  with `undefined` and forgets the frame counters, then runs the cleanups of `sync`,
   `viewport` and `host` in that order, destroys the pooled objects and the application
   (`{ removeView: true }`, `{ children: true, texture: false }`), removes the probe and the
   unsupported element and clears every map. It runs before `world` stops, so the world hooks are
   removed while `world` is alive. Textures are left to `assets`; a `Display` object is detached,
   never destroyed.
 
+## Doors
+
+`inspect.ts` holds `game.render` (key `render` in `sources`) of the editor's read door,
+`@moku-labs/game/inspect`, safe in a production build. No input. It reads `stats()` and is read
+again every frame (`changes: "frame"`).
+
+`control.ts` holds two commands of the editor's write door, `@moku-labs/game/control`, dev builds
+only. Each logs a `moku:dev` debug entry.
+
+| Key in `commands` | id | Input | Effect | Does |
+|---|---|---|---|---|
+| `capture` | `game.capture` | none | read | `capture()`: a PNG data URL of the canvas after the next drawn frame. `undefined` while inert |
+| `debug` | `game.debug` | `{ nineSlice: "boolean" }` | cosmetic | `sync.debug.nineSlice(on)`. Answers `sync.debug.state()` |
+
 ## Dependencies
 
-`time` for `onFrame("render")`, `lifecycle` for `push`/`pop` of `"background"` and `"device-lost"`,
-`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query` and
+`time` for `onFrame("input")` and `onFrame("render")` and `isPaused()` (a capture on a paused
+clock), `lifecycle` for `push`/`pop` of `"background"` and `"device-lost"`, `clock` for `now()`, the
+time source of the frame counters, `world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query` and
 `projection.layers`/`keyOf`. Core APIs: `ctx.log`. `pixi.js` is a peer dependency, reached only
 through `config.loadPixi`.
 
@@ -270,4 +324,6 @@ station in a real browser: that `kind()` is `webgpu` in Chrome and `webgl` with
 `preference: "webgl"`, that the board is visible and sorted on a screenshot, a real resize and a
 device rotation, the safe area on a mobile profile, a real device loss through `device.destroy()`
 and `WEBGL_lose_context`, a really hidden tab, the labels in the Pixi DevTools tree, and that the
-bundle of a game without `...screen` carries no Pixi import.
+bundle of a game without `...screen` carries no Pixi import. Also for the e2e station: `stats()` on
+a real frame loop (fps near the cap, a real `managedTextures` list), and `capture()` giving a PNG
+that shows the board, under WebGPU and WebGL.

@@ -67,3 +67,10 @@ None. Frame work is never an event.
 ## Lifecycle
 
 `onStart` starts the loop when `globalThis.requestAnimationFrame` is a function. In plain Bun there is no frame source: nothing starts, `isRunning()` stays false and tests drive frames with `step`. `onStop` is `({ state }) => stopLoop(state)`: it cancels the pending frame.
+
+## Doors
+
+`control.ts` holds `game.step` (key `step` in `commands`) of the editor's write door,
+`@moku-labs/game/control`, dev builds only. Input `{ frames: "number", deltaMs: "number?" }`: it
+calls `step(deltaMs)` `frames` times, also while paused, with `deltaMs` 1000/60 by default, and
+answers `snapshot()`. `frames` must be a whole number of 0 or more, or it throws. Effect `cosmetic`.

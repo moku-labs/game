@@ -275,3 +275,31 @@ the `Parent` chain, and its nine-slice or sprite size times that scale.
   style={{ width: 970, height: 970, fit: "contain" }}
 />
 ```
+
+## Doors
+
+`inspect.ts` holds the two ui sources of the editor's read door, `@moku-labs/game/inspect`. Both
+only read, so they are safe in a production build. Both need an app with `ui` and `renderer`.
+
+| Key in `sources` | id | Input | Changes | Reads |
+|---|---|---|---|---|
+| `ui` | `game.ui` | none | frame | `app.ui.tree()`: the live screen as plain data |
+| `rect` | `game.rect` | `{ key: "string" }` | frame | `{ x, y, w, h }` of the element with that `key`, in CSS px of the page, or `undefined` |
+
+`game.rect` answers where an element is drawn at rest:
+
+1. Only a live element counts. When `app.ui.find(key)` has no entity, the answer is `undefined`.
+2. It starts from the element's `rect` in `tree()`: its layout box from Yoga, not the Pixi bounds.
+   So a bare button with no fill, such as a text link, has a rect too.
+3. Every fitted element on the way up, the element itself included, scales that rect by its
+   `fitScale` about the centre of its own rect, the way `fit: "contain"` draws it.
+4. Both corners go through `renderer.viewport.toScreen`, so the rect is in CSS px of the page.
+   While the renderer is inert, as in a headless test, it stays in reference units.
+
+```ts
+import { read, sources } from "@moku-labs/game/inspect";
+
+// An e2e script finds the Play button on the page before it clicks there.
+read(app, sources.rect, { key: "play" }); // { x, y, w, h } in CSS px
+read(app, sources.rect, { key: "nothing" }); // undefined: no live element has this key
+```
