@@ -1,7 +1,8 @@
 /**
- * @file anim plugin — `defineMotion`: the sugar that turns named poses and keyframe tracks into
- * the three projection motion hooks of `world`. Pure, no ctx: it only builds hooks that call
- * `ViewHandle`, so a UI element and a projection view play the same way through the same driver.
+ * @file anim plugin — `defineMotion`: the sugar that turns named poses, keyframe tracks and a
+ * loop into the three projection motion hooks of `world`. Pure, no ctx: it only builds hooks that
+ * call `ViewHandle`, so a UI element and a projection view play the same way through the same
+ * driver.
  */
 import type {
   NineSliceValue,
@@ -21,7 +22,7 @@ import type {
   ViewHandle
 } from "../world/types";
 import { asComponent } from "./components";
-import { checkTrack, playKeyframes } from "./keyframes";
+import { checkLoop, checkTrack, playKeyframes, playLoop } from "./keyframes";
 import type { MotionKeyframe } from "./types";
 
 /** What a motion transition runs for when the author named nothing else. */
@@ -76,6 +77,11 @@ export type MotionTransition = { readonly ms: number; readonly ease: Ease };
  * which hooks to build. `on.enter` and `on.exit` name a state or a track. For a track,
  * `transition.ms` is the whole walk and each segment eases by its key, not by `transition.ease`.
  *
+ * `loop.track` names a keyframe track that plays from the moment the element enters, forever,
+ * added over whatever else moves it: one cycle is `loop.ms` (default `transition.ms`), every
+ * Transform key is an offset from rest, and the last key repeats the first one. It is not part of
+ * the motion `enter` returns.
+ *
  * @example
  * ```ts
  * const spec: MotionSpec = {
@@ -84,12 +90,21 @@ export type MotionTransition = { readonly ms: number; readonly ease: Ease };
  *   transition: { ms: 1000 },
  *   on: { enter: "dropIn", exit: "hidden", change: ["Transform"] }
  * };
+ * // An order card pops in over 250 ms and sways on its pin, one swing every 2400 ms.
+ * const orderCard: MotionSpec = {
+ *   states: { small: { Transform: { scale: 0.8 } } },
+ *   keyframes: { sway: [{ at: 0, Transform: { rotation: 0 } }, { at: 0.5, Transform: { rotation: 0.03 } }, { at: 1, Transform: { rotation: 0 } }] },
+ *   transition: { ms: 250 },
+ *   loop: { track: "sway", ms: 2400 },
+ *   on: { enter: "small" }
+ * };
  * ```
  */
 export type MotionSpec = {
   readonly states?: Readonly<Record<string, MotionState>>;
   readonly keyframes?: Readonly<Record<string, readonly MotionKeyframe[]>>;
   readonly transition?: { readonly ms?: number; readonly ease?: Ease };
+  readonly loop?: { readonly track: string; readonly ms?: number };
   readonly on: {
     readonly enter?: string;
     readonly exit?: string;
@@ -156,6 +171,43 @@ function ownEntry<Value>(
 }
 
 /**
+ * The resolved loop of a motion: the keys of its track and the length of one cycle.
+ */
+type MotionLoop = { readonly keys: readonly MotionKeyframe[]; readonly ms: number };
+
+/**
+ * Resolves the loop a motion names, if it names one.
+ *
+ * @param spec - What `defineMotion` was given.
+ * @param transitionMs - The resolved `transition.ms`, one cycle when `loop.ms` is left out.
+ * @returns The keys and the cycle length, or `undefined` when the motion has no loop.
+ * @throws {Error} When `loop.track` names no keyframe track, `loop.ms` is not a finite number
+ *   above 0, or the track does not close on itself.
+ */
+function loopOf(spec: MotionSpec, transitionMs: number): MotionLoop | undefined {
+  if (spec.loop === undefined) return undefined;
+
+  const { track, ms = transitionMs } = spec.loop;
+  const keys = ownEntry(spec.keyframes, track);
+
+  if (keys === undefined) {
+    throw new Error(
+      `[game] Motion names "${track}" in loop, but no keyframe track has it.\n  Define it in keyframes.`
+    );
+  }
+
+  if (!Number.isFinite(ms) || ms <= 0) {
+    throw new Error(
+      `[game] Motion loop "${track}" has ms ${ms}.\n  Give one cycle a finite length above 0.`
+    );
+  }
+
+  checkLoop(track, keys);
+
+  return { keys, ms };
+}
+
+/**
  * Checks a motion at definition time: every keyframe track, no name that is both a state and a
  * track, and an `on.enter` / `on.exit` that names one of them.
  *
@@ -215,6 +267,29 @@ function hookOf(
   const keys = ownEntry(spec.keyframes, name);
 
   return keys === undefined ? undefined : view => playKeyframes(view, keys, transition.ms, hook);
+}
+
+/**
+ * The enter hook with the loop: the enter `on.enter` names, if any, and next to it the loop,
+ * which is left out of the motion the hook returns.
+ *
+ * @param enter - The hook `on.enter` builds, if any.
+ * @param loop - The resolved loop, if any.
+ * @returns The hook, or `undefined` when there is neither an enter nor a loop.
+ */
+function withLoop(
+  enter: ((view: ViewHandle<unknown>) => Motion) | undefined,
+  loop: MotionLoop | undefined
+): ((view: ViewHandle<unknown>) => Motion) | undefined {
+  if (loop === undefined) return enter;
+
+  return view => {
+    const motion = enter?.(view);
+
+    playLoop(view, loop.keys, loop.ms);
+
+    return motion;
+  };
 }
 
 /**
@@ -280,13 +355,18 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
 /**
  * Builds the projection motion hooks of an element from named poses and keyframe tracks. The
  * transition is resolved and every name is checked here, at definition time, so every track it
- * starts carries a concrete duration and a wrong name fails where it is written.
+ * starts carries a concrete duration and a wrong name fails where it is written. A `loop` makes
+ * the `enter` hook even without `on.enter`: the loop starts where enter plays, so a projection
+ * view loops once it entered with motion, never after a direct reconcile. One cycle of the loop
+ * is `loop.ms`, or `transition.ms` when it is left out.
  *
- * @param spec - The named poses, the keyframe tracks, the transition and the hooks to build.
+ * @param spec - The named poses, the keyframe tracks, the transition, the loop and the hooks to
+ *   build.
  * @returns The `enter`, `exit` and `change` hooks. `settle` is left out: the default of `world`
  *   applies.
- * @throws {Error} When a track is invalid, a name is both a state and a track, or `on` names
- *   neither.
+ * @throws {Error} When a track is invalid, a name is both a state and a track, `on` names
+ *   neither, `loop.track` names no track, `loop.ms` is not a finite number above 0, or the loop
+ *   ends somewhere else than it starts.
  * @example
  * ```ts
  * const buttonMotion = defineMotion({
@@ -304,7 +384,7 @@ export function defineMotion(spec: MotionSpec): ProjectionMotion<unknown> {
     ms: spec.transition?.ms ?? DEFAULT_TRANSITION_MS,
     ease: spec.transition?.ease ?? DEFAULT_TRANSITION_EASE
   };
-  const enter = hookOf(spec, "enter", transition);
+  const enter = withLoop(hookOf(spec, "enter", transition), loopOf(spec, transition.ms));
   const exit = hookOf(spec, "exit", transition);
   const changed = spec.on.change ?? [];
 

@@ -115,7 +115,12 @@ export type TextStyleInput = {
   italic?: string;
   size: number;
   fill: number;
+  /** The outline colour. Drawn only when `strokeWidth` is above 0. */
   stroke?: number;
+  /**
+   * The outline width in reference px: 8 copies of each glyph run on a circle this wide (12 from 6
+   * on), tinted `stroke`. 0 draws none. It never changes what `measure` answers.
+   */
   strokeWidth?: number;
   letterSpacing?: number;
   align?: TextAlign;

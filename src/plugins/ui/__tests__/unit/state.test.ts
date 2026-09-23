@@ -5,7 +5,18 @@ import { createUiState } from "../../state";
 import { createStylesState } from "../../styles/state";
 import type { Config } from "../../types";
 
-const config: Config = { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } };
+const config: Config = {
+  tapTargetPt: 44,
+  breakpoints: { tall: 2, wide: 1.5 },
+  focusRing: {
+    stroke: 0x3a_22_12,
+    strokeWidth: 4,
+    dash: 10,
+    offset: 9,
+    halo: 0xff_f3_d6,
+    haloWidth: 12
+  }
+};
 
 describe("createUiState", () => {
   it("composes one branch per module", () => {

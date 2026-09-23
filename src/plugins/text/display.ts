@@ -23,14 +23,23 @@ import type {
 /** How much of the size a synthetic bold stroke is. */
 const SYNTHETIC_BOLD = 20;
 
+/** How many offset copies of a run draw its outline or its synthetic bold. */
+const OUTLINE_COPIES = 8;
+
+/** How many copies draw an outline at least `WIDE_OUTLINE` wide, so the ring stays closed. */
+const WIDE_OUTLINE_COPIES = 12;
+
+/** From this width on an outline takes `WIDE_OUTLINE_COPIES` copies. */
+const WIDE_OUTLINE = 6;
+
 /** How far a synthetic italic run leans. */
 const SYNTHETIC_ITALIC = -0.2;
 
 /** What a shadow copy is painted with, so its tint alone gives it the shadow colour. */
 const WHITE = 0xff_ff_ff;
 
-/** The colours one glyph run is drawn in: the fill, and the stroke when there is one. */
-type Paint = { fill: number; stroke: { color: number; width: number } | undefined };
+/** A ring of copies under a glyph run: its width, and the colour each white copy is tinted. */
+type Ring = { width: number; color: number };
 
 /**
  * Reads the fonts of `fontKeys` that `assets` can answer for: the advance table first, then the
@@ -116,26 +125,34 @@ function alignOffset(style: TextStyle, layout: TextLayout, line: Line): number {
 }
 
 /**
- * The stroke one run is drawn with: the synthetic bold when the style names no bold font, else
- * the stroke of the style, and nothing when there is none.
+ * The rings of copies one run is drawn over, bottom first: the outline of a stroked style, then the
+ * synthetic bold in the fill when the style names no bold font.
  *
  * @param style - The style of the label.
  * @param run - The run to draw.
  * @param fill - The colour the run is filled with.
- * @returns The Pixi stroke style, or `undefined`.
+ * @returns The rings, none for a plain run.
  */
-function strokeOf(
-  style: TextStyle,
-  run: TextRun,
-  fill: number
-): { color: number; width: number } | undefined {
+function ringsOf(style: TextStyle, run: TextRun, fill: number): Ring[] {
+  const rings: Ring[] = [];
+
+  if (style.strokeWidth > 0) rings.push({ width: style.strokeWidth, color: style.stroke });
   if (run.bold && style.bold === undefined) {
-    return { color: fill, width: style.size / SYNTHETIC_BOLD };
+    rings.push({ width: style.size / SYNTHETIC_BOLD, color: fill });
   }
 
-  if (style.strokeWidth > 0) return { color: style.stroke, width: style.strokeWidth };
+  return rings;
+}
 
-  return undefined;
+/**
+ * How many copies close a ring of this width.
+ *
+ * @example copiesFor(4); // 8
+ * @param width - The radius of the ring.
+ * @returns 8, or 12 from a width of 6 on.
+ */
+function copiesFor(width: number): number {
+  return width >= WIDE_OUTLINE ? WIDE_OUTLINE_COPIES : OUTLINE_COPIES;
 }
 
 /**
@@ -168,12 +185,13 @@ function buildIcon(
 }
 
 /**
- * Builds the `BitmapText` of one glyph run in one paint and places it.
+ * Builds the `BitmapText` of one glyph run in one colour and places it. No stroke goes to Pixi: it
+ * draws nothing on an MSDF font and only pads the anchor, so outlines are rings of copies.
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs to draw.
  * @param style - The style of the label.
- * @param paint - The fill and the stroke.
+ * @param fill - The colour of the glyphs.
  * @param at - Where the run starts, in the local space of the block.
  * @returns The display object.
  */
@@ -181,7 +199,7 @@ function buildGlyphs(
   pixi: PixiModule,
   run: TextRun,
   style: TextStyle,
-  paint: Paint,
+  fill: number,
   at: Point
 ): PixiContainer {
   const line = new pixi.BitmapText({
@@ -189,9 +207,8 @@ function buildGlyphs(
     style: {
       fontFamily: fontOfRun(style, run),
       fontSize: style.size,
-      fill: paint.fill,
-      letterSpacing: style.letterSpacing,
-      ...(paint.stroke === undefined ? {} : { stroke: paint.stroke })
+      fill,
+      letterSpacing: style.letterSpacing
     }
   });
 
@@ -204,8 +221,8 @@ function buildGlyphs(
 }
 
 /**
- * Builds the shadow of one glyph run: the same glyphs and stroke in white, tinted with the shadow
- * colour, at the shadow alpha, moved by its offset.
+ * Builds the shadow of one glyph run: the same glyphs in white, tinted with the shadow colour, at
+ * the shadow alpha, moved by its offset.
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs that cast the shadow.
@@ -221,12 +238,7 @@ function buildShadow(
   shadow: TextShadow,
   at: Point
 ): PixiContainer {
-  const stroke = strokeOf(style, run, WHITE);
-  const paint: Paint = {
-    fill: WHITE,
-    stroke: stroke === undefined ? undefined : { color: WHITE, width: stroke.width }
-  };
-  const copy = buildGlyphs(pixi, run, style, paint, { x: at.x + shadow.dx, y: at.y + shadow.dy });
+  const copy = buildGlyphs(pixi, run, style, WHITE, { x: at.x + shadow.dx, y: at.y + shadow.dy });
 
   copy.tint = shadow.color;
   copy.alpha = shadow.alpha;
@@ -235,8 +247,44 @@ function buildShadow(
 }
 
 /**
+ * Builds one ring under a glyph run: white copies of it on a circle of the ring width around the
+ * run, tinted with the ring colour, opaque like the run.
+ *
+ * @param pixi - The Pixi module the renderer loaded.
+ * @param run - The glyphs the ring surrounds.
+ * @param style - The style of the label.
+ * @param ring - The width and colour of the ring.
+ * @param at - Where the run starts, in the local space of the block.
+ * @returns The copies, to be drawn under the run.
+ */
+function buildRing(
+  pixi: PixiModule,
+  run: TextRun,
+  style: TextStyle,
+  ring: Ring,
+  at: Point
+): PixiContainer[] {
+  const count = copiesFor(ring.width);
+  const copies: PixiContainer[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const angle = (index / count) * Math.PI * 2;
+    const offset = {
+      x: at.x + Math.cos(angle) * ring.width,
+      y: at.y + Math.sin(angle) * ring.width
+    };
+    const copy = buildGlyphs(pixi, run, style, WHITE, offset);
+
+    copy.tint = ring.color;
+    copies.push(copy);
+  }
+
+  return copies;
+}
+
+/**
  * Builds the Pixi objects of one run, bottom first: an icon is one sprite, and a glyph run is its
- * shadow, when the style has one, then the glyphs.
+ * shadow when the style has one, its outline and synthetic bold rings, then the glyphs.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
@@ -255,11 +303,15 @@ function buildRun(
   if (run.kind === "icon") return [buildIcon(ctx, pixi, run, style, at)];
 
   const fill = run.color ?? style.fill;
-  const glyphs = buildGlyphs(pixi, run, style, { fill, stroke: strokeOf(style, run, fill) }, at);
+  const objects =
+    style.shadow === undefined ? [] : [buildShadow(pixi, run, style, style.shadow, at)];
 
-  if (style.shadow === undefined) return [glyphs];
+  for (const ring of ringsOf(style, run, fill))
+    objects.push(...buildRing(pixi, run, style, ring, at));
 
-  return [buildShadow(pixi, run, style, style.shadow, at), glyphs];
+  objects.push(buildGlyphs(pixi, run, style, fill, at));
+
+  return objects;
 }
 
 /**

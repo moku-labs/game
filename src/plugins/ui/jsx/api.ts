@@ -1,9 +1,11 @@
 /**
- * @file ui/jsx — the module factory: the three public readers and the frame half the lifecycle
- * registers. Built last, with `styles` and `layout` injected.
+ * @file ui/jsx — the module factory: the three public readers, the frame half the lifecycle
+ * registers and the keyboard focus. Built last, with `styles` and `layout` injected.
  */
+import type { KeyInput } from "../../input/types";
 import type { Entity } from "../../world/types";
 import type { UiCtx } from "../types";
+import { createFocus } from "./focus";
 import { releaseHosted } from "./hosts";
 import { runLint } from "./lint";
 import { coverPopup, reclaimPopup, releasePopup } from "./popups";
@@ -22,6 +24,7 @@ import type { AnyComponentDefinition, Finding, JsxModule, PopupLink, UiNode } fr
 export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const state = ctx.state.jsx;
   const frame = createReconciler(ctx, modules);
+  const focus = createFocus(ctx, frame.markPointer);
   const layerNames = (): string[] => ctx.deps.world.projection.layers().map(layer => layer.name);
 
   return {
@@ -41,7 +44,11 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     reconcile: frame.reconcile,
 
-    solve: frame.solve,
+    // The focus follows the solved rects, and drops when its element or its root left.
+    solve: (): void => {
+      frame.solve();
+      focus.refresh();
+    },
 
     register: (definition: AnyComponentDefinition): void => {
       if (state.components.has(definition.name)) {
@@ -71,6 +78,10 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     markPointer: frame.markPointer,
 
-    playEnter: frame.playEnter
+    playEnter: frame.playEnter,
+
+    key: (input: KeyInput): boolean => focus.key(input),
+
+    blur: focus.blur
   };
 }

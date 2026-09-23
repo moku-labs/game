@@ -38,18 +38,21 @@ function pivotOf(origin: Origin | undefined, width: number, height: number): Poi
 /**
  * The rest pose of the `Transform` of an element. The pivot is the origin of the style on the
  * box; the position is where the pivot lands, chosen so the unscaled element sits on its rect,
- * relative to its parent. The offsets and the scale of the style come on top. A fitted element
- * is scaled by its fit about the centre of its box, so its centre stays where the solve put it.
+ * relative to its parent. The offsets, the scale and the rotation of the style come on top: the
+ * element turns around its pivot. A fitted element is scaled by its fit about the centre of its
+ * box, so its centre stays where the solve put it.
  *
  * @param rect - The rect of the element in root coordinates.
  * @param parent - The rect of its parent, or nothing for a root element.
- * @param style - The resolved style, for `origin`, `offsetX`, `offsetY` and `scale`.
+ * @param style - The resolved style, for `origin`, `offsetX`, `offsetY`, `scale` and `rotation`.
  * @param fit - The element's own fit scale, 1 without `fit: "contain"`.
  * @returns The rest transform.
  * @example
  * ```ts
  * restTransform({ x: 40, y: 80, w: 10, h: 10 }, undefined);
  * // { x: 45, y: 85, rotation: 0, scale: 1, pivot: { x: 5, y: 5 } }
+ * restTransform({ x: 0, y: 0, w: 200, h: 80 }, undefined, { rotation: -0.026, origin: "top" });
+ * // { x: 100, y: 0, rotation: -0.026, scale: 1, pivot: { x: 100, y: 0 } }
  * ```
  */
 export function restTransform(
@@ -65,7 +68,7 @@ export function restTransform(
   return {
     x: local.x + centre.x + fit * (pivot.x + (style.offsetX ?? 0) - centre.x),
     y: local.y + centre.y + fit * (pivot.y + (style.offsetY ?? 0) - centre.y),
-    rotation: 0,
+    rotation: style.rotation ?? 0,
     scale: fit * (style.scale ?? 1),
     pivot
   };
@@ -170,9 +173,11 @@ export function still(element: Element): boolean {
 
 /**
  * Moves the rest `Transform` of an element to where its rect, style and fit put it now. A live
- * element plays its `change.Transform` motion when it has one, else takes the pose at once; an
- * element that has not spawned yet only records it, and so does one whose `change.Box` motion
- * already played. The content of a scroll keeps its `Transform`: the scroll step owns it.
+ * element plays its `change.Transform` motion when it has one, else takes the pose through a
+ * 0 ms rest track, which lands on the next frame step and lets an additive loop re-base on the
+ * new rest; an element that has not spawned yet only records it, and so does one whose
+ * `change.Box` motion already played. The content of a scroll keeps its `Transform`: the scroll
+ * step owns it.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element whose rect, style or fit may have changed.
@@ -204,5 +209,5 @@ export function repose(
     return;
   }
 
-  if (element.type !== CONTENT) ctx.deps.world.ecs.set(element.entity, Transform, next);
+  if (element.type !== CONTENT) handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
 }

@@ -240,7 +240,7 @@ export class FakeNineSliceSprite extends FakeContainer {
 
 /** One path the fake graphics was asked to draw. A `moveTo` or `lineTo` has no size. */
 export type FakeDrawOp = {
-  op: "rect" | "roundRect" | "moveTo" | "lineTo";
+  op: "rect" | "roundRect" | "moveTo" | "lineTo" | "closePath" | "beginPath";
   x: number;
   y: number;
   width: number;
@@ -327,6 +327,28 @@ export class FakeGraphics extends FakeContainer {
    */
   public lineTo(x: number, y: number): this {
     this.ops.push({ op: "lineTo", x, y, width: 0, height: 0, radius: 0 });
+
+    return this;
+  }
+
+  /**
+   * Records the close of the current line back to where it started.
+   *
+   * @returns The same object.
+   */
+  public closePath(): this {
+    this.ops.push({ op: "closePath", x: 0, y: 0, width: 0, height: 0, radius: 0 });
+
+    return this;
+  }
+
+  /**
+   * Records the start of a new path: what a fill or a stroke after it paints.
+   *
+   * @returns The same object.
+   */
+  public beginPath(): this {
+    this.ops.push({ op: "beginPath", x: 0, y: 0, width: 0, height: 0, radius: 0 });
 
     return this;
   }

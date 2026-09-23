@@ -17,11 +17,48 @@ import type { LayoutState } from "./layout/types";
 import type { StylesState } from "./styles/types";
 
 /**
+ * The look of the keyboard focus ring: a dashed ring with a solid halo under it, drawn around the
+ * focused control. Colours are `0xRRGGBB`, lengths reference units.
+ *
+ * @example
+ * ```ts
+ * // A dashed ink ring with a cream halo, 9 u outside the control.
+ * const ring: FocusRing = {
+ *   stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12
+ * };
+ * ```
+ */
+export type FocusRing = {
+  /** The colour of the dashed ring. */
+  stroke: number;
+  /** The stroke width of the dashed ring. */
+  strokeWidth: number;
+  /** The dash length of the ring, with gaps of half a dash; 0 draws it solid. */
+  dash: number;
+  /** How far outside the control's rect the ring runs, on every side. */
+  offset: number;
+  /** The colour of the solid halo drawn under the ring. */
+  halo: number;
+  /** The stroke width of the halo, centred on the same path as the ring. */
+  haloWidth: number;
+};
+
+/**
  * ui plugin config.
  *
  * @example
  * ```ts
  * createApp({ pluginConfigs: { ui: { tapTargetPt: 48, breakpoints: { tall: 2, wide: 1.5 } } } });
+ * // A game with a white focus ring on a dark board.
+ * createApp({
+ *   pluginConfigs: {
+ *     ui: {
+ *       focusRing: {
+ *         stroke: 0xffffff, strokeWidth: 4, dash: 10, offset: 9, halo: 0x000000, haloWidth: 12
+ *       }
+ *     }
+ *   }
+ * });
  * ```
  */
 export type Config = {
@@ -29,6 +66,8 @@ export type Config = {
   tapTargetPt: number;
   /** `when` flags: `tall` when height / width is at least `tall`, `wide` the other way round. */
   breakpoints: { tall: number; wide: number };
+  /** The ring drawn around the control the keyboard focused. */
+  focusRing: FocusRing;
 };
 
 /**
@@ -81,7 +120,7 @@ export type UiCtx = KernelSlice & { readonly deps: Deps };
 export type UiApi = {
   /**
    * The live screen as plain data: every root in layer order, every element in child order, with
-   * its rect in root coordinates, its resolved style and its six state flags. A rect is natural:
+   * its rect in root coordinates, its resolved style and its seven state flags. A rect is natural:
    * under a `fit: "contain"` element it is the rect before that scale, and the fitted element
    * adds `fitScale`. Works headless.
    *
@@ -112,11 +151,11 @@ export type UiApi = {
   find(key: string): Entity | undefined;
 
   /**
-   * Reads the live screen against the four rules: a tap target under `tapTargetPt` at the size
+   * Reads the live screen against the five rules: a tap target under `tapTargetPt` at the size
    * it is drawn (a `fit: "contain"` on it or above it shrinks it), a text that does not fit its
-   * box in some registered locale, an absolute element with no `reason`, and a clipping element
-   * (`scroll`, `overflow: "hidden"`) whose style names a nine-slice it never draws. Never throws;
-   * empty when nothing is mounted.
+   * box in some registered locale, an absolute element with no `reason`, a clipping element
+   * (`scroll`, `overflow: "hidden"`) whose style names a nine-slice it never draws, and a root
+   * element whose style sets a `zIndex` it ignores. Never throws; empty when nothing is mounted.
    *
    * @returns One finding per rule and element.
    * @example
@@ -125,6 +164,8 @@ export type UiApi = {
    * app.ui.lint(); // [{ rule: "tap-target", key: "cell", detail: "39 x 39 pt" }]
    * // A list styled with a nine-slice: the clip keeps it from drawing.
    * app.ui.lint(); // [{ rule: "nine-slice-clipped", key: "orders", detail: "scroll" }]
+   * // A screen root that asks to be drawn over the others: the layer decides that.
+   * app.ui.lint(); // [{ rule: "z-index-on-root", key: "board", detail: "zIndex 2" }]
    * ```
    */
   lint(): readonly Finding[];

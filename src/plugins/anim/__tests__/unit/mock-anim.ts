@@ -77,7 +77,7 @@ function createMockLog(): Log.LogApi {
  * @returns Both APIs, the fakes and the frame driver.
  */
 export function createMockAnim(options: Partial<Config> = {}): MockAnim {
-  const config: Config = { maxTracks: 2000, ...options };
+  const config: Config = { maxTracks: 2000, reducedMotion: false, ...options };
   const state = createAnimState({ config });
   const log = createMockLog();
   const emitted: Array<{ name: string; payload: unknown }> = [];

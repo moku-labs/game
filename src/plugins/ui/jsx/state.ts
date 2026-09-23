@@ -45,6 +45,7 @@ export function createJsxState(): JsxState {
     removing: emptySet(),
     hosts: emptySet(),
     hosted: emptyMap(),
-    reconciles: 0
+    reconciles: 0,
+    focus: { entity: undefined, ring: undefined, drawn: undefined, tapping: false }
   };
 }

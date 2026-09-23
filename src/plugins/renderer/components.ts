@@ -108,25 +108,32 @@ export type ParentValue = { entity: Entity };
 export type DisplayValue = { object: unknown };
 
 /**
- * A filled rounded rectangle, anchored at the top left of the `Transform`. `fillAlpha` is the
- * alpha of the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape. `clip`
- * masks the children of the entity to the rectangle, which is how `ui` draws a scroll and an
- * overflow.
+ * A filled rounded rectangle or a triangle, anchored at the top left of the `Transform`. `kind`
+ * picks the outline: `"rect"` (the default) or `"triangle"`, which fills its `w × h` box pointing
+ * right (rotate the element for another direction) and ignores `radius`. `fillAlpha` is the alpha
+ * of the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape. `dash` is the
+ * dash length of the stroke in reference units, with gaps of half a dash; 0 strokes a solid line.
+ * `clip` masks the children of the entity to the shape, always solid, which is how `ui` draws a
+ * scroll and an overflow.
  *
  * @example
  * ```ts
  * const value: ShapeValue = {
- *   w: 320, h: 96, fill: 0x101018, fillAlpha: 1, alpha: 1, radius: 16, stroke: 0x000000,
- *   strokeWidth: 0, clip: false
+ *   kind: "rect", w: 320, h: 96, fill: 0x101018, fillAlpha: 1, alpha: 1, radius: 16,
+ *   stroke: 0x000000, strokeWidth: 0, dash: 0, clip: false
  * };
  * // The honey ring on a selected cell: a stroke and no fill.
  * const ring: ShapeValue = {
- *   w: 140, h: 140, fill: 0xffffff, fillAlpha: 0, alpha: 1, radius: 24, stroke: 0xffc233,
- *   strokeWidth: 6, clip: false
+ *   kind: "rect", w: 140, h: 140, fill: 0xffffff, fillAlpha: 0, alpha: 1, radius: 24,
+ *   stroke: 0xffc233, strokeWidth: 6, dash: 0, clip: false
  * };
+ * // The play glyph of a watch button, and a dashed focus ring: 10 u dashes, 5 u gaps.
+ * const play: ShapeValue = { ...ring, kind: "triangle", w: 36, h: 40, fillAlpha: 1, strokeWidth: 0 };
+ * const focus: ShapeValue = { ...ring, w: 200, h: 80, stroke: 0x3a2212, strokeWidth: 4, dash: 10 };
  * ```
  */
 export type ShapeValue = {
+  kind: "rect" | "triangle";
   w: number;
   h: number;
   fill: number;
@@ -135,6 +142,7 @@ export type ShapeValue = {
   radius: number;
   stroke: number;
   strokeWidth: number;
+  dash: number;
   clip: boolean;
 };
 
@@ -156,6 +164,20 @@ export type SpriteOptions = {
 };
 
 const displayDefaults: DisplayValue = { object: undefined };
+
+const shapeDefaults: ShapeValue = {
+  kind: "rect",
+  w: 0,
+  h: 0,
+  fill: 0xff_ff_ff,
+  fillAlpha: 1,
+  alpha: 1,
+  radius: 0,
+  stroke: 0x00_00_00,
+  strokeWidth: 0,
+  dash: 0,
+  clip: false
+};
 
 const transformDefaults: TransformValue = {
   x: 0,
@@ -211,21 +233,11 @@ export const Parent = /*#__PURE__*/ component("Parent", { entity: 0 });
 export const Display = /*#__PURE__*/ component("Display", displayDefaults);
 
 /**
- * A filled rounded rectangle, drawn with Pixi `Graphics` and redrawn only when a field changed.
- * `fillAlpha: 0` draws only the stroke. `clip: true` masks the children of the entity to the
- * rectangle.
+ * A filled rounded rectangle or a right-pointing triangle, drawn with Pixi `Graphics` and redrawn
+ * only when a field changed. `fillAlpha: 0` draws only the stroke, `dash` above 0 dashes it.
+ * `clip: true` masks the children of the entity to the shape.
  */
-export const Shape = /*#__PURE__*/ component("Shape", {
-  w: 0,
-  h: 0,
-  fill: 0xff_ff_ff,
-  fillAlpha: 1,
-  alpha: 1,
-  radius: 0,
-  stroke: 0x00_00_00,
-  strokeWidth: 0,
-  clip: false
-});
+export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
 
 /**
  * Bundles the two components every visual needs, so a projection `view` reads as one line.

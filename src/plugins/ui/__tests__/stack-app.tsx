@@ -74,6 +74,7 @@ export const SettingsPopup = defineComponent("Settings", {
       <button
         key="close"
         intent="close"
+        escape
         style={{ width: 100, height: 60, alpha: 1, is: { covered: { alpha: 0 } } }}
       />
     </panel>
@@ -86,7 +87,7 @@ export const ConfirmPopup = defineComponent("Confirm", {
   view: () => (
     <panel key="confirmPanel" style={{ width: 400, height: 300 }} motion={countedMotion}>
       <button key="yes" intent="confirm" style={{ width: 100, height: 60 }} />
-      <button key="no" intent="cancel" style={{ width: 100, height: 60 }} />
+      <button key="no" intent="cancel" escape style={{ width: 100, height: 60 }} />
     </panel>
   )
 });
@@ -233,6 +234,76 @@ export const clippedScreen = projection({
   )
 });
 
+/**
+ * A screen of controls whose markup order is not their reading order: a row of two, one below
+ * it, and an absolute one on the top edge written last. A text between them never takes focus.
+ */
+export const focusScreen = projection({
+  name: "focusScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "focusScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => (
+    <column key="focusRoot" style={{ width: 1080, height: 1080 }}>
+      <row key="focusRow" style={{ gap: 10 }}>
+        <button
+          key="first"
+          intent="go"
+          style={{ width: 100, height: 100, radius: 12, is: { focus: { scale: 1.1 } } }}
+        />
+        <button key="second" intent="go" style={{ width: 100, height: 100 }} />
+      </row>
+      <text key="caption" style={{ width: 200, height: 40 }} content="not a control" />
+      <button key="third" intent="go" style={{ width: 100, height: 100 }} />
+      <button
+        key="pinned"
+        intent="go"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 500,
+          width: 100,
+          height: 100,
+          reason: "reading order"
+        }}
+      />
+    </column>
+  )
+});
+
+/**
+ * A screen of the delta-6 styles: a tilted plaque that turns further under the mouse, a strip
+ * drawn over the tray that follows it, a tray that rises over it under the mouse, and a slot with
+ * a `zIndex` that hosts the tokens. The root sets a `zIndex` it ignores.
+ */
+export const orderScreen = projection({
+  name: "orderScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "orderScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => (
+    <column key="orderRoot" style={{ width: 1080, height: 1080, zIndex: 3 }}>
+      <button
+        key="plaque"
+        intent="go"
+        style={{
+          width: 400,
+          height: 100,
+          rotation: -0.026,
+          origin: "top",
+          is: { hover: { rotation: 0.1 } }
+        }}
+      />
+      <row key="strip" style={{ width: 400, height: 100, zIndex: 1 }} />
+      <row
+        key="tray"
+        style={{ width: 400, height: 100, margin: { top: -40 }, is: { hover: { zIndex: 2 } } }}
+      />
+      <stack key="zSlot" hosts={["tokens"]} style={{ width: 300, height: 300, zIndex: 2 }} />
+    </column>
+  )
+});
+
 /** What the `hold` effect of the closing node waits for. */
 export const hold = { release: (): void => undefined };
 
@@ -329,7 +400,9 @@ export const stackFeature = defineFeature("stack", {
     sizedTokens,
     fitSlotScreen,
     listScreen,
-    clippedScreen
+    clippedScreen,
+    focusScreen,
+    orderScreen
   ],
   ui: [SettingsPopup, ConfirmPopup, Toggle],
   strings: { en: english }

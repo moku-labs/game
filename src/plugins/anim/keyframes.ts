@@ -1,8 +1,8 @@
 /**
- * @file anim plugin — the keyframe tracks of `defineMotion`: the definition-time check of a track
- * and the enter and exit walks. One tween with segments per component the keys name, composed
- * with `view.all`, so the whole walk runs on one clock of the driver `world` hands the tween to.
- * Pure, no ctx.
+ * @file anim plugin — the keyframe tracks of `defineMotion`: the definition-time checks of a track
+ * and of a loop, the enter and exit walks and the loop. One tween with segments per component the
+ * keys name, composed with `view.all`, so the whole walk runs on one clock of the driver `world`
+ * hands the tween to. Pure, no ctx.
  */
 import type { TransformValue } from "../renderer/components";
 import { NineSlice, Shape, Sprite, Transform } from "../renderer/components";
@@ -56,6 +56,59 @@ export function checkTrack(name: string, keys: readonly MotionKeyframe[]): void 
     }
 
     previous = key.at;
+  }
+}
+
+/**
+ * Every field one key names, flat: `"Transform.dx"`, `"Shape.alpha"` and so on.
+ *
+ * @param key - The key.
+ * @returns The named values, keyed by component and field.
+ * @example
+ * ```ts
+ * flatPose({ at: 0, Transform: { rotation: 0.1 }, Shape: { alpha: 1 } }); // { "Transform.rotation": 0.1, "Shape.alpha": 1 }
+ * ```
+ */
+function flatPose(key: MotionKeyframe): Record<string, number> {
+  const pose: Record<string, number> = {};
+
+  for (const [field, value] of Object.entries(key.Transform ?? {})) {
+    if (value !== undefined) pose[`Transform.${field}`] = value;
+  }
+
+  for (const name of ["Shape", "Sprite", "NineSlice"] as const) {
+    const alpha = key[name]?.alpha;
+
+    if (alpha !== undefined) pose[`${name}.alpha`] = alpha;
+  }
+
+  return pose;
+}
+
+/**
+ * Checks the seam of a loop at definition time: every field the track names stands at its last
+ * key where it stood at its first key, so a cycle closes without a jump. A Transform field the
+ * first key leaves out starts at no offset; an alpha the first key leaves out has no start a
+ * definition can know, so a loop that names it later is refused.
+ *
+ * @param name - The track name, for the error.
+ * @param keys - The keys of the track, already checked by `checkTrack`.
+ * @throws {Error} When a field ends somewhere else than it starts.
+ */
+export function checkLoop(name: string, keys: readonly MotionKeyframe[]): void {
+  const first = flatPose(keys[0] ?? { at: 0 });
+  const held: Record<string, number> = {};
+
+  for (const key of keys) Object.assign(held, flatPose(key));
+
+  for (const [field, value] of Object.entries(held)) {
+    const start = first[field] ?? (field.startsWith("Transform.") ? 0 : undefined);
+
+    if (start !== value) {
+      throw new Error(
+        `[game] Motion loop "${name}" ends somewhere else than it starts.\n  Give its last key the pose of its first key.`
+      );
+    }
   }
 }
 
@@ -228,6 +281,110 @@ function exitLane(
   if (Object.keys(target).length === 0) return undefined;
 
   return view.tween(lane.component, target, { ms, ease: KEY_EASE, segments });
+}
+
+/**
+ * The offsets one loop key gives the Transform: every field is added to the rest pose.
+ *
+ * @param key - The key.
+ * @returns The offsets the key names.
+ * @example
+ * ```ts
+ * loopTransformPose({ at: 0.5, Transform: { dx: 4, scale: 0.05 } }); // { x: 4, scale: 0.05 }
+ * ```
+ */
+function loopTransformPose(key: MotionKeyframe): KeyPose {
+  const pose: KeyPose = {};
+  const fields = key.Transform;
+
+  if (fields?.dx !== undefined) pose.x = fields.dx;
+  if (fields?.dy !== undefined) pose.y = fields.dy;
+  if (fields?.rotation !== undefined) pose.rotation = fields.rotation;
+  if (fields?.scale !== undefined) pose.scale = fields.scale;
+
+  return pose;
+}
+
+/**
+ * Turns an absolute pose into the offsets from the rest pose, for the alpha of a loop.
+ *
+ * @param pose - The absolute values a key gives.
+ * @param rest - The rest values of the lane.
+ * @returns The offsets.
+ * @example
+ * ```ts
+ * offsetsFromRest({ alpha: 0.5 }, { alpha: 1 }); // { alpha: -0.5 }
+ * ```
+ */
+function offsetsFromRest(pose: KeyPose, rest: KeyPose): KeyPose {
+  const offsets: KeyPose = {};
+
+  for (const [field, value] of Object.entries(pose)) offsets[field] = value - (rest[field] ?? 0);
+
+  return offsets;
+}
+
+/**
+ * The lanes of a loop: the lanes of the view, each reading a key as the offsets it adds.
+ *
+ * @param view - The view handle the hook was given.
+ * @returns The lanes, Transform first.
+ */
+function loopLanesOf(view: ViewHandle<unknown>): Lane[] {
+  return lanesOf(view).map(lane => ({
+    ...lane,
+    pose:
+      lane.component.componentName === Transform.componentName
+        ? loopTransformPose
+        : (key: MotionKeyframe): KeyPose => offsetsFromRest(lane.pose(key), lane.rest)
+  }));
+}
+
+/**
+ * Starts the loop of one lane: an additive walk of offsets, repeated forever. A first key after
+ * `at: 0` is held from 0, so the cycle closes on the pose it opens with.
+ *
+ * @param view - The view handle the hook was given.
+ * @param lane - The lane.
+ * @param keys - The checked keys of the loop.
+ * @param ms - The length of one cycle.
+ */
+function loopLane(
+  view: ViewHandle<unknown>,
+  lane: Lane,
+  keys: readonly MotionKeyframe[],
+  ms: number
+): void {
+  const segments = segmentsOf(lane, keys);
+  const target = lastValues(segments);
+  const first = segments[0];
+
+  if (first === undefined || Object.keys(target).length === 0) return;
+  if (first.at > 0) segments.unshift({ at: 0, to: first.to });
+
+  view.tween(lane.component, target, {
+    ms,
+    ease: KEY_EASE,
+    additive: true,
+    repeat: "forever",
+    segments
+  });
+}
+
+/**
+ * Starts a loop on a view: one additive walk per component the keys name, repeated forever. The
+ * walks belong to no motion: they run until the view dies, `flushAll` or `finishAll`.
+ *
+ * @param view - The view handle the hook was given.
+ * @param keys - The checked keys of the loop.
+ * @param ms - The length of one cycle: `loop.ms`, or `transition.ms` when it is left out.
+ */
+export function playLoop(
+  view: ViewHandle<unknown>,
+  keys: readonly MotionKeyframe[],
+  ms: number
+): void {
+  for (const lane of loopLanesOf(view)) loopLane(view, lane, keys, ms);
 }
 
 /**

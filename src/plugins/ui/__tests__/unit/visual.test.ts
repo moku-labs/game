@@ -23,6 +23,7 @@ function elementOf(patch: Partial<Element> = {}): Element {
     is: {
       pressed: false,
       hover: false,
+      focus: false,
       disabled: false,
       active: false,
       selected: false,
@@ -268,5 +269,40 @@ describe("samePose", () => {
     expect(samePose(pose, { ...pose, pivot: { x: 3, y: 4 } })).toBe(true);
     expect(samePose(pose, { ...pose, pivot: { x: 3, y: 5 } })).toBe(false);
     expect(samePose(pose, { ...pose, scale: 2 })).toBe(false);
+  });
+});
+
+// ─── delta 6: rotation, triangle and dash ─────────────────────
+
+describe("the delta 6 looks", () => {
+  it("writes the rotation into the rest pose around the origin of the style", () => {
+    expect(
+      restTransform({ x: 0, y: 0, w: 200, h: 80 }, undefined, { rotation: -0.026, origin: "top" })
+    ).toEqual({ x: 100, y: 0, rotation: -0.026, scale: 1, pivot: { x: 100, y: 0 } });
+    // Around the centre by default: the pivot lands where the unturned centre was.
+    expect(
+      restTransform(
+        { x: 40, y: 80, w: 100, h: 60 },
+        { x: 10, y: 20, w: 500, h: 500 },
+        {
+          rotation: 0.5
+        }
+      )
+    ).toEqual({ x: 80, y: 90, rotation: 0.5, scale: 1, pivot: { x: 50, y: 30 } });
+  });
+
+  it("passes the shape and the dash of the style to the rectangle", () => {
+    const [triangle] = visualOf(
+      elementOf({
+        type: "button",
+        style: { shape: "triangle", fill: 0xff_fb_e8, stroke: 0x3a_22_12, strokeWidth: 4, dash: 10 }
+      })
+    );
+
+    expect(triangle?.value).toMatchObject({ kind: "triangle", dash: 10, fillAlpha: 1, w: 200 });
+
+    const [plain] = visualOf(elementOf({ type: "button", style: { fill: 1 } }));
+
+    expect(plain?.value).toMatchObject({ kind: "rect", dash: 0 });
   });
 });

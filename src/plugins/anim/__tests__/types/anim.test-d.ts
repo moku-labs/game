@@ -5,7 +5,7 @@ import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { defineMotion } from "../../motion";
 import { defineAnimation, mark, play, sequence, set, tween } from "../../timeline/steps";
-import type { AnimApi, KernelSlice, MotionKeyframe, PlayHandle, Target } from "../../types";
+import type { AnimApi, Config, KernelSlice, MotionKeyframe, PlayHandle, Target } from "../../types";
 
 const card: Target = { projection: "hud", key: "order" };
 
@@ -123,3 +123,42 @@ declare const api: AnimApi;
 expectTypeOf(api.play(deliverOrder, { items: [card], card })).toEqualTypeOf<PlayHandle>();
 expectTypeOf(api.active()).toEqualTypeOf<number>();
 expectTypeOf(api.onMark(() => undefined)).toEqualTypeOf<() => void>();
+
+// Delta 6: a loop names one keyframe track; reduced motion is a config start value and a switch.
+defineMotion({
+  keyframes: {
+    sway: [
+      { at: 0, Transform: { rotation: 0 } },
+      { at: 1, Transform: { rotation: 0 } }
+    ]
+  },
+  loop: { track: "sway" },
+  on: {}
+});
+defineMotion({
+  keyframes: {
+    sway: [
+      { at: 0, Transform: { rotation: 0 } },
+      { at: 1, Transform: { rotation: 0 } }
+    ]
+  },
+  transition: { ms: 250 },
+  loop: { track: "sway", ms: 2400 },
+  on: {}
+});
+defineMotion({
+  // @ts-expect-error — a loop is { track, ms? }, not the bare track name
+  loop: "sway",
+  on: {}
+});
+defineMotion({
+  // @ts-expect-error — one cycle is a number of milliseconds
+  loop: { track: "sway", ms: "2400" },
+  on: {}
+});
+
+expectTypeOf(api.reducedMotion()).toEqualTypeOf<boolean>();
+expectTypeOf(api.reducedMotion(true)).toEqualTypeOf<boolean>();
+// @ts-expect-error — the switch takes a boolean
+api.reducedMotion("on");
+expectTypeOf<Config["reducedMotion"]>().toEqualTypeOf<boolean>();

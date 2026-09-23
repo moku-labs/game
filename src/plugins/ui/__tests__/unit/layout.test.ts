@@ -35,6 +35,7 @@ function elementOf(patch: Partial<Element> = {}): Element {
     is: {
       pressed: false,
       hover: false,
+      focus: false,
       disabled: false,
       active: false,
       selected: false,
@@ -260,6 +261,7 @@ describe("applyTap", () => {
           is: {
             pressed: false,
             hover: false,
+            focus: false,
             disabled: true,
             active: false,
             selected: false,

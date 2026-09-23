@@ -159,15 +159,39 @@ describe("the state variants of delta 4", () => {
     expect(resolved.nineSlice).toBe("ui.off");
   });
 
-  it("starts every element with the six state flags off", () => {
+  it("starts every element with the seven state flags off", () => {
     expect(noFlags()).toEqual({
       pressed: false,
       hover: false,
+      focus: false,
       disabled: false,
       active: false,
       selected: false,
       covered: false
     });
+  });
+});
+
+describe("the state variants of delta 6", () => {
+  const style = defineStyle({
+    gap: 0,
+    is: { hover: { gap: 1 }, focus: { gap: 2, rotation: 0.1 }, pressed: { gap: 3 } }
+  });
+
+  it("merges focus after hover and before pressed", () => {
+    expect(resolve(style, flags({ hover: true, focus: true }), viewportOf()).gap).toBe(2);
+    expect(resolve(style, flags({ focus: true, pressed: true }), viewportOf()).gap).toBe(3);
+  });
+
+  it("takes rotation, zIndex, shape and dash like any other field, in a variant too", () => {
+    const resolved = resolve(
+      defineStyle({ rotation: -0.026, zIndex: 1, shape: "triangle", dash: 10 }),
+      flags(),
+      viewportOf()
+    );
+
+    expect(resolved).toMatchObject({ rotation: -0.026, zIndex: 1, shape: "triangle", dash: 10 });
+    expect(resolve(style, flags({ focus: true }), viewportOf()).rotation).toBe(0.1);
   });
 });
 

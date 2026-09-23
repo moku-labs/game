@@ -14,7 +14,11 @@ import type { Config, State } from "./types";
  * @returns The plugin state.
  * @example
  * ```ts
- * createUiState({ config: { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 } } })
+ * const focusRing = {
+ *   stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12
+ * };
+ *
+ * createUiState({ config: { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 }, focusRing } })
  *   .layout.nodes; // 0
  * ```
  */

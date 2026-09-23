@@ -93,6 +93,19 @@ Shape({ w: 140, h: 140, fillAlpha: 0, radius: 24, stroke: 0xff_c2_33, strokeWidt
 // @ts-expect-error — fillAlpha is a number
 Shape({ fillAlpha: "0" });
 
+// ─── Shape: a kind that stays a union, and a dash length ──────
+
+expectTypeOf<ShapeValue["kind"]>().toEqualTypeOf<"rect" | "triangle">();
+expectTypeOf<ShapeValue["dash"]>().toEqualTypeOf<number>();
+expectTypeOf(Shape.defaults.kind).toEqualTypeOf<"rect" | "triangle">();
+
+// The play glyph of a watch button, and a dashed focus ring.
+Shape({ w: 36, h: 40, kind: "triangle", fill: 0xff_ff_ff });
+Shape({ w: 200, h: 80, radius: 16, fillAlpha: 0, stroke: 0x3a_22_12, strokeWidth: 4, dash: 10 });
+
+// @ts-expect-error — a shape is a rect or a triangle
+Shape({ kind: "circle" });
+
 // ─── the renderer API keeps its types ─────────────────────────
 
 declare const renderer: Api;

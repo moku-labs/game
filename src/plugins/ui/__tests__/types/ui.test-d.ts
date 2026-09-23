@@ -8,7 +8,7 @@ import { popup, uiFor } from "../../components";
 import { defineComponent } from "../../jsx/component";
 import type { Finding, UiNode } from "../../jsx/types";
 import { defineStyle } from "../../styles/define";
-import type { ElementChange, ElementMotion, UiApi } from "../../types";
+import type { Config, ElementChange, ElementMotion, UiApi } from "../../types";
 
 const Reward = defineComponent("Reward", {
   outcomes: { claim: {} as { orderId: string } },
@@ -101,6 +101,35 @@ describe("defineStyle", () => {
     // @ts-expect-error — text size comes from the text style key, never from the layout style.
     defineStyle({ fontSize: 24 });
     expectTypeOf(defineStyle({ gap: 8 }).gap).toEqualTypeOf<8>();
+  });
+});
+
+describe("the delta 6 vocabulary", () => {
+  it("takes rotation, zIndex, shape and dash, and a focus variant", () => {
+    const plaque = defineStyle({ rotation: -0.026, zIndex: 1, shape: "triangle", dash: 10 });
+
+    expectTypeOf(plaque.shape).toEqualTypeOf<"triangle">();
+    expectTypeOf(
+      defineStyle({ is: { focus: { scale: 1.1 } } }).is.focus.scale
+    ).toEqualTypeOf<1.1>();
+    // @ts-expect-error — a shape is "rect" or "triangle".
+    defineStyle({ shape: "circle" });
+    // @ts-expect-error — the draw order is a number.
+    defineStyle({ zIndex: "top" });
+  });
+
+  it("gives a button the escape prop, the snapshot the focus flag and the config the ring", () => {
+    const kit = uiFor<"ui.coin", "digits", "hud.coins">();
+    const close: typeof kit.intrinsics.button = { intent: "close", escape: true };
+    // @ts-expect-error — `escape` marks the button, it names nothing.
+    const wrongClose: typeof kit.intrinsics.button = { intent: "close", escape: "close" };
+
+    expectTypeOf(close).not.toBeUndefined();
+    expectTypeOf(wrongClose).not.toBeUndefined();
+    expectTypeOf<UiNode["state"]["focus"]>().toEqualTypeOf<boolean>();
+    expectTypeOf<Config["focusRing"]["offset"]>().toEqualTypeOf<number>();
+    expectTypeOf<Finding["rule"]>().toExtend<string>();
+    expectTypeOf<"z-index-on-root">().toExtend<Finding["rule"]>();
   });
 });
 

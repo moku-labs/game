@@ -13,6 +13,7 @@ const EMPTY: UiNode = {
   state: {
     pressed: false,
     hover: false,
+    focus: false,
     disabled: false,
     active: false,
     selected: false,

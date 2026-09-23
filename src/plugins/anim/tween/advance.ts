@@ -1,7 +1,7 @@
 /**
  * @file anim/tween — the one track table: starting a track, the retarget policy per field, the
- * offsets accumulator of the additive tracks, the per-frame advance and the two ways out.
- * Deterministic: the only clock is the `delta` a caller hands in.
+ * offsets accumulator of the additive tracks, the per-frame advance with its repeats, reduced
+ * motion and the two ways out. Deterministic: the only clock is the `delta` a caller hands in.
  */
 import type { AnyComponent } from "../../world/ecs/types";
 import type { Ease, Entity, TrackOptions, TrackSegment } from "../../world/types";
@@ -146,7 +146,7 @@ function walkValue(
  *
  * @param track - The track.
  * @param field - The field to read.
- * @param start - The value the track started from.
+ * @param start - The value the walk starts from: the start value, or 0 for an offset walk.
  * @param target - The value the track ends on.
  * @param fraction - Normalised time of the whole track.
  * @returns The value of the field.
@@ -170,6 +170,10 @@ function fieldValue(
  * an additive one, and in both cases the base plus every offset of the field. A component the
  * entity no longer carries ends the track silently.
  *
+ * An additive keyframe walk names offsets: it starts at no offset and each segment gives the
+ * delta it adds over the base, so a loop keeps its shape whatever pose it started on. A straight
+ * additive track still adds the way from its start value to its target.
+ *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track to write.
  * @param fraction - Normalised time of the track.
@@ -188,15 +192,17 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
   const from = readFrom(actx, track, stored);
   const owned = track.muted();
   const patch: Record<string, number> = {};
+  const walksOffsets = track.additive && track.segments !== undefined;
 
   for (const [field, target] of Object.entries(track.to)) {
     if (owned.has(field)) continue;
 
     const key = fieldKey(track.entity, track.component.componentName, field);
     const start = from[field] ?? target;
-    const value = final ? target : fieldValue(track, field, start, target, fraction);
+    const origin = walksOffsets ? 0 : start;
+    const value = final ? target : fieldValue(track, field, origin, target, fraction);
 
-    if (track.additive) offsetsOf(actx, key).set(track.id, value - start);
+    if (track.additive) offsetsOf(actx, key).set(track.id, value - origin);
     else actx.state.bases.set(key, value);
 
     patch[field] = (actx.state.bases.get(key) ?? start) + sumOffsets(actx, key);
@@ -349,8 +355,26 @@ function targetOf(
 }
 
 /**
+ * How many runs a track has after its first one.
+ *
+ * @param repeat - The `repeat` of the track options.
+ * @returns `Infinity` for `"forever"`, the whole number of extra runs, `0` for none.
+ * @example
+ * ```ts
+ * repeatsOf(2.5); // 2
+ * ```
+ */
+function repeatsOf(repeat: number | "forever" | undefined): number {
+  if (repeat === "forever") return Number.POSITIVE_INFINITY;
+
+  return repeat !== undefined && repeat > 0 ? Math.floor(repeat) : 0;
+}
+
+/**
  * Starts one track. The start values are read when the delay ends, never here. A track with
- * keyframe segments walks them over `ms` and books every field they name.
+ * keyframe segments walks them over `ms` and books every field they name; one with `repeat`
+ * walks again when a run ends. With reduced motion on, every track but a loop takes 0 ms, its
+ * delay and its repeats dropped: it lands on its target at its first frame step.
  *
  * @param actx - Domain context of the anim plugin.
  * @param entity - The entity to animate.
@@ -371,14 +395,16 @@ export function startTrack(
   driven = false
 ): Track {
   const target = targetOf(to, options.segments);
+  const repeats = repeatsOf(options.repeat);
+  const instant = actx.state.reducedMotion && repeats !== Number.POSITIVE_INFINITY;
   const track: Track = {
     id: actx.state.nextId,
     entity,
     component,
     to: target,
-    ms: options.ms,
+    ms: instant ? 0 : options.ms,
     ease: options.ease ?? "out",
-    delayMs: options.delayMs ?? 0,
+    delayMs: instant ? 0 : (options.delayMs ?? 0),
     elapsed: 0,
     from: undefined,
     muted,
@@ -386,7 +412,8 @@ export function startTrack(
     driven,
     bornFrame: actx.state.frame,
     ended: Object.keys(target).length === 0,
-    segments: options.segments
+    segments: options.segments,
+    repeatsLeft: instant ? 0 : repeats
   };
 
   actx.state.nextId += 1;
@@ -402,7 +429,42 @@ export function startTrack(
 }
 
 /**
- * Advances one track by one delta.
+ * Tells whether a loop stands on its first key instead of walking: with reduced motion on, or
+ * when it has no length to walk. It stays in the table either way, so it never ends by itself.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track.
+ * @returns True for a loop that holds.
+ */
+function holdsFirstKey(actx: AnimCtx, track: Track): boolean {
+  return (
+    track.repeatsLeft === Number.POSITIVE_INFINITY && (track.ms <= 0 || actx.state.reducedMotion)
+  );
+}
+
+/**
+ * Starts the next runs of a repeating track whose time went past the end of its run. The frame
+ * that lands exactly on the end of a run still writes that end; the next run starts after it.
+ *
+ * @param track - The track.
+ * @param past - Milliseconds since the delay ended, as the track counts them.
+ * @returns The milliseconds into the run that plays now.
+ */
+function wrapRuns(track: Track, past: number): number {
+  if (track.ms <= 0 || track.repeatsLeft === 0 || past <= track.ms) return past;
+
+  const runs = Math.min(Math.ceil(past / track.ms) - 1, track.repeatsLeft);
+
+  track.repeatsLeft -= runs;
+  track.elapsed -= runs * track.ms;
+
+  return past - runs * track.ms;
+}
+
+/**
+ * Advances one track by one delta. A repeating track walks again from its first segment when a
+ * run ends and ends after its last run; a loop never ends and, while it holds, stands on its
+ * first key with its clock kept at the start, so it walks on from there once released.
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track to advance.
@@ -418,14 +480,23 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
 
   if (past < 0) return 0;
 
-  const fraction = track.ms <= 0 ? 1 : Math.min(past / track.ms, 1);
+  if (holdsFirstKey(actx, track)) {
+    track.elapsed = track.delayMs;
+    writeFields(actx, track, 0, false);
 
-  writeFields(actx, track, fraction, fraction >= 1);
-  if (fraction < 1) return 0;
+    return 0;
+  }
+
+  const run = wrapRuns(track, past);
+  const fraction = track.ms <= 0 ? 1 : Math.min(run / track.ms, 1);
+  const final = fraction >= 1 && (track.repeatsLeft === 0 || track.ms <= 0);
+
+  writeFields(actx, track, fraction, final);
+  if (!final) return 0;
 
   endTrack(actx, track);
 
-  return Math.max(0, past - track.ms);
+  return Math.max(0, run - track.ms);
 }
 
 /**

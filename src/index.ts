@@ -55,6 +55,7 @@
  * | assets | baseUrl | undefined |
  * | assets | io | undefined, the browser fetch and the renderer textures |
  * | anim | maxTracks | 2000 |
+ * | anim | reducedMotion | false |
  * | i18n | locale | "en" |
  * | i18n | fallback | "en" |
  * | i18n | locales | {} |
@@ -62,6 +63,7 @@
  * | text | missingGlyph | "□" |
  * | ui | tapTargetPt | 44 |
  * | ui | breakpoints | { tall: 2, wide: 1.5 } |
+ * | ui | focusRing | { stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 } |
  * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |
