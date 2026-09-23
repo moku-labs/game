@@ -10,6 +10,14 @@ export default defineConfig({
         replacement: new URL("src/testing.ts", import.meta.url).pathname
       },
       {
+        find: "@moku-labs/game/inspect",
+        replacement: new URL("src/inspect.ts", import.meta.url).pathname
+      },
+      {
+        find: "@moku-labs/game/control",
+        replacement: new URL("src/control.ts", import.meta.url).pathname
+      },
+      {
         find: "@moku-labs/game/jsx-dev-runtime",
         replacement: new URL("src/jsx-dev-runtime.ts", import.meta.url).pathname
       },

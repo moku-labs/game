@@ -50,6 +50,8 @@ export default [
             seo: true,
             api: true,
             dev: true,
+            // The dev flag reader of the editor doors (delta D1 names it).
+            isDev: true,
             prod: true,
             md: true,
             dir: true,

@@ -34,7 +34,6 @@ declare global {
  * isDev(); // true
  * ```
  */
-// eslint-disable-next-line unicorn/prevent-abbreviations -- the spec names it isDev (delta D1).
 export function isDev(): boolean {
   return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__ === true;
 }

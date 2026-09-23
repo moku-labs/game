@@ -7,6 +7,9 @@ export default defineConfig({
     testing: "src/testing.ts",
     // Subpath: the build-time asset key scanner, node and bun only.
     assets: "src/assets.ts",
+    // Subpaths: the editor doors, reads and dev-only commands; re-exports only.
+    inspect: "src/inspect.ts",
+    control: "src/control.ts",
     // Subpaths: the JSX runtimes `jsxImportSource: "@moku-labs/game"` names; re-exports only.
     "jsx-runtime": "src/jsx-runtime.ts",
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts"

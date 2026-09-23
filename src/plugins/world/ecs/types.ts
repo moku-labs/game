@@ -28,6 +28,42 @@ export type Entity = number;
 export type Owner = { kind: "projection" | "node" | "plugin"; name: string };
 
 /**
+ * One entity as `snapshot()` reads it: its id and the two halves of the id, its owner, every
+ * component value that is plain JSON, and the names of the ones that are not.
+ *
+ * @example
+ * ```ts
+ * const entity: EntitySnapshot = {
+ *   id: 1_048_576, index: 0, generation: 1, owner: { kind: "projection", name: "board.items" },
+ *   components: { Layer: { name: "items" } }, skipped: ["Display"]
+ * };
+ * ```
+ */
+export type EntitySnapshot = {
+  id: Entity;
+  index: number;
+  generation: number;
+  owner: Owner;
+  components: Record<string, Json>;
+  skipped: string[];
+};
+
+/**
+ * The whole world as plain JSON: the effective mode, every entity sorted by index and every
+ * resource that is JSON.
+ *
+ * @example
+ * ```ts
+ * const empty: WorldSnapshot = { mode: "live", entities: [], resources: {} };
+ * ```
+ */
+export type WorldSnapshot = {
+  mode: WorldMode;
+  entities: EntitySnapshot[];
+  resources: Record<string, Json>;
+};
+
+/**
  * The four phases systems run in, in frame order.
  *
  * @example
@@ -765,7 +801,7 @@ export type EcsApi = {
    * The whole world as plain JSON, sorted by entity index. A component value that is not JSON is
    * left out and its name is listed in `skipped`.
    *
-   * @returns The world as JSON.
+   * @returns The world as JSON: the mode, the entities and the resources.
    * @example
    * ```ts
    * // A test asserts what the board holds after the first reconcile.
@@ -775,7 +811,7 @@ export type EcsApi = {
    * //   components: { Layer: { name: "items" } }, skipped: [] }], resources: {} }
    * ```
    */
-  snapshot(): Json;
+  snapshot(): WorldSnapshot;
 };
 
 /**

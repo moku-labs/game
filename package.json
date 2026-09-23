@@ -19,6 +19,14 @@
       "types": "./dist/assets.d.mts",
       "default": "./dist/assets.mjs"
     },
+    "./inspect": {
+      "types": "./dist/inspect.d.mts",
+      "default": "./dist/inspect.mjs"
+    },
+    "./control": {
+      "types": "./dist/control.d.mts",
+      "default": "./dist/control.mjs"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.mts",
       "default": "./dist/jsx-runtime.mjs"
