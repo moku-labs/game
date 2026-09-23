@@ -2,7 +2,6 @@
  * @file flow/doors — `run`, the `/control` side: dev builds only, a cheat taints, the envelope.
  */
 import type { HeadlessApp } from "../headless";
-// eslint-disable-next-line unicorn/prevent-abbreviations -- the spec names it isDev (delta D1).
 import { controlRefused, isDev } from "./dev";
 import { inputOrEmpty } from "./input";
 import { isTainted, recordCheat } from "./session";

@@ -68,6 +68,16 @@
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |
  * | audio | context | undefined, the real AudioContext |
+ * | audio | journal | 0, no started sound is kept |
+ *
+ * Subpaths next to the root:
+ *
+ * | Subpath | What |
+ * |---|---|
+ * | `@moku-labs/game/testing` | headless play, repro runs, the in-memory save, the fake clock |
+ * | `@moku-labs/game/assets` | the build-time asset key scanner, node and bun only |
+ * | `@moku-labs/game/inspect` | the editor's read door: `read`, `watch`, `defineSource`, the `sources` catalogue |
+ * | `@moku-labs/game/control` | the editor's write door, dev builds only: `run`, `defineCommand`, the `commands` catalogue |
  *
  * @file The package root: the composed framework and its public exports.
  * @example

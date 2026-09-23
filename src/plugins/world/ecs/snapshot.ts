@@ -4,7 +4,7 @@
 import type { Json } from "../../model/types";
 import { Tree } from "./define";
 import { generationOf, indexOf } from "./entities";
-import type { EcsState, Entity, WorldMode } from "./types";
+import type { EcsState, Entity, EntitySnapshot, WorldMode, WorldSnapshot } from "./types";
 
 /**
  * Tells whether a value survives `JSON.stringify` unchanged: a primitive, an array of such, or a
@@ -70,8 +70,8 @@ function componentsOf(
  * @param mode - The effective mode to report.
  * @returns The world as JSON.
  */
-export function snapshotWorld(state: EcsState, mode: WorldMode): Json {
-  const entities = [...state.owners.entries()]
+export function snapshotWorld(state: EcsState, mode: WorldMode): WorldSnapshot {
+  const entities: EntitySnapshot[] = [...state.owners.entries()]
     .toSorted(([left], [right]) => indexOf(left) - indexOf(right))
     .map(([entity, owner]) => ({
       id: entity,

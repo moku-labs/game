@@ -19,6 +19,8 @@
     "paths": {
       "@moku-labs/game": ["./src/index.ts"],
       "@moku-labs/game/testing": ["./src/testing.ts"],
+      "@moku-labs/game/inspect": ["./src/inspect.ts"],
+      "@moku-labs/game/control": ["./src/control.ts"],
       "@moku-labs/game/jsx-runtime": ["./src/jsx-runtime.ts"],
       "@moku-labs/game/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
     }

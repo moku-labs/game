@@ -115,6 +115,7 @@ export type {
   ComponentValue,
   EcsApi,
   Entity,
+  EntitySnapshot,
   Mut,
   Narrowed,
   Owner,
@@ -125,7 +126,8 @@ export type {
   SystemDefinition,
   TagType,
   WorldMode,
-  WorldPhase
+  WorldPhase,
+  WorldSnapshot
 } from "./ecs/types";
 export type {
   AnyProjectionSpec,
