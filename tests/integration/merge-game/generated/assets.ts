@@ -9,8 +9,12 @@ export type AssetKey =
   | "board.item-wood-2"
   | "board.item-wood-3"
   | "board.item-wood-4"
+  | "board.merge"
+  | "board.spawn"
   | "board.theme"
   | "home.home-sawmill-scene"
+  | "home.home-yard"
+  | "home.sign-post"
   | "orders.card-order"
   | "orders.complete"
   | "splash.bg-splash"
@@ -22,6 +26,7 @@ export type AssetKey =
   | "ui.button-green"
   | "ui.button-wood"
   | "ui.click"
+  | "ui.coins"
   | "ui.decor-clothespin"
   | "ui.decor-sprig"
   | "ui.font-body"
@@ -40,20 +45,28 @@ export type AssetKey =
   | "ui.icon-home"
   | "ui.icon-music"
   | "ui.icon-sound"
+  | "ui.link-wave"
   | "ui.panel-parchment"
   | "ui.panel-signboard"
+  | "ui.popup"
   | "ui.rope-vertical"
   | "ui.tab-active"
-  | "ui.tab-idle";
+  | "ui.tab-idle"
+  | "ui.theme";
 
 export type FontKey =
   | "ui.font-body"
   | "ui.font-display";
 
 export type AudioKey =
+  | "board.merge"
+  | "board.spawn"
   | "board.theme"
   | "orders.complete"
-  | "ui.click";
+  | "ui.click"
+  | "ui.coins"
+  | "ui.popup"
+  | "ui.theme";
 
 export type BundleKey =
   | "board"
@@ -63,9 +76,9 @@ export type BundleKey =
   | "ui";
 
 export const nineSlice = {
-  "board.board-tray": { left: 72, top: 72, right: 72, bottom: 72 },
+  "board.board-tray": { left: 96, top: 96, right: 96, bottom: 96 },
   "board.cell": { left: 44, top: 52, right: 44, bottom: 52 },
-  "orders.card-order": { left: 56, top: 84, right: 56, bottom: 84 },
+  "orders.card-order": { left: 40, top: 40, right: 40, bottom: 40 },
   "ui.bar-fill": { left: 24, top: 24, right: 24, bottom: 24 },
   "ui.bar-track": { left: 32, top: 28, right: 32, bottom: 28 },
   "ui.button-berry": { left: 32, top: 40, right: 32, bottom: 40 },
@@ -75,7 +88,7 @@ export const nineSlice = {
   "ui.header-plank": { left: 52, top: 52, right: 52, bottom: 52 },
   "ui.hud-pill": { left: 28, top: 30, right: 28, bottom: 30 },
   "ui.panel-parchment": { left: 48, top: 48, right: 48, bottom: 48 },
-  "ui.panel-signboard": { left: 64, top: 64, right: 64, bottom: 64 },
+  "ui.panel-signboard": { left: 72, top: 72, right: 72, bottom: 76 },
   "ui.tab-active": { left: 20, top: 20, right: 20, bottom: 20 },
   "ui.tab-idle": { left: 24, top: 20, right: 24, bottom: 20 }
 } as const;

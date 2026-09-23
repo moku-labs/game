@@ -4,7 +4,7 @@
     "board": {
       "feature": "board",
       "tier": "scene",
-      "mb": 8.852,
+      "mb": 8.862,
       "files": [
         {
           "key": "board.bg-forest-meadow",
@@ -15,15 +15,15 @@
         },
         {
           "key": "board.board-tray",
-          "path": "features/board/assets/board-tray{nine=72,72,72,72}.webp",
+          "path": "features/board/assets/board-tray{nine=96,96,96,96}.webp",
           "width": 640,
           "height": 631,
           "mb": 1.541,
           "nine": {
-            "left": 72,
-            "top": 72,
-            "right": 72,
-            "bottom": 72
+            "left": 96,
+            "top": 96,
+            "right": 96,
+            "bottom": 96
           }
         },
         {
@@ -75,6 +75,18 @@
           "mb": 0.243
         },
         {
+          "key": "board.merge",
+          "path": "features/board/assets/merge.mp3",
+          "kind": "audio",
+          "mb": 0.007
+        },
+        {
+          "key": "board.spawn",
+          "path": "features/board/assets/spawn.mp3",
+          "kind": "audio",
+          "mb": 0.003
+        },
+        {
           "key": "board.theme",
           "path": "features/board/assets/theme.mp3",
           "kind": "audio",
@@ -85,7 +97,7 @@
     "home": {
       "feature": "home",
       "tier": "core",
-      "mb": 6,
+      "mb": 9.513,
       "files": [
         {
           "key": "home.home-sawmill-scene",
@@ -93,32 +105,46 @@
           "width": 1024,
           "height": 1536,
           "mb": 6
+        },
+        {
+          "key": "home.home-yard",
+          "path": "features/home/assets/home-yard.webp",
+          "width": 960,
+          "height": 924,
+          "mb": 3.384
+        },
+        {
+          "key": "home.sign-post",
+          "path": "features/home/assets/sign-post.webp",
+          "width": 64,
+          "height": 530,
+          "mb": 0.129
         }
       ]
     },
     "orders": {
       "feature": "orders",
       "tier": "core",
-      "mb": 0.24,
+      "mb": 0.261,
       "files": [
         {
           "key": "orders.card-order",
-          "path": "features/orders/assets/card-order{nine=56,84,56,84}.webp",
-          "width": 208,
+          "path": "features/orders/assets/card-order{nine=40,40,40,40}.webp",
+          "width": 214,
           "height": 300,
-          "mb": 0.238,
+          "mb": 0.245,
           "nine": {
-            "left": 56,
-            "top": 84,
-            "right": 56,
-            "bottom": 84
+            "left": 40,
+            "top": 40,
+            "right": 40,
+            "bottom": 40
           }
         },
         {
           "key": "orders.complete",
           "path": "features/orders/assets/complete.mp3",
           "kind": "audio",
-          "mb": 0.002
+          "mb": 0.016
         }
       ]
     },
@@ -139,7 +165,7 @@
     "ui": {
       "feature": "ui",
       "tier": "boot",
-      "mb": 6.663,
+      "mb": 7.348,
       "files": [
         {
           "key": "ui.badge-level",
@@ -230,7 +256,13 @@
           "key": "ui.click",
           "path": "features/ui/assets/click.mp3",
           "kind": "audio",
-          "mb": 0.001
+          "mb": 0.002
+        },
+        {
+          "key": "ui.coins",
+          "path": "features/ui/assets/coins.mp3",
+          "kind": "audio",
+          "mb": 0.005
         },
         {
           "key": "ui.decor-clothespin",
@@ -385,6 +417,13 @@
           "mb": 0.053
         },
         {
+          "key": "ui.link-wave",
+          "path": "features/ui/assets/link-wave.webp",
+          "width": 400,
+          "height": 16,
+          "mb": 0.024
+        },
+        {
           "key": "ui.panel-parchment",
           "path": "features/ui/assets/panel-parchment{nine=48,48,48,48}.webp",
           "width": 384,
@@ -399,16 +438,22 @@
         },
         {
           "key": "ui.panel-signboard",
-          "path": "features/ui/assets/panel-signboard{nine=64,64,64,64}.webp",
+          "path": "features/ui/assets/panel-signboard{nine=72,72,72,76}.webp",
           "width": 512,
-          "height": 506,
-          "mb": 0.988,
+          "height": 505,
+          "mb": 0.986,
           "nine": {
-            "left": 64,
-            "top": 64,
-            "right": 64,
-            "bottom": 64
+            "left": 72,
+            "top": 72,
+            "right": 72,
+            "bottom": 76
           }
+        },
+        {
+          "key": "ui.popup",
+          "path": "features/ui/assets/popup.mp3",
+          "kind": "audio",
+          "mb": 0.005
         },
         {
           "key": "ui.rope-vertical",
@@ -442,6 +487,12 @@
             "right": 24,
             "bottom": 20
           }
+        },
+        {
+          "key": "ui.theme",
+          "path": "features/ui/assets/theme.mp3",
+          "kind": "audio",
+          "mb": 0.652
         }
       ]
     }

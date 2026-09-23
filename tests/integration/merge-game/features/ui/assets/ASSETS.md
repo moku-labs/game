@@ -16,11 +16,11 @@ key drops the tag.
 
 ### `ui.panel-signboard`
 
-- File: `features/ui/assets/panel-signboard{nine=64,64,64,64}.webp`, 512 × 506 px, 9-slice left 64, top 64, right 64, bottom 64.
-- Original: `ui/panel-signboard.png`, 1024 × 1024 px.
+- File: `features/ui/assets/panel-signboard{nine=72,72,72,76}.webp`, 512 × 505 px, 9-slice left 72, top 72, right 72, bottom 76 (the nails and the thicker bottom lip stay in the corners).
+- Original: `fix1/panel-signboard.png`, 1024 × 1024 px, drawn by Astra (gpt-6-astra, codex backend) on 2026-09-23.
 - Prompt:
 
-  > Use case: stylized-concept. Create exactly one 1024x1024 PNG game UI asset with a genuinely transparent alpha background. STYLE: hand-drawn storybook cartoon for a cozy casual mobile merge game called Timber Town, set in a forest lumber village. Confident dark-brown ink outlines (#3a2212), slightly wobbly hand-inked character, flat cel colours with soft watercolor-like shading and gentle top-left light, subtle paper/wood grain texture. Chunky friendly toy-like proportions, readable at 64 px. Palette: ink #3a2212, warm wood #d8a062 / light #efcd94 / dark #9c6031 / walnut #6e4121, honey gold #f2b43d / #c7841c, moss #8ab84e / #557f2d, pine #2f5a3b, berry #c93b4d / #8f2334, parchment #fbeed2, sky #cfe6ee. Use only the material-relevant colors. Orthographic front view. Designed for 9-slice scaling: fixed rounded corners, perfectly straight uniform middle edges, plain stretchable center with only fine repeating texture. No text, letters, numbers, icons, watermark, center decorations, edge-middle decorations, external drop shadows, ground plane, perspective, nails, ropes, foliage or separate objects. Transparent outside the shape. Subject: a painted warm wooden popup signboard made of horizontal planks. Nearly square silhouette spanning x=41..983 and y=41..983, approximately 4% transparent margin. Thick 5-7 px ink outline, rounded carved corners with radius about 12% of width, light top bevel and darker bottom lip inside silhouette. Very subdued straight horizontal plank divisions; keep center plain and stretchable with fine repeating wood grain. Small restrained white highlight on upper-left rounded corner only.
+  > Create one 1024x1024 PNG with genuinely transparent alpha background. Style: hand-drawn storybook cartoon for a cozy casual mobile merge game called Timber Town, set in a forest lumber village. Confident dark-brown ink outlines (#3a2212), 5-7 px at 1024 px, slightly wobbly hand-inked line; flat cel colours with soft watercolor-like shading and gentle top-left light; a single small white highlight on rounded forms; subtle paper/wood grain texture. Palette: ink #3a2212, warm wood #d8a062 / light #efcd94 / dark #9c6031 / walnut #6e4121, honey gold #f2b43d / #c7841c, moss green #8ab84e / #557f2d, pine #2f5a3b, berry red #c93b4d / #8f2334, parchment #fbeed2, sky pale blue #cfe6ee. Chunky, friendly, toy-like proportions, strong readable silhouettes at 64 px. No text, letters, numbers, watermark, or drop shadow outside the object. No ground plane unless specifically requested below. Transparent pixels outside the object, never a checkerboard illustration. Popup panel for 9-slice scaling: one single piece of light warm wood (#efcd94 to #d8a062) with fine vertical grain that repeats evenly, NO horizontal plank seams anywhere. Thick dark-brown ink outline, softly rounded corners about 10% of the width, a light inner bevel line inset from the edge, a darker bottom lip showing thickness, and one small round iron nail head in each of the four corners inside the bevel. Outside the corner regions, edges must be perfectly uniform so they stretch cleanly. Square, front-facing, filling the canvas with about 4% transparent margin on each side. Uniform restrained texture and no central decoration.
 
 ### `ui.panel-parchment`
 
@@ -312,7 +312,7 @@ Subject: A speaker with exactly two sound waves, drawn as two clear curved arcs 
 
 ### `board.board-tray`
 
-- File: `features/board/assets/board-tray{nine=72,72,72,72}.webp`, 640 × 631 px, 9-slice left 72, top 72, right 72, bottom 72.
+- File: `features/board/assets/board-tray{nine=96,96,96,96}.webp`, 640 × 631 px, 9-slice 96 on every side (72 cut through the corner joints).
 - Original: `ui/board-tray.png`, 1024 × 1024 px.
 - Prompt:
 
@@ -328,11 +328,32 @@ Subject: A speaker with exactly two sound waves, drawn as two clear curved arcs 
 
 ### `orders.card-order`
 
-- File: `features/orders/assets/card-order{nine=56,84,56,84}.webp`, 208 × 300 px, 9-slice left 56, top 84, right 56, bottom 84.
-- Original: `ui/card-order.png`, 1024 × 1024 px.
+- File: `features/orders/assets/card-order{nine=40,40,40,40}.webp`, 214 × 300 px, 9-slice 40 on every side (no punched hole: the clothespin covers the top).
+- Original: `fix1/card-order.png`, 1024 × 1024 px, drawn by Astra (gpt-6-astra, codex backend) on 2026-09-23.
 - Prompt:
 
-  > Use case: stylized-concept. Create exactly one 1024x1024 PNG game UI asset with a genuinely transparent alpha background. STYLE: hand-drawn storybook cartoon for a cozy casual mobile merge game called Timber Town, set in a forest lumber village. Confident dark-brown ink outlines (#3a2212), slightly wobbly hand-inked character, flat cel colours with soft watercolor-like shading and gentle top-left light, subtle paper/wood grain texture. Chunky friendly toy-like proportions, readable at 64 px. Palette: ink #3a2212, warm wood #d8a062 / light #efcd94 / dark #9c6031 / walnut #6e4121, honey gold #f2b43d / #c7841c, moss #8ab84e / #557f2d, pine #2f5a3b, berry #c93b4d / #8f2334, parchment #fbeed2, sky #cfe6ee. Use only the material-relevant colors. Orthographic front view. Designed for 9-slice scaling: fixed rounded corners, perfectly straight uniform middle edges, plain stretchable center with only fine repeating texture. No text, letters, numbers, icons, watermark, center decorations, edge-middle decorations, external drop shadows, ground plane, perspective, nails, ropes, foliage or separate objects. Transparent outside the shape. Subject: one parchment price-tag order card, portrait width:height about 3:4, centered in square canvas. Shape approximately x=159..865, y=41..983. Warm parchment #fbeed2, rounded corners, thin dark-brown ink outline, faint paper grain, plain stretchable center. One small circular punched hole at top center near y=86, with genuinely transparent interior and thin ink rim; this required hole is the sole exception to undecorated edges. No string or attachment, no clipped tag corners.
+  > Create one 1024x1024 PNG with genuinely transparent alpha background. Style: hand-drawn storybook cartoon for a cozy casual mobile merge game called Timber Town, set in a forest lumber village. Confident dark-brown ink outlines (#3a2212), 5-7 px at 1024 px, slightly wobbly hand-inked line; flat cel colours with soft watercolor-like shading and gentle top-left light; a single small white highlight on rounded forms; subtle paper/wood grain texture. Palette: ink #3a2212, warm wood #d8a062 / light #efcd94 / dark #9c6031 / walnut #6e4121, honey gold #f2b43d / #c7841c, moss green #8ab84e / #557f2d, pine #2f5a3b, berry red #c93b4d / #8f2334, parchment #fbeed2, sky pale blue #cfe6ee. Chunky, friendly, toy-like proportions, strong readable silhouettes at 64 px. No text, letters, numbers, watermark, or drop shadow outside the object. No ground plane unless specifically requested below. Transparent pixels outside the object, never a checkerboard illustration. A blank parchment price-tag card for an order, portrait shape about 3:4 inside the square canvas, centered with about 8% transparent top and bottom margin. Rounded corners, thin dark-brown ink outline, parchment #fbeed2, faint paper grain, perfectly uniform edges for 9-slice scaling. NO hole and NO marks at the top: a separate clothespin will cover the top centre, but do not draw the clothespin. Front-facing blank card only.
+
+### `home.home-yard`
+
+- File: `features/home/assets/home-yard.webp`, 960 × 924 px, the sawmill yard of Home without a background.
+- Original: `fix1/home-yard.png`, 1024 × 1024 px, drawn by Astra (gpt-6-astra, codex backend) on 2026-09-23.
+- Prompt:
+
+  > Create one 1024x1024 PNG with genuinely transparent alpha background. Style: hand-drawn storybook cartoon for a cozy casual mobile merge game called Timber Town, set in a forest lumber village. Confident dark-brown ink outlines (#3a2212), 5-7 px at 1024 px, slightly wobbly hand-inked line; flat cel colours with soft watercolor-like shading and gentle top-left light; a single small white highlight on rounded forms; subtle paper/wood grain texture. Palette: ink #3a2212, warm wood #d8a062 / light #efcd94 / dark #9c6031 / walnut #6e4121, honey gold #f2b43d / #c7841c, moss green #8ab84e / #557f2d, pine #2f5a3b, berry red #c93b4d / #8f2334, parchment #fbeed2, sky pale blue #cfe6ee. Chunky, friendly, toy-like proportions, strong readable silhouettes at 64 px. No text, letters, numbers, watermark, or drop shadow outside the object. No ground plane unless specifically requested below. Transparent pixels outside the object, never a checkerboard illustration. An isolated illustration of the Timber Town sawmill yard standing on a round sandy dirt patch: a small log cabin with a moss-green roof, a brick chimney with a little smoke puff, a round attic window and an arched door; a big round circular-saw blade with a honey-gold hub on its right side; a stack of three logs with little sprouting leaves on the right; a wooden crate and two loose planks on the left. No sky and no background scenery, transparent around the dirt patch and objects. Centered, filling about 90% of the width, front three-quarter view.
+
+### `home.sign-post`
+
+- File: `features/home/assets/sign-post.webp`, 64 × 530 px, one post of the Play sign.
+- Original: `fix1/sign-post.png`, 1024 × 1024 px, drawn by Astra (gpt-6-astra, codex backend) on 2026-09-23.
+- Prompt:
+
+  > Create one 1024x1024 PNG with genuinely transparent alpha background. Style: hand-drawn storybook cartoon for a cozy casual mobile merge game called Timber Town, set in a forest lumber village. Confident dark-brown ink outlines (#3a2212), 5-7 px at 1024 px, slightly wobbly hand-inked line; flat cel colours with soft watercolor-like shading and gentle top-left light; a single small white highlight on rounded forms; subtle paper/wood grain texture. Palette: ink #3a2212, warm wood #d8a062 / light #efcd94 / dark #9c6031 / walnut #6e4121, honey gold #f2b43d / #c7841c, moss green #8ab84e / #557f2d, pine #2f5a3b, berry red #c93b4d / #8f2334, parchment #fbeed2, sky pale blue #cfe6ee. Chunky, friendly, toy-like proportions, strong readable silhouettes at 64 px. No text, letters, numbers, watermark, or drop shadow outside the object. No ground plane unless specifically requested below. Transparent pixels outside the object, never a checkerboard illustration. One straight vertical wooden sign post only: a square beam of warm wood with visible grain and ink outline, narrow and tall, centered, occupying about 12% of the canvas width and 90% of the height. A slightly darker lower end as if set into the ground, but no ground visible. The top is flat because it will hold up a sign; do not draw the sign itself.
+
+### `ui.link-wave`
+
+- File: `features/ui/assets/link-wave.webp`, 400 × 16 px: the wavy underline of a text link, berry `#c93b4d`, 3 px stroke, period 24 px, amplitude 4 px.
+- Drawn with ImageMagick (a sine path), not by Astra.
 
 ## Fonts
 
@@ -348,5 +369,19 @@ Subject: A speaker with exactly two sound waves, drawn as two clear curved arcs 
 
 ## Sounds
 
-`ui.click`, `orders.complete` and `board.theme` are placeholder tones written by
-`scripts/make-placeholders.ts` with ffmpeg.
+Real recordings from Kenney (www.kenney.nl), licence Creative Commons Zero (CC0 1.0), "free to use
+in personal, educational and commercial projects"; credit is not required. Downloaded on 2026-09-23
+and converted with ffmpeg (effects mono 44.1 kHz 96 kbps, music stereo 44.1 kHz 128 kbps).
+
+| Key | File | Source pack | Source file |
+|---|---|---|---|
+| `ui.click` | `features/ui/assets/click.mp3` | Interface Sounds 1.0 | `click_001.ogg` |
+| `ui.popup` | `features/ui/assets/popup.mp3` | Interface Sounds 1.0 | `maximize_006.ogg` |
+| `ui.coins` | `features/ui/assets/coins.mp3` | Casino Audio | `chips-stack-3.ogg` |
+| `board.merge` | `features/board/assets/merge.mp3` | Interface Sounds 1.0 | `confirmation_002.ogg` |
+| `board.spawn` | `features/board/assets/spawn.mp3` | Interface Sounds 1.0 | `pluck_002.ogg` |
+| `orders.complete` | `features/orders/assets/complete.mp3` | Music Jingles | `Pizzicato jingles/jingles_PIZZI07.ogg` |
+| `ui.theme` | `features/ui/assets/theme.mp3` | Music Loops (Kenney's Sound Pack) | `Farm Frolics.ogg`, the 10.7 s loop repeated four times (42.7 s) |
+
+`board.theme` is the last placeholder tone (a 220 Hz sine); the board moves to `ui.theme` and the
+file is removed with it.
