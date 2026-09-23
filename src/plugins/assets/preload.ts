@@ -217,7 +217,7 @@ function follow(
 /**
  * Walks the graph breadth-first from the node the game stands on and lists the bundles worth
  * preloading: ordered by distance and then by name, without the `lazy` tier, without what is
- * already there, and cut where the budget would break.
+ * already there or loading outside the running queue, and cut where the budget would break.
  *
  * @param ctx - Domain context of the plugin.
  * @param depth - How many edges to look ahead.
@@ -268,8 +268,26 @@ export function neighbourhood(ctx: AssetsCtx, depth: number): string[] {
 }
 
 /**
- * Filters the walk's result: the `lazy` tier, a bundle that is already there and everything
- * behind the first bundle that would break the budget are dropped. Preload never evicts.
+ * Tells whether the preload still has to bring a bundle: it is not there yet, or it is loading
+ * while the running queue holds it. A load of the running queue belongs to the neighbourhood, so
+ * the same rest node gives the same queue again.
+ *
+ * @param state - The plugin state.
+ * @param name - Name of the bundle.
+ * @returns True for an idle bundle and for one the running queue is bringing.
+ */
+function isStillWanted(state: State, name: string): boolean {
+  const status = state.records.get(name)?.status ?? "idle";
+
+  if (status === "idle") return true;
+
+  return status === "loading" && state.queue?.bundles.includes(name) === true;
+}
+
+/**
+ * Filters the walk's result: the `lazy` tier, a bundle that is already there or loading outside
+ * the queue, and everything behind the first bundle that would break the budget are dropped.
+ * Preload never evicts.
  *
  * @param ctx - Domain context of the plugin.
  * @param distances - Bundle name to the distance it was first seen at.
@@ -284,10 +302,9 @@ function affordable(ctx: AssetsCtx, distances: Map<string, number>): string[] {
 
   for (const name of ordered) {
     const entry = ctx.state.manifest.bundles[name];
-    const record = ctx.state.records.get(name);
 
     if (entry === undefined || entry.tier === "lazy") continue;
-    if (record !== undefined && record.status !== "idle") continue;
+    if (!isStillWanted(ctx.state, name)) continue;
     if (running + entry.mb > ctx.config.textureBudgetMb) break;
 
     running += entry.mb;
@@ -336,8 +353,25 @@ export function stopPreload(state: State): void {
 }
 
 /**
- * Replaces the background preload with the neighbourhood of the node the game rests on. A depth
- * of zero and a headless app do nothing.
+ * Tells whether a new neighbourhood is what the running queue still has to bring: its bundles
+ * that are not loaded yet, in the same order.
+ *
+ * @param state - The plugin state.
+ * @param queue - The running queue.
+ * @param bundles - The neighbourhood of the node the game rests on now.
+ * @returns True when the running queue already brings exactly these bundles.
+ */
+function isSameQueue(state: State, queue: PreloadQueue, bundles: readonly string[]): boolean {
+  const remaining = queue.bundles.filter(name => state.records.get(name)?.status !== "loaded");
+
+  return remaining.length === bundles.length && remaining.every((name, at) => bundles[at] === name);
+}
+
+/**
+ * Points the background preload at the neighbourhood of the node the game rests on. The same
+ * neighbourhood keeps the running queue, so a rest node the graph comes back to often does not
+ * restart its loads; another neighbourhood aborts it and starts a new one. A depth of zero and a
+ * headless app do nothing.
  *
  * @param ctx - Domain context of the plugin.
  * @example
@@ -351,9 +385,13 @@ export function startPreload(ctx: AssetsCtx): void {
 
   if (state.io === undefined || ctx.config.preloadDepth <= 0) return;
 
-  stopPreload(state);
-
+  // The same neighbourhood again: the running queue already brings it.
   const bundles = neighbourhood(ctx, ctx.config.preloadDepth);
+
+  if (state.queue !== undefined && isSameQueue(state, state.queue, bundles)) return;
+
+  // Another neighbourhood: the old queue goes, a new one starts.
+  stopPreload(state);
 
   if (bundles.length === 0) return;
 
