@@ -1,6 +1,7 @@
 /**
  * @file The HUD as a feature: the two projections of the top bar, the counter component, the
- * coin flight, the text styles and the boot bundle with the fonts and the click. A headless test
+ * coin flight, and the shared interface of the game — the text styles of every screen and the
+ * boot bundle `ui` with the fonts, the 9-slice pieces, the icons and the click. A headless test
  * composes `hudFeature.logicOnly` and sees none of it.
  *
  * It also carries the compiled messages of the whole game. The compiler walks every feature's
@@ -10,16 +11,16 @@
 import ruStrings from "../../generated/strings.ru";
 import { defineFeature } from "../../kit";
 import { uiAssets } from "../ui/assets";
+import { uiStyles } from "../ui/styles";
 import { coinsFly } from "./animations";
 import { Counter, hudCoins } from "./coins";
-import { hudStyles } from "./styles";
 import { hud } from "./view";
 
 export const hudFeature = defineFeature("hud", {
   projections: [hud, hudCoins],
   components: [Counter],
   animations: [coinsFly],
-  textStyles: hudStyles,
+  textStyles: uiStyles,
   assets: uiAssets,
   strings: { ru: ruStrings, en: () => import("../../generated/strings.en") }
 });

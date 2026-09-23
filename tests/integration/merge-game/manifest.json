@@ -4,49 +4,75 @@
     "board": {
       "feature": "board",
       "tier": "scene",
-      "mb": 0.573,
+      "mb": 8.852,
       "files": [
         {
+          "key": "board.bg-forest-meadow",
+          "path": "features/board/assets/bg-forest-meadow.webp",
+          "width": 1024,
+          "height": 1536,
+          "mb": 6
+        },
+        {
+          "key": "board.board-tray",
+          "path": "features/board/assets/board-tray{nine=72,72,72,72}.webp",
+          "width": 640,
+          "height": 631,
+          "mb": 1.541,
+          "nine": {
+            "left": 72,
+            "top": 72,
+            "right": 72,
+            "bottom": 72
+          }
+        },
+        {
           "key": "board.cell",
-          "path": "features/board/assets/cell.png",
-          "width": 192,
-          "height": 192,
-          "mb": 0.141
+          "path": "features/board/assets/cell{nine=44,52,44,52}.webp",
+          "width": 224,
+          "height": 219,
+          "mb": 0.187,
+          "nine": {
+            "left": 44,
+            "top": 52,
+            "right": 44,
+            "bottom": 52
+          }
         },
         {
           "key": "board.generator",
-          "path": "features/board/assets/generator.png",
-          "width": 168,
-          "height": 168,
-          "mb": 0.108
+          "path": "features/board/assets/generator.webp",
+          "width": 288,
+          "height": 261,
+          "mb": 0.287
         },
         {
           "key": "board.item-wood-1",
-          "path": "features/board/assets/item-wood-1.png",
-          "width": 144,
-          "height": 144,
-          "mb": 0.079
+          "path": "features/board/assets/item-wood-1.webp",
+          "width": 170,
+          "height": 256,
+          "mb": 0.166
         },
         {
           "key": "board.item-wood-2",
-          "path": "features/board/assets/item-wood-2.png",
-          "width": 144,
-          "height": 144,
-          "mb": 0.079
+          "path": "features/board/assets/item-wood-2.webp",
+          "width": 256,
+          "height": 240,
+          "mb": 0.234
         },
         {
           "key": "board.item-wood-3",
-          "path": "features/board/assets/item-wood-3.png",
-          "width": 144,
-          "height": 144,
-          "mb": 0.079
+          "path": "features/board/assets/item-wood-3.webp",
+          "width": 256,
+          "height": 190,
+          "mb": 0.186
         },
         {
           "key": "board.item-wood-4",
-          "path": "features/board/assets/item-wood-4.png",
-          "width": 144,
-          "height": 144,
-          "mb": 0.079
+          "path": "features/board/assets/item-wood-4.webp",
+          "width": 256,
+          "height": 249,
+          "mb": 0.243
         },
         {
           "key": "board.theme",
@@ -56,11 +82,38 @@
         }
       ]
     },
+    "home": {
+      "feature": "home",
+      "tier": "core",
+      "mb": 6,
+      "files": [
+        {
+          "key": "home.home-sawmill-scene",
+          "path": "features/home/assets/home-sawmill-scene.webp",
+          "width": 1024,
+          "height": 1536,
+          "mb": 6
+        }
+      ]
+    },
     "orders": {
       "feature": "orders",
       "tier": "core",
-      "mb": 0.002,
+      "mb": 0.24,
       "files": [
+        {
+          "key": "orders.card-order",
+          "path": "features/orders/assets/card-order{nine=56,84,56,84}.webp",
+          "width": 208,
+          "height": 300,
+          "mb": 0.238,
+          "nine": {
+            "left": 56,
+            "top": 84,
+            "right": 56,
+            "bottom": 84
+          }
+        },
         {
           "key": "orders.complete",
           "path": "features/orders/assets/complete.mp3",
@@ -69,11 +122,110 @@
         }
       ]
     },
+    "splash": {
+      "feature": "splash",
+      "tier": "boot",
+      "mb": 6,
+      "files": [
+        {
+          "key": "splash.bg-splash",
+          "path": "features/splash/assets/bg-splash.webp",
+          "width": 1024,
+          "height": 1536,
+          "mb": 6
+        }
+      ]
+    },
     "ui": {
       "feature": "ui",
       "tier": "boot",
-      "mb": 0.627,
+      "mb": 6.663,
       "files": [
+        {
+          "key": "ui.badge-level",
+          "path": "features/ui/assets/badge-level.webp",
+          "width": 96,
+          "height": 96,
+          "mb": 0.035
+        },
+        {
+          "key": "ui.bar-fill",
+          "path": "features/ui/assets/bar-fill{nine=24,24,24,24}.webp",
+          "width": 480,
+          "height": 50,
+          "mb": 0.092,
+          "nine": {
+            "left": 24,
+            "top": 24,
+            "right": 24,
+            "bottom": 24
+          }
+        },
+        {
+          "key": "ui.bar-track",
+          "path": "features/ui/assets/bar-track{nine=32,28,32,28}.webp",
+          "width": 480,
+          "height": 65,
+          "mb": 0.119,
+          "nine": {
+            "left": 32,
+            "top": 28,
+            "right": 32,
+            "bottom": 28
+          }
+        },
+        {
+          "key": "ui.button-berry",
+          "path": "features/ui/assets/button-berry{nine=32,40,32,40}.webp",
+          "width": 360,
+          "height": 93,
+          "mb": 0.128,
+          "nine": {
+            "left": 32,
+            "top": 40,
+            "right": 32,
+            "bottom": 40
+          }
+        },
+        {
+          "key": "ui.button-disabled",
+          "path": "features/ui/assets/button-disabled{nine=36,40,36,40}.webp",
+          "width": 360,
+          "height": 94,
+          "mb": 0.129,
+          "nine": {
+            "left": 36,
+            "top": 40,
+            "right": 36,
+            "bottom": 40
+          }
+        },
+        {
+          "key": "ui.button-green",
+          "path": "features/ui/assets/button-green{nine=36,40,36,40}.webp",
+          "width": 360,
+          "height": 94,
+          "mb": 0.129,
+          "nine": {
+            "left": 36,
+            "top": 40,
+            "right": 36,
+            "bottom": 40
+          }
+        },
+        {
+          "key": "ui.button-wood",
+          "path": "features/ui/assets/button-wood{nine=36,36,36,36}.webp",
+          "width": 360,
+          "height": 94,
+          "mb": 0.129,
+          "nine": {
+            "left": 36,
+            "top": 36,
+            "right": 36,
+            "bottom": 36
+          }
+        },
         {
           "key": "ui.click",
           "path": "features/ui/assets/click.mp3",
@@ -81,32 +233,215 @@
           "mb": 0.001
         },
         {
+          "key": "ui.decor-clothespin",
+          "path": "features/ui/assets/decor-clothespin.webp",
+          "width": 40,
+          "height": 96,
+          "mb": 0.015
+        },
+        {
+          "key": "ui.decor-sprig",
+          "path": "features/ui/assets/decor-sprig.webp",
+          "width": 177,
+          "height": 192,
+          "mb": 0.13
+        },
+        {
           "key": "ui.font-body",
           "path": "features/ui/assets/font-body.fnt",
           "kind": "font",
-          "mb": 0.563,
+          "mb": 1,
           "pages": [
             {
-              "path": "features/ui/assets/font-body_0.png",
+              "path": "features/ui/assets/font-body.png",
               "width": 512,
-              "height": 288,
-              "mb": 0.563
+              "height": 512,
+              "mb": 1
             }
           ]
         },
         {
-          "key": "ui.font-digits",
-          "path": "features/ui/assets/font-digits.fnt",
+          "key": "ui.font-display",
+          "path": "features/ui/assets/font-display.fnt",
           "kind": "font",
-          "mb": 0.063,
+          "mb": 1,
           "pages": [
             {
-              "path": "features/ui/assets/font-digits_0.png",
+              "path": "features/ui/assets/font-display.png",
               "width": 512,
-              "height": 32,
-              "mb": 0.063
+              "height": 512,
+              "mb": 1
             }
           ]
+        },
+        {
+          "key": "ui.fx-leaf",
+          "path": "features/ui/assets/fx-leaf.webp",
+          "width": 58,
+          "height": 64,
+          "mb": 0.014
+        },
+        {
+          "key": "ui.fx-rays",
+          "path": "features/ui/assets/fx-rays.webp",
+          "width": 504,
+          "height": 512,
+          "mb": 0.984
+        },
+        {
+          "key": "ui.fx-sparkle",
+          "path": "features/ui/assets/fx-sparkle.webp",
+          "width": 85,
+          "height": 96,
+          "mb": 0.031
+        },
+        {
+          "key": "ui.header-plank",
+          "path": "features/ui/assets/header-plank{nine=52,52,52,52}.webp",
+          "width": 480,
+          "height": 107,
+          "mb": 0.196,
+          "nine": {
+            "left": 52,
+            "top": 52,
+            "right": 52,
+            "bottom": 52
+          }
+        },
+        {
+          "key": "ui.hud-pill",
+          "path": "features/ui/assets/hud-pill{nine=28,30,28,30}.webp",
+          "width": 300,
+          "height": 63,
+          "mb": 0.072,
+          "nine": {
+            "left": 28,
+            "top": 30,
+            "right": 28,
+            "bottom": 30
+          }
+        },
+        {
+          "key": "ui.icon-check",
+          "path": "features/ui/assets/icon-check.webp",
+          "width": 128,
+          "height": 113,
+          "mb": 0.055
+        },
+        {
+          "key": "ui.icon-close",
+          "path": "features/ui/assets/icon-close.webp",
+          "width": 128,
+          "height": 127,
+          "mb": 0.062
+        },
+        {
+          "key": "ui.icon-coin",
+          "path": "features/ui/assets/icon-coin.webp",
+          "width": 154,
+          "height": 160,
+          "mb": 0.094
+        },
+        {
+          "key": "ui.icon-energy",
+          "path": "features/ui/assets/icon-energy.webp",
+          "width": 112,
+          "height": 160,
+          "mb": 0.068
+        },
+        {
+          "key": "ui.icon-gear",
+          "path": "features/ui/assets/icon-gear.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
+          "key": "ui.icon-gift",
+          "path": "features/ui/assets/icon-gift.webp",
+          "width": 181,
+          "height": 192,
+          "mb": 0.133
+        },
+        {
+          "key": "ui.icon-home",
+          "path": "features/ui/assets/icon-home.webp",
+          "width": 160,
+          "height": 143,
+          "mb": 0.087
+        },
+        {
+          "key": "ui.icon-music",
+          "path": "features/ui/assets/icon-music.webp",
+          "width": 121,
+          "height": 128,
+          "mb": 0.059
+        },
+        {
+          "key": "ui.icon-sound",
+          "path": "features/ui/assets/icon-sound.webp",
+          "width": 128,
+          "height": 108,
+          "mb": 0.053
+        },
+        {
+          "key": "ui.panel-parchment",
+          "path": "features/ui/assets/panel-parchment{nine=48,48,48,48}.webp",
+          "width": 384,
+          "height": 379,
+          "mb": 0.555,
+          "nine": {
+            "left": 48,
+            "top": 48,
+            "right": 48,
+            "bottom": 48
+          }
+        },
+        {
+          "key": "ui.panel-signboard",
+          "path": "features/ui/assets/panel-signboard{nine=64,64,64,64}.webp",
+          "width": 512,
+          "height": 506,
+          "mb": 0.988,
+          "nine": {
+            "left": 64,
+            "top": 64,
+            "right": 64,
+            "bottom": 64
+          }
+        },
+        {
+          "key": "ui.rope-vertical",
+          "path": "features/ui/assets/rope-vertical.webp",
+          "width": 5,
+          "height": 256,
+          "mb": 0.005
+        },
+        {
+          "key": "ui.tab-active",
+          "path": "features/ui/assets/tab-active{nine=20,20,20,20}.webp",
+          "width": 256,
+          "height": 105,
+          "mb": 0.103,
+          "nine": {
+            "left": 20,
+            "top": 20,
+            "right": 20,
+            "bottom": 20
+          }
+        },
+        {
+          "key": "ui.tab-idle",
+          "path": "features/ui/assets/tab-idle{nine=24,20,24,20}.webp",
+          "width": 256,
+          "height": 101,
+          "mb": 0.099,
+          "nine": {
+            "left": 24,
+            "top": 20,
+            "right": 24,
+            "bottom": 20
+          }
         }
       ]
     }

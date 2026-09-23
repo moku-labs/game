@@ -156,7 +156,8 @@ function readXml(fnt: string): AdvanceTable | undefined {
   const lineHeight = attribute(fnt, /<common[^>]*\slineHeight="(-?\d+)"/) ?? 0;
   const advances = emptyAdvances();
 
-  for (const match of fnt.matchAll(/<char\s[^>]*>/g)) {
+  // An attribute value may hold a ">" (msdf-bmfont-xml writes char=">"), so quoted values are skipped whole.
+  for (const match of fnt.matchAll(/<char\s(?:[^>"]|"[^"]*")*>/g)) {
     const tag = match[0];
     const id = attribute(tag, /\sid="(-?\d+)"/);
     const advance = attribute(tag, /\sxadvance="(-?\d+)"/);

@@ -64,6 +64,17 @@ describe("parseAdvances", () => {
     );
   });
 
+  it('reads a glyph whose attribute value holds a > (msdf-bmfont-xml writes char=">")', () => {
+    const fnt =
+      '<?xml version="1.0"?><font><info face="f" size="48"/><common lineHeight="57"/>' +
+      '<chars count="2"><char id="62" index="1" char=">" xadvance="27"/>' +
+      '<char id="65" index="2" char="A" xadvance="30"/></chars></font>';
+    const table = parseAdvances(fnt, "ui.font-display");
+
+    expect(table.advances.get(">")).toBe(27);
+    expect(table.advances.get("A")).toBe(30);
+  });
+
   it("refuses a file that is neither format", () => {
     expect(() => parseAdvances("not a font at all", "ui.font-body")).toThrow(
       '[game] Font "ui.font-body" is not BMFont XML or JSON.\n' +

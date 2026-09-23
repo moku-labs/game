@@ -1,0 +1,6 @@
+{
+  "board.sawmill": "Лесопилка",
+  "board.item": "{item, select, twig {Щепка} log {Бревно} plank {Доска} crate {Ящик} other {Дерево}}",
+  "board.level": "Уровень {level}",
+  "board.full": "Доска заполнена"
+}

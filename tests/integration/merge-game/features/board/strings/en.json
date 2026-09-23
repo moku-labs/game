@@ -1,0 +1,6 @@
+{
+  "board.sawmill": "Sawmill",
+  "board.item": "{item, select, twig {Twig} log {Log} plank {Plank} crate {Crate} other {Wood}}",
+  "board.level": "Level {level}",
+  "board.full": "Board is full"
+}

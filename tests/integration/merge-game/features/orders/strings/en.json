@@ -1,5 +1,8 @@
 {
   "orders.done": "Order complete",
   "orders.reward": "{coins, plural, one {# coin} other {# coins}}",
-  "orders.claim": "Claim"
+  "orders.claim": "Claim",
+  "orders.title": "Order #{number}",
+  "orders.deliver": "Deliver",
+  "orders.stamp": "Done!"
 }
