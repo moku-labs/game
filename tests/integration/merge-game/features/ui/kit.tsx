@@ -10,6 +10,7 @@
  * the control and every keyed element inside it, so a test and a hint find them by name.
  */
 import type { I18n, Model } from "@moku-labs/game";
+import { defineMotion } from "@moku-labs/game";
 import type { AssetKey } from "../../generated/assets";
 import { defineStyle, defineTokens, tr } from "../../kit";
 
@@ -71,8 +72,11 @@ export const fullBleed = defineStyle({
 /** The three faces of a plank button: green is go, wood is neutral, berry is danger. */
 export type PlankLook = "green" | "wood" | "berry";
 
-/** The sizes a plank comes in: the Play sign, a popup button, and the Deliver of a card. */
-export type PlankSize = "large" | "medium" | "small";
+/**
+ * The sizes a plank comes in: the Play sign, a popup button, the Deliver of a card, and the wide
+ * plank a long label needs ("Смотреть и пополнить").
+ */
+export type PlankSize = "large" | "medium" | "small" | "wide";
 
 /** The nine-slice of every face. */
 const plankFaces: Record<PlankLook, AssetKey> = {
@@ -85,7 +89,8 @@ const plankFaces: Record<PlankLook, AssetKey> = {
 const plankBoxes: Record<PlankSize, { width: number; height: number }> = {
   large: { width: 520, height: 150 },
   medium: { width: 360, height: 120 },
-  small: { width: 250, height: 96 }
+  small: { width: 250, height: 96 },
+  wide: { width: 680, height: 120 }
 };
 
 /**
@@ -115,7 +120,10 @@ function plankStyle(look: PlankLook, size: PlankSize) {
 /** Every plank style, built once: a view never makes a new style object per frame. */
 const plankStyles = Object.fromEntries(
   (["green", "wood", "berry"] as const).flatMap(look =>
-    (["large", "medium", "small"] as const).map(size => [`${look}.${size}`, plankStyle(look, size)])
+    (["large", "medium", "small", "wide"] as const).map(size => [
+      `${look}.${size}`,
+      plankStyle(look, size)
+    ])
   )
 ) as Record<`${PlankLook}.${PlankSize}`, ReturnType<typeof plankStyle>>;
 
@@ -320,36 +328,156 @@ export type SignboardProps = {
   width: number;
   /** Height of the board in reference units. */
   height: number;
+  /**
+   * A popup board (design §6 F1, F2): it hangs on two ropes (`<id>RopeLeft`, `<id>RopeRight`),
+   * scales down into the safe area, swings in and out around its top edge, and recedes while
+   * another popup covers it.
+   */
+  hung?: boolean;
+  /** The intent of the X in the corner (`<id>Close`); no X when left out. */
+  close?: string;
   /** The contents under the header. */
   children?: unknown;
 };
 
+/** The ink-darkened tint of a board another popup covers: 42 % of its colour (design §6 F2). */
+const receded = 0x6b_6b_6b;
+
+/** The pose a popup board hangs in before it swings in and after it swings out. */
+const hanging = { Transform: { rotation: -0.12, scale: 0.8 } } as const;
+
+/** The swing in (design §6 F1): from the tilted, small pose, with a small overshoot, and the recede. */
+const swingIn = defineMotion({
+  states: { hanging },
+  transition: { ms: 420, ease: "outBack" },
+  on: { enter: "hanging", change: ["Transform"] }
+});
+
+/** The swing out: the same pose, reached quickly, so the next screen is not kept waiting. */
+const swingOut = defineMotion({
+  states: { hanging },
+  transition: { ms: 220, ease: "in" },
+  on: { exit: "hanging" }
+});
+
+/** The motion of every popup board: it swings in, recedes under a cover, and swings out. */
+export const swingMotion = { ...swingIn, ...swingOut };
+
+/**
+ * The style of one signboard. A hung board is fitted into its parent, turns around the middle of
+ * its top edge, and shrinks, rises and darkens while it is covered.
+ *
+ * @param width - The width of the board in reference units.
+ * @param height - The height of the board in reference units.
+ * @param hung - Whether the board is a popup board.
+ * @returns The frozen style.
+ */
+function boardStyle(width: number, height: number, hung: boolean) {
+  const board = {
+    width,
+    height,
+    direction: "column",
+    align: "center",
+    justify: "center",
+    gap: theme.space.md,
+    padding: { top: 100, right: 56, bottom: 56, left: 56 },
+    nineSlice: "ui.panel-signboard"
+  } as const;
+
+  if (!hung) return defineStyle(board);
+
+  return defineStyle({
+    ...board,
+    fit: "contain",
+    origin: "top",
+    is: { covered: { scale: 0.84, offsetY: -8, tint: receded } }
+  });
+}
+
+/** What hides while a popup is covered: its ropes and its X (design §6 F2). */
+const hiddenWhenCovered = { covered: { alpha: 0 } } as const;
+
+/**
+ * The style of one rope of a hung board, from far above it down behind its header plank.
+ *
+ * @param side - Which side the rope hangs on.
+ * @param width - The width of the board.
+ * @returns The frozen style.
+ */
+function hungRopeStyle(side: "left" | "right", width: number) {
+  const inset = Math.round(width * 0.2);
+
+  return defineStyle({
+    ...(side === "left" ? { left: inset } : { right: inset }),
+    position: "absolute",
+    top: -300,
+    width: 40,
+    height: 330,
+    is: hiddenWhenCovered,
+    reason: "the ropes hang the popup from a pivot above the screen (design §6 F1)"
+  });
+}
+
+/** The X in the corner of a board: a berry disc over the top-right corner. */
+const closeStyle = defineStyle({
+  position: "absolute",
+  top: -40,
+  right: -40,
+  width: 112,
+  height: 112,
+  radius: 56,
+  fill: theme.color.berry,
+  stroke: theme.color.ink,
+  strokeWidth: 6,
+  align: "center",
+  justify: "center",
+  is: { ...pointerStates, ...hiddenWhenCovered },
+  reason: "the X sits on the corner of the signboard"
+});
+
+/** The cross on the X. */
+const closeIconStyle = defineStyle({ width: 64, height: 64, is: hiddenWhenCovered });
+
 /**
  * A signboard (design §6 G): the painted wooden panel every popup and the logo are drawn on, with
- * an optional honey header plank. A panel swallows every tap, so nothing under it answers.
+ * an optional honey header plank. A panel swallows every tap, so nothing under it answers. A hung
+ * board is a popup board: two ropes, the swing, the fit into the safe area and the recede.
  *
  * @param props - The board as the screen declares it.
  * @returns The panel element.
  */
 export function Signboard(props: SignboardProps) {
+  const hung = props.hung === true;
+
   return (
     <panel
       key={props.id}
-      style={{
-        width: props.width,
-        height: props.height,
-        direction: "column",
-        align: "center",
-        justify: "center",
-        gap: theme.space.md,
-        padding: { top: 88, right: 56, bottom: 56, left: 56 },
-        nineSlice: "ui.panel-signboard"
-      }}
+      style={boardStyle(props.width, props.height, hung)}
+      {...(hung ? { motion: swingMotion } : {})}
     >
+      {hung ? (
+        <image
+          key={`${props.id}RopeLeft`}
+          texture="ui.rope-vertical"
+          style={hungRopeStyle("left", props.width)}
+        />
+      ) : undefined}
+      {hung ? (
+        <image
+          key={`${props.id}RopeRight`}
+          texture="ui.rope-vertical"
+          style={hungRopeStyle("right", props.width)}
+        />
+      ) : undefined}
       {props.title === undefined ? undefined : (
         <stack key={`${props.id}Header`} style={headerStyle}>
           <text key={`${props.id}Title`} style="ui.title" content={props.title} />
         </stack>
+      )}
+      {props.close === undefined ? undefined : (
+        <button key={`${props.id}Close`} intent={props.close} style={closeStyle}>
+          <icon key={`${props.id}CloseIcon`} name="ui.icon-close" style={closeIconStyle} />
+        </button>
       )}
       {props.children as never}
     </panel>

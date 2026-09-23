@@ -6,6 +6,8 @@
 import type { Assets, Model } from "@moku-labs/game";
 import { audioPlugin, createApp, screen } from "@moku-labs/game";
 import { fakeClock, memory } from "@moku-labs/game/testing";
+import { energyFeature } from "./features/energy";
+import { giftFeature } from "./features/gift";
 import { homeFeature } from "./features/home";
 import { hudFeature } from "./features/hud";
 import { ordersFeature } from "./features/orders";
@@ -94,8 +96,9 @@ export function createGame(options: GameOptions = {}): Game {
 
 /**
  * The plugins of the game with its screen: the nine screen plugins, `audio`, which is opt-in,
- * every feature — the splash, Home, the board, the reward, the HUD, the orders and the settings —
- * and the two plugins the game writes: the loading of the splash and the language switch.
+ * every feature — the splash, Home, the board, the reward, the HUD, the orders, the settings, the
+ * energy and the daily gift — and the two plugins the game writes: the loading of the splash and
+ * the language switch.
  */
 export const screenPlugins = [
   ...screen,
@@ -107,6 +110,8 @@ export const screenPlugins = [
   hudFeature,
   ordersFeature,
   settingsFeature,
+  energyFeature,
+  giftFeature,
   settingsLocalePlugin,
   loadingPlugin
 ];

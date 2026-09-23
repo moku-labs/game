@@ -1,18 +1,20 @@
 /**
  * @file The board as a sub-flow: one rest node the player answers, and one transit node per move.
- * It is left with `orderComplete` when an order was filled, or with `left`. The three settings
- * nodes hang off the same rest node, because the gear that opens them sits in the HUD of the
- * board.
+ * It is left with `orderComplete` when an order was filled, or with `left`. A refused tap of the
+ * sawmill says why: `energy` shows the Out of energy popup, `toast` the "board is full" sign. The
+ * settings sub-flow hangs off the same rest node, because the gear sits in the HUD of the board.
  */
 import { exit, type } from "@moku-labs/game";
-import { openSettings, setLocale, setVolume } from "../features/settings/nodes";
+import { settingsFlow } from "../features/settings/flow";
 import { defineFlow } from "../kit";
 import { awaitIntent } from "../nodes/await-intent";
 import { catchUp } from "../nodes/catch-up";
 import { deliver } from "../nodes/deliver";
+import { energy } from "../nodes/energy";
 import { giveToOrder } from "../nodes/give-to-order";
 import { merge } from "../nodes/merge";
 import { tapGenerator } from "../nodes/tap-generator";
+import { toast } from "../nodes/toast";
 
 export const boardFlow = defineFlow("board", {
   nodes: {
@@ -22,9 +24,9 @@ export const boardFlow = defineFlow("board", {
     giveToOrder,
     deliver,
     catchUp,
-    openSettings,
-    setVolume,
-    setLocale
+    energy,
+    toast,
+    settings: settingsFlow
   },
   start: "awaitIntent",
   outcomes: { orderComplete: type<{ rewardId: string }>(), left: type() },
@@ -34,11 +36,18 @@ export const boardFlow = defineFlow("board", {
       merge: "merge",
       give: "giveToOrder",
       deliver: "deliver",
-      openSettings: "openSettings",
+      openSettings: "settings",
       leave: exit("left"),
       elapsed: "catchUp"
     },
-    tapGenerator: { done: "awaitIntent", rejected: "awaitIntent" },
+    tapGenerator: {
+      done: "awaitIntent",
+      noEnergy: "energy",
+      boardFull: "toast",
+      rejected: "awaitIntent"
+    },
+    energy: { watch: "awaitIntent", later: "awaitIntent" },
+    toast: { done: "awaitIntent" },
     merge: { done: "awaitIntent", rejected: "awaitIntent" },
     giveToOrder: {
       done: "awaitIntent",
@@ -51,12 +60,6 @@ export const boardFlow = defineFlow("board", {
       rejected: "awaitIntent"
     },
     catchUp: { done: "awaitIntent" },
-    openSettings: {
-      volume: "setVolume",
-      setLocale: "setLocale",
-      close: "awaitIntent"
-    },
-    setVolume: { done: "awaitIntent" },
-    setLocale: { done: "awaitIntent" }
+    settings: { closed: "awaitIntent" }
   }
 });

@@ -37,3 +37,6 @@ export const startingOrders: Order[] = [
   { id: 1, needs: [{ chain: "wood", level: 2 }], given: [], rewardId: "logs" },
   { id: 2, needs: [{ chain: "wood", level: 4 }], given: [], rewardId: "beams" }
 ];
+
+/** The coins the daily gift of Home pays (design §8). */
+export const giftCoins = 50;

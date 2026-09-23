@@ -28,11 +28,10 @@ export type TextStyleKey =
   | "ui.number"
   | "ui.name"
   | "ui.body"
+  | "ui.paragraph"
+  | "ui.link"
   | "ui.small"
-  | "ui.badge"
-  | "hud.digits"
-  | "hud.label"
-  | "hud.title";
+  | "ui.badge";
 
 export const {
   defineNode,

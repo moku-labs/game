@@ -167,15 +167,15 @@ describe("interface-merge — the HUD on the board", () => {
     expect(game.app.input.tap(elementOf(game, "settings"))).toBe(true);
     await stepFrames(game, 6);
 
-    expect(game.app.flow.state().path).toBe("board/openSettings");
-    expect(elementOf(game, "close")).toBeGreaterThan(0);
-    expect(resolvedOf(game, elementOf(game, "title"))).toBe("Настройки");
+    expect(game.app.flow.state().path).toBe("board/settings/open");
+    expect(elementOf(game, "settingsBoardClose")).toBeGreaterThan(0);
+    expect(resolvedOf(game, elementOf(game, "settingsBoardTitle"))).toBe("Настройки");
 
-    expect(game.app.input.tap(elementOf(game, "close"))).toBe(true);
+    expect(game.app.input.tap(elementOf(game, "settingsBoardClose"))).toBe(true);
     await stepFrames(game, 6);
 
     expect(game.app.flow.state().path).toBe("board/awaitIntent");
-    expect(game.app.ui.find("close")).toBeUndefined();
+    expect(game.app.ui.find("settingsBoardClose")).toBeUndefined();
 
     await game.app.stop();
   });
@@ -186,13 +186,14 @@ describe("interface-merge — the HUD on the board", () => {
     game.app.input.tap(elementOf(game, "settings"));
     await stepFrames(game, 6);
 
-    expect(game.app.input.tap(elementOf(game, "quieter"))).toBe(true);
+    expect(game.app.input.tap(elementOf(game, "musicDown"))).toBe(true);
     await stepFrames(game, 6);
 
     expect(game.app.model.store.snapshot().player).toMatchObject({
-      settings: { audio: { music: 0.4 } }
+      settings: { audio: { music: 0.5 } }
     });
-    expect(game.app.flow.state().path).toBe("board/awaitIntent");
+    // The step commits and comes back to the same popup.
+    expect(game.app.flow.state().path).toBe("board/settings/open");
 
     await game.app.stop();
   });
@@ -203,20 +204,21 @@ describe("interface-merge — the HUD on the board", () => {
     game.app.input.tap(elementOf(game, "settings"));
     await stepFrames(game, 6);
 
-    // The tab is local state: `input.tap` answers no gate, the screen simply swaps its pane.
-    game.app.input.tap(elementOf(game, "language"));
+    // The tab is local state: `input.tap` answers no gate, the popup simply swaps its pane.
+    game.app.input.tap(elementOf(game, "tabLanguage"));
     await stepFrames(game, 4);
 
-    expect(game.app.flow.state().path).toBe("board/openSettings");
-    expect(resolvedOf(game, elementOf(game, "englishLabel"))).toBe("English");
+    expect(game.app.flow.state().path).toBe("board/settings/open");
+    expect(resolvedOf(game, elementOf(game, "languageEnglishLabel"))).toBe("English");
 
-    expect(game.app.input.tap(elementOf(game, "english"))).toBe(true);
+    expect(game.app.input.tap(elementOf(game, "languageEnglish"))).toBe(true);
     // The language module is fetched, so the node waits for a real import before it commits.
     await stepFrames(game, 20);
 
     expect(game.app.i18n.locale()).toBe("en");
     expect(game.app.model.store.snapshot().player).toMatchObject({ settings: { locale: "en" } });
-    expect(game.app.flow.state().path).toBe("board/awaitIntent");
+    expect(game.app.flow.state().path).toBe("board/settings/open");
+    expect(resolvedOf(game, elementOf(game, "settingsBoardTitle"))).toBe("Settings");
     expect(resolvedOf(game, elementOf(game, "card0Title"))).toBe("Order #1");
 
     await game.app.stop();
@@ -238,14 +240,14 @@ describe("interface-merge — the order delivered through the HUD", () => {
 
     expect(game.app.world.ecs.get(deliver, Text)).toBeUndefined();
     expect(game.app.input.tap(deliver)).toBe(true);
-    // The node plays the delivery before it opens the popup, and the label of an element that
-    // arrived this frame is resolved by `text` in the next one.
-    await stepFrames(game, 40);
+    // The node stamps the card "Готово!" before the popup opens (about 0.7 s), and the label of
+    // an element that arrived this frame is resolved by `text` in the next one.
+    await stepFrames(game, 70);
 
     // The reward popup is up and the node waits for its one outcome.
     expect(game.app.flow.state().path).toBe("afterOrder/show");
-    expect(elementOf(game, "claim")).toBeGreaterThan(0);
-    expect(resolvedOf(game, elementOf(game, "amount"))).toBe("25 монет");
+    expect(elementOf(game, "rewardClaim")).toBeGreaterThan(0);
+    expect(resolvedOf(game, elementOf(game, "rewardCoins"))).toBe("+25");
 
     // The coins are still parked: the wallet is paid when the player takes the reward, so the
     // counter — which is not a ui element but the projection the label binds to — stands still.
@@ -257,7 +259,7 @@ describe("interface-merge — the order delivered through the HUD", () => {
       merge: { wallet: { coins: 0 } }
     });
 
-    expect(game.app.input.tap(elementOf(game, "claim"))).toBe(true);
+    expect(game.app.input.tap(elementOf(game, "rewardClaim"))).toBe(true);
     // The claim commits the coins and releases the `coins.fly` hint, so the counter waits for the
     // flight before it rolls. Four frames in it still shows what the player had.
     await stepFrames(game, 4);

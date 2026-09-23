@@ -1,12 +1,14 @@
 /**
- * @file The settings as a feature: the screen component and the three nodes behind it. The nodes
- * are wired into the board flow, because the gear sits in the HUD of the board.
+ * @file The settings as a feature: the sub-flow behind the gear and its two popups, the settings
+ * and the confirm stacked on them. The sub-flow is a node of the main flow (Home) and of the board
+ * flow, because the gear sits on both screens.
  */
 import { defineFeature } from "../../kit";
-import { openSettings, setLocale, setVolume } from "./nodes";
+import { Confirm } from "./confirm";
+import { settingsFlow } from "./flow";
 import { Settings } from "./settings";
 
 export const settingsFeature = defineFeature("settings", {
-  nodes: [openSettings, setVolume, setLocale],
-  ui: [Settings]
+  flows: [settingsFlow],
+  ui: [Settings, Confirm]
 });

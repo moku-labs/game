@@ -1,18 +1,13 @@
 /**
- * @file The look of the board screen around the board: the HUD row, the board area with its
- * slot, and the design tokens the reward popup and the settings still read until they move onto
- * the signboard. Styles are data, so the markup reads as structure and nothing else. The numbers
- * are the layout rules of design §5, in reference units.
+ * @file The look of the board screen around the board: the HUD row and the board area with its
+ * slot. Styles are data, so the markup reads as structure and nothing else. The numbers are the
+ * layout rules of design §5, in reference units.
  */
-import { defineStyle, defineTokens } from "../../kit";
+import { defineStyle } from "../../kit";
 import { slot } from "../../view/layout";
 
-/** The V3 table the reward popup and the settings are still drawn with. */
-export const tokens = defineTokens({
-  space: { xs: 8, sm: 16, md: 24 },
-  color: { bar: 0x1b_22_30, card: 0x2a_33_42, accent: 0xc9_8b_2e, text: 0xff_e0_82 },
-  radius: { card: 16 }
-});
+/** How tall the HUD row is (design §5.3). The toast hangs a fixed distance under it. */
+export const hudRowHeight = 144;
 
 /** The HUD row: 40 units under the top safe edge, 144 tall, its four controls spread across. */
 export const hudRow = defineStyle({
@@ -20,7 +15,7 @@ export const hudRow = defineStyle({
   align: "center",
   justify: "between",
   alignSelf: "stretch",
-  height: 144,
+  height: hudRowHeight,
   margin: { top: 40 },
   padding: { left: 24, right: 24 }
 });

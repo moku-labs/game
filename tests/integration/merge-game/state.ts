@@ -77,3 +77,24 @@ export const startingSession: Session = { taps: 0, loading: 0 };
 export function applyRules(player: Player, state: MergeState): void {
   player.merge = state;
 }
+
+/**
+ * Starts the progress over (design §6 E3): board, coins, orders, the waiting reward and the daily
+ * gift go back to what a new player has. The settings stay, so the volumes and the language the
+ * player chose survive a reset.
+ *
+ * @param player - The player draft of the open transaction.
+ * @example
+ * ```ts
+ * startProgressOver(player); // player.merge is startingPlayer.merge again, player.settings untouched
+ * ```
+ */
+export function startProgressOver(player: Player): void {
+  const fresh = structuredClone(startingPlayer);
+
+  player.merge = fresh.merge;
+  player.claimed = fresh.claimed;
+  player.pendingReward = fresh.pendingReward;
+  player.pendingCoins = fresh.pendingCoins;
+  player.giftClaimed = fresh.giftClaimed;
+}

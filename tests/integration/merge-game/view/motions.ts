@@ -1,7 +1,7 @@
 /**
  * @file The motions of the board, written on the tween of `world.projection`. Every hook gets one
  * view and brings it to the rest pose the projection just computed; none of them reads another
- * view. The nodes of this game release no hint, so every hook takes the default path.
+ * view. The nodes of the board release no hint, so every hook takes the default path.
  */
 import type { World } from "@moku-labs/game";
 import { Sprite, Transform } from "@moku-labs/game";
@@ -13,20 +13,31 @@ import { cellBox } from "./layout";
 /** The cell the only generator of this game stands on: a new item starts its arc there. */
 const generatorCell = tables.generators[generatorId].cell;
 
+/** How long a new item takes from the generator to its cell. */
+const POP_MS = 340;
+
 /**
- * Enter: a new item pops out of the generator. It starts small on the generator's cell and
- * travels to the cell the rules gave it. Both points are in the board slot's own space, which is
- * the space the hosted item is drawn in.
+ * Enter: a new item pops out of the generator (design §6 F5). It starts small on the generator's
+ * cell and travels on an arc to the cell the rules gave it: x and y are two tweens with different
+ * eases, so the path bends, and the scale springs up with an overshoot. Both points are in the
+ * board slot's own space, which is the space the hosted item is drawn in.
  *
  * @param view - The view of the item that entered.
  * @returns The motion that carries it home.
  */
 export function itemPopIn(view: World.ViewHandle<MergeItem>): World.Motion {
   const from = cellBox(generatorCell).middle;
+  const rest = view.rest(Transform);
 
   view.set(Transform, { x: from.x, y: from.y, scale: 0.2 });
 
-  return view.toRest(Transform, { ms: 260 });
+  if (rest === undefined) return view.toRest(Transform, { ms: POP_MS });
+
+  return view.all([
+    view.tween(Transform, { x: rest.x }, { ms: POP_MS, ease: "out" }),
+    view.tween(Transform, { y: rest.y }, { ms: POP_MS, ease: "inBack" }),
+    view.tween(Transform, { scale: rest.scale }, { ms: POP_MS, ease: "outBack" })
+  ]);
 }
 
 /**

@@ -1,9 +1,8 @@
 /**
- * @file The look of the orders: the order strip of the board with its three paper cards, and the
- * reward popup with the button that closes it.
+ * @file The look of the orders: the order strip of the board with its three paper cards. The
+ * reward popup is drawn with the kit's signboard and needs no style of its own here.
  */
 import { defineStyle } from "../../kit";
-import { tokens } from "../hud/styles";
 import { theme } from "../ui/kit";
 
 /** Width and height of one card, in reference units. */
@@ -32,7 +31,10 @@ export const ropeStyle = defineStyle({
   reason: "the rope runs behind the cards, across the strip"
 });
 
-/** One order card: the paper tag. A ready card is selected and glows honey (design §6 B2). */
+/**
+ * One order card: the paper tag. A ready card is selected: it glows honey and stands a little
+ * larger (design §6 B2, F10). The larger rest pose is what starts its sway.
+ */
 export const orderCard = defineStyle({
   ...card,
   direction: "column",
@@ -41,7 +43,7 @@ export const orderCard = defineStyle({
   gap: 10,
   padding: { top: 64, right: 20, bottom: 28, left: 20 },
   nineSlice: "orders.card-order",
-  is: { selected: { tint: theme.color.honeyGlow } }
+  is: { selected: { tint: theme.color.honeyGlow, scale: 1.04 } }
 });
 
 /** The clothespin that holds a card to the rope, over the middle of its top edge. */
@@ -95,30 +97,3 @@ export const rewardRow = defineStyle({ direction: "row", align: "center", gap: 8
 
 /** The coin in front of the reward. */
 export const rewardIcon = defineStyle({ width: 48, height: 48 });
-
-/** The panel of the popup, centred by the layout of the popup layer. */
-export const rewardPanel = defineStyle({
-  direction: "column",
-  align: "center",
-  justify: "center",
-  gap: tokens.space.sm,
-  padding: tokens.space.md,
-  width: 640,
-  height: 420,
-  radius: tokens.radius.card,
-  fill: tokens.color.bar,
-  stroke: tokens.color.accent,
-  strokeWidth: 4
-});
-
-/** The one button of the popup: it answers `claim`, which is the outcome of the component. */
-export const claimButton = defineStyle({
-  direction: "column",
-  align: "center",
-  justify: "center",
-  width: 320,
-  height: 120,
-  radius: tokens.radius.card,
-  fill: tokens.color.card,
-  is: { pressed: { fill: tokens.color.accent } }
-});
