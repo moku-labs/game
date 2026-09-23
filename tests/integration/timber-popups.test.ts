@@ -434,6 +434,11 @@ describe("timber-popups — the look of a popup board", () => {
       // As wide as its title and 80 units on each side, never under 420.
       expect(plaque.w, header).toBeGreaterThanOrEqual(420);
       expect(plaque.w, header).toBe(Math.max(420, rectOf(game, `${board}Title`).w + 160));
+      // Hung a little crooked: 1.5 degrees to the left, turning around its middle.
+      expect(nodeOf(game.app.ui.tree(), header)?.style.rotation, header).toBe(-0.026);
+      expect(game.app.world.ecs.get(elementOf(game, header), Transform)?.rotation, header).toBe(
+        -0.026
+      );
     }
 
     await game.app.stop();
@@ -491,6 +496,12 @@ describe("timber-popups — the look of a popup board", () => {
     // The board's inner width: 840 less 72 on each side.
     expect(watch).toMatchObject({ x: board.x + 72, w: 840 - 2 * 72, h: 200 });
     expect(shows(game, "energyWatchPlay")).toBe(true);
+    // The play glyph is a moss triangle with an ink edge in the cream ring, pointing right; no text.
+    expect(nodeOf(game.app.ui.tree(), "energyWatchPlayMark")?.style).toMatchObject({
+      shape: "triangle",
+      stroke: 0x3a_22_12
+    });
+    expect(game.app.world.ecs.has(elementOf(game, "energyWatchPlayMark"), Text)).toBe(false);
     expect(rectOf(game, "energyLater")).toMatchObject({ w: 554, h: 150 });
 
     await game.app.stop();

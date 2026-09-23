@@ -65,9 +65,11 @@ describe("timber-board — the column (p2)", () => {
     const bar = rectOf(game, "infoBar");
 
     expect(strip.y).toBe(hud.y + hud.h + 11);
-    expect(tray).toMatchObject({ y: strip.y + strip.h + 24, w: 970, h: 970 });
+    // The strip gives the tray's 24 units back and 18 more: its cards hang over the tray (p2).
+    expect(tray).toMatchObject({ y: strip.y + strip.h - 18, w: 970, h: 970 });
     expect(tray.x + tray.w / 2).toBe(strip.x + strip.w / 2);
-    expect(bar).toMatchObject({ y: tray.y + tray.h + 24, w: 830, h: 160 });
+    // The bar keeps its place in p2: the 42 units the tray rose under the strip are its gap.
+    expect(bar).toMatchObject({ y: tray.y + tray.h + 66, w: 830, h: 160 });
     // The tray is never fitted on its own: the viewport fits the whole column.
     expect(nodeOf(game.app.ui.tree(), "boardSlot")?.fitScale).toBeUndefined();
     // The whole column fits the long side the game declares; the rest is left below the bar.
@@ -103,9 +105,14 @@ describe("timber-board — the order strip (p2)", () => {
       { w: 300, h: 550 }
     ]);
     expect(cards.map(card => card.y - strip.y)).toEqual([74, 94, 74]);
-    // The cards at the ends fill the strip; the middle one hangs into the gap above the tray.
+    // The cards at the ends fill the strip and hang 18 units over the top of the tray, the middle
+    // one 38 (p2); the strip draws over the tray.
+    const tray = rectOf(game, "boardSlot");
+
     expect((cards[0]?.y ?? 0) + (cards[0]?.h ?? 0)).toBe(strip.y + strip.h);
-    expect((cards[1]?.y ?? 0) + (cards[1]?.h ?? 0)).toBeLessThan(rectOf(game, "boardSlot").y);
+    expect(cards.map(card => card.y + card.h - tray.y)).toEqual([18, 38, 18]);
+    expect(nodeOf(game.app.ui.tree(), "orders")?.style.zIndex).toBe(1);
+    expect(game.app.world.ecs.get(elementOf(game, "orders"), Order)?.value).toBe(1);
     expect(game.app.world.ecs.get(elementOf(game, "ordersRope"), Sprite)?.texture).toBe(
       "orders.rope"
     );
@@ -124,6 +131,9 @@ describe("timber-board — the order strip (p2)", () => {
     expect(ecs.get(elementOf(game, "card1Name"), Text)?.resolved).toBe("Бревно");
     expect(ecs.get(elementOf(game, "card1CountLabel"), Text)?.resolved).toBe("×2");
     expect(ecs.get(elementOf(game, "card1LevelNumber"), Text)?.resolved).toBe("2");
+    // The digits of both badges are ink on the honey disc, with no outline (p2).
+    expect(ecs.get(elementOf(game, "card1CountLabel"), Text)?.style).toBe("ui.badgeInk");
+    expect(ecs.get(elementOf(game, "card1LevelNumber"), Text)?.style).toBe("ui.badgeInk");
     // Lower left and lower right of the frame, both over its rim.
     expect(count.x).toBeLessThan(picture.x);
     expect(level.x + level.w).toBeGreaterThan(picture.x + picture.w);

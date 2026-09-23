@@ -11,7 +11,10 @@
   </head>
   <body>
     <!-- Run `bun ./web/serve.ts` from tests/integration/merge-game/: it serves this page on /
-         and /manifest.json plus /features/board/assets/*.png as static files. -->
+         and /manifest.json plus /features/board/assets/*.png as static files.
+         Keyboard: Tab and Shift+Tab move the focus through the controls of the top popup (or of
+         the screen when no popup is open), Enter or Space taps the focused control, and Escape
+         closes a dismissable popup (Settings, Out of energy, Daily gift). -->
     <div id="game"></div>
     <script type="module" src="./main.ts"></script>
   </body>

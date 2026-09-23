@@ -11,13 +11,24 @@ export const orderCardSize = { width: 300, height: 550 } as const;
 
 /**
  * How far a card hangs under the top of the strip. The rope sags, so the middle card hangs
- * 20 units lower than the two at the ends.
+ * 20 units lower than the two at the ends, and deeper over the tray.
  */
 const hang = { end: 74, middle: 94 } as const;
 
 /**
+ * How far the cards hang over the top of the tray (p2: the ends 13 px over its rim, the middle
+ * one 29 px). The tray keeps 24 units above it (`board/tray.tsx`), so the strip gives those back
+ * and the cards at the ends overlap the tray by the rest.
+ */
+const overTray = 18;
+
+/** The margin the tray keeps above it, which the strip gives back. */
+const trayMargin = 24;
+
+/**
  * The strip under the HUD: 11 units below it, as tall as the cards at the ends of the rope hang.
- * The middle card hangs 20 units lower, into the gap above the tray.
+ * Its cards hang over the top of the tray, the ends 18 units and the middle one 38, so it draws
+ * over the tray (`zIndex`), as in p2.
  */
 export const orderStrip = defineStyle({
   direction: "row",
@@ -25,7 +36,8 @@ export const orderStrip = defineStyle({
   justify: "evenly",
   alignSelf: "stretch",
   height: hang.end + orderCardSize.height,
-  margin: { top: 11 }
+  margin: { top: 11, bottom: -(trayMargin + overTray) },
+  zIndex: 1
 });
 
 /** The washing line: one sagging rope across the whole strip, behind the cards. */

@@ -174,7 +174,19 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
       i18n: { locale: "ru", fallback: "ru" },
       audio: { volumes: volumesOf },
-      input: { heldScale: 1.08 }
+      input: { heldScale: 1.08 },
+      // The keyboard focus ring of design §4: a dashed ink ring over a cream halo, 9 px of the
+      // 390-wide design outside the control.
+      ui: {
+        focusRing: {
+          stroke: 0x3a_22_12,
+          strokeWidth: 4,
+          dash: 10,
+          offset: 25,
+          halo: 0xff_f3_d6,
+          haloWidth: 12
+        }
+      }
     }
   });
 

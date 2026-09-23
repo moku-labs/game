@@ -9,8 +9,9 @@
 
 import { readFile } from "node:fs/promises";
 import type { Assets, Ui } from "@moku-labs/game";
-import { Parent, Sprite, Tappable, Text, Touchable, Transform } from "@moku-labs/game";
+import { Parent, Shape, Sprite, Tappable, Text, Touchable, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
+import { GIFT_WOBBLE_MS } from "./merge-game/features/home/motions";
 import { fillHead, fillWidth, track } from "./merge-game/features/splash/view";
 import { createScreenGame, startMoment } from "./merge-game/game";
 import type { Player, Session } from "./merge-game/state";
@@ -167,6 +168,24 @@ function sessionOf(game: Game): Session {
 }
 
 /**
+ * Finds the element that has the keyboard focus.
+ *
+ * @param node - The node to search from.
+ * @returns The focused node, or `undefined` when nothing has the focus.
+ */
+function focusedIn(node: Ui.UiNode): Ui.UiNode | undefined {
+  if (node.state.focus) return node;
+
+  for (const child of node.children) {
+    const found = focusedIn(child);
+
+    if (found !== undefined) return found;
+  }
+
+  return undefined;
+}
+
+/**
  * Finds a keyed node in the snapshot of the screen.
  *
  * @param node - The snapshot to search.
@@ -305,17 +324,30 @@ describe("timber-screens — the splash", () => {
     await frames(game);
 
     const ecs = game.app.world.ecs;
-    const blade = game.app.world.projection.entitiesOf("splash.blade")[0] ?? 0;
-    // `get` answers the stored object, which the next frame writes into: copy what is read.
-    const first = { ...ecs.get(blade, Transform) };
+    const blade = elementOf(game, "loadingBlade");
+    const rect = rectOf(game, "loadingBlade");
+    const trackRect = rectOf(game, "loadingTrack");
+    const first = ecs.get(blade, Transform)?.rotation ?? 0;
 
-    expect(ecs.get(blade, Parent)?.entity).toBe(elementOf(game, "loadingTrack"));
-    expect(ecs.get(blade, Sprite)?.texture).toBe("ui.icon-gear");
-    expect(first).toMatchObject({ x: fillHead(sessionOf(game).loading), y: track.height / 2 });
+    // The middle of the blade stands on the head of the fill, on the middle line of the track.
+    expect(rect.x + rect.w / 2 - trackRect.x).toBe(fillHead(sessionOf(game).loading));
+    expect(rect.y + rect.h / 2 - trackRect.y).toBe(track.height / 2);
+    expect(ecs.get(blade, Sprite)).toMatchObject({ texture: "ui.icon-gear", tint: 0xb8_c4_cc });
 
     await frames(game, 3);
 
-    expect(ecs.get(blade, Transform)?.rotation).not.toBe(first.rotation);
+    expect(ecs.get(blade, Transform)?.rotation).not.toBe(first);
+
+    // Under reduced motion the blade stands on its rest pose.
+    game.app.anim.reducedMotion(true);
+    await frames(game, 2);
+
+    const held = ecs.get(blade, Transform)?.rotation;
+
+    await frames(game, 5);
+
+    expect(held).toBe(0);
+    expect(ecs.get(blade, Transform)?.rotation).toBe(held);
 
     disk.release();
     await until(game, () => game.app.flow.state().path === "home");
@@ -410,6 +442,92 @@ describe("timber-screens — Home", () => {
     );
     expect(childKeysOf(game, "homeScreen").at(-1)).toBe("homeTop");
     expect(game.app.world.ecs.has(elementOf(game, "homeLogo"), Touchable)).toBe(false);
+
+    await game.app.stop();
+  });
+});
+
+/**
+ * Runs frames and records the rotation of the gift wobble in each of them.
+ *
+ * @param game - The running game.
+ * @param count - How many frames.
+ * @returns The rotation in each frame.
+ */
+async function wobbleOf(game: Game, count: number): Promise<number[]> {
+  const wobble = elementOf(game, "giftWobble");
+  const tilts: number[] = [];
+
+  for (let frame = 0; frame < count; frame += 1) {
+    await frames(game, 1);
+    tilts.push(game.app.world.ecs.get(wobble, Transform)?.rotation ?? 0);
+  }
+
+  return tilts;
+}
+
+describe("timber-screens — the daily gift wobble (B6)", () => {
+  it("wobbles the gift button on its middle while the gift waits, again and again", async () => {
+    const game = await start(createScreenGame({ manifest: await readManifest() }));
+
+    await frames(game);
+
+    const tilts = await wobbleOf(game, Math.ceil((2 * GIFT_WOBBLE_MS) / 16));
+    const second = tilts.slice(Math.ceil(GIFT_WOBBLE_MS / 16));
+
+    expect(Math.max(...second)).toBeGreaterThan(0.1);
+    expect(Math.min(...second)).toBeLessThan(-0.1);
+    // The wobble turns the button, never moves it: the wrapper is the button's own rect.
+    expect(rectOf(game, "giftWobble")).toEqual(rectOf(game, "gift"));
+    expect(game.app.world.ecs.get(elementOf(game, "giftWobble"), Transform)?.pivot).toEqual({
+      x: 130,
+      y: 130
+    });
+
+    await game.app.stop();
+  });
+
+  it("stands the gift button still once the gift is claimed", async () => {
+    const claimed: Player = { ...startingPlayer, giftClaimed: true };
+    const game = await start(createScreenGame({ player: claimed, manifest: await readManifest() }));
+
+    await frames(game);
+
+    const tilts = await wobbleOf(game, Math.ceil(GIFT_WOBBLE_MS / 16));
+
+    expect(tilts.every(tilt => tilt === 0)).toBe(true);
+
+    await game.app.stop();
+  });
+});
+
+describe("timber-screens — the keyboard focus ring (design §4)", () => {
+  it("draws the dashed ink ring 25 units outside the focused control, over a cream halo", async () => {
+    const game = await start(createScreenGame({ manifest: await readManifest() }));
+
+    await frames(game);
+    expect(game.app.input.key("Tab")).toBe(true);
+    await frames(game);
+
+    const focused = focusedIn(game.app.ui.tree());
+    const rect = nodeOf(game.app.ui.tree(), focused?.key ?? "")?.rect;
+    const ecs = game.app.world.ecs;
+    const parts = [...ecs.query(Shape)].filter(([, shape]) => shape.alpha === 1 && shape.dash > 0);
+    const [ring] = parts;
+
+    expect(focused).toBeDefined();
+    expect(parts).toHaveLength(1);
+    expect(ring?.[1]).toMatchObject({
+      stroke: 0x3a_22_12,
+      strokeWidth: 4,
+      dash: 10,
+      w: (rect?.w ?? 0) + 50,
+      h: (rect?.h ?? 0) + 50
+    });
+    expect(ecs.get(ring?.[0] ?? 0, Transform)).toMatchObject({
+      x: (rect?.x ?? 0) - 25,
+      y: (rect?.y ?? 0) - 25
+    });
 
     await game.app.stop();
   });

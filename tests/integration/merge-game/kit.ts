@@ -37,6 +37,7 @@ export type TextStyleKey =
   | "ui.link"
   | "ui.small"
   | "ui.badge"
+  | "ui.badgeInk"
   | "ui.logo"
   | "ui.sign";
 

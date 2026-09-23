@@ -1,8 +1,8 @@
 /**
  * @file The popup shell of Timber Town (design §4, §5.7, §6 E and F): every popup is a `screen`
  * root that holds a full-bleed backdrop and one hung signboard, centred in the safe area. The
- * backdrop dims the screen and fades in; on a dismissable popup it answers `close`, on Reward and
- * Confirm it answers nothing and only swallows the tap. The board itself is the `Signboard` of the
+ * backdrop dims the screen and fades in; on a dismissable popup it answers `close`, and Escape
+ * taps it (design §4); on Reward and Confirm it answers nothing and only swallows the tap. The board itself is the `Signboard` of the
  * kit with `hung`: ropes, the swing, the fit into the safe area and the recede under a cover.
  *
  * The prize of Reward, Daily gift and Out of energy is here too: a reward on the honey rays with
@@ -49,7 +49,10 @@ const backdropMotion = defineMotion({
 export type PopupScreenProps = {
   /** The popup's name: the root is keyed `<id>Screen`, the backdrop `<id>Backdrop`. */
   id: string;
-  /** The intent the backdrop answers. Left out, the popup is not dismissable (Reward, Confirm). */
+  /**
+   * The intent the backdrop answers, on a tap and on Escape. Left out, the popup is not
+   * dismissable (Reward, Confirm).
+   */
   dismiss?: string;
   /** The hung signboard of the popup. */
   children?: unknown;
@@ -73,6 +76,7 @@ export function PopupScreen(props: PopupScreenProps) {
         <button
           key={backdrop}
           intent={props.dismiss}
+          escape
           style={backdropStyle}
           motion={backdropMotion}
         />

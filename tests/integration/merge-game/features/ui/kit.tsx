@@ -182,6 +182,21 @@ const playRingStyle = defineStyle({
   justify: "center"
 });
 
+/**
+ * The play mark in the ring (design §6 E4): a moss triangle with an ink edge, pointing right. It
+ * moves right by a sixth of its width, so its centre of mass, not its box, sits in the middle of
+ * the ring.
+ */
+const playMarkStyle = defineStyle({
+  width: 30,
+  height: 34,
+  shape: "triangle",
+  fill: 0x55_7f_2d,
+  stroke: theme.color.ink,
+  strokeWidth: 4,
+  offsetX: 5
+});
+
 /** What a plank button takes. */
 export type PlankButtonProps = {
   /** The key of the button; its words are keyed `<id>Label`. */
@@ -228,7 +243,7 @@ export function PlankButton(props: PlankButtonProps) {
       ) : undefined}
       {props.glyph === "play" ? (
         <stack key={`${props.id}Play`} style={playRingStyle}>
-          <text key={`${props.id}PlayMark`} style="ui.tab" content=">" />
+          <stack key={`${props.id}PlayMark`} style={playMarkStyle} />
         </stack>
       ) : undefined}
       <text key={`${props.id}Label`} style={plankLabels[size]} content={props.label} />
@@ -432,7 +447,8 @@ const PLAQUE_HEIGHT = 150;
 
 /**
  * The honey title plaque: a separate plank as wide as its title plus the padding, centred on the
- * top edge of the board with half of it above. The same in every popup, so titles are uniform.
+ * top edge of the board with half of it above and tilted by 1.5 degrees. The same in every popup,
+ * so titles are uniform.
  */
 const plaqueStyle = defineStyle({
   position: "absolute",
@@ -444,6 +460,8 @@ const plaqueStyle = defineStyle({
   align: "center",
   justify: "center",
   nineSlice: "ui.header-plank",
+  // Hung a little crooked, 1.5 degrees to the left, as the design draws it.
+  rotation: -0.026,
   reason: "the title plaque sits on the top edge of the signboard, half above it (design §6 G)"
 });
 

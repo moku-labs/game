@@ -2,13 +2,14 @@
  * @file The splash (design §6 A1, §5.10): the full-bleed forest, the logo sign of Home at 24 % of
  * the safe height, and the loader 305 units above the bottom safe edge: the wooden track, the
  * honey fill that grows with `session.loading`, which the `setLoading` node commits as the three
- * bundles come in, the saw blade riding the head of the fill (`blade.ts`, hosted by the track),
- * and "Загрузка…" under it.
+ * bundles come in, the saw blade spinning on the head of the fill (`blade.ts`), and "Загрузка…"
+ * under it.
  */
 import { defineStyle, projection, tr } from "../../kit";
 import type { Player, Session } from "../../state";
 import { LogoSign } from "../home/logo";
 import { fullBleed, safeScreen } from "../ui/kit";
+import { blade, bladeSpin } from "./blade";
 
 /** The track of the loading bar and the inset its fill keeps from the rim. */
 export const track = { width: 810, height: 100, inset: 16 } as const;
@@ -68,7 +69,7 @@ export function fillWidth(loading: number): number {
 }
 
 /**
- * Where the fill ends, in the track's own units: the point the saw blade rides on.
+ * Where the fill ends, in the track's own units: the point the middle of the saw blade stands on.
  *
  * @param loading - The share, 0..1.
  * @returns The x of the head of the fill.
@@ -97,6 +98,25 @@ function fillStyle(loading: number) {
 }
 
 /**
+ * The style of the saw blade for one share: its middle on the head of the fill and on the middle
+ * line of the track, tinted steel.
+ *
+ * @param loading - The share, 0..1.
+ * @returns The style of the blade.
+ */
+function bladeStyle(loading: number) {
+  return defineStyle({
+    position: "absolute",
+    left: fillHead(loading) - blade.size / 2,
+    top: (track.height - blade.size) / 2,
+    width: blade.size,
+    height: blade.size,
+    tint: blade.steel,
+    reason: "the saw blade rides the head of the fill, over the rim of the track"
+  });
+}
+
+/**
  * The splash screen: one item, so the projection needs no key.
  */
 export const splashScreen = projection({
@@ -110,8 +130,14 @@ export const splashScreen = projection({
       <LogoSign id="splashLogo" />
       <spacer key="splashBetween" style={between} />
       <column key="loader" style={loader}>
-        <row key="loadingTrack" hosts={["splash.blade"]} style={trackStyle}>
+        <row key="loadingTrack" style={trackStyle}>
           <row key="loadingFill" style={fillStyle(item.loading)} />
+          <image
+            key="loadingBlade"
+            texture="ui.icon-gear"
+            style={bladeStyle(item.loading)}
+            motion={bladeSpin}
+          />
         </row>
         <text key="loadingLabel" style="ui.caption" content={tr("splash.loading")} />
       </column>
