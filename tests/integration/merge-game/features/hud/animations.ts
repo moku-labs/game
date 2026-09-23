@@ -1,7 +1,7 @@
 /**
  * @file The coin flight (design §6 F3): a coin gain flies coins from the popup picture to the coin
- * icon of the counter, and the counter rolls when they land. Seven coins for a reward, eight for
- * the daily gift. The coins are temporary entities the animation spawns, `coin1` … `coin8`, and
+ * icon of the counter, and the counter rolls when they land, as `ui.coins` rings. Seven coins for a
+ * reward, eight for the daily gift. The coins are temporary entities the animation spawns, `coin1` … `coin8`, and
  * every one of them is despawned when the timeline ends.
  *
  * A coin flies on a curve: its x and its y are two tweens with different eases. Each tween reads
@@ -14,12 +14,14 @@ import {
   parallel,
   sequence,
   set,
+  sfx,
   spawn,
   spawned,
   stagger,
   Transform,
   tween,
-  type
+  type,
+  wait
 } from "@moku-labs/game";
 import { defineAnimation, Sprite } from "../../kit";
 
@@ -92,31 +94,35 @@ function coinFlight(id: string, count: number) {
             );
           })
         ),
-        stagger(coins, STAGGER_MS, (coin, index) =>
-          sequence(
-            parallel(
-              tween(
-                spawned(coin),
-                Transform,
-                { x: end.x },
-                {
-                  ms: FLIGHT_MS,
-                  ease: index % 2 === 0 ? "out" : "inOut"
-                }
+        parallel(
+          // The first coin lands after one flight: the jingle rings as the counter starts to roll.
+          sequence(wait(FLIGHT_MS), sfx("ui.coins")),
+          stagger(coins, STAGGER_MS, (coin, index) =>
+            sequence(
+              parallel(
+                tween(
+                  spawned(coin),
+                  Transform,
+                  { x: end.x },
+                  {
+                    ms: FLIGHT_MS,
+                    ease: index % 2 === 0 ? "out" : "inOut"
+                  }
+                ),
+                tween(
+                  spawned(coin),
+                  Transform,
+                  { y: end.y },
+                  {
+                    ms: FLIGHT_MS,
+                    ease: index % 2 === 0 ? "inCubic" : "in"
+                  }
+                ),
+                tween(spawned(coin), Transform, { scale: 0.7 }, { ms: FLIGHT_MS, ease: "in" })
               ),
-              tween(
-                spawned(coin),
-                Transform,
-                { y: end.y },
-                {
-                  ms: FLIGHT_MS,
-                  ease: index % 2 === 0 ? "inCubic" : "in"
-                }
-              ),
-              tween(spawned(coin), Transform, { scale: 0.7 }, { ms: FLIGHT_MS, ease: "in" })
-            ),
-            // Landed: the coin is gone from sight at once, its entity leaves with the timeline.
-            set(spawned(coin), Sprite, { alpha: 0 })
+              // Landed: the coin is gone from sight at once, its entity leaves with the timeline.
+              set(spawned(coin), Sprite, { alpha: 0 })
+            )
           )
         )
       );

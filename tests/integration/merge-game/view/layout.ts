@@ -6,26 +6,33 @@
  */
 import type { Board, CellId } from "../rules";
 
-/** The board slot: a square of 970 units, the tray drawn over all of it (design §5.5). */
-export const slot = { size: 970, inset: 55, gap: 10 } as const;
+/**
+ * The board slot: a square of 970 units, the tray drawn over all of it (design p2). The cells
+ * start 55 units in, just inside the wooden frame of the tray, and keep 22 units of tray floor
+ * between them.
+ */
+export const slot = { size: 970, inset: 55, gap: 22 } as const;
 
 /** Edge length of one cell: three cells and two gaps fill the tray inside its inset. */
 export const cellSize = (slot.size - 2 * slot.inset - 2 * slot.gap) / 3;
 
-/** Edge length of the box an item or the generator is drawn into: the cell less its grass rim. */
+/** Edge length of the box an item or the generator is drawn into: 82 % of the cell. */
 export const itemSize = Math.round(cellSize * 0.82);
 
 /**
  * Draw order inside the board slot: the grass, the glow on it, the selection ring, the generator,
- * the four parts of its clock badge, the items over everything.
+ * the three parts of its charges plate, the four parts of its clock badge, the items, and the
+ * check badge over the item a ready order takes.
  */
 export const depth = {
   cells: 0,
   glows: 1,
   selection: 2,
   generators: 3,
-  clock: 4,
-  items: 8
+  charges: 4,
+  clock: 7,
+  items: 11,
+  check: 12
 } as const;
 
 /**
@@ -33,7 +40,7 @@ export const depth = {
  *
  * @example
  * ```ts
- * const at: Point = { x: 485, y: 195 };
+ * const at: Point = { x: 485, y: 191 };
  * ```
  */
 export type Point = { x: number; y: number };
@@ -43,7 +50,7 @@ export type Point = { x: number; y: number };
  *
  * @example
  * ```ts
- * const box: CellBox = { x: 345, y: 55, size: 280, middle: { x: 485, y: 195 } };
+ * const box: CellBox = { x: 349, y: 55, size: 272, middle: { x: 485, y: 191 } };
  * ```
  */
 export type CellBox = { x: number; y: number; size: number; middle: Point };
@@ -89,7 +96,7 @@ function coordinatesOf(cell: CellId): { col: number; row: number } {
  * @returns The corner, the size and the middle of the cell.
  * @example
  * ```ts
- * cellBox("c1_0"); // { x: 345, y: 55, size: 280, middle: { x: 485, y: 195 } }
+ * cellBox("c1_0"); // { x: 349, y: 55, size: 272, middle: { x: 485, y: 191 } }
  * ```
  */
 export function cellBox(cell: CellId): CellBox {

@@ -9,6 +9,7 @@ import type { Anim } from "@moku-labs/game";
 import { play, sfx, type } from "@moku-labs/game";
 import { coinsFlyReward } from "../features/hud/animations";
 import { RewardPopup, rewardPictureOf } from "../features/orders/reward";
+import { showPopup } from "../features/ui/popup";
 import { defineNode, popup } from "../kit";
 
 /** The prize box of the reward popup: where the coins start from. */
@@ -23,14 +24,14 @@ export const show = defineNode({
   run: async ({ player, fx, out }) => {
     void fx(sfx("orders.complete"));
 
-    await fx(
+    await showPopup(
+      fx,
       popup(RewardPopup, {
         coins: player.pendingCoins,
         picture: rewardPictureOf(player.pendingReward)
       })
     );
 
-    void fx(sfx("ui.click"));
     void fx(play(coinsFlyReward, { from: prize, to: coinIcon }));
 
     return out.claim();

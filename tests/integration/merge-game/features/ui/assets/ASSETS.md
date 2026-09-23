@@ -355,6 +355,12 @@ Subject: A speaker with exactly two sound waves, drawn as two clear curved arcs 
 - File: `features/ui/assets/link-wave.webp`, 400 × 16 px: the wavy underline of a text link, berry `#c93b4d`, 3 px stroke, period 24 px, amplitude 4 px.
 - Drawn with ImageMagick (a sine path), not by Astra.
 
+### `orders.rope`
+
+- File: `features/orders/assets/rope.webp`, 1080 × 100 px: the rope of the order strip, a quadratic
+  Bézier that sags 42 u, ink `#3a2212` 18 px with `#dcaa66` dashes 7 px (19 on, 8 off).
+- Drawn with ImageMagick, not by Astra.
+
 ## Fonts
 
 - `features/ui/assets/font-display.fnt` with its page `font-display.png` (key `ui.font-display`):
@@ -382,6 +388,3 @@ and converted with ffmpeg (effects mono 44.1 kHz 96 kbps, music stereo 44.1 kHz 
 | `board.spawn` | `features/board/assets/spawn.mp3` | Interface Sounds 1.0 | `pluck_002.ogg` |
 | `orders.complete` | `features/orders/assets/complete.mp3` | Music Jingles | `Pizzicato jingles/jingles_PIZZI07.ogg` |
 | `ui.theme` | `features/ui/assets/theme.mp3` | Music Loops (Kenney's Sound Pack) | `Farm Frolics.ogg`, the 10.7 s loop repeated four times (42.7 s) |
-
-`board.theme` is the last placeholder tone (a 220 Hz sine); the board moves to `ui.theme` and the
-file is removed with it.

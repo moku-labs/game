@@ -13,7 +13,7 @@ export type Strings = {
   "energy.title": Record<string, never>;
   "energy.watch": Record<string, never>;
   "gift.claim": Record<string, never>;
-  "gift.reward": { coins: number };
+  "gift.coins": { coins: number };
   "gift.title": Record<string, never>;
   "home.play": Record<string, never>;
   "hud.deliver": Record<string, never>;

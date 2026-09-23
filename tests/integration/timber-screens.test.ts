@@ -1,6 +1,7 @@
 /**
  * @file The screens of Timber Town, headless: the splash fills its loading bar from the asset
- * events and moves on to Home by itself, Play on Home opens the board, the board slot hosts every
+ * events, rides the saw blade on the head of the fill and moves on to Home by itself, Home lays out
+ * as the design (the bar, the centre group, the gift), Play on Home opens the board, the board slot hosts every
  * cell, the sawmill and every item, before and after a drag merges two of them, the three order
  * cards enable only the Deliver the rules accept, and the HUD shows the energy of the save. Plain
  * Bun: the renderer is inert and Yoga lays out the same rects as in the browser.
@@ -8,9 +9,9 @@
 
 import { readFile } from "node:fs/promises";
 import type { Assets, Ui } from "@moku-labs/game";
-import { Parent, Tappable, Text, Touchable } from "@moku-labs/game";
+import { Parent, Sprite, Tappable, Text, Touchable, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
-import { fillWidth } from "./merge-game/features/splash/view";
+import { fillHead, fillWidth, track } from "./merge-game/features/splash/view";
 import { createScreenGame, startMoment } from "./merge-game/game";
 import type { Player, Session } from "./merge-game/state";
 import { startingPlayer } from "./merge-game/state";
@@ -201,6 +202,28 @@ function elementOf(game: Game, key: string): number {
 }
 
 /**
+ * The natural rect of a keyed node of the screen, in root units.
+ *
+ * @param game - The running game.
+ * @param key - The key of the node.
+ * @returns Its rect; a zero rect when it is not on the screen.
+ */
+function rectOf(game: Game, key: string): Ui.UiNode["rect"] {
+  return nodeOf(game.app.ui.tree(), key)?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+}
+
+/**
+ * The keys of the children of one keyed node, in draw order.
+ *
+ * @param game - The running game.
+ * @param key - The key of the node.
+ * @returns The keys of its children.
+ */
+function childKeysOf(game: Game, key: string): string[] {
+  return (nodeOf(game.app.ui.tree(), key)?.children ?? []).map(child => child.key ?? "");
+}
+
+/**
  * Starts the headless game and walks it onto the board through the screens: the splash lets it
  * through (every bundle counts as loaded without a file seam), and the Play plank of Home is
  * tapped.
@@ -254,6 +277,51 @@ describe("timber-screens — the splash", () => {
     await game.app.stop();
   });
 
+  it("hangs the logo at 24 % of the safe height and the loader 305 units above the bottom", async () => {
+    const disk = diskIo("features/board/");
+    const game = await start(createScreenGame({ manifest: await readManifest(), io: disk.io }));
+
+    await until(game, () => sessionOf(game).loading > 0.5);
+    await frames(game);
+
+    const screen = rectOf(game, "splashScreen");
+    const loader = rectOf(game, "loader");
+
+    expect(Math.abs(rectOf(game, "splashLogo").y - 0.24 * screen.h)).toBeLessThanOrEqual(1);
+    expect(rectOf(game, "splashLogo").w).toBe(900);
+    expect(loader.y + loader.h).toBe(screen.h - 305);
+    expect(rectOf(game, "loadingTrack")).toMatchObject({ w: track.width, h: track.height });
+
+    disk.release();
+    await until(game, () => game.app.flow.state().path === "home");
+    await game.app.stop();
+  });
+
+  it("rides the spinning saw blade on the head of the fill", async () => {
+    const disk = diskIo("features/board/");
+    const game = await start(createScreenGame({ manifest: await readManifest(), io: disk.io }));
+
+    await until(game, () => sessionOf(game).loading > 0.5);
+    await frames(game);
+
+    const ecs = game.app.world.ecs;
+    const blade = game.app.world.projection.entitiesOf("splash.blade")[0] ?? 0;
+    // `get` answers the stored object, which the next frame writes into: copy what is read.
+    const first = { ...ecs.get(blade, Transform) };
+
+    expect(ecs.get(blade, Parent)?.entity).toBe(elementOf(game, "loadingTrack"));
+    expect(ecs.get(blade, Sprite)?.texture).toBe("ui.icon-gear");
+    expect(first).toMatchObject({ x: fillHead(sessionOf(game).loading), y: track.height / 2 });
+
+    await frames(game, 3);
+
+    expect(ecs.get(blade, Transform)?.rotation).not.toBe(first.rotation);
+
+    disk.release();
+    await until(game, () => game.app.flow.state().path === "home");
+    await game.app.stop();
+  });
+
   it("lets a game without the file seam through to Home at once", async () => {
     const game = await start(createScreenGame({ manifest: await readManifest() }));
 
@@ -263,6 +331,85 @@ describe("timber-screens — the splash", () => {
     expect(sessionOf(game).loading).toBe(1);
     // The daily gift waits, so its button carries the red "1".
     expect(game.app.world.ecs.get(elementOf(game, "giftBadgeCount"), Text)?.resolved).toBe("1");
+
+    await game.app.stop();
+  });
+});
+
+describe("timber-screens — Home", () => {
+  it("lays Home out as the design: the bar, the centre group between the bar and the gift, the gift at the bottom", async () => {
+    const game = await start(createScreenGame({ manifest: await readManifest() }));
+
+    await frames(game);
+
+    const screen = rectOf(game, "homeScreen");
+    const bar = rectOf(game, "homeBar");
+    const middle = rectOf(game, "homeMiddle");
+    const centre = rectOf(game, "homeCentre");
+    const label = rectOf(game, "giftLabel");
+
+    expect(game.app.world.ecs.get(elementOf(game, "homeBackground"), Sprite)?.texture).toBe(
+      "board.bg-forest-meadow"
+    );
+    expect(bar).toMatchObject({ y: 50, h: 144, w: screen.w });
+    // The centre group is centred in the room between the bar and the gift row.
+    expect(middle.y).toBe(bar.y + bar.h);
+    expect(middle.y + middle.h).toBe(rectOf(game, "homeBottom").y);
+    expect(centre.y + centre.h / 2).toBeCloseTo(middle.y + middle.h / 2, 5);
+    expect(
+      ["homeLogo", "homeYard", "play", "gift"].map(key => [
+        rectOf(game, key).w,
+        rectOf(game, key).h
+      ])
+    ).toEqual([
+      [900, 440],
+      [960, 924],
+      [880, 220],
+      [260, 260]
+    ]);
+    expect(Math.abs(screen.h - 44 - (label.y + label.h))).toBeLessThanOrEqual(1);
+
+    await game.app.stop();
+  });
+
+  it("scales the centre group down as one when the room between the bar and the gift is short", async () => {
+    const game = await start(createScreenGame({ manifest: await readManifest() }));
+
+    await frames(game);
+
+    const middle = rectOf(game, "homeMiddle");
+    const centre = nodeOf(game.app.ui.tree(), "homeCentre");
+
+    // Headless the screen is 1080 × 1440, the shortest shape: the group of 1644 units shrinks.
+    expect(centre?.fitScale).toBeCloseTo(middle.h / (centre?.rect.h ?? 1), 5);
+    expect(centre?.fitScale).toBeLessThan(1);
+
+    await game.app.stop();
+  });
+
+  it("hangs the logo on ropes from above, stands the Play plank on its posts, and draws the bar last", async () => {
+    const game = await start(createScreenGame({ manifest: await readManifest() }));
+
+    await frames(game);
+
+    const logo = rectOf(game, "homeLogo");
+    const rope = rectOf(game, "homeLogoRopeLeft");
+
+    // The rope ends on the top rim of the sign and reaches 900 units above it.
+    expect(logo.y - rope.y).toBe(900);
+    expect(rope.y + rope.h - logo.y).toBe(16);
+    expect(childKeysOf(game, "playSign")).toEqual([
+      "playPostLeft",
+      "playPostRight",
+      "play",
+      "playSprigLeft",
+      "playSprigRight"
+    ]);
+    expect(rectOf(game, "playPostLeft").y + rectOf(game, "playPostLeft").h).toBe(
+      rectOf(game, "play").y + 220 + 150
+    );
+    expect(childKeysOf(game, "homeScreen").at(-1)).toBe("homeTop");
+    expect(game.app.world.ecs.has(elementOf(game, "homeLogo"), Touchable)).toBe(false);
 
     await game.app.stop();
   });
@@ -283,7 +430,7 @@ describe("timber-screens — the board screen", () => {
     expect(hosted.map(entity => game.app.world.ecs.get(entity, Parent)?.entity)).toEqual(
       hosted.map(() => slot)
     );
-    // The slot is the tray at its natural 970 units, scaled down into what the bars leave.
+    // The slot is the tray at its natural 970 units; the viewport fits the whole column.
     expect(nodeOf(game.app.ui.tree(), "boardSlot")).toMatchObject({
       rect: { w: 970, h: 970 },
       style: { nineSlice: "board.board-tray" }

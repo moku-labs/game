@@ -3,12 +3,14 @@
  * flight of the delivered item into its card and the "Готово!" stamp on a finished order, the
  * merge burst, the legal targets marked while an item is held, the sawmill squash, the twig's arc
  * out of the sawmill, the honey ring on the selected sawmill or item with the info bar that names
- * it, and the sway and glow of an order card that becomes ready. Every spawned entity is checked
- * to leave with its timeline.
+ * it, and the cards swaying on the rope, the ready one wider and glowing. Every spawned entity is
+ * checked to leave with its timeline.
  */
 
 import { Held, NineSlice, Order, Parent, Shape, Sprite, Text, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
+import { SWAY_MS } from "./merge-game/features/orders/motions";
+import { orderCardSize } from "./merge-game/features/orders/styles";
 import { generatorId } from "./merge-game/tables";
 import { Highlighted } from "./merge-game/view/components";
 import { cellBox } from "./merge-game/view/layout";
@@ -42,8 +44,11 @@ const diagonalDrop = withItems([
   { id: "i2", chain: "wood", level: 1, cell: "c0_1" }
 ]);
 
-/** The honey glow of a ready card (design §2, the `selected` variant of the card style). */
-const honeyGlow = 0xff_e3_9a;
+/** How far a card swings to each side, in radians: a waiting card 1.5°, a ready one 2.5°. */
+const reach = { waiting: 0.026, ready: 0.044 } as const;
+
+/** How many frames of 16 ms one whole swing of a card takes. */
+const swingFrames = Math.ceil(SWAY_MS / 16);
 
 /**
  * The live `Transform` of one view of a board projection.
@@ -123,7 +128,10 @@ describe("timber-motions — the Done stamp (F6)", () => {
   it("flies the delivered item into the card before the give commits", async () => {
     const game = await startOnBoard(player);
     const item = game.app.world.projection.entityOf("board.items", "i1") ?? 0;
-    const card = rootPoseOf(game, elementOf(game, "card0"));
+    // A card turns around its clothespin: its pose is the middle of its top edge, and the item
+    // lands on the middle of the card, half a card below it.
+    const pin = rootPoseOf(game, elementOf(game, "card0"));
+    const card = { ...pin, y: pin.y + (orderCardSize.height / 2) * pin.scale };
 
     await tap(game, "deliver0");
     // The stamp is spawned once the flight has landed.
@@ -266,12 +274,72 @@ describe("timber-motions — the sawmill tap (F5)", () => {
   });
 });
 
-describe("timber-motions — the ready order card (F10)", () => {
-  it("sways once when it becomes ready and keeps its honey glow", async () => {
+/**
+ * Runs frames and records the rotation of every order card in each of them.
+ *
+ * @param game - The running game.
+ * @param count - How many frames.
+ * @returns One list of rotations per card, left to right.
+ */
+async function tiltsOf(
+  game: Awaited<ReturnType<typeof startOnBoard>>,
+  count: number
+): Promise<number[][]> {
+  const cards = [0, 1, 2].map(slot => elementOf(game, `card${slot}`));
+  const tilts: number[][] = cards.map(() => []);
+
+  for (let frame = 0; frame < count; frame += 1) {
+    await frames(game, 1);
+    for (const [slot, card] of cards.entries()) {
+      tilts[slot]?.push(game.app.world.ecs.get(card, Transform)?.rotation ?? 0);
+    }
+  }
+
+  return tilts;
+}
+
+/**
+ * The widest a card swung in a run of frames.
+ *
+ * @param tilts - Its rotation in each frame.
+ * @returns The largest rotation to either side.
+ */
+function widest(tilts: readonly number[] | undefined): number {
+  return Math.max(0, ...(tilts ?? []).map(tilt => Math.abs(tilt)));
+}
+
+describe("timber-motions — the cards on the rope (F10)", () => {
+  it("sways every card on its clothespin, the ready one wider, the middle one mirrored", async () => {
+    const game = await startOnBoard(player);
+    const ecs = game.app.world.ecs;
+
+    // The plank on the board fills the first order; the log and the crate wait.
+    const tilts = await tiltsOf(game, swingFrames * 2);
+
+    expect(widest(tilts[0])).toBeCloseTo(reach.ready, 2);
+    expect(widest(tilts[1])).toBeCloseTo(reach.waiting, 2);
+    expect(widest(tilts[2])).toBeCloseTo(reach.waiting, 2);
+    // A quarter into the first swing the middle card leans the other way.
+    const quarter = Math.floor(swingFrames / 4);
+
+    expect(Math.sign(tilts[0]?.[quarter] ?? 0)).toBe(1);
+    expect(Math.sign(tilts[1]?.[quarter] ?? 0)).toBe(-1);
+    // It keeps swinging: the second swing reaches as far as the first.
+    expect(widest(tilts[2]?.slice(swingFrames))).toBeCloseTo(reach.waiting, 2);
+    // The card turns around the middle of its top edge, where the clothespin holds it.
+    expect(ecs.get(elementOf(game, "card0"), Transform)?.pivot).toEqual({
+      x: orderCardSize.width / 2,
+      y: 0
+    });
+
+    await game.app.stop();
+  });
+
+  it("glows a card honey the moment its order can be filled, and swings it wider", async () => {
     const game = await startOnBoard(twoTwigs);
-    const card = elementOf(game, "card1");
 
     expect(nodeOf(game.app.ui.tree(), "card1")?.state.selected).toBe(false);
+    expect(shows(game, "card1Glow")).toBe(false);
 
     // Two twigs make the second log the second order asks for; the first already lies on c2_2.
     game.app.input.drag(
@@ -279,25 +347,17 @@ describe("timber-motions — the ready order card (F10)", () => {
       { projection: "board.items", key: "i2" }
     );
     await tick();
+    await frames(game, 3);
 
-    const tilts: number[] = [];
-
-    for (let frame = 0; frame < 40; frame += 1) {
-      await frames(game, 1);
-      tilts.push(game.app.world.ecs.get(card, Transform)?.rotation ?? 0);
-    }
-
-    expect(Math.max(...tilts.map(tilt => Math.abs(tilt)))).toBeGreaterThan(0.02);
-    expect(nodeOf(game.app.ui.tree(), "card1")).toMatchObject({
-      state: { selected: true },
-      style: { tint: honeyGlow }
+    expect(nodeOf(game.app.ui.tree(), "card1")?.state.selected).toBe(true);
+    expect(nodeOf(game.app.ui.tree(), "card1Glow")).toMatchObject({
+      style: { stroke: 0xf2_b4_3d }
     });
 
-    await frames(game, 20);
+    // The swing it is in ends as it began; the next ones are the wide swing of a ready card.
+    const tilts = await tiltsOf(game, swingFrames * 3);
 
-    // The sway is over; the glow stays.
-    expect(game.app.world.ecs.get(card, Transform)?.rotation).toBe(0);
-    expect(game.app.world.ecs.get(card, NineSlice)?.tint).toBe(honeyGlow);
+    expect(widest(tilts[1]?.slice(swingFrames * 2))).toBeCloseTo(reach.ready, 2);
 
     await game.app.stop();
   });

@@ -5,12 +5,15 @@
  * Confirm it answers nothing and only swallows the tap. The board itself is the `Signboard` of the
  * kit with `hung`: ropes, the swing, the fit into the safe area and the recede under a cover.
  *
- * The prize picture of Reward, Daily gift and Out of energy is here too: a picture on a disc,
- * with the honey rays behind it when it is a reward.
+ * The prize of Reward, Daily gift and Out of energy is here too: a reward on the honey rays with
+ * no disc, the bolt in its sky disc; the coin with the big amount under a reward; and the one
+ * place a popup's swing sound is played, `showPopup`.
  */
-import { defineMotion } from "@moku-labs/game";
+import type { Flow } from "@moku-labs/game";
+import { defineMotion, sfx } from "@moku-labs/game";
 import type { AssetKey } from "../../generated/assets";
 import { defineStyle } from "../../kit";
+import type { Label } from "./kit";
 import { safeEdges, theme } from "./kit";
 
 /** The root of a popup: the whole viewport, the board centred in the safe area. */
@@ -79,77 +82,124 @@ export function PopupScreen(props: PopupScreenProps) {
   );
 }
 
-/** The disc colours of a prize: parchment for a reward, pale sky for the energy. */
-export type PrizeDisc = "paper" | "sky";
+/** The box of a prize on rays: the rays shine past it, the picture sits in its middle. */
+const prizeStyle = defineStyle({ width: 400, height: 400, align: "center", justify: "center" });
 
-/** The box of a prize: the rays fill it, the disc sits in its middle. */
-const prizeStyle = defineStyle({ width: 360, height: 360, align: "center", justify: "center" });
-
-/** The honey rays behind a reward. */
+/** The honey rays behind a reward: wider than the box, so they fade out over the board. */
 const raysStyle = defineStyle({
   position: "absolute",
-  left: 0,
-  top: 0,
-  width: 360,
-  height: 360,
-  reason: "the rays shine behind the disc, over the whole prize box"
+  left: -90,
+  top: -90,
+  width: 580,
+  height: 580,
+  reason: "the rays shine behind the prize, past its box (design §6 E1, E5)"
 });
 
-/**
- * The style of the disc a prize sits on.
- *
- * @param fill - The colour of the disc.
- * @returns The frozen style.
- */
-function discStyle(fill: number) {
-  return defineStyle({
-    width: 240,
-    height: 240,
-    radius: 120,
-    fill,
-    stroke: theme.color.woodDark,
-    strokeWidth: 6,
-    align: "center",
-    justify: "center"
-  });
-}
+/** The picture of a reward: the delivered item or the gift, on the rays with no disc. */
+const prizePictureStyle = defineStyle({ width: 300, height: 300 });
 
-/** Both discs, built once. */
-const discStyles: Record<PrizeDisc, ReturnType<typeof discStyle>> = {
-  paper: discStyle(theme.color.parchment),
-  sky: discStyle(0xcf_e8_f5)
-};
+/** The pale-sky disc the empty energy sits in (design §6 E4). */
+const skyDiscStyle = defineStyle({
+  width: 320,
+  height: 320,
+  radius: 160,
+  fill: 0xcf_e8_f5,
+  stroke: theme.color.ink,
+  strokeWidth: 8,
+  align: "center",
+  justify: "center"
+});
 
-/** The picture on the disc. */
-const prizePictureStyle = defineStyle({ width: 180, height: 180 });
+/** The bolt in the sky disc. */
+const discPictureStyle = defineStyle({ width: 210, height: 210 });
 
 /** What a prize takes. */
 export type PrizeProps = {
-  /** The key of the prize box; the coins of a claim fly from it. Its parts are `<id>Rays`, `<id>Disc`, `<id>Picture`. */
+  /** The key of the prize; the coins of a claim fly from it. Its parts are `<id>Rays`, `<id>Disc`, `<id>Picture`. */
   id: string;
-  /** The picture on the disc. */
+  /** The picture. */
   picture: AssetKey;
-  /** Whether the honey rays shine behind it: a reward does, the empty energy bar does not. */
-  rays?: boolean;
-  /** The colour of the disc. */
-  disc: PrizeDisc;
+  /**
+   * How the picture is shown: `"rays"`, a reward on the honey rays with no disc (Reward, Daily
+   * gift), or `"sky"`, in the pale-sky disc (Out of energy).
+   */
+  look: "rays" | "sky";
 };
 
 /**
- * A prize (design §6 E1, E4, E5): the delivered item, the gift or the bolt on its disc.
+ * A prize (design §6 E1, E4, E5): the delivered item or the gift on its rays, or the bolt in its
+ * sky disc.
  *
  * @param props - The prize as the popup declares it.
  * @returns The stack element.
  */
 export function Prize(props: PrizeProps) {
+  if (props.look === "sky") {
+    return (
+      <stack key={props.id} style={skyDiscStyle}>
+        <image key={`${props.id}Picture`} texture={props.picture} style={discPictureStyle} />
+      </stack>
+    );
+  }
+
   return (
     <stack key={props.id} style={prizeStyle}>
-      {props.rays === true ? (
-        <image key={`${props.id}Rays`} texture="ui.fx-rays" style={raysStyle} />
-      ) : undefined}
-      <stack key={`${props.id}Disc`} style={discStyles[props.disc]}>
-        <image key={`${props.id}Picture`} texture={props.picture} style={prizePictureStyle} />
-      </stack>
+      <image key={`${props.id}Rays`} texture="ui.fx-rays" style={raysStyle} />
+      <image key={`${props.id}Picture`} texture={props.picture} style={prizePictureStyle} />
     </stack>
   );
+}
+
+/** The coin and the amount a reward pays, under its picture. */
+const amountRow = defineStyle({ direction: "row", align: "center", gap: theme.space.md });
+
+/** The coin in front of the amount. */
+const amountCoin = defineStyle({ width: 104, height: 104 });
+
+/**
+ * The amount a reward pays (design §6 E1, E5): a coin, the big "+25", and the word after it when
+ * the popup names one ("+50 монет").
+ *
+ * @param props - The amount.
+ * @param props.id - The key of the row; the coin is keyed `<id>Coin`.
+ * @param props.amountKey - The key of the big number.
+ * @param props.amount - The number, already signed: `"+25"`.
+ * @param props.unitKey - The key of the word after it.
+ * @param props.unit - The word after the number; none when left out.
+ * @returns The row element.
+ */
+export function Amount(props: {
+  id: string;
+  amountKey: string;
+  amount: string;
+  unitKey?: string;
+  unit?: Label;
+}) {
+  return (
+    <row key={props.id} style={amountRow}>
+      <icon key={`${props.id}Coin`} name="ui.icon-coin" style={amountCoin} />
+      <text key={props.amountKey} style="ui.amount" content={props.amount} />
+      {props.unit === undefined ? undefined : (
+        <text key={props.unitKey ?? `${props.id}Unit`} style="ui.title" content={props.unit} />
+      )}
+    </row>
+  );
+}
+
+/** The sound a popup board makes as it swings in (design §6 F1). */
+export const popupSound = sfx("ui.popup");
+
+/**
+ * Shows a popup that comes in: plays its swing sound once and awaits the popup. A node that shows
+ * the same popup again after a transit (Settings after a volume step) awaits the popup alone,
+ * because the board is taken back and does not swing in again.
+ *
+ * @param fx - The effects of the node.
+ * @param descriptor - The popup: `popup(Component, props, options?)`.
+ * @returns What the popup answered.
+ */
+export function showPopup(fx: Flow.NodeFx, descriptor: Flow.Descriptor): Promise<unknown> {
+  void fx(popupSound);
+
+  return fx(descriptor);
 }

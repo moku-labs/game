@@ -12,7 +12,7 @@
 import type { I18n, Model } from "@moku-labs/game";
 import { defineMotion } from "@moku-labs/game";
 import type { AssetKey } from "../../generated/assets";
-import { defineStyle, defineTokens, tr } from "../../kit";
+import { defineStyle, defineTokens } from "../../kit";
 
 /** What a control shows as its words: a message of the string table, or a plain number. */
 export type Label = I18n.Message | string;
@@ -21,6 +21,7 @@ export type Label = I18n.Message | string;
 export const theme = defineTokens({
   color: {
     ink: 0x3a_22_12,
+    cream: 0xff_f3_d6,
     parchment: 0xfb_ee_d2,
     wood: 0xd8_a0_62,
     woodDark: 0x9c_60_31,
@@ -37,7 +38,7 @@ export const theme = defineTokens({
  * The one state rule set of every control (design §4): it lifts a little under the mouse and
  * sinks onto its lip when pressed. Touch never hovers, so a phone only ever sees the sink.
  */
-const pointerStates = {
+export const pointerStates = {
   hover: { offsetY: -4, scale: 1.03 },
   pressed: { offsetY: 6, scale: 0.97 }
 } as const;
@@ -73,10 +74,25 @@ export const fullBleed = defineStyle({
 export type PlankLook = "green" | "wood" | "berry";
 
 /**
- * The sizes a plank comes in: the Play sign, a popup button, the Deliver of a card, and the wide
- * plank a long label needs ("Смотреть и пополнить").
+ * The sizes a plank comes in. `large`, `medium`, `small` and `wide` have a fixed box: the Play
+ * sign, a small popup button, the Deliver of a card, a long label. `popup` is the plank of a
+ * popup (Claim, Later), `full` spans the width of the column that holds it (a language plank),
+ * `half` shares a row with another plank at the same width (Reset and Cancel), `tall` spans the
+ * column with room for two lines (Watch & refill).
  */
-export type PlankSize = "large" | "medium" | "small" | "wide";
+export type PlankSize = "large" | "medium" | "small" | "wide" | "popup" | "full" | "half" | "tall";
+
+/** Every size, in the order the plank styles are built. */
+const plankSizes: readonly PlankSize[] = [
+  "large",
+  "medium",
+  "small",
+  "wide",
+  "popup",
+  "full",
+  "half",
+  "tall"
+];
 
 /** The nine-slice of every face. */
 const plankFaces: Record<PlankLook, AssetKey> = {
@@ -85,12 +101,37 @@ const plankFaces: Record<PlankLook, AssetKey> = {
   berry: "ui.button-berry"
 };
 
-/** Width and height of every size, in reference units. */
-const plankBoxes: Record<PlankSize, { width: number; height: number }> = {
+/**
+ * The box of every size, in reference units. A size without a width stretches across its column;
+ * a `half` plank starts at no width and grows, so two of them in a row share it equally.
+ */
+const plankBoxes: Record<
+  PlankSize,
+  { width?: number; height: number; alignSelf?: "stretch"; grow?: number }
+> = {
   large: { width: 520, height: 150 },
   medium: { width: 360, height: 120 },
   small: { width: 250, height: 96 },
-  wide: { width: 680, height: 120 }
+  wide: { width: 680, height: 120 },
+  popup: { width: 554, height: 150 },
+  full: { alignSelf: "stretch", height: 150 },
+  half: { width: 0, grow: 1, height: 140 },
+  tall: { alignSelf: "stretch", height: 200 }
+};
+
+/**
+ * The words of a plank: the small label on the Deliver of a card, the button voice on a medium
+ * plank, the bigger label on the others.
+ */
+const plankLabels: Record<PlankSize, "ui.button-small" | "ui.button" | "ui.plank"> = {
+  large: "ui.plank",
+  medium: "ui.button",
+  small: "ui.button-small",
+  wide: "ui.plank",
+  popup: "ui.plank",
+  full: "ui.plank",
+  half: "ui.plank",
+  tall: "ui.plank"
 };
 
 /**
@@ -107,7 +148,9 @@ function plankStyle(look: PlankLook, size: PlankSize) {
     direction: "row",
     align: "center",
     justify: "center",
-    gap: theme.space.xs,
+    gap: theme.space.md,
+    // The rounded ends of the art stay clear of the words; the small plank has room for less.
+    padding: size === "small" ? { left: 16, right: 16 } : { left: 40, right: 40 },
     nineSlice: plankFaces[look],
     is: {
       ...pointerStates,
@@ -120,15 +163,24 @@ function plankStyle(look: PlankLook, size: PlankSize) {
 /** Every plank style, built once: a view never makes a new style object per frame. */
 const plankStyles = Object.fromEntries(
   (["green", "wood", "berry"] as const).flatMap(look =>
-    (["large", "medium", "small", "wide"] as const).map(size => [
-      `${look}.${size}`,
-      plankStyle(look, size)
-    ])
+    plankSizes.map(size => [`${look}.${size}`, plankStyle(look, size)])
   )
 ) as Record<`${PlankLook}.${PlankSize}`, ReturnType<typeof plankStyle>>;
 
 /** The check a selected plank carries next to its words. */
-const checkStyle = defineStyle({ width: 48, height: 48 });
+const checkStyle = defineStyle({ width: 64, height: 64 });
+
+/** The play glyph of Watch & refill: a cream ring at the left end of the plank. */
+const playRingStyle = defineStyle({
+  width: 72,
+  height: 72,
+  radius: 36,
+  fill: 0xff_f3_d6,
+  stroke: theme.color.ink,
+  strokeWidth: 6,
+  align: "center",
+  justify: "center"
+});
 
 /** What a plank button takes. */
 export type PlankButtonProps = {
@@ -142,8 +194,10 @@ export type PlankButtonProps = {
   label: Label;
   /** Green, wood or berry. */
   look: PlankLook;
-  /** Large, medium or small. `"medium"` when left out. */
+  /** The size of the plank. `"medium"` when left out. */
   size?: PlankSize;
+  /** A glyph in front of the words: `"play"` for a plank that plays a video. */
+  glyph?: "play";
   /** A disabled plank is grey, swallows the tap and answers nothing. */
   disabled?: boolean;
   /** A selected plank is green with a check. */
@@ -159,6 +213,7 @@ export type PlankButtonProps = {
  */
 export function PlankButton(props: PlankButtonProps) {
   const selected = props.selected === true;
+  const size = props.size ?? "medium";
 
   return (
     <button
@@ -166,47 +221,84 @@ export function PlankButton(props: PlankButtonProps) {
       intent={props.intent}
       payload={props.payload ?? {}}
       state={{ disabled: props.disabled === true, selected }}
-      style={plankStyles[`${props.look}.${props.size ?? "medium"}`]}
+      style={plankStyles[`${props.look}.${size}`]}
     >
       {selected ? (
         <icon key={`${props.id}Check`} name="ui.icon-check" style={checkStyle} />
       ) : undefined}
-      <text key={`${props.id}Label`} style="ui.button" content={props.label} />
+      {props.glyph === "play" ? (
+        <stack key={`${props.id}Play`} style={playRingStyle}>
+          <text key={`${props.id}PlayMark`} style="ui.tab" content=">" />
+        </stack>
+      ) : undefined}
+      <text key={`${props.id}Label`} style={plankLabels[size]} content={props.label} />
     </button>
   );
 }
 
-/** The round wood button: a disc with an ink rim, the same states as a plank. */
-const roundStyle = defineStyle({
-  width: 144,
-  height: 144,
-  radius: 72,
-  fill: theme.color.wood,
-  stroke: theme.color.ink,
-  strokeWidth: 6,
-  align: "center",
-  justify: "center",
-  is: { ...pointerStates, disabled: { alpha: 0.6 } }
-});
+/** The size of a round button of the HUD (design §6 B1, F4). */
+const ROUND_SIZE = 120;
 
-/** The icon inside a round button. */
-const roundIconStyle = defineStyle({ width: 88, height: 88 });
+/**
+ * The styles of a round wood button of one size: the disc with its ink rim and the same states
+ * as a plank, the icon on it, and the red count on its rim.
+ *
+ * @param size - The diameter in reference units.
+ * @returns The three frozen styles.
+ */
+function roundStylesOf(size: number) {
+  const badge = Math.max(52, Math.round(size * 0.34));
 
-/** The red count in the corner of a round button. */
-const badgeStyle = defineStyle({
-  position: "absolute",
-  top: -6,
-  right: -6,
-  width: 56,
-  height: 56,
-  radius: 28,
-  fill: theme.color.berry,
-  stroke: theme.color.ink,
-  strokeWidth: 4,
-  align: "center",
-  justify: "center",
-  reason: "the count sits on the rim of the button, over its corner"
-});
+  return {
+    disc: defineStyle({
+      width: size,
+      height: size,
+      radius: size / 2,
+      fill: theme.color.wood,
+      stroke: theme.color.ink,
+      strokeWidth: 6,
+      align: "center",
+      justify: "center",
+      is: { ...pointerStates, disabled: { alpha: 0.6 } }
+    }),
+    icon: defineStyle({ width: Math.round(size * 0.66), height: Math.round(size * 0.66) }),
+    badge: defineStyle({
+      position: "absolute",
+      top: -6,
+      right: -6,
+      width: badge,
+      height: badge,
+      radius: badge / 2,
+      fill: theme.color.berry,
+      stroke: theme.color.ink,
+      strokeWidth: 4,
+      align: "center",
+      justify: "center",
+      reason: "the count sits on the rim of the button, over its corner"
+    })
+  };
+}
+
+/** The styles of every round size a screen asked for, built once per size. */
+const roundStyles = new Map<number, ReturnType<typeof roundStylesOf>>();
+
+/**
+ * The styles of a round button of one size, built the first time the size is asked for.
+ *
+ * @param size - The diameter in reference units.
+ * @returns The styles of that size.
+ */
+function roundOf(size: number): ReturnType<typeof roundStylesOf> {
+  const known = roundStyles.get(size);
+
+  if (known !== undefined) return known;
+
+  const built = roundStylesOf(size);
+
+  roundStyles.set(size, built);
+
+  return built;
+}
 
 /** What a round button takes. */
 export type RoundButtonProps = {
@@ -218,6 +310,8 @@ export type RoundButtonProps = {
   icon: AssetKey;
   /** A count in the red badge; no badge when left out or `undefined`. */
   badge?: number | undefined;
+  /** The diameter in reference units: 120, the HUD size, when left out. */
+  size?: number;
 };
 
 /**
@@ -228,11 +322,13 @@ export type RoundButtonProps = {
  * @returns The button element.
  */
 export function RoundButton(props: RoundButtonProps) {
+  const styles = roundOf(props.size ?? ROUND_SIZE);
+
   return (
-    <button key={props.id} intent={props.intent} style={roundStyle}>
-      <icon key={`${props.id}Icon`} name={props.icon} style={roundIconStyle} />
+    <button key={props.id} intent={props.intent} style={styles.disc}>
+      <icon key={`${props.id}Icon`} name={props.icon} style={styles.icon} />
       {props.badge === undefined ? undefined : (
-        <stack key={`${props.id}Badge`} style={badgeStyle}>
+        <stack key={`${props.id}Badge`} style={styles.badge}>
           <text key={`${props.id}BadgeCount`} style="ui.badge" content={String(props.badge)} />
         </stack>
       )}
@@ -241,21 +337,43 @@ export function RoundButton(props: RoundButtonProps) {
 }
 
 /**
- * The geometry of a HUD pill, in the pill's own units. The coin counter is a projection hosted by
- * the pill, so it is placed with the same numbers the pill is laid out with.
+ * The geometry of a HUD pill, in the pill's own units (design §6 B1, F4). The pill is the bar at
+ * the height ratio of its art (300×63), so the corners of the nine-slice are never stretched; the
+ * icon is bigger than the bar and hangs over its left end. The coin counter is a projection
+ * hosted by the pill, so it is placed with the same numbers the pill is laid out with.
  */
-export const pill = { height: 104, padLeft: 12, padRight: 28, icon: 84, gap: 12 } as const;
+export const pill = {
+  height: 76,
+  icon: 110,
+  overhang: 36,
+  padLeft: 84,
+  padRight: 24,
+  widths: { wide: 290, narrow: 280 }
+} as const;
 
-/** Where the number of a pill starts, in the pill's own units: after the icon, at mid height. */
-export const pillNumberAt = { x: pill.padLeft + pill.icon + pill.gap, y: pill.height / 2 };
+/**
+ * Where the number of the coin pill sits, in the pill's own units: the middle of the bar right of
+ * the icon.
+ */
+export const pillNumberAt = {
+  x: (pill.padLeft + pill.widths.wide - pill.padRight) / 2,
+  y: pill.height / 2
+};
 
-/** The icon at the left end of a pill. */
-const pillIconStyle = defineStyle({ width: pill.icon, height: pill.icon });
+/** The icon at the left end of a pill, over the end of the bar. */
+const pillIconStyle = defineStyle({
+  position: "absolute",
+  left: -pill.overhang,
+  top: (pill.height - pill.icon) / 2,
+  width: pill.icon,
+  height: pill.icon,
+  reason: "the icon of a HUD pill is bigger than the bar and hangs over its left end (design §6 B1)"
+});
 
 /**
  * The style of a pill of one width.
  *
- * @param width - The width of the pill in reference units.
+ * @param width - The width of the bar in reference units.
  * @returns The frozen style.
  */
 function pillStyle(width: number) {
@@ -264,14 +382,18 @@ function pillStyle(width: number) {
     height: pill.height,
     direction: "row",
     align: "center",
-    gap: pill.gap,
+    justify: "center",
+    margin: { left: pill.overhang },
     padding: { left: pill.padLeft, right: pill.padRight },
     nineSlice: "ui.hud-pill"
   });
 }
 
-/** The two pills of the HUD: the coins take more room than the energy. */
-const pillStyles = { wide: pillStyle(320), narrow: pillStyle(300) } as const;
+/** The two pills of the HUD: the coins take a little more room than the energy. */
+const pillStyles = {
+  wide: pillStyle(pill.widths.wide),
+  narrow: pillStyle(pill.widths.narrow)
+} as const;
 
 /** What a HUD pill takes. */
 export type HudPillProps = {
@@ -288,8 +410,8 @@ export type HudPillProps = {
 };
 
 /**
- * A HUD pill (design §6 G): the wooden pill with an icon and a number. The coin pill hosts the
- * counter projection, so the number rolls where it is drawn.
+ * A HUD pill (design §6 G): the wooden bar with a big icon over its left end and a number in its
+ * middle. The coin pill hosts the counter projection, so the number rolls where it is drawn.
  *
  * @param props - The pill as the screen declares it.
  * @returns The row element.
@@ -305,74 +427,114 @@ export function HudPill(props: HudPillProps) {
   );
 }
 
-/** The header plank that hangs over the top edge of a signboard. */
-const headerStyle = defineStyle({
+/** How tall the honey title plaque is; half of it rises above the board (design §6 G). */
+const PLAQUE_HEIGHT = 150;
+
+/**
+ * The honey title plaque: a separate plank as wide as its title plus the padding, centred on the
+ * top edge of the board with half of it above. The same in every popup, so titles are uniform.
+ */
+const plaqueStyle = defineStyle({
   position: "absolute",
-  top: -44,
-  left: 0,
-  right: 0,
-  height: 110,
+  top: -PLAQUE_HEIGHT / 2,
+  height: PLAQUE_HEIGHT,
+  minWidth: 420,
+  padding: { left: 80, right: 80 },
+  direction: "row",
   align: "center",
   justify: "center",
   nineSlice: "ui.header-plank",
-  reason: "the header plank hangs over the top edge of the signboard"
+  reason: "the title plaque sits on the top edge of the signboard, half above it (design §6 G)"
 });
 
 /** What a signboard takes. */
 export type SignboardProps = {
-  /** The key of the board; its header is keyed `<id>Header`, its title `<id>Title`. */
+  /** The key of the board; its plaque is keyed `<id>Header`, its title `<id>Title`. */
   id: string;
-  /** The words on the header plank; no plank when left out. */
+  /** The words on the title plaque; no plaque when left out. */
   title?: Label;
-  /** Width and height of the board in reference units. */
+  /** Width of the board in reference units. */
   width: number;
   /** Height of the board in reference units. */
   height: number;
+  /** The padding above the contents; 110, room for the lower half of the plaque, when left out. */
+  top?: number;
   /**
    * A popup board (design §6 F1, F2): it hangs on two ropes (`<id>RopeLeft`, `<id>RopeRight`),
-   * scales down into the safe area, swings in and out around its top edge, and recedes while
-   * another popup covers it.
+   * scales down into the safe area, swings in and out on the ropes, and recedes while another
+   * popup covers it.
    */
   hung?: boolean;
   /** The intent of the X in the corner (`<id>Close`); no X when left out. */
   close?: string;
-  /** The contents under the header. */
+  /** The contents under the plaque. */
   children?: unknown;
 };
 
 /** The ink-darkened tint of a board another popup covers: 42 % of its colour (design §6 F2). */
 const receded = 0x6b_6b_6b;
 
-/** The pose a popup board hangs in before it swings in and after it swings out. */
-const hanging = { Transform: { rotation: -0.12, scale: 0.8 } } as const;
+/** How small a covered board gets (design §6 F2). */
+const RECEDE_SCALE = 0.84;
 
-/** The swing in (design §6 F1): from the tilted, small pose, with a small overshoot, and the recede. */
+/** How far up a covered board moves, besides the shrink (design §6 F2). */
+const RECEDE_RISE = 8;
+
+/** Degrees to radians, for the keys of the swing, which the design gives in degrees. */
+const degree = Math.PI / 180;
+
+/**
+ * The swing in (design §6 F1): the board drops from above the screen on its ropes, overshoots
+ * with a turn, and wobbles to rest around the rope point above it.
+ */
 const swingIn = defineMotion({
-  states: { hanging },
-  transition: { ms: 420, ease: "outBack" },
-  on: { enter: "hanging", change: ["Transform"] }
+  keyframes: {
+    swingIn: [
+      { at: 0, Transform: { dy: -780, rotation: -2 * degree, scale: 0.8 } },
+      { at: 0.42, ease: "out", Transform: { dy: 14, rotation: 5 * degree, scale: 1.04 } },
+      { at: 0.58, Transform: { dy: -5, rotation: -3.2 * degree, scale: 0.99 } },
+      { at: 0.72, Transform: { dy: 2, rotation: 1.8 * degree, scale: 1.01 } },
+      { at: 0.86, Transform: { dy: 0, rotation: -0.7 * degree, scale: 1 } }
+    ]
+  },
+  transition: { ms: 1000 },
+  on: { enter: "swingIn" }
 });
 
-/** The swing out: the same pose, reached quickly, so the next screen is not kept waiting. */
+/** The swing out: a small dip, then up and out of the screen, quickly. */
 const swingOut = defineMotion({
-  states: { hanging },
-  transition: { ms: 220, ease: "in" },
-  on: { exit: "hanging" }
+  keyframes: {
+    swingOut: [
+      { at: 0.25, Transform: { dy: 10, rotation: -2 * degree } },
+      { at: 1, ease: "in", Transform: { dy: -840, rotation: 3 * degree, scale: 0.9 } }
+    ]
+  },
+  transition: { ms: 420 },
+  on: { exit: "swingOut" }
+});
+
+/** The recede under a cover and the rise back: the rest pose moves, the board follows it. */
+const recede = defineMotion({
+  transition: { ms: 320, ease: "out" },
+  on: { change: ["Transform"] }
 });
 
 /** The motion of every popup board: it swings in, recedes under a cover, and swings out. */
-export const swingMotion = { ...swingIn, ...swingOut };
+export const swingMotion = { ...recede, ...swingIn, ...swingOut };
 
 /**
- * The style of one signboard. A hung board is fitted into its parent, turns around the middle of
- * its top edge, and shrinks, rises and darkens while it is covered.
+ * The style of one signboard. A hung board is fitted into its parent and turns around the rope
+ * point half its height above its top edge. Covered, it shrinks, rises a little and darkens; the
+ * shrink around the rope point would lift it by the part of its height it loses, so the offset
+ * gives that back and the board shrinks around its middle, as the design shows.
  *
  * @param width - The width of the board in reference units.
  * @param height - The height of the board in reference units.
+ * @param top - The padding above the contents.
  * @param hung - Whether the board is a popup board.
  * @returns The frozen style.
  */
-function boardStyle(width: number, height: number, hung: boolean) {
+function boardStyle(width: number, height: number, top: number, hung: boolean) {
   const board = {
     width,
     height,
@@ -380,7 +542,7 @@ function boardStyle(width: number, height: number, hung: boolean) {
     align: "center",
     justify: "center",
     gap: theme.space.md,
-    padding: { top: 100, right: 56, bottom: 56, left: 56 },
+    padding: { top, right: 72, bottom: 64, left: 72 },
     nineSlice: "ui.panel-signboard"
   } as const;
 
@@ -389,43 +551,136 @@ function boardStyle(width: number, height: number, hung: boolean) {
   return defineStyle({
     ...board,
     fit: "contain",
-    origin: "top",
-    is: { covered: { scale: 0.84, offsetY: -8, tint: receded } }
+    origin: { x: 0.5, y: -0.5 },
+    is: {
+      covered: {
+        scale: RECEDE_SCALE,
+        offsetY: Math.round((1 - RECEDE_SCALE) * height) - RECEDE_RISE,
+        tint: receded
+      }
+    }
   });
+}
+
+/** Every board style a popup asked for, built once per size. */
+const boardStyles = new Map<string, ReturnType<typeof boardStyle>>();
+
+/**
+ * The style of a board of one size, built the first time it is asked for.
+ *
+ * @param width - The width of the board.
+ * @param height - The height of the board.
+ * @param top - The padding above the contents.
+ * @param hung - Whether the board is a popup board.
+ * @returns The style of that board.
+ */
+function boardOf(width: number, height: number, top: number, hung: boolean) {
+  const key = `${width}x${height}+${top}${hung ? "h" : ""}`;
+  const known = boardStyles.get(key);
+
+  if (known !== undefined) return known;
+
+  const built = boardStyle(width, height, top, hung);
+
+  boardStyles.set(key, built);
+
+  return built;
 }
 
 /** What hides while a popup is covered: its ropes and its X (design §6 F2). */
 const hiddenWhenCovered = { covered: { alpha: 0 } } as const;
 
+/** How wide a rope is drawn, and how long one segment of it is: its art at one uniform scale. */
+const rope = { width: 12, segment: 614, segments: 3 } as const;
+
+/** One segment of a rope: the rope art at a uniform scale, hidden while the popup is covered. */
+const ropeSegmentStyle = defineStyle({
+  width: rope.width,
+  height: rope.segment,
+  is: hiddenWhenCovered
+});
+
 /**
- * The style of one rope of a hung board, from far above it down behind its header plank.
+ * The style of one rope of a hung board: a column of segments from far above the screen down to
+ * the top edge of the board, 18 % in from its side (design §6 F1).
  *
  * @param side - Which side the rope hangs on.
  * @param width - The width of the board.
  * @returns The frozen style.
  */
 function hungRopeStyle(side: "left" | "right", width: number) {
-  const inset = Math.round(width * 0.2);
+  const inset = Math.round(width * 0.18 - rope.width / 2);
 
   return defineStyle({
     ...(side === "left" ? { left: inset } : { right: inset }),
     position: "absolute",
-    top: -300,
-    width: 40,
-    height: 330,
+    top: -rope.segment * rope.segments,
+    width: rope.width,
+    height: rope.segment * rope.segments,
+    direction: "column",
     is: hiddenWhenCovered,
-    reason: "the ropes hang the popup from a pivot above the screen (design §6 F1)"
+    reason: "the ropes hang the popup from above the screen (design §6 F1)"
   });
+}
+
+/** Both ropes of every board width a popup asked for, built once per width. */
+const ropeStyles = new Map<
+  number,
+  { left: ReturnType<typeof hungRopeStyle>; right: ReturnType<typeof hungRopeStyle> }
+>();
+
+/**
+ * The two rope styles of a board of one width, built the first time the width is asked for.
+ *
+ * @param width - The width of the board.
+ * @returns The left and the right rope.
+ */
+function ropesOf(width: number) {
+  const known = ropeStyles.get(width);
+
+  if (known !== undefined) return known;
+
+  const built = { left: hungRopeStyle("left", width), right: hungRopeStyle("right", width) };
+
+  ropeStyles.set(width, built);
+
+  return built;
+}
+
+/** Every segment index of a rope. */
+const ropeSegments = Array.from({ length: rope.segments }, (_unused, index) => index);
+
+/**
+ * One rope of a hung board: its segments, one under the other.
+ *
+ * @param props - The rope.
+ * @param props.id - The key of the rope; its segments are keyed `<id>0`, `<id>1`, ….
+ * @param props.style - The style of the rope column.
+ * @returns The column element.
+ */
+function Rope(props: { id: string; style: ReturnType<typeof hungRopeStyle> }) {
+  return (
+    <column key={props.id} style={props.style}>
+      {ropeSegments.map(index => (
+        <image
+          key={`${props.id}${index}`}
+          texture="ui.rope-vertical"
+          fit="fill"
+          style={ropeSegmentStyle}
+        />
+      ))}
+    </column>
+  );
 }
 
 /** The X in the corner of a board: a berry disc over the top-right corner. */
 const closeStyle = defineStyle({
   position: "absolute",
-  top: -40,
-  right: -20,
-  width: 112,
-  height: 112,
-  radius: 56,
+  top: -36,
+  right: -28,
+  width: 128,
+  height: 128,
+  radius: 64,
   fill: theme.color.berry,
   stroke: theme.color.ink,
   strokeWidth: 6,
@@ -436,50 +691,43 @@ const closeStyle = defineStyle({
 });
 
 /** The cross on the X. */
-const closeIconStyle = defineStyle({ width: 64, height: 64, is: hiddenWhenCovered });
+const closeIconStyle = defineStyle({ width: 72, height: 72, is: hiddenWhenCovered });
+
+/** The padding above the contents of a board: room for the lower half of the plaque. */
+const BOARD_TOP = 110;
 
 /**
- * A signboard (design §6 G): the painted wooden panel every popup and the logo are drawn on, with
- * an optional honey header plank. A panel swallows every tap, so nothing under it answers. A hung
- * board is a popup board: two ropes, the swing, the fit into the safe area and the recede.
+ * A signboard (design §6 G): the painted wooden panel every popup is drawn on, with an optional
+ * honey title plaque over its top edge. A panel swallows every tap, so nothing under it answers.
+ * A hung board is a popup board: two ropes, the swing, the fit into the safe area and the recede.
+ * The contents draw before the plaque and the X, so the rays of a prize pass under the plaque.
  *
  * @param props - The board as the screen declares it.
  * @returns The panel element.
  */
 export function Signboard(props: SignboardProps) {
   const hung = props.hung === true;
+  const ropes = hung ? ropesOf(props.width) : undefined;
 
   return (
     <panel
       key={props.id}
-      style={boardStyle(props.width, props.height, hung)}
+      style={boardOf(props.width, props.height, props.top ?? BOARD_TOP, hung)}
       {...(hung ? { motion: swingMotion } : {})}
     >
-      {hung ? (
-        <image
-          key={`${props.id}RopeLeft`}
-          texture="ui.rope-vertical"
-          style={hungRopeStyle("left", props.width)}
-        />
-      ) : undefined}
-      {hung ? (
-        <image
-          key={`${props.id}RopeRight`}
-          texture="ui.rope-vertical"
-          style={hungRopeStyle("right", props.width)}
-        />
-      ) : undefined}
+      {ropes === undefined ? undefined : <Rope id={`${props.id}RopeLeft`} style={ropes.left} />}
+      {ropes === undefined ? undefined : <Rope id={`${props.id}RopeRight`} style={ropes.right} />}
+      {props.children as never}
       {props.title === undefined ? undefined : (
-        <stack key={`${props.id}Header`} style={headerStyle}>
+        <row key={`${props.id}Header`} style={plaqueStyle}>
           <text key={`${props.id}Title`} style="ui.title" content={props.title} />
-        </stack>
+        </row>
       )}
       {props.close === undefined ? undefined : (
         <button key={`${props.id}Close`} intent={props.close} style={closeStyle}>
           <icon key={`${props.id}CloseIcon`} name="ui.icon-close" style={closeIconStyle} />
         </button>
       )}
-      {props.children as never}
     </panel>
   );
 }
@@ -488,6 +736,11 @@ export function Signboard(props: SignboardProps) {
 export type ParchmentProps = {
   /** The key of the insert. */
   id: string;
+  /**
+   * A chip is the small paper a popup body is written on (design §6 E3, E4): as tall as its
+   * words. Without it the insert fills what the board leaves, as the settings pane does.
+   */
+  chip?: boolean;
   /** The contents on the paper. */
   children?: unknown;
 };
@@ -497,10 +750,21 @@ const parchmentStyle = defineStyle({
   direction: "column",
   align: "center",
   justify: "center",
-  gap: theme.space.sm,
-  padding: 40,
+  gap: theme.space.lg,
+  padding: 48,
   alignSelf: "stretch",
   grow: 1,
+  nineSlice: "ui.panel-parchment"
+});
+
+/** The parchment chip of a popup body: the width of the board, as tall as its words. */
+const chipStyle = defineStyle({
+  direction: "column",
+  align: "center",
+  justify: "center",
+  padding: { top: 40, right: 40, bottom: 40, left: 40 },
+  minHeight: 200,
+  alignSelf: "stretch",
   nineSlice: "ui.panel-parchment"
 });
 
@@ -512,77 +776,8 @@ const parchmentStyle = defineStyle({
  */
 export function Parchment(props: ParchmentProps) {
   return (
-    <column key={props.id} style={parchmentStyle}>
+    <column key={props.id} style={props.chip === true ? chipStyle : parchmentStyle}>
       {props.children as never}
     </column>
-  );
-}
-
-/** One rope of the logo sign, from above the sign down to its top edge. */
-const ropeStyle = defineStyle({
-  position: "absolute",
-  top: -150,
-  width: 40,
-  height: 170,
-  reason: "the ropes hang the sign from a point above it"
-});
-
-/** The berry sprig on the top-left corner of the logo sign. */
-const sprigLeftStyle = defineStyle({
-  position: "absolute",
-  left: -40,
-  top: -40,
-  width: 130,
-  height: 140,
-  reason: "the sprig is pinned over the corner of the sign"
-});
-
-/** The berry sprig on the bottom-right corner of the logo sign. */
-const sprigRightStyle = defineStyle({
-  position: "absolute",
-  right: -40,
-  bottom: -40,
-  width: 130,
-  height: 140,
-  reason: "the sprig is pinned over the corner of the sign"
-});
-
-/** The name of the game, in the language of the player. */
-const gameName = tr("ui.gameName");
-
-/** The sign the name of the game is painted on. */
-const logoStyle = defineStyle({
-  width: 860,
-  height: 280,
-  align: "center",
-  justify: "center",
-  nineSlice: "ui.panel-signboard"
-});
-
-/**
- * The logo sign of Splash and Home (design §6 A1, A2): the name of the game painted on a
- * signboard that hangs on two ropes, with a berry sprig on two corners.
- *
- * @param props - The key of the sign.
- * @param props.id - The key; the name is keyed `<id>Name`.
- * @returns The panel element.
- */
-export function LogoSign(props: { id: string }) {
-  return (
-    <panel key={props.id} style={logoStyle}>
-      <image
-        key={`${props.id}RopeLeft`}
-        texture="ui.rope-vertical"
-        style={{ ...ropeStyle, left: 150 }}
-      />
-      <image
-        key={`${props.id}RopeRight`}
-        texture="ui.rope-vertical"
-        style={{ ...ropeStyle, right: 150 }}
-      />
-      <text key={`${props.id}Name`} style="ui.title" content={gameName} />
-      <image key={`${props.id}SprigLeft`} texture="ui.decor-sprig" style={sprigLeftStyle} />
-      <image key={`${props.id}SprigRight`} texture="ui.decor-sprig" style={sprigRightStyle} />
-    </panel>
   );
 }

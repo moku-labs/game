@@ -8,6 +8,7 @@ import { boardAssets } from "../features/board/assets";
 import { toastBoardFull } from "../features/board/toast";
 import { defineFeature } from "../kit";
 import { lookAnimations, mergeBurst, refuseShake, sawmillTap } from "./animations";
+import { boardBadges } from "./badges";
 import { boardClock } from "./clock";
 import { Generator, Glow, Highlighted, Item } from "./components";
 import { boardCells, boardGenerators, boardGlows, boardItems, boardSelection } from "./projections";
@@ -15,7 +16,7 @@ import { boardScene } from "./scene";
 import { glowCells, highlightLegal } from "./systems";
 
 /**
- * The board on the screen: one scene, its six projections, two systems, four components, the
+ * The board on the screen: one scene, its seven projections, two systems, four components, the
  * animations of the board, and the bundle that carries their pictures. A game composes it next to
  * `...screen`; a headless test leaves it out and the same graph plays on.
  *
@@ -24,7 +25,15 @@ import { glowCells, highlightLegal } from "./systems";
  */
 export const boardView = defineFeature("boardScreen", {
   scenes: [boardScene],
-  projections: [boardCells, boardGlows, boardSelection, boardItems, boardGenerators, boardClock],
+  projections: [
+    boardCells,
+    boardGlows,
+    boardSelection,
+    boardItems,
+    boardGenerators,
+    boardClock,
+    boardBadges
+  ],
   systems: [highlightLegal, glowCells],
   components: [Item, Highlighted, Generator, Glow],
   animations: [

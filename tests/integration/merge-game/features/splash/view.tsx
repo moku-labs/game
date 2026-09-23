@@ -1,14 +1,17 @@
 /**
- * @file The splash (design §6 A1): the full-bleed forest, the logo sign at a quarter of the safe
- * height, and the loading bar with its label near the bottom. The fill of the bar is
- * `session.loading`, which the `setLoading` node commits as the three bundles come in.
+ * @file The splash (design §6 A1, §5.10): the full-bleed forest, the logo sign of Home at 24 % of
+ * the safe height, and the loader 305 units above the bottom safe edge: the wooden track, the
+ * honey fill that grows with `session.loading`, which the `setLoading` node commits as the three
+ * bundles come in, the saw blade riding the head of the fill (`blade.ts`, hosted by the track),
+ * and "Загрузка…" under it.
  */
 import { defineStyle, projection, tr } from "../../kit";
 import type { Player, Session } from "../../state";
-import { fullBleed, LogoSign, safeScreen } from "../ui/kit";
+import { LogoSign } from "../home/logo";
+import { fullBleed, safeScreen } from "../ui/kit";
 
 /** The track of the loading bar and the inset its fill keeps from the rim. */
-const track = { width: 720, height: 72, inset: 12 } as const;
+export const track = { width: 810, height: 100, inset: 16 } as const;
 
 /** The narrowest the fill can be drawn: the two ends of its nine-slice. */
 const minFill = 48;
@@ -23,7 +26,7 @@ const between = defineStyle({ grow: 1 });
 const loader = defineStyle({
   direction: "column",
   align: "center",
-  gap: 16,
+  gap: 40,
   margin: { bottom: 305 }
 });
 
@@ -55,13 +58,27 @@ export type SplashView = { loading: number };
  * @returns The width of the fill.
  * @example
  * ```ts
- * fillWidth(1); // 696
+ * fillWidth(1); // 778
  * ```
  */
 export function fillWidth(loading: number): number {
   const inside = track.width - 2 * track.inset;
 
   return Math.round(minFill + loading * (inside - minFill));
+}
+
+/**
+ * Where the fill ends, in the track's own units: the point the saw blade rides on.
+ *
+ * @param loading - The share, 0..1.
+ * @returns The x of the head of the fill.
+ * @example
+ * ```ts
+ * fillHead(1); // 794
+ * ```
+ */
+export function fillHead(loading: number): number {
+  return track.inset + fillWidth(loading);
 }
 
 /**
@@ -93,7 +110,7 @@ export const splashScreen = projection({
       <LogoSign id="splashLogo" />
       <spacer key="splashBetween" style={between} />
       <column key="loader" style={loader}>
-        <row key="loadingTrack" style={trackStyle}>
+        <row key="loadingTrack" hosts={["splash.blade"]} style={trackStyle}>
           <row key="loadingFill" style={fillStyle(item.loading)} />
         </row>
         <text key="loadingLabel" style="ui.caption" content={tr("splash.loading")} />
