@@ -47,6 +47,7 @@ function elementOf(patch: Partial<Element> = {}): Element {
     fit: 1,
     rest: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
     handles: [],
+    loop: undefined,
     motion: undefined,
     parent: undefined,
     children: [],

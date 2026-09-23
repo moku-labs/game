@@ -379,6 +379,7 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
       fit: 1,
       rest: identityPose(),
       handles: [],
+      loop: undefined,
       motion: node.props.motion as ElementMotion | undefined,
       parent: parent?.entity,
       children: [],
@@ -426,12 +427,19 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
       previousNode.props.content !== node.props.content ||
       previousNode.props.style !== node.props.style;
 
+    const motion = node.props.motion as ElementMotion | undefined;
+    const loopChanged = motion?.loop !== element.motion?.loop;
+
     element.node = node;
     element.is = is;
     element.style = style;
-    element.motion = node.props.motion as ElementMotion | undefined;
+    element.motion = motion;
     element.instance = instance;
     trackHost(state, element);
+
+    // A new loop replaces the running one, and a motion without a loop stops it. An element that
+    // has not entered yet starts the loop of its motion when it enters.
+    if (loopChanged && element.entered) modules.layout.loop(element);
 
     if (moved || contentChanged) {
       modules.layout.applyStyle(element);

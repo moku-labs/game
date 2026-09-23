@@ -297,17 +297,25 @@ export type ChangeHooks<Item> = { readonly [component: string]: ChangeHook<Item>
 
 /**
  * The motion hooks of a projection. Every one is optional; without a hook the component diff is
- * written directly.
+ * written directly. `loop` starts what moves a view for its whole life (an additive sway, a spin):
+ * it is played wherever `enter` plays, next to it, and its motion is kept apart from the view's
+ * other motions, so a change never cancels it; it ends when the view dies.
  *
  * @example
  * ```ts
  * const motion: ProjectionMotion<Item> = {
  *   change: { Transform: view => view.toRest(Transform, { ms: 350 }) }
  * };
+ * // An order card that sways forever once it entered.
+ * const swaying: ProjectionMotion<Item> = {
+ *   loop: view =>
+ *     view.tween(Transform, { rotation: 0.05 }, { ms: 1200, additive: true, repeat: "forever" })
+ * };
  * ```
  */
 export type ProjectionMotion<Item> = {
   enter?(view: ViewHandle<Item>, item: Item, hint?: Hint): Motion;
+  loop?(view: ViewHandle<Item>): Motion;
   exit?(view: ViewHandle<Item>, item: Item, hint?: Hint): Motion;
   readonly change?: ChangeHooks<Item>;
   settle?(view: ViewHandle<Item>, components: readonly string[]): Motion;
@@ -323,6 +331,7 @@ export type ProjectionMotion<Item> = {
  */
 export type AnyProjectionMotion = {
   enter?(view: ViewHandle<unknown>, item: unknown, hint?: Hint): Motion;
+  loop?(view: ViewHandle<unknown>): Motion;
   exit?(view: ViewHandle<unknown>, item: unknown, hint?: Hint): Motion;
   readonly change?: ChangeHooks<never>;
   settle?(view: ViewHandle<unknown>, components: readonly string[]): Motion;

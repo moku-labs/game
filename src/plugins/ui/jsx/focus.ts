@@ -122,7 +122,9 @@ export function createFocus(
   const usable = (element: Element): boolean => element.live && !state.exiting.has(element.entity);
 
   /**
-   * The controls of a root in reading order: its live elements that answer a tap.
+   * The controls of a root in reading order: its live elements that answer a tap. A button with
+   * `escape` and no children is a popup's backdrop, not a Tab stop: its ring would run around the
+   * whole screen. Escape and a tap still reach it.
    *
    * @param root - The root the keyboard works in.
    * @returns The elements, upper first, then left first.
@@ -134,8 +136,9 @@ export function createFocus(
       if (element.root !== root.entity || !usable(element)) continue;
 
       const answers = ecs.has(element.entity, Tappable) || ecs.has(element.entity, LocalWrite);
+      const backdrop = element.node.props.escape === true && element.children.length === 0;
 
-      if (answers) found.push({ element, rect: visualRectOf(element, lookup) });
+      if (answers && !backdrop) found.push({ element, rect: visualRectOf(element, lookup) });
     }
 
     found.sort((first, second) => readingOrder(first.rect, second.rect));

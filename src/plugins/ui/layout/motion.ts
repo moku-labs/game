@@ -161,6 +161,36 @@ export function play(
 }
 
 /**
+ * Starts the loop of an element's motion, and cancels the one it ran before: at enter, and again
+ * whenever the `loop` hook of its motion prop changed. A motion without a loop only stops the old
+ * one. The loop's motion is kept apart from the element's handles, so the exit sweep never waits
+ * for it; a throwing hook is logged.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element that entered, or whose motion changed.
+ */
+export function startLoop(ctx: UiCtx, element: Element): void {
+  element.loop?.cancel();
+  element.loop = undefined;
+
+  const hook = element.motion?.loop;
+
+  if (hook === undefined) return;
+
+  const handle = handleOf(ctx, element);
+
+  if (handle === undefined) return;
+
+  try {
+    const motion = hook(handle);
+
+    if (motion !== undefined) element.loop = motion;
+  } catch (error) {
+    ctx.log.error("ui:motion-failed", { key: element.key, type: element.type }, asError(error));
+  }
+}
+
+/**
  * Tells whether every motion of an element has finished, which is when an exiting element may
  * be despawned.
  *

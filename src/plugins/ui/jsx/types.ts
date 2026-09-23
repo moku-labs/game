@@ -180,7 +180,8 @@ export type Instance = {
  * One live element: the entity, the Yoga node, the resolved style and the place in the tree.
  * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit`
  * is the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform`
- * last written for it.
+ * last written for it. `loop` is the motion of the running `loop` hook, kept apart from
+ * `handles`: it never ends, so the exit sweep must not wait for it.
  */
 export type Element = {
   entity: Entity;
@@ -198,6 +199,7 @@ export type Element = {
   fit: number;
   rest: TransformValue;
   handles: MotionHandle[];
+  loop: MotionHandle | undefined;
   motion: ElementMotion | undefined;
   parent: Entity | undefined;
   children: Entity[];
@@ -329,7 +331,8 @@ export type CommonProps = {
   key?: string;
   style?: Style;
   state?: { active?: boolean; disabled?: boolean; selected?: boolean };
-  motion?: ElementMotion;
+  /** The motion hooks; `undefined` written out stops a running loop, as leaving it out does. */
+  motion?: ElementMotion | undefined;
   children?: JsxChild;
 };
 
