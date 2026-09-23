@@ -14,7 +14,6 @@ import { worldPlugin } from "../world";
 import { Layer, system, Tree } from "../world/ecs/define";
 import { createModules } from "./api";
 import { Box, UI_OWNER } from "./components";
-import { asTagHandle } from "./errors";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
@@ -97,10 +96,10 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     }),
     ecs.onRemoved(Tree, entity => jsx.unmountRoot(entity)),
     ecs.onAdded(Box, entity => jsx.playEnter(entity)),
-    ecs.onAdded(asTagHandle(Pressed), entity => jsx.markPointer(entity, "pressed", true)),
-    ecs.onRemoved(asTagHandle(Pressed), entity => jsx.markPointer(entity, "pressed", false)),
-    ecs.onAdded(asTagHandle(PointerOver), entity => jsx.markPointer(entity, "hover", true)),
-    ecs.onRemoved(asTagHandle(PointerOver), entity => jsx.markPointer(entity, "hover", false)),
+    ecs.onAdded(Pressed, entity => jsx.markPointer(entity, "pressed", true)),
+    ecs.onRemoved(Pressed, entity => jsx.markPointer(entity, "pressed", false)),
+    ecs.onAdded(PointerOver, entity => jsx.markPointer(entity, "hover", true)),
+    ecs.onRemoved(PointerOver, entity => jsx.markPointer(entity, "hover", false)),
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.input.onTap(jsx.applyTap),

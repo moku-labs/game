@@ -2,7 +2,8 @@
  * @file input plugin — the drag: grab, move, hover, release and abort. The engine owns the
  * lifting, the muted position and the way home; a game writes no drag code. A view with a
  * `Parent` is carried in root space: it leaves its parent at the grab and is hung back under it,
- * where the finger left it, at the release.
+ * where the finger left it, at the release. With a `heldScale` other than 1 the view in the hand
+ * is carried that much bigger than its rest size and set down at its rest size.
  */
 import { Parent, Transform } from "../renderer/components";
 import { localPoseOf, parentOf, rootPoseOf } from "../renderer/sync/pose";
@@ -14,6 +15,9 @@ import type { InputCtx, Point } from "./types";
 
 /** The fields the finger owns on a view that keeps its place in the scene. */
 const FINGER_FIELDS = ["x", "y"];
+
+/** The fields the finger owns on a view that keeps its place and is carried at a lifted scale. */
+const LIFTED_FIELDS = ["x", "y", "scale"];
 
 /**
  * The fields the finger owns on a view it took out of its parent: every number of the root pose
@@ -80,10 +84,79 @@ function reparent(ctx: InputCtx, entity: Entity): void {
 }
 
 /**
- * Takes a view into the hand: it is tagged, it leaves its parent, its pose is muted so no motion
- * writes it, it is lifted above its neighbours, and the gate learns that a pointer is down. The
- * offset to the finger is read last, so a view that is still sliding from an earlier motion is
- * picked up where it is, with no jump.
+ * The scale the lifted look starts from: the rest scale of the view in root space, so a view a
+ * press squashed is carried at its own size times `heldScale`. A view with no recorded rest starts
+ * from the scale it has. Read before the view leaves its parent, while the chain is still there.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The view the finger picked up.
+ * @returns The base scale, or `undefined` when `heldScale` is 1 or the view has no `Transform`.
+ */
+function restScaleOf(ctx: InputCtx, entity: Entity): number | undefined {
+  const { ecs, projection } = ctx.deps.world;
+
+  if (ctx.config.heldScale === 1 || !ecs.has(entity, Transform)) return undefined;
+
+  return rootPoseOf(ecs, entity, projection.restOf(entity, Transform)).scale;
+}
+
+/**
+ * Gives the view in the hand its lifted look: its rest scale times `heldScale`. The rest scale is
+ * remembered for the release.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The view the finger picked up, already in root space when it left a parent.
+ * @param restScale - What `restScaleOf` read before the view left its parent.
+ * @returns True when the scale was written.
+ */
+function scaleUp(ctx: InputCtx, entity: Entity, restScale: number | undefined): boolean {
+  if (restScale === undefined) return false;
+
+  ctx.state.restScale = restScale;
+  ctx.deps.world.ecs.set(entity, Transform, { scale: restScale * ctx.config.heldScale });
+
+  return true;
+}
+
+/**
+ * Takes the lifted look off: the rest scale is written back, so the view is hung back and sent
+ * home at its own size. A view that is gone is forgotten.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The view that was carried.
+ */
+function scaleDown(ctx: InputCtx, entity: Entity): void {
+  const { restScale } = ctx.state;
+  const { ecs } = ctx.deps.world;
+
+  ctx.state.restScale = undefined;
+  if (restScale === undefined || !ecs.has(entity, Transform)) return;
+
+  ecs.set(entity, Transform, { scale: restScale });
+}
+
+/**
+ * The fields of the `Transform` the finger owns for the drag.
+ *
+ * @param unparented - The view left a parent and carries its root pose.
+ * @param scaled - The view carries the lifted scale.
+ * @returns The field names to mute.
+ * @example
+ * ```ts
+ * ownedFields(false, true); // ["x", "y", "scale"]
+ * ```
+ */
+function ownedFields(unparented: boolean, scaled: boolean): string[] {
+  if (unparented) return ROOT_POSE_FIELDS;
+
+  return scaled ? LIFTED_FIELDS : FINGER_FIELDS;
+}
+
+/**
+ * Takes a view into the hand: it is tagged, it leaves its parent, it takes the lifted scale, its
+ * pose is muted so no motion writes it, it is lifted above its neighbours, and the gate learns
+ * that a pointer is down. The offset to the finger is read last, so a view that is still sliding
+ * from an earlier motion is picked up where it is, with no jump.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The view under the finger.
@@ -94,7 +167,9 @@ export function grab(ctx: InputCtx, entity: Entity, point: Point): void {
 
   ecs.tag(entity, Held);
 
-  const fields = unparent(ctx, entity) ? ROOT_POSE_FIELDS : FINGER_FIELDS;
+  const restScale = restScaleOf(ctx, entity);
+  const unparented = unparent(ctx, entity);
+  const fields = ownedFields(unparented, scaleUp(ctx, entity, restScale));
 
   ctx.state.unmute = projection.mute(entity, Transform, fields);
   projection.lift(entity, true);
@@ -144,12 +219,12 @@ export function moveHover(ctx: InputCtx, point: Point): void {
 
 /**
  * Lets the view go. With a drop target under the finger both components are read NOW, not at the
- * grab. A view that left its parent is hung back under it first, so a commit that follows the
- * answer moves it from under the finger. Then the answer goes to the gate, and always, in this
- * order: the mute is lifted so the settle motion can write the position again, the view is sent
- * home, the lift is released — on a view that still moves that takes effect when its last motion
- * ends, so a settling view flies home above its neighbours — the tags go, and the gate learns the
- * pointer is up.
+ * grab. The lifted scale comes off and a view that left its parent is hung back under it first,
+ * so a commit that follows the answer moves it from under the finger, at its own size. Then the
+ * answer goes to the gate, and always, in this order: the mute is lifted so the settle motion can
+ * write the position again, the view is sent home, the lift is released — on a view that still
+ * moves that takes effect when its last motion ends, so a settling view flies home above its
+ * neighbours — the tags go, and the gate learns the pointer is up.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - Where the finger let go. Left out for a cancel, which has no target.
@@ -165,6 +240,7 @@ export function release(ctx: InputCtx, point?: Point): boolean {
   const draggable = ecs.get(entity, Draggable);
   const dropTarget = target === undefined ? undefined : ecs.get(target, DropTarget);
 
+  scaleDown(ctx, entity);
   reparent(ctx, entity);
 
   const accepted =
@@ -187,9 +263,10 @@ export function release(ctx: InputCtx, point?: Point): boolean {
 
 /**
  * Gives the drag up because the view left: a commit despawned it, or its exit is playing. The
- * mute is lifted, which is safe after the entity is gone, a view that plays its exit is hung back
- * under the parent it left, and the gate learns the pointer is up. No answer, no settle and no
- * `lift(false)`: the exit motion and its layer belong to the projection.
+ * mute is lifted, which is safe after the entity is gone, a view that plays its exit loses the
+ * lifted scale and is hung back under the parent it left, and the gate learns the pointer is up.
+ * No answer, no settle and no `lift(false)`: the exit motion and its layer belong to the
+ * projection.
  *
  * @param ctx - Domain context of the input plugin.
  */
@@ -199,7 +276,10 @@ export function abortDrag(ctx: InputCtx): void {
 
   ctx.state.unmute?.();
   ctx.state.unmute = undefined;
-  if (entity !== undefined) reparent(ctx, entity);
+  if (entity !== undefined) {
+    scaleDown(ctx, entity);
+    reparent(ctx, entity);
+  }
   if (entity !== undefined && ecs.has(entity, Held)) ecs.untag(entity, Held);
   clearHover(ctx);
   ctx.deps.flow.gate.pointer(false);

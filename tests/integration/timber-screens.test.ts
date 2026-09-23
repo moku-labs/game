@@ -342,13 +342,7 @@ describe("timber-screens — the board screen", () => {
     await game.app.stop();
   });
 
-  // Engine gap, expected to fail until it is fixed. `ui` `writeLive`
-  // (src/plugins/ui/jsx/reconcile.ts:433) sets the whole `Text` value again, `resolved: ""`
-  // included, although `resolved` is the owned field of `text`. `text` `isStale`
-  // (src/plugins/text/resolve.ts:306) sees the same string content and never resolves it again.
-  // A message label comes back one frame later, a flicker; a plain-string label stays blank.
-  // Flip `it.fails` to `it` when the engine is fixed.
-  it.fails("keeps the plain-string labels of the HUD when the board screen is patched", async () => {
+  it("keeps the plain-string labels of the HUD when the board screen is patched", async () => {
     const game = await startOnBoard(readyPlayer);
     const ecs = game.app.world.ecs;
 

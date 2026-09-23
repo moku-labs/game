@@ -7,7 +7,8 @@ const config: Config = {
   longPressMs: 450,
   dragStartPx: 8,
   swipeMinPx: 48,
-  swipeMaxMs: 300
+  swipeMaxMs: 300,
+  heldScale: 1
 };
 
 describe("createInputState", () => {
@@ -29,6 +30,7 @@ describe("createInputState", () => {
     expect(state.start).toEqual({ x: 0, y: 0 });
     expect(state.grabOffset).toEqual({ x: 0, y: 0 });
     expect(state.unmute).toBeUndefined();
+    expect(state.restScale).toBeUndefined();
     expect(state.canvas).toBeUndefined();
     expect(state.offFrame).toBeUndefined();
     expect(state.detach).toBeUndefined();

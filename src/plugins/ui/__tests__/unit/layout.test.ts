@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { Pressed } from "../../../input/components";
 import { NineSlice, Sprite, Transform } from "../../../renderer/components";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { Box, LocalWrite } from "../../components";
-import { asError, asHandle, asTagHandle } from "../../errors";
+import { asError, asHandle } from "../../errors";
 import { forgetInstances } from "../../jsx/instances";
 import { Fragment, jsx } from "../../jsx/runtime";
 import { createJsxState } from "../../jsx/state";
@@ -68,9 +67,8 @@ describe("errors", () => {
     expect(asError("boom").message).toBe("boom");
   });
 
-  it("reads a component and a tag as the handle the ecs takes", () => {
+  it("reads a component type as the handle the ecs takes", () => {
     expect(asHandle(Box).componentName).toBe("Box");
-    expect(asTagHandle(Pressed).componentName).toBe("Pressed");
   });
 });
 

@@ -89,6 +89,10 @@ export type TapListener = (entity: Entity) => void;
  * @example
  * ```ts
  * createApp({ plugins: [...screen], pluginConfigs: { input: { longPressMs: 300, swipeMinPx: 64 } } });
+ * // A merge game carries the item in the hand 8% bigger: a board item resting at scale 0.5 on
+ * // screen is drawn at 0.54 from the grab to the drop, even after a press squashed it, then
+ * // flies home at 0.5.
+ * createApp({ plugins: [...screen], pluginConfigs: { input: { heldScale: 1.08 } } });
  * ```
  */
 export type Config = {
@@ -102,6 +106,13 @@ export type Config = {
   swipeMinPx: number;
   /** Longest swipe, in ms of `time`, from pointer down to pointer up. */
   swipeMaxMs: number;
+  /**
+   * How much bigger the view in the hand is drawn: its rest scale in root space times this, from
+   * the grab to the release, so a squash a press left on it does not shrink the lift. A view with
+   * no recorded rest starts from its scale at the grab. The drop, the cancel and the abort write
+   * the rest scale back, so the way home starts at the view's own size. `1` changes nothing.
+   */
+  heldScale: number;
 };
 
 /**
@@ -129,6 +140,8 @@ export type State = {
   pointerOver: Entity | undefined;
   /** The `Parent` the held view had at the grab. It is hung back under it on the release. */
   parent: Entity | undefined;
+  /** The rest scale of the held view in root space: the base of `heldScale`, set back on drop. */
+  restScale: number | undefined;
   /** The remover `world.projection.mute` returned, while a drag runs. */
   unmute: (() => void) | undefined;
   canvas: HTMLCanvasElement | undefined;

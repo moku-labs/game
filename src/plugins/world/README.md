@@ -31,7 +31,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `has(entity, Component)` / `tag` / `untag` | Structural and idempotent. False for a stale id. |
 | `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C`. |
 | `resource(Resource)` | The one mutable value per world, cloned from the defaults on first read. |
-| `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied. A throwing listener is logged; the others still run. |
+| `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied, for a component or a tag. A component listener gets the entity and the value; a tag listener gets the entity. A throwing listener is logged; the others still run. |
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
 | `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
@@ -99,8 +99,9 @@ entity that died meanwhile is dropped.
 A new motion on a view that still animates cancels the running ones and starts from the current
 values (spike P5). Components the new hooks do not drive are brought to the rest pose by
 `motion.settle`, or by the built-in `toRest` over `settleMs`. When the last motion of a view ends,
-every rest component is compared with the stored value, muted fields excluded; a difference is
-written and reported with `log.warn("world:view-corrected", …)`.
+every rest component is compared with the stored value, muted fields excluded. A number counts as
+at rest within 1e-6 reference units, so float noise from a root-space round trip is no difference.
+A difference is written and reported with `log.warn("world:view-corrected", …)`.
 
 `ViewHandle.tween`, `toRest` and `all` run on the driver `anim` installs with `setDriver`
 (`projection/driver.ts`). A track reads its start values when its `delayMs` ends, writes the exact

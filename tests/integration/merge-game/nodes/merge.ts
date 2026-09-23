@@ -1,14 +1,17 @@
 /**
  * @file Transit node `merge`: the item on `from` is dragged onto the item on `to`. A legal merge
- * bursts into sparkles and leaves on the item that rose (design §6 F4); the node does not wait
- * for them, so the next drag is free at once.
+ * bursts into sparkles and leaves on the item that rose (design §6 F4); a merge the rules refuse —
+ * another level, a crate on a crate, the sawmill — shakes what stands on `to` and changes nothing
+ * (design §6 F7), and the dragged item flies home on the settle of the input plugin. The node
+ * waits for neither, so the next drag is free at once.
  */
 import { play, type } from "@moku-labs/game";
 import { defineNode } from "../kit";
 import { rules } from "../rules";
 import { applyRules } from "../state";
 import { tables } from "../tables";
-import { mergeBurst } from "../view/animations";
+import { mergeBurst, refuseShake } from "../view/animations";
+import { viewAt } from "../view/targets";
 
 export const merge = defineNode({
   input: type<{ from: string; to: string }>(),
@@ -16,7 +19,13 @@ export const merge = defineNode({
   run: ({ input, player, fx, out }) => {
     const result = rules.merge(player.merge, input.from, input.to, tables);
 
-    if (!result.legal) return out.rejected({ reason: result.reason });
+    if (!result.legal) {
+      const target = viewAt(player, input.to);
+
+      if (target !== undefined) void fx(play(refuseShake, { target }));
+
+      return out.rejected({ reason: result.reason });
+    }
 
     applyRules(player, result.state);
     // The risen item keeps the id of the target, so the burst aims at the item that stays.

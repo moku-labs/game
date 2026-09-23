@@ -421,3 +421,206 @@ describe("the drag of a parented view", () => {
     expect(mock.has(item, Held)).toBe(false);
   });
 });
+
+describe("the lifted look of the view in the hand (heldScale)", () => {
+  it("carries a plain view at its scale times heldScale and owns the scale for the drag", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const item = grabbed(mock, { x: 50, y: 50 }, { x: 50, y: 50 });
+
+    expect(mock.read(item, Transform)).toMatchObject({ x: 50, y: 50 });
+    expect((mock.read(item, Transform) as { scale: number }).scale).toBeCloseTo(1.08, 10);
+    expect(mock.muted).toEqual([["x", "y", "scale"]]);
+    expect(mock.calls).toEqual(["tag:Held", "set:Transform", "mute", "lift:true", "pointer:true"]);
+  });
+
+  it("carries a parented view at its root scale times heldScale, where it was picked up", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const { item } = parented(mock);
+
+    expect(mock.read(item, Transform)).toMatchObject({ x: 90, y: 160, rotation: 0 });
+    expect((mock.read(item, Transform) as { scale: number }).scale).toBeCloseTo(0.54, 10);
+    expect(mock.muted).toEqual([["x", "y", "rotation", "scale"]]);
+  });
+
+  it("keeps the lifted scale while the finger moves the view", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const { item } = parented(mock);
+
+    moveHeld(mock.input, { x: 190, y: 260 });
+
+    expect(mock.read(item, Transform)).toMatchObject({ x: 190, y: 260 });
+    expect((mock.read(item, Transform) as { scale: number }).scale).toBeCloseTo(0.54, 10);
+  });
+
+  it("writes the scale of the grab back on the drop, so the way home starts unscaled", () => {
+    const plain = createMockInput({ heldScale: 1.08 });
+    const lifted = createMockInput({ heldScale: 1.08 });
+    const item = grabbed(plain, { x: 50, y: 50 }, { x: 50, y: 50 });
+    const { slot, item: hosted } = parented(lifted);
+
+    release(plain.input, { x: 900, y: 900 });
+    moveHeld(lifted.input, { x: 190, y: 260 });
+    release(lifted.input, { x: 900, y: 900 });
+
+    expect(plain.read(item, Transform)).toMatchObject({ x: 50, y: 50, scale: 1 });
+    expect(lifted.read(hosted, Parent)).toEqual({ entity: slot });
+    expect(lifted.read(hosted, Transform)).toMatchObject({ x: 300, y: 400, rotation: 0, scale: 1 });
+    expect(lifted.state.restScale).toBeUndefined();
+  });
+
+  it("writes the scale back before the drop answer, so a commit retargets an unscaled view", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const item = grabbed(mock, { x: 50, y: 50 }, { x: 50, y: 50 });
+    const cell = mock.spawn([DropTarget({ intent: "merge", payload: { to: "c3" } })]);
+
+    mock.boxes.push({ entity: cell, x: 100, y: 0, width: 100, height: 100 });
+    mock.calls.length = 0;
+    release(mock.input, { x: 150, y: 50 });
+
+    expect(mock.calls.indexOf("set:Transform")).toBeLessThan(mock.calls.indexOf("answer"));
+    expect(mock.read(item, Transform)).toMatchObject({ scale: 1 });
+  });
+
+  it("writes the scale back on a cancel and when the drag is given up", () => {
+    const cancelled = createMockInput({ heldScale: 1.08 });
+    const aborted = createMockInput({ heldScale: 1.08 });
+    const { item } = parented(cancelled);
+    const { slot, item: exiting } = parented(aborted);
+
+    release(cancelled.input);
+    aborted.attachTo(exiting, Exiting());
+    abortDrag(aborted.input);
+
+    expect(cancelled.read(item, Transform)).toMatchObject({ x: 100, y: 200, scale: 1 });
+    expect(aborted.read(exiting, Parent)).toEqual({ entity: slot });
+    expect(aborted.read(exiting, Transform)).toMatchObject({ x: 100, y: 200, scale: 1 });
+    expect(aborted.state.restScale).toBeUndefined();
+  });
+
+  it("keeps the unscaled root pose when the parent left the world during the drag", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const { slot, item } = parented(mock);
+
+    mock.kill(slot);
+    release(mock.input, { x: 900, y: 900 });
+
+    expect(mock.has(item, Parent)).toBe(false);
+    expect(mock.read(item, Transform)).toMatchObject({ x: 90, y: 160, scale: 0.5 });
+  });
+
+  it("forgets the scale when the held view is gone", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const item = grabbed(mock, { x: 50, y: 50 }, { x: 50, y: 50 });
+
+    mock.kill(item);
+    mock.calls.length = 0;
+    abortDrag(mock.input);
+
+    expect(mock.state.restScale).toBeUndefined();
+    expect(mock.calls).toEqual(["unmute", "pointer:false"]);
+  });
+
+  it("scales nothing on a view that carries no Transform", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const entity = mock.spawn([Draggable({})], { projection: "board.items", key: "i5" });
+
+    mock.state.entity = entity;
+    grab(mock.input, entity, { x: 40, y: 60 });
+
+    expect(mock.state.restScale).toBeUndefined();
+    expect(mock.calls).toEqual(["tag:Held", "mute", "lift:true", "pointer:true"]);
+  });
+
+  it("lifts a view squashed at the grab from its rest scale, and sets it down at rest", () => {
+    const plain = createMockInput({ heldScale: 1.08 });
+    const item = plain.spawn([Draggable({}), Transform({ x: 50, y: 50, scale: 0.94 })], {
+      projection: "board.items",
+      key: "i5"
+    });
+
+    plain.setRest(item, Transform({ x: 50, y: 50 }));
+    plain.state.entity = item;
+    grab(plain.input, item, { x: 50, y: 50 });
+
+    expect((plain.read(item, Transform) as { scale: number }).scale).toBeCloseTo(1.08, 10);
+
+    release(plain.input, { x: 900, y: 900 });
+
+    expect(plain.read(item, Transform)).toMatchObject({ scale: 1 });
+  });
+
+  it("lifts a parented view squashed at the grab from its rest scale in root space", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const slot = mock.spawn([Transform({ x: 40, y: 60, scale: 0.5 })]);
+    const item = mock.spawn(
+      [Draggable({}), Transform({ x: 100, y: 200, scale: 0.94 }), Parent({ entity: slot })],
+      { projection: "board.items", key: "i5" }
+    );
+
+    mock.setRest(item, Transform({ x: 100, y: 200 }));
+    mock.state.entity = item;
+    grab(mock.input, item, { x: 90, y: 160 });
+
+    expect(mock.read(item, Transform)).toMatchObject({ x: 90, y: 160 });
+    expect((mock.read(item, Transform) as { scale: number }).scale).toBeCloseTo(0.54, 10);
+
+    release(mock.input);
+
+    expect(mock.read(item, Parent)).toEqual({ entity: slot });
+    expect(mock.read(item, Transform)).toMatchObject({ x: 100, y: 200, scale: 1 });
+  });
+
+  it("lifts a view with no recorded rest from the scale it has at the grab", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const item = mock.spawn([Draggable({}), Transform({ x: 50, y: 50, scale: 0.94 })], {
+      projection: "board.items",
+      key: "i5"
+    });
+
+    mock.state.entity = item;
+    grab(mock.input, item, { x: 50, y: 50 });
+
+    expect((mock.read(item, Transform) as { scale: number }).scale).toBeCloseTo(0.94 * 1.08, 10);
+  });
+
+  it("changes nothing with heldScale 1: no scale write, only x and y owned", () => {
+    const mock = createMockInput({ heldScale: 1 });
+    const item = grabbed(mock, { x: 50, y: 50 }, { x: 50, y: 50 });
+
+    expect(mock.calls).toEqual(["tag:Held", "mute", "lift:true", "pointer:true"]);
+    expect(mock.muted).toEqual([["x", "y"]]);
+    expect(mock.state.restScale).toBeUndefined();
+
+    mock.calls.length = 0;
+    release(mock.input, { x: 900, y: 900 });
+
+    expect(mock.read(item, Transform)).toMatchObject({ x: 50, y: 50, scale: 1 });
+    expect(mock.calls).toEqual(["unmute", "settle", "lift:false", "untag:Held", "pointer:false"]);
+  });
+
+  it("carries the view lifted through the frame step and sets it down unscaled on the up", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const slot = mock.spawn([Transform({ x: 40, y: 60, scale: 0.5 })]);
+    const item = mock.spawn(
+      [Draggable({}), Transform({ x: 100, y: 200 }), Parent({ entity: slot })],
+      { projection: "board.items", key: "i5" }
+    );
+    const at = (kind: "down" | "move" | "up", x: number, y: number): void =>
+      record(mock.state, { kind, pointerType: "touch", pointerId: 1, clientX: x, clientY: y });
+
+    mock.boxes.push({ entity: item, x: 80, y: 150, width: 20, height: 20 });
+    mock.start();
+    at("down", 90, 160);
+    mock.frame();
+    at("move", 140, 210);
+    mock.frame();
+
+    expect((mock.read(item, Transform) as { scale: number }).scale).toBeCloseTo(0.54, 10);
+
+    at("up", 140, 210);
+    mock.frame();
+
+    expect(mock.read(item, Parent)).toEqual({ entity: slot });
+    expect(mock.read(item, Transform)).toMatchObject({ x: 100, y: 200, scale: 1 });
+  });
+});

@@ -67,6 +67,26 @@ describe("ecs storage", () => {
     expect(removed).toHaveBeenCalledWith(entity, { texture: "b" });
   });
 
+  it("fires onAdded on tag and onRemoved on untag, once each, with the entity", () => {
+    const world = createMockWorld();
+    const added = vi.fn();
+    const removed = vi.fn();
+    const entity = world.api.ecs.spawn(test, []);
+
+    world.api.ecs.onAdded(Held, added);
+    world.api.ecs.onRemoved(Held, removed);
+
+    world.api.ecs.tag(entity, Held);
+    world.api.ecs.tag(entity, Held);
+    expect(added).toHaveBeenCalledTimes(1);
+    expect(added.mock.calls[0]?.[0]).toBe(entity);
+
+    world.api.ecs.untag(entity, Held);
+    world.api.ecs.untag(entity, Held);
+    expect(removed).toHaveBeenCalledTimes(1);
+    expect(removed.mock.calls[0]?.[0]).toBe(entity);
+  });
+
   it("logs a throwing structural hook and still runs the others", () => {
     const world = createMockWorld();
     const second = vi.fn();

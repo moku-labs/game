@@ -20,7 +20,8 @@ const app = createApp({
     model: { initialPlayer: startingPlayer, initialSession: startingSession, seed: 42 },
     flow: { mainFlow, safeNode: "home" },
     i18n: { locale: "ru", fallback: "ru" },
-    audio: { volumes: volumesOf }
+    audio: { volumes: volumesOf },
+    input: { heldScale: 1.08 }
   },
   onStart: ctx => {
     ctx.flow.run().catch((error: unknown) => {

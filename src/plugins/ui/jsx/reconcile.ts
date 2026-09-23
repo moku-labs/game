@@ -263,6 +263,25 @@ function entitySet(entities: Iterable<Entity>): Set<Entity> {
 }
 
 /**
+ * The patch a live element writes into one of its components: every field but the ones the
+ * component type gives to a plugin. That plugin keeps such a field for the life of the entity, so
+ * a re-render never puts it back to its default: a label keeps the string `text` resolved for it.
+ *
+ * @param value - The component value the element carries now.
+ * @param owned - The fields the component type gives to a plugin.
+ * @returns The fields to write.
+ * @example
+ * ```ts
+ * livePatch({ content: "Play", resolved: "" }, ["resolved"]); // { content: "Play" }
+ * ```
+ */
+function livePatch(value: object, owned: readonly string[]): object {
+  if (owned.length === 0) return value;
+
+  return Object.fromEntries(Object.entries(value).filter(([field]) => !owned.includes(field)));
+}
+
+/**
  * Builds the reconcile half of the jsx module: the two systems of the frame and the root
  * bookkeeping around them.
  *
@@ -430,7 +449,9 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
       }
 
       if (value.value !== true && value.type !== Scroll) {
-        ecs.set(element.entity, asHandle(value.type), value.value);
+        const owned = ecs.typeOf(value.type.componentName)?.owned ?? [];
+
+        ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
       }
     }
   }

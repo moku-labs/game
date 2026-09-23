@@ -16,6 +16,19 @@ export const cellSize = (slot.size - 2 * slot.inset - 2 * slot.gap) / 3;
 export const itemSize = Math.round(cellSize * 0.82);
 
 /**
+ * Draw order inside the board slot: the grass, the glow on it, the selection ring, the generator,
+ * the four parts of its clock badge, the items over everything.
+ */
+export const depth = {
+  cells: 0,
+  glows: 1,
+  selection: 2,
+  generators: 3,
+  clock: 4,
+  items: 8
+} as const;
+
+/**
  * A point of the slot's own space.
  *
  * @example
