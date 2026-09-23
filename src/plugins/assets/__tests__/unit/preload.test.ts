@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphNode } from "../../../flow/runner/types";
 import type { FlowGraph, NodeInfo } from "../../../flow/types";
+import { createHandlers } from "../../handlers";
 import { bundlesOfNode, neighbourhood, startPreload, stopPreload } from "../../preload";
 import { loadBundle } from "../../tiers";
 import type { MockAssets } from "./mock-assets";
@@ -241,7 +242,7 @@ describe("startPreload", () => {
     expect(mock.emitted.filter(entry => entry.name === "assets:bundle-loaded")).toHaveLength(5);
   });
 
-  it("replaces the running queue and aborts the old one", async () => {
+  it("replaces the running queue and aborts the old one when the neighbourhood changed", async () => {
     const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
       { flow: "main", node: "board" },
       { flow: "board", node: "await" }
@@ -252,10 +253,23 @@ describe("startPreload", () => {
 
     const first = mock.ctx.state.queue;
 
+    // The graph left the board for home: another neighbourhood, so another queue.
+    mock.flow.stack = [{ flow: "main", node: "home", input: 0 }];
+    mock.ctx.state.current = {
+      path: "main/home",
+      flow: "main",
+      node: "home",
+      rest: true,
+      over: false,
+      checkpoint: false,
+      barrier: false,
+      scene: "home"
+    } as NodeInfo;
     startPreload(mock.assetsCtx);
 
     expect(first?.controller.signal.aborted).toBe(true);
     expect(mock.ctx.state.queue).not.toBe(first);
+    expect(mock.ctx.state.queue?.bundles[0]).toBe("home");
 
     stopPreload(mock.ctx.state);
     mock.io.releaseAll();
@@ -278,6 +292,43 @@ describe("startPreload", () => {
     startPreload(mock.assetsCtx);
 
     expect(mock.ctx.state.queue).toBeUndefined();
+  });
+});
+
+describe("startPreload on a rest node the graph comes back to", () => {
+  it("keeps the running queue for the same neighbourhood, so its load finishes once", async () => {
+    const mock = await standingAt({ flow: "board", node: "await", scene: "board" }, [
+      { flow: "main", node: "board" },
+      { flow: "board", node: "await" }
+    ]);
+    const rest = createHandlers(mock.ctx)["flow:rest"];
+
+    mock.io.control.gated = true;
+    rest({ path: "board/await", checkpoint: false });
+
+    const first = mock.ctx.state.queue;
+
+    // The first bundle of the queue is in flight when the same rest node comes back.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(mock.ctx.state.records.get("board")?.status).toBe("loading");
+    rest({ path: "board/await", checkpoint: false });
+
+    expect(mock.ctx.state.queue).toBe(first);
+    expect(first?.controller.signal.aborted).toBe(false);
+
+    mock.io.control.gated = false;
+    mock.io.releaseAll();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const loaded = mock.emitted
+      .filter(entry => entry.name === "assets:bundle-loaded")
+      .map(entry => (entry.payload as { bundle: string }).bundle);
+
+    expect(loaded.filter(name => name === "board")).toHaveLength(1);
+    expect(mock.io.fetched.filter(url => url === "/features/board/assets/cell.png")).toHaveLength(
+      1
+    );
+    expect(mock.ctx.state.records.get("reward")?.status).toBe("loaded");
   });
 });
 

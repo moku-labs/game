@@ -154,9 +154,12 @@ breadth-first over `flow.describe()` from the current node, at most `preloadDept
 `"node"` and `"map:node"` move inside the flow, a node with `subFlow` adds the start node of that
 flow at the same distance, a node with `slot` adds the start nodes of `graph.slots[slot]`, and
 `"exit:name"` continues on the parent frame taken from `flow.state().stack`. Bundles come out
-ordered by distance, then by name; the `lazy` tier, what is loaded and what is loading are
-skipped. The queue stops at the first bundle that would break the budget — preload never evicts.
-A new rest node replaces the queue and aborts the old one. A fast walk skips the preload.
+ordered by distance, then by name; the `lazy` tier, what is loaded and what is loading outside
+the running queue are skipped. The queue stops at the first bundle that would break the budget —
+preload never evicts. A rest node with the same neighbourhood keeps the running queue, so a node
+the graph comes back to often (a splash that commits its progress through a transit node) does
+not restart its loads. A different neighbourhood replaces the queue and aborts the old one. A
+fast walk skips the preload.
 
 `enforceBudget` runs after every load and at every rest node: while `usedMb > textureBudgetMb` it
 unloads the bundle with the smallest use counter that is not pinned, not `boot` or `core`, not
