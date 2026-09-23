@@ -82,7 +82,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
 
       if (!deps.host.ready()) return undefined;
 
-      ctx.log.debug("moku:dev renderer.capture");
+      ctx.log.debug("moku:dev", { command: "renderer.capture" });
 
       if (ctx.deps.time.isPaused()) return deps.host.extract();
 

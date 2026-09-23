@@ -4,10 +4,11 @@
  * by the door `src/control.ts` only, so no plugin reaches it and no import cycle forms.
  */
 import { reducedMotionCommand } from "../../anim/control";
-import { dragCommand, keyCommand, tapCommand } from "../../input/control";
+import { dragCommand, keyCommand } from "../../input/control";
 import { pauseCommand, resumeCommand } from "../../lifecycle/control";
 import { captureCommand, debugCommand } from "../../renderer/control";
 import { stepCommand } from "../../time/control";
+import { tapCommand } from "../../ui/control";
 import { answerCommand, bookmarkCommand, restoreCommand, walkCommand } from "../control";
 
 /**

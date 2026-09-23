@@ -78,13 +78,32 @@ describe("audio journal", () => {
     expect(mock.api.journal().map(entry => entry.key)).toEqual(["b", "c"]);
   });
 
-  it("hands out a copy a caller cannot write into", async () => {
+  it("keeps only the last sound with a journal of one", async () => {
+    const mock = unlocked(1);
+
+    await mock.fx("sfx", sfx("a"));
+    await mock.fx("sfx", sfx("b"));
+
+    expect(mock.api.journal().map(entry => entry.key)).toEqual(["b"]);
+  });
+
+  it("hands out a frozen list that a new sound replaces, never writes into", async () => {
     const mock = unlocked(5);
 
     await mock.fx("sfx", sfx("ui.click"));
-    (mock.api.journal() as unknown[]).length = 0;
 
-    expect(mock.api.journal()).toHaveLength(1);
+    const before = mock.api.journal();
+
+    expect(Object.isFrozen(before)).toBe(true);
+    expect(mock.api.journal()).toBe(before);
+
+    await mock.fx("sfx", sfx("ui.gear"));
+
+    const after = mock.api.journal();
+
+    expect(before.map(entry => entry.key)).toEqual(["ui.click"]);
+    expect(after.map(entry => entry.key)).toEqual(["ui.click", "ui.gear"]);
+    expect(Object.isFrozen(after)).toBe(true);
   });
 
   it("is cleared when the plugin stops", async () => {
@@ -94,5 +113,6 @@ describe("audio journal", () => {
     await mock.stop();
 
     expect(mock.api.journal()).toEqual([]);
+    expect(Object.isFrozen(mock.api.journal())).toBe(true);
   });
 });

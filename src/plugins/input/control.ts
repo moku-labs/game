@@ -1,15 +1,14 @@
 /**
- * @file input plugin — the input commands of the `/control` door: a tap on an element or a
- * view, a drag from one view onto another and a key press. Each goes through `app.input`, so
- * the gate decides and the session stays clean. Dev builds only: every body starts with the
- * inline dev guard, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
+ * @file input plugin — the input commands of the `/control` door: a drag from one view onto
+ * another and a key press. Each goes through `app.input`, so the gate decides and the session
+ * stays clean. Dev builds only: every body starts with the inline dev guard, so a bundler
+ * `define` of `false` drops it, and logs the `moku:dev` marker. `readTarget` is shared with the
+ * `game.tap` command of ui, which taps a view by the same projection key.
  */
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
 import type { Json } from "../model/types";
-import type { UiApi } from "../ui/types";
-import type { Entity } from "../world/types";
 import type { InputApi } from "./types";
 
 /** What the input commands need of an app: the control app plus the input. */
@@ -45,62 +44,13 @@ function isProjectionTarget(value: Json | undefined): value is ProjectionTarget 
  * @returns The target, a fresh object.
  * @throws {Error} When the JSON is not an object with a string `projection` and a string `key`.
  */
-function readTarget(value: Json | undefined): ProjectionTarget {
+export function readTarget(value: Json | undefined): ProjectionTarget {
   if (isProjectionTarget(value)) return { projection: value.projection, key: value.key };
 
   throw new Error(
     '[game] The target is not a projection key.\n  Pass a view like { projection: "board.items", key: "i5" }.'
   );
 }
-
-/**
- * Finds the entity of a keyed ui element on screen.
- *
- * @param ui - The ui API.
- * @param key - The `key` prop of the element.
- * @returns The entity.
- * @throws {Error} When no element with the key is on screen.
- */
-function elementOf(ui: UiApi, key: string): Entity {
-  // eslint-disable-next-line unicorn/no-array-callback-reference -- `ui.find` takes a key, not a callback.
-  const entity = ui.find(key);
-
-  if (entity !== undefined) return entity;
-
-  throw new Error(
-    `[game] No element with the key "${key}" is on screen.\n  Read sources.ui for the keys on screen.`
-  );
-}
-
-/**
- * Taps a ui element by its key, or a view by its projection key: exactly one of the two. Answers
- * what `input.tap` answers: whether the gate took the answer.
- *
- * @example
- * ```ts
- * // Home rests: tap the Play plank, then the first generator of the board.
- * (await run(app, commands.tap, { key: "play" })).value; // true
- * await run(app, commands.tap, { target: { projection: "board.generators", key: "g1" } });
- * ```
- */
-export const tapCommand = defineCommand({
-  id: "game.tap",
-  title: "Tap",
-  input: { key: "string?", target: "json?" },
-  effect: "route",
-  run: (app: InputApp & { readonly ui: UiApi }, { key, target }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
-
-    app.log.debug("moku:dev", { command: "game.tap", key });
-
-    if (key !== undefined && target === undefined) return app.input.tap(elementOf(app.ui, key));
-    if (target !== undefined && key === undefined) return app.input.tap(readTarget(target));
-
-    throw new Error(
-      "[game] game.tap takes a key or a target.\n  Pass exactly one of { key } and { target }."
-    );
-  }
-});
 
 /**
  * Drags one view onto another, both by their projection keys. Answers what `input.drag`

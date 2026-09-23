@@ -108,7 +108,7 @@ export async function stopAudio(state: State): Promise<void> {
   removeUnlock(state);
   stopMusic(state);
   state.decoded.clear();
-  state.journal.length = 0;
+  state.journal = Object.freeze([]);
   state.unlocked = false;
 
   const context = state.context;

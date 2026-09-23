@@ -6,6 +6,7 @@ import { defineSource } from "../flow/doors/define";
 import type { HeadlessApp } from "../flow/headless";
 import type { Api as RendererApi } from "../renderer/types";
 import type { UiApi, UiNode } from "./types";
+import { scaleByFits } from "./visual";
 
 /** A rect: left, top, width and height. */
 type Rect = UiNode["rect"];
@@ -45,24 +46,10 @@ function chainTo(node: UiNode, key: string): Chain | undefined {
  * @returns The drawn rect.
  */
 function drawnRect(chain: Chain): Rect {
-  let rect: Rect = { ...chain[0].rect };
-
-  for (const above of chain) {
-    const fit = above.fitScale ?? 1;
-
-    if (fit === 1) continue;
-
-    const centre = { x: above.rect.x + above.rect.w / 2, y: above.rect.y + above.rect.h / 2 };
-
-    rect = {
-      x: centre.x + fit * (rect.x - centre.x),
-      y: centre.y + fit * (rect.y - centre.y),
-      w: rect.w * fit,
-      h: rect.h * fit
-    };
-  }
-
-  return rect;
+  return scaleByFits(
+    chain[0].rect,
+    chain.map(node => ({ rect: node.rect, fit: node.fitScale ?? 1 }))
+  );
 }
 
 /**

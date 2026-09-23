@@ -187,6 +187,40 @@ export function fitScaleOf(element: Element, lookup: ElementLookup): number {
 }
 
 /**
+ * Scales a rect about the centre of every fitted link of a chain, in order: the way ui draws a
+ * `fit: "contain"`. A link with fit 1 leaves the rect alone.
+ *
+ * @param rect - The natural rect.
+ * @param chain - The element and its ancestors, nearest first, each with its rect and fit scale.
+ * @returns The drawn rect, a new object.
+ * @example
+ * ```ts
+ * scaleByFits({ x: 0, y: 0, w: 100, h: 100 }, [{ rect: { x: 0, y: 0, w: 100, h: 100 }, fit: 0.5 }]); // { x: 25, y: 25, w: 50, h: 50 }
+ * ```
+ */
+export function scaleByFits(
+  rect: Readonly<Rect>,
+  chain: readonly { readonly rect: Readonly<Rect>; readonly fit: number }[]
+): Rect {
+  let drawn: Rect = { ...rect };
+
+  for (const above of chain) {
+    if (above.fit === 1) continue;
+
+    const centre = { x: above.rect.x + above.rect.w / 2, y: above.rect.y + above.rect.h / 2 };
+
+    drawn = {
+      x: centre.x + above.fit * (drawn.x - centre.x),
+      y: centre.y + above.fit * (drawn.y - centre.y),
+      w: drawn.w * above.fit,
+      h: drawn.h * above.fit
+    };
+  }
+
+  return drawn;
+}
+
+/**
  * Where an element is drawn at rest, in root coordinates: its natural rect, scaled about the
  * centre of every fitted element on the way up, the element itself included. The visual
  * transform styles (offset, scale) are left out: they are a state look, never a place.
@@ -196,22 +230,7 @@ export function fitScaleOf(element: Element, lookup: ElementLookup): number {
  * @returns The drawn rect.
  */
 export function visualRectOf(element: Element, lookup: ElementLookup): Rect {
-  let rect: Rect = { ...element.rect };
-
-  for (const above of chainOf(element, lookup)) {
-    if (above.fit === 1) continue;
-
-    const centre = { x: above.rect.x + above.rect.w / 2, y: above.rect.y + above.rect.h / 2 };
-
-    rect = {
-      x: centre.x + above.fit * (rect.x - centre.x),
-      y: centre.y + above.fit * (rect.y - centre.y),
-      w: rect.w * above.fit,
-      h: rect.h * above.fit
-    };
-  }
-
-  return rect;
+  return scaleByFits(element.rect, chainOf(element, lookup));
 }
 
 /**

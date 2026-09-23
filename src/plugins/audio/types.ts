@@ -185,8 +185,11 @@ export type State = {
   unlock: (() => void) | undefined;
   /** The removers of the two fx handlers. */
   removers: Array<() => void>;
-  /** The sounds that started, oldest first, at most `config.journal` of them. */
-  journal: SoundEntry[];
+  /**
+   * The sounds that started, oldest first, at most `config.journal` of them. Frozen: a write
+   * replaces the whole list, so `journal()` hands it out without a copy.
+   */
+  journal: readonly SoundEntry[];
 };
 
 /**
@@ -269,7 +272,7 @@ export type AudioApi = {
    * and a music switch to the track that already plays are not in it. Empty while
    * `config.journal` is 0, the default, and after the app stopped.
    *
-   * @returns A copy of the journal.
+   * @returns The journal, frozen; a later sound replaces the list and leaves this one as it was.
    * @example
    * ```ts
    * // A test composed with `pluginConfigs.audio = { journal: 200 }` taps "deliver" after the

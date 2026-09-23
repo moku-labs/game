@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Element } from "../../jsx/types";
 import { restTransform } from "../../layout/motion";
 import { fitInto } from "../../layout/solve";
-import { fitScaleOf, samePose, visualOf, visualRectOf } from "../../visual";
+import { fitScaleOf, samePose, scaleByFits, visualOf, visualRectOf } from "../../visual";
 
 /**
  * Builds the smallest element the visual helpers read.
@@ -260,6 +260,26 @@ describe("fitScaleOf and visualRectOf", () => {
       h: 140 * 0.8
     });
     expect(visualRectOf(slot, lookup)).toEqual(slot.rect);
+  });
+});
+
+describe("scaleByFits", () => {
+  it("scales a rect about the centre of every fitted link, nearest first", () => {
+    const rect = { x: 0, y: 0, w: 100, h: 100 };
+    const chain = [
+      { rect, fit: 0.5 },
+      { rect: { x: 0, y: 0, w: 200, h: 200 }, fit: 0.5 }
+    ];
+
+    expect(scaleByFits(rect, chain)).toEqual({ x: 62.5, y: 62.5, w: 25, h: 25 });
+  });
+
+  it("returns a copy of the rect when no link fits", () => {
+    const rect = { x: 10, y: 20, w: 30, h: 40 };
+    const drawn = scaleByFits(rect, [{ rect, fit: 1 }]);
+
+    expect(drawn).toEqual(rect);
+    expect(drawn).not.toBe(rect);
   });
 });
 

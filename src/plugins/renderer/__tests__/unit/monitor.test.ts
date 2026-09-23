@@ -209,6 +209,16 @@ describe("renderer capture", () => {
     await expect(mock.api.capture()).resolves.toBe(FAKE_PNG);
   });
 
+  it("leaves a moku:dev debug entry naming the command, like every dev command", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await started();
+
+    mock.setPaused(true);
+    await mock.api.capture();
+
+    expect(mock.log.debug).toHaveBeenCalledWith("moku:dev", { command: "renderer.capture" });
+  });
+
   it("logs a failed read and answers undefined", async () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const mock = await started();
