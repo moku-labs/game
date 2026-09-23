@@ -13,7 +13,7 @@ import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { Layer, system, Tree } from "../world/ecs/define";
 import { createModules } from "./api";
-import { Box, UI_OWNER } from "./components";
+import { Box, LocalWrite, UI_OWNER } from "./components";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
@@ -74,7 +74,8 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 
 /**
  * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
- * `PointerOver`, the two effect handlers and the tap listener. Every remover goes into the state,
+ * `PointerOver`, the two effect handlers, the tap listener and `LocalWrite` as an input control,
+ * so the cursor shows a hand over a local-state button. Every remover goes into the state,
  * so the teardown closes exactly these, and gives every hosted view its layer back before the ui
  * entities go.
  *
@@ -103,6 +104,7 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.input.onTap(jsx.applyTap),
+    ctx.deps.input.controls.add(LocalWrite),
     () => jsx.releaseHosted(),
     () => ecs.despawnOwnedBy(UI_OWNER)
   );

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Tappable } from "../../../input/components";
-import { Box } from "../../components";
-import { startUiApp, tick } from "../app";
+import type { AnyComponentType } from "../../../world/types";
+import { Box, LocalWrite } from "../../components";
+import { createUiApp, startUiApp, tick } from "../app";
 
 // ---------------------------------------------------------------------------
 // Integration: the real time, lifecycle, model, clock, flow, world, an inert
@@ -49,6 +50,29 @@ describe("ui plugin integration", () => {
     expect(app.world.projection.entityOf("hud", "coins")).toBe(app.ui.find("coins"));
 
     await app.stop();
+  });
+
+  it("registers LocalWrite as an input control on start and removes it on stop", async () => {
+    const app = createUiApp();
+    const add = app.input.controls.add;
+    const removed: AnyComponentType[] = [];
+    const spy = vi.spyOn(app.input.controls, "add").mockImplementation(component => {
+      const off = add(component);
+
+      return () => {
+        removed.push(component);
+        off();
+      };
+    });
+
+    await app.start();
+
+    expect(spy).toHaveBeenCalledExactlyOnceWith(LocalWrite);
+    expect(removed).toEqual([]);
+
+    await app.stop();
+
+    expect(removed).toEqual([LocalWrite]);
   });
 
   it("leaves no Yoga node and no ui entity behind on stop", async () => {

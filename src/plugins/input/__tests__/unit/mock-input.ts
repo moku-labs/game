@@ -170,7 +170,6 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const frames: FrameRegistration[] = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
   const stores = new Map<Entity, Map<string, object | true>>();
-  const types = new Map<string, AnyComponentType>();
   const resources = new Map<string, object>();
   const keys = new Map<Entity, { projection: string; key: string }>();
   const rests = new Map<Entity, Map<string, object>>();
@@ -230,8 +229,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
 
       return fresh;
     },
-    mode: () => world.mode,
-    typeOf: (name: string): AnyComponentType | undefined => types.get(name)
+    mode: () => world.mode
   };
 
   const projection = {
@@ -359,7 +357,6 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
       nextEntity += 1;
       for (const value of values) {
         store.set(value.type.componentName, value.value);
-        types.set(value.type.componentName, value.type);
       }
       stores.set(entity, store);
       if (key !== undefined) keys.set(entity, key);
@@ -368,7 +365,6 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     },
     attachTo: (entity, value) => {
       stores.get(entity)?.set(value.type.componentName, value.value);
-      types.set(value.type.componentName, value.type);
     },
     setRest: (entity, value) => {
       const table = rests.get(entity) ?? new Map<string, object>();

@@ -1,5 +1,6 @@
 import { expectTypeOf } from "vitest";
-import type { EcsApi, Entity, TagType } from "../../../world/types";
+import { LocalWrite } from "../../../ui/components";
+import type { AnyComponentType, EcsApi, Entity, TagType } from "../../../world/types";
 import type { PointerValue } from "../../components";
 import { PointerOver } from "../../components";
 import type { Config, InputApi, RawSample, TapListener, Target } from "../../types";
@@ -56,6 +57,21 @@ export const flatCursor: Partial<Config> = { cursor: "pointer" };
 
 // @ts-expect-error — a shallow merge keeps no default, so `idle` is required next to `control`
 export const halfCursor: Partial<Config> = { cursor: { control: "grab" } };
+
+// ─── another plugin registers its controls ───────────────────
+
+expectTypeOf<InputApi["controls"]["add"]>().toEqualTypeOf<
+  (component: AnyComponentType) => () => void
+>();
+
+declare const controls: InputApi["controls"];
+
+// ui registers its local-state button; a tag counts as well.
+export const offLocalWrite: () => void = controls.add(LocalWrite);
+export const offPointerOver: () => void = controls.add(PointerOver);
+
+// @ts-expect-error — a control is a component type, not its storage name
+controls.add("LocalWrite");
 
 // ─── a raw sample names its device ────────────────────────────
 

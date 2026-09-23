@@ -45,6 +45,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |
 | `onTap(fn)` | Registers a listener called with the tapped entity before the `Tappable` answer; returns the remover |
 | `cursor()` | The CSS cursor input last wrote on the canvas (`"pointer"` over a control, `""` elsewhere) |
+| `controls.add(component)` | Counts a component type of another plugin as a control for the cursor; returns the remover. `ui` registers `LocalWrite` in `onStart` and removes it in `onStop` |
 
 `tap`, `press`, `drag` and `swipe` return what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
 
@@ -116,7 +117,7 @@ At most one view carries `PointerOver`. It is not `Hovered`: that one marks the 
 
 ### The cursor
 
-After the frame's hover hit test, input writes `canvas.style.cursor`: `cursor.control` (`"pointer"`) while the view under the mouse is a control — it carries `Tappable`, `LocalWrite` (ui's local-state button, found by name through `world.ecs.typeOf`), `Draggable`, `Pressable` or `Swipeable` — and `cursor.idle` (`""`, the page's own cursor) everywhere else, on leave, on a touch and while the world is paused. A disabled or covered ui control has lost its `Tappable`, so it shows `idle`. The style is written only when it changes, and detach puts back what the canvas had. `app.input.cursor()` reads what is set.
+After the frame's hover hit test, input writes `canvas.style.cursor`: `cursor.control` (`"pointer"`) while the view under the mouse is a control — it carries `Tappable`, `Draggable`, `Pressable`, `Swipeable` or a component another plugin registered through `controls.add`, such as ui's `LocalWrite` — and `cursor.idle` (`""`, the page's own cursor) everywhere else, on leave, on a touch and while the world is paused. A disabled or covered ui control has lost its `Tappable`, so it shows `idle`. The style is written only when it changes, and detach puts back what the canvas had. `app.input.cursor()` reads what is set.
 
 Every queued sample calls `time.wake()`, so a finger on the screen always runs at the full frame rate, whatever the idle cap says.
 

@@ -2,10 +2,11 @@
  * @file input plugin — the hover of a mouse or a pen. `PointerOver` sits on the topmost view a
  * press would take, found with the same filter a press uses. At most one view carries it. A touch
  * never hovers: a touch sample, a pointer cancel and the pointer leaving the canvas take it away.
- * The cursor of the canvas follows the hover: it shows a control while `PointerOver` sits on one.
+ * The cursor of the canvas follows the hover: it shows a control while `PointerOver` sits on one,
+ * counting the control components other plugins registered through `controls.add`.
  */
 
-import type { Entity } from "../world/types";
+import type { AnyComponentType, Entity } from "../world/types";
 import {
   Draggable,
   PointerOver,
@@ -15,16 +16,10 @@ import {
   Tappable
 } from "./components";
 import { findPressed } from "./hit";
-import type { InputCtx, Point, RawSample } from "./types";
+import type { InputCtx, Point, RawSample, State } from "./types";
 
 /** The components of input that make a view a control: a press on it answers something. */
 const CONTROLS = [Tappable, Draggable, Pressable, Swipeable] as const;
-
-/**
- * The storage name of `ui`'s `LocalWrite`, the one control component input does not own. `ui`
- * depends on `input`, so input finds it by name through `world.ecs.typeOf` instead of importing it.
- */
-const LOCAL_WRITE = "LocalWrite";
 
 /**
  * Takes `PointerOver` away from the view that carries it, if any.
@@ -84,8 +79,32 @@ export function isHover(ctx: InputCtx, pointer: PointerValue, sample: RawSample)
 }
 
 /**
- * Tells whether a view is a control: it carries one of input's answering components or `ui`'s
- * `LocalWrite`. A disabled or covered button keeps only `Touchable`, so it is not one.
+ * Registers a component type of another plugin as a control. Each call adds one entry, so a type
+ * registered twice stays until both removers ran; a remover does nothing when it runs again.
+ *
+ * @param state - The input state.
+ * @param component - The component or tag type to count as a control.
+ * @returns The remover.
+ */
+export function addControl(state: State, component: AnyComponentType): () => void {
+  state.controls.push(component);
+
+  let removed = false;
+
+  return (): void => {
+    if (removed) return;
+    removed = true;
+
+    const at = state.controls.indexOf(component);
+
+    if (at !== -1) state.controls.splice(at, 1);
+  };
+}
+
+/**
+ * Tells whether a view is a control: it carries one of input's answering components or a
+ * component another plugin registered, such as `ui`'s `LocalWrite`. A disabled or covered button
+ * keeps only `Touchable`, so it is not one.
  *
  * @param ctx - Domain context of the input plugin.
  * @param entity - The hovered view.
@@ -95,10 +114,9 @@ function isControl(ctx: InputCtx, entity: Entity): boolean {
   const { ecs } = ctx.deps.world;
 
   for (const type of CONTROLS) if (ecs.has(entity, type)) return true;
+  for (const type of ctx.state.controls) if (ecs.has(entity, type)) return true;
 
-  const localWrite = ecs.typeOf(LOCAL_WRITE);
-
-  return localWrite !== undefined && ecs.has(entity, localWrite);
+  return false;
 }
 
 /**
