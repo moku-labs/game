@@ -200,6 +200,72 @@ describe("playMusic", () => {
     expect(mock.context?.sources).toHaveLength(1);
   });
 
+  it("starts one source for the same key requested twice while the first is decoding", async () => {
+    const mock = unlocked();
+
+    await Promise.all([
+      playMusic(mock.audio, { key: "ui.theme", fadeMs: 600 }),
+      playMusic(mock.audio, { key: "ui.theme", fadeMs: 600 })
+    ]);
+
+    expect(mock.context?.sources).toHaveLength(1);
+    expect(mock.state.music?.key).toBe("ui.theme");
+    expect(mock.state.musicPending).toBeUndefined();
+  });
+
+  it("plays only the second key when it is requested while the first is decoding", async () => {
+    const mock = unlocked();
+
+    await Promise.all([
+      playMusic(mock.audio, { key: "board.theme", fadeMs: 600 }),
+      playMusic(mock.audio, { key: "home.theme", fadeMs: 600 })
+    ]);
+
+    const sources = mock.context?.sources ?? [];
+
+    expect(sources).toHaveLength(1);
+    expect(keyOf(sources[0]?.buffer)).toBe("home.theme");
+    expect(mock.state.music?.key).toBe("home.theme");
+  });
+
+  it("plays nothing when null is requested while a key is decoding", async () => {
+    const mock = unlocked();
+
+    await Promise.all([
+      playMusic(mock.audio, { key: "board.theme", fadeMs: 600 }),
+      // eslint-disable-next-line unicorn/no-null -- `null` is the seam: it stops the music.
+      playMusic(mock.audio, { key: null, fadeMs: 600 })
+    ]);
+
+    expect(mock.context?.sources).toHaveLength(0);
+    expect(mock.state.music).toBeUndefined();
+  });
+
+  it("keeps the playing key and drops the pending one when the playing key is asked again", async () => {
+    const mock = unlocked();
+
+    await playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+    await Promise.all([
+      playMusic(mock.audio, { key: "home.theme", fadeMs: 600 }),
+      playMusic(mock.audio, { key: "board.theme", fadeMs: 600 })
+    ]);
+
+    expect(mock.context?.sources).toHaveLength(1);
+    expect(mock.context?.sources[0]?.stoppedAt).toBeUndefined();
+    expect(mock.state.music?.key).toBe("board.theme");
+  });
+
+  it("starts nothing when the music is stopped while a key is decoding", async () => {
+    const mock = unlocked();
+    const pending = playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+
+    stopMusic(mock.state);
+    await pending;
+
+    expect(mock.context?.sources).toHaveLength(0);
+    expect(mock.state.music).toBeUndefined();
+  });
+
   it("remembers the key headless and starts nothing", async () => {
     const mock = createMockAudio();
 

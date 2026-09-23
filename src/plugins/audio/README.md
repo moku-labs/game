@@ -30,7 +30,7 @@ createApp({
 | Kind | Built by | Behaviour |
 |---|---|---|
 | `sfx` | `anim`'s `sfx(key, { bus? })` | A new `AudioBufferSourceNode` per play into its bus. Two plays in one frame are heard twice. The promise resolves when `start()` was called; the handler's `signal` is ignored, because a sound that began plays to its end |
-| `music` | `music(key \| null, { fadeMs? })` of this plugin | One looping source on its own gain into the `music` bus. The same key does nothing, a new key cross-fades, `null` fades out |
+| `music` | `music(key \| null, { fadeMs? })` of this plugin | One looping source on its own gain into the `music` bus. The same key does nothing, a new key cross-fades, `null` fades out. A key still decoding counts as the same key; any other request replaces it, and the replaced switch starts nothing |
 
 Both handlers are registered with `{ runInFast: false }`: a fast walk never waits for a sound. A game without `audio` has no handler for either kind, and `flow` resolves the effect with `undefined` at once — so the same node code runs in a game that carries no audio at all.
 
@@ -55,7 +55,7 @@ The settings node commits `player.settings.audio`; on every `model:committed` th
 
 ## The unlock
 
-A browser starts every context suspended. `onStart` puts one `pointerdown` and one `touchend` listener on `window` (`once`, `passive`); the first of them removes both and resumes the context. `unlocked()` turns true only when the context really reached `"running"`, and a refused resume warns once and puts the listeners back, so the next gesture tries again. The listeners sit on `window`, not on the canvas: the gesture may as well be a button of the game's loading page, which `input` never sees. Music a scene declared while the context was locked is remembered and started by that first gesture. A sound effect requested while that resume is still pending — the click of the very button that unlocks the context — is queued, one per key, and played as soon as the context runs; a refused resume drops the queue.
+A browser starts every context suspended. `onStart` puts one `pointerdown` and one `touchend` listener on `window` (`once`, `passive`); the first of them removes both and resumes the context. `unlocked()` turns true only when the context really reached `"running"`, and a refused resume warns once and puts the listeners back, so the next gesture tries again. The listeners sit on `window`, not on the canvas: the gesture may as well be a button of the game's loading page, which `input` never sees. Music a scene declared while the context was locked is remembered and started by that first gesture. When the same tap also enters a scene with the same track, the track starts once: the second request finds the first still decoding and does nothing. A sound effect requested while that resume is still pending — the click of the very button that unlocks the context — is queued, one per key, and played as soon as the context runs; a refused resume drops the queue.
 
 ## Pause and iOS
 

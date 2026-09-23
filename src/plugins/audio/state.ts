@@ -2,7 +2,7 @@
  * @file audio plugin — state factory. The buses start at the configured volumes, so a headless
  * run answers `volume()` with the same numbers a run with a context does.
  */
-import type { Bus, BusState, Config, MusicTrack, SfxRequest, State } from "./types";
+import type { Bus, BusState, Config, MusicSwitch, MusicTrack, SfxRequest, State } from "./types";
 
 /**
  * Creates the decode cache. Its own function because lint rule L5 refuses a collection built
@@ -61,6 +61,7 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     sfx: busState(ctx.config.buses.sfx)
   };
   const music: MusicTrack | undefined = undefined;
+  const musicPending: MusicSwitch | undefined = undefined;
 
   return {
     context: undefined,
@@ -73,6 +74,7 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     warned: emptyWarned(),
     warnedVolumes: false,
     music,
+    musicPending,
     unlock: undefined,
     removers: []
   };

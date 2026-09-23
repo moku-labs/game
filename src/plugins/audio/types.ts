@@ -129,6 +129,17 @@ export type MusicTrack = {
 };
 
 /**
+ * A music switch that waits for its buffer to decode. Its identity is the token: a later request
+ * replaces it, and the replaced switch neither starts nor fades anything when its buffer arrives.
+ *
+ * @example
+ * ```ts
+ * const waiting: MusicSwitch = { key: "ui.theme" };
+ * ```
+ */
+export type MusicSwitch = { key: string };
+
+/**
  * audio plugin state.
  */
 export type State = {
@@ -149,6 +160,8 @@ export type State = {
   /** `config.volumes` threw once and was reported; it is not reported again this run. */
   warnedVolumes: boolean;
   music: MusicTrack | undefined;
+  /** The latest switch still decoding; `undefined` once it started or a later request replaced it. */
+  musicPending: MusicSwitch | undefined;
   /** Removes the two window listeners of the unlock. */
   unlock: (() => void) | undefined;
   /** The removers of the two fx handlers. */
