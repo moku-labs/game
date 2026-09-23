@@ -96,6 +96,9 @@ entity that died meanwhile is dropped.
 
 ## Motions
 
+A motion may carry a `loop` hook (`defineMotion` with `loop` builds it): it is played wherever `enter`
+plays, kept out of the view's handles so a change never cancels it, and ends with the view.
+
 A new motion on a view that still animates cancels the running ones and starts from the current
 values (spike P5). Components the new hooks do not drive are brought to the rest pose by
 `motion.settle`, or by the built-in `toRest` over `settleMs`. When the last motion of a view ends,
@@ -116,6 +119,11 @@ tween's `ease` when left out), all on one clock. A field a segment does not name
 `to` is where the last segment ends, and the track owns every field a segment names for the whole
 walk. `motions.ts` passes `segments` to the driver unchanged; the instant default writes the last
 value of every segment field at once.
+
+`TweenOptions.repeat` (and `TrackOptions.repeat`) is `number | "forever"`: the driver starts the
+walk again from its first segment when it ends, a number counting the extra runs. `motions.ts`
+passes it on like `segments`, and names no `repeat` when the tween has none. The instant default
+ignores it and writes the end pose once, so a world without `anim` never loops.
 
 ## Events
 

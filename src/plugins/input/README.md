@@ -44,12 +44,16 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 | `drag(from, to)` | Reads `Draggable` of `from` and `DropTarget` of `to`, answers `{ intent: target.intent, payload: { ...draggable.payload, ...target.payload } }` |
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |
 | `onTap(fn)` | Registers a listener called with the tapped entity before the `Tappable` answer; returns the remover |
+| `onKey(fn)` | Registers a listener called with `{ key, shift }` on every key; returning `true` marks it handled; returns the remover |
+| `key(key, { shift })` | Runs the `onKey` listeners headless, the way a DOM `keydown` does; returns whether one handled the key |
 | `cursor()` | The CSS cursor input last wrote on the canvas (`"pointer"` over a control, `""` elsewhere) |
 | `controls.add(component)` | Counts a component type of another plugin as a control for the cursor; returns the remover. `ui` registers `LocalWrite` in `onStart` and removes it in `onStop` |
 
 `tap`, `press`, `drag` and `swipe` return what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
 
 `onTap` is the seam `ui` uses for a button that carries `LocalWrite` and no intent: the listeners run on every tap — the finger's and `app.input.tap`'s — in registration order, before the answer. A listener that throws is logged through `ctx.log.error` with its entity, and the listeners after it still run.
+
+`onKey` is the seam `ui` uses for keyboard focus; input itself knows no focus and no key meaning. While the canvas is attached, one `keydown` listener on `window` hands `{ key: event.key, shift: event.shiftKey }` to every listener in registration order. A listener that returns `true` marks the key handled and input calls `preventDefault()`, so Tab stays on the canvas. A listener that throws is logged through `ctx.log.error` with its key, and the rest still run. `app.input.key("Escape")` runs the same listeners without a keyboard.
 
 ```ts
 // a view spawned by the last commit exists after the next reconcile
@@ -183,7 +187,7 @@ No `pixi.js` import: the canvas is a DOM element and hit tests go through `rende
 
 ## Lifecycle
 
-`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the six listeners, the frame callback, the `onTap` listeners and a mute a drag still holds, and restores the touch action.
+`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`, and puts one `keydown` listener on `window`. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the six listeners, the `keydown` listener, the frame callback, the `onTap` and `onKey` listeners and a mute a drag still holds, and restores the touch action.
 
 ## Not in V2
 
