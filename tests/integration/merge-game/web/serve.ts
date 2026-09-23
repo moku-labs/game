@@ -13,7 +13,12 @@ const server = Bun.serve({
   development: true,
   routes: { "/": index },
   fetch(request) {
-    const path = new URL(request.url).pathname;
+    // The browser percent-encodes the braces of a nine-slice tag (`{nine=…}`), the disk does not.
+    const path = decodeURIComponent(new URL(request.url).pathname);
+
+    // A decoded path could climb out of the game folder; the page never asks for one.
+    if (path.includes("..")) return new Response("not found", { status: 404 });
+
     const asset = file(`${root}${path.slice(1)}`);
 
     return asset.size > 0 ? new Response(asset) : new Response("not found", { status: 404 });
