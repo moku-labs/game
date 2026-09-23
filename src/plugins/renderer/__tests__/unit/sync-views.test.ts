@@ -828,3 +828,133 @@ describe("sync views: pivot", () => {
     expect(object.pivot.y).toBe(0);
   });
 });
+
+/**
+ * A texture with nine-slice insets, as `textures.create` makes one from a `{nine=…}` file.
+ *
+ * @param borders - Left, top, right and bottom in pixels.
+ * @param borders.left - Left inset.
+ * @param borders.top - Top inset.
+ * @param borders.right - Right inset.
+ * @param borders.bottom - Bottom inset.
+ * @param resolution - Resolution of the source; 1 when left out.
+ * @returns The texture.
+ */
+function bordered(
+  borders: { left: number; top: number; right: number; bottom: number },
+  resolution?: number
+): FakeTexture {
+  return new FakeTexture({
+    source: {
+      width: 300,
+      height: 300,
+      destroyed: false,
+      ...(resolution === undefined ? {} : { resolution })
+    },
+    defaultBorders: borders
+  });
+}
+
+/**
+ * Spawns a nine-slice in the `items` layer and builds its view.
+ *
+ * @param mock - The mock renderer.
+ * @param texture - The asset key.
+ * @returns The entity and the nine-slice object that draws it.
+ */
+function drawNine(mock: MockRenderer, texture: string): { entity: number; object: object } {
+  const entity = mock.world.ecs.spawn(owner, [
+    Layer({ name: "items" }),
+    Transform(),
+    NineSlice({ texture, width: 1000, height: 1040 })
+  ]);
+
+  mock.modules.sync.pass();
+
+  return { entity, object: mock.ctx.state.sync.views.get(entity)?.object ?? {} };
+}
+
+/**
+ * The four slice widths of a nine-slice object.
+ *
+ * @param object - The object.
+ * @returns Left, top, right and bottom as the object holds them.
+ */
+function slices(object: object): unknown[] {
+  return ["leftWidth", "topHeight", "rightWidth", "bottomHeight"].map(
+    field => (object as Record<string, unknown>)[field]
+  );
+}
+
+describe("sync views: nine-slice borders", () => {
+  it("copies the insets of the texture into the four slice widths", async () => {
+    const mock = await started();
+    const board = bordered({ left: 72, top: 76, right: 72, bottom: 76 });
+
+    mock.api.sync.textures.provide(() => board as never);
+
+    const { object } = drawNine(mock, "board.board-tray");
+
+    expect(slices(object)).toEqual([72, 76, 72, 76]);
+  });
+
+  it("gives a texture without insets slices of 0, not Pixi's 10", async () => {
+    const mock = await started();
+
+    mock.api.sync.textures.provide(() => new FakeTexture({}) as never);
+
+    const { object } = drawNine(mock, "ui.plain");
+
+    expect(slices(object)).toEqual([0, 0, 0, 0]);
+  });
+
+  it("follows the insets when the entity names another texture", async () => {
+    const mock = await started();
+    const textures: Record<string, FakeTexture> = {
+      "ui.panel": bordered({ left: 48, top: 48, right: 48, bottom: 48 }),
+      "ui.signboard": bordered({ left: 72, top: 72, right: 72, bottom: 76 })
+    };
+
+    mock.api.sync.textures.provide(key => textures[key] as never);
+
+    const { entity, object } = drawNine(mock, "ui.panel");
+
+    mock.world.ecs.set(entity, NineSlice, { texture: "ui.signboard" });
+    mock.modules.sync.pass();
+
+    expect(slices(object)).toEqual([72, 72, 72, 76]);
+  });
+
+  it("follows the insets when a bundle brings new art for the same key", async () => {
+    const mock = await started();
+    let art = bordered({ left: 72, top: 72, right: 72, bottom: 72 });
+
+    mock.api.sync.textures.provide(() => art as never);
+
+    const { object } = drawNine(mock, "board.board-tray");
+
+    art = bordered({ left: 96, top: 96, right: 96, bottom: 96 });
+    mock.api.sync.textures.invalidate(["board.board-tray"]);
+    mock.modules.sync.pass();
+
+    expect(slices(object)).toEqual([96, 96, 96, 96]);
+  });
+
+  it("draws the insets in reference units when the source is not at resolution 1", async () => {
+    const mock = await started();
+    const board = bordered({ left: 144, top: 152, right: 144, bottom: 152 }, 2);
+
+    mock.api.sync.textures.provide(() => board as never);
+
+    const { object } = drawNine(mock, "board.board-tray");
+
+    expect(slices(object)).toEqual([72, 76, 72, 76]);
+  });
+
+  it("gives the placeholder of a missing texture slices of 0", async () => {
+    const mock = await started();
+    const { object } = drawNine(mock, "ui.missing");
+
+    expect(slices(object)).toEqual([0, 0, 0, 0]);
+  });
+});

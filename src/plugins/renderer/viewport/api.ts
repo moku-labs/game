@@ -5,7 +5,7 @@
 import type { PixiContainer, RendererCtx, ViewportModule } from "../types";
 import { fitFrame, referenceOf, scaleOf } from "./fit";
 import { measureMount, watchResize } from "./resize";
-import { clipToFrame, createSafeAreaProbe, readInsets } from "./safe-area";
+import { clipInsets, clipToFrame, createSafeAreaProbe, readInsets } from "./safe-area";
 import type { Point, SafeArea, ViewportCtx, ViewportDeps, ViewportSize } from "./types";
 
 /**
@@ -46,22 +46,27 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
   const state = ctx.state.viewport;
 
   /**
-   * Measures the mount, resizes the renderer and recomputes frame, scale and safe area.
+   * Measures the mount, resizes the renderer and recomputes frame, scale and safe area. The scale
+   * fits the long side between the insets that cover the frame, so they are clipped first, in CSS
+   * pixels, and turned into reference units last.
    */
   const layout = (): void => {
     const size = measureMount(vctx);
 
     deps.host.resize(size.width, size.height);
     state.frame = fitFrame(size, ctx.config.aspect, ctx.global.orientation);
-    state.scale = scaleOf(state.frame, ctx.global.orientation, ctx.global.referenceSide);
-    state.reference = referenceOf(state.frame, state.scale);
-    state.safeArea = clipToFrame({
+
+    const clip = {
       insets: readInsets(state.probe),
       frame: state.frame,
       canvas: canvasOrigin(deps.host.canvas()),
-      window: windowSize(),
-      scale: state.scale
-    });
+      window: windowSize()
+    };
+    const { orientation, referenceSide, referenceLong } = ctx.global;
+
+    state.scale = scaleOf(state.frame, orientation, referenceSide, referenceLong, clipInsets(clip));
+    state.reference = referenceOf(state.frame, state.scale);
+    state.safeArea = clipToFrame({ ...clip, scale: state.scale });
   };
 
   /**

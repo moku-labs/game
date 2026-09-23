@@ -42,6 +42,26 @@ describe("sync fonts", () => {
     expect(fakeCache.entries.get("hud.body-bitmap")).toBe(FakeBitmapFont.made[0]);
   });
 
+  it("draws a loaded font from the line top, where BMFont measures yoffset from", async () => {
+    const mock = await started();
+    const fnt = JSON.stringify({
+      chars: { A: {} },
+      pages: [{ id: 0 }],
+      fontSize: 48,
+      lineHeight: 57,
+      baseLineOffset: 12
+    });
+
+    mock.api.sync.fonts.install("ui.font-display", fnt, texture());
+
+    const font = FakeBitmapFont.made[0];
+
+    // Pixi would start the line 57 - 45 = 12 units low and centre it by (57 - 48) / 2 more.
+    expect(font?.baseLineOffset).toBe(0);
+    expect(font?.fontMetrics.fontSize).toBe(57);
+    expect(font?.lineHeight).toBe(57);
+  });
+
   it("reads a BMFont XML file and a BMFont JSON file", async () => {
     const mock = await started();
 

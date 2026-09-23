@@ -7,8 +7,8 @@
 import type { PixiModule } from "../types";
 import { createFakeElement, type FakeElement } from "./fake-dom";
 
-/** The source behind a fake texture. */
-export type FakeSource = { width: number; height: number; destroyed: boolean };
+/** The source behind a fake texture. `resolution` is 1 when left out, as Pixi's default. */
+export type FakeSource = { width: number; height: number; destroyed: boolean; resolution?: number };
 
 /** A fake Pixi rectangle: what a texture frame is made of. */
 export class FakeRectangle {
@@ -196,7 +196,13 @@ export class FakeContainer {
   public destroy(options?: { children?: boolean; texture?: boolean }): void {
     this.destroyed = true;
     this.parent?.removeChild(this);
-    if (options?.children === true) for (const child of this.children) child.destroy(options);
+    if (options?.children !== true) return;
+
+    // As Pixi does: take the children out first, then free them, so none is skipped.
+    for (const child of this.children.splice(0)) {
+      child.parent = null;
+      child.destroy(options);
+    }
   }
 }
 
@@ -212,16 +218,19 @@ export class FakeSprite extends FakeContainer {
   }
 }
 
-/** A fake Pixi nine-slice sprite. */
+/**
+ * A fake Pixi nine-slice sprite. The four slice widths hold a number only once the renderer wrote
+ * one: no silent default, so a renderer that never copies the texture's borders fails its test.
+ */
 export class FakeNineSliceSprite extends FakeContainer {
   public texture: FakeTexture;
   public width = 0;
   public height = 0;
   public tint = 0xff_ff_ff;
-  public leftWidth = 0;
-  public topHeight = 0;
-  public rightWidth = 0;
-  public bottomHeight = 0;
+  public leftWidth: number | undefined = undefined;
+  public topHeight: number | undefined = undefined;
+  public rightWidth: number | undefined = undefined;
+  public bottomHeight: number | undefined = undefined;
 
   public constructor(options: { texture: FakeTexture }) {
     super();
@@ -229,9 +238,9 @@ export class FakeNineSliceSprite extends FakeContainer {
   }
 }
 
-/** One path the fake graphics was asked to draw. */
+/** One path the fake graphics was asked to draw. A `moveTo` or `lineTo` has no size. */
 export type FakeDrawOp = {
-  op: "rect" | "roundRect";
+  op: "rect" | "roundRect" | "moveTo" | "lineTo";
   x: number;
   y: number;
   width: number;
@@ -240,7 +249,7 @@ export type FakeDrawOp = {
 };
 
 /** A fill or a stroke style the fake graphics recorded. */
-export type FakePaint = { color: number; alpha?: number; width?: number };
+export type FakePaint = { color: number; alpha?: number; width?: number; pixelLine?: boolean };
 
 /** A fake Pixi graphics: it records what was drawn and how often it was cleared. */
 export class FakeGraphics extends FakeContainer {
@@ -297,6 +306,32 @@ export class FakeGraphics extends FakeContainer {
   }
 
   /**
+   * Records the start of a new line.
+   *
+   * @param x - Where the line starts, x.
+   * @param y - Where the line starts, y.
+   * @returns The same object.
+   */
+  public moveTo(x: number, y: number): this {
+    this.ops.push({ op: "moveTo", x, y, width: 0, height: 0, radius: 0 });
+
+    return this;
+  }
+
+  /**
+   * Records a line to a point.
+   *
+   * @param x - Where the line ends, x.
+   * @param y - Where the line ends, y.
+   * @returns The same object.
+   */
+  public lineTo(x: number, y: number): this {
+    this.ops.push({ op: "lineTo", x, y, width: 0, height: 0, radius: 0 });
+
+    return this;
+  }
+
+  /**
    * Records a fill of the last path.
    *
    * @param style - Colour of the fill.
@@ -321,11 +356,14 @@ export class FakeGraphics extends FakeContainer {
   }
 }
 
-/** What a fake bitmap font was built from. */
+/** What a fake bitmap font was built from. The three metrics are read as Pixi reads them. */
 export type FakeFontData = {
   chars: Record<string, unknown>;
   pages: unknown[];
   fontFamily?: string;
+  lineHeight?: number;
+  baseLineOffset?: number;
+  fontSize?: number;
 };
 
 /** A fake Pixi bitmap font. */
@@ -336,10 +374,18 @@ export class FakeBitmapFont {
   public data: FakeFontData;
   public textures: FakeTexture[];
   public destroyed = false;
+  /** Where Pixi starts the first line: `lineHeight - base` of the file. */
+  public baseLineOffset: number;
+  public lineHeight: number;
+  /** Pixi centres a line by `(lineHeight - fontMetrics.fontSize) / 2`. */
+  public fontMetrics: { ascent: number; descent: number; fontSize: number };
 
   public constructor(options: { data: FakeFontData; textures: FakeTexture[] }) {
     this.data = options.data;
     this.textures = options.textures;
+    this.baseLineOffset = options.data.baseLineOffset ?? 0;
+    this.lineHeight = options.data.lineHeight ?? 0;
+    this.fontMetrics = { ascent: 0, descent: 0, fontSize: options.data.fontSize ?? 0 };
     FakeBitmapFont.made?.push(this);
   }
 

@@ -63,13 +63,15 @@ export function record(state: State, sample: RawSample): void {
 
 /**
  * Puts the six pointer listeners on the canvas and takes the browser's own gestures away, so a
- * drag does not scroll the page. The remover is kept in the state.
+ * drag does not scroll the page. The remover is kept in the state; it also gives the canvas back
+ * the cursor it had.
  *
  * @param canvas - The canvas of the Pixi application.
  * @param state - State of the input plugin.
  */
 export function attach(canvas: HTMLCanvasElement, state: State): void {
   const previousTouchAction = canvas.style.touchAction;
+  const previousCursor = canvas.style.cursor;
   const attached = POINTER_EVENTS.map(entry => {
     const listener = (event: PointerEvent): void => {
       record(state, {
@@ -91,16 +93,18 @@ export function attach(canvas: HTMLCanvasElement, state: State): void {
   state.detach = (): void => {
     for (const entry of attached) canvas.removeEventListener(entry.name, entry.listener);
     canvas.style.touchAction = previousTouchAction;
+    canvas.style.cursor = previousCursor;
   };
 }
 
 /**
- * Removes the listeners of the attached canvas and restores its touch action. A no-op when
- * nothing was attached.
+ * Removes the listeners of the attached canvas and restores its touch action and its cursor. A
+ * no-op when nothing was attached.
  *
  * @param state - State of the input plugin.
  */
 export function detach(state: State): void {
   state.detach?.();
   state.detach = undefined;
+  state.cursor = undefined;
 }

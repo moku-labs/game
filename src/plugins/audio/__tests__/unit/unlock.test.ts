@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Descriptor } from "../../../flow/types";
 import { removeUnlock } from "../../unlock";
-import { createFakeContext, installFakeWindow } from "../fake-audio-context";
+import { createFakeContext, installFakeWindow, keyOf } from "../fake-audio-context";
 import { createMockAudio } from "./mock-audio";
 
 afterEach(() => {
@@ -103,6 +104,108 @@ describe("installUnlock", () => {
 
     expect(context.sources).toHaveLength(1);
     expect(mock.state.music?.source).toBeDefined();
+  });
+});
+
+/** Builds the `sfx` descriptor `anim` hands the handler. */
+function sfx(key: string): Descriptor {
+  return { kind: "sfx", payload: { key }, cosmetic: true };
+}
+
+describe("sounds during the unlock", () => {
+  it("marks the context as resuming until the resume settles", async () => {
+    const fakeWindow = installFakeWindow();
+    const mock = createMockAudio({ context: createFakeContext() });
+
+    mock.start();
+    fakeWindow.dispatch("pointerdown");
+
+    expect(mock.state.resuming).toBe(true);
+
+    await tick();
+
+    expect(mock.state.resuming).toBe(false);
+  });
+
+  it("plays a sound fired while resume() is pending once the context runs", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    fakeWindow.dispatch("pointerdown");
+    const play = mock.fx("sfx", sfx("ui.click"));
+
+    expect([...mock.state.pendingSfx.keys()]).toEqual(["ui.click"]);
+    expect(context.sources).toHaveLength(0);
+
+    await play;
+    await tick();
+
+    expect(context.sources.map(source => keyOf(source.buffer))).toEqual(["ui.click"]);
+    expect(mock.state.pendingSfx.size).toBe(0);
+  });
+
+  it("keeps one sound per key while the resume is pending", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    fakeWindow.dispatch("pointerdown");
+    const plays = [
+      mock.fx("sfx", sfx("ui.click")),
+      mock.fx("sfx", sfx("ui.click")),
+      mock.fx("sfx", sfx("ui.popup"))
+    ];
+
+    expect(mock.state.pendingSfx.size).toBe(2);
+
+    await Promise.all(plays);
+    await tick();
+
+    expect(context.sources.map(source => keyOf(source.buffer))).toEqual(["ui.click", "ui.popup"]);
+  });
+
+  it("drops the queued sounds when the browser refuses to resume", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    context.resumeFails = true;
+    mock.start();
+    fakeWindow.dispatch("pointerdown");
+    await mock.fx("sfx", sfx("ui.click"));
+    await tick();
+
+    expect(context.sources).toHaveLength(0);
+    expect(mock.state.pendingSfx.size).toBe(0);
+    expect(mock.state.resuming).toBe(false);
+  });
+
+  it("drops the queued sounds when the context resumed but does not run", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    context.resumeState = "suspended";
+    mock.start();
+    fakeWindow.dispatch("pointerdown");
+    await mock.fx("sfx", sfx("ui.click"));
+    await tick();
+
+    expect(context.sources).toHaveLength(0);
+    expect(mock.state.pendingSfx.size).toBe(0);
+  });
+
+  it("queues nothing before the first gesture", async () => {
+    installFakeWindow();
+    const mock = createMockAudio({ context: createFakeContext() });
+
+    mock.start();
+    await mock.fx("sfx", sfx("ui.click"));
+
+    expect(mock.state.pendingSfx.size).toBe(0);
   });
 });
 

@@ -43,6 +43,20 @@ export const liftedHand: Partial<Config> = { heldScale: 1.08 };
 // @ts-expect-error — the held scale is a factor, a number
 export const wrongScale: Partial<Config> = { heldScale: "1.08" };
 
+// ─── the cursor of the canvas ─────────────────────────────────
+
+expectTypeOf<InputApi["cursor"]>().toEqualTypeOf<() => string>();
+expectTypeOf<Config["cursor"]>().toEqualTypeOf<{ control: string; idle: string }>();
+
+// A game with its own cursors names both: the config merges shallowly.
+export const ownCursors: Partial<Config> = { cursor: { control: "grab", idle: "default" } };
+
+// @ts-expect-error — the cursor config is an object of two CSS values, not one value
+export const flatCursor: Partial<Config> = { cursor: "pointer" };
+
+// @ts-expect-error — a shallow merge keeps no default, so `idle` is required next to `control`
+export const halfCursor: Partial<Config> = { cursor: { control: "grab" } };
+
 // ─── a raw sample names its device ────────────────────────────
 
 expectTypeOf<RawSample["pointerType"]>().toEqualTypeOf<"mouse" | "touch" | "pen">();

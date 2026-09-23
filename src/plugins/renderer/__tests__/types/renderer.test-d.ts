@@ -1,4 +1,5 @@
 import { expectTypeOf } from "vitest";
+import type { Config as GameConfig } from "../../../../config";
 import type { Entity } from "../../../world/types";
 import type {
   NineSliceValue,
@@ -8,7 +9,15 @@ import type {
   TransformValue
 } from "../../components";
 import { componentsFor, NineSlice, Shape, Sprite, Transform } from "../../components";
-import type { Api, Orientation, Point, SafeArea, ViewportSize } from "../../types";
+import type {
+  Api,
+  Config,
+  DebugSwitches,
+  Orientation,
+  Point,
+  SafeArea,
+  ViewportSize
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -66,6 +75,13 @@ kit.NineSlice({ alpha: 0, tint: 0xff_ff_ff });
 // @ts-expect-error — alpha is a number from 0 to 1
 NineSlice({ alpha: "0.5" });
 
+// The board tray, outlined while its insets are checked.
+expectTypeOf<NineSliceValue["debug"]>().toEqualTypeOf<boolean>();
+NineSlice({ texture: "board.board-tray", width: 1000, height: 1040, debug: true });
+
+// @ts-expect-error — debug is on or off
+NineSlice({ debug: "on" });
+
 // ─── Shape: the fill has its own alpha ────────────────────────
 
 expectTypeOf<ShapeValue["fillAlpha"]>().toEqualTypeOf<number>();
@@ -109,3 +125,13 @@ expectTypeOf(renderer.viewport.toReference).toEqualTypeOf<
 
 // @ts-expect-error — `apply` is the viewport's internal half, not on the public API
 renderer.viewport.apply;
+
+// ─── debug switches and the long side of the reference space ──
+
+expectTypeOf(renderer.sync.debug.nineSlice).toEqualTypeOf<(on: boolean) => void>();
+expectTypeOf(renderer.sync.debug.state()).toEqualTypeOf<{ nineSlice: boolean }>();
+expectTypeOf<Config["debug"]>().toEqualTypeOf<DebugSwitches>();
+expectTypeOf<GameConfig["referenceLong"]>().toEqualTypeOf<number>();
+
+// @ts-expect-error — the switch takes a boolean
+renderer.sync.debug.nineSlice("yes");

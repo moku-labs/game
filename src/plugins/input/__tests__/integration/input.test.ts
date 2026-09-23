@@ -170,6 +170,8 @@ describe("input plugin integration", () => {
   it("stays inert without a DOM and leaves nothing behind on stop", async () => {
     const app = await startApp();
 
+    expect(app.input.cursor()).toBe("");
+
     await app.stop();
 
     expect(app.time.isRunning()).toBe(false);

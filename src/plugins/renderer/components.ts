@@ -63,12 +63,18 @@ export type SpriteValue = {
 };
 
 /**
- * A stretchable panel. The slice borders come with the texture, not with the component.
+ * A stretchable panel. The slice borders come with the texture, not with the component. `debug`
+ * strokes the bounds and the four cut lines over the panel: cyan, red when the corners overlap or
+ * the texture is missing.
  *
  * @example
  * ```ts
  * const value: NineSliceValue = {
- *   texture: "ui.panel", width: 600, height: 320, alpha: 1, tint: 0xffffff
+ *   texture: "ui.panel", width: 600, height: 320, alpha: 1, tint: 0xffffff, debug: false
+ * };
+ * // The board tray, outlined while its insets are checked.
+ * const tray: NineSliceValue = {
+ *   texture: "board.board-tray", width: 1000, height: 1040, alpha: 1, tint: 0xffffff, debug: true
  * };
  * ```
  */
@@ -78,6 +84,7 @@ export type NineSliceValue = {
   height: number;
   alpha: number;
   tint: number;
+  debug: boolean;
 };
 
 /**
@@ -181,14 +188,16 @@ export const Transform = /*#__PURE__*/ component("Transform", transformDefaults)
 export const Sprite = /*#__PURE__*/ component("Sprite", spriteDefaults);
 
 /**
- * A stretchable panel, sized in reference units, with its own alpha and tint.
+ * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
+ * the slice outline over it.
  */
 export const NineSlice = /*#__PURE__*/ component("NineSlice", {
   texture: "",
   width: 0,
   height: 0,
   alpha: 1,
-  tint: 0xff_ff_ff
+  tint: 0xff_ff_ff,
+  debug: false
 });
 
 /**

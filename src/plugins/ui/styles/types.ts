@@ -117,6 +117,8 @@ export type PositionStyle = {
  * ```ts
  * // A wooden button: the nine-slice of the style, greyed while disabled.
  * const visual: VisualStyle = { nineSlice: "ui.button-wood", alpha: 1, tint: 0xffffff };
+ * // The popup board while its insets are checked: the slice lines drawn over it.
+ * const checked: VisualStyle = { nineSlice: "ui.panel-signboard", debug: true };
  * ```
  */
 export type VisualStyle<Asset extends string = string> = {
@@ -133,6 +135,11 @@ export type VisualStyle<Asset extends string = string> = {
   nineSlice?: Asset;
   /** Multiplies the colour of a nine-slice or an image. */
   tint?: number;
+  /**
+   * Outlines the nine-slice of the style: its bounds and the four slice lines, cyan, red when
+   * the corners overlap or the texture is missing. A look for checking art, never for a player.
+   */
+  debug?: boolean;
 };
 
 /**

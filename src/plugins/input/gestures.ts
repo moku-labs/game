@@ -20,7 +20,7 @@ import {
 } from "./components";
 import { abortDrag, grab, moveHeld, moveHover, release } from "./drag";
 import { findPressed } from "./hit";
-import { clearPointerOver, endsHover, isHover, movePointerOver } from "./hover";
+import { clearPointerOver, endsHover, isHover, movePointerOver, syncCursor } from "./hover";
 import { attach, detach, record } from "./pointer";
 import type { Direction, InputCtx, Point, RawSample } from "./types";
 
@@ -399,6 +399,7 @@ function pauseGestures(ctx: InputCtx): void {
  * The one frame step of the plugin, registered with `time.onFrame("input")` in `onInit`, so it
  * runs before the `world` callback of the same phase: `Pointer`, `Held`, `Hovered` and `Pressed`
  * are fresh when game systems of phase `input` read them.
+ * The canvas cursor is set right after the hover.
  *
  * @param ctx - Domain context of the input plugin.
  * @param time - The frame's `Time`.
@@ -421,6 +422,7 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
 
   if (mode === "paused") {
     pauseGestures(ctx);
+    syncCursor(ctx);
 
     return;
   }
@@ -432,6 +434,7 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
   pointer.justReleased = false;
   ctx.state.samples = [];
   drainSamples(ctx, pointer, queue);
+  syncCursor(ctx);
 
   advanceTime(ctx, pointer, time.delta);
   if (ctx.state.phase === "dragging") followDrag(ctx, pointer);

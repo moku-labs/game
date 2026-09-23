@@ -2,10 +2,29 @@
  * @file input plugin — the hover of a mouse or a pen. `PointerOver` sits on the topmost view a
  * press would take, found with the same filter a press uses. At most one view carries it. A touch
  * never hovers: a touch sample, a pointer cancel and the pointer leaving the canvas take it away.
+ * The cursor of the canvas follows the hover: it shows a control while `PointerOver` sits on one.
  */
-import { PointerOver, type PointerValue } from "./components";
+
+import type { Entity } from "../world/types";
+import {
+  Draggable,
+  PointerOver,
+  type PointerValue,
+  Pressable,
+  Swipeable,
+  Tappable
+} from "./components";
 import { findPressed } from "./hit";
 import type { InputCtx, Point, RawSample } from "./types";
+
+/** The components of input that make a view a control: a press on it answers something. */
+const CONTROLS = [Tappable, Draggable, Pressable, Swipeable] as const;
+
+/**
+ * The storage name of `ui`'s `LocalWrite`, the one control component input does not own. `ui`
+ * depends on `input`, so input finds it by name through `world.ecs.typeOf` instead of importing it.
+ */
+const LOCAL_WRITE = "LocalWrite";
 
 /**
  * Takes `PointerOver` away from the view that carries it, if any.
@@ -62,4 +81,43 @@ export function endsHover(sample: RawSample): boolean {
  */
 export function isHover(ctx: InputCtx, pointer: PointerValue, sample: RawSample): boolean {
   return sample.pointerType !== "touch" && ctx.state.phase === "idle" && !pointer.down;
+}
+
+/**
+ * Tells whether a view is a control: it carries one of input's answering components or `ui`'s
+ * `LocalWrite`. A disabled or covered button keeps only `Touchable`, so it is not one.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The hovered view.
+ * @returns True when the view answers a press.
+ */
+function isControl(ctx: InputCtx, entity: Entity): boolean {
+  const { ecs } = ctx.deps.world;
+
+  for (const type of CONTROLS) if (ecs.has(entity, type)) return true;
+
+  const localWrite = ecs.typeOf(LOCAL_WRITE);
+
+  return localWrite !== undefined && ecs.has(entity, localWrite);
+}
+
+/**
+ * Sets the cursor of the canvas after the frame's hover: `config.cursor.control` over a control,
+ * `config.cursor.idle` everywhere else, which covers a leave and a touch because both take
+ * `PointerOver` away. The style is written only when the cursor changes.
+ *
+ * @param ctx - Domain context of the input plugin.
+ */
+export function syncCursor(ctx: InputCtx): void {
+  const { canvas, pointerOver } = ctx.state;
+
+  if (canvas === undefined) return;
+
+  const { control, idle } = ctx.config.cursor;
+  const wanted = pointerOver !== undefined && isControl(ctx, pointerOver) ? control : idle;
+
+  if (wanted === (ctx.state.cursor ?? idle)) return;
+
+  canvas.style.cursor = wanted;
+  ctx.state.cursor = wanted;
 }

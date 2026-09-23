@@ -3,18 +3,18 @@
  * and the handle a caller drives it with.
  */
 import type { AnyComponent } from "../../world/ecs/types";
-import type { Ease, Entity, MotionHandle } from "../../world/types";
+import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types";
 
 /**
  * One running track: the numeric fields of one component of one entity moving from the values
- * read at the end of the delay to the exact target.
+ * read at the end of the delay to the exact target, straight or through keyframe segments.
  *
  * @example
  * ```ts
  * const track: Track = {
  *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 }, ms: 350, ease: "out",
  *   delayMs: 0, elapsed: 0, from: undefined, muted: () => new Set(), additive: false,
- *   driven: false, bornFrame: 4, ended: false
+ *   driven: false, bornFrame: 4, ended: false, segments: undefined
  * };
  * ```
  */
@@ -37,6 +37,11 @@ export type Track = {
   /** The frame step the track was born in. That step does not advance it a second time. */
   readonly bornFrame: number;
   ended: boolean;
+  /**
+   * The keyframe segments the track walks over `ms`, or `undefined` for a straight track. A
+   * segment without an ease runs on the track's `ease`.
+   */
+  readonly segments: readonly TrackSegment[] | undefined;
 };
 
 /**

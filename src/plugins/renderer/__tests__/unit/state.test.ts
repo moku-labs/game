@@ -11,7 +11,8 @@ const config: Config = {
   aspect: { min: 4 / 3, max: 21 / 9 },
   poolLimit: 256,
   unsupportedMessage: "This device cannot run the game.",
-  loadPixi: () => Promise.reject(new Error("not loaded in this test"))
+  loadPixi: () => Promise.reject(new Error("not loaded in this test")),
+  debug: { nineSlice: false }
 };
 
 describe("renderer state", () => {
@@ -57,6 +58,7 @@ describe("renderer state", () => {
       value: undefined,
       drawScale: { x: 1, y: 1 },
       frameKey: "",
+      outline: undefined,
       hitBox: { x: 0, y: 0, width: 1, height: 1 }
     });
 

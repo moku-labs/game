@@ -24,7 +24,8 @@ const config: Config = {
   aspect: { min: 4 / 3, max: 21 / 9 },
   poolLimit: 256,
   unsupportedMessage: "This device cannot run the game.",
-  loadPixi: () => import("pixi.js")
+  loadPixi: () => import("pixi.js"),
+  debug: { nineSlice: false }
 };
 
 /**

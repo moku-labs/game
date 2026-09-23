@@ -144,6 +144,7 @@ export type {
   ProjectionSpec,
   RestOptions,
   TrackOptions,
+  TrackSegment,
   TweenDriver,
   TweenOptions,
   ViewHandle,

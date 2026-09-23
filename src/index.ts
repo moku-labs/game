@@ -2,6 +2,14 @@
 /**
  * The `@moku-labs/game` package — 2D puzzle game engine on Moku Core.
  *
+ * Global options and their defaults, set through `config`:
+ *
+ * | Option | Default |
+ * |---|---|
+ * | orientation | "portrait" |
+ * | referenceSide | 1080 |
+ * | referenceLong | 1920, the long side the layout needs inside the safe area |
+ *
  * Plugin options and their defaults, set through `pluginConfigs`:
  *
  * | Plugin | Option | Default |
@@ -33,12 +41,14 @@
  * | renderer | poolLimit | 256 |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
+ * | renderer | debug | { nineSlice: false } |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
  * | input | dragStartPx | 8 |
  * | input | swipeMinPx | 48 |
  * | input | swipeMaxMs | 300 |
  * | input | heldScale | 1 |
+ * | input | cursor | { control: "pointer", idle: "" } |
  * | assets | manifest | undefined, a URL or an inline manifest |
  * | assets | textureBudgetMb | 192 |
  * | assets | preloadDepth | 2 |

@@ -93,15 +93,40 @@ export type NumericFields<Value extends object> = {
 };
 
 /**
+ * One keyframe segment of a track: the fraction of the track's `ms` it ends at (`0..1`), the
+ * curve it eases with (the track's `ease` when left out) and the numeric fields it reaches. A
+ * field it does not name holds where the segment before left it.
+ *
+ * @example
+ * ```ts
+ * // The swing of a popup board: past the rest pose at 42 % of the track, then home.
+ * const segments: TrackSegment[] = [
+ *   { at: 0.42, ease: "out", to: { y: 974, rotation: 0.087 } },
+ *   { at: 1, ease: "inOut", to: { y: 960, rotation: 0 } }
+ * ];
+ * ```
+ */
+export type TrackSegment = { at: number; ease?: Ease; to: Record<string, number> };
+
+/**
  * Options of `ViewHandle.tween`. An additive tween adds its delta over the value the absolute
- * writer of the field holds, instead of owning the field.
+ * writer of the field holds, instead of owning the field. `segments` turns the tween into a
+ * keyframe walk: the segments run one after another over `ms` on one clock, and `to` is where the
+ * last one ends.
  *
  * @example
  * ```ts
  * const options: TweenOptions = { ms: 350, ease: "out", delayMs: 40 };
+ * const walk: TweenOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
  * ```
  */
-export type TweenOptions = { ms: number; ease?: Ease; delayMs?: number; additive?: boolean };
+export type TweenOptions = {
+  ms: number;
+  ease?: Ease;
+  delayMs?: number;
+  additive?: boolean;
+  segments?: readonly TrackSegment[];
+};
 
 /**
  * Options of `ViewHandle.toRest`. Defaults: the plugin's `settleMs` and ease `"out"`. `delayMs`
@@ -115,15 +140,24 @@ export type TweenOptions = { ms: number; ease?: Ease; delayMs?: number; additive
 export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number };
 
 /**
- * What the driver is told about one track: how long it runs, how it eases, how long it waits and
- * whether it adds to the field or owns it.
+ * What the driver is told about one track: how long it runs, how it eases, how long it waits,
+ * whether it adds to the field or owns it, and the keyframe segments it walks. A track with
+ * segments walks them over `ms` on one clock and claims every field a segment names; its target
+ * `to` is the last segment's target.
  *
  * @example
  * ```ts
  * const options: TrackOptions = { ms: 250, ease: "outBack", delayMs: 0, additive: false };
+ * const walk: TrackOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
  * ```
  */
-export type TrackOptions = { ms: number; ease?: Ease; delayMs?: number; additive?: boolean };
+export type TrackOptions = {
+  ms: number;
+  ease?: Ease;
+  delayMs?: number;
+  additive?: boolean;
+  segments?: readonly TrackSegment[];
+};
 
 /**
  * The tween engine behind `ViewHandle.tween`, `toRest` and `all`. `anim` installs one with

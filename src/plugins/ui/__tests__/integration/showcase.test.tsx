@@ -4,7 +4,7 @@ import { NineSlice, Shape, Sprite, Transform } from "../../../renderer/component
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { Box } from "../../components";
 import type { UiNode } from "../../jsx/types";
-import { fitBars, startUiApp, tick } from "../app";
+import { fitBars, startUiApp, swingDrop, tick } from "../app";
 
 // ---------------------------------------------------------------------------
 // Delta 4 of the ui plugin, on the real screen set in plain Bun: nine-slices in
@@ -108,7 +108,8 @@ describe("nine-slice in the style", () => {
       width: 300,
       height: 120,
       alpha: 0.9,
-      tint: 0xff_ee_dd
+      tint: 0xff_ee_dd,
+      debug: false
     });
     expect(app.world.ecs.has(sliced, Shape)).toBe(false);
     expect(app.world.ecs.get(entityOf(app, "slicedRow"), NineSlice)?.texture).toBe("ui.strip");
@@ -542,6 +543,47 @@ describe("the guide hole over a fitted button", () => {
 
     expect(app.flow.gate.answer({ intent: "ok" })).toBe(true);
     await tick();
+
+    await app.stop();
+  });
+});
+
+describe("a keyframed motion on an element with a pivot above its box", () => {
+  it("mounts, starts on the first key and walks to the rest pose around the pivot", async () => {
+    const app = await startUiApp();
+
+    mount(app, "keyframed");
+
+    const board = entityOf(app, "swinging");
+    const rest = app.world.projection.restOf(board, Transform);
+    const box = app.world.ecs.get(board, Box);
+
+    // The pivot hangs half the height above the top edge; the position compensates.
+    expect(rest?.pivot).toEqual({ x: 300, y: -200 });
+    expect(rest?.y).toBe((box?.y ?? 0) - 200);
+
+    // Two frames into the 1000 ms walk: still high above the rest and small.
+    const early = app.world.ecs.get(board, Transform);
+
+    expect(early?.y).toBeLessThan((rest?.y ?? 0) - swingDrop / 2);
+    expect(early?.scale).toBeLessThan(1);
+
+    for (let frame = 0; frame < 80; frame += 1) app.time.step(16);
+
+    expect(app.world.ecs.get(board, Transform)).toEqual(rest);
+
+    await app.stop();
+  });
+
+  it("outlines the slices of an element whose style asks for debug", async () => {
+    const app = await startUiApp();
+
+    mount(app, "keyframed");
+
+    expect(app.world.ecs.get(entityOf(app, "outlined"), NineSlice)).toMatchObject({
+      texture: "ui.card",
+      debug: true
+    });
 
     await app.stop();
   });

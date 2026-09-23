@@ -24,6 +24,8 @@ describe("createAudioState", () => {
     expect(state.context).toBeUndefined();
     expect(state.paused).toBe(false);
     expect(state.unlocked).toBe(false);
+    expect(state.resuming).toBe(false);
+    expect(state.pendingSfx.size).toBe(0);
     expect(state.music).toBeUndefined();
     expect(state.decoded.size).toBe(0);
     expect(state.warned.size).toBe(0);

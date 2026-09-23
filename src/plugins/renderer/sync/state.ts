@@ -1,7 +1,7 @@
 /**
  * @file renderer/sync — state factory.
  */
-import type { SyncState } from "./types";
+import type { DebugSwitches, SyncState } from "./types";
 
 /**
  * Creates an empty collection. It lives in its own non-exported function because lint rule L5
@@ -25,9 +25,10 @@ function emptySet<Value>(): Set<Value> {
 /**
  * Creates the initial sync state: no root, no layers, no view, no pool and no provider.
  *
+ * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
  */
-export function createSyncState(): SyncState {
+export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
   return {
     root: undefined,
     layerList: undefined,
@@ -47,6 +48,8 @@ export function createSyncState(): SyncState {
     added: emptySet(),
     removed: emptySet(),
     reparented: emptySet(),
+    debug: { nineSlice: debug.nineSlice },
+    outlinesStale: false,
     cleanups: []
   };
 }

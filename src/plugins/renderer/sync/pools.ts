@@ -56,6 +56,21 @@ export function dropMask(view: View): void {
 }
 
 /**
+ * Takes the debug outline off a view: the graphics leaves the wrapper and is freed.
+ *
+ * @param view - The view of a nine-slice that was outlined, or of anything that was not.
+ */
+export function dropOutline(view: View): void {
+  const outline = view.outline;
+
+  if (outline === undefined) return;
+
+  detach(outline);
+  outline.destroy();
+  view.outline = undefined;
+}
+
+/**
  * The pool an object belongs to: its class and the texture it draws.
  *
  * @param kind - Which component gave the entity its display object.
@@ -124,6 +139,7 @@ export function release(sctx: SyncCtx, view: View): void {
   const state = sctx.ctx.state.sync;
 
   dropMask(view);
+  dropOutline(view);
 
   if (view.wrapper !== undefined) {
     detach(view.wrapper);

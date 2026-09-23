@@ -15,6 +15,7 @@ import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture } from "./textures";
 import type {
   CreateTextureOptions,
+  DebugSwitches,
   DisplayAdapter,
   SyncCtx,
   SyncDeps,
@@ -271,6 +272,19 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
+   * The nine-slice switch moved: every nine-slice is written again, so its outline follows.
+   */
+  const applyOutlines = (): void => {
+    if (!state.outlinesStale) return;
+
+    state.outlinesStale = false;
+
+    for (const [entity, view] of state.views) {
+      if (view.kind === "NineSlice") guard(entity, () => applyNineSlice(sctx, entity, view));
+    }
+  };
+
+  /**
    * Takes the entities that are waiting to be built out of the change set.
    *
    * @returns The entities of this pass, so the change step skips what the build just wrote.
@@ -304,6 +318,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     applyReparented(built);
     applyAdapterChanges(built);
     applyInvalidated();
+    applyOutlines();
   };
 
   /**
@@ -314,6 +329,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     for (const view of state.views.values()) {
       if (view.kind === "Display") detach(view.object);
       view.wrapper = undefined;
+      view.outline = undefined;
     }
 
     state.views.clear();
@@ -352,6 +368,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.added.clear();
     state.removed.clear();
     state.reparented.clear();
+    // Every view was just written with the switch as it is now.
+    state.outlinesStale = false;
   };
 
   return {
@@ -405,6 +423,17 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         installFont(sctx, key, fnt, texture),
 
       installed: (key: string): boolean => isFontInstalled(state, key)
+    },
+
+    debug: {
+      nineSlice: (on: boolean): void => {
+        if (state.debug.nineSlice === on) return;
+
+        state.debug.nineSlice = on;
+        state.outlinesStale = true;
+      },
+
+      state: (): DebugSwitches => ({ ...state.debug })
     },
 
     root: (): PixiContainer | undefined => state.root,

@@ -1,10 +1,11 @@
 import { expectTypeOf } from "vitest";
+import type { Anim } from "../../../../index";
 import { defineGame } from "../../../../index";
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { defineMotion } from "../../motion";
 import { defineAnimation, mark, play, sequence, set, tween } from "../../timeline/steps";
-import type { AnimApi, KernelSlice, PlayHandle, Target } from "../../types";
+import type { AnimApi, KernelSlice, MotionKeyframe, PlayHandle, Target } from "../../types";
 
 const card: Target = { projection: "hud", key: "order" };
 
@@ -77,6 +78,32 @@ defineMotion({
   states: { hidden: { Nope: { alpha: 0 } } },
   on: { enter: "hidden" }
 });
+
+// A keyframe track names offsets on Transform and alpha on the three visuals; states are optional.
+const settle: MotionKeyframe = { at: 0.42, ease: "out", Transform: { dy: 14, rotation: 0.087 } };
+
+defineMotion({
+  keyframes: {
+    dropIn: [{ at: 0, Transform: { dy: -780, scale: 0.8 }, Shape: { alpha: 0 } }, settle]
+  },
+  transition: { ms: 1000 },
+  on: { enter: "dropIn" }
+});
+defineMotion({
+  // @ts-expect-error — a key moves the Transform by dx and dy, never by an absolute x
+  keyframes: { dropIn: [{ at: 0, Transform: { x: 10 } }] },
+  on: { enter: "dropIn" }
+});
+defineMotion({
+  // @ts-expect-error — a key gives the Shape its alpha only
+  keyframes: { dropIn: [{ at: 0, Shape: { fill: 0 } }] },
+  on: { enter: "dropIn" }
+});
+// @ts-expect-error — every key sits somewhere on the track
+const noAt: MotionKeyframe = { Transform: { dy: 1 } };
+
+expectTypeOf(noAt).toEqualTypeOf<MotionKeyframe>();
+expectTypeOf<Anim.MotionKeyframe>().toEqualTypeOf<MotionKeyframe>();
 
 // The own events reach the plugin context: `emit` is the kernel's, typed with anim's event map.
 declare const animCtx: KernelSlice;

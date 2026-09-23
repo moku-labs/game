@@ -134,20 +134,42 @@ async function bufferOf(ctx: AudioCtx, key: string): Promise<AudioBuffer | undef
 /**
  * Plays one sound: the handler of the kind `"sfx"`. Every play is its own source, so the same key
  * twice in one frame is heard twice, and the promise resolves when the sound STARTED. The handler
- * ignores its signal: a sound that began plays to its end.
+ * ignores its signal: a sound that began plays to its end. While the first gesture's `resume()` is
+ * pending the sound waits in `pendingSfx`, one per key; before any gesture it is dropped.
  *
  * @param ctx - Domain context of the plugin.
  * @param descriptor - The `sfx` descriptor `anim` built.
  */
 export async function playSfx(ctx: AudioCtx, descriptor: Descriptor | Hint): Promise<void> {
   const state = ctx.state;
-  const context = state.context;
 
-  if (context === undefined || !state.unlocked) return;
+  if (state.context === undefined) return;
 
   const request = sfxOf(descriptor);
 
   if (request === undefined) return;
+
+  if (!state.unlocked) {
+    if (state.resuming) state.pendingSfx.set(request.key, request);
+
+    return;
+  }
+
+  await playRequest(ctx, request);
+}
+
+/**
+ * Starts one source of a sound on its bus. `playSfx` calls it for a live play and the unlock for
+ * every sound that waited for the resume.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param request - The key and the bus of the sound.
+ */
+export async function playRequest(ctx: AudioCtx, request: SfxRequest): Promise<void> {
+  const state = ctx.state;
+  const context = state.context;
+
+  if (context === undefined) return;
 
   if (!isBus(state, request.bus)) {
     ctx.log.warn("audio: unknown bus", { bus: request.bus });
