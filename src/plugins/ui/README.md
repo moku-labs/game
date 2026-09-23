@@ -28,7 +28,7 @@ Yoga arrives through `await import("yoga-layout/load")` in `onStart`; nothing so
 | `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
 | `text` | `Text`; a string `style` is the text style key | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint` | as below |
-| any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke; a style with a `stroke` and no `fill` draws only the stroke (`fillAlpha: 0`), a ring | as below |
+| any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke; with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
 | `scroll` | `Shape` with `clip` | `Touchable`, `Scroll` |
