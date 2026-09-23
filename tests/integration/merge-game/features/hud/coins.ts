@@ -4,27 +4,21 @@
  * hook decides how the number travels — at once, or after the coins that fly to it have landed.
  *
  * It is its own projection because a `bind` reads the component of the entity the label sits on,
- * and a JSX element carries only what `ui` writes on it.
+ * and a JSX element carries only what `ui` writes on it. The coin pill of Home and of the board
+ * hosts it, so it is drawn inside the pill, in the pill's own units, and the coins that fly to it
+ * land where the number really is.
  */
 import type { Flow, World } from "@moku-labs/game";
 import { component, Order, Text, Transform } from "@moku-labs/game";
 import { projection } from "../../kit";
 import type { Player } from "../../state";
-import { barItemHeight, barPadding } from "./styles";
+import { pillNumberAt } from "../ui/kit";
 
 /** How long the number rolls when nothing announced a flight. */
 const ROLL_MS = 200;
 
 /** How long it rolls after a flight landed. */
 const FLIGHT_ROLL_MS = 400;
-
-/**
- * Where the counter is drawn, in reference units. It is the origin of the `coinSlot` element of
- * the HUD, computed from the same two style numbers the markup uses: the label cannot sit inside
- * the markup, because a `bind` reads the component of the entity its label sits on and a ui
- * element carries only what `ui` writes on it.
- */
-const at = { x: barPadding, y: barPadding + barItemHeight / 4 };
 
 /** The number the counter shows. A component, so the engine can tween it like a position. */
 export const Counter = component("Counter", { value: 0 });
@@ -76,9 +70,9 @@ export function rollCoins(
 }
 
 /**
- * The coin counter of the HUD: one entity that carries the number and the label bound to it.
- * The label resolves to the rounded value every frame, so the roll is drawn without a single
- * string being built.
+ * The coin counter: one entity that carries the number and the label bound to it. The label
+ * resolves to the rounded value every frame, so the roll is drawn without a single string being
+ * built. It starts after the icon of the pill that hosts it and sits on its middle line.
  */
 export const hudCoins = projection({
   name: "hud.coins",
@@ -88,12 +82,12 @@ export const hudCoins = projection({
   view: item => [
     Counter({ value: item.value }),
     Text({
-      style: "hud.digits",
+      style: "ui.number",
       bind: { component: "Counter", field: "value" },
-      anchor: { x: 0, y: 0 }
+      anchor: { x: 0, y: 0.5 }
     }),
-    Transform({ x: at.x, y: at.y }),
-    // Above the bar of the HUD, which shares the `ui` layer and is drawn after the counter spawns.
+    Transform({ x: pillNumberAt.x, y: pillNumberAt.y }),
+    // Above the pill's own nine-slice, which is the hosting element's visual at depth 0.
     Order({ value: 1 })
   ],
   motion: { change: { Counter: rollCoins } }

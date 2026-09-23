@@ -29,6 +29,7 @@ export type TextStyleKey =
   | "ui.name"
   | "ui.body"
   | "ui.small"
+  | "ui.badge"
   | "hud.digits"
   | "hud.label"
   | "hud.title";
@@ -39,6 +40,8 @@ export const {
   defineFeature,
   projection,
   sprite,
+  Sprite,
+  NineSlice,
   defineBundles,
   load,
   defineScene,
@@ -56,7 +59,7 @@ export const {
   session: Session;
   assets: AssetKey;
   bundles: BundleKey;
-  scenes: "home" | "board";
+  scenes: "splash" | "home" | "board";
   strings: Strings;
   textStyles: TextStyleKey;
 }>();

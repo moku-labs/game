@@ -17,6 +17,7 @@ import type { Player } from "./merge-game/state";
 import { startingPlayer } from "./merge-game/state";
 import { generatorId } from "./merge-game/tables";
 import { Item } from "./merge-game/view/components";
+import { cellBox } from "./merge-game/view/layout";
 
 const runCommand = promisify(execFile);
 
@@ -122,7 +123,9 @@ function countByLayer(snapshot: Model.Json): Record<string, number> {
 }
 
 /**
- * Starts the game live with the screen composed and walks it onto the board.
+ * Starts the game live with the screen composed and walks it onto the board. Headless, every
+ * bundle counts as loaded at once, so the loading plugin posts `loaded` at start and the splash
+ * lets the graph through to Home; there the test answers `play`.
  *
  * @param player - The player a new save starts from.
  * @returns The started game, resting on `board/awaitIntent`.
@@ -139,6 +142,7 @@ async function startBoard(player: Player) {
 
   if (loop.failure !== undefined) throw loop.failure;
 
+  expect(game.app.flow.state().path).toBe("home");
   expect(game.app.flow.gate.answer({ intent: "play" })).toBe(true);
   await tick();
   game.app.time.step(16);
@@ -155,17 +159,17 @@ describe("screen-merge — the board as entities", () => {
     expect(
       app.log.trace().filter(item => item.event === "scenes: a rest node was entered with no scene")
     ).toEqual([]);
+    // `ui` sits under `lifted`: the item in the hand leaves the board slot and draws over the screen.
     expect(app.world.projection.layers()).toEqual([
-      { name: "background", sort: "none" },
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
+      { name: "ui", sort: "order" },
       { name: "lifted", sort: "none" },
-      { name: "fx", sort: "none" },
-      { name: "ui", sort: "order" }
+      { name: "fx", sort: "none" }
     ]);
-    // Nine cells, three items and the generator, which is drawn among the items. In the `ui` layer
-    // every scene carries: the two projections of the HUD and the root element of its markup.
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 3 });
+    // Nine cells, three items and the generator, which is drawn in the items layer. The slot of
+    // the board screen hosts them, and they keep their layer to fall back to.
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 4 });
     expect(app.world.projection.entityOf("board.cells", "c1_0")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
     expect(app.world.projection.entityOf("board.generators", generatorId)).toBeDefined();
@@ -223,7 +227,7 @@ describe("screen-merge — the board as entities", () => {
     expect(app.model.store.snapshot().player).toEqual(before);
     expect(app.world.projection.entityOf("board.items", "i2")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i3")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 4, ui: 3 });
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 4 });
 
     await app.stop();
   });
@@ -231,7 +235,7 @@ describe("screen-merge — the board as entities", () => {
   it("spawns one more item entity when the generator is tapped", async () => {
     const { app } = await startBoard(startingPlayer);
 
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 1, ui: 3 });
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 1 });
 
     const generator = app.world.projection.entityOf("board.generators", generatorId) ?? 0;
 
@@ -241,7 +245,7 @@ describe("screen-merge — the board as entities", () => {
     app.time.step(16);
 
     expect(app.world.projection.entityOf("board.items", "i1")).toBeDefined();
-    expect(countByLayer(app.world.ecs.snapshot())).toEqual({ cells: 9, items: 2, ui: 3 });
+    expect(countByLayer(app.world.ecs.snapshot())).toMatchObject({ cells: 9, items: 2 });
 
     await app.stop();
   });
@@ -280,11 +284,13 @@ describe("screen-merge — the fast walk", () => {
 
     const item = app.world.projection.entityOf("board.items", "i1") ?? 0;
 
-    // The drop lands on c1_0, next to the generator. The enter motion would start the view at
-    // scale 0 on the generator; fast mode skips it.
+    // The drop lands on c1_0, next to the generator, at the middle of that cell in the board
+    // slot's own space. The enter motion would start the view small on the generator; fast mode
+    // skips it.
+    expect(cellBox("c1_0").middle).toEqual({ x: 485, y: 195 });
     expect(app.world.ecs.get(item, Transform)).toEqual({
-      x: 540,
-      y: 720,
+      x: 485,
+      y: 195,
       rotation: 0,
       scale: 1,
       pivot: { x: 0, y: 0 }

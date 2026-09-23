@@ -6,10 +6,13 @@
 import type { Assets, Model } from "@moku-labs/game";
 import { audioPlugin, createApp, screen } from "@moku-labs/game";
 import { fakeClock, memory } from "@moku-labs/game/testing";
+import { homeFeature } from "./features/home";
 import { hudFeature } from "./features/hud";
 import { ordersFeature } from "./features/orders";
 import { settingsFeature } from "./features/settings";
 import { settingsLocalePlugin } from "./features/settings/plugin";
+import { splashFeature } from "./features/splash";
+import { loadingPlugin } from "./features/splash/plugin";
 import { mainFlow } from "./flows/main";
 import { rewardFeature } from "./flows/reward";
 import type { Player } from "./state";
@@ -90,18 +93,22 @@ export function createGame(options: GameOptions = {}): Game {
 }
 
 /**
- * The plugins of the game with its screen: the nine screen plugins, `audio`, which is opt-in, and
- * every feature — the board, the reward, the HUD, the orders and the settings.
+ * The plugins of the game with its screen: the nine screen plugins, `audio`, which is opt-in,
+ * every feature — the splash, Home, the board, the reward, the HUD, the orders and the settings —
+ * and the two plugins the game writes: the loading of the splash and the language switch.
  */
-const screenPlugins = [
+export const screenPlugins = [
   ...screen,
   audioPlugin,
   rewardFeature,
+  splashFeature,
+  homeFeature,
   boardView,
   hudFeature,
   ordersFeature,
   settingsFeature,
-  settingsLocalePlugin
+  settingsLocalePlugin,
+  loadingPlugin
 ];
 
 /** The game with its screen and the two seams a test holds on to. */
@@ -115,6 +122,11 @@ export type ScreenGame = {
 export type ScreenGameOptions = GameOptions & {
   /** The manifest the assets plugin reads. A URL in the browser, the parsed file in a test. */
   manifest?: string | Assets.Manifest;
+  /**
+   * The file seam of the assets plugin. Left out, the game is headless: the manifest is read and
+   * every bundle counts as loaded at once. A test passes one to watch the splash really load.
+   */
+  io?: Assets.AssetsIo;
 };
 
 /**
@@ -128,7 +140,8 @@ export type ScreenGameOptions = GameOptions & {
  * ```ts
  * const { app } = createScreenGame({ seed: 42 });
  * await app.start();
- * app.scenes.current(); // undefined: the graph rests on "home", which names no scene
+ * app.flow.run(); // boot, the splash takes "progress" and "loaded" from the loading plugin
+ * app.flow.state().path; // "home" a few microtasks later, with the Home scene mounted
  * ```
  */
 export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
@@ -145,7 +158,7 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       },
       clock: { source: clock },
       flow: { mainFlow, safeNode: "home" },
-      assets: { manifest: options.manifest },
+      assets: { manifest: options.manifest, io: options.io },
       text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
       i18n: { locale: "ru", fallback: "ru" },
       audio: { volumes: volumesOf }

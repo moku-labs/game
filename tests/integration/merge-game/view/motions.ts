@@ -8,20 +8,21 @@ import { Sprite, Transform } from "@moku-labs/game";
 import type { Item as MergeItem } from "../rules";
 import { generatorId, tables } from "../tables";
 import { Item } from "./components";
-import { cellCenter } from "./layout";
+import { cellBox } from "./layout";
 
 /** The cell the only generator of this game stands on: a new item starts its arc there. */
 const generatorCell = tables.generators[generatorId].cell;
 
 /**
  * Enter: a new item pops out of the generator. It starts small on the generator's cell and
- * travels to the cell the rules gave it.
+ * travels to the cell the rules gave it. Both points are in the board slot's own space, which is
+ * the space the hosted item is drawn in.
  *
  * @param view - The view of the item that entered.
  * @returns The motion that carries it home.
  */
 export function itemPopIn(view: World.ViewHandle<MergeItem>): World.Motion {
-  const from = cellCenter(generatorCell);
+  const from = cellBox(generatorCell).middle;
 
   view.set(Transform, { x: from.x, y: from.y, scale: 0.2 });
 
