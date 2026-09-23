@@ -18,6 +18,7 @@ import type {
   RunnerApi,
   Stage
 } from "./types";
+import { readState } from "./view";
 import { walkRoute } from "./walk";
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
@@ -229,17 +230,7 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
 
     describe: (): FlowGraph => graphOf(ctx, modules),
 
-    state: (): FlowState => {
-      const open = ctx.state.gate.open;
-
-      return {
-        running: state.running !== undefined,
-        path: framePath(state.stack),
-        stack: [...state.stack],
-        pending: open === undefined ? {} : { gate: [...open.allowed] },
-        mode: ctx.state.fx.mode
-      };
-    },
+    state: (): FlowState => readState(ctx),
 
     history: (): readonly JournalEntry[] => [...state.journal],
 

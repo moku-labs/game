@@ -9,6 +9,7 @@ import type { Require } from "../../../../config";
 import type { Api as AssetsApi } from "../../../assets/types";
 import type { Descriptor, Api as FlowApi, FxHandler } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
+import type { Api as TimeApi } from "../../../time/types";
 import { createAudioApi } from "../../api";
 import { createHandlers } from "../../handlers";
 import { startAudio, stopAudio, withDeps } from "../../lifecycle";
@@ -28,6 +29,9 @@ export type FakeAssets = { asked: string[]; missing: Set<string>; api: AssetsApi
 /** The fake `model`: one committed player a test writes. */
 export type FakeModel = { player: Json; api: ModelApi };
 
+/** The fake `time`: `snapshot().elapsed` answers what a test wrote. */
+export type FakeTime = { elapsed: number; api: TimeApi };
+
 /** Everything a unit test drives the plugin with. */
 export type MockAudio = {
   ctx: KernelSlice;
@@ -39,6 +43,7 @@ export type MockAudio = {
   flow: FakeFlow;
   assets: FakeAssets;
   model: FakeModel;
+  time: FakeTime;
   hooks: ReturnType<typeof createHandlers>;
   start(): void;
   stop(): Promise<void>;
@@ -122,13 +127,25 @@ function createFakeModel(): FakeModel {
   return fake;
 }
 
-/** The six config defaults, as `index.ts` declares them. */
+/** Creates the fake `time`: the elapsed game time a test sets before a sound starts. */
+function createFakeTime(): FakeTime {
+  const fake: FakeTime = { elapsed: 0, api: undefined as unknown as TimeApi };
+
+  fake.api = {
+    snapshot: () => ({ delta: 0, elapsed: fake.elapsed, scale: 1, frame: 0, idle: false })
+  } as unknown as TimeApi;
+
+  return fake;
+}
+
+/** The config defaults, as `index.ts` declares them. */
 function defaultConfig(): Config {
   return {
     buses: { master: 1, music: 0.6, sfx: 1 },
     musicFadeMs: 600,
     volumes: undefined,
-    context: undefined
+    context: undefined,
+    journal: 0
   };
 }
 
@@ -150,7 +167,13 @@ export function createMockAudio(
   const flow = createFakeFlow();
   const assets = createFakeAssets();
   const model = createFakeModel();
-  const apis: Record<string, unknown> = { flow: flow.api, assets: assets.api, model: model.api };
+  const time = createFakeTime();
+  const apis: Record<string, unknown> = {
+    flow: flow.api,
+    assets: assets.api,
+    model: model.api,
+    time: time.api
+  };
 
   const ctx: KernelSlice = {
     config,
@@ -171,6 +194,7 @@ export function createMockAudio(
     flow,
     assets,
     model,
+    time,
     hooks: createHandlers(ctx),
     start: (): void => startAudio(ctx),
     stop: (): Promise<void> => stopAudio(state),

@@ -9,7 +9,14 @@ describe("renderer api", () => {
   it("groups the API by module", () => {
     const mock = createMockRenderer({ dom: false });
 
-    expect(Object.keys(mock.api).toSorted()).toEqual(["host", "sync", "viewport"]);
+    expect(Object.keys(mock.api).toSorted()).toEqual([
+      "capture",
+      "host",
+      "stats",
+      "sync",
+      "viewport"
+    ]);
+    expect(Object.keys(mock.api.viewport).toSorted()).toEqual(["size", "toReference", "toScreen"]);
     expect(Object.keys(mock.api.host).toSorted()).toEqual(["canvas", "kind", "pixi", "ready"]);
     expect(Object.keys(mock.api.sync).toSorted()).toEqual([
       "debug",

@@ -168,11 +168,22 @@ export function createStoreApi(ctx: ModelCtx, deps: { createRngView: CreateRngVi
     emitCommitted(allRoots, "load");
   };
 
-  const snapshot = (): Snapshot => ({
-    player: store.doc.player,
-    session: store.session,
-    rng: store.doc.rng
-  });
+  // The last snapshot and the trees it was made of: handed out again while they are unchanged.
+  let last: { doc: SaveDoc; session: Json; snapshot: Snapshot } | undefined;
+
+  const snapshot = (): Snapshot => {
+    if (last?.doc === store.doc && last.session === store.session) return last.snapshot;
+
+    const next: Snapshot = Object.freeze({
+      player: store.doc.player,
+      session: store.session,
+      rng: store.doc.rng
+    });
+
+    last = { doc: store.doc, session: store.session, snapshot: next };
+
+    return next;
+  };
 
   /**
    * Closes the open transaction, or explains that it is gone.

@@ -193,6 +193,25 @@ export type FlowKit<Game extends GameState> = {
   defineFeature: (name: string, description: FeatureDescription) => FeaturePlugin;
 };
 
+/**
+ * Where the graph rests, as the `game.position` source reads it: the path, the flow and node on
+ * top of the stack, and the intents the open gate waits for.
+ *
+ * @example
+ * ```ts
+ * // The board rests and waits for a tap or for leaving.
+ * const position: Position = {
+ *   path: "board/awaitIntent", flow: "board", node: "awaitIntent", waiting: ["tap", "leave"]
+ * };
+ * ```
+ */
+export type Position = {
+  path: string;
+  flow: string | undefined;
+  node: string | undefined;
+  waiting: readonly string[];
+};
+
 export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";
 export type { Descriptor, FxApi, FxHandler, GuideOptions, Hint, NodeFx } from "./fx/types";
 export type { Allow, Answer, GateApi } from "./gate/types";

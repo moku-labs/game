@@ -274,13 +274,23 @@ function reproPath(app: HeadlessApp, repro: Repro): string {
 
 /**
  * Builds the bookmark a repro is entered with: its state, its checkpoint and the hash of the
- * graph that runs now, so a checkpoint is accepted and any other rest node is checked.
+ * graph that runs now, so a checkpoint is accepted and any other rest node is checked. The route
+ * is not part of it: the caller walks it after the restore.
  *
  * @param app - The started app.
  * @param repro - Starting state, optional checkpoint and the route.
  * @returns The bookmark to restore.
+ * @throws {Error} When the repro names no checkpoint and the graph has no main flow.
+ * @example
+ * ```ts
+ * // The game.restore command loads a bug report taken at the "home" checkpoint.
+ * const bookmark = reproBookmark(app, { player: { coins: 7 }, checkpoint: "home", route: [] });
+ * bookmark.path; // "home"
+ * bookmark.rng; // { seed: 1, streams: {} }: the repro pinned no rng
+ * await app.flow.restore(bookmark);
+ * ```
  */
-function reproBookmark(app: HeadlessApp, repro: Repro): Bookmark {
+export function reproBookmark(app: HeadlessApp, repro: Repro): Bookmark {
   return {
     path: reproPath(app, repro),
     input: noPayload,

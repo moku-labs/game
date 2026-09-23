@@ -2,26 +2,29 @@
  * @file renderer plugin — lifecycle functions: dependency resolution, the `onStart` sequence
  * host → viewport → sync, and the teardown that undoes exactly what it created.
  */
+import { clockPlugin } from "../clock";
 import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createModules } from "./api";
 import { stopHost } from "./host/init";
+import { stopMonitor } from "./monitor/api";
 import { stopSync } from "./sync/views";
 import type { Deps, KernelSlice, Modules, RendererCtx, TeardownScope } from "./types";
 import { stopViewport } from "./viewport/resize";
 
 /**
- * Resolves the dependency APIs `time`, `lifecycle` and `world` with `ctx.require`.
+ * Resolves the dependency APIs `time`, `lifecycle`, `world` and `clock` with `ctx.require`.
  *
  * @param ctx - Kernel context of the renderer plugin.
- * @returns The three dependency APIs.
+ * @returns The four dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     time: ctx.require(timePlugin),
     lifecycle: ctx.require(lifecyclePlugin),
-    world: ctx.require(worldPlugin)
+    world: ctx.require(worldPlugin),
+    clock: ctx.require(clockPlugin)
   };
 }
 
@@ -36,10 +39,11 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
 }
 
 /**
- * The one frame callback of the renderer: a pending resize is applied first, then the frame is
- * drawn. Nothing else happens per frame; the display objects are written by the `sync` system.
+ * The draw callback of the renderer: a pending resize is applied first, then the frame is drawn,
+ * then `monitor` closes the frame and hands it to a waiting capture. The display objects are
+ * written by the `sync` system.
  *
- * @param modules - The three modules.
+ * @param modules - The four modules.
  */
 function renderFrame(modules: Modules): void {
   if (modules.viewport.applyPending()) {
@@ -49,6 +53,7 @@ function renderFrame(modules: Modules): void {
   }
 
   modules.host.render();
+  modules.monitor.end();
 }
 
 /**
@@ -68,6 +73,7 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     modules.viewport.start();
     modules.sync.start();
     rendererCtx.state.host.cleanups.push(
+      rendererCtx.deps.time.onFrame("input", () => modules.monitor.begin()),
       rendererCtx.deps.time.onFrame("render", () => renderFrame(modules))
     );
   });
@@ -84,13 +90,15 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
 }
 
 /**
- * Stops the renderer in the reverse order of the start: `sync` lets its views go while `world`
- * is still alive, `viewport` drops its observer and its probe, and `host` destroys the
- * application. Textures are left to `assets`; a `Display` object is left to the game.
+ * Stops the renderer in the reverse order of the start: `monitor` answers the waiting captures,
+ * `sync` lets its views go while `world` is still alive, `viewport` drops its observer and its
+ * probe, and `host` destroys the application. Textures are left to `assets`; a `Display` object
+ * is left to the game.
  *
  * @param scope - What `onStop` receives: the frozen config and the plugin state.
  */
 export function stopRenderer(scope: TeardownScope): void {
+  stopMonitor(scope.state.monitor);
   stopSync(scope.state.sync);
   stopViewport(scope.state.viewport);
   stopHost(scope.state.host);

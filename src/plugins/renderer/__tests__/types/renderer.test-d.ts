@@ -15,6 +15,7 @@ import type {
   DebugSwitches,
   Orientation,
   Point,
+  RenderStats,
   SafeArea,
   ViewportSize
 } from "../../types";
@@ -148,3 +149,24 @@ expectTypeOf<GameConfig["referenceLong"]>().toEqualTypeOf<number>();
 
 // @ts-expect-error — the switch takes a boolean
 renderer.sync.debug.nineSlice("yes");
+
+// ─── the doors of the editor: toScreen, stats, capture ────────
+
+expectTypeOf(renderer.viewport.toScreen).toEqualTypeOf<(point: Point) => Point>();
+expectTypeOf(renderer.stats()).toEqualTypeOf<RenderStats>();
+expectTypeOf<RenderStats>().toEqualTypeOf<{
+  fps: number;
+  frameMs: number;
+  textures: number;
+  textureMb: number;
+  views: number;
+  pooled: number;
+  drawCalls?: number;
+}>();
+expectTypeOf(renderer.capture).toEqualTypeOf<() => Promise<string | undefined>>();
+
+// @ts-expect-error — toScreen takes one point, not two numbers
+renderer.viewport.toScreen(540, 960);
+
+// @ts-expect-error — `begin` is the monitor's internal half, not on the public API
+renderer.begin;

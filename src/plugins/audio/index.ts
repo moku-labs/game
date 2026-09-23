@@ -12,6 +12,7 @@ import { flowPlugin } from "../flow";
 import { lifecyclePlugin } from "../lifecycle";
 import { modelPlugin } from "../model";
 import { scenesPlugin } from "../scenes";
+import { timePlugin } from "../time";
 import { createAudioApi } from "./api";
 import { createHandlers } from "./handlers";
 import { startAudio, stopAudio } from "./lifecycle";
@@ -22,7 +23,8 @@ const config: Config = {
   buses: { master: 1, music: 0.6, sfx: 1 },
   musicFadeMs: 600,
   volumes: undefined,
-  context: undefined
+  context: undefined,
+  journal: 0
 };
 
 /**
@@ -39,7 +41,7 @@ const config: Config = {
  * ```
  */
 export const audioPlugin = /*#__PURE__*/ createPlugin("audio", {
-  depends: [lifecyclePlugin, modelPlugin, flowPlugin, assetsPlugin, scenesPlugin],
+  depends: [timePlugin, lifecyclePlugin, modelPlugin, flowPlugin, assetsPlugin, scenesPlugin],
   config,
   createState: createAudioState,
   api: createAudioApi,

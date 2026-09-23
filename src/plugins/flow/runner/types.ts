@@ -5,7 +5,7 @@
 import type { Json, RngState, RngView } from "../../model/types";
 import type { FeaturesApi, FeaturesInternal } from "../features/types";
 import type { FxApi, FxInternal, NodeFx } from "../fx/types";
-import type { GateApi, GateInternal } from "../gate/types";
+import type { GateApi, GateInternal, GateSpec } from "../gate/types";
 import type { InboxApi, InboxInternal } from "../inbox/types";
 
 // ─── Type tags ────────────────────────────────────────────────
@@ -844,6 +844,22 @@ export type RunnerState = {
   failures: number;
   /** How `walk` and `restore` steer the loop. Absent until one of them needs it. */
   seam?: LoopSeam;
+  /** The last `state()` and what it was read from. Absent until the first `state()`. */
+  view?: StateView;
+};
+
+/**
+ * The last `flow.state()` and the fields it was built from. `state()` hands the same frozen
+ * object out again while none of them moved, so a watcher compares identities.
+ */
+export type StateView = {
+  running: boolean;
+  depth: number;
+  top: Frame | undefined;
+  open: GateSpec | undefined;
+  mode: "live" | "fast";
+  journalIndex: number;
+  state: FlowState;
 };
 
 /**
@@ -978,7 +994,8 @@ export type RunnerApi = {
   describe(): FlowGraph;
 
   /**
-   * Reads where the graph stands.
+   * Reads where the graph stands. Frozen, and the same object while the graph did not move: no
+   * edge, no gate opened or closed, no mode switch.
    *
    * @returns Whether it runs, the path, the stack, what it waits for and the mode.
    * @example
@@ -986,6 +1003,9 @@ export type RunnerApi = {
    * // The screen enables only the buttons the resting node takes.
    * const { path, pending } = app.flow.state();
    * // path: "home", pending: { gate: ["play"] }
+   *
+   * // An editor panel redraws the position only when the graph moved.
+   * app.flow.state() === app.flow.state(); // true while "home" rests
    * ```
    */
   state(): FlowState;

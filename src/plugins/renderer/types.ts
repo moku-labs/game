@@ -4,10 +4,12 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Config as GameConfig, Require } from "../../config";
+import type { Api as ClockApi } from "../clock/types";
 import type { Api as LifecycleApi } from "../lifecycle/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Api as WorldApi } from "../world/types";
 import type { HostApi, HostInternal, HostState } from "./host/types";
+import type { MonitorApi, MonitorInternal, MonitorState } from "./monitor/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
@@ -155,24 +157,31 @@ export type Config = {
 /**
  * renderer plugin state: one branch per module.
  */
-export type State = { host: HostState; viewport: ViewportState; sync: SyncState };
+export type State = {
+  host: HostState;
+  viewport: ViewportState;
+  sync: SyncState;
+  monitor: MonitorState;
+};
 
 /**
- * renderer plugin API, `app.renderer`, grouped by module.
+ * renderer plugin API, `app.renderer`: grouped by module, and the two members of `monitor`,
+ * `stats()` and `capture()`, on the plugin itself.
  *
  * @example
  * ```ts
  * app.renderer.host.kind(); // "webgpu"
  * app.renderer.viewport.size().width; // 1080, reference units
  * app.renderer.sync.hitTest(540, 300, () => true); // 1048576
+ * app.renderer.stats().views; // 180
  * ```
  */
-export type Api = { host: HostApi; viewport: ViewportApi; sync: SyncApi };
+export type Api = { host: HostApi; viewport: ViewportApi; sync: SyncApi } & MonitorApi;
 
 /**
- * Resolved dependency APIs.
+ * Resolved dependency APIs. `clock` is the time source of the frame counters.
  */
-export type Deps = { time: TimeApi; lifecycle: LifecycleApi; world: WorldApi };
+export type Deps = { time: TimeApi; lifecycle: LifecycleApi; world: WorldApi; clock: ClockApi };
 
 /**
  * What the kernel context offers before the deps are attached.
@@ -208,16 +217,33 @@ export type ViewportModule = ViewportApi & ViewportInternal;
 export type SyncModule = SyncApi & SyncInternal;
 
 /**
- * The three modules in injection order.
+ * Both halves of the `monitor` module: what a tool calls and what the frame drives.
  */
-export type Modules = { host: HostModule; viewport: ViewportModule; sync: SyncModule };
+export type MonitorModule = MonitorApi & MonitorInternal;
+
+/**
+ * The four modules in injection order.
+ */
+export type Modules = {
+  host: HostModule;
+  viewport: ViewportModule;
+  sync: SyncModule;
+  monitor: MonitorModule;
+};
 
 /**
  * What `onStop` receives: the frozen config and the plugin state, nothing else.
  */
 export type TeardownScope = { readonly config: Readonly<Config>; readonly state: State };
 
-export type { HostApi, HostInternal, HostState } from "./host/types";
+export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
+export type {
+  MonitorApi,
+  MonitorDeps,
+  MonitorInternal,
+  MonitorState,
+  RenderStats
+} from "./monitor/types";
 export type {
   CoverFrame,
   CreateTextureOptions,
@@ -231,6 +257,7 @@ export type {
   LayerEntry,
   NineBorders,
   SyncApi,
+  SyncCounts,
   SyncInternal,
   SyncState,
   TextureProvider,

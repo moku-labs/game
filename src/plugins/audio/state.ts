@@ -76,6 +76,7 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     music,
     musicPending,
     unlock: undefined,
-    removers: []
+    removers: [],
+    journal: []
   };
 }

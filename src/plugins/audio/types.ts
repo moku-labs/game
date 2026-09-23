@@ -10,6 +10,7 @@ import type { Descriptor, Api as FlowApi } from "../flow/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Events as ModelEvents } from "../model/types";
 import type { Events as ScenesEvents } from "../scenes/types";
+import type { Api as TimeApi } from "../time/types";
 
 /**
  * The three volume buses. `master` carries the whole game, `music` the scene track, `sfx` every
@@ -100,6 +101,24 @@ export type Config = {
   volumes: Volumes | undefined;
   /** Context factory, the test seam. `undefined`: `new AudioContext()` when the global exists, otherwise headless. */
   context: (() => AudioContextLike) | undefined;
+  /** How many started sounds `journal()` keeps, newest last. `0` turns the journal off. */
+  journal: number;
+};
+
+/**
+ * One sound that started: a play of an `sfx` or a music track that began. `at` is the elapsed
+ * game time in milliseconds, `app.time.snapshot().elapsed` at the start.
+ *
+ * @example
+ * ```ts
+ * const entry: SoundEntry = { key: "ui.click", bus: "sfx", kind: "sfx", at: 1600 };
+ * ```
+ */
+export type SoundEntry = {
+  readonly key: string;
+  readonly bus: Bus;
+  readonly kind: "sfx" | "music";
+  readonly at: number;
 };
 
 /**
@@ -166,6 +185,8 @@ export type State = {
   unlock: (() => void) | undefined;
   /** The removers of the two fx handlers. */
   removers: Array<() => void>;
+  /** The sounds that started, oldest first, at most `config.journal` of them. */
+  journal: SoundEntry[];
 };
 
 /**
@@ -241,12 +262,30 @@ export type AudioApi = {
    * ```
    */
   unlocked(): boolean;
+
+  /**
+   * The sounds that started, oldest first: every play of an `sfx` and every music track that
+   * began, at most `config.journal` of them. A sound dropped before the unlock, a missing file
+   * and a music switch to the track that already plays are not in it. Empty while
+   * `config.journal` is 0, the default, and after the app stopped.
+   *
+   * @returns A copy of the journal.
+   * @example
+   * ```ts
+   * // A test composed with `pluginConfigs.audio = { journal: 200 }` taps "deliver" after the
+   * // first touch and checks the chime was heard.
+   * app.audio.journal();
+   * // [{ key: "board.theme", bus: "music", kind: "music", at: 0 },
+   * //  { key: "orders.complete", bus: "sfx", kind: "sfx", at: 1600 }]
+   * ```
+   */
+  journal(): readonly SoundEntry[];
 };
 
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { flow: FlowApi; assets: AssetsApi; model: ModelApi };
+export type Deps = { flow: FlowApi; assets: AssetsApi; model: ModelApi; time: TimeApi };
 
 /**
  * What the kernel context offers before the deps are attached.

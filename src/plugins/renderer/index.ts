@@ -7,6 +7,7 @@
  */
 import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
+import { clockPlugin } from "../clock";
 import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
@@ -45,7 +46,7 @@ const config: Config = {
  * ```
  */
 export const rendererPlugin = /*#__PURE__*/ createPlugin("renderer", {
-  depends: [timePlugin, lifecyclePlugin, worldPlugin],
+  depends: [timePlugin, lifecyclePlugin, clockPlugin, worldPlugin],
   config,
   events: (register: RegisterFunction) =>
     register.map<Events>({

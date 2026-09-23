@@ -1,10 +1,12 @@
 /**
- * @file renderer plugin — API factory. The one place that builds `host`, `viewport` and `sync`
- * in the accepted injection order, and the one place that reduces them to their public half.
+ * @file renderer plugin — API factory. The one place that builds `host`, `viewport`, `sync` and
+ * `monitor` in the accepted injection order, and the one place that reduces them to their public
+ * half.
  */
 import { createHostApi } from "./host/api";
 import type { HostApi } from "./host/types";
 import { resolveDeps } from "./lifecycle";
+import { createMonitorApi } from "./monitor/api";
 import { createSyncApi } from "./sync/api";
 import type { SyncApi } from "./sync/types";
 import type { Api, HostModule, KernelSlice, Modules, RendererCtx, SyncModule } from "./types";
@@ -12,18 +14,20 @@ import { createViewportApi } from "./viewport/api";
 import type { ViewportApi } from "./viewport/types";
 
 /**
- * Builds the three modules in the accepted order `host → viewport → sync`. Each keeps its data
- * in its branch of `ctx.state`, so these objects are views on the plugin state, not owners of it.
+ * Builds the four modules in the accepted order `host → viewport → sync → monitor`. Each keeps
+ * its data in its branch of `ctx.state`, so these objects are views on the plugin state, not
+ * owners of it.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @returns The three modules with their public and internal methods.
+ * @returns The four modules with their public and internal methods.
  */
 export function createModules(ctx: RendererCtx): Modules {
   const host = createHostApi(ctx);
   const viewport = createViewportApi(ctx, { host });
   const sync = createSyncApi(ctx, { host, viewport });
+  const monitor = createMonitorApi(ctx, { host, sync });
 
-  return { host, viewport, sync };
+  return { host, viewport, sync, monitor };
 }
 
 /**
@@ -55,15 +59,26 @@ function exposeSync(sync: SyncModule): SyncApi {
 }
 
 /**
- * Creates the renderer API: `app.renderer.host`, `.viewport` and `.sync`.
+ * Creates the renderer API: `app.renderer.host`, `.viewport` and `.sync`, and `stats()` and
+ * `capture()` of `monitor` on the plugin itself.
  *
  * @param ctx - Kernel context of the renderer plugin.
  * @returns The plugin API.
  */
 export function createRendererApi(ctx: KernelSlice): Api {
   const rendererCtx: RendererCtx = { ...ctx, deps: resolveDeps(ctx) };
-  const { host, viewport, sync } = createModules(rendererCtx);
-  const publicViewport: ViewportApi = { toReference: viewport.toReference, size: viewport.size };
+  const { host, viewport, sync, monitor } = createModules(rendererCtx);
+  const publicViewport: ViewportApi = {
+    toReference: viewport.toReference,
+    toScreen: viewport.toScreen,
+    size: viewport.size
+  };
 
-  return { host: exposeHost(host), viewport: publicViewport, sync: exposeSync(sync) };
+  return {
+    host: exposeHost(host),
+    viewport: publicViewport,
+    sync: exposeSync(sync),
+    stats: monitor.stats,
+    capture: monitor.capture
+  };
 }

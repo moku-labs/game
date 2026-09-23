@@ -9,6 +9,7 @@ import type { FlowCtx } from "../types";
 import { loopSeam } from "./loop";
 import { framePath } from "./registry";
 import type { Bookmark, FlowState, LoopSeam, Modules, RouteStep } from "./types";
+import { readState } from "./view";
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
 const noPayload: Json = null;
@@ -331,25 +332,6 @@ async function playRoute(
 }
 
 /**
- * Reads where the graph stands, the way `flow.state()` does.
- *
- * @param ctx - Domain context of the flow plugin.
- * @returns Whether it runs, the path, the stack, what it waits for and the mode.
- */
-function walkState(ctx: FlowCtx): FlowState {
-  const state = ctx.state.runner;
-  const open = ctx.state.gate.open;
-
-  return {
-    running: state.running !== undefined,
-    path: framePath(state.stack),
-    stack: [...state.stack],
-    pending: open === undefined ? {} : { gate: [...open.allowed] },
-    mode: ctx.state.fx.mode
-  };
-}
-
-/**
  * Walks a route through the running loop: restores `from` when given, switches to fast mode,
  * waits until the loop rests at each step's `at` and answers through the gate, and substitutes
  * the result of every sub-flow node the route skips. The mode of the caller is put back
@@ -391,5 +373,5 @@ export async function walkRoute(
     modules.fx.setMode(previous);
   }
 
-  return walkState(ctx);
+  return readState(ctx);
 }

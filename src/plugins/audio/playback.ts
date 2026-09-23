@@ -5,6 +5,7 @@
 import type { Descriptor, Hint } from "../flow/types";
 import type { Json } from "../model/types";
 import { isBus, ramp } from "./graph";
+import { recordSound } from "./journal";
 import type {
   AudioContextLike,
   AudioCtx,
@@ -194,6 +195,7 @@ export async function playRequest(ctx: AudioCtx, request: SfxRequest): Promise<v
   source.buffer = buffer;
   source.connect(gain);
   source.start();
+  recordSound(ctx, { key: request.key, bus: request.bus, kind: "sfx" });
 }
 
 /**
@@ -227,7 +229,7 @@ function isPlaying(state: State, key: string): boolean {
 /**
  * Cross-fades from the track that plays to a new looping source of the decoded buffer.
  *
- * @param state - The plugin state.
+ * @param ctx - Domain context of the plugin.
  * @param context - The running audio context.
  * @param track - The key, its decoded buffer and the length of the fade in seconds.
  * @param track.key - Asset key of the new track.
@@ -235,10 +237,11 @@ function isPlaying(state: State, key: string): boolean {
  * @param track.seconds - Length of the cross-fade, in seconds of the context clock.
  */
 function startTrack(
-  state: State,
+  ctx: AudioCtx,
   context: AudioContextLike,
   track: { key: string; buffer: AudioBuffer; seconds: number }
 ): void {
+  const state = ctx.state;
   const bus = state.buses.music.gain;
 
   if (bus === undefined) return;
@@ -257,6 +260,7 @@ function startTrack(
   source.start();
 
   state.music = { key: track.key, source, gain };
+  recordSound(ctx, { key: track.key, bus: "music", kind: "music" });
 }
 
 /**
@@ -310,7 +314,7 @@ export async function playMusic(ctx: AudioCtx, request: MusicRequest): Promise<v
   // A key without a file changes nothing: the track that plays keeps playing.
   if (buffer === undefined) return;
 
-  startTrack(state, context, { key, buffer, seconds });
+  startTrack(ctx, context, { key, buffer, seconds });
 }
 
 /**

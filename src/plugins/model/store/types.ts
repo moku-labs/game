@@ -279,7 +279,8 @@ export type StoreApi = {
 
   /**
    * Hands out the committed trees. Frozen: this is the only thing a view or a projection sees.
-   * Before `load()` it shows the initial player, never a half-read save.
+   * Before `load()` it shows the initial player, never a half-read save. The same object comes
+   * back while nothing was committed, so a watcher compares identities instead of trees.
    *
    * @returns The frozen player, session and rng trees.
    * @example
@@ -287,6 +288,9 @@ export type StoreApi = {
    * // A test plays two rolls headless and reads what was committed.
    * await game.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]);
    * app.model.store.snapshot().session; // { rolls: 2 }
+   *
+   * // An editor panel re-reads the model only when a commit replaced the snapshot.
+   * app.model.store.snapshot() === app.model.store.snapshot(); // true until the next commit
    * ```
    */
   snapshot(): Snapshot;

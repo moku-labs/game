@@ -102,6 +102,19 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
       };
     },
 
+    toScreen: (point: Point): Point => {
+      const canvas = deps.host.canvas();
+
+      if (canvas === undefined || state.scale <= 0) return { x: point.x, y: point.y };
+
+      const rect = canvas.getBoundingClientRect();
+
+      return {
+        x: rect.left + state.frame.x + point.x * state.scale,
+        y: rect.top + state.frame.y + point.y * state.scale
+      };
+    },
+
     size: (): ViewportSize => {
       if (state.reference.width <= 0) return inertSize();
 
