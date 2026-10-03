@@ -8,11 +8,11 @@
  * come down from the top of the screen behind the coin pill and the gear.
  */
 import { defineStyle } from "../../kit";
-import { pointerStates, safeEdges } from "../ui/kit";
+import { pointerStates, ROUND_SIZE, safeEdges } from "../ui/kit";
 import { logo } from "./logo";
 
-/** The top bar: 50 units under the safe edge, 144 tall. */
-const bar = { top: 50, height: 144 } as const;
+/** The top bar: 50 units under the safe edge, 144 tall, its ends 48 and 44 in from the sides. */
+const bar = { top: 50, height: 144, padLeft: 48, padRight: 44 } as const;
 
 /** The yard illustration: 960 units wide at the art's own ratio (960 × 924). */
 const yard = { width: 960, height: 924 } as const;
@@ -50,7 +50,7 @@ export const homeBar = defineStyle({
   alignSelf: "stretch",
   height: bar.height,
   margin: { top: bar.top },
-  padding: { left: 48, right: 44 }
+  padding: { left: bar.padLeft, right: bar.padRight }
 });
 
 /** The space between the top bar and the bottom: the centre group is centred in it. */
@@ -144,14 +144,17 @@ export const playSprigRight = defineStyle({
 export const GIFT_SIZE = 130;
 
 /** The middle of the gear, from the right edge of the bar: its padding plus half the gear. */
-const gearMiddle = 44 + 60;
+const gearMiddle = bar.padRight + ROUND_SIZE / 2;
+
+/** The gap between the bar and the gift under the gear. */
+export const GIFT_GAP = 24;
 
 /** The gift under the gear, centred on the middle of the gear. No label: it would cross the edge. */
 export const giftCorner = defineStyle({
   direction: "column",
   align: "center",
   alignSelf: "end",
-  margin: { top: 24, right: gearMiddle - GIFT_SIZE / 2 }
+  margin: { top: GIFT_GAP, right: gearMiddle - GIFT_SIZE / 2 }
 });
 
 /** The element the gift button wobbles in: the button's own square, turning on its middle. */
