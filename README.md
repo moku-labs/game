@@ -39,7 +39,7 @@ V1, V2 and V3 are built. V4 has its engine side: the two doors described in [Doo
 | V3 | built | `anim`, `i18n`, `text`, `ui`, `audio`, the `@moku-labs/game/jsx-runtime` entry | Popup, HUD and buttons with sound; the same game still plays to the end headless |
 | V4 | doors built | `/inspect` and `/control` entries | External tools can read and drive a game |
 | V5 | built | `effects`, `Frames`, render passes and draw calls; the production pack of `assets`, icons in wrapped text, the `input` tag, visual tests in `/testing` | Not defined yet |
-| V6 | planned | `platform` | A template game runs on a phone |
+| V6 | built | `platform` (provider seam, Back chain, haptics, keep-awake), custom filters on WebGL, the Tauri fallback in `assets`, a WebGL leg of the visual tests | The fixture game runs as a Tauri app on the iOS simulator and an Android emulator; real phones are not checked yet |
 
 Rendering: WebGPU is preferred, with Pixi's WebGL fallback and an honest "unsupported device" screen when neither exists.
 
