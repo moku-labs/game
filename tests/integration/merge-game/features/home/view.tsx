@@ -3,8 +3,7 @@
  * safe-area tokens holds the full-bleed meadow, the centre group — the logo sign on its ropes, the
  * sawmill yard and the green Play sign on two posts. The top bar with the coin pill and the gear
  * lies over it all, and the daily gift with its "1" and its wobble while it waits hangs under the
- * gear. Every button names an
- * intent of the `home` rest node: `play`, `gift` and `openSettings`.
+ * gear. Every button names an intent of the `home` rest node: `play`, `gift` and `openSettings`.
  */
 import { projection, tr } from "../../kit";
 import type { Player } from "../../state";

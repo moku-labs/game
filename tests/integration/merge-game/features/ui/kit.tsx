@@ -330,7 +330,7 @@ export function PlankButton(props: PlankButtonProps) {
 }
 
 /** The size of a round button of the HUD (design §6 B1, F4). */
-const ROUND_SIZE = 120;
+export const ROUND_SIZE = 120;
 
 /**
  * The styles of a round wood button of one size: the disc with its ink rim and the same states

@@ -12,6 +12,7 @@ import type { Assets, Ui } from "@moku-labs/game";
 import { Parent, Shape, Sprite, Tappable, Text, Touchable, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { GIFT_WOBBLE_MS } from "./merge-game/features/home/motions";
+import { GIFT_GAP } from "./merge-game/features/home/styles";
 import { fillHead, fillWidth, track } from "./merge-game/features/splash/view";
 import { createScreenGame, startMoment } from "./merge-game/game";
 import type { Player, Session } from "./merge-game/state";
@@ -475,8 +476,9 @@ describe("timber-screens — Home", () => {
       [880, 220],
       [130, 130]
     ]);
-    // The gift hangs 24 units under the bar, on the middle line of the gear.
-    expect(gift.y).toBe(bar.y + bar.h + 24);
+    // The gift hangs under the bar on the right, on the middle line of the gear.
+    expect(gift.y).toBe(bar.y + bar.h + GIFT_GAP);
+    expect(gift.x).toBeGreaterThan(screen.w / 2);
     expect(gift.x + gift.w / 2).toBeCloseTo(gear.x + gear.w / 2, 5);
 
     await game.app.stop();
