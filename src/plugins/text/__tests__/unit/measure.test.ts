@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { layoutRuns, measureRun, parseAdvances } from "../../measure";
-import type { AdvanceTable, LayoutOptions, TextRun, TextStyle, Warn } from "../../types";
+import type { AdvanceTable, LayoutOptions, Run, TextRun, TextStyle, Warn } from "../../types";
 import { miniFontJson, miniFontNoMissing, miniFontXml } from "../fixtures/mini-font";
 
 // ---------------------------------------------------------------------------
@@ -183,19 +183,6 @@ describe("layoutRuns — many lines", () => {
     expect(layout.lines.map(line => line.width)).toEqual([24, 24, 24]);
   });
 
-  it("drops an icon inside a wrapped style and warns", () => {
-    const written = options();
-    const layout = layoutRuns(
-      [text("A"), { kind: "icon", key: "hud.coin" }],
-      style({ wrap: 200 }),
-      tables(),
-      written
-    );
-
-    expect(layout.lines[0]?.runs).toEqual([text("A")]);
-    expect(written.written).toEqual(["icon-wrapped:hud.coin"]);
-  });
-
   it("keeps a word that spans two runs together", () => {
     const layout = layoutRuns(
       [text("A"), text("A", { bold: true })],
@@ -229,6 +216,128 @@ describe("layoutRuns — the headless fallback", () => {
 
     expect(layout.width).toBeCloseTo(57.6, 5);
     expect(layout.height).toBeCloseTo(38.4, 5);
+    expect(written.written).toEqual(["font:ui.font-body"]);
+  });
+});
+
+describe("layoutRuns — icons inside wrapped text", () => {
+  /** The coin icon of the cases. */
+  const coin: Run = { kind: "icon", key: "hud.coin" };
+
+  it("keeps an icon that fits on the line, as wide as the line is high", () => {
+    const written = options();
+    const layout = layoutRuns([text("A "), coin], style({ wrap: 200 }), tables(), written);
+
+    expect(layout.lines).toEqual([{ runs: [text("A "), coin], width: 72 }]);
+    expect(layout.height).toBe(40);
+    expect(written.written).toEqual([]);
+  });
+
+  it("adds the letter spacing to the icon as to a glyph", () => {
+    const layout = layoutRuns(
+      [text("A "), coin],
+      style({ wrap: 200, letterSpacing: 2 }),
+      tables(),
+      options()
+    );
+
+    expect(layout.width).toBe(78);
+  });
+
+  it("moves an icon that does not fit to the next line with its word", () => {
+    const written = options();
+    const layout = layoutRuns(
+      [text("A A"), coin, text("1")],
+      style({ wrap: 80 }),
+      tables(),
+      written
+    );
+
+    expect(layout.lines).toEqual([
+      { runs: [text("A")], width: 24 },
+      { runs: [text("A"), coin, text("1")], width: 80 }
+    ]);
+    expect(layout.height).toBe(80);
+    expect(written.written).toEqual([]);
+  });
+
+  it("makes the glyphs touching an icon one word with it", () => {
+    const layout = layoutRuns(
+      [text("A 2"), coin, text("1")],
+      style({ wrap: 90 }),
+      tables(),
+      options()
+    );
+
+    // "2", the coin and "1" move together: 20 + 40 + 16.
+    expect(layout.lines.map(line => line.width)).toEqual([24, 76]);
+  });
+
+  it("makes an icon between two spaces a word of its own", () => {
+    const layout = layoutRuns(
+      [text("A "), coin, text(" A")],
+      style({ wrap: 60 }),
+      tables(),
+      options()
+    );
+
+    expect(layout.lines).toEqual([
+      { runs: [text("A")], width: 24 },
+      { runs: [coin], width: 40 },
+      { runs: [text("A")], width: 24 }
+    ]);
+  });
+
+  it("breaks a word with an icon wider than the wrap by glyphs, the icon one piece", () => {
+    const layout = layoutRuns(
+      [text("2"), coin, text("1")],
+      style({ wrap: 50 }),
+      tables(),
+      options()
+    );
+
+    expect(layout.lines).toEqual([
+      { runs: [text("2")], width: 20 },
+      { runs: [coin], width: 40 },
+      { runs: [text("1")], width: 16 }
+    ]);
+  });
+
+  it("gives an icon wider than the wrap a line of its own, never dropping it", () => {
+    const written = options();
+    const alone = layoutRuns([coin], style({ wrap: 10 }), tables(), written);
+    const between = layoutRuns(
+      [text("A "), coin, text(" A")],
+      style({ wrap: 30 }),
+      tables(),
+      written
+    );
+
+    expect(alone.lines).toEqual([{ runs: [coin], width: 40 }]);
+    expect(between.lines.map(line => line.runs)).toEqual([[text("A")], [coin], [text("A")]]);
+    expect(written.written).toEqual([]);
+  });
+
+  it("keeps the icon a run of its own next to text with the same flags", () => {
+    const layout = layoutRuns(
+      [text("1"), coin, text("2")],
+      style({ wrap: 200 }),
+      tables(),
+      options()
+    );
+
+    expect(layout.lines[0]?.runs).toEqual([text("1"), coin, text("2")]);
+  });
+
+  it("measures the icon at 1.2 em when no font is loaded", () => {
+    const written = options();
+    const layout = layoutRuns([text("A "), coin], style({ wrap: 60 }), new Map(), written);
+
+    expect(layout.lines.map(line => line.width)).toEqual([
+      expect.closeTo(19.2, 5),
+      expect.closeTo(38.4, 5)
+    ]);
+    expect(layout.height).toBeCloseTo(76.8, 5);
     expect(written.written).toEqual(["font:ui.font-body"]);
   });
 });

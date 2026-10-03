@@ -32,7 +32,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 |---|---|---|
 | `Transform({ x, y, rotation, scale, pivot })` | `0, 0, 0, 1, { x: 0, y: 0 }` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. `pivot` is the local point the view turns and scales around; `x`, `y` is where it lands. |
 | `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. |
-| `NineSlice({ texture, width, height, alpha, tint, debug })` | `"", 0, 0, 1, 0xffffff, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. |
+| `NineSlice({ texture, width, height, alpha, tint, debug, clip })` | `"", 0, 0, 1, 0xffffff, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
 | `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false` | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape. `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape; the mask is always filled and never dashed. Motions tween only the numeric fields, never `kind`. |
@@ -106,7 +106,8 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `hitTest(x, y, accept)` | Reference coordinates, topmost first. Component math, never a Pixi world matrix. Inert: `undefined`. |
 | `textures.provide(fn)` | Adds a provider to the chain; the newest is asked first. Returns the remover. Works while inert. |
 | `textures.create(image, { nine? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. Throws while the renderer does not draw. |
-| `textures.destroy(texture)` | `texture.destroy(true)`. Twice is a no-op. |
+| `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
+| `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. |
 | `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once. No-op while inert. |
 | `displays.provide(Component, adapter)` | A plugin above says how its own component becomes a display object: `create` on the first pass after it appeared, `update` on every change, `destroy` when it leaves. Stored while inert, never called there. Returns the remover. |
 | `fonts.install(key, fnt, texture)` | Installs a BMFont file (text, XML or JSON) and its page texture under an asset key. Throws while the renderer does not draw. |
@@ -119,7 +120,7 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
 An adapter object is parented, sorted and freed like a sprite; its hit box is `getLocalBounds()`
 read at attach, as a `Display` object's is. A point outside the rectangle of a `clip: true` ancestor
-hits nothing inside it. The hit test moves the point into the view's local space through the pose
+(a `Shape` or a `NineSlice`) hits nothing inside it. The hit test moves the point into the view's local space through the pose
 helpers below, pivot included. A box without area holds no point: a particle container measures
 `0 × 0` and is never hit, not even at its origin.
 
@@ -296,10 +297,40 @@ pass: `world` records no change for a removed component, so `sync` watches `onRe
 `resolve(key)` asks the providers from the newest to the oldest; the first non-`undefined` wins.
 Nothing answers: the view draws `Texture.WHITE` at 64×64 with tint `0xff00ff`, and `ctx.log.warn`
 reports the key once. The key is not asked again per frame — only `invalidate(keys)` makes it
-resolve again. `assets` owns texture lifetime: it calls `create`, answers through its provider, and
-calls `invalidate` then `destroy` on unload. The renderer never destroys a texture by itself; the
+resolve again. `assets` owns texture lifetime: it calls `create` (or `slice` for a packed file),
+answers through its provider, and calls `invalidate` then `destroy` on unload. The renderer never destroys a texture by itself; the
 crops it cuts for `"cover"` sprites share the base's source. A crop is freed when its last sprite
 lets go, with its base (`destroy`), when its key answers a new texture, and when the renderer stops.
+
+### Slices of an atlas page
+
+A packed bundle of `assets` loads one page per atlas, makes it with `create`, and cuts each file
+out of it with `slice(page, frame, { nine })`, the frame of the manifest `atlas` field. The slice is
+a new Pixi texture over the page's source: no pixel is copied, `width` and `height` are the frame's,
+and `nine` becomes its `defaultBorders`. The frame is offset by the page's own frame, so a slice of
+a slice lands right; a page is a full-source texture, so the offset is 0 today.
+
+```ts
+// `assets`: the page "ui/main-0" landed; the packed button is cut out of it with its borders.
+const renderer = ctx.require(rendererPlugin);
+const button = renderer.sync.textures.slice(page, { x: 583, y: 595, width: 256, height: 128 }, { nine: [24, 24, 24, 24] });
+button.width; // 256
+button.defaultBorders; // { left: 24, top: 24, right: 24, bottom: 24 }
+renderer.sync.textures.destroy(button); // the wrapper goes, the page's source stays
+```
+
+The renderer marks every slice (`state.sync.slices`, a `WeakSet`). `destroy(slice)` frees only the
+wrapper; `destroy(page)` frees the source, as for any texture. `assets` releases slices first, then
+pages. A slice destroyed after its page frees its wrapper and never asks for the source again;
+destroyed twice, it is a no-op. The mark outlives `onStop`, so a release after the renderer stopped
+still keeps the page's source. A frame outside the page, or with a negative number, throws
+`[game] renderer.sync.textures.slice: frame 583,595 256x128 is outside page 512x512.` with the hint
+`Run "bun run assets:pack".`: the packer checks it, so this catches a stale manifest.
+
+To `sync` a slice is one texture like any other: providers answer it by key, `invalidate`, pools
+and `byKey` work by key. A `NineSlice` drawn from it copies the slice's borders on every write, and
+Pixi cuts them against the slice's frame. A `"cover"` sprite crops relative to the texture's frame,
+so its crop stays inside the slice and is freed with it.
 
 ### Nine-slice borders and the debug outline
 

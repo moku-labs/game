@@ -23,7 +23,17 @@ function emptySet<Value>(): Set<Value> {
 }
 
 /**
- * Creates the initial sync state: no root, no layers, no view, no pool, no provider and no filter.
+ * Creates an empty weak set. Same reason as `emptyMap`.
+ *
+ * @returns An empty weak set.
+ */
+function emptyWeakSet<Value extends WeakKey>(): WeakSet<Value> {
+  return new WeakSet();
+}
+
+/**
+ * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter and
+ * no slice.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -43,6 +53,7 @@ export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
     fontCache: undefined,
     byKey: emptyMap(),
     frames: emptyMap(),
+    slices: emptyWeakSet(),
     invalidated: emptySet(),
     warned: emptySet(),
     added: emptySet(),

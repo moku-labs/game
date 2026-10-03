@@ -62,7 +62,7 @@ view.tween(Glow, { strength: 0 }, { ms: 200 });
 
 ### One instance, one container
 
-The first frame an `Emitter` names an effect, the effect is baked (64-entry scale, alpha and tint tables, the reach of its particles, its textures) and an instance starts: one `ParticleContainer` with the dynamic set `{ position, vertex, rotation, color }` (`uvs` static), its first texture, its blend, and a `boundsArea` of the reach, so a future culling pass never hides it. The container is the `Display` of an entity owned by `{ kind: "plugin", name: "effects" }`, with a `Transform` and the host's `Layer` and `Order` copied: in a layer sorted by `"y"` or `"order"` the particles tie with the host and draw just above it. The entity has no gesture component, so `input` never accepts it, and no `Parent`, in either space.
+The first frame an `Emitter` names an effect, the effect is baked (64-entry scale, alpha and tint tables, the reach of its particles, its textures) and an instance starts: one `ParticleContainer` with the dynamic set `{ position, vertex, rotation, color }` (`uvs` static), its first texture, its blend, and a `boundsArea` of the reach, so a future culling pass never hides it. The container is the `Display` of an entity owned by `{ kind: "plugin", name: "effects" }`, with a `Transform` and the `Layer` and `Order` of the top of the host's `Parent` chain copied (the first ancestor without a `Parent`, or the host itself). The renderer draws a parented view in the layer of its top ancestor, so a burst on a slot-hosted view draws above the screen that hosts it; in a layer sorted by `"y"` or `"order"` the particles tie with that ancestor and draw just above it. The entity has no gesture component, so `input` never accepts it, and no `Parent`, in either space.
 
 - **World space**: the container stands at the host's root point and stays there. A stream emits from where the host is now, so a moving stream leaves a trail.
 - **Local space**: the system writes the container's `Transform` from `rootPoseOf(host)` every frame, so the particles move with the host.
@@ -75,7 +75,7 @@ One system, `effects:particles`, phase `animate`: `world` skips it while paused 
 
 An instance whose effect changes, or whose host loses its `Emitter` or despawns, retires: a local-space or empty instance is destroyed at once (entity despawned, container destroyed without its textures), a world-space instance with live particles becomes an orphan that flies until its last particle died.
 
-A texture that is not loaded warns `effects:missing-texture` once per key and the effect is tried again next frame. In a dev build, textures of two atlas pages log `effects:atlas` once and the effect never draws: Pixi binds one page per container and samples the wrong one silently.
+A texture that is not loaded warns `effects:missing-texture` once per key and the effect is tried again next frame. Pixi binds one page per container and samples the wrong one silently, so in a dev build textures of two sources (loose files) warn `effects:atlas` once per effect id, `{ effect, keys, dropped }`, and the effect draws with the textures that share the first texture's source. A packed build puts every fx texture on one page and never warns.
 
 ## Filters
 
@@ -93,13 +93,15 @@ Every filter component also carries `enabled: true` (a disabled filter costs not
 
 | Component | Fields and defaults | Source | Passes |
 |---|---|---|---|
-| `Glow` | `strength: 2, distance: 10, color: 0xffffff, alpha: 1` | our WGSL, padded by `distance` | 1 |
+| `Glow` | `strength: 2, distance: 10, color: 0xffffff, alpha: 1` | our WGSL, padded by `distance`; 64 probes per pixel | 1 |
 | `Outline` | `thickness: 2, color: 0x000000, alpha: 1` | our WGSL, padded by `thickness` | 1 |
 | `Blur` | `strength: 8, quality: 0, resolution: 0, repeatEdgePixels: true` | Pixi `BlurFilter` | `2 × quality` |
 | `ColorMatrix` | `brightness: 1, saturation: 0, contrast: 0, hue: 0, grayscale: 0` | Pixi `ColorMatrixFilter` | 1 |
 | `Noise` | `amount: 0.5, seed: 0` | Pixi `NoiseFilter`, the seed always given | 1 |
 | `Displacement` | `map: "", scaleX: 20, scaleY: 20` | Pixi `DisplacementFilter` over a sprite of the asset `map` | 1 |
 | `Alpha` | `alpha: 1` | Pixi `AlphaFilter` | 1 |
+
+`Glow` is a soft halo that follows the shape: its alpha is `strength × alpha ×` the share of the disc of radius `distance` around the pixel that the view covers. That share is about ½ next to a straight edge and 0 at `distance`, so `strength: 2` is full at the edge, rounded corners stay rounded, and the padding beyond `distance` stays clear. The 64 probes sit on a golden-angle spiral, so no rings or spokes show; every probe is clamped to the input frame. The halo is premultiplied and drawn under the source pixel.
 
 `Blur` with `quality: 0` uses `config.blur.quality`; with `resolution: 0` it uses `config.blur.phoneResolution` on a phone, otherwise 1.
 

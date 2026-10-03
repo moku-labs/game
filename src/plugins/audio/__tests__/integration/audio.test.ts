@@ -76,6 +76,7 @@ function createIo(): AssetsIo {
       }),
     decode: () => Promise.resolve({} as unknown as DecodedImage),
     createTexture: () => ({}) as unknown as Texture,
+    sliceTexture: () => ({}) as unknown as Texture,
     destroyTexture: () => undefined
   };
 }

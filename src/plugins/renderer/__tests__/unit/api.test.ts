@@ -37,7 +37,8 @@ describe("renderer api", () => {
       "create",
       "destroy",
       "invalidate",
-      "provide"
+      "provide",
+      "slice"
     ]);
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
     expect(Object.keys(mock.api.sync.filters)).toEqual(["set"]);

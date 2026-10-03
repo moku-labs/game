@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../../../index";
 import { run } from "../../../flow/doors/run";
 import type { Target } from "../../../input/types";
-import { tapCommand } from "../../control";
+import { fillCommand, tapCommand } from "../../control";
 
 // ---------------------------------------------------------------------------
 // Unit test: the ui command of the /control door over a stub input and a
@@ -132,5 +132,62 @@ describe("game.tap", () => {
       /^\[game] game\.tap takes a key or a target\.\n {2}.*\.$/
     );
     expect(tapped).toEqual([]);
+  });
+});
+
+/**
+ * An app whose screen holds one text field under the key "nameField", with a fill that records
+ * what it typed and answers true for that key only.
+ *
+ * @returns The app the command runs on and the fills made.
+ */
+function form(): {
+  app: ReturnType<typeof createApp> & { ui: { fill(key: string, value: string): boolean } };
+  filled: Array<[string, string]>;
+} {
+  const filled: Array<[string, string]> = [];
+  const fill = (key: string, value: string): boolean => {
+    filled.push([key, value]);
+
+    return key === "nameField";
+  };
+
+  return { app: { ...createApp(), ui: { fill } }, filled };
+}
+
+describe("game.fill", () => {
+  it("is named fill, takes a key and a value, and goes through the graph", () => {
+    expect(fillCommand.id).toBe("game.fill");
+    expect(fillCommand.input).toEqual({ key: "string", value: "string" });
+    expect(fillCommand.effect).toBe("route");
+  });
+
+  it("refuses outside a dev build", () => {
+    const { app, filled } = form();
+
+    expect(() => fillCommand.run(app, { key: "nameField", value: "Alex" })).toThrow(
+      "dev builds only"
+    );
+    expect(filled).toEqual([]);
+  });
+
+  it("types into a field through ui.fill and answers what it answers", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, filled } = form();
+
+    const ran = await run(app, fillCommand, { key: "nameField", value: "Alex" });
+    const missed = await run(app, fillCommand, { key: "nothing", value: "Alex" });
+
+    expect(ran.value).toBe(true);
+    expect(missed.value).toBe(false);
+    expect(filled).toEqual([
+      ["nameField", "Alex"],
+      ["nothing", "Alex"]
+    ]);
+    expect(ran.state.tainted).toBe(false);
+    expect(app.log.trace().at(-1)).toMatchObject({
+      event: "moku:dev",
+      data: { command: "game.fill", key: "nothing" }
+    });
   });
 });

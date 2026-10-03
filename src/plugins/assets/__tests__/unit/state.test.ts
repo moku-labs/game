@@ -34,6 +34,7 @@ describe("createAssetsState", () => {
       textures: new Map(),
       fonts: new Map(),
       audio: new Map(),
+      pages: new Map(),
       inflight: undefined,
       lastUsed: 0
     });

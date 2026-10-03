@@ -145,12 +145,49 @@ async function tick(times = 80): Promise<void> {
 }
 
 /**
+ * The same game packed (version 2): the scene bundle "ui" of "home" is one atlas page with two
+ * frames, the rest stays as it is.
+ */
+const packed: Manifest = {
+  version: 2,
+  bundles: {
+    ...manifest.bundles,
+    ui: {
+      feature: "board",
+      tier: "scene",
+      mb: 0.25,
+      pages: [
+        { id: "ui/main-0", path: "ui/main-0-3b1d55a0c9.webp", width: 256, height: 256, mb: 0.25 }
+      ],
+      files: [
+        {
+          key: "board.badge",
+          width: 64,
+          height: 64,
+          mb: 0,
+          atlas: { page: "ui/main-0", x: 2, y: 2, width: 64, height: 64 }
+        },
+        {
+          key: "board.panel",
+          width: 128,
+          height: 64,
+          mb: 0,
+          nine: { left: 16, top: 16, right: 16, bottom: 16 },
+          atlas: { page: "ui/main-0", x: 68, y: 2, width: 128, height: 64 }
+        }
+      ]
+    }
+  }
+};
+
+/**
  * Starts the full screen set over an inline manifest and lets the graph settle on "home".
  *
  * @param io - The I/O seam, or `undefined` for the headless run.
+ * @param source - The manifest: the dev one by default.
  * @returns The started app.
  */
-async function startApp(io?: ReturnType<typeof createFakeIo>) {
+async function startApp(io?: ReturnType<typeof createFakeIo>, source: Manifest = manifest) {
   heard.loaded.length = 0;
   heard.progress.length = 0;
   heard.unloaded.length = 0;
@@ -160,7 +197,7 @@ async function startApp(io?: ReturnType<typeof createFakeIo>) {
     pluginConfigs: {
       flow: { mainFlow: main },
       model: { initialPlayer: { coins: 0 }, initialSession: { visits: 0 }, seed: 1 },
-      assets: { manifest, preloadDepth: 2, ...(io === undefined ? {} : { io }) }
+      assets: { manifest: source, preloadDepth: 2, ...(io === undefined ? {} : { io }) }
     }
   });
 
@@ -370,5 +407,41 @@ describe("assets plugin integration — with an io seam", () => {
 
     expect(io.destroyed).toHaveLength(io.created.length);
     expect(app.assets.usage().bundles).toEqual([]);
+  });
+});
+
+describe("assets plugin integration — a packed manifest", () => {
+  it("cuts the files of the entered scene out of one page, and frees slices before the page", async () => {
+    const io = createFakeIo();
+    const app = await startApp(io, packed);
+
+    expect(app.assets.isLoaded("ui")).toBe(true);
+    expect(io.fetched.filter(url => url.startsWith("/ui/"))).toEqual([
+      "/ui/main-0-3b1d55a0c9.webp"
+    ]);
+    expect(app.assets.texture("board.panel")).toMatchObject({
+      frame: { page: "ui/main-0", x: 68, y: 2, width: 128, height: 64 },
+      nine: [16, 16, 16, 16]
+    });
+
+    const page = io.created.find(texture => texture.from.includes("main-0"));
+
+    await app.stop();
+
+    const ids = io.destroyed.map(texture => texture.id);
+
+    expect(ids).toHaveLength(io.created.length + io.sliced.length);
+    expect(ids.indexOf(page?.id ?? "")).toBeGreaterThan(
+      Math.max(...io.sliced.map(slice => ids.indexOf(slice.id)))
+    );
+  });
+
+  it("answers headless on the packed manifest as on the dev one", async () => {
+    const app = await startApp(undefined, packed);
+
+    expect(Object.keys(packed.bundles).every(name => app.assets.isLoaded(name))).toBe(true);
+    expect(app.assets.texture("board.panel")).toBeUndefined();
+
+    await app.stop();
   });
 });

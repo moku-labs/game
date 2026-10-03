@@ -44,6 +44,35 @@ export type FocusRing = {
 };
 
 /**
+ * The look of a text field while it is edited: the caret, the selection box and the IME
+ * underline. Colours are `0xRRGGBB`, lengths reference units, `keyboardMargin` CSS px. The caret
+ * does not blink.
+ *
+ * @example
+ * ```ts
+ * // A thick ink caret, a pale blue selection, the field 16 px above the keyboard.
+ * const look: TextInputLook = {
+ *   caretWidth: 3, caret: 0x3a2212, selection: 0x3390ff, selectionAlpha: 0.35,
+ *   composingUnderline: 3, keyboardMargin: 16
+ * };
+ * ```
+ */
+export type TextInputLook = {
+  /** The width of the caret. */
+  caretWidth: number;
+  /** The colour of the caret and of the underline under an IME composing range. */
+  caret: number;
+  /** The colour of the selection box. */
+  selection: number;
+  /** The alpha of the selection box. */
+  selectionAlpha: number;
+  /** The height of the underline under an IME composing range. */
+  composingUnderline: number;
+  /** How far above the keyboard the bottom of the edited field is lifted, in CSS px. */
+  keyboardMargin: number;
+};
+
+/**
  * ui plugin config.
  *
  * @example
@@ -55,6 +84,17 @@ export type FocusRing = {
  *     ui: {
  *       focusRing: {
  *         stroke: 0xffffff, strokeWidth: 4, dash: 10, offset: 9, halo: 0x000000, haloWidth: 12
+ *       }
+ *     }
+ *   }
+ * });
+ * // A game whose text fields have an ink caret.
+ * createApp({
+ *   pluginConfigs: {
+ *     ui: {
+ *       textInput: {
+ *         caretWidth: 3, caret: 0x3a2212, selection: 0x3390ff, selectionAlpha: 0.35,
+ *         composingUnderline: 3, keyboardMargin: 16
  *       }
  *     }
  *   }
@@ -71,6 +111,11 @@ export type Config = {
    * `focusRing` gives all six fields.
    */
   focusRing: FocusRing;
+  /**
+   * The caret, the selection and the IME underline of a text field. Shallow merge: a game that
+   * sets `textInput` gives all six fields.
+   */
+  textInput: TextInputLook;
 };
 
 /**
@@ -109,8 +154,9 @@ export type KernelSlice = PluginCtx<Config, State> & {
 export type UiCtx = KernelSlice & { readonly deps: Deps };
 
 /**
- * ui plugin API, `app.ui`. The screen is one more projection, so the three members read it the
- * way a test reads the board: a snapshot, a key lookup and a list of findings.
+ * ui plugin API, `app.ui`. The screen is one more projection, so three members read it the way a
+ * test reads the board: a snapshot, a key lookup and a list of findings; the fourth types into a
+ * text field.
  *
  * @example
  * ```ts
@@ -172,6 +218,27 @@ export type UiApi = {
    * ```
    */
   lint(): readonly Finding[];
+
+  /**
+   * Types into a text field the way a player does, for a headless test or an agent: the field
+   * becomes the one being edited, `value` cut to its `maxLength` is written into it, and the
+   * local field it names is written, so the component re-renders on the next frame. Nothing
+   * reaches the gate: Enter submits.
+   *
+   * @param key - The `key` prop of the `input` element.
+   * @param value - The text to type.
+   * @returns True when the field took the text; false with one warning when no live `input` has
+   *   the key.
+   * @example
+   * ```ts
+   * // A headless test renames the player through the Rename popup.
+   * app.ui.fill("nameField", "Alex"); // true
+   * app.time.step(16);
+   * app.input.pressKey("Enter"); // true: the gate took { intent: "save", payload: { name: "Alex" } }
+   * app.ui.fill("nothing", "Alex"); // false, with the warning "ui:fill-without-input"
+   * ```
+   */
+  fill(key: string, value: string): boolean;
 };
 
 export type { ElementChange, ElementMotion, Finding, UiNode } from "./jsx/types";

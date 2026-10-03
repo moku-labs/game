@@ -12,13 +12,16 @@ import { componentsFor, NineSlice, Shape, Sprite, Transform } from "../../compon
 import type {
   Api,
   Config,
+  CreateTextureOptions,
   DebugSwitches,
   FilterSlot,
   Orientation,
   PixiFilter,
+  PixiTexture,
   Point,
   RenderStats,
   SafeArea,
+  SliceFrame,
   ViewportSize
 } from "../../types";
 
@@ -84,6 +87,13 @@ NineSlice({ texture: "board.board-tray", width: 1000, height: 1040, debug: true 
 
 // @ts-expect-error — debug is on or off
 NineSlice({ debug: "on" });
+
+// A text field framed by a nine-slice keeps a long value inside the frame.
+expectTypeOf<NineSliceValue["clip"]>().toEqualTypeOf<boolean>();
+NineSlice({ texture: "ui.field", width: 480, height: 96, clip: true });
+
+// @ts-expect-error — clip is on or off
+NineSlice({ clip: "yes" });
 
 // ─── Shape: the fill has its own alpha ────────────────────────
 
@@ -191,3 +201,28 @@ renderer.sync.filters.set(1_048_577, [{ filter: glow }]);
 
 // @ts-expect-error — the slot holds a Pixi filter instance, not a kind name
 renderer.sync.filters.set(1_048_578, [{ filter: "glow", passes: 1 }]);
+
+// ─── wave B: a slice out of an atlas page, for assets ─────────
+
+declare const page: PixiTexture;
+declare const packed: { page: string; x: number; y: number; width: number; height: number };
+
+expectTypeOf<SliceFrame>().toEqualTypeOf<{ x: number; y: number; width: number; height: number }>();
+expectTypeOf(renderer.sync.textures.slice).toEqualTypeOf<
+  (page: PixiTexture, frame: SliceFrame, options?: CreateTextureOptions) => PixiTexture
+>();
+
+renderer.sync.textures.slice(
+  page,
+  { x: 583, y: 595, width: 256, height: 128 },
+  { nine: [24, 24, 24, 24] }
+);
+
+// The manifest frame of assets carries its page id too, and passes where a SliceFrame is asked.
+renderer.sync.textures.slice(page, packed);
+
+// @ts-expect-error — a frame has a height
+renderer.sync.textures.slice(page, { x: 0, y: 0, width: 256 });
+
+// @ts-expect-error — the page is a texture, not its id
+renderer.sync.textures.slice("ui/main-0", { x: 0, y: 0, width: 256, height: 128 });

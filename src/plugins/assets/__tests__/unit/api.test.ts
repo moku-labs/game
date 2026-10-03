@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { lookupTexture } from "../../api";
 import { loadBundle } from "../../tiers";
-import { createMockAssets, manifestOf } from "./mock-assets";
+import { createMockAssets, manifestOf, packedManifest } from "./mock-assets";
 
 const manifest = manifestOf({
   ui: { feature: "ui", tier: "core", keys: ["ui.panel"] },
@@ -263,5 +263,32 @@ describe("usage", () => {
     await mock.start();
 
     expect(mock.api.usage()).toEqual({ textureMb: 0, budgetMb: 192, bundles: [] });
+  });
+});
+
+describe("texture of a packed key", () => {
+  it("answers the slice cut out of the page", async () => {
+    const mock = createMockAssets({ manifest: packedManifest() });
+
+    await mock.start();
+    await mock.api.load("ui");
+
+    expect(mock.api.texture("ui.panel")).toMatchObject({
+      id: "s3",
+      frame: { x: 2, y: 68, width: 256, height: 128 },
+      nine: [48, 48, 48, 48]
+    });
+    expect(mock.api.texture("ui.bg")).toMatchObject({ from: "/ui/ui.bg-5e0a71bd42.webp" });
+  });
+
+  it("answers undefined while headless and fetches nothing", async () => {
+    const mock = createMockAssets({ manifest: packedManifest(), io: undefined });
+
+    await mock.start();
+    await mock.api.load("ui");
+
+    expect(mock.api.isLoaded("ui")).toBe(true);
+    expect(mock.api.texture("ui.panel")).toBeUndefined();
+    expect(mock.io.fetched).toEqual([]);
   });
 });

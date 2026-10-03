@@ -41,6 +41,7 @@ describe("renderer state", () => {
     expect(state.sync.layerList).toBeUndefined();
     expect(state.sync.pooled).toBe(0);
     expect(state.sync.filters.size).toBe(0);
+    expect(state.sync.slices).toBeInstanceOf(WeakSet);
     expect(state.monitor.draws).toEqual({ frame: 0, last: 0 });
   });
 
@@ -69,6 +70,7 @@ describe("renderer state", () => {
     expect(second.sync.layers).not.toBe(first.sync.layers);
     expect(second.host.cleanups).not.toBe(first.host.cleanups);
     expect(second.sync.filters).not.toBe(first.sync.filters);
+    expect(second.sync.slices).not.toBe(first.sync.slices);
     expect(second.monitor.draws).not.toBe(first.monitor.draws);
   });
 });

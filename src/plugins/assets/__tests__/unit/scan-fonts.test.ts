@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { emitKeys, emitManifest } from "../../scan/emit";
-import { pagesOfFont } from "../../scan/fonts";
+import { pagesOfFont, renamePages } from "../../scan/fonts";
 import { type ScanResult, scanAssets } from "../../scan/scan";
 import {
   audioBytes,
@@ -119,6 +119,40 @@ describe("fonts", () => {
     await expect(scan(root)).rejects.toThrow(
       'the font "features/ui/assets/body.fnt" declares no page.'
     );
+  });
+});
+
+describe("renamePages", () => {
+  it("renames every page of a text font in declaration order, and nothing else", () => {
+    const source = bmfontText("body_0.png", "body_1.png");
+
+    expect(renamePages(source, ["ui.body-0-aaaa.png", "ui.body-1-bbbb.png"])).toBe(
+      'info face="body" size=32\ncommon lineHeight=38 pages=2\n' +
+        'page id=0 file="ui.body-0-aaaa.png"\npage id=1 file="ui.body-1-bbbb.png"'
+    );
+  });
+
+  it("renames the pages of an XML font", () => {
+    const renamed = renamePages(bmfontXml("body_0.png"), ["ui.body-0-aaaa.png"]);
+
+    expect(renamed).toContain('<page id="0" file="ui.body-0-aaaa.png" />');
+    expect(renamed).not.toContain("body_0.png");
+  });
+
+  it("renames the pages of a JSON font, as names or as objects", () => {
+    expect(JSON.parse(renamePages(bmfontJson("body_0.png"), ["x-0.png"]))).toEqual({
+      pages: ["x-0.png"],
+      chars: []
+    });
+    expect(
+      JSON.parse(renamePages(JSON.stringify({ pages: [{ id: 0, file: "a.png" }] }), ["x-0.png"]))
+    ).toEqual({ pages: [{ id: 0, file: "x-0.png" }] });
+  });
+
+  it("reads the same pages back after the rename", () => {
+    const renamed = renamePages(bmfontText("a.png", "b.png"), ["x-0.png", "x-1.png"]);
+
+    expect(pagesOfFont(renamed, "features/ui/assets/body.fnt")).toEqual(["x-0.png", "x-1.png"]);
   });
 });
 

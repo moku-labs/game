@@ -21,6 +21,7 @@ import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
 import { CONTENT, visualOf } from "../visual";
+import type { Fields } from "./fields";
 import { hostViews, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
 import { settlePopups } from "./popups";
@@ -186,14 +187,15 @@ function styleOf(node: DescriptionNode): Style | undefined {
 }
 
 /**
- * Refuses the two tags that are not in V3.
+ * Refuses the two tags that cannot be placed: a text field that names no local field, and a
+ * horizontal scroll.
  *
  * @param node - The node being placed.
- * @throws {Error} For an `input` tag and for a horizontal scroll.
+ * @throws {Error} For an `input` tag without `local` and for a horizontal scroll.
  */
 function checkTag(node: DescriptionNode): void {
-  if (node.type === "input") {
-    throw new Error("[game] Text input arrives in V5.\n  Use a button or a list for now.");
+  if (node.type === "input" && typeof node.props.local !== "string") {
+    throw new Error('[game] An input needs a local field.\n  Write <input local="name" />.');
   }
 
   if (node.type === "scroll" && node.props.axis === "x") {
@@ -203,8 +205,8 @@ function checkTag(node: DescriptionNode): void {
 
 /**
  * The input components of an element: a button answers the gate, writes local state, or only
- * swallows the tap; a panel swallows the tap too, so nothing under it answers; a scroll
- * container takes the press that moves its content. A button of a covered popup answers nothing,
+ * swallows the tap; a panel swallows the tap too, so nothing under it answers; a text field takes
+ * the tap that starts its editing; a scroll container takes the press that moves its content. A button of a covered popup answers nothing,
  * so only the top popup answers the gate. A button with the `escape` prop that answers also
  * carries `Escapable`, the control the Escape key taps.
  *
@@ -215,7 +217,7 @@ function inputOf(element: Element): AnyComponentValue[] {
   const { type, node, is } = element;
 
   if (type === "scroll") return [Touchable(), Scroll({ axis: "y" })];
-  if (type === "panel") return [Touchable()];
+  if (type === "panel" || type === "input") return [Touchable()];
   if (type !== "button") return [];
   if (is.disabled || is.covered) return [Touchable()];
 
@@ -429,9 +431,15 @@ function livePatch(value: object, owned: readonly string[]): object {
  *
  * @param ctx - Domain context of the ui plugin.
  * @param modules - The styles and layout modules, injected in that order.
+ * @param fields - The text fields: told when a field enters, changes, exits and despawns, and
+ *   pulled once per reconcile.
  * @returns The two frame steps and the root registry.
  */
-export function createReconciler(ctx: UiCtx, modules: JsxModules) {
+export function createReconciler(
+  ctx: UiCtx,
+  modules: JsxModules,
+  fields: Pick<Fields, "enter" | "patch" | "exit" | "drop" | "pull">
+) {
   const state: JsxState = ctx.state.jsx;
   const ecs = ctx.deps.world.ecs;
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
@@ -512,6 +520,9 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     state.byIdentity.set(identity, entity);
     trackHost(state, element);
     registerKey(root, element);
+
+    if (element.type === "input") fields.enter(element);
+
     modules.layout.attach(element);
     diffChildren(root, element, childrenOf(node), instance);
     root.needsSolve = true;
@@ -555,6 +566,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     element.motion = motion;
     element.instance = instance;
     trackHost(state, element);
+
+    if (element.type === "input") fields.patch(element);
 
     // A new loop replaces the running one, and a motion without a loop stops it. An element that
     // has not entered yet starts the loop of its motion when it enters.
@@ -833,6 +846,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     state.hosts.delete(element.entity);
     modules.layout.exit(element);
 
+    if (element.type === "input") fields.exit(element);
+
     for (const child of element.children) {
       const childElement = state.elements.get(child);
 
@@ -894,6 +909,9 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
     }
 
     modules.layout.free(element);
+
+    if (element.type === "input") fields.drop(element);
+
     state.hosts.delete(element.entity);
     state.exiting.delete(element.entity);
     state.elements.delete(element.entity);
@@ -1068,7 +1086,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
 
   /**
    * The first of the two systems of phase `layout`: the sweep, the popups that may leave, the
-   * viewport, the dirty roots, the hosted views and the scroll offsets.
+   * pull of the text being typed, the viewport, the dirty roots, the hosted views and the scroll
+   * offsets.
    */
   function reconcile(): void {
     // Despawn what finished exiting, and count this pass.
@@ -1077,6 +1096,9 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
 
     // A released popup leaves once the flow rests on a node that shows none of its component.
     settlePopups(ctx, state, unmountRoot);
+
+    // The text being typed reaches the local of its component before the roots re-render.
+    fields.pull();
 
     // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());

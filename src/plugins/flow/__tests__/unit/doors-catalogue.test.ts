@@ -46,7 +46,8 @@ describe("the base catalogue", () => {
       "resume",
       "capture",
       "debug",
-      "reducedMotion"
+      "reducedMotion",
+      "fill"
     ]);
   });
 

@@ -83,6 +83,20 @@ export type GesturePhase = "idle" | "pressed" | "longPressed" | "dragging";
 export type TapListener = (entity: Entity) => void;
 
 /**
+ * What `onPointer` registers: called with the raw sample inside the DOM listener, for the kinds
+ * `down`, `up` and `cancel`, right after the sample is queued.
+ *
+ * @example
+ * ```ts
+ * const lifts: RawSample[] = [];
+ * const listener: PointerListener = sample => {
+ *   if (sample.kind === "up") lifts.push(sample);
+ * };
+ * ```
+ */
+export type PointerListener = (sample: RawSample) => void;
+
+/**
  * One key press as `onKey` hands it to a listener: the DOM `KeyboardEvent.key` and whether Shift
  * was held.
  *
@@ -183,6 +197,8 @@ export type State = {
   tapListeners: TapListener[];
   /** Registered through `onKey`, called in this order on every key. */
   keyListeners: KeyListener[];
+  /** Registered through `onPointer`, called in this order inside the DOM listener. */
+  pointerListeners: PointerListener[];
   /** Takes the one `keydown` listener off `window`; set while a canvas is attached. */
   detachKeys: (() => void) | undefined;
   /** `time.wake`, bound in `onInit`: every pointer sample leaves the idle frame rate. */
@@ -287,8 +303,34 @@ export type InputApi = {
   onTap(fn: TapListener): () => void;
 
   /**
+   * Registers a listener called synchronously inside the DOM pointer listener, right after the
+   * sample is queued, for `pointerdown`, `pointerup` and `pointercancel`. It is the one place a
+   * browser call that needs the user gesture can run, such as `focus()` on a text field: in the
+   * next frame iOS shows no keyboard. Never called for a move, a leave or a lost capture, and never
+   * by `tap`, `press`, `drag` or `swipe`, which have no DOM moment. The sample is raw: client px,
+   * no hit test. Listeners run in registration order; a listener that throws is logged with the
+   * sample kind, and the listeners after it still run.
+   *
+   * @param fn - What to run with the raw sample.
+   * @returns The remover; call it to stop listening.
+   * @example
+   * ```ts
+   * // ui opens the keyboard the moment the finger lifts on a text field, inside the DOM listener.
+   * const off = ctx.require(inputPlugin).onPointer(sample => {
+   *   if (sample.kind === "up" && fieldAt(sample.clientX, sample.clientY) !== undefined) element.focus({ preventScroll: true });
+   *   if (sample.kind === "down" && fieldAt(sample.clientX, sample.clientY) === undefined) element.blur();
+   * });
+   * // a tap on the Rename field on an iPhone: the keyboard shows; a tap on the parchment next to it: the keyboard hides
+   * off(); // in onStop
+   * ```
+   */
+  onPointer(fn: PointerListener): () => void;
+
+  /**
    * Registers a listener called on every key pressed while the canvas is attached, and on every
-   * `key` call. Listeners run in registration order, all of them, each time. A listener that
+   * `pressKey` call. A key typed into a text field is not handed over, except Enter and Escape,
+   * and an Enter that commits an IME composition is dropped. Listeners run in registration order,
+   * all of them, each time. A listener that
    * returns `true` marks the key handled, and input calls `preventDefault()` on the DOM event. A
    * listener that throws is logged with its key, and the listeners after it still run.
    *

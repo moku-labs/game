@@ -1,11 +1,13 @@
 /**
- * @file ui/jsx — the module factory: the three public readers, the frame half the lifecycle
- * registers and the keyboard focus. Built last, with `styles` and `layout` injected.
+ * @file ui/jsx — the module factory: the three public readers, `fill`, the frame half the
+ * lifecycle registers, the keyboard focus and the text fields. Built last, with `styles` and
+ * `layout` injected.
  */
-import type { KeyInput } from "../../input/types";
+import type { KeyInput, RawSample } from "../../input/types";
 import type { Entity, LayerSpec } from "../../world/types";
 import type { UiCtx } from "../types";
-import { createFocus } from "./focus";
+import { createFields } from "./fields";
+import { createFocus, focusRoot } from "./focus";
 import { releaseHosted } from "./hosts";
 import { runLint } from "./lint";
 import { coverPopup, reclaimPopup, releasePopup } from "./popups";
@@ -46,31 +48,60 @@ function layerNamesOf(ctx: UiCtx): () => readonly string[] {
  */
 export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const state = ctx.state.jsx;
-  const frame = createReconciler(ctx, modules);
   const layerNames = layerNamesOf(ctx);
-  const focus = createFocus(ctx, frame.markPointer, layerNames);
+  const fields = createFields(ctx, {
+    layout: modules.layout,
+    topRoot: () => focusRoot(state, layerNames())
+  });
+  const frame = createReconciler(ctx, modules, fields);
+  const focus = createFocus(ctx, frame.markPointer, layerNames, fields);
+  const find = (key: string): Entity | undefined => {
+    for (const root of sortedRoots(state, layerNames())) {
+      const entity = state.byKey.get(root.entity)?.get(key);
+
+      if (entity !== undefined && !state.exiting.has(entity)) return entity;
+    }
+
+    return undefined;
+  };
 
   return {
     tree: (): UiNode => readTree(state, layerNames()),
 
-    find: (key: string): Entity | undefined => {
-      for (const root of sortedRoots(state, layerNames())) {
-        const entity = state.byKey.get(root.entity)?.get(key);
-
-        if (entity !== undefined && !state.exiting.has(entity)) return entity;
-      }
-
-      return undefined;
-    },
+    find,
 
     lint: (): readonly Finding[] => runLint(ctx),
 
+    // A live text field takes the text and the quiet focus; any other key is one warning.
+    fill: (key: string, value: string): boolean => {
+      const entity = find(key);
+
+      if (entity === undefined || !fields.isField(entity)) {
+        ctx.log.warn("ui:fill-without-input", { key });
+
+        return false;
+      }
+
+      focus.quiet(entity);
+      fields.fill(entity, value);
+
+      return true;
+    },
+
+    open: fields.open,
+
+    pointer: (sample: RawSample): void => fields.pointer(sample),
+
+    tapped: (entity: Entity): void => focus.tapped(entity),
+
     reconcile: frame.reconcile,
 
-    // The focus follows the solved rects, and drops when its element or its root left.
+    // The focus follows the solved rects, and drops when its element or its root left; the text
+    // fields draw their parts and lift the edited one above the keyboard.
     solve: (): void => {
       frame.solve();
       focus.refresh();
+      fields.place();
     },
 
     register: (definition: AnyComponentDefinition): void => {

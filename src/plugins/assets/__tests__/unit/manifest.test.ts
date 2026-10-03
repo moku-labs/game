@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  atlasProblem,
   emptyManifest,
   fileUrl,
   indexKeys,
@@ -137,8 +136,8 @@ describe("parseManifest", () => {
   });
 
   it("refuses another version", () => {
-    expect(() => parseManifest({ version: 2, bundles: {} })).toThrow(
-      "[game] assets: manifest version 2 is not supported (expected 1)."
+    expect(() => parseManifest({ version: 3, bundles: {} })).toThrow(
+      "[game] assets: manifest version 3 is not supported (expected 1 or 2)."
     );
   });
 
@@ -233,26 +232,89 @@ describe("nineOf", () => {
   });
 });
 
-describe("atlasProblem", () => {
-  it("refuses a file packed in an atlas and names it", () => {
-    const files: ManifestFile[] = [
-      {
-        key: "ui.panel",
-        path: "features/ui/assets/panel.png",
-        width: 1,
-        height: 1,
-        mb: 0,
-        atlas: { page: "ui-0.png", x: 0, y: 0, width: 1, height: 1 }
-      }
-    ];
+/** The packed manifest of the spec (09-assets Delta 8), as the packer writes it. */
+const packed = {
+  version: 2,
+  bundles: {
+    ui: {
+      feature: "ui",
+      tier: "core",
+      mb: 8.865,
+      pages: [
+        { id: "ui/main-0", path: "ui/main-0-3b1d55a0c9.webp", width: 966, height: 1365, mb: 5.03 },
+        { id: "ui/fx-0", path: "ui/fx-0-2a7f9c04e1.webp", width: 595, height: 516, mb: 1.171 }
+      ],
+      files: [
+        {
+          key: "ui.panel",
+          width: 256,
+          height: 128,
+          mb: 0,
+          nine: { left: 48, top: 48, right: 48, bottom: 48 },
+          atlas: { page: "ui/main-0", x: 583, y: 595, width: 256, height: 128 }
+        },
+        {
+          key: "ui.bg-splash",
+          path: "ui/ui.bg-splash-5e0a71bd42.webp",
+          width: 1024,
+          height: 1536,
+          mb: 6
+        }
+      ]
+    }
+  }
+};
 
-    expect(atlasProblem("ui", files)).toBe(
-      '[game] assets: file "features/ui/assets/panel.png" of bundle "ui" is packed in an atlas, which this version cannot load.\n  Rebuild the manifest with "bun run assets:keys".'
-    );
+describe("manifest v2", () => {
+  it("keeps version 2, the pages sorted by id and a packed file without a path", () => {
+    const manifest = parseManifest(packed);
+    const ui = manifest.bundles.ui;
+
+    expect(manifest.version).toBe(2);
+    expect(ui?.pages?.map(page => page.id)).toEqual(["ui/fx-0", "ui/main-0"]);
+    expect(ui?.pages?.[1]).toEqual({
+      id: "ui/main-0",
+      path: "ui/main-0-3b1d55a0c9.webp",
+      width: 966,
+      height: 1365,
+      mb: 5.03
+    });
+    expect(ui?.files.map(file => file.key)).toEqual(["ui.bg-splash", "ui.panel"]);
+    expect(ui?.files[1]).toEqual({
+      key: "ui.panel",
+      width: 256,
+      height: 128,
+      mb: 0,
+      nine: { left: 48, top: 48, right: 48, bottom: 48 },
+      atlas: { page: "ui/main-0", x: 583, y: 595, width: 256, height: 128 }
+    });
+    expect(ui?.files[1]).not.toHaveProperty("path");
   });
 
-  it("is undefined for loose files", () => {
-    expect(atlasProblem("ui", parseManifest(raw).bundles.ui?.files ?? [])).toBeUndefined();
+  it("indexes a packed key like a loose one", () => {
+    expect(indexKeys(parseManifest(packed)).get("ui.panel")).toBe("ui");
+  });
+
+  it("reads a v1 bundle with no pages field", () => {
+    expect(parseManifest(raw).bundles.ui).not.toHaveProperty("pages");
+  });
+
+  it("drops a page that is not an object and fills the missing fields of one that is", () => {
+    const manifest = parseManifest({
+      version: 2,
+      bundles: { ui: { feature: "ui", tier: "core", mb: 0, pages: ["nope", {}], files: [] } }
+    });
+
+    expect(manifest.bundles.ui?.pages).toEqual([{ id: "", path: "", width: 0, height: 0, mb: 0 }]);
+  });
+
+  it("reads a pages field that is not an array as no pages", () => {
+    const manifest = parseManifest({
+      version: 2,
+      bundles: { ui: { feature: "ui", tier: "core", mb: 0, pages: "nope", files: [] } }
+    });
+
+    expect(manifest.bundles.ui).not.toHaveProperty("pages");
   });
 });
 
@@ -291,7 +353,6 @@ describe("parseManifest tolerates broken entries", () => {
     expect(manifest.bundles.ui?.mb).toBe(0);
     expect(manifest.bundles.ui?.files[0]).toEqual({
       key: "",
-      path: "",
       width: 0,
       height: 0,
       mb: 0

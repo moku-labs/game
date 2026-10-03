@@ -2,6 +2,7 @@
  * @file ui/jsx — `tree()`: the live screen as plain data. A pure reader over the state, so it
  * answers in plain Bun with no renderer at all.
  */
+import { fieldValue } from "./fields";
 import type { Element, JsxState, Root, UiNode } from "./types";
 
 /** What `tree()` answers with when nothing is mounted. */
@@ -24,7 +25,7 @@ const EMPTY: UiNode = {
 
 /**
  * Turns one element and its subtree into snapshot nodes. The rect is natural; a fitted element
- * adds the scale it is drawn at.
+ * adds the scale it is drawn at; a text field adds its value.
  *
  * @param state - The jsx state.
  * @param element - The element to read.
@@ -50,8 +51,10 @@ function nodeOf(state: JsxState, element: Element): UiNode {
     children
   };
   const fitted = element.style.fit === "contain" ? { ...node, fitScale: element.fit } : node;
+  const field = state.fields.get(element.entity);
+  const valued = field === undefined ? fitted : { ...fitted, value: fieldValue(state, field) };
 
-  return local === undefined ? fitted : { ...fitted, local: { ...local } };
+  return local === undefined ? valued : { ...valued, local: { ...local } };
 }
 
 /**

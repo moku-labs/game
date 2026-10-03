@@ -130,7 +130,7 @@ export const Leaving = defineComponent("Leaving", {
   )
 });
 
-/** The tags of `UiIntrinsicElements` the every-tag screen writes; `input` arrives in wave B. */
+/** The tags of `UiIntrinsicElements` the every-tag screen writes, each once. */
 export const TAGS = [
   "screen",
   "layer",
@@ -143,7 +143,8 @@ export const TAGS = [
   "icon",
   "text",
   "button",
-  "scroll"
+  "scroll",
+  "input"
 ] as const;
 
 /** The extras every tag of the every-tag screen carries. */
@@ -155,7 +156,7 @@ const tagBox = { width: 100, height: 100 } as const;
 /** One row of a single-root screen. */
 type ScreenItem = { id: string };
 
-/** Every tag once, each with `Mark`; the scroll holds one column of content. */
+/** Every tag once, each with `Mark`; the scroll holds one column of content; the input sits outside every component. */
 export const everyTagScreen = projection({
   name: "everyTag",
   layer: "ui",
@@ -182,6 +183,7 @@ export const everyTagScreen = projection({
       <scroll key="tag-scroll" axis="y" style={tagBox} components={tagExtras}>
         <column key="tagRows" style={{ width: 100, height: 400 }} />
       </scroll>
+      <input key="tag-input" local="name" style={tagBox} components={tagExtras} />
     </column>
   )
 });

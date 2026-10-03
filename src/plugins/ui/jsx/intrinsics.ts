@@ -43,6 +43,18 @@ export type ImageFit = ("contain" | "cover" | "fill") & Brand<"ImageFit">;
 export type ScrollAxis = ("x" | "y") & Brand<"ScrollAxis">;
 /** The world projections whose live views a container draws inside itself. */
 export type HostedProjections = readonly string[] & Brand<"HostedProjections">;
+/** The local field of the nearest component instance a text field writes on every keystroke. */
+export type InputLocal = string & Brand<"InputLocal">;
+/** The intent a text field answers on Enter, with `{ [local]: value }` as the payload. */
+export type InputSubmit = string & Brand<"InputSubmit">;
+/** The longest value of a text field, in UTF-16 units. */
+export type InputMaxLength = number & Brand<"InputMaxLength">;
+/** What an empty text field shows at half alpha; also the label a screen reader says. */
+export type InputPlaceholder = (string | Message) & Brand<"InputPlaceholder">;
+/** The keyboard a text field opens: plain text, a decimal pad or an email keyboard. */
+export type TextInputKind = ("text" | "number" | "email") & Brand<"TextInputKind">;
+/** The text style key of a field's value, its placeholder and its caret height. */
+export type InputTextStyle = string & Brand<"InputTextStyle">;
 
 /**
  * Extra component values an element's entity carries, beside the ones the tag writes itself. Any
@@ -165,6 +177,27 @@ export type PanelProps = CommonProperties;
 export type ScrollProps = CommonProperties & { axis?: ScrollAxis };
 
 /**
+ * What a text field takes. `local` is required: every keystroke writes that field of the local
+ * state of the nearest component, and Enter answers `submit` with `{ [local]: value }`. `style` is
+ * the layout style of the field box.
+ *
+ * @example
+ * ```tsx
+ * // The name field of a rename popup. The player types "Alex": local.name is "Alex".
+ * <input key="nameField" local="name" maxLength={16} submit="save" placeholder="Your name" />;
+ * // Enter then answers the gate with { intent: "save", payload: { name: "Alex" } }
+ * ```
+ */
+export type InputProps = CommonProperties & {
+  local: InputLocal;
+  submit?: InputSubmit;
+  maxLength?: InputMaxLength;
+  placeholder?: InputPlaceholder;
+  kind?: TextInputKind;
+  textStyle?: InputTextStyle;
+};
+
+/**
  * The thirteen tags a screen is written with.
  *
  * @example
@@ -185,7 +218,7 @@ export type UiIntrinsicElements = {
   text: TextTagProps;
   button: ButtonTagProps;
   scroll: ScrollProps;
-  input: BoxProps;
+  input: InputProps;
 };
 
 /**
@@ -205,7 +238,8 @@ export type Restyled<Properties, Asset extends string> = Properties extends unkn
 /**
  * The same tags with the asset keys, text style keys and message keys of one game. `uiFor`
  * carries it, so a game can name the type of its own intrinsics. The asset keys narrow `texture`,
- * `name` and the `nineSlice` of every style.
+ * `name` and the `nineSlice` of every style; the text style keys narrow the `style` of a text
+ * and the `textStyle` of a field; the message keys narrow `content` and `placeholder`.
  *
  * @example
  * ```ts
@@ -217,11 +251,15 @@ export type IntrinsicElementsFor<
   TextStyleKey extends string,
   StringKey extends string
 > = {
-  [Tag in Exclude<keyof UiIntrinsicElements, "image" | "icon" | "text">]: Restyled<
+  [Tag in Exclude<keyof UiIntrinsicElements, "image" | "icon" | "text" | "input">]: Restyled<
     UiIntrinsicElements[Tag],
     Asset
   >;
 } & {
+  input: Restyled<Omit<InputProps, "textStyle" | "placeholder">, Asset> & {
+    textStyle?: TextStyleKey;
+    placeholder?: string | Message<StringKey>;
+  };
   image: Restyled<CommonProperties, Asset> & { texture: Asset; fit?: "contain" | "cover" | "fill" };
   icon: Restyled<CommonProperties, Asset> & { name: Asset; fit?: "contain" | "cover" | "fill" };
   text: Omit<CommonProperties, "style"> & {

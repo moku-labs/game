@@ -1,11 +1,47 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInputApi } from "../../api";
-import { addKeyListener, attachKeys, detachKeys, runKeys } from "../../keys";
+import { addKeyListener, attachKeys, detachKeys, keyFromTextInput, runKeys } from "../../keys";
 import { stopInput } from "../../lifecycle";
 import { createMockInput, createStubCanvas } from "./mock-input";
 
 /** One keydown the fake window hands its listeners. */
-type FakeKeyEvent = { key: string; shiftKey: boolean; preventDefault: () => void };
+type FakeKeyEvent = {
+  key: string;
+  shiftKey: boolean;
+  preventDefault: () => void;
+  target?: EventTarget | null;
+  isComposing?: boolean;
+  keyCode?: number;
+};
+
+/** What a text field adds to a keydown: where it was typed and whether an IME composes. */
+type TextFacts = { target: EventTarget | null; isComposing?: boolean; keyCode?: number };
+
+/**
+ * A fake event target with the fields an editable check reads.
+ *
+ * @param fields - The tag name and the content-editable flag of the fake element.
+ * @param fields.tagName - The upper-case tag name, such as `"INPUT"`.
+ * @param fields.isContentEditable - True for a content-editable element.
+ * @returns The fake, typed as the DOM target it stands for.
+ */
+function fakeTarget(fields: { tagName: string; isContentEditable?: boolean }): EventTarget {
+  return { isContentEditable: false, ...fields } as unknown as EventTarget;
+}
+
+/**
+ * A fake keydown for `keyFromTextInput`.
+ *
+ * @param key - The DOM `KeyboardEvent.key`.
+ * @param facts - The target and the composition flags.
+ * @returns The fake, typed as the event fields the function reads.
+ */
+function fakeKey(
+  key: string,
+  facts: TextFacts
+): Pick<KeyboardEvent, "key" | "target" | "isComposing" | "keyCode"> {
+  return { isComposing: false, keyCode: 0, ...facts, key };
+}
 
 /**
  * A fake `window` that records its listeners by event name.
@@ -26,8 +62,8 @@ function createFakeWindow() {
       else listeners.set(name, left);
     },
     count: (name: string): number => listeners.get(name)?.length ?? 0,
-    press: (key: string, shiftKey = false): FakeKeyEvent => {
-      const event = { key, shiftKey, preventDefault: vi.fn() };
+    press: (key: string, shiftKey = false, facts?: TextFacts): FakeKeyEvent => {
+      const event = { ...facts, key, shiftKey, preventDefault: vi.fn() };
 
       for (const fn of listeners.get("keydown") ?? []) fn(event);
 
@@ -186,5 +222,86 @@ describe("app.input.onKey and app.input.pressKey", () => {
     off();
 
     expect(api.pressKey("Enter")).toBe(false);
+  });
+});
+
+describe("keyFromTextInput", () => {
+  const field = fakeTarget({ tagName: "INPUT" });
+  const area = fakeTarget({ tagName: "TEXTAREA" });
+  const editable = fakeTarget({ tagName: "DIV", isContentEditable: true });
+  const canvas = fakeTarget({ tagName: "CANVAS" });
+
+  it("skips every key typed into an editable element but Enter and Escape", () => {
+    for (const target of [field, area, editable]) {
+      for (const key of ["a", " ", "Tab", "ArrowLeft", "Backspace"]) {
+        expect(keyFromTextInput(fakeKey(key, { target }))).toBe("skip");
+      }
+    }
+  });
+
+  it("skips an Enter that commits an IME composition", () => {
+    expect(keyFromTextInput(fakeKey("Enter", { target: field, isComposing: true }))).toBe("skip");
+    expect(keyFromTextInput(fakeKey("Enter", { target: field, keyCode: 229 }))).toBe("skip");
+  });
+
+  it("passes Enter and Escape typed into an editable element", () => {
+    expect(keyFromTextInput(fakeKey("Enter", { target: field, keyCode: 13 }))).toBe("pass");
+    expect(keyFromTextInput(fakeKey("Escape", { target: area }))).toBe("pass");
+    expect(keyFromTextInput(fakeKey("Escape", { target: editable }))).toBe("pass");
+  });
+
+  it("passes every key of any other target, as before", () => {
+    expect(keyFromTextInput(fakeKey("Tab", { target: canvas }))).toBe("pass");
+    expect(keyFromTextInput(fakeKey(" ", { target: fakeTarget({ tagName: "BUTTON" }) }))).toBe(
+      "pass"
+    );
+    expect(keyFromTextInput(fakeKey("Enter", { target: canvas, isComposing: true }))).toBe("pass");
+    expect(keyFromTextInput(fakeKey("a", { target: fakeTarget({ tagName: "BODY" }) }))).toBe(
+      "pass"
+    );
+  });
+});
+
+describe("the window listener and a text field", () => {
+  it("prevents the default of an Enter passed from a field that a listener handled", () => {
+    const fake = createFakeWindow();
+    const mock = createMockInput();
+    const field = fakeTarget({ tagName: "INPUT" });
+
+    vi.stubGlobal("window", fake);
+    attachKeys(mock.input);
+    addKeyListener(mock.state, key => key.key === "Enter");
+
+    expect(
+      fake.press("Enter", false, { target: field, keyCode: 13 }).preventDefault
+    ).toHaveBeenCalledTimes(1);
+  });
+
+  it("never hands a Tab typed into a field to a listener, and keeps its default", () => {
+    const fake = createFakeWindow();
+    const mock = createMockInput();
+    const listener = vi.fn(() => true);
+
+    vi.stubGlobal("window", fake);
+    attachKeys(mock.input);
+    addKeyListener(mock.state, listener);
+
+    const event = fake.press("Tab", false, { target: fakeTarget({ tagName: "INPUT" }) });
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("drops a composing Enter before any listener sees it", () => {
+    const fake = createFakeWindow();
+    const mock = createMockInput();
+    const listener = vi.fn(() => true);
+
+    vi.stubGlobal("window", fake);
+    attachKeys(mock.input);
+    addKeyListener(mock.state, listener);
+    fake.press("Enter", false, { target: fakeTarget({ tagName: "INPUT" }), isComposing: true });
+
+    expect(listener).not.toHaveBeenCalled();
   });
 });

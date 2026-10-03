@@ -25,7 +25,7 @@ const STILL: Readonly<Point> = Object.freeze({ x: 0, y: 0 });
  * warn again.
  *
  * @param ectx - Domain context of the effects plugin.
- * @param key - The one-shot key, `"emitter:fx.x"` or `"texture:fx.star"`.
+ * @param key - The one-shot key, `"emitter:fx.x"`, `"texture:fx.star"` or `"atlas:fx.x"`.
  * @param event - The log event.
  * @param data - What the log line carries.
  */
@@ -37,20 +37,36 @@ function warnOnce(ectx: EffectsCtx, key: string, event: string, data: object): v
 }
 
 /**
- * Tells whether every texture samples one source. Pixi binds one source per particle container
- * and samples the wrong page silently (P9).
+ * Keeps the textures that sample the first texture's source. Pixi binds one source per particle
+ * container and samples the wrong page silently (P9); loose dev files sit on one source each, so
+ * the dropped keys warn `effects:atlas` once per effect id.
  *
- * @param textures - The resolved textures.
- * @returns True when they share their source.
+ * @param ectx - Domain context of the effects plugin.
+ * @param id - The effect id.
+ * @param keys - The asset keys of the effect, in the order of `config.textures`.
+ * @param textures - Their resolved textures, in the same order.
+ * @returns The textures the instance draws with.
  */
-function oneSource(textures: readonly PixiTexture[]): boolean {
-  return textures.every(texture => texture.source === textures[0]?.source);
+function firstSource(
+  ectx: EffectsCtx,
+  id: string,
+  keys: readonly string[],
+  textures: readonly PixiTexture[]
+): readonly PixiTexture[] {
+  const source = textures[0]?.source;
+  const dropped = keys.filter((_key, index) => textures[index]?.source !== source);
+
+  if (dropped.length === 0) return textures;
+
+  warnOnce(ectx, `atlas:${id}`, "effects:atlas", { effect: id, keys, dropped });
+
+  return textures.filter(texture => texture.source === source);
 }
 
 /**
  * Bakes an effect on its first use. An unknown id warns once per id; a texture that is not
  * loaded warns once per key and is asked again next frame; in a dev build, textures of two
- * sources log once and the id is broken for good.
+ * sources warn once per id and the effect draws with the ones on the first texture's source.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param id - The effect id.
@@ -66,9 +82,10 @@ function bake(ectx: EffectsCtx, id: string): BakedEmitter | undefined {
     return undefined;
   }
 
+  const keys = definition.config.textures;
   const textures: PixiTexture[] = [];
 
-  for (const key of definition.config.textures) {
+  for (const key of keys) {
     const texture = ectx.deps.assets.texture(key);
 
     if (texture === undefined) {
@@ -80,14 +97,7 @@ function bake(ectx: EffectsCtx, id: string): BakedEmitter | undefined {
     textures.push(texture);
   }
 
-  if (isDev() && !oneSource(textures)) {
-    ectx.log.error("effects:atlas", { effect: id, keys: definition.config.textures });
-    state.broken.add(id);
-
-    return undefined;
-  }
-
-  const baked = bakeEmitter(definition, textures);
+  const baked = bakeEmitter(definition, isDev() ? firstSource(ectx, id, keys, textures) : textures);
 
   state.baked.set(id, baked);
 
@@ -153,7 +163,7 @@ function startInstance(
   const { state } = ectx;
   const id = emitter.effect;
 
-  if (id === "" || state.broken.has(id)) return undefined;
+  if (id === "") return undefined;
 
   const baked = state.baked.get(id) ?? bake(ectx, id);
 
@@ -287,9 +297,9 @@ export function forgetEmitter(ectx: EffectsCtx, host: Entity): void {
 }
 
 /**
- * Destroys every instance whose textures meet `keys`, orphans included, and drops the bake and
- * the broken mark of every effect that names one of them. The next `Emitter` that names such an
- * effect bakes it again once the bundle is back.
+ * Destroys every instance whose textures meet `keys`, orphans included, and drops the bake of
+ * every effect that names one of them. The next `Emitter` that names such an effect bakes it
+ * again once the bundle is back.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param keys - The asset keys that left.
@@ -319,7 +329,6 @@ export function retireParticleKeys(ectx: EffectsCtx, keys: readonly string[]): v
     if (!touches(definition.config.textures)) continue;
 
     state.baked.delete(id);
-    state.broken.delete(id);
   }
 }
 

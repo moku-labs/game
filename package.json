@@ -64,13 +64,20 @@
     "test:integration": "vitest run --project integration",
     "test:coverage": "vitest run --project unit --project integration --coverage",
     "build": "tsdown",
+    "fixture:pack": "bun src/assets.ts --root tests/integration/merge-game --keys tests/integration/merge-game/generated/assets.ts --pack tests/integration/merge-game/dist/assets",
     "validate": "publint && attw --pack . --profile esm-only",
     "release:setup": "moku-release setup",
     "release:doctor": "moku-release doctor",
     "release": "moku-release"
   },
   "peerDependencies": {
-    "pixi.js": "^8.0.0"
+    "pixi.js": "^8.0.0",
+    "sharp": "^0.34.0"
+  },
+  "peerDependenciesMeta": {
+    "sharp": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.3",
@@ -90,6 +97,7 @@
     "lefthook": "2.1.1",
     "pixi.js": "8.21.0",
     "publint": "0.3.21",
+    "sharp": "0.34.5",
     "tsdown": "0.22.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.58.0",
@@ -99,6 +107,7 @@
     "@moku-labs/common": "0.3.3",
     "@moku-labs/core": "1.7.0",
     "immer": "11.1.18",
+    "maxrects-packer": "2.7.3",
     "yoga-layout": "3.2.1"
   },
   "publishConfig": {

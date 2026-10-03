@@ -8,19 +8,14 @@
  * entities (`merge-game/__tests__/effects.test.ts`).
  */
 import { readFile } from "node:fs/promises";
-import type { Assets, Model, Renderer } from "@moku-labs/game";
+import type { Assets, Model } from "@moku-labs/game";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createFakeDevice,
   createFakeEffectsPixi,
   FakeFxParticleContainer
 } from "../../src/plugins/effects/__tests__/fake-effects-pixi";
 import { installFakeDom } from "../../src/plugins/renderer/__tests__/fake-dom";
-import {
-  FakeContainer,
-  FakeRectangle,
-  FakeTexture
-} from "../../src/plugins/renderer/__tests__/fake-pixi";
+import { FakeRectangle, FakeTexture } from "../../src/plugins/renderer/__tests__/fake-pixi";
 import { createScreenGame } from "./merge-game/game";
 import type { Player } from "./merge-game/state";
 import { player, tick, withItems } from "./timber-helpers";
@@ -46,37 +41,6 @@ type WorldEntity = {
   owner: { kind: string; name: string };
   components: Record<string, Model.Json>;
 };
-
-/** A container that empties itself, as Pixi's does when `text` redraws a label. */
-class FakeTextContainer extends FakeContainer {
-  /**
-   * Takes every child out.
-   *
-   * @returns The children that were in it.
-   */
-  public removeChildren(): FakeContainer[] {
-    const children = [...this.children];
-
-    // eslint-disable-next-line unicorn/prefer-dom-node-remove -- a Pixi container, not a DOM node: it has no `remove()`.
-    for (const child of children) this.removeChild(child);
-
-    return children;
-  }
-}
-
-/** The glyph run `text` builds for a line: it keeps its text and the fields `text` writes. */
-class FakeBitmapText extends FakeTextContainer {
-  public text: unknown;
-  public skew = { x: 0, y: 0 };
-  public tint = 0xff_ff_ff;
-  public width = 0;
-  public height = 0;
-
-  public constructor(options: { text?: unknown } = {}) {
-    super();
-    this.text = options.text;
-  }
-}
 
 /**
  * The file seam over the fixture folder: every file is read from disk, every image decodes to the
@@ -127,6 +91,7 @@ function diskIo(manifest: Assets.Manifest): Assets.AssetsIo {
         frame: new FakeRectangle(0, 0, width, height)
       }) as unknown as Assets.Texture;
     },
+    sliceTexture: () => ({ label: "slice" }) as unknown as Assets.Texture,
     destroyTexture: () => undefined
   };
 }
@@ -174,27 +139,16 @@ async function startDrawn(start: Player): Promise<DrawnGame> {
   const manifest = JSON.parse(
     await readFile(new URL("manifest.json", gameFolder), "utf8")
   ) as Assets.Manifest;
+  // The shared fake draws the labels of `text` and compiles the WGSL of `Glow` with no error.
   const pixi = createFakeEffectsPixi();
-  const module = {
-    ...pixi.module,
-    Container: FakeTextContainer,
-    BitmapText: FakeBitmapText
-  } as unknown as Renderer.PixiModule;
   const game = createScreenGame({
     player: start,
     manifest,
     io: diskIo(manifest),
-    renderer: { mount: "#game", loadPixi: () => Promise.resolve(module) }
+    renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
   });
 
   await game.app.start();
-
-  // The dev check compiles the WGSL of `Glow` on the device first: this one reports no error.
-  const shaders = createFakeDevice();
-
-  Object.assign(pixi.last().renderer.gpu?.device ?? {}, {
-    createShaderModule: shaders.device.createShaderModule.bind(shaders.device)
-  });
   game.app.flow.run().catch(() => undefined);
   await until(game, () => game.app.flow.state().path === "home" && game.app.renderer.host.ready());
   await frames(game, 4);

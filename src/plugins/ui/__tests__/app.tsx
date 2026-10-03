@@ -126,7 +126,7 @@ export const movedProjection = projection({
   )
 });
 
-/** A screen whose root element names a tag that is not in V3. */
+/** A screen whose root element is an input without `local`, which throws at reconcile. */
 export const inputProjection = projection({
   name: "inputScreen",
   layer: "ui",
@@ -134,7 +134,10 @@ export const inputProjection = projection({
     { id: "inputScreen", coins: player.coins }
   ],
   key: (item: { id: string }) => item.id,
-  view: () => <input key="field" style={{ width: 100, height: 40 }} />
+  view: () => (
+    // @ts-expect-error — an input without `local` is the tag this screen refuses.
+    <input key="field" style={{ width: 100, height: 40 }} />
+  )
 });
 
 /** A screen with a horizontal scroll, which arrives after V3. */

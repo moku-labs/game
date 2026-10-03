@@ -3,7 +3,7 @@
  * render time, one frame after the input phase asks.
  */
 import type { Entity } from "../../world/types";
-import { Shape } from "../components";
+import { NineSlice, Shape } from "../components";
 import type { PixiContainer, Point } from "../types";
 import { localPoseOf, parentOf } from "./pose";
 import type { HitBox, SyncCtx } from "./types";
@@ -60,8 +60,29 @@ function inBox(box: HitBox, point: Point): boolean {
 }
 
 /**
- * Tells whether a clipping ancestor hides the point: a `Shape` with `clip: true` shows its
- * children only inside its own rectangle, so a point outside it reaches nothing below.
+ * The rectangle an entity clips its children to: the box of a `Shape` or a `NineSlice` with
+ * `clip: true`.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @returns The box in its local units, or `undefined` when it does not clip.
+ */
+function clipBoxOf(sctx: SyncCtx, entity: Entity): HitBox | undefined {
+  const ecs = sctx.ctx.deps.world.ecs;
+  const shape = ecs.get(entity, Shape);
+
+  if (shape?.clip === true) return { x: 0, y: 0, width: shape.w, height: shape.h };
+
+  const nine = ecs.get(entity, NineSlice);
+
+  if (nine?.clip === true) return { x: 0, y: 0, width: nine.width, height: nine.height };
+
+  return undefined;
+}
+
+/**
+ * Tells whether a clipping ancestor hides the point: a `Shape` or a `NineSlice` with `clip: true`
+ * shows its children only inside its own rectangle, so a point outside it reaches nothing below.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity being tested.
@@ -74,13 +95,9 @@ function clippedOut(sctx: SyncCtx, entity: Entity, x: number, y: number): boolea
   let current = parentOf(ecs, entity);
 
   for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
-    const shape = ecs.get(current, Shape);
+    const box = clipBoxOf(sctx, current);
 
-    if (shape?.clip === true) {
-      const box: HitBox = { x: 0, y: 0, width: shape.w, height: shape.h };
-
-      if (!inBox(box, localPoint(sctx, current, x, y))) return true;
-    }
+    if (box !== undefined && !inBox(box, localPoint(sctx, current, x, y))) return true;
 
     current = parentOf(ecs, current);
   }

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Api as RendererApi } from "../../../renderer/types";
+import type { Api as RendererApi, SliceFrame } from "../../../renderer/types";
 import { browserDecode, browserFetch, createBrowserIo } from "../../browser";
 import type { CreateTextureOptions, DecodedImage, Texture } from "../../types";
 
 /** What the fake renderer recorded. */
 type Recorded = {
   created: Array<{ image: DecodedImage; options: CreateTextureOptions | undefined }>;
+  sliced: Array<{ page: Texture; frame: SliceFrame; options: CreateTextureOptions | undefined }>;
   destroyed: Texture[];
   api: RendererApi;
 };
@@ -17,10 +18,12 @@ type Recorded = {
  */
 function createRecordingRenderer(): Recorded {
   const created: Recorded["created"] = [];
+  const sliced: Recorded["sliced"] = [];
   const destroyed: Texture[] = [];
 
   return {
     created,
+    sliced,
     destroyed,
     api: {
       sync: {
@@ -29,6 +32,11 @@ function createRecordingRenderer(): Recorded {
             created.push({ image, options });
 
             return { id: `t${created.length}` } as unknown as Texture;
+          },
+          slice: (page: Texture, frame: SliceFrame, options?: CreateTextureOptions): Texture => {
+            sliced.push({ page, frame, options });
+
+            return { id: `s${sliced.length}` } as unknown as Texture;
           },
           destroy: (texture: Texture): void => {
             destroyed.push(texture);
@@ -103,6 +111,18 @@ describe("createBrowserIo", () => {
     io.createTexture(image);
 
     expect(renderer.created).toEqual([{ image, options: undefined }]);
+  });
+
+  it("cuts a slice out of a page through the renderer, frame and borders as given", () => {
+    const renderer = createRecordingRenderer();
+    const io = createBrowserIo(renderer.api);
+    const page = io.createTexture({ width: 512 } as unknown as ImageBitmap);
+    const frame = { page: "ui/main-0", x: 2, y: 68, width: 256, height: 128 };
+
+    const slice = io.sliceTexture(page, frame, { nine: [48, 48, 48, 48] });
+
+    expect(renderer.sliced).toEqual([{ page, frame, options: { nine: [48, 48, 48, 48] } }]);
+    expect(slice).toEqual({ id: "s1" });
   });
 
   it("frees a texture through the renderer", () => {

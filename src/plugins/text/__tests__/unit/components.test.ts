@@ -14,8 +14,13 @@ describe("Text", () => {
       style: "body",
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
+      alpha: 1,
       resolved: ""
     });
+  });
+
+  it("draws at full alpha unless the game fades it", () => {
+    expect(Text({ content: "Your name", alpha: 0.5 }).value.alpha).toBe(0.5);
   });
 
   it("takes the fields a game writes and leaves `resolved` to the engine", () => {
@@ -24,6 +29,7 @@ describe("Text", () => {
       style: "board.float",
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
+      alpha: 1,
       resolved: ""
     });
   });
@@ -39,6 +45,7 @@ describe("label", () => {
       style: "board.float",
       bind: undefined,
       anchor: { x: 0.5, y: 0.5 },
+      alpha: 1,
       resolved: ""
     });
     expect(transform.type).toBe(Transform);

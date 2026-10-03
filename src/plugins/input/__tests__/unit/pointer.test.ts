@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { attach, detach, record } from "../../pointer";
+import { stopInput } from "../../lifecycle";
+import { addPointerListener, attach, detach, record } from "../../pointer";
 import type { RawSample } from "../../types";
 import { createMockInput, createStubCanvas } from "./mock-input";
 
@@ -60,7 +61,7 @@ describe("attach and detach", () => {
     const mock = createMockInput();
     const canvas = createStubCanvas();
 
-    attach(canvas.element, mock.state);
+    attach(canvas.element, mock.input);
 
     expect(canvas.names()).toEqual([
       "lostpointercapture",
@@ -77,7 +78,7 @@ describe("attach and detach", () => {
     const mock = createMockInput();
     const canvas = createStubCanvas();
 
-    attach(canvas.element, mock.state);
+    attach(canvas.element, mock.input);
     canvas.dispatch("pointerdown", {
       pointerType: "touch",
       pointerId: 3,
@@ -103,7 +104,7 @@ describe("attach and detach", () => {
     const mock = createMockInput();
     const canvas = createStubCanvas();
 
-    attach(canvas.element, mock.state);
+    attach(canvas.element, mock.input);
     canvas.dispatch("pointerdown", { pointerType: "pen", pointerId: 1, clientX: 0, clientY: 0 });
     canvas.dispatch("pointerup", { pointerType: "touch", pointerId: 1, clientX: 0, clientY: 0 });
     canvas.dispatch("pointerdown", { pointerType: "mouse", pointerId: 2, clientX: 0, clientY: 0 });
@@ -121,7 +122,7 @@ describe("attach and detach", () => {
     const mock = createMockInput();
     const canvas = createStubCanvas();
 
-    attach(canvas.element, mock.state);
+    attach(canvas.element, mock.input);
     canvas.dispatch("pointerleave", { pointerType: "mouse", pointerId: 1, clientX: 5, clientY: 6 });
 
     expect(mock.state.samples).toEqual([
@@ -133,7 +134,7 @@ describe("attach and detach", () => {
     const mock = createMockInput();
     const canvas = createStubCanvas();
 
-    attach(canvas.element, mock.state);
+    attach(canvas.element, mock.input);
     detach(mock.state);
 
     expect(canvas.names()).toEqual([]);
@@ -184,5 +185,151 @@ describe("record and the idle cap", () => {
 
     expect(() => record(mock.state, move(1, 10))).not.toThrow();
     expect(mock.wake).not.toHaveBeenCalled();
+  });
+});
+
+describe("pointerdown keeps the focus of a text field", () => {
+  it("prevents the default of pointerdown once and of no other pointer event", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+
+    attach(canvas.element, mock.input);
+
+    const down = canvas.dispatch("pointerdown", { pointerId: 1, clientX: 0, clientY: 0 });
+    const others = [
+      "pointermove",
+      "pointerup",
+      "pointercancel",
+      "lostpointercapture",
+      "pointerleave"
+    ].map(name => canvas.dispatch(name, { pointerId: 1, clientX: 0, clientY: 0 }));
+
+    expect(down.preventDefault).toHaveBeenCalledTimes(1);
+    for (const event of others) expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(canvas.style.touchAction).toBe("none");
+  });
+});
+
+describe("onPointer, the one synchronous door", () => {
+  it("runs the listeners inside the DOM listener for down, up and cancel only", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+    const kinds: string[] = [];
+
+    attach(canvas.element, mock.input);
+    addPointerListener(mock.state, sample => kinds.push(sample.kind));
+
+    for (const name of [
+      "pointerdown",
+      "pointermove",
+      "pointerup",
+      "pointercancel",
+      "lostpointercapture",
+      "pointerleave"
+    ]) {
+      canvas.dispatch(name, { pointerType: "touch", pointerId: 4, clientX: 30, clientY: 40 });
+    }
+
+    expect(kinds).toEqual(["down", "up", "cancel"]);
+  });
+
+  it("hands the raw sample, already queued, before any frame step", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+    const seen: Array<{ sample: unknown; queued: number; frame: number }> = [];
+
+    mock.start();
+    attach(canvas.element, mock.input);
+    addPointerListener(mock.state, sample => {
+      seen.push({ sample, queued: mock.state.samples.length, frame: mock.time.frame });
+    });
+    canvas.dispatch("pointerup", { pointerType: "pen", pointerId: 2, clientX: 11, clientY: 22 });
+
+    expect(seen).toEqual([
+      {
+        sample: { kind: "up", pointerType: "pen", pointerId: 2, clientX: 11, clientY: 22 },
+        queued: 1,
+        frame: 0
+      }
+    ]);
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("runs the listeners in registration order", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+    const order: string[] = [];
+
+    attach(canvas.element, mock.input);
+    addPointerListener(mock.state, () => order.push("first"));
+    addPointerListener(mock.state, () => order.push("second"));
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 0, clientY: 0 });
+
+    expect(order).toEqual(["first", "second"]);
+  });
+
+  it("drops only the listener whose remover ran, and lets a listener remove itself", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+    const order: string[] = [];
+    const offFirst = addPointerListener(mock.state, () => order.push("first"));
+    const offSelf = addPointerListener(mock.state, () => {
+      order.push("self");
+      offSelf();
+    });
+
+    addPointerListener(mock.state, () => order.push("last"));
+    attach(canvas.element, mock.input);
+    offFirst();
+    offFirst();
+    canvas.dispatch("pointerdown", { pointerId: 1, clientX: 0, clientY: 0 });
+    canvas.dispatch("pointerup", { pointerId: 1, clientX: 0, clientY: 0 });
+
+    expect(order).toEqual(["self", "last", "last"]);
+  });
+
+  it("logs a throwing listener with the kind and still runs the next one", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+    const error = new Error("broken");
+    const kinds: string[] = [];
+
+    attach(canvas.element, mock.input);
+    addPointerListener(mock.state, () => {
+      throw error;
+    });
+    addPointerListener(mock.state, sample => kinds.push(sample.kind));
+    canvas.dispatch("pointercancel", { pointerId: 1, clientX: 0, clientY: 0 });
+
+    expect(kinds).toEqual(["cancel"]);
+    expect(mock.log.error).toHaveBeenCalledWith("input: an onPointer listener threw", {
+      kind: "cancel",
+      error
+    });
+  });
+
+  it("is never called by record alone, the path a frame or a test takes", () => {
+    const mock = createMockInput();
+    const kinds: string[] = [];
+
+    addPointerListener(mock.state, sample => kinds.push(sample.kind));
+    record(mock.state, {
+      kind: "down",
+      pointerType: "touch",
+      pointerId: 1,
+      clientX: 0,
+      clientY: 0
+    });
+
+    expect(kinds).toEqual([]);
+  });
+
+  it("empties the listener list on stop", () => {
+    const mock = createMockInput();
+
+    addPointerListener(mock.state, () => undefined);
+    stopInput(mock.state);
+
+    expect(mock.state.pointerListeners).toEqual([]);
   });
 });

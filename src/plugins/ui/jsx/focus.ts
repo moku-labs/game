@@ -3,6 +3,8 @@
  * reading order, Enter and Space tap the focused one, Escape taps the `escape` button of the top
  * root, and a pointer tap clears the focus. The ring around the focused control is two ui-owned
  * shapes, a solid halo under a dashed ring, drawn in the layer of that root above its elements.
+ * While a text field is edited, Enter submits it and Escape ends the editing; Tab landing on a
+ * field starts it, and a tap on a field focuses it with no ring.
  */
 import { Tappable } from "../../input/components";
 import type { KeyInput } from "../../input/types";
@@ -14,6 +16,7 @@ import { asHandle } from "../errors";
 import type { Rect } from "../layout/types";
 import type { FocusRing, UiCtx } from "../types";
 import { visualRectOf } from "../visual";
+import type { Fields } from "./fields";
 import { sortedRoots } from "./tree";
 import type { DrawnRing, Element, JsxState, PointerFlag, Root } from "./types";
 
@@ -23,12 +26,20 @@ const HALO_ORDER = 0.5;
 /** Where the dashed ring draws: above the halo, still under the next root. */
 const RING_ORDER = 0.75;
 
-/** What the jsx module takes from the focus: the key listener, the pointer tap and the frame step. */
+/**
+ * What the jsx module takes from the focus: the key listener, the pointer tap, the tap that
+ * reaches a text field, the quiet focus `fill` gives a field, and the frame step.
+ */
 export type Focus = {
   key(input: KeyInput): boolean;
   blur(): void;
+  tapped(entity: Entity): void;
+  quiet(entity: Entity): void;
   refresh(): void;
 };
+
+/** What the focus takes from the text fields. */
+export type FocusFields = Pick<Fields, "editing" | "isField" | "edit" | "done" | "submit">;
 
 /**
  * Compares two rects in reading order: the upper one first, and on the same top the left one.
@@ -125,12 +136,14 @@ function partOf(
  * @param ctx - Domain context of the ui plugin.
  * @param mark - Sets the `focus` flag of an element and re-resolves its style.
  * @param layerNames - The layer names of the scene in draw order, shared with `tree` and `find`.
- * @returns The key listener, the pointer tap and the frame step.
+ * @param fields - The text fields: which one is edited, and how an editing starts and ends.
+ * @returns The key listener, the pointer taps, the quiet focus and the frame step.
  */
 export function createFocus(
   ctx: UiCtx,
   mark: (entity: Entity, flag: PointerFlag, on: boolean) => void,
-  layerNames: () => readonly string[]
+  layerNames: () => readonly string[],
+  fields: FocusFields
 ): Focus {
   const state: JsxState = ctx.state.jsx;
   const focus = state.focus;
@@ -140,9 +153,9 @@ export function createFocus(
   const usable = (element: Element): boolean => element.live && !state.exiting.has(element.entity);
 
   /**
-   * The controls of a root in reading order: its live elements that answer a tap. A button with
-   * `escape` and no children is a popup's backdrop, not a Tab stop: its ring would run around the
-   * whole screen. Escape and a tap still reach it.
+   * The controls of a root in reading order: its live elements that answer a tap, and its text
+   * fields. A button with `escape` and no children is a popup's backdrop, not a Tab stop: its ring
+   * would run around the whole screen. Escape and a tap still reach it.
    *
    * @param root - The root the keyboard works in.
    * @returns The elements, upper first, then left first.
@@ -153,7 +166,10 @@ export function createFocus(
     for (const element of state.elements.values()) {
       if (element.root !== root.entity || !usable(element)) continue;
 
-      const answers = ecs.has(element.entity, Tappable) || ecs.has(element.entity, LocalWrite);
+      const answers =
+        fields.isField(element.entity) ||
+        ecs.has(element.entity, Tappable) ||
+        ecs.has(element.entity, LocalWrite);
       const backdrop = element.node.props.escape === true && element.children.length === 0;
 
       if (answers && !backdrop) found.push({ element, rect: visualRectOf(element, lookup) });
@@ -242,6 +258,7 @@ export function createFocus(
     const entity = focus.entity;
 
     focus.entity = undefined;
+    focus.ringless = false;
 
     if (entity !== undefined) mark(entity, "focus", false);
 
@@ -260,8 +277,26 @@ export function createFocus(
     if (previous !== undefined && previous !== element.entity) mark(previous, "focus", false);
 
     focus.entity = element.entity;
+    focus.ringless = false;
     mark(element.entity, "focus", true);
     draw(element);
+    ctx.deps.time.wake();
+  }
+
+  /**
+   * Moves the focus to a text field with no ring: the finger or `fill` chose it, not the keyboard.
+   *
+   * @param element - The field.
+   */
+  function quiet(element: Element): void {
+    const previous = focus.entity;
+
+    if (previous !== undefined && previous !== element.entity) mark(previous, "focus", false);
+
+    focus.entity = element.entity;
+    focus.ringless = true;
+    mark(element.entity, "focus", true);
+    hide();
     ctx.deps.time.wake();
   }
 
@@ -282,7 +317,8 @@ export function createFocus(
       return;
     }
 
-    draw(element);
+    if (!focus.ringless) draw(element);
+    else if (focus.drawn !== undefined) hide();
   }
 
   /**
@@ -318,6 +354,10 @@ export function createFocus(
     if (next === undefined) return false;
 
     focusOn(next);
+
+    // Tab landing on a field starts its editing; leaving one ends it.
+    if (fields.isField(next.entity)) fields.edit(next.entity);
+    else fields.done();
 
     return true;
   }
@@ -359,8 +399,30 @@ export function createFocus(
     return false;
   }
 
+  /**
+   * Answers a key while a text field is edited: Enter submits it, Escape ends the editing, Tab
+   * moves on as always; every other key belongs to the field.
+   *
+   * @param input - The key.
+   * @returns Whether the key was handled, or `undefined` for Tab, which the focus moves on with.
+   */
+  function editingKey(input: KeyInput): boolean | undefined {
+    if (input.key === "Enter") return fields.submit();
+
+    if (input.key === "Escape") {
+      fields.done();
+
+      return true;
+    }
+
+    return input.key === "Tab" ? undefined : false;
+  }
+
   return {
     key: (input: KeyInput): boolean => {
+      const editing = fields.editing() === undefined ? undefined : editingKey(input);
+
+      if (editing !== undefined) return editing;
       if (input.key === "Tab") return move(input.shift ? -1 : 1);
       if (input.key === "Enter" || input.key === " ") return press();
       if (input.key === "Escape") return dismiss();
@@ -370,6 +432,28 @@ export function createFocus(
 
     blur: (): void => {
       if (!focus.tapping && focus.entity !== undefined) drop();
+    },
+
+    // A tap on a field starts its editing, focused with no ring unless the keyboard tapped it; a
+    // tap on anything else ends the editing.
+    tapped: (entity: Entity): void => {
+      const element = state.elements.get(entity);
+
+      if (!fields.isField(entity) || element === undefined || !usable(element)) {
+        fields.done();
+
+        return;
+      }
+
+      if (!focus.tapping) quiet(element);
+
+      fields.edit(entity);
+    },
+
+    quiet: (entity: Entity): void => {
+      const element = state.elements.get(entity);
+
+      if (element !== undefined) quiet(element);
     },
 
     refresh

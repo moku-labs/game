@@ -32,7 +32,7 @@ export function createModules(ctx: UiCtx): {
 }
 
 /**
- * Creates the ui API: the three members a game calls, flat.
+ * Creates the ui API: the four members a game calls, flat.
  *
  * @param ctx - Kernel context of the ui plugin.
  * @returns The plugin API.
@@ -40,5 +40,5 @@ export function createModules(ctx: UiCtx): {
 export function createUiApi(ctx: KernelSlice): UiApi {
   const { jsx } = createModules(withDeps(ctx));
 
-  return { tree: jsx.tree, find: jsx.find, lint: jsx.lint };
+  return { tree: jsx.tree, find: jsx.find, lint: jsx.lint, fill: jsx.fill };
 }

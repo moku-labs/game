@@ -131,8 +131,8 @@ describe("element motion", () => {
   });
 });
 
-describe("the two tags that are not in V3", () => {
-  it("refuses an input tag and keeps the other roots alive", async () => {
+describe("the two tags that throw", () => {
+  it("refuses an input without local and keeps the other roots alive", async () => {
     const app = await startUiApp();
 
     mount(app, "inputScreen");

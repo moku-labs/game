@@ -37,6 +37,7 @@ describe("createInputState", () => {
     expect(state.detach).toBeUndefined();
     expect(state.cursor).toBeUndefined();
     expect(state.controls).toEqual([]);
+    expect(state.pointerListeners).toEqual([]);
   });
 
   it("gives every app its own state", () => {

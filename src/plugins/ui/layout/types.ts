@@ -61,6 +61,7 @@ export type LayoutModule = {
   loop(element: Element): void;
   change(element: Element, previous: Rect): boolean;
   repose(element: Element, parent: Rect | undefined, hooked: boolean): void;
+  lift(element: Element, units: number): void;
   exit(element: Element): void;
   settled(element: Element): boolean;
   scroll(containers: readonly Element[], lookup: ElementLookup): void;

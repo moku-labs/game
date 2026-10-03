@@ -241,3 +241,22 @@ export function repose(
 
   if (element.type !== CONTENT) handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
 }
+
+/**
+ * Moves the rest `Transform` of a root element up by the keyboard lift, or back to its own rest
+ * with 0, through a 0 ms rest track: the repose of a new rect, so a loop re-bases on the lifted
+ * rest and nothing fights. The element's own rest stays unlifted, so the next repose writes the
+ * layout's pose and the lift is written on top of it again.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The root element of the edited field.
+ * @param units - How far up, in reference units.
+ */
+export function liftRest(ctx: UiCtx, element: Element, units: number): void {
+  ctx.deps.world.projection.setRest(element.entity, Transform, {
+    ...element.rest,
+    y: element.rest.y - units
+  });
+
+  if (element.live) handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
+}

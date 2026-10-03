@@ -15,6 +15,14 @@ const config: Config = {
     offset: 9,
     halo: 0xff_f3_d6,
     haloWidth: 12
+  },
+  textInput: {
+    caretWidth: 3,
+    caret: 0x00_00_00,
+    selection: 0x33_90_ff,
+    selectionAlpha: 0.35,
+    composingUnderline: 3,
+    keyboardMargin: 16
   }
 };
 
@@ -45,6 +53,14 @@ describe("the module state factories", () => {
     expect(state.elements.size).toBe(0);
     expect(state.exiting.size).toBe(0);
     expect(state.reconciles).toBe(0);
+    expect(state.fields.size).toBe(0);
+    expect(state.text.editing).toBeUndefined();
+    expect(state.text.mirror).toEqual({
+      value: "",
+      selectionStart: 0,
+      selectionEnd: 0,
+      direction: "none"
+    });
   });
 
   it("starts the styles module portrait with no viewport", () => {

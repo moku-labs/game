@@ -373,7 +373,7 @@ function syncCanvas(ctx: InputCtx): void {
   }
 
   ctx.state.canvas = canvas;
-  if (canvas !== undefined) attach(canvas, ctx.state);
+  if (canvas !== undefined) attach(canvas, ctx);
 }
 
 /**

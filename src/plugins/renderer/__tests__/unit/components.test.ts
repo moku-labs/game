@@ -25,14 +25,15 @@ describe("renderer components", () => {
     });
   });
 
-  it("gives NineSlice a zero size, full alpha, a white tint and no debug outline", () => {
+  it("gives NineSlice a zero size, full alpha, a white tint, no debug outline and no clip", () => {
     expect(NineSlice().value).toEqual({
       texture: "",
       width: 0,
       height: 0,
       alpha: 1,
       tint: 0xff_ff_ff,
-      debug: false
+      debug: false,
+      clip: false
     });
   });
 

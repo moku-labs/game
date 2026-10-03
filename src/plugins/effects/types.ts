@@ -54,7 +54,7 @@ export type State = {
   seedCounter: number;
   /** Live particles after the last step. */
   particles: number;
-  /** Effect ids whose textures span two sources, and filter kinds whose WGSL failed. */
+  /** Filter kinds whose WGSL failed the dev check. */
   broken: Set<string>;
   /** The filter kinds, built-ins first, then the filters of every feature. */
   kinds: Map<string, FilterKind>;
@@ -62,7 +62,7 @@ export type State = {
   checks: Map<string, "pending" | "ok">;
   /** Entity to the filters the sync keeps for it. */
   views: Map<Entity, FilteredView>;
-  /** Keys of the one-shot warnings: `"emitter:fx.x"`, `"texture:board.cell"`. */
+  /** Keys of the one-shot warnings: `"emitter:fx.x"`, `"texture:board.cell"`, `"atlas:fx.x"`. */
   warned: Set<string>;
   /** Whether each budget warning is in force, so a crossing warns once. */
   over: { particles: boolean; passes: boolean; fullScreen: boolean };

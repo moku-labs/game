@@ -15,13 +15,15 @@ const textDefaults: TextValue = {
   style: "body",
   bind: undefined,
   anchor: { x: 0.5, y: 0.5 },
+  alpha: 1,
   resolved: ""
 };
 
 /**
  * Words on the screen: a string or a message, the style it is drawn in, and the string `text`
- * resolved out of it. A game writes `content`, `style`, `bind` and `anchor`; `resolved` is
- * engine-owned and `ui` and the tests read it.
+ * resolved out of it. A game writes `content`, `style`, `bind`, `anchor` and `alpha`; `resolved`
+ * is engine-owned and `ui` and the tests read it. `alpha` (1 by default) fades the whole block and
+ * is patched in place, so a tween on it rebuilds nothing.
  */
 export const Text = /*#__PURE__*/ component("Text", textDefaults, { owned: ["resolved"] });
 
@@ -50,7 +52,7 @@ export type LabelOptions = {
  * ```ts
  * label({ text: "+5", style: "board.float", at: { x: 90, y: 180 } });
  * // [Text({ content: "+5", style: "board.float", bind: undefined,
- * //   anchor: { x: 0.5, y: 0.5 }, resolved: "" }),
+ * //   anchor: { x: 0.5, y: 0.5 }, alpha: 1, resolved: "" }),
  * //  Transform({ x: 90, y: 180, rotation: 0, scale: 1 })]
  * ```
  */

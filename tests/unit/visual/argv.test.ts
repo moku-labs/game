@@ -1,0 +1,109 @@
+import { describe, expect, it } from "vitest";
+import { parseVisualArgv, resolveVisualOptions } from "../../../src/visual/run";
+import type { VisualSetup } from "../../../src/visual/types";
+
+// ---------------------------------------------------------------------------
+// Unit (pure): the four flags of the command line, the defaults, and an
+// explicit option winning over a flag
+// ---------------------------------------------------------------------------
+
+/** A setup whose app is never built: the options do not start a game. */
+const headless: VisualSetup = {
+  app: () => {
+    throw new Error("not built");
+  }
+};
+
+const withPage: VisualSetup = { ...headless, page: { url: "http://localhost:3000/" } };
+
+describe("parseVisualArgv", () => {
+  it("reads nothing from an empty command line", () => {
+    expect(parseVisualArgv([])).toEqual({});
+  });
+
+  it("reads the four flags; --only repeats", () => {
+    expect(
+      parseVisualArgv([
+        "--update",
+        "--no-pixels",
+        "--only",
+        "reward-popup",
+        "--only",
+        "home",
+        "--dir",
+        "visual"
+      ])
+    ).toEqual({ update: true, pixels: false, only: ["reward-popup", "home"], dir: "visual" });
+  });
+
+  it("leaves arguments it does not know to the script that got them", () => {
+    expect(parseVisualArgv(["run", "--project", "unit", "--update"])).toEqual({ update: true });
+  });
+
+  it("refuses --only and --dir without a value", () => {
+    expect(() => parseVisualArgv(["--only"])).toThrow(
+      "[game] The flag --only needs a value.\n  Write it as --only <name>."
+    );
+    expect(() => parseVisualArgv(["--dir", "--update"])).toThrow(
+      "[game] The flag --dir needs a value.\n  Write it as --dir <path>."
+    );
+  });
+});
+
+describe("resolveVisualOptions", () => {
+  it("fills the defaults", () => {
+    expect(resolveVisualOptions(headless, { argv: [] })).toEqual({
+      dir: "tests/visual",
+      update: false,
+      pixels: false,
+      settleFrames: 600,
+      tolerance: { ratio: 0.001, threshold: 24 }
+    });
+  });
+
+  it("turns pixels on by default only with a page on a Mac", () => {
+    expect(resolveVisualOptions(withPage, { argv: [] }).pixels).toBe(process.platform === "darwin");
+    expect(resolveVisualOptions(headless, { argv: [] }).pixels).toBe(false);
+  });
+
+  it("takes the flags of argv", () => {
+    const run = resolveVisualOptions(withPage, {
+      argv: ["--update", "--no-pixels", "--only", "home", "--dir", "shots"]
+    });
+
+    expect(run).toMatchObject({ update: true, pixels: false, only: ["home"], dir: "shots" });
+  });
+
+  it("lets an explicit option win over a flag", () => {
+    const run = resolveVisualOptions(withPage, {
+      argv: ["--update", "--no-pixels", "--only", "home", "--dir", "shots"],
+      update: false,
+      pixels: true,
+      only: ["reward-popup"],
+      dir: "baselines",
+      settleFrames: 30,
+      tolerance: { ratio: 0, threshold: 0 }
+    });
+
+    expect(run).toEqual({
+      update: false,
+      pixels: true,
+      only: ["reward-popup"],
+      dir: "baselines",
+      settleFrames: 30,
+      tolerance: { ratio: 0, threshold: 0 }
+    });
+  });
+
+  it("reads process.argv when no argv is given", () => {
+    const saved = process.argv;
+
+    process.argv = ["bun", "tests/visual/run.ts", "--update"];
+
+    try {
+      expect(resolveVisualOptions(headless).update).toBe(true);
+    } finally {
+      process.argv = saved;
+    }
+  });
+});

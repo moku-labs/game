@@ -340,16 +340,23 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
     { entity, width: value.width, height: value.height, borders, missing },
     value.debug
   );
+  applyClip(sctx, entity, view, {
+    ...Shape.defaults,
+    w: value.width,
+    h: value.height,
+    clip: value.clip
+  });
 }
 
 /**
- * Keeps the clip rectangle of a shape in step with its value: a clipping shape gets a wrapper
- * whose children are masked, and a shape that stopped clipping loses both mask and effect.
+ * Keeps the clip rectangle of a view in step with its value: a clipping view gets a wrapper whose
+ * children are masked, and a view that stopped clipping loses both mask and effect. A nine-slice
+ * clips through the plain rectangle of its box, handed in as a shape value.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - Its view.
- * @param value - The shape value.
+ * @param value - The shape the mask is drawn from, and whether it clips.
  */
 function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<ShapeValue>): void {
   const pixi = sctx.deps.host.pixi();

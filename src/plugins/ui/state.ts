@@ -17,9 +17,13 @@ import type { Config, State } from "./types";
  * const focusRing = {
  *   stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12
  * };
+ * const textInput = {
+ *   caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35,
+ *   composingUnderline: 3, keyboardMargin: 16
+ * };
+ * const breakpoints = { tall: 2, wide: 1.5 };
  *
- * createUiState({ config: { tapTargetPt: 44, breakpoints: { tall: 2, wide: 1.5 }, focusRing } })
- *   .layout.nodes; // 0
+ * createUiState({ config: { tapTargetPt: 44, breakpoints, focusRing, textInput } }).layout.nodes; // 0
  * ```
  */
 export function createUiState(_ctx: { readonly config: Readonly<Config> }): State {

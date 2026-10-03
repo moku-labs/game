@@ -1,9 +1,14 @@
 /**
- * @file input plugin — the only file that touches the DOM. The six listeners do one thing: turn
- * a pointer event into a raw sample and queue it. They hit-test nothing, answer nothing and write
+ * @file input plugin — the only file that touches the pointer DOM. The six listeners turn a
+ * pointer event into a raw sample and queue it; for a down, an up and a cancel they then run the
+ * `onPointer` listeners, the one synchronous door. They hit-test nothing, answer nothing and write
  * no component; the frame step owns every decision.
  */
-import type { RawSample, State } from "./types";
+import type { Log } from "@moku-labs/common/browser";
+import type { PointerListener, RawSample, State } from "./types";
+
+/** What the DOM listeners need: the state that holds the queue and the log for a throw. */
+type PointerCtx = { readonly state: State; readonly log: Log.LogApi };
 
 /** Which DOM event becomes which sample. A lost capture ends the gesture like a cancel. */
 const POINTER_EVENTS: ReadonlyArray<{
@@ -62,25 +67,84 @@ export function record(state: State, sample: RawSample): void {
 }
 
 /**
+ * Whether the `onPointer` listeners hear a sample kind: a down, an up and a cancel, the moments a
+ * browser still counts as a user gesture.
+ *
+ * @param kind - The kind of the queued sample.
+ * @returns True for `down`, `up` and `cancel`.
+ * @example
+ * ```ts
+ * isDoorKind("move"); // false
+ * ```
+ */
+function isDoorKind(kind: RawSample["kind"]): boolean {
+  return kind === "down" || kind === "up" || kind === "cancel";
+}
+
+/**
+ * Registers one `onPointer` listener at the end of the list.
+ *
+ * @param state - State of the input plugin.
+ * @param fn - What to run with every down, up and cancel sample.
+ * @returns The remover; it drops that one listener and leaves the rest.
+ */
+export function addPointerListener(state: State, fn: PointerListener): () => void {
+  state.pointerListeners.push(fn);
+
+  return (): void => {
+    const at = state.pointerListeners.indexOf(fn);
+
+    if (at !== -1) state.pointerListeners.splice(at, 1);
+  };
+}
+
+/**
+ * Runs every `onPointer` listener with one sample, in registration order. A listener that throws
+ * is reported with the sample kind and the listeners after it still run. The list is copied first,
+ * so a listener may remove itself while it runs.
+ *
+ * @param ctx - The input state and the log.
+ * @param sample - The sample the DOM listener just queued.
+ */
+function runPointerListeners(ctx: PointerCtx, sample: RawSample): void {
+  const listeners = [...ctx.state.pointerListeners];
+
+  for (const listener of listeners) {
+    try {
+      listener(sample);
+    } catch (error) {
+      ctx.log.error("input: an onPointer listener threw", { kind: sample.kind, error });
+    }
+  }
+}
+
+/**
  * Puts the six pointer listeners on the canvas and takes the browser's own gestures away, so a
- * drag does not scroll the page. The remover is kept in the state; it also gives the canvas back
- * the cursor it had.
+ * drag does not scroll the page. `pointerdown` also prevents its default: the compatibility
+ * `mousedown` would blur a text field focused by an `onPointer` listener. The remover is kept in
+ * the state; it also gives the canvas back the cursor it had.
  *
  * @param canvas - The canvas of the Pixi application.
- * @param state - State of the input plugin.
+ * @param ctx - The input state and the log.
  */
-export function attach(canvas: HTMLCanvasElement, state: State): void {
+export function attach(canvas: HTMLCanvasElement, ctx: PointerCtx): void {
+  const { state } = ctx;
   const previousTouchAction = canvas.style.touchAction;
   const previousCursor = canvas.style.cursor;
   const attached = POINTER_EVENTS.map(entry => {
     const listener = (event: PointerEvent): void => {
-      record(state, {
+      if (entry.kind === "down") event.preventDefault();
+
+      const sample: RawSample = {
         kind: entry.kind,
         pointerType: pointerTypeOf(event.pointerType),
         pointerId: event.pointerId,
         clientX: event.clientX,
         clientY: event.clientY
-      });
+      };
+
+      record(state, sample);
+      if (isDoorKind(entry.kind)) runPointerListeners(ctx, sample);
     };
 
     canvas.addEventListener(entry.name, listener);
