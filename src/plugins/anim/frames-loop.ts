@@ -2,7 +2,9 @@
  * @file anim plugin — the `Frames` component at run time: one loop per entity that carries it,
  * kept by two world hooks and stepped once per frame after the timelines and the tracks. A loop
  * writes `Sprite.texture` through `ecs.set` and stands aside while a running `frames` step holds
- * its entity. It reuses the frame arithmetic of the `frames` step.
+ * its entity. While the entity carries `Frames` the field is muted for the projection, so the end
+ * of a projection motion does not correct it back to the rest key. It reuses the frame arithmetic
+ * of the `frames` step.
  */
 import { Sprite } from "../renderer/components";
 import type { Entity } from "../world/types";
@@ -26,9 +28,37 @@ function freshLoop(keys: readonly string[]): FrameLoop {
 }
 
 /**
+ * Gives `Sprite.texture` of an entity to its loop: mutes the field for the projection, once per
+ * entity. A no-op for an entity that is muted already.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param entity - The entity that carries `Frames`.
+ */
+function ownTexture(actx: AnimCtx, entity: Entity): void {
+  const mutes = actx.state.frameMutes;
+
+  if (mutes.has(entity)) return;
+
+  mutes.set(entity, actx.deps.world.projection.mute(entity, Sprite, ["texture"]));
+}
+
+/**
+ * Hands `Sprite.texture` of an entity back to the projection. A no-op for an entity that is not
+ * muted.
+ *
+ * @param state - The plugin state.
+ * @param entity - The entity that lost `Frames` or left.
+ */
+function releaseTexture(state: State, entity: Entity): void {
+  state.frameMutes.get(entity)?.();
+  state.frameMutes.delete(entity);
+}
+
+/**
  * Opens the loop table: a loop for every entity that gets `Frames` from now on, none for an
  * entity that loses it (`onRemoved` fires on `ecs.remove` and on despawn alike), and a loop for
- * every entity that carries it already.
+ * every entity that carries it already. Each loop owns `Sprite.texture` of its entity while it
+ * lives.
  *
  * @param actx - Domain context of the anim plugin.
  */
@@ -39,25 +69,32 @@ export function openFrameLoops(actx: AnimCtx): void {
   actx.state.offFrames.push(
     ecs.onAdded(Frames, (entity, value) => {
       loops.set(entity, freshLoop(value.keys));
+      ownTexture(actx, entity);
     }),
     ecs.onRemoved(Frames, entity => {
       loops.delete(entity);
+      releaseTexture(actx.state, entity);
     })
   );
 
   for (const [entity, value] of ecs.query(Frames)) {
     if (!loops.has(entity)) loops.set(entity, freshLoop(value.keys));
+
+    ownTexture(actx, entity);
   }
 }
 
 /**
- * Removes the two world hooks and empties both tables. The teardown runs it after `finishAll`
- * released every hold.
+ * Removes the two world hooks, hands every muted `Sprite.texture` back to the projection and
+ * empties the tables. The teardown runs it after `finishAll` released every hold.
  *
  * @param state - The plugin state.
  */
 export function closeFrameLoops(state: State): void {
   for (const off of state.offFrames.splice(0)) off();
+  for (const release of state.frameMutes.values()) release();
+
+  state.frameMutes.clear();
 
   state.frameLoops.clear();
   state.framesHeld.clear();
@@ -157,7 +194,8 @@ function stepFrameLoop(
 /**
  * Steps every `Frames` loop by the frame's delta. Runs in world mode `"live"` only, after the
  * timelines and the tracks, so a `frames` step that started in this frame holds its entity
- * already. An entity that lost `Frames` leaves the table here too.
+ * already. An entity that lost `Frames` leaves the table here too, and its texture goes back to
+ * the projection.
  *
  * @param actx - Domain context of the anim plugin.
  * @param deltaMs - Milliseconds of game time of the frame.
@@ -170,6 +208,7 @@ export function stepFrameLoops(actx: AnimCtx, deltaMs: number): void {
 
     if (value === undefined) {
       actx.state.frameLoops.delete(entity);
+      releaseTexture(actx.state, entity);
 
       continue;
     }

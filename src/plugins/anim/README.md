@@ -270,6 +270,10 @@ coin: item => [Sprite({ texture: "items.coin-0" }), Frames({ keys: coinSpin, fps
 - A running `frames` step on the same entity wins: it owns `Sprite.texture` while it runs, the loop
   keeps its clock, and on the first frame step after the step ended (by its last key, `finish()`,
   `finishAll()`, the abort of a node or `cancel()`) the loop writes its current key again.
+- On a projection view `Frames` owns `Sprite.texture`: the loop mutes it with
+  `world.projection.mute` while the entity carries `Frames`, so the end of a projection motion
+  never snaps it back to the rest key; the mute goes when `Frames` is removed, the entity leaves or
+  `anim` stops.
 - Modes: `"paused"` moves nothing, `"fast"` stops the clock (a loop has no end to finish), `"live"`
   goes on from there. Reduced motion stops it on the frame it shows; switched off, it walks on from
   that frame.
@@ -329,7 +333,7 @@ door, `@moku-labs/game/control`, dev builds only. Input `{ on: "boolean" }`: it 
 ## Dependencies
 
 `time` (the frame step, `delta`, `wake()`), `flow` (`fx.handle`, `fx.dispatch`, `features.all()`),
-`world` (the driver seam, `projection.entityOf`, `restOf`, the ecs with `spawn` and `despawn`,
+`world` (the driver seam, `projection.entityOf`, `restOf`, `mute` for `Sprite.texture`, the ecs with `spawn` and `despawn`,
 `onAdded`, `onRemoved` and `query` for `Frames`, the `Layer` and `Order` components), `renderer`
 (its `Sprite`, `Transform` and `Parent` components and
 the `rootPoseOf`, `localPoseOf` and `parentOf` pose helpers of `sync/pose.ts`; no API call).
