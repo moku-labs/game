@@ -3481,7 +3481,7 @@
         "effects.glow": {
           "alpha": 1,
           "color": 15905853,
-          "distance": 32,
+          "distance": 18,
           "enabled": true,
           "order": 0,
           "strength": 1.8
@@ -3897,7 +3897,7 @@
         "effects.glow": {
           "alpha": 1,
           "color": 15905853,
-          "distance": 32,
+          "distance": 18,
           "enabled": true,
           "order": 0,
           "strength": 1.8
@@ -4870,7 +4870,7 @@
         "effects.glow": {
           "alpha": 1,
           "color": 15905853,
-          "distance": 32,
+          "distance": 18,
           "enabled": true,
           "order": 0,
           "strength": 1.8
@@ -4985,7 +4985,7 @@
         "effects.glow": {
           "alpha": 1,
           "color": 15905853,
-          "distance": 32,
+          "distance": 18,
           "enabled": true,
           "order": 0,
           "strength": 1.8
