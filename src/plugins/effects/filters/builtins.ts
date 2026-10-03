@@ -58,7 +58,9 @@ const alphaDefaults: AlphaValue = { alpha: 1, enabled: true, order: 0 };
  * wide, that follows the shape: rounded corners stay rounded. Its alpha is
  * `strength × alpha ×` the share of the disc of radius `distance` around the pixel the view
  * covers, so `strength: 2` is full next to a straight edge and fades to nothing at `distance`.
- * The view is padded by its live `distance`. One render pass per apply.
+ * It takes 64 to 256 probes, by radius in physical pixels: about 3.5 physical pixels apart up to
+ * a radius of 32 physical pixels. The view is padded by its live `distance`. One render pass per
+ * apply.
  *
  * @example
  * ```ts

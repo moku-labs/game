@@ -36,6 +36,23 @@ function readsOf(body: string, declared: readonly string[]): string[] {
   return declared.filter(name => new RegExp(String.raw`\b${name}\b`).test(body));
 }
 
+/**
+ * The probe count of a Glow body, WGSL or GLSL, with the language left out: the radius in
+ * physical pixels with the `fu.` and `gfu.` prefixes dropped, then the argument of `ceil`, the
+ * floor and the cap of the clamp.
+ *
+ * @param body - The shader body.
+ * @returns The four parts, or `[]` when a line is missing.
+ */
+function countOf(body: string): string[] {
+  const radius = /radiusPx = ([^;]+);/.exec(body);
+  const count = /probes = clamp\(\w+\(ceil\(([^)]+)\)\), (\d+), (\w+)\);/.exec(body);
+
+  if (!radius?.[1] || !count) return [];
+
+  return [radius[1].replaceAll(/\bg?fu\./g, ""), ...count.slice(1)];
+}
+
 describe("the Glow GLSL", () => {
   it("defines main and reads every uniform Glow declares", () => {
     const names = Glow.filter.uniforms.map(uniform => uniform.name);
@@ -44,19 +61,41 @@ describe("the Glow GLSL", () => {
     expect(readsOf(GLOW_GLSL, names)).toEqual(names);
   });
 
-  it("uses the 64 probes and the golden-angle turn of the WGSL", () => {
-    for (const name of ["GLOW_PROBES", "GLOW_TURN_COS", "GLOW_TURN_SIN"]) {
+  it("uses the 256-probe bound and the golden-angle turn of the WGSL", () => {
+    for (const name of ["GLOW_MAX_PROBES", "GLOW_TURN_COS", "GLOW_TURN_SIN"]) {
       expect(constant(GLOW_GLSL, name), name).toBe(constant(GLOW_WGSL, name));
     }
 
-    expect(constant(GLOW_GLSL, "GLOW_PROBES")).toBe(64);
+    expect(constant(GLOW_GLSL, "GLOW_MAX_PROBES")).toBe(256);
+  });
+
+  it("counts the probes from the radius in physical pixels as the WGSL does", () => {
+    expect(GLOW_GLSL).toContain("float radiusPx = distance * uInputPixel.x * uInputSize.z;");
+    expect(GLOW_GLSL).toContain(
+      "int probes = clamp(int(ceil(radiusPx * radiusPx * 0.25)), 64, GLOW_MAX_PROBES);"
+    );
+    expect(countOf(GLOW_GLSL)).toEqual([
+      "distance * uInputPixel.x * uInputSize.z",
+      "radiusPx * radiusPx * 0.25",
+      "64",
+      "GLOW_MAX_PROBES"
+    ]);
+    expect(countOf(GLOW_GLSL)).toEqual(countOf(GLOW_WGSL));
+  });
+
+  it("loops to the constant bound and leaves at the probe count before it samples", () => {
+    const loop = GLOW_GLSL.slice(GLOW_GLSL.indexOf("for (int probeIndex"));
+    const body = loop.slice(loop.indexOf("{") + 1).trimStart();
+
+    expect(GLOW_GLSL).toContain(
+      "for (int probeIndex = 0; probeIndex < GLOW_MAX_PROBES; probeIndex++) {"
+    );
+    expect(body).toMatch(/^if \(probeIndex >= probes\) break;\n/);
   });
 
   it("spreads, weights and clamps the probes as the WGSL does", () => {
     expect(GLOW_GLSL).toContain("vec2 reach = uInputSize.zw * distance;");
-    expect(GLOW_GLSL).toContain(
-      "float along = sqrt((float(probeIndex) + 0.5) / float(GLOW_PROBES));"
-    );
+    expect(GLOW_GLSL).toContain("float along = sqrt((float(probeIndex) + 0.5) / float(probes));");
     expect(GLOW_GLSL).toContain("float weight = (1.0 - along) * (1.0 - along);");
     expect(GLOW_GLSL).toContain(
       "vec2 probe = clamp(vTextureCoord + turn * reach * along, uInputClamp.xy, uInputClamp.zw);"
