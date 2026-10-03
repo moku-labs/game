@@ -171,6 +171,22 @@ describe("timber-text-input — the Rename popup", () => {
     await game.app.stop();
   });
 
+  // Found by exploratory QA: 15 letters and an emoji are 17 UTF-16 units; the field keeps the
+  // emoji out whole, as the browser's own `maxlength` does, so the save is always well formed.
+  it("never cuts an emoji in half at 16 characters", async () => {
+    const game = await openRename();
+
+    await fill(game, "nameField", "aaaaaaaaaaaaaaa😀");
+
+    expect(fieldValue(game)).toBe("aaaaaaaaaaaaaaa");
+
+    await press(game, "Enter");
+
+    expect(playerOf(game).name.isWellFormed()).toBe(true);
+
+    await game.app.stop();
+  });
+
   it("keeps the typed name when Escape ends the editing, and Save saves it", async () => {
     const game = await openRename();
 

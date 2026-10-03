@@ -32,7 +32,14 @@ import {
   removeHiddenInput,
   watchKeyboard
 } from "./dom-input";
-import { type FieldLayout, layoutField, liftOf, type PartBox, paddingOf } from "./field-layout";
+import {
+  clampValue,
+  type FieldLayout,
+  layoutField,
+  liftOf,
+  type PartBox,
+  paddingOf
+} from "./field-layout";
 import type {
   Composing,
   DescriptionNode,
@@ -114,21 +121,6 @@ export function fieldAttributesOf(node: DescriptionNode): FieldAttributes {
     textStyle: typeof props.textStyle === "string" ? props.textStyle : "body",
     placeholder: props.placeholder as string | Message | undefined
   };
-}
-
-/**
- * Cuts a value to the max length of its field.
- *
- * @param value - The text.
- * @param maxLength - The longest value the field keeps, in UTF-16 units.
- * @returns The value the field keeps.
- * @example
- * ```ts
- * clampValue("abcdefghijk", 8); // "abcdefgh"
- * ```
- */
-export function clampValue(value: string, maxLength: number | undefined): string {
-  return maxLength === undefined ? value : value.slice(0, maxLength);
 }
 
 /**
