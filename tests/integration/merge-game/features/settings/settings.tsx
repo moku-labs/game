@@ -1,11 +1,12 @@
 /**
- * @file The settings popup (design §6 E2, D1): the plaque "Настройки", the X, two folder tabs that
- * stand on the parchment, and the pane under them — Music and Effects on two lines each (the name
- * and the percent, then −, a 10-segment level bar and +), or the two language planks with a check
- * on the current one — and the "Сбросить прогресс" link with its wave.
+ * @file The settings popup (design §6 E2, D1): the plaque "Настройки", the X, three folder tabs
+ * that stand on the parchment, and the pane under them — Music and Effects on two lines each (the
+ * name and the percent, then −, a 10-segment level bar and +), the two language planks with a
+ * check on the current one, or the player's name with the plank that opens the Rename popup — and
+ * the "Сбросить прогресс" link with its wave.
  *
  * Which tab is open is local state of the component: the save never hears about it and no node
- * runs when the player looks around. The buttons that change something name the four outcomes;
+ * runs when the player looks around. The buttons that change something name the five outcomes;
  * the backdrop and the X answer `close`.
  */
 import { type } from "@moku-labs/game";
@@ -21,6 +22,7 @@ import {
   languageColumn,
   linkStyle,
   linkWave,
+  profileColumn,
   rowIcon,
   rowName,
   rowPercent,
@@ -37,8 +39,8 @@ import {
   volumeRow
 } from "./styles";
 
-/** The two tabs of the popup. */
-export type Tab = "audio" | "language";
+/** The three tabs of the popup. */
+export type Tab = "audio" | "language" | "profile";
 
 /** The two buses the player sets. */
 export type Bus = "music" | "sfx";
@@ -56,7 +58,14 @@ export const SEGMENTS = 10;
 export const VOLUME_STEP = 1 / SEGMENTS;
 
 /** The tabs in the order they are drawn. */
-const tabs: readonly Tab[] = ["audio", "language"];
+const tabs: readonly Tab[] = ["audio", "language", "profile"];
+
+/** The key of every tab's button; its words are keyed `<key>Label`. */
+const tabKeys: Record<Tab, string> = {
+  audio: "tabSound",
+  language: "tabLanguage",
+  profile: "tabProfile"
+};
 
 /** The two buses in the order they are drawn, with their icons. */
 const buses: readonly { bus: Bus; icon: AssetKey }[] = [
@@ -73,8 +82,8 @@ const languages = [
 /** Every segment index, built once. */
 const segments = Array.from({ length: SEGMENTS }, (_unused, index) => index);
 
-/** What the popup is shown with: the two volumes and the current language. */
-export type SettingsProps = { music: number; sfx: number; locale: string };
+/** What the popup is shown with: the two volumes, the current language and the player's name. */
+export type SettingsProps = { music: number; sfx: number; locale: string; name: string };
 
 /**
  * How many segments of the bar a volume lights.
@@ -100,7 +109,7 @@ function litOf(volume: number): number {
  * @returns The button element, keyed `tab<Name>`.
  */
 function TabButton(props: { tab: Tab; open: boolean }) {
-  const key = props.tab === "audio" ? "tabSound" : "tabLanguage";
+  const key = tabKeys[props.tab];
 
   return (
     <button
@@ -230,11 +239,59 @@ function LanguagePane(props: { locale: string }) {
   );
 }
 
+/**
+ * The name pane: the name the player chose, or a line that says there is none yet, over the wood
+ * plank that opens the Rename popup.
+ *
+ * @param props - The name.
+ * @param props.name - The name the save holds, `""` before the first rename.
+ * @returns The column element.
+ */
+function ProfilePane(props: { name: string }) {
+  return (
+    <column key="profilePane" style={profileColumn}>
+      <text
+        key="profileName"
+        style="ui.tab"
+        content={props.name === "" ? tr("settings.noName") : props.name}
+      />
+      <PlankButton
+        id="profileRename"
+        intent="rename"
+        look="wood"
+        size="full"
+        label={tr("settings.rename")}
+      />
+    </column>
+  );
+}
+
+/**
+ * The pane of the open tab.
+ *
+ * @param tab - The open tab.
+ * @param props - What the popup is shown with.
+ * @returns The rows of the pane.
+ */
+function paneOf(tab: Tab, props: SettingsProps) {
+  if (tab === "language") return <LanguagePane locale={props.locale} />;
+  if (tab === "profile") return <ProfilePane name={props.name} />;
+
+  return buses.map(entry => (
+    <VolumeRow
+      bus={entry.bus}
+      icon={entry.icon}
+      volume={entry.bus === "music" ? props.music : props.sfx}
+    />
+  ));
+}
+
 export const Settings = defineComponent("Settings", {
   local: { tab: "audio" as Tab },
   outcomes: {
     volume: type<VolumeInput>(),
     setLocale: type<LocaleInput>(),
+    rename: type(),
     reset: type(),
     close: type()
   },
@@ -250,17 +307,7 @@ export const Settings = defineComponent("Settings", {
         close="close"
       >
         <Parchment id="settingsPane">
-          {local.tab === "audio" ? (
-            buses.map(entry => (
-              <VolumeRow
-                bus={entry.bus}
-                icon={entry.icon}
-                volume={entry.bus === "music" ? props.music : props.sfx}
-              />
-            ))
-          ) : (
-            <LanguagePane locale={props.locale} />
-          )}
+          {paneOf(local.tab, props)}
           <row key="settingsTabs" style={tabRow}>
             {tabs.map(tab => (
               <TabButton tab={tab} open={local.tab === tab} />

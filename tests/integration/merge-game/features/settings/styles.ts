@@ -1,14 +1,18 @@
 /**
- * @file The look of the settings popup (design §6 E2, D1) and of the confirm stacked on it (E3):
- * the folder tabs that sit on the parchment, the sound rows on two lines with their − and +, the
- * 10-segment level bar that grows to fill, the language column, the text link with its wave, and
- * the button row of the confirm. The board, the ropes, the X and the parchment are the kit's.
+ * @file The look of the settings popup (design §6 E2, D1) and of the two popups stacked on it, the
+ * confirm (E3) and the rename: the folder tabs that sit on the parchment, the sound rows on two
+ * lines with their − and +, the 10-segment level bar that grows to fill, the language column, the
+ * name pane, the text link with its wave, the button row of the confirm, and the name field with
+ * its counter. The board, the ropes, the X and the parchment are the kit's.
  */
 import { defineStyle } from "../../kit";
 import { theme } from "../ui/kit";
 
-/** How tall the open tab is, and how far it reaches down over the border of the parchment. */
-const tab = { height: 120, idleHeight: 100, width: 260, overlap: 12 } as const;
+/**
+ * How tall the open tab is, and how far it reaches down over the border of the parchment. Three
+ * tabs of this width and their gaps fit the 806 units of the parchment.
+ */
+const tab = { height: 120, idleHeight: 100, width: 250, overlap: 12 } as const;
 
 /**
  * The padding above the settings pane: the lower half of the title plaque, the room between it
@@ -195,6 +199,14 @@ export const languageColumn = defineStyle({
   gap: 36
 });
 
+/** The name pane: the player's name over the plank that opens the Rename popup. */
+export const profileColumn = defineStyle({
+  direction: "column",
+  alignSelf: "stretch",
+  align: "center",
+  gap: 36
+});
+
 /** The "Сбросить прогресс" link: no plank, the berry words with the wave under them. */
 export const linkStyle = defineStyle({
   direction: "column",
@@ -213,4 +225,32 @@ export const confirmButtons = defineStyle({
   align: "center",
   alignSelf: "stretch",
   gap: theme.space.md
+});
+
+/** The field and its counter on the paper of the Rename popup, one under the other. */
+export const nameColumn = defineStyle({
+  direction: "column",
+  alignSelf: "stretch",
+  gap: theme.space.xs
+});
+
+/**
+ * The name field: a cream slot with an ink rim, as wide as the paper. The words start 32 units in
+ * from its left edge and stand in its middle.
+ */
+export const nameField = defineStyle({
+  alignSelf: "stretch",
+  height: 120,
+  padding: { left: 32, right: 32 },
+  fill: theme.color.cream,
+  stroke: theme.color.ink,
+  strokeWidth: 5,
+  radius: 24
+});
+
+/** The counter under the field, at its right end: "4/16". */
+export const nameCountRow = defineStyle({
+  direction: "row",
+  alignSelf: "stretch",
+  justify: "end"
 });

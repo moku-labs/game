@@ -400,6 +400,11 @@ export default [
               name: "yoga-layout",
               allowTypeImports: true,
               message: "Load Yoga lazily with import() in ui onStart. Types may be imported."
+            },
+            {
+              name: "playwright-core",
+              message:
+                "playwright-core is an optional peer. Load it with await import() in src/visual/leg-browser.ts only."
             }
           ]
         }

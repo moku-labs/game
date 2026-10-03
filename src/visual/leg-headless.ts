@@ -57,7 +57,7 @@ function enableDevelopment(): () => void {
  * messageOf(new Error("[game] Boom.\n  Fix it.")); // "[game] Boom.\n  Fix it."
  * ```
  */
-function messageOf(error: unknown): string {
+export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -72,13 +72,30 @@ function messageOf(error: unknown): string {
  * reasonOf(new Error("[game] No element.\n  Read sources.ui.")); // "No element. Read sources.ui."
  * ```
  */
-function reasonOf(error: unknown): string {
+export function reasonOf(error: unknown): string {
   const text = messageOf(error)
     .replace(/^\[game\] /u, "")
     .replaceAll(/\n\s*/gu, " ")
     .trim();
 
   return text.endsWith(".") ? text : `${text}.`;
+}
+
+/**
+ * Builds the error of a step that failed: the test, the step and the reason. Both legs use it.
+ *
+ * @param test - The test name.
+ * @param where - The step, such as `step 2 (tap)`.
+ * @param error - What the step threw, or the message of it.
+ * @returns The error, ready to throw.
+ * @example
+ * ```ts
+ * stepFailure("reward-popup", "step 1 (tap)", "Target crashed").message;
+ * // '[game] Visual test "reward-popup", step 1 (tap) failed.\n  Target crashed.'
+ * ```
+ */
+export function stepFailure(test: string, where: string, error: unknown): Error {
+  return new Error(`[game] Visual test "${test}", ${where} failed.\n  ${reasonOf(error)}`);
 }
 
 /**
@@ -93,7 +110,7 @@ async function failing(test: string, where: string, work: () => Promise<unknown>
   try {
     await work();
   } catch (error) {
-    throw new Error(`[game] Visual test "${test}", ${where} failed.\n  ${reasonOf(error)}`);
+    throw stepFailure(test, where, error);
   }
 }
 

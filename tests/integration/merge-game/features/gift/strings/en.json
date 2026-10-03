@@ -1,5 +1,6 @@
 {
   "gift.title": "Daily gift",
   "gift.coins": "{coins, plural, one {coin} other {coins}}",
+  "gift.note": "Come back tomorrow for more <icon=ui.icon-coin>",
   "gift.claim": "Claim"
 }

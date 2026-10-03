@@ -2,7 +2,7 @@
 
 **A 2D puzzle game engine where the game is a deterministic graph of business logic.**
 
-`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations. V3 adds the interface: choreographies as data, strings as data, text from MSDF fonts, screens written in JSX and laid out by Yoga, and sound as an effect a node awaits. V4 adds two doors for the editor: sources that read a running game and dev-only commands that drive it. V5 adds cosmetic effects as data: particles and WGSL filters as components, a frame loop for sprites, and the render numbers that say what they cost.
+`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations. V3 adds the interface: choreographies as data, strings as data, text from MSDF fonts, screens written in JSX and laid out by Yoga, and sound as an effect a node awaits. V4 adds two doors for the editor: sources that read a running game and dev-only commands that drive it. V5 adds cosmetic effects as data: particles and WGSL filters as components, a frame loop for sprites, and the render numbers that say what they cost; then the production pack of the art, icons that wrap with their words, a text field, and visual tests.
 
 <br/>
 
@@ -30,7 +30,7 @@
 
 ## Status
 
-V1, V2 and V3 are built. V4 has its engine side: the two doors described in [Doors for the editor](#doors-for-the-editor). The editor that uses them is a separate package. V5 has its effects: the `effects` plugin, the `Frames` component, the `components` prop of the JSX tags and the render numbers; the production mode of `assets`, the text input and the visual tests are next. Everything after that is a plan and may change.
+V1, V2 and V3 are built. V4 has its engine side: the two doors described in [Doors for the editor](#doors-for-the-editor). The editor that uses them is a separate package. V5 is built: the `effects` plugin, the `Frames` component, the `components` prop of the JSX tags and the render numbers; the production pack of `assets` (`--pack`, a v2 manifest with WebP atlas pages); icons inside wrapped text; the `input` tag, a text field; and visual tests in `@moku-labs/game/testing`. Everything after that is a plan and may change.
 
 | Milestone | State | Scope | Exit criterion |
 |---|---|---|---|
@@ -38,7 +38,7 @@ V1, V2 and V3 are built. V4 has its engine side: the two doors described in [Doo
 | V2 | built | `world`, `renderer`, `input`, `assets`, `scenes`, the `@moku-labs/game/assets` entry | A board is visible and items merge by drag; the same game still plays to the end headless |
 | V3 | built | `anim`, `i18n`, `text`, `ui`, `audio`, the `@moku-labs/game/jsx-runtime` entry | Popup, HUD and buttons with sound; the same game still plays to the end headless |
 | V4 | doors built | `/inspect` and `/control` entries | External tools can read and drive a game |
-| V5 | `effects` built | `effects`, `Frames`, render passes and draw calls; production mode of `assets`, visual test helpers still planned | Not defined yet |
+| V5 | built | `effects`, `Frames`, render passes and draw calls; the production pack of `assets`, icons in wrapped text, the `input` tag, visual tests in `/testing` | Not defined yet |
 | V6 | planned | `platform` | A template game runs on a phone |
 
 Rendering: WebGPU is preferred, with Pixi's WebGL fallback and an honest "unsupported device" screen when neither exists.
@@ -244,7 +244,7 @@ Five logic plugins are on every app; the nine screen plugins are the list `scree
 | [`anim`](./src/plugins/anim/README.md) | Complex | The one tween core, installed into `world.projection` as the `TweenDriver`; timelines as frozen data built from typed slots; `defineMotion` sugar for the enter, exit and change hooks; the `Frames` component, a frame loop that walks a sprite's textures for its whole life | `play(animation, slots)`, `finishAll()`, `active()`, `onMark(fn)` |
 | [`i18n`](./src/plugins/i18n/README.md) | Complex | Strings as data: `tr(key, params)` is a `Message`, ICU MessageFormat compiled to plain functions by `compileStrings` on the `assets` door, `Part[]` at run time, never a joined string | `locale()`, `setLocale(locale)`, `format(message, locale?)`, `plain(message)`, `has(key)`, `locales()` |
 | [`text`](./src/plugins/text/README.md) | Complex | The `Text` component, `label()`, `defineTextStyles()`, the tags `<b> <i> <color=#hex> <icon=key>`, measurement from the font's advance table, BitmapText from the MSDF fonts of a bundle | `measure(content, style)`, `styles()` |
-| [`ui`](./src/plugins/ui/README.md) | Very Complex | A screen is a projection whose `view` returns JSX; the tree is reconciled by identity into entities, laid out by one Yoga solve per change, `Box` is the rest pose; `defineComponent` with `local` and `outcomes`, `popup` as an effect, `defineStyle`, `defineTokens`; every tag takes `components`, extra component values such as a filter | `tree()`, `find(key)`, `lint()` |
+| [`ui`](./src/plugins/ui/README.md) | Very Complex | A screen is a projection whose `view` returns JSX; the tree is reconciled by identity into entities, laid out by one Yoga solve per change, `Box` is the rest pose; `defineComponent` with `local` and `outcomes`, `popup` as an effect, `defineStyle`, `defineTokens`; every tag takes `components`, extra component values such as a filter; the `input` tag is a text field whose text lives in `local` | `tree()`, `find(key)`, `lint()`, `fill(key, value)` |
 | [`audio`](./src/plugins/audio/README.md) | Standard | Opt-in. Buses `master`, `music`, `sfx`; `sfx()` descriptors of `anim` and `music()` descriptors handled here; the scene's `music`; volumes read from the committed player through `volumes` | `setVolume(bus, value)`, `volume(bus)`, `mute(bus, on)`, `unlocked()` |
 | [`effects`](./src/plugins/effects/README.md) | Complex | Opt-in. Particles: `defineEmitter` and the `Emitter` component, one Pixi `ParticleContainer` per instance stepped by the engine clock. Filters: `defineFilter` turns a WGSL fragment body into a flat component that `tween` drives; `Glow`, `Outline`, `Blur`, `ColorMatrix`, `Noise`, `Displacement`, `Alpha` ship built in. Budgets warn once per crossing; a dev build compiles each WGSL kind before its first instance. Headless it draws nothing | `stats()` |
 
@@ -338,7 +338,7 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 
 | Entry | Runs in | Exports |
 |---|---|---|
-| `@moku-labs/game/testing` | anywhere | The headless helpers, see below |
+| `@moku-labs/game/testing` | node and bun only | The headless helpers and the visual tests, see below. The visual runner reads and writes baseline files |
 | `@moku-labs/game/assets` | node and bun only | `scanAssets`, `emitKeys`, `emitManifest`, `compileStrings`, `checkStrings`, `packAssets`, `runCli`. A game runs it as `bun run assets:keys`: it writes the manifest, the typed asset keys and, next to them, `generated/strings.ts` with one `strings.<locale>.ts` per locale; `--check` fails when any of them is out of date; `--pack <dir>` writes the production build: WebP atlas pages, content-hashed names and a v2 manifest |
 | `@moku-labs/game/inspect` | anywhere, production included | `read`, `watch`, `defineSource`, the catalogue `sources` and the types `Source`, `InputSchema`, `InputOf`. See [Doors for the editor](#doors-for-the-editor) |
 | `@moku-labs/game/control` | dev builds only | `run`, `defineCommand`, `controlRefused`, the catalogue `commands` and the types `Command`, `Ran`. See [Doors for the editor](#doors-for-the-editor) |
@@ -346,7 +346,7 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 
 ### Testing entry
 
-`@moku-labs/game/testing` re-exports the headless helpers.
+`@moku-labs/game/testing` re-exports the headless helpers and the visual tests.
 
 | Export | Signature | Purpose |
 |---|---|---|
@@ -356,8 +356,35 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 | `fakeClock` | `(start = 0) => FakeClock` | A `ClockSource` with `advance(ms)` and `set(moment)` |
 | `memory` | `(fixture?: { state: SaveDoc; version: number }) => PlayerStateProvider & { calls: ProviderCall[] }` | In-memory save provider. It keeps what it was committed and records every call |
 | `saveOf` | `(player: Json, seed?: number) => SaveDoc` | Builds a save document for a fixture |
+| `defineVisualTest` | `(name: string, test: { start: VisualStart; steps: readonly VisualStep[] }) => VisualTest` | A visual test as frozen data: where it starts and its steps |
+| `runVisualTests` | `(setup: VisualSetup, tests: readonly VisualTest[], options?: VisualOptions) => Promise<VisualReport>` | Plays the tests and compares every checkpoint with its baseline files |
+| `parseVisualArgv` | `(argv: readonly string[]) => { update?; pixels?; only?; dir? }` | Reads `--update`, `--no-pixels`, `--only <name>` and `--dir <path>` from a command line |
 
 A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`.
+
+### Visual tests
+
+A visual test is data: where the game starts, then steps. A step is a `/control` command by its short name (`answer`, `tap`, `drag`, `key`, `fill`, `walk`, `restore`, `step`, `pause`, `resume`, `reducedMotion`) with that command's input, or a checkpoint.
+
+```ts
+// tests/visual/reward-popup.visual.ts
+export const rewardPopup = defineVisualTest("reward-popup", {
+  start: { player: fixtures.ready, checkpoint: "home" },
+  steps: [
+    { tap: { key: "play" } },
+    { answer: { intent: "deliver", payload: { orderId: "o1" } } },
+    { checkpoint: "open" },
+    { tap: { key: "claim" } },
+    { checkpoint: "claimed" }
+  ]
+});
+
+// tests/visual/run.ts, `bun tests/visual/run.ts --update`
+const report = await runVisualTests({ app: () => createScreenGame().app, page: { url: "http://localhost:3000/" } }, [rewardPopup]);
+process.exitCode = report.ok ? 0 : 1;
+```
+
+A checkpoint settles the motions and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.png`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, on a Mac only, and compares `screen.png` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
 
 ## Interface in JSX
 
@@ -368,7 +395,7 @@ The interface is one more projection. A screen is a projection whose `view` retu
 { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@moku-labs/game" } }
 ```
 
-The tags are `screen`, `layer`, `row`, `column`, `stack`, `spacer`, `panel`, `image`, `icon`, `text`, `button` and `scroll`. A `button` either names an `intent` for the gate or writes `local` state of its nearest component, never both. A `text` takes a string or a `Message` from `tr`; its size comes from a text style key, not from the layout style. Every tag takes `components`, a list of extra component values for the element's entity: `<button key="claim" intent="claim" components={[Glow({ strength: 2 })]} />` glows, and the glow covers the button and its label.
+The tags are `screen`, `layer`, `row`, `column`, `stack`, `spacer`, `panel`, `image`, `icon`, `text`, `button`, `scroll` and `input`. A `button` either names an `intent` for the gate or writes `local` state of its nearest component, never both. An `input` is a text field: its text lives in the `local` field it names, every keystroke writes it, and Enter answers its `submit` intent with `{ [local]: value }`, the only thing the gate hears: `<input key="nameField" local="name" maxLength={16} submit="save" placeholder={tr("rename.hint")} />`. A `text` takes a string or a `Message` from `tr`; its size comes from a text style key, not from the layout style. Every tag takes `components`, a list of extra component values for the element's entity: `<button key="claim" intent="claim" components={[Glow({ strength: 2 })]} />` glows, and the glow covers the button and its label.
 
 ```tsx
 // features/hud/view.tsx — the HUD, a reward popup and the choreography they share
@@ -549,6 +576,7 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `tap` | `game.tap` | `{ key: "string?", target: "json?" }`, exactly one | route | `input.tap` on the ui element with that `key`, or on the view `target: { projection, key }`. Value: whether the gate took the answer |
 | `drag` | `game.drag` | `{ from: "json", to: "json" }` | route | `input.drag(from, to)`, both `{ projection, key }`. Value: whether the gate took the answer |
 | `key` | `game.key` | `{ key: "string", shift: "boolean?" }` | route | `input.pressKey(key, { shift })`. Value: whether a listener handled the key |
+| `fill` | `game.fill` | `{ key: "string", value: "string" }` | route | `ui.fill(key, value)`: types into the `input` with that `key`, cut to its `maxLength`. Value: whether the field took the text |
 | `walk` | `game.walk` | `{ route: "json" }` | route | `flow.walk(route)`. Value: the flow state after the walk |
 | `bookmark` | `game.bookmark` | none | read | `flow.bookmark()`. Value: the bookmark, plain JSON |
 | `restore` | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `flow.restore(bookmark)`, or a `/testing` repro: its state at its checkpoint, then `flow.walk(repro.route)`. Value: the flow state |
@@ -762,6 +790,7 @@ bun run test:unit          # vitest project "unit"
 bun run test:integration   # vitest project "integration"
 bun run test:coverage      # both projects with coverage, 90% thresholds
 bun run validate           # publint and attw with the esm-only profile
+bun run fixture:pack       # pack the fixture game into tests/integration/merge-game/dist/assets
 bun run release:setup      # moku-release setup
 bun run release:doctor     # moku-release doctor
 bun run release            # moku-release

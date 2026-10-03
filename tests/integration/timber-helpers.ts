@@ -129,10 +129,80 @@ function yieldTask(): Promise<void> {
  *
  * @returns The parsed manifest.
  */
-async function readManifest(): Promise<Assets.Manifest> {
+export async function readManifest(): Promise<Assets.Manifest> {
   const text = await readFile(new URL("merge-game/manifest.json", import.meta.url), "utf8");
 
   return JSON.parse(text) as Assets.Manifest;
+}
+
+/** A texture of `folderIo`: the path of the file it was decoded from, nothing else. */
+export type DiskTexture = { path: string };
+
+/** One texture `folderIo` cut out of a page: the page's path, the frame and the nine borders. */
+export type DiskSlice = {
+  page: string;
+  frame: { x: number; y: number; width: number; height: number };
+  nine: readonly number[] | undefined;
+};
+
+/** The file seam over one folder, and what went through it. */
+export type FolderIo = {
+  io: Assets.AssetsIo;
+  /** The path of every file fetched, in order, relative to the folder. */
+  fetched: string[];
+  /** Every slice cut out of a page, in order. */
+  slices: DiskSlice[];
+};
+
+/**
+ * The file seam of `assets` over one folder on disk: every file is really read, an image decodes
+ * to a stand-in that remembers its path, and a slice remembers its page and frame. The renderer
+ * is inert, so nothing reaches a GPU; the fonts are real, so `text` measures with their tables.
+ *
+ * @param folder - The folder the manifest's paths are relative to, ending in `/`.
+ * @returns The seam, the fetched paths and the slices.
+ */
+export function folderIo(folder: URL): FolderIo {
+  const fetched: string[] = [];
+  const slices: DiskSlice[] = [];
+  const paths = new WeakMap<Blob, string>();
+  const io: Assets.AssetsIo = {
+    fetch: async url => {
+      const path = url.replace(/^\//, "");
+      const bytes = await readFile(new URL(path, folder));
+      const blob = new Blob([bytes]);
+
+      fetched.push(path);
+      paths.set(blob, path);
+
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(JSON.parse(bytes.toString("utf8")) as unknown),
+        blob: () => Promise.resolve(blob),
+        text: () => Promise.resolve(bytes.toString("utf8")),
+        arrayBuffer: () => Promise.resolve(new Uint8Array(bytes).buffer)
+      };
+    },
+    decode: blob => {
+      const texture: DiskTexture = { path: paths.get(blob) ?? "" };
+
+      return Promise.resolve(texture as unknown as Assets.DecodedImage);
+    },
+    createTexture: image => image as unknown as Assets.Texture,
+    sliceTexture: (page, frame, options) => {
+      const { path } = page as unknown as DiskTexture;
+      const { x, y, width, height } = frame;
+      const slice: DiskTexture = { path: `${path}#${x},${y}` };
+
+      slices.push({ page: path, frame: { x, y, width, height }, nine: options?.nine });
+
+      return slice as unknown as Assets.Texture;
+    },
+    destroyTexture: () => undefined
+  };
+
+  return { io, fetched, slices };
 }
 
 /**

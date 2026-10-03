@@ -2,22 +2,29 @@
  * @file The headless half of the V2 exit criterion: the fixture merge game with its screen
  * composed. The board becomes entities in their layers, a scripted drag merges two items, and the
  * same game still plays to the end in plain Bun. The browser half is driven by the e2e station.
+ *
+ * The production build too (V5): the fixture is packed into a temp folder with `--pack`, the
+ * same game plays to the end on the packed manifest, every bundle loads from the atlas pages, and
+ * the dev server hands the page the packed build with `--packed`.
  */
 
-import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import type { Assets, Flow, Model } from "@moku-labs/game";
 import { Transform } from "@moku-labs/game";
 import { createHeadless } from "@moku-labs/game/testing";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createScreenGame } from "./merge-game/game";
 import type { Player } from "./merge-game/state";
 import { startingPlayer } from "./merge-game/state";
 import { generatorId } from "./merge-game/tables";
 import { Item } from "./merge-game/view/components";
 import { cellBox } from "./merge-game/view/layout";
+import { folderIo, until } from "./timber-helpers";
 
 const runCommand = promisify(execFile);
 
@@ -326,5 +333,259 @@ describe("screen-merge — the generated asset keys", () => {
     );
 
     expect(stdout).toContain("up to date");
+  }, 60_000);
+});
+
+/** What the pack test keeps between its cases: the temp folder and the manifest written there. */
+type PackRun = { folder: string; manifest: Assets.Manifest };
+
+/** The packed build of the fixture, made once for the cases below. */
+const packed: PackRun = { folder: "", manifest: { version: 1, bundles: {} } };
+
+/** The textures that go to the `fx` page of the `ui` bundle: every key that starts with `fx-`. */
+const fxKeys = ["ui.fx-leaf", "ui.fx-puff", "ui.fx-rays", "ui.fx-sparkle", "ui.fx-star"];
+
+/**
+ * Reads the asset keys the scanner wrote into a key module: the members of `AssetKey`.
+ *
+ * @param source - The text of the key module.
+ * @returns The keys, in the order of the module.
+ */
+function assetKeysOf(source: string): string[] {
+  const union = /export type AssetKey =([^;]*);/.exec(source)?.[1] ?? "";
+
+  return [...union.matchAll(/"([^"]+)"/g)].map(match => match[1] ?? "");
+}
+
+/**
+ * Every file of a manifest, with the bundle that lists it.
+ *
+ * @param manifest - The manifest.
+ * @returns The files, bundle by bundle.
+ */
+function filesOf(manifest: Assets.Manifest): { bundle: string; file: Assets.ManifestFile }[] {
+  return Object.entries(manifest.bundles).flatMap(([bundle, entry]) =>
+    entry.files.map(file => ({ bundle, file }))
+  );
+}
+
+/** A dev server of the fixture page started by a test, and everything it printed so far. */
+type Server = { child: ChildProcess; printed: () => string };
+
+/**
+ * Starts the dev server of the fixture page from the fixture's folder, as a person does.
+ *
+ * @param args - The flags after the script.
+ * @returns The process and what it printed.
+ */
+function launchServer(args: readonly string[]): Server {
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- the Bun on PATH is the one the project scripts run.
+  const child = spawn("bun", ["./web/serve.ts", ...args], {
+    cwd: fileURLToPath(new URL("merge-game/", import.meta.url))
+  });
+  const chunks: string[] = [];
+  const keep = (chunk: Buffer): void => {
+    chunks.push(chunk.toString("utf8"));
+  };
+
+  child.stdout.on("data", keep);
+  child.stderr.on("data", keep);
+
+  return { child, printed: () => chunks.join("") };
+}
+
+/**
+ * Waits for the line in which the server names its URL.
+ *
+ * @param server - The started server.
+ * @returns The URL, ending in `/`.
+ */
+function urlOf(server: Server): Promise<string> {
+  return new Promise((resolve, reject) => {
+    server.child.stdout?.on("data", () => {
+      const url = /https?:\/\/\S+\//.exec(server.printed())?.[0];
+
+      if (url !== undefined) resolve(url);
+    });
+    server.child.on("close", code => {
+      reject(new Error(`serve.ts ended with ${code}: ${server.printed()}`));
+    });
+  });
+}
+
+/**
+ * Waits for the server to end.
+ *
+ * @param server - The started server.
+ * @returns The exit code.
+ */
+function exitOf(server: Server): Promise<number | null> {
+  return new Promise(resolve => {
+    server.child.on("close", resolve);
+  });
+}
+
+describe("screen-merge — the packed build", () => {
+  beforeAll(async () => {
+    packed.folder = await mkdtemp(path.join(tmpdir(), "merge-game-pack-"));
+
+    await runCommand(
+      "bun",
+      [
+        "src/assets.ts",
+        "--root",
+        gameRoot,
+        "--keys",
+        path.join(packed.folder, "generated/assets.ts"),
+        "--pack",
+        path.join(packed.folder, "assets")
+      ],
+      { cwd: repoRoot }
+    );
+
+    const text = await readFile(path.join(packed.folder, "assets/manifest.json"), "utf8");
+
+    packed.manifest = JSON.parse(text) as Assets.Manifest;
+  }, 120_000);
+
+  afterAll(async () => {
+    await rm(packed.folder, { recursive: true, force: true });
+  });
+
+  it("packs every key of the game once, with the same key module as a dev run", async () => {
+    const committed = await readFile(new URL("merge-game/generated/assets.ts", import.meta.url));
+    const written = await readFile(path.join(packed.folder, "generated/assets.ts"));
+    const keys = filesOf(packed.manifest).map(entry => entry.file.key);
+
+    expect(packed.manifest.version).toBe(2);
+    expect(written.equals(committed)).toBe(true);
+    expect(keys.toSorted()).toEqual(assetKeysOf(committed.toString("utf8")).toSorted());
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("puts the fx textures of the ui bundle on one page of their own", () => {
+    const ui = packed.manifest.bundles.ui;
+    const onFx = (ui?.files ?? []).filter(file => file.atlas?.page === "ui/fx-0");
+
+    expect(ui?.pages?.map(page => page.id)).toEqual(["ui/fx-0", "ui/main-0"]);
+    expect(onFx.map(file => file.key)).toEqual(fxKeys);
+  });
+
+  it("keeps the nine-slice borders of the dev manifest", async () => {
+    const dev = filesOf(await readManifest());
+    const nines = new Map(filesOf(packed.manifest).map(entry => [entry.file.key, entry.file.nine]));
+    const sliced = dev.filter(entry => entry.file.nine !== undefined);
+
+    expect(sliced.length).toBeGreaterThan(0);
+
+    for (const { file } of sliced) expect(nines.get(file.key), file.key).toEqual(file.nine);
+  });
+
+  it("plays the whole game to the end on the packed manifest, every bundle loaded", async () => {
+    const { app } = createScreenGame({ manifest: packed.manifest });
+    const game = await createHeadless(app);
+
+    for (const bundle of Object.keys(packed.manifest.bundles)) {
+      expect(app.assets.isLoaded(bundle), bundle).toBe(true);
+    }
+
+    const board = await game.walk(untilOrder);
+
+    expect(board.path).toBe("afterOrder/show");
+
+    const home = await game.walk([claim, leave]);
+
+    expect(home.path).toBe("home");
+    expect(app.model.store.snapshot().player).toMatchObject({
+      claimed: ["planks"],
+      merge: { board: { items: [] }, wallet: { coins: 25 } }
+    });
+
+    await game.stop();
+  });
+
+  it("loads every bundle from the pack folder: each page fetched once, each packed texture sliced from it", async () => {
+    const disk = folderIo(pathToFileURL(`${path.join(packed.folder, "assets")}/`));
+    const game = createScreenGame({ manifest: packed.manifest, io: disk.io });
+    const bundles = Object.keys(packed.manifest.bundles);
+
+    await game.app.start();
+    game.app.flow.run().catch(() => undefined);
+    await until(game, () => game.app.flow.state().path === "home");
+    await Promise.all(bundles.map(bundle => game.app.assets.load(bundle)));
+
+    const pages = bundles.flatMap(bundle => packed.manifest.bundles[bundle]?.pages ?? []);
+    const pagePath = new Map(pages.map(page => [page.id, page.path]));
+    const packedFiles = filesOf(packed.manifest).flatMap(({ file }) =>
+      file.atlas === undefined ? [] : [{ file, atlas: file.atlas }]
+    );
+
+    for (const page of pages) {
+      expect(
+        disk.fetched.filter(fetched => fetched === page.path),
+        page.id
+      ).toHaveLength(1);
+    }
+
+    expect(disk.slices).toHaveLength(packedFiles.length);
+
+    for (const { file, atlas } of packedFiles) {
+      const { page, ...frame } = atlas;
+      const slice = disk.slices.find(
+        entry =>
+          entry.page === pagePath.get(page) &&
+          entry.frame.x === frame.x &&
+          entry.frame.y === frame.y
+      );
+
+      expect(slice?.frame, file.key).toEqual(frame);
+      expect(slice?.nine, file.key).toEqual(
+        file.nine === undefined
+          ? undefined
+          : [file.nine.left, file.nine.top, file.nine.right, file.nine.bottom]
+      );
+    }
+
+    // A packed key answers its slice; a font answers the `.fnt` the packer rewrote.
+    const coin = packed.manifest.bundles.ui?.files.find(file => file.key === "ui.icon-coin");
+
+    expect(game.app.assets.texture("ui.icon-coin")).toEqual({
+      path: `${pagePath.get("ui/main-0")}#${coin?.atlas?.x},${coin?.atlas?.y}`
+    });
+    expect(game.app.assets.font("ui.font-body")?.fnt).toMatch(
+      /file="ui\.font-body-0-[0-9a-f]{10}\.png"/
+    );
+
+    await game.app.stop();
+  });
+
+  it("serves the packed build to the dev page with --packed", async () => {
+    const server = launchServer(["--packed", path.join(packed.folder, "assets"), "--port", "0"]);
+
+    try {
+      const url = await urlOf(server);
+      const served = await fetch(`${url}manifest.json`);
+      const page = packed.manifest.bundles.ui?.pages?.[0]?.path ?? "";
+      const atlas = await fetch(`${url}${page}`);
+      const bytes = Buffer.from(await atlas.arrayBuffer());
+      const loose = await fetch(`${url}features/ui/assets/font-body.fnt`);
+      const html = await fetch(url);
+
+      expect(await served.json()).toEqual(packed.manifest);
+      expect(atlas.status).toBe(200);
+      expect(bytes.subarray(8, 12).toString("latin1")).toBe("WEBP");
+      // The loose dev files are not part of the packed build.
+      expect(loose.status).toBe(404);
+      expect(await html.text()).toContain('<div id="game"></div>');
+    } finally {
+      server.child.kill();
+    }
+  }, 60_000);
+
+  it("refuses --packed without a pack and names the script that makes one", async () => {
+    const server = launchServer(["--packed", path.join(packed.folder, "missing"), "--port", "0"]);
+
+    expect(await exitOf(server)).toBe(1);
+    expect(server.printed()).toContain('Run "bun run fixture:pack"');
   }, 60_000);
 });

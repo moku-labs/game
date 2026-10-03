@@ -1,8 +1,10 @@
 /**
  * @file visual — the types of the visual tests: the descriptor a game writes, the setup and the
  * options of the runner, and the report it answers. The headless leg reads the descriptor and
- * writes `state.json` and `describe.json`; the browser leg of wave B3 reads `page`, `pixels` and
- * `tolerance` and fills the pixel fields of a checkpoint result.
+ * writes `state.json` and `describe.json`; the browser leg reads `page`, `pixels` and `tolerance`,
+ * writes `screen.png` and fills the pixel fields of a checkpoint result. The Chrome types at the end
+ * are the part of Playwright the browser leg calls, written out, so no type of `playwright-core`
+ * enters the package.
  */
 import type { AnimApi } from "../plugins/anim/types";
 import type { commands } from "../plugins/flow/doors/commands";
@@ -102,13 +104,15 @@ export type VisualApp = ControlApp & {
 };
 
 /**
- * The dev page the browser leg opens: its URL, the viewport width in CSS px, the device scale
- * and which Chrome to launch. The page height follows the renderer's `aspect.min`.
+ * The dev page the browser leg opens: its URL, the viewport width in CSS px (390 by default), the
+ * device scale (2 by default) and which Chrome to launch. The page height follows the inert frame
+ * of the renderer: 520 for a 390 wide portrait game at the default 4:3. Without `browser` the leg
+ * launches Playwright's own Chromium, and the system Chrome when that one is not installed.
  *
  * @example
  * ```ts
  * // The fixture's dev server, a 390 px wide phone at 2x, the system Chrome.
- * const page: VisualPage = { url: "http://localhost:3000/", width: 390, deviceScaleFactor: 2 };
+ * const page: VisualPage = { url: "http://localhost:3000/", browser: { channel: "chrome" } };
  * ```
  */
 export type VisualPage = {
@@ -277,3 +281,54 @@ export type VisualView = {
 
 /** The screen a checkpoint saves in `describe.json`: the ui tree and the keyed views. */
 export type VisualDescribe = { ui: UiNode; views: readonly VisualView[] };
+
+/** What a comparison with one baseline file found, and the path of the first difference. */
+export type Checked = { outcome: Outcome; first?: string };
+
+/**
+ * What the pixel comparison of a checkpoint found: `first` is `"size"` when the two pictures differ
+ * in size, `pixelRatio` the share of differing pixels when it is over the tolerance.
+ */
+export type PixelCheck = Checked & { pixelRatio?: number };
+
+/**
+ * What the browser leg found at one checkpoint: the page's state against `state.json` (none when
+ * the file is missing) and the pixels against `screen.png`.
+ */
+export type PixelFound = { state: Checked | undefined; pixels: PixelCheck };
+
+/** The options of `chromium.launch` the leg passes: the Chrome, and the WebGPU flags. */
+export type LaunchOptions = { channel?: string; executablePath?: string; args: string[] };
+
+/** The options of `browser.newContext` the leg passes: a phone-shaped page with touch. */
+export type ContextOptions = {
+  viewport: { width: number; height: number };
+  deviceScaleFactor: number;
+  isMobile: boolean;
+  hasTouch: boolean;
+};
+
+/** The calls the leg makes on a Playwright page. */
+export type ChromePage = {
+  addInitScript(script: { content: string }): Promise<unknown>;
+  goto(url: string): Promise<unknown>;
+  waitForFunction(
+    fn: () => boolean,
+    argument: undefined,
+    options: { timeout: number }
+  ): Promise<unknown>;
+  evaluate<R, A>(fn: (argument: A) => R | Promise<R>, argument: A): Promise<R>;
+  close(): Promise<void>;
+};
+
+/** The call the leg makes on a Playwright browser context. */
+export type ChromeContext = { newPage(): Promise<ChromePage> };
+
+/** The calls the leg makes on a Playwright browser. */
+export type ChromeBrowser = {
+  newContext(options: ContextOptions): Promise<ChromeContext>;
+  close(): Promise<void>;
+};
+
+/** The call the leg makes on `chromium` of `playwright-core`. */
+export type Chromium = { launch(options: LaunchOptions): Promise<ChromeBrowser> };

@@ -66,6 +66,20 @@ describe("resolveVisualOptions", () => {
     expect(resolveVisualOptions(headless, { argv: [] }).pixels).toBe(false);
   });
 
+  it("keeps pixels off off a Mac, even with a page", () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform") ?? { value: "darwin" };
+
+    try {
+      Object.defineProperty(process, "platform", { value: "linux" });
+      expect(resolveVisualOptions(withPage, { argv: [] }).pixels).toBe(false);
+
+      Object.defineProperty(process, "platform", { value: "darwin" });
+      expect(resolveVisualOptions(withPage, { argv: [] }).pixels).toBe(true);
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+
   it("takes the flags of argv", () => {
     const run = resolveVisualOptions(withPage, {
       argv: ["--update", "--no-pixels", "--only", "home", "--dir", "shots"]

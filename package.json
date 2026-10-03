@@ -72,9 +72,13 @@
   },
   "peerDependencies": {
     "pixi.js": "^8.0.0",
+    "playwright-core": ">=1.50.0",
     "sharp": "^0.34.0"
   },
   "peerDependenciesMeta": {
+    "playwright-core": {
+      "optional": true
+    },
     "sharp": {
       "optional": true
     }
@@ -96,6 +100,7 @@
     "jiti": "2.6.1",
     "lefthook": "2.1.1",
     "pixi.js": "8.21.0",
+    "playwright-core": "1.60.0",
     "publint": "0.3.21",
     "sharp": "0.34.5",
     "tsdown": "0.22.1",

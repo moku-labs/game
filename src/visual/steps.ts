@@ -11,7 +11,7 @@ import type { Json } from "../plugins/model/types";
 import type { StepCommand, VisualApp, VisualStep } from "./types";
 
 /** The input of a command step as the runner hands it on: the object the step carries. */
-type StepInput = Readonly<Record<string, Json | undefined>>;
+export type StepInput = Readonly<Record<string, Json | undefined>>;
 
 /**
  * One step taken apart: a checkpoint by its name, or a command by its short name with its input.
@@ -25,7 +25,7 @@ export type StepEntry =
  * type paired with that name. `run` is a method, so every command of the catalogue fits
  * whatever input its schema names, without a cast.
  */
-type StepRunner = {
+export type StepRunner = {
   readonly id: string;
   readonly title: string;
   readonly input: InputSchema;
