@@ -1,0 +1,14 @@
+{
+  "name": "spike-p15-fixture-native",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:web": "bun scripts/build-web.ts",
+    "native:doctor": "bun scripts/native.ts doctor",
+    "native:build": "bun scripts/native.ts build"
+  },
+  "dependencies": {
+    "@moku-labs/native": "0.2.2",
+    "@tauri-apps/api": "2.12.1"
+  }
+}
