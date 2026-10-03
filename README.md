@@ -291,6 +291,7 @@ flowchart LR
   EF --> W
   EF --> R
   EF --> A
+  EF --> AN
   PL["platform"] --> L
   PL --> F
   PL --> I
@@ -304,7 +305,7 @@ flowchart LR
   class AN,N,X,U,AU,EF,PL v
 ```
 
-An arrow means "depends on"; for the V3 plugins the edges to `time` and the edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants particles and filters appends `effectsPlugin`, one that wants sound appends `audioPlugin`, and one in a native shell appends `platformPlugin` last. A game without `effectsPlugin` carries none of its systems, filters or WGSL in its bundle. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
+An arrow means "depends on"; from `renderer` on, the edges to `time` and `clock` and the edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants particles and filters appends `effectsPlugin`, one that wants sound appends `audioPlugin`, and one in a native shell appends `platformPlugin` last. A game without `effectsPlugin` carries none of its systems, filters or WGSL in its bundle. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
 
 ### Planned
 
@@ -385,14 +386,14 @@ const report = await runVisualTests({ app: () => createScreenGame().app, page: {
 process.exitCode = report.ok ? 0 : 1;
 ```
 
-A checkpoint settles the motions and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.webp`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, on a Mac only, and compares `screen.webp` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
+A checkpoint settles the motions and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.webp`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, or with WebGL under `--webgl`, on a Mac only, and compares `screen.webp` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
 
 #### Pixels
 
 The pixel leg runs on a Mac only. `pixels` is on by default when the setup has a `page` and the platform is `darwin`, and off everywhere else. No CI job runs it: a Linux runner has no WebGPU worth trusting.
 
 - **`playwright-core`** is an optional peer dependency. The leg loads it with a dynamic import, so a game that never runs pixels never installs it. Add it with `bun add -d playwright-core`. Without it the run stops with "The pixel leg needs playwright-core"; `--no-pixels` runs the headless leg alone.
-- **The browser.** `page.browser` when the setup names one (`{ channel }` or `{ executablePath }`). Otherwise Playwright's own Chromium, whose version `playwright-core` pins, so a Chrome update never moves the baselines: install it with `bunx playwright-core install chromium`. Otherwise the system Google Chrome. Chrome starts with WebGPU on Metal; a page that draws with anything else fails the leg.
+- **The browser.** `page.browser` when the setup names one (`{ channel }` or `{ executablePath }`). Otherwise Playwright's own Chromium, whose version `playwright-core` pins, so a Chrome update never moves the baselines: install it with `bunx playwright-core install chromium`. Otherwise the system Google Chrome. Chrome starts with WebGPU on Metal; a page that draws with a renderer other than the requested one fails the leg.
 - **The page.** 390 CSS px wide at a device scale of 2, as tall as the game's inert frame: 520 for a 4:3 portrait game, so `screen.webp` is 780 × 1040.
 - **Game time.** The leg drives the clock itself, so two runs draw the same pixels: a dash phase, a pulse or a particle reads the same time. It waits until the page has loaded what it asked for (no request for half a second), runs `pause`, then steps the game to 5 s of game time, the last frame shorter so it lands exactly. From there every frame of the restore, of every settle and of a checkpoint is a `step` of 1000/60 ms, the frame of the headless leg; the browser's own frames move no game time. The picture is the stage after the last stepped frame. A `resume` step hands the clock back to the browser.
 - **The picture.** Lossless WebP: the page encodes it with `convertToBlob({ type: "image/webp", quality: 1 })`, which Chrome encodes without loss, so the baseline holds the captured pixels exactly.
@@ -723,7 +724,7 @@ Global events are empty: every event belongs to a plugin. `time` and `clock` emi
 | `anim:finished` | `anim` | `{ animation }` | A timeline ended or was finished. Never on `cancel()` |
 | `i18n:locale-changed` | `i18n` | `{ locale }` | The module of the new locale is loaded; `text` re-resolves. Never at start |
 
-`text`, `ui` and `audio` emit nothing.
+`text`, `ui`, `audio`, `effects` and `platform` emit nothing; the `effects` budgets are log warnings.
 
 ```ts
 import { createPlugin, flowPlugin } from "@moku-labs/game";
@@ -880,6 +881,8 @@ The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 - [`text`](./src/plugins/text/README.md): styles, tags, measurement, fonts
 - [`ui`](./src/plugins/ui/README.md): the JSX runtime, components, styles, layout, popups
 - [`audio`](./src/plugins/audio/README.md): buses, the unlock, pause, memory
+- [`effects`](./src/plugins/effects/README.md): particles, filters, WGSL and GLSL twins, budgets
+- [`platform`](./src/plugins/platform/README.md): the provider seam, the Back chain, haptics, keep-awake
 - [`llms.txt`](./llms.txt): overview for an LLM that writes a game on this engine
 - [Moku Core specification](https://github.com/moku-labs/core/tree/main/specification)
 
