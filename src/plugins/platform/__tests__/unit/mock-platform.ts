@@ -30,8 +30,8 @@ export type MockPlatform = {
   fake: FakeProvider;
   /** Whether a ui root has an `escape` button, and every key pressed. */
   input: { escape: boolean; pressed: string[] };
-  /** Whether the resting node lists the intent, and every answer given. */
-  gate: { accepts: boolean; answers: Answer[] };
+  /** Whether the gate is open, whether the resting node lists the intent, and every answer given. */
+  gate: { open: boolean; accepts: boolean; answers: Answer[] };
   /** Whether the game is paused, and every push and pop. */
   lifecycle: { paused: boolean; pushed: PauseReason[]; popped: PauseReason[] };
   /** The fx handlers registered, and the kinds removed. */
@@ -78,7 +78,7 @@ export function createMockPlatform(
   const state = createPlatformState();
   const log = createMockLog();
   const input = { escape: false, pressed: [] as string[] };
-  const gate = { accepts: false, answers: [] as Answer[] };
+  const gate = { open: true, accepts: false, answers: [] as Answer[] };
   const lifecycle = {
     paused: false,
     pushed: [] as PauseReason[],
@@ -100,7 +100,8 @@ export function createMockPlatform(
           gate.answers.push(answer);
 
           return gate.accepts;
-        }
+        },
+        state: () => ({ open: gate.open, allowed: [], narrowed: false })
       },
       fx: {
         handle: (kind: string, run: FxHandler, handleOptions?: { runInFast?: boolean }) => {

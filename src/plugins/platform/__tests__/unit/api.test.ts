@@ -44,6 +44,18 @@ describe("back", () => {
     expect(mock.fake.provider.exit).toHaveBeenCalledTimes(1);
   });
 
+  // Found at V6 build: a press while the graph moves between nodes met a closed gate and left the
+  // app. The gate holds the answer for a frame, so the press counts as taken.
+  it("never exits while the gate is closed between nodes", () => {
+    const mock = createMockPlatform();
+
+    mock.gate.open = false;
+
+    expect(mock.api.back()).toBe("intent");
+    expect(mock.gate.answers).toEqual([{ intent: "back" }]);
+    expect(mock.fake.provider.exit).not.toHaveBeenCalled();
+  });
+
   it("logs an exit that throws and still answers exit", () => {
     const mock = createMockPlatform();
     const failure = new Error("no permission");
