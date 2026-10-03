@@ -188,7 +188,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | `@moku-labs/game/assets` | Node and Bun | Asset keys, the manifest, strings, the pack |
 | `@moku-labs/game/inspect` | anywhere | Read a running game |
 | `@moku-labs/game/control` | dev builds | Drive a running game |
-| `@moku-labs/game/jsx-runtime` | anywhere | The JSX runtime. A game never imports it by hand. |
+| `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | anywhere | The JSX runtime. A game never imports it by hand. |
 
 ## Docs
 
@@ -225,7 +225,7 @@ Every script is in [docs/testing.md](./docs/testing.md#scripts).
 
 - **Node `>= 24`** and **Bun `>= 1.3.14`**. Use `bun` only.
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
-- **`pixi.js` `^8.0.0`** as a peer dependency. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
+- **`pixi.js` `^8.0.0`** as a peer dependency. `playwright-core` for visual tests and `sharp` for the asset pack are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
 - **[`@moku-labs/core`](https://github.com/moku-labs/core)** is the kernel. **[`@moku-labs/common`](https://github.com/moku-labs/common)** brings `log` and `env`.
 
 ## License
