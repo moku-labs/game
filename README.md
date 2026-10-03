@@ -2,11 +2,11 @@
 
 **A 2D puzzle game engine where the game is a deterministic graph of business logic.**
 
-`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations. V3 adds the interface: choreographies as data, strings as data, text from MSDF fonts, screens written in JSX and laid out by Yoga, and sound as an effect a node awaits. V4 adds two doors for the editor: sources that read a running game and dev-only commands that drive it. V5 adds cosmetic effects as data: particles and WGSL filters as components, a frame loop for sprites, and the render numbers that say what they cost; then the production pack of the art, icons that wrap with their words, a text field, and visual tests.
+`@moku-labs/game` is a Layer-2 framework on [`@moku-labs/core`](https://github.com/moku-labs/core), written in TypeScript, with PixiJS v8 as a peer dependency. You write small nodes and edge tables. The engine runs them, commits state on the edges, saves at rest points and replays the same game without a screen. It is not a general-purpose engine and it ships no genre rules: no match-3, no merge, no physics. V1 is the logic half; V2 adds the screen: an own small ECS, projections from committed state, a Pixi v8 renderer loaded lazily, gestures as data components, typed asset keys and scenes as declarations. V3 adds the interface: choreographies as data, strings as data, text from MSDF fonts, screens written in JSX and laid out by Yoga, and sound as an effect a node awaits. V4 adds two doors for the editor: sources that read a running game and dev-only commands that drive it. V5 adds cosmetic effects as data: particles and WGSL filters as components, a frame loop for sprites, and the render numbers that say what they cost; then the production pack of the art, icons that wrap with their words, a text field, and visual tests. V6 adds the platform seam: the Back chain, haptics and keep-awake, filters that also draw on WebGL, and the game as a Tauri app on iOS and Android.
 
 <br/>
 
-[![version](https://img.shields.io/badge/version-0.0.0-1864ab)](#status)
+[![version](https://img.shields.io/badge/version-0.1.0-1864ab)](#status)
 [![types](https://img.shields.io/badge/types-included-3178c6?logo=typescript&logoColor=white)](#requirements)
 [![node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](#requirements)
 [![bun](https://img.shields.io/badge/bun-%3E%3D1.3.14-2da44e?logo=bun&logoColor=white)](#requirements)
@@ -30,7 +30,7 @@
 
 ## Status
 
-V1, V2 and V3 are built. V4 has its engine side: the two doors described in [Doors for the editor](#doors-for-the-editor). The editor that uses them is a separate package. V5 is built: the `effects` plugin, the `Frames` component, the `components` prop of the JSX tags and the render numbers; the production pack of `assets` (`--pack`, a v2 manifest with WebP atlas pages); icons inside wrapped text; the `input` tag, a text field; and visual tests in `@moku-labs/game/testing`. Everything after that is a plan and may change.
+V1, V2 and V3 are built. V4 has its engine side: the two doors described in [Doors for the editor](#doors-for-the-editor). The editor that uses them is a separate package. V5 is built: the `effects` plugin, the `Frames` component, the `components` prop of the JSX tags and the render numbers; the production pack of `assets` (`--pack`, a v2 manifest with WebP atlas pages); icons inside wrapped text; the `input` tag, a text field; and visual tests in `@moku-labs/game/testing`. V6 is built: the `platform` plugin with its provider seam, the Back chain, haptics and keep-awake; GLSL twins for custom filters, so they draw on WebGL; the Tauri fallback in `assets`; and a WebGL leg of the visual tests. `0.1.0` is the first working release. The API may still change before `1.0`.
 
 | Milestone | State | Scope | Exit criterion |
 |---|---|---|---|
@@ -50,7 +50,7 @@ bun add @moku-labs/game pixi.js
 ```
 
 > [!NOTE]
-> **Status: `0.0.0`, not published yet.** The package is not on npm. The command above is the intended install line. `pixi.js` `^8.0.0` is a peer dependency. No V1 code imports it.
+> **Status: `0.1.0` on npm.** The first working release; the API may change before `1.0`. `pixi.js` `^8.0.0` is a peer dependency.
 
 > [!IMPORTANT]
 > Bun only. ESM only. `"sideEffects": false`. There is no CJS build. `yoga-layout` is a dependency the `ui` plugin loads lazily; nothing imports it before `onStart`.
