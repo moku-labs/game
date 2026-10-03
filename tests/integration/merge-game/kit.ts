@@ -2,8 +2,8 @@
  * @file The authoring helpers bound to the types of this game, once for the whole game. The asset
  * and bundle keys come from `generated/assets.ts` and the message keys from `generated/strings.ts`,
  * which the scanner writes, so a texture, a bundle or a sentence the game does not have does not
- * compile. The text style names are the one union written by hand: a style is declared in a
- * feature, and a feature imports this file.
+ * compile. The text style names and the effect ids are the two unions written by hand: a style and
+ * an effect are declared in a feature, and a feature imports this file.
  */
 import { defineGame } from "@moku-labs/game";
 import type { AssetKey, BundleKey } from "./generated/assets";
@@ -41,6 +41,17 @@ export type TextStyleKey =
   | "ui.logo"
   | "ui.sign";
 
+/**
+ * Every particle effect this game draws, declared with `defineEmitter` in `view/effects.ts`: the
+ * stars and the sparkles of a burst, and the steam of the sawmill.
+ *
+ * @example
+ * ```ts
+ * const effect: EffectId = "fx.steam";
+ * ```
+ */
+export type EffectId = "fx.stars" | "fx.sparkles" | "fx.steam";
+
 export const {
   defineNode,
   defineFlow,
@@ -60,7 +71,10 @@ export const {
   defineStyle,
   defineTokens,
   popup,
-  music
+  music,
+  Frames,
+  defineEmitter,
+  Emitter
 } = defineGame<{
   player: Player;
   session: Session;
@@ -69,4 +83,5 @@ export const {
   scenes: "splash" | "home" | "board";
   strings: Strings;
   textStyles: TextStyleKey;
+  emitters: EffectId;
 }>();

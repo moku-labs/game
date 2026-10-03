@@ -7,7 +7,7 @@
  */
 import { projection, tr } from "../../kit";
 import type { Player } from "../../state";
-import { fullBleed, HudPill, RoundButton, safeScreen } from "../ui/kit";
+import { fullBleed, HudPill, primaryGlow, RoundButton, safeScreen } from "../ui/kit";
 import { LogoSign } from "./logo";
 import { giftStill, giftWobble } from "./motions";
 import {
@@ -41,7 +41,8 @@ export type HomeView = { giftWaiting: boolean };
 
 /**
  * The Play sign: the green plank on two posts, a berry sprig on each end. The posts come first,
- * so the plank covers their tops; the plank is the button `play`.
+ * so the plank covers their tops; the plank is the button `play`, and it glows like every primary
+ * button.
  *
  * @returns The stack element.
  */
@@ -50,7 +51,7 @@ function PlaySign() {
     <stack key="playSign" style={playSignStyle}>
       <image key="playPostLeft" texture="home.sign-post" fit="cover" style={playPosts.left} />
       <image key="playPostRight" texture="home.sign-post" fit="cover" style={playPosts.right} />
-      <button key="play" intent="play" style={playButton}>
+      <button key="play" intent="play" style={playButton} components={[primaryGlow]}>
         <text key="playLabel" style="ui.sign" content={tr("home.play")} />
       </button>
       <image key="playSprigLeft" texture="ui.decor-sprig" style={playSprigLeft} />

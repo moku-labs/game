@@ -178,7 +178,8 @@ describe("timber-motions — the merge burst (F4)", () => {
     await tick();
     await frames(game, 2);
 
-    const pieces = spawnedByAnim(game);
+    // The two emitters of the particle burst carry no sprite: `merge-game/__tests__` reads them.
+    const pieces = spawnedByAnim(game).filter(piece => textureOf(piece) !== undefined);
 
     expect(pieces).toHaveLength(12);
     expect(pieces.filter(piece => textureOf(piece) === "ui.fx-sparkle")).toHaveLength(6);

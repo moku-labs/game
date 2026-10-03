@@ -1,10 +1,11 @@
 /**
  * @file The animations of the board (design §4, §6 F4, F5, F7). The merge burst spawns twelve
- * sparkles and leaves on the merged item that fly out and fade; they are despawned when the
- * timeline ends. The sawmill squashes about its middle when it is tapped: its sprite is anchored
- * on its middle, so a scale tween of its `Transform` keeps it standing where it stands. A target
- * the rules refuse shakes. The three looks bring a thing on the board to its pose under the
- * pointer: at rest, lifted under the mouse, squashed under the finger.
+ * sparkles and leaves on the merged item that fly out and fade, together with a particle burst of
+ * stars and sparkles (`effects.ts`); all of them are despawned when the timeline ends, and the
+ * particles in the air fly on until they die. The sawmill squashes about its middle when it is
+ * tapped: its sprite is anchored on its middle, so a scale tween of its `Transform` keeps it
+ * standing where it stands. A target the rules refuse shakes. The three looks bring a thing on the
+ * board to its pose under the pointer: at rest, lifted under the mouse, squashed under the finger.
  *
  * All aim at views hosted by the board slot. `at()` answers the root pose — the slot's scale
  * included — so the burst is drawn at the size of the board on every phone, and a lift of six
@@ -13,6 +14,7 @@
 import type { Anim } from "@moku-labs/game";
 import { parallel, sequence, spawn, spawned, Transform, tween, type } from "@moku-labs/game";
 import { defineAnimation, Sprite } from "../kit";
+import { starBurst } from "./effects";
 
 /** How many pieces a merge bursts into (design §6 F4). */
 const PIECES = 12;
@@ -29,7 +31,8 @@ const pieces = Array.from({ length: PIECES }, (_unused, index) => ({
 
 /**
  * The merge burst: the pieces appear on the middle of the merged item and fly out on twelve
- * rays, turning and fading. They draw in the `fx` layer, over the board and the HUD.
+ * rays, turning and fading, while the stars and the sparkles of the particle burst fly out of the
+ * same point. They draw in the `fx` layer, over the board and the HUD.
  */
 export const mergeBurst = defineAnimation("board.mergeBurst", {
   slots: { item: type<Anim.Target>() },
@@ -49,7 +52,8 @@ export const mergeBurst = defineAnimation("board.mergeBurst", {
             ],
             { layer: "fx", order: index }
           )
-        )
+        ),
+        starBurst(middle, { layer: "fx", order: PIECES })
       ),
       parallel(
         ...pieces.map(piece =>

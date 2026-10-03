@@ -3,8 +3,8 @@
  * screen and one with it. A shipped game adds `onStart: ctx => { ctx.flow.run().catch(showFatal); }`;
  * here the headless runner owns `run()`, so a fatal error reaches the test instead of a handler.
  */
-import type { Assets, Audio, Model } from "@moku-labs/game";
-import { audioPlugin, createApp, screen } from "@moku-labs/game";
+import type { Assets, Audio, Model, Renderer } from "@moku-labs/game";
+import { audioPlugin, createApp, effectsPlugin, screen } from "@moku-labs/game";
 import { fakeClock, memory } from "@moku-labs/game/testing";
 import { energyFeature } from "./features/energy";
 import { giftFeature } from "./features/gift";
@@ -98,14 +98,16 @@ export function createGame(options: GameOptions = {}): Game {
 }
 
 /**
- * The plugins of the game with its screen: the nine screen plugins, `audio`, which is opt-in,
- * every feature — the splash, Home, the board, the reward, the HUD, the orders, the settings, the
- * energy and the daily gift — and the four plugins the game writes: the loading of the splash,
- * the language switch, the look of the board under the pointer and the click of every control.
+ * The plugins of the game with its screen: the nine screen plugins, `audio` and `effects`, which
+ * are opt-in, every feature — the splash, Home, the board, the reward, the HUD, the orders, the
+ * settings, the energy and the daily gift — and the four plugins the game writes: the loading of
+ * the splash, the language switch, the look of the board under the pointer and the click of every
+ * control.
  */
 export const screenPlugins = [
   ...screen,
   audioPlugin,
+  effectsPlugin,
   rewardFeature,
   splashFeature,
   homeFeature,
@@ -143,12 +145,19 @@ export type ScreenGameOptions = GameOptions & {
    * fake context to hear the game.
    */
   audio?: { context: () => Audio.AudioContextLike; journal: number };
+  /**
+   * The renderer seams: the element the canvas goes into and how Pixi is loaded. Left out, the
+   * renderer is inert and nothing is drawn. A test passes a fake page and a fake Pixi module to
+   * draw the game, its particles and its filters.
+   */
+  renderer?: { mount: string; loadPixi: () => Promise<Renderer.PixiModule> };
 };
 
 /**
- * Creates the same game with its screen composed: the screen set, `audio` and the view half of
- * every feature. Without a document the renderer is inert, the audio context stays locked and the
- * assets plugin reads the manifest only, so this runs in plain Bun exactly like the headless game.
+ * Creates the same game with its screen composed: the screen set, `audio`, `effects` and the view
+ * half of every feature. Without the renderer seam the renderer is inert, the audio context stays
+ * locked, the effects draw nothing and the assets plugin reads the manifest only, so this runs in
+ * plain Bun exactly like the headless game.
  *
  * @param options - The seams a test pins, plus the manifest.
  * @returns The app and the seams behind it.
@@ -176,6 +185,7 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       },
       clock: { source: clock },
       flow: { mainFlow, safeNode: "home" },
+      renderer: options.renderer ?? {},
       assets: { manifest: options.manifest, io: options.io },
       text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
       i18n: { locale: "ru", fallback: "ru" },

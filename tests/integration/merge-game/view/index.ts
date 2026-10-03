@@ -11,15 +11,17 @@ import { lookAnimations, mergeBurst, refuseShake, sawmillTap } from "./animation
 import { boardBadges } from "./badges";
 import { boardClock } from "./clock";
 import { Generator, Glow, Highlighted, Item, SelectionRing } from "./components";
+import { boardSteam, sparkles, stars, steam } from "./effects";
 import { boardCells, boardGenerators, boardGlows, boardItems, boardSelection } from "./projections";
 import { marchRing } from "./ring";
 import { boardScene } from "./scene";
 import { glowCells, highlightLegal } from "./systems";
 
 /**
- * The board on the screen: one scene, its seven projections, three systems, five components, the
- * animations of the board, and the bundle that carries their pictures. A game composes it next to
- * `...screen`; a headless test leaves it out and the same graph plays on.
+ * The board on the screen: one scene, its eight projections, three systems, five components, the
+ * animations of the board, the three particle effects, and the bundle that carries their pictures.
+ * A game composes it next to `...screen` and `effectsPlugin`; a headless test leaves it out and the
+ * same graph plays on.
  *
  * The feature name shares its namespace with the flow ids, and "board" is already the sub-flow of
  * the board, so the screen half of the same feature is registered under its own name.
@@ -33,7 +35,8 @@ export const boardView = defineFeature("boardScreen", {
     boardItems,
     boardGenerators,
     boardClock,
-    boardBadges
+    boardBadges,
+    boardSteam
   ],
   systems: [highlightLegal, glowCells, marchRing],
   components: [Item, Highlighted, Generator, Glow, SelectionRing],
@@ -46,5 +49,6 @@ export const boardView = defineFeature("boardScreen", {
     lookAnimations.hover,
     lookAnimations.pressed
   ],
+  emitters: [stars, sparkles, steam],
   assets: boardAssets
 });

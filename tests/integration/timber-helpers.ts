@@ -342,13 +342,15 @@ export function textureOf(entity: WorldEntity): string | undefined {
 }
 
 /**
- * The flying coins among the spawned entities.
+ * The flying coins among the spawned entities: the ones that spin through the frames of the
+ * turning coin.
  *
  * @param game - The running game.
  * @returns How many coins are in the air.
  */
 export function coinsInFlight(game: Game): number {
-  return spawnedByAnim(game).filter(entity => textureOf(entity) === "ui.icon-coin").length;
+  return spawnedByAnim(game).filter(entity => textureOf(entity)?.startsWith("ui.coin-spin-"))
+    .length;
 }
 
 /**
