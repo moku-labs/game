@@ -444,7 +444,7 @@ describe("timber-screens — the splash", () => {
 });
 
 describe("timber-screens — Home", () => {
-  it("lays Home out as the design: the bar, the centre group between the bar and the gift, the gift at the bottom", async () => {
+  it("lays Home out as the design: the bar, the centre group under it, the small gift under the gear", async () => {
     const game = await start(createScreenGame({ manifest: await readManifest() }));
 
     await frames(game);
@@ -453,15 +453,16 @@ describe("timber-screens — Home", () => {
     const bar = rectOf(game, "homeBar");
     const middle = rectOf(game, "homeMiddle");
     const centre = rectOf(game, "homeCentre");
-    const label = rectOf(game, "giftLabel");
+    const gear = rectOf(game, "homeSettings");
+    const gift = rectOf(game, "gift");
 
     expect(game.app.world.ecs.get(elementOf(game, "homeBackground"), Sprite)?.texture).toBe(
       "board.bg-forest-meadow"
     );
     expect(bar).toMatchObject({ y: 50, h: 144, w: screen.w });
-    // The centre group is centred in the room between the bar and the gift row.
+    // The centre group is centred in the room between the bar and the bottom, 44 units above it.
     expect(middle.y).toBe(bar.y + bar.h);
-    expect(middle.y + middle.h).toBe(rectOf(game, "homeBottom").y);
+    expect(middle.y + middle.h).toBe(screen.h - 44);
     expect(centre.y + centre.h / 2).toBeCloseTo(middle.y + middle.h / 2, 5);
     expect(
       ["homeLogo", "homeYard", "play", "gift"].map(key => [
@@ -472,14 +473,16 @@ describe("timber-screens — Home", () => {
       [900, 440],
       [960, 924],
       [880, 220],
-      [260, 260]
+      [130, 130]
     ]);
-    expect(Math.abs(screen.h - 44 - (label.y + label.h))).toBeLessThanOrEqual(1);
+    // The gift hangs 24 units under the bar, on the middle line of the gear.
+    expect(gift.y).toBe(bar.y + bar.h + 24);
+    expect(gift.x + gift.w / 2).toBeCloseTo(gear.x + gear.w / 2, 5);
 
     await game.app.stop();
   });
 
-  it("scales the centre group down as one when the room between the bar and the gift is short", async () => {
+  it("scales the centre group down as one when the room under the bar is short", async () => {
     const game = await start(createScreenGame({ manifest: await readManifest() }));
 
     await frames(game);
@@ -555,8 +558,8 @@ describe("timber-screens — the daily gift wobble (B6)", () => {
     // The wobble turns the button, never moves it: the wrapper is the button's own rect.
     expect(rectOf(game, "giftWobble")).toEqual(rectOf(game, "gift"));
     expect(game.app.world.ecs.get(elementOf(game, "giftWobble"), Transform)?.pivot).toEqual({
-      x: 130,
-      y: 130
+      x: 65,
+      y: 65
     });
 
     await game.app.stop();

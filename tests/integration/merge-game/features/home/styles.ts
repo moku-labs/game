@@ -1,8 +1,8 @@
 /**
  * @file The look of Home (design §5.9, §6 A2), measured on the approved screenshot: the top bar 50
  * units under the top safe edge, the centre group — the logo sign, the yard and the Play sign on
- * its two posts — scaled down as one when the space between the bar and the gift is short, and
- * the gift corner 44 units above the bottom safe edge.
+ * its two posts — scaled down as one when the space between the bar and the bottom is short, and
+ * the daily gift under the gear, half the size it first had.
  *
  * The bar is drawn last, on a layer of its own over the screen, so the ropes of the logo sign
  * come down from the top of the screen behind the coin pill and the gear.
@@ -53,12 +53,13 @@ export const homeBar = defineStyle({
   padding: { left: 48, right: 44 }
 });
 
-/** The space between the top bar and the gift: the centre group is centred in it. */
+/** The space between the top bar and the bottom: the centre group is centred in it. */
 export const homeMiddle = defineStyle({
   grow: 1,
   alignSelf: "stretch",
   align: "center",
-  justify: "center"
+  justify: "center",
+  margin: { bottom: 44 }
 });
 
 /** The centre group: the logo sign, the yard and the Play sign, scaled down as one. */
@@ -139,20 +140,19 @@ export const playSprigRight = defineStyle({
   reason: "the sprig is pinned over the end of the sign"
 });
 
-/** The bottom row: the daily gift on the left, 44 units above the safe edge. */
-export const homeBottom = defineStyle({
-  direction: "row",
-  alignSelf: "stretch",
-  justify: "start",
-  margin: { bottom: 44 },
-  padding: { left: 60 }
+/** The width of the round gift button: half the 260 it first had, near the 120 of the gear. */
+export const GIFT_SIZE = 130;
+
+/** The middle of the gear, from the right edge of the bar: its padding plus half the gear. */
+const gearMiddle = 44 + 60;
+
+/** The gift under the gear, centred on the middle of the gear. No label: it would cross the edge. */
+export const giftCorner = defineStyle({
+  direction: "column",
+  align: "center",
+  alignSelf: "end",
+  margin: { top: 24, right: gearMiddle - GIFT_SIZE / 2 }
 });
-
-/** The width of the round gift button. */
-export const GIFT_SIZE = 260;
-
-/** The gift button, a round wood button 260 units wide, with its label under it. */
-export const giftCorner = defineStyle({ direction: "column", align: "center", gap: 12 });
 
 /** The element the gift button wobbles in: the button's own square, turning on its middle. */
 export const giftWobbleStyle = defineStyle({ width: GIFT_SIZE, height: GIFT_SIZE });

@@ -1,8 +1,9 @@
 /**
  * @file Home (design §6 A2): the hub the player comes back to. A `screen` root padded with the
  * safe-area tokens holds the full-bleed meadow, the centre group — the logo sign on its ropes, the
- * sawmill yard and the green Play sign on two posts — and the daily gift with its "1" and its
- * wobble while it waits. The top bar with the coin pill and the gear lies over it all. Every button names an
+ * sawmill yard and the green Play sign on two posts. The top bar with the coin pill and the gear
+ * lies over it all, and the daily gift with its "1" and its wobble while it waits hangs under the
+ * gear. Every button names an
  * intent of the `home` rest node: `play`, `gift` and `openSettings`.
  */
 import { projection, tr } from "../../kit";
@@ -16,7 +17,6 @@ import {
   giftWobbleStyle,
   homeBar,
   homeBarRoom,
-  homeBottom,
   homeCentre,
   homeMiddle,
   homeTop,
@@ -78,7 +78,11 @@ export const homeScreen = projection({
           <PlaySign />
         </column>
       </column>
-      <row key="homeBottom" style={homeBottom}>
+      <column key="homeTop" style={homeTop}>
+        <row key="homeBar" style={homeBar}>
+          <HudPill id="homeCoins" icon="ui.icon-coin" hosts={["hud.coins"]} width="wide" />
+          <RoundButton id="homeSettings" intent="openSettings" icon="ui.icon-gear" />
+        </row>
         <column key="giftCorner" style={giftCorner}>
           <stack
             key="giftWobble"
@@ -93,14 +97,7 @@ export const homeScreen = projection({
               size={GIFT_SIZE}
             />
           </stack>
-          <text key="giftLabel" style="ui.caption" content={tr("gift.title")} />
         </column>
-      </row>
-      <column key="homeTop" style={homeTop}>
-        <row key="homeBar" style={homeBar}>
-          <HudPill id="homeCoins" icon="ui.icon-coin" hosts={["hud.coins"]} width="wide" />
-          <RoundButton id="homeSettings" intent="openSettings" icon="ui.icon-gear" />
-        </row>
       </column>
     </screen>
   )

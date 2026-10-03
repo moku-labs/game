@@ -117,10 +117,14 @@ describe("merge-game effects — the bursts", () => {
 
     const bursts = burstsOf(game);
 
-    expect(bursts.map(entity => entity.components.Emitter)).toEqual([
-      { effect: "fx.stars", active: true },
-      { effect: "fx.sparkles", active: true }
-    ]);
+    // Entity ids are recycled, so the two bursts come in any order.
+    expect(bursts.map(entity => entity.components.Emitter)).toEqual(
+      expect.arrayContaining([
+        { effect: "fx.stars", active: true },
+        { effect: "fx.sparkles", active: true }
+      ])
+    );
+    expect(bursts).toHaveLength(2);
 
     for (const burst of bursts) {
       // Over the board and the HUD, after the twelve pieces of the burst, on the merged item.
@@ -149,10 +153,14 @@ describe("merge-game effects — the bursts", () => {
     const bursts = burstsOf(game);
 
     expect(game.app.flow.state().path).toBe("board/deliver");
-    expect(bursts.map(entity => entity.components.Emitter)).toEqual([
-      { effect: "fx.stars", active: true },
-      { effect: "fx.sparkles", active: true }
-    ]);
+    // Entity ids are recycled, so the two bursts come in any order.
+    expect(bursts.map(entity => entity.components.Emitter)).toEqual(
+      expect.arrayContaining([
+        { effect: "fx.stars", active: true },
+        { effect: "fx.sparkles", active: true }
+      ])
+    );
+    expect(bursts).toHaveLength(2);
 
     for (const burst of bursts) {
       // In the `ui` layer over the berry stamp (1000) and its words (1001).
