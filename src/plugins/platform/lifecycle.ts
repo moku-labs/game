@@ -37,15 +37,18 @@ function subscribe(ctx: KernelSlice, method: ProviderMethod, open: () => () => v
 export function startPlatform(ctx: KernelSlice): void {
   const provider = ctx.config.provider;
 
+  // Inert without a provider: a haptic effect then resolves at once.
   if (provider === undefined) return;
 
   const lifecycle = ctx.require(lifecyclePlugin);
   const fx = ctx.require(flowPlugin).fx;
 
+  // The provider's pause, resume and Back press.
   subscribe(ctx, "onPause", () => provider.onPause(() => lifecycle.push(BACKGROUND)));
   subscribe(ctx, "onResume", () => provider.onResume(() => lifecycle.pop(BACKGROUND)));
   subscribe(ctx, "onBack", () => provider.onBack(() => runBack(ctx) !== "none"));
 
+  // Haptic effects reach the provider; on stop, the screen may sleep again.
   ctx.state.offs.push(
     fx.handle("haptic", descriptor => playHaptic(ctx, provider, kindOf(descriptor)), {
       runInFast: false
@@ -55,6 +58,7 @@ export function startPlatform(ctx: KernelSlice): void {
     }
   );
 
+  // Keep the screen on from the start, unless the game starts paused.
   if (ctx.config.keepAwake && !lifecycle.isPaused()) setAwake(ctx, provider, true);
 }
 

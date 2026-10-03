@@ -151,13 +151,13 @@ function isMissing(response: FetchResponse, path: string): boolean {
 /**
  * Names the status and the type of a missing file for an error message.
  *
+ * @param status - HTTP status the response carried.
+ * @param contentType - Its `content-type`, when it had one.
+ * @returns The status alone, or the status and the type.
  * @example
  * ```ts
  * missingLabel(200, "text/html"); // "200, text/html"
  * ```
- * @param status - HTTP status the response carried.
- * @param contentType - Its `content-type`, when it had one.
- * @returns The status alone, or the status and the type.
  */
 function missingLabel(status: number, contentType: string | undefined): string {
   return contentType === undefined ? String(status) : `${status}, ${contentType}`;
@@ -528,16 +528,18 @@ function fail(
 
   const detail = failureDetail(error);
 
-  if (detail === undefined)
+  if (detail === undefined) {
     ctx.log.error("assets: bundle failed", { bundle, error: String(error) });
-  else {
-    ctx.log.error("assets: bundle failed", {
-      bundle: detail.bundle,
-      file: detail.file,
-      status: detail.status,
-      contentType: detail.contentType
-    });
+
+    return;
   }
+
+  ctx.log.error("assets: bundle failed", {
+    bundle: detail.bundle,
+    file: detail.file,
+    status: detail.status,
+    contentType: detail.contentType
+  });
 }
 
 /**

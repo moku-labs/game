@@ -1,6 +1,8 @@
 /**
  * @file platform plugin — the handler of the effect kind `haptic`. `anim` builds the descriptor,
  * a node awaits it or a timeline reaches it, and this file hands the kind to the provider.
+ * `HAPTIC_KINDS` is a plain constant `anim` owns: importing it adds no `depends` edge on purpose,
+ * so a game without `anim` (a headless one) still runs `platform`.
  */
 import { HAPTIC_KINDS } from "../anim/timeline/steps";
 import { isDev } from "../flow/doors/dev";
