@@ -34,6 +34,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied, for a component or a tag. A component listener gets the entity and the value; a tag listener gets the entity. A throwing listener is logged; the others still run. |
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
 | `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
+| `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
 | `snapshot(): WorldSnapshot` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
 

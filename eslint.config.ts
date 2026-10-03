@@ -321,7 +321,8 @@ export default [
       "src/plugins/world/*/**/*.ts",
       "src/plugins/renderer/*/**/*.ts",
       "src/plugins/anim/*/**/*.ts",
-      "src/plugins/ui/*/**/*.ts"
+      "src/plugins/ui/*/**/*.ts",
+      "src/plugins/effects/*/**/*.ts"
     ],
     ignores: ["src/**/__tests__/**"],
     rules: {
@@ -353,6 +354,7 @@ export default [
       "src/plugins/world/**/*.ts",
       "src/plugins/renderer/**/*.ts",
       "src/plugins/anim/**/*.ts",
+      "src/plugins/effects/**/*.ts",
       "src/plugins/clock/**/*.ts",
       "tests/integration/merge-game/rules/**/*.ts"
     ],

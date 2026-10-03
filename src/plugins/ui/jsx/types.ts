@@ -15,9 +15,10 @@ import type {
   ProjectionMotion,
   ViewHandle
 } from "../../world/projection/types";
-import type { Entity } from "../../world/types";
+import type { AnyComponentValue, Entity } from "../../world/types";
 import type { BoxValue } from "../components";
 import type { IsFlags, ResolvedStyle, Style } from "../styles/types";
+import type { ElementComponents } from "./intrinsics";
 
 /**
  * One node of an element description, as the JSX runtime builds it. `key` is the third argument
@@ -181,7 +182,9 @@ export type Instance = {
  * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit`
  * is the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform`
  * last written for it. `loop` is the motion of the running `loop` hook, kept apart from
- * `handles`: it never ends, so the exit sweep must not wait for it.
+ * `handles`: it never ends, so the exit sweep must not wait for it. `extras` holds the values of
+ * the `components` prop added last time, by component name; `warnedOwned` the names of the
+ * `components` values the element owns that were already logged.
  */
 export type Element = {
   entity: Entity;
@@ -207,6 +210,8 @@ export type Element = {
   live: boolean;
   entered: boolean;
   dropKey: (() => void) | undefined;
+  extras: ReadonlyMap<string, AnyComponentValue>;
+  warnedOwned: Set<string>;
 };
 
 /**
@@ -348,6 +353,8 @@ export type CommonProps = {
   /** The motion hooks; `undefined` written out stops a running loop, as leaving it out does. */
   motion?: ElementMotion | undefined;
   children?: JsxChild;
+  /** Extra components the element's entity carries, beside the ones the tag writes itself. */
+  components?: ElementComponents;
 };
 
 /**

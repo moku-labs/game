@@ -42,6 +42,7 @@ the cursor shows a hand over a local-state button, and one `input.onKey` listene
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
 | `scroll` | `Shape` with `clip` | `Touchable`, `Scroll` |
+| any tag | `components` adds extra components to the element's entity, see [Extra components](#extra-components) | |
 
 A live element follows its state: a button that becomes disabled loses `Tappable` and
 `LocalWrite` and keeps `Touchable`, so it stops answering the gate; enabled again, it answers.
@@ -71,6 +72,44 @@ renderer: `app.renderer.sync.debug.nineSlice(true)` or `pluginConfigs.renderer.d
 ```tsx
 <panel key="board" style={{ nineSlice: "ui.panel-signboard", padding: 72, debug: true }} />
 ```
+
+## Extra components
+
+Every tag takes `components`: a list of component values added to the element's entity, next to
+the ones the tag writes itself. `ui` knows nothing about what they are: a filter of `effects`, such
+as `Glow` or `Blur`, or a game's own component.
+
+```tsx
+// a glowing claim button; the glow covers the button and its label
+<button key="claim" intent="claim" components={[Glow({ strength: 2 })]} />
+
+// a blurred board behind a popup: the blur sits on the slot that hosts the board
+<stack key="boardSlot" hosts={["board.items"]} style={boardSlot} components={[Blur({ strength: 6 })]} />
+```
+
+A filter covers the entity's subtree, so the blur goes on the slot that hosts the board views, not
+on a `layer`: a `<layer components={[Blur(...)]} />` blurs its own children only.
+
+- Mount: the extras are added after the element's visual and input, before `Box`, so a `Box` hook
+  sees them.
+- Patch: a new name is added; a name whose fields changed (shallow, `Object.is` per field) is set,
+  without the fields its type gives to a plugin; a name that left is removed. The same fields write
+  nothing, so a tween on `Glow.strength` from a motion hook survives an unrelated re-render.
+- Exit: nothing is removed. An exiting element keeps its extras until it despawns.
+- A `scroll` gets them on the container, not on its content.
+- Of two values of one type, the last wins.
+
+The element owns `Transform`, `Box`, `Layer`, `Order`, `Parent`, `Sprite`, `NineSlice`, `Shape`,
+`Text`, `Tappable`, `Touchable`, `LocalWrite`, `Scroll`, `Escapable`, `Exiting`, `Pressed` and
+`PointerOver`. A value of one of these types is dropped, never written, and logged once per
+element and name. Nothing throws: the element keeps its own component and the screen draws.
+
+```tsx
+<button key="claim" intent="claim" components={[Transform({ x: 10 })]} />
+// ctx.log.error("ui:component-owned", { key: "claim", component: "Transform" }); the Transform of the layout stays
+```
+
+An element without a key is logged with its identity as `key`.
 
 ## Draw order
 

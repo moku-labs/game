@@ -216,13 +216,35 @@ describe("sync.filters.set", () => {
     expect(objectOf(mock, entity).filters).toEqual([glow]);
   });
 
-  it("forgets the filters of an entity whose visual left without a successor", async () => {
+  it("keeps the filters of a live entity whose visual left, and hangs them on its next view", async () => {
+    const mock = await started();
+    const glow = new FakeFilter();
+    const entity = spawnSprite(mock);
+
+    mock.modules.sync.pass();
+    mock.api.sync.filters.set(entity, [slot(glow)]);
+    mock.world.ecs.remove(entity, Sprite);
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.has(entity)).toBe(false);
+    expect(mock.ctx.state.sync.filters.get(entity)).toEqual([slot(glow)]);
+
+    mock.modules.sync.pass();
+    mock.world.ecs.add(entity, Sprite({ texture: "board.cell" }));
+    mock.modules.sync.pass();
+
+    expect(objectOf(mock, entity).filters).toEqual([glow]);
+  });
+
+  it("forgets the filters of an entity that despawned without a view", async () => {
     const mock = await started();
     const entity = spawnSprite(mock);
 
     mock.modules.sync.pass();
     mock.api.sync.filters.set(entity, [slot(new FakeFilter())]);
     mock.world.ecs.remove(entity, Sprite);
+    mock.modules.sync.pass();
+    mock.world.ecs.despawn(entity);
     mock.modules.sync.pass();
 
     expect(mock.ctx.state.sync.filters.has(entity)).toBe(false);

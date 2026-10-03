@@ -39,6 +39,22 @@ describe("ecs entities", () => {
     expect(() => world.api.ecs.set(entity, Transform, { x: 1 })).toThrow("[game]");
   });
 
+  it("names the owner of a live entity and none for a stale id, also after its index came back", () => {
+    const world = createMockWorld();
+    const first = world.api.ecs.spawn(other, [Transform()]);
+
+    expect(world.api.ecs.ownerOf(first)).toEqual(other);
+
+    world.api.ecs.despawn(first);
+
+    expect(world.api.ecs.ownerOf(first)).toBeUndefined();
+
+    const second = world.api.ecs.spawn(test, [Transform()]);
+
+    expect(world.api.ecs.ownerOf(first)).toBeUndefined();
+    expect(world.api.ecs.ownerOf(second)).toEqual(test);
+  });
+
   it("despawns exactly the entities of one owner", () => {
     const world = createMockWorld();
     const mine = world.api.ecs.spawn(test, [Transform()]);

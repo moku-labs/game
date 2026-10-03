@@ -2,7 +2,7 @@
  * @file ui/jsx — the reconcile: a description tree diffed by identity into the entities `ui`
  * owns, and the solve that gives every one of them its rect before it is ever drawn.
  */
-import { Tappable, Touchable } from "../../input/components";
+import { PointerOver, Pressed, Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
 import {
   NineSlice,
@@ -13,7 +13,7 @@ import {
   type TransformValue
 } from "../../renderer/components";
 import { Text } from "../../text/components";
-import { Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
+import { Exiting, Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
 import type { AnyComponentType, AnyComponentValue, Entity } from "../../world/types";
 import { Box, Escapable, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
@@ -45,6 +45,35 @@ const VISUALS: readonly AnyComponentType[] = [Sprite, NineSlice, Shape, Text];
  * the answering one and the marker.
  */
 const INPUTS: readonly AnyComponentType[] = [Tappable, Touchable, LocalWrite, Scroll, Escapable];
+
+/**
+ * The names of a list of component types. Its own function, because lint rule L5 refuses a
+ * collection built in a module-scope declaration.
+ *
+ * @param types - The component and tag types.
+ * @returns Their names.
+ */
+function namesOf(types: readonly AnyComponentType[]): ReadonlySet<string> {
+  return new Set(types.map(type => type.componentName));
+}
+
+/**
+ * The components an element writes or reads on its own entity: the reconcile's own, every visual
+ * and input it may trade for another, the exit tag, and the two pointer tags `input` writes. A
+ * value of the `components` prop of one of these types is dropped, never written.
+ */
+export const ELEMENT_OWNED: ReadonlySet<string> = namesOf([
+  Transform,
+  Box,
+  Layer,
+  Order,
+  Parent,
+  ...VISUALS,
+  ...INPUTS,
+  Exiting,
+  Pressed,
+  PointerOver
+]);
 
 /** The style of a scroll's content: one object, so a render never reads as a new style. */
 const CONTENT_STYLE: Style = Object.freeze({ origin: "topLeft" });
@@ -218,11 +247,93 @@ function answerOf(node: DescriptionNode): AnyComponentValue[] {
 }
 
 /**
+ * Creates the extras map of one element. Its own function, because lint rule L5 refuses a
+ * collection built inside an exported declaration.
+ *
+ * @returns An empty map.
+ */
+function extrasMap(): Map<string, AnyComponentValue> {
+  return new Map();
+}
+
+/**
+ * Creates the set of owned names an element already logged. Its own function, because lint rule
+ * L5 refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty set.
+ */
+function nameSet(): Set<string> {
+  return new Set();
+}
+
+/**
+ * The `components` prop of a node as the markup wrote it.
+ *
+ * @param node - The node of this render.
+ * @returns The values, or none when the prop is left out.
+ */
+function listedOf(node: DescriptionNode): readonly AnyComponentValue[] {
+  const listed: unknown = node.props.components;
+
+  return Array.isArray(listed) ? (listed as readonly AnyComponentValue[]) : [];
+}
+
+/**
+ * The extra components of an element: its `components` prop with every value whose type the
+ * element owns dropped. Of two values of one type the last wins.
+ *
+ * @param element - The element, or anything that carries its node.
+ * @param element.node - The node of this render.
+ * @returns The values to carry, by component name.
+ * @example
+ * ```ts
+ * const node = { type: "row", props: { components: [Transform({ x: 10 }), Held()] }, children: [] };
+ * [...extrasOf({ node }).keys()]; // ["Held"]
+ * ```
+ */
+export function extrasOf(element: Pick<Element, "node">): ReadonlyMap<string, AnyComponentValue> {
+  const extras = extrasMap();
+
+  for (const value of listedOf(element.node)) {
+    const name = value.type.componentName;
+
+    if (!ELEMENT_OWNED.has(name)) extras.set(name, value);
+  }
+
+  return extras;
+}
+
+/**
+ * Tells whether two values of one component carry the same fields: shallow, `Object.is` per
+ * field. A tag value is the same as another tag value.
+ *
+ * @param previous - The value of the previous render.
+ * @param next - The value of this render.
+ * @returns True when nothing has to be written.
+ * @example
+ * ```ts
+ * sameFields({ strength: 2 }, { strength: 2 }); // true
+ * ```
+ */
+function sameFields(previous: object | true, next: object | true): boolean {
+  if (previous === true || next === true) return previous === next;
+
+  const before = new Map<string, unknown>(Object.entries(previous));
+  const after = Object.entries(next) as [string, unknown][];
+
+  return (
+    before.size === after.length &&
+    after.every(([field, value]) => before.has(field) && Object.is(before.get(field), value))
+  );
+}
+
+/**
  * Everything an entering element gets at once, so a display object never exists without a rect.
  * A child draws with its parent, at the `zIndex` of its style among its siblings when it sets
- * one; the root element draws in the layer of its root, at its order, and ignores `zIndex`.
+ * one; the root element draws in the layer of its root, at its order, and ignores `zIndex`. The
+ * extras of its `components` prop come after its own visual and input, before `Box`.
  *
- * @param element - The element whose rect and rest pose are known.
+ * @param element - The element whose rect, rest pose and extras are known.
  * @param root - The layer and the order of the root the element belongs to.
  * @param root.layer - The layer the root draws in.
  * @param root.order - The order of the root inside that layer.
@@ -243,8 +354,14 @@ export function componentsOf(
   }
 
   // `Box` is last on purpose: the world applies a queued attach in call order and fires
-  // `onAdded` as it goes, so the hook on `Box` is the moment the whole entity exists.
-  return [...values, ...visualOf(element), ...inputOf(element), Box(element.rect)];
+  // `onAdded` as it goes, so the hook on `Box` is the moment the whole entity exists, extras too.
+  return [
+    ...values,
+    ...visualOf(element),
+    ...inputOf(element),
+    ...element.extras.values(),
+    Box(element.rect)
+  ];
 }
 
 /**
@@ -386,7 +503,9 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
       instance,
       live: false,
       entered: false,
-      dropKey: undefined
+      dropKey: undefined,
+      extras: extrasMap(),
+      warnedOwned: nameSet()
     };
 
     state.elements.set(entity, element);
@@ -489,7 +608,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
    * Writes the visual and input components of a live element again. A visual or an input the
    * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
    * back, and a button that became disabled stops answering the gate. `Scroll` is only ever added:
-   * its offset belongs to the finger, and a new look or a new rect never resets it.
+   * its offset belongs to the finger, and a new look or a new rect never resets it. The extras of
+   * the `components` prop are diffed last.
    *
    * @param element - The element that changed.
    */
@@ -517,6 +637,63 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
         ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
       }
     }
+
+    writeExtras(element);
+  }
+
+  /**
+   * Logs every value of the `components` prop whose type the element owns, once per element and
+   * name. The value is dropped and the element's own component stays as the tag wrote it.
+   *
+   * @param element - The element being mounted or patched.
+   */
+  function warnOwned(element: Element): void {
+    for (const value of listedOf(element.node)) {
+      const component = value.type.componentName;
+
+      if (!ELEMENT_OWNED.has(component) || element.warnedOwned.has(component)) continue;
+
+      element.warnedOwned.add(component);
+      ctx.log.error("ui:component-owned", { key: element.key ?? element.identity, component });
+    }
+  }
+
+  /**
+   * Diffs the extras of a live element against the ones it added last time. A new name is added,
+   * a name whose fields changed is set without the fields its type gives to a plugin, and a name
+   * that left is removed. The same fields write nothing, so a tween a motion hook runs on one of
+   * them survives an unrelated re-render.
+   *
+   * @param element - The live element that changed.
+   */
+  function writeExtras(element: Element): void {
+    if (element.extras.size === 0 && listedOf(element.node).length === 0) return;
+
+    const next = extrasOf(element);
+
+    warnOwned(element);
+
+    for (const [name, previous] of element.extras) {
+      if (!next.has(name)) ecs.remove(element.entity, previous.type);
+    }
+
+    for (const [name, value] of next) {
+      const previous = element.extras.get(name);
+
+      if (previous !== undefined && sameFields(previous.value, value.value)) continue;
+
+      if (previous === undefined || value.value === true || !ecs.has(element.entity, value.type)) {
+        ecs.add(element.entity, value);
+
+        continue;
+      }
+
+      const owned = ecs.typeOf(name)?.owned ?? [];
+
+      ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
+    }
+
+    element.extras = next;
   }
 
   /**
@@ -781,6 +958,8 @@ export function createReconciler(ctx: UiCtx, modules: JsxModules) {
 
       modules.layout.commit(element, parent);
       modules.layout.repose(element, parent, true);
+      element.extras = extrasOf(element);
+      warnOwned(element);
 
       for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
 

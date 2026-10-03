@@ -27,7 +27,6 @@ export function createModules(ctx: WorldCtx): {
   const ecs = createEcsApi(ctx);
   const projection = createProjectionApi(ctx, {
     ecs,
-    ecsInternal: ecs,
     components: WORLD_COMPONENTS
   });
 
@@ -61,6 +60,7 @@ function exposeEcs(ecs: EcsModule, projection: ProjectionModule): EcsApi {
     onRemoved: ecs.onRemoved,
     changed: ecs.changed,
     typeOf: ecs.typeOf,
+    ownerOf: ecs.ownerOf,
     mode: ecs.mode,
     setMode: (mode: WorldMode): void => {
       ecs.setMode(mode);

@@ -3,9 +3,13 @@
  * @file ui plugin — the mistakes a game makes in its markup, each one a compile error whose
  * message names the tag and the prop. Nothing here runs: `tsc` reads it.
  */
+import { component } from "../../../world/ecs/define";
 import { defineComponent } from "../../jsx/component";
 
 const Plain = defineComponent("Plain", { view: () => ({ type: "row", props: {}, children: [] }) });
+
+/** A game's own component, standing in for a filter of `effects`. */
+const Mark = component("Mark", { level: 0 });
 
 /** A button whose intent is a number, not an intent name. */
 export const wrongIntent = (
@@ -69,5 +73,35 @@ export const wrongFit = (
     texture="ui.coin"
     // @ts-expect-error — `fit` is "contain", "cover" or "fill".
     fit="stretch"
+  />
+);
+
+/** A components list with a plain object where a component value belongs. */
+export const plainExtra = (
+  <button
+    key="i"
+    intent="claim"
+    // @ts-expect-error — each value is an AnyComponentValue, built by calling a component.
+    components={[{ level: 2 }]}
+  />
+);
+
+/** A components list with the component itself, not a value of it. */
+export const factoryExtra = (
+  <button
+    key="j"
+    intent="claim"
+    // @ts-expect-error — `Mark` is the component, not an AnyComponentValue: write `Mark({ level: 2 })`.
+    components={[Mark]}
+  />
+);
+
+/** A components prop that names a filter instead of listing values. */
+export const namedExtra = (
+  <button
+    key="k"
+    intent="claim"
+    // @ts-expect-error — `components` is an ElementComponents, not a name.
+    components="glow"
   />
 );

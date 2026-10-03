@@ -68,6 +68,8 @@ function elementOf(patch: Partial<Element>): Element {
     live: true,
     entered: true,
     dropKey: undefined,
+    extras: new Map(),
+    warnedOwned: new Set(),
     ...patch
   };
 }

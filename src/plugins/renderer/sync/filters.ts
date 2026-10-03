@@ -3,6 +3,7 @@
  * cost. The renderer never creates, writes or destroys a filter: it keeps the slot list per
  * entity, assigns the instances to the view, and takes them off when it lets the object go.
  */
+import type { EcsApi } from "../../world/ecs/types";
 import type { Entity } from "../../world/types";
 import type { PixiContainer, PixiFilter } from "../types";
 import type { FilterSlot, SyncState, View } from "./types";
@@ -106,14 +107,16 @@ export function moveFilters(state: SyncState, entity: Entity, view: View): void 
 }
 
 /**
- * Forgets the filters of an entity whose view left. An entity that got another visual in the same
- * frame, as a `ui` element that swaps its shape for a nine-slice, keeps them for its new view.
+ * Forgets the filters of an entity whose view left, only when the entity itself is gone. A live
+ * entity keeps them for its next view, in this frame, as a `ui` element that swaps its shape for a
+ * nine-slice, or in a later one.
  *
  * @param state - The sync branch of the plugin state.
+ * @param ecs - The world's ecs, asked whether the entity still lives.
  * @param entity - An entity of the pass's removed set.
  */
-export function forgetLeft(state: SyncState, entity: Entity): void {
-  if (!state.added.has(entity)) state.filters.delete(entity);
+export function forgetLeft(state: SyncState, ecs: Pick<EcsApi, "ownerOf">, entity: Entity): void {
+  if (ecs.ownerOf(entity) === undefined) state.filters.delete(entity);
 }
 
 /**

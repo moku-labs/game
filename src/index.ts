@@ -69,6 +69,10 @@
  * | audio | volumes | undefined, the buses stay at `buses` |
  * | audio | context | undefined, the real AudioContext |
  * | audio | journal | 0, no started sound is kept |
+ * | effects | maxParticles | 3000, live particles above which one dev warning fires per crossing |
+ * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
+ * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |
+ * | effects | blur | { quality: 2, phoneResolution: 0.5 }, what a Blur with quality 0 and resolution 0 resolves to |
  *
  * Subpaths next to the root:
  *
@@ -105,8 +109,15 @@ import {
 import { animFor } from "./plugins/anim/bind";
 import { bundlesFor } from "./plugins/assets/bundles";
 import { audioFor } from "./plugins/audio/descriptors";
+import { effectsFor } from "./plugins/effects/bind";
 import { flowFor } from "./plugins/flow/feature";
-import type { BundlesOf, GameTypes, SceneIdOf, TextStylesOf } from "./plugins/flow/types";
+import type {
+  BundlesOf,
+  EmitterIdOf,
+  GameTypes,
+  SceneIdOf,
+  TextStylesOf
+} from "./plugins/flow/types";
 import { i18nFor } from "./plugins/i18n/tr";
 import { componentsFor } from "./plugins/renderer/components";
 import { scenesFor } from "./plugins/scenes/define";
@@ -157,7 +168,8 @@ export const createPlugin = framework.createPlugin;
  * only spreads them, so the kit's type is inferred and never written by hand. At run time these
  * are the same functions and component objects the plugins export.
  *
- * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles` and `strings`.
+ * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`
+ *   and `emitters`.
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
@@ -176,14 +188,15 @@ export function defineGame<Types extends GameTypes>() {
     ...i18nFor<Types["strings"]>(),
     ...textFor<TextStylesOf<Types>, Types["assets"]>(),
     ...uiFor<Types["assets"], TextStylesOf<Types>, Extract<keyof Types["strings"], string>>(),
-    ...audioFor<Types["assets"]>()
+    ...audioFor<Types["assets"]>(),
+    ...effectsFor<Types["assets"], EmitterIdOf<Types>>()
   };
 }
 
 // ─── Plugin sets ──────────────────────────────────────────────
 /**
  * The screen plugins, in dependency order. A game with a screen spreads them into `plugins`;
- * a headless test leaves them out. V2: `world`, `renderer`, `input`, `assets`, `scenes`. V3 appends `anim`, `i18n`, `text`, `ui`; `audio` stays opt-in: `[...screen, audioPlugin]`.
+ * a headless test leaves them out. V2: `world`, `renderer`, `input`, `assets`, `scenes`. V3 appends `anim`, `i18n`, `text`, `ui`; `audio` and `effects` stay opt-in: `[...screen, audioPlugin, effectsPlugin]`.
  *
  * @example
  * ```ts
@@ -286,3 +299,16 @@ export { resolve } from "./plugins/ui/styles/resolve";
 export { defineTokens } from "./plugins/ui/styles/tokens";
 // audio: the music descriptor (sfx is anim's)
 export { music } from "./plugins/audio/descriptors";
+// effects: particles and filters as data on entities
+export {
+  Alpha,
+  Blur,
+  ColorMatrix,
+  Displacement,
+  Glow,
+  Noise,
+  Outline
+} from "./plugins/effects/filters/builtins";
+export { defineFilter } from "./plugins/effects/filters/define";
+export { Emitter } from "./plugins/effects/particles/component";
+export { defineEmitter } from "./plugins/effects/particles/define";

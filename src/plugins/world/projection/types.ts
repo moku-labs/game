@@ -9,7 +9,6 @@ import type {
   AnyComponentValue,
   ComponentType,
   EcsApi,
-  EcsInternal,
   Entity,
   Owner,
   TagType
@@ -545,7 +544,6 @@ export type WorldComponents = {
  */
 export type ProjectionDeps = {
   ecs: EcsApi;
-  ecsInternal: EcsInternal;
   components: WorldComponents;
 };
 

@@ -6,6 +6,7 @@
  */
 import { assetsSource } from "../../assets/inspect";
 import { soundsSource } from "../../audio/inspect";
+import { effectsSource } from "../../effects/inspect";
 import { modelSource } from "../../model/inspect";
 import { renderSource } from "../../renderer/inspect";
 import { rectSource, uiSource } from "../../ui/inspect";
@@ -43,6 +44,7 @@ export const sources = Object.freeze({
   rect: rectSource,
   render: renderSource,
   sounds: soundsSource,
+  effects: effectsSource,
   assets: assetsSource,
   log: logSource
 });

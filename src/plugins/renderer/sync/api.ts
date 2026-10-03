@@ -301,16 +301,23 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * One pass: removed, layers, added, changed, invalidated. An entity that left takes its filter
-   * slots with it; one that swapped its visual in this frame keeps them.
+   * One pass: removed, layers, added, changed, invalidated. A despawned entity takes its filter
+   * slots with it, also when its view left in an earlier pass; a live one keeps them for its next
+   * view.
    */
   const pass = (): void => {
     for (const entity of state.removed) {
       guard(entity, () => dropView(sctx, entity));
-      forgetLeft(state, entity);
+      forgetLeft(state, ctx.deps.world.ecs, entity);
     }
 
     state.removed.clear();
+
+    // An entity whose visual left in an earlier pass and that despawned since has no view to
+    // remove any more; its entry goes here, so no despawned entity keeps one.
+    for (const entity of state.filters.keys()) {
+      if (!state.views.has(entity)) forgetLeft(state, ctx.deps.world.ecs, entity);
+    }
 
     syncLayers(sctx);
 
