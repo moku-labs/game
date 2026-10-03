@@ -1,27 +1,33 @@
 /**
  * @file effects/filters — the GLSL twin of the `Glow` fragment, the same math as `glow-wgsl.ts`
- * for the WebGL fallback: 64 probes on a golden-angle spiral over the disc of radius `distance`,
- * each weighted by `(1 − r / distance)²`, every probe clamped to the input frame, and the source
- * drawn over the premultiplied halo `color × coverage × strength × alpha`.
+ * for the WebGL fallback: 64 to 256 probes, by radius in physical pixels, on a golden-angle
+ * spiral over the disc of radius `distance`, each weighted by `(1 − r / distance)²`, every probe
+ * clamped to the input frame, and the source drawn over the premultiplied halo
+ * `color × coverage × strength × alpha`. The loop bound stays the constant 256, as GLSL ES
+ * wants, and a `break` leaves at the count.
  */
 
 /**
  * The GLSL ES 3.0 fragment body of `Glow`. Reads the uniforms `strength`, `distance`, `color` and
  * `alpha` under their bare names.
  */
-export const GLOW_GLSL = /* glsl */ `const int GLOW_PROBES = 64;
+export const GLOW_GLSL = /* glsl */ `const int GLOW_MAX_PROBES = 256;
 const float GLOW_TURN_COS = -0.7373688780783197;
 const float GLOW_TURN_SIN = 0.6754902942615238;
 
 void main() {
   vec4 source = texture(uTexture, vTextureCoord);
   vec2 reach = uInputSize.zw * distance;
+  float radiusPx = distance * uInputPixel.x * uInputSize.z;
+  int probes = clamp(int(ceil(radiusPx * radiusPx * 0.25)), 64, GLOW_MAX_PROBES);
   vec2 turn = vec2(1.0, 0.0);
   float coverage = 0.0;
   float weights = 0.0;
 
-  for (int probeIndex = 0; probeIndex < GLOW_PROBES; probeIndex++) {
-    float along = sqrt((float(probeIndex) + 0.5) / float(GLOW_PROBES));
+  for (int probeIndex = 0; probeIndex < GLOW_MAX_PROBES; probeIndex++) {
+    if (probeIndex >= probes) break;
+
+    float along = sqrt((float(probeIndex) + 0.5) / float(probes));
     float weight = (1.0 - along) * (1.0 - along);
     vec2 probe = clamp(vTextureCoord + turn * reach * along, uInputClamp.xy, uInputClamp.zw);
 

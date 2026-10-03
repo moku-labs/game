@@ -3,6 +3,8 @@ import { createApp } from "../../../../index";
 import { flowFor } from "../../feature";
 import { defineFlow, defineNode, exit, to, type } from "../../runner/define";
 
+type Empty = Record<string, never>;
+
 // The five author mistakes of the design context, proven in spikes/p3-graph-types/mistakes.ts.
 // Each `@ts-expect-error` fails the build in both directions: the mistake must error, and a
 // correct line under one of them would be reported as an unused directive.
@@ -139,8 +141,8 @@ describe("flow graph types", () => {
 describe("scene ids per game", () => {
   it("refuses a scene id the game did not declare", () => {
     const { defineNode: typedNode } = flowFor<{
-      player: {};
-      session: {};
+      player: Empty;
+      session: Empty;
       scenes: "home" | "board";
     }>();
 
@@ -152,7 +154,7 @@ describe("scene ids per game", () => {
   });
 
   it("accepts any string when the game declares no scenes", () => {
-    const { defineNode: looseNode } = flowFor<{ player: {}; session: {} }>();
+    const { defineNode: looseNode } = flowFor<{ player: Empty; session: Empty }>();
 
     expectTypeOf(looseNode({ scene: "anything", rest: true, outcomes: {} })).toHaveProperty(
       "scene"
