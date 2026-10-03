@@ -120,7 +120,7 @@ One system, `effects:filters`, phase `sync`, in every world mode. It walks the v
 | Key | Default | Meaning |
 |---|---|---|
 | `maxParticles` | `3000` | Live particles over all instances above which `effects:particle-budget` warns once per crossing |
-| `maxPasses` | `24` | Render passes per frame above which `effects:pass-budget` warns once per crossing. Checked only while a filtered view exists: with none, the frame is at most one pass under any budget |
+| `maxPasses` | `24` | Render passes per frame, `renderer.sync.renderPasses()`, above which `effects:pass-budget` warns once per crossing. Read once per frame and only while a filtered view exists: with none, the frame is at most one pass under any budget |
 | `phone` | `"auto"` | Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart` |
 | `blur` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to. Shallow merge: a game that sets `blur` gives both fields |
 
@@ -130,7 +130,7 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 
 | Member | Behaviour |
 |---|---|
-| `stats()` | `{ particles, emitters, filters, renderPasses }`, a fresh object: live particles, instances plus orphans, filter instances over every view, and `renderer.stats().renderPasses` read at call time. Headless every number is 0 |
+| `stats()` | `{ particles, emitters, filters, renderPasses }`, a fresh object: live particles, instances plus orphans, filter instances over every view, and `renderer.sync.renderPasses()` read at call time. Headless every number is 0 |
 
 ## Typed ids
 
@@ -158,4 +158,4 @@ None. Nothing above `effects` needs to know a particle died or a filter was assi
 
 ## Dependencies
 
-`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.device()`, `sync.filters.set`, `viewport.size()`, `stats()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)` and the `assets:bundle-unloaded` hook). No package dependency: every Pixi class comes from `renderer.host.pixi()`.
+`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.device()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)` and the `assets:bundle-unloaded` hook). No package dependency: every Pixi class comes from `renderer.host.pixi()`.

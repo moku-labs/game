@@ -46,7 +46,7 @@ type FrameRegistration = { phase: Phase; callback: FrameCallback };
 export type FakeRendererState = {
   /** `host.ready()`. */
   ready: boolean;
-  /** `stats().renderPasses`. */
+  /** `sync.renderPasses()`. */
   passes: number;
   /** `host.device()`. */
   device: GPUDevice | undefined;
@@ -197,20 +197,15 @@ export function createMockEffects(
           renderer.sets.push({ entity, slots });
         }
       },
+      renderPasses: (): number => renderer.passes,
       displayOf: (entity: Entity): unknown => (renderer.displays.has(entity) ? {} : undefined)
     },
     viewport: {
       size: () => ({ ...renderer.viewport, scale: 1, orientation: "portrait" })
     },
-    stats: () => ({
-      fps: 0,
-      frameMs: 0,
-      textures: 0,
-      textureMb: 0,
-      views: 0,
-      pooled: 0,
-      renderPasses: renderer.passes
-    })
+    stats: (): never => {
+      throw new Error("effects reads renderer.sync.renderPasses(), never renderer.stats()");
+    }
   } as unknown as RendererApi;
 
   const assetsApi = {

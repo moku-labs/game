@@ -31,6 +31,7 @@ describe("renderer api", () => {
       "filters",
       "fonts",
       "hitTest",
+      "renderPasses",
       "textures"
     ]);
     expect(Object.keys(mock.api.sync.textures).toSorted()).toEqual([

@@ -396,7 +396,7 @@ export type FiltersApi = {
    * // `effects`: Glow appeared on a button; one instance per view and kind, one pass per apply.
    * const renderer = ctx.require(rendererPlugin);
    * renderer.sync.filters.set(button, [{ filter: glow, passes: 1 }]);
-   * renderer.stats().renderPasses; // 3: the frame, the button's content pass, one glow apply
+   * renderer.sync.renderPasses(); // 3: the frame, the button's content pass, one glow apply
    * renderer.sync.filters.set(button, []); // the Glow component left: back to 1
    * ```
    */
@@ -551,6 +551,22 @@ export type SyncApi = {
   filters: FiltersApi;
 
   /**
+   * The render passes of the frame, the number `stats().renderPasses` reports: 1 for the frame,
+   * plus, for every view in the tree with an enabled filter, 1 for its content and the passes of
+   * its enabled slots. Read from the slots at call time, with no allocation. Inert: 0.
+   *
+   * @returns The render passes.
+   * @example
+   * ```ts
+   * // `effects` checks its pass budget once per frame while a view carries a filter.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.filters.set(button, [{ filter: glow, passes: 1 }]);
+   * renderer.sync.renderPasses(); // 3: the frame, the button's content pass, one glow apply
+   * ```
+   */
+  renderPasses(): number;
+
+  /**
    * The Pixi object of an entity, for debugging and for the plugins that draw their own thing.
    *
    * @param entity - The entity to ask about.
@@ -600,19 +616,17 @@ export type SyncInternal = {
   root(): PixiContainer | undefined;
 
   /**
-   * How many display objects `sync` holds and what its filters cost, for the counters of
-   * `monitor`.
+   * How many display objects `sync` holds, for the counters of `monitor`.
    *
-   * @returns The views of entities, the objects waiting in the pools, and the render passes.
+   * @returns The views of entities and the objects waiting in the pools.
    */
   counts(): SyncCounts;
 };
 
 /**
- * The display objects `sync` holds, views of entities and pooled objects, and the render passes
- * its filter slots cost.
+ * The display objects `sync` holds: views of entities and pooled objects.
  */
-export type SyncCounts = { views: number; pooled: number; renderPasses: number };
+export type SyncCounts = { views: number; pooled: number };
 
 /**
  * sync module state.

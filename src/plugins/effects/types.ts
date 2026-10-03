@@ -89,7 +89,7 @@ export type EffectsStats = {
   emitters: number;
   /** Filter instances over every view. */
   filters: number;
-  /** `renderer.stats().renderPasses`, read at call time. */
+  /** `renderer.sync.renderPasses()`, read at call time. */
   renderPasses: number;
 };
 

@@ -77,6 +77,7 @@ function exposeSync(sync: SyncModule): SyncApi {
     fonts: sync.fonts,
     debug: sync.debug,
     filters: sync.filters,
+    renderPasses: sync.renderPasses,
     displayOf: sync.displayOf
   };
 }
