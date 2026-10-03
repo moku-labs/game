@@ -30,6 +30,12 @@ export type HostState = {
    * so a restore reuses the installed classes; `undefined` in a production build.
    */
   uninstallCounting: (() => void) | undefined;
+  /**
+   * Swaps Pixi's own bitmap text pipe back in. Set once per host state when the renderer's pipe,
+   * whose SDF shader applies the alpha once, went into Pixi's registry, so a restore reuses it;
+   * `undefined` while inert and when the module lacked the pieces.
+   */
+  uninstallSdfText: (() => void) | undefined;
 };
 
 /**

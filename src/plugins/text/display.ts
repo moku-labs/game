@@ -1,12 +1,10 @@
 /**
  * @file text plugin — the screen half: the fonts handed to the renderer, and the display adapter
  * that turns one `Text` into one Pixi container of `BitmapText` runs, their shadows and icon
- * sprites, each at the alpha that draws at `Text.alpha`. Pixi is never imported here: the classes
- * come from the module the renderer loaded.
+ * sprites. Pixi is never imported here: the classes come from the module the renderer loaded.
  */
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiSprite, PixiTexture } from "../renderer/types";
-import { msdfAlpha, msdfOpacity } from "./alpha";
 import { fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
 import { layoutFor, markDirty, styleOf, warnFor } from "./resolve";
 import type {
@@ -255,8 +253,8 @@ function buildGlyphs(
 }
 
 /**
- * Builds the shadow of one glyph run: the same glyphs in white, tinted with the shadow colour,
- * moved by its offset. Its alpha is written with the rest of the label, by `paintAlpha`.
+ * Builds the shadow of one glyph run: the same glyphs in white, tinted with the shadow colour, at
+ * the shadow alpha, moved by its offset.
  *
  * @param pixi - The Pixi module the renderer loaded.
  * @param run - The glyphs that cast the shadow.
@@ -275,6 +273,7 @@ function buildShadow(
   const copy = buildGlyphs(pixi, run, style, WHITE, { x: at.x + shadow.dx, y: at.y + shadow.dy });
 
   copy.tint = shadow.color;
+  copy.alpha = shadow.alpha;
 
   return copy;
 }
@@ -586,98 +585,10 @@ function redraw(
 }
 
 /**
- * The alpha to hand one glyph object so it draws at its own alpha, faded once by the `Text`. A
- * plain bitmap font takes the product as it is. Pixi 8.21 draws a distance-field font with a
- * shader that applies the alpha twice, so such an object gets the inverse of that shader. Its own
- * alpha keeps the look Pixi gives it at a `Text.alpha` of 1.
- *
- * @param field - True when the font of the run names a distance field.
- * @param alpha - The alpha of the `Text`.
- * @param own - The alpha of the object itself: the shadow alpha, or 1.
- * @param color - The colour the object shows: the fill of the run, or the tint of a white copy.
- * @returns The alpha of the object.
- * @example
- * ```ts
- * glyphAlpha(true, 0.25, 1, 0x00_00_00); // 0.5: the MSDF shader draws 0.5 × 0.5 for black
- * ```
- */
-function glyphAlpha(field: boolean, alpha: number, own: number, color: number): number {
-  if (!field || alpha === 1) return alpha * own;
-
-  return msdfAlpha(alpha * msdfOpacity(own, color), color);
-}
-
-/**
- * The alpha of every object of one glyph run, in the order `buildRun` adds them: its shadow, the
- * copies of its rings, then the run itself.
- *
- * @param ctx - Domain context of the text plugin.
- * @param style - The style of the label.
- * @param run - The glyph run.
- * @param alpha - The alpha of the `Text`.
- * @returns One alpha per object.
- */
-function glyphAlphas(ctx: TextCtx, style: TextStyle, run: TextRun, alpha: number): number[] {
-  const field = ctx.state.tables.get(fontOfRun(style, run))?.distanceField === true;
-  const fill = run.color ?? style.fill;
-  const shadow = style.shadow;
-  const alphas = shadow === undefined ? [] : [glyphAlpha(field, alpha, shadow.alpha, shadow.color)];
-
-  for (const ring of ringsOf(style, run, fill)) {
-    const copy = glyphAlpha(field, alpha, 1, ring.color);
-
-    alphas.push(...Array.from({ length: copiesFor(ring.width) }, () => copy));
-  }
-
-  alphas.push(glyphAlpha(field, alpha, 1, fill));
-
-  return alphas;
-}
-
-/**
- * The alpha of every object of a label, in the order `fill` added them: an icon takes the alpha of
- * the `Text` as it is, a glyph run what `glyphAlphas` answers.
- *
- * @param ctx - Domain context of the text plugin.
- * @param label - The style and the laid-out block the container was filled from.
- * @param alpha - The alpha of the `Text`.
- * @returns One alpha per child of the container.
- */
-function labelAlphas(ctx: TextCtx, label: DrawnLabel, alpha: number): number[] {
-  const alphas: number[] = [];
-
-  for (const line of label.layout.lines) {
-    for (const run of line.runs) {
-      if (run.kind === "icon") alphas.push(alpha);
-      else alphas.push(...glyphAlphas(ctx, label.style, run, alpha));
-    }
-  }
-
-  return alphas;
-}
-
-/**
- * Writes the alpha of a `Text` on every object of its label. The container stays at 1: no single
- * alpha above the runs is right for runs that need different ones.
- *
- * @param ctx - Domain context of the text plugin.
- * @param container - The container of this label.
- * @param alpha - The alpha of the `Text`.
- */
-function paintAlpha(ctx: TextCtx, container: PixiContainer, alpha: number): void {
-  const label = ctx.state.drawn.get(container);
-
-  if (label === undefined) return;
-
-  const alphas = labelAlphas(ctx, label, alpha);
-
-  for (const [index, child] of container.children.entries()) child.alpha = alphas[index] ?? alpha;
-}
-
-/**
  * How a `Text` becomes Pixi objects. The renderer parents, orders and frees the container like a
  * sprite and never calls any of this while it is inert, so a headless run builds nothing. The
- * `alpha` of the value is written on every object of the label on every create and update.
+ * `alpha` of the value is the alpha of the container, written on every create and update; the
+ * renderer's SDF shader applies it once, so it draws at its value.
  *
  * @param ctx - Domain context of the text plugin.
  * @returns The adapter `renderer.sync.displays.provide` takes.
@@ -691,8 +602,8 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
 
       const container = new pixi.Container();
 
+      container.alpha = value.alpha;
       fill(ctx, pixi, container, value, labelOf(ctx, value));
-      paintAlpha(ctx, container, value.alpha);
 
       return container;
     },
@@ -704,17 +615,18 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
 
       const container = asContainer(object);
 
+      // The alpha fades the container, so a tween on it never touches the runs.
+      container.alpha = next.alpha;
+
       if (
-        previous.resolved !== next.resolved ||
-        previous.style !== next.style ||
-        !samePoint(previous.anchor, next.anchor)
+        previous.resolved === next.resolved &&
+        previous.style === next.style &&
+        samePoint(previous.anchor, next.anchor)
       ) {
-        redraw(ctx, pixi, container, previous, next);
+        return;
       }
 
-      // Written on every update: a tween step rebuilds no run, and a font that just landed may
-      // name a distance field.
-      paintAlpha(ctx, container, next.alpha);
+      redraw(ctx, pixi, container, previous, next);
     },
 
     destroy: (object): void => {

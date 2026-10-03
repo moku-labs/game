@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { layoutRuns, measureRun, parseAdvances } from "../../measure";
 import type { AdvanceTable, LayoutOptions, Run, TextRun, TextStyle, Warn } from "../../types";
-import { latinFontJson, miniFontJson, miniFontMsdfXml, miniFontXml } from "../fixtures/mini-font";
+import { latinFontJson, miniFontJson, miniFontXml } from "../fixtures/mini-font";
 
 // ---------------------------------------------------------------------------
 // The measurement is pure: runs, a style and the advance tables in, lines and
@@ -73,21 +73,6 @@ describe("parseAdvances", () => {
 
     expect(table.advances.get(">")).toBe(27);
     expect(table.advances.get("A")).toBe(30);
-  });
-
-  it("reads whether the file names a distance field, as Pixi decides its shader", () => {
-    expect(parseAdvances(miniFontXml, "ui.font-body").distanceField).toBe(false);
-    expect(parseAdvances(miniFontJson, "ui.font-body").distanceField).toBe(false);
-    expect(parseAdvances(miniFontMsdfXml, "ui.font-body").distanceField).toBe(true);
-    expect(parseAdvances(latinFontJson, "ui.font-body").distanceField).toBe(true);
-  });
-
-  it("reads a distance field of type none as no distance field", () => {
-    const xml = miniFontMsdfXml.replace('fieldType="msdf"', 'fieldType="none"');
-    const json = latinFontJson.replace('"fieldType":"msdf"', '"fieldType":"none"');
-
-    expect(parseAdvances(xml, "ui.font-body").distanceField).toBe(false);
-    expect(parseAdvances(json, "ui.font-body").distanceField).toBe(false);
   });
 
   it("refuses a file that is neither format", () => {

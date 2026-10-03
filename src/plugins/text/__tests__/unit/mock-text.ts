@@ -430,7 +430,7 @@ function createMockLog(): Log.LogApi {
 
 /** The config defaults, as `index.ts` declares them. */
 function defaultConfig(): Config {
-  return { fonts: { body: "ui.font-body", digits: "ui.font-digits" }, missingGlyph: "□" };
+  return { fonts: { body: "ui.font-body", digits: "ui.font-digits" } };
 }
 
 /**

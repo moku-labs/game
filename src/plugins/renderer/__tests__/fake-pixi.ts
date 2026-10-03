@@ -809,6 +809,149 @@ export class FakeGpuEncoderSystem {
   }
 }
 
+/** Pixi's `ExtensionType.WebGLPipes`: the bitmap text pipe registers here and under WebGPU. */
+export const WEBGL_PIPES = "webgl-pipes";
+
+/** Pixi's `ExtensionType.WebGPUPipes`: the bitmap text pipe registers here and under WebGL. */
+export const WEBGPU_PIPES = "webgpu-pipes";
+
+/** The fake of Pixi's `Matrix`: the identity. */
+export class FakeMatrix {
+  public a = 1;
+  public b = 0;
+  public c = 0;
+  public d = 1;
+  public tx = 0;
+  public ty = 0;
+}
+
+/** What a fake shader is built from: Pixi's `Shader` options the renderer passes. */
+export type FakeShaderOptions = { gpuProgram?: unknown; resources?: Record<string, unknown> };
+
+/** The fake of Pixi's `Shader`: the program and the resources it was built with. */
+export class FakeShader {
+  public gpuProgram: unknown;
+  public resources: Record<string, unknown>;
+
+  public constructor(options: FakeShaderOptions) {
+    this.gpuProgram = options.gpuProgram;
+    this.resources = options.resources ?? {};
+  }
+}
+
+/** One stage of a high-shader bit: the WGSL it adds at each hook. */
+export type FakeShaderStage = { header?: string; start?: string; main?: string; end?: string };
+
+/** A bit of Pixi's high shader: a name and the WGSL it adds to each stage. */
+export type FakeShaderBit = { name: string; vertex?: FakeShaderStage; fragment?: FakeShaderStage };
+
+/** The fake of Pixi's `colorBit`: the vertex colour, premultiplied. */
+export const fakeColorBit: FakeShaderBit = {
+  name: "color-bit",
+  vertex: { main: "vColor *= vec4<f32>(aColor.rgb * aColor.a, aColor.a);" }
+};
+
+/** The fake of Pixi's `roundPixelsBit`. */
+export const fakeRoundPixelsBit: FakeShaderBit = {
+  name: "round-pixels-bit",
+  vertex: { header: "fn roundPixels(position: vec2<f32>, targetSize: vec2<f32>) -> vec2<f32> {}" }
+};
+
+/** The fake of Pixi's `mSDFBit`: the coverage function of a distance-field glyph. */
+export const fakeMSDFBit: FakeShaderBit = {
+  name: "msdf-bit",
+  fragment: {
+    header:
+      "fn calculateMSDFAlpha(msdfColor:vec4<f32>, shapeColor:vec4<f32>, distance:f32) -> f32 {}"
+  }
+};
+
+/** The fake of Pixi 8.21's `localUniformMSDFBit`, with the step that hands over `vColor`. */
+export const fakeLocalUniformMSDFBit = {
+  name: "local-uniform-msdf-bit",
+  vertex: {
+    header: "struct LocalUniforms { uColor:vec4<f32>, }",
+    main: "vColor *= localUniforms.uColor;",
+    end: "if(localUniforms.uRound == 1) {}"
+  },
+  fragment: {
+    header: "struct LocalUniforms { uColor:vec4<f32>, }",
+    main: "outColor = vec4<f32>(calculateMSDFAlpha(outColor, vColor, localUniforms.uDistance));"
+  }
+};
+
+/** The texture batch bits made so far, one per texture count, as Pixi caches them. */
+const textureBatchBits = new Map<number, FakeShaderBit>();
+
+/**
+ * The fake of Pixi's `generateTextureBatchBit`: one bit per texture count, made once.
+ *
+ * @param maxTextures - How many textures a batch samples.
+ * @returns The bit of that count.
+ */
+export function fakeTextureBatchBit(maxTextures: number): FakeShaderBit {
+  const made = textureBatchBits.get(maxTextures) ?? {
+    name: "texture-batch-bit",
+    fragment: { main: `outColor = textureSample(${String(maxTextures)});` }
+  };
+
+  textureBatchBits.set(maxTextures, made);
+
+  return made;
+}
+
+/** What a fake high-shader compile was asked for. */
+export type FakeCompile = { name: string; bits: FakeShaderBit[] };
+
+/** The fake of Pixi's `compileHighShaderGpuProgram`: it records every compile. */
+export const fakeShaderCompiler = {
+  /** Every compile since the fake module was made. */
+  compiled: [] as FakeCompile[],
+
+  /**
+   * Compiles a program out of bits, as Pixi's `compileHighShaderGpuProgram` does.
+   *
+   * @param options - The name of the program and its bits.
+   * @returns A program that keeps the options.
+   */
+  compile(options: FakeCompile): FakeGpuProgram {
+    fakeShaderCompiler.compiled.push(options);
+
+    return new FakeGpuProgram(options);
+  }
+};
+
+/** What a pipe reads of its renderer: its backend name and its texture limit. */
+export type FakePipeRenderer = {
+  name: "webgpu" | "webgl";
+  limits: { maxBatchableTextures: number };
+};
+
+/** The shader Pixi's own pipe hands out: its `SdfShader`, which applies the alpha twice. */
+export class FakeSdfShader extends FakeShader {
+  public readonly kind = "pixi-sdf";
+}
+
+/** The fake of Pixi's `BitmapTextPipe`: one per renderer, under the same name for both backends. */
+export class FakeBitmapTextPipe {
+  public static extension = { type: [WEBGL_PIPES, WEBGPU_PIPES], name: "bitmapText" };
+
+  protected _renderer: FakePipeRenderer;
+
+  public constructor(renderer: FakePipeRenderer) {
+    this._renderer = renderer;
+  }
+
+  /**
+   * The shader of a distance-field font, asked once per text the pipe draws.
+   *
+   * @returns Pixi's own SDF shader.
+   */
+  protected getSdfShader(): FakeShader {
+    return new FakeSdfShader({ resources: { localUniforms: new FakeUniformGroup({}) } });
+  }
+}
+
 /** A class Pixi's extension registry takes: it carries its `extension` metadata. */
 export type FakeExtensionClass = { extension: { type: readonly string[]; name: string } };
 
@@ -881,10 +1024,18 @@ export const fakeExtensions: FakeExtensions = {
     return fakeExtensions.lists.get(type)?.find(entry => entry.name === name)?.ref;
   },
 
-  /** Empties the registry and registers Pixi's own three draw classes, as importing Pixi does. */
+  /**
+   * Empties the registry and registers Pixi's own three draw classes and its bitmap text pipe, as
+   * importing Pixi does.
+   */
   reset(): void {
     fakeExtensions.lists.clear();
-    fakeExtensions.add(FakeGpuBatchAdaptor, FakeGpuGraphicsAdaptor, FakeGpuEncoderSystem);
+    fakeExtensions.add(
+      FakeGpuBatchAdaptor,
+      FakeGpuGraphicsAdaptor,
+      FakeGpuEncoderSystem,
+      FakeBitmapTextPipe
+    );
   }
 };
 
@@ -991,6 +1142,8 @@ export class FakeApplication {
   public initOptions: Record<string, unknown> | undefined;
   /** The draw classes a WebGPU application took from the registry at init; none on WebGL. */
   public drawClasses: FakeDrawClasses | undefined;
+  /** The bitmap text pipe the renderer took from the registry at init, for its backend. */
+  public textPipe: FakeExtensionClass | undefined;
   public destroyed = false;
   public destroyArgs: unknown[] = [];
   private loseDevice: ((info: { reason: string }) => void) | undefined;
@@ -1065,6 +1218,10 @@ export class FakeApplication {
       };
     }
 
+    this.textPipe = fakeExtensions.named(
+      FakeApplication.settings.kind === "webgpu" ? WEBGPU_PIPES : WEBGL_PIPES,
+      "bitmapText"
+    );
     this.renderer = renderer;
   }
 
@@ -1130,6 +1287,7 @@ export function createFakePixi(
   FakeBitmapFont.made.length = 0;
   fakeCache.entries.clear();
   fakeExtensions.reset();
+  fakeShaderCompiler.compiled.length = 0;
 
   const module = {
     Application: FakeApplication,
@@ -1157,7 +1315,16 @@ export function createFakePixi(
     extensions: fakeExtensions,
     GpuBatchAdaptor: FakeGpuBatchAdaptor,
     GpuGraphicsAdaptor: FakeGpuGraphicsAdaptor,
-    GpuEncoderSystem: FakeGpuEncoderSystem
+    GpuEncoderSystem: FakeGpuEncoderSystem,
+    BitmapTextPipe: FakeBitmapTextPipe,
+    Shader: FakeShader,
+    Matrix: FakeMatrix,
+    compileHighShaderGpuProgram: fakeShaderCompiler.compile,
+    colorBit: fakeColorBit,
+    generateTextureBatchBit: fakeTextureBatchBit,
+    localUniformMSDFBit: fakeLocalUniformMSDFBit,
+    mSDFBit: fakeMSDFBit,
+    roundPixelsBit: fakeRoundPixelsBit
   } as unknown as PixiModule;
 
   return {
