@@ -791,7 +791,6 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `i18n` | `fallback` | `string` | `"en"` | The locale a missing key is read from before it is reported missing |
 | `i18n` | `locales` | `Record<string, module \| loader>` | `{}` | Compiled modules outside features, per locale |
 | `text` | `fonts` | `{ body, digits }` | `{ body: "ui.font-body", digits: "ui.font-digits" }` | The two boot fonts behind the built-in styles `body` and `digits` |
-| `text` | `missingGlyph` | `string` | `"□"` | Drawn for a glyph the font lacks |
 | `ui` | `tapTargetPt` | `number` | `44` | The smallest tap target `lint()` accepts |
 | `ui` | `breakpoints` | `{ tall, wide }` | `{ tall: 2, wide: 1.5 }` | Aspect thresholds of the `when` style variants |
 | `audio` | `buses` | `{ master, music, sfx }` | `{ master: 1, music: 0.6, sfx: 1 }` | Start gain of each bus, 0..1 |

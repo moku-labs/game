@@ -3,6 +3,7 @@
  * application, append its canvas. And the teardown that undoes exactly that.
  */
 import type { PixiModule, RendererCtx } from "../types";
+import { installSdfTextPipe } from "./sdf-text";
 import type { HostState, InstallDrawCounting } from "./types";
 
 /**
@@ -86,6 +87,27 @@ function installCounting(
 }
 
 /**
+ * Swaps Pixi's bitmap text pipe for the renderer's, whose SDF shader applies the alpha of
+ * distance-field text once. Like the draw counter it runs before `new Application()`, because Pixi
+ * builds its pipes inside `init`, and once per host state: a restore reuses the installed pipe.
+ * Every build installs it. A Pixi without the pieces draws on with its own pipe, with a warning.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param pixi - The module the application is built from.
+ */
+function installSdfText(ctx: RendererCtx, pixi: PixiModule): void {
+  const state = ctx.state.host;
+
+  if (state.uninstallSdfText !== undefined) return;
+
+  try {
+    state.uninstallSdfText = installSdfTextPipe(pixi);
+  } catch (error) {
+    ctx.log.warn("renderer: distance-field text applies its alpha twice", { error });
+  }
+}
+
+/**
  * Loads Pixi once, creates the application and appends its canvas. Pixi picks WebGL by itself
  * when WebGPU is missing, so only a device with neither ends up in the catch of the caller.
  *
@@ -104,6 +126,7 @@ export async function createApplication(
 
   state.pixi = pixi;
   installCounting(ctx, pixi, install);
+  installSdfText(ctx, pixi);
 
   const app = new pixi.Application();
 
@@ -145,7 +168,8 @@ export function destroyApplication(state: HostState): void {
 /**
  * Undoes everything `init` created. Works on the state alone, because `onStop` has no context.
  * `ready` drops first, so a device that goes away during the teardown is ignored. The draw
- * counter swaps Pixi's own classes back, so the next application on the page starts from them.
+ * counter and the bitmap text pipe swap Pixi's own classes back, so the next application on the
+ * page starts from them.
  *
  * @param state - The host branch of the plugin state.
  */
@@ -160,6 +184,8 @@ export function stopHost(state: HostState): void {
 
   state.uninstallCounting?.();
   state.uninstallCounting = undefined;
+  state.uninstallSdfText?.();
+  state.uninstallSdfText = undefined;
   state.unsupported?.remove();
   state.unsupported = undefined;
   state.onReady.length = 0;

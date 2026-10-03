@@ -60,7 +60,6 @@
  * | i18n | fallback | "en" |
  * | i18n | locales | {} |
  * | text | fonts | { body: "ui.font-body", digits: "ui.font-digits" } |
- * | text | missingGlyph | "□" |
  * | ui | tapTargetPt | 44 |
  * | ui | breakpoints | { tall: 2, wide: 1.5 } |
  * | ui | focusRing | { stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }; shallow merge: a game that sets `focusRing` gives all six fields |

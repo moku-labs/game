@@ -178,24 +178,15 @@ export type TextStyle = {
 export type TextStyles = { readonly kind: "textStyles"; readonly map: Record<string, TextStyle> };
 
 /**
- * What a `.fnt` is read into: the advances of one font at the size it was exported with, and
- * whether the file names a distance field. Widths scale by `style.size / size`; kerning pairs are
- * ignored. Pixi draws a distance-field font (MSDF or SDF) with a shader that applies the alpha
- * twice, so the display hands its runs a corrected alpha.
+ * The advances of one font at the size the `.fnt` was exported with. Widths scale by
+ * `style.size / size`; kerning pairs are ignored.
  *
  * @example
  * ```ts
- * const table: AdvanceTable = {
- *   size: 32, lineHeight: 40, advances: new Map([["1", 18]]), distanceField: true
- * };
+ * const table: AdvanceTable = { size: 32, lineHeight: 40, advances: new Map([["1", 18]]) };
  * ```
  */
-export type AdvanceTable = {
-  size: number;
-  lineHeight: number;
-  advances: Map<string, number>;
-  distanceField: boolean;
-};
+export type AdvanceTable = { size: number; lineHeight: number; advances: Map<string, number> };
 
 /**
  * One run of glyphs: the text and the flags every glyph in it shares.
@@ -307,12 +298,6 @@ export type SeenText = {
 export type Config = {
   /** The two fonts every game ships in its boot bundle. They back the built-in styles. */
   fonts: { body: string; digits: string };
-  /**
-   * No glyph is drawn or measured in its place: a character the font has no glyph for is drawn as
-   * nothing by Pixi and measures 0 wide, so a label is as wide as what is drawn. Nothing reads
-   * this value.
-   */
-  missingGlyph: string;
 };
 
 /**

@@ -5,7 +5,7 @@ import {
   Text,
   textFor
 } from "../../components";
-import type { Size, TextStyles, TextValue } from "../../types";
+import type { Config, Size, TextStyles, TextValue } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -62,3 +62,9 @@ looseStyles({ anything: { font: "any.font", size: 1, fill: 0 } });
 declare const measured: Size;
 
 expectTypeOf(measured).toEqualTypeOf<{ width: number; height: number }>();
+
+// ─── the config names the two boot fonts and nothing else ─────
+
+declare const config: Config;
+
+expectTypeOf(config).toEqualTypeOf<{ fonts: { body: string; digits: string } }>();

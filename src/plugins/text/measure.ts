@@ -89,25 +89,6 @@ function readChars(chars: readonly unknown[]): Map<string, number> {
 }
 
 /**
- * Tells whether a BMFont JSON names a distance field. Pixi reads `distanceField.type`, the
- * exporters write `distanceField.fieldType`; a field of type `none` is no field.
- *
- * @param data - The parsed file.
- * @returns True when Pixi draws the font with its distance-field shader.
- * @example
- * ```ts
- * jsonField({ distanceField: { fieldType: "msdf", distanceRange: 6 } }); // true
- * ```
- */
-function jsonField(data: Record<string, unknown>): boolean {
-  const field = data.distanceField;
-
-  if (!isRecord(field)) return false;
-
-  return (field.fieldType ?? field.type) !== "none";
-}
-
-/**
  * Reads a `.fnt` in BMFont JSON.
  *
  * @param fnt - The file as text.
@@ -133,8 +114,7 @@ function readJson(fnt: string): AdvanceTable | undefined {
   return {
     size,
     lineHeight: common > 0 ? common : size,
-    advances: readChars(data.chars),
-    distanceField: jsonField(data)
+    advances: readChars(data.chars)
   };
 }
 
@@ -159,25 +139,6 @@ function attribute(source: string, pattern: RegExp): number | undefined {
   const found = pattern.exec(source);
 
   return found === null ? undefined : numberOf(Number(found[1]));
-}
-
-/**
- * Tells whether a BMFont XML names a distance field: a `<distanceField>` whose `fieldType` is not
- * `none`, the test Pixi decides its shader by.
- *
- * @param fnt - The file as text.
- * @returns True when Pixi draws the font with its distance-field shader.
- * @example
- * ```ts
- * xmlField('<font><distanceField fieldType="msdf" distanceRange="6"/></font>'); // true
- * ```
- */
-function xmlField(fnt: string): boolean {
-  const tag = /<distanceField\s(?:[^>"]|"[^"]*")*>/.exec(fnt);
-
-  if (tag === null) return false;
-
-  return /\sfieldType="([^"]*)"/.exec(tag[0])?.[1] !== "none";
 }
 
 /**
@@ -207,12 +168,7 @@ function readXml(fnt: string): AdvanceTable | undefined {
     advances.set(String.fromCodePoint(id), advance);
   }
 
-  return {
-    size,
-    lineHeight: lineHeight > 0 ? lineHeight : size,
-    advances,
-    distanceField: xmlField(fnt)
-  };
+  return { size, lineHeight: lineHeight > 0 ? lineHeight : size, advances };
 }
 
 /**
@@ -221,13 +177,12 @@ function readXml(fnt: string): AdvanceTable | undefined {
  *
  * @param fnt - The `.fnt` file as text, in BMFont XML or BMFont JSON.
  * @param key - The asset key of the font, for the error.
- * @returns The export size, the line height, one advance per character, and whether the file
- * names a distance field.
+ * @returns The export size, the line height and one advance per character.
  * @throws {Error} When the file is in neither format.
  * @example
  * ```ts
  * parseAdvances('{"info":{"size":32},"common":{"lineHeight":40},"chars":[]}', "ui.font-body");
- * // { size: 32, lineHeight: 40, advances: Map(0), distanceField: false }
+ * // { size: 32, lineHeight: 40, advances: Map(0) }
  * ```
  */
 export function parseAdvances(fnt: string, key: string): AdvanceTable {

@@ -363,6 +363,34 @@ and then centres it by `(lineHeight − fontMetrics.fontSize) / 2`. `fonts.insta
 `baseLineOffset = 0` and `fontMetrics.fontSize = lineHeight`, so glyphs are drawn in the box `text`
 measures (the fixture's display font was 12.9 u low at 54 u without it; both lines are needed).
 
+### Distance-field text
+
+Pixi 8.21 applies the alpha of distance-field (MSDF, SDF) bitmap text twice. Its SDF shader hands
+`calculateMSDFAlpha` the vertex colour, which is premultiplied: the function raises
+`vColor.a × coverage` to a gamma that leans on the luma of the premultiplied colour, and the shader
+template multiplies the result by `vColor` again. A label at alpha 0.5 so drew at about 0.25, a
+0.55 shadow at 0.31, a label under a parent at 0.6 at 0.42.
+
+The renderer brings its own bitmap text pipe. `host/sdf-text.ts` builds a subclass of Pixi's
+`BitmapTextPipe` from the module object, with the base's `static extension` object, and
+`host/init.ts` swaps it in through `pixi.extensions.remove` and `add` before `new Application()`,
+in every build, as the draw counter does. No Pixi prototype and no Pixi instance is patched. Its
+`getSdfShader()` compiles Pixi's own five SDF bits with one step changed: the fragment step of
+`localUniformMSDFBit` hands the function
+`vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0)`, the colour un-premultiplied at alpha 1. The
+coverage is the glyph's alone, and the template's `outColor * vColor` applies every alpha once: the
+label's (`Text.alpha` is the alpha of its container), a parent's (a disabled button, a popup fade)
+and the world's. Full-alpha text draws the same pixels as before. The program is compiled once per
+batch texture limit and shared by every text; each text gets its own local uniforms, as from Pixi's
+pipe. WebGPU only: on the WebGL fallback the pipe hands out Pixi's own shader, so text there still
+applies its alpha twice.
+
+The swap happens once per host state, a restore reuses the pipe, and `onStop` swaps Pixi's own pipe
+back. A Pixi module without the pieces draws on with its own pipe, with `ctx.log.warn`. A unit test
+against the real module pins the pipe's name and metadata, the exact step it replaces, and the WGSL
+of the compiled fragment, so a Pixi that renames them, or fixes the double alpha itself, fails in
+CI.
+
 ## Device loss and the hidden tab
 
 | Step | WebGPU | WebGL |
@@ -431,3 +459,5 @@ a real frame loop (fps near the cap, a real `managedTextures` list), and `captur
 that shows the board, under WebGPU and WebGL. The real `drawCalls` number needs a GPU: the
 fixture's board screen with no filter and no emitter pins it in `tests/integration/merge-game/run.mjs`
 once measured, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
+How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,
+a label under a 0.6 parent at 0.6, and the same pixels for full-alpha text, in the browser.

@@ -17,10 +17,7 @@ import { startText, stopText } from "./lifecycle";
 import { createTextState } from "./state";
 import type { Config } from "./types";
 
-const config: Config = {
-  fonts: { body: "ui.font-body", digits: "ui.font-digits" },
-  missingGlyph: "□"
-};
+const config: Config = { fonts: { body: "ui.font-body", digits: "ui.font-digits" } };
 
 /**
  * Text plugin: `app.text.measure(...)`, the `Text` component and the helpers `label` and

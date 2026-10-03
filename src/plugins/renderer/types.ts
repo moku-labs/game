@@ -18,14 +18,17 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * crop of a `"cover"` sprite), the bitmap-font pieces `fonts.install` needs, the `BitmapText` a
  * plugin above builds through `host.pixi()`, the filter and particle classes `effects` builds
  * through it, and the extension registry with the three WebGPU draw classes the dev draw-call
- * counter swaps. The module object never arrives through a static import: `config.loadPixi()`
- * returns it, so a game without a screen carries no Pixi in its bundle.
+ * counter swaps and the bitmap text pipe `host` swaps for one whose SDF shader applies the alpha
+ * once (with the shader pieces it compiles that shader from). The module object never arrives
+ * through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
+ * Pixi in its bundle.
  *
  * @example
  * ```ts
  * const pixi: PixiModule = await import("pixi.js");
  * pixi.Texture.WHITE.width; // 1
  * pixi.GpuBatchAdaptor.extension.name; // "batch"
+ * pixi.BitmapTextPipe.extension.name; // "bitmapText"
  * ```
  */
 export type PixiModule = Pick<
@@ -34,6 +37,7 @@ export type PixiModule = Pick<
   | "Application"
   | "BitmapFont"
   | "BitmapText"
+  | "BitmapTextPipe"
   | "BlurFilter"
   | "Cache"
   | "ColorMatrixFilter"
@@ -45,17 +49,25 @@ export type PixiModule = Pick<
   | "GpuGraphicsAdaptor"
   | "GpuProgram"
   | "Graphics"
+  | "Matrix"
   | "NineSliceSprite"
   | "NoiseFilter"
   | "Particle"
   | "ParticleContainer"
   | "Rectangle"
+  | "Shader"
   | "Sprite"
   | "Texture"
   | "UniformGroup"
   | "bitmapFontTextParser"
   | "bitmapFontXMLStringParser"
+  | "colorBit"
+  | "compileHighShaderGpuProgram"
   | "extensions"
+  | "generateTextureBatchBit"
+  | "localUniformMSDFBit"
+  | "mSDFBit"
+  | "roundPixelsBit"
 >;
 
 /**

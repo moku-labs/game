@@ -4,8 +4,8 @@
 import type { HostState } from "./types";
 
 /**
- * Creates the initial host state: no Pixi, no application, nothing drawn, nothing listening and
- * no draw counter installed.
+ * Creates the initial host state: no Pixi, no application, nothing drawn, nothing listening, no
+ * draw counter and no bitmap text pipe installed.
  *
  * @returns The host branch of the plugin state.
  */
@@ -23,6 +23,7 @@ export function createHostState(): HostState {
     onLoss: [],
     cleanups: [],
     unsupported: undefined,
-    uninstallCounting: undefined
+    uninstallCounting: undefined,
+    uninstallSdfText: undefined
   };
 }
