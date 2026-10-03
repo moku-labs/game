@@ -13,10 +13,12 @@ export { parseVisualArgv, runVisualTests } from "./visual/run";
 export type {
   CheckpointResult,
   VisualOptions,
+  VisualPage,
   VisualReport,
   VisualSetup,
   VisualStart,
   VisualStep,
   VisualTest,
-  VisualTestResult
+  VisualTestResult,
+  VisualTolerance
 } from "./visual/types";

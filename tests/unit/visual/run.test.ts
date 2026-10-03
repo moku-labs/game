@@ -3,9 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineVisualTest } from "../../../src/visual/define";
+import { runBrowserLeg } from "../../../src/visual/leg-browser";
 import { runVisualTests } from "../../../src/visual/run";
-import type { VisualSetup, VisualTest } from "../../../src/visual/types";
+import type { CheckpointResult, VisualSetup, VisualTest } from "../../../src/visual/types";
 import { createTinyGame } from "./game";
+
+// The browser leg keeps its own code unless a test hands it an answer.
+vi.mock("../../../src/visual/leg-browser", async importOriginal => {
+  const original = await importOriginal<typeof import("../../../src/visual/leg-browser")>();
+
+  return { ...original, runBrowserLeg: vi.fn(original.runBrowserLeg) };
+});
 
 // ---------------------------------------------------------------------------
 // Unit (the tiny game in plain Bun): runVisualTests selects the tests, runs
@@ -45,6 +53,22 @@ function popupTest(name: string, coins: number) {
     start: { player: { coins }, checkpoint: "home" },
     steps: [{ tap: { key: "open" } }, { checkpoint: "open" }]
   });
+}
+
+/**
+ * Hands the browser leg an answer: every checkpoint of the headless leg with these pixels.
+ *
+ * @param pixels - The pixel fields of every checkpoint.
+ */
+function pixelsAnswer(pixels: Partial<CheckpointResult>) {
+  vi.mocked(runBrowserLeg).mockImplementationOnce((_setup, _tests, _run, headless) =>
+    Promise.resolve(
+      headless.map(test => ({
+        ...test,
+        checkpoints: test.checkpoints.map(checkpoint => ({ ...checkpoint, ...pixels }))
+      }))
+    )
+  );
 }
 
 describe("runVisualTests", () => {
@@ -138,11 +162,52 @@ describe("runVisualTests", () => {
     );
   });
 
-  it("refuses the pixel leg until it is built", async () => {
+  it("fails a run with pixels and no page, after printing the headless lines", async () => {
     await expect(
       runVisualTests(setup, [popupTest("popup", 1)], { argv: [], dir, pixels: true })
     ).rejects.toThrow(
-      "[game] The pixel leg of the visual tests is not built yet.\n  Run with --no-pixels, or pass pixels: false."
+      "[game] The pixel leg needs the dev page.\n  Pass page: { url } in the setup, or run with --no-pixels."
     );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("pixels skipped");
+  });
+
+  const withPage: VisualSetup = { ...setup, page: { url: "http://localhost:3000/" } };
+
+  it("runs the browser leg after the headless one and prints the share of differing pixels", async () => {
+    pixelsAnswer({ pixels: "different", pixelRatio: 0.0042, verdict: "rendering" });
+
+    const report = await runVisualTests(withPage, [popupTest("popup", 7)], {
+      argv: [],
+      dir,
+      pixels: true
+    });
+
+    expect(report.ok).toBe(false);
+    expect(lines).toEqual([expect.stringContaining("pixels different 0.42% (rendering)")]);
+    expect(vi.mocked(runBrowserLeg)).toHaveBeenLastCalledWith(
+      withPage,
+      [expect.objectContaining({ name: "popup" })],
+      expect.objectContaining({ pixels: true, dir }),
+      [expect.objectContaining({ name: "popup" })]
+    );
+  });
+
+  it("prints a picture of another size, and answers ok when the pixels are the same", async () => {
+    pixelsAnswer({ pixels: "different", first: "size", verdict: "behaviour" });
+    await runVisualTests(withPage, [popupTest("popup", 7)], { argv: [], dir, pixels: true });
+
+    expect(lines[0]).toContain("pixels different at size (behaviour)");
+
+    pixelsAnswer({ pixels: "same" });
+
+    const report = await runVisualTests(withPage, [popupTest("popup", 7)], {
+      argv: [],
+      dir,
+      pixels: true
+    });
+
+    expect(report.ok).toBe(true);
+    expect(lines[1]).toContain("pixels same");
   });
 });

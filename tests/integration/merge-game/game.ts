@@ -201,6 +201,15 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
           offset: 25,
           halo: 0xff_f3_d6,
           haloWidth: 12
+        },
+        // The name field of the Rename popup: a steady ink caret and a honey selection.
+        textInput: {
+          caretWidth: 3,
+          caret: 0x3a_22_12,
+          selection: 0xf2_b4_3d,
+          selectionAlpha: 0.45,
+          composingUnderline: 3,
+          keyboardMargin: 16
         }
       }
     }

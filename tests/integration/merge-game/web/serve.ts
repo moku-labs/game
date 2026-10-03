@@ -1,29 +1,89 @@
 /**
- * @file The dev server of the fixture page: the bundled page on `/`, and the committed manifest and
- * tiles as static files. Bun's `bun ./index.html` serves the page only, so the assets need this
- * one route. Run from `tests/integration/merge-game/`: `bun ./web/serve.ts`.
+ * @file The dev server of the fixture page: the bundled page on `/`, and the game's files as
+ * static files. Bun's `bun ./index.html` serves the page only, so the assets need this one route.
+ * Run from `tests/integration/merge-game/`:
+ *
+ * - `bun ./web/serve.ts` serves the dev build: the committed `manifest.json` and the loose art
+ *   under `features/`.
+ * - `bun ./web/serve.ts --packed` serves the production build instead: the v2 manifest, the atlas
+ *   pages and the hashed files that `bun run fixture:pack` writes into `dist/assets/`. A folder
+ *   after the flag serves another pack: `--packed /tmp/pack/assets`.
+ * - `--port <n>` picks the port, 3000 when left out; `0` lets the system choose a free one.
+ *
+ * The page is the same in both builds: it fetches `/manifest.json`, and the paths of the manifest
+ * are relative to it.
  */
+import path from "node:path";
 import { createBrandConsole } from "@moku-labs/common/cli";
 import { file } from "bun";
 import index from "./index.html";
 
-const root = new URL("..", import.meta.url).pathname;
+/** What the command line asks for: the folder whose files are served, and the port. */
+type ServeOptions = { root: string; packed: boolean; port: number };
 
-const server = Bun.serve({
-  port: 3000,
-  development: true,
-  routes: { "/": index },
-  fetch(request) {
-    // The browser percent-encodes the braces of a nine-slice tag (`{nine=…}`), the disk does not.
-    const path = decodeURIComponent(new URL(request.url).pathname);
+/** The folder of the fixture game: the dev manifest and `features/` live here. */
+const gameFolder = new URL("..", import.meta.url).pathname;
 
-    // A decoded path could climb out of the game folder; the page never asks for one.
-    if (path.includes("..")) return new Response("not found", { status: 404 });
+/** Where `bun run fixture:pack` writes the packed build. */
+const packFolder = path.join(gameFolder, "dist/assets");
 
-    const asset = file(`${root}${path.slice(1)}`);
+/** The port of the dev page, which the e2e station opens. */
+const DEFAULT_PORT = 3000;
 
-    return asset.size > 0 ? new Response(asset) : new Response("not found", { status: 404 });
-  }
-});
+/**
+ * Reads the flags of the server: `--packed [folder]` and `--port <n>`.
+ *
+ * @param argv - The arguments after the script.
+ * @returns The folder to serve, whether it is a packed build, and the port.
+ */
+function optionsOf(argv: readonly string[]): ServeOptions {
+  const at = argv.indexOf("--packed");
+  const folder = at === -1 ? undefined : argv[at + 1];
+  const given = folder === undefined || folder.startsWith("--") ? packFolder : path.resolve(folder);
+  const port = argv.indexOf("--port");
 
-createBrandConsole().info(`merge-game on ${server.url}`);
+  return {
+    root: at === -1 ? gameFolder : given,
+    packed: at !== -1,
+    port: port === -1 ? DEFAULT_PORT : Number(argv[port + 1])
+  };
+}
+
+/**
+ * Answers one request for a file of the served folder.
+ *
+ * @param root - The served folder.
+ * @param request - The request of the page.
+ * @returns The file, or a 404.
+ */
+function serveFile(root: string, request: Request): Response {
+  // The browser percent-encodes the braces of a nine-slice tag (`{nine=…}`), the disk does not.
+  const relative = decodeURIComponent(new URL(request.url).pathname);
+
+  // A decoded path could climb out of the served folder; the page never asks for one.
+  if (relative.includes("..")) return new Response("not found", { status: 404 });
+
+  const asset = file(path.join(root, relative));
+
+  return asset.size > 0 ? new Response(asset) : new Response("not found", { status: 404 });
+}
+
+const options = optionsOf(process.argv.slice(2));
+const ui = createBrandConsole();
+
+if (options.packed && !(await file(path.join(options.root, "manifest.json")).exists())) {
+  ui.error(
+    `no packed build in "${options.root}".\n` +
+      'Run "bun run fixture:pack" from the root of the repository first.'
+  );
+  process.exitCode = 1;
+} else {
+  const server = Bun.serve({
+    port: options.port,
+    development: true,
+    routes: { "/": index },
+    fetch: request => serveFile(options.root, request)
+  });
+
+  ui.info(`merge-game${options.packed ? " (packed build)" : ""} on ${server.url}`);
+}

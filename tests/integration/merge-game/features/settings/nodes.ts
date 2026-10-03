@@ -1,10 +1,10 @@
 /**
- * @file The five nodes of the settings sub-flow. `enter` plays the swing sound of the popup once,
+ * @file The six nodes of the settings sub-flow. `enter` plays the swing sound of the popup once,
  * as the flow comes in. `open` shows the popup and rests there, so a volume step or a language
  * switch goes out through a transit node that commits and comes back to the same popup: the
  * engine keeps its root while the flow is in transit, and nothing swings in again, so nothing
  * sounds. `confirmReset` asks before the save starts over, with the confirm stacked on the
- * settings.
+ * settings; `rename` asks for a name the same way, with the Rename popup.
  *
  * A node has no audio and no i18n in its context: the volume is committed and `audio` reads it
  * back on the commit, and the language goes out as an effect the feature's own plugin handles.
@@ -17,6 +17,7 @@ import { startProgressOver } from "../../state";
 import { tables } from "../../tables";
 import { popupSound, showPopup } from "../ui/popup";
 import { Confirm } from "./confirm";
+import { NAME_LENGTH, Rename } from "./rename";
 import type { LocaleInput, VolumeInput } from "./settings";
 import { Settings } from "./settings";
 
@@ -69,6 +70,23 @@ function localeOf(payload: unknown): LocaleInput {
 }
 
 /**
+ * Reads the name out of the answer of the Rename popup: the spaces around it go, and it is never
+ * longer than the field takes.
+ *
+ * @param payload - What Save or Enter carried.
+ * @returns The name, `""` when the answer carried none.
+ * @example
+ * ```ts
+ * nameOf({ name: "  Alex " }); // "Alex"
+ * ```
+ */
+function nameOf(payload: unknown): string {
+  const answer = payload as { name?: unknown } | undefined;
+
+  return typeof answer?.name === "string" ? answer.name.trim().slice(0, NAME_LENGTH) : "";
+}
+
+/**
  * Transit node `enter`: the settings come in, so their board swings in with its sound. The popup
  * of `open` is taken back after every step, so `open` itself plays nothing.
  */
@@ -90,17 +108,18 @@ export const open = defineNode({
   outcomes: {
     volume: type<VolumeInput>(),
     setLocale: type<LocaleInput>(),
+    rename: type(),
     reset: type(),
     close: type()
   },
   run: async ({ player, fx, out }) => {
     const { audio, locale } = player.settings;
-    const answered = (await fx(popup(Settings, { music: audio.music, sfx: audio.sfx, locale }))) as
-      | Flow.Answer
-      | undefined;
+    const shown = { music: audio.music, sfx: audio.sfx, locale, name: player.name };
+    const answered = (await fx(popup(Settings, shown))) as Flow.Answer | undefined;
 
     if (answered?.intent === "volume") return out.volume(volumeOf(answered.payload));
     if (answered?.intent === "setLocale") return out.setLocale(localeOf(answered.payload));
+    if (answered?.intent === "rename") return out.rename();
     if (answered?.intent === "reset") return out.reset();
 
     return out.close();
@@ -158,5 +177,26 @@ export const confirmReset = defineNode({
     await fx(schedule(rules.nextDue(player.merge, tables)));
 
     return out.reset();
+  }
+});
+
+/**
+ * Transit node `rename`: the Rename popup stacked on the settings. Save and Enter write the typed
+ * name into the save; an empty name, the X, the backdrop and Escape keep the old one. Either way
+ * the flow goes back to the same settings popup, which shows the name.
+ */
+export const rename = defineNode({
+  outcomes: { saved: type(), kept: type() },
+  run: async ({ player, fx, out }) => {
+    const answered = (await showPopup(fx, popup(Rename, {}, { over: "Settings" }))) as
+      | Flow.Answer
+      | undefined;
+    const name = answered?.intent === "save" ? nameOf(answered.payload) : "";
+
+    if (name === "") return out.kept();
+
+    player.name = name;
+
+    return out.saved();
   }
 });

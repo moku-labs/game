@@ -1,11 +1,12 @@
 /**
  * @file visual — `runVisualTests`, the runner a game's script calls, and `parseVisualArgv`, its
- * command line. It resolves the options, selects the tests, runs the headless leg, prints one
- * line per checkpoint through the branded console of `@moku-labs/common/cli` and answers one
- * report. The game's script sets the exit code. The browser leg arrives in wave B3.
+ * command line. It resolves the options, selects the tests, runs the headless leg and then, with
+ * `pixels` on, the browser leg, prints one line per checkpoint through the branded console of
+ * `@moku-labs/common/cli` and answers one report. The game's script sets the exit code.
  */
 import { createBrandConsole } from "@moku-labs/common/cli";
 import { checkVisualTest } from "./define";
+import { runBrowserLeg } from "./leg-browser";
 import { runHeadlessLeg } from "./leg-headless";
 import type {
   CheckpointResult,
@@ -138,17 +139,6 @@ function selectTests(tests: readonly VisualTest[], only?: readonly string[]): Vi
 }
 
 /**
- * Builds the error a run with pixels gets until the browser leg is built.
- *
- * @returns The error, ready to throw.
- */
-function pixelLegMissing(): Error {
-  return new Error(
-    "[game] The pixel leg of the visual tests is not built yet.\n  Run with --no-pixels, or pass pixels: false."
-  );
-}
-
-/**
  * Writes one comparison of a checkpoint for its line.
  *
  * @param kind - `state`, `describe` or `pixels`.
@@ -164,6 +154,27 @@ function outcomeText(kind: string, outcome: string, first?: string): string {
   return outcome === "different" && first !== undefined
     ? `${kind} ${outcome} at ${first}`
     : `${kind} ${outcome}`;
+}
+
+/**
+ * Writes the pixel comparison of a checkpoint for its line: on a difference, the share of
+ * differing pixels, or `at size`, and the verdict.
+ *
+ * @param result - The checkpoint's outcome.
+ * @returns `pixels same`, or `pixels different 0.42% (rendering)`.
+ * @example
+ * ```ts
+ * pixelText({ name: "open", state: "same", describe: "same", pixels: "different", pixelRatio: 0.0042, verdict: "rendering" });
+ * // "pixels different 0.42% (rendering)"
+ * ```
+ */
+function pixelText(result: CheckpointResult): string {
+  if (result.pixels !== "different") return `pixels ${result.pixels}`;
+
+  const share =
+    result.pixelRatio === undefined ? "at size" : `${(result.pixelRatio * 100).toFixed(2)}%`;
+
+  return `pixels different ${share} (${result.verdict ?? "behaviour"})`;
 }
 
 /**
@@ -184,7 +195,7 @@ function checkpointLine(test: string, result: CheckpointResult): string {
     "·",
     outcomeText("describe", result.describe, describeFirst),
     "·",
-    `pixels ${result.pixels}`
+    pixelText(result)
   ].join(" ");
 }
 
@@ -215,24 +226,63 @@ function printResults(ui: ReportConsole, results: readonly VisualTestResult[]): 
 }
 
 /**
- * Runs visual tests: the headless leg over every selected test, then the pixel leg when
- * `pixels` is on. A checkpoint saves `state.json` and `describe.json` in
- * `<dir>/<test>/<checkpoint>/`: a missing file is written, `--update` rewrites every file of the
- * tests run, any other file is compared exactly. One line per checkpoint goes to the branded
- * console; the script sets the exit code from `ok`. The pixel leg is not built yet, so a run with
- * `pixels` on throws.
+ * Runs the browser leg after the headless one. When the leg fails as a whole, the lines of the
+ * headless leg are printed before its error is thrown, so they are not lost.
+ *
+ * @param ui - Where the lines go.
+ * @param setup - How to build a game, and the dev page.
+ * @param tests - The selected tests.
+ * @param run - The run options.
+ * @param headless - The results of the headless leg.
+ * @returns The results with their pixel fields.
+ * @throws {Error} Whatever fails the browser leg.
+ */
+async function withPixelLeg(
+  ui: ReportConsole,
+  setup: VisualSetup,
+  tests: readonly VisualTest[],
+  run: VisualRun,
+  headless: VisualTestResult[]
+): Promise<VisualTestResult[]> {
+  try {
+    return await runBrowserLeg(setup, tests, run, headless);
+  } catch (error) {
+    printResults(ui, headless);
+
+    throw error;
+  }
+}
+
+/**
+ * Runs visual tests: the headless leg over every selected test, then the browser leg over the
+ * same tests when `pixels` is on (by default only with a `page` on a Mac). A checkpoint saves
+ * `state.json` and `describe.json` in `<dir>/<test>/<checkpoint>/`, and the browser leg
+ * `screen.png`: a missing file is written, `--update` rewrites every file of the tests run, a
+ * JSON file is compared exactly. The browser leg opens the dev page in Chrome with WebGPU
+ * through `playwright-core`, plays each test there, checks the page's state against
+ * `state.json` and compares the picture in the page: a pixel differs above
+ * `tolerance.threshold`, and the screen differs when more than `tolerance.ratio` of its pixels
+ * do; `screen.actual.png` and `screen.diff.png` are written beside the baseline then. A pixel
+ * difference over the same state and describe is a rendering regression (`verdict:
+ * "rendering"`). One line per checkpoint goes to the branded console; the script sets the exit
+ * code from `ok`.
  *
  * @param setup - How to build a game: a fresh, unstarted app per test, and the dev page.
  * @param tests - Every visual test of the game.
  * @param options - Overrides of the flags of `argv` and of the defaults.
  * @returns The report: `ok` when no test failed and nothing is `"different"`.
  * @throws {Error} When a test is not well formed, two tests share a name, `only` names no test,
- *   a flag misses its value, or `pixels` is on.
+ *   a flag misses its value, or the browser leg fails as a whole: no `page`, no
+ *   `playwright-core`, no Chrome, or a page that does not open, expose `game` and `doors`, start,
+ *   or draw with WebGPU.
  * @example
  * ```ts
- * // tests/visual/run.ts of a game, `bun tests/visual/run.ts --update --no-pixels`
- * const report = await runVisualTests({ app: () => createScreenGame().app }, [rewardPopup]);
- * report.tests[0]?.checkpoints[0]; // { name: "open", state: "written", describe: "written", pixels: "skipped" }
+ * // tests/visual/run.ts of a game, `bun tests/visual/run.ts --update` on a Mac
+ * const report = await runVisualTests(
+ *   { app: () => createScreenGame().app, page: { url: "http://localhost:3000/" } },
+ *   [rewardPopup]
+ * );
+ * report.tests[0]?.checkpoints[0]; // { name: "open", state: "written", describe: "written", pixels: "written" }
  * process.exitCode = report.ok ? 0 : 1;
  * ```
  */
@@ -243,12 +293,11 @@ export async function runVisualTests(
 ): Promise<VisualReport> {
   const run = resolveVisualOptions(setup, options);
   const selected = selectTests(tests, run.only);
+  const ui = createBrandConsole();
+  const headless = await runHeadlessLeg(setup, selected, run);
+  const results = run.pixels ? await withPixelLeg(ui, setup, selected, run, headless) : headless;
 
-  if (run.pixels) throw pixelLegMissing();
-
-  const results = await runHeadlessLeg(setup, selected, run);
-
-  printResults(createBrandConsole(), results);
+  printResults(ui, results);
 
   const ok = results.every(
     result =>

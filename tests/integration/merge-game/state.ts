@@ -30,6 +30,8 @@ export type Player = {
   settings: Settings;
   /** Whether the daily gift of Home was taken. The gift button shows its "1" badge until it is. */
   giftClaimed: boolean;
+  /** The name the player typed into the Rename popup of Settings, `""` until then. */
+  name: string;
 };
 
 /** The session: what one run of the game keeps and never saves. */
@@ -61,7 +63,8 @@ export const startingPlayer: Player = {
   pendingReward: "",
   pendingCoins: 0,
   settings: { audio: { master: 1, music: 0.6, sfx: 1 }, locale: "ru" },
-  giftClaimed: false
+  giftClaimed: false,
+  name: ""
 };
 
 /** The session at every start. */
@@ -85,13 +88,13 @@ export function applyRules(player: Player, state: MergeState): void {
 
 /**
  * Starts the progress over (design §6 E3): board, coins, orders, the waiting reward and the daily
- * gift go back to what a new player has. The settings stay, so the volumes and the language the
- * player chose survive a reset.
+ * gift go back to what a new player has. The settings and the name stay, so the volumes, the
+ * language and the name the player chose survive a reset.
  *
  * @param player - The player draft of the open transaction.
  * @example
  * ```ts
- * startProgressOver(player); // player.merge is startingPlayer.merge again, player.settings untouched
+ * startProgressOver(player); // player.merge is startingPlayer.merge again, player.name untouched
  * ```
  */
 export function startProgressOver(player: Player): void {

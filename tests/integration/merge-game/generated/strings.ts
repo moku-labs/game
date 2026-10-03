@@ -14,6 +14,7 @@ export type Strings = {
   "energy.watch": Record<string, never>;
   "gift.claim": Record<string, never>;
   "gift.coins": { coins: number };
+  "gift.note": Record<string, never>;
   "gift.title": Record<string, never>;
   "home.play": Record<string, never>;
   "hud.deliver": Record<string, never>;
@@ -32,10 +33,15 @@ export type Strings = {
   "settings.confirmReset": Record<string, never>;
   "settings.confirmTitle": Record<string, never>;
   "settings.english": Record<string, never>;
+  "settings.noName": Record<string, never>;
   "settings.percent": { percent: Argument };
+  "settings.rename": Record<string, never>;
+  "settings.renameHint": Record<string, never>;
+  "settings.renameSave": Record<string, never>;
+  "settings.renameTitle": Record<string, never>;
   "settings.reset": Record<string, never>;
   "settings.russian": Record<string, never>;
-  "settings.tab": { tab: "audio" | "language" };
+  "settings.tab": { tab: "audio" | "language" | "profile" };
   "settings.title": Record<string, never>;
   "splash.loading": Record<string, never>;
   "ui.gameName": Record<string, never>;
