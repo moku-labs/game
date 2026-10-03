@@ -2,7 +2,7 @@
 
 **A 2D puzzle engine where the game is a graph, and the screen is just an opinion about it.**
 
-You write small nodes and edge tables. The engine runs them, saves on the edges and replays the whole game without a screen. It ships no genre rules. No match-3, no merge, no physics. We checked twice.
+You write small nodes and edge tables. The engine runs them, saves on the edges and replays the whole game without a screen. It ships no genre rules.
 
 <br/>
 
