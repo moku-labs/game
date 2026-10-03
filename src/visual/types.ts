@@ -2,7 +2,7 @@
  * @file visual — the types of the visual tests: the descriptor a game writes, the setup and the
  * options of the runner, and the report it answers. The headless leg reads the descriptor and
  * writes `state.json` and `describe.json`; the browser leg reads `page`, `pixels` and `tolerance`,
- * writes `screen.png` and fills the pixel fields of a checkpoint result. The Chrome types at the end
+ * writes `screen.webp` and fills the pixel fields of a checkpoint result. The Chrome types at the end
  * are the part of Playwright the browser leg calls, written out, so no type of `playwright-core`
  * enters the package.
  */
@@ -293,7 +293,7 @@ export type PixelCheck = Checked & { pixelRatio?: number };
 
 /**
  * What the browser leg found at one checkpoint: the page's state against `state.json` (none when
- * the file is missing) and the pixels against `screen.png`.
+ * the file is missing) and the pixels against `screen.webp`.
  */
 export type PixelFound = { state: Checked | undefined; pixels: PixelCheck };
 
@@ -317,6 +317,7 @@ export type ChromePage = {
     argument: undefined,
     options: { timeout: number }
   ): Promise<unknown>;
+  waitForLoadState(state: "networkidle", options: { timeout: number }): Promise<void>;
   evaluate<R, A>(fn: (argument: A) => R | Promise<R>, argument: A): Promise<R>;
   close(): Promise<void>;
 };

@@ -5,6 +5,11 @@
  * and `pageScript()` installs all of them there first, so the others are found by name. Nothing
  * in them may reach the scope of this module. Every function the leg calls answers instead of
  * throwing, so a failure comes back as a message and not as Playwright's own error.
+ *
+ * Game time is the leg's: once a test holds the pause, only the `step` command moves it, one frame
+ * of 1000/60 ms at a time, and the browser's frames only let a load and a promise chain progress.
+ * Two runs of a test see the same game time, so time-driven pixels are the same. The pictures
+ * leave the page as lossless WebP.
  */
 import type { commands } from "../plugins/flow/doors/commands";
 import type { read } from "../plugins/flow/doors/read";
@@ -51,10 +56,16 @@ export type PixelDiff = {
   diff: Uint8ClampedArray<ArrayBuffer>;
 };
 
-/** What `pageCompare` answers: the counts, and the diff picture as a PNG data URL when one differs. */
+/**
+ * What `pageCompare` answers: the counts, and the diff picture as a lossless WebP data URL when
+ * one differs.
+ */
 export type PageCompared = { sameSize: boolean; differing: number; total: number; diff?: string };
 
-/** What the page saw at a checkpoint: the state through the doors and the picture of the canvas. */
+/**
+ * What the page saw at a checkpoint: the state through the doors and the picture of the canvas as
+ * a lossless WebP data URL.
+ */
 export type PageShot = { state: VisualState; screen: string | undefined };
 
 /**
@@ -120,7 +131,7 @@ function pageHandles(): PageHandles {
 }
 
 /**
- * Waits for the next frame of the page.
+ * Waits for the next frame of the browser. It moves no game time while the leg holds the pause.
  *
  * @returns A promise that settles in the next `requestAnimationFrame`.
  */
@@ -129,6 +140,17 @@ function pageFrame(): Promise<void> {
     requestAnimationFrame(() => {
       resolve();
     });
+  });
+}
+
+/**
+ * Yields the task queue once, so every promise chain that can move does.
+ *
+ * @returns A promise that settles in the next task.
+ */
+function pageTask(): Promise<void> {
+  return new Promise(resolve => {
+    setTimeout(resolve, 0);
   });
 }
 
@@ -147,27 +169,51 @@ function pageMessage(error: unknown): string {
 }
 
 /**
- * Waits frame by frame until the graph rests at a gate or stops: at least one frame, at most
- * `limit`, then one frame more so the ui of a screen the gate opened is built. The settle of the
- * headless leg, on `requestAnimationFrame` instead of `time.step`.
+ * Runs one frame of the game through the `step` command: the six phases, the render included,
+ * also while the game is paused.
  *
- * @param game - The game of the page.
- * @param limit - The most frames to wait, `settleFrames` of the run.
+ * @param handles - The game and the doors.
+ * @param deltaMs - The game time of the frame: 1000/60 ms, the frame of the headless leg.
+ */
+async function pageStepFrame(handles: PageHandles, deltaMs = 1000 / 60): Promise<void> {
+  await handles.doors.run(handles.game, handles.doors.commands.step, { frames: 1, deltaMs });
+}
+
+/**
+ * Runs one frame of a test: a stepped frame of 1000/60 ms, then the browser's next frame, so a
+ * load and a promise chain progress before the graph is read.
+ *
+ * @param handles - The game and the doors.
+ */
+async function pageTick(handles: PageHandles): Promise<void> {
+  await pageStepFrame(handles);
+  await pageFrame();
+}
+
+/**
+ * Runs frames until the graph rests at a gate or stops: at least one frame, at most `limit`, then
+ * one frame more so the ui of a screen the gate opened is built. The settle of the headless leg,
+ * on the same stepped frames.
+ *
+ * @param handles - The game and the doors.
+ * @param limit - The most frames to run, `settleFrames` of the run.
  * @param place - The test and the step, for the message.
  * @returns The error message when the graph did not rest, `undefined` when it did.
  */
 async function pageSettle(
-  game: VisualApp,
+  handles: PageHandles,
   limit: number,
   place: Place
 ): Promise<string | undefined> {
+  const { game } = handles;
+
   for (let frame = 0; frame < limit; frame += 1) {
-    await pageFrame();
+    await pageTick(handles);
 
     const state = game.flow.state();
 
     if (state.pending.gate !== undefined || !state.running) {
-      await pageFrame();
+      await pageTick(handles);
 
       return undefined;
     }
@@ -177,8 +223,64 @@ async function pageSettle(
 }
 
 /**
+ * Runs one `/control` command through the doors, the way an editor does, and runs frames while it
+ * waits for them: a `restore` resolves only once the graph rests, and that takes frames. A
+ * command that waits for no frame is done before the first one.
+ *
+ * @param handles - The game and the doors.
+ * @param command - The command by its short name, and its input.
+ * @param command.name - The short name of the command.
+ * @param command.input - Its input.
+ * @param limit - The most frames to run, `settleFrames` of the run.
+ * @param place - The test and the step, for the message.
+ * @returns The error message when the command did not finish, `undefined` when it did.
+ * @throws {unknown} Whatever the command threw.
+ */
+async function pageRun(
+  handles: PageHandles,
+  command: { name: StepCommand; input: StepInput },
+  limit: number,
+  place: Place
+): Promise<string | undefined> {
+  const { game, doors } = handles;
+  const runners: Readonly<Record<StepCommand, StepRunner>> = doors.commands;
+  const ran: { done: boolean; failure: { error: unknown } | undefined } = {
+    done: false,
+    failure: undefined
+  };
+  const finished = doors.run(game, runners[command.name], command.input).then(
+    () => {
+      ran.done = true;
+    },
+    (error: unknown) => {
+      ran.done = true;
+      ran.failure = { error };
+    }
+  );
+  let frames = 0;
+
+  await pageTask();
+
+  while (!ran.done) {
+    if (frames === limit) {
+      return `[game] Visual test "${place.test}", ${place.where} did not finish in ${limit} frames.\n  The graph stands at "${game.flow.state().path}"; the command waits for something the stepped frames never bring.`;
+    }
+
+    await pageTick(handles);
+    frames += 1;
+  }
+
+  await finished;
+
+  if (ran.failure !== undefined) throw ran.failure.error;
+
+  return undefined;
+}
+
+/**
  * Waits until the page's own graph runs and rests at a gate, the way the dev page starts it, and
- * reads the backend the renderer chose.
+ * reads the backend the renderer chose. The game runs on the browser's frames here: the leg
+ * pauses it later, before the start of a test.
  *
  * @param argument - The page URL, for the message, and the most frames to wait.
  * @param argument.url - The URL of the dev page.
@@ -212,8 +314,46 @@ export async function pageStart(argument: {
 }
 
 /**
- * Runs one `/control` command through the doors of the page, the way an editor does, then
- * settles. The leg restores the start of a test with it too, as the command `restore`.
+ * Holds the game for a test: the `pause` command, the editor's pause, so the browser's frames no
+ * longer move game time; then stepped frames up to the start time, 1000/60 ms each and the last
+ * one shorter, so the game lands on it to the last bit. The page's own start took a different
+ * time on every run; from here on every test starts at the same game time.
+ *
+ * @param argument - The test and the step, and the game time a test starts at.
+ * @param argument.startMs - The game time a test starts at, in milliseconds; a page whose clock
+ *   is already past it starts at the next multiple of it.
+ * @returns The game time the test starts at, or why the page refused the pause.
+ */
+export async function pagePause(
+  argument: Place & { startMs: number }
+): Promise<PageAnswer<number>> {
+  try {
+    const handles = pageHandles();
+    const { game, doors } = handles;
+    const { startMs } = argument;
+
+    await doors.run(game, doors.commands.pause);
+
+    const start = Math.max(startMs, Math.ceil(game.time.snapshot().elapsed / startMs) * startMs);
+
+    for (
+      let left = start - game.time.snapshot().elapsed;
+      left > 0;
+      left = start - game.time.snapshot().elapsed
+    ) {
+      await pageStepFrame(handles, Math.min(left, 1000 / 60));
+    }
+
+    return { ok: true, value: game.time.snapshot().elapsed };
+  } catch (error) {
+    return { ok: false, reason: pageMessage(error) };
+  }
+}
+
+/**
+ * Runs one `/control` command through the doors of the page, the way an editor does, with frames
+ * stepped while it waits for them, then settles. The leg restores the start of a test with it
+ * too, as the command `restore`.
  *
  * @param argument - The test and the step, the command by its short name, its input, and the most
  *   frames to settle.
@@ -226,12 +366,9 @@ export async function pageStep(
   argument: Place & { name: StepCommand; input: StepInput; settleFrames: number }
 ): Promise<PageAnswer<undefined>> {
   try {
-    const { game, doors } = pageHandles();
-    const runners: Readonly<Record<StepCommand, StepRunner>> = doors.commands;
-
-    await doors.run(game, runners[argument.name], argument.input);
-
-    const unsettled = await pageSettle(game, argument.settleFrames, argument);
+    const handles = pageHandles();
+    const unfinished = await pageRun(handles, argument, argument.settleFrames, argument);
+    const unsettled = unfinished ?? (await pageSettle(handles, argument.settleFrames, argument));
 
     return unsettled === undefined
       ? { ok: true, value: undefined }
@@ -242,9 +379,9 @@ export async function pageStep(
 }
 
 /**
- * Plays a checkpoint in the page: settle, land every track and loop, two frames, then the picture
- * of the whole canvas and the state through the doors. The frame loop keeps running: the
- * picture is taken at the end of the next drawn frame.
+ * Plays a checkpoint in the page: settle, land every track and loop, two stepped frames, then the
+ * picture of the whole canvas as lossless WebP and the state through the doors. The game is
+ * paused, so the picture is the stage after the last stepped frame.
  *
  * @param argument - The test and the step, and the most frames to settle.
  * @param argument.settleFrames - The most frames to settle.
@@ -254,16 +391,18 @@ export async function pageCheckpoint(
   argument: Place & { settleFrames: number }
 ): Promise<PageAnswer<PageShot>> {
   try {
-    const { game, doors } = pageHandles();
-    const unsettled = await pageSettle(game, argument.settleFrames, argument);
+    const handles = pageHandles();
+    const { game, doors } = handles;
+    const unsettled = await pageSettle(handles, argument.settleFrames, argument);
 
     if (unsettled !== undefined) return { ok: false, error: unsettled };
 
     game.anim.finishAll();
-    await pageFrame();
-    await pageFrame();
+    await pageTick(handles);
+    await pageTick(handles);
 
-    const screen = await game.renderer.capture();
+    const captured = await game.renderer.capture();
+    const screen = captured === undefined ? undefined : await pageWebp(captured);
     const state = {
       path: doors.read(game, doors.sources.position).path,
       ...doors.read(game, doors.sources.model)
@@ -358,7 +497,7 @@ function pageCanvas(width: number, height: number) {
 }
 
 /**
- * Decodes a PNG data URL into its pixels, with no colour conversion.
+ * Decodes a PNG or WebP data URL into its pixels, with no colour conversion.
  *
  * @param url - The data URL.
  * @returns The pixels.
@@ -380,17 +519,24 @@ async function pageDecode(url: string): Promise<Pixels> {
 }
 
 /**
- * Encodes pixels as a PNG data URL.
+ * Encodes pixels as a lossless WebP data URL: Chrome encodes WebP at quality 1 losslessly, so an
+ * opaque picture decodes to the same bytes.
  *
  * @param pixels - The pixels.
  * @returns The data URL.
+ * @throws {Error} When the browser answers another type: it encodes no WebP.
  */
 async function pageEncode(pixels: Pixels): Promise<string> {
   const { canvas, context } = pageCanvas(pixels.width, pixels.height);
 
   context.putImageData(new ImageData(pixels.data, pixels.width, pixels.height), 0, 0);
 
-  const blob = await canvas.convertToBlob({ type: "image/png" });
+  const blob = await canvas.convertToBlob({ type: "image/webp", quality: 1 });
+
+  if (blob.type !== "image/webp") {
+    throw new Error(`The browser does not encode WebP: it answered ${blob.type}.`);
+  }
+
   const bytes = new Uint8Array(await blob.arrayBuffer());
   let binary = "";
 
@@ -398,15 +544,25 @@ async function pageEncode(pixels: Pixels): Promise<string> {
     binary += String.fromCodePoint(...bytes.subarray(start, start + 32_768));
   }
 
-  return `data:image/png;base64,${btoa(binary)}`;
+  return `data:image/webp;base64,${btoa(binary)}`;
+}
+
+/**
+ * Turns the PNG data URL of `renderer.capture()` into the lossless WebP of the baselines.
+ *
+ * @param url - The PNG data URL.
+ * @returns The WebP data URL of the same pixels.
+ */
+async function pageWebp(url: string): Promise<string> {
+  return pageEncode(await pageDecode(url));
 }
 
 /**
  * Compares the baseline picture with the capture inside the page, on an `OffscreenCanvas`, so
  * the Bun side needs no image library. The diff picture comes back only when a pixel differs.
  *
- * @param argument - The test and the step, the two PNG data URLs and the channel threshold.
- * @param argument.expected - The baseline `screen.png`.
+ * @param argument - The test and the step, the two WebP data URLs and the channel threshold.
+ * @param argument.expected - The baseline `screen.webp`.
  * @param argument.actual - The capture.
  * @param argument.threshold - The largest channel delta that still counts as the same pixel.
  * @returns The counts and the diff picture, or why the pictures could not be compared.
@@ -443,9 +599,14 @@ const pageFunctions: ReadonlyArray<{ readonly name: string }> = [
   isPageDoors,
   pageHandles,
   pageFrame,
+  pageTask,
   pageMessage,
+  pageStepFrame,
+  pageTick,
   pageSettle,
+  pageRun,
   pageStart,
+  pagePause,
   pageStep,
   pageCheckpoint,
   channelDelta,
@@ -453,6 +614,7 @@ const pageFunctions: ReadonlyArray<{ readonly name: string }> = [
   pageCanvas,
   pageDecode,
   pageEncode,
+  pageWebp,
   pageCompare
 ];
 

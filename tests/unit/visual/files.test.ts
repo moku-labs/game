@@ -14,7 +14,7 @@ import {
 // ---------------------------------------------------------------------------
 // Unit (a temp dir): the baseline files of a checkpoint — written when
 // missing, compared when present, rewritten with --update; the browser leg
-// compares state.json without writing it and keeps screen.png as bytes
+// compares state.json without writing it and keeps screen.webp as bytes
 // ---------------------------------------------------------------------------
 
 let dir = "";
@@ -121,12 +121,12 @@ describe("compareBaseline", () => {
 });
 
 describe("readScreen and writeScreen", () => {
-  /** The eight bytes every PNG starts with. */
-  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  const url = `data:image/png;base64,${signature.toString("base64")}`;
+  /** The twelve bytes every WebP starts with: the RIFF header and the WEBP tag. */
+  const signature = Buffer.from("RIFF\u0000\u0000\u0000\u0000WEBP", "latin1");
+  const url = `data:image/webp;base64,${signature.toString("base64")}`;
 
-  it("write the bytes of a PNG data URL, folders included, and read them back as one", async () => {
-    const file = baselineFile(dir, "reward-popup", "open", "screen.png");
+  it("write the bytes of a WebP data URL, folders included, and read them back as one", async () => {
+    const file = baselineFile(dir, "reward-popup", "open", "screen.webp");
 
     await writeScreen(file, url);
 
@@ -135,25 +135,25 @@ describe("readScreen and writeScreen", () => {
   });
 
   it("answer nothing for a missing screen", async () => {
-    expect(await readScreen(path.join(dir, "screen.png"))).toBeUndefined();
+    expect(await readScreen(path.join(dir, "screen.webp"))).toBeUndefined();
   });
 
-  it("refuse a picture that is not a PNG data URL", async () => {
+  it("refuse a picture that is not a WebP data URL, such as the PNG of a capture", async () => {
     await expect(
-      writeScreen(path.join(dir, "screen.png"), "data:image/jpeg;base64,AAAA")
+      writeScreen(path.join(dir, "screen.webp"), "data:image/png;base64,iVBORw0KGgo=")
     ).rejects.toThrow(
-      "[game] The page gave a picture that is not a PNG data URL.\n  Capture it with renderer.capture() of a dev build."
+      "[game] The page gave a picture that is not a WebP data URL.\n  Run the pixel leg in Chrome: the baselines are lossless WebP."
     );
   });
 
-  it("place screen.actual.png and screen.diff.png beside the baseline", () => {
+  it("place screen.actual.webp and screen.diff.webp beside the baseline", () => {
     const folder = path.join("tests/visual", "reward-popup", "open");
 
-    expect(baselineFile("tests/visual", "reward-popup", "open", "screen.actual.png")).toBe(
-      path.join(folder, "screen.actual.png")
+    expect(baselineFile("tests/visual", "reward-popup", "open", "screen.actual.webp")).toBe(
+      path.join(folder, "screen.actual.webp")
     );
-    expect(baselineFile("tests/visual", "reward-popup", "open", "screen.diff.png")).toBe(
-      path.join(folder, "screen.diff.png")
+    expect(baselineFile("tests/visual", "reward-popup", "open", "screen.diff.webp")).toBe(
+      path.join(folder, "screen.diff.webp")
     );
   });
 });

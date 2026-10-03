@@ -1,8 +1,9 @@
 /**
  * @file visual — the baseline files next to the tests: `<dir>/<test>/<checkpoint>/state.json`,
- * `describe.json` and `screen.png`, with `screen.actual.png` and `screen.diff.png` beside them on a
- * pixel difference. The only module of the runner that touches the disk, so `node:fs/promises`
- * and `node:path` are imported here and nowhere else; the `./testing` entry is node and bun only.
+ * `describe.json` and `screen.webp`, with `screen.actual.webp` and `screen.diff.webp` beside them
+ * on a pixel difference. The pictures are lossless WebP, encoded in the page. The only module of
+ * the runner that touches the disk, so `node:fs/promises` and `node:path` are imported here and
+ * nowhere else; the `./testing` entry is node and bun only.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,8 +27,8 @@ export function baselineFile(dir: string, test: string, checkpoint: string, file
   return path.join(dir, test, checkpoint, file);
 }
 
-/** What every picture of the renderer starts with: `renderer.capture()` answers a PNG data URL. */
-const PNG_URL = "data:image/png;base64,";
+/** What every picture of the leg starts with: the page encodes the capture as lossless WebP. */
+const WEBP_URL = "data:image/webp;base64,";
 
 /**
  * Tells a missing file from the other errors of a read.
@@ -121,7 +122,8 @@ export async function compareBaseline(file: string, text: string): Promise<Check
 }
 
 /**
- * Reads a picture of a checkpoint, such as `screen.png`, as the page takes it: a PNG data URL.
+ * Reads a picture of a checkpoint, such as `screen.webp`, the way the page hands one over: a
+ * WebP data URL.
  *
  * @param file - The path.
  * @returns The data URL, or `undefined` when there is no such file.
@@ -130,23 +132,23 @@ export async function compareBaseline(file: string, text: string): Promise<Check
 export async function readScreen(file: string): Promise<string | undefined> {
   const bytes = await readBytes(file);
 
-  return bytes === undefined ? undefined : `${PNG_URL}${bytes.toString("base64")}`;
+  return bytes === undefined ? undefined : `${WEBP_URL}${bytes.toString("base64")}`;
 }
 
 /**
- * Writes a picture of a checkpoint: the bytes of the PNG data URL `renderer.capture()` answered,
- * its folders included.
+ * Writes a picture of a checkpoint: the bytes of the lossless WebP data URL the page encoded, its
+ * folders included.
  *
- * @param file - The path: `screen.png`, `screen.actual.png` or `screen.diff.png`.
- * @param url - The PNG data URL.
- * @throws {Error} When the URL is not a PNG data URL, or the disk refused.
+ * @param file - The path: `screen.webp`, `screen.actual.webp` or `screen.diff.webp`.
+ * @param url - The WebP data URL.
+ * @throws {Error} When the URL is not a WebP data URL, or the disk refused.
  */
 export async function writeScreen(file: string, url: string): Promise<void> {
-  if (!url.startsWith(PNG_URL)) {
+  if (!url.startsWith(WEBP_URL)) {
     throw new Error(
-      "[game] The page gave a picture that is not a PNG data URL.\n  Capture it with renderer.capture() of a dev build."
+      "[game] The page gave a picture that is not a WebP data URL.\n  Run the pixel leg in Chrome: the baselines are lossless WebP."
     );
   }
 
-  await writeBaseline(file, Buffer.from(url.slice(PNG_URL.length), "base64"));
+  await writeBaseline(file, Buffer.from(url.slice(WEBP_URL.length), "base64"));
 }
