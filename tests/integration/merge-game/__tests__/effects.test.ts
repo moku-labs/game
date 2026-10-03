@@ -206,7 +206,7 @@ describe("merge-game effects — the glow of the primary buttons", () => {
 
     expect(game.app.world.ecs.get(elementOf(game, "play"), Glow)).toEqual(primaryGlow.value);
     // Wide and moderate, in the deeper honey: a halo that fades out, never a band.
-    expect(primaryGlow.value).toMatchObject({ strength: 1.8, distance: 32, color: 0xf2_b4_3d });
+    expect(primaryGlow.value).toMatchObject({ strength: 1.8, distance: 18, color: 0xf2_b4_3d });
 
     await tap(game, "gift");
 

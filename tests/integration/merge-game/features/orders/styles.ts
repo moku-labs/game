@@ -92,7 +92,7 @@ export function orderCardStyle(slot: number) {
  * and under strength 2, so it fades out and never draws a band; in the deeper honey, because the
  * pale honey glow is almost the colour of the paper.
  */
-export const readyCardGlow = Glow({ strength: 1.8, distance: 32, color: theme.color.honey });
+export const readyCardGlow = Glow({ strength: 1.8, distance: 18, color: theme.color.honey });
 
 /** The clothespin that holds a card to the rope, over the middle of its top edge. */
 export const pinStyle = defineStyle({

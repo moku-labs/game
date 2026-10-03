@@ -41,7 +41,7 @@ export const theme = defineTokens({
  * under strength 2 the halo never saturates next to the plank, so it fades out instead of drawing
  * a band. The deeper honey reads on cream paper and on the meadow alike.
  */
-export const primaryGlow = Glow({ strength: 1.8, distance: 32, color: theme.color.honey });
+export const primaryGlow = Glow({ strength: 1.8, distance: 18, color: theme.color.honey });
 
 /**
  * The one state rule set of every control (design §4): it lifts a little under the mouse and
