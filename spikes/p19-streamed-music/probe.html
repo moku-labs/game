@@ -1,0 +1,198 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>P19 probe</title>
+<button id="go" style="width:300px;height:200px">go</button>
+<script>
+// Every test starts inside the click handler of #go, so play() and the context run with a user
+// gesture. The runner arms a test, clicks, then awaits window.result.
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let armed;
+window.arm = (name, args) => { armed = { name, args }; window.result = undefined; };
+document.getElementById("go").addEventListener("click", () => {
+  const { name, args } = armed;
+  window.result = tests[name](...args).catch(e => ({ error: String(e) }));
+});
+
+function silentOut(ctx) { const g = ctx.createGain(); g.gain.value = 0; g.connect(ctx.destination); return g; }
+async function recorder(ctx) {
+  await ctx.audioWorklet.addModule("/recorder.js");
+  const node = new AudioWorkletNode(ctx, "recorder");
+  node.connect(silentOut(ctx));
+  const read = () => new Promise(r => { node.port.onmessage = e => r(e.data); node.port.postMessage("read"); });
+  return { node, read, arm: () => node.port.postMessage("arm") };
+}
+function edges(data) {
+  let lead = 0; while (lead < data.length && Math.abs(data[lead]) < 1e-3) lead++;
+  let trail = 0; while (trail < data.length && Math.abs(data[data.length - 1 - trail]) < 1e-3) trail++;
+  return { lead, trail };
+}
+
+const tests = {
+  // Decoded size of each file at a given context rate.
+  async decode(files, rate) {
+    const ctx = new AudioContext(rate ? { sampleRate: rate } : {});
+    const out = [];
+    for (const f of files) {
+      try {
+        const bytes = await (await fetch("/range/" + f)).arrayBuffer();
+        const fileBytes = bytes.byteLength;
+        const t0 = performance.now();
+        const buf = await ctx.decodeAudioData(bytes);
+        const ms = Math.round(performance.now() - t0);
+        const e = edges(buf.getChannelData(0));
+        out.push({ f, fileBytes, ctxRate: ctx.sampleRate, length: buf.length, ch: buf.numberOfChannels, duration: +buf.duration.toFixed(4), decodedMB: +(buf.length * buf.numberOfChannels * 4 / 1e6).toFixed(1), decodeMs: ms, leadSilentSamples: e.lead, trailSilentSamples: e.trail });
+      } catch (err) { out.push({ f, error: String(err) }); }
+    }
+    await ctx.close();
+    return out;
+  },
+
+  // Memory scenarios: hold N decoded buffers playing, or N streamed elements playing.
+  async hold(mode, n, file) {
+    const ctx = new AudioContext();
+    window.keep = [];
+    const out = silentOut(ctx);
+    if (mode === "buffer") {
+      for (let i = 0; i < n; i++) {
+        const buf = await ctx.decodeAudioData(await (await fetch("/range/" + file + "?" + i)).arrayBuffer());
+        const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.connect(out); s.start();
+        window.keep.push(s, buf);
+      }
+    } else if (mode === "stream") {
+      for (let i = 0; i < n; i++) {
+        const a = new Audio(); a.crossOrigin = "anonymous"; a.loop = true; a.src = "/range/" + file + "?" + i;
+        const src = ctx.createMediaElementSource(a); src.connect(out);
+        await a.play();
+        window.keep.push(a, src);
+      }
+    }
+    await sleep(3000);
+    return { mode, n, file, state: ctx.state };
+  },
+
+  // Gain and fades on a streamed element: RMS after the track gain, before and during a ramp to 0.
+  async fade(path) {
+    const ctx = new AudioContext();
+    const a = new Audio(); a.crossOrigin = "anonymous"; a.src = path; a.loop = true;
+    const playing = a.play();
+    const src = ctx.createMediaElementSource(a);
+    const g = ctx.createGain();
+    const rec = await recorder(ctx);
+    src.connect(g); g.connect(rec.node);
+    await playing;
+    await sleep(1200); await rec.read();
+    await sleep(500); const full = (await rec.read()).rms;
+    const now = ctx.currentTime;
+    g.gain.setValueAtTime(1, now); g.gain.linearRampToValueAtTime(0, now + 1);
+    await sleep(500); const mid = (await rec.read()).rms;
+    await sleep(800); await rec.read();
+    await sleep(300); const end = (await rec.read()).rms;
+    a.volume = 0.5; const volumeAfterSet = a.volume;
+    a.pause(); await ctx.close();
+    return { path, rmsFull: +full.toFixed(4), rmsDuringRamp: +mid.toFixed(4), rmsAfterRamp: +end.toFixed(5), volumeAfterSet };
+  },
+
+  // Seamless loop: a 2 s sine looped for `seconds`, measured after the source.
+  async loop(kind, file, seconds) {
+    const ctx = new AudioContext();
+    let a;
+    let playing = Promise.resolve();
+    if (kind === "element") {
+      a = new Audio(); a.crossOrigin = "anonymous"; a.loop = true; a.src = "/range/" + file; playing = a.play();
+    }
+    const rec = await recorder(ctx);
+    if (kind === "element") {
+      ctx.createMediaElementSource(a).connect(rec.node);
+      await playing;
+    } else {
+      const buf = await ctx.decodeAudioData(await (await fetch("/range/" + file)).arrayBuffer());
+      const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.connect(rec.node); s.start();
+    }
+    await sleep(400); rec.arm();
+    await sleep(seconds * 1000);
+    const r = await rec.read();
+    a?.pause(); await ctx.close();
+    return { kind, file, seconds, gapsOver32Samples: r.gaps, longestSilentRun: r.maxRun, rms: +r.rms.toFixed(3) };
+  },
+
+  // Cross-fade between two streamed tracks: both gains ramp over fadeMs; RMS of each side.
+  async crossfade(fileA, fileB, fadeMs) {
+    const ctx = new AudioContext();
+    const mk = f => { const a = new Audio(); a.crossOrigin = "anonymous"; a.loop = true; a.src = "/range/" + f; return a; };
+    const A = mk(fileA), B = mk(fileB);
+    const pA = A.play();
+    const recA = await recorder(ctx), recB = await recorder(ctx);
+    const gA = ctx.createGain(), gB = ctx.createGain(); gB.gain.value = 0;
+    ctx.createMediaElementSource(A).connect(gA); gA.connect(recA.node);
+    ctx.createMediaElementSource(B).connect(gB); gB.connect(recB.node);
+    await pA; await sleep(1000);
+    const t0 = performance.now();
+    await B.play();
+    const startMs = Math.round(performance.now() - t0);
+    const now = ctx.currentTime, s = fadeMs / 1000;
+    gA.gain.setValueAtTime(1, now); gA.gain.linearRampToValueAtTime(0, now + s);
+    gB.gain.setValueAtTime(0, now); gB.gain.linearRampToValueAtTime(1, now + s);
+    await recA.read(); await recB.read();
+    await sleep(fadeMs / 2); const midA = (await recA.read()).rms, midB = (await recB.read()).rms;
+    await sleep(fadeMs / 2 + 300); await recA.read(); await recB.read();
+    await sleep(300); const endA = (await recA.read()).rms, endB = (await recB.read()).rms;
+    A.pause(); B.pause(); await ctx.close();
+    return { fadeMs, secondPlayToPlayingMs: startMs, mid: [+midA.toFixed(3), +midB.toFixed(3)], end: [+endA.toFixed(4), +endB.toFixed(3)] };
+  },
+
+  // Media served without Range: does it play, loop, and seek?
+  async seekloop(mode, file) {
+    const a = new Audio(); a.src = "/" + mode + "/" + file; a.loop = true; a.muted = true;
+    await a.play();
+    await sleep(800);
+    const seekable = a.seekable.length ? [a.seekable.start(0), a.seekable.end(a.seekable.length - 1)] : [];
+    const target = Math.min(100, a.duration - 3);
+    a.currentTime = target;
+    await Promise.race([new Promise(r => a.addEventListener("seeked", r, { once: true })), sleep(4000)]);
+    const afterSeek = a.currentTime;
+    a.currentTime = a.duration - 0.5;
+    await Promise.race([new Promise(r => a.addEventListener("seeked", r, { once: true })), sleep(4000)]);
+    const nearEnd = a.currentTime;
+    await sleep(1500);
+    const afterLoop = a.currentTime;
+    a.pause();
+    return { mode, file, duration: a.duration, seekableRanges: seekable.map(x => +x.toFixed(2)), seekTarget: target, afterSeek: +afterSeek.toFixed(2), nearEnd: +nearEnd.toFixed(2), afterEndWithLoop: +afterLoop.toFixed(2), paused: a.paused, ended: a.ended, error: a.error?.code ?? null };
+  },
+
+  // The bytes `assets` already fetched, played through a blob: URL into MediaElementSource.
+  async blob(file, type) {
+    const ctx = new AudioContext();
+    const bytes = await (await fetch("/norange/" + file)).arrayBuffer();
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    const a = new Audio(url); a.loop = true;
+    let playError = null;
+    const p = a.play().catch(e => { playError = String(e); });
+    const rec = await recorder(ctx);
+    const g = ctx.createGain();
+    ctx.createMediaElementSource(a).connect(g); g.connect(rec.node);
+    await p; await sleep(1200); await rec.read(); await sleep(500);
+    const full = (await rec.read()).rms;
+    g.gain.setValueAtTime(1, ctx.currentTime); g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
+    await sleep(600); await rec.read(); await sleep(300);
+    const end = (await rec.read()).rms;
+    a.currentTime = 100;
+    await Promise.race([new Promise(r => a.addEventListener("seeked", r, { once: true })), sleep(3000)]);
+    const afterSeek = a.currentTime;
+    a.pause(); URL.revokeObjectURL(url); await ctx.close();
+    return { file, playError, rmsFull: +full.toFixed(4), rmsAfterFade: +end.toFixed(5), afterSeek: +afterSeek.toFixed(2) };
+  },
+
+  // Cross-origin media without CORS headers through MediaElementSource.
+  async nocors(file) {
+    const ctx = new AudioContext();
+    const a = new Audio(); a.src = "http://127.0.0.1:8797/range/" + file; a.loop = true;
+    const p = a.play();
+    const rec = await recorder(ctx);
+    ctx.createMediaElementSource(a).connect(rec.node);
+    await p; await sleep(1200); await rec.read(); await sleep(500);
+    const r = await rec.read();
+    a.pause(); await ctx.close();
+    return { file, rms: +r.rms.toFixed(4), elementPaused: a.paused };
+  }
+};
+</script>

@@ -1,0 +1,1 @@
+probe server on 8796 (page, CORS) and 8797 (no CORS)

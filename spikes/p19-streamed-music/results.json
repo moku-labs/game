@@ -1,0 +1,852 @@
+{
+  "chromium": {
+    "version": "148.0.7778.96",
+    "decodeDefault": [
+      {
+        "f": "track.mp3",
+        "fileBytes": 2401218,
+        "ctxRate": 48000,
+        "length": 7200000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 57.6,
+        "decodeMs": 348,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.m4a",
+        "fileBytes": 2427699,
+        "ctxRate": 48000,
+        "length": 7200042,
+        "ch": 2,
+        "duration": 150.0009,
+        "decodedMB": 57.6,
+        "decodeMs": 312,
+        "leadSilentSamples": 1,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.ogg",
+        "fileBytes": 1687201,
+        "ctxRate": 48000,
+        "length": 7200043,
+        "ch": 2,
+        "duration": 150.0009,
+        "decodedMB": 57.6,
+        "decodeMs": 294,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.opus.ogg",
+        "fileBytes": 1660164,
+        "ctxRate": 48000,
+        "length": 7200000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 57.6,
+        "decodeMs": 165,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.webm",
+        "fileBytes": 1702427,
+        "ctxRate": 48000,
+        "length": 7200000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 57.6,
+        "decodeMs": 164,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.wav",
+        "fileBytes": 26460078,
+        "ctxRate": 48000,
+        "length": 7200000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 57.6,
+        "decodeMs": 244,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      }
+    ],
+    "decode44k": [
+      {
+        "f": "track.mp3",
+        "fileBytes": 2401218,
+        "ctxRate": 44100,
+        "length": 6615000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 52.9,
+        "decodeMs": 130,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.m4a",
+        "fileBytes": 2427699,
+        "ctxRate": 44100,
+        "length": 6615039,
+        "ch": 2,
+        "duration": 150.0009,
+        "decodedMB": 52.9,
+        "decodeMs": 94,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      }
+    ],
+    "decodeLoopEdges": [
+      {
+        "f": "loop.wav",
+        "fileBytes": 352878,
+        "ctxRate": 44100,
+        "length": 88200,
+        "ch": 2,
+        "duration": 2,
+        "decodedMB": 0.7,
+        "decodeMs": 1,
+        "leadSilentSamples": 1,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "loop.mp3",
+        "fileBytes": 33061,
+        "ctxRate": 44100,
+        "length": 88200,
+        "ch": 2,
+        "duration": 2,
+        "decodedMB": 0.7,
+        "decodeMs": 2,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "loop.m4a",
+        "fileBytes": 34483,
+        "ctxRate": 44100,
+        "length": 89087,
+        "ch": 2,
+        "duration": 2.0201,
+        "decodedMB": 0.7,
+        "decodeMs": 2,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 760
+      },
+      {
+        "f": "loop.ogg",
+        "fileBytes": 9502,
+        "ctxRate": 44100,
+        "length": 88640,
+        "ch": 2,
+        "duration": 2.01,
+        "decodedMB": 0.7,
+        "decodeMs": 1,
+        "leadSilentSamples": 1,
+        "trailSilentSamples": 2
+      },
+      {
+        "f": "loop.opus.ogg",
+        "fileBytes": 29998,
+        "ctxRate": 44100,
+        "length": 88199,
+        "ch": 2,
+        "duration": 2,
+        "decodedMB": 0.7,
+        "decodeMs": 5,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "loop.webm",
+        "fileBytes": 30825,
+        "ctxRate": 44100,
+        "length": 88199,
+        "ch": 2,
+        "duration": 2,
+        "decodedMB": 0.7,
+        "decodeMs": 5,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      }
+    ],
+    "fade": {
+      "path": "/range/track.mp3",
+      "rmsFull": 0.1815,
+      "rmsDuringRamp": 0.1379,
+      "rmsAfterRamp": 0,
+      "volumeAfterSet": 0.5
+    },
+    "fadeNoRange": {
+      "path": "/norange/track.mp3",
+      "rmsFull": 0.1813,
+      "rmsDuringRamp": 0.1382,
+      "rmsAfterRamp": 0,
+      "volumeAfterSet": 0.5
+    },
+    "crossfade": {
+      "fadeMs": 1000,
+      "secondPlayToPlayingMs": 0,
+      "mid": [
+        0.138,
+        0.055
+      ],
+      "end": [
+        0,
+        0.19
+      ]
+    },
+    "loop": [
+      {
+        "kind": "element",
+        "file": "loop.wav",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 410,
+        "rms": 0.353
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.wav",
+        "seconds": 6,
+        "gapsOver32Samples": 0,
+        "longestSilentRun": 1,
+        "rms": 0.354
+      },
+      {
+        "kind": "element",
+        "file": "loop.mp3",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 410,
+        "rms": 0.335
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.mp3",
+        "seconds": 6,
+        "gapsOver32Samples": 0,
+        "longestSilentRun": 1,
+        "rms": 0.336
+      },
+      {
+        "kind": "element",
+        "file": "loop.m4a",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 2360,
+        "rms": 0.349
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.m4a",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 966,
+        "rms": 0.352
+      },
+      {
+        "kind": "element",
+        "file": "loop.ogg",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 467,
+        "rms": 0.355
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.ogg",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 118,
+        "rms": 0.355
+      },
+      {
+        "kind": "element",
+        "file": "loop.webm",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 257,
+        "rms": 0.353
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.webm",
+        "seconds": 6,
+        "gapsOver32Samples": 0,
+        "longestSilentRun": 1,
+        "rms": 0.354
+      }
+    ],
+    "seekloop": [
+      {
+        "mode": "range",
+        "file": "track.mp3",
+        "duration": 150,
+        "seekableRanges": [
+          0,
+          150
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100,
+        "nearEnd": 149.5,
+        "afterEndWithLoop": 0.87,
+        "paused": true,
+        "ended": false,
+        "error": null
+      },
+      {
+        "mode": "range",
+        "file": "track.m4a",
+        "duration": 150.000998,
+        "seekableRanges": [
+          0,
+          150
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100,
+        "nearEnd": 149.5,
+        "afterEndWithLoop": 0.87,
+        "paused": true,
+        "ended": false,
+        "error": null
+      },
+      {
+        "mode": "norange",
+        "file": "track.mp3",
+        "duration": 150,
+        "seekableRanges": [
+          0,
+          150
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100,
+        "nearEnd": 149.5,
+        "afterEndWithLoop": 0.87,
+        "paused": true,
+        "ended": false,
+        "error": null
+      },
+      {
+        "mode": "norange",
+        "file": "track.m4a",
+        "duration": 150.000998,
+        "seekableRanges": [
+          0,
+          150
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100,
+        "nearEnd": 149.5,
+        "afterEndWithLoop": 0.87,
+        "paused": true,
+        "ended": false,
+        "error": null
+      }
+    ],
+    "nocors": {
+      "file": "track.mp3",
+      "rms": 0,
+      "elementPaused": true
+    },
+    "memory": [
+      {
+        "mode": "none",
+        "n": 0,
+        "res": {
+          "mode": "none",
+          "n": 0,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 219,
+          "largestMB": 69,
+          "processes": 5
+        },
+        "after": {
+          "totalMB": 283,
+          "largestMB": 85,
+          "processes": 6
+        }
+      },
+      {
+        "mode": "buffer",
+        "n": 1,
+        "res": {
+          "mode": "buffer",
+          "n": 1,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 219,
+          "largestMB": 69,
+          "processes": 5
+        },
+        "after": {
+          "totalMB": 481,
+          "largestMB": 209,
+          "processes": 10
+        }
+      },
+      {
+        "mode": "buffer",
+        "n": 2,
+        "res": {
+          "mode": "buffer",
+          "n": 2,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 219,
+          "largestMB": 69,
+          "processes": 5
+        },
+        "after": {
+          "totalMB": 469,
+          "largestMB": 270,
+          "processes": 6
+        }
+      },
+      {
+        "mode": "stream",
+        "n": 1,
+        "res": {
+          "mode": "stream",
+          "n": 1,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 219,
+          "largestMB": 69,
+          "processes": 5
+        },
+        "after": {
+          "totalMB": 299,
+          "largestMB": 97,
+          "processes": 6
+        }
+      },
+      {
+        "mode": "stream",
+        "n": 2,
+        "res": {
+          "mode": "stream",
+          "n": 2,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 219,
+          "largestMB": 69,
+          "processes": 5
+        },
+        "after": {
+          "totalMB": 305,
+          "largestMB": 103,
+          "processes": 6
+        }
+      }
+    ]
+  },
+  "webkit": {
+    "version": "26.4",
+    "decodeDefault": [
+      {
+        "f": "track.mp3",
+        "fileBytes": 2401218,
+        "ctxRate": 48000,
+        "length": 7200000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 57.6,
+        "decodeMs": 150,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.m4a",
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "f": "track.ogg",
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "f": "track.opus.ogg",
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "f": "track.webm",
+        "fileBytes": 1702427,
+        "ctxRate": 48000,
+        "length": 7200000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 57.6,
+        "decodeMs": 207,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.wav",
+        "fileBytes": 26460078,
+        "ctxRate": 48000,
+        "length": 7200000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 57.6,
+        "decodeMs": 41,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      }
+    ],
+    "decode44k": [
+      {
+        "f": "track.mp3",
+        "fileBytes": 2401218,
+        "ctxRate": 44100,
+        "length": 6615000,
+        "ch": 2,
+        "duration": 150,
+        "decodedMB": 52.9,
+        "decodeMs": 120,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "track.m4a",
+        "error": "EncodingError: Decoding failed"
+      }
+    ],
+    "decodeLoopEdges": [
+      {
+        "f": "loop.wav",
+        "fileBytes": 352878,
+        "ctxRate": 44100,
+        "length": 88200,
+        "ch": 2,
+        "duration": 2,
+        "decodedMB": 0.7,
+        "decodeMs": 2,
+        "leadSilentSamples": 1,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "loop.mp3",
+        "fileBytes": 33061,
+        "ctxRate": 44100,
+        "length": 88200,
+        "ch": 2,
+        "duration": 2,
+        "decodedMB": 0.7,
+        "decodeMs": 2,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      },
+      {
+        "f": "loop.m4a",
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "f": "loop.ogg",
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "f": "loop.opus.ogg",
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "f": "loop.webm",
+        "fileBytes": 30825,
+        "ctxRate": 44100,
+        "length": 88200,
+        "ch": 2,
+        "duration": 2,
+        "decodedMB": 0.7,
+        "decodeMs": 3,
+        "leadSilentSamples": 0,
+        "trailSilentSamples": 0
+      }
+    ],
+    "fade": {
+      "path": "/range/track.mp3",
+      "rmsFull": 0.1807,
+      "rmsDuringRamp": 0.1389,
+      "rmsAfterRamp": 0,
+      "volumeAfterSet": 0.5
+    },
+    "fadeNoRange": {
+      "path": "/norange/track.mp3",
+      "rmsFull": 0.1824,
+      "rmsDuringRamp": 0.1379,
+      "rmsAfterRamp": 0,
+      "volumeAfterSet": 0.5
+    },
+    "crossfade": {
+      "fadeMs": 1000,
+      "secondPlayToPlayingMs": 13,
+      "mid": [
+        0.139,
+        0.025
+      ],
+      "end": [
+        0,
+        0.19
+      ]
+    },
+    "loop": [
+      {
+        "kind": "element",
+        "file": "loop.wav",
+        "seconds": 6,
+        "gapsOver32Samples": 5,
+        "longestSilentRun": 19911,
+        "rms": 0.311
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.wav",
+        "seconds": 6,
+        "gapsOver32Samples": 0,
+        "longestSilentRun": 1,
+        "rms": 0.354
+      },
+      {
+        "kind": "element",
+        "file": "loop.mp3",
+        "seconds": 6,
+        "gapsOver32Samples": 5,
+        "longestSilentRun": 19910,
+        "rms": 0.291
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.mp3",
+        "seconds": 6,
+        "gapsOver32Samples": 0,
+        "longestSilentRun": 1,
+        "rms": 0.336
+      },
+      {
+        "kind": "element",
+        "file": "loop.m4a",
+        "seconds": 6,
+        "gapsOver32Samples": 4,
+        "longestSilentRun": 19911,
+        "rms": 0.318
+      },
+      {
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "kind": "element",
+        "file": "loop.ogg",
+        "seconds": 6,
+        "gapsOver32Samples": 3,
+        "longestSilentRun": 12112,
+        "rms": 0.327
+      },
+      {
+        "error": "EncodingError: Decoding failed"
+      },
+      {
+        "kind": "element",
+        "file": "loop.webm",
+        "seconds": 6,
+        "gapsOver32Samples": 0,
+        "longestSilentRun": 0,
+        "rms": 0
+      },
+      {
+        "kind": "buffer",
+        "file": "loop.webm",
+        "seconds": 6,
+        "gapsOver32Samples": 0,
+        "longestSilentRun": 1,
+        "rms": 0.354
+      }
+    ],
+    "seekloop": [
+      {
+        "mode": "range",
+        "file": "track.mp3",
+        "duration": 150.04734693877552,
+        "seekableRanges": [
+          0,
+          150.05
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100.01,
+        "nearEnd": 100.04,
+        "afterEndWithLoop": 101.5,
+        "paused": true,
+        "ended": false,
+        "error": null
+      },
+      {
+        "mode": "range",
+        "file": "track.m4a",
+        "duration": 150.001,
+        "seekableRanges": [
+          0,
+          150
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100.01,
+        "nearEnd": 100.03,
+        "afterEndWithLoop": 101.5,
+        "paused": true,
+        "ended": false,
+        "error": null
+      },
+      {
+        "mode": "norange",
+        "file": "track.mp3",
+        "duration": 150.04734693877552,
+        "seekableRanges": [
+          0,
+          150.05
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100.01,
+        "nearEnd": 100.03,
+        "afterEndWithLoop": 101.5,
+        "paused": true,
+        "ended": false,
+        "error": null
+      },
+      {
+        "mode": "norange",
+        "file": "track.m4a",
+        "duration": 150.001,
+        "seekableRanges": [
+          0,
+          150
+        ],
+        "seekTarget": 100,
+        "afterSeek": 100.01,
+        "nearEnd": 100.03,
+        "afterEndWithLoop": 101.5,
+        "paused": true,
+        "ended": false,
+        "error": null
+      }
+    ],
+    "nocors": {
+      "file": "track.mp3",
+      "rms": 0,
+      "elementPaused": true
+    },
+    "memory": [
+      {
+        "mode": "none",
+        "n": 0,
+        "res": {
+          "mode": "none",
+          "n": 0,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 303,
+          "largestMB": 103,
+          "processes": 7
+        },
+        "after": {
+          "totalMB": 321,
+          "largestMB": 105,
+          "processes": 7
+        }
+      },
+      {
+        "mode": "buffer",
+        "n": 1,
+        "res": {
+          "mode": "buffer",
+          "n": 1,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 305,
+          "largestMB": 103,
+          "processes": 7
+        },
+        "after": {
+          "totalMB": 448,
+          "largestMB": 226,
+          "processes": 9
+        }
+      },
+      {
+        "mode": "buffer",
+        "n": 2,
+        "res": {
+          "mode": "buffer",
+          "n": 2,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 305,
+          "largestMB": 103,
+          "processes": 7
+        },
+        "after": {
+          "totalMB": 511,
+          "largestMB": 288,
+          "processes": 7
+        }
+      },
+      {
+        "mode": "stream",
+        "n": 1,
+        "res": {
+          "mode": "stream",
+          "n": 1,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 305,
+          "largestMB": 103,
+          "processes": 7
+        },
+        "after": {
+          "totalMB": 758,
+          "largestMB": 202,
+          "processes": 21
+        }
+      },
+      {
+        "mode": "stream",
+        "n": 2,
+        "res": {
+          "mode": "stream",
+          "n": 2,
+          "file": "track.mp3",
+          "state": "running"
+        },
+        "before": {
+          "totalMB": 1097,
+          "largestMB": 178,
+          "processes": 38
+        },
+        "after": {
+          "totalMB": 1597,
+          "largestMB": 181,
+          "processes": 48
+        }
+      }
+    ]
+  }
+}

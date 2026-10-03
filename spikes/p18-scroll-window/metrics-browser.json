@@ -1,0 +1,286 @@
+[
+  {
+    "n": 50,
+    "mode": "full",
+    "renderer": "webgpu",
+    "mountMs": 39.6,
+    "startMs": 673.3,
+    "uiEntities": 255,
+    "yogaNodes": 255,
+    "views": 255,
+    "idle": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 183.3
+      },
+      "workMs": {
+        "p50": 1.04,
+        "p95": 1.04,
+        "max": 1.04
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "drag": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 33.4
+      },
+      "workMs": {
+        "p50": 1.09,
+        "p95": 1.15,
+        "max": 1.15
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "windowRenders": 0,
+    "offset": -3808,
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  },
+  {
+    "n": 50,
+    "mode": "window",
+    "renderer": "webgpu",
+    "mountMs": 27.1,
+    "startMs": 49.9,
+    "uiEntities": 127,
+    "yogaNodes": 127,
+    "views": 127,
+    "idle": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 0.74,
+        "p95": 0.74,
+        "max": 0.74
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "drag": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 0.76,
+        "p95": 1.27,
+        "max": 1.47
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "windowRenders": 26,
+    "offset": -3840,
+    "errors": []
+  },
+  {
+    "n": 200,
+    "mode": "full",
+    "renderer": "webgpu",
+    "mountMs": 65.5,
+    "startMs": 51.7,
+    "uiEntities": 1005,
+    "yogaNodes": 1005,
+    "views": 1005,
+    "idle": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 1.5,
+        "p95": 1.5,
+        "max": 1.5
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "drag": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 33.3
+      },
+      "workMs": {
+        "p50": 1.95,
+        "p95": 2.42,
+        "max": 2.42
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "windowRenders": 0,
+    "offset": -3840,
+    "errors": []
+  },
+  {
+    "n": 200,
+    "mode": "window",
+    "renderer": "webgpu",
+    "mountMs": 27.4,
+    "startMs": 50.5,
+    "uiEntities": 127,
+    "yogaNodes": 127,
+    "views": 127,
+    "idle": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 0.65,
+        "p95": 0.65,
+        "max": 0.65
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "drag": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 1.25,
+        "p95": 1.4,
+        "max": 1.4
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "windowRenders": 26,
+    "offset": -3840,
+    "errors": []
+  },
+  {
+    "n": 1000,
+    "mode": "full",
+    "renderer": "webgpu",
+    "mountMs": 164.8,
+    "startMs": 56.2,
+    "uiEntities": 5005,
+    "yogaNodes": 5005,
+    "views": 5005,
+    "idle": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 3.75,
+        "p95": 3.75,
+        "max": 3.75
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "drag": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 66.7
+      },
+      "workMs": {
+        "p50": 4.29,
+        "p95": 5.42,
+        "max": 5.42
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "windowRenders": 0,
+    "offset": -3824,
+    "errors": []
+  },
+  {
+    "n": 1000,
+    "mode": "window",
+    "renderer": "webgpu",
+    "mountMs": 29.4,
+    "startMs": 50.1,
+    "uiEntities": 127,
+    "yogaNodes": 127,
+    "views": 127,
+    "idle": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.7,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 0.8,
+        "p95": 0.8,
+        "max": 0.8
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "drag": {
+      "rafDeltaMs": {
+        "p50": 16.7,
+        "p95": 16.8,
+        "max": 16.8
+      },
+      "workMs": {
+        "p50": 1.48,
+        "p95": 1.8,
+        "max": 1.8
+      },
+      "drawCalls": {
+        "p50": 3,
+        "p95": 3,
+        "max": 3
+      }
+    },
+    "windowRenders": 26,
+    "offset": -3840,
+    "errors": []
+  }
+]
