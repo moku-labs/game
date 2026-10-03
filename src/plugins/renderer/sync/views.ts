@@ -13,7 +13,14 @@ import {
   type SpriteValue,
   Transform
 } from "../components";
-import type { PixiContainer, PixiGraphics, PixiSprite, PixiTexture, Point } from "../types";
+import type {
+  PixiContainer,
+  PixiGraphics,
+  PixiModule,
+  PixiSprite,
+  PixiTexture,
+  Point
+} from "../types";
 import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
 import { applyFilters, clearFilters, filtersOf, moveFilters } from "./filters";
 import { clearFonts } from "./fonts";
@@ -349,9 +356,44 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
 }
 
 /**
- * Keeps the clip rectangle of a view in step with its value: a clipping view gets a wrapper whose
- * children are masked, and a view that stopped clipping loses both mask and effect. A nine-slice
- * clips through the plain rectangle of its box, handed in as a shape value.
+ * Gives a clipping view the masked container its children hang in, next to its own visual in the
+ * wrapper. The children already in the wrapper move into it with their depth; the visual and the
+ * debug outline stay outside, so the mask never cuts them.
+ *
+ * @param pixi - The Pixi module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param wrapper - Its wrapper.
+ * @returns The masked container.
+ */
+function ensureClipped(
+  pixi: PixiModule,
+  entity: Entity,
+  view: View,
+  wrapper: PixiContainer
+): PixiContainer {
+  if (view.clipped !== undefined) return view.clipped;
+
+  const clipped = new pixi.Container();
+
+  clipped.label = `children#${entity}`;
+  clipped.sortableChildren = true;
+
+  for (const child of wrapper.children) {
+    if (child !== view.object && child !== view.outline) clipped.addChild(child);
+  }
+
+  wrapper.addChild(clipped);
+  view.clipped = clipped;
+
+  return clipped;
+}
+
+/**
+ * Keeps the clip rectangle of a view in step with its value: a clipping view masks the container
+ * its children hang in, never its own visual, and a view that stopped clipping loses both mask
+ * and container. A nine-slice clips through the plain rectangle of its box, handed in as a shape
+ * value.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -371,14 +413,16 @@ function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<Sh
 
   if (wrapper === undefined) return;
 
+  const clipped = ensureClipped(pixi, entity, view, wrapper);
   const mask = view.mask ?? new pixi.Graphics();
 
   mask.label = `clip#${entity}`;
   drawShapePath(mask, value, 1);
 
+  // The mask sits beside the masked container, in the same local space of the wrapper.
   if (mask.parent !== wrapper) wrapper.addChild(mask);
 
-  wrapper.mask = mask;
+  clipped.mask = mask;
   view.mask = mask;
 }
 
@@ -481,7 +525,8 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
  * Gives a parent entity the container its children hang in. A v8 sprite takes no children, so
  * the parent's own visual moves into the wrapper as child 0 and the transform moves with it. The
  * wrapper sorts its children by their `Order`; the visual is child 0 at depth 0, so a child with
- * the same depth draws above it.
+ * the same depth draws above it. A clipping parent hangs its children one level down, in the
+ * masked container `applyClip` adds.
  *
  * @param sctx - Domain context of the sync module.
  * @param parentEntity - The entity named as a parent.
@@ -516,8 +561,22 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
 }
 
 /**
- * Hangs a view where it belongs: under its parent's wrapper, or in the container of the layer
- * it names. An entity with no layer and no parent is not drawn.
+ * The container the children of a parent hang in: the masked one while the parent clips, its
+ * wrapper otherwise.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param parentEntity - The entity named as a parent.
+ * @returns The container, or `undefined` when the parent draws nothing.
+ */
+function childHostOf(sctx: SyncCtx, parentEntity: Entity): PixiContainer | undefined {
+  const wrapper = ensureWrapper(sctx, parentEntity);
+
+  return sctx.ctx.state.sync.views.get(parentEntity)?.clipped ?? wrapper;
+}
+
+/**
+ * Hangs a view where it belongs: under its parent, or in the container of the layer it names.
+ * An entity with no layer and no parent is not drawn.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -528,18 +587,18 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
   const parentEntity = parentOf(sctx.ctx.deps.world.ecs, entity);
 
   if (parentEntity !== 0) {
-    const wrapper = ensureWrapper(sctx, parentEntity);
+    const host = childHostOf(sctx, parentEntity);
 
     view.layer = "";
 
-    if (wrapper === undefined) {
+    if (host === undefined) {
       sctx.ctx.log.warn("renderer: parent draws nothing", { entity, parent: parentEntity });
       detach(view.object);
 
       return;
     }
 
-    wrapper.addChild(view.wrapper ?? view.object);
+    host.addChild(view.wrapper ?? view.object);
 
     return;
   }
@@ -650,6 +709,7 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     wrapper: undefined,
     placeholder: false,
     mask: undefined,
+    clipped: undefined,
     display: visual.display,
     value: built.value,
     drawScale: { x: 1, y: 1 },
@@ -694,9 +754,9 @@ function displayObjectOf(sctx: SyncCtx, entity: Entity): PixiContainer | undefin
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The parent entity.
- * @param wrapper - Its wrapper.
+ * @param host - The container its children hang in.
  */
-function detachChildren(sctx: SyncCtx, entity: Entity, wrapper: PixiContainer): void {
+function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): void {
   const orphans: Entity[] = [];
 
   for (const [child, childView] of sctx.ctx.state.sync.views) {
@@ -704,7 +764,7 @@ function detachChildren(sctx: SyncCtx, entity: Entity, wrapper: PixiContainer): 
 
     const object = childView.wrapper ?? childView.object;
 
-    if (object.parent !== wrapper) continue;
+    if (object.parent !== host) continue;
 
     detach(object);
     orphans.push(child);
@@ -727,7 +787,9 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 
   if (view === undefined) return;
 
-  if (view.wrapper !== undefined) detachChildren(sctx, entity, view.wrapper);
+  const host = view.clipped ?? view.wrapper;
+
+  if (host !== undefined) detachChildren(sctx, entity, host);
 
   state.views.delete(entity);
   state.entityOf.delete(view.object);
@@ -767,6 +829,7 @@ export function stopSync(state: SyncState): void {
     }
 
     view.mask = undefined;
+    view.clipped = undefined;
     // A live view is left detached with its layer, so its outline is freed here.
     dropOutline(view);
     view.wrapper = undefined;

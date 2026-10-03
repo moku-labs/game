@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { PixiTexture } from "../../../renderer/types";
+import { msdfOpacity } from "../../alpha";
 import { defineTextStyles, Text } from "../../components";
 import type { TextStyle, TextStyles, TextValue } from "../../types";
-import { miniFontJson } from "../fixtures/mini-font";
+import { miniFontJson, miniFontMsdfXml } from "../fixtures/mini-font";
 import { createMockText, type FakeObject, type MockText } from "./mock-text";
 
 // ---------------------------------------------------------------------------
@@ -742,12 +743,14 @@ describe("the display adapter — icons inside wrapped text", () => {
 });
 
 describe("the alpha of a Text", () => {
-  it("draws its runs at the alpha of the value", () => {
+  // No font is loaded here, so no run is drawn with Pixi's distance-field shader.
+
+  it("writes the alpha on every object of the block; the container stays at 1", () => {
     const mock = drawing();
     const object = build(mock, value({ resolved: "Your name", alpha: 0.5 }));
 
-    expect(object.alpha).toBe(0.5);
-    expect(object.children.map(child => child.alpha)).toEqual([1]);
+    expect(object.alpha).toBe(1);
+    expect(object.children.map(child => child.alpha)).toEqual([0.5]);
   });
 
   it("patches a changed alpha in place without rebuilding the runs", () => {
@@ -759,7 +762,8 @@ describe("the alpha of a Text", () => {
 
     entry?.adapter.update(object, previous, value({ resolved: "<icon=hud.coin>12", alpha: 0.25 }));
 
-    expect(object.alpha).toBe(0.25);
+    expect(object.alpha).toBe(1);
+    expect(object.children.map(child => child.alpha)).toEqual([0.25, 0.25]);
     expect(object.children.every((child, index) => child === before[index])).toBe(true);
     expect(before.map(child => child.destroyed)).toEqual([false, false]);
   });
@@ -772,7 +776,138 @@ describe("the alpha of a Text", () => {
 
     entry?.adapter.update(object, previous, value({ resolved: "13", alpha: 0.5 }));
 
-    expect(object.alpha).toBe(0.5);
+    expect(object.children[0]?.alpha).toBe(0.5);
     expect(textOf(object.children[0])).toBe("13");
+  });
+});
+
+/** Lands the MSDF fixture font, as a bundle that just loaded. */
+function loadMsdf(mock: MockText): void {
+  mock.assets.fonts.set("ui.font-body", { fnt: miniFontMsdfXml, texture: coinTexture });
+  mock.hooks["assets:bundle-loaded"]({ bundle: "boot", tier: "boot", mb: 1, reason: "boot" });
+}
+
+describe("the alpha of a Text on an MSDF font", () => {
+  // Pixi 8.21's MSDF shader multiplies the group alpha in twice; `msdfOpacity` is that shader
+  // (alpha.test.ts holds it against the shader step by step), so it reads what Pixi draws.
+
+  /** Deep ink, the fill of the fixture's `ui.field` style. */
+  const deepInk = 0x24_12_0a;
+
+  /** Ink, the outline and the shadow colour of the fixture. */
+  const ink = 0x3a_22_12;
+
+  /** Cream, the fill of the outlined fixture words. */
+  const cream = 0xff_f3_d6;
+
+  /** A drawing plugin with the MSDF fixture font loaded and three styles over it. */
+  function msdf(): MockText {
+    const mock = drawing();
+
+    mock.state.styles.set("field", { ...centred, fill: deepInk });
+    mock.state.styles.set("outlined", { ...centred, fill: cream, stroke: ink, strokeWidth: 3 });
+    mock.state.styles.set("shadowed", {
+      ...centred,
+      fill: cream,
+      shadow: { color: ink, dx: 0, dy: 8, alpha: 0.55 }
+    });
+    loadMsdf(mock);
+
+    return mock;
+  }
+
+  it("hands Pixi the alpha its MSDF shader draws at the asked alpha", () => {
+    const mock = msdf();
+    const object = build(mock, value({ resolved: "12", style: "field", alpha: 0.5 }));
+    const run = object.children[0];
+
+    expect(run?.alpha).toBeCloseTo(0.7029, 4);
+    expect(msdfOpacity(run?.alpha ?? 0, deepInk)).toBeCloseTo(0.5, 6);
+    expect(object.alpha).toBe(1);
+  });
+
+  it("draws an MSDF run opaque at alpha 1", () => {
+    const mock = msdf();
+    const object = build(mock, value({ resolved: "12", style: "field" }));
+
+    expect(object.children[0]?.alpha).toBe(1);
+  });
+
+  it("draws an icon beside an MSDF run at the alpha as it is", () => {
+    const mock = msdf();
+    const object = build(
+      mock,
+      value({ resolved: "<icon=hud.coin>12", style: "field", alpha: 0.5 })
+    );
+    const [sprite, run] = object.children;
+
+    expect(sprite?.kind).toBe("Sprite");
+    expect(sprite?.alpha).toBe(0.5);
+    expect(msdfOpacity(run?.alpha ?? 0, deepInk)).toBeCloseTo(0.5, 6);
+  });
+
+  it("gives every copy of an outline the alpha its own colour needs", () => {
+    const mock = msdf();
+    const object = build(mock, value({ resolved: "12", style: "outlined", alpha: 0.5 }));
+    const copies = object.children.slice(0, -1);
+    const run = object.children.at(-1);
+
+    expect(copies).toHaveLength(8);
+    expect(copies.map(copy => msdfOpacity(copy.alpha, ink))).toEqual(
+      copies.map(() => expect.closeTo(0.5, 6))
+    );
+    expect(msdfOpacity(run?.alpha ?? 0, cream)).toBeCloseTo(0.5, 6);
+    expect(copies[0]?.alpha).not.toBeCloseTo(run?.alpha ?? 0, 3);
+  });
+
+  it("keeps the look of a shadow at alpha 1 and fades it once with the block", () => {
+    const mock = msdf();
+    const opaque = build(mock, value({ resolved: "12", style: "shadowed" }));
+    const faded = build(mock, value({ resolved: "12", style: "shadowed", alpha: 0.5 }));
+
+    expect(opaque.children[0]?.alpha).toBeCloseTo(0.55, 10);
+    expect(msdfOpacity(faded.children[0]?.alpha ?? 0, ink)).toBeCloseTo(
+      0.5 * msdfOpacity(0.55, ink),
+      6
+    );
+    expect(msdfOpacity(faded.children[1]?.alpha ?? 0, cream)).toBeCloseTo(0.5, 6);
+  });
+
+  it("writes the compensated alpha in place on a tween step", () => {
+    const mock = msdf();
+    const entry = mock.renderer.provided[0];
+    const previous = value({ resolved: "12", style: "field" });
+    const object = build(mock, previous);
+    const before = [...object.children];
+
+    entry?.adapter.update(object, previous, value({ resolved: "12", style: "field", alpha: 0.5 }));
+
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+    expect(msdfOpacity(object.children[0]?.alpha ?? 0, deepInk)).toBeCloseTo(0.5, 6);
+  });
+
+  it("compensates a label drawn before its font landed on the next update", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+    const current = value({ resolved: "12", alpha: 0.5 });
+    const object = build(mock, current);
+
+    expect(object.children[0]?.alpha).toBe(0.5);
+
+    loadMsdf(mock);
+    entry?.adapter.update(object, current, current);
+
+    expect(msdfOpacity(object.children[0]?.alpha ?? 0, 0xff_ff_ff)).toBeCloseTo(0.5, 6);
+  });
+
+  it("leaves a plain bitmap font at the alpha as it is", () => {
+    const mock = drawing();
+
+    mock.assets.fonts.set("ui.font-body", { fnt: miniFontJson, texture: coinTexture });
+    mock.hooks["assets:bundle-loaded"]({ bundle: "boot", tier: "boot", mb: 1, reason: "boot" });
+
+    const object = build(mock, value({ resolved: "12", alpha: 0.5 }));
+
+    expect(object.children[0]?.alpha).toBe(0.5);
   });
 });

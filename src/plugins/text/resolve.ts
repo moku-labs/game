@@ -94,7 +94,6 @@ export function layoutFor(ctx: TextCtx, resolved: string, styleName: string): Te
 
   const warn = warnFor(ctx);
   const layout = layoutRuns(parseTags(resolved, warn), styleOf(ctx, styleName), ctx.state.tables, {
-    missingGlyph: ctx.config.missingGlyph,
     warn
   });
 
@@ -111,8 +110,8 @@ export function layoutFor(ctx: TextCtx, resolved: string, styleName: string): Te
 
 /**
  * Whether the font of a style has a glyph for one character, the lookup Pixi draws by: a
- * character the font lacks is drawn as nothing. While the font is not loaded every character
- * counts, as the fallback measures it.
+ * character the font lacks is drawn as nothing and measures 0 wide. While the font is not loaded
+ * every character counts, as the fallback measures it.
  *
  * @param ctx - Domain context of the text plugin.
  * @param char - One character.

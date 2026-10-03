@@ -96,6 +96,11 @@ export type View = {
   placeholder: boolean;
   /** The rectangle a `clip: true` shape or nine-slice masks its children with. */
   mask: PixiGraphics | undefined;
+  /**
+   * The masked container the children hang in while the entity clips, inside its wrapper. The
+   * entity's own visual stays outside it, so the mask never cuts its stroke.
+   */
+  clipped: PixiContainer | undefined;
   /** The registration that built the object, for a component a plugin above draws its own way. */
   display: DisplayEntry | undefined;
   /** A copy of the component value the adapter last saw, so `update` gets an honest `previous`. */

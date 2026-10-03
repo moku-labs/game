@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
 import type { Entity, LayerSort } from "../../../world/types";
 import { Parent, Shape, Sprite, Transform } from "../../components";
-import type { FakeGraphics } from "../fake-pixi";
+import type { FakeContainer, FakeGraphics } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -30,6 +30,18 @@ function graphicsOf(mock: MockRenderer, entity: Entity): FakeGraphics {
   if (object === undefined) throw new Error("the view is missing");
 
   return object as unknown as FakeGraphics;
+}
+
+/** True when the object, or anything above it, is masked. */
+function masked(object: object | undefined): boolean {
+  let current = object as FakeContainer | undefined;
+
+  while (current !== undefined) {
+    if (current.mask !== null) return true;
+    current = current.parent ?? undefined;
+  }
+
+  return false;
 }
 
 describe("sync shapes", () => {
@@ -288,7 +300,8 @@ describe("sync shapes", () => {
 
     expect(mask).toBeDefined();
     expect(mask?.ops).toEqual([{ op: "rect", x: 0, y: 0, width: 100, height: 100, radius: 0 }]);
-    expect(view?.wrapper?.mask).toBe(view?.mask);
+    expect(view?.clipped?.mask).toBe(view?.mask);
+    expect(view?.wrapper?.mask).toBeNull();
     expect(mask?.parent).toBe(view?.wrapper);
     expect(view?.wrapper?.position.x).toBe(10);
 
@@ -297,6 +310,32 @@ describe("sync shapes", () => {
 
     expect(view?.wrapper?.position.x).toBe(42);
     expect(mask?.parent).toBe(view?.wrapper);
+  });
+
+  it("keeps the stroke of a clipping shape outside the mask, and masks its children", async () => {
+    const mock = await started();
+    const frame = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 100, h: 100, clip: true, stroke: 0xff_c2_33, strokeWidth: 4 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const child = mock.world.ecs.spawn(owner, [
+      Transform({ x: 20, y: 20 }),
+      Shape({ w: 40, h: 40 }),
+      Parent({ entity: frame })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const view = mock.ctx.state.sync.views.get(frame);
+    expect(graphicsOf(mock, frame).strokes).toHaveLength(1);
+    expect(view?.object.parent).toBe(view?.wrapper);
+    expect(masked(view?.object)).toBe(false);
+    expect(graphicsOf(mock, child).parent).toBe(view?.clipped);
+    expect(masked(graphicsOf(mock, child))).toBe(true);
   });
 
   it("fills the mask of a clipping shape whole, even when the shape draws only its stroke", async () => {
@@ -332,6 +371,7 @@ describe("sync shapes", () => {
     mock.modules.sync.pass();
 
     expect(view?.mask).toBeUndefined();
+    expect(view?.clipped).toBeUndefined();
     expect(view?.wrapper?.mask).toBeNull();
     expect(mask?.destroyed).toBe(true);
   });

@@ -6,10 +6,14 @@ font's advance table. No canvas anywhere, so `app.text.measure(content, style)` 
 numbers in a browser and in plain Bun — that is the contract `ui.layout` stands on.
 
 - **Config:** `fonts: { body, digits }` (the two boot fonts behind the built-in styles),
-  `missingGlyph: "□"`.
+  `missingGlyph: "□"`. Nothing reads `missingGlyph`: no glyph is drawn or measured in place of
+  a missing one (see Missing glyphs).
 - **API:** `measure(content, style)`, `hasGlyph(char, style)`, `styles()`. `hasGlyph` answers
   whether the loaded font of a style has a character, the lookup Pixi draws by; it is true while
   the font is not loaded. `ui` measures a text field's caret over the characters it is true for.
+- **Missing glyphs:** a character the loaded font has no glyph for (an emoji, CJK) is drawn as
+  nothing by Pixi, so it measures 0 wide, letter spacing included, and is reported once per font
+  and character. `"ab😀"` measures as `"ab"`, and a label is as wide as what is drawn.
 - **Helpers:** `Text`, `label({ text, style, at, anchor? })`, `defineTextStyles(map)`,
   `textFor<TextStyles, Fonts>()` for `defineGame`.
 - **Styles:** `font`, `size` and `fill` are required. `bold`, `italic`, `stroke`, `strokeWidth`,
@@ -27,10 +31,17 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   next line as one word, and `a <icon=hud.coin> b` makes the icon a word of its own. A word wider
   than `wrap` breaks between glyphs and never inside the icon; an icon wider than `wrap` gets a line
   of its own.
-- **Alpha:** `Text({ alpha })` fades the whole block: runs, shadows, outlines and icons. It is 1 by
-  default and is the alpha of the label's container, so a change is written in place, rebuilds no
-  run, and a tween on `Text.alpha` costs one assignment a frame. `ui` draws a field's placeholder
-  at `alpha: 0.5`.
+- **Alpha:** `Text({ alpha })` fades the whole block once: runs, shadows, outlines and icons. It is
+  1 by default. A change is written in place on every object of the label and rebuilds no run, so
+  a tween on `Text.alpha` costs one assignment per object a frame; the container stays at 1. An
+  icon and a run of a plain bitmap font take the alpha as it is. Pixi 8.21 draws a distance-field
+  font (MSDF, SDF) with a shader that applies the alpha twice: `calculateMSDFAlpha` raises
+  `vColor.a` to a gamma that leans on the colour's luma, then the result is multiplied by `vColor`
+  again, so `alpha: 0.5` would draw at about 0.25. Such a run gets the inverse of that shader for
+  its own colour (`alpha.ts`), so it draws at 0.5; every outline copy is corrected for the outline
+  colour. A shadow keeps the look it has at alpha 1 and is faded once with the block. The `.fnt`
+  tells which font has a distance field: `<distanceField fieldType="msdf">`, as Pixi reads it.
+  `ui` draws a field's placeholder at `alpha: 0.5`.
 - **Numbers:** `bind: { component, field }` shows `Math.round` of a numeric component field,
   read every frame, written only when the rounded value moved.
 - **Screen:** a `DisplayAdapter` registered with `renderer.sync.displays.provide(Text, …)` builds

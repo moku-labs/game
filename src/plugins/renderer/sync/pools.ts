@@ -39,17 +39,39 @@ export function detach(object: PixiContainer): void {
 }
 
 /**
- * Takes the clip rectangle off a view: the wrapper stops masking and the graphics goes.
+ * Takes the masked container off a view: its children go back to the wrapper, unmasked and in
+ * their order, and the container is freed.
+ *
+ * @param view - The view of a shape that clips, or of anything that does not.
+ */
+function dropClipped(view: View): void {
+  const clipped = view.clipped;
+
+  if (clipped === undefined) return;
+
+  // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears a mask.
+  clipped.mask = null;
+
+  const wrapper = view.wrapper;
+
+  if (wrapper !== undefined) for (const child of clipped.children) wrapper.addChild(child);
+
+  detach(clipped);
+  clipped.destroy();
+  view.clipped = undefined;
+}
+
+/**
+ * Takes the clip rectangle off a view: the children stop being masked and the graphics goes.
  *
  * @param view - The view of a shape that clips, or of anything that does not.
  */
 export function dropMask(view: View): void {
+  dropClipped(view);
+
   const mask = view.mask;
 
   if (mask === undefined) return;
-
-  // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears a mask.
-  if (view.wrapper !== undefined) view.wrapper.mask = null;
 
   detach(mask);
   mask.destroy();
