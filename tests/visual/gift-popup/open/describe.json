@@ -744,7 +744,7 @@
                           "h": 916,
                           "w": 18,
                           "x": 303,
-                          "y": -1098.5
+                          "y": -927
                         },
                         "state": {
                           "active": false,
@@ -772,7 +772,7 @@
                           "h": 916,
                           "w": 18,
                           "x": 759,
-                          "y": -1098.5
+                          "y": -927
                         },
                         "state": {
                           "active": false,
@@ -800,7 +800,7 @@
                           "h": 308,
                           "w": 564,
                           "x": 258,
-                          "y": -138.5
+                          "y": 33
                         },
                         "state": {
                           "active": false,
@@ -821,7 +821,7 @@
                           "h": 195,
                           "w": 180,
                           "x": 866,
-                          "y": -246.5
+                          "y": -75
                         },
                         "state": {
                           "active": false,
@@ -849,7 +849,7 @@
                           "h": 195,
                           "w": 180,
                           "x": -6,
-                          "y": 150.5
+                          "y": 322
                         },
                         "state": {
                           "active": false,
@@ -876,7 +876,7 @@
                       "h": 440,
                       "w": 900,
                       "x": 90,
-                      "y": -198.5
+                      "y": -27
                     },
                     "state": {
                       "active": false,
@@ -910,7 +910,7 @@
                       "h": 924,
                       "w": 960,
                       "x": 60,
-                      "y": 271.5
+                      "y": 443
                     },
                     "state": {
                       "active": false,
@@ -936,7 +936,7 @@
                           "h": 330,
                           "w": 48,
                           "x": 240,
-                          "y": 1265.5
+                          "y": 1437
                         },
                         "state": {
                           "active": false,
@@ -964,7 +964,7 @@
                           "h": 330,
                           "w": 48,
                           "x": 792,
-                          "y": 1265.5
+                          "y": 1437
                         },
                         "state": {
                           "active": false,
@@ -991,10 +991,10 @@
                             "children": [],
                             "key": "playLabel",
                             "rect": {
-                              "h": 131,
+                              "h": 132,
                               "w": 404,
                               "x": 338,
-                              "y": 1269.5
+                              "y": 1441
                             },
                             "state": {
                               "active": false,
@@ -1014,7 +1014,7 @@
                           "h": 220,
                           "w": 880,
                           "x": 100,
-                          "y": 1225.5
+                          "y": 1397
                         },
                         "state": {
                           "active": false,
@@ -1046,7 +1046,7 @@
                           "h": 184,
                           "w": 170,
                           "x": 38,
-                          "y": 1185.5
+                          "y": 1357
                         },
                         "state": {
                           "active": false,
@@ -1074,7 +1074,7 @@
                           "h": 184,
                           "w": 170,
                           "x": 876,
-                          "y": 1331.5
+                          "y": 1503
                         },
                         "state": {
                           "active": false,
@@ -1101,7 +1101,7 @@
                       "h": 220,
                       "w": 880,
                       "x": 100,
-                      "y": 1225.5
+                      "y": 1397
                     },
                     "state": {
                       "active": false,
@@ -1119,13 +1119,13 @@
                     "type": "stack"
                   }
                 ],
-                "fitScale": 0.5225060827250608,
+                "fitScale": 0.7311435523114356,
                 "key": "homeCentre",
                 "rect": {
                   "h": 1644,
                   "w": 1000,
                   "x": 40,
-                  "y": -198.5
+                  "y": -27
                 },
                 "state": {
                   "active": false,
@@ -1149,7 +1149,7 @@
             ],
             "key": "homeMiddle",
             "rect": {
-              "h": 859,
+              "h": 1202,
               "w": 1080,
               "x": 0,
               "y": 194
@@ -1167,224 +1167,12 @@
               "align": "center",
               "alignSelf": "stretch",
               "grow": 1,
-              "justify": "center"
-            },
-            "type": "column"
-          },
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "children": [
-                      {
-                        "children": [
-                          {
-                            "children": [],
-                            "key": "giftIcon",
-                            "rect": {
-                              "h": 172,
-                              "w": 172,
-                              "x": 177,
-                              "y": 1097
-                            },
-                            "state": {
-                              "active": false,
-                              "covered": false,
-                              "disabled": false,
-                              "focus": false,
-                              "hover": false,
-                              "pressed": false,
-                              "selected": false
-                            },
-                            "style": {
-                              "height": 172,
-                              "width": 172
-                            },
-                            "type": "icon"
-                          },
-                          {
-                            "children": [
-                              {
-                                "children": [],
-                                "key": "giftBadgeCount",
-                                "rect": {
-                                  "h": 41,
-                                  "w": 19,
-                                  "x": 346,
-                                  "y": 1070
-                                },
-                                "state": {
-                                  "active": false,
-                                  "covered": false,
-                                  "disabled": false,
-                                  "focus": false,
-                                  "hover": false,
-                                  "pressed": false,
-                                  "selected": false
-                                },
-                                "style": {},
-                                "type": "text"
-                              }
-                            ],
-                            "key": "giftBadge",
-                            "rect": {
-                              "h": 88,
-                              "w": 88,
-                              "x": 311,
-                              "y": 1047
-                            },
-                            "state": {
-                              "active": false,
-                              "covered": false,
-                              "disabled": false,
-                              "focus": false,
-                              "hover": false,
-                              "pressed": false,
-                              "selected": false
-                            },
-                            "style": {
-                              "align": "center",
-                              "fill": 13187917,
-                              "height": 88,
-                              "justify": "center",
-                              "position": "absolute",
-                              "radius": 44,
-                              "reason": "the count sits on the rim of the button, over its corner",
-                              "right": -6,
-                              "stroke": 3809810,
-                              "strokeWidth": 4,
-                              "top": -6,
-                              "width": 88
-                            },
-                            "type": "stack"
-                          }
-                        ],
-                        "key": "gift",
-                        "rect": {
-                          "h": 260,
-                          "w": 260,
-                          "x": 133,
-                          "y": 1053
-                        },
-                        "state": {
-                          "active": false,
-                          "covered": false,
-                          "disabled": false,
-                          "focus": false,
-                          "hover": false,
-                          "pressed": false,
-                          "selected": false
-                        },
-                        "style": {
-                          "align": "center",
-                          "fill": 14196834,
-                          "height": 260,
-                          "justify": "center",
-                          "radius": 130,
-                          "stroke": 3809810,
-                          "strokeWidth": 6,
-                          "width": 260
-                        },
-                        "type": "button"
-                      }
-                    ],
-                    "key": "giftWobble",
-                    "rect": {
-                      "h": 260,
-                      "w": 260,
-                      "x": 133,
-                      "y": 1053
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 260,
-                      "width": 260
-                    },
-                    "type": "stack"
-                  },
-                  {
-                    "children": [],
-                    "key": "giftLabel",
-                    "rect": {
-                      "h": 72,
-                      "w": 405,
-                      "x": 60,
-                      "y": 1325
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {},
-                    "type": "text"
-                  }
-                ],
-                "key": "giftCorner",
-                "rect": {
-                  "h": 343,
-                  "w": 405,
-                  "x": 60,
-                  "y": 1053
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "align": "center",
-                  "direction": "column",
-                  "gap": 12
-                },
-                "type": "column"
-              }
-            ],
-            "key": "homeBottom",
-            "rect": {
-              "h": 343,
-              "w": 1080,
-              "x": 0,
-              "y": 1053
-            },
-            "state": {
-              "active": false,
-              "covered": false,
-              "disabled": false,
-              "focus": false,
-              "hover": false,
-              "pressed": false,
-              "selected": false
-            },
-            "style": {
-              "alignSelf": "stretch",
-              "direction": "row",
-              "justify": "start",
+              "justify": "center",
               "margin": {
                 "bottom": 44
-              },
-              "padding": {
-                "left": 60
               }
             },
-            "type": "row"
+            "type": "column"
           },
           {
             "children": [
@@ -1541,6 +1329,172 @@
                   }
                 },
                 "type": "row"
+              },
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "children": [],
+                            "key": "giftIcon",
+                            "rect": {
+                              "h": 86,
+                              "w": 86,
+                              "x": 933,
+                              "y": 240
+                            },
+                            "state": {
+                              "active": false,
+                              "covered": false,
+                              "disabled": false,
+                              "focus": false,
+                              "hover": false,
+                              "pressed": false,
+                              "selected": false
+                            },
+                            "style": {
+                              "height": 86,
+                              "width": 86
+                            },
+                            "type": "icon"
+                          },
+                          {
+                            "children": [
+                              {
+                                "children": [],
+                                "key": "giftBadgeCount",
+                                "rect": {
+                                  "h": 42,
+                                  "w": 18,
+                                  "x": 1012,
+                                  "y": 217
+                                },
+                                "state": {
+                                  "active": false,
+                                  "covered": false,
+                                  "disabled": false,
+                                  "focus": false,
+                                  "hover": false,
+                                  "pressed": false,
+                                  "selected": false
+                                },
+                                "style": {},
+                                "type": "text"
+                              }
+                            ],
+                            "key": "giftBadge",
+                            "rect": {
+                              "h": 52,
+                              "w": 52,
+                              "x": 995,
+                              "y": 212
+                            },
+                            "state": {
+                              "active": false,
+                              "covered": false,
+                              "disabled": false,
+                              "focus": false,
+                              "hover": false,
+                              "pressed": false,
+                              "selected": false
+                            },
+                            "style": {
+                              "align": "center",
+                              "fill": 13187917,
+                              "height": 52,
+                              "justify": "center",
+                              "position": "absolute",
+                              "radius": 26,
+                              "reason": "the count sits on the rim of the button, over its corner",
+                              "right": -6,
+                              "stroke": 3809810,
+                              "strokeWidth": 4,
+                              "top": -6,
+                              "width": 52
+                            },
+                            "type": "stack"
+                          }
+                        ],
+                        "key": "gift",
+                        "rect": {
+                          "h": 130,
+                          "w": 130,
+                          "x": 911,
+                          "y": 218
+                        },
+                        "state": {
+                          "active": false,
+                          "covered": false,
+                          "disabled": false,
+                          "focus": false,
+                          "hover": false,
+                          "pressed": false,
+                          "selected": false
+                        },
+                        "style": {
+                          "align": "center",
+                          "fill": 14196834,
+                          "height": 130,
+                          "justify": "center",
+                          "radius": 65,
+                          "stroke": 3809810,
+                          "strokeWidth": 6,
+                          "width": 130
+                        },
+                        "type": "button"
+                      }
+                    ],
+                    "key": "giftWobble",
+                    "rect": {
+                      "h": 130,
+                      "w": 130,
+                      "x": 911,
+                      "y": 218
+                    },
+                    "state": {
+                      "active": false,
+                      "covered": false,
+                      "disabled": false,
+                      "focus": false,
+                      "hover": false,
+                      "pressed": false,
+                      "selected": false
+                    },
+                    "style": {
+                      "height": 130,
+                      "width": 130
+                    },
+                    "type": "stack"
+                  }
+                ],
+                "key": "giftCorner",
+                "rect": {
+                  "h": 130,
+                  "w": 130,
+                  "x": 911,
+                  "y": 218
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {
+                  "align": "center",
+                  "alignSelf": "end",
+                  "direction": "column",
+                  "margin": {
+                    "right": 39,
+                    "top": 24
+                  }
+                },
+                "type": "column"
               }
             ],
             "key": "homeTop",
@@ -2496,10 +2450,10 @@
     {
       "components": {
         "Box": {
-          "h": 260,
-          "w": 260,
-          "x": 133,
-          "y": 1053
+          "h": 130,
+          "w": 130,
+          "x": 911,
+          "y": 218
         },
         "Parent": {
           "key": "giftWobble",
@@ -2511,12 +2465,12 @@
           "dash": 0,
           "fill": 14196834,
           "fillAlpha": 1,
-          "h": 260,
+          "h": 130,
           "kind": "rect",
-          "radius": 130,
+          "radius": 65,
           "stroke": 3809810,
           "strokeWidth": 6,
-          "w": 260
+          "w": 130
         },
         "Tappable": {
           "intent": "gift",
@@ -2524,13 +2478,13 @@
         },
         "Transform": {
           "pivot": {
-            "x": 130,
-            "y": 130
+            "x": 65,
+            "y": 65
           },
           "rotation": 0,
           "scale": 1,
-          "x": 130,
-          "y": 130
+          "x": 65,
+          "y": 65
         }
       },
       "key": "gift",
@@ -2539,10 +2493,10 @@
     {
       "components": {
         "Box": {
-          "h": 88,
-          "w": 88,
-          "x": 311,
-          "y": 1047
+          "h": 52,
+          "w": 52,
+          "x": 995,
+          "y": 212
         },
         "Parent": {
           "key": "gift",
@@ -2554,22 +2508,22 @@
           "dash": 0,
           "fill": 13187917,
           "fillAlpha": 1,
-          "h": 88,
+          "h": 52,
           "kind": "rect",
-          "radius": 44,
+          "radius": 26,
           "stroke": 3809810,
           "strokeWidth": 4,
-          "w": 88
+          "w": 52
         },
         "Transform": {
           "pivot": {
-            "x": 44,
-            "y": 44
+            "x": 26,
+            "y": 26
           },
           "rotation": 0,
           "scale": 1,
-          "x": 222,
-          "y": 38
+          "x": 110,
+          "y": 20
         }
       },
       "key": "giftBadge",
@@ -2578,10 +2532,10 @@
     {
       "components": {
         "Box": {
-          "h": 41,
-          "w": 19,
-          "x": 346,
-          "y": 1070
+          "h": 42,
+          "w": 18,
+          "x": 1012,
+          "y": 217
         },
         "Parent": {
           "key": "giftBadge",
@@ -2589,13 +2543,13 @@
         },
         "Transform": {
           "pivot": {
-            "x": 9.5,
-            "y": 20.5
+            "x": 9,
+            "y": 21
           },
           "rotation": 0,
           "scale": 1,
-          "x": 44.5,
-          "y": 43.5
+          "x": 26,
+          "y": 26
         }
       },
       "key": "giftBadgeCount",
@@ -2604,13 +2558,13 @@
     {
       "components": {
         "Box": {
-          "h": 343,
-          "w": 405,
-          "x": 60,
-          "y": 1053
+          "h": 130,
+          "w": 130,
+          "x": 911,
+          "y": 218
         },
         "Parent": {
-          "key": "homeBottom",
+          "key": "homeTop",
           "projection": "home.screen"
         },
         "Shape": {
@@ -2619,22 +2573,22 @@
           "dash": 0,
           "fill": 16777215,
           "fillAlpha": 0,
-          "h": 343,
+          "h": 130,
           "kind": "rect",
           "radius": 0,
           "stroke": 0,
           "strokeWidth": 0,
-          "w": 405
+          "w": 130
         },
         "Transform": {
           "pivot": {
-            "x": 202.5,
-            "y": 171.5
+            "x": 65,
+            "y": 65
           },
           "rotation": 0,
           "scale": 1,
-          "x": 262.5,
-          "y": 171.5
+          "x": 976,
+          "y": 283
         }
       },
       "key": "giftCorner",
@@ -2643,10 +2597,10 @@
     {
       "components": {
         "Box": {
-          "h": 172,
-          "w": 172,
-          "x": 177,
-          "y": 1097
+          "h": 86,
+          "w": 86,
+          "x": 933,
+          "y": 240
         },
         "Parent": {
           "key": "gift",
@@ -2659,20 +2613,20 @@
             "y": 0
           },
           "fit": "contain",
-          "height": 172,
+          "height": 86,
           "texture": "ui.icon-gift",
           "tint": 16777215,
-          "width": 172
+          "width": 86
         },
         "Transform": {
           "pivot": {
-            "x": 86,
-            "y": 86
+            "x": 43,
+            "y": 43
           },
           "rotation": 0,
           "scale": 1,
-          "x": 130,
-          "y": 130
+          "x": 65,
+          "y": 65
         }
       },
       "key": "giftIcon",
@@ -2681,36 +2635,10 @@
     {
       "components": {
         "Box": {
-          "h": 72,
-          "w": 405,
-          "x": 60,
-          "y": 1325
-        },
-        "Parent": {
-          "key": "giftCorner",
-          "projection": "home.screen"
-        },
-        "Transform": {
-          "pivot": {
-            "x": 202.5,
-            "y": 36
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 202.5,
-          "y": 308
-        }
-      },
-      "key": "giftLabel",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 260,
-          "w": 260,
-          "x": 133,
-          "y": 1053
+          "h": 130,
+          "w": 130,
+          "x": 911,
+          "y": 218
         },
         "Parent": {
           "key": "giftCorner",
@@ -2722,22 +2650,22 @@
           "dash": 0,
           "fill": 16777215,
           "fillAlpha": 0,
-          "h": 260,
+          "h": 130,
           "kind": "rect",
           "radius": 0,
           "stroke": 0,
           "strokeWidth": 0,
-          "w": 260
+          "w": 130
         },
         "Transform": {
           "pivot": {
-            "x": 130,
-            "y": 130
+            "x": 65,
+            "y": 65
           },
           "rotation": 0,
           "scale": 1,
-          "x": 203,
-          "y": 130
+          "x": 65,
+          "y": 65
         }
       },
       "key": "giftWobble",
@@ -2871,49 +2799,10 @@
     {
       "components": {
         "Box": {
-          "h": 343,
-          "w": 1080,
-          "x": 0,
-          "y": 1053
-        },
-        "Parent": {
-          "key": "homeScreen",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 343,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 1080
-        },
-        "Transform": {
-          "pivot": {
-            "x": 540,
-            "y": 171.5
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 540,
-          "y": 1224.5
-        }
-      },
-      "key": "homeBottom",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
           "h": 1644,
           "w": 1000,
           "x": 40,
-          "y": -198.5
+          "y": -27
         },
         "Parent": {
           "key": "homeMiddle",
@@ -2938,9 +2827,9 @@
             "y": 822
           },
           "rotation": 0,
-          "scale": 0.5225060827250608,
+          "scale": 0.7311435523114356,
           "x": 540,
-          "y": 429.5
+          "y": 601
         }
       },
       "key": "homeCentre",
@@ -3025,7 +2914,7 @@
           "h": 440,
           "w": 900,
           "x": 90,
-          "y": -198.5
+          "y": -27
         },
         "NineSlice": {
           "alpha": 1,
@@ -3060,7 +2949,7 @@
           "h": 308,
           "w": 564,
           "x": 258,
-          "y": -138.5
+          "y": 33
         },
         "Parent": {
           "key": "homeLogo",
@@ -3086,7 +2975,7 @@
           "h": 916,
           "w": 18,
           "x": 303,
-          "y": -1098.5
+          "y": -927
         },
         "Parent": {
           "key": "homeLogo",
@@ -3124,7 +3013,7 @@
           "h": 916,
           "w": 18,
           "x": 759,
-          "y": -1098.5
+          "y": -927
         },
         "Parent": {
           "key": "homeLogo",
@@ -3162,7 +3051,7 @@
           "h": 195,
           "w": 180,
           "x": -6,
-          "y": 150.5
+          "y": 322
         },
         "Parent": {
           "key": "homeLogo",
@@ -3200,7 +3089,7 @@
           "h": 195,
           "w": 180,
           "x": 866,
-          "y": -246.5
+          "y": -75
         },
         "Parent": {
           "key": "homeLogo",
@@ -3235,7 +3124,7 @@
     {
       "components": {
         "Box": {
-          "h": 859,
+          "h": 1202,
           "w": 1080,
           "x": 0,
           "y": 194
@@ -3250,7 +3139,7 @@
           "dash": 0,
           "fill": 16777215,
           "fillAlpha": 0,
-          "h": 859,
+          "h": 1202,
           "kind": "rect",
           "radius": 0,
           "stroke": 0,
@@ -3260,12 +3149,12 @@
         "Transform": {
           "pivot": {
             "x": 540,
-            "y": 429.5
+            "y": 601
           },
           "rotation": 0,
           "scale": 1,
           "x": 540,
-          "y": 623.5
+          "y": 795
         }
       },
       "key": "homeMiddle",
@@ -3438,7 +3327,7 @@
           "h": 924,
           "w": 960,
           "x": 60,
-          "y": 271.5
+          "y": 443
         },
         "Parent": {
           "key": "homeCentre",
@@ -3476,7 +3365,7 @@
           "h": 220,
           "w": 880,
           "x": 100,
-          "y": 1225.5
+          "y": 1397
         },
         "NineSlice": {
           "alpha": 1,
@@ -3520,10 +3409,10 @@
     {
       "components": {
         "Box": {
-          "h": 131,
+          "h": 132,
           "w": 404,
           "x": 338,
-          "y": 1269.5
+          "y": 1441
         },
         "Parent": {
           "key": "play",
@@ -3532,12 +3421,12 @@
         "Transform": {
           "pivot": {
             "x": 202,
-            "y": 65.5
+            "y": 66
           },
           "rotation": 0,
           "scale": 1,
           "x": 440,
-          "y": 109.5
+          "y": 110
         }
       },
       "key": "playLabel",
@@ -3549,7 +3438,7 @@
           "h": 330,
           "w": 48,
           "x": 240,
-          "y": 1265.5
+          "y": 1437
         },
         "Parent": {
           "key": "playSign",
@@ -3587,7 +3476,7 @@
           "h": 330,
           "w": 48,
           "x": 792,
-          "y": 1265.5
+          "y": 1437
         },
         "Parent": {
           "key": "playSign",
@@ -3625,7 +3514,7 @@
           "h": 220,
           "w": 880,
           "x": 100,
-          "y": 1225.5
+          "y": 1397
         },
         "Parent": {
           "key": "homeCentre",
@@ -3664,7 +3553,7 @@
           "h": 184,
           "w": 170,
           "x": 38,
-          "y": 1185.5
+          "y": 1357
         },
         "Parent": {
           "key": "playSign",
@@ -3702,7 +3591,7 @@
           "h": 184,
           "w": 170,
           "x": 876,
-          "y": 1331.5
+          "y": 1503
         },
         "Parent": {
           "key": "playSign",
