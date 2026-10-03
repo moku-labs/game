@@ -69,14 +69,17 @@ function openPopup(coins: number, name = "open-popup"): VisualTest {
 }
 
 /**
- * Reads the bytes a data URL carries.
+ * Reads the bytes a data URL carries, whatever its type.
  *
  * @param url - A data URL.
  * @returns The bytes.
  */
 function bytesOf(url: string): Buffer {
-  return Buffer.from(url.slice("data:image/png;base64,".length), "base64");
+  return Buffer.from(url.slice(url.indexOf(",") + 1), "base64");
 }
+
+/** The game time every test of the leg starts at. */
+const START_MS = 5000;
 
 describe("pixelOutcome", () => {
   it("answers same at or under the tolerated ratio", () => {
@@ -333,7 +336,7 @@ describe("runBrowserLeg", () => {
     return path.join(dir, "open-popup", "open", name);
   }
 
-  it("writes screen.png on the first run and finds the same screen on the second", async () => {
+  it("writes screen.webp on the first run and finds the same screen on the second", async () => {
     const screen = pngOf(4, 4);
 
     await pageGame({ screen: () => screen });
@@ -347,7 +350,7 @@ describe("runBrowserLeg", () => {
         checkpoints: [{ name: "open", state: "written", describe: "written", pixels: "written" }]
       }
     ]);
-    expect(await readFile(file("screen.png"))).toEqual(bytesOf(screen));
+    expect(await readFile(file("screen.webp"))).toEqual(bytesOf(screen));
 
     const second = await bothLegs([openPopup(7)], chromium);
 
@@ -355,6 +358,7 @@ describe("runBrowserLeg", () => {
       { name: "open", state: "same", describe: "same", pixels: "same" }
     ]);
     expect(log.urls).toEqual([URL, URL]);
+    expect(log.loads).toEqual(["networkidle", "networkidle"]);
     expect(log.scripts).toEqual([pageScript(), pageScript()]);
     expect(log.contexts[0]).toEqual({
       viewport: { width: 390, height: 520 },
@@ -391,11 +395,11 @@ describe("runBrowserLeg", () => {
         verdict: "rendering"
       }
     ]);
-    expect(await readFile(file("screen.png"))).toEqual(bytesOf(pngOf(4, 4)));
-    expect(await readFile(file("screen.actual.png"))).toEqual(bytesOf(changed));
+    expect(await readFile(file("screen.webp"))).toEqual(bytesOf(pngOf(4, 4)));
+    expect(await readFile(file("screen.actual.webp"))).toEqual(bytesOf(changed));
 
-    const diffBytes = await readFile(file("screen.diff.png"));
-    const diff = pictureOf(`data:image/png;base64,${diffBytes.toString("base64")}`);
+    const diffBytes = await readFile(file("screen.diff.webp"));
+    const diff = pictureOf(`data:image/webp;base64,${diffBytes.toString("base64")}`);
 
     expect(diff.data.slice(20, 24)).toEqual([255, 0, 0, 255]);
     expect(diff.data.slice(0, 4)).toEqual([194, 196, 199, 255]);
@@ -418,11 +422,11 @@ describe("runBrowserLeg", () => {
       first: "size",
       verdict: "rendering"
     });
-    expect(await readFile(file("screen.actual.png"))).toEqual(bytesOf(shot.url));
-    await expect(readFile(file("screen.diff.png"))).rejects.toThrow("ENOENT");
+    expect(await readFile(file("screen.actual.webp"))).toEqual(bytesOf(shot.url));
+    await expect(readFile(file("screen.diff.webp"))).rejects.toThrow("ENOENT");
   });
 
-  it("rewrites screen.png with --update", async () => {
+  it("rewrites screen.webp with --update", async () => {
     const shot = { url: pngOf(4, 4) };
 
     await pageGame({ screen: () => shot.url });
@@ -435,7 +439,7 @@ describe("runBrowserLeg", () => {
     const results = await bothLegs([openPopup(7)], chromium, { update: true });
 
     expect(results[0]?.checkpoints[0]).toMatchObject({ pixels: "written" });
-    expect(await readFile(file("screen.png"))).toEqual(bytesOf(shot.url));
+    expect(await readFile(file("screen.webp"))).toEqual(bytesOf(shot.url));
   });
 
   it("compares the page's state with state.json: a difference there is a state difference", async () => {
@@ -517,7 +521,7 @@ describe("runBrowserLeg", () => {
       sources,
       commands,
       run: (app: object, command: { id: string }, input: object) => {
-        stuck.on = command.id === "game.tap";
+        if (command.id === "game.tap") stuck.on = true;
 
         return Reflect.apply(run, undefined, [app, command, input]);
       }
@@ -552,6 +556,48 @@ describe("runBrowserLeg", () => {
       '[game] Visual test "open-popup", the start failed.\n  Target crashed.'
     );
     expect(log.pagesClosed).toBe(1);
+  });
+
+  it("pauses the page for the devtools before the restore, so every test starts at the same game time", async () => {
+    const { app } = await pageGame();
+    const seen: Array<{ id: string; elapsed: number }> = [];
+
+    app.time.step(83.236_666);
+    vi.stubGlobal("doors", {
+      read,
+      sources,
+      commands,
+      run: (target: object, command: { id: string }, input: object) => {
+        if (command.id !== "game.step") {
+          seen.push({ id: command.id, elapsed: app.time.snapshot().elapsed });
+        }
+
+        return Reflect.apply(run, undefined, [target, command, input]);
+      }
+    });
+
+    const { chromium } = fakeChromium();
+
+    await bothLegs([openPopup(7)], chromium);
+
+    expect(seen).toEqual([
+      { id: "game.pause", elapsed: 83.236_666 },
+      { id: "game.restore", elapsed: START_MS },
+      { id: "game.tap", elapsed: expect.any(Number) }
+    ]);
+    expect(app.lifecycle.reasons()).toEqual(["devtools"]);
+  });
+
+  it("names a page that never stops loading", async () => {
+    await pageGame();
+
+    const { chromium, log } = fakeChromium({ idle: false });
+
+    await expect(bothLegs([openPopup(7)], chromium)).rejects.toThrow(
+      `[game] The page at ${URL} did not stop loading in 15 s.\n  Let it finish its requests: the leg pauses the game once nothing loads.`
+    );
+    expect(log.pagesClosed).toBe(1);
+    expect(log.browsersClosed).toBe(1);
   });
 
   it("leaves a test the headless leg failed as it was", async () => {

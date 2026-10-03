@@ -45,7 +45,11 @@
           "readyAt": 0
         }
       },
-      "inventory": [null, null, null],
+      "inventory": [
+        null,
+        null,
+        null
+      ],
       "nextItemId": 5,
       "orders": [
         {

@@ -1,10 +1,11 @@
 /**
  * @file visual — the browser leg: Chrome with WebGPU on a Mac, driven by Playwright. It loads
- * `playwright-core` with a dynamic import only here, opens the dev page once per test, plays the
- * test inside the page through `globalThis.game` and `globalThis.doors`, and at each checkpoint
- * checks the page's state against `state.json` and its picture against `screen.png`. The pixels
- * are compared in the page (`page-script.ts`); the files are written by `files.ts`. A failure of
- * the page itself fails the leg; a failure of a step ends its test only.
+ * `playwright-core` with a dynamic import only here, opens the dev page once per test, waits until
+ * the page has loaded what it asked for, pauses the game and steps it to the start time, plays the
+ * test inside the page through `globalThis.game` and `globalThis.doors` on stepped frames, and at
+ * each checkpoint checks the page's state against `state.json` and its picture against
+ * `screen.webp`. The pixels are compared in the page (`page-script.ts`); the files are written by
+ * `files.ts`. A failure of the page itself fails the leg; a failure of a step ends its test only.
  */
 import type { RendererKind } from "../plugins/renderer/types";
 import { stableJson } from "./compare";
@@ -14,6 +15,7 @@ import type { PageAnswer, PageCompared } from "./page-script";
 import {
   pageCheckpoint,
   pageCompare,
+  pagePause,
   pageReady,
   pageScript,
   pageStart,
@@ -52,8 +54,18 @@ const DEFAULT_WIDTH = 390;
 /** The device scale when the setup names none. */
 const DEFAULT_SCALE = 2;
 
-/** How long the page may take to expose `game` and `doors`, in milliseconds. */
+/** How long the page may take to expose `game` and `doors`, and to stop loading, in milliseconds. */
 const READY_MS = 15_000;
+
+/**
+ * The game time every test starts at, in milliseconds: the page reaches it on stepped frames after
+ * the pause, whatever its own start took. A page whose clock is past it starts at the next
+ * multiple.
+ */
+const START_MS = 5000;
+
+/** The baseline picture of a checkpoint, and the two the leg leaves beside it on a difference. */
+const SCREEN = { baseline: "screen.webp", actual: "screen.actual.webp", diff: "screen.diff.webp" };
 
 /** What one test plays on: its page, the test and the run options. */
 type Play = { page: ChromePage; test: VisualTest; run: VisualRun };
@@ -286,14 +298,15 @@ async function startPage(page: ChromePage, url: string, run: VisualRun): Promise
 
 /**
  * Opens the dev page for one test: the page script first, then the URL, then the wait for
- * `game` and `doors`, for the graph at its first gate, and the check that it draws with WebGPU.
+ * `game` and `doors`, for the graph at its first gate, the check that it draws with WebGPU, and
+ * the wait until no request ran for half a second, so no load is left for the stepped frames.
  *
  * @param context - The browser context.
  * @param url - The URL of the dev page.
  * @param run - The run options, for `settleFrames`.
  * @returns The open page.
- * @throws {Error} When the page does not open, never exposes `game` and `doors`, does not start
- *   or does not draw with WebGPU. The page is closed then.
+ * @throws {Error} When the page does not open, never exposes `game` and `doors`, does not start,
+ *   does not draw with WebGPU or never stops loading. The page is closed then.
  */
 async function openPage(context: ChromeContext, url: string, run: VisualRun): Promise<ChromePage> {
   const page = await context.newPage();
@@ -319,6 +332,12 @@ async function openPage(context: ChromeContext, url: string, run: VisualRun): Pr
       );
     }
 
+    await page.waitForLoadState("networkidle", { timeout: READY_MS }).catch(() => {
+      throw new Error(
+        `[game] The page at ${url} did not stop loading in ${READY_MS / 1000} s.\n  Let it finish its requests: the leg pauses the game once nothing loads.`
+      );
+    });
+
     return page;
   } catch (error) {
     await page.close();
@@ -328,8 +347,9 @@ async function openPage(context: ChromeContext, url: string, run: VisualRun): Pr
 }
 
 /**
- * Checks the picture of a checkpoint against `screen.png`: a missing baseline, or `--update`,
- * writes it; a difference writes `screen.actual.png`, and `screen.diff.png` when the sizes match.
+ * Checks the picture of a checkpoint against `screen.webp`: a missing baseline, or `--update`,
+ * writes it; a difference writes `screen.actual.webp`, and `screen.diff.webp` when the sizes
+ * match.
  *
  * @param play - The test being played.
  * @param file - Names a file of the checkpoint.
@@ -344,10 +364,10 @@ async function checkScreen(
   screen: string
 ): Promise<PixelCheck> {
   const { run } = play;
-  const baseline = run.update ? undefined : await readScreen(file("screen.png"));
+  const baseline = run.update ? undefined : await readScreen(file(SCREEN.baseline));
 
   if (baseline === undefined) {
-    await writeScreen(file("screen.png"), screen);
+    await writeScreen(file(SCREEN.baseline), screen);
 
     return { outcome: "written" };
   }
@@ -362,9 +382,9 @@ async function checkScreen(
   const found = pixelOutcome(compared, run.tolerance);
 
   if (found.outcome === "different") {
-    await writeScreen(file("screen.actual.png"), screen);
+    await writeScreen(file(SCREEN.actual), screen);
 
-    if (compared.diff !== undefined) await writeScreen(file("screen.diff.png"), compared.diff);
+    if (compared.diff !== undefined) await writeScreen(file(SCREEN.diff), compared.diff);
   }
 
   return found;
@@ -372,7 +392,7 @@ async function checkScreen(
 
 /**
  * Plays a checkpoint in the page and checks what it found: the state against `state.json` the
- * headless leg wrote, the picture against `screen.png`.
+ * headless leg wrote, the picture against `screen.webp`.
  *
  * @param play - The test being played.
  * @param name - The checkpoint name.
@@ -401,8 +421,9 @@ async function checkpoint(play: Play, name: string, where: string): Promise<Pixe
 }
 
 /**
- * Plays the start and the steps of a test in the open page, the way the headless leg does:
- * restore the start, run each command and settle, and check each checkpoint.
+ * Plays the start and the steps of a test in the open page, the way the headless leg does: pause
+ * the game and step it to the start time, restore the start, run each command and settle on
+ * stepped frames, and check each checkpoint.
  *
  * @param play - The test being played.
  * @param found - Where what each checkpoint found goes, as soon as it is known.
@@ -412,6 +433,11 @@ async function playSteps(play: Play, found: Map<string, PixelFound>): Promise<vo
   const repro = { ...test.start, route: [] };
   const base = { test: test.name, settleFrames: run.settleFrames };
 
+  await callPage(play.page, pagePause, {
+    test: test.name,
+    where: "the start",
+    startMs: START_MS
+  });
   await callPage(play.page, pageStep, {
     ...base,
     where: "the start",
@@ -486,7 +512,7 @@ async function browserTest(
  * @param load - Loads `chromium`; `playwright-core` by default.
  * @returns One result per test, in order.
  * @throws {Error} When the setup has no page, `playwright-core` or Chrome is missing, or the page
- *   does not open, expose `game` and `doors`, start, or draw with WebGPU.
+ *   does not open, expose `game` and `doors`, start, draw with WebGPU or stop loading.
  */
 export async function runBrowserLeg(
   setup: VisualSetup,

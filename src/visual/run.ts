@@ -257,15 +257,15 @@ async function withPixelLeg(
  * Runs visual tests: the headless leg over every selected test, then the browser leg over the
  * same tests when `pixels` is on (by default only with a `page` on a Mac). A checkpoint saves
  * `state.json` and `describe.json` in `<dir>/<test>/<checkpoint>/`, and the browser leg
- * `screen.png`: a missing file is written, `--update` rewrites every file of the tests run, a
- * JSON file is compared exactly. The browser leg opens the dev page in Chrome with WebGPU
- * through `playwright-core`, plays each test there, checks the page's state against
- * `state.json` and compares the picture in the page: a pixel differs above
- * `tolerance.threshold`, and the screen differs when more than `tolerance.ratio` of its pixels
- * do; `screen.actual.png` and `screen.diff.png` are written beside the baseline then. A pixel
- * difference over the same state and describe is a rendering regression (`verdict:
- * "rendering"`). One line per checkpoint goes to the branded console; the script sets the exit
- * code from `ok`.
+ * `screen.webp`, lossless: a missing file is written, `--update` rewrites every file of the tests
+ * run, a JSON file is compared exactly. The browser leg opens the dev page in Chrome with WebGPU
+ * through `playwright-core`, pauses its game, plays each test there on stepped frames of 1000/60
+ * ms, so two runs see the same game time, checks the page's state against `state.json` and
+ * compares the picture in the page: a pixel differs above `tolerance.threshold`, and the screen
+ * differs when more than `tolerance.ratio` of its pixels do; `screen.actual.webp` and
+ * `screen.diff.webp` are written beside the baseline then. A pixel difference over the same state
+ * and describe is a rendering regression (`verdict: "rendering"`). One line per checkpoint goes
+ * to the branded console; the script sets the exit code from `ok`.
  *
  * @param setup - How to build a game: a fresh, unstarted app per test, and the dev page.
  * @param tests - Every visual test of the game.
@@ -274,7 +274,7 @@ async function withPixelLeg(
  * @throws {Error} When a test is not well formed, two tests share a name, `only` names no test,
  *   a flag misses its value, or the browser leg fails as a whole: no `page`, no
  *   `playwright-core`, no Chrome, or a page that does not open, expose `game` and `doors`, start,
- *   or draw with WebGPU.
+ *   draw with WebGPU or stop loading.
  * @example
  * ```ts
  * // tests/visual/run.ts of a game, `bun tests/visual/run.ts --update` on a Mac

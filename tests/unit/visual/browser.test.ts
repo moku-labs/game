@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 import { stableJson } from "../../../src/visual/compare";
 import { defineVisualTest } from "../../../src/visual/define";
 import { launchChrome, loadChromium, runBrowserLeg } from "../../../src/visual/leg-browser";
-import { pageStep } from "../../../src/visual/page-script";
+import type { Pixels } from "../../../src/visual/page-script";
+import { pageScript, pageStep } from "../../../src/visual/page-script";
 import { resolveVisualOptions } from "../../../src/visual/run";
 import type { Chromium, VisualSetup, VisualTestResult } from "../../../src/visual/types";
 import { createTinyGame } from "./game";
@@ -19,8 +20,9 @@ import { createTinyGame } from "./game";
 // ---------------------------------------------------------------------------
 
 /**
- * The tiny page: an 8x6 canvas in one colour, a game whose graph rests at Home, and doors whose
- * `tap` on the key "paint" turns one pixel red.
+ * The tiny page: an 8x6 canvas in one colour, a game whose graph rests at Home and whose clock
+ * the doors' `pause` and `step` hold and move, and doors whose `tap` on the key "paint" turns one
+ * pixel red.
  */
 const PAGE = `<!doctype html>
 <canvas id="screen" width="8" height="6"></canvas>
@@ -30,7 +32,9 @@ const PAGE = `<!doctype html>
   context.fillStyle = "#3366cc";
   context.fillRect(0, 0, 8, 6);
   const model = { player: { coins: 0 }, session: {}, rng: { seed: 1 } };
+  const clock = { elapsed: 83.2, paused: false };
   globalThis.game = {
+    time: { snapshot: () => ({ elapsed: clock.elapsed }) },
     flow: { state: () => ({ path: "home", running: true, pending: { gate: "home" } }) },
     anim: { finishAll: () => {} },
     renderer: {
@@ -43,7 +47,14 @@ const PAGE = `<!doctype html>
     read: (game, source) => (source === "position" ? { path: "home" } : model),
     run: async (game, command, input) => ({ value: await command.run(game, input) }),
     commands: {
-      restore: { run: (game, input) => { model.player = input.repro.player; } },
+      pause: { run: () => { clock.paused = true; return true; } },
+      step: { run: (game, input) => { clock.elapsed += input.frames * input.deltaMs; } },
+      restore: {
+        run: (game, input) => {
+          if (!clock.paused || clock.elapsed !== 5000) throw new Error("Restored before the pause.");
+          model.player = input.repro.player;
+        }
+      },
       tap: {
         run: (game, input) => {
           if (input.key !== "paint") throw new Error("No element with the key " + input.key + ".");
@@ -179,16 +190,100 @@ describe("the browser leg in a real Chrome", () => {
         verdict: "rendering"
       });
 
-      const signature = Buffer.from([137, 80, 78, 71]);
-
-      for (const name of ["screen.png", "screen.actual.png", "screen.diff.png"]) {
+      for (const name of ["screen.webp", "screen.actual.webp", "screen.diff.webp"]) {
         const bytes = await readFile(path.join(folder, name));
 
-        expect(bytes.subarray(0, 4)).toEqual(signature);
+        expect(bytes.subarray(0, 4).toString("latin1")).toBe("RIFF");
+        expect(bytes.subarray(8, 12).toString("latin1")).toBe("WEBP");
       }
     } finally {
       await server.close();
       await rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+/**
+ * Runs in the page: encodes opaque pseudo-random pixels with the WebP encoder of the page script
+ * and decodes them again, then counts the bytes that came back different. Random pixels do not
+ * compress, so a lossy encoder could never bring them back.
+ *
+ * @param argument - The size of the picture and the seed of xorshift32.
+ * @param argument.width - Pixels across.
+ * @param argument.height - Pixels down.
+ * @param argument.seed - The seed, not 0.
+ * @returns The data URL prefix, the size it decoded to, the differing bytes and the bitstream.
+ */
+async function roundTrip(argument: { width: number; height: number; seed: number }) {
+  const encode: (pixels: Pixels) => Promise<string> = Reflect.get(globalThis, "pageEncode");
+  const decode: (url: string) => Promise<Pixels> = Reflect.get(globalThis, "pageDecode");
+  const { width, height } = argument;
+  const data = new Uint8ClampedArray(width * height * 4);
+  let state = argument.seed;
+
+  for (let at = 0; at < data.length; at += 1) {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    data[at] = at % 4 === 3 ? 255 : state & 255;
+  }
+
+  const url = await encode({ width, height, data });
+  const back = await decode(url);
+  const comma = url.indexOf(",");
+  let differing = 0;
+
+  for (const [at, value] of data.entries()) {
+    if (back.data[at] !== value) differing += 1;
+  }
+
+  return {
+    prefix: url.slice(0, comma + 1),
+    width: back.width,
+    height: back.height,
+    differing,
+    lossless: atob(url.slice(comma + 1)).includes("VP8L")
+  };
+}
+
+describe("the WebP of the pixel leg in a real Chrome", () => {
+  it("is lossless: opaque random pixels come back byte for byte", async ctx => {
+    ctx.skip(
+      process.env.MOKU_VISUAL_BROWSER !== "1",
+      "opt-in: run with MOKU_VISUAL_BROWSER=1 on a Mac with a WebGPU Chrome"
+    );
+    ctx.skip(
+      /\bcov_\w+\(/u.test(String(pageStep)),
+      "coverage instruments the page functions, so they cannot run in Chrome"
+    );
+
+    const server = await serve();
+    const browser = await launchChrome(await loadChromium(), undefined);
+
+    try {
+      const context = await browser.newContext({
+        viewport: { width: 390, height: 520 },
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true
+      });
+      const page = await context.newPage();
+
+      await page.addInitScript({ content: pageScript() });
+      await page.goto(server.url);
+
+      expect(
+        await page.evaluate(roundTrip, { width: 257, height: 131, seed: 2_463_534_242 })
+      ).toEqual({
+        prefix: "data:image/webp;base64,",
+        width: 257,
+        height: 131,
+        differing: 0,
+        lossless: true
+      });
+    } finally {
+      await browser.close();
+      await server.close();
     }
   }, 60_000);
 });
