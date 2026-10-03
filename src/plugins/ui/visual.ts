@@ -81,8 +81,8 @@ function contentOf(props: Record<string, unknown>): string {
  * nine-slice of its style (outlined when the style sets `debug`), or a rounded rectangle, a
  * triangle with `shape: "triangle"`, its stroke dashed with `dash`. A clipping element (`scroll`,
  * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
- * clips too, and a nine-slice field draws its slices and clips to them. A style with a stroke and no fill draws
- * only the stroke, a ring. A container with no fill and no stroke gets a rectangle that draws
+ * clips too, and a nine-slice field draws its slices and clips to them. A style with a stroke and
+ * no fill draws only the stroke, a ring. A container with no fill and no stroke gets a rectangle that draws
  * nothing, no fill and no stroke: the renderer hangs children under the display object of their
  * parent, so every parent needs one. It keeps the alpha of its style, because the alpha of an
  * entity fades its children too.

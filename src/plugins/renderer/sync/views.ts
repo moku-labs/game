@@ -358,9 +358,11 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
 
   retargetKey(sctx.ctx.state.sync, entity, view, value.texture);
 
+  // Resolve the texture and its borders.
   const { texture, missing } = textureFor(sctx, value.texture);
   const borders = bordersOf(texture);
 
+  // Write the texture, the insets, the tint, the alpha and the size.
   view.placeholder = missing;
   if (texture !== undefined) object.texture = texture;
   object.leftWidth = borders.left;
@@ -371,6 +373,8 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
   applyAlpha(view, value.alpha);
   object.width = value.width;
   object.height = value.height;
+
+  // Record the hit box, then keep the outline and the clip in step.
   view.hitBox = { x: 0, y: 0, width: value.width, height: value.height };
   applyOutline(
     sctx,
