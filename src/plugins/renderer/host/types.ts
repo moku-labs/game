@@ -1,7 +1,6 @@
 /**
  * @file renderer/host — type definitions: the one Pixi application, its backend and its listeners.
  */
-import type { DrawCounter } from "../monitor/types";
 import type { PixiApplication, PixiContainer, PixiModule, RendererKind } from "../types";
 
 /**
@@ -131,10 +130,11 @@ export type TextureUsage = { count: number; bytes: number };
 
 /**
  * Swaps Pixi's three WebGPU draw classes for counting ones and returns the undo. The plugin root
- * injects `installDrawCounting` of `monitor/draw-calls.ts` here in a dev build, because the
- * counter must be in Pixi's registry before `new Application()`, earlier than `monitor` exists.
+ * injects `installDrawCounting` of `monitor/draw-calls.ts` here in a dev build, already bound to
+ * the draw counter of `monitor`, because the counter must be in Pixi's registry before
+ * `new Application()`, earlier than `monitor` exists.
  */
-export type InstallDrawCounting = (pixi: PixiModule, counter: DrawCounter) => () => void;
+export type InstallDrawCounting = (pixi: PixiModule) => () => void;
 
 /**
  * What `host` gets injected: the draw-call counter of a dev build, `undefined` in production.

@@ -283,7 +283,6 @@ async function withPixelLeg(
  *   [rewardPopup]
  * );
  * report.tests[0]?.checkpoints[0]; // { name: "open", state: "written", describe: "written", pixels: "written" }
- * process.exitCode = report.ok ? 0 : 1;
  * ```
  */
 export async function runVisualTests(

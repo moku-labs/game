@@ -3,10 +3,11 @@
  * submits "save", a confirm popup opened over it, a profile screen whose component keeps a
  * nickname, a field outside every component and a field without `local`. Real flow runner,
  * plain Bun, inert renderer, real Yoga, and a fake `text.measure` of 10 px per character. With
- * `dom`, the renderer hands out a canvas of a fake page, so `ui` makes its hidden input there.
+ * `dom`, the renderer hands out a canvas of a fake page, so `ui` makes its hidden input there. A
+ * probe lands the body font late, as a page whose fonts load async does.
  */
 import { vi } from "vitest";
-import { createApp, defineGame, projection, type } from "../../../index";
+import { createApp, createPlugin, defineGame, projection, type } from "../../../index";
 import { animPlugin } from "../../anim";
 import { assetsPlugin } from "../../assets";
 import type { Answer } from "../../flow/gate/types";
@@ -193,6 +194,26 @@ export const fieldFeature = defineFeature("fields", {
   strings: { en: english }
 });
 
+/** The body font key of `text`, the font every field of the fixture is drawn in. */
+const BODY_FONT = "ui.font-body";
+
+/** A BMFont of the body font, for `text` to read when the probe lands it. */
+const bodyFont = JSON.stringify({
+  info: { face: "body", size: 32 },
+  common: { lineHeight: 40, base: 32 },
+  chars: [{ id: 65, char: "A", xadvance: 20 }]
+});
+
+/** Sends `assets:bundle-loaded` the way `assets` does, so `text` reads the fonts it can find. */
+const fontProbe = createPlugin("fontProbe", {
+  depends: [assetsPlugin],
+  api: ctx => ({
+    land: (bundle: string): void => {
+      ctx.emit("assets:bundle-loaded", { bundle, tier: "lazy", mb: 0, reason: "request" });
+    }
+  })
+});
+
 /** Yields the microtask queue to the loop, the way a test waits without a timer. */
 async function tick(times = 60): Promise<void> {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
@@ -243,6 +264,7 @@ export async function startFieldApp(options: { dom?: boolean; innerHeight?: numb
       i18nPlugin,
       textPlugin,
       uiPlugin,
+      fontProbe,
       fieldFeature
     ],
     pluginConfigs: {
@@ -270,6 +292,24 @@ export async function startFieldApp(options: { dom?: boolean; innerHeight?: numb
 
 /** The app `startFieldApp` builds. */
 export type FieldApp = Awaited<ReturnType<typeof startFieldApp>>["app"];
+
+/**
+ * Lands the body font after the fields were placed: `assets` answers for it, a bundle-loaded
+ * reaches `text`, and the fake measure answers 20 px per character from now on, as the real
+ * advances replace the fallback metrics.
+ *
+ * @param app - The running app.
+ */
+export function landBodyFont(app: FieldApp): void {
+  vi.spyOn(app.assets, "font").mockImplementation(key =>
+    key === BODY_FONT ? { fnt: bodyFont, texture: undefined as never } : undefined
+  );
+  vi.mocked(app.text.measure).mockImplementation(content => ({
+    width: typeof content === "string" ? content.length * 20 : 0,
+    height: 40
+  }));
+  app.fontProbe.land("fonts");
+}
 
 /**
  * Lets the runner move, then runs frames, so the next node is entered and the screen follows.

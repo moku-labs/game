@@ -81,7 +81,7 @@ function installCounting(
     ctx.log.debug("moku:dev", { command: "renderer.drawCalls" });
 
     try {
-      state.uninstallCounting = install(pixi, ctx.state.monitor.draws);
+      state.uninstallCounting = install(pixi);
     } catch (error) {
       ctx.log.warn("renderer: draw calls are not counted", { error });
     }

@@ -34,6 +34,7 @@ import {
 } from "./dom-input";
 import { type FieldLayout, layoutField, liftOf, type PartBox, paddingOf } from "./field-layout";
 import type {
+  Composing,
   DescriptionNode,
   Element,
   Field,
@@ -240,6 +241,50 @@ function partValues(
     caret: boxPart(layout.caret, look.caret, 1),
     composing: boxPart(layout.composing, look.caret, 1)
   };
+}
+
+/**
+ * A cheap fingerprint of what a field is laid out from: the selection and the composing range
+ * while it is edited, the box, the padding, the text style, the placeholder and the value. The
+ * value goes last, so no character of it can shift another input.
+ *
+ * @param field - The field.
+ * @param element - Its live element.
+ * @param mirror - The mirror while the field is edited, else `undefined`.
+ * @param composing - The composing range while the field is edited, else `undefined`.
+ * @param value - The value it shows.
+ * @returns The fingerprint.
+ */
+function inputsOf(
+  field: Field,
+  element: Element,
+  mirror: Mirror | undefined,
+  composing: Composing | undefined,
+  value: string
+): string {
+  const pad = paddingOf(element.style.padding);
+  const selection =
+    mirror === undefined
+      ? "-"
+      : `${mirror.selectionStart},${mirror.selectionEnd},${mirror.direction}`;
+  const range = composing === undefined ? "-" : `${composing.start},${composing.end}`;
+  const box = `${element.rect.w},${element.rect.h},${pad.top},${pad.right},${pad.bottom},${pad.left}`;
+
+  const look = `${field.textStyle}\u0000${JSON.stringify(field.placeholder ?? "")}`;
+
+  return `${selection}\u0000${range}\u0000${box}\u0000${look}\u0000${value}`;
+}
+
+/**
+ * Tells whether a field with parts was laid out from these same inputs last time, so nothing it
+ * draws can have changed.
+ *
+ * @param field - The field.
+ * @param inputs - The fingerprint of its inputs now.
+ * @returns True when the field is still.
+ */
+function isStill(field: Field, inputs: string): boolean {
+  return field.parts !== undefined && field.inputs === inputs;
 }
 
 /**
@@ -583,8 +628,26 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
   }
 
   /**
+   * Forgets the inputs of every field whose text part `text` resolved again this frame. `text`
+   * does that for every label when a font arrives or leaves, and on a locale change, so the field
+   * is measured again with the metrics it has now. The frame after a field wrote its text part,
+   * the same write lays it out once more.
+   */
+  function forgetRelabelled(): void {
+    const ecs = ctx.deps.world.ecs;
+
+    for (const part of ecs.changed(Text)) {
+      const owner = ecs.get(part, Parent)?.entity;
+      const field = owner === undefined ? undefined : state.fields.get(owner);
+
+      if (field?.parts?.text === part) field.inputs = undefined;
+    }
+  }
+
+  /**
    * Lays out and draws one live field: spawns its parts the first time, writes them when the
-   * mirror, the value or the rect changed, and writes nothing for a still field.
+   * mirror, the value or the rect changed, and writes nothing for a still field. A field whose
+   * inputs did not change is neither measured nor laid out.
    *
    * @param field - The field.
    */
@@ -597,13 +660,42 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
     // Lay the field out around the mirror while it is edited, around its value otherwise.
     const editing = text.editing === field.entity;
     const value = editing ? text.mirror.value : fieldValue(state, field);
+    const mirror = editing ? text.mirror : undefined;
+    const composing = editing ? text.composing : undefined;
+
+    // A still field is neither measured nor laid out again.
+    const inputs = inputsOf(field, element, mirror, composing, value);
+
+    if (isStill(field, inputs)) return;
+
+    drawField(field, layoutOf(field, element, value, mirror, composing), value, inputs);
+  }
+
+  /**
+   * Lays out one field around its value, and the mirror while it is edited.
+   *
+   * @param field - The field.
+   * @param element - Its live element.
+   * @param value - The value it shows.
+   * @param mirror - The mirror while the field is edited, else `undefined`.
+   * @param composing - The composing range while the field is edited, else `undefined`.
+   * @returns Where its parts go.
+   */
+  function layoutOf(
+    field: Field,
+    element: Element,
+    value: string,
+    mirror: Mirror | undefined,
+    composing: Composing | undefined
+  ): FieldLayout {
     const look = ctx.config.textInput;
     const measure = (piece: string): { width: number; height: number } =>
       ctx.deps.text.measure(piece, field.textStyle);
-    const layout = layoutField({
+
+    return layoutField({
       value,
-      mirror: editing ? text.mirror : undefined,
-      composing: editing ? text.composing : undefined,
+      mirror,
+      composing,
       size: { w: element.rect.w, h: element.rect.h },
       padding: paddingOf(element.style.padding),
       lineHeight: measure("").height,
@@ -611,11 +703,25 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       underline: look.composingUnderline,
       prefix: piece => measure(piece).width
     });
+  }
 
+  /**
+   * Draws a laid-out field: spawns its parts the first time, and writes them again only when what
+   * they draw changed.
+   *
+   * @param field - The field.
+   * @param layout - Where its parts go.
+   * @param value - The value it shows.
+   * @param inputs - The fingerprint of what it was laid out from.
+   */
+  function drawField(field: Field, layout: FieldLayout, value: string, inputs: string): void {
     // Resolve what the parts draw, and a fingerprint of it.
+    const look = ctx.config.textInput;
     const content = layout.content === "placeholder" ? (field.placeholder ?? "") : value;
     const values = partValues(layout, content, field.textStyle, look);
     const drawn = JSON.stringify({ layout, content, look, style: field.textStyle });
+
+    field.inputs = inputs;
 
     // Spawn the parts the first time.
     if (field.parts === undefined) {
@@ -780,7 +886,8 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
         instance: element.instance,
         ...fieldAttributesOf(element.node),
         parts: undefined,
-        drawn: undefined
+        drawn: undefined,
+        inputs: undefined
       });
 
       if (element.instance === undefined) {
@@ -821,6 +928,8 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
     pull,
 
     place: (): void => {
+      forgetRelabelled();
+
       for (const field of state.fields.values()) placeField(field);
 
       placeInputAndLift();

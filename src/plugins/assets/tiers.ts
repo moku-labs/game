@@ -180,10 +180,6 @@ function recordOf(state: State, bundle: string): BundleRecord {
  *
  * @param state - The plugin state.
  * @param record - Record of the bundle that was used.
- * @example
- * ```ts
- * touch(state, record); // state.useCounter goes from 11 to 12 and record.lastUsed becomes 12
- * ```
  */
 export function touch(state: State, record: BundleRecord): void {
   state.useCounter += 1;
@@ -629,11 +625,6 @@ async function waitFor(
  * @param reason - Why this caller wants the bundle.
  * @returns A promise that resolves when every texture of the bundle exists.
  * @throws {Error} When the manifest has no such bundle, when a file fails and on an abort.
- * @example
- * ```ts
- * // The enter callback of a node, cancelled when the graph leaves it again.
- * await loadBundle(ctx, "board", enter.signal, "enter");
- * ```
  */
 export async function loadBundle(
   ctx: AssetsCtx,
@@ -692,6 +683,40 @@ function bundleMapsOf(value: unknown): BundleMap[] {
 }
 
 /**
+ * Warns when one bundle a feature declares disagrees with the manifest: the manifest has no such
+ * bundle, or it carries the bundle under another tier.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param feature - Name of the feature that declared the bundle.
+ * @param name - Name of the bundle.
+ * @param spec - What the feature declared for it.
+ */
+function checkDeclaredBundle(ctx: AssetsCtx, feature: string, name: string, spec: unknown): void {
+  const entry = ctx.state.manifest.bundles[name];
+
+  if (entry === undefined) {
+    ctx.log.warn("assets: bundle is not in the manifest", {
+      feature,
+      bundle: name,
+      fix: 'Run "bun run assets:keys".'
+    });
+
+    return;
+  }
+
+  const declared = (spec as { tier?: string } | undefined)?.tier;
+
+  if (declared === undefined || declared === entry.tier) return;
+
+  ctx.log.warn("assets: bundle tier disagrees with the manifest", {
+    feature,
+    bundle: name,
+    declared,
+    manifest: entry.tier
+  });
+}
+
+/**
  * Compares what the composed features declare with what the manifest carries. A disagreement is
  * one warning per bundle, never a failure: the game still runs on the manifest.
  *
@@ -699,27 +724,11 @@ function bundleMapsOf(value: unknown): BundleMap[] {
  */
 function checkDeclaredBundles(ctx: AssetsCtx): void {
   for (const feature of ctx.deps.flow.features.all()) {
-    for (const bundles of bundleMapsOf(feature.description.assets)) {
-      for (const [name, spec] of Object.entries(bundles.map)) {
-        const entry = ctx.state.manifest.bundles[name];
-        const declared = (spec as { tier?: string } | undefined)?.tier;
+    const declared = bundleMapsOf(feature.description.assets).flatMap(bundles =>
+      Object.entries(bundles.map)
+    );
 
-        if (entry === undefined) {
-          ctx.log.warn("assets: bundle is not in the manifest", {
-            feature: feature.name,
-            bundle: name,
-            fix: 'Run "bun run assets:keys".'
-          });
-        } else if (declared !== undefined && declared !== entry.tier) {
-          ctx.log.warn("assets: bundle tier disagrees with the manifest", {
-            feature: feature.name,
-            bundle: name,
-            declared,
-            manifest: entry.tier
-          });
-        }
-      }
-    }
+    for (const [name, spec] of declared) checkDeclaredBundle(ctx, feature.name, name, spec);
   }
 }
 
@@ -781,12 +790,6 @@ async function readManifest(ctx: AssetsCtx): Promise<void> {
  * @param ctx - Domain context of the plugin.
  * @returns A promise that resolves once the manifest and the `boot` tier are there.
  * @throws {Error} In a browser, when the manifest or a boot bundle cannot be read.
- * @example
- * ```ts
- * // What `startAssets` awaits before the game's first node runs.
- * await bootTiers(ctx);
- * ctx.state.manifest.bundles.boot; // the boot bundle, loaded
- * ```
  */
 export async function bootTiers(ctx: AssetsCtx): Promise<void> {
   await readManifest(ctx);

@@ -44,12 +44,6 @@ export function browserDecode(blob: Blob): Promise<DecodedImage> {
  *
  * @param renderer - The resolved renderer API.
  * @returns The default io.
- * @example
- * ```ts
- * // What `onStart` does when the renderer draws and the game configured no `io`.
- * const io = createBrowserIo(ctx.require(rendererPlugin));
- * io.createTexture(bitmap, { nine: [48, 48, 48, 48] }); // a Pixi texture with nine-slice borders
- * ```
  */
 export function createBrowserIo(renderer: RendererApi): AssetsIo {
   return {

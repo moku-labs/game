@@ -22,6 +22,9 @@ const PHONE_SIDE = 820;
 /** A feature entry that is a filter component made by `defineFilter`. */
 type FilterComponentLike = ComponentHandle<FilterFields> & { readonly filter: FilterDefinition };
 
+/** The valid entry of each feature key `effects` reads. */
+type FeatureEntryOf = { emitters: EmitterDefinition; filters: FilterComponentLike };
+
 /**
  * Reads one property of a value a feature brought, whatever its type.
  *
@@ -74,6 +77,34 @@ function isFilterComponent(entry: unknown): entry is FilterComponentLike {
   );
 }
 
+/** The check of each feature key `effects` reads. */
+const entryChecks: {
+  readonly [Key in keyof FeatureEntryOf]: (entry: unknown) => entry is FeatureEntryOf[Key];
+} = { emitters: isEmitterDefinition, filters: isFilterComponent };
+
+/**
+ * Yields the valid entries of one key of every feature, in feature order, and logs
+ * `effects:bad-feature-entry` for each entry that fails its check. It yields lazily, so a warning
+ * and a throw of the caller come in the order of the entries.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param key - The feature key: `emitters` or `filters`.
+ * @yields {FeatureEntryOf[Key]} Each valid entry.
+ */
+function* featureEntries<Key extends keyof FeatureEntryOf>(
+  ectx: EffectsCtx,
+  key: Key
+): Generator<FeatureEntryOf[Key]> {
+  const isEntry = entryChecks[key];
+
+  for (const feature of ectx.deps.flow.features.all()) {
+    for (const entry of feature.description[key] ?? []) {
+      if (isEntry(entry)) yield entry;
+      else ectx.log.warn("effects:bad-feature-entry", { feature: feature.name });
+    }
+  }
+}
+
 /**
  * Resolves the dependency APIs `flow`, `world`, `renderer` and `assets` onto the kernel context.
  *
@@ -123,22 +154,15 @@ export function resolvePhone(setting: boolean | "auto"): boolean {
  * @throws {Error} When two features register the same emitter id.
  */
 function registerEmitters(ectx: EffectsCtx): void {
-  for (const feature of ectx.deps.flow.features.all()) {
-    for (const entry of feature.description.emitters ?? []) {
-      if (!isEmitterDefinition(entry)) {
-        ectx.log.warn("effects:bad-feature-entry", { feature: feature.name });
-
-        continue;
-      }
-
-      if (ectx.state.emitters.has(entry.id)) {
-        throw new Error(
-          `[game] Emitter "${entry.id}" is registered twice.\n  Keep one defineEmitter per id.`
-        );
-      }
-
-      ectx.state.emitters.set(entry.id, entry);
+  for (const entry of featureEntries(ectx, "emitters")) {
+    // One emitter per id over every feature.
+    if (ectx.state.emitters.has(entry.id)) {
+      throw new Error(
+        `[game] Emitter "${entry.id}" is registered twice.\n  Keep one defineEmitter per id.`
+      );
     }
+
+    ectx.state.emitters.set(entry.id, entry);
   }
 }
 
@@ -153,30 +177,24 @@ function registerKinds(ectx: EffectsCtx): void {
   const builtIns = builtInKinds();
   const entries: KindEntry[] = [...builtIns];
 
-  for (const feature of ectx.deps.flow.features.all()) {
-    for (const entry of feature.description.filters ?? []) {
-      if (!isFilterComponent(entry)) {
-        ectx.log.warn("effects:bad-feature-entry", { feature: feature.name });
+  for (const entry of featureEntries(ectx, "filters")) {
+    const id = entry.filter.id;
 
-        continue;
-      }
-
-      const id = entry.filter.id;
-
-      if (builtIns.some(kind => kind.id === id)) {
-        throw new Error(`[game] Filter "${id}" is built in.\n  Choose another id.`);
-      }
-
-      if (entries.some(kind => kind.id === id)) {
-        throw new Error(
-          `[game] Filter "${id}" is registered twice.\n  Keep one defineFilter per id.`
-        );
-      }
-
-      entries.push({ id, component: entry, source: "wgsl", definition: entry.filter });
+    // A game's filter takes neither the id of a built-in nor an id another filter took.
+    if (builtIns.some(kind => kind.id === id)) {
+      throw new Error(`[game] Filter "${id}" is built in.\n  Choose another id.`);
     }
+
+    if (entries.some(kind => kind.id === id)) {
+      throw new Error(
+        `[game] Filter "${id}" is registered twice.\n  Keep one defineFilter per id.`
+      );
+    }
+
+    entries.push({ id, component: entry, source: "wgsl", definition: entry.filter });
   }
 
+  // The registration order is each kind's index.
   for (const [index, entry] of entries.entries())
     ectx.state.kinds.set(entry.id, { ...entry, index });
 }

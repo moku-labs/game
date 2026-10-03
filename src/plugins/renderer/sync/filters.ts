@@ -135,6 +135,18 @@ function inTree(object: PixiContainer, root: PixiContainer): boolean {
 }
 
 /**
+ * Tells whether the view of a filtered entity is drawn this frame: it exists and hangs under the
+ * root. A view outside the tree costs no pass.
+ *
+ * @param view - The view of the entity, `undefined` when it has none.
+ * @param root - The root container of the renderer.
+ * @returns True when the view is in the drawn tree.
+ */
+function isDrawn(view: View | undefined, root: PixiContainer): view is View {
+  return view !== undefined && inTree(view.wrapper ?? view.object, root);
+}
+
+/**
  * The passes one filtered view costs: its content once, then every apply of its enabled filters.
  * A disabled filter costs nothing, and a view whose filters are all disabled is drawn unfiltered.
  *
@@ -164,9 +176,7 @@ export function renderPassesOf(state: SyncState): number {
   let passes = 1;
 
   for (const [entity, slots] of state.filters) {
-    const view = state.views.get(entity);
-
-    if (view !== undefined && inTree(view.wrapper ?? view.object, root)) passes += passesOf(slots);
+    if (isDrawn(state.views.get(entity), root)) passes += passesOf(slots);
   }
 
   return passes;

@@ -307,8 +307,7 @@ export type FieldParts = { selection: Entity; text: Entity; caret: Entity; compo
 
 /**
  * One text field: its entity and the props of the `input` tag, filled at enter and dropped at the
- * despawn. `instance` is the nearest component instance, the one whose `local` the field writes;
- * `drawn` is the layout of its parts last written, so a still field writes nothing.
+ * despawn. `instance` is the nearest component instance, the one whose `local` the field writes.
  */
 export type Field = {
   entity: Entity;
@@ -322,7 +321,14 @@ export type Field = {
   textStyle: string;
   placeholder: string | Message | undefined;
   parts: FieldParts | undefined;
+  /** What the parts were last written with, so a field laid out the same way writes nothing. */
   drawn: string | undefined;
+  /**
+   * A fingerprint of what the field was last laid out from, so a still field is neither measured
+   * nor laid out. `undefined` lays it out again: before its first placement, and after `text`
+   * resolved its text part again, as it does when a font arrives.
+   */
+  inputs: string | undefined;
 };
 
 /**
