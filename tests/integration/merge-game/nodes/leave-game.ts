@@ -1,8 +1,8 @@
 /**
  * @file Transit node `leaveGame`: Back was pressed on Home. The Leave popup asks first; Leave
  * awaits the `exit` effect, which the leave feature's plugin hands to the provider of the native
- * shell, and Stay, the backdrop and Escape answer `stay`. Both go back to Home: on the web page
- * there is no provider, so nothing closes and Home is where the player is.
+ * shell, and Stay, the backdrop and Escape answer `stay`. Both go back to Home: where the shell
+ * cannot close the app, in a browser and on iOS, nothing closes and Home is where the player is.
  */
 import type { Flow } from "@moku-labs/game";
 import { type } from "@moku-labs/game";

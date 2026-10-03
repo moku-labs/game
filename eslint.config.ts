@@ -18,7 +18,9 @@ export default [
       "spikes/**",
       "declarations.d.ts",
       // Tool output: the asset scanner and compileStrings write these files.
-      "**/generated/**"
+      "**/generated/**",
+      // Build output of the fixture game: the pack, the static page and the native app.
+      "tests/integration/merge-game/dist/**"
     ]
   },
 

@@ -105,7 +105,8 @@ export function createGame(options: GameOptions = {}): Game {
  * board, the reward, the HUD, the orders, the settings, the energy, the daily gift and the Leave
  * popup — and the five plugins the game writes: the loading of the splash, the language switch,
  * the way out of the Leave popup, the look of the board under the pointer and the click of every
- * control. Without a provider `platform` is inert, as on the web page.
+ * control. Without a provider `platform` is inert; the web page and the native app pass the
+ * bridge of `platform-bridge.ts`.
  */
 export const screenPlugins = [
   ...screen,
@@ -159,7 +160,7 @@ export type ScreenGameOptions = GameOptions & {
   renderer?: { mount: string; loadPixi: () => Promise<Renderer.PixiModule> };
   /**
    * The phone behind the game: its Back button, its pause and its `exit()`. Left out, `platform`
-   * is inert and Leave closes nothing, as on the web page. A test passes a fake to press Back.
+   * is inert and Leave closes nothing. A test passes a fake to press Back.
    */
   platform?: PlatformProvider;
 };

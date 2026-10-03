@@ -1,8 +1,8 @@
 /**
  * @file The handler of the `exit` effect: Leave on the Leave popup asks the app to close. A node
  * has no platform in its context, so the feature that asks owns the one line that leaves. The app
- * passes the provider's `exit` in `pluginConfigs.leaveExit`; the web page has no provider and
- * passes none, so Leave lands back on Home there.
+ * passes the provider's `exit` in `pluginConfigs.leaveExit`. Where the shell cannot close the app,
+ * in a browser and on iOS, Leave lands back on Home.
  */
 import { createPlugin, flowPlugin } from "@moku-labs/game";
 
