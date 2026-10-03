@@ -1,0 +1,120 @@
+# P15: the packed fixture game inside Tauri on the iOS simulator
+
+**Goal: learn whether the packed merge-game fixture runs as a Tauri 2 iOS app, and settle the asset, renderer, touch, safe-area and lifecycle claims of P14.**
+
+Status: run on 2026-10-03. iPhone 17 Pro simulator, iOS 26.3, Xcode 26.3. Packager `@moku-labs/native` 0.2.2, `@tauri-apps/cli` 2.12.1, tauri 2.12.1, wry 0.57.0. Nothing in `src/` or `tests/` was changed.
+
+**The simulator renders through the Mac GPU. Renderer and timing results do not prove anything for a real iPhone.**
+
+## How it was built
+
+| step | what | proof |
+|---|---|---|
+| Pack | `bun src/assets.ts --root tests/integration/merge-game --pack spikes/p15-fixture-native/pack`. No `--keys`, so no repo file changes. 3 pages, 8 loose files, 2 fonts, 7 sounds. No `.ktx2` in the pack. | `pack/manifest.json` |
+| Page | `web/index.html` = the fixture page + `web/probe.ts`. Bundled with `Bun.build`, pack copied to the static root, as `serve.ts --packed` serves it. | `scripts/build-web.ts`, `dist/` |
+| App | `scripts/native.ts` uses `@moku-labs/native` as a library, `target: "ios", simulator: true`. | `build-2-ok.log` |
+| Report | The probe POSTs JSON to `http://127.0.0.1:8788/report`. It works from `tauri://localhost`. | `reports.jsonl` |
+
+## Results
+
+| check | result | proof |
+|---|---|---|
+| First simulator build | Fails. Packager bug, same as P13 risk 1: `project 'p15fixture' is damaged and cannot be opened due to a parse error`. One-quote fix in the generated `project.pbxproj`, then the build passes in 67 s. | `build-1-failed.log`, `build-2-ok.log` |
+| Assets from the Tauri protocol | Load. Manifest, atlas pages, webp, fonts and sounds all work: splash reaches Home, the board draws, text renders. | `p15-home.png`, `p15-after-tap.png` |
+| `/manifest.json` | 200, `application/json` | `reports.jsonl` line 2 |
+| Missing file `/missing-file.json` | **200, `text/html`, body is `index.html`.** P14 claim confirmed. | `reports.jsonl` line 2 |
+| Missing file in a missing folder `/no-such-dir/x.png` | **200, `text/html`, body is `index.html`.** | `reports.jsonl` line 2 |
+| `.ktx2` with the real KTX2 identifier | **200, `text/html`.** Bytes arrive intact. P14 claim confirmed. | `reports.jsonl` line 2, `scripts/build-web.ts` writes `probe.ktx2` |
+| Resource Timing | `tauri://` fetches do not show in `performance.getEntriesByType("resource")`. Only the `http://` POSTs show. | `reports.jsonl` line 5 |
+| Splash reaches Home | yes. Cold start: `boot` 519 ms, `home` 1352 ms. Warm start: `splash` 173 ms, `home` 277 ms. | `reports.jsonl` lines 3 and 14, `p15-home.png` |
+| Renderer | `webgl`. `navigator.gpu` exists, `requestAdapter()` gives `null`. Same as P13 and Mobile Safari on the simulator. | `reports.jsonl` lines 2 and 3 |
+| Touch, page helper | `game.input.tap(game.ui.find("play"))` returns `true`. Flow moves to `board/awaitIntent`. This is a synthetic tap. | `reports.jsonl` line 4, `p15-after-tap.png` |
+| Touch, real finger | **Not verified.** `simctl` cannot tap. The probe listens for `touchstart` and `pointerdown`, none came. | `web/probe.ts` |
+| Safe area, as generated | **Broken.** The page gets 402 x 778, not 402 x 874. A white band of 96 pt sits at the bottom. `env()` insets are 62 / 34 after layout, but they are 0 at `load`. | `reports.jsonl` line 18, `p15-home.png` |
+| Safe area, with the fix | **Fixed.** 402 x 874, insets 62 / 34, no band. Engine safe area 167 / 92 design units at scale 0.370. | `reports.jsonl` line 23, `p15-home-fixed.png` |
+| Background to Settings | `tauri://blur` and `tauri://suspended` at once. `visibilitychange` `hidden` 1.5 s later. No `pagehide`, no `window` `blur`. | `reports.jsonl` lines 6 to 8, `p15-backgrounded-settings.png` |
+| Back to the app | `tauri://resumed` and `visibilitychange` `visible` within 2 ms. `tauri://focus` 0.4 s later. No `window` `focus`. Same pid, the page was not reloaded. | `reports.jsonl` lines 9 to 11, `p15-resumed.png` |
+| iOS `tauri://suspended` | **Fires on iOS.** The "Android only" JS doc is wrong. P14 risk 1 settled. | `reports.jsonl` line 7 |
+
+How lifecycle was driven: `xcrun simctl launch booted com.apple.Preferences` (our app goes to background), wait 6 s, then `xcrun simctl launch booted dev.moku.spike.p15` (same pid 96212, so a resume, not a relaunch).
+
+---
+
+## Safe area: root cause and fix
+
+**1. The page does not get the full screen**
+
+Issue: wry 0.57.0 creates the iOS `WKWebView` and never sets `scrollView.contentInsetAdjustmentBehavior`. It stays `.automatic`. UIKit then shrinks the page by the safe area: 874 − 62 − 34 = 778. Tauri 2.12.1 has no config key for it. Proof: no `contentInset` in `wry-0.57.0`, `tauri-2.12.1`, `tauri-runtime-wry-2.12.1`, `tauri-utils-2.10.1` (grep of the cargo sources). Upstream: tauri-apps/tauri#8166 is still open and points to an own plugin.
+
+Fix, one setup hook in the generated `src-tauri/src/lib.rs` and one iOS dependency. Tested as `native-fix/lib.rs`:
+
+```rust
+// now (generated by @moku-labs/native 0.2.2)
+tauri::Builder::default()
+  .run(tauri::generate_context!())
+
+// fix
+tauri::Builder::default()
+  .setup(|_app| {
+    #[cfg(target_os = "ios")]
+    if let Some(window) = _app.get_webview_window("main") {
+      window.with_webview(|webview| unsafe {
+        use objc2::{msg_send, runtime::AnyObject};
+        let wk = &*(webview.inner() as *mut AnyObject);
+        let scroll: *mut AnyObject = msg_send![wk, scrollView];
+        // UIScrollViewContentInsetAdjustmentNever = 2
+        let _: () = msg_send![&*scroll, setContentInsetAdjustmentBehavior: 2isize];
+      })?;
+    }
+    Ok(())
+  })
+  .run(tauri::generate_context!())
+```
+
+```toml
+# fix, Cargo.toml
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+```
+
+Owner: **`@moku-labs/native` codegen.** It writes `lib.rs` and `Cargo.toml`. Not `@moku-labs/system` (runtime JS API) and not the engine (the engine already reads `env()` correctly).
+
+---
+
+**2. Where the white comes from**
+
+Issue: not from html or body. Both are `rgb(16, 22, 29)` (`#10161d`, `reports.jsonl` line 18). The band is below the 778 pt page box. It is the native view behind the page. wry sets `UIColor.systemBackgroundColor` there when no window `backgroundColor` is set (`wry-0.57.0/src/wkwebview/mod.rs` lines 447 to 469). That is white in light mode.
+
+Fix: keep the fixture body at `#10161d`. Also let the packager set the window color, so the launch flash and any gap are dark:
+
+```json
+// fix, tauri.conf.json
+"app": { "windows": [{ "title": "P15Fixture", "backgroundColor": "#10161d" }] }
+```
+
+The `backgroundColor` line was not built in this spike. With fix 1 the band is gone anyway.
+
+---
+
+**3. The user agent says iPhone OS 18_7 on iOS 26.3**
+
+Issue: the OS number in the UA is frozen. WKWebView sends `iPhone OS 18_7` and no `Version/` token. Safari sends `Version/26.3` with the same `18_7`.
+
+Fix: never read the iOS version from the UA. Detect features: `navigator.gpu` plus a non-null `requestAdapter()`. If the shell needs the real OS version, ask the native side (for example `@tauri-apps/plugin-os`).
+
+---
+
+## Open / risks
+
+1. **Packager bug: first iOS build always fails.** `patchMobile` drops the opening `"` of `shellScript` in `project.pbxproj`. The `(?:\S*/)?` prefix of `PACKAGE_RUNNER` eats it. Details and the one-line fix in `../p13-webgpu-webview/RESULT.md` risk 1. Owner: `@moku-labs/native`.
+2. **The packager overwrites hand edits.** `project:generate` rewrites `lib.rs` and `Cargo.toml` on every build. The fixed app was built with `node …/tauri.js ios build --ci --target aarch64-sim` straight from `.moku/tauri`, with `[lib] path` pointing at `native-fix/lib.rs` (`build-4-fix.log`). The moku rails hook refuses shell writes to any `src/` path, also the generated one. That is why the file lives outside `src/`.
+3. **Missing files return 200 + `index.html`.** The loader must check `content-type` for JSON and must not trust `response.ok`.
+4. **`.ktx2` comes as `text/html`.** Fine for `arrayBuffer()`. Breaks any MIME check.
+5. **`env()` insets read 0 at `load`.** They are right a moment later. The engine already re-reads on resize. Any one-shot read at boot is wrong.
+6. **Real touch not verified.** Needs a click in the Simulator window or a device.
+7. **`visibilitychange` lags `tauri://suspended` by 1.5 s on hide.** A pause on `tauri://suspended` is faster. On resume both arrive together.
+8. **Renderer on device unknown.** The simulator gives no WebGPU adapter. See P13.
+
+## Files
+
+`web/probe.ts`, `web/index.html`, `scripts/build-web.ts`, `scripts/native.ts`, `scripts/report-server.ts`, `native-fix/lib.rs`, `reports.jsonl`, `build-*.log`, screenshots `p15-*.png`.

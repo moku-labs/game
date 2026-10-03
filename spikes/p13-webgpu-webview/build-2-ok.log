@@ -1,0 +1,27 @@
+  ⠋ ios · scaffold…
+  ✓ ios · scaffold
+      1ms
+  ⠋ ios · codegen…
+  › project:generate {"target":"ios","written":0,"unchanged":6}
+  › project:patchMobile {"target":"ios","patched":0}
+  ✓ ios · codegen
+      5ms
+  ⠋ ios · icons…
+  ✓ ios · icons
+      up to date (6ms)
+  ⠋ ios · compile…
+  ✓ ios · compile
+      75117ms
+  ⠋ ios · bundle…
+  ✓ ios · bundle
+      0ms
+  ⠋ ios · collect…
+  ✓ ios · collect
+      2ms
++---------------------------------------+
+| P13Gpu — ios build complete           |
+| Target     ios                        |
+| Output     dist-native/ios            |
+| Artifact   dist-native/ios/P13Gpu.app |
+| Duration   75132ms                    |
++---------------------------------------+
