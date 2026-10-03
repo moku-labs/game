@@ -201,7 +201,13 @@ const BODY_FONT = "ui.font-body";
 const bodyFont = JSON.stringify({
   info: { face: "body", size: 32 },
   common: { lineHeight: 40, base: 32 },
-  chars: [{ id: 65, char: "A", xadvance: 20 }]
+  chars: [
+    { id: 65, char: "A", xadvance: 20 },
+    { id: 66, char: "B", xadvance: 20 },
+    { id: 97, char: "a", xadvance: 20 },
+    { id: 98, char: "b", xadvance: 20 },
+    { id: 111, char: "o", xadvance: 20 }
+  ]
 });
 
 /** Sends `assets:bundle-loaded` the way `assets` does, so `text` reads the fonts it can find. */

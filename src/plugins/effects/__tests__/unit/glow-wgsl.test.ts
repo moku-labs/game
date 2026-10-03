@@ -5,8 +5,9 @@ import { GLOW_WGSL } from "../../filters/glow-wgsl";
 // ---------------------------------------------------------------------------
 // Unit test: the shape of the Glow fragment. Bun has no WebGPU, so the pixels
 // are checked in a browser; here the text pins what makes the halo soft: the
-// mean source alpha over a disc of radius `distance`, every probe in the
-// input frame, the source drawn over a premultiplied halo
+// weighted mean source alpha over a disc of radius `distance`, the near probes
+// counting most, every probe in the input frame, the source drawn over a
+// premultiplied halo
 // ---------------------------------------------------------------------------
 
 /**
@@ -37,10 +38,15 @@ describe("the Glow fragment", () => {
     );
   });
 
-  it("takes the mean alpha around the pixel, never the largest one", () => {
+  it("takes the weighted mean alpha around the pixel, never the largest one", () => {
     expect(GLOW_WGSL).not.toMatch(/\bmax\(/);
-    expect(GLOW_WGSL).toContain("coverage += textureSample(uTexture, uSampler, probe).a;");
-    expect(GLOW_WGSL).toContain("coverage /= f32(GLOW_PROBES);");
+    expect(GLOW_WGSL).toContain("coverage += textureSample(uTexture, uSampler, probe).a * weight;");
+    expect(GLOW_WGSL).toContain("weights += weight;");
+    expect(GLOW_WGSL).toContain("coverage /= weights;");
+  });
+
+  it("weights a probe by (1 - r / distance)², so the halo fades out with no band at the rim", () => {
+    expect(GLOW_WGSL).toContain("let weight = (1.0 - along) * (1.0 - along);");
   });
 
   it("spreads the probes evenly over the disc of radius distance, none beyond it", () => {

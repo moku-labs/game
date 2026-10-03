@@ -62,6 +62,8 @@ export default {
   "settings.russian": () => [{ kind: "text", text: "Русский" }],
   "settings.tab": p => [{ kind: "text", text: (String(p.tab) === "audio" ? "Sound" : String(p.tab) === "language" ? "Language" : String(p.tab) === "profile" ? "Name" : "More") }],
   "settings.title": () => [{ kind: "text", text: "Settings" }],
+  "splash.failed": () => [{ kind: "text", text: "Couldn't load" }],
   "splash.loading": () => [{ kind: "text", text: "Loading…" }],
+  "splash.retry": () => [{ kind: "text", text: "Try again" }],
   "ui.gameName": () => [{ kind: "text", text: "Timber Town" }]
 } satisfies I18n.CompiledMessages;

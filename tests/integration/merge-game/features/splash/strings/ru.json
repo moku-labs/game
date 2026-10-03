@@ -1,3 +1,5 @@
 {
-  "splash.loading": "Загрузка…"
+  "splash.loading": "Загрузка…",
+  "splash.failed": "Не удалось загрузить",
+  "splash.retry": "Повторить"
 }

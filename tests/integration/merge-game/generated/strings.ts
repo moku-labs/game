@@ -43,7 +43,9 @@ export type Strings = {
   "settings.russian": Record<string, never>;
   "settings.tab": { tab: "audio" | "language" | "profile" };
   "settings.title": Record<string, never>;
+  "splash.failed": Record<string, never>;
   "splash.loading": Record<string, never>;
+  "splash.retry": Record<string, never>;
   "ui.gameName": Record<string, never>;
 };
 

@@ -364,6 +364,26 @@ export type TextApi = {
   measure(content: string | Message, style: string): Size;
 
   /**
+   * Whether the font of a style has a glyph for one character. Pixi draws nothing for a character
+   * its font lacks, while `measure` counts `missingGlyph` for it, so a caret measured over such a
+   * character would stand past the drawn text. While the font is not loaded every character
+   * counts, as the fallback measures it. An unknown style warns once and looks up `body`.
+   *
+   * @param char - One character, a whole code point.
+   * @param style - A registered style name.
+   * @returns False only for a character a loaded font has no glyph for.
+   * @example
+   * ```ts
+   * // `ui` measures the caret of a text field over the characters the font draws.
+   * const text = ctx.require(textPlugin);
+   *
+   * text.hasGlyph("a", "body"); // true
+   * text.hasGlyph("😀", "body"); // false: an MSDF font has no emoji, so the caret skips it
+   * ```
+   */
+  hasGlyph(char: string, style: string): boolean;
+
+  /**
    * The registered style names: the two built-ins first, then the styles of every feature in
    * feature order.
    *

@@ -261,6 +261,19 @@ export function advanceParticles(
 }
 
 /**
+ * Tells whether an instance stands still this frame: a stream under reduced motion emits nothing
+ * and its particles keep their place and age, like a `Frames` loop (WCAG 2.3.3). A burst is never
+ * held; it is skipped where it is played.
+ *
+ * @param instance - The instance.
+ * @param reducedMotion - What `anim.reducedMotion()` answers now.
+ * @returns True for a stream under reduced motion.
+ */
+export function standsStill(instance: EmitterInstance, reducedMotion: boolean): boolean {
+  return reducedMotion && instance.baked.config.rate !== undefined;
+}
+
+/**
  * Runs one step of an instance and uploads once when a particle was born or died. Never
  * `addParticle` or `removeParticle` per particle: `update()` marks every attribute dirty, which
  * the churn needs anyway.

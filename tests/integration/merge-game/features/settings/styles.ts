@@ -2,8 +2,8 @@
  * @file The look of the settings popup (design §6 E2, D1) and of the two popups stacked on it, the
  * confirm (E3) and the rename: the folder tabs that sit on the parchment, the sound rows on two
  * lines with their − and +, the 10-segment level bar that grows to fill, the language column, the
- * name pane, the text link with its wave, the button row of the confirm, and the name field with
- * its counter. The board, the ropes, the X and the parchment are the kit's.
+ * name pane, the text link with its wave, the button row of the confirm, and the name field in its
+ * frame with its counter. The board, the ropes, the X and the parchment are the kit's.
  */
 import { defineStyle } from "../../kit";
 import { theme } from "../ui/kit";
@@ -207,12 +207,24 @@ export const profileColumn = defineStyle({
   gap: 36
 });
 
-/** The "Сбросить прогресс" link: no plank, the berry words with the wave under them. */
+/**
+ * How much the tap box of the reset link reaches past its words and wave, above and below. The
+ * link draws 99 units tall (words 65, gap 2, wave 16, padding 16), so its box is 143: over the 140
+ * of a tap target (`TAP_MIN`), 44 pt on the smallest phone.
+ */
+const linkReach = 22;
+
+/**
+ * The "Сбросить прогресс" link: no plank, the berry words with the wave under them. The padding
+ * grows the box that takes the tap and the negative margins give it back, so the words and the
+ * wave stand where they stood.
+ */
 export const linkStyle = defineStyle({
   direction: "column",
   align: "center",
   gap: 2,
-  padding: { top: 8, bottom: 8 },
+  padding: { top: 8 + linkReach, bottom: 8 + linkReach },
+  margin: { top: -linkReach, bottom: -linkReach },
   is: { pressed: { offsetY: 3 } }
 });
 
@@ -235,17 +247,28 @@ export const nameColumn = defineStyle({
 });
 
 /**
- * The name field: a cream slot with an ink rim, as wide as the paper. The words start 32 units in
- * from its left edge and stand in its middle.
+ * The frame of the name field: a cream slot with an ink rim, as wide as the paper. The frame draws
+ * the slot, not the field: a field clips what it holds to its box, its own rim included, and the
+ * clip would cut the outer half of the rim and leave its rounded corners stepped.
  */
-export const nameField = defineStyle({
+export const nameFrame = defineStyle({
+  direction: "row",
+  align: "stretch",
   alignSelf: "stretch",
   height: 120,
-  padding: { left: 32, right: 32 },
   fill: theme.color.cream,
   stroke: theme.color.ink,
   strokeWidth: 5,
   radius: 24
+});
+
+/**
+ * The name field inside its frame: the whole frame, with no fill and no rim of its own. The words
+ * start 32 units in from its left edge and stand in its middle.
+ */
+export const nameField = defineStyle({
+  grow: 1,
+  padding: { left: 32, right: 32 }
 });
 
 /** The counter under the field, at its right end: "4/16". */

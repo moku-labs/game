@@ -15,7 +15,6 @@ import { nameOf, pictureOf } from "../../view/items";
 import { PlankButton } from "../ui/kit";
 import { cardSwayOf } from "./motions";
 import {
-  cardGlow,
   cardPicture,
   countBadge,
   levelBadge,
@@ -24,6 +23,7 @@ import {
   orderStrip,
   pictureFrame,
   pinStyle,
+  readyCardGlow,
   rewardIcon,
   rewardRow,
   ropeStyle,
@@ -217,8 +217,8 @@ export function OrderCard(props: { card: OrderCardView }) {
       state={{ selected: card.ready }}
       style={orderCardStyle(card.slot)}
       motion={cardSwayOf(card.slot, card.ready)}
+      components={card.ready ? [readyCardGlow] : []}
     >
-      {card.ready ? <stack key={`${id}Glow`} style={cardGlow} /> : undefined}
       <image key={`${id}Pin`} texture="ui.decor-clothespin" style={pinStyle} />
       <text
         key={`${id}Title`}

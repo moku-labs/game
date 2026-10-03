@@ -271,8 +271,40 @@
                   {
                     "children": [
                       {
-                        "children": [],
-                        "key": "nameField",
+                        "children": [
+                          {
+                            "children": [],
+                            "key": "nameField",
+                            "local": {
+                              "name": "Alex"
+                            },
+                            "rect": {
+                              "h": 120,
+                              "w": 676,
+                              "x": 202,
+                              "y": 570
+                            },
+                            "state": {
+                              "active": false,
+                              "covered": false,
+                              "disabled": false,
+                              "focus": true,
+                              "hover": false,
+                              "pressed": false,
+                              "selected": false
+                            },
+                            "style": {
+                              "grow": 1,
+                              "padding": {
+                                "left": 32,
+                                "right": 32
+                              }
+                            },
+                            "type": "input",
+                            "value": "Alex"
+                          }
+                        ],
+                        "key": "nameFrame",
                         "local": {
                           "name": "Alex"
                         },
@@ -286,25 +318,22 @@
                           "active": false,
                           "covered": false,
                           "disabled": false,
-                          "focus": true,
+                          "focus": false,
                           "hover": false,
                           "pressed": false,
                           "selected": false
                         },
                         "style": {
+                          "align": "stretch",
                           "alignSelf": "stretch",
+                          "direction": "row",
                           "fill": 16774102,
                           "height": 120,
-                          "padding": {
-                            "left": 32,
-                            "right": 32
-                          },
                           "radius": 24,
                           "stroke": 3809810,
                           "strokeWidth": 5
                         },
-                        "type": "input",
-                        "value": "Alex"
+                        "type": "row"
                       },
                       {
                         "children": [
@@ -1381,10 +1410,10 @@
                   "tab": "profile"
                 },
                 "rect": {
-                  "h": 99,
+                  "h": 143,
                   "w": 426,
                   "x": 327,
-                  "y": 1087
+                  "y": 1065
                 },
                 "state": {
                   "active": false,
@@ -1399,9 +1428,13 @@
                   "align": "center",
                   "direction": "column",
                   "gap": 2,
+                  "margin": {
+                    "bottom": -22,
+                    "top": -22
+                  },
                   "padding": {
-                    "bottom": 8,
-                    "top": 8
+                    "bottom": 30,
+                    "top": 30
                   }
                 },
                 "type": "button"
@@ -2644,20 +2677,20 @@
           "y": 570
         },
         "Parent": {
-          "key": "renameColumn",
+          "key": "nameFrame",
           "projection": "Rename"
         },
         "Shape": {
           "alpha": 1,
           "clip": true,
           "dash": 0,
-          "fill": 16774102,
-          "fillAlpha": 1,
+          "fill": 16777215,
+          "fillAlpha": 0,
           "h": 120,
           "kind": "rect",
-          "radius": 24,
-          "stroke": 3809810,
-          "strokeWidth": 5,
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
           "w": 676
         },
         "Touchable": true,
@@ -2673,6 +2706,45 @@
         }
       },
       "key": "nameField",
+      "projection": "Rename"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 120,
+          "w": 676,
+          "x": 202,
+          "y": 570
+        },
+        "Parent": {
+          "key": "renameColumn",
+          "projection": "Rename"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16774102,
+          "fillAlpha": 1,
+          "h": 120,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 3809810,
+          "strokeWidth": 5,
+          "w": 676
+        },
+        "Transform": {
+          "pivot": {
+            "x": 338,
+            "y": 60
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 338,
+          "y": 60
+        }
+      },
+      "key": "nameFrame",
       "projection": "Rename"
     },
     {
@@ -3316,11 +3388,11 @@
         },
         "effects.glow": {
           "alpha": 1,
-          "color": 16769946,
-          "distance": 14,
+          "color": 15905853,
+          "distance": 32,
           "enabled": true,
           "order": 0,
-          "strength": 1.5
+          "strength": 1.8
         }
       },
       "key": "renameSave",
@@ -4079,10 +4151,10 @@
     {
       "components": {
         "Box": {
-          "h": 99,
+          "h": 143,
           "w": 426,
           "x": 327,
-          "y": 1087
+          "y": 1065
         },
         "Parent": {
           "key": "settingsBoard",
@@ -4094,7 +4166,7 @@
           "dash": 0,
           "fill": 16777215,
           "fillAlpha": 0,
-          "h": 99,
+          "h": 143,
           "kind": "rect",
           "radius": 0,
           "stroke": 0,
@@ -4105,7 +4177,7 @@
         "Transform": {
           "pivot": {
             "x": 213,
-            "y": 49.5
+            "y": 71.5
           },
           "rotation": 0,
           "scale": 1,
@@ -4136,7 +4208,7 @@
           "rotation": 0,
           "scale": 1,
           "x": 213,
-          "y": 40.5
+          "y": 62.5
         }
       },
       "key": "settingsResetLabel",
@@ -4174,7 +4246,7 @@
           "rotation": 0,
           "scale": 1,
           "x": 213,
-          "y": 83
+          "y": 105
         }
       },
       "key": "settingsResetWave",
@@ -5460,11 +5532,11 @@
         },
         "effects.glow": {
           "alpha": 1,
-          "color": 16769946,
-          "distance": 14,
+          "color": 15905853,
+          "distance": 32,
           "enabled": true,
           "order": 0,
-          "strength": 1.5
+          "strength": 1.8
         }
       },
       "key": "play",

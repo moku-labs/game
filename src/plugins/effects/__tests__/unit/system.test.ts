@@ -499,6 +499,55 @@ describe("the particle system — modes", () => {
     expect(container?.particleChildren).toHaveLength(count);
   });
 
+  it("stands a stream still under reduced motion and resumes it when reduced motion is off", () => {
+    const mock = started();
+
+    mock.spawn([Emitter({ effect: "fx.trail" }), Transform({ x: 0, y: 0 })]);
+    frames(mock, 5);
+
+    const container = FakeFxParticleContainer.made[0];
+    const instance = [...mock.state.instances.values()][0];
+    const pose = (): number[][] =>
+      (container?.particleChildren ?? []).map(particle => [particle.x, particle.y]);
+    const count = container?.particleChildren.length ?? 0;
+    const still = pose();
+    const ages = [...(instance?.born.age ?? [])];
+    const updates = container?.updates ?? 0;
+
+    expect(count).toBeGreaterThan(0);
+
+    mock.anim.reducedMotion = true;
+    frames(mock, 30);
+
+    // No emission, no advance: the same particles at the same places and ages, no upload.
+    expect(container?.particleChildren).toHaveLength(count);
+    expect(pose()).toEqual(still);
+    expect([...(instance?.born.age ?? [])]).toEqual(ages);
+    expect(container?.updates).toBe(updates);
+
+    mock.anim.reducedMotion = false;
+    frames(mock, 5);
+
+    expect(container?.particleChildren.length).toBeGreaterThan(count);
+    expect(instance?.born.age[0]).toBe((ages[0] ?? 0) + 5 * 16);
+  });
+
+  it("lets a burst run out under reduced motion", () => {
+    const mock = started();
+
+    mock.anim.reducedMotion = true;
+    mock.spawn([Emitter({ effect: "fx.stars" }), Transform({ x: 0, y: 0 })]);
+    mock.frame();
+
+    const container = FakeFxParticleContainer.made[0];
+
+    expect(container?.particleChildren).toHaveLength(20);
+
+    frames(mock, 60);
+
+    expect(container?.particleChildren).toHaveLength(0);
+  });
+
   it("counts live particles and instances", () => {
     const mock = started();
 

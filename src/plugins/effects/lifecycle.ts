@@ -3,6 +3,7 @@
  * registers the filter kinds and opens the two systems and the world hooks, and the teardown that
  * frees every container, filter and uniform buffer from state.
  */
+import { animPlugin } from "../anim";
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
@@ -106,7 +107,8 @@ function* featureEntries<Key extends keyof FeatureEntryOf>(
 }
 
 /**
- * Resolves the dependency APIs `flow`, `world`, `renderer` and `assets` onto the kernel context.
+ * Resolves the dependency APIs `flow`, `world`, `renderer`, `assets` and `anim` onto the kernel
+ * context.
  *
  * @param ctx - Kernel context of the effects plugin.
  * @returns The domain context of the effects plugin.
@@ -118,7 +120,8 @@ export function withDeps(ctx: KernelSlice): EffectsCtx {
       flow: ctx.require(flowPlugin),
       world: ctx.require(worldPlugin),
       renderer: ctx.require(rendererPlugin),
-      assets: ctx.require(assetsPlugin)
+      assets: ctx.require(assetsPlugin),
+      anim: ctx.require(animPlugin)
     }
   };
 }

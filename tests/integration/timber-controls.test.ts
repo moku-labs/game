@@ -5,11 +5,13 @@
  * and the current language is the green plank with a check. The mouse is the `PointerOver` tag and
  * the finger the `Pressed` tag the input plugin writes; `ui` reads both as `is.hover` and
  * `is.pressed`. The HUD row draws its round buttons at 120 units and its pills at the ratio of
- * their art, the icon hanging over the left end (design §6 B1, F4).
+ * their art, the icon hanging over the left end (design §6 B1, F4). A control drawn shorter than
+ * 44 pt on the smallest phone takes its taps on a taller, invisible box around unchanged art.
  */
 
-import { NineSlice, PointerOver, Pressed, Tappable, Text, Transform } from "@moku-labs/game";
+import { NineSlice, PointerOver, Pressed, Shape, Tappable, Text, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
+import { TAP_MIN } from "./merge-game/features/ui/kit";
 import type { Game } from "./timber-helpers";
 import {
   elementOf,
@@ -122,9 +124,12 @@ describe("timber-controls — disabled", () => {
     const ecs = game.app.world.ecs;
     const waiting = elementOf(game, "deliver1");
 
-    // The plank on the board fills the first order only.
-    expect(ecs.get(elementOf(game, "deliver0"), NineSlice)?.texture).toBe("ui.button-green");
-    expect(ecs.get(waiting, NineSlice)?.texture).toBe("ui.button-disabled");
+    // The plank on the board fills the first order only. The art of a short plank is the
+    // `<id>Plank` inside its taller tap box.
+    expect(ecs.get(elementOf(game, "deliver0Plank"), NineSlice)?.texture).toBe("ui.button-green");
+    expect(ecs.get(elementOf(game, "deliver1Plank"), NineSlice)?.texture).toBe(
+      "ui.button-disabled"
+    );
 
     ecs.tag(waiting, PointerOver);
     ecs.tag(waiting, Pressed);
@@ -154,7 +159,9 @@ describe("timber-controls — disabled", () => {
     const game = await startOnBoard(twoTwigs);
     const ecs = game.app.world.ecs;
 
-    expect(ecs.get(elementOf(game, "deliver1"), NineSlice)?.texture).toBe("ui.button-disabled");
+    expect(ecs.get(elementOf(game, "deliver1Plank"), NineSlice)?.texture).toBe(
+      "ui.button-disabled"
+    );
 
     // Two twigs make the second log the second order asks for; the first already lies on c2_2.
     game.app.input.drag(
@@ -166,7 +173,7 @@ describe("timber-controls — disabled", () => {
 
     const ready = elementOf(game, "deliver1");
 
-    expect(ecs.get(ready, NineSlice)?.texture).toBe("ui.button-green");
+    expect(ecs.get(elementOf(game, "deliver1Plank"), NineSlice)?.texture).toBe("ui.button-green");
     expect(ecs.has(ready, Tappable)).toBe(true);
     expect(nodeOf(game.app.ui.tree(), "deliver1")?.state.disabled).toBe(false);
 
@@ -219,6 +226,61 @@ describe("timber-controls — the HUD row", () => {
 
     expect(game.app.world.ecs.get(counter, Text)?.anchor).toEqual({ x: 0.5, y: 0.5 });
     expect(game.app.world.ecs.get(counter, Transform)).toMatchObject({ x: 175, y: 38 });
+
+    await game.app.stop();
+  });
+});
+
+/**
+ * The scale the smallest phone the game is checked on draws at: the iPhone SE, 375 × 667 pt, over
+ * the 1080 × 2100 reference of the fixture (`referenceLong: 2100`).
+ */
+const smallestScale = Math.min(375 / 1080, 667 / 2100);
+
+describe("timber-controls — tap targets of 44 pt", () => {
+  it("is 44 pt on the smallest phone", () => {
+    expect(TAP_MIN * smallestScale).toBeGreaterThanOrEqual(44);
+  });
+
+  it("takes the taps of a Deliver on a tap box around its plank, which stays where it was drawn", async () => {
+    const game = await startOnBoard(player);
+    const tree = game.app.ui.tree();
+    const box = nodeOf(tree, "deliver0")?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+    const plank = nodeOf(tree, "deliver0Plank")?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+    const reward = nodeOf(tree, "card0Reward")?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+
+    // The art: 250 × 96, under the reward row (its margin 17 and the gap 9 of the card).
+    expect(plank).toMatchObject({ w: 250, h: 96, y: reward.y + reward.h + 17 + 9 });
+    // The tap box: as wide, TAP_MIN tall, centred on the art, and drawing nothing of its own.
+    expect(box).toEqual({ x: plank.x, y: plank.y - (TAP_MIN - 96) / 2, w: 250, h: TAP_MIN });
+    expect(game.app.world.ecs.get(elementOf(game, "deliver0"), Shape)).toMatchObject({
+      w: 250,
+      h: TAP_MIN,
+      fillAlpha: 0,
+      strokeWidth: 0
+    });
+    expect(game.app.world.ecs.has(elementOf(game, "deliver0"), Tappable)).toBe(true);
+
+    await game.app.stop();
+  });
+
+  it("takes the taps of the reset link on a box at least TAP_MIN tall, its words where they were", async () => {
+    const game = await startOnHome(player);
+
+    await tap(game, "homeSettings");
+
+    const tree = game.app.ui.tree();
+    const link = nodeOf(tree, "settingsReset")?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+    const words = nodeOf(tree, "settingsResetLabel")?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+    const wave = nodeOf(tree, "settingsResetWave")?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+    const paper = nodeOf(tree, "settingsPane")?.rect ?? { x: 0, y: 0, w: 0, h: 0 };
+
+    expect(link.h).toBeGreaterThanOrEqual(TAP_MIN);
+    // 22 units of reach and the 8 of padding above the words, as many under the wave.
+    expect(words.y - link.y).toBe(30);
+    expect(link.y + link.h - (wave.y + wave.h)).toBe(30);
+    // The words still stand the board's gap of 24 plus the old padding of 8 under the paper.
+    expect(words.y - (paper.y + paper.h)).toBe(24 + 8);
 
     await game.app.stop();
   });

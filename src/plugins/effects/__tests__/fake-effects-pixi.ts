@@ -3,8 +3,8 @@
  * @file effects plugin — the fake Pixi module the effects tests run on. Not a test file: the
  * projects only collect `*.test.ts`. It extends the renderer's fake module with a particle
  * container that counts its uploads, particles with every field the step writes, a program that
- * records its sources and the five core filters recording their setter calls, plus a fake GPU
- * device for the dev WGSL check.
+ * records its sources, a filter that keeps the resolution it was built at and the five core
+ * filters recording their setter calls, plus a fake GPU device for the dev WGSL check.
  */
 
 import {
@@ -109,6 +109,18 @@ export class FakeFxGpuProgram extends FakeGpuProgram {
   }
 }
 
+/** Pixi's `Filter` with the resolution it was built at: a number, `"inherit"`, or 1 by default. */
+export class FakeFxFilter extends FakeFilter {
+  public resolution: number | "inherit";
+
+  public constructor(options: Record<string, unknown> = {}) {
+    super(options);
+    const { resolution } = options;
+
+    this.resolution = resolution === "inherit" || typeof resolution === "number" ? resolution : 1;
+  }
+}
+
 /** The fake of Pixi's `BlurFilter`: its four setters recorded in call order. */
 export class FakeFxBlurFilter extends FakeFilter {
   public readonly calls: string[] = [];
@@ -166,11 +178,11 @@ export class FakeFxBlurFilter extends FakeFilter {
 }
 
 /** The fake of Pixi's `ColorMatrixFilter`: every composing call recorded. */
-export class FakeFxColorMatrixFilter extends FakeFilter {
+export class FakeFxColorMatrixFilter extends FakeFxFilter {
   public readonly calls: string[] = [];
 
-  public constructor() {
-    super({ resources: { colorMatrixUniforms: new FakeUniformGroup({}) } });
+  public constructor(options: { resolution?: number | "inherit" } = {}) {
+    super({ ...options, resources: { colorMatrixUniforms: new FakeUniformGroup({}) } });
   }
 
   /** Back to the identity. */
@@ -212,12 +224,14 @@ export class FakeFxColorMatrixFilter extends FakeFilter {
 }
 
 /** The fake of Pixi's `NoiseFilter`: its two setters recorded. */
-export class FakeFxNoiseFilter extends FakeFilter {
+export class FakeFxNoiseFilter extends FakeFxFilter {
   public readonly calls: string[] = [];
-  public readonly built: { noise?: number; seed?: number };
+  public readonly built: { noise?: number; seed?: number; resolution?: number | "inherit" };
 
-  public constructor(options: { noise?: number; seed?: number } = {}) {
-    super({ resources: { noiseUniforms: new FakeUniformGroup({}) } });
+  public constructor(
+    options: { noise?: number; seed?: number; resolution?: number | "inherit" } = {}
+  ) {
+    super({ ...options, resources: { noiseUniforms: new FakeUniformGroup({}) } });
     this.built = options;
   }
 
@@ -231,24 +245,28 @@ export class FakeFxNoiseFilter extends FakeFilter {
 }
 
 /** The fake of Pixi's `DisplacementFilter`: its map sprite and its scale point. */
-export class FakeFxDisplacementFilter extends FakeFilter {
+export class FakeFxDisplacementFilter extends FakeFxFilter {
   public readonly sprite: FakeSprite;
   public readonly scale: FakePoint;
 
-  public constructor(options: { sprite: FakeSprite; scale?: { x: number; y: number } }) {
-    super({ resources: { filterUniforms: new FakeUniformGroup({}) } });
+  public constructor(options: {
+    sprite: FakeSprite;
+    scale?: { x: number; y: number };
+    resolution?: number | "inherit";
+  }) {
+    super({ ...options, resources: { filterUniforms: new FakeUniformGroup({}) } });
     this.sprite = options.sprite;
     this.scale = new FakePoint(options.scale?.x ?? 20, options.scale?.y ?? 20);
   }
 }
 
 /** The fake of Pixi's `AlphaFilter`: its setter recorded. */
-export class FakeFxAlphaFilter extends FakeFilter {
+export class FakeFxAlphaFilter extends FakeFxFilter {
   public readonly calls: string[] = [];
-  public readonly built: { alpha?: number };
+  public readonly built: { alpha?: number; resolution?: number | "inherit" };
 
-  public constructor(options: { alpha?: number } = {}) {
-    super({ resources: { alphaUniforms: new FakeUniformGroup({}) } });
+  public constructor(options: { alpha?: number; resolution?: number | "inherit" } = {}) {
+    super({ ...options, resources: { alphaUniforms: new FakeUniformGroup({}) } });
     this.built = options;
   }
 
@@ -337,7 +355,7 @@ export function createFakeEffectsPixi(
     ...(base.module as unknown as Record<string, unknown>),
     ParticleContainer: FakeFxParticleContainer,
     Particle: FakeFxParticle,
-    Filter: FakeFilter,
+    Filter: FakeFxFilter,
     GpuProgram: FakeFxGpuProgram,
     UniformGroup: FakeUniformGroup,
     BlurFilter: FakeFxBlurFilter,

@@ -7,14 +7,24 @@
  * checked to leave with its timeline.
  */
 
-import { Held, NineSlice, Order, Parent, Sprite, Text, Transform } from "@moku-labs/game";
+import {
+  Frames,
+  Glow,
+  Held,
+  NineSlice,
+  Order,
+  Parent,
+  Sprite,
+  Text,
+  Transform
+} from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { SWAY_MS } from "./merge-game/features/orders/motions";
-import { orderCardSize } from "./merge-game/features/orders/styles";
+import { orderCardSize, readyCardGlow } from "./merge-game/features/orders/styles";
 import { generatorId } from "./merge-game/tables";
 import { Highlighted } from "./merge-game/view/components";
 import { cellBox } from "./merge-game/view/layout";
-import { ringFrameAt, ringFrames, ringSize, ringStepMs } from "./merge-game/view/ring";
+import { ringFps, ringFrames, ringSize } from "./merge-game/view/ring";
 import {
   elementOf,
   frames,
@@ -370,9 +380,10 @@ describe("timber-motions — the cards on the rope (F10)", () => {
 
   it("glows a card honey the moment its order can be filled", async () => {
     const game = await startOnBoard(twoTwigs);
+    const glowOfCard = () => game.app.world.ecs.get(elementOf(game, "card1"), Glow);
 
     expect(nodeOf(game.app.ui.tree(), "card1")?.state.selected).toBe(false);
-    expect(shows(game, "card1Glow")).toBe(false);
+    expect(glowOfCard()).toBeUndefined();
 
     // Two twigs make the second log the second order asks for; the first already lies on c2_2.
     game.app.input.drag(
@@ -383,9 +394,10 @@ describe("timber-motions — the cards on the rope (F10)", () => {
     await frames(game, 3);
 
     expect(nodeOf(game.app.ui.tree(), "card1")?.state.selected).toBe(true);
-    expect(nodeOf(game.app.ui.tree(), "card1Glow")).toMatchObject({
-      style: { stroke: 0xf2_b4_3d }
-    });
+    // A real halo on the card column, in the deeper honey, and no stroke ring around the paper.
+    expect(glowOfCard()).toEqual(readyCardGlow.value);
+    expect(readyCardGlow.value).toMatchObject({ color: 0xf2_b4_3d, enabled: true });
+    expect(shows(game, "card1Glow")).toBe(false);
 
     await game.app.stop();
   });
@@ -457,17 +469,24 @@ describe("timber-motions — the selection (F9)", () => {
     await game.app.stop();
   });
 
-  it("walks the dashes: the ring shows the four phases in turn, one every 250 ms", async () => {
+  it("walks the dashes with a Frames loop: the four phases in turn, one every 250 ms", async () => {
     const game = await startOnBoard(player);
     const ecs = game.app.world.ecs;
-    const textureNow = () =>
-      ecs.get(game.app.world.projection.entitiesOf("board.selection")[0] ?? 0, Sprite)?.texture;
+    const ringNow = () => game.app.world.projection.entitiesOf("board.selection")[0] ?? 0;
     const seen: string[] = [];
+
+    // The loop lives on the ring view itself: the four phases, four a second, round and round.
+    expect(ecs.get(ringNow(), Frames)).toEqual({
+      keys: ringFrames,
+      fps: ringFps,
+      loop: true,
+      playing: true
+    });
 
     // 16 frames of 16 ms are 256 ms: one phase further every block.
     for (let block = 0; block < ringFrames.length; block += 1) {
       await frames(game, 16);
-      seen.push(textureNow() ?? "");
+      seen.push(ecs.get(ringNow(), Sprite)?.texture ?? "");
     }
 
     const first = ringFrames.indexOf(seen[0] as (typeof ringFrames)[number]);
@@ -476,8 +495,38 @@ describe("timber-motions — the selection (F9)", () => {
     expect(seen).toEqual(
       ringFrames.map((_frame, index) => ringFrames[(first + index) % ringFrames.length])
     );
-    expect(ringFrameAt(0)).toBe("board.selection-ring-0");
-    expect(ringFrameAt(ringStepMs * 5)).toBe("board.selection-ring-1");
+
+    await game.app.stop();
+  });
+
+  it("corrects no view through a merge, a delivery and the reward: the loop owns the ring's picture", async () => {
+    const game = await startOnBoard(
+      withItems([
+        { id: "i1", chain: "wood", level: 3, cell: "c1_0" },
+        { id: "i2", chain: "wood", level: 1, cell: "c2_1" },
+        { id: "i3", chain: "wood", level: 1, cell: "c2_0" }
+      ])
+    );
+    const corrected = () =>
+      game.app.log.trace().filter(entry => entry.event === "world:view-corrected");
+
+    // The ring walks on the sawmill the whole run: through the merge, the stamp and the reward.
+    await frames(game, 20);
+    game.app.input.drag(
+      { projection: "board.items", key: "i2" },
+      { projection: "board.items", key: "i3" }
+    );
+    await tick();
+    await frames(game, 60);
+
+    await tap(game, "deliver0");
+    await until(game, () => shows(game, "rewardClaim"));
+    await frames(game, 20);
+    await tap(game, "rewardClaim");
+    await until(game, () => game.app.flow.state().path === "board/awaitIntent");
+    await frames(game, 90);
+
+    expect(corrected()).toEqual([]);
 
     await game.app.stop();
   });

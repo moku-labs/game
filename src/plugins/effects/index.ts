@@ -7,6 +7,7 @@
  * @see README.md
  */
 import { createPlugin } from "../../config";
+import { animPlugin } from "../anim";
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
 import { rendererPlugin } from "../renderer";
@@ -39,7 +40,7 @@ const config: Config = {
  * ```
  */
 export const effectsPlugin = /*#__PURE__*/ createPlugin("effects", {
-  depends: [flowPlugin, worldPlugin, rendererPlugin, assetsPlugin],
+  depends: [flowPlugin, worldPlugin, rendererPlugin, assetsPlugin, animPlugin],
   config,
   createState: createEffectsState,
   api: createEffectsApi,

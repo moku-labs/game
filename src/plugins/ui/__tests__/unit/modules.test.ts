@@ -155,7 +155,7 @@ function layoutParts() {
     state: { layout: createLayoutState() },
     log: { error, warn: vi.fn() },
     deps: {
-      text: { measure: () => ({ width: 10, height: 10 }) },
+      text: { measure: () => ({ width: 10, height: 10 }), hasGlyph: () => true },
       world: {
         ecs: { set },
         projection: { setRest, viewOf: () => handle }

@@ -99,6 +99,34 @@ describe("measure", () => {
   });
 });
 
+describe("hasGlyph", () => {
+  it("answers whether the font of the style has the character, as Pixi draws it", () => {
+    const mock = started();
+
+    mock.assets.fonts.set("ui.font-body", { fnt: miniFontJson, texture: undefined as never });
+    mock.hooks["assets:bundle-loaded"]({ bundle: "boot", tier: "boot", mb: 1, reason: "boot" });
+
+    expect(mock.api.hasGlyph("A", "body")).toBe(true);
+    expect(mock.api.hasGlyph("😀", "body")).toBe(false);
+    expect(warningsOf(mock, "text: the font has no glyph")).toHaveLength(0);
+  });
+
+  it("answers true while the font is not loaded: the fallback measures every character", () => {
+    const mock = started();
+
+    expect(mock.api.hasGlyph("😀", "body")).toBe(true);
+  });
+
+  it("looks an unknown style up as body and warns once", () => {
+    const mock = started();
+
+    mock.api.hasGlyph("A", "nope");
+    mock.api.hasGlyph("B", "nope");
+
+    expect(warningsOf(mock, "text: unknown style")).toHaveLength(1);
+  });
+});
+
 describe("the layout cache", () => {
   it("keeps at most 1024 blocks and drops the oldest first", () => {
     const mock = started();

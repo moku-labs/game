@@ -670,7 +670,8 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       lineHeight: measure("").height,
       caretWidth: look.caretWidth,
       underline: look.composingUnderline,
-      prefix: piece => measure(piece).width
+      prefix: piece => measure(piece).width,
+      hasGlyph: char => ctx.deps.text.hasGlyph(char, field.textStyle)
     });
   }
 

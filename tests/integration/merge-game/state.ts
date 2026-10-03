@@ -40,6 +40,8 @@ export type Session = {
   taps: number;
   /** How far the splash has loaded the bundles Home and the board need, 0..1. */
   loading: number;
+  /** Whether a bundle the splash waits for failed to load: the splash shows its retry line. */
+  loadFailed: boolean;
   /**
    * The id of the thing the player selected on the board, a generator id or an item id, `""`
    * while nothing is. An id, not a cell: the selection follows an item that rises in a merge.
@@ -68,7 +70,7 @@ export const startingPlayer: Player = {
 };
 
 /** The session at every start. */
-export const startingSession: Session = { taps: 0, loading: 0, selected: "" };
+export const startingSession: Session = { taps: 0, loading: 0, loadFailed: false, selected: "" };
 
 /**
  * Writes the state a rules function returned into the player draft. The rules are pure and build

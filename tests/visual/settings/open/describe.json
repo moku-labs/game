@@ -2211,10 +2211,10 @@
                   "tab": "audio"
                 },
                 "rect": {
-                  "h": 99,
+                  "h": 143,
                   "w": 426,
                   "x": 327,
-                  "y": 1087
+                  "y": 1065
                 },
                 "state": {
                   "active": false,
@@ -2229,9 +2229,13 @@
                   "align": "center",
                   "direction": "column",
                   "gap": 2,
+                  "margin": {
+                    "bottom": -22,
+                    "top": -22
+                  },
                   "padding": {
-                    "bottom": 8,
-                    "top": 8
+                    "bottom": 30,
+                    "top": 30
                   }
                 },
                 "type": "button"
@@ -4989,10 +4993,10 @@
     {
       "components": {
         "Box": {
-          "h": 99,
+          "h": 143,
           "w": 426,
           "x": 327,
-          "y": 1087
+          "y": 1065
         },
         "Parent": {
           "key": "settingsBoard",
@@ -5004,7 +5008,7 @@
           "dash": 0,
           "fill": 16777215,
           "fillAlpha": 0,
-          "h": 99,
+          "h": 143,
           "kind": "rect",
           "radius": 0,
           "stroke": 0,
@@ -5018,7 +5022,7 @@
         "Transform": {
           "pivot": {
             "x": 213,
-            "y": 49.5
+            "y": 71.5
           },
           "rotation": 0,
           "scale": 1,
@@ -5049,7 +5053,7 @@
           "rotation": 0,
           "scale": 1,
           "x": 213,
-          "y": 40.5
+          "y": 62.5
         }
       },
       "key": "settingsResetLabel",
@@ -5087,7 +5091,7 @@
           "rotation": 0,
           "scale": 1,
           "x": 213,
-          "y": 83
+          "y": 105
         }
       },
       "key": "settingsResetWave",
@@ -7410,11 +7414,11 @@
         },
         "effects.glow": {
           "alpha": 1,
-          "color": 16769946,
-          "distance": 14,
+          "color": 15905853,
+          "distance": 32,
           "enabled": true,
           "order": 0,
-          "strength": 1.5
+          "strength": 1.8
         }
       },
       "key": "play",

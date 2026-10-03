@@ -414,7 +414,10 @@ the `Text` of the value, or of the placeholder at `alpha: 0.5`, the caret
 (`textInput.caretWidth` wide, a measured line tall, `textInput.caret`, steady) and the IME
 underline. They have no Yoga node and no key: `tree()` lists the field with its `value` and not
 the parts, and `lint()` counts the field as a tap target, never a part. A value wider than the box
-scrolls left so the caret stays inside. Every position is `text.measure` of a prefix of the value.
+scrolls left so the caret stays inside. Every position is `text.measure` of a prefix of the value,
+over the characters the font draws: a character the font has no glyph for (an emoji, CJK) is
+drawn as nothing by Pixi, so `text.hasGlyph` leaves it out and the caret and the selection never
+stand past the drawn text.
 
 ### The hidden input
 

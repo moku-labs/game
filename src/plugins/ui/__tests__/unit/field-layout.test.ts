@@ -26,6 +26,7 @@ function inputOf(patch: Partial<FieldLayoutInput>): FieldLayoutInput {
     caretWidth: 3,
     underline: 3,
     prefix: text => text.length * 10,
+    hasGlyph: () => true,
     ...patch
   };
 }
@@ -114,6 +115,34 @@ describe("layoutField", () => {
 
     expect(layout.text.x).toBe(-20);
     expect(layout.caret.x).toBe(280);
+  });
+
+  it("ends the caret at the drawn text when the font has no glyph for a character", () => {
+    const value = "ab😀";
+    const layout = layoutField(
+      inputOf({
+        value,
+        mirror: { value, selectionStart: 4, selectionEnd: 4, direction: "none" },
+        hasGlyph: char => char !== "😀"
+      })
+    );
+
+    // Pixi draws nothing for the emoji, so the caret stands right after "ab": 20 + 2 × 10.
+    expect(layout.caret.x).toBe(40);
+  });
+
+  it("selects across a character with no glyph by the drawn width only", () => {
+    const value = "a😀b";
+    const layout = layoutField(
+      inputOf({
+        value,
+        mirror: { value, selectionStart: 0, selectionEnd: 4, direction: "forward" },
+        hasGlyph: char => char !== "😀"
+      })
+    );
+
+    expect(layout.selection).toEqual({ x: 20, y: 30, w: 20, h: 40, shown: true });
+    expect(layout.caret.x).toBe(40);
   });
 
   it("shows the placeholder while the value is empty, and no caret outside the editing", () => {

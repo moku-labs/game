@@ -3,12 +3,13 @@
  * the safe height, and the loader 305 units above the bottom safe edge: the wooden track, the
  * honey fill that grows with `session.loading`, which the `setLoading` node commits as the three
  * bundles come in, the saw blade spinning on the head of the fill (`blade.ts`), and "Загрузка…"
- * under it.
+ * under it. When a bundle fails to load, the line says so and a green "Повторить" plank under it
+ * answers `retry`, so the splash never waits on a full bar that does not move on.
  */
 import { defineStyle, projection, tr } from "../../kit";
 import type { Player, Session } from "../../state";
 import { LogoSign } from "../home/logo";
-import { fullBleed, safeScreen } from "../ui/kit";
+import { fullBleed, PlankButton, safeScreen } from "../ui/kit";
 import { blade, bladeSpin } from "./blade";
 
 /** The track of the loading bar and the inset its fill keeps from the rim. */
@@ -42,14 +43,14 @@ const trackStyle = defineStyle({
 });
 
 /**
- * The splash as the view reads it: how far the loading has come.
+ * The splash as the view reads it: how far the loading has come, and whether a bundle failed.
  *
  * @example
  * ```ts
- * const splash: SplashView = { loading: 0.5 };
+ * const splash: SplashView = { loading: 0.5, failed: false };
  * ```
  */
-export type SplashView = { loading: number };
+export type SplashView = { loading: number; failed: boolean };
 
 /**
  * The width of the fill for one share, in reference units: from the two ends of the nine-slice up
@@ -122,7 +123,10 @@ function bladeStyle(loading: number) {
 export const splashScreen = projection({
   name: "splash.screen",
   layer: "ui",
-  from: (_player: Player, session: Session): SplashView => ({ loading: session.loading }),
+  from: (_player: Player, session: Session): SplashView => ({
+    loading: session.loading,
+    failed: session.loadFailed
+  }),
   view: item => (
     <screen key="splashScreen" style={safeScreen}>
       <image key="splashBackground" texture="splash.bg-splash" fit="cover" style={fullBleed} />
@@ -139,7 +143,20 @@ export const splashScreen = projection({
             motion={bladeSpin}
           />
         </row>
-        <text key="loadingLabel" style="ui.caption" content={tr("splash.loading")} />
+        <text
+          key="loadingLabel"
+          style="ui.caption"
+          content={item.failed ? tr("splash.failed") : tr("splash.loading")}
+        />
+        {item.failed ? (
+          <PlankButton
+            id="loadingRetry"
+            intent="retry"
+            look="green"
+            size="popup"
+            label={tr("splash.retry")}
+          />
+        ) : undefined}
       </column>
     </screen>
   )

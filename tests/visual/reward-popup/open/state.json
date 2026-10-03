@@ -107,6 +107,7 @@
     }
   },
   "session": {
+    "loadFailed": false,
     "loading": 1,
     "selected": "",
     "taps": 0

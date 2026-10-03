@@ -352,6 +352,31 @@ describe("effects plugin integration", () => {
     expect(stream?.destroyed).toBe(true);
   });
 
+  it("stands a stream still under reduced motion and resumes it when it turns off", async () => {
+    const app = await startApp([{ id: "gen", kind: "generator" }]);
+
+    step(app, 2);
+
+    const stream = FakeFxParticleContainer.made[0];
+    const positions = (): number[] => (stream?.particleChildren ?? []).map(particle => particle.y);
+
+    app.anim.setReducedMotion(true);
+
+    const still = positions();
+
+    step(app, 30);
+
+    expect(still.length).toBeGreaterThan(0);
+    expect(positions()).toEqual(still);
+
+    app.anim.setReducedMotion(false);
+    step(app, 5);
+
+    expect(positions().slice(0, still.length)).not.toEqual(still);
+
+    await app.stop();
+  });
+
   it("answers zeros and touches no Pixi class without a mount", async () => {
     const app = await startApp(
       [

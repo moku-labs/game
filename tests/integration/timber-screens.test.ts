@@ -108,6 +108,39 @@ function diskIo(held: string): DiskIo {
   return { io, release: () => latch.open() };
 }
 
+/** An `AssetsIo` over the files of the fixture whose files under one prefix answer 404 for now. */
+type FailingIo = {
+  io: Assets.AssetsIo;
+  /** From now on the broken files load. */
+  heal(): void;
+};
+
+/**
+ * The file seam of `assets` over the disk, with the files under `broken` answering 404 until
+ * `heal()`, the way a dropped connection fails one bundle of the splash.
+ *
+ * @param broken - The path prefix of the files that fail.
+ * @returns The seam and its switch.
+ */
+function failingIo(broken: string): FailingIo {
+  const health = { failing: true };
+  const disk = diskIo("held/nothing/");
+  const io: Assets.AssetsIo = {
+    ...disk.io,
+    fetch: async (url, init) =>
+      health.failing && url.replace(/^\//, "").startsWith(broken)
+        ? new Response("not found", { status: 404 })
+        : disk.io.fetch(url, init)
+  };
+
+  return {
+    io,
+    heal: () => {
+      health.failing = false;
+    }
+  };
+}
+
 /**
  * Starts the game with its screen and its graph.
  *
@@ -352,6 +385,45 @@ describe("timber-screens — the splash", () => {
 
     disk.release();
     await until(game, () => game.app.flow.state().path === "home");
+    await game.app.stop();
+  });
+
+  it("shows a retry line when a bundle fails to load, and a tap on it loads the bundle again", async () => {
+    const broken = failingIo("features/board/");
+    const game = await start(createScreenGame({ manifest: await readManifest(), io: broken.io }));
+    const label = () => game.app.world.ecs.get(elementOf(game, "loadingLabel"), Text)?.resolved;
+
+    await until(game, () => sessionOf(game).loadFailed);
+    await frames(game);
+
+    // The splash says what happened and offers the retry instead of a full bar that never moves on.
+    expect(game.app.flow.state().path).toBe("splash");
+    expect(game.app.assets.isLoaded("board")).toBe(false);
+    expect(label()).toBe("Не удалось загрузить");
+    expect(game.app.world.ecs.get(elementOf(game, "loadingRetryLabel"), Text)?.resolved).toBe(
+      "Повторить"
+    );
+    expect(
+      game.app.log
+        .trace()
+        .filter(entry => entry.event === "merge-game: a bundle of the splash failed")
+        .map(entry => entry.data)
+    ).toEqual([expect.objectContaining({ bundle: "board" })]);
+
+    broken.heal();
+    expect(game.app.input.tap(elementOf(game, "loadingRetry"))).toBe(true);
+    await tick();
+    await frames(game, 2);
+
+    // The line goes, and the bar starts over from what is really in: Home and the orders.
+    expect(sessionOf(game).loadFailed).toBe(false);
+    expect(sessionOf(game).loading).toBeCloseTo(0.67, 2);
+
+    await until(game, () => game.app.flow.state().path === "home");
+
+    expect(game.app.assets.isLoaded("board")).toBe(true);
+    expect(sessionOf(game).loading).toBe(1);
+
     await game.app.stop();
   });
 

@@ -22,6 +22,12 @@ const ink = 0x3a_22_12;
 /** Soft ink: the small lines on paper, one step lighter than the body. */
 const softInk = 0x5b_3a_20;
 
+/**
+ * Deep ink: the words typed into a field, a step darker than ink. The engine draws the placeholder
+ * of a field in the same colour at half alpha, and this one keeps it at 3:1 on the cream slot.
+ */
+const deepInk = 0x24_12_0a;
+
 /** Berry: danger, and the text link that resets the progress. */
 const berry = 0x8f_23_34;
 
@@ -103,6 +109,8 @@ export const uiStyles = defineTextStyles({
   },
   // A line on paper: the name of a sound row ("Музыка").
   "ui.body": { font: "ui.font-body", size: 52, fill: ink, align: "center" },
+  // The words typed into a text field, and its placeholder at half alpha ("Введи имя").
+  "ui.field": { font: "ui.font-body", size: 52, fill: deepInk, align: "center" },
   // The body of a popup on its parchment chip, wrapped to the width of the chip.
   "ui.paragraph": { font: "ui.font-body", size: 52, fill: ink, align: "center", wrap: 520 },
   // The text link of design §6 G: Pangolin in berry ("Сбросить прогресс"), the wave under it.
