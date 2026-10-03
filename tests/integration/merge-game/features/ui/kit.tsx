@@ -3,14 +3,14 @@
  * the round wood button, the HUD pill, the signboard with its header plank, the parchment insert
  * and the logo sign. One state rule set drives every control (design §4): it lifts under the
  * mouse, sinks when pressed, turns into the grey plank when disabled and green with a check when
- * selected.
+ * selected. A primary control, the green plank that says go, glows honey.
  *
  * A control is a plain function of its props. The JSX runtime calls it, so a control carries no
  * local state and no outcomes of its own: the button inside names the intent. The `id` prop keys
  * the control and every keyed element inside it, so a test and a hint find them by name.
  */
 import type { I18n, Model } from "@moku-labs/game";
-import { defineMotion } from "@moku-labs/game";
+import { defineMotion, Glow } from "@moku-labs/game";
 import type { AssetKey } from "../../generated/assets";
 import { defineStyle, defineTokens } from "../../kit";
 
@@ -33,6 +33,13 @@ export const theme = defineTokens({
   },
   space: { xs: 8, sm: 16, md: 24, lg: 40 }
 });
+
+/**
+ * The glow of a primary button (design §2: green is go, honey is reward): a soft honey halo around
+ * the plank and its words, through the `components` prop of the button. One value for every
+ * primary button: Play, Claim, Watch & refill and the Deliver of a ready order.
+ */
+export const primaryGlow = Glow({ strength: 1.5, distance: 14, color: theme.color.honeyGlow });
 
 /**
  * The one state rule set of every control (design §4): it lifts a little under the mouse and
@@ -221,22 +228,27 @@ export type PlankButtonProps = {
 
 /**
  * A plank button (design §6 G): the painted plank that sits on its lip, with its words in the
- * button voice. Disabled is the grey plank; the tap is swallowed and the gate hears nothing.
+ * button voice. Disabled is the grey plank; the tap is swallowed and the gate hears nothing. A
+ * green plank that takes a tap is a primary button and glows (`primaryGlow`); the glow leaves when
+ * it turns grey.
  *
  * @param props - The plank as the screen declares it.
  * @returns The button element.
  */
 export function PlankButton(props: PlankButtonProps) {
   const selected = props.selected === true;
+  const disabled = props.disabled === true;
   const size = props.size ?? "medium";
+  const primary = props.look === "green" && !disabled;
 
   return (
     <button
       key={props.id}
       intent={props.intent}
       payload={props.payload ?? {}}
-      state={{ disabled: props.disabled === true, selected }}
+      state={{ disabled, selected }}
       style={plankStyles[`${props.look}.${size}`]}
+      components={primary ? [primaryGlow] : []}
     >
       {selected ? (
         <icon key={`${props.id}Check`} name="ui.icon-check" style={checkStyle} />

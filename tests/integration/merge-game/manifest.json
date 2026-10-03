@@ -194,7 +194,7 @@
     "ui": {
       "feature": "ui",
       "tier": "boot",
-      "mb": 7.348,
+      "mb": 8.126,
       "files": [
         {
           "key": "ui.badge-level",
@@ -288,6 +288,55 @@
           "mb": 0.002
         },
         {
+          "key": "ui.coin-spin-0",
+          "path": "features/ui/assets/coin-spin-0.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
+          "key": "ui.coin-spin-1",
+          "path": "features/ui/assets/coin-spin-1.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
+          "key": "ui.coin-spin-2",
+          "path": "features/ui/assets/coin-spin-2.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
+          "key": "ui.coin-spin-3",
+          "path": "features/ui/assets/coin-spin-3.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
+          "key": "ui.coin-spin-4",
+          "path": "features/ui/assets/coin-spin-4.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
+          "key": "ui.coin-spin-5",
+          "path": "features/ui/assets/coin-spin-5.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
+          "key": "ui.coin-spin-6",
+          "path": "features/ui/assets/coin-spin-6.webp",
+          "width": 160,
+          "height": 160,
+          "mb": 0.098
+        },
+        {
           "key": "ui.coins",
           "path": "features/ui/assets/coins.mp3",
           "kind": "audio",
@@ -343,6 +392,13 @@
           "mb": 0.014
         },
         {
+          "key": "ui.fx-puff",
+          "path": "features/ui/assets/fx-puff.webp",
+          "width": 128,
+          "height": 118,
+          "mb": 0.058
+        },
+        {
           "key": "ui.fx-rays",
           "path": "features/ui/assets/fx-rays.webp",
           "width": 504,
@@ -355,6 +411,13 @@
           "width": 85,
           "height": 96,
           "mb": 0.031
+        },
+        {
+          "key": "ui.fx-star",
+          "path": "features/ui/assets/fx-star.webp",
+          "width": 96,
+          "height": 93,
+          "mb": 0.034
         },
         {
           "key": "ui.header-plank",

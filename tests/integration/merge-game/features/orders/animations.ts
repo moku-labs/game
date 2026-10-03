@@ -3,7 +3,7 @@
  * flies into the order card, then a berry stamp with the word on it hits the card before the
  * reward popup opens. The stamp is two entities the animation spawns — the berry sign and its
  * words — scaled in together around the middle of the card, held for a moment, and despawned when
- * the timeline ends.
+ * the timeline ends. As it hits, a burst of stars and sparkles flies out of the card over it.
  *
  * The item is hosted by the board slot, so its `Transform` is slot-local, and `at(card)` is a root
  * pose. The flight names the root space, and `anim` turns the card's pose into the slot's units.
@@ -23,6 +23,7 @@ import {
   wait
 } from "@moku-labs/game";
 import { defineAnimation, NineSlice, tr } from "../../kit";
+import { starBurst } from "../../view/effects";
 import { orderCardSize } from "./styles";
 
 /** The stamp: a berry plank, turned like a hand-pressed stamp. */
@@ -40,8 +41,8 @@ const STAMP_ORDER = 1000;
 /**
  * The flight and the stamp: the item speeds up from its cell onto the middle of the card and
  * takes the card's size; then the sign and its words appear at nothing on the same middle, scale
- * in with an overshoot, and hold. The card slot is the card element, so both land on it on every
- * phone.
+ * in with an overshoot while the burst flies out over them, and hold. The card slot is the card
+ * element, so all of it lands on the card on every phone.
  */
 export const deliverStamp = defineAnimation("orders.deliverStamp", {
   slots: { item: type<Anim.Target>(), card: type<Anim.Target>() },
@@ -72,7 +73,8 @@ export const deliverStamp = defineAnimation("orders.deliverStamp", {
       ),
       parallel(
         tween(spawned("stampSign"), Transform, { scale: 1 }, { ms: timing.hitMs, ease: "outBack" }),
-        tween(spawned("stampText"), Transform, { scale: 1 }, { ms: timing.hitMs, ease: "outBack" })
+        tween(spawned("stampText"), Transform, { scale: 1 }, { ms: timing.hitMs, ease: "outBack" }),
+        starBurst(middle, { order: STAMP_ORDER + 2 })
       ),
       wait(timing.holdMs)
     );

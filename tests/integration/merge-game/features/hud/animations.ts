@@ -6,8 +6,9 @@
  *
  * A coin flies on a curve: its x and its y are two tweens with different eases. Each tween reads
  * its start from the coin's own `Transform` when it begins, and `at()` of the target gives the end.
- * The coins are built with the kit's `Sprite`, which checks the texture key, and the steps name
- * the same kit `Sprite`.
+ * It spins as it flies: a `Frames` loop walks the seven frames of the turning coin, each coin from
+ * another frame, so the coins never turn in step. The coins are built with the kit's `Sprite` and
+ * `Frames`, which check the texture keys, and the steps name the same kit `Sprite`.
  */
 import type { Anim } from "@moku-labs/game";
 import {
@@ -23,7 +24,8 @@ import {
   type,
   wait
 } from "@moku-labs/game";
-import { defineAnimation, Sprite } from "../../kit";
+import type { AssetKey } from "../../generated/assets";
+import { defineAnimation, Frames, Sprite } from "../../kit";
 
 /** How long one coin flies. The counter waits this long, so it rolls when the first coin lands. */
 export const FLIGHT_MS = 520;
@@ -39,6 +41,43 @@ const SPREAD = 40;
 
 /** Above everything of the `ui` layer: the screen and every popup root. */
 const COIN_ORDER = 1000;
+
+/** The frames of the turning coin: half a turn, front face to back face, which loops back. */
+const coinSpin: readonly AssetKey[] = [
+  "ui.coin-spin-0",
+  "ui.coin-spin-1",
+  "ui.coin-spin-2",
+  "ui.coin-spin-3",
+  "ui.coin-spin-4",
+  "ui.coin-spin-5",
+  "ui.coin-spin-6"
+];
+
+/** How fast a coin turns: a half turn in under half a second, about one per flight. */
+const SPIN_FPS = 16;
+
+/**
+ * The spin of every coin, built once: coin `n` starts on frame `n`, so neighbours never show the
+ * same face. A `Frames` loop restarts on a new `keys` array, so each coin keeps one array for life.
+ */
+const coinSpins = coinSpin.map((_key, start) => [
+  ...coinSpin.slice(start),
+  ...coinSpin.slice(0, start)
+]);
+
+/**
+ * The frames coin `index` spins through.
+ *
+ * @param index - The coin, from 0.
+ * @returns The keys, starting on the coin's own frame.
+ * @example
+ * ```ts
+ * spinOf(2)[0]; // "ui.coin-spin-2"
+ * ```
+ */
+function spinOf(index: number): readonly AssetKey[] {
+  return coinSpins[index % coinSpins.length] ?? coinSpin;
+}
 
 /**
  * Where coin `index` of `count` starts, around the middle of the picture.
@@ -78,16 +117,18 @@ function coinFlight(id: string, count: number) {
         parallel(
           ...coins.map((coin, index) => {
             const offset = spreadOf(index, count);
+            const spin = spinOf(index);
 
             return spawn(
               coin,
               [
                 Sprite({
-                  texture: "ui.icon-coin",
+                  texture: spin[0] ?? "ui.coin-spin-0",
                   width: COIN_SIZE,
                   height: COIN_SIZE,
                   fit: "contain"
                 }),
+                Frames({ keys: spin, fps: SPIN_FPS }),
                 Transform({ x: start.x + offset.x, y: start.y + offset.y })
               ],
               { order: COIN_ORDER + index }

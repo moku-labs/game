@@ -5,8 +5,8 @@
  * every projection, here and by the compiler.
  *
  * The board screen is one `ui` root, and its slot hosts the cells, their glows, the selection
- * ring, the generator with its clock badge, the badges (the charges plate and the checks) and the
- * items, so they draw inside it whatever layer they name. `ui` is declared under `lifted`: an item in the
+ * ring, the generator with its clock badge, the badges (the charges plate and the checks), the
+ * items and the chimney the steam rises from, so they draw inside it whatever layer they name. `ui` is declared under `lifted`: an item in the
  * hand leaves the slot for the lifted layer and must draw over the whole screen, background
  * included. The layers `cells`, `glows` and `items` are where a view falls back to when no slot
  * hosts it.
@@ -16,6 +16,7 @@ import { hud } from "../features/hud/view";
 import { defineScene } from "../kit";
 import { boardBadges } from "./badges";
 import { boardClock } from "./clock";
+import { boardSteam } from "./effects";
 import { boardCells, boardGenerators, boardGlows, boardItems, boardSelection } from "./projections";
 
 export const boardScene = defineScene("board", {
@@ -37,6 +38,7 @@ export const boardScene = defineScene("board", {
     boardGenerators,
     boardClock,
     boardBadges,
+    boardSteam,
     hud,
     hudCoins
   ]
