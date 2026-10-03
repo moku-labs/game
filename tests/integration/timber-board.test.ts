@@ -7,8 +7,9 @@
  * the renderer is inert and Yoga lays out the same rects as in the browser.
  */
 import type { Ui } from "@moku-labs/game";
-import { Order, Parent, Shape, Sprite, Text, Transform } from "@moku-labs/game";
+import { Glow, Order, Parent, Shape, Sprite, Text, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
+import { readyCardGlow } from "./merge-game/features/orders/styles";
 import { startMoment } from "./merge-game/game";
 import type { Player } from "./merge-game/state";
 import { generatorId } from "./merge-game/tables";
@@ -148,11 +149,14 @@ describe("timber-board — the order strip (p2)", () => {
 
   it("glows only the card whose order the board can fill", async () => {
     const game = await startOnBoard(player);
-    const tree = game.app.ui.tree();
+    const glowOfCard = (key: string) => game.app.world.ecs.get(elementOf(game, key), Glow);
 
-    expect(nodeOf(tree, "card0Glow")).toBeDefined();
-    expect(nodeOf(tree, "card1Glow")).toBeUndefined();
-    expect(nodeOf(tree, "card2Glow")).toBeUndefined();
+    // The halo is a Glow on the card column itself: it follows the paper and sways with it.
+    expect(glowOfCard("card0")).toEqual(readyCardGlow.value);
+    expect(glowOfCard("card1")).toBeUndefined();
+    expect(glowOfCard("card2")).toBeUndefined();
+    // No stroke ring is drawn around the paper any more.
+    expect(nodeOf(game.app.ui.tree(), "card0Glow")).toBeUndefined();
 
     await game.app.stop();
   });

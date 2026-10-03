@@ -62,6 +62,8 @@ export default {
   "settings.russian": () => [{ kind: "text", text: "Русский" }],
   "settings.tab": p => [{ kind: "text", text: (String(p.tab) === "audio" ? "Звук" : String(p.tab) === "language" ? "Язык" : String(p.tab) === "profile" ? "Имя" : "Ещё") }],
   "settings.title": () => [{ kind: "text", text: "Настройки" }],
+  "splash.failed": () => [{ kind: "text", text: "Не удалось загрузить" }],
   "splash.loading": () => [{ kind: "text", text: "Загрузка…" }],
+  "splash.retry": () => [{ kind: "text", text: "Повторить" }],
   "ui.gameName": () => [{ kind: "text", text: "Лесной городок" }]
 } satisfies I18n.CompiledMessages;

@@ -1,8 +1,8 @@
 /**
- * @file The main flow: boot, the splash that waits for the bundles, the home checkpoint with its
- * three buttons, the board as a node, and the slot every finished order passes through. The
- * settings sub-flow hangs off Home as it hangs off the board, because the gear is on both
- * screens; the daily gift is a popup of Home.
+ * @file The main flow: boot, the splash that waits for the bundles and offers a retry when one of
+ * them fails, the home checkpoint with its three buttons, the board as a node, and the slot every
+ * finished order passes through. The settings sub-flow hangs off Home as it hangs off the board,
+ * because the gear is on both screens; the daily gift is a popup of Home.
  */
 import { slot } from "@moku-labs/game";
 import { settingsFlow } from "../features/settings/flow";
@@ -10,6 +10,8 @@ import { defineFlow } from "../kit";
 import { boot } from "../nodes/boot";
 import { dailyGift } from "../nodes/daily-gift";
 import { home } from "../nodes/home";
+import { loadFailed } from "../nodes/load-failed";
+import { retryLoading } from "../nodes/retry-loading";
 import { setLoading } from "../nodes/set-loading";
 import { splash } from "../nodes/splash";
 import { boardFlow } from "./board";
@@ -19,6 +21,8 @@ export const mainFlow = defineFlow("main", {
     boot,
     splash,
     setLoading,
+    loadFailed,
+    retryLoading,
     home,
     dailyGift,
     settings: settingsFlow,
@@ -28,8 +32,15 @@ export const mainFlow = defineFlow("main", {
   start: "boot",
   edges: {
     boot: { ready: "splash" },
-    splash: { progress: "setLoading", loaded: "home" },
+    splash: {
+      progress: "setLoading",
+      loaded: "home",
+      failed: "loadFailed",
+      retry: "retryLoading"
+    },
     setLoading: { done: "splash" },
+    loadFailed: { done: "splash" },
+    retryLoading: { done: "splash" },
     home: {
       play: "board",
       gift: "dailyGift",

@@ -73,6 +73,8 @@ The seed of an instance is `seedOf(id, ordinal)`, its random source xorshift32: 
 
 One system, `effects:particles`, phase `animate`: `world` skips it while paused and in a fast walk, so particles freeze with the clock and a fast walk emits nothing. Per instance and frame: the stream emits what its carry owes (never past `maxParticles`), every particle ages, falls, slows, moves and spins, takes the scale and the packed colour of its age, and dies at its life by swap-remove; one `update()` follows when anything was born or died. Never `addParticle` or `removeParticle` per particle.
 
+Under reduced motion (`anim.reducedMotion()`, read every frame) a `rate` stream stands still, like a `Frames` loop (WCAG 2.3.3): it emits nothing, and its live particles keep their place, age and look; no upload runs. A local-space container still follows its host. When reduced motion turns off the stream resumes where it stood. A burst is never held: it is skipped where it is played (a timeline under reduced motion), and one already flying runs out. An orphan runs out too. A stream started under reduced motion shows its prewarm, standing. This is why `effects` depends on `anim`.
+
 An instance whose effect changes, or whose host loses its `Emitter` or despawns, retires: a local-space or empty instance is destroyed at once (entity despawned, container destroyed without its textures), a world-space instance with live particles becomes an orphan that flies until its last particle died.
 
 A texture that is not loaded warns `effects:missing-texture` once per key and the effect is tried again next frame. Pixi binds one page per container and samples the wrong one silently, so in a dev build textures of two sources (loose files) warn `effects:atlas` once per effect id, `{ effect, keys, dropped }`, and the effect draws with the textures that share the first texture's source. A packed build puts every fx texture on one page and never warns.
@@ -101,9 +103,9 @@ Every filter component also carries `enabled: true` (a disabled filter costs not
 | `Displacement` | `map: "", scaleX: 20, scaleY: 20` | Pixi `DisplacementFilter` over a sprite of the asset `map` | 1 |
 | `Alpha` | `alpha: 1` | Pixi `AlphaFilter` | 1 |
 
-`Glow` is a soft halo that follows the shape: its alpha is `strength × alpha ×` the share of the disc of radius `distance` around the pixel that the view covers. That share is about ½ next to a straight edge and 0 at `distance`, so `strength: 2` is full at the edge, rounded corners stay rounded, and the padding beyond `distance` stays clear. The 64 probes sit on a golden-angle spiral, so no rings or spokes show; every probe is clamped to the input frame. The halo is premultiplied and drawn under the source pixel.
+`Glow` is a soft halo that follows the shape: its alpha is `strength × alpha ×` the weighted share of the disc of radius `distance` around the pixel that the view covers, each probe weighted by `(1 − r / distance)²`. That share is about ½ next to a straight edge; it falls fast near the edge and then slowly to 0 at `distance`, with no step at the rim, so the halo reads as a glow, not as a flat band. `strength: 2` is full at the edge, rounded corners stay rounded, and the padding beyond `distance` stays clear. Most of the light sits in the inner half of `distance`: a wider glow takes a larger `distance`. The 64 probes sit on a golden-angle spiral, so no rings or spokes show; every probe is clamped to the input frame. The halo is premultiplied and drawn under the source pixel.
 
-`Blur` with `quality: 0` uses `config.blur.quality`; with `resolution: 0` it uses `config.blur.phoneResolution` on a phone, otherwise 1.
+Every filter but `Blur` renders at `resolution: "inherit"`: the resolution of the canvas, so a filtered view stays sharp on DPR 2–3. `Blur` keeps its own: with `quality: 0` it uses `config.blur.quality`; with `resolution: 0` it uses `config.blur.phoneResolution` on a phone, otherwise 1.
 
 ### The filter sync
 
@@ -158,4 +160,4 @@ None. Nothing above `effects` needs to know a particle died or a filter was assi
 
 ## Dependencies
 
-`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.device()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)` and the `assets:bundle-unloaded` hook). No package dependency: every Pixi class comes from `renderer.host.pixi()`.
+`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.device()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)` and the `assets:bundle-unloaded` hook), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.

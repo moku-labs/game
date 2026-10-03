@@ -2,12 +2,13 @@
  * @file effects plugin — the mock kernel context of the unit tests. Not a test file: the unit
  * project only collects `*.test.ts`. The real `ecs` of `world` runs under a fake `time`, `model`
  * and `flow`; `renderer` and `assets` are fakes that answer from fields a test sets, and Pixi is the
- * fake module of `fake-effects-pixi.ts`. The real `effects` lifecycle, systems and API run over
+ * fake module of `fake-effects-pixi.ts`; `anim` answers its reduced-motion switch from a field. The real `effects` lifecycle, systems and API run over
  * them, so every case runs in plain Bun.
  */
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../../config";
+import type { AnimApi } from "../../../anim/types";
 import type { Api as AssetsApi } from "../../../assets/types";
 import type { FeatureDescription, Api as FlowApi } from "../../../flow/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
@@ -74,6 +75,8 @@ export type MockEffects = {
   features: Array<{ name: string; description: FeatureDescription }>;
   /** The flow mode the world reads; `"fast"` makes the world fast. */
   flow: { mode: "live" | "fast" };
+  /** What `anim.reducedMotion()` answers. */
+  anim: { reducedMotion: boolean };
   time: Time;
   /** Runs `connectWorld`, then `startEffects`, as the kernel would. */
   start(): void;
@@ -130,6 +133,7 @@ export function createMockEffects(
   const frames: FrameRegistration[] = [];
   const textures = new Map<string, FakeTexture>();
   const flowMode: { mode: "live" | "fast" } = { mode: "live" };
+  const animState = { reducedMotion: false };
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
   const model: { player: Json; session: Json } = { player: {}, session: {} };
   const renderer: FakeRendererState = {
@@ -212,11 +216,14 @@ export function createMockEffects(
     texture: (key: string) => textures.get(key)
   } as unknown as AssetsApi;
 
+  const animApi = { reducedMotion: () => animState.reducedMotion } as unknown as AnimApi;
+
   const apis: Record<string, unknown> = {
     ...worldApis,
     world,
     renderer: rendererApi,
-    assets: assetsApi
+    assets: assetsApi,
+    anim: animApi
   };
   const ctx: KernelSlice = {
     config,
@@ -240,6 +247,7 @@ export function createMockEffects(
     textures,
     features,
     flow: flowMode,
+    anim: animState,
     time,
     start: (): void => {
       connectWorld(worldCtx);

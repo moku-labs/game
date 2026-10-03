@@ -25,7 +25,8 @@ export type FieldLayout = {
 
 /**
  * What a field is laid out from. `mirror` is set only while the field is edited; `prefix`
- * measures a piece of the value in the field's text style.
+ * measures a piece of the value in the field's text style; `hasGlyph` tells whether the font of
+ * that style draws a character.
  */
 export type FieldLayoutInput = {
   value: string;
@@ -37,6 +38,7 @@ export type FieldLayoutInput = {
   caretWidth: number;
   underline: number;
   prefix: (text: string) => number;
+  hasGlyph: (char: string) => boolean;
 };
 
 /**
@@ -111,6 +113,26 @@ function clampIndex(index: number, value: string): number {
 }
 
 /**
+ * The characters of a piece the font draws. Pixi draws nothing for a character its font has no
+ * glyph for (an emoji, CJK), so such a character takes no width before the caret.
+ *
+ * @param text - A piece of the value.
+ * @param hasGlyph - Whether the font draws a character.
+ * @returns The piece without the characters the font lacks.
+ * @example
+ * ```ts
+ * drawnOf("ab😀", char => char !== "😀"); // "ab"
+ * ```
+ */
+function drawnOf(text: string, hasGlyph: (char: string) => boolean): string {
+  let drawn = "";
+
+  for (const char of text) if (hasGlyph(char)) drawn += char;
+
+  return drawn;
+}
+
+/**
  * A part that is not drawn: it keeps its place and its height, so it reads as the same part.
  *
  * @param x - Where it stands.
@@ -152,7 +174,8 @@ function composingPart(
 
 /**
  * Lays out the parts of one field. The text sits at the left padding minus the shift, centred
- * on its line; the caret after the measured prefix; the selection from one prefix to the other,
+ * on its line; the caret after the measured prefix, where a character the font has no glyph for
+ * takes no width, as it is drawn; the selection from one prefix to the other,
  * never while composing; the composing underline at the bottom of the line under its range.
  * Outside the editing only the text is drawn, unshifted.
  *
@@ -163,13 +186,14 @@ function composingPart(
  * layoutField({
  *   value: "Al", mirror: undefined, composing: undefined, size: { w: 300, h: 100 },
  *   padding: { top: 0, right: 20, bottom: 0, left: 20 }, lineHeight: 40, caretWidth: 3,
- *   underline: 3, prefix: text => text.length * 10
+ *   underline: 3, prefix: text => text.length * 10, hasGlyph: () => true
  * }).text; // { x: 20, y: 30 }
  * ```
  */
 export function layoutField(input: FieldLayoutInput): FieldLayout {
   // Centre the line in the box; the composing underline sits at its bottom.
-  const { value, mirror, padding, lineHeight, prefix, underline } = input;
+  const { value, mirror, padding, lineHeight, underline, hasGlyph } = input;
+  const prefix = (text: string): number => input.prefix(drawnOf(text, hasGlyph));
   const y = (input.size.h - lineHeight) / 2;
   const content = value === "" ? "placeholder" : "value";
   const lineBottom = y + lineHeight - underline;

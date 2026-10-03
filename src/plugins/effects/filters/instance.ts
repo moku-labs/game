@@ -2,7 +2,8 @@
  * @file effects/filters — the only file that builds, writes and destroys Pixi filters. Ours: a
  * `Filter` over a `GpuProgram` of the assembled WGSL with a `UniformGroup` bound as `fu`, written
  * every frame. The Pixi-core kinds: their own class, written through their setters when the
- * component changed. A destroy frees the uniform buffers first: `Filter.destroy()` leaves them to
+ * component changed. Every kind but `Blur` renders at `resolution: "inherit"`, the resolution of
+ * the canvas, so a filtered view stays sharp on DPR 2-3 (decision 32). A destroy frees the uniform buffers first: `Filter.destroy()` leaves them to
  * a GC that runs after a minute (P10).
  */
 import type { PixiModule } from "../../renderer/types";
@@ -17,6 +18,12 @@ import type {
   UniformSpec,
   UniformValues
 } from "./types";
+
+/**
+ * The resolution of every filter but `Blur`: the render target's, so a filter draws at the
+ * resolution of the canvas. Pixi's default of 1 would draw it at half the pixels on DPR 2.
+ */
+const CANVAS_RESOLUTION = "inherit";
 
 /** One uniform as a `UniformGroup` takes it. */
 type UniformStructure = { value: number | Float32Array; type: UniformSpec["type"] };
@@ -131,7 +138,8 @@ function createOurs(
   const filter = new pixi.Filter({
     gpuProgram,
     resources: group === undefined ? {} : { fu: group },
-    padding: paddingOf(definition, value)
+    padding: paddingOf(definition, value),
+    resolution: CANVAS_RESOLUTION
   });
 
   return { kind: "wgsl", filter, group, definition, passes: definition.passes };
@@ -233,7 +241,8 @@ function createDisplacement(
   const sprite = new pixi.Sprite(texture);
   const filter = new pixi.DisplacementFilter({
     sprite,
-    scale: { x: numberOf(value, "scaleX"), y: numberOf(value, "scaleY") }
+    scale: { x: numberOf(value, "scaleX"), y: numberOf(value, "scaleY") },
+    resolution: CANVAS_RESOLUTION
   });
 
   return { kind: "displacement", filter, sprite, map, passes: 1 };
@@ -269,7 +278,7 @@ function createCore(
       return { kind: "blur", filter, passes: 2 * quality };
     }
     case "colorMatrix": {
-      const filter = new pixi.ColorMatrixFilter();
+      const filter = new pixi.ColorMatrixFilter({ resolution: CANVAS_RESOLUTION });
 
       composeMatrix(filter, value);
 
@@ -278,7 +287,8 @@ function createCore(
     case "noise": {
       const filter = new pixi.NoiseFilter({
         noise: numberOf(value, "amount"),
-        seed: numberOf(value, "seed")
+        seed: numberOf(value, "seed"),
+        resolution: CANVAS_RESOLUTION
       });
 
       return { kind: "noise", filter, passes: 1 };
@@ -289,7 +299,10 @@ function createCore(
     default: {
       return {
         kind: "alpha",
-        filter: new pixi.AlphaFilter({ alpha: numberOf(value, "alpha") }),
+        filter: new pixi.AlphaFilter({
+          alpha: numberOf(value, "alpha"),
+          resolution: CANVAS_RESOLUTION
+        }),
         passes: 1
       };
     }

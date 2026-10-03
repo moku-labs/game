@@ -37,9 +37,11 @@ export const theme = defineTokens({
 /**
  * The glow of a primary button (design §2: green is go, honey is reward): a soft honey halo around
  * the plank and its words, through the `components` prop of the button. One value for every
- * primary button: Play, Claim, Watch & refill and the Deliver of a ready order.
+ * primary button: Play, Claim, Watch & refill and the Deliver of a ready order. Wide and moderate:
+ * under strength 2 the halo never saturates next to the plank, so it fades out instead of drawing
+ * a band. The deeper honey reads on cream paper and on the meadow alike.
  */
-export const primaryGlow = Glow({ strength: 1.5, distance: 14, color: theme.color.honeyGlow });
+export const primaryGlow = Glow({ strength: 1.8, distance: 32, color: theme.color.honey });
 
 /**
  * The one state rule set of every control (design §4): it lifts a little under the mouse and
@@ -142,8 +144,31 @@ const plankLabels: Record<PlankSize, "ui.button-small" | "ui.button" | "ui.plank
 };
 
 /**
+ * The shortest tap target, in reference units: 44 pt on the smallest phone the game is checked on
+ * (iPhone SE, 375 × 667 pt, drawn at 0.318 of the reference), as Apple's guidelines and WCAG 2.5.8
+ * ask. A plank drawn shorter takes its taps on a taller, invisible box around its art.
+ */
+export const TAP_MIN = 140;
+
+/**
+ * Whether a plank of one size is drawn shorter than a tap target: the Deliver of a card and the
+ * medium plank.
+ *
+ * @param size - The size of the plank.
+ * @returns True when the plank needs a taller tap box.
+ * @example
+ * ```ts
+ * isShort("small"); // true
+ * ```
+ */
+function isShort(size: PlankSize): boolean {
+  return plankBoxes[size].height < TAP_MIN;
+}
+
+/**
  * The style of one plank: its face, its size and the shared states. Disabled swaps in the grey
- * plank; selected swaps in the green one, which is how the current language reads as chosen.
+ * plank; selected swaps in the green one, which is how the current language reads as chosen. The
+ * face of a short plank sits inside its tap box, which lifts and sinks with the pointer for it.
  *
  * @param look - The face of the plank.
  * @param size - The size of the plank.
@@ -160,10 +185,33 @@ function plankStyle(look: PlankLook, size: PlankSize) {
     padding: size === "small" ? { left: 16, right: 16 } : { left: 40, right: 40 },
     nineSlice: plankFaces[look],
     is: {
-      ...pointerStates,
+      ...(isShort(size) ? {} : pointerStates),
       selected: { nineSlice: "ui.button-green" },
       disabled: { nineSlice: "ui.button-disabled" }
     }
+  });
+}
+
+/**
+ * The tap box of a short plank: as wide as the plank and `TAP_MIN` tall, centred on its art. The
+ * negative margins give the extra height back, so the plank stands exactly where it stood and
+ * only the area that takes a tap grows. It draws nothing; it lifts and sinks with the pointer.
+ *
+ * @param size - The size of the plank.
+ * @returns The frozen style.
+ */
+function tapBoxStyle(size: PlankSize) {
+  const { height, ...across } = plankBoxes[size];
+  const spare = (TAP_MIN - height) / 2;
+
+  return defineStyle({
+    ...across,
+    height: TAP_MIN,
+    margin: { top: -spare, bottom: -spare },
+    direction: "row",
+    align: "center",
+    justify: "center",
+    is: pointerStates
   });
 }
 
@@ -173,6 +221,11 @@ const plankStyles = Object.fromEntries(
     plankSizes.map(size => [`${look}.${size}`, plankStyle(look, size)])
   )
 ) as Record<`${PlankLook}.${PlankSize}`, ReturnType<typeof plankStyle>>;
+
+/** The tap box of every short size, built once. */
+const tapBoxStyles = Object.fromEntries(
+  plankSizes.filter(size => isShort(size)).map(size => [size, tapBoxStyle(size)])
+) as Partial<Record<PlankSize, ReturnType<typeof tapBoxStyle>>>;
 
 /** The check a selected plank carries next to its words. */
 const checkStyle = defineStyle({ width: 64, height: 64 });
@@ -230,7 +283,9 @@ export type PlankButtonProps = {
  * A plank button (design §6 G): the painted plank that sits on its lip, with its words in the
  * button voice. Disabled is the grey plank; the tap is swallowed and the gate hears nothing. A
  * green plank that takes a tap is a primary button and glows (`primaryGlow`); the glow leaves when
- * it turns grey.
+ * it turns grey. A plank shorter than a tap target (`TAP_MIN`) is a transparent button of that
+ * height with the painted plank inside it, keyed `<id>Plank`: the art stays as it was drawn and
+ * the finger gets 44 pt.
  *
  * @param props - The plank as the screen declares it.
  * @returns The button element.
@@ -240,6 +295,19 @@ export function PlankButton(props: PlankButtonProps) {
   const disabled = props.disabled === true;
   const size = props.size ?? "medium";
   const primary = props.look === "green" && !disabled;
+  const face = plankStyles[`${props.look}.${size}`];
+  const tapBox = tapBoxStyles[size];
+  const contents = [
+    selected ? (
+      <icon key={`${props.id}Check`} name="ui.icon-check" style={checkStyle} />
+    ) : undefined,
+    props.glyph === "play" ? (
+      <stack key={`${props.id}Play`} style={playRingStyle}>
+        <stack key={`${props.id}PlayMark`} style={playMarkStyle} />
+      </stack>
+    ) : undefined,
+    <text key={`${props.id}Label`} style={plankLabels[size]} content={props.label} />
+  ];
 
   return (
     <button
@@ -247,18 +315,16 @@ export function PlankButton(props: PlankButtonProps) {
       intent={props.intent}
       payload={props.payload ?? {}}
       state={{ disabled, selected }}
-      style={plankStyles[`${props.look}.${size}`]}
+      style={tapBox ?? face}
       components={primary ? [primaryGlow] : []}
     >
-      {selected ? (
-        <icon key={`${props.id}Check`} name="ui.icon-check" style={checkStyle} />
-      ) : undefined}
-      {props.glyph === "play" ? (
-        <stack key={`${props.id}Play`} style={playRingStyle}>
-          <stack key={`${props.id}PlayMark`} style={playMarkStyle} />
-        </stack>
-      ) : undefined}
-      <text key={`${props.id}Label`} style={plankLabels[size]} content={props.label} />
+      {tapBox === undefined ? (
+        contents
+      ) : (
+        <row key={`${props.id}Plank`} state={{ disabled, selected }} style={face}>
+          {contents}
+        </row>
+      )}
     </button>
   );
 }

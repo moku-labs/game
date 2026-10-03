@@ -110,6 +110,22 @@ export function layoutFor(ctx: TextCtx, resolved: string, styleName: string): Te
 }
 
 /**
+ * Whether the font of a style has a glyph for one character, the lookup Pixi draws by: a
+ * character the font lacks is drawn as nothing. While the font is not loaded every character
+ * counts, as the fallback measures it.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param char - One character.
+ * @param styleName - The style name.
+ * @returns False only for a character a loaded font has no glyph for.
+ */
+export function hasGlyphOf(ctx: TextCtx, char: string, styleName: string): boolean {
+  const table = ctx.state.tables.get(styleOf(ctx, styleName).font);
+
+  return table === undefined || table.advances.has(char);
+}
+
+/**
  * The size of a laid-out block, as `measure` and `ui` read it.
  *
  * @param layout - What `layoutFor` answered.

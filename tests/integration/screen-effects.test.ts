@@ -211,7 +211,7 @@ describe("screen-effects — the fixture drawn with effectsPlugin", () => {
     await game.app.stop();
   });
 
-  it("smokes over the sawmill on the board, above the board screen, and glows on the ready Deliver", async () => {
+  it("smokes over the sawmill on the board, above the board screen, and glows on the ready card and its Deliver", async () => {
     const game = await startDrawn(player);
 
     await openBoard(game);
@@ -221,8 +221,8 @@ describe("screen-effects — the fixture drawn with effectsPlugin", () => {
     // One stream, warmed up for two seconds, so the chimney smokes from the first frame.
     expect(stats.emitters).toBe(1);
     expect(stats.particles).toBeGreaterThan(0);
-    // The Deliver of the one ready order glows; the other two are grey.
-    expect(stats.filters).toBe(1);
+    // The one ready card glows, and so does its Deliver; the other two cards and planks do not.
+    expect(stats.filters).toBe(2);
     expect(containersOf(game).map(entity => entity.components)).toEqual([
       expect.objectContaining({ Layer: { name: "ui" }, Order: { value: 0.5 } })
     ]);

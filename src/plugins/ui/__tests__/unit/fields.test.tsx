@@ -209,6 +209,21 @@ describe("fill", () => {
     expect(fallbackX).toBe(30);
     expect(caretX()).toBe(60);
   });
+
+  it("ends the caret at the drawn text when the body font has no glyph for an emoji", async () => {
+    const app = await start();
+
+    mountScreen(app, "profile");
+    landBodyFont(app);
+    app.ui.fill("nickField", "ab😀");
+    app.time.step(16);
+    app.time.step(16);
+
+    const caret = partsOf(app, find(app, "nickField")).caret ?? 0;
+
+    // The font of the fixture has "a" and "b" at 20 px and no emoji: Pixi draws nothing for it.
+    expect(app.world.ecs.get(caret, Transform)?.x).toBe(40);
+  });
 });
 
 describe("Enter, Escape and the end of the editing", () => {

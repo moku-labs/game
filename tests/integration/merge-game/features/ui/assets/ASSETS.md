@@ -438,7 +438,7 @@ Subject: A speaker with exactly two sound waves, drawn as two clear curved arcs 
   every side. The outline is a rounded square with its centreline 6 px in from the edge and a
   corner radius of 44. It has 32 dashes of 22 px, stroke 9, in parchment `#fbeed2` with a 1.5 px
   ink `#3a2212` edge. Phase `n` starts the dashes `n` quarters of a period further clockwise, and
-  `marchRing` shows the phases in turn every 250 ms.
+  the `Frames` loop of the ring view shows the phases in turn every 250 ms.
 - Drawn with ImageMagick (`roundrectangle` with `stroke-dasharray`, 4× supersampled), not by
   Astra.
 

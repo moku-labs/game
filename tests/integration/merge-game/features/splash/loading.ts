@@ -1,7 +1,8 @@
 /**
  * @file What the splash waits for, as plain data and pure functions: the three bundles Home and
- * the board need, how far each one has come, and the share of the whole. The plugin in
- * `plugin.ts` feeds it from the asset events and posts what it computes into the flow inbox.
+ * the board need, how far each one has come, the share of the whole, and the bundles that failed
+ * and wait for a retry. The plugin in `plugin.ts` feeds it from the asset events and posts what it
+ * computes into the flow inbox.
  */
 
 /** The bundles the splash waits for: Home, the board and the order cards. */
@@ -12,7 +13,9 @@ export const watchedBundles = ["home", "board", "orders"] as const;
  *
  * @example
  * ```ts
- * const state: LoadingState = { shares: { home: 1, board: 0.5 }, loaded: ["home"], posted: false, reported: 0.5 };
+ * const state: LoadingState = {
+ *   shares: { home: 1, board: 0.5 }, loaded: ["home"], failed: [], posted: false, reported: 0.5
+ * };
  * ```
  */
 export type LoadingState = {
@@ -20,6 +23,8 @@ export type LoadingState = {
   shares: Record<string, number>;
   /** The watched bundles that are loaded. */
   loaded: string[];
+  /** The watched bundles whose load failed since the last retry. */
+  failed: string[];
   /** Whether `loaded` went into the inbox. After it nothing is posted any more. */
   posted: boolean;
   /** The share last posted, so the same number is never posted twice. */
@@ -32,11 +37,11 @@ export type LoadingState = {
  * @returns A fresh state.
  * @example
  * ```ts
- * createLoadingState(); // { shares: {}, loaded: [], posted: false, reported: -1 }
+ * createLoadingState(); // { shares: {}, loaded: [], failed: [], posted: false, reported: -1 }
  * ```
  */
 export function createLoadingState(): LoadingState {
-  return { shares: {}, loaded: [], posted: false, reported: -1 };
+  return { shares: {}, loaded: [], failed: [], posted: false, reported: -1 };
 }
 
 /**
@@ -86,7 +91,7 @@ export function recordLoaded(state: LoadingState, bundle: string): void {
  * @returns 0..1.
  * @example
  * ```ts
- * shareOf({ shares: { home: 1, board: 0.5 }, loaded: ["home"], posted: false, reported: 0 }); // 0.5
+ * shareOf({ shares: { home: 1, board: 0.5 }, loaded: ["home"], failed: [], posted: false, reported: 0 }); // 0.5
  * ```
  */
 export function shareOf(state: LoadingState): number {
@@ -103,4 +108,48 @@ export function shareOf(state: LoadingState): number {
  */
 export function isComplete(state: LoadingState): boolean {
   return watchedBundles.every(bundle => state.loaded.includes(bundle));
+}
+
+/**
+ * Records a bundle whose load failed. Only the first failure since the last retry asks for the
+ * retry line: the line is up already for the next one.
+ *
+ * @param state - The loading state.
+ * @param bundle - The bundle that failed.
+ * @returns True when the splash has to be told.
+ * @example
+ * ```ts
+ * recordFailed(createLoadingState(), "board"); // true
+ * ```
+ */
+export function recordFailed(state: LoadingState, bundle: string): boolean {
+  const first = state.failed.length === 0;
+
+  if (!state.failed.includes(bundle)) state.failed.push(bundle);
+
+  return first;
+}
+
+/**
+ * Takes the failed bundles for a retry: their shares go back to nothing, because a failed file
+ * counted as settled, and the share is reported again from there.
+ *
+ * @param state - The loading state.
+ * @returns The bundles to load again.
+ * @example
+ * ```ts
+ * const state = createLoadingState();
+ * recordFailed(state, "board");
+ * retryFailed(state); // ["board"], and state.failed is [] again
+ * ```
+ */
+export function retryFailed(state: LoadingState): string[] {
+  const bundles = state.failed;
+
+  state.failed = [];
+  state.reported = -1;
+
+  for (const bundle of bundles) state.shares[bundle] = 0;
+
+  return bundles;
 }

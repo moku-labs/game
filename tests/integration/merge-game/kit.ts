@@ -33,6 +33,7 @@ export type TextStyleKey =
   | "ui.name"
   | "ui.caption"
   | "ui.body"
+  | "ui.field"
   | "ui.paragraph"
   | "ui.link"
   | "ui.small"

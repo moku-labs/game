@@ -1,8 +1,8 @@
 /**
  * @file effects/particles — the `animate` system that runs every emitter: it starts an instance
  * when an `Emitter` names an effect, retires it when the effect changes or the component leaves,
- * steps the instances and the orphans, and keeps the particle budget. The renderer draws nothing
- * headless, so neither does this system.
+ * steps the instances and the orphans, and keeps the particle budget. Under reduced motion a
+ * stream stands still. The renderer draws nothing headless, so neither does this system.
  */
 import { isDev } from "../../flow/doors/dev";
 import { Transform } from "../../renderer/components";
@@ -14,7 +14,7 @@ import type { EffectsCtx } from "../types";
 import { bakeEmitter } from "./bake";
 import { Emitter } from "./component";
 import { createInstance, destroyInstance } from "./instance";
-import { stepInstance } from "./step";
+import { standsStill, stepInstance } from "./step";
 import type { BakedEmitter, EmitterInstance, EmitterValue } from "./types";
 
 /** The origin of an emission that does not follow its host. */
@@ -178,20 +178,23 @@ function startInstance(
 
 /**
  * Runs the `Emitter` of one entity for one frame: an instance of another effect is retired, a
- * missing one is started, and the instance steps.
+ * missing one is started, and the instance steps. A local-space container follows its host even
+ * while its stream stands still under reduced motion.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
  * @param host - The entity.
  * @param emitter - Its `Emitter`.
  * @param deltaMs - Milliseconds of game time.
+ * @param reducedMotion - What `anim.reducedMotion()` answers this frame.
  */
 function runEmitter(
   ectx: EffectsCtx,
   pixi: PixiModule,
   host: Entity,
   emitter: Readonly<EmitterValue>,
-  deltaMs: number
+  deltaMs: number,
+  reducedMotion: boolean
 ): void {
   const { state } = ectx;
   const current = state.instances.get(host);
@@ -205,7 +208,11 @@ function runEmitter(
 
   if (instance === undefined) return;
 
-  stepInstance(instance, deltaMs, followHost(ectx, instance), emitter.active);
+  const offset = followHost(ectx, instance);
+
+  if (!standsStill(instance, reducedMotion)) {
+    stepInstance(instance, deltaMs, offset, emitter.active);
+  }
 }
 
 /**
@@ -270,8 +277,10 @@ export function createParticleSystem(ectx: EffectsCtx): AnySystem {
 
       if (pixi === undefined) return;
 
+      const reducedMotion = ectx.deps.anim.reducedMotion();
+
       for (const [entity, emitter] of rows) {
-        runEmitter(ectx, pixi, entity, emitter, context.time.delta);
+        runEmitter(ectx, pixi, entity, emitter, context.time.delta, reducedMotion);
       }
 
       runOrphans(ectx, context.time.delta);

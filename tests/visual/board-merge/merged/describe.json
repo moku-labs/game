@@ -357,38 +357,6 @@
             "children": [
               {
                 "children": [],
-                "key": "card0Glow",
-                "rect": {
-                  "h": 574,
-                  "w": 324,
-                  "x": 33,
-                  "y": 257
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "alpha": 0.6,
-                  "height": 574,
-                  "left": -12,
-                  "position": "absolute",
-                  "radius": 42,
-                  "reason": "the glow rings the paper of a ready card from outside",
-                  "stroke": 15905853,
-                  "strokeWidth": 16,
-                  "top": -12,
-                  "width": 324
-                },
-                "type": "stack"
-              },
-              {
-                "children": [],
                 "key": "card0Pin",
                 "rect": {
                   "h": 72,
@@ -666,13 +634,35 @@
               {
                 "children": [
                   {
-                    "children": [],
-                    "key": "deliver0Label",
+                    "children": [
+                      {
+                        "children": [],
+                        "key": "deliver0Label",
+                        "rect": {
+                          "h": 53,
+                          "w": 166,
+                          "x": 112,
+                          "y": 693
+                        },
+                        "state": {
+                          "active": false,
+                          "covered": false,
+                          "disabled": false,
+                          "focus": false,
+                          "hover": false,
+                          "pressed": false,
+                          "selected": false
+                        },
+                        "style": {},
+                        "type": "text"
+                      }
+                    ],
+                    "key": "deliver0Plank",
                     "rect": {
-                      "h": 53,
-                      "w": 166,
-                      "x": 112,
-                      "y": 693
+                      "h": 96,
+                      "w": 250,
+                      "x": 70,
+                      "y": 672
                     },
                     "state": {
                       "active": false,
@@ -683,16 +673,28 @@
                       "pressed": false,
                       "selected": false
                     },
-                    "style": {},
-                    "type": "text"
+                    "style": {
+                      "align": "center",
+                      "direction": "row",
+                      "gap": 24,
+                      "height": 96,
+                      "justify": "center",
+                      "nineSlice": "ui.button-green",
+                      "padding": {
+                        "left": 16,
+                        "right": 16
+                      },
+                      "width": 250
+                    },
+                    "type": "row"
                   }
                 ],
                 "key": "deliver0",
                 "rect": {
-                  "h": 96,
+                  "h": 140,
                   "w": 250,
                   "x": 70,
-                  "y": 672
+                  "y": 650
                 },
                 "state": {
                   "active": false,
@@ -706,13 +708,11 @@
                 "style": {
                   "align": "center",
                   "direction": "row",
-                  "gap": 24,
-                  "height": 96,
+                  "height": 140,
                   "justify": "center",
-                  "nineSlice": "ui.button-green",
-                  "padding": {
-                    "left": 16,
-                    "right": 16
+                  "margin": {
+                    "bottom": -22,
+                    "top": -22
                   },
                   "width": 250
                 },
@@ -758,38 +758,6 @@
           },
           {
             "children": [
-              {
-                "children": [],
-                "key": "card1Glow",
-                "rect": {
-                  "h": 574,
-                  "w": 324,
-                  "x": 378,
-                  "y": 277
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "alpha": 0.6,
-                  "height": 574,
-                  "left": -12,
-                  "position": "absolute",
-                  "radius": 42,
-                  "reason": "the glow rings the paper of a ready card from outside",
-                  "stroke": 15905853,
-                  "strokeWidth": 16,
-                  "top": -12,
-                  "width": 324
-                },
-                "type": "stack"
-              },
               {
                 "children": [],
                 "key": "card1Pin",
@@ -1125,13 +1093,35 @@
               {
                 "children": [
                   {
-                    "children": [],
-                    "key": "deliver1Label",
+                    "children": [
+                      {
+                        "children": [],
+                        "key": "deliver1Label",
+                        "rect": {
+                          "h": 53,
+                          "w": 166,
+                          "x": 457,
+                          "y": 713
+                        },
+                        "state": {
+                          "active": false,
+                          "covered": false,
+                          "disabled": false,
+                          "focus": false,
+                          "hover": false,
+                          "pressed": false,
+                          "selected": false
+                        },
+                        "style": {},
+                        "type": "text"
+                      }
+                    ],
+                    "key": "deliver1Plank",
                     "rect": {
-                      "h": 53,
-                      "w": 166,
-                      "x": 457,
-                      "y": 713
+                      "h": 96,
+                      "w": 250,
+                      "x": 415,
+                      "y": 692
                     },
                     "state": {
                       "active": false,
@@ -1142,16 +1132,28 @@
                       "pressed": false,
                       "selected": false
                     },
-                    "style": {},
-                    "type": "text"
+                    "style": {
+                      "align": "center",
+                      "direction": "row",
+                      "gap": 24,
+                      "height": 96,
+                      "justify": "center",
+                      "nineSlice": "ui.button-green",
+                      "padding": {
+                        "left": 16,
+                        "right": 16
+                      },
+                      "width": 250
+                    },
+                    "type": "row"
                   }
                 ],
                 "key": "deliver1",
                 "rect": {
-                  "h": 96,
+                  "h": 140,
                   "w": 250,
                   "x": 415,
-                  "y": 692
+                  "y": 670
                 },
                 "state": {
                   "active": false,
@@ -1165,13 +1167,11 @@
                 "style": {
                   "align": "center",
                   "direction": "row",
-                  "gap": 24,
-                  "height": 96,
+                  "height": 140,
                   "justify": "center",
-                  "nineSlice": "ui.button-green",
-                  "padding": {
-                    "left": 16,
-                    "right": 16
+                  "margin": {
+                    "bottom": -22,
+                    "top": -22
                   },
                   "width": 250
                 },
@@ -1497,33 +1497,67 @@
               {
                 "children": [
                   {
-                    "children": [],
-                    "key": "deliver2Label",
+                    "children": [
+                      {
+                        "children": [],
+                        "key": "deliver2Label",
+                        "rect": {
+                          "h": 53,
+                          "w": 166,
+                          "x": 802,
+                          "y": 693
+                        },
+                        "state": {
+                          "active": false,
+                          "covered": false,
+                          "disabled": false,
+                          "focus": false,
+                          "hover": false,
+                          "pressed": false,
+                          "selected": false
+                        },
+                        "style": {},
+                        "type": "text"
+                      }
+                    ],
+                    "key": "deliver2Plank",
                     "rect": {
-                      "h": 53,
-                      "w": 166,
-                      "x": 802,
-                      "y": 693
+                      "h": 96,
+                      "w": 250,
+                      "x": 760,
+                      "y": 672
                     },
                     "state": {
                       "active": false,
                       "covered": false,
-                      "disabled": false,
+                      "disabled": true,
                       "focus": false,
                       "hover": false,
                       "pressed": false,
                       "selected": false
                     },
-                    "style": {},
-                    "type": "text"
+                    "style": {
+                      "align": "center",
+                      "direction": "row",
+                      "gap": 24,
+                      "height": 96,
+                      "justify": "center",
+                      "nineSlice": "ui.button-disabled",
+                      "padding": {
+                        "left": 16,
+                        "right": 16
+                      },
+                      "width": 250
+                    },
+                    "type": "row"
                   }
                 ],
                 "key": "deliver2",
                 "rect": {
-                  "h": 96,
+                  "h": 140,
                   "w": 250,
                   "x": 760,
-                  "y": 672
+                  "y": 650
                 },
                 "state": {
                   "active": false,
@@ -1537,13 +1571,11 @@
                 "style": {
                   "align": "center",
                   "direction": "row",
-                  "gap": 24,
-                  "height": 96,
+                  "height": 140,
                   "justify": "center",
-                  "nineSlice": "ui.button-disabled",
-                  "padding": {
-                    "left": 16,
-                    "right": 16
+                  "margin": {
+                    "bottom": -22,
+                    "top": -22
                   },
                   "width": 250
                 },
@@ -3224,6 +3256,17 @@
     },
     {
       "components": {
+        "Frames": {
+          "fps": 4,
+          "keys": [
+            "board.selection-ring-0",
+            "board.selection-ring-1",
+            "board.selection-ring-2",
+            "board.selection-ring-3"
+          ],
+          "loop": true,
+          "playing": true
+        },
         "Layer": {
           "name": "cells"
         },
@@ -3234,7 +3277,6 @@
           "key": "boardSlot",
           "projection": "hud"
         },
-        "SelectionRing": true,
         "Sprite": {
           "alpha": 1,
           "anchor": {
@@ -3435,6 +3477,14 @@
           "scale": 1,
           "x": 195,
           "y": 74
+        },
+        "effects.glow": {
+          "alpha": 1,
+          "color": 15905853,
+          "distance": 32,
+          "enabled": true,
+          "order": 0,
+          "strength": 1.8
         }
       },
       "key": "card0",
@@ -3502,45 +3552,6 @@
         }
       },
       "key": "card0Coins",
-      "projection": "hud"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 574,
-          "w": 324,
-          "x": 33,
-          "y": 257
-        },
-        "Parent": {
-          "key": "card0",
-          "projection": "hud"
-        },
-        "Shape": {
-          "alpha": 0.6,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 574,
-          "kind": "rect",
-          "radius": 42,
-          "stroke": 15905853,
-          "strokeWidth": 16,
-          "w": 324
-        },
-        "Transform": {
-          "pivot": {
-            "x": 162,
-            "y": 287
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 150,
-          "y": 275
-        }
-      },
-      "key": "card0Glow",
       "projection": "hud"
     },
     {
@@ -3882,6 +3893,14 @@
           "scale": 1,
           "x": 540,
           "y": 94
+        },
+        "effects.glow": {
+          "alpha": 1,
+          "color": 15905853,
+          "distance": 32,
+          "enabled": true,
+          "order": 0,
+          "strength": 1.8
         }
       },
       "key": "card1",
@@ -4014,45 +4033,6 @@
         }
       },
       "key": "card1CountLabel",
-      "projection": "hud"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 574,
-          "w": 324,
-          "x": 378,
-          "y": 277
-        },
-        "Parent": {
-          "key": "card1",
-          "projection": "hud"
-        },
-        "Shape": {
-          "alpha": 0.6,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 574,
-          "kind": "rect",
-          "radius": 42,
-          "stroke": 15905853,
-          "strokeWidth": 16,
-          "w": 324
-        },
-        "Transform": {
-          "pivot": {
-            "x": 162,
-            "y": 287
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 150,
-          "y": 275
-        }
-      },
-      "key": "card1Glow",
       "projection": "hud"
     },
     {
@@ -4848,23 +4828,27 @@
     {
       "components": {
         "Box": {
-          "h": 96,
+          "h": 140,
           "w": 250,
           "x": 70,
-          "y": 672
-        },
-        "NineSlice": {
-          "alpha": 1,
-          "clip": false,
-          "debug": false,
-          "height": 96,
-          "texture": "ui.button-green",
-          "tint": 16777215,
-          "width": 250
+          "y": 650
         },
         "Parent": {
           "key": "card0",
           "projection": "hud"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16777215,
+          "fillAlpha": 0,
+          "h": 140,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 250
         },
         "Tappable": {
           "intent": "deliver",
@@ -4876,7 +4860,7 @@
         "Transform": {
           "pivot": {
             "x": 125,
-            "y": 48
+            "y": 70
           },
           "rotation": 0,
           "scale": 1,
@@ -4885,11 +4869,11 @@
         },
         "effects.glow": {
           "alpha": 1,
-          "color": 16769946,
-          "distance": 14,
+          "color": 15905853,
+          "distance": 32,
           "enabled": true,
           "order": 0,
-          "strength": 1.5
+          "strength": 1.8
         }
       },
       "key": "deliver0",
@@ -4904,7 +4888,7 @@
           "y": 693
         },
         "Parent": {
-          "key": "deliver0",
+          "key": "deliver0Plank",
           "projection": "hud"
         },
         "Transform": {
@@ -4926,8 +4910,8 @@
         "Box": {
           "h": 96,
           "w": 250,
-          "x": 415,
-          "y": 692
+          "x": 70,
+          "y": 672
         },
         "NineSlice": {
           "alpha": 1,
@@ -4939,8 +4923,47 @@
           "width": 250
         },
         "Parent": {
+          "key": "deliver0",
+          "projection": "hud"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 125,
+            "y": 48
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 125,
+          "y": 70
+        }
+      },
+      "key": "deliver0Plank",
+      "projection": "hud"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 140,
+          "w": 250,
+          "x": 415,
+          "y": 670
+        },
+        "Parent": {
           "key": "card1",
           "projection": "hud"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16777215,
+          "fillAlpha": 0,
+          "h": 140,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 250
         },
         "Tappable": {
           "intent": "deliver",
@@ -4952,7 +4975,7 @@
         "Transform": {
           "pivot": {
             "x": 125,
-            "y": 48
+            "y": 70
           },
           "rotation": 0,
           "scale": 1,
@@ -4961,11 +4984,11 @@
         },
         "effects.glow": {
           "alpha": 1,
-          "color": 16769946,
-          "distance": 14,
+          "color": 15905853,
+          "distance": 32,
           "enabled": true,
           "order": 0,
-          "strength": 1.5
+          "strength": 1.8
         }
       },
       "key": "deliver1",
@@ -4980,7 +5003,7 @@
           "y": 713
         },
         "Parent": {
-          "key": "deliver1",
+          "key": "deliver1Plank",
           "projection": "hud"
         },
         "Transform": {
@@ -5002,27 +5025,66 @@
         "Box": {
           "h": 96,
           "w": 250,
-          "x": 760,
-          "y": 672
+          "x": 415,
+          "y": 692
         },
         "NineSlice": {
           "alpha": 1,
           "clip": false,
           "debug": false,
           "height": 96,
-          "texture": "ui.button-disabled",
+          "texture": "ui.button-green",
           "tint": 16777215,
           "width": 250
+        },
+        "Parent": {
+          "key": "deliver1",
+          "projection": "hud"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 125,
+            "y": 48
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 125,
+          "y": 70
+        }
+      },
+      "key": "deliver1Plank",
+      "projection": "hud"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 140,
+          "w": 250,
+          "x": 760,
+          "y": 650
         },
         "Parent": {
           "key": "card2",
           "projection": "hud"
         },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16777215,
+          "fillAlpha": 0,
+          "h": 140,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 250
+        },
         "Touchable": true,
         "Transform": {
           "pivot": {
             "x": 125,
-            "y": 48
+            "y": 70
           },
           "rotation": 0,
           "scale": 1,
@@ -5042,7 +5104,7 @@
           "y": 693
         },
         "Parent": {
-          "key": "deliver2",
+          "key": "deliver2Plank",
           "projection": "hud"
         },
         "Transform": {
@@ -5057,6 +5119,41 @@
         }
       },
       "key": "deliver2Label",
+      "projection": "hud"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 96,
+          "w": 250,
+          "x": 760,
+          "y": 672
+        },
+        "NineSlice": {
+          "alpha": 1,
+          "clip": false,
+          "debug": false,
+          "height": 96,
+          "texture": "ui.button-disabled",
+          "tint": 16777215,
+          "width": 250
+        },
+        "Parent": {
+          "key": "deliver2",
+          "projection": "hud"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 125,
+            "y": 48
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 125,
+          "y": 70
+        }
+      },
+      "key": "deliver2Plank",
       "projection": "hud"
     },
     {

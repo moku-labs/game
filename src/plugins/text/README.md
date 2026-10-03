@@ -7,7 +7,9 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
 
 - **Config:** `fonts: { body, digits }` (the two boot fonts behind the built-in styles),
   `missingGlyph: "□"`.
-- **API:** `measure(content, style)`, `styles()`.
+- **API:** `measure(content, style)`, `hasGlyph(char, style)`, `styles()`. `hasGlyph` answers
+  whether the loaded font of a style has a character, the lookup Pixi draws by; it is true while
+  the font is not loaded. `ui` measures a text field's caret over the characters it is true for.
 - **Helpers:** `Text`, `label({ text, style, at, anchor? })`, `defineTextStyles(map)`,
   `textFor<TextStyles, Fonts>()` for `defineGame`.
 - **Styles:** `font`, `size` and `fill` are required. `bold`, `italic`, `stroke`, `strokeWidth`,

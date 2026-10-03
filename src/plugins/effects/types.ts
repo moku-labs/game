@@ -6,6 +6,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
+import type { AnimApi } from "../anim/types";
 import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Api as RendererApi } from "../renderer/types";
@@ -124,7 +125,13 @@ export type EffectsApi = {
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { flow: FlowApi; world: WorldApi; renderer: RendererApi; assets: AssetsApi };
+export type Deps = {
+  flow: FlowApi;
+  world: WorldApi;
+  renderer: RendererApi;
+  assets: AssetsApi;
+  anim: AnimApi;
+};
 
 /**
  * What the kernel context offers before the deps are attached. `effects` owns no event, so

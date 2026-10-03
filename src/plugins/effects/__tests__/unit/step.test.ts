@@ -3,7 +3,13 @@ import type { PixiModule, PixiTexture } from "../../../renderer/types";
 import { bakeEmitter, createRng } from "../../particles/bake";
 import { defineEmitter } from "../../particles/define";
 import { bornFields } from "../../particles/instance";
-import { advanceParticles, emitParticles, fillInstance, stepInstance } from "../../particles/step";
+import {
+  advanceParticles,
+  emitParticles,
+  fillInstance,
+  standsStill,
+  stepInstance
+} from "../../particles/step";
 import type { EmitterConfig, EmitterInstance, PixiParticleContainer } from "../../particles/types";
 import { atlasTexture, FakeFxParticle, FakeFxParticleContainer } from "../fake-effects-pixi";
 
@@ -322,5 +328,20 @@ describe("stepInstance", () => {
 
     expect(advanceParticles(instance, 100, ORIGIN, true)).toBe(false);
     expect(advanceParticles(instance, 1000, ORIGIN, true)).toBe(true);
+  });
+});
+
+describe("standsStill", () => {
+  it("holds a stream under reduced motion and lets it run without", () => {
+    const { instance } = instanceOf({ textures: ["a"], rate: 12 });
+
+    expect(standsStill(instance, true)).toBe(true);
+    expect(standsStill(instance, false)).toBe(false);
+  });
+
+  it("never holds a burst: bursts are skipped where they are played", () => {
+    const { instance } = instanceOf({ textures: ["a"], burst: 20 });
+
+    expect(standsStill(instance, true)).toBe(false);
   });
 });

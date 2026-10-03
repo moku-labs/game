@@ -10,15 +10,14 @@ import { defineFeature } from "../kit";
 import { lookAnimations, mergeBurst, refuseShake, sawmillTap } from "./animations";
 import { boardBadges } from "./badges";
 import { boardClock } from "./clock";
-import { Generator, Glow, Highlighted, Item, SelectionRing } from "./components";
+import { Generator, Glow, Highlighted, Item } from "./components";
 import { boardSteam, sparkles, stars, steam } from "./effects";
 import { boardCells, boardGenerators, boardGlows, boardItems, boardSelection } from "./projections";
-import { marchRing } from "./ring";
 import { boardScene } from "./scene";
 import { glowCells, highlightLegal } from "./systems";
 
 /**
- * The board on the screen: one scene, its eight projections, three systems, five components, the
+ * The board on the screen: one scene, its eight projections, two systems, four components, the
  * animations of the board, the three particle effects, and the bundle that carries their pictures.
  * A game composes it next to `...screen` and `effectsPlugin`; a headless test leaves it out and the
  * same graph plays on.
@@ -38,8 +37,8 @@ export const boardView = defineFeature("boardScreen", {
     boardBadges,
     boardSteam
   ],
-  systems: [highlightLegal, glowCells, marchRing],
-  components: [Item, Highlighted, Generator, Glow, SelectionRing],
+  systems: [highlightLegal, glowCells],
+  components: [Item, Highlighted, Generator, Glow],
   animations: [
     toastBoardFull,
     mergeBurst,

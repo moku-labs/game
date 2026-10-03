@@ -1946,11 +1946,11 @@
         },
         "effects.glow": {
           "alpha": 1,
-          "color": 16769946,
-          "distance": 14,
+          "color": 15905853,
+          "distance": 32,
           "enabled": true,
           "order": 0,
-          "strength": 1.5
+          "strength": 1.8
         }
       },
       "key": "play",

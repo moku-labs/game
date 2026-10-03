@@ -12,16 +12,16 @@
  */
 import { Draggable, DropTarget, Order, Shape, Tappable, Transform } from "@moku-labs/game";
 import type { AssetKey } from "../generated/assets";
-import { NineSlice, projection, Sprite } from "../kit";
+import { Frames, NineSlice, projection, Sprite } from "../kit";
 import type { CellId, GeneratorTable } from "../rules";
 import type { Player, Session } from "../state";
 import { tables } from "../tables";
-import { Generator, Glow, Item, SelectionRing } from "./components";
+import { Generator, Glow, Item } from "./components";
 import { pictureOf } from "./items";
 import type { BoardCell } from "./layout";
 import { cellBox, cellsOf, depth, itemSize } from "./layout";
 import { itemLevelUp, itemMergeInto, itemPopIn, itemSlideTo } from "./motions";
-import { ringFrames, ringSize } from "./ring";
+import { ringFps, ringFrames, ringSize } from "./ring";
 import { selectedOf } from "./selection";
 
 /** The corner radius of a glow: round like the grass of the cell. */
@@ -150,7 +150,8 @@ function selectedCells(player: Player, session: Session): BoardCell[] {
  * The selection ring (design §6 F9): marching cream dashes around the cell of the thing the
  * player selected, the sawmill or an item. Nothing selected means the sawmill, as in the info
  * bar. The picture is centred on the cell and 14 units larger on every side, so the dashes lie in
- * the gap between the cells; `marchRing` walks them.
+ * the gap between the cells; its `Frames` loop walks them. The loop owns the picture of the view,
+ * so the projection never puts the first phase back.
  */
 export const boardSelection = projection({
   name: "board.selection",
@@ -162,7 +163,7 @@ export const boardSelection = projection({
 
     return [
       Sprite({ texture: ringFrames[0], width: ringSize, height: ringSize }),
-      SelectionRing(),
+      Frames({ keys: ringFrames, fps: ringFps }),
       Transform({ x: middle.x, y: middle.y }),
       Order({ value: depth.selection })
     ];

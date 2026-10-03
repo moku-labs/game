@@ -11,6 +11,7 @@ import {
   type FakeFxBlurFilter,
   type FakeFxColorMatrixFilter,
   type FakeFxDisplacementFilter,
+  type FakeFxFilter,
   FakeFxGpuProgram,
   type FakeFxNoiseFilter,
   FakeFxSprite
@@ -128,6 +129,16 @@ describe("createFilter — ours", () => {
     expect(instance?.passes).toBe(3);
   });
 
+  it("builds ours at the resolution of the canvas, so a filtered view is sharp on DPR 2-3", () => {
+    const { mock, pixi } = started();
+    const tint = build(mock, pixi, "fx.tint", Tint().value);
+    const glow = build(mock, pixi, "effects.glow", Glow().value);
+
+    expect((tint.filter as unknown as FakeFxFilter).resolution).toBe("inherit");
+    expect((glow.filter as unknown as FakeFxFilter).resolution).toBe("inherit");
+    expect((glow.filter as unknown as FakeFilter).options.resolution).toBe("inherit");
+  });
+
   it("pads Glow by its live distance", () => {
     const { mock, pixi } = started();
     const instance = build(mock, pixi, "effects.glow", Glow({ distance: 14 }).value);
@@ -184,7 +195,8 @@ describe("createFilter — the Pixi-core kinds", () => {
 
     expect((instance.filter as unknown as FakeFxNoiseFilter).built).toEqual({
       noise: 0.5,
-      seed: 7
+      seed: 7,
+      resolution: "inherit"
     });
   });
 
@@ -223,7 +235,31 @@ describe("createFilter — the Pixi-core kinds", () => {
     const { mock, pixi } = started();
     const instance = build(mock, pixi, "effects.alpha", Alpha({ alpha: 0.4 }).value);
 
-    expect((instance.filter as unknown as FakeFxAlphaFilter).built).toEqual({ alpha: 0.4 });
+    expect((instance.filter as unknown as FakeFxAlphaFilter).built).toEqual({
+      alpha: 0.4,
+      resolution: "inherit"
+    });
+  });
+
+  it("builds every core kind but Blur at the resolution of the canvas", () => {
+    const { mock, pixi } = started();
+
+    mock.textures.set("fx.ripple", atlasTexture({ width: 64, height: 64, destroyed: false }));
+
+    const values: Array<[string, FilterFields]> = [
+      ["effects.colorMatrix", ColorMatrix().value],
+      ["effects.noise", Noise().value],
+      ["effects.alpha", Alpha().value],
+      ["effects.displacement", Displacement({ map: "fx.ripple" }).value]
+    ];
+    const resolutions = values.map(
+      ([id, value]) => (build(mock, pixi, id, value).filter as unknown as FakeFxFilter).resolution
+    );
+    const blur = build(mock, pixi, "effects.blur", Blur().value);
+
+    expect(resolutions).toEqual(["inherit", "inherit", "inherit", "inherit"]);
+    // Blur keeps its own resolution: config.blur.phoneResolution on a phone, 1 elsewhere.
+    expect((blur.filter as unknown as FakeFxBlurFilter).resolution).toBe(1);
   });
 });
 

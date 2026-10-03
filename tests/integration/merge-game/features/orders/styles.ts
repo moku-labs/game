@@ -3,6 +3,7 @@
  * washing line (design p2). The numbers are measured on the approved screenshot, in reference
  * units. The reward popup is drawn with the kit's signboard and needs no style of its own here.
  */
+import { Glow } from "@moku-labs/game";
 import { defineStyle } from "../../kit";
 import { theme } from "../ui/kit";
 
@@ -85,19 +86,13 @@ export function orderCardStyle(slot: number) {
   return slot === 1 ? middleCard : endCard;
 }
 
-/** The honey glow of a ready card (design §6 B2, F10): a soft ring just outside the paper. */
-export const cardGlow = defineStyle({
-  position: "absolute",
-  left: -12,
-  top: -12,
-  width: orderCardSize.width + 24,
-  height: orderCardSize.height + 24,
-  radius: 42,
-  stroke: theme.color.honey,
-  strokeWidth: 16,
-  alpha: 0.6,
-  reason: "the glow rings the paper of a ready card from outside"
-});
+/**
+ * The honey halo of a ready card (design §6 B2, F10): a soft glow around the paper, through the
+ * `components` prop of the card column, so it follows the rounded paper and sways with it. Wide
+ * and under strength 2, so it fades out and never draws a band; in the deeper honey, because the
+ * pale honey glow is almost the colour of the paper.
+ */
+export const readyCardGlow = Glow({ strength: 1.8, distance: 32, color: theme.color.honey });
 
 /** The clothespin that holds a card to the rope, over the middle of its top edge. */
 export const pinStyle = defineStyle({
