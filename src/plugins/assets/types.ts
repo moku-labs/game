@@ -66,11 +66,13 @@ export type CreateTextureOptions = { nine?: NineBorders };
 /**
  * The part of a fetch response the plugin reads: the manifest is `json`, a texture is a `blob`,
  * a font file is `text` and an audio file stays the raw `arrayBuffer`. The global `Response`
- * fits it.
+ * fits it. `headers` gives the `content-type`: on `tauri://` a missing file comes back `200` with
+ * `index.html`, so `text/html` for a path that is not `.html` counts as missing.
  */
 export type FetchResponse = {
   ok: boolean;
   status: number;
+  headers: { get(name: string): string | null };
   json(): Promise<unknown>;
   blob(): Promise<Blob>;
   text(): Promise<string>;
@@ -88,6 +90,7 @@ export type FetchResponse = {
  *   fetch: async () => ({
  *     ok: true,
  *     status: 200,
+ *     headers: { get: () => null },
  *     json: async () => ({}),
  *     blob: async () => blob,
  *     text: async () => 'info face="body"',

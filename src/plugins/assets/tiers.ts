@@ -27,7 +27,12 @@ import type {
 } from "./types";
 
 /** A load failure that knows which file of which bundle broke, for the log entry. */
-type BundleFailure = Error & { bundle: string; file: string; status: number };
+type BundleFailure = Error & {
+  bundle: string;
+  file: string;
+  status: number;
+  contentType: string | undefined;
+};
 
 /** How far one running load got: the payload of the next `assets:bundle-progress`. */
 type Progress = Events["assets:bundle-progress"];
@@ -117,21 +122,66 @@ export function unknownBundle(bundle: string): Error {
 }
 
 /**
+ * Reads the `content-type` header of a response.
+ *
+ * @param response - The response.
+ * @returns The header, or `undefined` when the response has none.
+ */
+function contentTypeOf(response: FetchResponse): string | undefined {
+  return response.headers.get("content-type") ?? undefined;
+}
+
+/**
+ * Tells whether a response does not carry the file it was asked for. On `tauri://` a missing
+ * file comes back `200` with the body of `index.html`, so `text/html` for a path that is not an
+ * `.html` file counts as missing too. Nothing else reads the type: decoding goes by extension.
+ *
+ * @param response - The response.
+ * @param path - What was asked for: the path of a file or the URL of the manifest.
+ * @returns `true` when the file is missing.
+ */
+function isMissing(response: FetchResponse, path: string): boolean {
+  if (!response.ok) return true;
+
+  const servedHtml = contentTypeOf(response)?.startsWith("text/html") === true;
+
+  return servedHtml && !path.endsWith(".html");
+}
+
+/**
+ * Names the status and the type of a missing file for an error message.
+ *
+ * @example
+ * ```ts
+ * missingLabel(200, "text/html"); // "200, text/html"
+ * ```
+ * @param status - HTTP status the response carried.
+ * @param contentType - Its `content-type`, when it had one.
+ * @returns The status alone, or the status and the type.
+ */
+function missingLabel(status: number, contentType: string | undefined): string {
+  return contentType === undefined ? String(status) : `${status}, ${contentType}`;
+}
+
+/**
  * Builds the error every waiter of a broken bundle rejects with.
  *
  * @param bundle - Name of the bundle.
  * @param file - Path of the file that broke.
- * @param status - HTTP status the response carried.
- * @returns The error, carrying the three fields for the log entry.
+ * @param response - The response that did not carry it.
+ * @returns The error, carrying the four fields for the log entry.
  */
-function failure(bundle: string, file: string, status: number): BundleFailure {
+function failure(bundle: string, file: string, response: FetchResponse): BundleFailure {
+  const contentType = contentTypeOf(response);
   const error = new Error(
-    `[game] assets: bundle "${bundle}" failed at "${file}" (${status}).`
+    `[game] assets: bundle "${bundle}" failed at "${file}" ` +
+      `(${missingLabel(response.status, contentType)}).`
   ) as BundleFailure;
 
   error.bundle = bundle;
   error.file = file;
-  error.status = status;
+  error.status = response.status;
+  error.contentType = contentType;
 
   return error;
 }
@@ -140,7 +190,7 @@ function failure(bundle: string, file: string, status: number): BundleFailure {
  * Reads the three fields of a load failure, when the error carries them.
  *
  * @param error - What the load rejected with.
- * @returns The bundle, the file and the status, or `undefined`.
+ * @returns The bundle, the file, the status and the type, or `undefined`.
  */
 function failureDetail(error: unknown): BundleFailure | undefined {
   if (error instanceof Error && typeof (error as BundleFailure).file === "string") {
@@ -202,12 +252,12 @@ function emptyAssets(): LoadedAssets {
  * @param run - The running load.
  * @param path - Path of the file, relative to the folder of the manifest's files.
  * @returns The response.
- * @throws {Error} When the response is not ok.
+ * @throws {Error} When the file is missing: not ok, or `text/html` for a file that is not html.
  */
 async function fetchFile(run: Loading, path: string): Promise<FetchResponse> {
   const response = await run.io.fetch(fileUrl(run.base, path), { signal: run.signal });
 
-  if (!response.ok) throw failure(run.bundle, path, response.status);
+  if (isMissing(response, path)) throw failure(run.bundle, path, response);
 
   return response;
 }
@@ -484,7 +534,8 @@ function fail(
     ctx.log.error("assets: bundle failed", {
       bundle: detail.bundle,
       file: detail.file,
-      status: detail.status
+      status: detail.status,
+      contentType: detail.contentType
     });
   }
 }
@@ -739,7 +790,7 @@ function checkDeclaredBundles(ctx: AssetsCtx): void {
  * @param ctx - Domain context of the plugin.
  * @param url - Where the manifest lives.
  * @returns The parsed JSON.
- * @throws {Error} When the response is not ok.
+ * @throws {Error} When the manifest is missing: not ok, or served as `text/html`.
  */
 async function fetchManifest(ctx: AssetsCtx, url: string): Promise<unknown> {
   const controller = new AbortController();
@@ -749,9 +800,11 @@ async function fetchManifest(ctx: AssetsCtx, url: string): Promise<unknown> {
       ? await fetch(url, { signal: controller.signal })
       : await io.fetch(url, { signal: controller.signal });
 
-  if (!response.ok) {
+  if (isMissing(response, url)) {
+    const label = missingLabel(response.status, contentTypeOf(response));
+
     throw new Error(
-      `[game] assets: the manifest at "${url}" could not be read (${response.status}).\n` +
+      `[game] assets: the manifest at "${url}" could not be read (${label}).\n` +
         '  Run "bun run assets:keys" and publish the file.'
     );
   }

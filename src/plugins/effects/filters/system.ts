@@ -8,7 +8,7 @@ import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import type { FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
 import type { AnySystem, Entity } from "../../world/types";
 import type { EffectsCtx } from "../types";
-import { checkWgsl } from "./check";
+import { checkShader } from "./check";
 import { createFilter, destroyFilter, writeFilter } from "./instance";
 import type { FilteredView, FilterInstance, FilterKind } from "./types";
 
@@ -85,7 +85,7 @@ function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstanc
 
 /**
  * Brings one kind of one view up to date: the first frame it is seen it gets its instance, once
- * its WGSL check answered ok; after that it is written.
+ * its shader check answered ok; after that it is written.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -110,7 +110,7 @@ function syncKind(
   let instance = view.instances.get(kind.id);
 
   if (instance === undefined) {
-    if (checkWgsl(ectx, kind) !== "ok") return undefined;
+    if (checkShader(ectx, kind) !== "ok") return undefined;
 
     instance = createFilter(ectx, pixi, kind, value);
 

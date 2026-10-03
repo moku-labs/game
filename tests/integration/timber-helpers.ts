@@ -178,6 +178,8 @@ export function folderIo(folder: URL): FolderIo {
       return {
         ok: true,
         status: 200,
+        // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
+        headers: { get: () => null },
         json: () => Promise.resolve(JSON.parse(bytes.toString("utf8")) as unknown),
         blob: () => Promise.resolve(blob),
         text: () => Promise.resolve(bytes.toString("utf8")),

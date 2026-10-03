@@ -1,9 +1,10 @@
 /**
- * @file effects/filters — `defineFilter`: a WGSL fragment body becomes a flat component type with
- * its filter attached. Pure: no ctx, no device; the WGSL is checked in dev before the first
- * instance of the kind, by the filter sync.
+ * @file effects/filters — `defineFilter`: a WGSL fragment body and its GLSL twin become a flat
+ * component type with its filter attached. Pure: no ctx, no device; the shader of the running
+ * backend is checked in dev before the first instance of the kind, by the filter sync.
  */
 import { component } from "../../world/ecs/define";
+import { assembleGlsl } from "./glsl";
 import type {
   FilterComponent,
   FilterDefinition,
@@ -21,8 +22,18 @@ const UNIFORM_NAME = /^[a-z][\dA-Za-z]*$/;
 /** The WGSL type of a vector uniform, by its size minus 2. */
 const VECTOR_TYPES: readonly UniformSpec["type"][] = ["vec2<f32>", "vec3<f32>", "vec4<f32>"];
 
-/** What a body must define. */
+/** What a WGSL body must define. */
 const MAIN_FRAGMENT = /\bfn\s+mainFragment\s*\(/;
+
+/** What a GLSL body must define. */
+const MAIN_GLSL = /\bvoid\s+main\s*\(/;
+
+/**
+ * Names a uniform cannot take: the two fields every filter component carries, and the names the
+ * shader headers declare, which a game uniform would clash with (on WebGL only, for most).
+ */
+const RESERVED_NAME =
+  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler)$/;
 
 /**
  * Tells whether a value is a list of 2 to 4 finite numbers.
@@ -75,8 +86,8 @@ function readUniform(
   name: string,
   declaration: UniformDeclaration
 ): { spec: UniformSpec; value: FilterField } {
-  // The two fields every filter component carries.
-  if (name === "enabled" || name === "order") {
+  // The two fields every filter component carries, and the names of the shader headers.
+  if (RESERVED_NAME.test(name)) {
     throw new Error(`[game] Filter "${id}": uniform "${name}" is reserved.\n  Rename it.`);
   }
 
@@ -147,23 +158,27 @@ function checkCost(
 }
 
 /**
- * Turns a WGSL fragment body into a filter component type. The engine prepends the vertex stage,
- * the input bindings and a `FilterUniforms` struct in declaration order, bound as `fu`. Every
- * number uniform is a number field, so the existing `tween` drives it; a colour is one hex field
- * sent as a `vec3<f32>`; a tuple is an array field and not tweenable. Every filter component also
- * carries `enabled: true` and `order: 0`. Register it through the `filters` key of a feature.
+ * Turns a WGSL fragment body and its GLSL ES 3.0 twin into a filter component type; Pixi draws
+ * the one of the running backend. To the WGSL the engine prepends the vertex stage, the input
+ * bindings and a `FilterUniforms` struct in declaration order, bound as `fu`. To the GLSL it
+ * prepends `#version 300 es`, `vTextureCoord`, `finalColor`, `uTexture`, the global filter
+ * uniforms as `vec4` and one `uniform` per declared uniform under its bare name. Every number
+ * uniform is a number field, so the existing `tween` drives it; a colour is one hex field sent as
+ * a `vec3`; a tuple is an array field and not tweenable. Every filter component also carries
+ * `enabled: true` and `order: 0`. Register it through the `filters` key of a feature.
  *
  * @param id - The filter id, also the component name; unique, and not one of the built-ins.
- * @param spec - The body, the uniforms, the passes one apply costs and the padding.
+ * @param spec - Both bodies, the uniforms, the passes one apply costs and the padding.
  * @returns The component type, with the frozen `filter` definition attached.
- * @throws {Error} When the id is empty, the body has no `mainFragment`, a uniform is reserved,
- *   badly named or of no known form, or the passes or the padding break their rules.
+ * @throws {Error} When the id is empty, the WGSL has no `mainFragment`, the GLSL no `void main(`,
+ *   a uniform is reserved, badly named or of no known form, or the passes or the padding break
+ *   their rules.
  * @example
  * ```ts
- * // features/board/effects.ts: a gold tint a motion hook tweens on a merge.
- * const Tint = defineFilter("fx.tint", { wgsl: tintBody, uniforms: { amount: 0, color: { color: 0xffd700 } } });
+ * // features/board/effects.ts: a gold tint a motion hook tweens on a merge, on WebGPU and WebGL.
+ * const Tint = defineFilter("fx.tint", { wgsl: tintWgsl, glsl: tintGlsl, uniforms: { amount: 0, color: { color: 0xffd700 } } });
  * Tint({ amount: 1 }).value; // { amount: 1, color: 0xffd700, enabled: true, order: 0 }
- * Tint.filter.passes; // 1
+ * Tint.filter.glsl.includes("uniform vec3 color;"); // true
  * ```
  */
 export function defineFilter<
@@ -182,6 +197,14 @@ export function defineFilter<
     );
   }
 
+  // A JavaScript caller may leave `glsl` out: the test of `undefined` finds no main either.
+  if (!MAIN_GLSL.test(spec.glsl)) {
+    throw new Error(
+      `[game] Filter "${id}" has no main in its glsl.\n` +
+        "  Write void main() in GLSL ES 3.0 and set finalColor."
+    );
+  }
+
   const read = Object.entries(spec.uniforms ?? {}).map(([name, declaration]) =>
     readUniform(id, name, declaration)
   );
@@ -194,6 +217,7 @@ export function defineFilter<
   const filter: FilterDefinition = Object.freeze({
     id,
     source: assemble(uniforms, spec.wgsl),
+    glsl: assembleGlsl(uniforms, spec.glsl),
     uniforms,
     passes,
     padding

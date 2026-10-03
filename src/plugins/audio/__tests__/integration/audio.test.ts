@@ -69,6 +69,8 @@ function createIo(): AssetsIo {
       Promise.resolve({
         ok: true,
         status: 200,
+        // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
+        headers: { get: () => null },
         json: () => Promise.resolve(manifest),
         blob: () => Promise.resolve(new Blob()),
         text: () => Promise.resolve(""),

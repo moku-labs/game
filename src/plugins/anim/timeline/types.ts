@@ -7,6 +7,7 @@ import type { AnyComponent, AnyComponentValue, ComponentType } from "../../world
 import type { Ease, Entity, TrackOptions } from "../../world/types";
 import type { StepMotion } from "../tween/types";
 import type { Target } from "../types";
+import type { HAPTIC_KINDS } from "./steps";
 
 /**
  * The value of the component a step names, with its shape erased: the value type of
@@ -39,6 +40,17 @@ export type SfxDescriptor = {
 };
 
 /**
+ * One haptic tick a device can play: the impact, selection and notification families of Tauri.
+ * `HAPTIC_KINDS` lists the same seven at runtime.
+ *
+ * @example
+ * ```ts
+ * const kind: HapticKind = "success";
+ * ```
+ */
+export type HapticKind = (typeof HAPTIC_KINDS)[number];
+
+/**
  * A haptic tick, owned by `anim` and handled by `platform`. Like `sfx` it is a descriptor and a
  * timeline step at once.
  *
@@ -51,7 +63,7 @@ export type SfxDescriptor = {
  */
 export type HapticDescriptor = {
   readonly kind: "haptic";
-  readonly payload: { readonly kind: string };
+  readonly payload: { readonly kind: HapticKind };
   readonly cosmetic: true;
 };
 

@@ -91,6 +91,7 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `canvas(): HTMLCanvasElement \| undefined` | A WebGPU restore makes a NEW canvas: a caller that holds listeners compares it with its own every frame. |
 | `pixi(): PixiModule \| undefined` | The lazily loaded Pixi module once `ready()`, so a plugin above draws with the same Pixi and imports none of it. `undefined` while inert, lost or unsupported. |
 | `device(): GPUDevice \| undefined` | The GPU device of the live WebGPU application, read at call time: a restore makes a new one. `effects` checks a custom filter's WGSL with it in a dev build. `undefined` while inert, before `ready()`, while lost, on the unsupported screen and on WebGL. |
+| `gl(): WebGL2RenderingContext \| undefined` | The WebGL2 context of the live WebGL application, read at call time like `device()`: Pixi restores a lost context itself. `effects` compiles a custom filter's GLSL with it in a dev build. `undefined` while inert, before `ready()`, while the context is lost, on the unsupported screen and on WebGPU. |
 
 ### `viewport` — `app.renderer.viewport`
 

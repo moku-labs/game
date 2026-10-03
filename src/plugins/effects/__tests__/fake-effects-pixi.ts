@@ -3,13 +3,15 @@
  * @file effects plugin — the fake Pixi module the effects tests run on. Not a test file: the
  * projects only collect `*.test.ts`. It extends the renderer's fake module with a particle
  * container that counts its uploads, particles with every field the step writes, a program that
- * records its sources, a filter that keeps the resolution it was built at and the five core
- * filters recording their setter calls, plus a fake GPU device for the dev WGSL check.
+ * records its sources (WGSL and GLSL), a filter that keeps the resolution it was built at and the
+ * five core filters recording their setter calls, plus a fake GPU device for the dev WGSL check
+ * and a fake WebGL2 context for the dev GLSL check.
  */
 
 import {
   createFakePixi,
   FakeFilter,
+  FakeGlProgram,
   FakeGpuProgram,
   FakeParticle,
   FakeParticleContainer,
@@ -104,6 +106,26 @@ export class FakeFxGpuProgram extends FakeGpuProgram {
     const program = new FakeFxGpuProgram(options);
 
     FakeFxGpuProgram.made.push(program);
+
+    return program;
+  }
+}
+
+/** A GL program that records every source it was built from. */
+export class FakeFxGlProgram extends FakeGlProgram {
+  /** Every program `from` built, in order. */
+  public static made: FakeFxGlProgram[] = [];
+
+  /**
+   * Builds a program and records it.
+   *
+   * @param options - Name, vertex and fragment sources.
+   * @returns A new program.
+   */
+  public static override from(options: Record<string, unknown>): FakeFxGlProgram {
+    const program = new FakeFxGlProgram(options);
+
+    FakeFxGlProgram.made.push(program);
 
     return program;
   }
@@ -333,6 +355,69 @@ export function createFakeDevice(messages: FakeMessage[] = []): FakeDevice {
   return fake;
 }
 
+/** The fake WebGL2 context: what it compiled and the answer a test sets for every compile. */
+export type FakeGl = {
+  /** The shader type of every `createShader`, in order. */
+  created: number[];
+  /** Every GLSL source compiled, in order. */
+  compiled: string[];
+  /** How many shaders were deleted. */
+  deleted: number;
+  /** What `getShaderParameter(shader, COMPILE_STATUS)` answers. */
+  status: boolean;
+  /** What `getShaderInfoLog(shader)` answers. */
+  log: string;
+  /** False makes `createShader` answer null, as a lost context does. */
+  makesShaders: boolean;
+  context: WebGL2RenderingContext;
+};
+
+/**
+ * Creates a fake WebGL2 context whose compiles answer the status and the log a test sets: a
+ * success with an empty log by default.
+ *
+ * @returns The context and its records.
+ */
+export function createFakeGl(): FakeGl {
+  const FRAGMENT_SHADER = 0x8b_30;
+  const COMPILE_STATUS = 0x8b_81;
+  const fake: FakeGl = {
+    created: [],
+    compiled: [],
+    deleted: 0,
+    status: true,
+    log: "",
+    makesShaders: true,
+    context: {} as WebGL2RenderingContext
+  };
+  const context = {
+    FRAGMENT_SHADER,
+    COMPILE_STATUS,
+    createShader: (type: number): { source: string } | null => {
+      fake.created.push(type);
+
+      // eslint-disable-next-line unicorn/no-null -- WebGL answers null when it makes no shader.
+      return fake.makesShaders ? { source: "" } : null;
+    },
+    shaderSource: (shader: { source: string }, source: string): void => {
+      shader.source = source;
+    },
+    compileShader: (shader: { source: string }): void => {
+      fake.compiled.push(shader.source);
+    },
+    getShaderParameter: (_shader: unknown, name: number): unknown =>
+      name === COMPILE_STATUS ? fake.status : undefined,
+    getShaderInfoLog: (): string => fake.log,
+    deleteShader: (): void => {
+      fake.deleted += 1;
+    }
+  };
+
+  fake.context = context as unknown as WebGL2RenderingContext;
+
+  return fake;
+}
+
 /** The fake module plus the renderer's handles. */
 export type FakeEffectsPixi = FakePixi;
 
@@ -350,6 +435,7 @@ export function createFakeEffectsPixi(
 
   FakeFxParticleContainer.made = [];
   FakeFxGpuProgram.made = [];
+  FakeFxGlProgram.made = [];
 
   const module = {
     ...(base.module as unknown as Record<string, unknown>),
@@ -357,6 +443,7 @@ export function createFakeEffectsPixi(
     Particle: FakeFxParticle,
     Filter: FakeFxFilter,
     GpuProgram: FakeFxGpuProgram,
+    GlProgram: FakeFxGlProgram,
     UniformGroup: FakeUniformGroup,
     BlurFilter: FakeFxBlurFilter,
     ColorMatrixFilter: FakeFxColorMatrixFilter,

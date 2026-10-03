@@ -21,6 +21,21 @@ export function liveDevice(state: HostState): GPUDevice | undefined {
 }
 
 /**
+ * The WebGL2 context of the application that draws now. Only a WebGL application has one; a lost
+ * context, the unsupported screen and an inert plugin have none.
+ *
+ * @param state - The host branch of the plugin state.
+ * @returns The live context, or `undefined`.
+ */
+export function liveGl(state: HostState): WebGL2RenderingContext | undefined {
+  const app = state.app;
+
+  if (!state.ready || state.kind !== "webgl" || app === undefined) return undefined;
+
+  return "gl" in app.renderer ? app.renderer.gl : undefined;
+}
+
+/**
  * Starts a loss: the renderer stops drawing, the game pauses and the event goes out. A loss
  * while the plugin is already down, or while a restore runs, is ignored.
  *

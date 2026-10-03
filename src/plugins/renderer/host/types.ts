@@ -122,6 +122,22 @@ export type HostApi = {
    * ```
    */
   device(): GPUDevice | undefined;
+
+  /**
+   * The WebGL2 context of the live WebGL application, read at call time like `device()`. Pixi
+   * restores a lost context itself, so a caller asks again instead of keeping it.
+   *
+   * @returns The context, or `undefined` while inert, before `ready()`, while the context is lost,
+   *   on the unsupported screen and on WebGPU.
+   * @example
+   * ```ts
+   * // effects compiles a custom filter's GLSL once in a dev build, on the WebGL fallback only
+   * const gl = ctx.require(rendererPlugin).host.gl();
+   * if (gl === undefined) return; // WebGPU, inert or a lost context: nothing to compile on
+   * const shader = gl.createShader(gl.FRAGMENT_SHADER); // then shaderSource and compileShader
+   * ```
+   */
+  gl(): WebGL2RenderingContext | undefined;
 };
 
 /**

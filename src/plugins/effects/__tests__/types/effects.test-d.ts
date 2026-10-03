@@ -67,6 +67,7 @@ expectTypeOf<
 const card: Target = { projection: "board.items", key: "card" };
 const Tint = defineFilter("fx.tint", {
   wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return vec4<f32>(fu.amount); }",
+  glsl: "void main() { finalColor = vec4(amount); }",
   uniforms: { amount: 0, color: { color: 0xff_d7_00 }, offset: [1, 2] }
 });
 
@@ -88,7 +89,10 @@ expectTypeOf(Tint.filter.passes).toEqualTypeOf<number>();
 expectTypeOf(Glow).toMatchTypeOf<FilterComponent<{ strength: number }>>();
 
 // A reserved uniform name passes the type and is refused at run time (define-filter.test.ts).
-expectTypeOf(defineFilter).toBeCallableWith("fx.x", { wgsl: "", uniforms: { order: 1 } });
+expectTypeOf(defineFilter).toBeCallableWith("fx.x", { wgsl: "", glsl: "", uniforms: { order: 1 } });
+// @ts-expect-error — both bodies are required: a filter draws on WebGPU and on WebGL
+expectTypeOf(defineFilter).toBeCallableWith("fx.x", { wgsl: "" });
+expectTypeOf(Tint.filter.glsl).toEqualTypeOf<string>();
 
 const api = {} as EffectsApi;
 

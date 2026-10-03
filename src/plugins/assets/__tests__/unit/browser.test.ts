@@ -58,7 +58,8 @@ describe("browserFetch", () => {
     vi.stubGlobal("fetch", async (url: string, init: { signal: AbortSignal }) => {
       calls.push({ url, signal: init.signal });
 
-      return { ok: true, status: 200 };
+      // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
+      return { ok: true, status: 200, headers: { get: () => null } };
     });
 
     const controller = new AbortController();

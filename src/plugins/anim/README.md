@@ -50,6 +50,8 @@ frames(target, { keys, fps, loop? })    // writes Sprite.texture, one key per fr
 spawn(id, components, { layer?, order? }) // a temporary entity, made when the step is reached
 spawned(id)                             // the target of an entity a spawn step of this timeline made
 sfx(key, { bus? })   haptic(kind)       // descriptors anim owns; audio and platform own the handlers
+HAPTIC_KINDS                            // the kinds haptic takes: light, medium, heavy, selection,
+                                        // success, warning, error; HapticKind is the same list as a type
 use(animation, slots, tools?)           // nests one animation; pass the outer tools when it reads `at`
 play(animation, slots)                  // the fx descriptor a node awaits
 external(player, clip)                  // reserved for Spine: always throws

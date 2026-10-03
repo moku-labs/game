@@ -145,7 +145,7 @@ export type FxApi = {
    * @example
    * ```ts
    * // The screen wants a haptic tick outside any node. Nothing waits for it.
-   * app.flow.fx.dispatch({ kind: "haptic", payload: { style: "light" } });
+   * app.flow.fx.dispatch({ kind: "haptic", payload: { kind: "light" } });
    * ```
    */
   dispatch(descriptor: Descriptor | Hint): void;

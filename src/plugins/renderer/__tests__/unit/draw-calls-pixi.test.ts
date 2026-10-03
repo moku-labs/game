@@ -47,6 +47,8 @@ describe("the draw classes of the real Pixi module", () => {
     const exported = {
       Filter: pixi.Filter,
       GpuProgram: pixi.GpuProgram,
+      GlProgram: pixi.GlProgram,
+      defaultFilterVert: pixi.defaultFilterVert,
       UniformGroup: pixi.UniformGroup,
       BlurFilter: pixi.BlurFilter,
       ColorMatrixFilter: pixi.ColorMatrixFilter,
@@ -62,5 +64,12 @@ describe("the draw classes of the real Pixi module", () => {
     };
 
     for (const [name, value] of Object.entries(exported)) expect(value, name).toBeDefined();
+  });
+
+  it("hands a filter's GLSL the texture coordinate from its default vertex stage", () => {
+    // The GLSL header of a custom filter declares `in vec2 vTextureCoord;` for this stage.
+    expect(pixi.defaultFilterVert.startsWith("in vec2 aPosition;")).toBe(true);
+    expect(pixi.defaultFilterVert).toContain("out vec2 vTextureCoord;");
+    expect(typeof pixi.GlProgram.from).toBe("function");
   });
 });

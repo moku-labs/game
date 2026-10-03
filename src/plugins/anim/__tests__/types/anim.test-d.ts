@@ -1,11 +1,11 @@
 import { expectTypeOf } from "vitest";
-import type { Anim } from "../../../../index";
+import type { Anim, HAPTIC_KINDS, HapticKind } from "../../../../index";
 import { defineGame } from "../../../../index";
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
 import { Frames } from "../../components";
 import { defineMotion } from "../../motion";
-import { defineAnimation, mark, play, sequence, set, tween } from "../../timeline/steps";
+import { defineAnimation, haptic, mark, play, sequence, set, tween } from "../../timeline/steps";
 import type { AnimApi, Config, KernelSlice, MotionKeyframe, PlayHandle, Target } from "../../types";
 
 const card: Target = { projection: "hud", key: "order" };
@@ -189,3 +189,13 @@ expectTypeOf<Anim.FramesValue>().toEqualTypeOf<{
   loop: boolean;
   playing: boolean;
 }>();
+
+// A haptic step takes one of the seven kinds; the runtime list and the type are the same seven.
+haptic("selection");
+// @ts-expect-error — "buzz" is not a haptic kind
+haptic("buzz");
+expectTypeOf<(typeof HAPTIC_KINDS)[number]>().toEqualTypeOf<HapticKind>();
+expectTypeOf<HapticKind>().toEqualTypeOf<
+  "light" | "medium" | "heavy" | "selection" | "success" | "warning" | "error"
+>();
+expectTypeOf<Anim.HapticDescriptor["payload"]["kind"]>().toEqualTypeOf<HapticKind>();

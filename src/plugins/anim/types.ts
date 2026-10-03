@@ -472,6 +472,7 @@ export type {
   ExternalPlayer,
   FxStep,
   HapticDescriptor,
+  HapticKind,
   PlayDescriptor,
   RunningTimeline,
   SfxDescriptor,

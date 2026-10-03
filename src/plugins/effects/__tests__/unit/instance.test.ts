@@ -12,6 +12,7 @@ import {
   type FakeFxColorMatrixFilter,
   type FakeFxDisplacementFilter,
   type FakeFxFilter,
+  FakeFxGlProgram,
   FakeFxGpuProgram,
   type FakeFxNoiseFilter,
   FakeFxSprite
@@ -30,8 +31,14 @@ fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   return textureSample(uTexture, uSampler, uv) * fu.amount;
 }`;
 
+const GLSL = `
+void main() {
+  finalColor = texture(uTexture, vTextureCoord) * amount;
+}`;
+
 const Tint = defineFilter("fx.tint", {
   wgsl: BODY,
+  glsl: GLSL,
   uniforms: { amount: 0.5, color: { color: 0xff_80_00 }, offset: [2, 3] },
   padding: 6
 });
@@ -91,11 +98,12 @@ function build(
 }
 
 describe("createFilter — ours", () => {
-  it("builds a Filter over a GpuProgram of the assembled source and a uniform group fu", () => {
+  it("builds a Filter over both programs of the assembled sources and one uniform group fu", () => {
     const { mock, pixi } = started();
     const instance = build(mock, pixi, "fx.tint", Tint().value);
     const filter = instance.filter as unknown as FakeFilter;
     const program = FakeFxGpuProgram.made.at(-1);
+    const glProgram = FakeFxGlProgram.made.at(-1);
 
     expect(instance.kind).toBe("wgsl");
     expect(program?.options).toEqual({
@@ -104,7 +112,15 @@ describe("createFilter — ours", () => {
       fragment: { source: Tint.filter.source, entryPoint: "mainFragment" }
     });
     expect(filter.options.gpuProgram).toBe(program);
-    expect(filter.options.glProgram).toBeUndefined();
+    // Pixi draws the program of the running backend; the WebGL one over its default vertex stage.
+    expect(glProgram?.options).toEqual({
+      name: "fx.tint",
+      vertex: pixi.defaultFilterVert,
+      fragment: Tint.filter.glsl
+    });
+    expect(filter.options.glProgram).toBe(glProgram);
+    // One group serves both: Pixi binds it as `fu` on WebGPU and by bare uniform name on WebGL.
+    expect(Object.keys(filter.resources)).toEqual(["fu"]);
     expect(filter.padding).toBe(6);
     expect(instance.passes).toBe(1);
 
@@ -117,7 +133,7 @@ describe("createFilter — ours", () => {
 
   it("builds no uniform group for a filter without uniforms", () => {
     const { mock, pixi } = started();
-    const Copy = defineFilter("fx.copy", { wgsl: BODY, passes: 3 });
+    const Copy = defineFilter("fx.copy", { wgsl: BODY, glsl: GLSL, passes: 3 });
     const instance = createFilter(
       mock.ectx,
       pixi,

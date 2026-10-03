@@ -78,7 +78,16 @@ createApp({
 `sliceTexture(page, frame, options?)` and `destroyTexture(texture)` — the same test seam as
 `clock.source`. A fake `sliceTexture` returns a counted `{ id, page, frame }`. The response it answers with
 carries the four readers this plugin uses: `json()` for the manifest, `blob()` for an image,
-`text()` for a `.fnt` file and `arrayBuffer()` for a sound. A real `Response` fits it as it is.
+`text()` for a `.fnt` file and `arrayBuffer()` for a sound, plus `headers.get(name)` for the
+`content-type`. A real `Response` fits it as it is. A fake answers `headers: { get: () => null }`.
+
+### A missing file on `tauri://`
+
+The Tauri protocol answers a missing file with `200`, `content-type: text/html` and the body of
+`index.html`. So a response counts as missing when it is not `ok`, or when its `content-type`
+starts with `text/html` and the path does not end in `.html`. It fails with the same error as a
+`404`: `(200, text/html)` instead of `(404)`. Nothing else reads the type. Decoding goes by the
+extension, so a `.ktx2` served as `application/octet-stream` loads as before.
 
 ## The manifest
 
@@ -197,8 +206,9 @@ On success the assets are stored, `renderer.sync.textures.invalidate` is called 
 the bundle, the event goes out, `time.wake()` lifts the idle frame cap — the picture changes now —
 and the budget is enforced. On failure every texture made so far is
 destroyed (slices and loose textures first, then the pages, then the font pages, as on unload), the record goes back to `idle`, `ctx.log.error("assets: bundle failed", { bundle, file,
-status })` is written and every waiter rejects with
-`[game] assets: bundle "board" failed at "features/board/assets/cell.png" (404).` An abort is not
+status, contentType })` is written and every waiter rejects with
+`[game] assets: bundle "board" failed at "features/board/assets/cell.png" (404).` When the
+response had a `content-type`, it follows the status: `(200, text/html)`. An abort is not
 a failure and is never logged.
 
 ## Preload and budget

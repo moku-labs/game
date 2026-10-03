@@ -13,7 +13,7 @@ import type { Api as AssetsApi } from "../../../assets/types";
 import type { FeatureDescription, Api as FlowApi } from "../../../flow/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
 import type { FakeTexture } from "../../../renderer/__tests__/fake-pixi";
-import type { FilterSlot, Api as RendererApi } from "../../../renderer/types";
+import type { FilterSlot, Api as RendererApi, RendererKind } from "../../../renderer/types";
 import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/types";
 import { createWorldApi } from "../../../world/api";
 import { connectWorld } from "../../../world/lifecycle";
@@ -31,8 +31,10 @@ import type { Config, EffectsApi, EffectsCtx, KernelSlice, State } from "../../t
 import {
   createFakeDevice,
   createFakeEffectsPixi,
+  createFakeGl,
   type FakeDevice,
-  type FakeEffectsPixi
+  type FakeEffectsPixi,
+  type FakeGl
 } from "../fake-effects-pixi";
 
 const PHASE_ORDER: readonly Phase[] = ["input", "animate", "layout", "sync", "signals", "render"];
@@ -49,8 +51,12 @@ export type FakeRendererState = {
   ready: boolean;
   /** `sync.renderPasses()`. */
   passes: number;
+  /** `host.kind()`: `"webgpu"` by default. */
+  kind: RendererKind;
   /** `host.device()`. */
   device: GPUDevice | undefined;
+  /** `host.gl()`: `undefined` by default, as on WebGPU. */
+  gl: WebGL2RenderingContext | undefined;
   /** Every `sync.filters.set` call, in order. */
   sets: Array<{ entity: Entity; slots: readonly FilterSlot[] }>;
   /** Entities `sync.displayOf` answers an object for. */
@@ -69,6 +75,8 @@ export type MockEffects = {
   log: Log.LogApi;
   pixi: FakeEffectsPixi;
   gpu: FakeDevice;
+  /** The WebGL2 context a test hands `host.gl()` to drive the GLSL check. */
+  gl: FakeGl;
   renderer: FakeRendererState;
   /** The textures `assets.texture(key)` answers. */
   textures: Map<string, FakeTexture>;
@@ -129,6 +137,7 @@ export function createMockEffects(
   const log = createMockLog();
   const pixi = createFakeEffectsPixi();
   const gpu = createFakeDevice();
+  const gl = createFakeGl();
   const features: Array<{ name: string; description: FeatureDescription }> = [];
   const frames: FrameRegistration[] = [];
   const textures = new Map<string, FakeTexture>();
@@ -139,7 +148,9 @@ export function createMockEffects(
   const renderer: FakeRendererState = {
     ready: options.ready ?? true,
     passes: 1,
+    kind: "webgpu",
     device: gpu.device,
+    gl: undefined,
     sets: [],
     displays: new Set(),
     viewport: { width: 1080, height: 1920 }
@@ -193,7 +204,9 @@ export function createMockEffects(
     host: {
       ready: () => renderer.ready,
       pixi: () => (renderer.ready ? pixi.module : undefined),
-      device: () => renderer.device
+      kind: () => renderer.kind,
+      device: () => renderer.device,
+      gl: () => renderer.gl
     },
     sync: {
       filters: {
@@ -243,6 +256,7 @@ export function createMockEffects(
     log,
     pixi,
     gpu,
+    gl,
     renderer,
     textures,
     features,
