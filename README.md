@@ -305,7 +305,7 @@ flowchart LR
   class AN,N,X,U,AU,EF,PL v
 ```
 
-An arrow means "depends on"; from `renderer` on, the edges to `time` and `clock` and the edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants particles and filters appends `effectsPlugin`, one that wants sound appends `audioPlugin`, and one in a native shell appends `platformPlugin` last. A game without `effectsPlugin` carries none of its systems, filters or WGSL in its bundle. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
+An arrow means "depends on"; from `renderer` on, most edges to `time` and `clock` and most edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants particles and filters appends `effectsPlugin`, one that wants sound appends `audioPlugin`, and one in a native shell appends `platformPlugin` last. A game without `effectsPlugin` carries none of its systems, filters or WGSL in its bundle. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
 
 ### Planned
 
