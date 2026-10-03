@@ -33,7 +33,7 @@ export function createEffectsApi(ctx: KernelSlice): EffectsApi {
       particles: state.particles,
       emitters: state.instances.size + state.orphans.size,
       filters: countFilters(state),
-      renderPasses: ctx.require(rendererPlugin).stats().renderPasses
+      renderPasses: ctx.require(rendererPlugin).sync.renderPasses()
     })
   };
 }

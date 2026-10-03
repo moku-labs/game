@@ -247,8 +247,8 @@ function hasEnabledFilter(view: FilteredView): boolean {
 
 /**
  * Warns once per crossing of the pass budget: the renderer's render passes over
- * `config.maxPasses`. The renderer's count walks its textures, so it is read only while a view
- * carries a filter; with none the frame draws at most one pass and the budget cannot trip.
+ * `config.maxPasses`. The count walks the renderer's filtered views, so it is read only while a
+ * view carries a filter; with none the frame draws at most one pass and the budget cannot trip.
  *
  * @param ectx - Domain context of the effects plugin.
  */
@@ -263,7 +263,7 @@ function checkPassBudget(ectx: EffectsCtx): void {
   }
 
   // Warn once when the renderer's passes cross `maxPasses`.
-  const passes = deps.renderer.stats().renderPasses;
+  const passes = deps.renderer.sync.renderPasses();
   const overPasses = passes > config.maxPasses;
 
   if (overPasses && !state.over.passes) {

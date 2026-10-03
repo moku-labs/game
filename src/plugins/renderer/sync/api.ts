@@ -464,12 +464,13 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       set: (entity: Entity, slots: readonly FilterSlot[]): void => setFilters(state, entity, slots)
     },
 
+    renderPasses: (): number => renderPassesOf(state),
+
     root: (): PixiContainer | undefined => state.root,
 
     counts: (): SyncCounts => ({
       views: state.views.size,
-      pooled: state.pooled,
-      renderPasses: renderPassesOf(state)
+      pooled: state.pooled
     }),
 
     rebuildAll,

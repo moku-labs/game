@@ -358,25 +358,27 @@ describe("the filter sync — budgets", () => {
   it("reads neither the renderer's passes nor a change set while no view carries a filter", () => {
     const mock = started();
     const changed = vi.spyOn(mock.world.ecs, "changed");
-    const stats = vi.spyOn(mock.ectx.deps.renderer, "stats");
+    const passes = vi.spyOn(mock.ectx.deps.renderer.sync, "renderPasses");
 
     mock.renderer.passes = 30;
     mock.frame();
 
     expect(changed).not.toHaveBeenCalled();
-    expect(stats).not.toHaveBeenCalled();
+    expect(passes).not.toHaveBeenCalled();
     expect(mock.log.warn).not.toHaveBeenCalled();
   });
 
-  it("reads the renderer's passes once per frame while a view carries a filter", () => {
+  it("reads sync.renderPasses() once per frame while a view carries a filter, never stats()", () => {
     const mock = started();
+    const passes = vi.spyOn(mock.ectx.deps.renderer.sync, "renderPasses");
     const stats = vi.spyOn(mock.ectx.deps.renderer, "stats");
 
     view(mock, [Glow()]);
     mock.frame();
     mock.frame();
 
-    expect(stats).toHaveBeenCalledTimes(2);
+    expect(passes).toHaveBeenCalledTimes(2);
+    expect(stats).not.toHaveBeenCalled();
   });
 
   it("warns once per crossing of more than one full-screen filtered view", () => {

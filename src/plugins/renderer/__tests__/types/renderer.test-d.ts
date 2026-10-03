@@ -193,6 +193,7 @@ expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void
 >();
 expectTypeOf(renderer.host.device).toEqualTypeOf<() => GPUDevice | undefined>();
+expectTypeOf(renderer.sync.renderPasses).toEqualTypeOf<() => number>();
 
 renderer.sync.filters.set(1_048_576, [{ filter: glow, passes: 1 }]);
 

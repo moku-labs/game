@@ -71,7 +71,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
         textureMb: roundTo(usage.bytes / BYTES_PER_MB, 2),
         views: counts.views,
         pooled: counts.pooled,
-        renderPasses: counts.renderPasses
+        renderPasses: deps.sync.renderPasses()
       };
 
       // Inline, as in `capture()`: the field is absent from a production build, not undefined.

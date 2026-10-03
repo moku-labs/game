@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Sprite, Transform } from "../../../renderer/components";
 import { Glow } from "../../filters/builtins";
 import { Emitter } from "../../particles/component";
@@ -44,9 +44,11 @@ describe("stats", () => {
     mock.world.ecs.despawn(host);
     mock.renderer.passes = 3;
 
+    const passes = vi.spyOn(mock.ectx.deps.renderer.sync, "renderPasses");
     const first = mock.api.stats();
 
     expect(first).toEqual({ particles: 16, emitters: 2, filters: 1, renderPasses: 3 });
+    expect(passes).toHaveBeenCalledTimes(1);
     expect(mock.api.stats()).not.toBe(first);
   });
 });

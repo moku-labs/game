@@ -322,21 +322,35 @@ describe("sync.filters.set", () => {
   });
 });
 
+/**
+ * Reads the passes both ways, so every pin checks that `sync.renderPasses()` is the number
+ * `stats()` reports.
+ *
+ * @param mock - The mock renderer.
+ * @returns The passes `sync.renderPasses()` reads, when `stats()` reads the same.
+ */
+function passesOf(mock: MockRenderer): number {
+  const passes = mock.api.sync.renderPasses();
+
+  expect(mock.api.stats().renderPasses).toBe(passes);
+
+  return passes;
+}
+
 describe("renderPasses", () => {
   it("reads 0 while inert and 1 for a frame without filters", async () => {
     const inert = createMockRenderer({ dom: false });
 
     inert.api.sync.filters.set(7, [slot(new FakeFilter())]);
 
-    expect(inert.api.stats().renderPasses).toBe(0);
+    expect(passesOf(inert)).toBe(0);
 
     const mock = await started();
 
     spawnSprite(mock);
     mock.modules.sync.pass();
 
-    expect(mock.api.stats().renderPasses).toBe(1);
-    expect(mock.modules.sync.counts().renderPasses).toBe(1);
+    expect(passesOf(mock)).toBe(1);
   });
 
   it("adds the content pass and the passes of the slots: 3 for one glow, 10 for one blur", async () => {
@@ -347,12 +361,12 @@ describe("renderPasses", () => {
     mock.modules.sync.pass();
     mock.api.sync.filters.set(button, [slot(new FakeFilter(), 1)]);
 
-    expect(mock.api.stats().renderPasses).toBe(3);
+    expect(passesOf(mock)).toBe(3);
 
     mock.api.sync.filters.set(button, []);
     mock.api.sync.filters.set(backdrop, [slot(new FakeFilter(), 8)]);
 
-    expect(mock.api.stats().renderPasses).toBe(10);
+    expect(passesOf(mock)).toBe(10);
   });
 
   it("reads 31 for a glow and a tint on ten buttons", async () => {
@@ -365,7 +379,7 @@ describe("renderPasses", () => {
       mock.api.sync.filters.set(button, [slot(new FakeFilter()), slot(new FakeFilter())]);
     }
 
-    expect(mock.api.stats().renderPasses).toBe(31);
+    expect(passesOf(mock)).toBe(31);
   });
 
   it("counts no view that is out of the tree", async () => {
@@ -376,7 +390,7 @@ describe("renderPasses", () => {
     mock.api.sync.filters.set(lost, [slot(new FakeFilter())]);
 
     expect(mock.ctx.state.sync.views.has(lost)).toBe(true);
-    expect(mock.api.stats().renderPasses).toBe(1);
+    expect(passesOf(mock)).toBe(1);
   });
 
   it("counts a filtered child that hangs in its parent's wrapper", async () => {
@@ -387,7 +401,7 @@ describe("renderPasses", () => {
     mock.modules.sync.pass();
     mock.api.sync.filters.set(label, [slot(new FakeFilter())]);
 
-    expect(mock.api.stats().renderPasses).toBe(3);
+    expect(passesOf(mock)).toBe(3);
   });
 
   it("counts 0 for a disabled slot, and 0 for a view whose slots are all disabled", async () => {
@@ -399,12 +413,27 @@ describe("renderPasses", () => {
     mock.modules.sync.pass();
     mock.api.sync.filters.set(button, [slot(glow), slot(tint)]);
 
-    expect(mock.api.stats().renderPasses).toBe(4);
+    expect(passesOf(mock)).toBe(4);
 
     tint.enabled = false;
-    expect(mock.api.stats().renderPasses).toBe(3);
+    expect(passesOf(mock)).toBe(3);
 
     glow.enabled = false;
-    expect(mock.api.stats().renderPasses).toBe(1);
+    expect(passesOf(mock)).toBe(1);
+  });
+
+  it("reads the slots alone: no texture walk, no counts object", async () => {
+    const mock = await started();
+    const button = spawnSprite(mock);
+
+    mock.modules.sync.pass();
+    mock.api.sync.filters.set(button, [slot(new FakeFilter())]);
+
+    const textures = vi.spyOn(mock.modules.host, "textures");
+    const counts = vi.spyOn(mock.modules.sync, "counts");
+
+    expect(mock.api.sync.renderPasses()).toBe(3);
+    expect(textures).not.toHaveBeenCalled();
+    expect(counts).not.toHaveBeenCalled();
   });
 });

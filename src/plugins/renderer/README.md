@@ -117,6 +117,7 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.state()` | `{ nineSlice }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
+| `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
 An adapter object is parented, sorted and freed like a sprite; its hit box is `getLocalBounds()`
@@ -164,7 +165,7 @@ the same frame (a `ui` element that trades its shape for a nine-slice keeps its 
   `GCSystem` keeps its resource hashes private.
   `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
   level, in MiB.
-- `views` and `pooled` are read from the `sync` state.
+- `views` and `pooled` are read from the `sync` state, `renderPasses` through `sync.renderPasses()`.
 - The frame timing costs two `clock.now()` calls and a few number writes per frame; no allocation.
   The rest is read only when `stats()` is called.
 
@@ -177,7 +178,8 @@ P10); a disabled filter costs nothing, and a view whose filters are all disabled
 out of the tree (an unknown layer) counts 0. The pins from P10: no filter `1`; one glow of 1 pass
 on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and a tint on ten
 buttons `31`. The renderer is the one owner of this number; `effects` declares the passes per kind
-and reads `stats().renderPasses` for its budget warnings.
+and reads `sync.renderPasses()` for its budget warnings: the same number, without the texture walk
+and the fresh object of `stats()`.
 
 #### Draw calls
 
