@@ -83,17 +83,25 @@ export function fillHead(loading: number): number {
   return track.inset + fillWidth(loading);
 }
 
+/** The fill after a bundle failed: grey and faded, so a full bar never reads as "loaded". */
+const failedFill = { tint: 0x9a_9a_9a, alpha: 0.45 } as const;
+
 /**
- * The style of the fill for one share. Nothing is drawn before the first file settles.
+ * The style of the fill for one share. Nothing is drawn before the first file settles; after a
+ * failed bundle the fill turns grey next to the retry line.
  *
  * @param loading - The share, 0..1.
+ * @param failed - Whether a bundle failed to load.
  * @returns The style of the fill.
  */
-function fillStyle(loading: number) {
+function fillStyle(loading: number, failed: boolean) {
+  const shown = loading > 0 ? 1 : 0;
+
   return defineStyle({
     width: fillWidth(loading),
     height: track.height - 2 * track.inset,
-    alpha: loading > 0 ? 1 : 0,
+    alpha: failed ? failedFill.alpha : shown,
+    ...(failed ? { tint: failedFill.tint } : {}),
     nineSlice: "ui.bar-fill"
   });
 }
@@ -135,7 +143,7 @@ export const splashScreen = projection({
       <spacer key="splashBetween" style={between} />
       <column key="loader" style={loader}>
         <row key="loadingTrack" style={trackStyle}>
-          <row key="loadingFill" style={fillStyle(item.loading)} />
+          <row key="loadingFill" style={fillStyle(item.loading, item.failed)} />
           <image
             key="loadingBlade"
             texture="ui.icon-gear"
