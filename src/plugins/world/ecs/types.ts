@@ -798,6 +798,25 @@ export type EcsApi = {
   typeOf(name: string): AnyComponent | undefined;
 
   /**
+   * The owner of an entity, which is also the liveness check: a stale id has none, also after its
+   * index came back with a new generation. `projection` asks before it hands out a view handle for
+   * an entity another plugin owns; `renderer` asks before it forgets the filters of an entity whose
+   * visual left.
+   *
+   * @param entity - The entity to ask about.
+   * @returns The owner, or `undefined` when the id is stale.
+   * @example
+   * ```ts
+   * // renderer forgets the filter slots of an entity only after it despawned
+   * const ecs = ctx.require(worldPlugin).ecs;
+   * ecs.ownerOf(button); // { kind: "projection", name: "hud" }
+   * ecs.despawn(button);
+   * ecs.ownerOf(button); // undefined
+   * ```
+   */
+  ownerOf(entity: Entity): Owner | undefined;
+
+  /**
    * The whole world as plain JSON, sorted by entity index. A component value that is not JSON is
    * left out and its name is listed in `skipped`.
    *
@@ -815,7 +834,7 @@ export type EcsApi = {
 };
 
 /**
- * ecs methods injected into `projection`. Not public.
+ * ecs methods the plugin root calls: frame phases, the owner listener, the clears. Not public.
  */
 export type EcsInternal = {
   /**
@@ -826,15 +845,6 @@ export type EcsInternal = {
    * @returns The remover.
    */
   onOwnerLeft(fn: (owner: Owner) => void): () => void;
-
-  /**
-   * The owner of an entity, which is also the liveness check: a stale id has none. `projection`
-   * asks before it hands out a view handle for an entity another plugin owns.
-   *
-   * @param entity - The entity to ask about.
-   * @returns The owner, or `undefined` when the id is stale.
-   */
-  ownerOf(entity: Entity): Owner | undefined;
 
   /**
    * Runs the systems of one phase, then flushes the command buffer.

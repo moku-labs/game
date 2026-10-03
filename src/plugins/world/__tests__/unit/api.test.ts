@@ -16,6 +16,7 @@ const ECS_MEMBERS = [
   "mode",
   "onAdded",
   "onRemoved",
+  "ownerOf",
   "query",
   "remove",
   "resource",
@@ -29,7 +30,7 @@ const ECS_MEMBERS = [
   "untag"
 ];
 
-const ECS_INTERNALS = ["onOwnerLeft", "ownerOf", "runPhase", "flush", "clearChanges", "clear"];
+const ECS_INTERNALS = ["onOwnerLeft", "runPhase", "flush", "clearChanges", "clear"];
 
 const PROJECTION_MEMBERS = [
   "entitiesOf",

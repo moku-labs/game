@@ -377,7 +377,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     },
 
     viewOf: (entity: Entity, owner: Owner): ViewHandle<unknown> | undefined => {
-      const known = deps.ecsInternal.ownerOf(entity);
+      const known = deps.ecs.ownerOf(entity);
 
       if (known === undefined || known.kind !== "plugin") return undefined;
       if (owner.kind !== known.kind || owner.name !== known.name) return undefined;
@@ -393,7 +393,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       component: ComponentType<Value>,
       value: Value
     ): void => {
-      if (deps.ecsInternal.ownerOf(entity) === undefined) return;
+      if (deps.ecs.ownerOf(entity) === undefined) return;
 
       const pose = restOf(entity);
 

@@ -5,6 +5,7 @@
  */
 import type { Message } from "../../i18n/types";
 import type { Json } from "../../model/types";
+import type { AnyComponentValue } from "../../world/types";
 import type { Style } from "../styles/types";
 import type { CommonProps as CommonProperties, ElementMotion, JsxChild } from "./types";
 
@@ -42,6 +43,20 @@ export type ImageFit = ("contain" | "cover" | "fill") & Brand<"ImageFit">;
 export type ScrollAxis = ("x" | "y") & Brand<"ScrollAxis">;
 /** The world projections whose live views a container draws inside itself. */
 export type HostedProjections = readonly string[] & Brand<"HostedProjections">;
+
+/**
+ * Extra component values an element's entity carries, beside the ones the tag writes itself. Any
+ * component or tag works: a filter of `effects`, or a game's own component. A value whose type the
+ * element owns (`Transform`, `Box`, `Shape`, `Tappable`, ...) is dropped and logged as
+ * `ui:component-owned`; the element keeps its own.
+ *
+ * @example
+ * ```tsx
+ * <button key="claim" intent="claim" components={[Glow({ strength: 2 })]} />;
+ * // the button entity carries Glow({ strength: 2 }) next to Tappable, Shape and Box
+ * ```
+ */
+export type ElementComponents = readonly AnyComponentValue[] & Brand<"ElementComponents">;
 
 /**
  * The props every tag takes, with the key kept out: JSX passes it as the third argument.

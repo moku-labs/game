@@ -1,9 +1,23 @@
-import { describe, expect, it } from "vitest";
-import { popup } from "../../components";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Tappable } from "../../../input/components";
+import { Parent, Shape, Transform } from "../../../renderer/components";
+import { Exiting, system } from "../../../world/ecs/define";
+import { indexOf } from "../../../world/ecs/entities";
+import { Box, popup } from "../../components";
 import { defineComponent } from "../../jsx/component";
 import { FRAGMENT, flatten, textNode } from "../../jsx/flatten";
-import { identityOf, isFlagsOf } from "../../jsx/reconcile";
+import { ELEMENT_OWNED, extrasOf, identityOf, isFlagsOf } from "../../jsx/reconcile";
 import { Fragment, jsx, jsxDEV, jsxs } from "../../jsx/runtime";
+import {
+  type ExtrasApp,
+  Flag,
+  leaveMs,
+  Mark,
+  mountScreen,
+  settle,
+  startExtrasApp,
+  TAGS
+} from "../extras-app";
 
 // ─── The runtime ──────────────────────────────────────────────
 
@@ -147,5 +161,341 @@ describe("identity", () => {
       focus: true,
       covered: true
     });
+  });
+});
+
+// ─── the components prop: what the element keeps for itself ──
+
+describe("extrasOf", () => {
+  it("drops the values the element owns and keeps the last value of one type", () => {
+    const node = {
+      type: "button",
+      props: { components: [Mark({ level: 1 }), Transform({ x: 10 }), Flag(), Mark({ level: 4 })] },
+      children: []
+    };
+
+    expect([...extrasOf({ node }).values()]).toEqual([Mark({ level: 4 }), Flag()]);
+  });
+
+  it("is empty when the node names no components", () => {
+    expect(extrasOf({ node: { type: "row", props: {}, children: [] } }).size).toBe(0);
+  });
+
+  it("owns every component the reconcile, the exit and the pointer write on an element", () => {
+    expect([...ELEMENT_OWNED].toSorted()).toEqual(
+      [
+        "Transform",
+        "Box",
+        "Layer",
+        "Order",
+        "Parent",
+        "Sprite",
+        "NineSlice",
+        "Shape",
+        "Text",
+        "Tappable",
+        "Touchable",
+        "LocalWrite",
+        "Scroll",
+        "Escapable",
+        "Exiting",
+        "Pressed",
+        "PointerOver"
+      ].toSorted()
+    );
+  });
+});
+
+// ─── the components prop on a real world ──────────────────────
+
+/**
+ * The entity of a keyed element of the running app.
+ *
+ * @param app - The running app.
+ * @param key - The element key.
+ * @returns The entity.
+ */
+function find(app: ExtrasApp, key: string): number {
+  // eslint-disable-next-line unicorn/no-array-callback-reference -- `ui.find` takes a key, not a callback.
+  const entity = app.ui.find(key);
+
+  expect(entity).toBeDefined();
+
+  return entity ?? -1;
+}
+
+/**
+ * Taps a local-state button and runs the frames of the re-render.
+ *
+ * @param app - The running app.
+ * @param key - The key of the button.
+ * @param frames - How many frames to step.
+ */
+function tapAndStep(app: ExtrasApp, key: string, frames = 2): void {
+  app.input.tap(find(app, key));
+
+  for (let frame = 0; frame < frames; frame += 1) app.time.step(16);
+}
+
+/**
+ * Records, frame by frame, which entities the world marked changed for `Mark`.
+ *
+ * @param app - The running app.
+ * @returns The list the sync system fills, one entry per frame.
+ */
+function watchMark(app: ExtrasApp): number[][] {
+  const seen: number[][] = [];
+
+  app.world.ecs.system(
+    system({
+      name: "markWatcher",
+      phase: "sync",
+      query: [],
+      run: () => {
+        seen.push([...app.world.ecs.changed(Mark)]);
+      }
+    })
+  );
+
+  return seen;
+}
+
+/**
+ * The payloads of every `ui:component-owned` error logged so far.
+ *
+ * @param app - The running app.
+ * @returns The payloads, in order.
+ */
+function ownedErrors(app: ExtrasApp): unknown[] {
+  return app.log
+    .trace()
+    .filter(entry => entry.event === "ui:component-owned")
+    .map(entry => entry.data);
+}
+
+describe("the components prop", () => {
+  it("adds the values to the element entity next to its own components", async () => {
+    const app = await startExtrasApp();
+
+    mountScreen(app, "markedScreen");
+
+    const entity = find(app, "b");
+    const ecs = app.world.ecs;
+
+    expect(ecs.get(entity, Mark)).toEqual({ level: 2 });
+    expect(ecs.has(entity, Flag)).toBe(true);
+    expect([Tappable, Shape, Box].map(type => ecs.has(entity, type))).toEqual([true, true, true]);
+    expect(ownedErrors(app)).toEqual([]);
+
+    await app.stop();
+  });
+
+  it("adds the extras before Box, so the Box hook sees them", async () => {
+    const app = await startExtrasApp();
+    const ecs = app.world.ecs;
+    const markSawBox = new Map<number, boolean>();
+    const boxSawMark = new Map<number, boolean>();
+
+    ecs.onAdded(Mark, entity => markSawBox.set(entity, ecs.has(entity, Box)));
+    ecs.onAdded(Box, entity => boxSawMark.set(entity, ecs.has(entity, Mark)));
+    mountScreen(app, "markedScreen");
+
+    const entity = find(app, "b");
+
+    expect(markSawBox.get(entity)).toBe(false);
+    expect(boxSawMark.get(entity)).toBe(true);
+
+    await app.stop();
+  });
+
+  it("patches a changed field once", async () => {
+    const app = await startExtrasApp();
+
+    mountScreen(app, "markedScreen");
+
+    const entity = find(app, "b");
+    const seen = watchMark(app);
+
+    tapAndStep(app, "toFive");
+
+    expect(app.world.ecs.get(entity, Mark)).toEqual({ level: 5 });
+    expect(seen.flat()).toEqual([entity]);
+
+    await app.stop();
+  });
+
+  it("writes nothing when a re-render names the same fields in a new array", async () => {
+    const app = await startExtrasApp();
+
+    mountScreen(app, "markedScreen");
+    tapAndStep(app, "toFive");
+
+    const entity = find(app, "b");
+    const seen = watchMark(app);
+
+    tapAndStep(app, "again");
+
+    expect(seen.flat()).toEqual([]);
+
+    app.world.ecs.set(entity, Mark, { level: 9 });
+    app.time.step(16);
+    seen.length = 0;
+    tapAndStep(app, "again");
+
+    expect(seen.flat()).toEqual([]);
+    expect(app.world.ecs.get(entity, Mark)).toEqual({ level: 9 });
+
+    await app.stop();
+  });
+
+  it("removes a value that left the list, and every value when the prop is left out", async () => {
+    const app = await startExtrasApp();
+
+    mountScreen(app, "markedScreen");
+
+    const entity = find(app, "b");
+    const ecs = app.world.ecs;
+
+    tapAndStep(app, "dropMark");
+
+    expect(ecs.has(entity, Mark)).toBe(false);
+    expect(ecs.has(entity, Flag)).toBe(true);
+
+    tapAndStep(app, "addMark");
+
+    expect(ecs.get(entity, Mark)).toEqual({ level: 2 });
+
+    tapAndStep(app, "dropAll");
+
+    expect(ecs.has(entity, Flag)).toBe(false);
+    expect(ecs.has(entity, Tappable)).toBe(true);
+
+    await app.stop();
+  });
+
+  it("drops a value the element owns and logs it once per element and name", async () => {
+    const app = await startExtrasApp();
+
+    mountScreen(app, "clashScreen");
+
+    const entity = find(app, "owner");
+    const ecs = app.world.ecs;
+    const errors = [
+      { key: "owner", component: "Transform" },
+      { key: "owner", component: "Shape" },
+      { key: expect.stringContaining("|row@1|row"), component: "Order" }
+    ];
+
+    expect(ownedErrors(app)).toEqual(errors);
+    expect(ecs.get(entity, Transform)?.x).not.toBe(10);
+    expect(ecs.get(entity, Shape)?.fill).toBe(0x11_11_11);
+    expect(ecs.get(entity, Mark)).toEqual({ level: 3 });
+
+    tapAndStep(app, "clashAgain");
+
+    expect(ownedErrors(app)).toEqual(errors);
+    expect(ecs.get(entity, Transform)?.x).not.toBe(10);
+    expect(ecs.get(entity, Shape)?.fill).toBe(0x11_11_11);
+
+    await app.stop();
+  });
+
+  it("patches the extras of a popup the flow shows again", async () => {
+    const app = await startExtrasApp();
+
+    expect(app.flow.gate.answer({ intent: "openPopup" })).toBe(true);
+    await settle(app);
+
+    const button = find(app, "popupButton");
+
+    expect(app.world.ecs.get(button, Mark)).toEqual({ level: 1 });
+    expect(app.input.tap(button)).toBe(true);
+    await settle(app);
+
+    expect(app.flow.state().path).toBe("shown");
+    expect(app.ui.find("popupButton")).toBe(button);
+    expect(app.world.ecs.get(button, Mark)).toEqual({ level: 2 });
+    expect(app.world.ecs.has(button, Flag)).toBe(true);
+    expect(ownedErrors(app)).toEqual([]);
+
+    await app.stop();
+  });
+
+  it("starts clean on a recycled entity index", async () => {
+    const app = await startExtrasApp();
+    const ecs = app.world.ecs;
+
+    mountScreen(app, "markedScreen");
+
+    const first = find(app, "b");
+
+    tapAndStep(app, "hide", 3);
+
+    expect(app.ui.find("b")).toBeUndefined();
+    expect(ecs.has(first, Box)).toBe(false);
+
+    tapAndStep(app, "show");
+
+    const second = find(app, "b");
+
+    expect(second).not.toBe(first);
+    expect(indexOf(second)).toBe(indexOf(first));
+    expect(ecs.get(second, Mark)).toEqual({ level: 2 });
+    expect(ownedErrors(app)).toEqual([]);
+
+    tapAndStep(app, "dropMark");
+
+    expect(ecs.has(second, Mark)).toBe(false);
+    expect(ecs.has(second, Flag)).toBe(true);
+
+    await app.stop();
+  });
+
+  it("keeps the extras on an exiting element until it despawns", async () => {
+    const app = await startExtrasApp();
+    const ecs = app.world.ecs;
+
+    mountScreen(app, "leavingScreen");
+
+    const entity = find(app, "leaver");
+
+    tapAndStep(app, "leave");
+
+    expect(ecs.has(entity, Exiting)).toBe(true);
+    expect(ecs.get(entity, Mark)).toEqual({ level: 7 });
+
+    for (let elapsed = 0; elapsed < leaveMs * 2; elapsed += 16) app.time.step(16);
+
+    expect(ecs.has(entity, Mark)).toBe(false);
+    expect(ecs.has(entity, Box)).toBe(false);
+
+    await app.stop();
+  });
+});
+
+describe("the components prop on every tag", () => {
+  let app: ExtrasApp;
+
+  beforeAll(async () => {
+    app = await startExtrasApp();
+    mountScreen(app, "everyTag");
+  });
+
+  afterAll(async () => {
+    await app.stop();
+  });
+
+  it.each(TAGS)("mounts Mark on a %s", tagName => {
+    expect(app.world.ecs.get(find(app, `tag-${tagName}`), Mark)).toEqual({ level: 1 });
+  });
+
+  it("puts the extras on the scroll container, not on its content", () => {
+    const scroll = find(app, "tag-scroll");
+    const content = [...app.world.ecs.query(Parent)]
+      .filter(([, parent]) => parent.entity === scroll)
+      .map(([entity]) => entity);
+
+    expect(content).toHaveLength(1);
+    expect(app.world.ecs.has(content[0] ?? -1, Mark)).toBe(false);
   });
 });

@@ -135,9 +135,11 @@ instances differ from what the target holds; uniform writes and `enabled` flips 
 
 The filters come off the object and its wrapper when the view lets its object go: a pooled sprite
 never carries one into its next life, and a `Display` object leaves without them, on despawn as at
-stop. The entry is forgotten when the entity leaves, unless it swapped its visual in the same
-frame (a `ui` element that trades its shape for a nine-slice keeps its glow), and when the renderer
-stops. A `rebuildAll` after a restore applies them again. The renderer never destroys a filter.
+stop. The entry is forgotten when the entity despawned, read with `ecs.ownerOf` in the pass where its
+visual left, and when the renderer stops. Each pass also sweeps the entries of entities that have
+no view and whose `ecs.ownerOf` is `undefined`, so an entity that despawned after its visual had
+already left is forgotten too. A live entity keeps its filters for its next visual, in
+the same frame (a `ui` element that trades its shape for a nine-slice keeps its glow) or later. A `rebuildAll` after a restore applies them again. The renderer never destroys a filter.
 
 ### `monitor` — `app.renderer.stats()`, `app.renderer.capture()`
 

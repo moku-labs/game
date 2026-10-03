@@ -29,6 +29,7 @@ describe("the base catalogue", () => {
       "rect",
       "render",
       "sounds",
+      "effects",
       "assets",
       "log"
     ]);

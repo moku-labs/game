@@ -2,10 +2,16 @@ import { describe, expectTypeOf, it } from "vitest";
 import { defineMotion } from "../../../anim/motion";
 import type { Descriptor } from "../../../flow/fx/types";
 import { Transform, type TransformValue } from "../../../renderer/components";
+import { component, tag } from "../../../world/ecs/define";
 import type { Entity, Motion, ViewHandle } from "../../../world/types";
 import type { BoxValue } from "../../components";
 import { popup, uiFor } from "../../components";
 import { defineComponent } from "../../jsx/component";
+import type {
+  ElementComponents,
+  IntrinsicElementsFor,
+  UiIntrinsicElements
+} from "../../jsx/intrinsics";
 import type { Finding, UiNode } from "../../jsx/types";
 import { defineStyle } from "../../styles/define";
 import type { Config, ElementChange, ElementMotion, UiApi } from "../../types";
@@ -207,5 +213,38 @@ describe("element motion", () => {
 
     expectTypeOf(pop).toExtend<ElementMotion>();
     expectTypeOf(pop).toExtend<typeof kit.intrinsics.column.motion>();
+  });
+});
+
+/** A game's own component and tag, standing in for a filter of `effects`. */
+const Mark = component("Mark", { level: 0 });
+const Flag = tag("Flag");
+
+describe("the components prop", () => {
+  it("takes component and tag values on every tag", () => {
+    type Taken = { [Tag in keyof UiIntrinsicElements]: UiIntrinsicElements[Tag]["components"] };
+
+    const extras: ElementComponents = [Mark({ level: 2 }), Flag()];
+    const button: UiIntrinsicElements["button"] = { intent: "claim", components: extras };
+    const label: UiIntrinsicElements["text"] = { content: "120", components: [Flag()] };
+
+    expectTypeOf<Taken>().toEqualTypeOf<{
+      [Tag in keyof UiIntrinsicElements]: ElementComponents | undefined;
+    }>();
+    expectTypeOf(button.components).toEqualTypeOf<ElementComponents | undefined>();
+    expectTypeOf(label.components).toEqualTypeOf<ElementComponents | undefined>();
+  });
+
+  it("keeps it on the tags of IntrinsicElementsFor", () => {
+    type Tags = IntrinsicElementsFor<"ui.coin", "digits", "hud.coins">;
+    type Taken = { [Tag in keyof Tags]: Tags[Tag]["components"] };
+
+    const image: Tags["image"] = {
+      texture: "ui.coin",
+      components: [Mark({ level: 2 }), Flag()]
+    };
+
+    expectTypeOf<Taken>().toEqualTypeOf<{ [Tag in keyof Tags]: ElementComponents | undefined }>();
+    expectTypeOf(image.components).toEqualTypeOf<ElementComponents | undefined>();
   });
 });

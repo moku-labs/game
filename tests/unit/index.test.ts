@@ -32,13 +32,19 @@ describe("root index", () => {
     expect(kit.play).toBe(engine.play);
     expect(kit.tr).toBe(engine.tr);
     expect(kit.music).toBe(engine.music);
+    expect(kit.defineEmitter).toBe(engine.defineEmitter);
+    expect(kit.Emitter).toBe(engine.Emitter);
+    expect(kit.Displacement).toBe(engine.Displacement);
     expect(Object.keys(kit).toSorted()).toEqual([
+      "Displacement",
+      "Emitter",
       "Frames",
       "NineSlice",
       "Sprite",
       "defineAnimation",
       "defineBundles",
       "defineComponent",
+      "defineEmitter",
       "defineFeature",
       "defineFlow",
       "defineNode",
