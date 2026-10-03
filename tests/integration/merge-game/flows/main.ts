@@ -2,7 +2,8 @@
  * @file The main flow: boot, the splash that waits for the bundles and offers a retry when one of
  * them fails, the home checkpoint with its three buttons, the board as a node, and the slot every
  * finished order passes through. The settings sub-flow hangs off Home as it hangs off the board,
- * because the gear is on both screens; the daily gift is a popup of Home.
+ * because the gear is on both screens; the daily gift is a popup of Home, and so is the Leave
+ * popup that Back on Home asks first with.
  */
 import { slot } from "@moku-labs/game";
 import { settingsFlow } from "../features/settings/flow";
@@ -10,6 +11,7 @@ import { defineFlow } from "../kit";
 import { boot } from "../nodes/boot";
 import { dailyGift } from "../nodes/daily-gift";
 import { home } from "../nodes/home";
+import { leaveGame } from "../nodes/leave-game";
 import { loadFailed } from "../nodes/load-failed";
 import { retryLoading } from "../nodes/retry-loading";
 import { setLoading } from "../nodes/set-loading";
@@ -25,6 +27,7 @@ export const mainFlow = defineFlow("main", {
     retryLoading,
     home,
     dailyGift,
+    leaveGame,
     settings: settingsFlow,
     board: boardFlow,
     afterOrder: slot("afterOrder")
@@ -44,9 +47,11 @@ export const mainFlow = defineFlow("main", {
     home: {
       play: "board",
       gift: "dailyGift",
-      openSettings: "settings"
+      openSettings: "settings",
+      back: "leaveGame"
     },
     dailyGift: { claim: "home", close: "home" },
+    leaveGame: { leave: "home", stay: "home" },
     settings: { closed: "home" },
     board: { orderComplete: "afterOrder", left: "home" },
     // Back onto the board: the reward is taken there, the coins fly onto the HUD counter, and the

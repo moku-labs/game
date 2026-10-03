@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import type { Assets, Model, Ui } from "@moku-labs/game";
 import { Text } from "@moku-labs/game";
 import { expect } from "vitest";
+import type { ScreenGameOptions } from "./merge-game/game";
 import { createScreenGame, startMoment } from "./merge-game/game";
 import type { Player } from "./merge-game/state";
 import { startingPlayer } from "./merge-game/state";
@@ -242,10 +243,14 @@ export async function frames(game: Game, count = 6): Promise<void> {
  * counts as loaded at once, so the splash lets the graph through by itself.
  *
  * @param start - The player a new save starts from.
+ * @param seams - The phone behind the game, a fake provider; none by default, as on the web page.
  * @returns The game, resting on `home` with the Home screen laid out.
  */
-export async function startOnHome(start: Player): Promise<Game> {
-  const game = createScreenGame({ player: start, manifest: await readManifest() });
+export async function startOnHome(
+  start: Player,
+  seams: Pick<ScreenGameOptions, "platform"> = {}
+): Promise<Game> {
+  const game = createScreenGame({ ...seams, player: start, manifest: await readManifest() });
   const loop: { failure?: unknown } = {};
 
   await game.app.start();

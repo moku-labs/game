@@ -23,7 +23,8 @@ const checkpoints = [
   "rename-popup/typed",
   "rename-popup/saved",
   "gift-popup/open",
-  "settings/open"
+  "settings/open",
+  "leave-popup/open"
 ];
 
 describe("visual tests of the fixture game, headless", () => {

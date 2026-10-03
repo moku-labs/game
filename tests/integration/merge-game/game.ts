@@ -3,13 +3,15 @@
  * screen and one with it. A shipped game adds `onStart: ctx => { ctx.flow.run().catch(showFatal); }`;
  * here the headless runner owns `run()`, so a fatal error reaches the test instead of a handler.
  */
-import type { Assets, Audio, Model, Renderer } from "@moku-labs/game";
-import { audioPlugin, createApp, effectsPlugin, screen } from "@moku-labs/game";
+import type { Assets, Audio, Model, PlatformProvider, Renderer } from "@moku-labs/game";
+import { audioPlugin, createApp, effectsPlugin, platformPlugin, screen } from "@moku-labs/game";
 import { fakeClock, memory } from "@moku-labs/game/testing";
 import { energyFeature } from "./features/energy";
 import { giftFeature } from "./features/gift";
 import { homeFeature } from "./features/home";
 import { hudFeature } from "./features/hud";
+import { leaveFeature } from "./features/leave";
+import { leaveExitPlugin } from "./features/leave/plugin";
 import { ordersFeature } from "./features/orders";
 import { settingsFeature } from "./features/settings";
 import { settingsLocalePlugin } from "./features/settings/plugin";
@@ -98,16 +100,18 @@ export function createGame(options: GameOptions = {}): Game {
 }
 
 /**
- * The plugins of the game with its screen: the nine screen plugins, `audio` and `effects`, which
- * are opt-in, every feature — the splash, Home, the board, the reward, the HUD, the orders, the
- * settings, the energy and the daily gift — and the four plugins the game writes: the loading of
- * the splash, the language switch, the look of the board under the pointer and the click of every
- * control.
+ * The plugins of the game with its screen: the nine screen plugins, `audio`, `effects` and
+ * `platform`, which are opt-in and `platform` last of them, every feature — the splash, Home, the
+ * board, the reward, the HUD, the orders, the settings, the energy, the daily gift and the Leave
+ * popup — and the five plugins the game writes: the loading of the splash, the language switch,
+ * the way out of the Leave popup, the look of the board under the pointer and the click of every
+ * control. Without a provider `platform` is inert, as on the web page.
  */
 export const screenPlugins = [
   ...screen,
   audioPlugin,
   effectsPlugin,
+  platformPlugin,
   rewardFeature,
   splashFeature,
   homeFeature,
@@ -117,7 +121,9 @@ export const screenPlugins = [
   settingsFeature,
   energyFeature,
   giftFeature,
+  leaveFeature,
   settingsLocalePlugin,
+  leaveExitPlugin,
   loadingPlugin,
   boardLookPlugin,
   soundsPlugin
@@ -151,11 +157,16 @@ export type ScreenGameOptions = GameOptions & {
    * draw the game, its particles and its filters.
    */
   renderer?: { mount: string; loadPixi: () => Promise<Renderer.PixiModule> };
+  /**
+   * The phone behind the game: its Back button, its pause and its `exit()`. Left out, `platform`
+   * is inert and Leave closes nothing, as on the web page. A test passes a fake to press Back.
+   */
+  platform?: PlatformProvider;
 };
 
 /**
- * Creates the same game with its screen composed: the screen set, `audio`, `effects` and the view
- * half of every feature. Without the renderer seam the renderer is inert, the audio context stays
+ * Creates the same game with its screen composed: the screen set, `audio`, `effects`, `platform`
+ * and the view half of every feature. Without the renderer seam the renderer is inert, the audio context stays
  * locked, the effects draw nothing and the assets plugin reads the manifest only, so this runs in
  * plain Bun exactly like the headless game.
  *
@@ -185,6 +196,8 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       },
       clock: { source: clock },
       flow: { mainFlow, safeNode: "home" },
+      platform: { provider: options.platform },
+      leaveExit: { exit: () => options.platform?.exit() },
       renderer: options.renderer ?? {},
       assets: { manifest: options.manifest, io: options.io },
       text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
