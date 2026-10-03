@@ -64,15 +64,20 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       const usage = deps.host.textures();
       const counts = deps.sync.counts();
       const drawing = state.lastStart !== undefined && clock.now() - state.lastStart <= STALE_MS;
-
-      return {
+      const stats: RenderStats = {
         fps: drawing ? roundTo(state.fps, 1) : 0,
         frameMs: roundTo(state.frameMs, 2),
         textures: usage.count,
         textureMb: roundTo(usage.bytes / BYTES_PER_MB, 2),
         views: counts.views,
-        pooled: counts.pooled
+        pooled: counts.pooled,
+        renderPasses: counts.renderPasses
       };
+
+      // Inline, as in `capture()`: the field is absent from a production build, not undefined.
+      if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return stats;
+
+      return { ...stats, drawCalls: state.draws.last };
     },
 
     capture: async (): Promise<string | undefined> => {
@@ -93,10 +98,14 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
 
     begin: (): void => {
       beginFrame(state, clock.now());
+      // A draw between two frames, as the extract of a capture, is not a draw of this frame.
+      state.draws.frame = 0;
     },
 
     end: (): void => {
       endFrame(state, clock.now());
+      state.draws.last = state.draws.frame;
+      state.draws.frame = 0;
       flushCaptures();
     }
   };
@@ -104,11 +113,14 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
 
 /**
  * Stops the monitor: a capture still waiting gets `undefined`, and every frame seen is forgotten.
- * Works on the state alone, because `onStop` has no context.
+ * Works on the state alone, because `onStop` has no context. The draw counter keeps its identity:
+ * only its numbers go back to 0.
  *
  * @param state - The monitor branch of the plugin state.
  */
 export function stopMonitor(state: MonitorState): void {
   settle(state.captures.splice(0));
   resetWindow(state);
+  state.draws.frame = 0;
+  state.draws.last = 0;
 }

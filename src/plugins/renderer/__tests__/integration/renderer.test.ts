@@ -99,7 +99,8 @@ describe("renderer plugin integration", () => {
       textures: 0,
       textureMb: 0,
       views: 0,
-      pooled: 0
+      pooled: 0,
+      renderPasses: 0
     });
 
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
@@ -141,6 +142,42 @@ describe("renderer plugin integration", () => {
     await expect(capture).resolves.toBe(FAKE_PNG);
     expect(app.renderer.stats()).toMatchObject({ views: 1, pooled: 0 });
     expect(app.renderer.viewport.toScreen({ x: 1080, y: 0 }).x).toBeCloseTo(390, 6);
+
+    await app.stop();
+  });
+
+  it("reports one render pass without filters and, in a dev build, the draws of the frame", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    installFakeDom({ width: 1080, height: 1920 });
+    const pixi = createFakePixi({ scene: { batches: 2, graphics: [3], draws: 1 } });
+
+    const app = createApp({
+      plugins: [worldPlugin, rendererPlugin, boardFeature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        model: {
+          initialPlayer: { items: [{ id: "a", level: 1, x: 0 }] },
+          initialSession: { moves: 0 },
+          seed: 1
+        },
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+      }
+    });
+
+    await app.start();
+    app.world.projection.setLayers([{ name: "items", sort: "y" }]);
+    app.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Layer({ name: "items" }),
+      ...sprite({ texture: "board.cell", at: { x: 540, y: 300 } })
+    ]);
+    app.time.step(16);
+    app.time.step(16);
+
+    const stats = app.renderer.stats();
+
+    expect(stats.renderPasses).toBe(1);
+    expect(pixi.last().renderer.frameDraws).toBe(6);
+    expect(stats.drawCalls).toBe(pixi.last().renderer.frameDraws);
 
     await app.stop();
   });

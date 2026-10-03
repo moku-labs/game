@@ -13,7 +13,9 @@ import type {
   Api,
   Config,
   DebugSwitches,
+  FilterSlot,
   Orientation,
+  PixiFilter,
   Point,
   RenderStats,
   SafeArea,
@@ -161,6 +163,7 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   textureMb: number;
   views: number;
   pooled: number;
+  renderPasses: number;
   drawCalls?: number;
 }>();
 expectTypeOf(renderer.capture).toEqualTypeOf<() => Promise<string | undefined>>();
@@ -170,3 +173,21 @@ renderer.viewport.toScreen(540, 960);
 
 // @ts-expect-error — `begin` is the monitor's internal half, not on the public API
 renderer.begin;
+
+// ─── the effects seam: filters on a view, the live device ─────
+
+declare const glow: PixiFilter;
+
+expectTypeOf<FilterSlot>().toEqualTypeOf<{ filter: PixiFilter; passes: number }>();
+expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
+  (entity: Entity, slots: readonly FilterSlot[]) => void
+>();
+expectTypeOf(renderer.host.device).toEqualTypeOf<() => GPUDevice | undefined>();
+
+renderer.sync.filters.set(1_048_576, [{ filter: glow, passes: 1 }]);
+
+// @ts-expect-error — a slot says what one apply of its filter costs
+renderer.sync.filters.set(1_048_577, [{ filter: glow }]);
+
+// @ts-expect-error — the slot holds a Pixi filter instance, not a kind name
+renderer.sync.filters.set(1_048_578, [{ filter: "glow", passes: 1 }]);

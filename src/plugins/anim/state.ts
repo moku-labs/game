@@ -25,8 +25,8 @@ function emptySet<Value>(): Set<Value> {
 
 /**
  * Creates the initial anim state: an empty track table, the empty field bookkeeping of the
- * retarget policy and the offsets accumulator, no timeline and no animation, and reduced motion
- * at its configured start value.
+ * retarget policy and the offsets accumulator, no timeline, no animation and no frame loop, and
+ * reduced motion at its configured start value.
  *
  * @param ctx - Minimal context.
  * @param ctx.config - Resolved plugin config.
@@ -48,6 +48,9 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     removeDriver: undefined,
     offFrame: undefined,
     offPlay: undefined,
-    finishAll: undefined
+    finishAll: undefined,
+    frameLoops: emptyMap(),
+    framesHeld: emptyMap(),
+    offFrames: []
   };
 }

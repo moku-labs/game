@@ -3,6 +3,7 @@ import type { Anim } from "../../../../index";
 import { defineGame } from "../../../../index";
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
+import { Frames } from "../../components";
 import { defineMotion } from "../../motion";
 import { defineAnimation, mark, play, sequence, set, tween } from "../../timeline/steps";
 import type { AnimApi, Config, KernelSlice, MotionKeyframe, PlayHandle, Target } from "../../types";
@@ -164,3 +165,27 @@ api.reducedMotion(true);
 // @ts-expect-error — the switch takes a boolean
 api.setReducedMotion("on");
 expectTypeOf<Config["reducedMotion"]>().toEqualTypeOf<boolean>();
+
+// Delta 8: the Frames component. The kit narrows its keys to the game's asset keys.
+const coinKit = defineGame<{
+  player: { coins: number };
+  session: { open: boolean };
+  assets: "items.coin-0" | "items.coin-1";
+  bundles: "boot";
+  strings: { "hud.coins": string };
+}>();
+
+coinKit.Frames({ keys: ["items.coin-0", "items.coin-1"], fps: 12 });
+// @ts-expect-error — "nope" is not an asset key of the game
+coinKit.Frames({ keys: ["nope"] });
+// @ts-expect-error — fps is a number
+Frames({ fps: "12" });
+tween(card, Frames, { fps: 24 }, { ms: 100 });
+// @ts-expect-error — keys is a list of texture keys, not a numeric field
+tween(card, Frames, { keys: [] }, { ms: 100 });
+expectTypeOf<Anim.FramesValue>().toEqualTypeOf<{
+  keys: readonly string[];
+  fps: number;
+  loop: boolean;
+  playing: boolean;
+}>();

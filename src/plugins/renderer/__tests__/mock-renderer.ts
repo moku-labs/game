@@ -19,7 +19,7 @@ import { startRenderer, stopRenderer, withDeps } from "../lifecycle";
 import { createRendererState } from "../state";
 import type { Api, Config, KernelSlice, Modules } from "../types";
 import { type FakeDom, installFakeDom } from "./fake-dom";
-import { createFakePixi, type FakePixi } from "./fake-pixi";
+import { createFakePixi, type FakePixi, type FakeScene } from "./fake-pixi";
 
 /** One `time.onFrame` registration. */
 export type FrameRegistration = { phase: Phase; callback: FrameCallback };
@@ -148,6 +148,7 @@ function createWorld(timeApi: TimeApi, log: Log.LogApi): WorldApi & { clearChang
  * @param options.mountElement - True to pass the element itself instead of a selector.
  * @param options.orientation - The orientation the game is designed for.
  * @param options.referenceLong - The long side the layout needs inside the safe area.
+ * @param options.scene - What every WebGPU frame of the fake Pixi draws.
  * @returns The context, the modules, the fakes and the drivers.
  */
 export function createMockRenderer(
@@ -161,11 +162,13 @@ export function createMockRenderer(
     mountElement?: boolean;
     orientation?: "portrait" | "landscape";
     referenceLong?: number;
+    scene?: Partial<FakeScene>;
   } = {}
 ): MockRenderer {
   const pixi = createFakePixi({
     kind: options.kind ?? "webgpu",
-    failInit: options.failInit ?? false
+    failInit: options.failInit ?? false,
+    ...(options.scene === undefined ? {} : { scene: options.scene })
   });
   const dom =
     options.dom === false

@@ -23,7 +23,7 @@ function emptySet<Value>(): Set<Value> {
 }
 
 /**
- * Creates the initial sync state: no root, no layers, no view, no pool and no provider.
+ * Creates the initial sync state: no root, no layers, no view, no pool, no provider and no filter.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -50,6 +50,7 @@ export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
     reparented: emptySet(),
     debug: { nineSlice: debug.nineSlice },
     outlinesStale: false,
+    filters: emptyMap(),
     cleanups: []
   };
 }

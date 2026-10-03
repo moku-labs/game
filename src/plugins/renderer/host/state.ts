@@ -4,7 +4,8 @@
 import type { HostState } from "./types";
 
 /**
- * Creates the initial host state: no Pixi, no application, nothing drawn and nothing listening.
+ * Creates the initial host state: no Pixi, no application, nothing drawn, nothing listening and
+ * no draw counter installed.
  *
  * @returns The host branch of the plugin state.
  */
@@ -21,6 +22,7 @@ export function createHostState(): HostState {
     onRestore: [],
     onLoss: [],
     cleanups: [],
-    unsupported: undefined
+    unsupported: undefined,
+    uninstallCounting: undefined
   };
 }

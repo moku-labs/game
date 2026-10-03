@@ -6,6 +6,7 @@ import type { HostApi, HostInternal } from "../host/types";
 import type {
   PixiBitmapFont,
   PixiContainer,
+  PixiFilter,
   PixiGraphics,
   PixiModule,
   PixiTexture,
@@ -355,6 +356,50 @@ export type FontsApi = {
 };
 
 /**
+ * One filter on an entity's view: a Pixi filter instance `effects` built, and how many render
+ * passes one apply of it costs.
+ *
+ * @example
+ * ```ts
+ * // A full-screen blur of quality 4 applies 8 times.
+ * const slot: FilterSlot = { filter: blur, passes: 8 };
+ * ```
+ */
+export type FilterSlot = { filter: PixiFilter; passes: number };
+
+/**
+ * The filters drawn on entities' views, `app.renderer.sync.filters`. `effects` builds, writes and
+ * destroys the instances; the renderer only hangs them on the view and counts their passes.
+ *
+ * @example
+ * ```ts
+ * // `effects` saw the Glow component appear on a button.
+ * ctx.require(rendererPlugin).sync.filters.set(button, [{ filter: glow, passes: 1 }]);
+ * ```
+ */
+export type FiltersApi = {
+  /**
+   * Sets the filters drawn on an entity's view, in draw order. They cover the entity's whole
+   * subtree: a glow on a button glows its label too. The list is kept for the entity, so a call
+   * made before the view exists lands when it is built, and a pooled or rebuilt view gets it
+   * again. Pixi is written only when the instances differ from what the view holds. Works while
+   * inert: stored, nothing applied. The renderer never destroys a filter.
+   *
+   * @param entity - The entity whose view is filtered.
+   * @param slots - The filters in draw order, with their passes; `[]` clears them.
+   * @example
+   * ```ts
+   * // `effects`: Glow appeared on a button; one instance per view and kind, one pass per apply.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.filters.set(button, [{ filter: glow, passes: 1 }]);
+   * renderer.stats().renderPasses; // 3: the frame, the button's content pass, one glow apply
+   * renderer.sync.filters.set(button, []); // the Glow component left: back to 1
+   * ```
+   */
+  set(entity: Entity, slots: readonly FilterSlot[]): void;
+};
+
+/**
  * The debug switches of the renderer.
  *
  * @example
@@ -459,6 +504,11 @@ export type SyncApi = {
   debug: DebugApi;
 
   /**
+   * The filters `effects` hangs on entities' views.
+   */
+  filters: FiltersApi;
+
+  /**
    * The Pixi object of an entity, for debugging and for the plugins that draw their own thing.
    *
    * @param entity - The entity to ask about.
@@ -508,22 +558,24 @@ export type SyncInternal = {
   root(): PixiContainer | undefined;
 
   /**
-   * How many display objects `sync` holds, for the counters of `monitor`.
+   * How many display objects `sync` holds and what its filters cost, for the counters of
+   * `monitor`.
    *
-   * @returns The views of entities and the objects waiting in the pools.
+   * @returns The views of entities, the objects waiting in the pools, and the render passes.
    */
   counts(): SyncCounts;
 };
 
 /**
- * The display objects `sync` holds: views of entities and pooled objects.
+ * The display objects `sync` holds, views of entities and pooled objects, and the render passes
+ * its filter slots cost.
  *
  * @example
  * ```ts
- * const counts: SyncCounts = { views: 180, pooled: 24 };
+ * const counts: SyncCounts = { views: 180, pooled: 24, renderPasses: 3 };
  * ```
  */
-export type SyncCounts = { views: number; pooled: number };
+export type SyncCounts = { views: number; pooled: number; renderPasses: number };
 
 /**
  * sync module state.
@@ -561,6 +613,8 @@ export type SyncState = {
   debug: DebugSwitches;
   /** The nine-slice switch moved: the next pass writes every nine-slice again. */
   outlinesStale: boolean;
+  /** The filters `effects` set per entity, kept while the entity lives, view or not. */
+  filters: Map<Entity, readonly FilterSlot[]>;
   cleanups: Array<() => void>;
 };
 

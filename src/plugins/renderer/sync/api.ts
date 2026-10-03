@@ -7,6 +7,7 @@ import type { ComponentHandle, Entity } from "../../world/types";
 import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../components";
 import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { provideDisplay, updateAdapterView } from "./adapters";
+import { forgetLeft, renderPassesOf, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
 import { hitTest } from "./hit-test";
 import { clearLayers, resort, syncLayers } from "./layers";
@@ -17,6 +18,7 @@ import type {
   CreateTextureOptions,
   DebugSwitches,
   DisplayAdapter,
+  FilterSlot,
   SyncCounts,
   SyncCtx,
   SyncDeps,
@@ -299,10 +301,15 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * One pass: removed, layers, added, changed, invalidated.
+   * One pass: removed, layers, added, changed, invalidated. An entity that left takes its filter
+   * slots with it; one that swapped its visual in this frame keeps them.
    */
   const pass = (): void => {
-    for (const entity of state.removed) guard(entity, () => dropView(sctx, entity));
+    for (const entity of state.removed) {
+      guard(entity, () => dropView(sctx, entity));
+      forgetLeft(state, entity);
+    }
+
     state.removed.clear();
 
     syncLayers(sctx);
@@ -437,9 +444,17 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       state: (): DebugSwitches => ({ ...state.debug })
     },
 
+    filters: {
+      set: (entity: Entity, slots: readonly FilterSlot[]): void => setFilters(state, entity, slots)
+    },
+
     root: (): PixiContainer | undefined => state.root,
 
-    counts: (): SyncCounts => ({ views: state.views.size, pooled: state.pooled }),
+    counts: (): SyncCounts => ({
+      views: state.views.size,
+      pooled: state.pooled,
+      renderPasses: renderPassesOf(state)
+    }),
 
     rebuildAll,
 

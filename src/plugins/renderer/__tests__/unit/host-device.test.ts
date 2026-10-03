@@ -261,3 +261,66 @@ describe("renderer:device-lost payload", () => {
     expect(mock.emitted).toHaveLength(1);
   });
 });
+
+describe("host.device()", () => {
+  it("answers undefined while inert and before the renderer is ready", async () => {
+    const inert = createMockRenderer({ dom: false });
+
+    await inert.start();
+
+    expect(inert.api.host.device()).toBeUndefined();
+
+    const mock = createMockRenderer();
+
+    expect(mock.api.host.device()).toBeUndefined();
+  });
+
+  it("answers the device of the live WebGPU application", async () => {
+    const mock = createMockRenderer();
+
+    await mock.start();
+
+    expect(mock.api.host.device()).toBeDefined();
+    expect(mock.api.host.device()).toBe(mock.pixi.last().renderer.gpu?.device);
+  });
+
+  it("answers undefined while the device is lost, and the new device after the restore", async () => {
+    const mock = createMockRenderer();
+
+    await mock.start();
+
+    const first = mock.pixi.last();
+    const before = mock.api.host.device();
+    let duringLoss: unknown = before;
+
+    mock.modules.host.onLoss(() => {
+      duringLoss = mock.api.host.device();
+    });
+    first.lose("unknown");
+    await tick();
+
+    const second = mock.pixi.last();
+
+    expect(duringLoss).toBeUndefined();
+    expect(second).not.toBe(first);
+    expect(mock.api.host.device()).toBe(second.renderer.gpu?.device);
+    expect(mock.api.host.device()).not.toBe(before);
+  });
+
+  it("answers undefined on the WebGL fallback", async () => {
+    const mock = createMockRenderer({ kind: "webgl" });
+
+    await mock.start();
+
+    expect(mock.api.host.ready()).toBe(true);
+    expect(mock.api.host.device()).toBeUndefined();
+  });
+
+  it("answers undefined on the unsupported-device screen", async () => {
+    const mock = createMockRenderer({ failInit: true });
+
+    await mock.start();
+
+    expect(mock.api.host.device()).toBeUndefined();
+  });
+});

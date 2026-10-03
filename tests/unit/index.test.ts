@@ -27,11 +27,13 @@ describe("root index", () => {
     expect(kit.NineSlice).toBe(engine.NineSlice);
     expect(kit.defineAnimation).toBe(engine.defineAnimation);
     expect(kit.frames).toBe(engine.frames);
+    expect(kit.Frames).toBe(engine.Frames);
     expect(kit.sfx).toBe(engine.sfx);
     expect(kit.play).toBe(engine.play);
     expect(kit.tr).toBe(engine.tr);
     expect(kit.music).toBe(engine.music);
     expect(Object.keys(kit).toSorted()).toEqual([
+      "Frames",
       "NineSlice",
       "Sprite",
       "defineAnimation",

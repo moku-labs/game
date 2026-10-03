@@ -136,6 +136,7 @@ export type GameTypes = {
   scenes?: string;
   strings: Record<string, unknown>;
   textStyles?: string;
+  emitters?: string;
 };
 
 /**
@@ -150,6 +151,21 @@ export type TextStylesOf<Types extends GameTypes> = Types extends {
   textStyles: infer Keys extends string;
 }
   ? Keys
+  : string;
+
+/**
+ * The emitter id union of a game, `string` when the game passed none. `defineGame` types
+ * `Emitter({ effect })` with it.
+ *
+ * @example
+ * ```ts
+ * type Ids = EmitterIdOf<{ player: {}; session: {}; assets: string; strings: {}; emitters: "coins" }>; // "coins"
+ * ```
+ */
+export type EmitterIdOf<Types extends GameTypes> = Types extends {
+  emitters: infer Ids extends string;
+}
+  ? Ids
   : string;
 
 /**
@@ -212,7 +228,13 @@ export type Position = {
   waiting: readonly string[];
 };
 
-export type { Contribution, FeatureDescription, FeaturesApi } from "./features/types";
+export type {
+  Contribution,
+  FeatureDescription,
+  FeatureEmitter,
+  FeatureFilter,
+  FeaturesApi
+} from "./features/types";
 export type { Descriptor, FxApi, FxHandler, GuideOptions, Hint, NodeFx } from "./fx/types";
 export type { Allow, Answer, GateApi } from "./gate/types";
 export type { InboxApi, WorldEvent } from "./inbox/types";

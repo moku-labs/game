@@ -38,7 +38,8 @@ describe("game.render", () => {
       textures: 0,
       textureMb: 0,
       views: 0,
-      pooled: 0
+      pooled: 0,
+      renderPasses: 0
     });
   });
 });

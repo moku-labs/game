@@ -16,6 +16,31 @@ import type { AnyFlow, AnyNode } from "../runner/types";
 export type FeatureAnimation = { readonly id: string };
 
 /**
+ * One particle emitter of a feature, as `defineEmitter` returns it. Structural on purpose: `flow`
+ * stores what the game brought and never imports `effects`, which reads the rest of the object.
+ *
+ * @example
+ * ```ts
+ * const coins: FeatureEmitter = { id: "coins" };
+ * ```
+ */
+export type FeatureEmitter = { readonly id: string };
+
+/**
+ * One filter a feature puts on an interface component: the component by name and the filter as
+ * `defineFilter` returns it. Structural on purpose: `effects` reads the filter, `flow` only carries it.
+ *
+ * @example
+ * ```ts
+ * const glow: FeatureFilter = { componentName: "RewardPopup", filter: { id: "glow" } };
+ * ```
+ */
+export type FeatureFilter = {
+  readonly componentName: string;
+  readonly filter: { readonly id: string };
+};
+
+/**
  * One interface component of a feature, as `defineComponent` returns it. Structural on purpose:
  * `ui` reads the rest of the object, `flow` only carries it.
  *
@@ -84,6 +109,10 @@ export type FeatureDescription = {
   strings?: Record<string, CompiledMessagesLike | (() => Promise<unknown>)>;
   /** Text styles the feature owns, read by `text`. */
   textStyles?: FeatureTextStyles;
+  /** Particle emitters the feature owns, read by `effects`. */
+  emitters?: readonly FeatureEmitter[];
+  /** Filters the feature puts on its interface components, read by `effects`. */
+  filters?: readonly FeatureFilter[];
   [later: string]: unknown;
 };
 

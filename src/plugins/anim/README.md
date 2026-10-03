@@ -28,7 +28,7 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 |---|---|
 | `play(animation, slots)` | Builds the step tree now and starts it. Returns a `PlayHandle`: the `MotionHandle` contract over the whole tree plus `done` and `marks()`. |
 | `finishAll()` | Every timeline ends at its own end, every track writes its exact target and every spawned entity is despawned. Called by the frame step in world mode `"fast"`. |
-| `active()` | Tracks in the table, the delayed ones and the running loops included. `0` when nothing moves; a screen at rest with loops counts one track per loop lane. |
+| `active()` | Tracks in the table, the delayed ones and the running loops included. `0` when nothing moves; a screen at rest with loops counts one track per loop lane. A `Frames` component counts nothing. |
 | `onMark(fn)` | Direct subscription next to the event. Returns the remover. |
 | `reducedMotion()` | Whether reduced motion is on. |
 | `setReducedMotion(on)` | Switches reduced motion on or off for every track started afterwards. |
@@ -57,6 +57,10 @@ defineMotion({ states?, keyframes?, transition?, loop?, on })
 ```
 
 A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.
+
+`defineGame` spreads the kit of `anim`: `defineAnimation`, `play`, and `frames`, `sfx` and the
+`Frames` component with their keys narrowed to the game's asset keys. `Frames({ keys: ["nope"] })`
+from the kit does not compile. The objects are the same as the root exports.
 
 `Component` in `tween` and `set` is any component handle `world.ecs` takes: the root `Transform`
 and `Sprite`, and the kit's `Sprite` and `NineSlice` that `defineGame` narrows to the game's asset
@@ -161,7 +165,8 @@ started afterwards take 0 ms, its delay and repeats dropped: enter and exit, sta
 settle motions, drag returns and timeline tweens land on their target at the next frame step. Marks,
 sounds and `wait` steps of a timeline are untouched. Every loop stands on its first key, a running
 one at once, and walks on from its first key when the switch goes off. A loop that stands writes its
-first key once, not every frame. Tracks already running keep their length.
+first key once, not every frame. Tracks already running keep their length. A `Frames` loop stops on
+the frame it shows and walks on from that frame when the switch goes off.
 
 ```ts
 // web/main.ts follows the system setting
@@ -238,10 +243,47 @@ const coinsFly = defineAnimation("hud.coinsFly", {
 - `Animation.playing` counts the tracks of a spawned entity, not its timeline: the entity lives
   exactly as long as the timeline.
 
-## Component
+## Frames component
+
+A frame loop that lives as long as its entity. The `frames` step of a timeline plays a list of
+texture keys once per play; the `Frames` component plays the same list for the whole life of the
+entity, with no timeline around it: a spinning coin on the board, a flickering torch in a scene.
+
+```ts
+const coinSpin = ["items.coin-0", "items.coin-1", "items.coin-2", "items.coin-3"] as const;
+
+coin: item => [Sprite({ texture: "items.coin-0" }), Frames({ keys: coinSpin, fps: 12 })];
+// every 1000 / 12 ms Sprite.texture becomes the next key; after coin-3 it wraps to coin-0
+```
+
+- `Frames({ keys, fps, loop, playing })`, defaults `[]`, `12`, `true`, `true`. `keys` and `fps` mean
+  what they mean on the `frames` step. `Anim.FramesValue` is the value type.
+- The first key lands on the first frame step after the component appeared. Give the `Sprite` the
+  first key, as above, so no other picture shows before it.
+- A new `keys` array restarts at key 0. The same array never restarts, so a view that returns the
+  same constant every reconcile keeps its phase. A `set` of `fps`, `loop` or `playing` keeps the
+  position.
+- `playing: false` holds the key on the screen; `playing: true` walks on from it. `loop: false`
+  stops on the last key and writes nothing more until `keys` changes.
+- No `Sprite` on the entity: nothing is written and nothing is logged; the key is written once a
+  `Sprite` is there. An empty `keys` writes nothing.
+- A running `frames` step on the same entity wins: it owns `Sprite.texture` while it runs, the loop
+  keeps its clock, and on the first frame step after the step ended (by its last key, `finish()`,
+  `finishAll()`, the abort of a node or `cancel()`) the loop writes its current key again.
+- Modes: `"paused"` moves nothing, `"fast"` stops the clock (a loop has no end to finish), `"live"`
+  goes on from there. Reduced motion stops it on the frame it shows; switched off, it walks on from
+  that frame.
+- Not a track: `Animation` and `active()` do not count it, and it never calls `time.wake()`, so a
+  screen with spinning coins steps at `time.idleFps` two seconds after the last wake.
+- Writes go through `ecs.set`, so `changed(Sprite)` sees them and `renderer` swaps the texture. Plain
+  JSON: `world.ecs.snapshot()` and `/inspect` show it. Never saved: components are not the model.
+
+## Components
 
 `Animation({ playing })` — how many tracks and running timelines name the entity. Added at the
 first one, removed at zero. `anim` never reads it; the inspector and `ui.lint` do.
+
+`Frames({ keys, fps, loop, playing })` — the frame loop above. A game writes it; `anim` reads it.
 
 ## How a frame runs
 
@@ -250,9 +292,9 @@ callback and the sweep of the same frame sees the tracks it just advanced.
 
 | World mode | The step |
 |---|---|
-| `"live"` | The timelines consume `time.delta` first — a track a step just started takes the remainder at once — then every other track advances. |
+| `"live"` | The timelines consume `time.delta` first — a track a step just started takes the remainder at once — then every other track advances, then every `Frames` loop. |
 | `"paused"` | Nothing moves. |
-| `"fast"` | `finishAll()`. |
+| `"fast"` | `finishAll()`. The `Frames` loops stand. |
 
 Additive tracks advance before the absolute ones, so the absolute owner of a field writes the sum
 of this frame's offsets. Determinism: no `Date.now`, no `performance.now`, no `Math.random`, no
@@ -272,9 +314,11 @@ additive track leaves, the field is written once more without offsets.
 - **onInit** — registers the one `animate` frame step.
 - **onStart** — reads the `animations` of every feature into the registry (a duplicate id throws),
   installs the `TweenDriver` through `world.projection.setDriver`, registers
-  `flow.fx.handle("play", …, { runInFast: false })`.
-- **onStop** — finishes everything, so every pending `done` resolves, then removes the driver, the
-  frame callback and the handler and clears the tables.
+  `flow.fx.handle("play", …, { runInFast: false })`, registers `ecs.onAdded` and `ecs.onRemoved`
+  on `Frames` and seeds the loop table with the entities that carry it already.
+- **onStop** — finishes everything, so every pending `done` resolves and every `frames` step
+  releases its hold, then removes the driver, the frame callback, the handler and the two `Frames`
+  hooks and clears the tables.
 
 ## Doors
 
@@ -285,6 +329,7 @@ door, `@moku-labs/game/control`, dev builds only. Input `{ on: "boolean" }`: it 
 ## Dependencies
 
 `time` (the frame step, `delta`, `wake()`), `flow` (`fx.handle`, `fx.dispatch`, `features.all()`),
-`world` (the driver seam, `projection.entityOf`, `restOf`, the ecs with `spawn` and `despawn`, the
-`Layer` and `Order` components), `renderer` (its `Sprite`, `Transform` and `Parent` components and
+`world` (the driver seam, `projection.entityOf`, `restOf`, the ecs with `spawn` and `despawn`,
+`onAdded`, `onRemoved` and `query` for `Frames`, the `Layer` and `Order` components), `renderer`
+(its `Sprite`, `Transform` and `Parent` components and
 the `rootPoseOf`, `localPoseOf` and `parentOf` pose helpers of `sync/pose.ts`; no API call).

@@ -12,7 +12,7 @@ import { spawnStep } from "./spawn";
 import type { Cursor, CursorCtx, Step, TimelineRuntime } from "./types";
 
 /** A `frames` cursor starts before its first key, so the first advance always writes one. */
-const BEFORE_FIRST_FRAME = -1;
+export const BEFORE_FIRST_FRAME = -1;
 
 /**
  * Builds the cursor records of one step and of everything under it.
@@ -28,7 +28,8 @@ export function createCursor(step: Step): Cursor {
     elapsed: 0,
     motion: undefined,
     started: false,
-    ended: false
+    ended: false,
+    held: undefined
   };
 }
 
@@ -304,8 +305,38 @@ function advanceTween(
 }
 
 /**
+ * Claims the sprite a `frames` step writes, once per entity it resolves, so the `Frames` loop of
+ * that entity stands aside while the step runs.
+ *
+ * @param cctx - What the cursor carries down the tree.
+ * @param cursor - The frames cursor.
+ * @param entity - The entity the step writes now.
+ */
+function holdSprite(cctx: CursorCtx, cursor: Cursor, entity: Entity): void {
+  if (cursor.held === entity) return;
+
+  releaseSprite(cctx, cursor);
+  cursor.held = entity;
+  cctx.rt.holdFrames(entity);
+}
+
+/**
+ * Hands the sprite a `frames` step held back to its `Frames` loop. Every way the step ends calls
+ * it; only the first call releases.
+ *
+ * @param cctx - What the cursor carries down the tree.
+ * @param cursor - The frames cursor.
+ */
+function releaseSprite(cctx: CursorCtx, cursor: Cursor): void {
+  if (cursor.held === undefined) return;
+
+  cctx.rt.releaseFrames(cursor.held);
+  cursor.held = undefined;
+}
+
+/**
  * Advances a `frames` step: it writes the key the elapsed time landed on, and ends after the last
- * one unless the list loops.
+ * one unless the list loops. While it runs it holds its entity against the `Frames` loop.
  *
  * @param cctx - What the cursor carries down the tree.
  * @param cursor - The frames cursor.
@@ -322,11 +353,13 @@ function advanceFrames(
   const entity = step.keys.length === 0 ? undefined : spriteOf(cctx, step);
 
   if (entity === undefined) {
+    releaseSprite(cctx, cursor);
     cursor.ended = true;
 
     return deltaMs;
   }
 
+  holdSprite(cctx, cursor, entity);
   cursor.elapsed += deltaMs;
 
   const index = frameIndexAt(step.keys, step.fps, step.loop, cursor.elapsed);
@@ -341,6 +374,7 @@ function advanceFrames(
 
   if (step.loop || cursor.elapsed < total) return 0;
 
+  releaseSprite(cctx, cursor);
   cursor.ended = true;
 
   return cursor.elapsed - total;
@@ -454,6 +488,7 @@ export function finishCursor(cctx: CursorCtx, cursor: Cursor): void {
     }
     case "frames": {
       finishFrames(cctx, step);
+      releaseSprite(cctx, cursor);
 
       break;
     }
@@ -512,6 +547,11 @@ export function cancelCursor(cctx: CursorCtx, cursor: Cursor): void {
     }
     case "tween": {
       if (cursor.started) cursor.motion?.cancel();
+
+      break;
+    }
+    case "frames": {
+      releaseSprite(cctx, cursor);
 
       break;
     }

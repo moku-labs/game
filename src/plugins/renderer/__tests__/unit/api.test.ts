@@ -17,11 +17,18 @@ describe("renderer api", () => {
       "viewport"
     ]);
     expect(Object.keys(mock.api.viewport).toSorted()).toEqual(["size", "toReference", "toScreen"]);
-    expect(Object.keys(mock.api.host).toSorted()).toEqual(["canvas", "kind", "pixi", "ready"]);
+    expect(Object.keys(mock.api.host).toSorted()).toEqual([
+      "canvas",
+      "device",
+      "kind",
+      "pixi",
+      "ready"
+    ]);
     expect(Object.keys(mock.api.sync).toSorted()).toEqual([
       "debug",
       "displayOf",
       "displays",
+      "filters",
       "fonts",
       "hitTest",
       "textures"
@@ -33,6 +40,7 @@ describe("renderer api", () => {
       "provide"
     ]);
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
+    expect(Object.keys(mock.api.sync.filters)).toEqual(["set"]);
     expect(Object.keys(mock.api.sync.fonts).toSorted()).toEqual(["install", "installed"]);
     expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual(["nineSlice", "state"]);
   });
