@@ -19,9 +19,9 @@ app.renderer.stats();                            // monitor
 ```
 
 No module imports a sibling's run-time code: `api.ts` injects `host` into `viewport`, both into
-`sync`, and `host` and `sync` into `monitor`. One exception: `host/init.ts` calls
-`installDrawCounting` of `monitor/draw-calls.ts` in a dev build, because the counter must be in
-Pixi's registry before `new Application()`, earlier than any module is injected. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
+`sync`, and `host` and `sync` into `monitor`. `api.ts` also injects `installDrawCounting` of
+`monitor/draw-calls.ts` into `host` in a dev build, because `host/init.ts` must put the counter in
+Pixi's registry before `new Application()`, before `monitor` exists. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
 and lives in `state.host.pixi`, so a game without `...screen` carries no Pixi in its bundle.
 
 ## Components
@@ -195,7 +195,8 @@ The install sits behind the inline dev guard and logs `"moku:dev"` with
 `{ command: "renderer.drawCalls" }`, so a production `define` folds it and the counter leaves the
 bundle; `stats()` then has no `drawCalls` field. The guard is the one of `capture()` written as a
 positive branch (`typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__`): Bun 1.3.14 drops
-an import used only inside a folded `if`, but keeps one used after a folded early `return`. `begin()` starts the count of a frame at 0 and
+code used only inside a folded `if`, but keeps code used after a folded early `return`. `api.ts`
+hands `host` the counter under the same guard, so a production build drops the counter module. `begin()` starts the count of a frame at 0 and
 `end()` closes it, so a draw between frames, as a capture's extract, is not counted. The WebGL
 fallback reads 0: the three classes are WebGPU ones. Known miss: Pixi 8.22 adds one native
 `pass.draw(3)` for the MSAA restore (`GpuMsaaRestore`), which no subclass sees; it costs one call

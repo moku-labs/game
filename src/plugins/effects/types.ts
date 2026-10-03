@@ -32,7 +32,10 @@ export type Config = {
   maxPasses: number;
   /** Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart`. */
   phone: boolean | "auto";
-  /** What a `Blur` with `quality: 0` and `resolution: 0` resolves to. */
+  /**
+   * What a `Blur` with `quality: 0` and `resolution: 0` resolves to. Shallow merge: a game that
+   * sets `blur` gives both fields.
+   */
   blur: { quality: number; phoneResolution: number };
 };
 

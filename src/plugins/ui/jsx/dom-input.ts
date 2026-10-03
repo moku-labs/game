@@ -48,6 +48,18 @@ const FIXED_ATTRIBUTES: readonly (readonly [string, string])[] = [
 ];
 
 /**
+ * The `type` and the keyboard (`inputmode`) of each field kind. A text field leaves the keyboard
+ * to the browser.
+ */
+const KIND_ATTRIBUTES: Readonly<
+  Record<FieldKind, { type: string; inputMode: string | undefined }>
+> = {
+  text: { type: "text", inputMode: undefined },
+  number: { type: "text", inputMode: "decimal" },
+  email: { type: "email", inputMode: "email" }
+};
+
+/**
  * The page a canvas lives on.
  *
  * @param canvas - The canvas of the renderer, or nothing while it is inert.
@@ -93,12 +105,15 @@ export function removeHiddenInput(element: HTMLInputElement): void {
  * @param setup - The kind, the max length and the label of the field.
  */
 export function configureInput(element: HTMLInputElement, setup: InputSetup): void {
-  element.setAttribute("type", setup.kind === "email" ? "email" : "text");
+  // Give the element the type and the keyboard of the field's kind.
+  const { type, inputMode } = KIND_ATTRIBUTES[setup.kind];
 
-  if (setup.kind === "number") element.setAttribute("inputmode", "decimal");
-  else if (setup.kind === "email") element.setAttribute("inputmode", "email");
-  else element.removeAttribute("inputmode");
+  element.setAttribute("type", type);
 
+  if (inputMode === undefined) element.removeAttribute("inputmode");
+  else element.setAttribute("inputmode", inputMode);
+
+  // Then its max length and its label.
   if (setup.maxLength === undefined) element.removeAttribute("maxlength");
   else element.setAttribute("maxlength", String(setup.maxLength));
 

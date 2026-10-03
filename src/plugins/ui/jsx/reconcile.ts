@@ -629,14 +629,17 @@ export function createReconciler(
   function writeLive(element: Element): void {
     writeOrder(element);
 
+    // Remove the visuals and inputs the element no longer carries.
     const values = [...visualOf(element), ...inputOf(element)];
 
     for (const type of [...VISUALS, ...INPUTS]) {
       const carried = values.some(value => value.type === type);
+      const isDropped = !carried && ecs.has(element.entity, type);
 
-      if (!carried && ecs.has(element.entity, type)) ecs.remove(element.entity, type);
+      if (isDropped) ecs.remove(element.entity, type);
     }
 
+    // Add the ones the entity lacks; patch the fields of the rest, but never a tag or `Scroll`.
     for (const value of values) {
       if (!ecs.has(element.entity, value.type)) {
         ecs.add(element.entity, value);
@@ -644,11 +647,13 @@ export function createReconciler(
         continue;
       }
 
-      if (value.value !== true && value.type !== Scroll) {
-        const owned = ecs.typeOf(value.type.componentName)?.owned ?? [];
+      const isPatchable = value.value !== true && value.type !== Scroll;
 
-        ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
-      }
+      if (!isPatchable) continue;
+
+      const owned = ecs.typeOf(value.type.componentName)?.owned ?? [];
+
+      ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
     }
 
     writeExtras(element);
@@ -680,22 +685,31 @@ export function createReconciler(
    * @param element - The live element that changed.
    */
   function writeExtras(element: Element): void {
-    if (element.extras.size === 0 && listedOf(element.node).length === 0) return;
+    const hasNoExtras = element.extras.size === 0 && listedOf(element.node).length === 0;
 
+    if (hasNoExtras) return;
+
+    // Read the extras of this render and warn about the ones the element owns itself.
     const next = extrasOf(element);
 
     warnOwned(element);
 
+    // Remove the extras that left the `components` prop.
     for (const [name, previous] of element.extras) {
       if (!next.has(name)) ecs.remove(element.entity, previous.type);
     }
 
+    // Add a new, tag or missing extra whole; patch only the changed fields of the rest.
     for (const [name, value] of next) {
       const previous = element.extras.get(name);
+      const isUnchanged = previous !== undefined && sameFields(previous.value, value.value);
 
-      if (previous !== undefined && sameFields(previous.value, value.value)) continue;
+      if (isUnchanged) continue;
 
-      if (previous === undefined || value.value === true || !ecs.has(element.entity, value.type)) {
+      const isTag = value.value === true;
+      const needsAdd = previous === undefined || isTag || !ecs.has(element.entity, value.type);
+
+      if (needsAdd) {
         ecs.add(element.entity, value);
 
         continue;
@@ -706,6 +720,7 @@ export function createReconciler(
       ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
     }
 
+    // Remember them for the next diff.
     element.extras = next;
   }
 
@@ -753,20 +768,22 @@ export function createReconciler(
     parentIdentity: string,
     instance?: string
   ): Entity | undefined {
+    // Expand a component into its view; the view it produced takes the key of the component node.
     const identity = identityOf(parentIdentity, node, index);
     const expanded = expand(node, identity);
+    const view = expanded.node;
     const owner = expanded.instance ?? instance;
-    const effective =
-      expanded.node === undefined || expanded.instance === undefined
-        ? expanded.node
-        : withKey(expanded.node, node.key);
+    const isComponentView = view !== undefined && expanded.instance !== undefined;
+    const effective = isComponentView ? withKey(view, node.key) : view;
 
     if (effective === undefined) return state.byIdentity.get(identity);
 
+    // Patch the element at this identity when the type held; otherwise replace it.
     const existing = state.byIdentity.get(identity);
     const element = existing === undefined ? undefined : state.elements.get(existing);
+    const isSameType = element !== undefined && element.type === effective.type;
 
-    if (element !== undefined && element.type === effective.type) {
+    if (isSameType) {
       patch(root, element, effective, owner);
 
       return element.entity;
@@ -922,6 +939,7 @@ export function createReconciler(
    * Despawns every exiting element whose motions finished, and closes a popup whose root is gone.
    */
   function sweep(): void {
+    // Despawn the exiting subtrees that stopped moving.
     for (const entity of state.exiting) {
       const element = state.elements.get(entity);
 
@@ -936,12 +954,15 @@ export function createReconciler(
       despawnTree(element);
     }
 
+    // Drop a removed root once its element tree is gone, and close its popup.
     for (const entity of state.removing) {
       const root = state.roots.get(entity);
 
-      if (root === undefined || (root.element !== undefined && state.elements.has(root.element))) {
-        continue;
-      }
+      if (root === undefined) continue;
+
+      const isStillMounted = root.element !== undefined && state.elements.has(root.element);
+
+      if (isStillMounted) continue;
 
       state.removing.delete(entity);
       state.roots.delete(entity);
@@ -952,6 +973,51 @@ export function createReconciler(
   }
 
   /**
+   * Applies a solved rect to an element that is already live. A moved one gets its `Box`, its
+   * visual size and its `change.Box` motion; its rest pose then plays `change.Transform` unless
+   * the `change` hook already moves it.
+   *
+   * @param element - The live element to apply.
+   * @param parent - The rect of its parent, or nothing for a root.
+   */
+  function applyLive(element: Element, parent: Rect | undefined): void {
+    // Commit a moved rect, rewrite the components and play the `change` hook.
+    let hooked = false;
+
+    if (element.moved) {
+      modules.layout.commit(element, parent);
+      writeLive(element);
+      hooked = modules.layout.change(element, element.previous);
+    }
+
+    // Move the rest pose, which plays `change.Transform` only when no hook took it.
+    modules.layout.repose(element, parent, hooked);
+  }
+
+  /**
+   * Applies the first solved rect to an element that just entered: it takes its rect and rest
+   * pose with no motion, then gets every component and becomes live.
+   *
+   * @param element - The element that entered.
+   * @param parent - The rect of its parent, or nothing for a root.
+   */
+  function applyFirst(element: Element, parent: Rect | undefined): void {
+    // Take the rect and the rest pose without a motion.
+    modules.layout.commit(element, parent);
+    modules.layout.repose(element, parent, true);
+
+    // Spawn every component the element carries, extras included.
+    const root = state.roots.get(element.root) ?? { layer: "ui", order: 0 };
+
+    element.extras = extrasOf(element);
+    warnOwned(element);
+
+    for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
+
+    element.live = true;
+  }
+
+  /**
    * Gives every element of a solved root its components, its rest pose and its motion. A live
    * element whose rect moved gets its `Box`, its visual size and its `change.Box` motion; one
    * whose rest pose moved (a new rect, a new fit scale) plays `change.Transform` or takes it.
@@ -959,33 +1025,18 @@ export function createReconciler(
    * @param element - The element to apply.
    */
   function applyRects(element: Element): void {
+    // Apply this element: a live one moves, a new one spawns its components.
     const parent = parentRect(element);
 
     if (element.live) {
-      let hooked = false;
-
-      if (element.moved) {
-        modules.layout.commit(element, parent);
-        writeLive(element);
-        hooked = modules.layout.change(element, element.previous);
-      }
-
-      modules.layout.repose(element, parent, hooked);
+      applyLive(element, parent);
     } else {
-      const root = state.roots.get(element.root) ?? { layer: "ui", order: 0 };
-
-      modules.layout.commit(element, parent);
-      modules.layout.repose(element, parent, true);
-      element.extras = extrasOf(element);
-      warnOwned(element);
-
-      for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
-
-      element.live = true;
+      applyFirst(element, parent);
     }
 
     element.moved = false;
 
+    // Then its children, top-down.
     for (const child of element.children) {
       const childElement = lookup(child);
 

@@ -3,10 +3,23 @@
  * it and the runtime the cursor reaches the world through.
  */
 import type { Json } from "../../model/types";
-import type { AnyComponent, AnyComponentValue } from "../../world/ecs/types";
+import type { AnyComponent, AnyComponentValue, ComponentType } from "../../world/ecs/types";
 import type { Ease, Entity, TrackOptions } from "../../world/types";
 import type { StepMotion } from "../tween/types";
 import type { Target } from "../types";
+
+/**
+ * The value of the component a step names, with its shape erased: the value type of
+ * `AnyComponent`. A step is built against the real component, so `set(target, Sprite, patch)`
+ * checks the patch; the step tree and the runtime then carry the component erased, which lets one
+ * choreography mix components.
+ *
+ * @example
+ * ```ts
+ * const patch: ErasedFields = { texture: "hud.coin-gold" };
+ * ```
+ */
+export type ErasedFields = AnyComponent extends ComponentType<infer Value> ? Value : never;
 
 /**
  * A sound, owned by `anim` and handled by `audio`. It is a `flow` descriptor and a timeline step
@@ -103,7 +116,7 @@ export type Step =
       readonly kind: "set";
       readonly target: Target;
       readonly component: AnyComponent;
-      readonly patch: Readonly<Record<string, unknown>>;
+      readonly patch: Readonly<ErasedFields>;
     }
   | {
       readonly kind: "frames";
@@ -189,7 +202,7 @@ export type TimelineRuntime = {
    * @param component - The component to read.
    * @returns The stored value, or `undefined`.
    */
-  read(entity: Entity, component: AnyComponent): Readonly<Record<string, unknown>> | undefined;
+  read(entity: Entity, component: AnyComponent): Readonly<ErasedFields> | undefined;
 
   /**
    * Writes a patch through `ecs.set`, so `changed()` sees it.
@@ -198,7 +211,7 @@ export type TimelineRuntime = {
    * @param component - The component to write.
    * @param patch - The fields to overwrite.
    */
-  write(entity: Entity, component: AnyComponent, patch: Record<string, unknown>): void;
+  write(entity: Entity, component: AnyComponent, patch: Partial<ErasedFields>): void;
 
   /**
    * Turns the root-space target of a `tween` step into the local target under the entity's

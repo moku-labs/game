@@ -5,7 +5,7 @@
  */
 import type { Point } from "../../renderer/types";
 import { alphaByte, TABLE_SIZE } from "./bake";
-import type { BakedEmitter, BornFields, EmitterInstance, Rng, Shape } from "./types";
+import type { BakedEmitter, BornFields, EmitterInstance, PixiParticle, Rng, Shape } from "./types";
 
 /** The slice a prewarm is simulated in, in milliseconds. */
 const SLICE_MS = 16;
@@ -20,17 +20,29 @@ const DEGREES = Math.PI / 180;
 const ORIGIN: Readonly<Point> = Object.freeze({ x: 0, y: 0 });
 
 /**
- * Where a particle is born inside its shape, around the origin.
+ * The birth point every birth writes into and reads at once: one object for the whole module, so
+ * a birth makes no new one.
+ */
+const BIRTH: Point = { x: 0, y: 0 };
+
+/**
+ * Writes where a particle is born inside its shape, around the origin, into `at`.
  *
  * @param shape - The birth shape.
  * @param rng - The instance's random source.
- * @returns The offset from the origin.
+ * @param at - The point to write the offset from the origin into.
  */
-function birthPoint(shape: Shape, rng: Rng): Point {
-  if (shape.kind === "point") return { x: 0, y: 0 };
+function birthPoint(shape: Shape, rng: Rng, at: Point): void {
+  if (shape.kind === "point") {
+    at.x = 0;
+    at.y = 0;
+    return;
+  }
 
   if (shape.kind === "rect") {
-    return { x: (rng.next() - 0.5) * shape.w, y: (rng.next() - 0.5) * shape.h };
+    at.x = (rng.next() - 0.5) * shape.w;
+    at.y = (rng.next() - 0.5) * shape.h;
+    return;
   }
 
   const inner = shape.kind === "ring" ? Math.max(0, shape.radius - shape.width / 2) : 0;
@@ -39,7 +51,8 @@ function birthPoint(shape: Shape, rng: Rng): Point {
   const distance = Math.sqrt(inner * inner + rng.next() * (outer * outer - inner * inner));
   const turn = rng.next() * 2 * Math.PI;
 
-  return { x: Math.cos(turn) * distance, y: Math.sin(turn) * distance };
+  at.x = Math.cos(turn) * distance;
+  at.y = Math.sin(turn) * distance;
 }
 
 /**
@@ -61,9 +74,12 @@ function colorAt(baked: BakedEmitter, step: number): number {
  * @param to - The index it takes.
  */
 function moveBorn(born: BornFields, from: number, to: number): void {
-  for (const field of [born.age, born.life, born.vx, born.vy, born.spin, born.variant]) {
-    field[to] = field[from] ?? 0;
-  }
+  born.age[to] = born.age[from] ?? 0;
+  born.life[to] = born.life[from] ?? 0;
+  born.vx[to] = born.vx[from] ?? 0;
+  born.vy[to] = born.vy[from] ?? 0;
+  born.spin[to] = born.spin[from] ?? 0;
+  born.variant[to] = born.variant[from] ?? 0;
 }
 
 /**
@@ -135,6 +151,47 @@ function advanceLive(instance: EmitterInstance, deltaMs: number): number {
 }
 
 /**
+ * Gives one particle its birth at the next free index: place, look and born fields, drawn from the
+ * instance's own random source in a fixed order.
+ *
+ * @param instance - The instance.
+ * @param particle - The particle, from the pool or new.
+ * @param variant - The index of its texture.
+ * @param offset - Where the origin of the emission is now, in the container's space.
+ */
+function birthParticle(
+  instance: EmitterInstance,
+  particle: PixiParticle,
+  variant: number,
+  offset: Readonly<Point>
+): void {
+  const { baked, born, rng } = instance;
+  const { config } = baked;
+  const index = instance.container.particleChildren.length;
+
+  // Where it starts and where it heads: the birth point, then the direction and the speed.
+  birthPoint(config.shape, rng, BIRTH);
+  const turn = rng.between(config.angle[0], config.angle[1]) * DEGREES;
+  const speed = rng.between(config.speed[0], config.speed[1]);
+
+  // The look of its first step: placed at the birth point, upright, at the first table entry.
+  particle.x = offset.x + BIRTH.x;
+  particle.y = offset.y + BIRTH.y;
+  particle.rotation = 0;
+  particle.scaleX = baked.scaleTable[0] ?? 1;
+  particle.scaleY = particle.scaleX;
+  particle.color = colorAt(baked, 0);
+
+  // The born fields the advance reads: age, life, velocity, spin and texture.
+  born.age[index] = 0;
+  born.life[index] = rng.between(config.lifeMs[0], config.lifeMs[1]);
+  born.vx[index] = Math.cos(turn) * speed;
+  born.vy[index] = Math.sin(turn) * speed;
+  born.spin[index] = rng.between(config.spin[0], config.spin[1]);
+  born.variant[index] = variant;
+}
+
+/**
  * Emits up to `count` particles, never past `maxParticles`. A particle comes from the pool before
  * a new one is made; its texture, birth point, velocity, life and spin are drawn from the
  * instance's own random source.
@@ -149,37 +206,23 @@ export function emitParticles(
   count: number,
   offset: Readonly<Point>
 ): number {
-  const { baked, born, rng } = instance;
-  const { config } = baked;
+  const { baked, rng } = instance;
   const children = instance.container.particleChildren;
-  const due = Math.max(0, Math.min(count, config.maxParticles - children.length));
+  const due = Math.max(0, Math.min(count, baked.config.maxParticles - children.length));
 
   for (let made = 0; made < due; made += 1) {
+    // Pick its texture; an effect with none left stops here.
     const variant = rng.int(baked.textures.length);
     const texture = baked.textures[variant];
 
     if (texture === undefined) return made;
 
+    // Take a particle from the pool before making one, then give it its birth.
     const particle =
       instance.pool.pop() ?? new instance.particleClass({ texture, anchorX: 0.5, anchorY: 0.5 });
-    const at = birthPoint(config.shape, rng);
-    const turn = rng.between(config.angle[0], config.angle[1]) * DEGREES;
-    const speed = rng.between(config.speed[0], config.speed[1]);
-    const index = children.length;
 
     particle.texture = texture;
-    particle.x = offset.x + at.x;
-    particle.y = offset.y + at.y;
-    particle.rotation = 0;
-    particle.scaleX = baked.scaleTable[0] ?? 1;
-    particle.scaleY = particle.scaleX;
-    particle.color = colorAt(baked, 0);
-    born.age[index] = 0;
-    born.life[index] = rng.between(config.lifeMs[0], config.lifeMs[1]);
-    born.vx[index] = Math.cos(turn) * speed;
-    born.vy[index] = Math.sin(turn) * speed;
-    born.spin[index] = rng.between(config.spin[0], config.spin[1]);
-    born.variant[index] = variant;
+    birthParticle(instance, particle, variant, offset);
     children.push(particle);
   }
 

@@ -73,7 +73,7 @@
  * | effects | maxParticles | 3000, live particles above which one dev warning fires per crossing |
  * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
  * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |
- * | effects | blur | { quality: 2, phoneResolution: 0.5 }, what a Blur with quality 0 and resolution 0 resolves to |
+ * | effects | blur | { quality: 2, phoneResolution: 0.5 }, what a Blur with quality 0 and resolution 0 resolves to; shallow merge: a game that sets `blur` gives both fields |
  *
  * Subpaths next to the root:
  *

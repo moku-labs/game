@@ -173,10 +173,16 @@ function pageMessage(error: unknown): string {
  * also while the game is paused.
  *
  * @param handles - The game and the doors.
- * @param deltaMs - The game time of the frame: 1000/60 ms, the frame of the headless leg.
+ * @param deltaMs - The game time of the frame; 1000/60 ms when omitted, the frame of the
+ *   headless leg.
  */
-async function pageStepFrame(handles: PageHandles, deltaMs = 1000 / 60): Promise<void> {
-  await handles.doors.run(handles.game, handles.doors.commands.step, { frames: 1, deltaMs });
+async function pageStepFrame(handles: PageHandles, deltaMs?: number): Promise<void> {
+  const frameMs = 1000 / 60;
+
+  await handles.doors.run(handles.game, handles.doors.commands.step, {
+    frames: 1,
+    deltaMs: deltaMs ?? frameMs
+  });
 }
 
 /**
@@ -331,6 +337,7 @@ export async function pagePause(
     const handles = pageHandles();
     const { game, doors } = handles;
     const { startMs } = argument;
+    const frameMs = 1000 / 60;
 
     await doors.run(game, doors.commands.pause);
 
@@ -341,7 +348,7 @@ export async function pagePause(
       left > 0;
       left = start - game.time.snapshot().elapsed
     ) {
-      await pageStepFrame(handles, Math.min(left, 1000 / 60));
+      await pageStepFrame(handles, Math.min(left, frameMs));
     }
 
     return { ok: true, value: game.time.snapshot().elapsed };
@@ -458,6 +465,8 @@ export function comparePixels(expected: Pixels, actual: Pixels, threshold: numbe
 
   const total = expected.width * expected.height;
   const diff = new Uint8ClampedArray(total * 4);
+  // Three parts white to one part baseline: (value + 3 × 255) / 4.
+  const threeQuartersWhite = 3 * 255;
   let differing = 0;
 
   for (let at = 0; at < diff.length; at += 4) {
@@ -468,7 +477,7 @@ export function comparePixels(expected: Pixels, actual: Pixels, threshold: numbe
     }
 
     for (let channel = at; channel < at + 3; channel += 1) {
-      diff[channel] = ((expected.data[channel] ?? 0) + 765) / 4;
+      diff[channel] = ((expected.data[channel] ?? 0) + threeQuartersWhite) / 4;
     }
 
     diff[at + 3] = 255;
@@ -538,10 +547,12 @@ async function pageEncode(pixels: Pixels): Promise<string> {
   }
 
   const bytes = new Uint8Array(await blob.arrayBuffer());
+  // Bytes per `fromCodePoint` call, so the spread stays under the engine's argument limit.
+  const chunkBytes = 32_768;
   let binary = "";
 
-  for (let start = 0; start < bytes.length; start += 32_768) {
-    binary += String.fromCodePoint(...bytes.subarray(start, start + 32_768));
+  for (let start = 0; start < bytes.length; start += chunkBytes) {
+    binary += String.fromCodePoint(...bytes.subarray(start, start + chunkBytes));
   }
 
   return `data:image/webp;base64,${btoa(binary)}`;

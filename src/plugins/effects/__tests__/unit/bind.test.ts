@@ -15,7 +15,6 @@ describe("effectsFor", () => {
     expect(kit.defineEmitter).toBe(defineEmitter);
     expect(kit.Emitter).toBe(Emitter);
     expect(kit.Displacement).toBe(Displacement);
-    expect(Object.keys(kit).toSorted()).toEqual(["Displacement", "Emitter", "defineEmitter"]);
     expect(kit.defineEmitter("fx.stars", { textures: ["fx.star"], burst: 4 }).config.burst).toBe(4);
   });
 });

@@ -18,6 +18,56 @@ function problem(message: string): Error {
 }
 
 /**
+ * Tells whether a parsed JSON value is an object, so its fields can be read.
+ *
+ * @param value - A value of the parsed font.
+ * @returns `true` for an object or an array, `false` for `null` and every primitive.
+ */
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Tells whether a parsed BMFont JSON value carries a list of pages.
+ *
+ * @param font - The parsed file.
+ * @returns `true` when `font.pages` is an array.
+ */
+function hasPageList(font: unknown): font is { pages: unknown[] } {
+  return isObject(font) && "pages" in font && Array.isArray(font.pages);
+}
+
+/**
+ * Reads the file name of one BMFont JSON page: the page itself when it is a name, its `file`
+ * field when it is an object with a name there.
+ *
+ * @param page - One entry of the `pages` list.
+ * @returns The file name, or `undefined` when the page names none.
+ */
+function pageFile(page: unknown): string | undefined {
+  if (typeof page === "string") return page;
+  if (isObject(page) && "file" in page && typeof page.file === "string") return page.file;
+
+  return undefined;
+}
+
+/**
+ * Parses a BMFont JSON file.
+ *
+ * @param source - The file contents.
+ * @param message - The problem to throw when the JSON cannot be read.
+ * @returns The parsed file, still to be narrowed.
+ * @throws {Error} When the JSON cannot be read.
+ */
+function parseFont(source: string, message: string): unknown {
+  try {
+    return JSON.parse(source);
+  } catch {
+    throw problem(message);
+  }
+}
+
+/**
  * Reads the page names of a BMFont JSON file. A page is a file name, or an object with one.
  *
  * @param source - The file contents.
@@ -26,21 +76,11 @@ function problem(message: string): Error {
  * @throws {Error} When the JSON cannot be read.
  */
 function jsonPages(source: string, file: string): string[] {
-  let parsed: unknown;
+  const font = parseFont(source, `the font "${file}" is not readable BMFont JSON.`);
 
-  try {
-    parsed = JSON.parse(source);
-  } catch {
-    throw problem(`the font "${file}" is not readable BMFont JSON.`);
-  }
+  if (!hasPageList(font)) return [];
 
-  const pages = (parsed as { pages?: unknown }).pages;
-
-  if (!Array.isArray(pages)) return [];
-
-  return pages
-    .map(page => (typeof page === "string" ? page : (page as { file?: unknown }).file))
-    .filter((page): page is string => typeof page === "string");
+  return font.pages.map(page => pageFile(page)).filter(page => page !== undefined);
 }
 
 /**
@@ -76,27 +116,21 @@ export function pagesOfFont(source: string, file: string): readonly string[] {
  * @throws {Error} When the JSON cannot be read.
  */
 function renameJsonPages(source: string, names: readonly string[]): string {
-  let parsed: unknown;
+  const font = parseFont(source, "a font to rename is not readable BMFont JSON.");
 
-  try {
-    parsed = JSON.parse(source);
-  } catch {
-    throw problem("a font to rename is not readable BMFont JSON.");
-  }
+  if (!hasPageList(font)) return JSON.stringify(font);
 
-  const font = parsed as { pages?: unknown };
+  const pages = font.pages.map((page, index) => {
+    const name = names[index];
 
-  if (Array.isArray(font.pages)) {
-    font.pages = font.pages.map((page: unknown, index) => {
-      const name = names[index];
+    if (name === undefined) return page;
+    if (typeof page === "string") return name;
 
-      if (name === undefined) return page;
+    return isObject(page) ? { ...page, file: name } : { file: name };
+  });
 
-      return typeof page === "string" ? name : { ...(page as object), file: name };
-    });
-  }
-
-  return JSON.stringify(font);
+  // `pages` already is a key of the font, so the spread keeps it where the file had it.
+  return JSON.stringify({ ...font, pages });
 }
 
 /**

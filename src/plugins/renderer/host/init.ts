@@ -2,9 +2,8 @@
  * @file renderer/host — the init sequence: resolve the mount, load Pixi, create the one
  * application, append its canvas. And the teardown that undoes exactly that.
  */
-import { installDrawCounting } from "../monitor/draw-calls";
 import type { PixiModule, RendererCtx } from "../types";
-import type { HostState } from "./types";
+import type { HostState, InstallDrawCounting } from "./types";
 
 /**
  * The device pixel ratio, or 1 where there is none.
@@ -57,26 +56,32 @@ export function resolveMount(ctx: RendererCtx): HTMLElement | undefined {
  * Swaps Pixi's three WebGPU draw classes for counting ones, so `stats().drawCalls` sees every
  * draw. It runs before `new Application()`, because Pixi builds its systems and adaptors inside
  * `init`. Once per host state: a restore reuses the installed classes. Dev builds only, behind
- * the inline dev guard, so a production `define` folds it and the counter module leaves the
- * bundle. A Pixi without these classes draws on uncounted, with a warning.
+ * the inline dev guard, so a production `define` folds it and its log marker leaves the bundle.
+ * A Pixi without these classes draws on uncounted, with a warning.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param pixi - The module the application is built from.
+ * @param install - The counter the plugin root injected, `undefined` in a production build.
  */
-function installCounting(ctx: RendererCtx, pixi: PixiModule): void {
+function installCounting(
+  ctx: RendererCtx,
+  pixi: PixiModule,
+  install: InstallDrawCounting | undefined
+): void {
   const state = ctx.state.host;
 
-  // The guard of `capture()`, written as a positive branch: Bun 1.3.14 drops an import used only
-  // inside a folded `if`, but keeps one used after a folded early `return`.
+  // The guard of `capture()`, written as a positive branch: Bun 1.3.14 drops code used only
+  // inside a folded `if`, but keeps code used after a folded early `return`.
   if (
     typeof __MOKU_GAME_DEV__ !== "undefined" &&
     __MOKU_GAME_DEV__ &&
+    install !== undefined &&
     state.uninstallCounting === undefined
   ) {
     ctx.log.debug("moku:dev", { command: "renderer.drawCalls" });
 
     try {
-      state.uninstallCounting = installDrawCounting(pixi, ctx.state.monitor.draws);
+      state.uninstallCounting = install(pixi, ctx.state.monitor.draws);
     } catch (error) {
       ctx.log.warn("renderer: draw calls are not counted", { error });
     }
@@ -89,14 +94,19 @@ function installCounting(ctx: RendererCtx, pixi: PixiModule): void {
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param mount - Where the canvas goes.
+ * @param install - The draw-call counter of a dev build, `undefined` in production.
  * @returns Resolves when the canvas is in the page.
  */
-export async function createApplication(ctx: RendererCtx, mount: HTMLElement): Promise<void> {
+export async function createApplication(
+  ctx: RendererCtx,
+  mount: HTMLElement,
+  install: InstallDrawCounting | undefined
+): Promise<void> {
   const state = ctx.state.host;
   const pixi = state.pixi ?? (await ctx.config.loadPixi());
 
   state.pixi = pixi;
-  installCounting(ctx, pixi);
+  installCounting(ctx, pixi, install);
 
   const app = new pixi.Application();
 

@@ -482,6 +482,7 @@ export type AnimCtx = KernelSlice & { readonly deps: Deps };
 
 export type {
   Cursor,
+  ErasedFields,
   ExternalPlayer,
   FxStep,
   HapticDescriptor,

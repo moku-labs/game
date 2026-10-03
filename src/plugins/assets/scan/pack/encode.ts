@@ -129,7 +129,7 @@ function encoderOf(sharp: SharpFactory): Encoder {
  * @example
  * ```ts
  * const encoder = await loadEncoder();
- * encoder.version; // "0.34.5"
+ * encoder.version; // the installed sharp version, such as "0.34.5"
  * ```
  */
 export async function loadEncoder(): Promise<Encoder> {

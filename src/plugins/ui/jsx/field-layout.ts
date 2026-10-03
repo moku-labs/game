@@ -128,62 +128,6 @@ function hiddenPart(x: number, y: number, w: number, h: number): PartBox {
 }
 
 /**
- * Lays out the parts of one field. The text sits at the left padding minus the shift, centred
- * on its line; the caret after the measured prefix; the selection from one prefix to the other,
- * never while composing; the composing underline at the bottom of the line under its range.
- * Outside the editing only the text is drawn, unshifted.
- *
- * @param input - The value, the mirror, the box and the measure.
- * @returns Where every part goes, in the field's own space.
- * @example
- * ```ts
- * layoutField({
- *   value: "Al", mirror: undefined, composing: undefined, size: { w: 300, h: 100 },
- *   padding: { top: 0, right: 20, bottom: 0, left: 20 }, lineHeight: 40, caretWidth: 3,
- *   underline: 3, prefix: text => text.length * 10
- * }).text; // { x: 20, y: 30 }
- * ```
- */
-export function layoutField(input: FieldLayoutInput): FieldLayout {
-  const { value, mirror, padding, lineHeight, prefix, underline } = input;
-  const y = (input.size.h - lineHeight) / 2;
-  const content = value === "" ? "placeholder" : "value";
-  const lineBottom = y + lineHeight - underline;
-
-  if (mirror === undefined) {
-    return {
-      content,
-      text: { x: padding.left, y },
-      caret: hiddenPart(padding.left, y, input.caretWidth, lineHeight),
-      selection: hiddenPart(padding.left, y, 0, lineHeight),
-      composing: hiddenPart(padding.left, lineBottom, 0, underline)
-    };
-  }
-
-  const composing = input.composing;
-  const caret = clampIndex(caretIndexOf(mirror, composing !== undefined), value);
-  const inner = input.size.w - padding.left - padding.right;
-  const shift = shiftOf(prefix(value.slice(0, caret)), inner);
-  const xOf = (index: number): number => padding.left + prefix(value.slice(0, index)) - shift;
-  const start = clampIndex(Math.min(mirror.selectionStart, mirror.selectionEnd), value);
-  const end = clampIndex(Math.max(mirror.selectionStart, mirror.selectionEnd), value);
-  const selected = composing === undefined && start !== end;
-
-  return {
-    content,
-    text: { x: padding.left - shift, y },
-    caret: { x: xOf(caret), y, w: input.caretWidth, h: lineHeight, shown: true },
-    selection: selected
-      ? { x: xOf(start), y, w: xOf(end) - xOf(start), h: lineHeight, shown: true }
-      : hiddenPart(xOf(caret), y, 0, lineHeight),
-    composing:
-      composing === undefined
-        ? hiddenPart(xOf(caret), lineBottom, 0, underline)
-        : composingPart(composing, value, xOf, lineBottom, underline)
-  };
-}
-
-/**
  * The underline under a composing range.
  *
  * @param composing - The range the IME composes.
@@ -204,6 +148,68 @@ function composingPart(
   const end = clampIndex(composing.end, value);
 
   return { x: xOf(start), y, w: xOf(end) - xOf(start), h: height, shown: true };
+}
+
+/**
+ * Lays out the parts of one field. The text sits at the left padding minus the shift, centred
+ * on its line; the caret after the measured prefix; the selection from one prefix to the other,
+ * never while composing; the composing underline at the bottom of the line under its range.
+ * Outside the editing only the text is drawn, unshifted.
+ *
+ * @param input - The value, the mirror, the box and the measure.
+ * @returns Where every part goes, in the field's own space.
+ * @example
+ * ```ts
+ * layoutField({
+ *   value: "Al", mirror: undefined, composing: undefined, size: { w: 300, h: 100 },
+ *   padding: { top: 0, right: 20, bottom: 0, left: 20 }, lineHeight: 40, caretWidth: 3,
+ *   underline: 3, prefix: text => text.length * 10
+ * }).text; // { x: 20, y: 30 }
+ * ```
+ */
+export function layoutField(input: FieldLayoutInput): FieldLayout {
+  // Centre the line in the box; the composing underline sits at its bottom.
+  const { value, mirror, padding, lineHeight, prefix, underline } = input;
+  const y = (input.size.h - lineHeight) / 2;
+  const content = value === "" ? "placeholder" : "value";
+  const lineBottom = y + lineHeight - underline;
+
+  // Outside the editing only the text is drawn, unshifted.
+  if (mirror === undefined) {
+    return {
+      content,
+      text: { x: padding.left, y },
+      caret: hiddenPart(padding.left, y, input.caretWidth, lineHeight),
+      selection: hiddenPart(padding.left, y, 0, lineHeight),
+      composing: hiddenPart(padding.left, lineBottom, 0, underline)
+    };
+  }
+
+  // Shift the text so the caret stays inside the box, and find where an index is drawn.
+  const composing = input.composing;
+  const caret = clampIndex(caretIndexOf(mirror, composing !== undefined), value);
+  const inner = input.size.w - padding.left - padding.right;
+  const shift = shiftOf(prefix(value.slice(0, caret)), inner);
+  const xOf = (index: number): number => padding.left + prefix(value.slice(0, index)) - shift;
+
+  // Order the selection; it is never drawn while composing.
+  const start = clampIndex(Math.min(mirror.selectionStart, mirror.selectionEnd), value);
+  const end = clampIndex(Math.max(mirror.selectionStart, mirror.selectionEnd), value);
+  const selected = composing === undefined && start !== end;
+
+  // Place every part on the shifted line.
+  return {
+    content,
+    text: { x: padding.left - shift, y },
+    caret: { x: xOf(caret), y, w: input.caretWidth, h: lineHeight, shown: true },
+    selection: selected
+      ? { x: xOf(start), y, w: xOf(end) - xOf(start), h: lineHeight, shown: true }
+      : hiddenPart(xOf(caret), y, 0, lineHeight),
+    composing:
+      composing === undefined
+        ? hiddenPart(xOf(caret), lineBottom, 0, underline)
+        : composingPart(composing, value, xOf, lineBottom, underline)
+  };
 }
 
 /**

@@ -203,6 +203,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       withView(entity, work);
     };
 
+    // Placement: a moved entity gets a new transform and may sort differently.
     for (const entity of ecs.changed(Transform)) {
       write(entity, view => {
         applyTransform(sctx, entity, view);
@@ -210,6 +211,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       });
     }
 
+    // Look: the drawn content of the view changed.
     for (const entity of ecs.changed(Sprite)) {
       write(entity, view => {
         applySprite(sctx, entity, view);
@@ -226,8 +228,10 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       write(entity, view => applyShape(sctx, entity, view));
     }
 
+    // Draw order: only the position among the siblings changed.
     for (const entity of ecs.changed(Order)) write(entity, view => resort(sctx, entity, view));
 
+    // Tree position: the view moves to another layer or parent, and is placed and sorted there.
     for (const entity of ecs.changed(Layer)) {
       write(entity, view => {
         attach(sctx, entity, view);
@@ -243,6 +247,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       });
     }
 
+    // A new `Display` object of the game replaces the old view outright.
     for (const entity of ecs.changed(Display)) {
       if (built.has(entity)) continue;
 
