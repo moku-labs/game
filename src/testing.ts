@@ -12,6 +12,7 @@ export { defineVisualTest } from "./visual/define";
 export { parseVisualArgv, runVisualTests } from "./visual/run";
 export type {
   CheckpointResult,
+  VisualApp,
   VisualOptions,
   VisualPage,
   VisualReport,

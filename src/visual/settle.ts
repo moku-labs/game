@@ -1,7 +1,8 @@
 /**
  * @file visual — settle: run frames of 60 fps, each followed by one task so a load and a promise
- * chain progress, until the graph rests at a gate or stops. The mode stays `live`, so popups
- * mount and motions play while it runs.
+ * chain progress, until the graph rests at a gate or stops, then one frame more so the ui of a
+ * screen the gate opened is built. The mode stays `live`, so popups mount and motions play while
+ * it runs.
  */
 import type { SettleApp } from "./types";
 
@@ -36,7 +37,8 @@ export async function frames(app: SettleApp, count: number): Promise<void> {
 }
 
 /**
- * Runs frames until the graph rests at a gate or stops: at least one, at most `limit`.
+ * Runs frames until the graph rests at a gate or stops: at least one, at most `limit`. One more
+ * frame follows, because a screen the gate opened builds its ui in the frame after it.
  *
  * @param app - The started app.
  * @param limit - The most frames to run, `settleFrames` of the run.
@@ -49,7 +51,11 @@ export async function settle(app: SettleApp, limit: number, place: Place): Promi
 
     const state = app.flow.state();
 
-    if (state.pending.gate !== undefined || !state.running) return;
+    if (state.pending.gate !== undefined || !state.running) {
+      await frames(app, 1);
+
+      return;
+    }
   }
 
   throw new Error(

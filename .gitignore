@@ -41,3 +41,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Browser automation scratch files
 .playwright-mcp
+
+# Visual tests: the pictures a pixel difference leaves beside its baseline
+tests/visual/**/*.actual.png
+tests/visual/**/*.diff.png

@@ -65,6 +65,7 @@
     "test:coverage": "vitest run --project unit --project integration --coverage",
     "build": "tsdown",
     "fixture:pack": "bun src/assets.ts --root tests/integration/merge-game --keys tests/integration/merge-game/generated/assets.ts --pack tests/integration/merge-game/dist/assets",
+    "fixture:visual": "bun tests/visual/run.ts",
     "validate": "publint && attw --pack . --profile esm-only",
     "release:setup": "moku-release setup",
     "release:doctor": "moku-release doctor",

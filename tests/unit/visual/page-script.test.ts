@@ -169,6 +169,21 @@ describe("pageStep", () => {
     expect(app.flow.state().path).not.toBe("home");
   });
 
+  it("taps a popup's button right after the tap that opened it", async () => {
+    const { app } = await pageGame();
+    const tap = { ...restore, where: "step 1 (tap)", name: "tap", input: { key: "open" } } as const;
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pageStep(restore);
+    await pageStep(tap);
+
+    expect(await pageStep({ ...tap, where: "step 2 (tap)", input: { key: "claim" } })).toEqual({
+      ok: true,
+      value: undefined
+    });
+    expect(read(app, sources.model).player).toEqual({ coins: 12 });
+  });
+
   it("answers the reason when the command throws", async () => {
     await pageGame();
     await pageStart({ url: URL, settleFrames: 600 });

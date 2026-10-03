@@ -386,6 +386,32 @@ process.exitCode = report.ok ? 0 : 1;
 
 A checkpoint settles the motions and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.png`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, on a Mac only, and compares `screen.png` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
 
+#### Pixels
+
+The pixel leg runs on a Mac only. `pixels` is on by default when the setup has a `page` and the platform is `darwin`, and off everywhere else. No CI job runs it: a Linux runner has no WebGPU worth trusting.
+
+- **`playwright-core`** is an optional peer dependency. The leg loads it with a dynamic import, so a game that never runs pixels never installs it. Add it with `bun add -d playwright-core`. Without it the run stops with "The pixel leg needs playwright-core"; `--no-pixels` runs the headless leg alone.
+- **The browser.** `page.browser` when the setup names one (`{ channel }` or `{ executablePath }`). Otherwise Playwright's own Chromium, whose version `playwright-core` pins, so a Chrome update never moves the baselines: install it with `bunx playwright-core install chromium`. Otherwise the system Google Chrome. Chrome starts with WebGPU on Metal; a page that draws with anything else fails the leg.
+- **The page.** 390 CSS px wide at a device scale of 2, as tall as the game's inert frame: 520 for a 4:3 portrait game, so `screen.png` is 780 × 1040.
+- **`--update`** rewrites `state.json`, `describe.json` and `screen.png` of every test it runs. A pixel difference writes `screen.actual.png` and `screen.diff.png` beside the baseline, red where a pixel differs. Git ignores both.
+- **Tolerance.** A pixel differs when one of its channels moves by more than 24. A checkpoint differs when more than 0.1% of its pixels do. Both are `tolerance` in the options.
+
+The fixture game keeps its visual tests in `tests/visual/`: one `*.visual.ts` per test, the list in `tests.ts`, the script in `run.ts` and the baselines next to them. `bun run test` runs the headless leg through `tests/integration/visual-headless.test.ts`. Both legs run against the dev page:
+
+```sh
+# terminal 1: the dev page of the fixture on a free port
+cd tests/integration/merge-game && bun ./web/serve.ts --port 4173
+
+# terminal 2: from the root of the repository
+bun run fixture:visual --url http://localhost:4173/            # compare with the baselines
+bun run fixture:visual --url http://localhost:4173/ --update   # write the baselines again
+bun run fixture:visual --only gift-popup --no-pixels           # one test, headless only
+```
+
+Without `--url` the page is `http://localhost:3000/`. The exit code is 1 when a checkpoint differs.
+
+The test of the browser leg itself opens a real Chrome only on request: `MOKU_VISUAL_BROWSER=1 bunx vitest run tests/unit/visual/browser.test.ts`. Without the variable it skips with its reason, so `bun run test` opens no browser.
+
 ## Interface in JSX
 
 The interface is one more projection. A screen is a projection whose `view` returns JSX; `ui` reconciles the tree by identity into entities it owns and lays them out with one Yoga solve per change. There is no DOM and no React: the runtime builds plain description nodes, and `"jsxImportSource": "@moku-labs/game"` is the only setup.
@@ -791,6 +817,7 @@ bun run test:integration   # vitest project "integration"
 bun run test:coverage      # both projects with coverage, 90% thresholds
 bun run validate           # publint and attw with the esm-only profile
 bun run fixture:pack       # pack the fixture game into tests/integration/merge-game/dist/assets
+bun run fixture:visual     # the fixture's visual tests, both legs: --url <dev page>, --update, --only <name>, --no-pixels
 bun run release:setup      # moku-release setup
 bun run release:doctor     # moku-release doctor
 bun run release            # moku-release
@@ -803,6 +830,7 @@ bun run release            # moku-release
 | `tests/unit/` | Framework-level unit tests: root index, setup |
 | `tests/integration/` | Framework-level scenarios across plugins |
 | `tests/integration/merge-game/` | The fixture game, written on the public API only. Not published |
+| `tests/visual/` | The visual tests of the fixture game and their baselines: `<test>/<checkpoint>/state.json`, `describe.json`, `screen.png` |
 | `src/plugins/<name>/__tests__/unit/` | Unit tests of one plugin |
 | `src/plugins/<name>/__tests__/integration/` | Integration tests of one plugin |
 | `src/plugins/flow/__tests__/types/` | Type-level tests of the graph typing |
