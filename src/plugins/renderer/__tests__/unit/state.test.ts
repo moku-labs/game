@@ -31,7 +31,8 @@ describe("renderer state", () => {
       onRestore: [],
       onLoss: [],
       cleanups: [],
-      unsupported: undefined
+      unsupported: undefined,
+      uninstallCounting: undefined
     });
     expect(state.viewport.scale).toBe(1);
     expect(state.viewport.frame).toEqual({ x: 0, y: 0, width: 0, height: 0 });
@@ -39,6 +40,8 @@ describe("renderer state", () => {
     expect(state.sync.root).toBeUndefined();
     expect(state.sync.layerList).toBeUndefined();
     expect(state.sync.pooled).toBe(0);
+    expect(state.sync.filters.size).toBe(0);
+    expect(state.monitor.draws).toEqual({ frame: 0, last: 0 });
   });
 
   it("gives every app its own collections", () => {
@@ -65,5 +68,7 @@ describe("renderer state", () => {
     expect(second.sync.views.size).toBe(0);
     expect(second.sync.layers).not.toBe(first.sync.layers);
     expect(second.host.cleanups).not.toBe(first.host.cleanups);
+    expect(second.sync.filters).not.toBe(first.sync.filters);
+    expect(second.monitor.draws).not.toBe(first.monitor.draws);
   });
 });

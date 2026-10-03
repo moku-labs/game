@@ -31,17 +31,23 @@ export function createModules(ctx: RendererCtx): Modules {
 }
 
 /**
- * Reduces the host module to the three questions a caller may ask.
+ * Reduces the host module to the questions a caller may ask.
  *
  * @param host - The full host module.
  * @returns The public host API.
  */
 function exposeHost(host: HostModule): HostApi {
-  return { ready: host.ready, kind: host.kind, canvas: host.canvas, pixi: host.pixi };
+  return {
+    ready: host.ready,
+    kind: host.kind,
+    canvas: host.canvas,
+    pixi: host.pixi,
+    device: host.device
+  };
 }
 
 /**
- * Reduces the sync module to what `input`, `assets` and a debugging game call. There is no
+ * Reduces the sync module to what `input`, `assets`, `effects` and a debugging game call. There is no
  * `layers` member: layers are declared by the scene, through `world.projection.setLayers`.
  *
  * @param sync - The full sync module.
@@ -54,6 +60,7 @@ function exposeSync(sync: SyncModule): SyncApi {
     displays: sync.displays,
     fonts: sync.fonts,
     debug: sync.debug,
+    filters: sync.filters,
     displayOf: sync.displayOf
   };
 }

@@ -201,6 +201,33 @@ describe("logicOnly", () => {
     });
   });
 
+  it("drops the emitters and filters effects reads", () => {
+    const feature = defineFeature("board", {
+      ...description,
+      emitters: [{ id: "coins" }],
+      filters: [{ componentName: "RewardPopup", filter: { id: "glow" } }]
+    });
+
+    const calls = runInit(feature.logicOnly);
+
+    expect(Object.keys(calls[0]?.description ?? {})).toEqual(["nodes", "flows", "contribute"]);
+  });
+
+  it("registers emitters and filters through the feature itself", () => {
+    const feature = defineFeature("board", {
+      ...description,
+      emitters: [{ id: "coins" }],
+      filters: [{ componentName: "RewardPopup", filter: { id: "glow" } }]
+    });
+
+    const calls = runInit(feature);
+
+    expect(calls[0]?.description.emitters).toEqual([{ id: "coins" }]);
+    expect(calls[0]?.description.filters).toEqual([
+      { componentName: "RewardPopup", filter: { id: "glow" } }
+    ]);
+  });
+
   it("keeps the V1 values by reference", () => {
     const calls = runInit(defineFeature("board", description).logicOnly);
 

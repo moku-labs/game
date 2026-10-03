@@ -3,6 +3,7 @@
  */
 import type { HostApi, HostInternal } from "../host/types";
 import type { SyncApi, SyncInternal } from "../sync/types";
+import type { PixiModule } from "../types";
 
 /**
  * The counters of the renderer, for a stats panel or a frame-budget check. Plain numbers, so the
@@ -10,7 +11,11 @@ import type { SyncApi, SyncInternal } from "../sync/types";
  *
  * @example
  * ```ts
- * const stats: RenderStats = { fps: 60, frameMs: 3.4, textures: 12, textureMb: 41.25, views: 180, pooled: 24 };
+ * // The board of Timber Town in a dev build: one glowing button on screen.
+ * const stats: RenderStats = {
+ *   fps: 60, frameMs: 3.4, textures: 12, textureMb: 41.25, views: 180, pooled: 24,
+ *   renderPasses: 3, drawCalls: 14
+ * };
  * ```
  */
 export type RenderStats = {
@@ -33,11 +38,31 @@ export type RenderStats = {
   /** Display objects waiting in the pools. */
   pooled: number;
   /**
-   * Not counted, so always absent. Under WebGPU, Pixi 8.21 batches sprites and graphics straight
-   * onto the native render pass encoder (`encoder.renderPassEncoder.drawIndexed`), past
-   * `renderer.encoder.draw`, so no one place in Pixi sees every draw.
+   * Render passes of a frame, computed from the filter slots `sync` holds: 1 for the frame, and
+   * for every view in the tree with an enabled filter 1 for its content plus the passes of its
+   * enabled slots. 0 while inert. What filters cost on a phone.
+   */
+  renderPasses: number;
+  /**
+   * Draw calls of the last drawn frame. Dev builds only, counted on WebGPU: absent in a production
+   * build, 0 while inert and on the WebGL fallback.
    */
   drawCalls?: number;
+};
+
+/**
+ * The draw-call counter of a dev build: the draws of the frame being drawn and of the last one.
+ * The counting classes close over this one object, so its identity never changes.
+ */
+export type DrawCounter = { frame: number; last: number };
+
+/**
+ * The three counting subclasses, built from the Pixi module at run time.
+ */
+export type CountingClasses = {
+  batch: PixiModule["GpuBatchAdaptor"];
+  graphics: PixiModule["GpuGraphicsAdaptor"];
+  encoder: PixiModule["GpuEncoderSystem"];
 };
 
 /**
@@ -63,6 +88,8 @@ export type MonitorState = {
   frameMs: number;
   /** Callers of `capture()` waiting for the next drawn frame. */
   captures: Array<(url: string | undefined) => void>;
+  /** The draws the dev counter saw; stays at 0 in a production build. */
+  draws: DrawCounter;
 };
 
 /**
@@ -72,23 +99,24 @@ export type MonitorState = {
  * @example
  * ```ts
  * // A headless test: nothing is drawn, so every counter is 0 and there is no picture.
- * app.renderer.stats(); // { fps: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0 }
+ * app.renderer.stats(); // { fps: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0, renderPasses: 0 }
  * await app.renderer.capture(); // undefined
  * ```
  */
 export type MonitorApi = {
   /**
-   * The counters of the renderer, as a fresh object. The frame timing is kept each frame without
-   * an allocation; the rest is read at call time from `sync` and Pixi. There is no `drawCalls`:
-   * Pixi 8.21 has no one draw point under WebGPU.
+   * The counters of the renderer, as a fresh object. The frame timing and the draw calls are kept
+   * each frame without an allocation; the rest is read at call time from `sync` and Pixi.
+   * `drawCalls` is there in a dev build only.
    *
-   * @returns Frames per second, frame work, GPU textures and their memory, views, pooled objects.
-   *   Inert: all 0.
+   * @returns Frames per second, frame work, GPU textures and their memory, views, pooled objects,
+   *   render passes, and in a dev build the draw calls of the last frame. Inert: all 0.
    * @example
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
-   * app.renderer.stats(); // { fps: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0 }
+   * app.renderer.stats(); // { fps: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0, renderPasses: 1 }
+   * // The same frame in a dev build also counts the one sprite batch: { ..., drawCalls: 1 }
    * ```
    */
   stats(): RenderStats;
@@ -116,13 +144,14 @@ export type MonitorApi = {
  */
 export type MonitorInternal = {
   /**
-   * Marks the start of a frame: closes an interval of the measuring window.
+   * Marks the start of a frame: closes an interval of the measuring window and starts the draw
+   * count of the frame at 0.
    */
   begin(): void;
 
   /**
-   * Marks the end of a drawn frame: adds its work to the window, and hands the frame to the
-   * captures that wait for it.
+   * Marks the end of a drawn frame: adds its work to the window, closes the draw count, and hands
+   * the frame to the captures that wait for it.
    */
   end(): void;
 };

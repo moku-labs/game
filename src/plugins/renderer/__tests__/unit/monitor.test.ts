@@ -49,7 +49,15 @@ describe("renderer stats", () => {
     const mock = createMockRenderer({ dom: false });
     const stats = mock.api.stats();
 
-    expect(stats).toEqual({ fps: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0 });
+    expect(stats).toEqual({
+      fps: 0,
+      frameMs: 0,
+      textures: 0,
+      textureMb: 0,
+      views: 0,
+      pooled: 0,
+      renderPasses: 0
+    });
     expect("drawCalls" in stats).toBe(false);
   });
 

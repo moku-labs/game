@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Layer } from "../../../world/ecs/define";
+import { Layer, Order } from "../../../world/ecs/define";
 import { Display, NineSlice, Parent, Sprite, Transform } from "../../components";
-import { FakeContainer, type FakeSprite, FakeTexture } from "../fake-pixi";
+import { FakeContainer, FakeParticleContainer, type FakeSprite, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -956,5 +956,82 @@ describe("sync views: nine-slice borders", () => {
     const { object } = drawNine(mock, "ui.missing");
 
     expect(slices(object)).toEqual([0, 0, 0, 0]);
+  });
+});
+
+describe("sync views: a particle container on a Display", () => {
+  it("attaches in its layer with a label, a 0 x 0 hit box, and is never hit", async () => {
+    const mock = await started();
+    const container = new FakeParticleContainer();
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 540, y: 300 }),
+      Display({ object: container })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(container.parent).toBe(mock.ctx.state.sync.layers.get("items")?.container);
+    expect(container.label).toBe(`Display#${entity}`);
+    expect(mock.ctx.state.sync.views.get(entity)?.hitBox).toEqual({
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    });
+    expect(mock.api.sync.hitTest(540, 300, () => true)).toBeUndefined();
+  });
+
+  it("draws above the host it was spawned after, with the host's Order", async () => {
+    const mock = createMockRenderer();
+
+    await mock.start();
+    mock.world.projection.setLayers([{ name: "items", sort: "order" }]);
+
+    mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Order({ value: 3 }),
+      Transform(),
+      Sprite({ texture: "ui.button" })
+    ]);
+
+    const container = new FakeParticleContainer();
+
+    mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Order({ value: 3 }),
+      Transform(),
+      Display({ object: container })
+    ]);
+    mock.modules.sync.pass();
+
+    const children = mock.ctx.state.sync.layers.get("items")?.container?.children ?? [];
+
+    expect(children.indexOf(container as never)).toBe(1);
+    expect(container.zIndex).toBe(3);
+  });
+
+  it("is detached, not destroyed, when its entity leaves and when the renderer stops", async () => {
+    const mock = await started();
+    const left = new FakeParticleContainer();
+    const kept = new FakeParticleContainer();
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Display({ object: left })
+    ]);
+
+    mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Display({ object: kept })]);
+    mock.modules.sync.pass();
+    mock.world.ecs.despawn(entity);
+    mock.modules.sync.pass();
+
+    expect(left.parent).toBeNull();
+    expect(left.destroyed).toBe(false);
+
+    mock.stop();
+
+    expect(kept.parent).toBeNull();
+    expect(kept.destroyed).toBe(false);
   });
 });

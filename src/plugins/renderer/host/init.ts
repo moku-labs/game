@@ -2,7 +2,8 @@
  * @file renderer/host — the init sequence: resolve the mount, load Pixi, create the one
  * application, append its canvas. And the teardown that undoes exactly that.
  */
-import type { RendererCtx } from "../types";
+import { installDrawCounting } from "../monitor/draw-calls";
+import type { PixiModule, RendererCtx } from "../types";
 import type { HostState } from "./types";
 
 /**
@@ -53,6 +54,36 @@ export function resolveMount(ctx: RendererCtx): HTMLElement | undefined {
 }
 
 /**
+ * Swaps Pixi's three WebGPU draw classes for counting ones, so `stats().drawCalls` sees every
+ * draw. It runs before `new Application()`, because Pixi builds its systems and adaptors inside
+ * `init`. Once per host state: a restore reuses the installed classes. Dev builds only, behind
+ * the inline dev guard, so a production `define` folds it and the counter module leaves the
+ * bundle. A Pixi without these classes draws on uncounted, with a warning.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param pixi - The module the application is built from.
+ */
+function installCounting(ctx: RendererCtx, pixi: PixiModule): void {
+  const state = ctx.state.host;
+
+  // The guard of `capture()`, written as a positive branch: Bun 1.3.14 drops an import used only
+  // inside a folded `if`, but keeps one used after a folded early `return`.
+  if (
+    typeof __MOKU_GAME_DEV__ !== "undefined" &&
+    __MOKU_GAME_DEV__ &&
+    state.uninstallCounting === undefined
+  ) {
+    ctx.log.debug("moku:dev", { command: "renderer.drawCalls" });
+
+    try {
+      state.uninstallCounting = installDrawCounting(pixi, ctx.state.monitor.draws);
+    } catch (error) {
+      ctx.log.warn("renderer: draw calls are not counted", { error });
+    }
+  }
+}
+
+/**
  * Loads Pixi once, creates the application and appends its canvas. Pixi picks WebGL by itself
  * when WebGPU is missing, so only a device with neither ends up in the catch of the caller.
  *
@@ -65,6 +96,7 @@ export async function createApplication(ctx: RendererCtx, mount: HTMLElement): P
   const pixi = state.pixi ?? (await ctx.config.loadPixi());
 
   state.pixi = pixi;
+  installCounting(ctx, pixi);
 
   const app = new pixi.Application();
 
@@ -105,7 +137,8 @@ export function destroyApplication(state: HostState): void {
 
 /**
  * Undoes everything `init` created. Works on the state alone, because `onStop` has no context.
- * `ready` drops first, so a device that goes away during the teardown is ignored.
+ * `ready` drops first, so a device that goes away during the teardown is ignored. The draw
+ * counter swaps Pixi's own classes back, so the next application on the page starts from them.
  *
  * @param state - The host branch of the plugin state.
  */
@@ -118,6 +151,8 @@ export function stopHost(state: HostState): void {
 
   destroyApplication(state);
 
+  state.uninstallCounting?.();
+  state.uninstallCounting = undefined;
   state.unsupported?.remove();
   state.unsupported = undefined;
   state.onReady.length = 0;

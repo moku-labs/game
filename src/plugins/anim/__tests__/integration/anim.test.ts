@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createApp, createPlugin, defineGame, exit, Transform, type } from "../../../../index";
 import { rendererPlugin } from "../../../renderer";
+import { Sprite } from "../../../renderer/components";
 import { timePlugin } from "../../../time";
 import { worldPlugin } from "../../../world";
 import { projection } from "../../../world/projection/define";
+import { Frames } from "../../components";
 import { animPlugin } from "../../index";
-import { defineAnimation, mark, play, sequence, tween } from "../../timeline/steps";
+import { frameIndexAt } from "../../timeline/frames";
+import { defineAnimation, frames, mark, play, sequence, tween } from "../../timeline/steps";
 import type { Target } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -207,5 +210,42 @@ describe("anim plugin integration", () => {
     await handle.done;
 
     expect(app.anim.active()).toBe(0);
+  });
+
+  it("loops a Frames coin on the engine clock and lets a played frames step take over", async () => {
+    const app = await startApp();
+    const keys = ["c0", "c1", "c2"];
+    const coin = app.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Sprite({ texture: "c0" }),
+      Frames({ keys, fps: 10 })
+    ]);
+    const seen: Array<string | undefined> = [];
+    const expected: Array<string | undefined> = [];
+
+    for (let elapsed = 16; elapsed <= 1000; elapsed += 16) {
+      app.time.step(16);
+      seen.push(app.world.ecs.get(coin, Sprite)?.texture);
+      expected.push(keys[frameIndexAt(keys, 10, true, elapsed)]);
+    }
+
+    expect(seen).toEqual(expected);
+    expect(app.anim.active()).toBe(0);
+
+    const sparkle = defineAnimation("board.sparkle", {
+      slots: { it: type<Target>() },
+      build: ({ it }) => frames(it, { keys: ["s0", "s1"], fps: 10 })
+    });
+    const handle = app.anim.play(sparkle, { it: coin });
+    const during: Array<string | undefined> = [];
+
+    while (handle.active()) {
+      app.time.step(16);
+      if (handle.active()) during.push(app.world.ecs.get(coin, Sprite)?.texture);
+    }
+
+    expect(new Set(during)).toEqual(new Set(["s0", "s1"]));
+    expect(app.world.ecs.get(coin, Sprite)?.texture).toMatch(/^c[0-2]$/);
+
+    await app.stop();
   });
 });

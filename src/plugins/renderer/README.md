@@ -19,7 +19,9 @@ app.renderer.stats();                            // monitor
 ```
 
 No module imports a sibling's run-time code: `api.ts` injects `host` into `viewport`, both into
-`sync`, and `host` and `sync` into `monitor`. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
+`sync`, and `host` and `sync` into `monitor`. One exception: `host/init.ts` calls
+`installDrawCounting` of `monitor/draw-calls.ts` in a dev build, because the counter must be in
+Pixi's registry before `new Application()`, earlier than any module is injected. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
 and lives in `state.host.pixi`, so a game without `...screen` carries no Pixi in its bundle.
 
 ## Components
@@ -32,7 +34,7 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. |
 | `NineSlice({ texture, width, height, alpha, tint, debug })` | `"", 0, 0, 1, 0xffffff, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
-| `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. |
+| `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
 | `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false` | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape. `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape; the mask is always filled and never dashed. Motions tween only the numeric fields, never `kind`. |
 
 ```ts
@@ -87,6 +89,7 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `kind(): "webgpu" \| "webgl" \| "none"` | The backend Pixi chose, read once after init. `"none"` while inert or unsupported. |
 | `canvas(): HTMLCanvasElement \| undefined` | A WebGPU restore makes a NEW canvas: a caller that holds listeners compares it with its own every frame. |
 | `pixi(): PixiModule \| undefined` | The lazily loaded Pixi module once `ready()`, so a plugin above draws with the same Pixi and imports none of it. `undefined` while inert, lost or unsupported. |
+| `device(): GPUDevice \| undefined` | The GPU device of the live WebGPU application, read at call time: a restore makes a new one. `effects` checks a custom filter's WGSL with it in a dev build. `undefined` while inert, before `ready()`, while lost, on the unsupported screen and on WebGL. |
 
 ### `viewport` — `app.renderer.viewport`
 
@@ -111,18 +114,36 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `displayOf(entity)` | The Pixi object of the entity, for debugging. |
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.state()` | `{ nineSlice }`, a fresh object. |
+| `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
 An adapter object is parented, sorted and freed like a sprite; its hit box is `getLocalBounds()`
 read at attach, as a `Display` object's is. A point outside the rectangle of a `clip: true` ancestor
 hits nothing inside it. The hit test moves the point into the view's local space through the pose
-helpers below, pivot included.
+helpers below, pivot included. A box without area holds no point: a particle container measures
+`0 × 0` and is never hit, not even at its origin.
+
+### Filters
+
+`effects` builds, writes and destroys the filter instances; `sync` only hangs them on a view and
+counts their passes. `set` keeps the list per entity, view or not, so a call made before the first
+pass built the view lands when it is built. The Pixi target is `view.wrapper ?? view.object`: the
+filters cover the entity's subtree, so a glow on a button glows its label too, and they move from
+the object to a wrapper made later. Pixi copies and freezes the list on every assignment and
+rebuilds the render group when a view goes from no filter to some, so `sync` writes only when the
+instances differ from what the target holds; uniform writes and `enabled` flips need no call.
+
+The filters come off the object and its wrapper when the view lets its object go: a pooled sprite
+never carries one into its next life, and a `Display` object leaves without them, on despawn as at
+stop. The entry is forgotten when the entity leaves, unless it swapped its visual in the same
+frame (a `ui` element that trades its shape for a nine-slice keeps its glow), and when the renderer
+stops. A `rebuildAll` after a restore applies them again. The renderer never destroys a filter.
 
 ### `monitor` — `app.renderer.stats()`, `app.renderer.capture()`
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, frameMs, textures, textureMb, views, pooled }`, a fresh object. Inert: all 0. |
+| `stats()` | `{ fps, frameMs, textures, textureMb, views, pooled, renderPasses }`, plus `drawCalls` in a dev build, a fresh object. Inert: all 0. |
 | `capture()` | Dev builds only. A PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). |
 
 - `fps` counts frame starts over one second of `clock` time; 0 before the first full second and
@@ -140,14 +161,46 @@ helpers below, pivot included.
   `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
   level, in MiB.
 - `views` and `pooled` are read from the `sync` state.
-- `drawCalls` is not counted, and the field is absent. Checked in Pixi 8.21: under WebGPU the
-  batcher and the graphics adaptor draw straight on the native pass encoder
-  (`GpuBatchAdaptor` and `GpuGraphicsAdaptor` call `encoder.renderPassEncoder.drawIndexed`). They do
-  not pass `renderer.encoder.draw`, which only meshes, tiling sprites, particles and filters use.
-  Wrapping it would undercount. Counting every draw would mean patching every native
-  `GPURenderPassEncoder` the frame begins.
 - The frame timing costs two `clock.now()` calls and a few number writes per frame; no allocation.
   The rest is read only when `stats()` is called.
+
+#### Render passes
+
+`renderPasses` is computed from the filter slots `sync` holds, never asked of the GPU, at call time:
+0 while inert; otherwise `1 + Σ over views in the tree with an enabled filter (1 + Σ passes of the
+enabled slots)`. A filtered view costs one pass for its content and one per filter apply (spike
+P10); a disabled filter costs nothing, and a view whose filters are all disabled counts 0. A view
+out of the tree (an unknown layer) counts 0. The pins from P10: no filter `1`; one glow of 1 pass
+on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and a tint on ten
+buttons `31`. The renderer is the one owner of this number; `effects` declares the passes per kind
+and reads `stats().renderPasses` for its budget warnings.
+
+#### Draw calls
+
+`drawCalls` is counted in dev builds only, on WebGPU. Under WebGPU three Pixi 8.21 classes issue
+every draw: `GpuBatchAdaptor.execute` (one `drawIndexed` per batch), `GpuGraphicsAdaptor.execute`
+(one per instruction of the graphics context) and `GpuEncoderSystem.draw` / `drawIndirect` (meshes,
+tiling sprites, particles, filters). `monitor/draw-calls.ts` builds counting subclasses of them from
+the module object, each with the base's `static extension` object, and `host/init.ts` swaps them in
+through `pixi.extensions.remove` and `add` after `loadPixi()` and before `new Application()`,
+because Pixi builds its systems and adaptors inside `init`. No native prototype and no Pixi
+instance is patched. The swap happens once per host state: a restore after a lost device reuses the
+classes. `onStop` swaps Pixi's own classes back, so a second `createApp` on the page (HMR) starts
+from them. A Pixi module without the three classes draws on uncounted, with `ctx.log.warn`.
+
+The install sits behind the inline dev guard and logs `"moku:dev"` with
+`{ command: "renderer.drawCalls" }`, so a production `define` folds it and the counter leaves the
+bundle; `stats()` then has no `drawCalls` field. The guard is the one of `capture()` written as a
+positive branch (`typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__`): Bun 1.3.14 drops
+an import used only inside a folded `if`, but keeps one used after a folded early `return`. `begin()` starts the count of a frame at 0 and
+`end()` closes it, so a draw between frames, as a capture's extract, is not counted. The WebGL
+fallback reads 0: the three classes are WebGPU ones. Known miss: Pixi 8.22 adds one native
+`pass.draw(3)` for the MSAA restore (`GpuMsaaRestore`), which no subclass sees; it costs one call
+per frame only with `antialias: true`, whose default is false. The project pins 8.21.0, and a unit
+test against the real module pins the three names, their `extension` metadata and their methods.
+
+#### Capture
+
 - `capture()` guards with `typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__` inline,
   not with `isDev()`: Bun does not inline a function across modules, and the inline guard folds under
   a production `define`, so the capture code leaves the bundle. The dev branch logs `"moku:dev"`
@@ -206,8 +259,8 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 | `time` phase | What `renderer` does |
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
-| `input` | `monitor` marks the frame start for `stats()`. |
-| `render` | A pending resize is applied, then `app.renderer.render(app.stage)` when `ready`, then `monitor` closes the frame and hands it to a waiting `capture()`. |
+| `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
+| `render` | A pending resize is applied, then `app.renderer.render(app.stage)` when `ready`, then `monitor` closes the frame and its draw count and hands it to a waiting `capture()`. |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -286,16 +339,16 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
 
 ## Lifecycle
 
-- **onStart** `startRenderer` resolves the mount, loads Pixi, creates the application and appends
-  the canvas; then, in the `onReady` callback, `viewport` creates the safe-area probe and the
+- **onStart** `startRenderer` resolves the mount, loads Pixi, in a dev build swaps in the
+  draw-counting classes, creates the application and appends the canvas; then, in the `onReady` callback, `viewport` creates the safe-area probe and the
   resize observer, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
   `render` frame callback is registered. Inert without a document or without a mount: nothing is
   created and nothing is registered.
 - **onStop** `({ config, state }) => stopRenderer({ config, state })` answers a waiting capture
   with `undefined` and forgets the frame counters, then runs the cleanups of `sync`,
   `viewport` and `host` in that order, destroys the pooled objects and the application
-  (`{ removeView: true }`, `{ children: true, texture: false }`), removes the probe and the
-  unsupported element and clears every map. It runs before `world` stops, so the world hooks are
+  (`{ removeView: true }`, `{ children: true, texture: false }`), swaps Pixi's own draw classes
+  back, removes the probe and the unsupported element and clears every map, the filter slots too. It runs before `world` stops, so the world hooks are
   removed while `world` is alive. Textures are left to `assets`; a `Display` object is detached,
   never destroyed.
 
@@ -303,7 +356,7 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
 
 `inspect.ts` holds `game.render` (key `render` in `sources`) of the editor's read door,
 `@moku-labs/game/inspect`, safe in a production build. No input. It reads `stats()` and is read
-again every frame (`changes: "frame"`).
+again every frame (`changes: "frame"`): `renderPasses` always, `drawCalls` in a dev build.
 
 `control.ts` holds two commands of the editor's write door, `@moku-labs/game/control`, dev builds
 only. Each logs a `moku:dev` debug entry.
@@ -330,4 +383,6 @@ device rotation, the safe area on a mobile profile, a real device loss through `
 and `WEBGL_lose_context`, a really hidden tab, the labels in the Pixi DevTools tree, and that the
 bundle of a game without `...screen` carries no Pixi import. Also for the e2e station: `stats()` on
 a real frame loop (fps near the cap, a real `managedTextures` list), and `capture()` giving a PNG
-that shows the board, under WebGPU and WebGL.
+that shows the board, under WebGPU and WebGL. The real `drawCalls` number needs a GPU: the
+fixture's board screen with no filter and no emitter pins it in `tests/integration/merge-game/run.mjs`
+once measured, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.

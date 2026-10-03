@@ -253,7 +253,7 @@ export {
 export { defineBundles, load } from "./plugins/assets/bundles";
 export { defineScene } from "./plugins/scenes/define";
 // anim: choreography as data, the motion sugar, the Animation component
-export { Animation } from "./plugins/anim/components";
+export { Animation, Frames } from "./plugins/anim/components";
 export { defineMotion } from "./plugins/anim/motion";
 export {
   defineAnimation,

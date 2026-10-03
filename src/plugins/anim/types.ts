@@ -216,6 +216,36 @@ export type MotionKeyframe = {
 };
 
 /**
+ * The value of the `Frames` component: a frame loop that lives as long as its entity. `keys` and
+ * `fps` mean what they mean on the `frames` step; `loop: false` stops on the last key and
+ * `playing: false` holds the key on the screen. A new `keys` array restarts at key 0, the same
+ * array keeps its phase.
+ *
+ * @example
+ * ```ts
+ * const spin: FramesValue = { keys: ["items.coin-0", "items.coin-1"], fps: 12, loop: true, playing: true };
+ * ```
+ */
+export type FramesValue = {
+  keys: readonly string[];
+  fps: number;
+  loop: boolean;
+  playing: boolean;
+};
+
+/**
+ * Where the `Frames` loop of one entity stands. `keys` is the array last seen, for the restart
+ * check; `index` is the key the clock last landed on, `-1` before the first one; `written` is
+ * false while that key still has to reach the sprite.
+ */
+export type FrameLoop = {
+  keys: readonly string[];
+  elapsed: number;
+  index: number;
+  written: boolean;
+};
+
+/**
  * anim plugin config. The timings live in the steps and in `defineMotion`, not here: a
  * choreography that reads its duration from a config cannot be read as text.
  *
@@ -269,6 +299,12 @@ export type State = {
   offPlay: (() => void) | undefined;
   /** Bound in `onInit`, so the teardown context can end everything with the state alone. */
   finishAll: (() => void) | undefined;
+  /** One loop per entity that carries `Frames`, kept by the two world hooks. */
+  frameLoops: Map<Entity, FrameLoop>;
+  /** How many running `frames` steps write this entity now. Its loop writes nothing above 0. */
+  framesHeld: Map<Entity, number>;
+  /** Removers of the `onAdded` and `onRemoved` hooks on `Frames`. */
+  offFrames: Array<() => void>;
 };
 
 /**
@@ -355,7 +391,8 @@ export type AnimApi = {
 
   /**
    * How many tracks are in the table, the delayed ones and the running loops included. A loop
-   * never ends by itself, so a screen at rest counts one track per loop lane it shows.
+   * never ends by itself, so a screen at rest counts one track per loop lane it shows. A `Frames`
+   * component is not a track: a spinning coin counts nothing.
    *
    * @returns The number of running tracks.
    * @example
@@ -386,7 +423,8 @@ export type AnimApi = {
    * Switches reduced motion. While it is on, every track started from then on takes 0 ms: enter
    * and exit, state changes, change and settle motions, drag returns and timeline tweens land on
    * their target at the next frame, and their marks and sounds still fire. Every loop stands on
-   * its first key, a running one at once. Tracks already running keep their length.
+   * its first key, a running one at once. Tracks already running keep their length. A `Frames`
+   * loop stops on the frame it shows and walks on from that frame when the switch goes off.
    *
    * @param on - True for less motion, false for the full motion.
    * @example

@@ -15,6 +15,7 @@ import {
 } from "../components";
 import type { PixiContainer, PixiGraphics, PixiSprite, PixiTexture, Point } from "../types";
 import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
+import { applyFilters, clearFilters, filtersOf, moveFilters } from "./filters";
 import { clearFonts } from "./fonts";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
@@ -501,6 +502,8 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   wrapper.addChild(view.object);
   view.wrapper = wrapper;
   applyTransform(sctx, parentEntity, view);
+  // The filters cover the subtree: they move from the visual up to the wrapper.
+  moveFilters(sctx.ctx.state.sync, parentEntity, view);
 
   return wrapper;
 }
@@ -611,7 +614,7 @@ function adapterObject(
 }
 
 /**
- * Builds the view of one entity and hangs it in the tree.
+ * Builds the view of one entity and hangs it in the tree, with the filters kept for it.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -656,6 +659,7 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
   writeVisual(sctx, entity, view);
   applyTransform(sctx, entity, view);
   attach(sctx, entity, view);
+  applyFilters(view, filtersOf(state, entity));
   resort(sctx, entity, view);
 
   return true;
@@ -734,8 +738,9 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 }
 
 /**
- * Drops every view, every layer and every pool. Works on the state alone, because `onStop` has
- * no context. A `Display` object belongs to the game: it is detached, never destroyed.
+ * Drops every view, every layer, every pool and every filter slot. Works on the state alone,
+ * because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
+ * destroyed, and leaves without the filters the renderer hung on it.
  *
  * @param state - The sync branch of the plugin state.
  */
@@ -744,7 +749,10 @@ export function stopSync(state: SyncState): void {
   state.cleanups.length = 0;
 
   for (const view of state.views.values()) {
-    if (view.kind === "Display") detach(view.object);
+    if (view.kind === "Display") {
+      detach(view.object);
+      clearFilters(view.object);
+    }
 
     if (view.kind === "adapter") {
       detach(view.object);
@@ -769,6 +777,7 @@ export function stopSync(state: SyncState): void {
   state.removed.clear();
   state.reparented.clear();
   state.providers.length = 0;
+  state.filters.clear();
 
   clearLayers(state);
   destroyPools(state);

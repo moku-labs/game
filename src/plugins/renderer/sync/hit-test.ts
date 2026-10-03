@@ -37,7 +37,8 @@ function localPoint(sctx: SyncCtx, entity: Entity, x: number, y: number): Point 
 }
 
 /**
- * Tells whether a local point is inside a hit box.
+ * Tells whether a local point is inside a hit box. A box without area holds no point: a particle
+ * container measures 0 x 0 and is never hit, not even at its origin.
  *
  * @param box - The box, in local units.
  * @param point - The point, in local units.
@@ -49,6 +50,8 @@ function localPoint(sctx: SyncCtx, entity: Entity, x: number, y: number): Point 
  */
 function inBox(box: HitBox, point: Point): boolean {
   return (
+    box.width > 0 &&
+    box.height > 0 &&
     point.x >= box.x &&
     point.x <= box.x + box.width &&
     point.y >= box.y &&

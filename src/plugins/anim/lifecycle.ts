@@ -1,8 +1,8 @@
 /**
  * @file anim plugin — lifecycle functions: the dependency resolution, the
  * runtime the timelines reach the engine through, the one frame step registered in `onInit`, the
- * driver and the `play` handler opened in `onStart`, and the teardown that closes exactly what
- * was opened.
+ * driver, the `play` handler and the `Frames` hooks opened in `onStart`, and the teardown that
+ * closes exactly what was opened.
  */
 import { flowPlugin } from "../flow";
 import type { Descriptor, FxHandler } from "../flow/types";
@@ -12,6 +12,13 @@ import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
 import type { AnyComponent, AnyComponentValue } from "../world/ecs/types";
 import type { Entity, Owner, TrackOptions } from "../world/types";
+import {
+  closeFrameLoops,
+  holdFrames,
+  openFrameLoops,
+  releaseFrames,
+  stepFrameLoops
+} from "./frames-loop";
 import {
   advanceTimelines,
   finishAllTimelines,
@@ -148,7 +155,11 @@ export function createRuntime(actx: AnimCtx): TimelineRuntime {
 
     mark: (animation: string, name: string): void => reportMark(actx, animation, name),
 
-    wake: (): void => actx.deps.time.wake()
+    wake: (): void => actx.deps.time.wake(),
+
+    holdFrames: (entity: Entity): void => holdFrames(actx.state, entity),
+
+    releaseFrames: (entity: Entity): void => releaseFrames(actx.state, entity)
   };
 }
 
@@ -166,8 +177,9 @@ export function finishAllAnim(actx: AnimCtx, rt: TimelineRuntime): void {
 
 /**
  * The one frame step: the timelines consume the delta first, so a track a step just started is
- * advanced by the remainder at once, then every other track advances. A paused world moves
- * nothing; a fast world ends everything.
+ * advanced by the remainder at once, then every other track advances, then every `Frames` loop.
+ * A paused world moves nothing; a fast world ends everything, and a loop, which has no end,
+ * stands where it is.
  *
  * @param actx - Domain context of the anim plugin.
  * @param rt - The timeline runtime.
@@ -187,6 +199,7 @@ export function stepAnim(actx: AnimCtx, rt: TimelineRuntime, time: Readonly<Time
   beginFrame(actx);
   advanceTimelines(actx, rt, time.delta);
   advanceTracks(actx, time.delta);
+  stepFrameLoops(actx, time.delta);
 }
 
 /**
@@ -338,8 +351,8 @@ export function initAnim(ctx: KernelSlice): void {
 }
 
 /**
- * Opens what the plugin owns: the animations of every feature, the tween driver of `world` and
- * the handler of the `play` effect.
+ * Opens what the plugin owns: the animations of every feature, the tween driver of `world`, the
+ * handler of the `play` effect and the two world hooks that keep the `Frames` loops.
  *
  * @param ctx - Kernel context of the anim plugin.
  */
@@ -352,11 +365,13 @@ export function startAnim(ctx: KernelSlice): void {
   actx.state.offPlay = actx.deps.flow.fx.handle("play", createPlayHandler(actx, rt), {
     runInFast: false
   });
+  openFrameLoops(actx);
 }
 
 /**
- * Closes what the plugin opened. Everything is finished first, so every pending `done` resolves
- * and no node awaits a plugin that is gone; `world` stops after `anim`, so those writes land.
+ * Closes what the plugin opened. Everything is finished first, so every pending `done` resolves,
+ * every `frames` step releases its hold and no node awaits a plugin that is gone; `world` stops
+ * after `anim`, so those writes land.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
  */
@@ -365,6 +380,7 @@ export function stopAnim(state: State): void {
   state.removeDriver?.();
   state.offFrame?.();
   state.offPlay?.();
+  closeFrameLoops(state);
 
   state.finishAll = undefined;
   state.removeDriver = undefined;

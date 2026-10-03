@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
+import { Frames } from "../../components";
+import { stopAnim } from "../../lifecycle";
 import {
   defineAnimation,
   frames,
@@ -296,5 +298,156 @@ describe("anim/timeline cursor", () => {
       name: "anim:mark",
       payload: { animation: "inner.one", mark: "deep" }
     });
+  });
+});
+
+/**
+ * Starts the mock world with one entity that carries a `Frames` loop of three keys at 10 fps.
+ *
+ * @returns The mock, the entity and a reader of its texture.
+ */
+function looping(): { mock: MockAnim; entity: number; texture: () => string | undefined } {
+  const mock = createMockAnim();
+
+  mock.start();
+
+  const entity = spawnTestEntity(mock, [
+    Sprite({ texture: "c0" }),
+    Frames({ keys: ["c0", "c1", "c2"], fps: 10 })
+  ]);
+
+  return { mock, entity, texture: () => mock.world.ecs.get(entity, Sprite)?.texture };
+}
+
+describe("anim/timeline cursor: a frames step over a Frames loop", () => {
+  it("blocks the writes of the component from its first advance", () => {
+    const { mock, entity, texture } = looping();
+
+    playOn(mock, entity, it => frames(it, { keys: ["s0", "s1"], fps: 10, loop: false }));
+    mock.frame(16);
+
+    expect(texture()).toBe("s0");
+    expect(mock.state.framesHeld.get(entity)).toBe(1);
+
+    mock.frame(100);
+
+    expect(texture()).toBe("s1");
+  });
+
+  it("hands the sprite back when the step ends by its last key", () => {
+    const { mock, entity, texture } = looping();
+
+    playOn(mock, entity, it => frames(it, { keys: ["s0", "s1"], fps: 10, loop: false }));
+    mock.frame(16);
+    mock.frame(100);
+    mock.frame(100);
+
+    // The loop kept its clock while held: 216 ms is its key 2.
+    expect(texture()).toBe("c2");
+    expect(mock.state.framesHeld.has(entity)).toBe(false);
+  });
+
+  it("hands the sprite back after finish()", () => {
+    const { mock, entity, texture } = looping();
+    const handle = playOn(mock, entity, it =>
+      frames(it, { keys: ["s0", "s1"], fps: 10, loop: true })
+    );
+
+    mock.frame(16);
+    handle.finish();
+
+    expect(texture()).toBe("s1");
+    expect(mock.state.framesHeld.size).toBe(0);
+
+    mock.frame(16);
+
+    expect(texture()).toBe("c0");
+  });
+
+  it("hands the sprite back after cancel()", () => {
+    const { mock, entity, texture } = looping();
+    const handle = playOn(mock, entity, it =>
+      frames(it, { keys: ["s0", "s1"], fps: 10, loop: true })
+    );
+
+    mock.frame(16);
+    handle.cancel();
+
+    expect(texture()).toBe("s0");
+    expect(mock.state.framesHeld.size).toBe(0);
+
+    mock.frame(16);
+
+    expect(texture()).toBe("c0");
+  });
+
+  it("releases after the second of two steps on one entity", () => {
+    const { mock, entity, texture } = looping();
+    const long = playOn(mock, entity, it =>
+      frames(it, { keys: ["s0", "s1"], fps: 10, loop: true })
+    );
+
+    playOn(mock, entity, it => frames(it, { keys: ["t0"], fps: 10, loop: false }));
+    mock.frame(16);
+
+    expect(mock.state.framesHeld.get(entity)).toBe(2);
+
+    mock.frame(100);
+
+    expect(mock.state.framesHeld.get(entity)).toBe(1);
+    expect(texture()).toBe("s1");
+
+    long.finish();
+    mock.frame(16);
+
+    expect(mock.state.framesHeld.size).toBe(0);
+    expect(texture()).toBe("c1");
+  });
+
+  it("releases every hold on finishAll", () => {
+    const { mock, entity, texture } = looping();
+
+    playOn(mock, entity, it => frames(it, { keys: ["s0", "s1"], fps: 10, loop: true }));
+    mock.frame(16);
+    mock.api.finishAll();
+
+    expect(mock.state.framesHeld.size).toBe(0);
+
+    mock.frame(16);
+
+    expect(texture()).toBe("c0");
+  });
+
+  it("releases the hold when its entity dies mid-step", () => {
+    const { mock, entity } = looping();
+    const handle = playOn(mock, entity, it =>
+      frames(it, { keys: ["s0", "s1"], fps: 10, loop: true })
+    );
+
+    mock.frame(16);
+    mock.world.ecs.despawn(entity);
+    mock.frame(16);
+
+    expect(handle.active()).toBe(false);
+    expect(mock.state.framesHeld.size).toBe(0);
+  });
+
+  it("holds nothing when the step ends before it resolved an entity", () => {
+    const { mock } = looping();
+
+    playOn(mock, { projection: "hud", key: "ghost" }, it => frames(it, { keys: ["s0"], fps: 10 }));
+    mock.frame(16);
+
+    expect(mock.state.framesHeld.size).toBe(0);
+  });
+
+  it("leaves framesHeld empty after stopAnim", () => {
+    const { mock, entity } = looping();
+
+    playOn(mock, entity, it => frames(it, { keys: ["s0", "s1"], fps: 10, loop: true }));
+    mock.frame(16);
+    stopAnim(mock.state);
+
+    expect(mock.state.framesHeld.size).toBe(0);
   });
 });

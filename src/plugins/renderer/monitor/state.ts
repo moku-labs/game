@@ -4,7 +4,8 @@
 import type { MonitorState } from "./types";
 
 /**
- * Creates the initial monitor state: no frame seen, an empty window, no capture waiting.
+ * Creates the initial monitor state: no frame seen, an empty window, no capture waiting, no draw
+ * counted.
  *
  * @returns The monitor branch of the plugin state.
  */
@@ -18,6 +19,7 @@ export function createMonitorState(): MonitorState {
     frames: 0,
     fps: 0,
     frameMs: 0,
-    captures: []
+    captures: [],
+    draws: { frame: 0, last: 0 }
   };
 }

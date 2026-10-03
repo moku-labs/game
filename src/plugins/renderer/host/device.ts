@@ -3,6 +3,22 @@
  * needs a new application; WebGL raises two canvas events and Pixi restores itself.
  */
 import type { RendererCtx } from "../types";
+import type { HostState } from "./types";
+
+/**
+ * The GPU device of the application that draws now. Only a WebGPU application has one; a lost
+ * device, the unsupported screen and an inert plugin have none.
+ *
+ * @param state - The host branch of the plugin state.
+ * @returns The live device, or `undefined`.
+ */
+export function liveDevice(state: HostState): GPUDevice | undefined {
+  const app = state.app;
+
+  if (!state.ready || state.kind !== "webgpu" || app === undefined) return undefined;
+
+  return "gpu" in app.renderer ? app.renderer.gpu.device : undefined;
+}
 
 /**
  * Starts a loss: the renderer stops drawing, the game pauses and the event goes out. A loss

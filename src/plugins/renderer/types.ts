@@ -15,30 +15,47 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
 
 /**
  * The part of Pixi the engine uses: the classes `sync` builds views from (a `Rectangle` frames the
- * crop of a `"cover"` sprite), the bitmap-font pieces `fonts.install` needs, and the `BitmapText`
- * a plugin above builds through `host.pixi()`. The module object never arrives through a static
- * import: `config.loadPixi()` returns it, so a game without a screen carries no Pixi in its bundle.
+ * crop of a `"cover"` sprite), the bitmap-font pieces `fonts.install` needs, the `BitmapText` a
+ * plugin above builds through `host.pixi()`, the filter and particle classes `effects` builds
+ * through it, and the extension registry with the three WebGPU draw classes the dev draw-call
+ * counter swaps. The module object never arrives through a static import: `config.loadPixi()`
+ * returns it, so a game without a screen carries no Pixi in its bundle.
  *
  * @example
  * ```ts
  * const pixi: PixiModule = await import("pixi.js");
  * pixi.Texture.WHITE.width; // 1
+ * pixi.GpuBatchAdaptor.extension.name; // "batch"
  * ```
  */
 export type PixiModule = Pick<
   typeof import("pixi.js"),
+  | "AlphaFilter"
   | "Application"
   | "BitmapFont"
   | "BitmapText"
+  | "BlurFilter"
   | "Cache"
+  | "ColorMatrixFilter"
   | "Container"
+  | "DisplacementFilter"
+  | "Filter"
+  | "GpuBatchAdaptor"
+  | "GpuEncoderSystem"
+  | "GpuGraphicsAdaptor"
+  | "GpuProgram"
   | "Graphics"
   | "NineSliceSprite"
+  | "NoiseFilter"
+  | "Particle"
+  | "ParticleContainer"
   | "Rectangle"
   | "Sprite"
   | "Texture"
+  | "UniformGroup"
   | "bitmapFontTextParser"
   | "bitmapFontXMLStringParser"
+  | "extensions"
 >;
 
 /**
@@ -70,6 +87,12 @@ export type PixiGraphics = InstanceType<PixiModule["Graphics"]>;
  * A Pixi texture. `assets` owns its lifetime; the renderer only makes and destroys it on request.
  */
 export type PixiTexture = InstanceType<PixiModule["Texture"]>;
+
+/**
+ * A Pixi filter: what `effects` builds and `sync.filters.set` hangs on a view. `effects` owns
+ * the instance; the renderer only assigns it.
+ */
+export type PixiFilter = InstanceType<PixiModule["Filter"]>;
 
 /**
  * A bitmap font the renderer installed for a font asset key. One per key.
@@ -174,6 +197,7 @@ export type State = {
  * app.renderer.viewport.size().width; // 1080, reference units
  * app.renderer.sync.hitTest(540, 300, () => true); // 1048576
  * app.renderer.stats().views; // 180
+ * app.renderer.stats().renderPasses; // 1: no filter on screen
  * ```
  */
 export type Api = { host: HostApi; viewport: ViewportApi; sync: SyncApi } & MonitorApi;
@@ -238,6 +262,8 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
 export type {
+  CountingClasses,
+  DrawCounter,
   MonitorApi,
   MonitorDeps,
   MonitorInternal,
@@ -252,6 +278,8 @@ export type {
   DisplayAdapter,
   DisplayEntry,
   DisplaysApi,
+  FilterSlot,
+  FiltersApi,
   FontsApi,
   HitBox,
   LayerEntry,

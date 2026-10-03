@@ -25,6 +25,11 @@ export type HostState = {
   onLoss: Array<() => void>;
   cleanups: Array<() => void>;
   unsupported: HTMLElement | undefined;
+  /**
+   * Swaps Pixi's own draw classes back in. Set once per host state by the dev draw-call counter,
+   * so a restore reuses the installed classes; `undefined` in a production build.
+   */
+  uninstallCounting: (() => void) | undefined;
 };
 
 /**
@@ -94,6 +99,22 @@ export type HostApi = {
    * ```
    */
   pixi(): PixiModule | undefined;
+
+  /**
+   * The GPU device of the live WebGPU application, read at call time. A restore after a device
+   * loss makes a new device, so a caller asks again instead of keeping it.
+   *
+   * @returns The device, or `undefined` while inert, before `ready()`, while the device is lost, on
+   *   the unsupported screen and on the WebGL fallback.
+   * @example
+   * ```ts
+   * // effects checks a custom filter's WGSL once in a dev build
+   * const device = ctx.require(rendererPlugin).host.device();
+   * const info = await device?.createShaderModule({ code: source }).getCompilationInfo();
+   * info?.messages.filter(message => message.type === "error").length; // 0
+   * ```
+   */
+  device(): GPUDevice | undefined;
 };
 
 /**

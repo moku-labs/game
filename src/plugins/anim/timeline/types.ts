@@ -141,7 +141,7 @@ export type ExternalPlayer = { readonly name: string; play(clip: string): unknow
  * ```ts
  * const cursor: Cursor = {
  *   step: { kind: "wait", ms: 120 }, children: [], index: 0, elapsed: 0,
- *   motion: undefined, started: false, ended: false
+ *   motion: undefined, started: false, ended: false, held: undefined
  * };
  * ```
  */
@@ -155,6 +155,8 @@ export type Cursor = {
   motion: StepMotion | undefined;
   started: boolean;
   ended: boolean;
+  /** The entity a running `frames` step holds against its `Frames` loop, until the step ends. */
+  held: Entity | undefined;
 };
 
 /**
@@ -248,6 +250,22 @@ export type TimelineRuntime = {
    * Lifts the idle frame rate, because something started to move.
    */
   wake(): void;
+
+  /**
+   * Claims the sprite of an entity for a running `frames` step: the `Frames` loop of the entity
+   * writes nothing while any claim is open.
+   *
+   * @param entity - The entity the step writes.
+   */
+  holdFrames(entity: Entity): void;
+
+  /**
+   * Gives one claim back. At the last one the `Frames` loop writes its current key again on its
+   * next step, so the sprite does not stay on the step's last key.
+   *
+   * @param entity - The entity the step wrote.
+   */
+  releaseFrames(entity: Entity): void;
 };
 
 /**

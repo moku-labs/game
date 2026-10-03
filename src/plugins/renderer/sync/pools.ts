@@ -3,6 +3,7 @@
  * next entity with the same look gets it back without an allocation.
  */
 import type { PixiContainer, PixiNineSliceSprite, PixiSprite } from "../types";
+import { clearFilters } from "./filters";
 import type { SyncCtx, SyncState, View, ViewKind } from "./types";
 
 /**
@@ -130,7 +131,9 @@ function emptyPool(): PixiContainer[] {
 
 /**
  * Puts a view's object back into its pool and evicts the oldest one when the pool grew past the
- * configured limit. A `Display` object belongs to the game and is only detached.
+ * configured limit. A `Display` object belongs to the game and is only detached. The filters the
+ * renderer hung on the object or its wrapper come off first, so a pooled object never carries a
+ * filter into its next life; the filter instances themselves belong to `effects`.
  *
  * @param sctx - Domain context of the sync module.
  * @param view - The view that left.
@@ -140,8 +143,10 @@ export function release(sctx: SyncCtx, view: View): void {
 
   dropMask(view);
   dropOutline(view);
+  clearFilters(view.object);
 
   if (view.wrapper !== undefined) {
+    clearFilters(view.wrapper);
     detach(view.wrapper);
     view.wrapper.destroy({ children: false });
     view.wrapper = undefined;
