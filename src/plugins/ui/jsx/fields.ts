@@ -51,6 +51,9 @@ const KINDS: readonly FieldKind[] = ["text", "number", "email"];
 /** The alpha the placeholder draws at, so it never reads as a typed value. */
 const PLACEHOLDER_ALPHA = 0.5;
 
+/** The separator between the inputs of a field's fingerprint. */
+const FIELD_SEPARATOR = "\u0000";
+
 /** The props of an `input` tag a field record keeps. */
 type FieldAttributes = Pick<
   Field,
@@ -270,9 +273,10 @@ function inputsOf(
   const range = composing === undefined ? "-" : `${composing.start},${composing.end}`;
   const box = `${element.rect.w},${element.rect.h},${pad.top},${pad.right},${pad.bottom},${pad.left}`;
 
-  const look = `${field.textStyle}\u0000${JSON.stringify(field.placeholder ?? "")}`;
+  const placeholder = JSON.stringify(field.placeholder ?? "");
+  const look = `${field.textStyle}${FIELD_SEPARATOR}${placeholder}`;
 
-  return `${selection}\u0000${range}\u0000${box}\u0000${look}\u0000${value}`;
+  return [selection, range, box, look, value].join(FIELD_SEPARATOR);
 }
 
 /**
@@ -645,33 +649,6 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
   }
 
   /**
-   * Lays out and draws one live field: spawns its parts the first time, writes them when the
-   * mirror, the value or the rect changed, and writes nothing for a still field. A field whose
-   * inputs did not change is neither measured nor laid out.
-   *
-   * @param field - The field.
-   */
-  function placeField(field: Field): void {
-    const element = lookup(field.entity);
-    const isLive = element?.live === true;
-
-    if (!isLive) return;
-
-    // Lay the field out around the mirror while it is edited, around its value otherwise.
-    const editing = text.editing === field.entity;
-    const value = editing ? text.mirror.value : fieldValue(state, field);
-    const mirror = editing ? text.mirror : undefined;
-    const composing = editing ? text.composing : undefined;
-
-    // A still field is neither measured nor laid out again.
-    const inputs = inputsOf(field, element, mirror, composing, value);
-
-    if (isStill(field, inputs)) return;
-
-    drawField(field, layoutOf(field, element, value, mirror, composing), value, inputs);
-  }
-
-  /**
    * Lays out one field around its value, and the mirror while it is edited.
    *
    * @param field - The field.
@@ -736,6 +713,33 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
 
     field.drawn = drawn;
     writeParts(field.parts, values);
+  }
+
+  /**
+   * Lays out and draws one live field: spawns its parts the first time, writes them when the
+   * mirror, the value or the rect changed, and writes nothing for a still field. A field whose
+   * inputs did not change is neither measured nor laid out.
+   *
+   * @param field - The field.
+   */
+  function placeField(field: Field): void {
+    const element = lookup(field.entity);
+    const isLive = element?.live === true;
+
+    if (!isLive) return;
+
+    // Lay the field out around the mirror while it is edited, around its value otherwise.
+    const editing = text.editing === field.entity;
+    const value = editing ? text.mirror.value : fieldValue(state, field);
+    const mirror = editing ? text.mirror : undefined;
+    const composing = editing ? text.composing : undefined;
+
+    // A still field is neither measured nor laid out again.
+    const inputs = inputsOf(field, element, mirror, composing, value);
+
+    if (isStill(field, inputs)) return;
+
+    drawField(field, layoutOf(field, element, value, mirror, composing), value, inputs);
   }
 
   /**
@@ -904,11 +908,13 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
 
       Object.assign(field, fieldAttributesOf(element.node), { instance: element.instance });
 
+      // The hidden input of the field being edited takes its new kind, length or label.
       const after = JSON.stringify([field.kind, field.maxLength, field.placeholder]);
+      const input = text.element;
+      const needsReconfigure =
+        text.editing === field.entity && input !== undefined && before !== after;
 
-      if (text.editing === field.entity && text.element !== undefined && before !== after) {
-        configureInput(text.element, setupOf(field));
-      }
+      if (needsReconfigure) configureInput(input, setupOf(field));
     },
 
     exit: (element: Element): void => {

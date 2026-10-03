@@ -164,9 +164,9 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
     }));
 
     // A despawned entity gets no call: the renderer forgot its slots when it let the view go.
-    if (slots.length > 0 || ectx.deps.world.ecs.ownerOf(entity) !== undefined) {
-      ectx.deps.renderer.sync.filters.set(entity, Object.freeze(slots));
-    }
+    const needsSet = slots.length > 0 || ectx.deps.world.ecs.ownerOf(entity) !== undefined;
+
+    if (needsSet) ectx.deps.renderer.sync.filters.set(entity, Object.freeze(slots));
 
     view.assigned = slots;
   }
@@ -372,9 +372,9 @@ export function forgetFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity)
     view.retired.push(instance);
   }
 
-  if (view.kinds.size === 0 && view.retired.length === 0 && view.assigned.length === 0) {
-    ectx.state.views.delete(entity);
-  }
+  const isUnused = view.kinds.size === 0 && view.retired.length === 0 && view.assigned.length === 0;
+
+  if (isUnused) ectx.state.views.delete(entity);
 }
 
 /**

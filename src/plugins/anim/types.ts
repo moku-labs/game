@@ -143,7 +143,9 @@ export type AnyAnimationDefinition = AnimationDefinition<SlotTags>;
  *
  * @example
  * ```ts
- * const handle: PlayHandle = app.anim.play(coinsFly, { from: { projection: "hud", key: "coins" } });
+ * const deliverOrder = defineAnimation("orders.deliver", { slots: { card: type<Target>() },
+ *   build: ({ card }) => sequence(tween(card, Transform, { x: 100 }, { ms: 100 }), mark("done")) });
+ * const handle: PlayHandle = app.anim.play(deliverOrder, { card: { projection: "board.items", key: "a" } });
  * handle.marks(); // []: nothing reached yet
  * ```
  */
@@ -168,11 +170,11 @@ export type MarkListener = (animation: string, mark: string) => void;
  *
  * @example
  * ```ts
- * // A feature plugin waits for the mark its choreography emits.
+ * // A feature plugin logs every mark a choreography reaches.
  * createPlugin("rewardLog", {
  *   depends: [animPlugin],
  *   hooks: ctx => ({ "anim:mark": ({ mark }) => ctx.log.info("mark", { mark }) })
- * }); // the `done` mark of orders.deliver logs { mark: "done" }
+ * }); // a reached mark("done") step logs { mark: "done" }
  * ```
  */
 export type Events = {
@@ -314,21 +316,12 @@ export type State = {
  *
  * @example
  * ```ts
- * // The board is full: a toast sign drops in, holds for 1.6 s and leaves. Nothing stays behind.
- * const toastBoardFull = defineAnimation("board.toastBoardFull", {
- *   slots: {},
- *   build: () =>
- *     sequence(
- *       spawn("sign", [Text({ content: "Board is full", style: "title" }), Transform({ x: 540, y: -120 })]),
- *       tween(spawned("sign"), Transform, { y: 300 }, { ms: 400, ease: "outBack" }),
- *       wait(1600),
- *       tween(spawned("sign"), Transform, { y: -120 }, { ms: 300, ease: "in" })
- *     )
- * });
- * const handle = app.anim.play(toastBoardFull, {});
- *
- * for (let frame = 0; frame < 150; frame += 1) app.time.step(16);
- * handle.active(); // false: the timeline ended and despawned the sign
+ * // A choreography runs in game time: two frames of 50 ms play the 100 ms slide of a card.
+ * const deliverOrder = defineAnimation("orders.deliver", { slots: { card: type<Target>() },
+ *   build: ({ card }) => sequence(tween(card, Transform, { x: 100 }, { ms: 100 }), mark("done")) });
+ * app.anim.play(deliverOrder, { card: { projection: "board.items", key: "a" } });
+ * app.time.step(50); // app.anim.active() is 1: the card slides
+ * app.time.step(50); // app.anim.active() is 0: the card rests at x 100
  * ```
  */
 export type AnimApi = {
@@ -345,26 +338,12 @@ export type AnimApi = {
    * @throws {Error} When the tree spawns one id twice.
    * @example
    * ```ts
-   * // The reward is claimed: a coin appears on the reward picture and flies to the HUD counter.
-   * const coinsFly = defineAnimation("hud.coinsFly", {
-   *   slots: { from: type<Target>(), to: type<Target>() },
-   *   build: ({ from, to }, { at }) =>
-   *     sequence(
-   *       spawn("coin1", [
-   *         Sprite({ texture: "ui.icon-coin", width: 64, height: 64, fit: "contain" }),
-   *         Transform({ x: at(from).x, y: at(from).y })
-   *       ], { order: 50 }),
-   *       tween(spawned("coin1"), Transform, { x: at(to).x, y: at(to).y }, { ms: 600, ease: "inCubic" }),
-   *       mark("landed")
-   *     )
-   * });
-   * const handle = app.anim.play(coinsFly, {
-   *   from: { projection: "reward", key: "picture" },
-   *   to: { projection: "hud", key: "coins" }
-   * });
-   *
-   * for (let frame = 0; frame < 40; frame += 1) app.time.step(16);
-   * handle.marks(); // ["landed"]: the coin reached the counter and was despawned
+   * // The player delivers order card "a": it slides to x 100 in 100 ms, then reaches "done".
+   * const deliverOrder = defineAnimation("orders.deliver", { slots: { card: type<Target>() },
+   *   build: ({ card }) => sequence(tween(card, Transform, { x: 100 }, { ms: 100 }), mark("done")) });
+   * const handle = app.anim.play(deliverOrder, { card: { projection: "board.items", key: "a" } });
+   * app.time.step(100);
+   * handle.marks(); // ["done"], and handle.done resolves
    * ```
    */
   play<Tags extends SlotTags>(
@@ -379,12 +358,12 @@ export type AnimApi = {
    *
    * @example
    * ```ts
-   * // A /control tool skips the board-full toast mid-flight: the sign is gone at once.
-   * app.anim.play(toastBoardFull, {});
-   * app.time.step(16);
-   *
-   * app.anim.finishAll();
-   * app.anim.active(); // 0
+   * // A /control tool skips the delivery mid-flight: the card lands on x 100 at once.
+   * const deliverOrder = defineAnimation("orders.deliver", { slots: { card: type<Target>() },
+   *   build: ({ card }) => sequence(tween(card, Transform, { x: 100 }, { ms: 100 }), mark("done")) });
+   * app.anim.play(deliverOrder, { card: { projection: "board.items", key: "a" } });
+   * app.time.step(50);
+   * app.anim.finishAll(); // app.anim.active() is 0
    * ```
    */
   finishAll(): void;
@@ -398,10 +377,11 @@ export type AnimApi = {
    * @example
    * ```ts
    * // The assertion every motion test ends with: the screen came to rest.
+   * const deliverOrder = defineAnimation("orders.deliver", { slots: { card: type<Target>() },
+   *   build: ({ card }) => sequence(tween(card, Transform, { x: 100 }, { ms: 100 }), mark("done")) });
+   * app.anim.play(deliverOrder, { card: { projection: "board.items", key: "a" } });
+   * app.time.step(100);
    * app.anim.active(); // 0
-   *
-   * // Two order cards sway on their pins (a `loop` of rotation keys): at rest, two loops run.
-   * app.anim.active(); // 2
    * ```
    */
   active(): number;
@@ -444,11 +424,12 @@ export type AnimApi = {
    * @returns The remover; calling it twice is a no-op.
    * @example
    * ```ts
-   * // A test waits for the "done" mark of the delivery instead of counting frames.
+   * // A test waits for the "done" mark instead of counting frames.
+   * const ping = defineAnimation("fx.ping", { slots: {}, build: () => sequence(wait(100), mark("done")) });
    * const reached: string[] = [];
-   * const off = app.anim.onMark((animation, mark) => reached.push(`${animation}:${mark}`));
-   *
-   * off(); // reached: ["orders.deliver:done"]
+   * app.anim.onMark((animation, name) => reached.push(`${animation}:${name}`));
+   * app.anim.play(ping, {});
+   * app.time.step(100); // reached: ["fx.ping:done"]
    * ```
    */
   onMark(fn: MarkListener): () => void;
