@@ -257,3 +257,26 @@ export function liftOf(input: {
 }): number {
   return Math.max(0, input.fieldBottom + input.margin - (input.innerHeight - input.inset));
 }
+
+/** A high surrogate: the first half of a character outside the Basic Multilingual Plane. */
+const OPEN_SURROGATE = /[\uD800-\uDBFF]$/;
+
+/**
+ * Cuts a value to the max length of its field without splitting a character in two: an emoji
+ * that would end half inside the limit is left out whole, as the browser's `maxlength` does.
+ *
+ * @param value - The text.
+ * @param maxLength - The longest value the field keeps, in UTF-16 units.
+ * @returns The value the field keeps.
+ * @example
+ * ```ts
+ * clampValue("aaaaaaaaaaaaaaa😀", 16); // "aaaaaaaaaaaaaaa"
+ * ```
+ */
+export function clampValue(value: string, maxLength: number | undefined): string {
+  if (maxLength === undefined || value.length <= maxLength) return value;
+
+  const cut = value.slice(0, maxLength);
+
+  return OPEN_SURROGATE.test(cut) ? cut.slice(0, -1) : cut;
+}

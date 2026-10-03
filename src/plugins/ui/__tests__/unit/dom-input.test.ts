@@ -115,6 +115,19 @@ describe("the mirror", () => {
     expect(readMirror(input.element, undefined).value).toBe("Alexander");
   });
 
+  // Found by exploratory QA: an IME composition is not held to `maxlength`, so the element can
+  // hold 15 letters and an emoji (17 units); the cut keeps the emoji out whole, never half of it.
+  it("never cuts an emoji in half at the max length", () => {
+    const { input } = hidden();
+
+    input.type("aaaaaaaaaaaaaaa😀", 17, 17, "none");
+
+    const mirror = readMirror(input.element, 16);
+
+    expect(mirror.value).toBe("aaaaaaaaaaaaaaa");
+    expect(mirror.value.isWellFormed()).toBe(true);
+  });
+
   it("is filled by the input event, the composing range by the composition events", () => {
     const { input } = hidden();
     const mirrors: Mirror[] = [];

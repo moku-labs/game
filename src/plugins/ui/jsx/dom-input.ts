@@ -6,7 +6,7 @@
  */
 import type { PointerListener } from "../../input/types";
 import type { Rect } from "../layout/types";
-import { insetOf } from "./field-layout";
+import { clampValue, insetOf } from "./field-layout";
 import type { Composing, FieldKind, Mirror } from "./types";
 
 /**
@@ -128,7 +128,7 @@ export function configureInput(element: HTMLInputElement, setup: InputSetup): vo
  * @returns The mirror.
  */
 export function readMirror(element: HTMLInputElement, maxLength: number | undefined): Mirror {
-  const value = maxLength === undefined ? element.value : element.value.slice(0, maxLength);
+  const value = clampValue(element.value, maxLength);
   const start = Math.min(element.selectionStart ?? value.length, value.length);
   const end = Math.min(element.selectionEnd ?? start, value.length);
   const direction = element.selectionDirection;
