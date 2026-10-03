@@ -1,0 +1,32 @@
+{
+  "out": "page512",
+  "cache": false,
+  "trim": false,
+  "lossless": false,
+  "timings": {
+    "scan": 24,
+    "stage": 120,
+    "assetpack": 625,
+    "post": 3
+  },
+  "sizes": {
+    "outPng": 2217342,
+    "outWebp": 640894,
+    "outJson": 15757,
+    "pages": 12
+  },
+  "problems": [
+    "board.board-tray: no output (its atlas failed?).",
+    "board.cell: no output (its atlas failed?).",
+    "board.generator: no output (its atlas failed?).",
+    "board.item-wood-1: no output (its atlas failed?).",
+    "board.item-wood-2: no output (its atlas failed?).",
+    "board.item-wood-3: no output (its atlas failed?).",
+    "board.item-wood-4: no output (its atlas failed?).",
+    "home.home-yard: no output (its atlas failed?).",
+    "home.sign-post: no output (its atlas failed?).",
+    "ui: the fx atlas has 2 pages, expected 1.",
+    "ui.fx-rays: no output (its atlas failed?).",
+    "ui.panel-signboard: no output (its atlas failed?)."
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "out": "trim",
+  "cache": false,
+  "trim": true,
+  "lossless": false,
+  "timings": {
+    "scan": 30,
+    "stage": 142,
+    "assetpack": 1090,
+    "post": 4
+  },
+  "sizes": {
+    "outPng": 2960059,
+    "outWebp": 917898,
+    "outJson": 16241,
+    "pages": 5
+  },
+  "problems": [
+    "board.board-tray: rotated in the atlas.",
+    "board.cell: rotated in the atlas.",
+    "board.item-wood-1: rotated in the atlas.",
+    "board.item-wood-3: rotated in the atlas.",
+    "home.sign-post: rotated in the atlas.",
+    "ui.bar-fill: rotated in the atlas.",
+    "ui.bar-track: rotated in the atlas.",
+    "ui.button-berry: rotated in the atlas.",
+    "ui.button-disabled: rotated in the atlas.",
+    "ui.decor-clothespin: rotated in the atlas.",
+    "ui.fx-leaf: rotated in the atlas.",
+    "ui.fx-rays: rotated in the atlas.",
+    "ui.hud-pill: rotated in the atlas.",
+    "ui.icon-check: rotated in the atlas.",
+    "ui.icon-gift: rotated in the atlas.",
+    "ui.link-wave: trimmed 400x16 -> 400x13.",
+    "ui.panel-parchment: rotated in the atlas.",
+    "ui.panel-signboard: rotated in the atlas.",
+    "ui.tab-active: rotated in the atlas.",
+    "ui.tab-idle: rotated in the atlas."
+  ]
+}

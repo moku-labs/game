@@ -1,0 +1,16 @@
+{
+  "name": "p10-filters",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun serve.ts",
+    "measure": "bun drive.ts"
+  },
+  "dependencies": {
+    "pixi.js": "8.21.0",
+    "pixi-filters": "^6"
+  },
+  "devDependencies": {
+    "playwright-core": "^1"
+  }
+}

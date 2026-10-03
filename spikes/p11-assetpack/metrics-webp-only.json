@@ -1,0 +1,19 @@
+{
+  "out": "webp-only",
+  "cache": false,
+  "trim": false,
+  "lossless": false,
+  "timings": {
+    "scan": 30,
+    "stage": 117,
+    "assetpack": 257,
+    "post": 7
+  },
+  "sizes": {
+    "outPng": 0,
+    "outWebp": 913882,
+    "outJson": 8145,
+    "pages": 5
+  },
+  "problems": []
+}

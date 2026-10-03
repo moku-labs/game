@@ -1,0 +1,22 @@
+{
+  "ms": 1116,
+  "bytesPng": 963159,
+  "bytesWebp": 406024,
+  "atlases": {
+    "ui/atlas-main": [
+      "936x1289"
+    ],
+    "ui/atlas-fx": [
+      "568x614"
+    ],
+    "home/atlas-main": [
+      "1030x928"
+    ],
+    "board/atlas-main": [
+      "902x1149"
+    ],
+    "board.rings/atlas-main": [
+      "606x606"
+    ]
+  }
+}

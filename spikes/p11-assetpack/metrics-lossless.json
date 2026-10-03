@@ -1,0 +1,19 @@
+{
+  "out": "lossless",
+  "cache": false,
+  "trim": false,
+  "lossless": true,
+  "timings": {
+    "scan": 24,
+    "stage": 132,
+    "assetpack": 886,
+    "post": 4
+  },
+  "sizes": {
+    "outPng": 11132197,
+    "outWebp": 6247034,
+    "outJson": 16285,
+    "pages": 5
+  },
+  "problems": []
+}
