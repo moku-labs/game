@@ -82,9 +82,10 @@ function contentOf(props: Record<string, unknown>): string {
  * triangle with `shape: "triangle"`, its stroke dashed with `dash`. A clipping element (`scroll`,
  * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
  * clips too, and a nine-slice field draws its slices and clips to them. A style with a stroke and no fill draws
- * only the stroke, a ring. A container with no fill and no stroke gets an invisible rectangle:
- * the renderer hangs children under the display object of their parent, so every parent needs
- * one.
+ * only the stroke, a ring. A container with no fill and no stroke gets a rectangle that draws
+ * nothing, no fill and no stroke: the renderer hangs children under the display object of their
+ * parent, so every parent needs one. It keeps the alpha of its style, because the alpha of an
+ * entity fades its children too.
  *
  * @param element - The element to draw, with its rect known.
  * @returns The component values: one visual.
@@ -149,10 +150,11 @@ export function visualOf(element: Element): AnyComponentValue[] {
       fill: style.fill ?? Shape.defaults.fill,
       // No `fill` paints nothing inside: a stroke-only ring, or a button whose label is all it shows.
       fillAlpha: style.fill === undefined ? 0 : Shape.defaults.fillAlpha,
-      alpha: invisible ? 0 : alpha,
+      // The alpha fades the children too: a container that draws nothing keeps its style's.
+      alpha,
       radius: style.radius ?? 0,
       stroke: style.stroke ?? Shape.defaults.stroke,
-      strokeWidth: style.strokeWidth ?? 0,
+      strokeWidth: invisible ? 0 : (style.strokeWidth ?? 0),
       dash: style.dash ?? 0,
       // A text field clips its value to its box, so a long one never leaves it.
       clip: clip || type === "input"

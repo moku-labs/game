@@ -366,8 +366,13 @@ describe("the rest pose of the visual", () => {
 
     expect(app.world.ecs.get(app.ui.find("strokeOnly") ?? 0, Shape)?.stroke).toBe(0x44_44_44);
     // The renderer hangs children under the display object of their parent, so a container
-    // with nothing to draw still carries a shape: sized to its rect, never drawn.
-    expect(app.world.ecs.get(app.ui.find("pinned") ?? 0, Shape)).toMatchObject({ alpha: 0 });
+    // with nothing to draw still carries a shape: sized to its rect, with no fill and no stroke.
+    // Its alpha stays 1, because the alpha of a parent fades its children too.
+    expect(app.world.ecs.get(app.ui.find("pinned") ?? 0, Shape)).toMatchObject({
+      alpha: 1,
+      fillAlpha: 0,
+      strokeWidth: 0
+    });
 
     await app.stop();
   });

@@ -32,11 +32,11 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 | Component | Defaults | Meaning |
 |---|---|---|
 | `Transform({ x, y, rotation, scale, pivot })` | `0, 0, 0, 1, { x: 0, y: 0 }` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. `pivot` is the local point the view turns and scales around; `x`, `y` is where it lands. |
-| `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. |
-| `NineSlice({ texture, width, height, alpha, tint, debug, clip })` | `"", 0, 0, 1, 0xffffff, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. |
+| `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. `alpha` fades the quad and the entity's children. |
+| `NineSlice({ texture, width, height, alpha, tint, debug, clip })` | `"", 0, 0, 1, 0xffffff, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. `alpha` fades the panel and the entity's children. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
-| `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false` | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape. `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. Motions tween only the numeric fields, never `kind`. |
+| `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false` | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape and the entity's children (see the alpha rule under "Layers, sort and lift"). `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. Motions tween only the numeric fields, never `kind`. |
 
 ```ts
 sprite({ texture: "board.cell", at: { x: 540, y: 300 } });
@@ -301,6 +301,17 @@ under a clipping parent a negative `Order` sorts among the children, never below
 stay on the wrapper and cover the visual and the children; the debug outline stays outside the
 mask. Turning `clip` off moves the children back into the wrapper and frees the container and the
 mask.
+
+The alpha of an entity fades its whole subtree. `Sprite.alpha`, `NineSlice.alpha` and
+`Shape.alpha` are written on the wrapper when the entity has one, and the visual inside it stays at
+1, so the alpha is applied once: a disabled button at 0.6 draws its disc, its icon and its label at
+0.6, and a popup that fades to 0 takes its board with it. A view without a wrapper keeps the alpha
+on its own object, so an entity without children draws the same pixels as before. The alpha moves
+up when the wrapper is made, with the filters, and it reaches the hit test too: a child of a parent
+at alpha 0 is not hit. Pixi multiplies the alpha into every child, so overlapping children show
+through each other; the `effects` `Alpha` filter fades the subtree as one layer instead. A
+`Display` object and an adapter object keep their own alpha: the game and the plugin that draws
+them own it (`Text.alpha` is the alpha of the text's container).
 Removing `Parent` puts the view back in the layer its `Layer` names, at its own pose, in the same
 pass: `world` records no change for a removed component, so `sync` watches `onRemoved(Parent)`.
 
@@ -382,14 +393,21 @@ coverage is the glyph's alone, and the template's `outColor * vColor` applies ev
 label's (`Text.alpha` is the alpha of its container), a parent's (a disabled button, a popup fade)
 and the world's. Full-alpha text draws the same pixels as before. The program is compiled once per
 batch texture limit and shared by every text; each text gets its own local uniforms, as from Pixi's
-pipe. WebGPU only: on the WebGL fallback the pipe hands out Pixi's own shader, so text there still
-applies its alpha twice.
+pipe.
+
+Both backends. On WebGPU the shader carries the WGSL program above. On the WebGL fallback it
+carries the GLSL program, compiled with `compileHighShaderGlProgram` from the GL twins of the same
+five bits (`colorBitGl`, `generateTextureBatchBitGl`, `localUniformMSDFBitGl`, `mSDFBitGl`,
+`roundPixelsBitGl`), with the same step changed:
+`calculateMSDFAlpha(outColor, vec4(vColor.rgb / max(vColor.a, 1e-4), 1.0), uDistance)`. A WebGL
+shader also gets Pixi's batch sampler slots (`getBatchSamplersUniformGroup`), as Pixi's own
+`SdfShader` does. Each backend's program is compiled once per texture limit.
 
 The swap happens once per host state, a restore reuses the pipe, and `onStop` swaps Pixi's own pipe
 back. A Pixi module without the pieces draws on with its own pipe, with `ctx.log.warn`. A unit test
-against the real module pins the pipe's name and metadata, the exact step it replaces, and the WGSL
-of the compiled fragment, so a Pixi that renames them, or fixes the double alpha itself, fails in
-CI.
+against the real module pins the pipe's name and metadata, the exact WGSL and GLSL steps it
+replaces, and the compiled fragment of both programs, so a Pixi that renames them, or fixes the
+double alpha itself, fails in CI.
 
 ## Device loss and the hidden tab
 
@@ -460,4 +478,6 @@ that shows the board, under WebGPU and WebGL. The real `drawCalls` number needs 
 fixture's board screen with no filter and no emitter pins it in `tests/integration/merge-game/run.mjs`
 once measured, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
 How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,
-a label under a 0.6 parent at 0.6, and the same pixels for full-alpha text, in the browser.
+a label under a 0.6 parent at 0.6, and the same pixels for full-alpha text, in the browser, under
+WebGPU and under WebGL. So does the alpha of a parent: the icon of a disabled round button measured
+at 0.6 in the browser.

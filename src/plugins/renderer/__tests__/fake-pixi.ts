@@ -826,16 +826,31 @@ export class FakeMatrix {
 }
 
 /** What a fake shader is built from: Pixi's `Shader` options the renderer passes. */
-export type FakeShaderOptions = { gpuProgram?: unknown; resources?: Record<string, unknown> };
+export type FakeShaderOptions = {
+  gpuProgram?: unknown;
+  glProgram?: unknown;
+  resources?: Record<string, unknown>;
+};
 
-/** The fake of Pixi's `Shader`: the program and the resources it was built with. */
+/** The fake of Pixi's `Shader`: the programs and the resources it was built with. */
 export class FakeShader {
   public gpuProgram: unknown;
+  public glProgram: unknown;
   public resources: Record<string, unknown>;
 
   public constructor(options: FakeShaderOptions) {
     this.gpuProgram = options.gpuProgram;
+    this.glProgram = options.glProgram;
     this.resources = options.resources ?? {};
+  }
+}
+
+/** The fake of Pixi's `GlProgram`: the options of the compile it came from. */
+export class FakeGlProgram {
+  public options: Record<string, unknown>;
+
+  public constructor(options: Record<string, unknown>) {
+    this.options = options;
   }
 }
 
@@ -900,13 +915,93 @@ export function fakeTextureBatchBit(maxTextures: number): FakeShaderBit {
   return made;
 }
 
+/** The fake of Pixi's `colorBitGl`: the vertex colour, premultiplied, in GLSL. */
+export const fakeColorBitGl: FakeShaderBit = {
+  name: "color-bit",
+  vertex: { main: "vColor *= vec4(aColor.rgb * aColor.a, aColor.a);" }
+};
+
+/** The fake of Pixi's `roundPixelsBitGl`. */
+export const fakeRoundPixelsBitGl: FakeShaderBit = {
+  name: "round-pixels-bit",
+  vertex: { header: "vec2 roundPixels(vec2 position, vec2 targetSize) {}" }
+};
+
+/** The fake of Pixi's `mSDFBitGl`: the coverage function of a distance-field glyph, in GLSL. */
+export const fakeMSDFBitGl: FakeShaderBit = {
+  name: "msdf-bit",
+  fragment: {
+    header: "float calculateMSDFAlpha(vec4 msdfColor, vec4 shapeColor, float distance) {}"
+  }
+};
+
+/** The fake of Pixi 8.21's `localUniformMSDFBitGl`, with the step that hands over `vColor`. */
+export const fakeLocalUniformMSDFBitGl = {
+  name: "local-uniform-msdf-bit",
+  vertex: {
+    header: "uniform mat3 uTransformMatrix; uniform vec4 uColor; uniform float uRound;",
+    main: "vColor *= uColor;",
+    end: "if(uRound == 1.) {}"
+  },
+  fragment: {
+    header: "uniform float uDistance;",
+    main: "outColor = vec4(calculateMSDFAlpha(outColor, vColor, uDistance));"
+  }
+};
+
+/** The GLSL texture batch bits made so far, one per texture count, as Pixi caches them. */
+const textureBatchBitsGl = new Map<number, FakeShaderBit>();
+
+/**
+ * The fake of Pixi's `generateTextureBatchBitGl`: one bit per texture count, made once.
+ *
+ * @param maxTextures - How many textures a batch samples.
+ * @returns The bit of that count.
+ */
+export function fakeTextureBatchBitGl(maxTextures: number): FakeShaderBit {
+  const made = textureBatchBitsGl.get(maxTextures) ?? {
+    name: "texture-batch-bit",
+    fragment: { main: `outColor = texture(uTextures[${String(maxTextures)}]);` }
+  };
+
+  textureBatchBitsGl.set(maxTextures, made);
+
+  return made;
+}
+
+/** The batch sampler groups made so far, one per texture count, as Pixi caches them. */
+const batchSamplers = new Map<number, FakeUniformGroup>();
+
+/**
+ * The fake of Pixi's `getBatchSamplersUniformGroup`: the sampler slots of a WebGL batch, one
+ * static group per texture count.
+ *
+ * @param maxTextures - How many textures a batch samples.
+ * @returns The group of that count.
+ */
+export function fakeBatchSamplers(maxTextures: number): FakeUniformGroup {
+  const made =
+    batchSamplers.get(maxTextures) ??
+    new FakeUniformGroup({
+      uTextures: { value: Int32Array.from({ length: maxTextures }, (_, index) => index) }
+    });
+
+  made.isStatic = true;
+  batchSamplers.set(maxTextures, made);
+
+  return made;
+}
+
 /** What a fake high-shader compile was asked for. */
 export type FakeCompile = { name: string; bits: FakeShaderBit[] };
 
-/** The fake of Pixi's `compileHighShaderGpuProgram`: it records every compile. */
+/** The fake of Pixi's two high-shader compilers: they record every compile. */
 export const fakeShaderCompiler = {
-  /** Every compile since the fake module was made. */
+  /** Every WebGPU compile since the fake module was made. */
   compiled: [] as FakeCompile[],
+
+  /** Every WebGL compile since the fake module was made. */
+  compiledGl: [] as FakeCompile[],
 
   /**
    * Compiles a program out of bits, as Pixi's `compileHighShaderGpuProgram` does.
@@ -918,6 +1013,18 @@ export const fakeShaderCompiler = {
     fakeShaderCompiler.compiled.push(options);
 
     return new FakeGpuProgram(options);
+  },
+
+  /**
+   * Compiles a program out of GLSL bits, as Pixi's `compileHighShaderGlProgram` does.
+   *
+   * @param options - The name of the program and its bits.
+   * @returns A program that keeps the options.
+   */
+  compileGl(options: FakeCompile): FakeGlProgram {
+    fakeShaderCompiler.compiledGl.push(options);
+
+    return new FakeGlProgram(options);
   }
 };
 
@@ -1288,6 +1395,7 @@ export function createFakePixi(
   fakeCache.entries.clear();
   fakeExtensions.reset();
   fakeShaderCompiler.compiled.length = 0;
+  fakeShaderCompiler.compiledGl.length = 0;
 
   const module = {
     Application: FakeApplication,
@@ -1324,7 +1432,14 @@ export function createFakePixi(
     generateTextureBatchBit: fakeTextureBatchBit,
     localUniformMSDFBit: fakeLocalUniformMSDFBit,
     mSDFBit: fakeMSDFBit,
-    roundPixelsBit: fakeRoundPixelsBit
+    roundPixelsBit: fakeRoundPixelsBit,
+    compileHighShaderGlProgram: fakeShaderCompiler.compileGl,
+    colorBitGl: fakeColorBitGl,
+    generateTextureBatchBitGl: fakeTextureBatchBitGl,
+    localUniformMSDFBitGl: fakeLocalUniformMSDFBitGl,
+    mSDFBitGl: fakeMSDFBitGl,
+    roundPixelsBitGl: fakeRoundPixelsBitGl,
+    getBatchSamplersUniformGroup: fakeBatchSamplers
   } as unknown as PixiModule;
 
   return {

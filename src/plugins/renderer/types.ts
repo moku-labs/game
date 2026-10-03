@@ -19,7 +19,7 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * plugin above builds through `host.pixi()`, the filter and particle classes `effects` builds
  * through it, and the extension registry with the three WebGPU draw classes the dev draw-call
  * counter swaps and the bitmap text pipe `host` swaps for one whose SDF shader applies the alpha
- * once (with the shader pieces it compiles that shader from). The module object never arrives
+ * once (with the WGSL and GLSL shader pieces it compiles that shader from). The module object never arrives
  * through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
  * Pixi in its bundle.
  *
@@ -62,12 +62,19 @@ export type PixiModule = Pick<
   | "bitmapFontTextParser"
   | "bitmapFontXMLStringParser"
   | "colorBit"
+  | "colorBitGl"
+  | "compileHighShaderGlProgram"
   | "compileHighShaderGpuProgram"
   | "extensions"
   | "generateTextureBatchBit"
+  | "generateTextureBatchBitGl"
+  | "getBatchSamplersUniformGroup"
   | "localUniformMSDFBit"
+  | "localUniformMSDFBitGl"
   | "mSDFBit"
+  | "mSDFBitGl"
   | "roundPixelsBit"
+  | "roundPixelsBitGl"
 >;
 
 /**

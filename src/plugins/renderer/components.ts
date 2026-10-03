@@ -42,7 +42,8 @@ export type SpriteFit = "fill" | "contain" | "cover";
 /**
  * One textured quad. `texture` is an asset key; `defineGame` narrows it to the game's keys.
  * `width` and `height` are the box in reference units; 0 on an axis keeps the texture's own size
- * there. `anchor` is the point of the box that sits on the `Transform`.
+ * there. `anchor` is the point of the box that sits on the `Transform`. `alpha` fades the quad
+ * and the entity's children.
  *
  * @example
  * ```ts
@@ -67,7 +68,7 @@ export type SpriteValue = {
  * strokes the bounds and the four cut lines over the panel: cyan, red when the corners overlap or
  * the texture is missing. `clip` masks the children of the entity to the `width × height` box,
  * the same rule as `Shape.clip`: the mask is a filled rectangle and is never drawn, and the panel
- * itself is never masked.
+ * itself is never masked. `alpha` fades the panel and the entity's children.
  *
  * @example
  * ```ts
@@ -119,7 +120,8 @@ export type DisplayValue = { object: unknown };
  * A filled rounded rectangle or a triangle, anchored at the top left of the `Transform`. `kind`
  * picks the outline: `"rect"` (the default) or `"triangle"`, which fills its `w × h` box pointing
  * right (rotate the element for another direction) and ignores `radius`. `fillAlpha` is the alpha
- * of the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape. `dash` is the
+ * of the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape and the
+ * entity's children: a disabled button at 0.6 draws its icon at 0.6 too. `dash` is the
  * dash length of the stroke in reference units, with gaps of half a dash; 0 strokes a solid line.
  * `clip` masks the children of the entity to the shape, always solid, which is how `ui` draws a
  * scroll and an overflow. The shape itself is never masked, so its stroke is drawn whole.
