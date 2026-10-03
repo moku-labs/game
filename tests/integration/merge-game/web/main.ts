@@ -11,18 +11,35 @@
  * The page is a dev build: `./dev` sets the dev flag before anything else runs, and the audio
  * journal keeps the last 200 sounds, so the editor and the e2e station can read what was heard.
  * It draws with WebGPU; `?renderer=webgl` asks for WebGL, as the WebGL leg of the visual tests
- * does. The page passes no platform provider: `platform` is inert, Back is the browser's own and
- * Leave on the Leave popup closes nothing.
+ * does.
+ *
+ * The phone behind the page is a system app of `@moku-labs/system` with lifecycle, back, haptics
+ * and keepAwake, handed to `platform` through `fromSystem`, with the screen kept on. In the native
+ * app of `../native.ts` it talks to the shell. In a browser its web providers answer honestly:
+ * pause and resume follow `visibilitychange`, a haptic tick vibrates on Android only, Back is the
+ * browser's own and Leave on the Leave popup closes nothing.
  */
 import "./dev";
 import { createApp } from "@moku-labs/game";
 import { commands, run } from "@moku-labs/game/control";
 import { read, sources, watch } from "@moku-labs/game/inspect";
+import { createApp as createSystem } from "@moku-labs/system";
+import { backPlugin } from "@moku-labs/system/back";
+import { hapticsPlugin } from "@moku-labs/system/haptics";
+import { keepAwakePlugin } from "@moku-labs/system/keep-awake";
+import { lifecyclePlugin } from "@moku-labs/system/lifecycle";
 import { mainFlow } from "../flows/main";
 import { screenPlugins, volumesOf } from "../game";
+import { fromSystem } from "../platform-bridge";
 import { startingSession } from "../state";
 import { rendererFor } from "./renderer";
 import { playerFor } from "./scenarios";
+
+// The shell: Tauri providers in the native app, web providers in a browser.
+const system = createSystem({
+  plugins: [lifecyclePlugin, backPlugin, hapticsPlugin, keepAwakePlugin]
+});
+const platform = fromSystem(system);
 
 const app = createApp({
   plugins: [...screenPlugins],
@@ -36,6 +53,8 @@ const app = createApp({
     flow: { mainFlow, safeNode: "home" },
     i18n: { locale: "ru", fallback: "ru" },
     audio: { volumes: volumesOf, journal: 200 },
+    platform: { provider: platform, keepAwake: true },
+    leaveExit: { exit: () => platform.exit() },
     input: { heldScale: 1.08 },
     // The keyboard focus ring of design §4: a dashed ink ring over a cream halo, 9 px of the
     // 390-wide design outside the control.
@@ -73,6 +92,9 @@ const app = createApp({
 // The e2e station drives the page through this handle: `game.input.drag(...)`, `game.flow.state()`.
 Reflect.set(globalThis, "game", app);
 
+// The e2e station asks the shell what it can do through this handle: `system.haptics.selection()`.
+Reflect.set(globalThis, "system", system);
+
 // The editor reaches the game through the doors; e2e scripts use the same handle.
 Reflect.set(globalThis, "doors", { read, watch, sources, run, commands });
 
@@ -83,5 +105,6 @@ app.anim.setReducedMotion(reducedMotion.matches);
 reducedMotion.addEventListener("change", event => app.anim.setReducedMotion(event.matches));
 
 // The page opens on the splash, which moves to Home by itself once Home and the board are loaded.
-// Play is the player's own tap.
+// Play is the player's own tap. The shell starts first, so keep-awake finds it running.
+await system.start();
 await app.start();

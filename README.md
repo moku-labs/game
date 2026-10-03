@@ -822,6 +822,7 @@ bun run test:coverage      # both projects with coverage, 90% thresholds
 bun run validate           # publint and attw with the esm-only profile
 bun run fixture:pack       # pack the fixture game into tests/integration/merge-game/dist/assets
 bun run fixture:visual     # the fixture's visual tests, both legs: --url <dev page>, --update, --only <name>, --no-pixels, --webgl
+bun run fixture:native     # the fixture as a native app on @moku-labs/native: <target> [--simulator] [--page <html>]
 bun run release:setup      # moku-release setup
 bun run release:doctor     # moku-release doctor
 bun run release            # moku-release

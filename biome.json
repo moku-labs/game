@@ -1,7 +1,13 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
   "files": {
-    "includes": ["src/**", "tests/**", "*.config.ts", "!tests/visual/**/*.json"]
+    "includes": [
+      "src/**",
+      "tests/**",
+      "*.config.ts",
+      "!tests/visual/**/*.json",
+      "!tests/integration/merge-game/dist"
+    ]
   },
   "formatter": {
     "enabled": true,
