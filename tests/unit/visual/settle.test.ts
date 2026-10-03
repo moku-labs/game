@@ -36,14 +36,14 @@ function fakeGame(onFrame: (game: FakeGame) => void = () => undefined): FakeGame
 const place = { test: "reward-popup", where: "step 2 (answer)" };
 
 describe("settle", () => {
-  it("stops at the first frame the gate is open", async () => {
+  it("runs one more frame after the gate opens, so the ui of a screen it opened is built", async () => {
     const game = fakeGame(fake => {
       if (fake.frame === 3) fake.state = { ...fake.state, pending: { gate: ["claim"] } };
     });
 
     await settle(game, 600, place);
 
-    expect(game.frame).toBe(3);
+    expect(game.frame).toBe(4);
   });
 
   it("steps at least one frame, also when the gate is already open", async () => {
@@ -52,17 +52,17 @@ describe("settle", () => {
     game.state = { ...game.state, pending: { gate: ["play"] } };
     await settle(game, 600, place);
 
-    expect(game.frame).toBe(1);
+    expect(game.frame).toBe(2);
   });
 
-  it("stops when the graph does not run any more", async () => {
+  it("stops one frame after the graph does not run any more", async () => {
     const game = fakeGame(fake => {
       if (fake.frame === 2) fake.state = { ...fake.state, running: false };
     });
 
     await settle(game, 600, place);
 
-    expect(game.frame).toBe(2);
+    expect(game.frame).toBe(3);
   });
 
   it("lets a load that resolves on a later task finish", async () => {

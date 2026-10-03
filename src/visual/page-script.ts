@@ -148,7 +148,8 @@ function pageMessage(error: unknown): string {
 
 /**
  * Waits frame by frame until the graph rests at a gate or stops: at least one frame, at most
- * `limit`. The settle of the headless leg, on `requestAnimationFrame` instead of `time.step`.
+ * `limit`, then one frame more so the ui of a screen the gate opened is built. The settle of the
+ * headless leg, on `requestAnimationFrame` instead of `time.step`.
  *
  * @param game - The game of the page.
  * @param limit - The most frames to wait, `settleFrames` of the run.
@@ -165,7 +166,11 @@ async function pageSettle(
 
     const state = game.flow.state();
 
-    if (state.pending.gate !== undefined || !state.running) return undefined;
+    if (state.pending.gate !== undefined || !state.running) {
+      await pageFrame();
+
+      return undefined;
+    }
   }
 
   return `[game] Visual test "${place.test}", ${place.where} did not settle in ${limit} frames.\n  The graph stands at "${game.flow.state().path}"; add a step that answers what it waits for.`;

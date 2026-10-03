@@ -122,3 +122,40 @@ describe("describeOf", () => {
     expect(text).not.toContain("10");
   });
 });
+
+describe("describeOf, parents", () => {
+  /** Projection keys of a world with a panel, its keyed button and a child of an unkeyed part. */
+  const parentKeys = new Map([
+    [1_048_614, { projection: "DailyGift", key: "giftBoard" }],
+    [2_097_164, { projection: "DailyGift", key: "giftClaim" }],
+    [2_097_170, { projection: "DailyGift", key: "giftNote" }]
+  ]);
+
+  /** The world: the board, the claim button inside it, a note inside an unkeyed part. */
+  const parentEntities = [
+    entity(1_048_614, "ui", { Box: { x: 0, y: 0, w: 600, h: 400 } }),
+    entity(2_097_164, "ui", { Parent: { entity: 1_048_614 }, Box: { x: 0, y: 0, w: 200, h: 80 } }),
+    entity(2_097_165, "ui", { Box: { x: 0, y: 0, w: 10, h: 10 } }),
+    entity(2_097_170, "ui", { Parent: { entity: 2_097_165 } })
+  ];
+
+  /** The fake app over that world. */
+  const parentApp = {
+    ...app,
+    world: {
+      ecs: { snapshot: () => ({ mode: "live", entities: parentEntities, resources: {} }) },
+      projection: { keyOf: (id: number) => parentKeys.get(id) }
+    }
+  } as unknown as ReaderApp;
+
+  it("names a keyed parent by its projection and key, and an unkeyed one by nothing", () => {
+    const views = describeOf(parentApp).views;
+
+    expect(views.find(view => view.key === "giftClaim")?.components.Parent).toEqual({
+      projection: "DailyGift",
+      key: "giftBoard"
+    });
+    expect(views.find(view => view.key === "giftNote")?.components.Parent).toEqual({});
+    expect(JSON.stringify(views)).not.toMatch(/entity|1048614|2097165/u);
+  });
+});

@@ -159,6 +159,21 @@ describe("the headless leg", () => {
     expect(keysOf(described.ui)).not.toContain("reward");
   });
 
+  it("taps a popup's button right after the tap that opened it: the popup is built a frame after its gate", async () => {
+    const test = openPopup(7, [
+      { tap: { key: "open" } },
+      { tap: { key: "claim" } },
+      { checkpoint: "claimed" }
+    ]);
+    const [result] = await runHeadlessLeg(setup, [test], runInto());
+
+    expect(result?.error).toBeUndefined();
+    expect(await baseline("open-popup", "claimed", "state.json")).toMatchObject({
+      path: "home",
+      player: { coins: 12 }
+    });
+  });
+
   it("does not mount a popup that the last node of a walk opens", async () => {
     const test = openPopup(7, [
       { walk: { route: [{ at: "home", intent: "open" }] } },

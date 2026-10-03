@@ -2,10 +2,12 @@
  * @file visual — the two readers of a checkpoint. Both read through the `/inspect` sources only,
  * never a plugin internal: `stateOf` the graph position and the committed model, `describeOf`
  * the ui tree and the keyed views. Entity ids and skipped components (the renderer's `Display`)
- * are dropped, so the entity numbering never enters a baseline.
+ * are dropped and a `Parent` names its entity by address, so the entity numbering never enters a
+ * baseline.
  */
 import { read } from "../plugins/flow/doors/read";
 import { sources } from "../plugins/flow/doors/sources";
+import type { Json } from "../plugins/model/types";
 import type { Entity } from "../plugins/world/types";
 import type { ReaderApp, VisualDescribe, VisualState, VisualView } from "./types";
 
@@ -46,6 +48,43 @@ function addressesOf(keys: Record<string, Record<string, Entity>>): Map<Entity, 
 }
 
 /**
+ * Reads the entity a `Parent` component points at.
+ *
+ * @param parent - The JSON of the component, if the view has one.
+ * @returns The parent entity, or `undefined` when there is no `Parent` of the usual shape.
+ * @example
+ * ```ts
+ * parentOf({ entity: 1048614 }); // 1048614
+ * ```
+ */
+function parentOf(parent: Json | undefined): Entity | undefined {
+  if (typeof parent !== "object" || parent === null || Array.isArray(parent)) return undefined;
+
+  return typeof parent.entity === "number" ? parent.entity : undefined;
+}
+
+/**
+ * Names the parent of a view by its projection and key instead of its entity id, which depends
+ * on the order the world spawned and freed its entities. A parent no projection names is `{}`.
+ *
+ * @param components - The JSON components of the view.
+ * @param addresses - The address of every keyed entity.
+ * @returns The components, with `Parent` as an address.
+ */
+function withParentAddress(
+  components: Record<string, Json>,
+  addresses: ReadonlyMap<Entity, Address>
+): Record<string, Json> {
+  const parent = parentOf(components.Parent);
+
+  if (parent === undefined) return components;
+
+  const address = addresses.get(parent);
+
+  return { ...components, Parent: address === undefined ? {} : { ...address } };
+}
+
+/**
  * Reads the state a checkpoint saves: where the graph rests, then the committed player,
  * session and rng.
  *
@@ -71,7 +110,9 @@ export function describeOf(app: ReaderApp): VisualDescribe {
   for (const entity of read(app, sources.entities)) {
     const address = addresses.get(entity.id);
 
-    if (address !== undefined) views.push({ ...address, components: entity.components });
+    if (address !== undefined) {
+      views.push({ ...address, components: withParentAddress(entity.components, addresses) });
+    }
   }
 
   return { ui: read(app, sources.ui), views: views.toSorted(byAddress) };
