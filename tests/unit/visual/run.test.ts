@@ -56,6 +56,21 @@ function popupTest(name: string, coins: number) {
 }
 
 /**
+ * A popup test that also runs in the WebGL leg.
+ *
+ * @param name - The test name.
+ * @param coins - The coins of the starting player.
+ * @returns The test, with `webgl: true`.
+ */
+function webglTest(name: string, coins: number) {
+  return defineVisualTest(name, {
+    start: { player: { coins }, checkpoint: "home" },
+    steps: [{ tap: { key: "open" } }, { checkpoint: "open" }],
+    webgl: true
+  });
+}
+
+/**
  * Hands the browser leg an answer: every checkpoint of the headless leg with these pixels.
  *
  * @param pixels - The pixel fields of every checkpoint.
@@ -131,6 +146,24 @@ describe("runVisualTests", () => {
     ).rejects.toThrow('[game] No visual test is named "popop".\n  Use one of: popup.');
   });
 
+  it("runs only the tests with webgl: true in the WebGL leg", async () => {
+    const tests = [popupTest("plain", 1), webglTest("glow", 2)];
+    const report = await runVisualTests(setup, tests, { argv: ["--webgl"], dir });
+
+    expect(report.tests.map(test => test.name)).toEqual(["glow"]);
+  });
+
+  it("refuses an --only name whose test has no WebGL leg", async () => {
+    await expect(
+      runVisualTests(setup, [popupTest("plain", 1), webglTest("glow", 2)], {
+        argv: ["--webgl", "--only", "plain"],
+        dir
+      })
+    ).rejects.toThrow(
+      '[game] The visual test "plain" has no WebGL leg.\n  Pass webgl: true to its defineVisualTest, or run without --webgl.'
+    );
+  });
+
   it("refuses two tests with one name: they would share their baselines", async () => {
     await expect(
       runVisualTests(setup, [popupTest("popup", 1), popupTest("popup", 2)], { argv: [], dir })
@@ -155,7 +188,12 @@ describe("runVisualTests", () => {
   });
 
   it("checks a test written by hand, so its name cannot leave the folder", async () => {
-    const handMade: VisualTest = { name: "../outside", start: { player: {} }, steps: [] };
+    const handMade: VisualTest = {
+      name: "../outside",
+      start: { player: {} },
+      steps: [],
+      webgl: false
+    };
 
     await expect(runVisualTests(setup, [handMade], { argv: [], dir })).rejects.toThrow(
       '[game] The visual test name "../outside" is not a file name.'
@@ -190,6 +228,24 @@ describe("runVisualTests", () => {
       [expect.objectContaining({ name: "popup" })],
       expect.objectContaining({ pixels: true, dir }),
       [expect.objectContaining({ name: "popup" })]
+    );
+  });
+
+  it("hands the browser leg the WebGL renderer and the WebGL tests only", async () => {
+    pixelsAnswer({ pixels: "same" });
+
+    const report = await runVisualTests(withPage, [popupTest("plain", 1), webglTest("glow", 2)], {
+      argv: ["--webgl"],
+      dir,
+      pixels: true
+    });
+
+    expect(report.ok).toBe(true);
+    expect(vi.mocked(runBrowserLeg)).toHaveBeenLastCalledWith(
+      withPage,
+      [expect.objectContaining({ name: "glow" })],
+      expect.objectContaining({ renderer: "webgl" }),
+      [expect.objectContaining({ name: "glow" })]
     );
   });
 

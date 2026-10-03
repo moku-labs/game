@@ -14,6 +14,7 @@ export { i18nPlugin } from "./i18n";
 export { inputPlugin } from "./input";
 export { lifecyclePlugin } from "./lifecycle";
 export { modelPlugin } from "./model";
+export { platformPlugin } from "./platform";
 export { rendererPlugin } from "./renderer";
 export { scenesPlugin } from "./scenes";
 export { textPlugin } from "./text";
@@ -32,6 +33,7 @@ export * as I18n from "./i18n/types";
 export * as Input from "./input/types";
 export * as Lifecycle from "./lifecycle/types";
 export * as Model from "./model/types";
+export * as Platform from "./platform/types";
 export * as Renderer from "./renderer/types";
 export * as Scenes from "./scenes/types";
 // `Text` is the component exported from the root, so the type namespace takes a longer name.

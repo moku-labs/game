@@ -1,6 +1,6 @@
 /**
- * @file visual — `defineVisualTest`: a name, where the test starts and its steps, checked and
- * frozen. Nothing runs at definition.
+ * @file visual — `defineVisualTest`: a name, where the test starts, its steps and whether it runs
+ * in the WebGL leg, checked and frozen. Nothing runs at definition.
  */
 import { stepEntry } from "./steps";
 import type { VisualStart, VisualStep, VisualTest } from "./types";
@@ -91,12 +91,15 @@ export function checkVisualTest(name: string, steps: readonly VisualStep[]): voi
  * `/control` command by its short name with that command's input, or `{ checkpoint: name }`,
  * where the runner saves `state.json` and `describe.json` next to the test. `walk` runs fast: a
  * popup its last node opens never mounts, so the step before a checkpoint that shows a node's
- * result is `answer` or `tap`. The answer is a frozen copy; nothing runs here.
+ * result is `answer` or `tap`. With `webgl: true` the test also runs in the WebGL leg
+ * (`--webgl`), whose pictures go to `screen.webgl.webp`: set it on a screen with a custom filter.
+ * The answer is a frozen copy; nothing runs here.
  *
  * @param name - The test name, also its folder: lowercase letters, digits and dashes.
- * @param test - Where it starts and its steps.
+ * @param test - Where it starts, its steps and its WebGL leg.
  * @param test.start - The player, and optionally the session, the rng and the checkpoint.
  * @param test.steps - The commands and the checkpoints, in order.
+ * @param test.webgl - True to run the test in the WebGL leg too; false by default.
  * @returns The test, frozen.
  * @throws {Error} When the name or a checkpoint name is not a file name, a checkpoint name is
  *   used twice, or a step is not one step command.
@@ -108,13 +111,23 @@ export function checkVisualTest(name: string, steps: readonly VisualStep[]): voi
  *   steps: [{ tap: { key: "play" } }, { answer: { intent: "deliver", payload: { orderId: "o1" } } },
  *     { checkpoint: "open" }, { tap: { key: "claim" } }, { checkpoint: "claimed" }]
  * });
+ * // A board drawn through a custom filter: the test also runs in the WebGL leg (`--webgl`).
+ * export const boardMerge = defineVisualTest("board-merge", {
+ *   start: atHome,
+ *   steps: [{ tap: { key: "play" } }, { drag: { from: { projection: "board.items", key: "i2" },
+ *     to: { projection: "board.items", key: "i3" } } }, { checkpoint: "merged" }],
+ *   webgl: true
+ * });
+ * boardMerge.webgl; // true
  * ```
  */
 export function defineVisualTest(
   name: string,
-  test: { start: VisualStart; steps: readonly VisualStep[] }
+  test: { start: VisualStart; steps: readonly VisualStep[]; webgl?: boolean }
 ): VisualTest {
   checkVisualTest(name, test.steps);
 
-  return freezeDeep(structuredClone({ name, start: test.start, steps: test.steps }));
+  const webgl = test.webgl ?? false;
+
+  return freezeDeep(structuredClone({ name, start: test.start, steps: test.steps, webgl }));
 }

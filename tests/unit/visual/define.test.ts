@@ -18,12 +18,19 @@ describe("defineVisualTest", () => {
     ];
     const test = defineVisualTest("reward-popup", { start, steps });
 
-    expect(test).toEqual({ name: "reward-popup", start, steps });
+    expect(test).toEqual({ name: "reward-popup", start, steps, webgl: false });
     expect(Object.isFrozen(test)).toBe(true);
     expect(Object.isFrozen(test.start)).toBe(true);
     expect(Object.isFrozen(test.start.player)).toBe(true);
     expect(Object.isFrozen(test.steps)).toBe(true);
     expect(Object.isFrozen(test.steps[1])).toBe(true);
+  });
+
+  it("marks a test for the WebGL leg with webgl: true", () => {
+    const test = defineVisualTest("board", { start, steps: [{ checkpoint: "glow" }], webgl: true });
+
+    expect(test.webgl).toBe(true);
+    expect(defineVisualTest("home", { start, steps: [], webgl: false }).webgl).toBe(false);
   });
 
   it("copies what it was given, so the caller's objects stay its own", () => {

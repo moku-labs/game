@@ -159,6 +159,14 @@ describe("defineFilter", () => {
     }
   });
 
+  it("refuses finalColor and vTextureCoord: the GLSL header declares them", () => {
+    for (const name of ["finalColor", "vTextureCoord"]) {
+      expect(() =>
+        defineFilter("fx.x", { wgsl: BODY, glsl: GLSL, uniforms: { [name]: 1 } })
+      ).toThrow(`[game] Filter "fx.x": uniform "${name}" is reserved.\n  Rename it.`);
+    }
+  });
+
   it("refuses an empty id", () => {
     expect(() => defineFilter("", { wgsl: BODY, glsl: GLSL })).toThrow(
       "[game] A filter needs an id.\n  Pass a non-empty string as the first argument."

@@ -1,8 +1,9 @@
 /**
  * @file visual — the types of the visual tests: the descriptor a game writes, the setup and the
  * options of the runner, and the report it answers. The headless leg reads the descriptor and
- * writes `state.json` and `describe.json`; the browser leg reads `page`, `pixels` and `tolerance`,
- * writes `screen.webp` and fills the pixel fields of a checkpoint result. The Chrome types at the end
+ * writes `state.json` and `describe.json`; the browser leg reads `page`, `pixels`, `renderer` and
+ * `tolerance`, writes `screen.webp` (`screen.webgl.webp` in the WebGL leg) and fills the pixel
+ * fields of a checkpoint result. The Chrome types at the end
  * are the part of Playwright the browser leg calls, written out, so no type of `playwright-core`
  * enters the package.
  */
@@ -65,8 +66,8 @@ export type VisualStep =
   | { [K in StepCommand]: { [P in K]: InputOf<Catalogue[K]["input"]> } }[StepCommand];
 
 /**
- * A visual test as `defineVisualTest` answers it: its name, where it starts and its steps.
- * Frozen data; nothing runs at definition.
+ * A visual test as `defineVisualTest` answers it: its name, where it starts, its steps, and
+ * `webgl`, true when it also runs in the WebGL leg. Frozen data; nothing runs at definition.
  *
  * @example
  * ```ts
@@ -75,6 +76,7 @@ export type VisualStep =
  *   steps: [{ tap: { key: "play" } }, { checkpoint: "board" }]
  * });
  * test.name; // "reward-popup"
+ * test.webgl; // false
  * Object.isFrozen(test.steps); // true
  * ```
  */
@@ -82,6 +84,7 @@ export type VisualTest = {
   readonly name: string;
   readonly start: Readonly<VisualStart>;
   readonly steps: readonly VisualStep[];
+  readonly webgl: boolean;
 };
 
 /**
@@ -149,21 +152,36 @@ export type VisualSetup = {
 export type VisualTolerance = { ratio: number; threshold: number };
 
 /**
+ * The backend the browser leg draws with: `"webgpu"`, or `"webgl"` for the WebGL leg.
+ *
+ * @example
+ * ```ts
+ * const renderer: VisualRenderer = "webgl"; // what --webgl asks for
+ * ```
+ */
+export type VisualRenderer = "webgpu" | "webgl";
+
+/**
  * The options of a run. Each one left out comes from the command line (`argv`), then from its
  * default: `dir` `"tests/visual"`, `update` false, `pixels` true with a `page` on a Mac,
- * `settleFrames` 600, `tolerance` `{ ratio: 0.001, threshold: 24 }`, `argv`
- * `process.argv.slice(2)`. An option given here wins over a flag.
+ * `renderer` `"webgpu"`, `settleFrames` 600, `tolerance` `{ ratio: 0.001, threshold: 24 }`,
+ * `argv` `process.argv.slice(2)`. An option given here wins over a flag. `renderer: "webgl"`
+ * runs only the tests with `webgl: true`, on the page with `?renderer=webgl`, and compares their
+ * pictures with `screen.webgl.webp`.
  *
  * @example
  * ```ts
  * // The same as `bun tests/visual/run.ts --only reward-popup --no-pixels`.
  * const options: VisualOptions = { only: ["reward-popup"], pixels: false };
+ * // The same as `bun tests/visual/run.ts --webgl`.
+ * const webgl: VisualOptions = { renderer: "webgl" };
  * ```
  */
 export type VisualOptions = {
   dir?: string;
   update?: boolean;
   pixels?: boolean;
+  renderer?: VisualRenderer;
   only?: readonly string[];
   settleFrames?: number;
   tolerance?: VisualTolerance;
@@ -238,6 +256,7 @@ export type VisualRun = {
   dir: string;
   update: boolean;
   pixels: boolean;
+  renderer: VisualRenderer;
   only?: readonly string[];
   settleFrames: number;
   tolerance: VisualTolerance;
@@ -248,6 +267,7 @@ export type VisualFlags = {
   dir?: string;
   update?: boolean;
   pixels?: boolean;
+  renderer?: VisualRenderer;
   only?: readonly string[];
 };
 
@@ -293,7 +313,8 @@ export type PixelCheck = Checked & { pixelRatio?: number };
 
 /**
  * What the browser leg found at one checkpoint: the page's state against `state.json` (none when
- * the file is missing) and the pixels against `screen.webp`.
+ * the file is missing) and the pixels against `screen.webp`, or `screen.webgl.webp` in the WebGL
+ * leg.
  */
 export type PixelFound = { state: Checked | undefined; pixels: PixelCheck };
 
