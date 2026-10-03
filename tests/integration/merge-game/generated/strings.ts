@@ -21,6 +21,9 @@ export type Strings = {
   "hud.need": { chain: Argument; level: Argument };
   "hud.order": Record<string, never>;
   "hud.settings": Record<string, never>;
+  "leave.leave": Record<string, never>;
+  "leave.stay": Record<string, never>;
+  "leave.title": Record<string, never>;
   "orders.claim": Record<string, never>;
   "orders.deliver": Record<string, never>;
   "orders.done": Record<string, never>;

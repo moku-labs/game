@@ -2,6 +2,8 @@
  * @file Visual test: the Rename popup (V5 text input). The gear of Home opens Settings, its Name
  * tab and the Rename plank stack the popup on top; "Alex" goes into the field through the `fill`
  * command and the counter under it reads 4/16. Enter saves the name, and the Name tab shows it.
+ * The green Save and the Play plank under the popups glow, so the test also runs in the WebGL
+ * leg (`--webgl`).
  */
 import { defineVisualTest } from "@moku-labs/game/testing";
 import { atHome } from "./fixture";
@@ -16,5 +18,6 @@ export const renamePopup = defineVisualTest("rename-popup", {
     { checkpoint: "typed" },
     { key: { key: "Enter" } },
     { checkpoint: "saved" }
-  ]
+  ],
+  webgl: true
 });

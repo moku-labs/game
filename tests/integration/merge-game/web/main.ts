@@ -10,6 +10,9 @@
  *
  * The page is a dev build: `./dev` sets the dev flag before anything else runs, and the audio
  * journal keeps the last 200 sounds, so the editor and the e2e station can read what was heard.
+ * It draws with WebGPU; `?renderer=webgl` asks for WebGL, as the WebGL leg of the visual tests
+ * does. The page passes no platform provider: `platform` is inert, Back is the browser's own and
+ * Leave on the Leave popup closes nothing.
  */
 import "./dev";
 import { createApp } from "@moku-labs/game";
@@ -18,6 +21,7 @@ import { read, sources, watch } from "@moku-labs/game/inspect";
 import { mainFlow } from "../flows/main";
 import { screenPlugins, volumesOf } from "../game";
 import { startingSession } from "../state";
+import { rendererFor } from "./renderer";
 import { playerFor } from "./scenarios";
 
 const app = createApp({
@@ -25,7 +29,7 @@ const app = createApp({
   // The board column is 2084 units tall: a wide screen scales the whole interface down together.
   config: { referenceLong: 2100 },
   pluginConfigs: {
-    renderer: { mount: "#game" },
+    renderer: { mount: "#game", preference: rendererFor(location.search) },
     assets: { manifest: "/manifest.json" },
     text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
     model: { initialPlayer: playerFor(location.search), initialSession: startingSession, seed: 42 },

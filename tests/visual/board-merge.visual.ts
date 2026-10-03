@@ -3,6 +3,7 @@
  * onto the Twig on c0_2 and a Log rises there with a burst of stars (V5 particles). A second of
  * frames lets the last star fall and fade before the checkpoint: the checkpoint lands the
  * motions, and the particles left in the air would be a different picture on every run.
+ * The ready order card and its green Deliver glow, so the test also runs in the WebGL leg.
  */
 import { defineVisualTest } from "@moku-labs/game/testing";
 import { atHome } from "./fixture";
@@ -19,5 +20,6 @@ export const boardMerge = defineVisualTest("board-merge", {
     },
     { step: { frames: 60 } },
     { checkpoint: "merged" }
-  ]
+  ],
+  webgl: true
 });

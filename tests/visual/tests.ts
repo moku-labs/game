@@ -7,6 +7,7 @@ import type { VisualTest } from "@moku-labs/game/testing";
 import { boardMerge } from "./board-merge.visual";
 import { giftPopup } from "./gift-popup.visual";
 import { home } from "./home.visual";
+import { leavePopup } from "./leave-popup.visual";
 import { renamePopup } from "./rename-popup.visual";
 import { rewardPopup } from "./reward-popup.visual";
 import { settings } from "./settings.visual";
@@ -17,5 +18,6 @@ export const fixtureVisualTests: readonly VisualTest[] = [
   rewardPopup,
   renamePopup,
   giftPopup,
-  settings
+  settings,
+  leavePopup
 ];
