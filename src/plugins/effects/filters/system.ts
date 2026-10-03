@@ -12,44 +12,49 @@ import { checkWgsl } from "./check";
 import { createFilter, destroyFilter, writeFilter } from "./instance";
 import type { FilteredView, FilterInstance, FilterKind } from "./types";
 
-/** One instance on its view, with what it sorts by. */
-type Placed = { instance: FilterInstance; order: number; index: number };
-
 /**
- * Creates the record of a view with no filter yet.
+ * Creates the record of a view with no filter yet. Its change marks and its sorted list are made
+ * here once and reused every frame.
  *
  * @returns An empty view.
  */
 function emptyView(): FilteredView {
-  return { kinds: new Set(), instances: new Map(), retired: [], assigned: [] };
+  return {
+    kinds: new Set(),
+    instances: new Map(),
+    retired: [],
+    assigned: [],
+    changed: new Set(),
+    placed: []
+  };
 }
 
 /**
- * The entities whose component of each Pixi-core kind changed this frame, one set per kind id.
- * A core kind is written only then; ours are written every frame.
+ * Marks on each view the Pixi-core kinds whose component changed this frame. A core kind is
+ * written only then; ours are written every frame.
  *
  * @param ectx - Domain context of the effects plugin.
- * @returns The change sets of the core kinds.
  */
-function coreChanges(ectx: EffectsCtx): Map<string, Set<Entity>> {
-  const changes = new Map<string, Set<Entity>>();
+function markCoreChanges(ectx: EffectsCtx): void {
+  const { state, deps } = ectx;
 
-  for (const kind of ectx.state.kinds.values()) {
-    if (kind.source === "core")
-      changes.set(kind.id, new Set(ectx.deps.world.ecs.changed(kind.component)));
+  for (const kind of state.kinds.values()) {
+    if (kind.source !== "core") continue;
+
+    for (const entity of deps.world.ecs.changed(kind.component)) {
+      state.views.get(entity)?.changed.add(kind.id);
+    }
   }
-
-  return changes;
 }
 
 /**
- * Sorts placed instances by their `order`, then by the index of their kind.
+ * Sorts instances by their `order`, then by the index of their kind.
  *
- * @param a - One placed instance.
+ * @param a - One instance.
  * @param b - The other.
  * @returns Negative when `a` goes first.
  */
-function byOrder(a: Placed, b: Placed): number {
+function byOrder(a: FilterInstance, b: FilterInstance): number {
   return a.order - b.order || a.index - b.index;
 }
 
@@ -61,11 +66,16 @@ function byOrder(a: Placed, b: Placed): number {
  * @param placed - The sorted instances of this frame.
  * @returns True when the renderer must get a new list.
  */
-function differs(assigned: readonly FilterSlot[], placed: readonly Placed[]): boolean {
+function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstance[]): boolean {
   if (assigned.length !== placed.length) return true;
 
-  for (const [index, { instance }] of placed.entries()) {
+  // Walk both lists side by side; a counter instead of `entries()`, which builds a pair per item.
+  let index = 0;
+
+  for (const instance of placed) {
     const slot = assigned[index];
+
+    index += 1;
 
     if (slot?.filter !== instance.filter || slot.passes !== instance.passes) return true;
   }
@@ -83,7 +93,7 @@ function differs(assigned: readonly FilterSlot[], placed: readonly Placed[]): bo
  * @param view - Its record.
  * @param kind - The kind.
  * @param changed - Whether its component changed this frame.
- * @returns The instance with its sort keys, or `undefined` while it has none.
+ * @returns The instance, its `order` up to date, or `undefined` while it has none.
  */
 function syncKind(
   ectx: EffectsCtx,
@@ -92,7 +102,7 @@ function syncKind(
   view: FilteredView,
   kind: FilterKind,
   changed: boolean
-): Placed | undefined {
+): FilterInstance | undefined {
   const value = ectx.deps.world.ecs.get(entity, kind.component);
 
   if (value === undefined) return undefined;
@@ -109,9 +119,10 @@ function syncKind(
     view.instances.set(kind.id, instance);
   } else {
     writeFilter(ectx, instance, value, changed);
+    instance.order = value.order;
   }
 
-  return { instance, order: value.order, index: kind.index };
+  return instance;
 }
 
 /**
@@ -123,32 +134,31 @@ function syncKind(
  * @param pixi - The module the renderer loaded.
  * @param entity - The entity.
  * @param view - Its record.
- * @param changes - The change sets of the core kinds.
  */
-function syncView(
-  ectx: EffectsCtx,
-  pixi: PixiModule,
-  entity: Entity,
-  view: FilteredView,
-  changes: ReadonlyMap<string, ReadonlySet<Entity>>
-): void {
-  // Bring every kind of the view up to date and collect the instances it has.
-  const placed: Placed[] = [];
+function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: FilteredView): void {
+  // Bring every kind of the view up to date, consuming its change mark, and collect the instances
+  // it has into the view's own list.
+  const { placed } = view;
+
+  placed.length = 0;
 
   for (const id of view.kinds) {
     const kind = ectx.state.kinds.get(id);
-    const changed = changes.get(id)?.has(entity) === true;
-    const entry =
+    const changed = view.changed.delete(id);
+    const instance =
       kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed);
 
-    if (entry !== undefined) placed.push(entry);
+    if (instance !== undefined) placed.push(instance);
   }
+
+  // A kind that left this frame leaves no mark behind for a later frame.
+  if (view.changed.size > 0) view.changed.clear();
 
   // Hand the renderer a new frozen list only when the sorted instances changed.
   placed.sort(byOrder);
 
   if (differs(view.assigned, placed)) {
-    const slots = placed.map(({ instance }) => ({
+    const slots = placed.map(instance => ({
       filter: instance.filter,
       passes: instance.passes
     }));
@@ -171,33 +181,31 @@ function syncView(
 }
 
 /**
- * The box a view declares, in reference units: its sprite's size, its nine-slice's or its
- * shape's. A sprite without a size declares none.
+ * Tells whether a box of a view, times the view's scale, covers the viewport on both axes.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param entity - The entity.
- * @returns Width and height, or `undefined`.
+ * @param width - The width of its box, reference units.
+ * @param height - The height of its box.
+ * @param size - The viewport size.
+ * @returns True when the scaled box covers the viewport.
  */
-function boxOf(ectx: EffectsCtx, entity: Entity): { width: number; height: number } | undefined {
-  const ecs = ectx.deps.world.ecs;
-  const sprite = ecs.get(entity, Sprite);
+function boxCovers(
+  ectx: EffectsCtx,
+  entity: Entity,
+  width: number,
+  height: number,
+  size: ViewportSize
+): boolean {
+  const scale = ectx.deps.world.ecs.get(entity, Transform)?.scale ?? 1;
 
-  if (sprite !== undefined) {
-    return sprite.width > 0 && sprite.height > 0 ? sprite : undefined;
-  }
-
-  const nine = ecs.get(entity, NineSlice);
-
-  if (nine !== undefined) return nine;
-
-  const shape = ecs.get(entity, Shape);
-
-  return shape === undefined ? undefined : { width: shape.w, height: shape.h };
+  return width * scale >= size.width && height * scale >= size.height;
 }
 
 /**
- * Tells whether a filtered view covers the whole viewport: its box times its scale covers the
- * reference size on both axes. Read from components, never from Pixi bounds.
+ * Tells whether a filtered view covers the whole viewport: the box its sprite, its nine-slice or
+ * its shape declares, times its scale, covers the reference size on both axes. A sprite without a
+ * size declares none. Read from components, never from Pixi bounds.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param entity - The entity.
@@ -205,13 +213,22 @@ function boxOf(ectx: EffectsCtx, entity: Entity): { width: number; height: numbe
  * @returns True for a full-screen view.
  */
 function coversScreen(ectx: EffectsCtx, entity: Entity, size: ViewportSize): boolean {
-  const box = boxOf(ectx, entity);
+  const ecs = ectx.deps.world.ecs;
+  const sprite = ecs.get(entity, Sprite);
 
-  if (box === undefined) return false;
+  if (sprite !== undefined) {
+    if (sprite.width <= 0 || sprite.height <= 0) return false;
 
-  const scale = ectx.deps.world.ecs.get(entity, Transform)?.scale ?? 1;
+    return boxCovers(ectx, entity, sprite.width, sprite.height, size);
+  }
 
-  return box.width * scale >= size.width && box.height * scale >= size.height;
+  const nine = ecs.get(entity, NineSlice);
+
+  if (nine !== undefined) return boxCovers(ectx, entity, nine.width, nine.height, size);
+
+  const shape = ecs.get(entity, Shape);
+
+  return shape !== undefined && boxCovers(ectx, entity, shape.w, shape.h, size);
 }
 
 /**
@@ -229,15 +246,23 @@ function hasEnabledFilter(view: FilteredView): boolean {
 }
 
 /**
- * Warns once per crossing of each filter budget: the renderer's render passes over
- * `config.maxPasses`, and more than one full-screen view with an enabled filter.
+ * Warns once per crossing of the pass budget: the renderer's render passes over
+ * `config.maxPasses`. The renderer's count walks its textures, so it is read only while a view
+ * carries a filter; with none the frame draws at most one pass and the budget cannot trip.
  *
  * @param ectx - Domain context of the effects plugin.
  */
-function checkBudgets(ectx: EffectsCtx): void {
+function checkPassBudget(ectx: EffectsCtx): void {
   const { state, config, deps } = ectx;
 
-  // The pass budget: warn once when the renderer's passes cross `maxPasses`.
+  // No filtered view: at most one pass, under any budget.
+  if (state.views.size === 0) {
+    state.over.passes = false;
+
+    return;
+  }
+
+  // Warn once when the renderer's passes cross `maxPasses`.
   const passes = deps.renderer.stats().renderPasses;
   const overPasses = passes > config.maxPasses;
 
@@ -246,6 +271,18 @@ function checkBudgets(ectx: EffectsCtx): void {
   }
 
   state.over.passes = overPasses;
+}
+
+/**
+ * Warns once per crossing of each filter budget: the renderer's render passes over
+ * `config.maxPasses`, and more than one full-screen view with an enabled filter.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ */
+function checkBudgets(ectx: EffectsCtx): void {
+  const { state, deps } = ectx;
+
+  checkPassBudget(ectx);
 
   // The full-screen budget: count the views that cover the viewport with an enabled filter.
   const size = deps.renderer.viewport.size();
@@ -283,15 +320,15 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
 
       if (pixi === undefined) return;
 
-      // With no filtered view only the pass budget needs a look: no change sets to build.
+      // With no filtered view only the budgets need a look: no change to mark.
       if (ectx.state.views.size === 0) {
         checkBudgets(ectx);
         return;
       }
 
-      const changes = coreChanges(ectx);
+      markCoreChanges(ectx);
 
-      for (const [entity, view] of ectx.state.views) syncView(ectx, pixi, entity, view, changes);
+      for (const [entity, view] of ectx.state.views) syncView(ectx, pixi, entity, view);
 
       checkBudgets(ectx);
     }

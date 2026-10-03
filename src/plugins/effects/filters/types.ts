@@ -290,9 +290,10 @@ export type UniformValues = Record<string, number | Float32Array>;
 export type FilterUniforms = { readonly uniforms: UniformValues };
 
 /**
- * The Pixi instance of one kind on one view, with the passes one apply of it costs now.
+ * The Pixi object of one kind on one view, with the passes one apply of it costs now: what the
+ * builders of `instance.ts` make before the instance gets its sort keys.
  */
-export type FilterInstance =
+export type FilterBody =
   | {
       readonly kind: "wgsl";
       readonly filter: PixiFilter;
@@ -330,13 +331,22 @@ export type FilterInstance =
     };
 
 /**
+ * The instance of one kind on one view: its Pixi object, and what it sorts by on the view, the
+ * `order` of its component (written every frame) and the `index` of its kind.
+ */
+export type FilterInstance = FilterBody & { order: number; readonly index: number };
+
+/**
  * What the filter sync keeps for one entity: the kinds it carries, one instance per kind, the
- * instances waiting to be destroyed after the next assignment, and the slots last handed to
- * `renderer.sync.filters.set`.
+ * instances waiting to be destroyed after the next assignment, the slots last handed to
+ * `renderer.sync.filters.set`, the core kinds whose component changed this frame, and the
+ * instances of this frame in their sorted order (one array, reused every frame).
  */
 export type FilteredView = {
   readonly kinds: Set<string>;
   readonly instances: Map<string, FilterInstance>;
   readonly retired: FilterInstance[];
   assigned: readonly FilterSlot[];
+  readonly changed: Set<string>;
+  readonly placed: FilterInstance[];
 };

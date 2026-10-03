@@ -17,10 +17,6 @@ type Heavy = { key: string; mb: number };
  *
  * @param state - The plugin state.
  * @returns The used megabytes.
- * @example
- * ```ts
- * usedMb(state); // 3.5 while only the board bundle is loaded
- * ```
  */
 export function usedMb(state: State): number {
   let total = 0;
@@ -40,10 +36,6 @@ export function usedMb(state: State): number {
  *
  * @param state - The plugin state.
  * @returns The bundle name, or `undefined` when nothing may go.
- * @example
- * ```ts
- * pickVictim(state); // "shop", the scene the player left longest ago
- * ```
  */
 export function pickVictim(state: State): string | undefined {
   let victim: string | undefined;
@@ -73,11 +65,6 @@ export function pickVictim(state: State): string | undefined {
  *
  * @param io - The I/O seam, or `undefined` while headless.
  * @param assets - The maps of a loaded bundle, or of a load that broke half way.
- * @example
- * ```ts
- * // The load of the ui bundle failed after its page and two slices of it were there.
- * releaseAssets(io, assets); // the two slices destroyed, then the page; every map empty
- * ```
  */
 export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): void {
   if (io !== undefined) {
@@ -103,11 +90,6 @@ export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): v
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
  * @param reason - Whether the budget or a caller asked for it.
- * @example
- * ```ts
- * // The timed event ended and its textures go back to the GPU.
- * unloadBundle(ctx, "event.halloween", "request");
- * ```
  */
 export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: "budget" | "request"): void {
   const state = ctx.state;
@@ -178,11 +160,6 @@ function warnOverBudget(ctx: AssetsCtx): void {
  * Headless there is no texture memory, so it does nothing.
  *
  * @param ctx - Domain context of the plugin.
- * @example
- * ```ts
- * // After a scene switch loaded 40 MB over the 192 MB budget.
- * enforceBudget(ctx); // the least recently used scenes are freed until it fits
- * ```
  */
 export function enforceBudget(ctx: AssetsCtx): void {
   const state = ctx.state;

@@ -9,6 +9,7 @@ import type { PixiModule } from "../../renderer/types";
 import type { EffectsCtx } from "../types";
 import type {
   CoreKind,
+  FilterBody,
   FilterDefinition,
   FilterFields,
   FilterInstance,
@@ -107,13 +108,13 @@ function paddingOf(definition: FilterDefinition, value: Readonly<FilterFields>):
  * @param pixi - The module the renderer loaded.
  * @param definition - The filter definition.
  * @param value - The stored filter value.
- * @returns The instance.
+ * @returns The Pixi object and its passes.
  */
 function createOurs(
   pixi: PixiModule,
   definition: FilterDefinition,
   value: Readonly<FilterFields>
-): FilterInstance {
+): FilterBody {
   const { source } = definition;
   const gpuProgram = pixi.GpuProgram.from({
     name: definition.id,
@@ -217,13 +218,13 @@ function mapTexture(
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
  * @param value - The stored `Displacement` value.
- * @returns The instance, or `undefined` while the map is not loaded.
+ * @returns The Pixi object and its passes, or `undefined` while the map is not loaded.
  */
 function createDisplacement(
   ectx: EffectsCtx,
   pixi: PixiModule,
   value: Readonly<FilterFields>
-): FilterInstance | undefined {
+): FilterBody | undefined {
   const map = typeof value.map === "string" ? value.map : "";
   const texture = mapTexture(ectx, map);
 
@@ -245,14 +246,15 @@ function createDisplacement(
  * @param pixi - The module the renderer loaded.
  * @param core - The core kind.
  * @param value - The stored filter value.
- * @returns The instance, or `undefined` for a `Displacement` whose map is not loaded.
+ * @returns The Pixi object and its passes, or `undefined` for a `Displacement` whose map is not
+ * loaded.
  */
 function createCore(
   ectx: EffectsCtx,
   pixi: PixiModule,
   core: CoreKind,
   value: Readonly<FilterFields>
-): FilterInstance | undefined {
+): FilterBody | undefined {
   switch (core) {
     case "blur": {
       const quality = blurQuality(ectx, value);
@@ -295,8 +297,8 @@ function createCore(
 }
 
 /**
- * Builds the instance of one kind on one view, its uniforms or settings at the stored value and
- * its `enabled` switch set.
+ * Builds the instance of one kind on one view, its uniforms or settings at the stored value, its
+ * `enabled` switch set, and its sort keys: the `order` of the value and the `index` of the kind.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -310,14 +312,48 @@ export function createFilter(
   kind: FilterKind,
   value: Readonly<FilterFields>
 ): FilterInstance | undefined {
-  const instance =
+  const body =
     kind.source === "wgsl"
       ? createOurs(pixi, kind.definition, value)
       : createCore(ectx, pixi, kind.core, value);
 
-  if (instance !== undefined) instance.filter.enabled = value.enabled;
+  if (body === undefined) return undefined;
 
-  return instance;
+  body.filter.enabled = value.enabled;
+
+  return { ...body, order: value.order, index: kind.index };
+}
+
+/**
+ * Writes one uniform of a uniform group: a number in place, a colour or a tuple into the vector
+ * the group already holds. A vector uniform without its vector is left alone.
+ *
+ * @param uniforms - The values of the uniform group.
+ * @param uniform - The uniform.
+ * @param value - The stored filter value.
+ */
+function writeUniform(
+  uniforms: UniformValues,
+  uniform: UniformSpec,
+  value: Readonly<FilterFields>
+): void {
+  if (uniform.form === "number") {
+    uniforms[uniform.name] = numberOf(value, uniform.name);
+
+    return;
+  }
+
+  const target = uniforms[uniform.name];
+
+  if (!(target instanceof Float32Array)) return;
+
+  if (uniform.form === "color") {
+    writeColor(target, numberOf(value, uniform.name));
+
+    return;
+  }
+
+  target.set(vectorOf(value, uniform.name).slice(0, uniform.size));
 }
 
 /**
@@ -334,16 +370,8 @@ function writeOurs(
   value: Readonly<FilterFields>
 ): void {
   if (instance.group !== undefined) {
-    const uniforms: UniformValues = instance.group.uniforms;
-
-    for (const uniform of definition.uniforms) {
-      const target = uniforms[uniform.name];
-
-      if (uniform.form === "number") uniforms[uniform.name] = numberOf(value, uniform.name);
-      else if (!(target instanceof Float32Array)) continue;
-      else if (uniform.form === "color") writeColor(target, numberOf(value, uniform.name));
-      else target.set(vectorOf(value, uniform.name).slice(0, uniform.size));
-    }
+    for (const uniform of definition.uniforms)
+      writeUniform(instance.group.uniforms, uniform, value);
   }
 
   if (typeof definition.padding === "string")

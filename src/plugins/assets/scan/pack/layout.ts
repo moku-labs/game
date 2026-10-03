@@ -79,6 +79,27 @@ function framesOf(rects: readonly KeyedRect[]): LayoutFrame[] {
 }
 
 /**
+ * Names every texture that fits no page, one sentence each, sorted by key.
+ *
+ * @param members - The textures of a group.
+ * @returns One problem per texture that is too large.
+ * @example
+ * ```ts
+ * unfitProblems([{ key: "ui.sky", width: 4096, height: 64 }]); // ['the texture "ui.sky" (4096×64) fits no 2048×2048 page with a 2 px border.']
+ * ```
+ */
+function unfitProblems(members: readonly Sized[]): string[] {
+  return members
+    .filter(member => !fitsPage(member))
+    .toSorted((left, right) => left.key.localeCompare(right.key))
+    .map(
+      member =>
+        `the texture "${member.key}" (${member.width}×${member.height}) fits no ` +
+        `${PAGE_SIZE}×${PAGE_SIZE} page with a ${BORDER} px border.`
+    );
+}
+
+/**
  * Lays the members of one atlas group out on pages of at most 2048 × 2048 pixels: 2 px of
  * padding between frames and a 2 px border, never trimmed and never rotated, so every frame keeps
  * the size of its source and a nine-slice keeps its borders. A texture that fits no page is a
@@ -91,17 +112,14 @@ function framesOf(rects: readonly KeyedRect[]): LayoutFrame[] {
  * @returns The pages and the problems.
  * @example
  * ```ts
- * layoutGroup("ui", "main", [
- *   { key: "ui.icon-a", width: 20, height: 20 },
- *   { key: "ui.icon-b", width: 24, height: 10 }
- * ]).pages;
- * // [{ width: 28, height: 36, frames: [
- * //   { key: "ui.icon-a", x: 2, y: 14, width: 20, height: 20 },
- * //   { key: "ui.icon-b", x: 2, y: 2, width: 24, height: 10 }
- * // ] }]
+ * layoutGroup("ui", "main", [{ key: "ui.dot", width: 8, height: 8 }]).pages; // [{ width: 12, height: 12, frames: [{ key: "ui.dot", x: 2, y: 2, width: 8, height: 8 }] }]
  * ```
  */
 export function layoutGroup(bundle: string, group: Group, members: readonly Sized[]): Layout {
+  // A texture larger than a page is reported by key and left out of the packing.
+  const problems = unfitProblems(members);
+
+  // The rest goes to the packer in a fixed order, so the same members give the same layout.
   const packer = new MaxRectsPacker<KeyedRect>(PAGE_SIZE, PAGE_SIZE, PADDING, {
     smart: true,
     pot: false,
@@ -109,23 +127,17 @@ export function layoutGroup(bundle: string, group: Group, members: readonly Size
     allowRotation: false,
     border: BORDER
   });
-  const problems = members
-    .filter(member => !fitsPage(member))
-    .toSorted((left, right) => left.key.localeCompare(right.key))
-    .map(
-      member =>
-        `the texture "${member.key}" (${member.width}×${member.height}) fits no ` +
-        `${PAGE_SIZE}×${PAGE_SIZE} page with a ${BORDER} px border.`
-    );
 
   for (const member of members.filter(entry => fitsPage(entry)).toSorted(packingOrder)) {
     packer.add(member.width, member.height, { key: member.key });
   }
 
+  // Every bin that holds a frame becomes a page.
   const pages = packer.bins
     .filter(bin => bin instanceof MaxRectsBin && bin.rects.length > 0)
     .map(bin => ({ width: bin.width, height: bin.height, frames: framesOf(bin.rects) }));
 
+  // A particle emitter binds one page, so an fx group must fit on one.
   if (group === "fx" && pages.length > 1) {
     problems.push(
       `the fx textures of bundle "${bundle}" need ${pages.length} pages; a particle emitter ` +

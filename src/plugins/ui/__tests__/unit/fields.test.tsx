@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Touchable } from "../../../input/components";
-import { Shape } from "../../../renderer/components";
+import { Shape, Transform } from "../../../renderer/components";
 import { Text } from "../../../text/components";
 import { Box } from "../../components";
 import {
   alphaOf,
   type FieldApp,
   find,
+  landBodyFont,
   logged,
   mountScreen,
   nodeOf,
@@ -167,6 +168,46 @@ describe("fill", () => {
     expect(alphaOf(app, parts.caret)).toBe(1);
     expect(app.world.ecs.get(parts.caret ?? 0, Shape)).toMatchObject({ w: 3, h: 40, fill: 0 });
     expect(app.world.ecs.get(parts.text ?? 0, Text)?.content).toBe("Bob");
+  });
+
+  it("measures a still field once: the next frame lays nothing out", async () => {
+    const app = await start();
+
+    mountScreen(app, "profile");
+    app.ui.fill("nickField", "Bob");
+    app.time.step(16);
+    app.time.step(16);
+
+    const measure = vi.mocked(app.text.measure);
+
+    measure.mockClear();
+    app.time.step(16);
+
+    expect(measure).not.toHaveBeenCalled();
+
+    app.ui.fill("nickField", "Bobby");
+    app.time.step(16);
+
+    expect(measure).toHaveBeenCalled();
+  });
+
+  it("lays a still field out again on the frame after its font installs", async () => {
+    const app = await start();
+
+    mountScreen(app, "profile");
+    app.ui.fill("nickField", "Bob");
+    app.time.step(16);
+    app.time.step(16);
+
+    const caret = partsOf(app, find(app, "nickField")).caret ?? 0;
+    const caretX = (): number | undefined => app.world.ecs.get(caret, Transform)?.x;
+    const fallbackX = caretX();
+
+    landBodyFont(app);
+    app.time.step(16);
+
+    expect(fallbackX).toBe(30);
+    expect(caretX()).toBe(60);
   });
 });
 

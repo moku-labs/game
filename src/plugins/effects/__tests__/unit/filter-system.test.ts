@@ -176,6 +176,27 @@ describe("the filter sync — instances and assignment", () => {
     expect(mock.renderer.sets).toHaveLength(2);
   });
 
+  it("writes a core kind only on the frame its component changed, and only on that view", () => {
+    const mock = started();
+    const changed = view(mock, [Blur()]);
+    const still = view(mock, [Blur()]);
+
+    mock.frame();
+    mock.world.ecs.set(changed, Blur, { strength: 2 });
+    mock.frame();
+
+    const written = filterOf(mock, changed, "effects.blur") as unknown as FakeFxBlurFilter;
+    const untouched = filterOf(mock, still, "effects.blur") as unknown as FakeFxBlurFilter;
+    const calls = written.calls.length;
+
+    expect(written.calls).toContain("strength=2");
+    expect(untouched.calls).not.toContain("strength=2");
+
+    mock.frame();
+
+    expect(written.calls).toHaveLength(calls);
+  });
+
   it("orders the filters by order, then by registration", () => {
     const mock = started();
     const entity = view(mock, [Tint(), Glow()]);
@@ -318,6 +339,7 @@ describe("the filter sync — budgets", () => {
   it("warns once per crossing of the renderer's render passes", () => {
     const mock = started();
 
+    view(mock, [Glow()]);
     mock.renderer.passes = 30;
     mock.frame();
     mock.frame();
@@ -333,15 +355,28 @@ describe("the filter sync — budgets", () => {
     expect(mock.log.warn).toHaveBeenCalledTimes(2);
   });
 
-  it("checks the pass budget but reads no change set while no view carries a filter", () => {
+  it("reads neither the renderer's passes nor a change set while no view carries a filter", () => {
     const mock = started();
     const changed = vi.spyOn(mock.world.ecs, "changed");
+    const stats = vi.spyOn(mock.ectx.deps.renderer, "stats");
 
     mock.renderer.passes = 30;
     mock.frame();
 
     expect(changed).not.toHaveBeenCalled();
-    expect(mock.log.warn).toHaveBeenCalledWith("effects:pass-budget", { passes: 30, budget: 24 });
+    expect(stats).not.toHaveBeenCalled();
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("reads the renderer's passes once per frame while a view carries a filter", () => {
+    const mock = started();
+    const stats = vi.spyOn(mock.ectx.deps.renderer, "stats");
+
+    view(mock, [Glow()]);
+    mock.frame();
+    mock.frame();
+
+    expect(stats).toHaveBeenCalledTimes(2);
   });
 
   it("warns once per crossing of more than one full-screen filtered view", () => {

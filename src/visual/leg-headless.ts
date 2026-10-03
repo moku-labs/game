@@ -233,6 +233,31 @@ async function playTest(
 }
 
 /**
+ * Plays one test and turns its outcome into a result. A test that fails keeps the checkpoints it
+ * reached and carries the error instead of throwing it.
+ *
+ * @param setup - How the runner builds a game.
+ * @param test - The test to play.
+ * @param options - The run options.
+ * @returns The result of the test.
+ */
+async function playOne(
+  setup: VisualSetup,
+  test: VisualTest,
+  options: VisualRun
+): Promise<VisualTestResult> {
+  const checkpoints: CheckpointResult[] = [];
+
+  try {
+    await playTest(setup, test, options, checkpoints);
+
+    return { name: test.name, checkpoints };
+  } catch (error) {
+    return { name: test.name, checkpoints, error: messageOf(error) };
+  }
+}
+
+/**
  * Runs the headless leg over the selected tests, one after the other. The dev flag is on for the
  * run and put back after it. A test that fails keeps the checkpoints it reached and carries the
  * error; the next test still runs.
@@ -251,16 +276,7 @@ export async function runHeadlessLeg(
   const results: VisualTestResult[] = [];
 
   try {
-    for (const test of tests) {
-      const checkpoints: CheckpointResult[] = [];
-
-      try {
-        await playTest(setup, test, options, checkpoints);
-        results.push({ name: test.name, checkpoints });
-      } catch (error) {
-        results.push({ name: test.name, checkpoints, error: messageOf(error) });
-      }
-    }
+    for (const test of tests) results.push(await playOne(setup, test, options));
   } finally {
     restore();
   }

@@ -16,14 +16,15 @@ import type { ViewportApi } from "./viewport/types";
 
 /**
  * The draw-call counter `host` installs before `new Application()`: the one of `monitor` in a dev
- * build, none in production. A production `define` folds the guard, so the counter module leaves
- * the bundle.
+ * build, bound to the draw counter in the monitor branch of the state, none in production. A
+ * production `define` folds the guard, so the counter module leaves the bundle.
  *
- * @returns `installDrawCounting`, or `undefined` without the dev flag.
+ * @param ctx - Domain context of the renderer plugin.
+ * @returns The bound installer, or `undefined` without the dev flag.
  */
-function devDrawCounting(): InstallDrawCounting | undefined {
+function devDrawCounting(ctx: RendererCtx): InstallDrawCounting | undefined {
   return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__
-    ? installDrawCounting
+    ? pixi => installDrawCounting(pixi, ctx.state.monitor.draws)
     : undefined;
 }
 
@@ -37,7 +38,7 @@ function devDrawCounting(): InstallDrawCounting | undefined {
  * @returns The four modules with their public and internal methods.
  */
 export function createModules(ctx: RendererCtx): Modules {
-  const host = createHostApi(ctx, { installDrawCounting: devDrawCounting() });
+  const host = createHostApi(ctx, { installDrawCounting: devDrawCounting(ctx) });
   const viewport = createViewportApi(ctx, { host });
   const sync = createSyncApi(ctx, { host, viewport });
   const monitor = createMonitorApi(ctx, { host, sync });

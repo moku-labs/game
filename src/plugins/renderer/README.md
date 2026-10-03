@@ -20,8 +20,9 @@ app.renderer.stats();                            // monitor
 
 No module imports a sibling's run-time code: `api.ts` injects `host` into `viewport`, both into
 `sync`, and `host` and `sync` into `monitor`. `api.ts` also injects `installDrawCounting` of
-`monitor/draw-calls.ts` into `host` in a dev build, because `host/init.ts` must put the counter in
-Pixi's registry before `new Application()`, before `monitor` exists. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
+`monitor/draw-calls.ts` into `host` in a dev build, already bound to the draw counter in
+`state.monitor`, because `host/init.ts` must put the counter in Pixi's registry before
+`new Application()`, before `monitor` exists. `host` never reads the monitor branch of the state. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
 and lives in `state.host.pixi`, so a game without `...screen` carries no Pixi in its bundle.
 
 ## Components
