@@ -81,6 +81,30 @@ function emptyFieldSet(): Set<string> {
 }
 
 /**
+ * Deletes a released field set once it is empty, and the entity's table once no component is
+ * left. Only the set and table still stored are touched, so a remover that runs after a clear
+ * never drops a newer mute.
+ *
+ * @param mutes - The mute tables of every entity.
+ * @param entity - The muted entity.
+ * @param name - The muted component's name.
+ * @param owned - The field set the remover released from.
+ */
+function dropEmptyMute(
+  mutes: Map<Entity, Map<string, Set<string>>>,
+  entity: Entity,
+  name: string,
+  owned: Set<string>
+): void {
+  const byComponent = mutes.get(entity);
+
+  if (owned.size > 0 || byComponent?.get(name) !== owned) return;
+
+  byComponent.delete(name);
+  if (byComponent.size === 0) mutes.delete(entity);
+}
+
+/**
  * Creates the empty dirty record the next reconcile reads.
  *
  * @returns Nothing to reconcile yet.
@@ -320,6 +344,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
         released = true;
         for (const field of fields) owned.delete(field);
+        dropEmptyMute(state.mutes, entity, component.componentName, owned);
       };
     },
 

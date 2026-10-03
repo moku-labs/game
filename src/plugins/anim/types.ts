@@ -305,6 +305,11 @@ export type State = {
   frameLoops: Map<Entity, FrameLoop>;
   /** How many running `frames` steps write this entity now. Its loop writes nothing above 0. */
   framesHeld: Map<Entity, number>;
+  /**
+   * Per entity that carries `Frames`, the remover of its `world.projection.mute` on
+   * `Sprite.texture`: the loop owns that field, so a projection never corrects it back.
+   */
+  frameMutes: Map<Entity, () => void>;
   /** Removers of the `onAdded` and `onRemoved` hooks on `Frames`. */
   offFrames: Array<() => void>;
 };

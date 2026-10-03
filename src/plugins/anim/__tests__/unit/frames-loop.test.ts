@@ -284,6 +284,55 @@ describe("anim Frames component", () => {
     expect(mock.state.frameLoops.size).toBe(0);
   });
 
+  it("mutes Sprite.texture for the projection while the entity carries Frames", () => {
+    const mock = createMockAnim();
+    const releases: Array<ReturnType<typeof vi.fn>> = [];
+    const mute = vi.spyOn(mock.world.projection, "mute").mockImplementation(() => {
+      const release = vi.fn();
+
+      releases.push(release);
+
+      return release;
+    });
+    const before = spawnTestEntity(mock, [Sprite(), Frames({ keys: KEYS })]);
+
+    mock.start();
+
+    const added = spawnTestEntity(mock, [Sprite(), Frames({ keys: KEYS })]);
+
+    expect(mute.mock.calls).toEqual([
+      [before, Sprite, ["texture"]],
+      [added, Sprite, ["texture"]]
+    ]);
+
+    mock.world.ecs.remove(before, Frames);
+
+    expect(releases.map(release => release.mock.calls.length)).toEqual([1, 0]);
+
+    mock.world.ecs.despawn(added);
+
+    expect(releases.map(release => release.mock.calls.length)).toEqual([1, 1]);
+  });
+
+  it("mutes once on a re-add and releases every mute on stop", () => {
+    const mock = createMockAnim();
+    const release = vi.fn();
+    const mute = vi.spyOn(mock.world.projection, "mute").mockReturnValue(release);
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Sprite(), Frames({ keys: KEYS })]);
+
+    mock.world.ecs.add(entity, Frames({ keys: [...KEYS] }));
+
+    expect(mute).toHaveBeenCalledTimes(1);
+
+    stopAnim(mock.state);
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(mock.state.frameMutes.size).toBe(0);
+  });
+
   it("has the typed defaults [], 12, true, true", () => {
     expect(Frames.defaults).toEqual({ keys: [], fps: 12, loop: true, playing: true });
     expect(Frames.componentName).toBe("Frames");

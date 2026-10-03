@@ -365,3 +365,59 @@ describe("projection structural diff", () => {
     expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 0, y: 0, scale: 1 });
   });
 });
+
+describe("projection mute cleanup", () => {
+  it("leaves no entry behind when a mute on an entity that is not a view is released", () => {
+    const world = createMockWorld();
+    const coin = world.api.ecs.spawn(MOUNT_OWNER, [Transform()]);
+    const release = world.api.projection.mute(coin, Transform, ["x", "y"]);
+
+    expect(world.ctx.state.projection.mutes.get(coin)?.get("Transform")).toEqual(
+      new Set(["x", "y"])
+    );
+
+    release();
+
+    expect(world.ctx.state.projection.mutes.has(coin)).toBe(false);
+  });
+
+  it("keeps the other component muted until its own remover runs", () => {
+    const world = createMockWorld();
+    const coin = world.api.ecs.spawn(MOUNT_OWNER, [Transform(), Sparkle()]);
+    const releaseTransform = world.api.projection.mute(coin, Transform, ["x"]);
+    const releaseSparkle = world.api.projection.mute(coin, Sparkle, ["power"]);
+
+    releaseTransform();
+
+    expect(world.ctx.state.projection.mutes.get(coin)?.has("Transform")).toBe(false);
+    expect(world.ctx.state.projection.mutes.get(coin)?.get("Sparkle")).toEqual(new Set(["power"]));
+
+    releaseSparkle();
+
+    expect(world.ctx.state.projection.mutes.has(coin)).toBe(false);
+  });
+
+  it("keeps the field set while another field of the same component is still muted", () => {
+    const world = createMockWorld();
+    const coin = world.api.ecs.spawn(MOUNT_OWNER, [Transform()]);
+    const releaseX = world.api.projection.mute(coin, Transform, ["x"]);
+
+    world.api.projection.mute(coin, Transform, ["y"]);
+    releaseX();
+
+    expect(world.ctx.state.projection.mutes.get(coin)?.get("Transform")).toEqual(new Set(["y"]));
+  });
+
+  it("never drops a newer mute when a remover from before a clear runs late", () => {
+    const world = createMockWorld();
+    const coin = world.api.ecs.spawn(MOUNT_OWNER, [Transform()]);
+    const { projection: module } = createModules(withDeps(world.ctx));
+    const stale = world.api.projection.mute(coin, Transform, ["x"]);
+
+    module.clear();
+    world.api.projection.mute(coin, Transform, ["y"]);
+    stale();
+
+    expect(world.ctx.state.projection.mutes.get(coin)?.get("Transform")).toEqual(new Set(["y"]));
+  });
+});
