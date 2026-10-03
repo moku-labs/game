@@ -61,15 +61,14 @@ export type PlatformProvider = {
 export type BackResult = "popup" | "intent" | "exit" | "none";
 
 /**
- * platform plugin config.
+ * What a game sets on `pluginConfigs.platform`: the provider seam its application layer fills
+ * from the native shell, and whether the screen stays on while the game runs.
  *
  * @example
  * ```ts
- * // app.ts of a game in the native shell: the bridge maps the system plugins onto the provider.
- * createApp({
- *   plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin],
- *   pluginConfigs: { platform: { provider: fromSystem(system), keepAwake: true } }
- * });
+ * // app.ts of a game in the native shell; `provider` is the game's own bridge to the shell.
+ * const config: Platform.Config = { provider, keepAwake: true };
+ * config.keepAwake; // true
  * ```
  */
 export type Config = {

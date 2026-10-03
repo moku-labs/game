@@ -105,20 +105,9 @@ export function checkVisualTest(name: string, steps: readonly VisualStep[]): voi
  *   used twice, or a step is not one step command.
  * @example
  * ```ts
- * // tests/visual/reward-popup.visual.ts: Play, deliver the first order, claim the reward.
- * export const rewardPopup = defineVisualTest("reward-popup", {
- *   start: { player: fixtures.ready, checkpoint: "home" },
- *   steps: [{ tap: { key: "play" } }, { answer: { intent: "deliver", payload: { orderId: "o1" } } },
- *     { checkpoint: "open" }, { tap: { key: "claim" } }, { checkpoint: "claimed" }]
- * });
- * // A board drawn through a custom filter: the test also runs in the WebGL leg (`--webgl`).
- * export const boardMerge = defineVisualTest("board-merge", {
- *   start: atHome,
- *   steps: [{ tap: { key: "play" } }, { drag: { from: { projection: "board.items", key: "i2" },
- *     to: { projection: "board.items", key: "i3" } } }, { checkpoint: "merged" }],
- *   webgl: true
- * });
- * boardMerge.webgl; // true
+ * // tests/visual/home.visual.ts: Home with the glowing Play plank, in both legs.
+ * const home = defineVisualTest("home", { start: atHome, steps: [{ checkpoint: "rest" }], webgl: true });
+ * home.webgl; // true
  * ```
  */
 export function defineVisualTest(
