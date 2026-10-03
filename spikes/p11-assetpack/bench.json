@@ -1,0 +1,66 @@
+[
+  {
+    "label": "cold 1",
+    "wall": 970,
+    "scan": 25,
+    "stage": 126,
+    "assetpack": 736,
+    "post": 3
+  },
+  {
+    "label": "cold 2",
+    "wall": 979,
+    "scan": 21,
+    "stage": 123,
+    "assetpack": 750,
+    "post": 4
+  },
+  {
+    "label": "cold 3",
+    "wall": 961,
+    "scan": 26,
+    "stage": 110,
+    "assetpack": 739,
+    "post": 4
+  },
+  {
+    "label": "cache miss",
+    "wall": 972,
+    "scan": 26,
+    "stage": 115,
+    "assetpack": 745,
+    "post": 3
+  },
+  {
+    "label": "cache warm, no change",
+    "wall": 259,
+    "scan": 23,
+    "stage": 138,
+    "assetpack": 14,
+    "post": 3
+  },
+  {
+    "label": "cache, ui.icon-coin changed",
+    "wall": 615,
+    "scan": 22,
+    "stage": 112,
+    "assetpack": 404,
+    "post": 3
+  },
+  {
+    "label": "cache, board.selection-ring-2 changed",
+    "wall": 302,
+    "scan": 23,
+    "stage": 133,
+    "assetpack": 68,
+    "post": 3
+  },
+  {
+    "label": "cache, both restored",
+    "wall": 641,
+    "scan": 23,
+    "stage": 121,
+    "assetpack": 417,
+    "post": 3
+  }
+]

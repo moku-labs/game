@@ -1,0 +1,13 @@
+{
+  "name": "p9-particles",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun serve.ts",
+    "measure": "bun measure.ts"
+  },
+  "dependencies": {
+    "pixi.js": "8.21.0",
+    "playwright-core": "1.61.1"
+  }
+}

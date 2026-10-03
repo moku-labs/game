@@ -1,0 +1,19 @@
+{
+  "out": "bench-cache",
+  "cache": true,
+  "trim": false,
+  "lossless": false,
+  "timings": {
+    "scan": 23,
+    "stage": 121,
+    "assetpack": 417,
+    "post": 3
+  },
+  "sizes": {
+    "outPng": 3206126,
+    "outWebp": 1057994,
+    "outJson": 27343,
+    "pages": 5
+  },
+  "problems": []
+}

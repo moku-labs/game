@@ -1,0 +1,15 @@
+{
+  "name": "p12-text-input",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun serve.ts",
+    "drive": "bun drive.ts"
+  },
+  "dependencies": {
+    "pixi.js": "8.21.0"
+  },
+  "devDependencies": {
+    "playwright": "1.60.0"
+  }
+}

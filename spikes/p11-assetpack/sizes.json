@@ -1,0 +1,47 @@
+{
+  "loose": {
+    "files": 47,
+    "sourceWebp": 1201712,
+    "pngLossless": 11269129,
+    "pngPalette90": 3006575,
+    "webpQ80": 921904,
+    "webpLossless": 6196788
+  },
+  "packed": {
+    "prod": {
+      "outPng": 2930169,
+      "outWebp": 913882,
+      "outJson": 16285,
+      "pages": 5,
+      "requests": 10
+    },
+    "webp-only": {
+      "outPng": 0,
+      "outWebp": 913882,
+      "outJson": 8145,
+      "pages": 5,
+      "requests": 10
+    },
+    "lossless": {
+      "outPng": 11132197,
+      "outWebp": 6247034,
+      "outJson": 16285,
+      "pages": 5,
+      "requests": 10
+    },
+    "trim": {
+      "outPng": 2960059,
+      "outWebp": 917898,
+      "outJson": 16241,
+      "pages": 5,
+      "requests": 10
+    },
+    "loose512": {
+      "outPng": 2933309,
+      "outWebp": 920646,
+      "outJson": 14874,
+      "pages": 4,
+      "requests": 12
+    }
+  }
+}

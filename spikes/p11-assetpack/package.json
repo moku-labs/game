@@ -1,0 +1,13 @@
+{
+  "name": "p11-assetpack",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pack": "bun pack.ts"
+  },
+  "dependencies": {
+    "@assetpack/core": "1.7.0",
+    "maxrects-packer": "2.7.3",
+    "sharp": "0.34.5"
+  }
+}

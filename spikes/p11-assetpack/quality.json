@@ -1,0 +1,32 @@
+[
+  {
+    "page": "board/main-0",
+    "pngPalette90": "42.3",
+    "webpQ80": "39.7",
+    "webpLossless": "Infinity"
+  },
+  {
+    "page": "board.rings/main-0",
+    "pngPalette90": "53.1",
+    "webpQ80": "46.4",
+    "webpLossless": "Infinity"
+  },
+  {
+    "page": "home/main-0",
+    "pngPalette90": "41.9",
+    "webpQ80": "41.0",
+    "webpLossless": "Infinity"
+  },
+  {
+    "page": "ui/main-0",
+    "pngPalette90": "41.4",
+    "webpQ80": "41.6",
+    "webpLossless": "Infinity"
+  },
+  {
+    "page": "ui/fx-0",
+    "pngPalette90": "47.2",
+    "webpQ80": "46.3",
+    "webpLossless": "Infinity"
+  }
+]
