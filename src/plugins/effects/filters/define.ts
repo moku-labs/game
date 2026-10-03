@@ -30,10 +30,11 @@ const MAIN_GLSL = /\bvoid\s+main\s*\(/;
 
 /**
  * Names a uniform cannot take: the two fields every filter component carries, and the names the
- * shader headers declare, which a game uniform would clash with (on WebGL only, for most).
+ * shader headers declare, which a game uniform would clash with (on WebGL only, for most). The
+ * GLSL header also declares `finalColor` and `vTextureCoord`.
  */
 const RESERVED_NAME =
-  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler)$/;
+  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler|finalColor|vTextureCoord)$/;
 
 /**
  * Tells whether a value is a list of 2 to 4 finite numbers.

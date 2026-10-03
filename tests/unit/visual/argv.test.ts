@@ -36,6 +36,13 @@ describe("parseVisualArgv", () => {
     ).toEqual({ update: true, pixels: false, only: ["reward-popup", "home"], dir: "visual" });
   });
 
+  it("reads --webgl as the WebGL leg", () => {
+    expect(parseVisualArgv(["--webgl", "--only", "home"])).toEqual({
+      renderer: "webgl",
+      only: ["home"]
+    });
+  });
+
   it("leaves arguments it does not know to the script that got them", () => {
     expect(parseVisualArgv(["run", "--project", "unit", "--update"])).toEqual({ update: true });
   });
@@ -56,6 +63,7 @@ describe("resolveVisualOptions", () => {
       dir: "tests/visual",
       update: false,
       pixels: false,
+      renderer: "webgpu",
       settleFrames: 600,
       tolerance: { ratio: 0.001, threshold: 24 }
     });
@@ -90,11 +98,12 @@ describe("resolveVisualOptions", () => {
 
   it("lets an explicit option win over a flag", () => {
     const run = resolveVisualOptions(withPage, {
-      argv: ["--update", "--no-pixels", "--only", "home", "--dir", "shots"],
+      argv: ["--update", "--no-pixels", "--only", "home", "--dir", "shots", "--webgl"],
       update: false,
       pixels: true,
       only: ["reward-popup"],
       dir: "baselines",
+      renderer: "webgpu",
       settleFrames: 30,
       tolerance: { ratio: 0, threshold: 0 }
     });
@@ -104,9 +113,15 @@ describe("resolveVisualOptions", () => {
       pixels: true,
       only: ["reward-popup"],
       dir: "baselines",
+      renderer: "webgpu",
       settleFrames: 30,
       tolerance: { ratio: 0, threshold: 0 }
     });
+  });
+
+  it("takes the WebGL leg from --webgl or from the renderer option", () => {
+    expect(resolveVisualOptions(withPage, { argv: ["--webgl"] }).renderer).toBe("webgl");
+    expect(resolveVisualOptions(withPage, { argv: [], renderer: "webgl" }).renderer).toBe("webgl");
   });
 
   it("reads process.argv when no argv is given", () => {

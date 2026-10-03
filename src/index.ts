@@ -73,6 +73,8 @@
  * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
  * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |
  * | effects | blur | { quality: 2, phoneResolution: 0.5 }, what a Blur with quality 0 and resolution 0 resolves to; shallow merge: a game that sets `blur` gives both fields |
+ * | platform | provider | undefined, inert: no subscription, no haptic handler, `back()` answers "none" |
+ * | platform | keepAwake | false |
  *
  * Subpaths next to the root:
  *
@@ -196,7 +198,7 @@ export function defineGame<Types extends GameTypes>() {
 // ─── Plugin sets ──────────────────────────────────────────────
 /**
  * The screen plugins, in dependency order. A game with a screen spreads them into `plugins`;
- * a headless test leaves them out. V2: `world`, `renderer`, `input`, `assets`, `scenes`. V3 appends `anim`, `i18n`, `text`, `ui`; `audio` and `effects` stay opt-in: `[...screen, audioPlugin, effectsPlugin]`.
+ * a headless test leaves them out. V2: `world`, `renderer`, `input`, `assets`, `scenes`. V3 appends `anim`, `i18n`, `text`, `ui`; `audio`, `effects` and `platform` stay opt-in: `[...screen, effectsPlugin, audioPlugin, platformPlugin]`.
  *
  * @example
  * ```ts
@@ -314,3 +316,5 @@ export {
 export { defineFilter } from "./plugins/effects/filters/define";
 export { Emitter } from "./plugins/effects/particles/component";
 export { defineEmitter } from "./plugins/effects/particles/define";
+// platform: the provider seam a game fills, and what one Back press ends in
+export type { BackResult, PlatformProvider } from "./plugins/platform/types";

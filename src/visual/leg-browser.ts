@@ -4,7 +4,8 @@
  * the page has loaded what it asked for, pauses the game and steps it to the start time, plays the
  * test inside the page through `globalThis.game` and `globalThis.doors` on stepped frames, and at
  * each checkpoint checks the page's state against `state.json` and its picture against
- * `screen.webp`. The pixels are compared in the page (`page-script.ts`); the files are written by
+ * `screen.webp`. The WebGL leg opens the page with `?renderer=webgl` and keeps its pictures in
+ * `screen.webgl.webp`. The pixels are compared in the page (`page-script.ts`); the files are written by
  * `files.ts`. A failure of the page itself fails the leg; a failure of a step ends its test only.
  */
 import type { RendererKind } from "../plugins/renderer/types";
@@ -33,6 +34,7 @@ import type {
   PixelCheck,
   PixelFound,
   VisualPage,
+  VisualRenderer,
   VisualRun,
   VisualSetup,
   VisualTest,
@@ -64,14 +66,64 @@ const READY_MS = 15_000;
  */
 const START_MS = 5000;
 
+/** The name of each backend in a message. */
+const BACKEND: Record<VisualRenderer, string> = { webgpu: "WebGPU", webgl: "WebGL" };
+
+/** What to do about a page that draws with another backend than the leg asked for. */
+const OTHER_BACKEND_FIX: Record<VisualRenderer, string> = {
+  webgpu:
+    "The WebGPU baselines need a Chrome with WebGPU on a Mac: use one, or run with --no-pixels.",
+  webgl:
+    "The WebGL baselines need a page that passes renderer=webgl from its query to the renderer: serve one, or run without --webgl."
+};
+
 /** The baseline picture of a checkpoint, and the two the leg leaves beside it on a difference. */
-const SCREEN = { baseline: "screen.webp", actual: "screen.actual.webp", diff: "screen.diff.webp" };
+type ScreenFiles = { baseline: string; actual: string; diff: string };
 
 /** What one test plays on: its page, the test and the run options. */
 type Play = { page: ChromePage; test: VisualTest; run: VisualRun };
 
 /** A launch that worked, or the first line of why it did not. */
 type Attempt = { browser: ChromeBrowser } | { reason: string };
+
+/**
+ * Names the URL a leg opens: the dev page as it is for WebGPU, with `renderer=webgl` in its query
+ * for WebGL.
+ *
+ * @param url - The URL of the dev page.
+ * @param renderer - The backend of the leg.
+ * @returns The URL to open.
+ * @example
+ * ```ts
+ * rendererUrl("http://localhost:3000/", "webgl"); // "http://localhost:3000/?renderer=webgl"
+ * ```
+ */
+export function rendererUrl(url: string, renderer: VisualRenderer): string {
+  if (renderer === "webgpu") return url;
+
+  const withRenderer = new URL(url);
+
+  withRenderer.searchParams.set("renderer", renderer);
+
+  return withRenderer.href;
+}
+
+/**
+ * Names the pictures of a checkpoint for a backend: `screen.webp` and its actual and diff for
+ * WebGPU, the same names with `.webgl` before the end for WebGL.
+ *
+ * @param renderer - The backend of the leg.
+ * @returns The file names of the baseline, the actual and the diff.
+ * @example
+ * ```ts
+ * screenFiles("webgl"); // { baseline: "screen.webgl.webp", actual: "screen.webgl.actual.webp", diff: "screen.webgl.diff.webp" }
+ * ```
+ */
+export function screenFiles(renderer: VisualRenderer): ScreenFiles {
+  const stem = renderer === "webgpu" ? "screen" : `screen.${renderer}`;
+
+  return { baseline: `${stem}.webp`, actual: `${stem}.actual.webp`, diff: `${stem}.diff.webp` };
+}
 
 /**
  * Reads the first line of a Playwright error, without the name of the call that failed.
@@ -302,15 +354,16 @@ async function startPage(page: ChromePage, url: string, run: VisualRun): Promise
 
 /**
  * Opens the dev page for one test: the page script first, then the URL, then the wait for
- * `game` and `doors`, for the graph at its first gate, the check that it draws with WebGPU, and
- * the wait until no request ran for half a second, so no load is left for the stepped frames.
+ * `game` and `doors`, for the graph at its first gate, the check that it draws with the backend
+ * of the leg, and the wait until no request ran for half a second, so no load is left for the
+ * stepped frames.
  *
  * @param context - The browser context.
- * @param url - The URL of the dev page.
- * @param run - The run options, for `settleFrames`.
+ * @param url - The URL of the page the leg opens.
+ * @param run - The run options, for `settleFrames` and `renderer`.
  * @returns The open page.
  * @throws {Error} When the page does not open, never exposes `game` and `doors`, does not start,
- *   does not draw with WebGPU or never stops loading. The page is closed then.
+ *   draws with another backend or never stops loading. The page is closed then.
  */
 async function openPage(context: ChromeContext, url: string, run: VisualRun): Promise<ChromePage> {
   const page = await context.newPage();
@@ -330,9 +383,9 @@ async function openPage(context: ChromeContext, url: string, run: VisualRun): Pr
 
     const kind = await startPage(page, url, run);
 
-    if (kind !== "webgpu") {
+    if (kind !== run.renderer) {
       throw new Error(
-        `[game] The page at ${url} draws with ${kind}, not WebGPU.\n  The pixel baselines are WebGPU only: use a Chrome with WebGPU on a Mac, or run with --no-pixels.`
+        `[game] The page at ${url} draws with ${kind}, not ${BACKEND[run.renderer]}.\n  ${OTHER_BACKEND_FIX[run.renderer]}`
       );
     }
 
@@ -351,9 +404,9 @@ async function openPage(context: ChromeContext, url: string, run: VisualRun): Pr
 }
 
 /**
- * Checks the picture of a checkpoint against `screen.webp`: a missing baseline, or `--update`,
- * writes it; a difference writes `screen.actual.webp`, and `screen.diff.webp` when the sizes
- * match.
+ * Checks the picture of a checkpoint against `screen.webp` (`screen.webgl.webp` in the WebGL
+ * leg): a missing baseline, or `--update`, writes it; a difference writes `screen.actual.webp`,
+ * and `screen.diff.webp` when the sizes match, named the same way.
  *
  * @param play - The test being played.
  * @param file - Names a file of the checkpoint.
@@ -368,10 +421,11 @@ async function checkScreen(
   screen: string
 ): Promise<PixelCheck> {
   const { run } = play;
-  const baseline = run.update ? undefined : await readScreen(file(SCREEN.baseline));
+  const names = screenFiles(run.renderer);
+  const baseline = run.update ? undefined : await readScreen(file(names.baseline));
 
   if (baseline === undefined) {
-    await writeScreen(file(SCREEN.baseline), screen);
+    await writeScreen(file(names.baseline), screen);
 
     return { outcome: "written" };
   }
@@ -386,9 +440,9 @@ async function checkScreen(
   const found = pixelOutcome(compared, run.tolerance);
 
   if (found.outcome === "different") {
-    await writeScreen(file(SCREEN.actual), screen);
+    await writeScreen(file(names.actual), screen);
 
-    if (compared.diff !== undefined) await writeScreen(file(SCREEN.diff), compared.diff);
+    if (compared.diff !== undefined) await writeScreen(file(names.diff), compared.diff);
   }
 
   return found;
@@ -396,7 +450,7 @@ async function checkScreen(
 
 /**
  * Plays a checkpoint in the page and checks what it found: the state against `state.json` the
- * headless leg wrote, the picture against `screen.webp`.
+ * headless leg wrote, the picture against the baseline of the leg's backend.
  *
  * @param play - The test being played.
  * @param name - The checkpoint name.
@@ -414,7 +468,7 @@ async function checkpoint(play: Play, name: string, where: string): Promise<Pixe
 
   if (shot.screen === undefined) {
     throw new Error(
-      `[game] Visual test "${test.name}", ${where}: the page gave no picture.\n  Serve a dev build with WebGPU: renderer.capture() answers only there.`
+      `[game] Visual test "${test.name}", ${where}: the page gave no picture.\n  Serve a dev build with ${BACKEND[run.renderer]}: renderer.capture() answers only there.`
     );
   }
 
@@ -470,7 +524,7 @@ async function playSteps(play: Play, found: Map<string, PixelFound>): Promise<vo
  * @param play - The test and the run options; the page is opened here.
  * @param play.test - The test.
  * @param play.run - The run options.
- * @param url - The URL of the dev page.
+ * @param url - The URL of the page the leg opens.
  * @param headless - The result of the test in the headless leg.
  * @returns The result of the test with its pixel fields.
  * @throws {Error} When the page fails to open: that fails the leg.
@@ -506,8 +560,9 @@ async function browserTest(
 
 /**
  * Runs the browser leg over the tests the headless leg played, one page per test, and answers
- * their results with the pixel fields. A test the headless leg failed is left as it is. The
- * browser closes at the end, also after an error.
+ * their results with the pixel fields. The page opens with `?renderer=webgl` in the WebGL leg. A
+ * test the headless leg failed is left as it is. The browser closes at the end, also after an
+ * error.
  *
  * @param setup - The setup: its `page`, and its app for the size of the page.
  * @param tests - The selected tests.
@@ -516,7 +571,8 @@ async function browserTest(
  * @param load - Loads `chromium`; `playwright-core` by default.
  * @returns One result per test, in order.
  * @throws {Error} When the setup has no page, `playwright-core` or Chrome is missing, or the page
- *   does not open, expose `game` and `doors`, start, draw with WebGPU or stop loading.
+ *   does not open, expose `game` and `doors`, start, draw with the backend of the leg or stop
+ *   loading.
  */
 export async function runBrowserLeg(
   setup: VisualSetup,
@@ -535,6 +591,7 @@ export async function runBrowserLeg(
 
   const chromium = await load();
   const options = pageSize(setup, page);
+  const url = rendererUrl(page.url, run.renderer);
   const browser = await launchChrome(chromium, page.browser);
 
   try {
@@ -548,9 +605,7 @@ export async function runBrowserLeg(
       };
 
       results.push(
-        before.error === undefined
-          ? await browserTest(context, { test, run }, page.url, before)
-          : before
+        before.error === undefined ? await browserTest(context, { test, run }, url, before) : before
       );
     }
 

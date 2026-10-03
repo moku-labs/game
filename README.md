@@ -225,7 +225,7 @@ flowchart LR
 
 ## Plugins
 
-Five logic plugins are on every app; the nine screen plugins are the list `screen` a game spreads in; `audio` and `effects` are opt-in, `[...screen, audioPlugin, effectsPlugin]`. `log` and `env` come from [`@moku-labs/common`](https://github.com/moku-labs/common) and sit on every plugin context as `ctx.log` and `ctx.env`.
+Five logic plugins are on every app; the nine screen plugins are the list `screen` a game spreads in; `effects`, `audio` and `platform` are opt-in, `[...screen, effectsPlugin, audioPlugin, platformPlugin]`. `log` and `env` come from [`@moku-labs/common`](https://github.com/moku-labs/common) and sit on every plugin context as `ctx.log` and `ctx.env`.
 
 ### Built
 
@@ -246,7 +246,8 @@ Five logic plugins are on every app; the nine screen plugins are the list `scree
 | [`text`](./src/plugins/text/README.md) | Complex | The `Text` component, `label()`, `defineTextStyles()`, the tags `<b> <i> <color=#hex> <icon=key>`, measurement from the font's advance table, BitmapText from the MSDF fonts of a bundle | `measure(content, style)`, `styles()` |
 | [`ui`](./src/plugins/ui/README.md) | Very Complex | A screen is a projection whose `view` returns JSX; the tree is reconciled by identity into entities, laid out by one Yoga solve per change, `Box` is the rest pose; `defineComponent` with `local` and `outcomes`, `popup` as an effect, `defineStyle`, `defineTokens`; every tag takes `components`, extra component values such as a filter; the `input` tag is a text field whose text lives in `local` | `tree()`, `find(key)`, `lint()`, `fill(key, value)` |
 | [`audio`](./src/plugins/audio/README.md) | Standard | Opt-in. Buses `master`, `music`, `sfx`; `sfx()` descriptors of `anim` and `music()` descriptors handled here; the scene's `music`; volumes read from the committed player through `volumes` | `setVolume(bus, value)`, `volume(bus)`, `mute(bus, on)`, `unlocked()` |
-| [`effects`](./src/plugins/effects/README.md) | Complex | Opt-in. Particles: `defineEmitter` and the `Emitter` component, one Pixi `ParticleContainer` per instance stepped by the engine clock. Filters: `defineFilter` turns a WGSL fragment body into a flat component that `tween` drives; `Glow`, `Outline`, `Blur`, `ColorMatrix`, `Noise`, `Displacement`, `Alpha` ship built in. Budgets warn once per crossing; a dev build compiles each WGSL kind before its first instance. Headless it draws nothing | `stats()` |
+| [`effects`](./src/plugins/effects/README.md) | Complex | Opt-in. Particles: `defineEmitter` and the `Emitter` component, one Pixi `ParticleContainer` per instance stepped by the engine clock. Filters: `defineFilter` turns a WGSL fragment body and its GLSL twin into a flat component that `tween` drives, so a custom filter draws on WebGPU and on WebGL; `Glow`, `Outline`, `Blur`, `ColorMatrix`, `Noise`, `Displacement`, `Alpha` ship built in. Budgets warn once per crossing; a dev build compiles each kind before its first instance, WGSL on WebGPU and GLSL on WebGL. Headless it draws nothing | `stats()` |
+| [`platform`](./src/plugins/platform/README.md) | Standard | Opt-in, last in the array. The phone as a provider: the game passes a `PlatformProvider`; its pause and resume become the `"background"` reason of `lifecycle`, its Back press runs the Back chain (Escape, then the intent `back`, then `exit()`), the `haptic` effect reaches `provider.haptic`, and `keepAwake` keeps the screen on while the game runs. Inert without a provider | `back()` |
 
 ```mermaid
 flowchart LR
@@ -290,6 +291,9 @@ flowchart LR
   EF --> W
   EF --> R
   EF --> A
+  PL["platform"] --> L
+  PL --> F
+  PL --> I
   classDef u fill:#0b7285,stroke:#08525f,color:#fff;
   classDef m fill:#1864ab,stroke:#0d3d6e,color:#fff;
   classDef s fill:#5c940d,stroke:#3d6208,color:#fff;
@@ -297,18 +301,14 @@ flowchart LR
   class G u
   class F,T,L,M,C m
   class W,R,I,A,S s
-  class AN,N,X,U,AU,EF v
+  class AN,N,X,U,AU,EF,PL v
 ```
 
-An arrow means "depends on"; for the V3 plugins the edges to `time` and the edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants sound appends `audioPlugin`, and one that wants particles and filters appends `effectsPlugin`. A game without `effectsPlugin` carries none of its systems, filters or WGSL in its bundle. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
+An arrow means "depends on"; for the V3 plugins the edges to `time` and the edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants particles and filters appends `effectsPlugin`, one that wants sound appends `audioPlugin`, and one in a native shell appends `platformPlugin` last. A game without `effectsPlugin` carries none of its systems, filters or WGSL in its bundle. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
 
 ### Planned
 
-Not built. Names are reserved: `defineFeature` refuses them as feature names. Scope and tiers come from the plan and may change.
-
-| Plugin | Milestone | Tier | Depends on | Will own |
-|---|---|---|---|---|
-| `platform` | V6 | Standard | `lifecycle`, `flow` | The native provider: background, system dialogs |
+None at the moment: `platform`, the last planned plugin, is built. `defineFeature` refuses every engine plugin name as a feature name.
 
 ### Root exports
 
@@ -330,9 +330,10 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 | `Text`, `label`, `defineTextStyles` | component and functions | Words on the screen and the text styles a feature registers |
 | `defineComponent`, `popup`, `defineStyle`, `defineTokens`, `resolve`, `Box`, `LocalWrite` | functions and components | Interface components, the popup effect, the style vocabulary, the rect of an element |
 | `music` | function | `music(key \| null, { fadeMs? })`, the awaited effect that switches the music track |
-| `defineEmitter`, `Emitter`, `defineFilter`, `Glow`, `Outline`, `Blur`, `ColorMatrix`, `Noise`, `Displacement`, `Alpha` | functions and components | Effects as data, drawn by `effectsPlugin`. `defineEmitter(id, config)` describes a particle effect that a feature lists under `emitters`; `Emitter({ effect, active })` runs it on its entity. `defineFilter(id, { wgsl, uniforms, passes?, padding? })` returns a filter component type that a feature lists under `filters`; a filter on a ui element goes in its `components` prop |
-| `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`, `worldPlugin`, `rendererPlugin`, `inputPlugin`, `assetsPlugin`, `scenesPlugin`, `animPlugin`, `i18nPlugin`, `textPlugin`, `uiPlugin`, `audioPlugin`, `effectsPlugin` | plugin instances | For `depends` and `ctx.require` in game plugins; `screen` is the list of the nine screen plugins |
-| `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`, `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`, `Effects` | type namespaces | All public types of one plugin |
+| `defineEmitter`, `Emitter`, `defineFilter`, `Glow`, `Outline`, `Blur`, `ColorMatrix`, `Noise`, `Displacement`, `Alpha` | functions and components | Effects as data, drawn by `effectsPlugin`. `defineEmitter(id, config)` describes a particle effect that a feature lists under `emitters`; `Emitter({ effect, active })` runs it on its entity. `defineFilter(id, { wgsl, glsl, uniforms, passes?, padding? })` returns a filter component type that a feature lists under `filters`; a filter on a ui element goes in its `components` prop |
+| `PlatformProvider`, `BackResult`, `HapticKind`, `HAPTIC_KINDS` | types and a constant | The seam a game fills for `platformPlugin`, what one Back press ends in, and the seven haptic kinds as a type and as a frozen list |
+| `timePlugin`, `lifecyclePlugin`, `modelPlugin`, `clockPlugin`, `flowPlugin`, `worldPlugin`, `rendererPlugin`, `inputPlugin`, `assetsPlugin`, `scenesPlugin`, `animPlugin`, `i18nPlugin`, `textPlugin`, `uiPlugin`, `audioPlugin`, `effectsPlugin`, `platformPlugin` | plugin instances | For `depends` and `ctx.require` in game plugins; `screen` is the list of the nine screen plugins |
+| `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`, `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`, `Effects`, `Platform` | type namespaces | All public types of one plugin |
 
 ### Other entries
 
@@ -356,9 +357,9 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 | `fakeClock` | `(start = 0) => FakeClock` | A `ClockSource` with `advance(ms)` and `set(moment)` |
 | `memory` | `(fixture?: { state: SaveDoc; version: number }) => PlayerStateProvider & { calls: ProviderCall[] }` | In-memory save provider. It keeps what it was committed and records every call |
 | `saveOf` | `(player: Json, seed?: number) => SaveDoc` | Builds a save document for a fixture |
-| `defineVisualTest` | `(name: string, test: { start: VisualStart; steps: readonly VisualStep[] }) => VisualTest` | A visual test as frozen data: where it starts and its steps |
+| `defineVisualTest` | `(name: string, test: { start: VisualStart; steps: readonly VisualStep[]; webgl?: boolean }) => VisualTest` | A visual test as frozen data: where it starts, its steps, and whether it also runs in the WebGL leg |
 | `runVisualTests` | `(setup: VisualSetup, tests: readonly VisualTest[], options?: VisualOptions) => Promise<VisualReport>` | Plays the tests and compares every checkpoint with its baseline files |
-| `parseVisualArgv` | `(argv: readonly string[]) => { update?; pixels?; only?; dir? }` | Reads `--update`, `--no-pixels`, `--only <name>` and `--dir <path>` from a command line |
+| `parseVisualArgv` | `(argv: readonly string[]) => { update?; pixels?; only?; dir?; renderer? }` | Reads `--update`, `--no-pixels`, `--webgl`, `--only <name>` and `--dir <path>` from a command line. `--webgl` runs only the tests with `webgl: true`, on the page with `?renderer=webgl`: such a test writes its picture to `screen.webgl.webp` and shares `state.json` and `describe.json` with the WebGPU leg |
 
 A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`.
 
@@ -801,6 +802,8 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `effects` | `maxPasses` | `number` | `24` | Render passes per frame above which `effects:pass-budget` warns once per crossing |
 | `effects` | `phone` | `boolean \| "auto"` | `"auto"` | Whether the device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once at start |
 | `effects` | `blur` | `{ quality, phoneResolution }` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to |
+| `platform` | `provider` | `PlatformProvider \| undefined` | `undefined` | The provider the game builds, usually from `@moku-labs/system`. Absent: the plugin is inert and `back()` answers `"none"` |
+| `platform` | `keepAwake` | `boolean` | `false` | Keep the screen on while the game runs; released while it is paused and on stop |
 
 ## Development
 
@@ -818,7 +821,7 @@ bun run test:integration   # vitest project "integration"
 bun run test:coverage      # both projects with coverage, 90% thresholds
 bun run validate           # publint and attw with the esm-only profile
 bun run fixture:pack       # pack the fixture game into tests/integration/merge-game/dist/assets
-bun run fixture:visual     # the fixture's visual tests, both legs: --url <dev page>, --update, --only <name>, --no-pixels
+bun run fixture:visual     # the fixture's visual tests, both legs: --url <dev page>, --update, --only <name>, --no-pixels, --webgl
 bun run release:setup      # moku-release setup
 bun run release:doctor     # moku-release doctor
 bun run release            # moku-release
@@ -838,7 +841,7 @@ bun run release            # moku-release
 
 Plugin tests never go into the root `tests/` folder. Coverage thresholds are 90% for lines, functions, branches and statements.
 
-### Lint rules L1 to L9
+### Lint rules
 
 The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 
@@ -853,6 +856,7 @@ The project rules live in [`eslint.config.ts`](./eslint.config.ts).
 | L7 | The public contract carries the docs: every member of a `…Api` type in `types.ts` has JSDoc and a scenario `@example` (when it is called, literal arguments, the result). A member another plugin calls is shown from that plugin's point of view; there is no private tier and no exemption. The implementation of an API method has no JSDoc. Elsewhere an example is allowed, never required | `src/plugins/**/types.ts` |
 | L8 | No signature echo: an `@example` whose whole body is one call with bare identifiers is an error | `src/**` |
 | L9 | The JSX runtime module is reached only through `src/jsx-runtime.ts` and `src/jsx-dev-runtime.ts`, and those two import nothing else | `src/**` outside `ui` |
+| L13 | No import of `@moku-labs/system`, `@moku-labs/native` or `@tauri-apps/*`, type imports included. The game builds the `PlatformProvider` in its own layer | every file under `src/`, tests included |
 
 ## Requirements
 

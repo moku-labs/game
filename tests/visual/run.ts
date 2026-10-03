@@ -9,6 +9,8 @@
  * - `--url <url>` names another page, such as one served with `--port 4173`.
  * - `--update` rewrites the baselines, `--only <name>` runs one test, `--no-pixels` the headless
  *   leg only.
+ * - `--webgl` runs the tests with `webgl: true` on the page with `?renderer=webgl`, against their
+ *   `screen.webgl.webp` baselines; `runVisualTests` reads the flag itself.
  *
  * The exit code is 1 when a checkpoint differs or a test fails.
  */

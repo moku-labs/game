@@ -281,6 +281,55 @@ export default [
     rules: { "l11/packer-imports": "error" }
   },
 
+  // 6b6. L13 — the engine never imports a native package: `@moku-labs/system`, `@moku-labs/native`
+  // and `@tauri-apps/*` are reached by the game through the `PlatformProvider` it builds in the
+  // application layer. Every file under `src/`, tests included, and type imports too. A rule of its
+  // own for the same reason as L11.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: {
+      l13: {
+        rules: {
+          "native-imports": {
+            meta: {
+              type: "problem",
+              schema: [],
+              messages: {
+                native:
+                  "The engine never imports @moku-labs/system, @moku-labs/native or @tauri-apps/*. The game passes a PlatformProvider in pluginConfigs.platform."
+              }
+            },
+            create: (
+              context: import("eslint").Rule.RuleContext
+            ): import("eslint").Rule.RuleListener => {
+              const check = (
+                node: import("estree").Node,
+                source: import("estree").Node | null | undefined
+              ): void => {
+                const name = source?.type === "Literal" ? source.value : undefined;
+
+                if (
+                  typeof name === "string" &&
+                  /^(?:@moku-labs\/(?:system|native)(?:\/|$)|@tauri-apps\/)/.test(name)
+                ) {
+                  context.report({ node, messageId: "native" });
+                }
+              };
+
+              return {
+                ImportDeclaration: node => check(node, node.source),
+                ImportExpression: node => check(node, node.source),
+                ExportAllDeclaration: node => check(node, node.source),
+                ExportNamedDeclaration: node => check(node, node.source)
+              };
+            }
+          }
+        }
+      }
+    },
+    rules: { "l13/native-imports": "error" }
+  },
+
   // 6b3. L9 — the JSX runtime module is reached only through the two entry files, and they
   // import nothing else.
   {

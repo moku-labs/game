@@ -13,7 +13,9 @@ import {
   loadChromium,
   pageSize,
   pixelOutcome,
+  rendererUrl,
   runBrowserLeg,
+  screenFiles,
   withPixels
 } from "../../../src/visual/leg-browser";
 import { runHeadlessLeg } from "../../../src/visual/leg-headless";
@@ -102,6 +104,29 @@ describe("pixelOutcome", () => {
     expect(pixelOutcome({ sameSize: false, differing: 0, total: 0 }, tolerance)).toEqual({
       outcome: "different",
       first: "size"
+    });
+  });
+});
+
+describe("rendererUrl and screenFiles: one page and one baseline per backend", () => {
+  it("keeps the URL for WebGPU and adds renderer=webgl to it for WebGL", () => {
+    expect(rendererUrl(URL, "webgpu")).toBe(URL);
+    expect(rendererUrl(URL, "webgl")).toBe("http://localhost:3000/?renderer=webgl");
+    expect(rendererUrl("http://localhost:4173/?seed=7", "webgl")).toBe(
+      "http://localhost:4173/?seed=7&renderer=webgl"
+    );
+  });
+
+  it("names the screens of each backend", () => {
+    expect(screenFiles("webgpu")).toEqual({
+      baseline: "screen.webp",
+      actual: "screen.actual.webp",
+      diff: "screen.diff.webp"
+    });
+    expect(screenFiles("webgl")).toEqual({
+      baseline: "screen.webgl.webp",
+      actual: "screen.webgl.actual.webp",
+      diff: "screen.webgl.diff.webp"
     });
   });
 });
@@ -629,15 +654,69 @@ describe("runBrowserLeg", () => {
     expect(log.browsersClosed).toBe(1);
   });
 
-  it("refuses a page that draws with WebGL: there are no WebGL baselines", async () => {
+  it("refuses a page that draws with WebGL in the WebGPU leg", async () => {
     await pageGame({ kind: "webgl" });
 
     const { chromium, log } = fakeChromium();
 
     await expect(bothLegs([openPopup(7)], chromium)).rejects.toThrow(
-      `[game] The page at ${URL} draws with webgl, not WebGPU.\n  The pixel baselines are WebGPU only: use a Chrome with WebGPU on a Mac, or run with --no-pixels.`
+      `[game] The page at ${URL} draws with webgl, not WebGPU.\n  The WebGPU baselines need a Chrome with WebGPU on a Mac: use one, or run with --no-pixels.`
     );
     expect(log.browsersClosed).toBe(1);
+  });
+
+  it("refuses a page that draws with WebGPU in the WebGL leg", async () => {
+    await pageGame({ kind: "webgpu" });
+
+    const { chromium, log } = fakeChromium();
+
+    await expect(bothLegs([openPopup(7)], chromium, { renderer: "webgl" })).rejects.toThrow(
+      `[game] The page at ${URL}?renderer=webgl draws with webgpu, not WebGL.\n  The WebGL baselines need a page that passes renderer=webgl from its query to the renderer: serve one, or run without --webgl.`
+    );
+    expect(log.browsersClosed).toBe(1);
+  });
+
+  it("plays the WebGL leg on ?renderer=webgl and keeps its picture in screen.webgl.webp", async () => {
+    const shot = { url: pngOf(4, 4) };
+
+    await pageGame({ kind: "webgl", screen: () => shot.url });
+
+    const { chromium, log } = fakeChromium();
+    const first = await bothLegs([openPopup(7)], chromium, { renderer: "webgl" });
+
+    expect(first[0]?.checkpoints).toEqual([
+      { name: "open", state: "written", describe: "written", pixels: "written" }
+    ]);
+    expect(log.urls).toEqual([`${URL}?renderer=webgl`]);
+    expect(await readFile(file("screen.webgl.webp"))).toEqual(bytesOf(shot.url));
+    await expect(readFile(file("screen.webp"))).rejects.toThrow("ENOENT");
+
+    const changed = pngOf(4, 4, index => (index === 5 ? [250, 20, 30, 255] : [10, 20, 30, 255]));
+
+    shot.url = changed;
+
+    const second = await bothLegs([openPopup(7)], chromium, { renderer: "webgl" });
+
+    expect(second[0]?.checkpoints[0]).toMatchObject({
+      state: "same",
+      describe: "same",
+      pixels: "different",
+      verdict: "rendering"
+    });
+    expect(await readFile(file("screen.webgl.actual.webp"))).toEqual(bytesOf(changed));
+    await expect(readFile(file("screen.webgl.diff.webp"))).resolves.toBeInstanceOf(Buffer);
+    await expect(readFile(file("screen.actual.webp"))).rejects.toThrow("ENOENT");
+  });
+
+  it("names WebGL when a page of the WebGL leg gives no picture", async () => {
+    await pageGame({ kind: "webgl", screen: () => undefined });
+
+    const { chromium } = fakeChromium();
+    const results = await bothLegs([openPopup(7)], chromium, { renderer: "webgl" });
+
+    expect(results[0]?.error).toBe(
+      '[game] Visual test "open-popup", step 2 (checkpoint): the page gave no picture.\n  Serve a dev build with WebGL: renderer.capture() answers only there.'
+    );
   });
 
   it("names a page that does not open", async () => {

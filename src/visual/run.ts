@@ -1,7 +1,7 @@
 /**
  * @file visual — `runVisualTests`, the runner a game's script calls, and `parseVisualArgv`, its
- * command line. It resolves the options, selects the tests, runs the headless leg and then, with
- * `pixels` on, the browser leg, prints one line per checkpoint through the branded console of
+ * command line. It resolves the options, selects the tests (in the WebGL leg, the ones with
+ * `webgl: true`), runs the headless leg and then, with `pixels` on, the browser leg, prints one line per checkpoint through the branded console of
  * `@moku-labs/common/cli` and answers one report. The game's script sets the exit code.
  */
 import { createBrandConsole } from "@moku-labs/common/cli";
@@ -54,7 +54,7 @@ function valueAfter(argv: readonly string[], index: number, placeholder: string)
 }
 
 /**
- * Reads the flags of the visual tests from a command line: `--update`, `--no-pixels`,
+ * Reads the flags of the visual tests from a command line: `--update`, `--no-pixels`, `--webgl`,
  * `--only <name>` (repeatable) and `--dir <path>`. An argument it does not know is left to the
  * script that got it, so a test runner's own arguments pass through.
  *
@@ -66,6 +66,7 @@ function valueAfter(argv: readonly string[], index: number, placeholder: string)
  * // `bun tests/visual/run.ts --update --only reward-popup`
  * parseVisualArgv(["--update", "--only", "reward-popup"]); // { update: true, only: ["reward-popup"] }
  * parseVisualArgv(["--no-pixels", "--dir", "shots"]); // { pixels: false, dir: "shots" }
+ * parseVisualArgv(["--webgl"]); // { renderer: "webgl" }
  * ```
  */
 export function parseVisualArgv(argv: readonly string[]): VisualFlags {
@@ -75,6 +76,7 @@ export function parseVisualArgv(argv: readonly string[]): VisualFlags {
   for (const [index, argument] of argv.entries()) {
     if (argument === "--update") flags.update = true;
     if (argument === "--no-pixels") flags.pixels = false;
+    if (argument === "--webgl") flags.renderer = "webgl";
     if (argument === "--only") only.push(valueAfter(argv, index, "<name>"));
     if (argument === "--dir") flags.dir = valueAfter(argv, index, "<path>");
   }
@@ -84,7 +86,7 @@ export function parseVisualArgv(argv: readonly string[]): VisualFlags {
 
 /**
  * Fills in the options of a run: an explicit option wins over a flag of `argv`, a flag over the
- * default. `pixels` is on by default only with a `page` on a Mac.
+ * default. `pixels` is on by default only with a `page` on a Mac; `renderer` is `"webgpu"`.
  *
  * @param setup - The setup, for its `page`.
  * @param options - The options the script passed.
@@ -99,11 +101,35 @@ export function resolveVisualOptions(setup: VisualSetup, options: VisualOptions 
     update: options.update ?? flags.update ?? false,
     pixels:
       options.pixels ?? flags.pixels ?? (setup.page !== undefined && process.platform === "darwin"),
+    renderer: options.renderer ?? flags.renderer ?? "webgpu",
     settleFrames: options.settleFrames ?? DEFAULT_SETTLE_FRAMES,
     tolerance: options.tolerance ?? { ...DEFAULT_TOLERANCE }
   };
 
   return only === undefined ? run : { ...run, only };
+}
+
+/**
+ * Keeps the tests the WebGL leg plays: the ones with `webgl: true`. The WebGPU leg plays every
+ * test.
+ *
+ * @param tests - The tests `only` selected.
+ * @param run - The run options, for `renderer` and `only`.
+ * @returns The tests of the leg.
+ * @throws {Error} When `only` names a test without `webgl: true` in the WebGL leg.
+ */
+function legTests(tests: readonly VisualTest[], run: VisualRun): VisualTest[] {
+  if (run.renderer === "webgpu") return [...tests];
+
+  const withoutLeg = run.only === undefined ? undefined : tests.find(test => !test.webgl);
+
+  if (withoutLeg !== undefined) {
+    throw new Error(
+      `[game] The visual test "${withoutLeg.name}" has no WebGL leg.\n  Pass webgl: true to its defineVisualTest, or run without --webgl.`
+    );
+  }
+
+  return tests.filter(test => test.webgl);
 }
 
 /**
@@ -255,7 +281,10 @@ async function withPixelLeg(
 
 /**
  * Runs visual tests: the headless leg over every selected test, then the browser leg over the
- * same tests when `pixels` is on (by default only with a `page` on a Mac). A checkpoint saves
+ * same tests when `pixels` is on (by default only with a `page` on a Mac). With `renderer:
+ * "webgl"` (`--webgl`) only the tests with `webgl: true` run, the page opens with
+ * `?renderer=webgl` and its pictures go to `screen.webgl.webp`; `state.json` and `describe.json`
+ * are shared with the WebGPU leg and compared as always. A checkpoint saves
  * `state.json` and `describe.json` in `<dir>/<test>/<checkpoint>/`, and the browser leg
  * `screen.webp`, lossless: a missing file is written, `--update` rewrites every file of the tests
  * run, a JSON file is compared exactly. The browser leg opens the dev page in Chrome with WebGPU
@@ -274,7 +303,8 @@ async function withPixelLeg(
  * @throws {Error} When a test is not well formed, two tests share a name, `only` names no test,
  *   a flag misses its value, or the browser leg fails as a whole: no `page`, no
  *   `playwright-core`, no Chrome, or a page that does not open, expose `game` and `doors`, start,
- *   draw with WebGPU or stop loading.
+ *   draw with the requested backend or stop loading. In the WebGL leg, also when `only` names a
+ *   test without `webgl: true`.
  * @example
  * ```ts
  * // tests/visual/run.ts of a game, `bun tests/visual/run.ts --update` on a Mac
@@ -291,7 +321,7 @@ export async function runVisualTests(
   options: VisualOptions = {}
 ): Promise<VisualReport> {
   const run = resolveVisualOptions(setup, options);
-  const selected = selectTests(tests, run.only);
+  const selected = legTests(selectTests(tests, run.only), run);
   const ui = createBrandConsole();
   const headless = await runHeadlessLeg(setup, selected, run);
   const results = run.pixels ? await withPixelLeg(ui, setup, selected, run, headless) : headless;

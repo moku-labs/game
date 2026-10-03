@@ -15,6 +15,7 @@ export type {
   VisualApp,
   VisualOptions,
   VisualPage,
+  VisualRenderer,
   VisualReport,
   VisualSetup,
   VisualStart,

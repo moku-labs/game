@@ -29,6 +29,12 @@ describe("VisualStep", () => {
     expectTypeOf(defineVisualTest("popup", { start, steps })).toEqualTypeOf<VisualTest>();
   });
 
+  it("takes an optional webgl flag and answers it as a boolean", () => {
+    expectTypeOf(
+      defineVisualTest("glow", { start, steps: [], webgl: true }).webgl
+    ).toEqualTypeOf<boolean>();
+  });
+
   it("rejects a step outside the catalogue", () => {
     // @ts-expect-error capture is not a step: the runner captures by itself
     const capture: VisualStep = { capture: {} };
