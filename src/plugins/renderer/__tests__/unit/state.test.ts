@@ -58,6 +58,7 @@ describe("renderer state", () => {
       wrapper: undefined,
       placeholder: false,
       mask: undefined,
+      clipped: undefined,
       display: undefined,
       value: undefined,
       drawScale: { x: 1, y: 1 },

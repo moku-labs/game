@@ -1,7 +1,8 @@
 /**
  * @file text plugin — the measurement. A `.fnt` becomes an advance table, runs become lines, and
  * a block becomes a size in reference pixels. Pure and canvas-free: the same numbers on a screen
- * and in plain Bun, which is what keeps `ui.layout` honest.
+ * and in plain Bun, which is what keeps `ui.layout` honest. A character the font has no glyph for
+ * measures 0 wide, because Pixi draws nothing for it.
  */
 import type {
   AdvanceTable,
@@ -88,6 +89,25 @@ function readChars(chars: readonly unknown[]): Map<string, number> {
 }
 
 /**
+ * Tells whether a BMFont JSON names a distance field. Pixi reads `distanceField.type`, the
+ * exporters write `distanceField.fieldType`; a field of type `none` is no field.
+ *
+ * @param data - The parsed file.
+ * @returns True when Pixi draws the font with its distance-field shader.
+ * @example
+ * ```ts
+ * jsonField({ distanceField: { fieldType: "msdf", distanceRange: 6 } }); // true
+ * ```
+ */
+function jsonField(data: Record<string, unknown>): boolean {
+  const field = data.distanceField;
+
+  if (!isRecord(field)) return false;
+
+  return (field.fieldType ?? field.type) !== "none";
+}
+
+/**
  * Reads a `.fnt` in BMFont JSON.
  *
  * @param fnt - The file as text.
@@ -113,7 +133,8 @@ function readJson(fnt: string): AdvanceTable | undefined {
   return {
     size,
     lineHeight: common > 0 ? common : size,
-    advances: readChars(data.chars)
+    advances: readChars(data.chars),
+    distanceField: jsonField(data)
   };
 }
 
@@ -138,6 +159,25 @@ function attribute(source: string, pattern: RegExp): number | undefined {
   const found = pattern.exec(source);
 
   return found === null ? undefined : numberOf(Number(found[1]));
+}
+
+/**
+ * Tells whether a BMFont XML names a distance field: a `<distanceField>` whose `fieldType` is not
+ * `none`, the test Pixi decides its shader by.
+ *
+ * @param fnt - The file as text.
+ * @returns True when Pixi draws the font with its distance-field shader.
+ * @example
+ * ```ts
+ * xmlField('<font><distanceField fieldType="msdf" distanceRange="6"/></font>'); // true
+ * ```
+ */
+function xmlField(fnt: string): boolean {
+  const tag = /<distanceField\s(?:[^>"]|"[^"]*")*>/.exec(fnt);
+
+  if (tag === null) return false;
+
+  return /\sfieldType="([^"]*)"/.exec(tag[0])?.[1] !== "none";
 }
 
 /**
@@ -167,7 +207,12 @@ function readXml(fnt: string): AdvanceTable | undefined {
     advances.set(String.fromCodePoint(id), advance);
   }
 
-  return { size, lineHeight: lineHeight > 0 ? lineHeight : size, advances };
+  return {
+    size,
+    lineHeight: lineHeight > 0 ? lineHeight : size,
+    advances,
+    distanceField: xmlField(fnt)
+  };
 }
 
 /**
@@ -176,12 +221,13 @@ function readXml(fnt: string): AdvanceTable | undefined {
  *
  * @param fnt - The `.fnt` file as text, in BMFont XML or BMFont JSON.
  * @param key - The asset key of the font, for the error.
- * @returns The export size, the line height and one advance per character.
+ * @returns The export size, the line height, one advance per character, and whether the file
+ * names a distance field.
  * @throws {Error} When the file is in neither format.
  * @example
  * ```ts
  * parseAdvances('{"info":{"size":32},"common":{"lineHeight":40},"chars":[]}', "ui.font-body");
- * // { size: 32, lineHeight: 40, advances: Map(0) }
+ * // { size: 32, lineHeight: 40, advances: Map(0), distanceField: false }
  * ```
  */
 export function parseAdvances(fnt: string, key: string): AdvanceTable {
@@ -237,13 +283,14 @@ export function lineHeightOf(style: TextStyle, tables: Map<string, AdvanceTable>
 }
 
 /**
- * The width of one character, letter spacing included.
+ * The width of one character, letter spacing included. A character the loaded font has no glyph
+ * for is 0 wide, spacing and all: Pixi skips it when it lays the run out and draws nothing.
  *
  * @param char - The character.
  * @param style - The style of the label.
  * @param fontKey - The font of the run.
  * @param tables - The advance tables that are loaded.
- * @param options - The missing glyph and where a warning goes.
+ * @param options - Where a warning goes.
  * @returns The advance in reference pixels.
  */
 function advanceOf(
@@ -273,11 +320,7 @@ function advanceOf(
     glyph: char
   });
 
-  const missing = table.advances.get(options.missingGlyph);
-
-  return (
-    (missing === undefined ? FALLBACK_ADVANCE * style.size : missing * scale) + style.letterSpacing
-  );
+  return 0;
 }
 
 /**
@@ -286,7 +329,7 @@ function advanceOf(
  * @param run - The run to measure.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded.
- * @param options - The missing glyph and where a warning goes.
+ * @param options - Where a warning goes.
  * @returns The width in reference pixels.
  * @example
  * ```ts
@@ -340,7 +383,7 @@ function appendRun(runs: Run[], piece: Run): void {
  * @param runs - The runs of the block.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded.
- * @param options - The missing glyph and where a warning goes.
+ * @param options - Where a warning goes.
  * @returns The lines, each with its width.
  */
 function layoutFixed(
@@ -428,7 +471,7 @@ function pushToken(tokens: Token[], token: Token, touches: boolean): void {
  * @param runs - The runs of the block.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded.
- * @param options - The missing glyph and where a warning goes.
+ * @param options - Where a warning goes.
  * @returns The tokens, in reading order.
  */
 function tokenise(
@@ -605,7 +648,6 @@ function onceOnly(options: LayoutOptions): LayoutOptions {
   const seen = emptyKeys();
 
   return {
-    missingGlyph: options.missingGlyph,
     warn: (key, message, data): void => {
       if (seen.has(key)) return;
 
@@ -631,11 +673,11 @@ function emptyKeys(): Set<string> {
  * @param runs - What `parseTags` made of the resolved string.
  * @param style - The style of the label.
  * @param tables - The advance tables that are loaded, by font key.
- * @param options - The missing glyph of the config and where a warning goes.
+ * @param options - Where a warning goes.
  * @returns The lines and the size of the block in reference pixels.
  * @example
  * ```ts
- * layoutRuns([], bodyStyle, new Map(), { missingGlyph: "□", warn: () => undefined });
+ * layoutRuns([], bodyStyle, new Map(), { warn: () => undefined });
  * // { lines: [{ runs: [], width: 0 }], width: 0, height: 38.4 }
  * ```
  */

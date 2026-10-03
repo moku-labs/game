@@ -33,10 +33,10 @@ Pure, made with the `component()` helper of `world`, exported from the package r
 |---|---|---|
 | `Transform({ x, y, rotation, scale, pivot })` | `0, 0, 0, 1, { x: 0, y: 0 }` | Reference units, radians, uniform scale. Relative to the `Parent` when there is one. `pivot` is the local point the view turns and scales around; `x`, `y` is where it lands. |
 | `Sprite({ texture, tint, alpha, anchor, width, height, fit })` | `"", 0xffffff, 1, { x: 0.5, y: 0.5 }, 0, 0, "fill"` | `texture` is an asset key. `width`/`height` are the box in reference units; 0 keeps the texture's own size on that axis. `fit` is `"fill"`, `"contain"` or `"cover"`. |
-| `NineSlice({ texture, width, height, alpha, tint, debug, clip })` | `"", 0, 0, 1, 0xffffff, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. |
+| `NineSlice({ texture, width, height, alpha, tint, debug, clip })` | `"", 0, 0, 1, 0xffffff, false, false` | Size in reference units; the borders come with the texture (`defaultBorders`, copied on every write, 0 when the texture has none). `debug: true` draws the slice outline over it. `clip: true` masks the children of the entity to the `width × height` box, as `Shape.clip` does: a filled rectangle in the wrapper, never drawn, redrawn on a size change. The panel itself is never masked. |
 | `Parent({ entity })` | `0` | "Moves with its parent". It never decides draw order between layers. |
 | `Display({ object })` | `undefined` | The game owns a Pixi object. Never pooled, never destroyed by `sync`. `effects` places its particle containers through it, on entities it owns. |
-| `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false` | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape. `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape; the mask is always filled and never dashed. Motions tween only the numeric fields, never `kind`. |
+| `Shape({ kind, w, h, fill, fillAlpha, alpha, radius, stroke, strokeWidth, dash, clip })` | `"rect", 0, 0, 0xffffff, 1, 1, 0, 0x000000, 0, 0, false` | A filled rounded rectangle, or with `kind: "triangle"` a triangle that fills its `w × h` box pointing right (rotate the element for another direction; `radius` is ignored), drawn with `Graphics`, anchored top left. `fillAlpha` is the alpha of the fill alone: `0` draws only the stroke, a ring. `alpha` fades the whole shape. `dash` above 0 dashes the stroke: dashes of `dash` reference units, gaps of half a dash, walking the straight edges and the rounded corners sampled as arcs (`sync/shape-path.ts`). `clip: true` masks the children of the entity to the shape, never the shape itself, so its stroke is drawn whole; the mask is always filled and never dashed. Motions tween only the numeric fields, never `kind`. |
 
 ```ts
 sprite({ texture: "board.cell", at: { x: 540, y: 300 } });
@@ -293,6 +293,14 @@ a parent it gets a wrapper `Container` (a v8 sprite takes no children); its own 
 `zIndex` from its `Order` (0 without one) when it is attached and when `Order` changes, whatever
 layer its parent is in. The parent's own visual has depth 0, so a child with the same depth draws
 above it and a child with a negative `Order` below it. A layer container keeps its own sort rule.
+A clipping parent (`Shape.clip`, `NineSlice.clip`) masks only its children. Its wrapper holds the
+parent's own visual, a sortable `Container` labelled `children#<entity>` that the children hang in,
+and the mask `Graphics` (`clip#<entity>`) beside it, so the mask never cuts the parent's stroke or
+its corners. The children keep their `Order` inside that container, which draws above the visual:
+under a clipping parent a negative `Order` sorts among the children, never below the parent. Filters
+stay on the wrapper and cover the visual and the children; the debug outline stays outside the
+mask. Turning `clip` off moves the children back into the wrapper and frees the container and the
+mask.
 Removing `Parent` puts the view back in the layer its `Layer` names, at its own pose, in the same
 pass: `world` records no change for a removed component, so `sync` watches `onRemoved(Parent)`.
 

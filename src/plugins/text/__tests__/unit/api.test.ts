@@ -111,6 +111,17 @@ describe("hasGlyph", () => {
     expect(warningsOf(mock, "text: the font has no glyph")).toHaveLength(0);
   });
 
+  it("matches measure: a character the font lacks is drawn as nothing and measures 0 wide", () => {
+    const mock = started();
+
+    mock.assets.fonts.set("ui.font-body", { fnt: miniFontJson, texture: undefined as never });
+    mock.hooks["assets:bundle-loaded"]({ bundle: "boot", tier: "boot", mb: 1, reason: "boot" });
+
+    expect(mock.api.hasGlyph("😀", "body")).toBe(false);
+    expect(mock.api.measure("A😀", "body")).toEqual(mock.api.measure("A", "body"));
+    expect(mock.api.measure("A😀", "body").width).toBe(24);
+  });
+
   it("answers true while the font is not loaded: the fallback measures every character", () => {
     const mock = started();
 

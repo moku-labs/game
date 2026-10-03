@@ -66,7 +66,8 @@ export type SpriteValue = {
  * A stretchable panel. The slice borders come with the texture, not with the component. `debug`
  * strokes the bounds and the four cut lines over the panel: cyan, red when the corners overlap or
  * the texture is missing. `clip` masks the children of the entity to the `width × height` box,
- * the same rule as `Shape.clip`: the mask is a filled rectangle and is never drawn.
+ * the same rule as `Shape.clip`: the mask is a filled rectangle and is never drawn, and the panel
+ * itself is never masked.
  *
  * @example
  * ```ts
@@ -121,7 +122,7 @@ export type DisplayValue = { object: unknown };
  * of the fill alone: 0 draws only the stroke, a ring. `alpha` fades the whole shape. `dash` is the
  * dash length of the stroke in reference units, with gaps of half a dash; 0 strokes a solid line.
  * `clip` masks the children of the entity to the shape, always solid, which is how `ui` draws a
- * scroll and an overflow.
+ * scroll and an overflow. The shape itself is never masked, so its stroke is drawn whole.
  *
  * @example
  * ```ts

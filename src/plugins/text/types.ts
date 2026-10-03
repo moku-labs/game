@@ -178,15 +178,24 @@ export type TextStyle = {
 export type TextStyles = { readonly kind: "textStyles"; readonly map: Record<string, TextStyle> };
 
 /**
- * The advances of one font at the size the `.fnt` was exported with. Widths scale by
- * `style.size / size`; kerning pairs are ignored.
+ * What a `.fnt` is read into: the advances of one font at the size it was exported with, and
+ * whether the file names a distance field. Widths scale by `style.size / size`; kerning pairs are
+ * ignored. Pixi draws a distance-field font (MSDF or SDF) with a shader that applies the alpha
+ * twice, so the display hands its runs a corrected alpha.
  *
  * @example
  * ```ts
- * const table: AdvanceTable = { size: 32, lineHeight: 40, advances: new Map([["1", 18]]) };
+ * const table: AdvanceTable = {
+ *   size: 32, lineHeight: 40, advances: new Map([["1", 18]]), distanceField: true
+ * };
  * ```
  */
-export type AdvanceTable = { size: number; lineHeight: number; advances: Map<string, number> };
+export type AdvanceTable = {
+  size: number;
+  lineHeight: number;
+  advances: Map<string, number>;
+  distanceField: boolean;
+};
 
 /**
  * One run of glyphs: the text and the flags every glyph in it shares.
@@ -267,10 +276,10 @@ export type Warn = (key: string, message: string, data?: Record<string, unknown>
  *
  * @example
  * ```ts
- * const options: LayoutOptions = { missingGlyph: "□", warn: () => undefined };
+ * const options: LayoutOptions = { warn: () => undefined };
  * ```
  */
-export type LayoutOptions = { missingGlyph: string; warn: Warn };
+export type LayoutOptions = { warn: Warn };
 
 /**
  * What was resolved for one entity last, so the frame step knows whether anything moved.
@@ -298,7 +307,11 @@ export type SeenText = {
 export type Config = {
   /** The two fonts every game ships in its boot bundle. They back the built-in styles. */
   fonts: { body: string; digits: string };
-  /** Drawn and measured for a character the font does not have. */
+  /**
+   * No glyph is drawn or measured in its place: a character the font has no glyph for is drawn as
+   * nothing by Pixi and measures 0 wide, so a label is as wide as what is drawn. Nothing reads
+   * this value.
+   */
   missingGlyph: string;
 };
 
@@ -364,10 +377,10 @@ export type TextApi = {
   measure(content: string | Message, style: string): Size;
 
   /**
-   * Whether the font of a style has a glyph for one character. Pixi draws nothing for a character
-   * its font lacks, while `measure` counts `missingGlyph` for it, so a caret measured over such a
-   * character would stand past the drawn text. While the font is not loaded every character
-   * counts, as the fallback measures it. An unknown style warns once and looks up `body`.
+   * Whether the font of a style has a glyph for one character, the lookup Pixi draws by. A
+   * character its font lacks is drawn as nothing and `measure` counts it 0 wide. While the font is
+   * not loaded every character counts, as the 0.6 em fallback measures it. An unknown style warns
+   * once and looks up `body`.
    *
    * @param char - One character, a whole code point.
    * @param style - A registered style name.
@@ -377,8 +390,8 @@ export type TextApi = {
    * // `ui` measures the caret of a text field over the characters the font draws.
    * const text = ctx.require(textPlugin);
    *
-   * text.hasGlyph("a", "body"); // true
-   * text.hasGlyph("😀", "body"); // false: an MSDF font has no emoji, so the caret skips it
+   * text.hasGlyph("A", "body"); // true
+   * text.hasGlyph("😀", "body"); // false once the body font is loaded: it has no emoji glyph
    * ```
    */
   hasGlyph(char: string, style: string): boolean;

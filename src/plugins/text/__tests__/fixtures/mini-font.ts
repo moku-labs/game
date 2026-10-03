@@ -34,12 +34,22 @@ export const miniFontXml = `<?xml version="1.0"?>
   </chars>
 </font>`;
 
-/** The fixture with no `□`, so a character the font lacks falls through to the 0.6 em rule. */
-export const miniFontNoMissing = JSON.stringify({
-  info: { face: "mini", size: 32 },
+/**
+ * The same fixture as an MSDF export: BMFont XML that names its distance field, the way
+ * msdf-bmfont-xml writes it. Pixi draws such a font with its distance-field shader.
+ */
+export const miniFontMsdfXml = miniFontXml.replace(
+  "<chars",
+  '<distanceField fieldType="msdf" distanceRange="6" />\n  <chars'
+);
+
+/** A font with `a` and `b` and no emoji, in BMFont JSON with its distance field. */
+export const latinFontJson = JSON.stringify({
+  info: { face: "latin", size: 32 },
   common: { lineHeight: 40 },
+  distanceField: { fieldType: "msdf", distanceRange: 6 },
   chars: [
-    { id: 49, xadvance: 16 },
-    { id: 32, xadvance: 8 }
+    { id: 97, char: "a", xadvance: 18 },
+    { id: 98, char: "b", xadvance: 20 }
   ]
 });
