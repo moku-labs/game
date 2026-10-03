@@ -246,6 +246,37 @@ function showCover(sctx: SyncCtx, entity: Entity, view: View, frameKey: string):
 }
 
 /**
+ * Tells whether the renderer writes the alpha of a view: the three built-in visuals. A `Display`
+ * object belongs to the game and an adapter object to the plugin that draws it; their alpha is
+ * theirs.
+ *
+ * @param view - The view.
+ * @returns True for a `Sprite`, a `NineSlice` and a `Shape`.
+ */
+function ownsAlpha(view: View): boolean {
+  return view.kind === "Sprite" || view.kind === "NineSlice" || view.kind === "Shape";
+}
+
+/**
+ * Writes the alpha of a built-in visual. It fades the entity's whole subtree: on a view with a
+ * wrapper it goes on the wrapper, over the visual and the children, and the visual inside stays
+ * at 1, so the alpha is applied once. A view without a wrapper keeps it on its object.
+ *
+ * @param view - The view of a `Sprite`, a `NineSlice` or a `Shape`.
+ * @param alpha - The alpha of the component.
+ */
+function applyAlpha(view: View, alpha: number): void {
+  if (view.wrapper === undefined) {
+    view.object.alpha = alpha;
+
+    return;
+  }
+
+  view.wrapper.alpha = alpha;
+  view.object.alpha = 1;
+}
+
+/**
  * Writes the `Sprite` component onto its display object: the texture, or its crop for a `"cover"`
  * sprite, the stretch into the box, and the box as the hit box, the anchor applied.
  *
@@ -264,7 +295,7 @@ export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
   const { texture, missing } = textureFor(sctx, value.texture);
 
   view.placeholder = missing;
-  object.alpha = value.alpha;
+  applyAlpha(view, value.alpha);
 
   if (missing || texture === undefined) {
     showCover(sctx, entity, view, "");
@@ -337,7 +368,7 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
   object.rightWidth = borders.right;
   object.bottomHeight = borders.bottom;
   object.tint = missing ? PLACEHOLDER_TINT : value.tint;
-  object.alpha = value.alpha;
+  applyAlpha(view, value.alpha);
   object.width = value.width;
   object.height = value.height;
   view.hitBox = { x: 0, y: 0, width: value.width, height: value.height };
@@ -443,7 +474,7 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
   drawShapePath(object, value, value.fillAlpha);
   strokeShape(object, value);
 
-  object.alpha = value.alpha;
+  applyAlpha(view, value.alpha);
   view.hitBox = { x: 0, y: 0, width: value.w, height: value.h };
   applyClip(sctx, entity, view, value);
 }
@@ -526,7 +557,8 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
  * the parent's own visual moves into the wrapper as child 0 and the transform moves with it. The
  * wrapper sorts its children by their `Order`; the visual is child 0 at depth 0, so a child with
  * the same depth draws above it. A clipping parent hangs its children one level down, in the
- * masked container `applyClip` adds.
+ * masked container `applyClip` adds. The filters and the alpha of a built-in visual move up to
+ * the wrapper, so they cover the children too.
  *
  * @param sctx - Domain context of the sync module.
  * @param parentEntity - The entity named as a parent.
@@ -554,8 +586,9 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   wrapper.addChild(view.object);
   view.wrapper = wrapper;
   applyTransform(sctx, parentEntity, view);
-  // The filters cover the subtree: they move from the visual up to the wrapper.
+  // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.
   moveFilters(sctx.ctx.state.sync, parentEntity, view);
+  if (ownsAlpha(view)) applyAlpha(view, view.object.alpha);
 
   return wrapper;
 }

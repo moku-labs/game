@@ -41,12 +41,16 @@ fields; `onStop` removes all of them.
 | `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
 | `text` | `Text`; a string `style` is the text style key | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug` | as below |
-| any other tag | a rounded `Shape`, invisible on a container with no fill and no stroke; with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash) | as below |
+| any other tag | a rounded `Shape`, drawing nothing on a container with no fill and no stroke (no fill, stroke width 0, the alpha of its style); with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash) | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
 | `scroll` | `Shape` with `clip` | `Touchable`, `Scroll` |
 | `input` | as any other tag, with `clip` on the `Shape` or on the `NineSlice` of `style.nineSlice`; four ui-owned children draw the text, the caret, the selection and the IME underline, see [Text input](#text-input) | `Touchable` |
 | any tag | `components` adds extra components to the element's entity, see [Extra components](#extra-components) | |
+
+`style.alpha` fades the element and everything inside it: a disabled button at `alpha: 0.6`
+draws its icon and its label at 0.6 too, and a column at `alpha: 0` hides its children. The
+renderer applies it once, on the element's wrapper (see the renderer README).
 
 A live element follows its state: a button that becomes disabled loses `Tappable` and
 `LocalWrite` and keeps `Touchable`, so it stops answering the gate; enabled again, it answers.

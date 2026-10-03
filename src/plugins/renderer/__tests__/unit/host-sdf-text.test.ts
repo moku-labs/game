@@ -4,18 +4,25 @@ import type { PixiModule } from "../../types";
 import {
   createFakePixi,
   FakeBitmapTextPipe,
+  FakeGlProgram,
   FakeGpuProgram,
   FakeMatrix,
   FakeSdfShader,
   FakeShader,
   FakeUniformGroup,
+  fakeBatchSamplers,
   fakeColorBit,
+  fakeColorBitGl,
   fakeExtensions,
   fakeLocalUniformMSDFBit,
+  fakeLocalUniformMSDFBitGl,
   fakeMSDFBit,
+  fakeMSDFBitGl,
   fakeRoundPixelsBit,
+  fakeRoundPixelsBitGl,
   fakeShaderCompiler,
   fakeTextureBatchBit,
+  fakeTextureBatchBitGl,
   WEBGL_PIPES,
   WEBGPU_PIPES
 } from "../fake-pixi";
@@ -23,9 +30,9 @@ import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 // ---------------------------------------------------------------------------
 // Unit test: the renderer's own bitmap text pipe. A subclass of Pixi's pipe,
-// swapped in through the extension registry before init, whose WebGPU SDF
-// shader hands `calculateMSDFAlpha` the colour un-premultiplied, so every
-// alpha is applied once.
+// swapped in through the extension registry before init, whose SDF shader
+// hands `calculateMSDFAlpha` the colour un-premultiplied, so every alpha is
+// applied once: WGSL on WebGPU, GLSL on the WebGL fallback.
 // ---------------------------------------------------------------------------
 
 afterEach(() => {
@@ -38,6 +45,13 @@ const pixiStep = "calculateMSDFAlpha(outColor, vColor, localUniforms.uDistance)"
 /** The fragment step of the renderer: the colour un-premultiplied, at alpha 1. */
 const singleAlphaStep =
   "calculateMSDFAlpha(outColor, vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0), localUniforms.uDistance)";
+
+/** The GLSL fragment step Pixi 8.21 ships, the same double alpha on WebGL. */
+const pixiStepGl = "calculateMSDFAlpha(outColor, vColor, uDistance)";
+
+/** The GLSL fragment step of the renderer: the colour un-premultiplied, at alpha 1. */
+const singleAlphaStepGl =
+  "calculateMSDFAlpha(outColor, vec4(vColor.rgb / max(vColor.a, 1e-4), 1.0), uDistance)";
 
 /** What the fake pipe reads of its renderer. */
 type PipeRenderer = { name: "webgpu" | "webgl"; limits: { maxBatchableTextures: number } };
@@ -135,12 +149,58 @@ describe("createSdfTextPipe", () => {
     expect(fakeShaderCompiler.compiled).toHaveLength(1);
   });
 
-  it("hands out Pixi's own shader on WebGL", () => {
+  it("compiles Pixi's GLSL SDF bits with the alpha handed over once on WebGL", () => {
     const pixi = createFakePixi();
     const shader = shaderOf(pipeOn(pixi.module, "webgl"));
+    const [compile] = fakeShaderCompiler.compiledGl;
+    const textBit = compile?.bits[2];
 
-    expect(shader).toBeInstanceOf(FakeSdfShader);
+    expect(shader).toBeInstanceOf(FakeShader);
+    expect(shader).not.toBeInstanceOf(FakeSdfShader);
+    expect(shader.glProgram).toBeInstanceOf(FakeGlProgram);
+    expect(shader.gpuProgram).toBeUndefined();
     expect(fakeShaderCompiler.compiled).toHaveLength(0);
+    expect(compile?.bits).toEqual([
+      fakeColorBitGl,
+      fakeTextureBatchBitGl(16),
+      textBit,
+      fakeMSDFBitGl,
+      fakeRoundPixelsBitGl
+    ]);
+    expect(textBit?.fragment?.main).toContain(singleAlphaStepGl);
+    expect(textBit?.fragment?.main).not.toContain(pixiStepGl);
+    // Everything but the fragment step is Pixi's own.
+    expect(textBit?.vertex).toBe(fakeLocalUniformMSDFBitGl.vertex);
+    expect(textBit?.fragment?.header).toBe(fakeLocalUniformMSDFBitGl.fragment.header);
+    expect(textBit?.name).not.toBe(fakeLocalUniformMSDFBitGl.name);
+  });
+
+  it("gives a WebGL shader its own local uniforms and Pixi's batch samplers", () => {
+    const pixi = createFakePixi();
+    const pipe = pipeOn(pixi.module, "webgl");
+    const first = shaderOf(pipe);
+    const second = shaderOf(pipe);
+
+    expect(first.resources.localUniforms).toBeInstanceOf(FakeUniformGroup);
+    expect(first.resources.localUniforms).not.toBe(second.resources.localUniforms);
+    expect((first.resources.localUniforms as FakeUniformGroup).uniforms).toEqual({
+      uColor: new Float32Array([1, 1, 1, 1]),
+      uTransformMatrix: new FakeMatrix(),
+      uDistance: 4,
+      uRound: 0
+    });
+    expect(first.resources.batchSamplers).toBe(fakeBatchSamplers(16));
+    expect(second.glProgram).toBe(first.glProgram);
+    expect(fakeShaderCompiler.compiledGl).toHaveLength(1);
+  });
+
+  it("keeps a WebGPU shader free of the WebGL program and samplers", () => {
+    const pixi = createFakePixi();
+    const shader = shaderOf(pipeOn(pixi.module, "webgpu"));
+
+    expect(shader.glProgram).toBeUndefined();
+    expect(shader.resources.batchSamplers).toBeUndefined();
+    expect(fakeShaderCompiler.compiledGl).toHaveLength(0);
   });
 });
 
@@ -174,7 +234,7 @@ describe("the host and the bitmap text pipe", () => {
     expect(mock.ctx.state.host.uninstallSdfText).toBeTypeOf("function");
   });
 
-  it("installs it on the WebGL fallback too, where it hands out Pixi's own shader", async () => {
+  it("installs it on the WebGL fallback too", async () => {
     const mock = createMockRenderer({ kind: "webgl" });
 
     await mock.start();

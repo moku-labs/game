@@ -2582,7 +2582,7 @@
           "projection": "RewardPopup"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -2770,7 +2770,7 @@
           "projection": "RewardPopup"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -2923,7 +2923,7 @@
           "projection": "RewardPopup"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -3201,7 +3201,7 @@
           "projection": "RewardPopup"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -3318,7 +3318,7 @@
           "value": 1
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -4624,7 +4624,7 @@
           "value": 0
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -4835,7 +4835,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -5041,7 +5041,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -5308,7 +5308,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -5514,7 +5514,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -5716,7 +5716,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -5922,7 +5922,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -6552,7 +6552,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -6872,7 +6872,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,
@@ -6914,7 +6914,7 @@
           "projection": "hud"
         },
         "Shape": {
-          "alpha": 0,
+          "alpha": 1,
           "clip": false,
           "dash": 0,
           "fill": 16777215,

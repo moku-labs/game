@@ -123,7 +123,19 @@ describe("visualOf", () => {
     expect(hidden?.type.componentName).toBe("Shape");
     expect(hidden?.value).toMatchObject({ clip: true, w: 200, h: 100 });
     expect(scroll?.value).toMatchObject({ clip: true });
-    expect(plain?.value).toMatchObject({ clip: false, alpha: 0 });
+    expect(plain?.value).toMatchObject({ clip: false, fillAlpha: 0, strokeWidth: 0 });
+  });
+
+  it("draws nothing for a container without fill or stroke, and keeps its alpha for its children", () => {
+    // The alpha of an entity fades its children too, so an alpha of 0 would hide them.
+    const plain = visualOf(elementOf({ type: "column" }))[0];
+    const faded = visualOf(elementOf({ type: "row", style: { alpha: 0.5 } }))[0];
+    // A width with no stroke colour strokes nothing on a container, as before.
+    const widthOnly = visualOf(elementOf({ type: "stack", style: { strokeWidth: 4 } }))[0];
+
+    expect(plain?.value).toMatchObject({ alpha: 1, fillAlpha: 0, strokeWidth: 0 });
+    expect(faded?.value).toMatchObject({ alpha: 0.5, fillAlpha: 0, strokeWidth: 0 });
+    expect(widthOnly?.value).toMatchObject({ alpha: 1, fillAlpha: 0, strokeWidth: 0 });
   });
 
   it("paints nothing inside a style with no fill: a ring, a frame, a bare button", () => {
