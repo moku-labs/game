@@ -29,15 +29,25 @@ export type FrameRegistration = { phase: Phase; callback: FrameCallback };
 /** One rectangle the fake `hitTest` walks. The last box pushed is the topmost. */
 export type StubBox = { entity: Entity; x: number; y: number; width: number; height: number };
 
+/** The event a stub listener receives: the fields of the dispatch and a `preventDefault` spy. */
+export type StubPointerEvent = {
+  pointerType?: string;
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+  preventDefault: Mock<() => void>;
+};
+
 /** A canvas stub: five listener slots, a style object and the two capture methods. */
 export type StubCanvas = {
   element: HTMLCanvasElement;
   style: { touchAction: string; cursor: string };
   names(): string[];
+  /** Runs the listeners of one event name; the event is returned to read its `preventDefault`. */
   dispatch(
     name: string,
     event: { pointerType?: string; pointerId: number; clientX: number; clientY: number }
-  ): void;
+  ): StubPointerEvent;
   captured: number[];
   released: number[];
   /** False makes `setPointerCapture` throw, the way a browser does for a pointer that is gone. */
@@ -143,7 +153,11 @@ export function createStubCanvas(): StubCanvas {
     flags,
     names: () => [...listeners.keys()].toSorted(),
     dispatch: (name, event) => {
-      for (const fn of listeners.get(name) ?? []) fn(event);
+      const dispatched: StubPointerEvent = { ...event, preventDefault: vi.fn() };
+
+      for (const fn of listeners.get(name) ?? []) fn(dispatched);
+
+      return dispatched;
     }
   };
 }

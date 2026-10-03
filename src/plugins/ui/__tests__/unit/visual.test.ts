@@ -65,9 +65,22 @@ describe("visualOf", () => {
         height: 100,
         alpha: 0.5,
         tint: 0x80_80_80,
-        debug: false
+        debug: false,
+        clip: false
       });
     }
+  });
+
+  it("clips a text field drawn with a nine-slice to its slices", () => {
+    const [field] = visualOf(elementOf({ type: "input", style: { nineSlice: "ui.field" } }));
+
+    expect(field?.type.componentName).toBe("NineSlice");
+    expect(field?.value).toMatchObject({
+      texture: "ui.field",
+      width: 200,
+      height: 100,
+      clip: true
+    });
   });
 
   it("passes debug of the style into the nine-slice, so the renderer outlines its slices", () => {

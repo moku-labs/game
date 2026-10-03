@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
-import { Sprite, Transform } from "../../components";
-import { FakeTexture } from "../fake-pixi";
+import { NineSlice, Sprite, Transform } from "../../components";
+import type { NineBorders, PixiTexture, SliceFrame } from "../../types";
+import { FakeRectangle, type FakeSprite, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -200,5 +201,234 @@ describe("sync textures", () => {
 
     expect(texture.destroyCalls).toBe(1);
     expect(texture.source.destroyed).toBe(true);
+  });
+});
+
+/**
+ * A 512 x 512 atlas page, made the way `assets` makes it: one texture over the whole source.
+ *
+ * @param mock - The mock renderer, started.
+ * @returns The page.
+ */
+function pageOf(mock: MockRenderer): FakeTexture {
+  return mock.api.sync.textures.create({ width: 512, height: 512 } as never) as never;
+}
+
+/**
+ * Cuts a slice out of a page.
+ *
+ * @param mock - The mock renderer, started.
+ * @param page - The page.
+ * @param frame - The frame in page pixels.
+ * @param nine - Nine-slice borders, when the file has them.
+ * @returns The slice.
+ */
+function sliceOf(
+  mock: MockRenderer,
+  page: FakeTexture,
+  frame: SliceFrame,
+  nine?: NineBorders
+): FakeTexture {
+  const texture: PixiTexture = mock.api.sync.textures.slice(
+    page as never,
+    frame,
+    nine === undefined ? undefined : { nine }
+  );
+
+  return texture as never;
+}
+
+describe("sync textures: a slice out of an atlas page", () => {
+  it("shares the page's source and shows the frame it was cut at", async () => {
+    const mock = await started();
+    const page = pageOf(mock);
+    const slice = sliceOf(mock, page, { x: 100, y: 50, width: 256, height: 128 });
+
+    expect(slice).not.toBe(page);
+    expect(slice.source).toBe(page.source);
+    expect({ ...slice.frame }).toEqual({ x: 100, y: 50, width: 256, height: 128 });
+    expect(slice.width).toBe(256);
+    expect(slice.height).toBe(128);
+    expect(slice.defaultBorders).toBeUndefined();
+    expect(mock.ctx.state.sync.slices.has(slice as never)).toBe(true);
+    expect(mock.ctx.state.sync.slices.has(page as never)).toBe(false);
+  });
+
+  it("offsets the frame by the page's own frame, so a slice of a slice stays honest", async () => {
+    const mock = await started();
+    const page = pageOf(mock);
+    const outer = sliceOf(mock, page, { x: 100, y: 50, width: 256, height: 128 });
+    const inner = sliceOf(mock, outer, { x: 16, y: 8, width: 64, height: 32 });
+
+    expect(inner.source).toBe(page.source);
+    expect({ ...inner.frame }).toEqual({ x: 116, y: 58, width: 64, height: 32 });
+  });
+
+  it("writes the nine-slice borders of `nine` into the slice's default borders", async () => {
+    const mock = await started();
+    const button = sliceOf(
+      mock,
+      pageOf(mock),
+      { x: 0, y: 0, width: 256, height: 128 },
+      [24, 20, 16, 12]
+    );
+
+    expect(button.defaultBorders).toEqual({ left: 24, top: 20, right: 16, bottom: 12 });
+  });
+
+  it("draws a nine-slice from a slice with the borders the slice carries", async () => {
+    const mock = await started();
+    const button = sliceOf(
+      mock,
+      pageOf(mock),
+      { x: 0, y: 0, width: 256, height: 128 },
+      [24, 20, 16, 12]
+    );
+
+    mock.api.sync.textures.provide(key => (key === "ui.button" ? button : undefined) as never);
+
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      NineSlice({ texture: "ui.button", width: 400, height: 128 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const object = mock.ctx.state.sync.views.get(entity)?.object as unknown as Record<
+      string,
+      unknown
+    >;
+
+    expect(object.texture).toBe(button);
+    expect([object.leftWidth, object.topHeight, object.rightWidth, object.bottomHeight]).toEqual([
+      24, 20, 16, 12
+    ]);
+  });
+
+  it("crops a cover sprite on a slice inside the slice's frame", async () => {
+    const mock = await started();
+    const page = pageOf(mock);
+    const meadow = sliceOf(mock, page, { x: 100, y: 50, width: 200, height: 100 });
+
+    mock.api.sync.textures.provide(() => meadow as never);
+
+    const entity = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "board.bg", width: 100, height: 100, fit: "cover" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const object = mock.ctx.state.sync.views.get(entity)?.object as unknown as FakeSprite;
+
+    expect(object.texture.source).toBe(page.source);
+    expect({ ...object.texture.frame }).toEqual({ x: 150, y: 50, width: 100, height: 100 });
+  });
+
+  it("frees only the wrapper of a slice, and the crops cut from it", async () => {
+    const mock = await started();
+    const page = pageOf(mock);
+    const meadow = sliceOf(mock, page, { x: 100, y: 50, width: 200, height: 100 });
+
+    mock.api.sync.textures.provide(() => meadow as never);
+    mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "board.bg", width: 100, height: 100, fit: "cover" })
+    ]);
+    mock.modules.sync.pass();
+
+    const crop = [...mock.ctx.state.sync.frames.values()][0]?.texture as unknown as FakeTexture;
+
+    mock.api.sync.textures.destroy(meadow as never);
+
+    expect(meadow.destroyed).toBe(true);
+    expect(meadow.destroyedSource).toBe(false);
+    expect(crop.destroyed).toBe(true);
+    expect(crop.destroyedSource).toBe(false);
+    expect(mock.ctx.state.sync.frames.size).toBe(0);
+    expect(page.source.destroyed).toBe(false);
+    expect(page.destroyed).toBe(false);
+  });
+
+  it("frees a slice once, however often it is asked", async () => {
+    const mock = await started();
+    const slice = sliceOf(mock, pageOf(mock), { x: 0, y: 0, width: 32, height: 32 });
+
+    mock.api.sync.textures.destroy(slice as never);
+    mock.api.sync.textures.destroy(slice as never);
+
+    expect(slice.destroyCalls).toBe(1);
+    expect(slice.source.destroyed).toBe(false);
+  });
+
+  it("frees the source with the page, and a slice after it never asks for the source again", async () => {
+    const mock = await started();
+    const page = pageOf(mock);
+    const slice = sliceOf(mock, page, { x: 0, y: 0, width: 32, height: 32 });
+
+    mock.api.sync.textures.destroy(page as never);
+
+    expect(page.destroyedSource).toBe(true);
+    expect(page.source.destroyed).toBe(true);
+    expect(() => mock.api.sync.textures.destroy(slice as never)).not.toThrow();
+    expect(slice.destroyedSource).toBe(false);
+
+    mock.api.sync.textures.destroy(slice as never);
+
+    expect(slice.destroyCalls).toBe(1);
+  });
+
+  it("refuses a frame outside the page, which a stale manifest names", async () => {
+    const mock = await started();
+    const page = pageOf(mock);
+
+    expect(() => sliceOf(mock, page, { x: 300, y: 0, width: 256, height: 128 })).toThrow(
+      '[game] renderer.sync.textures.slice: frame 300,0 256x128 is outside page 512x512.\n  Run "bun run assets:pack".'
+    );
+    expect(() => sliceOf(mock, page, { x: 0, y: 400, width: 256, height: 128 })).toThrow(
+      "frame 0,400 256x128 is outside page 512x512."
+    );
+    expect(() => sliceOf(mock, page, { x: -1, y: 0, width: 8, height: 8 })).toThrow(
+      "frame -1,0 8x8 is outside page 512x512."
+    );
+    expect(() => sliceOf(mock, page, { x: 0, y: 0, width: 8, height: -8 })).toThrow(
+      "frame 0,0 8x-8 is outside page 512x512."
+    );
+    expect(() => sliceOf(mock, page, { x: 256, y: 384, width: 256, height: 128 })).not.toThrow();
+  });
+
+  it("measures the page by its own frame, not by its source", async () => {
+    const mock = await started();
+    const page = new FakeTexture({
+      source: { width: 512, height: 512, destroyed: false },
+      frame: new FakeRectangle(0, 0, 128, 128)
+    });
+
+    expect(() => sliceOf(mock, page, { x: 64, y: 0, width: 128, height: 64 })).toThrow(
+      "frame 64,0 128x64 is outside page 128x128."
+    );
+  });
+
+  it("refuses to slice while the device is lost", async () => {
+    const mock = await started();
+    const page = pageOf(mock);
+
+    mock.ctx.state.host.ready = false;
+
+    expect(() => sliceOf(mock, page, { x: 0, y: 0, width: 8, height: 8 })).toThrow(
+      "[game] renderer.sync.textures.slice needs a ready renderer.\n  Check app.renderer.host.ready() first."
+    );
+  });
+
+  it("refuses to slice while inert", () => {
+    const mock = createMockRenderer({ dom: false });
+    const page = new FakeTexture({});
+
+    expect(() => sliceOf(mock, page, { x: 0, y: 0, width: 8, height: 8 })).toThrow(
+      "[game] renderer.sync.textures.slice needs a ready renderer."
+    );
   });
 });

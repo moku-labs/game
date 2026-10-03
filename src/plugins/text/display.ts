@@ -586,7 +586,8 @@ function redraw(
 
 /**
  * How a `Text` becomes Pixi objects. The renderer parents, orders and frees the container like a
- * sprite and never calls any of this while it is inert, so a headless run builds nothing.
+ * sprite and never calls any of this while it is inert, so a headless run builds nothing. The
+ * `alpha` of the value is the alpha of the container, written on every create and update.
  *
  * @param ctx - Domain context of the text plugin.
  * @returns The adapter `renderer.sync.displays.provide` takes.
@@ -600,6 +601,7 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
 
       const container = new pixi.Container();
 
+      container.alpha = value.alpha;
       fill(ctx, pixi, container, value, labelOf(ctx, value));
 
       return container;
@@ -609,6 +611,12 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
       const pixi = ctx.deps.renderer.host.pixi();
 
       if (pixi === undefined || object === undefined) return;
+
+      const container = asContainer(object);
+
+      // The alpha fades the container, so a tween on it never touches the runs.
+      container.alpha = next.alpha;
+
       if (
         previous.resolved === next.resolved &&
         previous.style === next.style &&
@@ -617,7 +625,7 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
         return;
       }
 
-      redraw(ctx, pixi, asContainer(object), previous, next);
+      redraw(ctx, pixi, container, previous, next);
     },
 
     destroy: (object): void => {

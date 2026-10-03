@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { bootTiers, isPermanent, loadBundle } from "../../tiers";
 import type { AssetsCtx, Manifest } from "../../types";
-import { createMockAssets, type MockAssets, manifestOf } from "./mock-assets";
+import { createMockAssets, type MockAssets, manifestOf, packedManifest } from "./mock-assets";
 
 const boardManifest = manifestOf({
   board: { feature: "board", tier: "scene", keys: ["board.cell", "board.item"] }
@@ -229,7 +229,7 @@ describe("loadBundle", () => {
     });
   });
 
-  it("refuses a file that is packed in an atlas", async () => {
+  it("slices a v1 file that carries an atlas, and fails it when its page is not listed", async () => {
     const withAtlas = {
       version: 1,
       bundles: {
@@ -255,8 +255,190 @@ describe("loadBundle", () => {
     await mock.start();
 
     await expect(loadBundle(mock.assetsCtx, "ui", undefined, "request")).rejects.toThrow(
-      "is packed in an atlas"
+      '[game] assets: file "ui.panel" of bundle "ui" names page "ui-0.png", which the bundle does not list.\n  Run "bun run assets:pack".'
     );
+    expect(mock.io.fetched).not.toContain("/features/ui/assets/panel.png");
+  });
+
+  it("fails a file that has neither a path nor an atlas frame, and names its key", async () => {
+    const pathless = {
+      version: 2,
+      bundles: {
+        ui: {
+          feature: "ui",
+          tier: "core",
+          mb: 0,
+          files: [{ key: "ui.panel", width: 1, height: 1, mb: 0 }]
+        }
+      }
+    };
+    const mock = createMockAssets({ manifest: pathless as never });
+
+    await mock.start();
+
+    await expect(loadBundle(mock.assetsCtx, "ui", undefined, "request")).rejects.toThrow(
+      '[game] assets: file "ui.panel" of bundle "ui" has neither a path nor an atlas frame.\n  Run "bun run assets:pack".'
+    );
+  });
+});
+
+describe("loadBundle of a packed bundle", () => {
+  it("fetches the page once and cuts every packed file out of it, frame and nine", async () => {
+    const mock = createMockAssets({ manifest: packedManifest() });
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "ui", undefined, "request");
+
+    expect(mock.io.fetched.filter(url => url.includes("main-0"))).toEqual([
+      "/ui/main-0-3b1d55a0c9.webp"
+    ]);
+
+    const page = mock.io.created.find(texture => texture.from.includes("main-0"));
+
+    expect(page?.nine).toBeUndefined();
+    expect(mock.io.sliced).toEqual([
+      {
+        id: "s1",
+        page: page?.id,
+        frame: { page: "ui/main-0", x: 2, y: 2, width: 64, height: 64 },
+        nine: undefined
+      },
+      {
+        id: "s2",
+        page: page?.id,
+        frame: { page: "ui/main-0", x: 68, y: 2, width: 64, height: 64 },
+        nine: undefined
+      },
+      {
+        id: "s3",
+        page: page?.id,
+        frame: { page: "ui/main-0", x: 2, y: 68, width: 256, height: 128 },
+        nine: [48, 48, 48, 48]
+      }
+    ]);
+  });
+
+  it("loads a loose file next to the packed ones as before", async () => {
+    const mock = createMockAssets({ manifest: packedManifest() });
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "ui", undefined, "request");
+
+    const record = mock.ctx.state.records.get("ui");
+
+    expect(mock.io.fetched).toContain("/ui/ui.bg-5e0a71bd42.webp");
+    expect(record?.textures.get("ui.bg")).toMatchObject({ from: "/ui/ui.bg-5e0a71bd42.webp" });
+    expect(record?.textures.get("ui.panel")).toMatchObject({ id: "s3" });
+    expect([...(record?.pages.keys() ?? [])]).toEqual(["ui/main-0"]);
+    expect(mock.renderer.invalidated.at(-1)).toEqual([
+      "ui.bg",
+      "ui.icon-coin",
+      "ui.icon-gear",
+      "ui.panel"
+    ]);
+  });
+
+  it("counts files, not pages, and settles the files of a page together after it landed", async () => {
+    const mock = createMockAssets({ manifest: packedManifest() });
+
+    await mock.start();
+    mock.io.control.gated = true;
+
+    const loading = loadBundle(mock.assetsCtx, "ui", undefined, "request");
+
+    await tick();
+    mock.io.release(url => url.includes("ui.bg"));
+    await tick();
+    expect(progressOf(mock)).toEqual([{ bundle: "ui", loaded: 1, total: 4 }]);
+
+    mock.io.releaseAll();
+    await loading;
+
+    expect(progressOf(mock)).toEqual([
+      { bundle: "ui", loaded: 1, total: 4 },
+      { bundle: "ui", loaded: 2, total: 4 },
+      { bundle: "ui", loaded: 3, total: 4 },
+      { bundle: "ui", loaded: 4, total: 4 }
+    ]);
+  });
+
+  it("fails every file of a page that does not arrive, naming the page and the status", async () => {
+    const mock = createMockAssets({ manifest: packedManifest() });
+
+    await mock.start();
+    mock.io.status.set("/ui/main-0-3b1d55a0c9.webp", 404);
+
+    await expect(loadBundle(mock.assetsCtx, "ui", undefined, "request")).rejects.toThrow(
+      '[game] assets: bundle "ui" failed at "ui/main-0-3b1d55a0c9.webp" (404).'
+    );
+
+    expect(mock.io.sliced).toEqual([]);
+    expect(mock.ctx.state.records.get("ui")?.status).toBe("idle");
+    expect(mock.log.error).toHaveBeenCalledWith("assets: bundle failed", {
+      bundle: "ui",
+      file: "ui/main-0-3b1d55a0c9.webp",
+      status: 404
+    });
+  });
+
+  it("destroys the slices before their page when the load fails", async () => {
+    const mock = createMockAssets({ manifest: packedManifest() });
+
+    await mock.start();
+    mock.io.status.set("/ui/ui.bg-5e0a71bd42.webp", 404);
+
+    await expect(loadBundle(mock.assetsCtx, "ui", undefined, "request")).rejects.toThrow("(404)");
+
+    expect(mock.io.destroyed.map(texture => texture.id)).toEqual(["s1", "s2", "s3", "t1"]);
+  });
+
+  it("names an unknown page id and the command that fixes it", async () => {
+    const manifest = packedManifest();
+    const ui = manifest.bundles.ui;
+
+    if (ui === undefined) throw new Error("the packed manifest lost its bundle");
+
+    const broken = {
+      ...manifest,
+      bundles: {
+        ui: {
+          ...ui,
+          files: ui.files.map(file =>
+            file.key === "ui.icon-coin" && file.atlas !== undefined
+              ? { ...file, atlas: { ...file.atlas, page: "ui/main-9" } }
+              : file
+          )
+        }
+      }
+    };
+    const mock = createMockAssets({ manifest: broken });
+
+    await mock.start();
+
+    await expect(loadBundle(mock.assetsCtx, "ui", undefined, "request")).rejects.toThrow(
+      '[game] assets: file "ui.icon-coin" of bundle "ui" names page "ui/main-9", which the bundle does not list.\n  Run "bun run assets:pack".'
+    );
+    expect(mock.io.destroyed).toHaveLength(mock.io.created.length + mock.io.sliced.length);
+  });
+
+  it("aborts the page fetch with the last waiter and makes no slice", async () => {
+    const mock = createMockAssets({ manifest: packedManifest() });
+
+    await mock.start();
+    mock.io.control.gated = true;
+
+    const controller = new AbortController();
+    const only = loadBundle(mock.assetsCtx, "ui", controller.signal, "preload");
+
+    await tick();
+    controller.abort();
+
+    await expect(only).rejects.toMatchObject({ name: "AbortError" });
+    await tick();
+
+    expect(mock.io.sliced).toEqual([]);
+    expect(mock.ctx.state.records.get("ui")?.status).toBe("idle");
+    expect(mock.log.error).not.toHaveBeenCalled();
   });
 });
 

@@ -67,13 +67,13 @@ export function startInput(ctx: KernelSlice): void {
   ctx.state.canvas = canvas;
   if (canvas === undefined) return;
 
-  attach(canvas, ctx.state);
+  attach(canvas, ctx);
   attachKeys(ctx);
 }
 
 /**
- * Closes what the plugin opened: the six pointer listeners, the key listener, the frame callback and the mute a drag
- * still holds. The tags die with the world, which stops after `input`.
+ * Closes what the plugin opened: the six pointer listeners, the key listener, the frame callback,
+ * the `onTap`, `onKey` and `onPointer` listeners and the mute a drag still holds. The tags die with the world, which stops after `input`.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
  */
@@ -97,4 +97,5 @@ export function stopInput(state: State): void {
   state.wake = undefined;
   state.tapListeners = [];
   state.keyListeners = [];
+  state.pointerListeners = [];
 }

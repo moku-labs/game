@@ -38,6 +38,7 @@ const diskIo: Assets.AssetsIo = {
   decode: async () => ({ width: 1, height: 1 }) as unknown as ImageBitmap,
   createTexture: () =>
     ({ label: "stand-in" }) as unknown as ReturnType<Assets.AssetsIo["createTexture"]>,
+  sliceTexture: () => ({ label: "slice" }) as unknown as Assets.Texture,
   destroyTexture: () => undefined
 };
 

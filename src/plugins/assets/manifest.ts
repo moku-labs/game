@@ -1,10 +1,12 @@
 /**
  * @file assets plugin — the manifest: parsing, the key index and the URL of a file. Pure
- * functions over plain JSON, so the scanner, the plugin and the editor read the same contract.
+ * functions over plain JSON, so the scanner, the packer, the plugin and the editor read the same
+ * contract. Version 1 (dev, loose files) and version 2 (packed, atlas pages) go through one path.
  */
 import type {
   AssetKind,
   AtlasFrame,
+  AtlasPage,
   CreateTextureOptions,
   FontPage,
   Manifest,
@@ -101,7 +103,7 @@ function parseNine(value: unknown): NineSlice | undefined {
 }
 
 /**
- * Reads the reserved atlas placement of a file.
+ * Reads the atlas placement of a packed file.
  *
  * @param value - What the `atlas` field carried.
  * @returns The frame, or `undefined`.
@@ -135,7 +137,7 @@ function parseKind(value: unknown): AssetKind | undefined {
  * @param value - What the `pages` field carried.
  * @returns The pages in the order the font declares them, or `undefined`.
  */
-function parsePages(value: unknown): readonly FontPage[] | undefined {
+function parseFontPages(value: unknown): readonly FontPage[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
   return value
@@ -149,7 +151,29 @@ function parsePages(value: unknown): readonly FontPage[] | undefined {
 }
 
 /**
- * Reads one file entry. Unknown fields are dropped.
+ * Reads the atlas pages of a packed bundle, sorted by id.
+ *
+ * @param value - What the `pages` field of the bundle carried.
+ * @returns The pages, or `undefined` for a bundle with no `pages` array.
+ */
+function parseAtlasPages(value: unknown): readonly AtlasPage[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  return value
+    .filter(entry => isRecord(entry))
+    .map(entry => ({
+      id: stringAt(entry, "id"),
+      path: stringAt(entry, "path"),
+      width: numberAt(entry, "width"),
+      height: numberAt(entry, "height"),
+      mb: numberAt(entry, "mb")
+    }))
+    .toSorted((left, right) => left.id.localeCompare(right.id));
+}
+
+/**
+ * Reads one file entry. Unknown fields are dropped; a `path` that is not a string is absent, as
+ * on a texture packed in an atlas.
  *
  * @param raw - One element of the `files` array.
  * @returns The file, or `undefined` when the element is not an object.
@@ -158,19 +182,17 @@ function parseFile(raw: unknown): ManifestFile | undefined {
   if (!isRecord(raw)) return undefined;
 
   const kind = parseKind(raw.kind);
-  const pages = parsePages(raw.pages);
+  const pages = parseFontPages(raw.pages);
   const nine = parseNine(raw.nine);
   const atlas = parseAtlas(raw.atlas);
-  const file: ManifestFile = {
-    key: stringAt(raw, "key"),
-    path: stringAt(raw, "path"),
-    width: numberAt(raw, "width"),
-    height: numberAt(raw, "height"),
-    mb: numberAt(raw, "mb")
-  };
+  const path = typeof raw.path === "string" ? raw.path : undefined;
 
   return {
-    ...file,
+    key: stringAt(raw, "key"),
+    ...(path === undefined ? {} : { path }),
+    width: numberAt(raw, "width"),
+    height: numberAt(raw, "height"),
+    mb: numberAt(raw, "mb"),
     ...(kind === undefined ? {} : { kind }),
     ...(pages === undefined ? {} : { pages }),
     ...(nine === undefined ? {} : { nine }),
@@ -211,7 +233,7 @@ function parseTier(name: string, value: unknown): Tier {
 }
 
 /**
- * Reads one bundle entry, with its files sorted by key.
+ * Reads one bundle entry, with its pages sorted by id and its files sorted by key.
  *
  * @param name - Bundle name.
  * @param raw - What the manifest carried under that name.
@@ -231,25 +253,44 @@ function parseBundle(name: string, raw: unknown): ManifestBundle {
     .filter((file): file is ManifestFile => file !== undefined)
     .toSorted((left, right) => left.key.localeCompare(right.key));
 
+  const pages = parseAtlasPages(raw.pages);
+
   return {
     feature: stringAt(raw, "feature"),
     tier: parseTier(name, raw.tier),
     mb: numberAt(raw, "mb"),
+    ...(pages === undefined ? {} : { pages }),
     files
   };
 }
 
 /**
- * Reads a manifest as the scanner wrote it. Bundles come out sorted by name and files by key,
- * unknown fields are ignored and an unsupported version is refused.
+ * Reads the version of a manifest: `1` from the scanner, `2` from the packer.
+ *
+ * @param value - What the `version` field carried.
+ * @returns The version.
+ * @throws {Error} When it is neither.
+ */
+function parseVersion(value: unknown): Manifest["version"] {
+  if (value === 1 || value === 2) return value;
+
+  throw new Error(
+    `[game] assets: manifest version ${String(value)} is not supported (expected 1 or 2).\n` +
+      `  Rebuild the manifest with "bun run assets:keys".`
+  );
+}
+
+/**
+ * Reads a manifest as the scanner (version 1) or the packer (version 2) wrote it. Bundles come
+ * out sorted by name, pages by id and files by key, unknown fields are ignored and any other
+ * version is refused.
  *
  * @param raw - The parsed JSON, or the inline manifest of a test.
  * @returns The manifest.
- * @throws {Error} When the value is not a manifest, its version is not 1 or a tier is unknown.
+ * @throws {Error} When the value is not a manifest, its version is not 1 or 2, or a tier is unknown.
  * @example
  * ```ts
- * const manifest = parseManifest({ version: 1, bundles: {} });
- * manifest.bundles; // {}
+ * parseManifest({ version: 2, bundles: {} }); // { version: 2, bundles: {} }
  * ```
  */
 export function parseManifest(raw: unknown): Manifest {
@@ -260,13 +301,7 @@ export function parseManifest(raw: unknown): Manifest {
     );
   }
 
-  if (raw.version !== 1) {
-    throw new Error(
-      `[game] assets: manifest version ${String(raw.version)} is not supported (expected 1).\n` +
-        `  Rebuild the manifest with "bun run assets:keys".`
-    );
-  }
-
+  const version = parseVersion(raw.version);
   const source = isRecord(raw.bundles) ? raw.bundles : {};
   const bundles: Record<string, ManifestBundle> = {};
 
@@ -274,7 +309,7 @@ export function parseManifest(raw: unknown): Manifest {
     bundles[name] = parseBundle(name, source[name]);
   }
 
-  return { version: 1, bundles };
+  return { version, bundles };
 }
 
 /**
@@ -329,7 +364,8 @@ export function resolveBaseUrl(
  * Joins the prefix and the POSIX path of a file.
  *
  * @param base - The prefix, ending in a slash.
- * @param path - The path of the file, relative to the scan root.
+ * @param path - The path of the file: relative to the scan root in a dev manifest, to the pack
+ *   folder in a packed one.
  * @returns The URL to fetch.
  * @example
  * ```ts
@@ -357,30 +393,4 @@ export function nineOf(file: ManifestFile): CreateTextureOptions | undefined {
   if (nine === undefined) return undefined;
 
   return { nine: [nine.left, nine.top, nine.right, nine.bottom] };
-}
-
-/**
- * Looks for a file that is packed in an atlas. This version loads loose files only, so such a
- * bundle fails with a message that names the file.
- *
- * @param bundle - Name of the bundle.
- * @param files - Its files.
- * @returns The message, or `undefined` when every file is loose.
- * @example
- * ```ts
- * atlasProblem("ui", []); // undefined
- * ```
- */
-export function atlasProblem(bundle: string, files: readonly ManifestFile[]): string | undefined {
-  for (const file of files) {
-    if (file.atlas === undefined) continue;
-
-    return (
-      `[game] assets: file "${file.path}" of bundle "${bundle}" is packed in an atlas, ` +
-      "which this version cannot load.\n" +
-      '  Rebuild the manifest with "bun run assets:keys".'
-    );
-  }
-
-  return undefined;
 }

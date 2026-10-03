@@ -1,8 +1,9 @@
 /**
  * @file assets plugin — the default I/O seam in a browser: the global `fetch`, `createImageBitmap`
- * and the texture registry of `renderer`. Nothing here imports Pixi.
+ * and the texture registry of `renderer`, slices of atlas pages included. Nothing here imports
+ * Pixi.
  */
-import type { Api as RendererApi } from "../renderer/types";
+import type { Api as RendererApi, SliceFrame } from "../renderer/types";
 import type { AssetsIo, CreateTextureOptions, DecodedImage, FetchResponse, Texture } from "./types";
 
 /**
@@ -56,6 +57,8 @@ export function createBrowserIo(renderer: RendererApi): AssetsIo {
     decode: browserDecode,
     createTexture: (image: DecodedImage, options?: CreateTextureOptions): Texture =>
       renderer.sync.textures.create(image, options),
+    sliceTexture: (page: Texture, frame: SliceFrame, options?: CreateTextureOptions): Texture =>
+      renderer.sync.textures.slice(page, frame, options),
     destroyTexture: (texture: Texture): void => renderer.sync.textures.destroy(texture)
   };
 }

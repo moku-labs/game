@@ -114,7 +114,7 @@ export type View = {
   wrapper: PixiContainer | undefined;
   /** No provider answered: the view draws the 64x64 magenta square until a bundle arrives. */
   placeholder: boolean;
-  /** The rectangle a `clip: true` shape masks its children with. */
+  /** The rectangle a `clip: true` shape or nine-slice masks its children with. */
   mask: PixiGraphics | undefined;
   /** The registration that built the object, for a component a plugin above draws its own way. */
   display: DisplayEntry | undefined;
@@ -195,6 +195,17 @@ export type NineBorders = readonly [number, number, number, number];
 export type CreateTextureOptions = { nine?: NineBorders };
 
 /**
+ * Where `textures.slice` cuts a texture out of an atlas page, in page pixels. The manifest `atlas`
+ * field of `assets` carries it with the page id next to it, and passes as it is.
+ *
+ * @example
+ * ```ts
+ * const frame: SliceFrame = { x: 583, y: 595, width: 256, height: 128 };
+ * ```
+ */
+export type SliceFrame = { x: number; y: number; width: number; height: number };
+
+/**
  * The texture registry `assets` drives, `app.renderer.sync.textures`. The renderer makes and
  * destroys Pixi textures on request; `assets` owns when that happens.
  *
@@ -241,7 +252,33 @@ export type TexturesApi = {
   create(image: ImageBitmap | HTMLImageElement, options?: CreateTextureOptions): PixiTexture;
 
   /**
-   * Destroys a texture and its source. Destroying the same texture twice is a no-op.
+   * Cuts a texture out of an atlas page, so `assets` never imports Pixi. The slice shares the
+   * page's source: no pixel is copied, and the page keeps the GPU memory. A frame is measured
+   * from the page's own frame, so a slice of a slice lands where it should.
+   *
+   * @param page - The page texture `create` made.
+   * @param frame - The frame in page pixels.
+   * @param options - `nine` is left, top, right and bottom in pixels; it becomes the slice's
+   *   default nine-slice borders.
+   * @returns The slice. `destroy` frees only this wrapper, never the page's source.
+   * @throws {Error} When the renderer does not draw, and when the frame does not fit in the page
+   *   (a manifest packed for other pages).
+   * @example
+   * ```ts
+   * // `assets`: the page "ui/main-0" landed; the packed button texture is cut out of it with its borders.
+   * const renderer = ctx.require(rendererPlugin);
+   * const button = renderer.sync.textures.slice(page, { x: 583, y: 595, width: 256, height: 128 }, { nine: [24, 24, 24, 24] });
+   * button.width; // 256
+   * button.defaultBorders; // { left: 24, top: 24, right: 24, bottom: 24 }
+   * renderer.sync.textures.destroy(button); // the wrapper goes, the page's source stays
+   * ```
+   */
+  slice(page: PixiTexture, frame: SliceFrame, options?: CreateTextureOptions): PixiTexture;
+
+  /**
+   * Destroys a texture and its source. A slice loses only its wrapper: the source belongs to its
+   * page, which frees it. The crops of `"cover"` sprites cut from the texture go with it.
+   * Destroying the same texture twice is a no-op.
    *
    * @param texture - The texture to free.
    * @example
@@ -602,6 +639,11 @@ export type SyncState = {
   byKey: Map<string, Set<Entity>>;
   /** The crops of `"cover"` sprites, by `key@widthxheight`. */
   frames: Map<string, CoverFrame>;
+  /**
+   * The textures `textures.slice` cut, whose source belongs to a page. Kept past `onStop`, so
+   * `assets` releasing its slices later still frees only the wrappers.
+   */
+  slices: WeakSet<PixiTexture>;
   invalidated: Set<string>;
   /** Keys already reported missing, so one key warns once. */
   warned: Set<string>;

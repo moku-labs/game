@@ -310,17 +310,18 @@ export function measureRun(
 }
 
 /**
- * Appends a piece to a line, merging it into the last run when the flags are the same.
+ * Appends a piece to a line, merging glyphs into the last run when both are glyphs with the same
+ * flags. An icon is always a run of its own.
  *
  * @param runs - The runs of the line so far.
  * @param piece - The piece to append.
  */
-function appendRun(runs: Run[], piece: TextRun): void {
+function appendRun(runs: Run[], piece: Run): void {
   const last = runs.at(-1);
 
   if (
-    last !== undefined &&
-    last.kind === "text" &&
+    piece.kind === "text" &&
+    last?.kind === "text" &&
     last.bold === piece.bold &&
     last.italic === piece.italic &&
     last.color === piece.color
@@ -385,7 +386,7 @@ function layoutFixed(
 }
 
 /** One word, one run of spaces or one line break, with the runs it is made of. */
-type Token = { kind: "word" | "space" | "break"; runs: TextRun[]; width: number };
+type Token = { kind: "word" | "space" | "break"; runs: Run[]; width: number };
 
 /**
  * What one piece of a split run is: a line break, a run of spaces, or a word.
@@ -400,8 +401,29 @@ function kindOf(piece: string): Token["kind"] {
 }
 
 /**
- * Splits the runs into words, spaces and breaks. An icon cannot be wrapped, so a wrapped style
- * drops it and says so.
+ * Puts one piece into the tokens: onto the last word when the piece is a word that touches it,
+ * as a token of its own otherwise.
+ *
+ * @param tokens - The tokens so far.
+ * @param token - The piece, as a token of one run.
+ * @param touches - True when nothing stands between the piece and the token before it.
+ */
+function pushToken(tokens: Token[], token: Token, touches: boolean): void {
+  const last = tokens.at(-1);
+
+  if (touches && token.kind === "word" && last?.kind === "word") {
+    last.runs.push(...token.runs);
+    last.width += token.width;
+
+    return;
+  }
+
+  tokens.push(token);
+}
+
+/**
+ * Splits the runs into words, spaces and breaks. An icon is a glyph: one unbreakable piece of the
+ * word it touches, or a word of its own between spaces.
  *
  * @param runs - The runs of the block.
  * @param style - The style of the label.
@@ -419,9 +441,9 @@ function tokenise(
 
   for (const run of runs) {
     if (run.kind === "icon") {
-      options.warn(`icon-wrapped:${run.key}`, "text: an icon in a wrapped style is dropped", {
-        icon: run.key
-      });
+      const width = measureRun(run, style, tables, options);
+
+      pushToken(tokens, { kind: "word", runs: [run], width }, true);
 
       continue;
     }
@@ -432,16 +454,8 @@ function tokenise(
       const part: TextRun = { ...run, text: piece };
       const kind = kindOf(piece);
       const width = kind === "break" ? 0 : measureRun(part, style, tables, options);
-      const last = tokens.at(-1);
 
-      if (kind === "word" && index === 0 && last?.kind === "word") {
-        last.runs.push(part);
-        last.width += width;
-
-        continue;
-      }
-
-      tokens.push({ kind, runs: [part], width });
+      pushToken(tokens, { kind, runs: [part], width }, index === 0);
     }
   }
 
@@ -482,7 +496,24 @@ function add(builder: Builder, token: Token): void {
 }
 
 /**
- * Places a word that is wider than the wrap, glyph by glyph.
+ * The unbreakable pieces of one run: one run per character of a glyph run, the icon itself for
+ * an icon.
+ *
+ * @param run - One run of a word.
+ * @returns The pieces, in reading order.
+ * @example
+ * ```ts
+ * glyphsOf({ kind: "icon", key: "hud.coin" }); // [{ kind: "icon", key: "hud.coin" }]
+ * ```
+ */
+function glyphsOf(run: Run): Run[] {
+  if (run.kind === "icon") return [run];
+
+  return Array.from(run.text, (char): TextRun => ({ ...run, text: char }));
+}
+
+/**
+ * Places a word that is wider than the wrap, glyph by glyph. An icon is one glyph.
  *
  * @param builder - The lines built so far.
  * @param token - The word to break.
@@ -491,8 +522,7 @@ function add(builder: Builder, token: Token): void {
  */
 function breakWord(builder: Builder, token: Token, wrap: number, metrics: Metrics): void {
   for (const part of token.runs) {
-    for (const char of part.text) {
-      const piece: TextRun = { ...part, text: char };
+    for (const piece of glyphsOf(part)) {
       const glyph = measureRun(piece, metrics.style, metrics.tables, metrics.options);
 
       if (builder.runs.length > 0 && builder.width + glyph > wrap) commit(builder);

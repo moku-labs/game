@@ -8,8 +8,9 @@ driven by the graph: the node being entered gets its bundles, the neighbourhood 
 preloaded in the background.
 
 Nothing here imports `pixi.js`, not even dynamically. A texture is made by
-`renderer.sync.textures.create` and freed by `renderer.sync.textures.destroy`; `types.ts` only uses
-the texture *type*.
+`renderer.sync.textures.create`, a packed file is cut out of its atlas page by
+`renderer.sync.textures.slice`, and both are freed by `renderer.sync.textures.destroy`; `types.ts`
+only uses the texture *type*.
 
 ## API
 
@@ -73,12 +74,15 @@ createApp({
 });
 ```
 
-`AssetsIo` is `fetch(url, { signal })`, `decode(blob)`, `createTexture(image, options?)` and
-`destroyTexture(texture)` — the same test seam as `clock.source`. The response it answers with
+`AssetsIo` is `fetch(url, { signal })`, `decode(blob)`, `createTexture(image, options?)`,
+`sliceTexture(page, frame, options?)` and `destroyTexture(texture)` — the same test seam as
+`clock.source`. A fake `sliceTexture` returns a counted `{ id, page, frame }`. The response it answers with
 carries the four readers this plugin uses: `json()` for the manifest, `blob()` for an image,
 `text()` for a `.fnt` file and `arrayBuffer()` for a sound. A real `Response` fits it as it is.
 
 ## The manifest
+
+The dev manifest of `bun run assets:keys` is version 1: loose files, straight from the features.
 
 ```json
 {
@@ -98,14 +102,55 @@ carries the four readers this plugin uses: `json()` for the manifest, `blob()` f
 
 | Field | Rule |
 |---|---|
-| `version` | `1`. Any other value is refused: `[game] assets: manifest version 2 is not supported (expected 1).` |
-| `path` | POSIX, relative to the scan root. The URL is `baseUrl` + `path`. |
+| `version` | `1` (the scanner) or `2` (the packer, below). Any other value is refused: `[game] assets: manifest version 3 is not supported (expected 1 or 2).` |
+| `path` | POSIX, relative to the scan root. The URL is `baseUrl` + `path`. Absent on a texture packed in an atlas. |
 | `kind` | `"font"` or `"audio"`. A file without a `kind` is a texture, so a manifest written before fonts and audio reads the same. |
 | `pages` | A font only: the page images of its `.fnt`, in declaration order, each with `path`, `width`, `height` and `mb`. A page has no key: it belongs to the font. |
 | `mb` | Estimated memory: `width × height × 4 / 1 048 576` for a texture, the sum of the pages for a font, the file size for audio. Rounded to 3 decimals; the bundle `mb` is the sum. No mipmaps. |
 | `nine` | Optional, always four numbers, whichever of the three tag forms wrote them. Passed to `createTexture` as the tuple `[left, top, right, bottom]`. |
-| `atlas` | Reserved. A file that carries it fails its bundle with a message naming the file. |
+| `atlas` | `{ page, x, y, width, height }`: the file is cut out of the page of its bundle with that id. Written by the packer. |
 | Order | Bundles sorted by name, files sorted by key. Unknown fields are ignored. |
+
+## Manifest v2
+
+`bun run assets:pack` writes version 2. The runtime reads both versions through one path: a file
+with `atlas` is sliced from its page, a file with `path` is fetched. A v1 manifest still loads as
+it is.
+
+```json
+{
+  "version": 2,
+  "bundles": {
+    "ui": {
+      "feature": "ui", "tier": "core", "mb": 8.865,
+      "pages": [
+        { "id": "ui/fx-0", "path": "ui/fx-0-2a7f9c04e1.webp", "width": 595, "height": 516, "mb": 1.171 },
+        { "id": "ui/main-0", "path": "ui/main-0-3b1d55a0c9.webp", "width": 966, "height": 1365, "mb": 5.03 }
+      ],
+      "files": [
+        { "key": "ui.bg-splash", "path": "ui/ui.bg-splash-5e0a71bd42.webp", "width": 1024, "height": 1536, "mb": 6 },
+        { "key": "ui.click", "path": "ui/ui.click-9c4e2b7a10.mp3", "kind": "audio", "mb": 0.012 },
+        { "key": "ui.font-body", "path": "ui/ui.font-body-7d2c90f1ab.fnt", "kind": "font", "mb": 1,
+          "pages": [{ "path": "ui/ui.font-body-0-c81f3e2d55.png", "width": 512, "height": 512, "mb": 1 }] },
+        { "key": "ui.fx-sparkle", "width": 85, "height": 96, "mb": 0,
+          "atlas": { "page": "ui/fx-0", "x": 2, "y": 2, "width": 85, "height": 96 } },
+        { "key": "ui.panel", "width": 256, "height": 128, "mb": 0,
+          "nine": { "left": 48, "top": 48, "right": 48, "bottom": 48 },
+          "atlas": { "page": "ui/main-0", "x": 583, "y": 595, "width": 256, "height": 128 } }
+      ]
+    }
+  }
+}
+```
+
+| Field | Rule |
+|---|---|
+| `bundle.pages` | Optional, sorted by `id`: `{ id, path, width, height, mb }`. `id` is `<bundle>/<group>-<index>`; `path` follows the `path` rule of a file; `mb` is `width × height × 4 / 1 048 576`. |
+| `file.path` | Present on a loose texture, a font and a sound; absent on a packed texture. |
+| `file.atlas` | `{ page, x, y, width, height }`. `page` is a page id of the same bundle, never a file name. `width` and `height` equal the file's own, so `nine` stays valid as it is. |
+| `file.mb` | `0` for a packed texture: its page carries the cost. |
+| `bundle.mb` | Pages + loose textures + font pages + audio bytes. `usage()` reports it unchanged. |
+| Order | Bundles by name, pages by id, files by key. Field order of a file: `key`, `path`, `kind`, `width`, `height`, `mb`, `pages`, `nine`, `atlas`. |
 
 ## Tiers and the boot sequence
 
@@ -133,16 +178,25 @@ A file is loaded by what the manifest says it is: a texture is fetched, decoded 
 font reads its `.fnt` as text and uploads every page it lists; an audio file is kept as the raw
 `ArrayBuffer` and is never decoded here.
 
+A packed bundle starts one load per atlas page first (fetched and uploaded with no borders). A
+packed file waits for its page and becomes `io.sliceTexture(page, atlas, { nine })`: nothing is
+fetched twice in one load. A page id the bundle does not list fails the file with
+`[game] assets: file "ui.icon-coin" of bundle "ui" names page "ui/main-9", which the bundle does
+not list.\n  Run "bun run assets:pack".`; a page that fails rejects every file on it with the
+usual message, naming the page path and the status. A file with neither `path` nor `atlas` fails
+with a message naming its key.
+
 Every file that settles, loaded or failed, sends `assets:bundle-progress` with `loaded` (the
 settled files so far) and `total` (the files of the bundle). A font counts once, when its `.fnt`
-and all its pages are there. The last one of a load has `loaded === total`, and
+and all its pages are there. A page is not a file: the files of one page settle together, when
+their slices exist. The last one of a load has `loaded === total`, and
 `assets:bundle-loaded` comes after it. The files of an aborted load send nothing, so a loading bar
 never moves for a load that will not finish.
 
 On success the assets are stored, `renderer.sync.textures.invalidate` is called with the keys of
 the bundle, the event goes out, `time.wake()` lifts the idle frame cap — the picture changes now —
 and the budget is enforced. On failure every texture made so far is
-destroyed, the record goes back to `idle`, `ctx.log.error("assets: bundle failed", { bundle, file,
+destroyed (slices and loose textures first, then the pages, then the font pages, as on unload), the record goes back to `idle`, `ctx.log.error("assets: bundle failed", { bundle, file,
 status })` is written and every waiter rejects with
 `[game] assets: bundle "board" failed at "features/board/assets/cell.png" (404).` An abort is not
 a failure and is never logged.
@@ -164,7 +218,8 @@ fast walk skips the preload.
 `enforceBudget` runs after every load and at every rest node: while `usedMb > textureBudgetMb` it
 unloads the bundle with the smallest use counter that is not pinned, not `boot` or `core`, not
 loading and not in the queue, with reason `"budget"`. When nothing may go it writes one warning
-naming the five heaviest loaded files — the cure is smaller art or a split bundle.
+naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
+`page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
 
 ## Events
 
@@ -212,13 +267,14 @@ work.
 | `handlers.ts` | The `flow:rest` hook. |
 | `lifecycle.ts` | `connectAssets` (onInit), `startAssets` (onStart), `releaseAll` (onStop), the enter callback and the `load` effect. |
 | `bundles.ts` | `defineBundles` and the `load` descriptor. |
-| `manifest.ts` | `parseManifest`, `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, `atlasProblem`. |
+| `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`. |
 | `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
-| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`. |
+| `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`, `releaseAssets` (slices, then pages, then font pages). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
-| `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures`. |
+| `browser.ts` | The default io: the global `fetch`, `createImageBitmap`, `renderer.sync.textures` (`create`, `slice`, `destroy`). |
 | `scan/` | Build time only, reachable through `@moku-labs/game/assets`: the walk, the key rule, the image and font readers, the two emitters and the CLI. |
+| `scan/pack/` | Build time only: the production packer behind `--pack` (`pack`, `groups`, `layout`, `encode`, `names`, `cache`, `copy`). The only place that imports `sharp` and `maxrects-packer` (lint rule L11). |
 
 ## What the scanner reads
 
@@ -246,6 +302,81 @@ key, so the scan fails with a message that names the malformed tag.
 `generated/assets.ts` carries `AssetKey` over every kind, plus the narrower `FontKey` and
 `AudioKey` next to it, so a text style takes only a font and a sound only an MP3.
 
+## Production packing
+
+Dev stays on the loose pipeline above. A production build packs the same scan and key list into
+atlas pages with `--pack <dir>`:
+
+```jsonc
+// game package.json
+"assets:keys": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts",
+"assets:pack": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --keys src/generated/assets.ts --pack dist/assets"
+```
+
+| Flag | Rule |
+|---|---|
+| `--pack <dir>` | Packs on the same scan and key list. `<dir>` belongs to the command: it is created, written and pruned. A folder that holds the game sources is refused. |
+| `--manifest <file>` | With `--pack`: where the packed manifest goes, `<dir>/manifest.json` by default. The dev manifest is not touched by a pack run. |
+| `--keys <file>` | Written as in a dev run, same bytes: keys do not change between the two modes. The strings compile runs as in a dev run. |
+| `--no-cache` | Skips the cache, reads and writes. |
+| `--check` | Refused with `--pack`: `[game] assets: "--pack" writes files; drop "--check".` Exit 1. |
+
+`sharp` is an optional peer dependency: a game that packs runs `bun add -d sharp`; without it the
+pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".`
+
+| Rule | Value |
+|---|---|
+| Page | 2048 × 2048 at most, as small as its content (not a power of two, not square). |
+| Padding | 2 px between frames and a 2 px border, transparent, no extrude. |
+| Trim, rotation | Never: a rotated or trimmed nine-slice would lose its borders. |
+| Loose by size | A texture with a side above 512 px stays a file of its own. |
+| Groups | Per bundle: `fx` holds the textures whose key's last segment starts with `fx-`, whatever their size (a particle emitter binds one page); `main` holds the other textures. |
+| Group of one | Stays loose: an atlas of one file is one request either way. |
+| `fx` pages | Exactly one; more is a problem naming the bundle and the count. |
+| Oversized | A texture that fits no page is a problem naming the key, never a silent drop. |
+| Pages | WebP, `quality: 80, alphaQuality: 80`, composed from the sources decoded to RGBA. |
+| Loose textures | A `.webp` source is copied byte for byte; a `.png` source is encoded to WebP q80. |
+| Fonts | The pages are copied byte for byte and stay PNG (MSDF needs lossless); the `.fnt` is rewritten to name the hashed pages, then hashed. |
+| Audio | Copied byte for byte. |
+| Hash | The first 10 hex characters of the SHA-256 of the written bytes, in every file name. |
+| Prune | After writing, every file under `<dir>` the manifest does not reference, except `manifest.json`, is deleted. |
+| Determinism | Inputs sorted by key, fixed packer options, `maxrects-packer` pinned: two runs on the same tree and the same `sharp` write the same bytes. |
+
+Before anything is written, the pack checks that every key of the scan landed exactly once (a page
+frame or a loose file), that every `atlas.page` names a page of its own bundle, that every frame
+lies inside its page and has the size of its source (so `nine` stays valid). Every problem goes
+into one error, then `Fix them and run "bun run assets:pack" again.`, exit 1.
+
+The output folder:
+
+```
+dist/assets/
+  manifest.json                         # version 2
+  ui/fx-0-2a7f9c04e1.webp               # page <bundle>/<group>-<index>-<hash>.webp
+  ui/main-0-3b1d55a0c9.webp
+  ui/ui.bg-splash-5e0a71bd42.webp       # loose <bundle>/<key>-<hash>.webp
+  ui/ui.font-body-7d2c90f1ab.fnt        # font <bundle>/<key>-<hash>.fnt
+  ui/ui.font-body-0-c81f3e2d55.png      #   its pages <bundle>/<key>-<n>-<hash>.png
+  ui/ui.click-9c4e2b7a10.mp3            # audio <bundle>/<key>-<hash>.mp3
+```
+
+The cache lives in `node_modules/.cache/moku-game-pack/` under the working directory: one entry
+per atlas group and per encoded loose PNG, keyed by the versions of `sharp` and `maxrects-packer`,
+the packing constants and the members (key, SHA-256 of the source, nine). A hit replays the frames
+and the bytes with no decode and no encode; a changed source repacks only its group. Copies are not
+cached. The cache is content-addressed and never pruned.
+
+The command prints one line per bundle and a closing line through the branded console:
+
+```
+› packed ui: 2 pages, 0 loose, 2 fonts, 4 sounds, 8.814 MB
+› wrote "dist/assets/manifest.json": 3 pages, 8 loose files, 2 fonts, 7 sounds, 2398 KB. cache: 3 of 3 pages.
+```
+
+`packAssets({ root, manifest, out, manifestFile, cache })` is the same packer as a function on the
+door, for the editor and for tests: it takes the manifest of `scanAssets` and resolves
+`{ manifest, pages, loose, bytes, cacheHits }`.
+
 ## Doors
 
 `inspect.ts` holds `game.assets` (key `assets` in `sources`) of the editor's read door,
@@ -256,5 +387,5 @@ again every frame (`changes: "frame"`), because a bundle loads without a model c
 
 - `flowPlugin` — `onEnter("load")`, `fx.handle("load", …, { runInFast: true })`, `features.all()`,
   `describe()`, `state()`.
-- `rendererPlugin` — `sync.textures.provide / create / destroy / invalidate`, `host.ready()`.
+- `rendererPlugin` — `sync.textures.provide / create / slice / destroy / invalidate`, `host.ready()`.
 - `timePlugin` — `wake()` when a load settles, so the idle frame cap lifts as the picture changes.

@@ -24,8 +24,8 @@ export function nameOf(element: Element): string {
 }
 
 /**
- * Checks the smallest side of a tappable element against the config, at the size it is drawn:
- * a `fit: "contain"` on the element or above it shrinks the target.
+ * Checks the smallest side of a tappable element or a text field against the config, at the size
+ * it is drawn: a `fit: "contain"` on the element or above it shrinks the target.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element to check.
@@ -34,7 +34,10 @@ export function nameOf(element: Element): string {
  */
 function tapTarget(ctx: UiCtx, element: Element, scale: number): Finding | undefined {
   const ecs = ctx.deps.world.ecs;
-  const tappable = ecs.has(element.entity, Tappable) || ecs.has(element.entity, LocalWrite);
+  const tappable =
+    element.type === "input" ||
+    ecs.has(element.entity, Tappable) ||
+    ecs.has(element.entity, LocalWrite);
 
   if (!tappable) return undefined;
 

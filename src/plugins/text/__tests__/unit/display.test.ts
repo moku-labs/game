@@ -653,3 +653,126 @@ describe("installFonts", () => {
     expect(mock.renderer.provided[0]?.adapter.create(value({ resolved: "12" }), 1)).toBeUndefined();
   });
 });
+
+/** A wrapped style with the defaults of `body`, registered by every case. */
+function wrapping(mock: MockText, over: Partial<TextStyle> = {}): void {
+  mock.state.styles.set("wrapped", { ...centred, align: "left", wrap: 80, ...over });
+}
+
+describe("the display adapter — icons inside wrapped text", () => {
+  // No font is loaded here: a glyph is 19.2 px, a line and an icon 38.4 px.
+
+  it("places an icon on the second line at the line height, at the x its line gives", () => {
+    const mock = drawing();
+
+    wrapping(mock);
+
+    const object = build(
+      mock,
+      value({ resolved: "11 <icon=hud.coin>1", style: "wrapped", anchor: zero })
+    );
+    const [first, sprite, after] = object.children;
+
+    expect(object.children.map(child => child.kind)).toEqual([
+      "BitmapText",
+      "Sprite",
+      "BitmapText"
+    ]);
+    expect(textOf(first)).toBe("11");
+    expect(sprite?.texture).toBe(coinTexture);
+    expect(rounded(sprite?.x ?? -1, sprite?.y ?? -1)).toEqual({ x: 0, y: 38.4 });
+    expect(sprite?.width).toBeCloseTo(38.4, 5);
+    expect(sprite?.height).toBeCloseTo(38.4, 5);
+    expect(rounded(after?.x ?? -1, after?.y ?? -1)).toEqual({ x: 38.4, y: 38.4 });
+  });
+
+  it("aligns the line that holds the icon inside the widest one", () => {
+    const mock = drawing();
+
+    wrapping(mock, { align: "center" });
+
+    const object = build(
+      mock,
+      value({ resolved: "111 <icon=hud.coin>", style: "wrapped", anchor: zero })
+    );
+    const sprite = object.children[1];
+
+    expect(sprite?.kind).toBe("Sprite");
+    expect(rounded(sprite?.x ?? -1, sprite?.y ?? -1)).toEqual({ x: 9.6, y: 38.4 });
+  });
+
+  it("moves the sprite when an update moves the icon to another line", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+
+    wrapping(mock);
+
+    const previous = value({ resolved: "1 <icon=hud.coin>", style: "wrapped", anchor: zero });
+    const next = value({ resolved: "11 <icon=hud.coin>", style: "wrapped", anchor: zero });
+    const object = build(mock, previous);
+    const before = object.children[1];
+
+    expect(rounded(before?.x ?? -1, before?.y ?? -1)).toEqual({ x: 38.4, y: 0 });
+
+    entry?.adapter.update(object, previous, next);
+
+    const sprites = object.children.filter(child => child.kind === "Sprite");
+
+    expect(sprites).toHaveLength(1);
+    expect(rounded(sprites[0]?.x ?? -1, sprites[0]?.y ?? -1)).toEqual({ x: 0, y: 38.4 });
+  });
+
+  it("keeps one sprite per icon per line when a tick changes only the text", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+
+    wrapping(mock);
+
+    const previous = value({ resolved: "11 <icon=hud.coin>1", style: "wrapped", anchor: zero });
+    const next = value({ resolved: "12 <icon=hud.coin>2", style: "wrapped", anchor: zero });
+    const object = build(mock, previous);
+    const before = [...object.children];
+
+    entry?.adapter.update(object, previous, next);
+
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+    expect(object.children.map(child => textOf(child))).toEqual(["12", undefined, "2"]);
+    expect(rounded(before[1]?.x ?? -1, before[1]?.y ?? -1)).toEqual({ x: 0, y: 38.4 });
+  });
+});
+
+describe("the alpha of a Text", () => {
+  it("draws its runs at the alpha of the value", () => {
+    const mock = drawing();
+    const object = build(mock, value({ resolved: "Your name", alpha: 0.5 }));
+
+    expect(object.alpha).toBe(0.5);
+    expect(object.children.map(child => child.alpha)).toEqual([1]);
+  });
+
+  it("patches a changed alpha in place without rebuilding the runs", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+    const previous = value({ resolved: "<icon=hud.coin>12", alpha: 1 });
+    const object = build(mock, previous);
+    const before = [...object.children];
+
+    entry?.adapter.update(object, previous, value({ resolved: "<icon=hud.coin>12", alpha: 0.25 }));
+
+    expect(object.alpha).toBe(0.25);
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+    expect(before.map(child => child.destroyed)).toEqual([false, false]);
+  });
+
+  it("writes the alpha with a new text in the same update", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+    const previous = value({ resolved: "12" });
+    const object = build(mock, previous);
+
+    entry?.adapter.update(object, previous, value({ resolved: "13", alpha: 0.5 }));
+
+    expect(object.alpha).toBe(0.5);
+    expect(textOf(object.children[0])).toBe("13");
+  });
+});

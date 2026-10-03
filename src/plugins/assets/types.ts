@@ -6,7 +6,7 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Descriptor, Api as FlowApi, NodeInfo } from "../flow/types";
-import type { PixiTexture, Api as RendererApi } from "../renderer/types";
+import type { PixiTexture, Api as RendererApi, SliceFrame } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
 
 /**
@@ -95,6 +95,7 @@ export type FetchResponse = {
  *   }),
  *   decode: async () => bitmap,
  *   createTexture: () => ({ id: "t1" }) as unknown as Texture,
+ *   sliceTexture: (page, frame) => ({ id: "s1", page, frame }) as unknown as Texture,
  *   destroyTexture: texture => destroyed.push(texture)
  * };
  *
@@ -130,7 +131,20 @@ export type AssetsIo = {
   createTexture(image: DecodedImage, options?: CreateTextureOptions): Texture;
 
   /**
-   * Frees one texture and its source.
+   * Cuts the texture of one packed file out of its atlas page. The slice shares the page's
+   * source: no pixel is copied. Same shape as `renderer.sync.textures.slice`; the manifest's
+   * `atlas` frame is passed as it is.
+   *
+   * @param page - The page texture, made by `createTexture`.
+   * @param frame - Where the file lies on the page, in page pixels.
+   * @param options - `nine` becomes the default nine-slice borders of the slice.
+   * @returns The new texture over the page's source.
+   */
+  sliceTexture(page: Texture, frame: SliceFrame, options?: CreateTextureOptions): Texture;
+
+  /**
+   * Frees one texture. A page frees its source too; a slice frees only itself, so the slices of
+   * a bundle go first and its pages after them.
    *
    * @param texture - The texture to free.
    */
@@ -149,14 +163,34 @@ export type AssetsIo = {
 export type NineSlice = { left: number; top: number; right: number; bottom: number };
 
 /**
- * Reserved atlas placement. V2 never writes it and refuses to load a file that carries it.
+ * Where a packed file lies: `page` is the id of a page of the same bundle, never a file name, and
+ * the frame is in page pixels. `width` and `height` equal the file's own, so its `nine` stays
+ * valid as it is. The packer writes it; the loader cuts the file out of the page.
  *
  * @example
  * ```ts
- * const frame: AtlasFrame = { page: "ui-0.png", x: 0, y: 0, width: 128, height: 128 };
+ * const frame: AtlasFrame = { page: "ui/main-0", x: 583, y: 595, width: 256, height: 128 };
  * ```
  */
 export type AtlasFrame = { page: string; x: number; y: number; width: number; height: number };
+
+/**
+ * One atlas page of a packed bundle. `id` is `<bundle>/<group>-<index>`, the name an `atlas`
+ * frame uses; `path` is the hashed WebP file, read like the `path` of a file. `mb` is
+ * `width × height × 4 / 1 048 576`: the page carries the cost of every file packed on it.
+ *
+ * @example
+ * ```ts
+ * const page: AtlasPage = {
+ *   id: "ui/main-0",
+ *   path: "ui/main-0-3b1d55a0c9.webp",
+ *   width: 966,
+ *   height: 1365,
+ *   mb: 5.03
+ * };
+ * ```
+ */
+export type AtlasPage = { id: string; path: string; width: number; height: number; mb: number };
 
 /**
  * One page image of a font. A page has no key of its own: it belongs to the `.fnt` file that
@@ -176,12 +210,15 @@ export type FontPage = { path: string; width: number; height: number; mb: number
 
 /**
  * One file of a bundle. `mb` is what it costs: `width × height × 4` bytes for a texture, the sum
- * of the pages for a font, the size of the file for audio. `kind` is absent for a texture, which
- * is what every manifest written before fonts and audio carries.
+ * of the pages for a font, the size of the file for audio, and `0` for a texture packed in an
+ * atlas, whose page carries the cost. `kind` is absent for a texture, which is what every
+ * manifest written before fonts and audio carries. A loose file has `path`; a packed texture has
+ * `atlas` and no `path`.
  *
  * @example
  * ```ts
- * const file: ManifestFile = {
+ * // The dev manifest of the scanner: a loose file.
+ * const loose: ManifestFile = {
  *   key: "ui.panel",
  *   path: "features/ui/assets/panel{nine=48}.png",
  *   width: 256,
@@ -189,11 +226,21 @@ export type FontPage = { path: string; width: number; height: number; mb: number
  *   mb: 0.125,
  *   nine: { left: 48, top: 48, right: 48, bottom: 48 }
  * };
+ *
+ * // The packed manifest: the same key, cut out of the page "ui/main-0".
+ * const packed: ManifestFile = {
+ *   key: "ui.panel",
+ *   width: 256,
+ *   height: 128,
+ *   mb: 0,
+ *   nine: { left: 48, top: 48, right: 48, bottom: 48 },
+ *   atlas: { page: "ui/main-0", x: 583, y: 595, width: 256, height: 128 }
+ * };
  * ```
  */
 export type ManifestFile = {
   key: string;
-  path: string;
+  path?: string;
   kind?: AssetKind;
   width: number;
   height: number;
@@ -204,7 +251,9 @@ export type ManifestFile = {
 };
 
 /**
- * One bundle of the manifest: which feature owns it, when it loads and what it costs.
+ * One bundle of the manifest: which feature owns it, when it loads and what it costs. `pages` is
+ * written by the packer only, sorted by id; `mb` is then its pages, its loose textures, its font
+ * pages and its audio bytes together.
  *
  * @example
  * ```ts
@@ -215,24 +264,37 @@ export type ManifestBundle = {
   feature: string;
   tier: Tier;
   mb: number;
+  pages?: readonly AtlasPage[];
   files: readonly ManifestFile[];
 };
 
 /**
- * The manifest: the contract between the scanner, this plugin and the editor later. Bundles are
- * sorted by name and files by key, so two scans of the same tree give the same bytes.
+ * The manifest: the contract between the scanner, the packer, this plugin and the editor. Version
+ * `1` is the dev manifest of `bun run assets:keys`, version `2` the packed one of
+ * `bun run assets:pack`; the plugin reads both. Bundles are sorted by name, pages by id and files
+ * by key, so two runs on the same tree give the same bytes.
  *
  * @example
  * ```ts
+ * // A dev build: loose files, straight from the features.
  * const manifest: Manifest = {
  *   version: 1,
  *   bundles: { ui: { feature: "ui", tier: "core", mb: 0, files: [] } }
  * };
  *
  * createApp({ plugins: [...screen], pluginConfigs: { assets: { manifest } } });
+ *
+ * // The packed manifest of the same game: the panel is cut out of the page "ui/main-0".
+ * const page = { id: "ui/main-0", path: "ui/main-0-3b1d55a0c9.webp", width: 966, height: 1365, mb: 5.03 };
+ * const atlas = { page: "ui/main-0", x: 583, y: 595, width: 256, height: 128 };
+ * const panel = { key: "ui.panel", width: 256, height: 128, mb: 0, atlas };
+ * const packed: Manifest = {
+ *   version: 2,
+ *   bundles: { ui: { feature: "ui", tier: "core", mb: 5.03, pages: [page], files: [panel] } }
+ * };
  * ```
  */
-export type Manifest = { version: 1; bundles: Readonly<Record<string, ManifestBundle>> };
+export type Manifest = { version: 1 | 2; bundles: Readonly<Record<string, ManifestBundle>> };
 
 /**
  * What a feature declares about one of its bundles. `files` are globs relative to the feature's
@@ -335,13 +397,15 @@ export type FontAsset = { fnt: string; texture: Texture };
 export type LoadedFont = FontAsset & { pages: readonly Texture[] };
 
 /**
- * What one bundle brought, by asset key: textures, fonts with their pages, and the undecoded
- * bytes of the audio files. A running load fills the same three maps before they are published.
+ * What one bundle brought: textures by asset key (a packed file's is a slice of its page), fonts
+ * with their pages, the undecoded bytes of the audio files, and the atlas pages by page id. A
+ * running load fills the same four maps before they are published.
  */
 export type LoadedAssets = {
   textures: Map<string, Texture>;
   fonts: Map<string, LoadedFont>;
   audio: Map<string, ArrayBuffer>;
+  pages: Map<string, Texture>;
 };
 
 /**
@@ -532,7 +596,8 @@ export type Api = {
   /**
    * The texture of a loaded asset key. It touches the use counter of the bundle, which is what
    * the LRU reads. A key of a bundle that is not loaded warns once, starts a background load and
-   * answers `undefined`; the sprites waiting for it are textured when that load lands.
+   * answers `undefined`; the sprites waiting for it are textured when that load lands. A key packed
+   * in an atlas answers its slice of the page, so a game never sees the difference.
    *
    * @param key - Asset key, as `generated/assets.ts` types it.
    * @returns The texture, or `undefined` while the bundle is not loaded.

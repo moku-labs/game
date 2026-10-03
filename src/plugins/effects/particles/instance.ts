@@ -4,7 +4,7 @@
  * Pixi classes come from the module the renderer loaded, never from an import.
  */
 import { Display, Transform, type TransformValue } from "../../renderer/components";
-import { rootPoseOf } from "../../renderer/sync/pose";
+import { parentOf, rootPoseOf } from "../../renderer/sync/pose";
 import type { PixiModule } from "../../renderer/types";
 import { Layer, Order } from "../../world/ecs/define";
 import type { AnyComponentValue, EcsApi, Entity, Owner } from "../../world/types";
@@ -15,6 +15,9 @@ import type { BakedEmitter, BornFields, EmitterInstance } from "./types";
 
 /** The owner of every particle entity. */
 const EFFECTS_OWNER: Owner = Object.freeze({ kind: "plugin", name: "effects" });
+
+/** How deep a parent chain is followed, as `rootPoseOf` does; deeper is treated as a loop. */
+const MAX_DEPTH = 32;
 
 /**
  * The one dynamic set of an emitter container (P9): positions, frames, rotations and colours
@@ -46,16 +49,40 @@ export function bornFields(size: number): BornFields {
 }
 
 /**
- * The `Layer` and the `Order` of the host, copied, so a layer sorted by `"y"` or `"order"` ties
- * the particles with the host and Pixi's stable sort draws them just above it.
+ * The top of the host's `Parent` chain: the first ancestor without a `Parent`, or the host itself.
  *
  * @param ecs - The world.
  * @param host - The entity whose `Emitter` started the instance.
- * @returns The copies of the components the host has.
+ * @returns The entity the chain ends at.
+ */
+function topOf(ecs: EcsApi, host: Entity): Entity {
+  let top = host;
+
+  for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
+    const parent = parentOf(ecs, top);
+
+    if (parent === 0) break;
+
+    top = parent;
+  }
+
+  return top;
+}
+
+/**
+ * The `Layer` and the `Order` of the top of the host's `Parent` chain, copied: the renderer draws
+ * a parented view inside the layer of its top ancestor, so a burst on a slot-hosted view draws
+ * above the screen that hosts it, and a layer sorted by `"y"` or `"order"` ties the particles with
+ * that ancestor and Pixi's stable sort draws them just above it.
+ *
+ * @param ecs - The world.
+ * @param host - The entity whose `Emitter` started the instance.
+ * @returns The copies of the components the top of the chain has.
  */
 function placementOf(ecs: EcsApi, host: Entity): AnyComponentValue[] {
-  const layer = ecs.get(host, Layer);
-  const order = ecs.get(host, Order);
+  const top = topOf(ecs, host);
+  const layer = ecs.get(top, Layer);
+  const order = ecs.get(top, Order);
   const placement: AnyComponentValue[] = [];
 
   if (layer !== undefined) placement.push(Layer({ name: layer.name }));

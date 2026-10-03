@@ -47,6 +47,50 @@ describe("the ui API", () => {
     expectTypeOf<UiApi["tree"]>().toEqualTypeOf<() => UiNode>();
     expectTypeOf<UiApi["find"]>().toEqualTypeOf<(key: string) => Entity | undefined>();
     expectTypeOf<UiApi["lint"]>().toEqualTypeOf<() => readonly Finding[]>();
+    expectTypeOf<UiApi["fill"]>().toEqualTypeOf<(key: string, value: string) => boolean>();
+  });
+});
+
+describe("the text field", () => {
+  it("shows the value on a snapshot node and takes the look of the caret from the config", () => {
+    expectTypeOf<UiNode["value"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<Config["textInput"]["caret"]>().toEqualTypeOf<number>();
+    expectTypeOf<Config["textInput"]["keyboardMargin"]>().toEqualTypeOf<number>();
+  });
+
+  it("takes the input props, with local required", () => {
+    const field: UiIntrinsicElements["input"] = {
+      local: "name",
+      submit: "save",
+      maxLength: 16,
+      placeholder: "Your name",
+      kind: "email",
+      textStyle: "body"
+    };
+    // @ts-expect-error — a field names the local field it writes.
+    const unnamed: UiIntrinsicElements["input"] = { submit: "save" };
+
+    expectTypeOf(field.kind).toExtend<"text" | "number" | "email" | undefined>();
+    expectTypeOf(unnamed).not.toBeUndefined();
+  });
+
+  it("narrows textStyle, placeholder and the nine-slice to the game's keys", () => {
+    type Tags = IntrinsicElementsFor<"ui.field", "body" | "digits", "rename.hint">;
+
+    const field: Tags["input"] = {
+      local: "name",
+      textStyle: "digits",
+      placeholder: "Your name",
+      style: { nineSlice: "ui.field" }
+    };
+    // @ts-expect-error — "huge" is not a text style key of this game.
+    const wrongStyle: Tags["input"] = { local: "name", textStyle: "huge" };
+    // @ts-expect-error — the nine-slice of a field takes the game's asset keys.
+    const wrongSlice: Tags["input"] = { local: "name", style: { nineSlice: "ui.pane" } };
+
+    expectTypeOf(field.textStyle).toEqualTypeOf<"body" | "digits" | undefined>();
+    expectTypeOf(wrongStyle).not.toBeUndefined();
+    expectTypeOf(wrongSlice).not.toBeUndefined();
   });
 });
 

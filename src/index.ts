@@ -64,6 +64,7 @@
  * | ui | tapTargetPt | 44 |
  * | ui | breakpoints | { tall: 2, wide: 1.5 } |
  * | ui | focusRing | { stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }; shallow merge: a game that sets `focusRing` gives all six fields |
+ * | ui | textInput | { caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35, composingUnderline: 3, keyboardMargin: 16 }; shallow merge |
  * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |
@@ -79,7 +80,7 @@
  * | Subpath | What |
  * |---|---|
  * | `@moku-labs/game/testing` | headless play, repro runs, the in-memory save, the fake clock |
- * | `@moku-labs/game/assets` | the build-time asset key scanner, node and bun only |
+ * | `@moku-labs/game/assets` | the build-time asset key scanner and the production packer (`packAssets`, `--pack <dir>`), node and bun only |
  * | `@moku-labs/game/inspect` | the editor's read door: `read`, `watch`, `defineSource`, the `sources` catalogue |
  * | `@moku-labs/game/control` | the editor's write door, dev builds only: `run`, `defineCommand`, the `commands` catalogue |
  *

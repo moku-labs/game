@@ -6,16 +6,17 @@ rect from one Yoga solve per change.
 
 | Module | Owns |
 |---|---|
-| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the `onTap` application of `LocalWrite`, the keyboard focus, `tree()`, `find()`, `lint()` |
+| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
 | `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, scroll, the `popup` and `guide` handlers |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `value` on a text field, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
-| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size, text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
+| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
+| `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 
 Config:
 
@@ -24,12 +25,14 @@ Config:
 | `tapTargetPt` | `44` | the smallest tap target `lint()` accepts, in CSS px |
 | `breakpoints` | `{ tall: 2, wide: 1.5 }` | the ratios of the `tall` and `wide` flags |
 | `focusRing` | `{ stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }` | the keyboard focus ring: a dashed ring `offset` outside the control, over a solid halo of `haloWidth` on the same path |
+| `textInput` | `{ caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35, composingUnderline: 3, keyboardMargin: 16 }` | a text field while it is edited: the caret (it does not blink) and the IME underline in `caret`, the selection box, and the CSS px kept between the field and the keyboard. Shallow merge: a game that sets it gives all six fields |
 
 Emits nothing, listens to nothing. Depends on `time`, `flow`, `world`, `renderer`, `input`,
 `anim`, `i18n`, `text`. Yoga arrives through `await import("yoga-layout/load")` in `onStart`;
 nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
-the cursor shows a hand over a local-state button, and one `input.onKey` listener for the focus;
-`onStop` removes both.
+the cursor shows a hand over a local-state button, one `input.onKey` listener for the focus, one
+`input.onPointer` listener for the text fields, and on a page the hidden input of the text
+fields; `onStop` removes all of them.
 
 ## What an element is drawn with
 
@@ -42,6 +45,7 @@ the cursor shows a hand over a local-state button, and one `input.onKey` listene
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
 | `scroll` | `Shape` with `clip` | `Touchable`, `Scroll` |
+| `input` | as any other tag, with `clip` on the `Shape` or on the `NineSlice` of `style.nineSlice`; four ui-owned children draw the text, the caret, the selection and the IME underline, see [Text input](#text-input) | `Touchable` |
 | any tag | `components` adds extra components to the element's entity, see [Extra components](#extra-components) | |
 
 A live element follows its state: a button that becomes disabled loses `Tappable` and
@@ -151,14 +155,17 @@ focus, because it knows the roots and the layout.
 - **The root the keyboard works in:** the top uncovered popup; with no popup, the screen root in
   the top layer.
 - **Tab / Shift+Tab** move the focus through the controls of that root (the elements with
-  `Tappable` or `LocalWrite`) in reading order: the upper rect first, then the left one. Both
-  wrap. With no control, Tab does nothing and the browser keeps the key. A button with `escape`
+  `Tappable` or `LocalWrite`, and the text fields) in reading order: the upper rect first, then
+  the left one. Both wrap. Tab landing on a text field starts its editing; leaving one ends it. With no control, Tab does nothing and the browser keeps the key. A button with `escape`
   and no children is a popup's backdrop, not a Tab stop: Escape and a tap still reach it.
 - **Enter / Space** tap the focused control through `input.tap`, the same door a finger uses:
   the intent is answered, or the `local` patch is written. The focus stays.
 - **Escape** taps the button with the `escape` prop in that root: the close button or the
   backdrop of a dismissable popup. Nothing without one.
-- **A pointer tap** clears the focus: the ring shows only after a key (focus-visible).
+- **A pointer tap** clears the focus: the ring shows only after a key (focus-visible). A tap on a
+  text field focuses it with no ring.
+- **While a text field is edited**, Enter submits it and Escape ends the editing; see
+  [Text input](#text-input).
 - The focus drops when its element leaves, or its root gets covered or another root comes over
   it.
 
@@ -343,17 +350,115 @@ read(app, sources.rect, { key: "play" }); // { x, y, w, h } in CSS px
 read(app, sources.rect, { key: "nothing" }); // undefined: no live element has this key
 ```
 
-`control.ts` holds the ui command of the editor's write door, `@moku-labs/game/control`, dev
-builds only. It goes through `app.input`, so the gate decides and the session stays clean (effect
-`route`). It needs an app with `input` and `ui`.
+`control.ts` holds the two ui commands of the editor's write door, `@moku-labs/game/control`,
+dev builds only. `tap` goes through `app.input`, so the gate decides; `fill` goes through
+`app.ui.fill`, which writes a component's `local` and answers nothing. The session stays clean
+(effect `route`). They need an app with `input` and `ui`.
 
 | Key in `commands` | id | Input | Does |
 |---|---|---|---|
 | `tap` | `game.tap` | `{ key: "string?", target: "json?" }`, exactly one | `input.tap` on the ui element with that `key` (through `ui.find`) or on the view `target: { projection, key }` |
+| `fill` | `game.fill` | `{ key: "string", value: "string" }` | `ui.fill(key, value)`: types into the text field with that `key`; answers `false` for a key that is no live `input` |
 
 ```ts
 import { commands, run } from "@moku-labs/game/control";
 
 // An e2e script taps the Play plank of Home.
 (await run(app, commands.tap, { key: "play" })).value; // true
+// The Rename popup rests: type the name, then submit it with the Enter key.
+(await run(app, commands.fill, { key: "nameField", value: "Alex" })).value; // true
+await run(app, commands.key, { key: "Enter" }); // the gate takes { intent: "save", payload: { name: "Alex" } }
 ```
+
+## Text input
+
+The `input` tag is a text field. The text lives in the `local` of the nearest component: every
+keystroke writes it, and the journal sees only the answer Enter submits. No keystroke is an
+intent.
+
+```tsx
+export const Rename = defineComponent("Rename", {
+  local: { name: "" },
+  outcomes: { save: type<{ name: string }>(), close: type() },
+  view: (props, local) => (
+    <PopupScreen id="rename" dismiss="close">
+      <input key="nameField" local="name" maxLength={16} submit="save" placeholder={tr("rename.hint")} style={field} />
+      <text key="count" content={`${local.name.length}/16`} />
+      <button key="ok" intent="save" payload={{ name: local.name }} />
+    </PopupScreen>
+  )
+});
+// the node gets { name: "Alex" } through the gate, from Enter or from the button
+```
+
+| Prop | Meaning |
+|---|---|
+| `local` | required: the local field of the nearest component the field writes. Without it the tag throws `[game] An input needs a local field.` |
+| `submit` | the intent Enter answers with `{ [local]: value }`; without it Enter does nothing |
+| `maxLength` | the longest value, in UTF-16 units: the DOM `maxlength` and the cut of `fill` |
+| `placeholder` | a string or a message, drawn while the value is empty; also the `aria-label` |
+| `kind` | `"text"` (default), `"number"` (a decimal keyboard, the value stays a string) or `"email"` |
+| `textStyle` | the text style key of the value, the placeholder and the caret height; `"body"` by default |
+| `style` | the layout style of the field box: `fill`, `stroke`, `radius`, `nineSlice`, `padding`, `width`, `height` |
+
+A field outside every component draws and takes the focus, writes nothing and warns once
+(`ui:input-without-component`). `IntrinsicElementsFor` narrows `textStyle` to the game's text style
+keys and `placeholder` to its message keys.
+
+### What it is drawn with
+
+The field is the element entity: its `Shape` clips (a nine-slice field draws its slices and
+clips to them through `NineSlice.clip`), and it carries `Touchable`. Four ui-owned children with
+`Parent` = field draw the rest: the selection box (`textInput.selection` at `selectionAlpha`),
+the `Text` of the value, or of the placeholder at `alpha: 0.5`, the caret
+(`textInput.caretWidth` wide, a measured line tall, `textInput.caret`, steady) and the IME
+underline. They have no Yoga node and no key: `tree()` lists the field with its `value` and not
+the parts, and `lint()` counts the field as a tap target, never a part. A value wider than the box
+scrolls left so the caret stays inside. Every position is `text.measure` of a prefix of the value.
+
+### The hidden input
+
+On a page, `ui` makes one `<input>` in `onStart` (found through the renderer's canvas), appended to
+the body, removed in `onStop`: `position: fixed`, `opacity: 0`, `pointer-events: none`,
+`font-size: 16px`, with `enterkeyhint="done"` and autocomplete, autocorrect, autocapitalize and
+spellcheck off, outside every `<form>`. It holds the focus, the keyboard and the real text; the
+canvas draws. While a field is edited it sits over the drawn field, where a desktop IME window
+anchors. Headless there is none, and the mirror of the text is the whole truth.
+
+### Editing
+
+| Moment | What happens |
+|---|---|
+| a finger lifts on a field | inside the DOM `pointerup` (`input.onPointer`), the input is set up for that field and focused with `preventScroll`: the keyboard opens. iOS shows none for a focus made in the next frame |
+| the tap resolves (`input.onTap`) | the field is the one edited; the keyboard focus moves to it with no ring |
+| a finger goes down outside every field | the input blurs at once: the keyboard leaves |
+| the input blurs, Escape, a tap elsewhere, the field leaves, its root is covered or leaves | done: nothing is edited, the lift drops, the local keeps the value. A blur never submits |
+| Enter | with `submit`, the gate is answered with `{ [local]: value }`; the field stays edited, so a refused answer leaves the player typing. Without `submit`, nothing |
+| Tab | moves the focus on and ends the editing; landing on a field starts it with the ring shown |
+| `app.ui.fill(key, value)` | the field is edited, the value is written into it and into the local |
+
+Every frame, before the roots re-render, the value, the selection and its direction are read from
+the input into the mirror and written into the local, so the component re-renders in the same
+frame. A focus no tap resolved on (a press that slid away) is blurred by the next frame step.
+Enter and Escape reach `ui` through `input.onKey`, which skips every other key typed into the
+input and an IME commit, so `app.input.pressKey("Enter")` submits headless:
+
+```ts
+app.ui.fill("nameField", "Alex"); // true
+app.time.step(16);
+app.input.pressKey("Enter"); // true: the gate took { intent: "save", payload: { name: "Alex" } }
+```
+
+### Above the keyboard
+
+While a field is edited, `ui` follows `visualViewport` (`resize`, `scroll`): the keyboard covers
+`inset = innerHeight − (offsetTop + height)` CSS px, and the root of the field is lifted by
+`max(0, fieldBottom + keyboardMargin − (innerHeight − inset))` through `setRest` and a 0 ms rest
+track, so loops re-base and nothing fights. iOS does not pan the page for an invisible input. The
+lift drops at done, not at the late resize; the listeners go with it.
+
+### Not covered
+
+No native paste menu or long-press selection on the field (the input takes no pointer), no
+multi-line field, no grapheme clusters in the caret index (`selectionStart` counts UTF-16 units),
+no Android measurements.

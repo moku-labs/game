@@ -339,7 +339,7 @@ Not built. Names are reserved: `defineFeature` refuses them as feature names. Sc
 | Entry | Runs in | Exports |
 |---|---|---|
 | `@moku-labs/game/testing` | anywhere | The headless helpers, see below |
-| `@moku-labs/game/assets` | node and bun only | `scanAssets`, `emitKeys`, `emitManifest`, `compileStrings`, `checkStrings`, `runCli`. A game runs it as `bun run assets:keys`: it writes the manifest, the typed asset keys and, next to them, `generated/strings.ts` with one `strings.<locale>.ts` per locale; `--check` fails when any of them is out of date |
+| `@moku-labs/game/assets` | node and bun only | `scanAssets`, `emitKeys`, `emitManifest`, `compileStrings`, `checkStrings`, `packAssets`, `runCli`. A game runs it as `bun run assets:keys`: it writes the manifest, the typed asset keys and, next to them, `generated/strings.ts` with one `strings.<locale>.ts` per locale; `--check` fails when any of them is out of date; `--pack <dir>` writes the production build: WebP atlas pages, content-hashed names and a v2 manifest |
 | `@moku-labs/game/inspect` | anywhere, production included | `read`, `watch`, `defineSource`, the catalogue `sources` and the types `Source`, `InputSchema`, `InputOf`. See [Doors for the editor](#doors-for-the-editor) |
 | `@moku-labs/game/control` | dev builds only | `run`, `defineCommand`, `controlRefused`, the catalogue `commands` and the types `Command`, `Ran`. See [Doors for the editor](#doors-for-the-editor) |
 | `@moku-labs/game/jsx-runtime`, `@moku-labs/game/jsx-dev-runtime` | anywhere | `jsx`, `jsxs`, `jsxDEV`, `Fragment` and the `JSX` namespace that `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand |

@@ -300,6 +300,19 @@ export class FakeContainer {
   }
 
   /**
+   * Takes every child out, as Pixi's does when `text` redraws a label.
+   *
+   * @returns The children that were in it, in order.
+   */
+  public removeChildren(): FakeContainer[] {
+    const children = this.children.splice(0);
+
+    for (const child of children) child.parent = null;
+
+    return children;
+  }
+
+  /**
    * The local bounds, as a `Display` object reports them.
    *
    * @returns A 100x100 box around the origin.
@@ -364,6 +377,25 @@ export class FakeParticleContainer extends FakeContainer {
    */
   public override getLocalBounds(): { x: number; y: number; width: number; height: number } {
     return { x: 0, y: 0, width: 0, height: 0 };
+  }
+}
+
+/** What a fake bitmap text was built with: the text and Pixi's style options. */
+export type FakeBitmapTextOptions = { text?: unknown; style?: Record<string, unknown> };
+
+/** The fake of Pixi's `BitmapText`: one glyph run `text` builds, with the fields it writes. */
+export class FakeBitmapText extends FakeContainer {
+  public text: unknown;
+  public style: Record<string, unknown>;
+  public skew = new FakePoint();
+  public tint = 0xff_ff_ff;
+  public width = 0;
+  public height = 0;
+
+  public constructor(options: FakeBitmapTextOptions = {}) {
+    super();
+    this.text = options.text;
+    this.style = options.style ?? {};
   }
 }
 
@@ -872,6 +904,29 @@ export type FakeDrawClasses = {
   encoder: typeof FakeGpuEncoderSystem;
 };
 
+/** The compilation messages of a fake shader module: always none. */
+export type FakeCompilationInfo = { messages: unknown[] };
+
+/** The shader module the fake device compiles: it reports no message. */
+export type FakeShaderModule = { getCompilationInfo(): Promise<FakeCompilationInfo> };
+
+/** The fake WebGPU device: its `lost` promise and the WGSL compile `effects` checks in dev. */
+export type FakeGpuDevice = {
+  lost: Promise<{ reason: string }>;
+  createShaderModule(descriptor: { code: string }): FakeShaderModule;
+};
+
+/**
+ * Compiles a WGSL source the fake way: every source compiles with no message.
+ *
+ * @param _descriptor - The source, as Pixi hands it to the device.
+ * @param _descriptor.code - The WGSL code.
+ * @returns A module whose compilation info has no message.
+ */
+function compileShader(_descriptor: { code: string }): FakeShaderModule {
+  return { getCompilationInfo: () => Promise.resolve({ messages: [] }) };
+}
+
 /** What the fake renderer recorded. */
 export type FakeRenderer = FakeDrawTarget & {
   name: "webgpu" | "webgl";
@@ -879,7 +934,7 @@ export type FakeRenderer = FakeDrawTarget & {
   /** Native draws of the last `render`. */
   frameDraws: number;
   resizes: Array<{ width: number; height: number }>;
-  gpu?: { device: { lost: Promise<{ reason: string }> } };
+  gpu?: { device: FakeGpuDevice };
   /** The GPU texture sources, as Pixi's `renderer.texture.managedTextures`. */
   texture: { managedTextures: FakeManagedSource[] };
   /** Pixi's extract system: `base64` records its options and answers `FAKE_PNG`. */
@@ -996,7 +1051,8 @@ export class FakeApplication {
           lost: new Promise<{ reason: string }>((resolve, reject) => {
             this.loseDevice = resolve;
             this.failDevice = reject;
-          })
+          }),
+          createShaderModule: compileShader
         }
       };
       this.drawClasses = {
@@ -1084,6 +1140,7 @@ export function createFakePixi(
     Rectangle: FakeRectangle,
     Graphics: FakeGraphics,
     BitmapFont: FakeBitmapFont,
+    BitmapText: FakeBitmapText,
     Cache: fakeCache,
     bitmapFontTextParser: fakeTextParser,
     bitmapFontXMLStringParser: fakeXmlParser,

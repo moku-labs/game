@@ -14,6 +14,7 @@ import { worldPlugin } from "../world";
 import { Layer, system, Tree } from "../world/ecs/define";
 import { createModules } from "./api";
 import { Box, LocalWrite, UI_OWNER } from "./components";
+import { stopFields } from "./jsx/fields";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
@@ -74,11 +75,12 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 
 /**
  * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
- * `PointerOver`, the two effect handlers, the two tap listeners (the `LocalWrite` patch, and the
- * pointer tap that clears the keyboard focus), the key listener of the focus and `LocalWrite` as
- * an input control, so the cursor shows a hand over a local-state button. Every remover goes into
- * the state, so the teardown closes exactly these, and gives every hosted view its layer back
- * before the ui entities go.
+ * `PointerOver`, the two effect handlers, the three tap listeners (the `LocalWrite` patch, the
+ * pointer tap that clears the keyboard focus, and the tap that starts or ends the editing of a
+ * text field), the pointer door that opens the keyboard inside the DOM listener, the key listener
+ * of the focus and `LocalWrite` as an input control, so the cursor shows a hand over a local-state
+ * button. Every remover goes into the state, so the teardown closes exactly these, and gives every
+ * hosted view its layer back before the ui entities go.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param jsx - The jsx module.
@@ -106,6 +108,8 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
     ctx.deps.input.onTap(jsx.applyTap),
     ctx.deps.input.onTap(() => jsx.blur()),
+    ctx.deps.input.onTap(jsx.tapped),
+    ctx.deps.input.onPointer(jsx.pointer),
     ctx.deps.input.onKey(jsx.key),
     ctx.deps.input.controls.add(LocalWrite),
     () => jsx.releaseHosted(),
@@ -114,8 +118,9 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
 }
 
 /**
- * Loads Yoga, reads the components of every feature and opens the registrations. Nothing solves
- * before the wasm module resolved; a tree seen earlier waits and is reconciled on the next frame.
+ * Loads Yoga, reads the components of every feature, opens the registrations and, on a page,
+ * makes the hidden input of the text fields. Nothing solves before the wasm module resolved; a
+ * tree seen earlier waits and is reconciled on the next frame.
  *
  * @param ctx - Kernel context of the ui plugin.
  * @throws {Error} When two features define the same component name.
@@ -126,13 +131,15 @@ export async function startUi(ctx: KernelSlice): Promise<void> {
 
   registerComponents(uctx, jsx);
   openRegistrations(uctx, jsx, layout);
+  jsx.open();
 
   await layout.load();
 }
 
 /**
- * Closes what the plugin opened: the systems, the hooks, the handlers, the ui entities, and
- * every Yoga node, children first, because `free()` on an attached node throws.
+ * Closes what the plugin opened: the systems, the hooks, the handlers, the ui entities, the hidden
+ * input with its listeners, and every Yoga node, children first, because `free()` on an attached
+ * node throws.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
  */
@@ -140,6 +147,7 @@ export function stopUi(state: State): void {
   for (const off of state.layout.cleanups) off();
 
   state.layout.cleanups.length = 0;
+  stopFields(state.jsx);
 
   for (const node of state.layout.byEntity.values()) {
     for (let index = node.getChildCount() - 1; index >= 0; index -= 1) {

@@ -65,16 +65,22 @@ export type SpriteValue = {
 /**
  * A stretchable panel. The slice borders come with the texture, not with the component. `debug`
  * strokes the bounds and the four cut lines over the panel: cyan, red when the corners overlap or
- * the texture is missing.
+ * the texture is missing. `clip` masks the children of the entity to the `width × height` box,
+ * the same rule as `Shape.clip`: the mask is a filled rectangle and is never drawn.
  *
  * @example
  * ```ts
  * const value: NineSliceValue = {
- *   texture: "ui.panel", width: 600, height: 320, alpha: 1, tint: 0xffffff, debug: false
+ *   texture: "ui.panel", width: 600, height: 320, alpha: 1, tint: 0xffffff, debug: false,
+ *   clip: false
  * };
  * // The board tray, outlined while its insets are checked.
  * const tray: NineSliceValue = {
- *   texture: "board.board-tray", width: 1000, height: 1040, alpha: 1, tint: 0xffffff, debug: true
+ *   ...value, texture: "board.board-tray", width: 1000, height: 1040, debug: true
+ * };
+ * // A text field: a long value never draws outside the frame.
+ * const field: NineSliceValue = {
+ *   ...value, texture: "ui.field", width: 480, height: 96, clip: true
  * };
  * ```
  */
@@ -85,6 +91,7 @@ export type NineSliceValue = {
   alpha: number;
   tint: number;
   debug: boolean;
+  clip: boolean;
 };
 
 /**
@@ -211,7 +218,7 @@ export const Sprite = /*#__PURE__*/ component("Sprite", spriteDefaults);
 
 /**
  * A stretchable panel, sized in reference units, with its own alpha and tint. `debug: true` draws
- * the slice outline over it.
+ * the slice outline over it. `clip: true` masks the children of the entity to the panel box.
  */
 export const NineSlice = /*#__PURE__*/ component("NineSlice", {
   texture: "",
@@ -219,7 +226,8 @@ export const NineSlice = /*#__PURE__*/ component("NineSlice", {
   height: 0,
   alpha: 1,
   tint: 0xff_ff_ff,
-  debug: false
+  debug: false,
+  clip: false
 });
 
 /**

@@ -16,7 +16,7 @@ import type {
   FxHandler,
   Stage
 } from "../../../flow/types";
-import type { Api as RendererApi, TextureProvider } from "../../../renderer/types";
+import type { Api as RendererApi, SliceFrame, TextureProvider } from "../../../renderer/types";
 import type { Api as TimeApi } from "../../../time/types";
 import { createAssetsApi } from "../../api";
 import { connectAssets, startAssets, withDeps } from "../../lifecycle";
@@ -37,13 +37,23 @@ import type {
 /** A texture the fake io handed out. `from` is the URL its bytes came from. */
 export type FakeTexture = { id: string; from: string; nine: CreateTextureOptions["nine"] };
 
+/** A slice the fake io cut. `page` is the id of the page texture, `frame` what the loader passed. */
+export type FakeSlice = {
+  id: string;
+  page: string;
+  frame: SliceFrame;
+  nine: CreateTextureOptions["nine"];
+};
+
 /** One fetch the fake io is holding back. */
 export type Held = { url: string; resolve: () => void; reject: (error: unknown) => void };
 
 /** The fake I/O seam: a scripted network and a texture factory that counts. */
 export type FakeIo = AssetsIo & {
   created: FakeTexture[];
-  destroyed: FakeTexture[];
+  sliced: FakeSlice[];
+  /** Textures and slices, in the order they were destroyed. */
+  destroyed: Array<FakeTexture | FakeSlice>;
   fetched: string[];
   /** URL to the status the fake answers with. Missing means `200`. */
   status: Map<string, number>;
@@ -79,7 +89,8 @@ function abortError(): Error {
  */
 export function createFakeIo(manifest?: unknown): FakeIo {
   const created: FakeTexture[] = [];
-  const destroyed: FakeTexture[] = [];
+  const sliced: FakeSlice[] = [];
+  const destroyed: Array<FakeTexture | FakeSlice> = [];
   const fetched: string[] = [];
   const status = new Map<string, number>();
   const texts = new Map<string, string>();
@@ -89,6 +100,7 @@ export function createFakeIo(manifest?: unknown): FakeIo {
 
   const io: FakeIo = {
     created,
+    sliced,
     destroyed,
     fetched,
     status,
@@ -147,8 +159,20 @@ export function createFakeIo(manifest?: unknown): FakeIo {
 
       return texture as unknown as Texture;
     },
+    sliceTexture: (page: Texture, frame: SliceFrame, options?: CreateTextureOptions): Texture => {
+      const slice: FakeSlice = {
+        id: `s${sliced.length + 1}`,
+        page: (page as unknown as FakeTexture).id,
+        frame,
+        nine: options?.nine
+      };
+
+      sliced.push(slice);
+
+      return slice as unknown as Texture;
+    },
     destroyTexture: (texture: Texture): void => {
-      destroyed.push(texture as unknown as FakeTexture);
+      destroyed.push(texture as unknown as FakeTexture | FakeSlice);
     }
   };
 
@@ -226,7 +250,7 @@ function createMockLog(): Log.LogApi {
 }
 
 /**
- * Creates the fake `renderer`: no Pixi, only the four texture members and `host.ready()`.
+ * Creates the fake `renderer`: no Pixi, only the five texture members and `host.ready()`.
  *
  * @param io - The fake io whose texture factory the renderer hands out.
  * @returns The fake renderer and its recordings.
@@ -255,6 +279,7 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
           };
         },
         create: io.createTexture,
+        slice: io.sliceTexture,
         destroy: io.destroyTexture,
         invalidate: (keys: readonly string[]): void => {
           fake.invalidated.push([...keys]);
@@ -407,4 +432,51 @@ export function manifestOf(
   });
 
   return { version: 1, bundles: Object.fromEntries(entries) } as Manifest;
+}
+
+/**
+ * Builds a packed (v2) manifest: the bundle `ui` has one atlas page with three packed files, one
+ * of them a nine-slice, and one loose file next to them.
+ *
+ * @returns A manifest ready for the config.
+ */
+export function packedManifest(): Manifest {
+  return {
+    version: 2,
+    bundles: {
+      ui: {
+        feature: "ui",
+        tier: "scene",
+        mb: 1.916,
+        pages: [
+          { id: "ui/main-0", path: "ui/main-0-3b1d55a0c9.webp", width: 512, height: 512, mb: 1 }
+        ],
+        files: [
+          { key: "ui.bg", path: "ui/ui.bg-5e0a71bd42.webp", width: 600, height: 400, mb: 0.916 },
+          {
+            key: "ui.icon-coin",
+            width: 64,
+            height: 64,
+            mb: 0,
+            atlas: { page: "ui/main-0", x: 2, y: 2, width: 64, height: 64 }
+          },
+          {
+            key: "ui.icon-gear",
+            width: 64,
+            height: 64,
+            mb: 0,
+            atlas: { page: "ui/main-0", x: 68, y: 2, width: 64, height: 64 }
+          },
+          {
+            key: "ui.panel",
+            width: 256,
+            height: 128,
+            mb: 0,
+            nine: { left: 48, top: 48, right: 48, bottom: 48 },
+            atlas: { page: "ui/main-0", x: 2, y: 68, width: 256, height: 128 }
+          }
+        ]
+      }
+    }
+  };
 }

@@ -66,7 +66,7 @@ export type ScanResult = {
 };
 
 /** One output file: where it goes and what it should contain. */
-type Output = { file: string; text: string };
+export type Output = { file: string; text: string };
 
 /** One bundle while it is being filled. */
 type BundleDraft = { feature: string; tier: Tier; files: ManifestFile[] };
@@ -736,13 +736,19 @@ async function readCurrent(file: string): Promise<string | undefined> {
 }
 
 /**
- * Writes the outputs whose text changed, and tells whether any of them differed.
+ * Writes the outputs whose text changed, and tells whether any of them differed. The pack run of
+ * the CLI writes the key module through it, so the keys get the same bytes in both modes.
  *
  * @param outputs - Where each output goes and what it should contain.
  * @param write - False for a check run: nothing is written.
  * @returns True when an output on disk differs from what the scan produced.
+ * @example
+ * ```ts
+ * await applyOutputs([{ file: "src/generated/assets.ts", text: keysSource }], true);
+ * // true when the file was missing or held other text, and it holds keysSource now
+ * ```
  */
-async function applyOutputs(outputs: readonly Output[], write: boolean): Promise<boolean> {
+export async function applyOutputs(outputs: readonly Output[], write: boolean): Promise<boolean> {
   let changed = false;
 
   for (const output of outputs) {

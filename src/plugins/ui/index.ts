@@ -30,11 +30,20 @@ const config: Config = {
     offset: 9,
     halo: 0xff_f3_d6,
     haloWidth: 12
+  },
+  textInput: {
+    caretWidth: 3,
+    caret: 0x00_00_00,
+    selection: 0x33_90_ff,
+    selectionAlpha: 0.35,
+    composingUnderline: 3,
+    keyboardMargin: 16
   }
 };
 
 /**
- * Ui plugin: `app.ui.tree()`, `app.ui.find(...)`, `app.ui.lint()`, the components `Box` and
+ * Ui plugin: `app.ui.tree()`, `app.ui.find(...)`, `app.ui.lint()`, `app.ui.fill(...)`, the
+ * text field `<input local>`, the components `Box` and
  * `LocalWrite`, and the helpers `defineComponent`, `defineStyle`, `defineTokens` and `popup`.
  *
  * @example

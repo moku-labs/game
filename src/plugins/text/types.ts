@@ -47,13 +47,17 @@ export type TextBind = { component: string; field: string };
 
 /**
  * What the `Text` component holds. `resolved` is engine-owned: a game writes `content`, `style`,
- * `bind` and `anchor`, and reads `resolved`.
+ * `bind`, `anchor` and `alpha`, and reads `resolved`. `alpha` fades every run, shadow and icon of
+ * the block together, 1 by default; a change is written in place and a tween can drive it.
  *
  * @example
  * ```ts
  * const value: TextValue = {
- *   content: "+5", style: "body", bind: undefined, anchor: { x: 0.5, y: 0.5 }, resolved: "+5"
+ *   content: "+5", style: "body", bind: undefined, anchor: { x: 0.5, y: 0.5 }, alpha: 1,
+ *   resolved: "+5"
  * };
+ * // The hint of an empty name field, at half alpha.
+ * const hint: TextValue = { ...value, content: "Your name", alpha: 0.5, resolved: "Your name" };
  * ```
  */
 export type TextValue = {
@@ -61,6 +65,7 @@ export type TextValue = {
   style: string;
   bind: TextBind | undefined;
   anchor: Point;
+  alpha: number;
   resolved: string;
 };
 

@@ -8,6 +8,7 @@ import type {
   InputApi,
   KeyInput,
   KeyListener,
+  PointerListener,
   RawSample,
   TapListener,
   Target
@@ -139,3 +140,15 @@ input.pressKey("Enter");
 
 // @ts-expect-error — shift is a flag, not a key name
 input.pressKey("Tab", { shift: "Shift" });
+
+// ─── the synchronous pointer door ─────────────────────────────
+
+expectTypeOf<PointerListener>().toEqualTypeOf<(sample: RawSample) => void>();
+expectTypeOf(input.onPointer).toEqualTypeOf<(fn: PointerListener) => () => void>();
+
+input.onPointer(sample => {
+  expectTypeOf(sample).toEqualTypeOf<RawSample>();
+});
+
+// @ts-expect-error — a pointer listener gets the raw sample, not an entity
+input.onPointer((entity: Entity) => entity + 1);

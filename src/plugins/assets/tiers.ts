@@ -3,23 +3,17 @@
  * every caller a waiter: the last one to leave aborts the fetches.
  */
 import { enforceBudget, releaseAssets } from "./budget";
-import {
-  atlasProblem,
-  fileUrl,
-  indexKeys,
-  kindOf,
-  nineOf,
-  parseManifest,
-  resolveBaseUrl
-} from "./manifest";
+import { fileUrl, indexKeys, kindOf, nineOf, parseManifest, resolveBaseUrl } from "./manifest";
 import type {
   AssetsCtx,
   AssetsIo,
+  AtlasFrame,
+  AtlasPage,
   BundleMap,
   BundleRecord,
+  CreateTextureOptions,
   Events,
   FetchResponse,
-  FontPage,
   Inflight,
   LoadedAssets,
   LoadedFont,
@@ -37,6 +31,21 @@ type BundleFailure = Error & { bundle: string; file: string; status: number };
 
 /** How far one running load got: the payload of the next `assets:bundle-progress`. */
 type Progress = Events["assets:bundle-progress"];
+
+/**
+ * One running load of a bundle, as the file loaders see it: where the files come from, the
+ * signal that cancels them and the maps they fill.
+ */
+type Loading = {
+  io: AssetsIo;
+  bundle: string;
+  base: string;
+  signal: AbortSignal;
+  assets: LoadedAssets;
+};
+
+/** A running load once its atlas pages are on the way: the promise of each page by its id. */
+type Running = Loading & { pages: ReadonlyMap<string, Promise<Texture>> };
 
 /**
  * Tells whether a tier stays for the whole session. A permanent bundle is never evicted and
@@ -182,62 +191,48 @@ export function touch(state: State, record: BundleRecord): void {
 }
 
 /**
- * Creates the three empty maps a bundle's assets live in. It is its own function because lint
+ * Creates the four empty maps a bundle's assets live in. It is its own function because lint
  * rule L5 refuses a collection built inside an exported declaration.
  *
- * @returns Empty maps for textures, fonts and audio.
+ * @returns Empty maps for textures, fonts, audio and atlas pages.
  */
 function emptyAssets(): LoadedAssets {
-  return { textures: new Map(), fonts: new Map(), audio: new Map() };
+  return { textures: new Map(), fonts: new Map(), audio: new Map(), pages: new Map() };
 }
 
 /**
  * Fetches one file of a bundle.
  *
- * @param io - The I/O seam.
- * @param bundle - Name of the bundle, for the failure message.
- * @param path - Path of the file, relative to the scan root.
- * @param base - Prefix of every file URL.
- * @param signal - The signal of the running load.
+ * @param run - The running load.
+ * @param path - Path of the file, relative to the folder of the manifest's files.
  * @returns The response.
  * @throws {Error} When the response is not ok.
  */
-async function fetchFile(
-  io: AssetsIo,
-  bundle: string,
-  path: string,
-  base: string,
-  signal: AbortSignal
-): Promise<FetchResponse> {
-  const response = await io.fetch(fileUrl(base, path), { signal });
+async function fetchFile(run: Loading, path: string): Promise<FetchResponse> {
+  const response = await run.io.fetch(fileUrl(run.base, path), { signal: run.signal });
 
-  if (!response.ok) throw failure(bundle, path, response.status);
+  if (!response.ok) throw failure(run.bundle, path, response.status);
 
   return response;
 }
 
 /**
- * Fetches, decodes and uploads one image.
+ * Fetches, decodes and uploads one image: a loose texture, a font page or an atlas page.
  *
- * @param io - The I/O seam.
- * @param bundle - Name of the bundle, for the failure message.
- * @param image - The file or the font page to upload.
- * @param base - Prefix of every file URL.
- * @param signal - The signal of the running load.
+ * @param run - The running load.
+ * @param path - Path of the image.
+ * @param options - The nine-slice borders of a loose texture; none for a page.
  * @returns The texture of the image.
  * @throws {Error} When the response is not ok.
  */
 async function loadImage(
-  io: AssetsIo,
-  bundle: string,
-  image: ManifestFile | FontPage,
-  base: string,
-  signal: AbortSignal
+  run: Loading,
+  path: string,
+  options?: CreateTextureOptions
 ): Promise<Texture> {
-  const response = await fetchFile(io, bundle, image.path, base, signal);
-  const options = "key" in image ? nineOf(image) : undefined;
+  const response = await fetchFile(run, path);
 
-  return io.createTexture(await io.decode(await response.blob()), options);
+  return run.io.createTexture(await run.io.decode(await response.blob()), options);
 }
 
 /**
@@ -255,75 +250,155 @@ function pagelessFont(bundle: string, path: string): Error {
 }
 
 /**
+ * Reads the path of a file that is fetched: a loose texture, a font or a sound. Only a texture
+ * packed in an atlas may lack one.
+ *
+ * @param bundle - Name of the bundle, for the message.
+ * @param file - The file of the manifest.
+ * @returns The path.
+ * @throws {Error} When the file has no path.
+ */
+function pathOf(bundle: string, file: ManifestFile): string {
+  if (file.path !== undefined) return file.path;
+
+  throw new Error(
+    `[game] assets: file "${file.key}" of bundle "${bundle}" has neither a path nor an atlas frame.\n` +
+      '  Run "bun run assets:pack".'
+  );
+}
+
+/**
  * Loads one font: the `.fnt` file as text and every page it names as a texture. The pages go up
  * in parallel, the first one is what `text` installs.
  *
- * @param io - The I/O seam.
- * @param bundle - Name of the bundle, for the failure message.
+ * @param run - The running load.
  * @param file - The font file of the manifest.
- * @param base - Prefix of every file URL.
- * @param signal - The signal of the running load.
  * @returns The font file and its page textures.
  * @throws {Error} When a response is not ok, or the manifest lists no page.
  */
-async function loadFont(
-  io: AssetsIo,
-  bundle: string,
-  file: ManifestFile,
-  base: string,
-  signal: AbortSignal
-): Promise<LoadedFont> {
+async function loadFont(run: Loading, file: ManifestFile): Promise<LoadedFont> {
+  const path = pathOf(run.bundle, file);
   const entries = file.pages ?? [];
 
-  if (entries.length === 0) throw pagelessFont(bundle, file.path);
+  if (entries.length === 0) throw pagelessFont(run.bundle, path);
 
-  const response = await fetchFile(io, bundle, file.path, base, signal);
+  const response = await fetchFile(run, path);
   const fnt = await response.text();
-  const pages = await Promise.all(entries.map(page => loadImage(io, bundle, page, base, signal)));
+  const pages = await Promise.all(entries.map(page => loadImage(run, page.path)));
   const [first] = pages;
 
-  if (first === undefined) throw pagelessFont(bundle, file.path);
+  if (first === undefined) throw pagelessFont(run.bundle, path);
 
   return { fnt, texture: first, pages };
 }
 
 /**
- * Loads one file into the maps of the running load, by what the manifest says it is.
+ * Starts the one load of every atlas page of a bundle. A page lands in the `pages` map of the
+ * running load, so a failure later frees it with the rest. Nobody may wait for a page, so its
+ * failure is marked as handled here; the files on it still reject with it.
  *
- * @param io - The I/O seam.
- * @param bundle - Name of the bundle, for the failure message.
- * @param file - The file to load.
- * @param base - Prefix of every file URL.
- * @param into - Where the result goes, keyed by the asset key.
- * @param into.signal - The signal of the running load.
- * @param into.assets - The three maps of the running load.
- * @throws {Error} When the response is not ok, or a font lists no page.
+ * @param run - The running load, whose `assets.pages` map is filled.
+ * @param pages - The pages the bundle lists.
+ * @returns Page id to the promise of its texture.
  */
-async function loadFile(
-  io: AssetsIo,
-  bundle: string,
-  file: ManifestFile,
-  base: string,
-  into: { signal: AbortSignal; assets: LoadedAssets }
-): Promise<void> {
-  const { signal, assets } = into;
+function startPages(run: Loading, pages: readonly AtlasPage[]): Map<string, Promise<Texture>> {
+  const started = new Map<string, Promise<Texture>>();
+
+  for (const page of pages) {
+    const promise = loadImage(run, page.path).then(texture => {
+      run.assets.pages.set(page.id, texture);
+
+      return texture;
+    });
+
+    promise.catch(ignoreFailure);
+    started.set(page.id, promise);
+  }
+
+  return started;
+}
+
+/**
+ * Builds the error of a packed file whose page the bundle does not list.
+ *
+ * @param bundle - Name of the bundle.
+ * @param key - Asset key of the file.
+ * @param page - The page id its `atlas` frame names.
+ * @returns The error, with the command that fixes it.
+ * @example
+ * ```ts
+ * unlistedPage("ui", "ui.icon-coin", "ui/main-9").message;
+ * // '[game] assets: file "ui.icon-coin" of bundle "ui" names page "ui/main-9", which the bundle does not list.\n  Run "bun run assets:pack".'
+ * ```
+ */
+function unlistedPage(bundle: string, key: string, page: string): Error {
+  return new Error(
+    `[game] assets: file "${key}" of bundle "${bundle}" names page "${page}", ` +
+      'which the bundle does not list.\n  Run "bun run assets:pack".'
+  );
+}
+
+/**
+ * Cuts one packed file out of its page, once the page landed. Nothing is fetched for the file.
+ *
+ * @param run - The running load.
+ * @param file - The packed file.
+ * @param atlas - Its frame on the page.
+ * @returns The slice.
+ * @throws {Error} When the page is not listed by the bundle, or did not arrive.
+ */
+async function sliceFile(run: Running, file: ManifestFile, atlas: AtlasFrame): Promise<Texture> {
+  const page = run.pages.get(atlas.page);
+
+  if (page === undefined) throw unlistedPage(run.bundle, file.key, atlas.page);
+
+  return run.io.sliceTexture(await page, atlas, nineOf(file));
+}
+
+/**
+ * Loads one file into the maps of the running load, by what the manifest says it is. A texture
+ * with an `atlas` frame is cut out of its page; any other file is fetched by its path.
+ *
+ * @param run - The running load.
+ * @param file - The file to load.
+ * @throws {Error} When a response is not ok, a font lists no page, or a page is missing.
+ */
+async function loadFile(run: Running, file: ManifestFile): Promise<void> {
+  const { assets } = run;
   const kind = kindOf(file);
 
   if (kind === "font") {
-    assets.fonts.set(file.key, await loadFont(io, bundle, file, base, signal));
+    assets.fonts.set(file.key, await loadFont(run, file));
 
     return;
   }
 
   if (kind === "audio") {
-    const response = await fetchFile(io, bundle, file.path, base, signal);
+    const response = await fetchFile(run, pathOf(run.bundle, file));
 
     assets.audio.set(file.key, await response.arrayBuffer());
 
     return;
   }
 
-  assets.textures.set(file.key, await loadImage(io, bundle, file, base, signal));
+  const texture =
+    file.atlas === undefined
+      ? await loadImage(run, pathOf(run.bundle, file), nineOf(file))
+      : await sliceFile(run, file, file.atlas);
+
+  assets.textures.set(file.key, texture);
+}
+
+/**
+ * Throws the first failure among settled loads, in the order they were started.
+ *
+ * @param results - What `Promise.allSettled` gave back.
+ * @throws {Error} The reason of the first rejected load.
+ */
+function throwFirstFailure(results: readonly PromiseSettledResult<unknown>[]): void {
+  for (const result of results) {
+    if (result.status === "rejected") throw result.reason;
+  }
 }
 
 /**
@@ -363,6 +438,7 @@ function finish(
   record.textures = assets.textures;
   record.fonts = assets.fonts;
   record.audio = assets.audio;
+  record.pages = assets.pages;
   record.status = "loaded";
   record.inflight = undefined;
   touch(ctx.state, record);
@@ -440,25 +516,22 @@ async function runLoad(
   const assets = emptyAssets();
 
   try {
-    const problem = atlasProblem(bundle, entry.files);
-
-    if (problem !== undefined) throw new Error(problem);
-
-    // Load every file in parallel; each one that settles moves the progress on.
+    // Every page goes up once; the files on a page wait for it and are cut out of it.
     const base = resolveBaseUrl(ctx.config.baseUrl, ctx.config.manifest);
-    const into = { signal: inflight.controller.signal, assets };
+    const loading = { io, bundle, base, signal: inflight.controller.signal, assets };
+    const run: Running = { ...loading, pages: startPages(loading, entry.pages ?? []) };
+    // Load every file in parallel; each one that settles moves the progress on.
     const progress: Progress = { bundle, loaded: 0, total: entry.files.length };
-    const results = await Promise.allSettled(
+    const files = await Promise.allSettled(
       entry.files.map(file =>
-        loadFile(io, bundle, file, base, into).finally(() =>
-          reportSettled(ctx, progress, into.signal)
-        )
+        loadFile(run, file).finally(() => reportSettled(ctx, progress, run.signal))
       )
     );
+    // A page no file waited for still lands before the load is published or rolled back.
+    const pages = await Promise.allSettled(run.pages.values());
 
-    for (const result of results) {
-      if (result.status === "rejected") throw result.reason;
-    }
+    throwFirstFailure(files);
+    throwFirstFailure(pages);
   } catch (error) {
     fail(ctx, io, bundle, inflight, assets, error);
 

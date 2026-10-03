@@ -191,6 +191,7 @@ function createIo(): AssetsIo {
         source: page,
         frame: new FakeRectangle(0, 0, 32, 32)
       }) as unknown as Texture,
+    sliceTexture: () => ({ label: "slice" }) as unknown as Texture,
     destroyTexture: () => undefined
   };
 }

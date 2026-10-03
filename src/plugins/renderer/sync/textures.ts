@@ -1,11 +1,18 @@
 /**
  * @file renderer/sync — the texture chain: the providers `assets` registers, the magenta
- * placeholder for a key nobody answers, the crops of `"cover"` sprites, and the two calls that
- * make and free a Pixi texture.
+ * placeholder for a key nobody answers, the crops of `"cover"` sprites, and the calls that make,
+ * slice and free a Pixi texture.
  */
 import type { Entity } from "../../world/types";
-import type { PixiTexture } from "../types";
-import type { CreateTextureOptions, HitBox, SyncCtx, SyncState } from "./types";
+import type { PixiModule, PixiTexture } from "../types";
+import type {
+  CreateTextureOptions,
+  HitBox,
+  NineBorders,
+  SliceFrame,
+  SyncCtx,
+  SyncState
+} from "./types";
 
 /** How big the placeholder is drawn, in reference units. */
 export const PLACEHOLDER_SIZE = 64;
@@ -99,6 +106,47 @@ export function untrackKey(state: SyncState, entity: Entity, key: string): void 
 }
 
 /**
+ * The Pixi module of a renderer that draws. A texture made while it does not would be lost with
+ * the device, so the member that asked throws.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param member - The `textures` member that asked, for the message.
+ * @returns The Pixi module.
+ * @throws {Error} When the renderer does not draw.
+ */
+function drawingPixi(sctx: SyncCtx, member: "create" | "slice"): PixiModule {
+  const pixi = sctx.deps.host.pixi();
+
+  if (pixi === undefined || !sctx.deps.host.ready()) {
+    throw new Error(
+      `[game] renderer.sync.textures.${member} needs a ready renderer.\n` +
+        "  Check app.renderer.host.ready() first."
+    );
+  }
+
+  return pixi;
+}
+
+/**
+ * The default borders of a texture, from the four numbers `nine` gives.
+ *
+ * @param nine - Left, top, right and bottom in pixels.
+ * @returns The borders, as Pixi reads them.
+ * @example
+ * ```ts
+ * defaultBordersOf([24, 20, 16, 12]); // { left: 24, top: 20, right: 16, bottom: 12 }
+ * ```
+ */
+function defaultBordersOf(nine: NineBorders): {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+} {
+  return { left: nine[0], top: nine[1], right: nine[2], bottom: nine[3] };
+}
+
+/**
  * Makes a Pixi texture out of a decoded image, on behalf of `assets`.
  *
  * @param sctx - Domain context of the sync module.
@@ -112,15 +160,7 @@ export function createTexture(
   image: ImageBitmap | HTMLImageElement,
   options?: CreateTextureOptions
 ): PixiTexture {
-  const pixi = sctx.deps.host.pixi();
-
-  if (pixi === undefined || !sctx.deps.host.ready()) {
-    throw new Error(
-      "[game] renderer.sync.textures.create needs a ready renderer.\n" +
-        "  Check app.renderer.host.ready() first."
-    );
-  }
-
+  const pixi = drawingPixi(sctx, "create");
   const base = pixi.Texture.from(image);
   const nine = options?.nine;
 
@@ -128,13 +168,83 @@ export function createTexture(
 
   const bordered = new pixi.Texture({
     source: base.source,
-    defaultBorders: { left: nine[0], top: nine[1], right: nine[2], bottom: nine[3] }
+    defaultBorders: defaultBordersOf(nine)
   });
 
   // Only the source of the wrapper is kept, so the wrapper itself goes; the source stays.
   base.destroy(false);
 
   return bordered;
+}
+
+/**
+ * Tells whether a frame lies inside a page of the given size. A negative number, or one that is
+ * not a number, lies outside.
+ *
+ * @param frame - The frame in page pixels.
+ * @param page - The size of the page.
+ * @param page.width - Width of the page in pixels.
+ * @param page.height - Height of the page in pixels.
+ * @returns True when the whole frame is on the page.
+ * @example
+ * ```ts
+ * frameFits({ x: 256, y: 384, width: 256, height: 128 }, { width: 512, height: 512 }); // true
+ * ```
+ */
+function frameFits(frame: SliceFrame, page: { width: number; height: number }): boolean {
+  return (
+    frame.x >= 0 &&
+    frame.y >= 0 &&
+    frame.width >= 0 &&
+    frame.height >= 0 &&
+    frame.x + frame.width <= page.width &&
+    frame.y + frame.height <= page.height
+  );
+}
+
+/**
+ * Cuts a texture out of an atlas page, on behalf of `assets`. The slice shares the page's source,
+ * its frame is offset by the page's own frame, and it is marked as a slice so `destroyTexture`
+ * frees only the wrapper.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param page - The page texture.
+ * @param frame - The frame in page pixels.
+ * @param options - Nine-slice borders, in pixels.
+ * @returns The slice.
+ * @throws {Error} When the renderer does not draw, and when the frame does not fit in the page.
+ */
+export function sliceTexture(
+  sctx: SyncCtx,
+  page: PixiTexture,
+  frame: SliceFrame,
+  options?: CreateTextureOptions
+): PixiTexture {
+  const pixi = drawingPixi(sctx, "slice");
+
+  if (!frameFits(frame, page)) {
+    throw new Error(
+      `[game] renderer.sync.textures.slice: frame ${frame.x},${frame.y} ` +
+        `${frame.width}x${frame.height} is outside page ${page.width}x${page.height}.\n` +
+        '  Run "bun run assets:pack".'
+    );
+  }
+
+  const nine = options?.nine;
+  const slice = new pixi.Texture({
+    source: page.source,
+    frame: new pixi.Rectangle(
+      page.frame.x + frame.x,
+      page.frame.y + frame.y,
+      frame.width,
+      frame.height
+    ),
+    ...(nine === undefined ? {} : { defaultBorders: defaultBordersOf(nine) })
+  });
+
+  sctx.ctx.state.sync.slices.add(slice);
+
+  return slice;
 }
 
 /**
@@ -254,7 +364,8 @@ export function clearFrames(state: SyncState): void {
 }
 
 /**
- * Frees a texture, its source and the crops cut from it. A texture destroyed twice is a no-op.
+ * Frees a texture, its source and the crops cut from it. A slice keeps the source: it belongs to
+ * the page, which frees it. A texture destroyed twice is a no-op.
  *
  * @param state - The sync branch of the plugin state.
  * @param texture - The texture to free.
@@ -264,5 +375,5 @@ export function destroyTexture(state: SyncState, texture: PixiTexture): void {
 
   if (texture.destroyed) return;
 
-  texture.destroy(true);
+  texture.destroy(!state.slices.has(texture));
 }

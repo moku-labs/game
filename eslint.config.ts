@@ -234,6 +234,53 @@ export default [
     }
   },
 
+  // 6b5. L11 — `sharp` and `maxrects-packer`, the two packages of the production packer, are
+  // imported only under `src/plugins/assets/scan/pack/**`, so no browser bundle can reach them.
+  // A rule of its own: `no-restricted-imports` carries L9, L10 and L12, and a later block that
+  // sets it again replaces their patterns as a whole.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/plugins/assets/scan/pack/**", "src/**/__tests__/**"],
+    plugins: {
+      l11: {
+        rules: {
+          "packer-imports": {
+            meta: {
+              type: "problem",
+              schema: [],
+              messages: {
+                packer:
+                  "sharp and maxrects-packer are build-time only. Import them under src/plugins/assets/scan/pack/."
+              }
+            },
+            create: (
+              context: import("eslint").Rule.RuleContext
+            ): import("eslint").Rule.RuleListener => {
+              const check = (
+                node: import("estree").Node,
+                source: import("estree").Node | null | undefined
+              ): void => {
+                const name = source?.type === "Literal" ? source.value : undefined;
+
+                if (typeof name === "string" && /^(?:sharp|maxrects-packer)(?:\/|$)/.test(name)) {
+                  context.report({ node, messageId: "packer" });
+                }
+              };
+
+              return {
+                ImportDeclaration: node => check(node, node.source),
+                ImportExpression: node => check(node, node.source),
+                ExportAllDeclaration: node => check(node, node.source),
+                ExportNamedDeclaration: node => check(node, node.source)
+              };
+            }
+          }
+        }
+      }
+    },
+    rules: { "l11/packer-imports": "error" }
+  },
+
   // 6b3. L9 — the JSX runtime module is reached only through the two entry files, and they
   // import nothing else.
   {
@@ -269,6 +316,65 @@ export default [
             {
               regex: String.raw`^(?!\./plugins/ui/jsx/runtime$).*`,
               message: "An entry file re-exports the runtime and nothing else."
+            }
+          ]
+        }
+      ]
+    }
+  },
+
+  // 6b4. L12 — the visual test runner `src/visual/` is node-only and reaches the whole `/control`
+  // catalogue: only the door `src/testing.ts` imports it. A later block replaces the whole rule,
+  // so the patterns these files carry now are repeated: L9's outside `ui`, L10's inside it.
+  {
+    files: ["src/**/*.ts"],
+    ignores: [
+      "src/testing.ts",
+      "src/visual/**",
+      "src/jsx-runtime.ts",
+      "src/jsx-dev-runtime.ts",
+      "src/plugins/ui/**",
+      "src/**/__tests__/**"
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/ui/jsx/runtime", "./runtime", "../jsx/runtime"],
+              message:
+                "The JSX runtime is reached through src/jsx-runtime.ts and src/jsx-dev-runtime.ts only."
+            },
+            {
+              group: ["**/visual/**"],
+              message: "The visual test runner is node-only. Only src/testing.ts imports it."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    files: ["src/plugins/ui/**/*.ts"],
+    ignores: ["src/**/__tests__/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/assets/scan/**", "./scan/**", "../scan/**"],
+              message: "The asset scanner is node-only. Only src/assets.ts imports it."
+            },
+            {
+              group: ["**/i18n/compile/**", "./compile/**", "../compile/**"],
+              message:
+                "The string compiler is node-only. Only src/assets.ts and the assets CLI import it."
+            },
+            {
+              group: ["**/visual/**"],
+              message: "The visual test runner is node-only. Only src/testing.ts imports it."
             }
           ]
         }

@@ -8,7 +8,9 @@ import { describe, expect, it } from "vitest";
 // Integration: what a minified Bun build of a game carries. A game that
 // composes `...screen` without `effectsPlugin` carries no effects code (design
 // decision 7 of V5), and a production build carries no draw-call counter of
-// the renderer, which a dev build does (07-renderer Delta 8 §2).
+// the renderer, which a dev build does (07-renderer Delta 8 §2). And what the
+// package build carries: `dist/index.mjs` never names the two packages of the
+// production packer, which only `dist/assets.mjs` imports (09-assets Delta 8).
 // ---------------------------------------------------------------------------
 
 /** The root module of the package, as a game imports it. */
@@ -22,6 +24,9 @@ const drawClasses = ["GpuBatchAdaptor", "GpuGraphicsAdaptor", "GpuEncoderSystem"
 
 /** The command the dev install of the draw-call counter logs under `moku:dev`. */
 const drawCallsMarker = "renderer.drawCalls";
+
+/** The two packages of the production packer: only the node door `./assets` may name them. */
+const packerPackages = ["sharp", "maxrects-packer"];
 
 /** What the game composes: the screen set, or the screen set and `effectsPlugin`. */
 type Composition = "screen" | "screen+effects";
@@ -153,5 +158,58 @@ describe("the draw-call counter of the renderer in a game build", () => {
 
     expect(code).toContain(drawCallsMarker);
     expect(drawClasses.filter(name => !code.includes(name))).toEqual([]);
+  }, 60_000);
+});
+
+/**
+ * Builds one entry of the package the way `tsdown` builds `dist/`: ESM for node, every package
+ * left as an import, so a package the entry reaches shows up by its name. The entry lives outside
+ * the package and re-exports the source file, for the `"sideEffects": false` reason of
+ * `doors-build.test.ts`. Vitest runs on Node, so the build runs in a Bun child process.
+ *
+ * @param source - The entry file under `src/`.
+ * @returns The built code.
+ */
+function packageBuild(source: "index.ts" | "assets.ts"): string {
+  const file = fileURLToPath(new URL(`../../src/${source}`, import.meta.url));
+  const script = `
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "moku-package-"));
+    const entry = join(dir, "entry.ts");
+    await Bun.write(entry, ${JSON.stringify(`export * from ${JSON.stringify(file)};`)});
+    const result = await Bun.build({ entrypoints: [entry], target: "node", format: "esm", packages: "external" });
+    rmSync(dir, { recursive: true, force: true });
+    if (!result.success) {
+      console.error(result.logs.map(String).join(" "));
+      process.exit(1);
+    }
+    process.stdout.write(await result.outputs[0].text());
+  `;
+  // eslint-disable-next-line sonarjs/no-os-command-from-path -- the Bun on PATH is the one the project scripts run.
+  const run = spawnSync("bun", ["--eval", script], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024
+  });
+
+  if (run.status !== 0) throw new Error(`The Bun build failed.\n  ${run.stderr}.`);
+
+  return run.stdout;
+}
+
+describe("the packages of the production packer in the package build", () => {
+  it("are named nowhere in dist/index.mjs", () => {
+    const code = packageBuild("index.ts");
+
+    expect(code).toContain("createApp");
+    expect(packerPackages.filter(name => code.includes(name))).toEqual([]);
+  }, 60_000);
+
+  it("are imported, not bundled, by dist/assets.mjs: the check above would see them", () => {
+    const code = packageBuild("assets.ts");
+
+    expect(code).toContain('from "maxrects-packer"');
+    expect(code).toContain('import("sharp")');
   }, 60_000);
 });

@@ -20,6 +20,15 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   never changes what `measure` answers.
 - **Tags:** `<b>`, `<i>`, `<color=#rrggbb>`, `<icon=key>`, `\<`, `\n`. An unknown tag stays
   literal and is reported once.
+- **Icons:** `<icon=key>` is one glyph, square at the line height and as wide as the line is high
+  plus `letterSpacing`. In a wrapped style it wraps with its word: `×<icon=hud.coin>5` moves to the
+  next line as one word, and `a <icon=hud.coin> b` makes the icon a word of its own. A word wider
+  than `wrap` breaks between glyphs and never inside the icon; an icon wider than `wrap` gets a line
+  of its own.
+- **Alpha:** `Text({ alpha })` fades the whole block: runs, shadows, outlines and icons. It is 1 by
+  default and is the alpha of the label's container, so a change is written in place, rebuilds no
+  run, and a tween on `Text.alpha` costs one assignment a frame. `ui` draws a field's placeholder
+  at `alpha: 0.5`.
 - **Numbers:** `bind: { component, field }` shows `Math.round` of a numeric component field,
   read every frame, written only when the rounded value moved.
 - **Screen:** a `DisplayAdapter` registered with `renderer.sync.displays.provide(Text, …)` builds

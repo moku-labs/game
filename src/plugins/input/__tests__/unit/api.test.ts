@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { createInputApi } from "../../api";
 import { Draggable, DropTarget, Pressable, Swipeable, Tappable, Touchable } from "../../components";
-import type { Direction, Target } from "../../types";
-import { createMockInput } from "./mock-input";
+import type { Direction, RawSample, Target } from "../../types";
+import { createMockInput, createStubCanvas } from "./mock-input";
 
 describe("app.input.tap", () => {
   it("answers the intent of the Tappable under a projection key", () => {
@@ -278,5 +278,45 @@ describe("app.input.onTap", () => {
 
     expectTypeOf(api.onTap).parameter(0).toEqualTypeOf<(entity: number) => void>();
     expectTypeOf(api.onTap).returns.toEqualTypeOf<() => void>();
+  });
+});
+
+describe("app.input.onPointer", () => {
+  it("is never called by app.input.tap, which has no DOM moment", () => {
+    const mock = createMockInput();
+    const entity = mock.spawn([Tappable({ intent: "claim" })]);
+    const api = createInputApi(mock.ctx);
+    const seen: RawSample[] = [];
+
+    api.onPointer(sample => seen.push(sample));
+
+    expect(api.tap(entity)).toBe(true);
+    expect(api.press(entity)).toBe(false);
+    expect(seen).toEqual([]);
+  });
+
+  it("reaches a finger on the attached canvas and stops after its remover ran", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+    const api = createInputApi(mock.ctx);
+    const seen: string[] = [];
+
+    mock.canvas.current = canvas.element;
+    mock.start();
+
+    const off = api.onPointer(sample => seen.push(`${sample.kind}:${sample.clientX}`));
+
+    canvas.dispatch("pointerdown", { pointerType: "touch", pointerId: 1, clientX: 5, clientY: 9 });
+    off();
+    canvas.dispatch("pointerup", { pointerType: "touch", pointerId: 1, clientX: 5, clientY: 9 });
+
+    expect(seen).toEqual(["down:5"]);
+  });
+
+  it("takes a sample listener and hands out a remover", () => {
+    const api = createInputApi(createMockInput().ctx);
+
+    expectTypeOf(api.onPointer).parameter(0).toEqualTypeOf<(sample: RawSample) => void>();
+    expectTypeOf(api.onPointer).returns.toEqualTypeOf<() => void>();
   });
 });

@@ -1,5 +1,10 @@
 import { expectTypeOf } from "vitest";
-import { label as looseLabel, defineTextStyles as looseStyles, textFor } from "../../components";
+import {
+  label as looseLabel,
+  defineTextStyles as looseStyles,
+  Text,
+  textFor
+} from "../../components";
 import type { Size, TextStyles, TextValue } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -39,6 +44,13 @@ expectTypeOf(defineTextStyles({})).toEqualTypeOf<TextStyles>();
 expectTypeOf(label({ text: "+5", style: "body", at: { x: 0, y: 0 } })[0].value).toEqualTypeOf<
   Readonly<TextValue>
 >();
+
+// ─── a Text fades by a number, so a tween can drive it ────────
+
+expectTypeOf<TextValue["alpha"]>().toEqualTypeOf<number>();
+
+// @ts-expect-error — alpha is a number from 0 to 1, not a string
+Text({ alpha: "0.5" });
 
 // ─── the loose helpers take any name, as a plugin without a game does ─
 

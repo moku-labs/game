@@ -58,7 +58,6 @@ describe("assets:bundle-unloaded", () => {
     mock.world.ecs.despawn(hosts[2] ?? 0);
     mock.state.warned.add("texture:fx.star");
     mock.state.warned.add("texture:fx.puff");
-    mock.state.broken.add("fx.stars");
 
     expect(mock.state.orphans.size).toBe(1);
 
@@ -71,7 +70,6 @@ describe("assets:bundle-unloaded", () => {
     expect(mock.state.baked.has("fx.steam")).toBe(true);
     expect(mock.state.warned.has("texture:fx.star")).toBe(false);
     expect(mock.state.warned.has("texture:fx.puff")).toBe(true);
-    expect(mock.state.broken.has("fx.stars")).toBe(false);
 
     const destroyed = FakeFxParticleContainer.made.filter(container => container.destroyed);
 

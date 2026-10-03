@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { enforceBudget, pickVictim, unloadBundle, usedMb } from "../../budget";
 import { loadBundle } from "../../tiers";
 import type { MockAssets } from "./mock-assets";
-import { createMockAssets, manifestOf } from "./mock-assets";
+import { createMockAssets, manifestOf, packedManifest } from "./mock-assets";
 
 const manifest = manifestOf({
   ui: { feature: "ui", tier: "core", keys: ["ui.panel"] },
@@ -214,5 +214,63 @@ describe("budget edge cases", () => {
       "gamma.one",
       "ui.panel"
     ]);
+  });
+});
+
+/**
+ * Loads the packed bundle of the mock.
+ *
+ * @returns The mock with the bundle `ui` loaded: one page, three slices, one loose texture.
+ */
+async function loadPacked(): Promise<MockAssets> {
+  const mock = createMockAssets({ manifest: packedManifest() });
+
+  await mock.start();
+  await loadBundle(mock.assetsCtx, "ui", undefined, "request");
+
+  return mock;
+}
+
+describe("a packed bundle", () => {
+  it("unload destroys every slice and the loose texture, then the page", async () => {
+    const mock = await loadPacked();
+    const page = mock.io.created.find(texture => texture.from.includes("main-0"));
+    const loose = mock.io.created.find(texture => texture.from.includes("ui.bg"));
+
+    unloadBundle(mock.assetsCtx, "ui", "request");
+
+    const ids = mock.io.destroyed.map(texture => texture.id);
+
+    expect(ids.at(-1)).toBe(page?.id);
+    expect(ids.slice(0, -1).toSorted()).toEqual([loose?.id, "s1", "s2", "s3"].toSorted());
+    expect(mock.ctx.state.records.get("ui")?.pages.size).toBe(0);
+    expect(mock.emitted.at(-1)).toMatchObject({
+      name: "assets:bundle-unloaded",
+      payload: { keys: ["ui.bg", "ui.icon-coin", "ui.icon-gear", "ui.panel"] }
+    });
+  });
+
+  it("counts the bundle cost once, pages and loose files together", async () => {
+    const mock = await loadPacked();
+
+    expect(usedMb(mock.ctx.state)).toBeCloseTo(1.916, 3);
+  });
+
+  it("names a page among the heaviest entries, and no packed file", async () => {
+    const mock = await loadPacked();
+
+    mock.ctx.state.pinned = new Set(["ui"]);
+    mock.config.textureBudgetMb = 0;
+    enforceBudget(mock.assetsCtx);
+
+    expect(mock.log.warn).toHaveBeenCalledWith(
+      "assets: over the texture budget with nothing to unload",
+      expect.objectContaining({
+        heaviest: [
+          { key: 'page "ui/main-0"', mb: 1 },
+          { key: "ui.bg", mb: 0.916 }
+        ]
+      })
+    );
   });
 });

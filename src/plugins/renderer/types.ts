@@ -284,6 +284,7 @@ export type {
   HitBox,
   LayerEntry,
   NineBorders,
+  SliceFrame,
   SyncApi,
   SyncCounts,
   SyncInternal,

@@ -127,6 +127,53 @@ describe("the particle system — instances", () => {
     expect(mock.state.seedCounter).toBe(1);
   });
 
+  it("draws in the layer and order of the top of the host's parent chain", () => {
+    const mock = started();
+    const screen = mock.spawn([
+      Transform({ x: 0, y: 0 }),
+      Layer({ name: "ui" }),
+      Order({ value: 5 })
+    ]);
+    const slot = mock.spawn([
+      Transform({ x: 40, y: 60 }),
+      Parent({ entity: screen }),
+      Order({ value: 2 })
+    ]);
+    const host = mock.spawn([
+      Emitter({ effect: "fx.stars" }),
+      Transform({ x: 10, y: 0 }),
+      Parent({ entity: slot }),
+      Layer({ name: "board" }),
+      Order({ value: 9 })
+    ]);
+
+    mock.frame();
+
+    const entity = mock.state.instances.get(host)?.entity ?? 0;
+
+    expect(mock.world.ecs.get(entity, Layer)).toEqual({ name: "ui" });
+    expect(mock.world.ecs.get(entity, Order)).toEqual({ value: 5 });
+    expect(mock.world.ecs.has(entity, Parent)).toBe(false);
+  });
+
+  it("copies no layer and no order the top of the chain does not have", () => {
+    const mock = started();
+    const slot = mock.spawn([Transform({ x: 40, y: 60 })]);
+    const host = mock.spawn([
+      Emitter({ effect: "fx.steam" }),
+      Parent({ entity: slot }),
+      Layer({ name: "board" }),
+      Order({ value: 9 })
+    ]);
+
+    mock.frame();
+
+    const entity = mock.state.instances.get(host)?.entity ?? 0;
+
+    expect(mock.world.ecs.has(entity, Layer)).toBe(false);
+    expect(mock.world.ecs.has(entity, Order)).toBe(false);
+  });
+
   it("copies no layer and no order the host does not have", () => {
     const mock = started();
     const host = mock.spawn([Emitter({ effect: "fx.stars" })]);
@@ -303,24 +350,53 @@ describe("the particle system — warnings", () => {
     expect(mock.state.instances.get(host)?.id).toBe("fx.steam");
   });
 
-  it("in dev, errors once on textures of two sources and never draws the effect", () => {
+  it("in dev, warns once per effect on textures of two sources and draws the first source", () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const loose = { width: 64, height: 64, destroyed: false };
+    const sparkles = defineEmitter("fx.sparkles", {
+      textures: ["fx.sparkle", "fx.star", "fx.glint"],
+      burst: 12
+    });
     const mock = createMockEffects();
 
-    mock.features.push({ name: "board", description: { emitters: [stars] } });
+    mock.features.push({ name: "board", description: { emitters: [stars, sparkles] } });
     mock.textures.set("fx.star", atlasTexture(page));
-    mock.textures.set("fx.sparkle", atlasTexture({ width: 64, height: 64, destroyed: false }));
+    mock.textures.set("fx.sparkle", atlasTexture(loose));
+    mock.textures.set("fx.glint", atlasTexture(loose));
     mock.start();
+
+    const first = mock.spawn([Emitter({ effect: "fx.stars" })]);
+
     mock.spawn([Emitter({ effect: "fx.stars" })]);
+
+    const other = mock.spawn([Emitter({ effect: "fx.sparkles" })]);
+
     frames(mock, 3);
 
-    expect(mock.log.error).toHaveBeenCalledTimes(1);
-    expect(mock.log.error).toHaveBeenCalledWith("effects:atlas", {
+    expect(mock.log.error).not.toHaveBeenCalled();
+    expect(mock.log.warn).toHaveBeenCalledTimes(2);
+    expect(mock.log.warn).toHaveBeenCalledWith("effects:atlas", {
       effect: "fx.stars",
-      keys: ["fx.star", "fx.sparkle"]
+      keys: ["fx.star", "fx.sparkle"],
+      dropped: ["fx.sparkle"]
     });
-    expect(mock.state.broken.has("fx.stars")).toBe(true);
-    expect(FakeFxParticleContainer.made).toHaveLength(0);
+    expect(mock.log.warn).toHaveBeenCalledWith("effects:atlas", {
+      effect: "fx.sparkles",
+      keys: ["fx.sparkle", "fx.star", "fx.glint"],
+      dropped: ["fx.star"]
+    });
+    expect(FakeFxParticleContainer.made).toHaveLength(3);
+    expect(mock.state.instances.get(first)?.baked.textures).toEqual([mock.textures.get("fx.star")]);
+    expect(mock.state.instances.get(other)?.baked.textures).toEqual([
+      mock.textures.get("fx.sparkle"),
+      mock.textures.get("fx.glint")
+    ]);
+
+    const drawn = new Set(
+      FakeFxParticleContainer.made[0]?.particleChildren.map(particle => particle.texture)
+    );
+
+    expect([...drawn]).toEqual([mock.textures.get("fx.star")]);
   });
 
   it("does not check the sources in a production build", () => {

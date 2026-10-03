@@ -109,7 +109,8 @@ describe("nine-slice in the style", () => {
       height: 120,
       alpha: 0.9,
       tint: 0xff_ee_dd,
-      debug: false
+      debug: false,
+      clip: false
     });
     expect(app.world.ecs.has(sliced, Shape)).toBe(false);
     expect(app.world.ecs.get(entityOf(app, "slicedRow"), NineSlice)?.texture).toBe("ui.strip");

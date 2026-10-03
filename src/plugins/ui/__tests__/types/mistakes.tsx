@@ -105,3 +105,26 @@ export const namedExtra = (
     components="glow"
   />
 );
+
+/** A text field that names no local field. */
+// @ts-expect-error — `local` is required: an InputLocal names the local field the text is written to.
+export const noLocal = <input key="l" />;
+
+/** A text field whose local field is not a name. */
+export const wrongLocal = (
+  <input
+    key="m"
+    // @ts-expect-error — `local` is an InputLocal, the name of a local field.
+    local={5}
+  />
+);
+
+/** A text field with a keyboard the engine does not open. */
+export const wrongKind = (
+  <input
+    key="n"
+    local="name"
+    // @ts-expect-error — `kind` is a TextInputKind: "text", "number" or "email".
+    kind="phone"
+  />
+);

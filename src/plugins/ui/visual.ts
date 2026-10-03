@@ -80,7 +80,8 @@ function contentOf(props: Record<string, unknown>): string {
  * The visual component of an element: a sprite for an image or an icon, the text for a text, the
  * nine-slice of its style (outlined when the style sets `debug`), or a rounded rectangle, a
  * triangle with `shape: "triangle"`, its stroke dashed with `dash`. A clipping element (`scroll`,
- * `overflow: "hidden"`) keeps the rectangle, which carries the clip. A style with a stroke and no fill draws
+ * `overflow: "hidden"`) keeps the rectangle, which carries the clip; a text field's rectangle
+ * clips too, and a nine-slice field draws its slices and clips to them. A style with a stroke and no fill draws
  * only the stroke, a ring. A container with no fill and no stroke gets an invisible rectangle:
  * the renderer hangs children under the display object of their parent, so every parent needs
  * one.
@@ -130,7 +131,9 @@ export function visualOf(element: Element): AnyComponentValue[] {
         height: rect.h,
         alpha,
         tint,
-        debug: style.debug ?? false
+        debug: style.debug ?? false,
+        // A text field framed by slices clips its value to them, so a long one never leaves it.
+        clip: type === "input"
       })
     ];
   }
@@ -151,7 +154,8 @@ export function visualOf(element: Element): AnyComponentValue[] {
       stroke: style.stroke ?? Shape.defaults.stroke,
       strokeWidth: style.strokeWidth ?? 0,
       dash: style.dash ?? 0,
-      clip
+      // A text field clips its value to its box, so a long one never leaves it.
+      clip: clip || type === "input"
     })
   ];
 }

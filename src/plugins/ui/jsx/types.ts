@@ -5,7 +5,8 @@
  */
 
 import type { Hint } from "../../flow/types";
-import type { KeyInput } from "../../input/types";
+import type { Message } from "../../i18n/types";
+import type { KeyInput, RawSample } from "../../input/types";
 import type { Json } from "../../model/types";
 import type { TransformValue } from "../../renderer/components";
 import type {
@@ -267,11 +268,95 @@ export type FocusState = {
   ring: { halo: Entity; ring: Entity } | undefined;
   drawn: DrawnRing | undefined;
   tapping: boolean;
+  /** The focus came from a finger on a text field: the element is focused, no ring is drawn. */
+  ringless: boolean;
+};
+
+/**
+ * The text of the field being edited, as the frame step last read it from the hidden input, or
+ * as `fill` wrote it. Indexes count UTF-16 units, as the DOM does.
+ *
+ * @example
+ * ```ts
+ * // "Alex" typed, the caret at the end, nothing selected.
+ * const mirror: Mirror = { value: "Alex", selectionStart: 4, selectionEnd: 4, direction: "none" };
+ * ```
+ */
+export type Mirror = {
+  value: string;
+  selectionStart: number;
+  selectionEnd: number;
+  direction: "forward" | "backward" | "none";
+};
+
+/**
+ * The part of the value an IME is composing, between `compositionstart` and `compositionend`.
+ *
+ * @example
+ * ```ts
+ * const composing: Composing = { start: 4, end: 6 };
+ * ```
+ */
+export type Composing = { start: number; end: number };
+
+/** The keyboard a text field opens. */
+export type FieldKind = "text" | "number" | "email";
+
+/** The four ui-owned entities a field is drawn with besides its own, each with `Parent` = field. */
+export type FieldParts = { selection: Entity; text: Entity; caret: Entity; composing: Entity };
+
+/**
+ * One text field: its entity and the props of the `input` tag, filled at enter and dropped at the
+ * despawn. `instance` is the nearest component instance, the one whose `local` the field writes;
+ * `drawn` is the layout of its parts last written, so a still field writes nothing.
+ */
+export type Field = {
+  entity: Entity;
+  key: string | undefined;
+  root: Entity;
+  instance: string | undefined;
+  local: string;
+  submit: string | undefined;
+  maxLength: number | undefined;
+  kind: FieldKind;
+  textStyle: string;
+  placeholder: string | Message | undefined;
+  parts: FieldParts | undefined;
+  drawn: string | undefined;
+};
+
+/**
+ * Where the keyboard stands, in CSS px: the height it covers at the bottom of the window, the
+ * window height it was read with, and the lift the editing field's root is moved up by.
+ */
+export type Keyboard = { inset: number; innerHeight: number; lift: number };
+
+/**
+ * The root the keyboard lift was last written on: its root element, the lift in reference units,
+ * and the rest pose it was added to, so a new rest is lifted again.
+ */
+export type Lifted = { element: Entity; units: number; rest: TransformValue };
+
+/**
+ * The text input: the one hidden DOM input (none headless), the field being edited, the mirror of
+ * the text, the composing range, the keyboard, the root lifted above it, the listeners of the
+ * element (removed in `onStop`) and the viewport watcher (removed when the editing ends).
+ */
+export type TextState = {
+  element: HTMLInputElement | undefined;
+  editing: Entity | undefined;
+  mirror: Mirror;
+  composing: Composing | undefined;
+  keyboard: Keyboard;
+  lifted: Lifted | undefined;
+  placed: string | undefined;
+  watching: (() => void) | undefined;
+  cleanups: Array<() => void>;
 };
 
 /**
  * jsx module state. `hosts` holds the elements with a `hosts` prop; `hosted` maps a world view to
- * the element that hosts it.
+ * the element that hosts it; `fields` holds the text fields by entity.
  */
 export type JsxState = {
   components: Map<string, AnyComponentDefinition>;
@@ -286,12 +371,15 @@ export type JsxState = {
   hosted: Map<Entity, Entity>;
   reconciles: number;
   focus: FocusState;
+  fields: Map<Entity, Field>;
+  text: TextState;
 };
 
 /**
  * One node of the snapshot `tree()` answers with. `rect` is natural: under a `fit` ancestor it
  * is the rect before that ancestor's scale. An element with `fit: "contain"` adds `fitScale`,
- * the scale it is drawn at.
+ * the scale it is drawn at. An `input` adds `value`: the text being typed while it is edited,
+ * else the local field it writes.
  *
  * @example
  * ```ts
@@ -316,6 +404,7 @@ export type UiNode = {
   state: IsFlags;
   local?: Record<string, unknown>;
   fitScale?: number;
+  value?: string;
   children: UiNode[];
 };
 
@@ -380,12 +469,17 @@ export type ButtonProps = CommonProps & { escape?: boolean } & (
 export type PointerFlag = "pressed" | "hover" | "focus";
 
 /**
- * jsx module shape, injected onto the plugin API. `tree`, `find` and `lint` are the public half.
+ * jsx module shape, injected onto the plugin API. `tree`, `find`, `lint` and `fill` are the public
+ * half.
  */
 export type JsxModule = {
   tree(): UiNode;
   find(key: string): Entity | undefined;
   lint(): readonly Finding[];
+  fill(key: string, value: string): boolean;
+  open(): void;
+  pointer(sample: RawSample): void;
+  tapped(entity: Entity): void;
   reconcile(): void;
   solve(): void;
   register(definition: AnyComponentDefinition): void;

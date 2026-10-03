@@ -13,12 +13,13 @@ import { hitTest } from "./hit-test";
 import { clearLayers, resort, syncLayers } from "./layers";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { createSyncSystem } from "./system";
-import { clearFrames, createTexture, destroyTexture } from "./textures";
+import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
 import type {
   CreateTextureOptions,
   DebugSwitches,
   DisplayAdapter,
   FilterSlot,
+  SliceFrame,
   SyncCounts,
   SyncCtx,
   SyncDeps,
@@ -414,6 +415,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         image: ImageBitmap | HTMLImageElement,
         options?: CreateTextureOptions
       ): PixiTexture => createTexture(sctx, image, options),
+
+      slice: (page: PixiTexture, frame: SliceFrame, options?: CreateTextureOptions): PixiTexture =>
+        sliceTexture(sctx, page, frame, options),
 
       destroy: (texture: PixiTexture): void => destroyTexture(state, texture),
 

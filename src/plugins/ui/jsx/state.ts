@@ -2,7 +2,7 @@
  * @file ui/jsx — state factory: the component registry, the roots, the elements and the
  * instances whose local state outlives every render.
  */
-import type { JsxState } from "./types";
+import type { JsxState, TextState } from "./types";
 
 /**
  * Creates an empty map. Its own non-exported function, because lint rule L5 refuses a collection
@@ -21,6 +21,25 @@ function emptyMap<Key, Value>(): Map<Key, Value> {
  */
 function emptySet<Value>(): Set<Value> {
   return new Set();
+}
+
+/**
+ * Creates the text input branch: no hidden input, nothing edited, an empty mirror.
+ *
+ * @returns The text state.
+ */
+function createTextState(): TextState {
+  return {
+    element: undefined,
+    editing: undefined,
+    mirror: { value: "", selectionStart: 0, selectionEnd: 0, direction: "none" },
+    composing: undefined,
+    keyboard: { inset: 0, innerHeight: 0, lift: 0 },
+    lifted: undefined,
+    placed: undefined,
+    watching: undefined,
+    cleanups: []
+  };
 }
 
 /**
@@ -46,6 +65,14 @@ export function createJsxState(): JsxState {
     hosts: emptySet(),
     hosted: emptyMap(),
     reconciles: 0,
-    focus: { entity: undefined, ring: undefined, drawn: undefined, tapping: false }
+    focus: {
+      entity: undefined,
+      ring: undefined,
+      drawn: undefined,
+      tapping: false,
+      ringless: false
+    },
+    fields: emptyMap(),
+    text: createTextState()
   };
 }

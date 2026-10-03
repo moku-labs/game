@@ -44,6 +44,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 | `drag(from, to)` | Reads `Draggable` of `from` and `DropTarget` of `to`, answers `{ intent: target.intent, payload: { ...draggable.payload, ...target.payload } }` |
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |
 | `onTap(fn)` | Registers a listener called with the tapped entity before the `Tappable` answer; returns the remover |
+| `onPointer(fn)` | Registers a listener called with the raw sample inside the DOM listener, for `down`, `up` and `cancel`; returns the remover |
 | `onKey(fn)` | Registers a listener called with `{ key, shift }` on every key; returning `true` marks it handled; returns the remover |
 | `pressKey(key, { shift })` | Runs the `onKey` listeners headless, the way a DOM `keydown` does; returns whether one handled the key |
 | `cursor()` | The CSS cursor input last wrote on the canvas (`"pointer"` over a control, `""` elsewhere) |
@@ -53,7 +54,28 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 
 `onTap` is the seam `ui` uses for a button that carries `LocalWrite` and no intent: the listeners run on every tap — the finger's and `app.input.tap`'s — in registration order, before the answer. A listener that throws is logged through `ctx.log.error` with its entity, and the listeners after it still run.
 
+`onPointer` is the one synchronous door, the seam `ui` uses to open the keyboard of a text field: iOS shows no keyboard for a `focus()` made in the next frame. The listeners run inside the DOM listener, right after the sample is queued, for `pointerdown`, `pointerup` and `pointercancel` only; never for a move, a leave or a lost capture, and never from `app.input.tap`, `press`, `drag` or `swipe`, which have no DOM moment. The sample is raw: `kind`, `pointerType`, `pointerId`, `clientX`, `clientY`; a listener converts with `renderer.viewport.toReference` itself. Input still decides nothing there: the frame step sees the same sample afterwards and resolves the tap as before. A listener that throws is logged through `ctx.log.error` with the sample kind, and the rest still run.
+
+```ts
+// ui opens the keyboard the moment the finger lifts on a text field, inside the DOM listener.
+const off = ctx.require(inputPlugin).onPointer(sample => {
+  if (sample.kind === "up" && fieldAt(sample.clientX, sample.clientY) !== undefined) element.focus({ preventScroll: true });
+  if (sample.kind === "down" && fieldAt(sample.clientX, sample.clientY) === undefined) element.blur();
+});
+```
+
 `onKey` is the seam `ui` uses for keyboard focus; input itself knows no focus and no key meaning. While the canvas is attached, one `keydown` listener on `window` hands `{ key: event.key, shift: event.shiftKey }` to every listener in registration order. A listener that returns `true` marks the key handled and input calls `preventDefault()`, so Tab stays on the canvas. A listener that throws is logged through `ctx.log.error` with its key, and the rest still run. `app.input.pressKey("Escape")` runs the same listeners without a keyboard.
+
+The window listener leaves a key typed into a text field to the browser. The test reads the event target alone; input knows no text field and no `ui`:
+
+| Target of the event | Key | Result |
+|---|---|---|
+| an editable element (`<input>`, `<textarea>` or content-editable) | any but Enter and Escape | skipped: the listeners never see it, the browser keeps the key |
+| an editable element | Enter with `isComposing` or `keyCode === 229` | skipped: an IME commit, not a submit |
+| an editable element | Enter or Escape otherwise | passed to the listeners; a handled one gets `preventDefault()` |
+| anything else | any | passed to the listeners |
+
+`app.input.pressKey("Enter")` runs the listeners headless as before, so a test submits a field with it.
 
 ```ts
 // a view spawned by the last commit exists after the next reconcile
@@ -65,7 +87,7 @@ expect(
 
 ## The frame step
 
-The DOM handlers do one thing: turn a pointer event into a raw sample and queue it. They hit-test nothing, answer nothing and write no component. Everything else runs in one `time.onFrame("input")` callback, registered in `onInit` — before `world` registers its own `input` callback in its `onStart` — so `Pointer`, `Held`, `Hovered` and `Pressed` are fresh when game systems of phase `input` read them.
+The DOM handlers do one thing: turn a pointer event into a raw sample and queue it, then hand a down, an up or a cancel to the `onPointer` listeners. They hit-test nothing, answer nothing and write no component. Everything else runs in one `time.onFrame("input")` callback, registered in `onInit` — before `world` registers its own `input` callback in its `onStart` — so `Pointer`, `Held`, `Hovered` and `Pressed` are fresh when game systems of phase `input` read them.
 
 | Step | What happens |
 |---|---|
@@ -199,7 +221,7 @@ No `pixi.js` import: the canvas is a DOM element and hit tests go through `rende
 
 ## Lifecycle
 
-`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`, and puts one `keydown` listener on `window`. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the six listeners, the `keydown` listener, the frame callback, the `onTap` and `onKey` listeners and a mute a drag still holds, and restores the touch action.
+`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`, and puts one `keydown` listener on `window`. The `pointerdown` listener calls `preventDefault()`: without it the compatibility `mousedown` blurs a text field right after an `onPointer` listener focused it. The engine uses no `click`, so nothing is lost. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the six listeners, the `keydown` listener, the frame callback, the `onTap`, `onKey` and `onPointer` listeners and a mute a drag still holds, and restores the touch action.
 
 ## Not in V2
 
