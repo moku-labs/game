@@ -50,7 +50,7 @@ bun add @moku-labs/game pixi.js
 ```
 
 > [!NOTE]
-> **Status: `0.1.0` on npm.** The first working release; the API may change before `1.0`. `pixi.js` `^8.0.0` is a peer dependency.
+> **Status: `0.1.0` on npm.** The first working release; the API may still change before `1.0`. `pixi.js` `^8.0.0` is a peer dependency.
 
 > [!IMPORTANT]
 > Bun only. ESM only. `"sideEffects": false`. There is no CJS build. `yoga-layout` is a dependency the `ui` plugin loads lazily; nothing imports it before `onStart`.
