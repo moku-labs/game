@@ -204,6 +204,28 @@ function checkTag(node: DescriptionNode): void {
 }
 
 /**
+ * What a button that answers carries: `Tappable` with its intent, or `Touchable` and
+ * `LocalWrite` with its patch, or `Touchable` alone when it names neither.
+ *
+ * @param node - The node of the button.
+ * @returns The component values.
+ */
+function answerOf(node: DescriptionNode): AnyComponentValue[] {
+  const intent = node.props.intent;
+  const local = node.props.local;
+
+  if (typeof intent === "string") {
+    return [Tappable({ intent, payload: (node.props.payload ?? {}) as Json })];
+  }
+
+  if (typeof local === "object" && local !== null) {
+    return [Touchable(), LocalWrite({ patch: local as Record<string, unknown> })];
+  }
+
+  return [Touchable()];
+}
+
+/**
  * The input components of an element: a button answers the gate, writes local state, or only
  * swallows the tap; a panel swallows the tap too, so nothing under it answers; a text field takes
  * the tap that starts its editing; a scroll container takes the press that moves its content. A button of a covered popup answers nothing,
@@ -224,28 +246,6 @@ function inputOf(element: Element): AnyComponentValue[] {
   const answering = answerOf(node);
 
   return node.props.escape === true ? [...answering, Escapable()] : answering;
-}
-
-/**
- * What a button that answers carries: `Tappable` with its intent, or `Touchable` and
- * `LocalWrite` with its patch, or `Touchable` alone when it names neither.
- *
- * @param node - The node of the button.
- * @returns The component values.
- */
-function answerOf(node: DescriptionNode): AnyComponentValue[] {
-  const intent = node.props.intent;
-  const local = node.props.local;
-
-  if (typeof intent === "string") {
-    return [Tappable({ intent, payload: (node.props.payload ?? {}) as Json })];
-  }
-
-  if (typeof local === "object" && local !== null) {
-    return [Touchable(), LocalWrite({ patch: local as Record<string, unknown> })];
-  }
-
-  return [Touchable()];
 }
 
 /**
@@ -531,61 +531,6 @@ export function createReconciler(
   }
 
   /**
-   * Updates one live element from its new node.
-   *
-   * @param root - The root being reconciled.
-   * @param element - The element that stayed.
-   * @param node - The node of this render.
-   * @param instance - The identity of the nearest component instance.
-   */
-  function patch(
-    root: Root,
-    element: Element,
-    node: DescriptionNode,
-    instance: string | undefined
-  ): void {
-    const previousNode = element.node;
-    const is = isFlagsOf(node, {
-      pressed: element.is.pressed,
-      hover: element.is.hover,
-      focus: element.is.focus,
-      covered: root.covered
-    });
-    const style = modules.styles.resolveElement(styleOf(node), is);
-    const moved = modules.layout.affectsRect(element.style, style);
-    const contentChanged =
-      previousNode.props.content !== node.props.content ||
-      previousNode.props.style !== node.props.style;
-
-    const motion = node.props.motion as ElementMotion | undefined;
-    const loopChanged = motion?.loop !== element.motion?.loop;
-
-    element.node = node;
-    element.is = is;
-    element.style = style;
-    element.motion = motion;
-    element.instance = instance;
-    trackHost(state, element);
-
-    if (element.type === "input") fields.patch(element);
-
-    // A new loop replaces the running one, and a motion without a loop stops it. An element that
-    // has not entered yet starts the loop of its motion when it enters.
-    if (loopChanged && element.entered) modules.layout.loop(element);
-
-    if (moved || contentChanged) {
-      modules.layout.applyStyle(element);
-      root.needsSolve = true;
-    }
-
-    if (element.live) writeLive(element);
-    // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
-    if (element.live && !moved) modules.layout.repose(element, parentRect(element), false);
-
-    diffChildren(root, element, childrenOf(node), instance);
-  }
-
-  /**
    * The rect of the parent of an element.
    *
    * @param element - The element.
@@ -615,48 +560,6 @@ export function createReconciler(
     }
 
     if (current.value !== value) ecs.set(element.entity, Order, { value });
-  }
-
-  /**
-   * Writes the visual and input components of a live element again. A visual or an input the
-   * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
-   * back, and a button that became disabled stops answering the gate. `Scroll` is only ever added:
-   * its offset belongs to the finger, and a new look or a new rect never resets it. The extras of
-   * the `components` prop are diffed last.
-   *
-   * @param element - The element that changed.
-   */
-  function writeLive(element: Element): void {
-    writeOrder(element);
-
-    // Remove the visuals and inputs the element no longer carries.
-    const values = [...visualOf(element), ...inputOf(element)];
-
-    for (const type of [...VISUALS, ...INPUTS]) {
-      const carried = values.some(value => value.type === type);
-      const isDropped = !carried && ecs.has(element.entity, type);
-
-      if (isDropped) ecs.remove(element.entity, type);
-    }
-
-    // Add the ones the entity lacks; patch the fields of the rest, but never a tag or `Scroll`.
-    for (const value of values) {
-      if (!ecs.has(element.entity, value.type)) {
-        ecs.add(element.entity, value);
-
-        continue;
-      }
-
-      const isPatchable = value.value !== true && value.type !== Scroll;
-
-      if (!isPatchable) continue;
-
-      const owned = ecs.typeOf(value.type.componentName)?.owned ?? [];
-
-      ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
-    }
-
-    writeExtras(element);
   }
 
   /**
@@ -722,6 +625,103 @@ export function createReconciler(
 
     // Remember them for the next diff.
     element.extras = next;
+  }
+
+  /**
+   * Writes the visual and input components of a live element again. A visual or an input the
+   * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
+   * back, and a button that became disabled stops answering the gate. `Scroll` is only ever added:
+   * its offset belongs to the finger, and a new look or a new rect never resets it. The extras of
+   * the `components` prop are diffed last.
+   *
+   * @param element - The element that changed.
+   */
+  function writeLive(element: Element): void {
+    writeOrder(element);
+
+    // Remove the visuals and inputs the element no longer carries.
+    const values = [...visualOf(element), ...inputOf(element)];
+
+    for (const type of [...VISUALS, ...INPUTS]) {
+      const carried = values.some(value => value.type === type);
+      const isDropped = !carried && ecs.has(element.entity, type);
+
+      if (isDropped) ecs.remove(element.entity, type);
+    }
+
+    // Add the ones the entity lacks; patch the fields of the rest, but never a tag or `Scroll`.
+    for (const value of values) {
+      if (!ecs.has(element.entity, value.type)) {
+        ecs.add(element.entity, value);
+
+        continue;
+      }
+
+      const isPatchable = value.value !== true && value.type !== Scroll;
+
+      if (!isPatchable) continue;
+
+      const owned = ecs.typeOf(value.type.componentName)?.owned ?? [];
+
+      ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
+    }
+
+    writeExtras(element);
+  }
+
+  /**
+   * Updates one live element from its new node.
+   *
+   * @param root - The root being reconciled.
+   * @param element - The element that stayed.
+   * @param node - The node of this render.
+   * @param instance - The identity of the nearest component instance.
+   */
+  function patch(
+    root: Root,
+    element: Element,
+    node: DescriptionNode,
+    instance: string | undefined
+  ): void {
+    const previousNode = element.node;
+    const is = isFlagsOf(node, {
+      pressed: element.is.pressed,
+      hover: element.is.hover,
+      focus: element.is.focus,
+      covered: root.covered
+    });
+    const style = modules.styles.resolveElement(styleOf(node), is);
+    const moved = modules.layout.affectsRect(element.style, style);
+    const contentChanged =
+      previousNode.props.content !== node.props.content ||
+      previousNode.props.style !== node.props.style;
+
+    const motion = node.props.motion as ElementMotion | undefined;
+    const loopChanged = motion?.loop !== element.motion?.loop;
+
+    element.node = node;
+    element.is = is;
+    element.style = style;
+    element.motion = motion;
+    element.instance = instance;
+    trackHost(state, element);
+
+    if (element.type === "input") fields.patch(element);
+
+    // A new loop replaces the running one, and a motion without a loop stops it. An element that
+    // has not entered yet starts the loop of its motion when it enters.
+    if (loopChanged && element.entered) modules.layout.loop(element);
+
+    if (moved || contentChanged) {
+      modules.layout.applyStyle(element);
+      root.needsSolve = true;
+    }
+
+    if (element.live) writeLive(element);
+    // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
+    if (element.live && !moved) modules.layout.repose(element, parentRect(element), false);
+
+    diffChildren(root, element, childrenOf(node), instance);
   }
 
   /**
@@ -808,6 +808,7 @@ export function createReconciler(
     nodes: readonly DescriptionNode[],
     instance: string | undefined
   ): void {
+    // Diff each child of this render; a component that threw before its first view has no entity.
     const next: Entity[] = [];
 
     for (const [index, node] of nodes.entries()) {
@@ -816,6 +817,7 @@ export function createReconciler(
       if (entity !== undefined) next.push(entity);
     }
 
+    // Start the exit of every old child this render left out.
     const kept = entitySet(next);
 
     for (const old of parent.children) {
@@ -826,6 +828,7 @@ export function createReconciler(
       if (element !== undefined) exitElement(element);
     }
 
+    // Keep the new list; the same children in the same order need no new placement.
     const same =
       next.length === parent.children.length &&
       next.every((entity, index) => parent.children[index] === entity);
@@ -834,6 +837,7 @@ export function createReconciler(
 
     if (same) return;
 
+    // Re-place the children in the layout once, and solve again.
     modules.layout.place(
       parent,
       next.map(entity => state.elements.get(entity)).filter(element => isElement(element))

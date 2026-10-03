@@ -69,15 +69,12 @@ function installCounting(
   install: InstallDrawCounting | undefined
 ): void {
   const state = ctx.state.host;
+  // A counter was injected and none is installed yet.
+  const canInstall = install !== undefined && state.uninstallCounting === undefined;
 
   // The guard of `capture()`, written as a positive branch: Bun 1.3.14 drops code used only
   // inside a folded `if`, but keeps code used after a folded early `return`.
-  if (
-    typeof __MOKU_GAME_DEV__ !== "undefined" &&
-    __MOKU_GAME_DEV__ &&
-    install !== undefined &&
-    state.uninstallCounting === undefined
-  ) {
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__ && canInstall) {
     ctx.log.debug("moku:dev", { command: "renderer.drawCalls" });
 
     try {

@@ -17,11 +17,6 @@ import type { Point, ViewportApi, ViewportInternal } from "../viewport/types";
 /**
  * Which component gave an entity its display object. `"adapter"` is a component a plugin above
  * registered with `displays.provide`.
- *
- * @example
- * ```ts
- * const kind: ViewKind = "NineSlice";
- * ```
  */
 export type ViewKind = "Sprite" | "NineSlice" | "Shape" | "Display" | "adapter";
 
@@ -81,26 +76,11 @@ export type DisplayEntry = {
 
 /**
  * The rectangle a hit test checks, in the local space of the view: anchor already applied.
- *
- * @example
- * ```ts
- * const box: HitBox = { x: -32, y: -32, width: 64, height: 64 };
- * ```
  */
 export type HitBox = { x: number; y: number; width: number; height: number };
 
 /**
  * What `sync` knows about one drawn entity.
- *
- * @example
- * ```ts
- * const view: View = {
- *   object: sprite, kind: "Sprite", poolKey: "Sprite:board.cell", layer: "items",
- *   textureKey: "board.cell", wrapper: undefined, placeholder: false, mask: undefined,
- *   display: undefined, value: undefined, drawScale: { x: 1, y: 1 }, frameKey: "",
- *   outline: undefined, hitBox: { x: -32, y: -32, width: 64, height: 64 }
- * };
- * ```
  */
 export type View = {
   object: PixiContainer;
@@ -136,31 +116,16 @@ export type View = {
  * The crop of a `"cover"` sprite: a texture that shows the part of `base` covering one box.
  * Cached by texture key and box size, shared by the entities in `users`, and freed when the last
  * of them lets go or when its base is destroyed.
- *
- * @example
- * ```ts
- * const frame: CoverFrame = { base: meadow, texture: meadowCut, users: new Set([1_048_576]) };
- * ```
  */
 export type CoverFrame = { base: PixiTexture; texture: PixiTexture; users: Set<Entity> };
 
 /**
  * The one world read the pose helpers need, so a caller passes `world.ecs` as it is.
- *
- * @example
- * ```ts
- * const reader: PoseReader = ctx.require(worldPlugin).ecs;
- * ```
  */
 export type PoseReader = Pick<EcsApi, "get">;
 
 /**
  * One layer of the scene: its container and the sort rule its children follow.
- *
- * @example
- * ```ts
- * const entry: LayerEntry = { container: itemsContainer, sort: "y" };
- * ```
  */
 export type LayerEntry = { container: PixiContainer | undefined; sort: LayerSort };
 
@@ -211,9 +176,11 @@ export type SliceFrame = { x: number; y: number; width: number; height: number }
  *
  * @example
  * ```ts
- * // `assets` decoded a file, hands the bitmap over and answers for the key from then on.
- * const texture = app.renderer.sync.textures.create(bitmap);
- * app.renderer.sync.textures.invalidate(["board.cell"]);
+ * // `assets` decoded a file of a bundle: it uploads it, then the views of the key draw it.
+ * const renderer = ctx.require(rendererPlugin);
+ * const bitmap = await createImageBitmap(await (await fetch("/assets/board/cell.png")).blob());
+ * const texture = renderer.sync.textures.create(bitmap); // texture.width === bitmap.width
+ * renderer.sync.textures.invalidate(["board.cell"]); // the next pass resolves "board.cell" again
  * ```
  */
 export type TexturesApi = {
@@ -498,7 +465,9 @@ export type DebugApi = {
  * @example
  * ```ts
  * // `input` turns a pointer position into the entity under the finger.
- * app.renderer.sync.hitTest(540, 300, entity => !app.world.ecs.has(entity, Exiting)); // 1048576
+ * const renderer = ctx.require(rendererPlugin);
+ * const world = ctx.require(worldPlugin);
+ * renderer.sync.hitTest(540, 300, entity => !world.ecs.has(entity, Exiting)); // 1048576
  * ```
  */
 export type SyncApi = {
@@ -642,11 +611,6 @@ export type SyncInternal = {
 /**
  * The display objects `sync` holds, views of entities and pooled objects, and the render passes
  * its filter slots cost.
- *
- * @example
- * ```ts
- * const counts: SyncCounts = { views: 180, pooled: 24, renderPasses: 3 };
- * ```
  */
 export type SyncCounts = { views: number; pooled: number; renderPasses: number };
 

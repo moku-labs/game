@@ -4,6 +4,7 @@
  * then write the pack folder and prune it. This is the only file that touches the pack folder;
  * nothing is written there while a problem is open.
  */
+import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AtlasPage, Manifest, ManifestBundle, ManifestFile } from "../../types";
@@ -577,10 +578,12 @@ export function checkPacked(source: Manifest, packed: Manifest): string[] {
   const scanned = emptyMap<string, ManifestFile>();
   const landed = emptyMap<string, number>();
 
+  // Index the scan by key: the textures are checked against their sources.
   for (const bundle of Object.values(source.bundles)) {
     for (const file of bundle.files) scanned.set(file.key, file);
   }
 
+  // Count where every key landed and check each packed texture against its page and source.
   for (const [name, entry] of Object.entries(packed.bundles)) {
     for (const file of entry.files) {
       landed.set(file.key, (landed.get(file.key) ?? 0) + 1);
@@ -591,6 +594,7 @@ export function checkPacked(source: Manifest, packed: Manifest): string[] {
     }
   }
 
+  // Every key of either side is in the scan and landed exactly once.
   for (const key of keysOfBoth(scanned, landed)) {
     const count = landed.get(key) ?? 0;
 
@@ -630,6 +634,37 @@ async function writeChanged(file: string, bytes: Uint8Array): Promise<void> {
 }
 
 /**
+ * Prunes one entry of a folder: a sub-folder is pruned and removed once empty, a kept file stays,
+ * any other file is deleted.
+ *
+ * @param folder - The folder that holds the entry.
+ * @param entry - The entry as `readdir` listed it.
+ * @param keep - Absolute paths of the files to keep.
+ * @returns True when the entry is gone afterwards.
+ */
+async function pruneEntry(
+  folder: string,
+  entry: Dirent,
+  keep: ReadonlySet<string>
+): Promise<boolean> {
+  const target = path.join(folder, entry.name);
+
+  if (entry.isDirectory()) {
+    if (!(await prune(target, keep))) return false;
+
+    await rmdir(target);
+
+    return true;
+  }
+
+  if (keep.has(target)) return false;
+
+  await rm(target, { force: true });
+
+  return true;
+}
+
+/**
  * Deletes every file under a folder that is not kept, and every folder that ends up empty.
  *
  * @param folder - The folder to prune.
@@ -640,16 +675,7 @@ async function prune(folder: string, keep: ReadonlySet<string>): Promise<boolean
   let empty = true;
 
   for (const entry of await readdir(folder, { withFileTypes: true })) {
-    const target = path.join(folder, entry.name);
-
-    if (entry.isDirectory()) {
-      if (await prune(target, keep)) await rmdir(target);
-      else empty = false;
-    } else if (keep.has(target)) {
-      empty = false;
-    } else {
-      await rm(target, { force: true });
-    }
+    if (!(await pruneEntry(folder, entry, keep))) empty = false;
   }
 
   return empty;
@@ -752,13 +778,10 @@ function countLoose(bundles: readonly ManifestBundle[]): number {
  *   folder holds the sources.
  * @example
  * ```ts
- * // After `scanAssets` read the features of the game.
+ * // After `scanAssets` read the features of the game. `cache: false` skips the cache.
  * const { manifest, pages, cacheHits } = await packAssets({
- *   root: "src",
- *   manifest: scanned,
- *   out: "dist/assets",
- *   manifestFile: "dist/assets/manifest.json",
- *   cache: "node_modules/.cache/moku-game-pack"
+ *   root: "src", manifest: scanned, cache: "node_modules/.cache/moku-game-pack",
+ *   out: "dist/assets", manifestFile: "dist/assets/manifest.json"
  * });
  * // manifest.version: 2; on a second run with the same art, cacheHits equals pages
  * ```

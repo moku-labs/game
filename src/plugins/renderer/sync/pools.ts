@@ -130,6 +130,18 @@ function emptyPool(): PixiContainer[] {
 }
 
 /**
+ * The pool that holds the object that has waited longest.
+ *
+ * @param state - The sync branch of the plugin state.
+ * @returns A non-empty pool, or `undefined` when every pool is empty.
+ */
+function oldestPool(state: SyncState): PixiContainer[] | undefined {
+  for (const pool of state.pools.values()) if (pool.length > 0) return pool;
+
+  return undefined;
+}
+
+/**
  * Puts a view's object back into its pool and evicts the oldest one when the pool grew past the
  * configured limit. A `Display` object belongs to the game and is only detached. The filters the
  * renderer hung on the object or its wrapper come off first, so a pooled object never carries a
@@ -187,18 +199,6 @@ export function release(sctx: SyncCtx, view: View): void {
     oldest.shift()?.destroy({ texture: false });
     state.pooled -= 1;
   }
-}
-
-/**
- * The pool that holds the object that has waited longest.
- *
- * @param state - The sync branch of the plugin state.
- * @returns A non-empty pool, or `undefined` when every pool is empty.
- */
-function oldestPool(state: SyncState): PixiContainer[] | undefined {
-  for (const pool of state.pools.values()) if (pool.length > 0) return pool;
-
-  return undefined;
 }
 
 /**

@@ -57,25 +57,33 @@ export function pickVictim(state: State): string | undefined {
 }
 
 /**
- * Frees what a bundle brought and empties its four maps: every texture, every atlas page and every
- * font page goes back to the GPU, the audio bytes go to the garbage collector. The textures go
- * first, because a slice of a packed file frees only itself and its page frees the source they
- * share; then the pages, then the font pages. Headless there is no io and nothing to destroy, so
- * only the maps are emptied.
+ * Gives every texture, every atlas page and every font page of a bundle back to the GPU. The
+ * textures go first, because a slice of a packed file frees only itself and its page frees the
+ * source they share; then the pages, then the font pages.
+ *
+ * @param io - The I/O seam.
+ * @param assets - The maps of a loaded bundle, or of a load that broke half way.
+ */
+function destroyGpuAssets(io: AssetsIo, assets: LoadedAssets): void {
+  for (const texture of assets.textures.values()) io.destroyTexture(texture);
+
+  for (const page of assets.pages.values()) io.destroyTexture(page);
+
+  for (const font of assets.fonts.values()) {
+    for (const page of font.pages) io.destroyTexture(page);
+  }
+}
+
+/**
+ * Frees what a bundle brought and empties its four maps: the textures and pages go back to the
+ * GPU, the audio bytes go to the garbage collector. Headless there is no io and nothing to
+ * destroy, so only the maps are emptied.
  *
  * @param io - The I/O seam, or `undefined` while headless.
  * @param assets - The maps of a loaded bundle, or of a load that broke half way.
  */
 export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): void {
-  if (io !== undefined) {
-    for (const texture of assets.textures.values()) io.destroyTexture(texture);
-
-    for (const page of assets.pages.values()) io.destroyTexture(page);
-
-    for (const font of assets.fonts.values()) {
-      for (const page of font.pages) io.destroyTexture(page);
-    }
-  }
+  if (io !== undefined) destroyGpuAssets(io, assets);
 
   assets.textures.clear();
   assets.pages.clear();

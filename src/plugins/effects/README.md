@@ -120,7 +120,7 @@ One system, `effects:filters`, phase `sync`, in every world mode. It walks the v
 | Key | Default | Meaning |
 |---|---|---|
 | `maxParticles` | `3000` | Live particles over all instances above which `effects:particle-budget` warns once per crossing |
-| `maxPasses` | `24` | Render passes per frame above which `effects:pass-budget` warns once per crossing |
+| `maxPasses` | `24` | Render passes per frame above which `effects:pass-budget` warns once per crossing. Checked only while a filtered view exists: with none, the frame is at most one pass under any budget |
 | `phone` | `"auto"` | Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart` |
 | `blur` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to. Shallow merge: a game that sets `blur` gives both fields |
 

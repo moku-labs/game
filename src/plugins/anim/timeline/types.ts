@@ -149,14 +149,6 @@ export type ExternalPlayer = { readonly name: string; play(clip: string): unknow
 /**
  * Where one step of a running timeline stands. One mutable record per step of the tree, built
  * when the timeline starts.
- *
- * @example
- * ```ts
- * const cursor: Cursor = {
- *   step: { kind: "wait", ms: 120 }, children: [], index: 0, elapsed: 0,
- *   motion: undefined, started: false, ended: false, held: undefined
- * };
- * ```
  */
 export type Cursor = {
   readonly step: Step;

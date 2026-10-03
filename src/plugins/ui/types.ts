@@ -176,10 +176,12 @@ export type UiApi = {
    * @returns The root node; several roots come back under one `screen` node.
    * @example
    * ```ts
-   * // A snapshot test reads the HUD without a browser.
-   * app.ui.tree().children.map(child => child.key); // ["coins", "settings", "order"]
-   * // On an iPhone SE the board slot is drawn at 0.8 of its 970 u.
-   * app.ui.tree().children[3]?.fitScale; // 0.8
+   * // On an iPhone SE the 970 u board is drawn smaller to fit the slot between the bars.
+   * const screen = app.ui.tree();
+   * screen.children.map(child => child.key); // ["fitTop", "slot", "fitBottom"]
+   * const board = screen.children[1]?.children[0];
+   * board?.rect.w; // 970, the natural width
+   * board?.fitScale; // 0.805, the 781 u the slot leaves over 970 u
    * ```
    */
   tree(): UiNode;

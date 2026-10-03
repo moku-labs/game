@@ -389,17 +389,12 @@ export type JsxState = {
  *
  * @example
  * ```ts
- * // The board slot of a merge game on an iPhone SE.
- * const node: UiNode = {
- *   key: "boardSlot", type: "stack", rect: { x: 55, y: 223, w: 970, h: 970 },
- *   style: { width: 970, height: 970, fit: "contain" },
- *   state: {
- *     pressed: false, hover: false, focus: false, disabled: false, active: false, selected: false,
- *     covered: false
- *   },
- *   fitScale: 0.8,
- *   children: []
- * };
+ * // A profile screen before the player types: its name field shows the value, not its parts.
+ * const field = app.ui.tree().children[0];
+ * field?.key; // "nickField"
+ * field?.rect; // { x: 0, y: 0, w: 400, h: 80 }
+ * field?.value; // ""
+ * field?.children; // []
  * ```
  */
 export type UiNode = {
