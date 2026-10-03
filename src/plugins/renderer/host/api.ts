@@ -3,7 +3,7 @@
  * above it ever touches Pixi's `Application`.
  */
 import type { HostModule, PixiContainer, PixiModule, RendererCtx, RendererKind } from "../types";
-import { liveDevice, watchDevice } from "./device";
+import { liveDevice, liveGl, watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
 import { extractStage, textureUsage } from "./readback";
 import type { HostDeps, TextureUsage } from "./types";
@@ -54,6 +54,7 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
     canvas: (): HTMLCanvasElement | undefined => state.canvas,
     pixi: (): PixiModule | undefined => (state.ready ? state.pixi : undefined),
     device: (): GPUDevice | undefined => liveDevice(state),
+    gl: (): WebGL2RenderingContext | undefined => liveGl(state),
     stage: (): PixiContainer | undefined => state.app?.stage,
     mount: (): HTMLElement | undefined => state.mount,
 

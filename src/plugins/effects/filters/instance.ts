@@ -1,10 +1,11 @@
 /**
  * @file effects/filters — the only file that builds, writes and destroys Pixi filters. Ours: a
- * `Filter` over a `GpuProgram` of the assembled WGSL with a `UniformGroup` bound as `fu`, written
- * every frame. The Pixi-core kinds: their own class, written through their setters when the
- * component changed. Every kind but `Blur` renders at `resolution: "inherit"`, the resolution of
- * the canvas, so a filtered view stays sharp on DPR 2-3 (decision 32). A destroy frees the uniform buffers first: `Filter.destroy()` leaves them to
- * a GC that runs after a minute (P10).
+ * `Filter` over a `GpuProgram` of the assembled WGSL and a `GlProgram` of the assembled GLSL, with
+ * one `UniformGroup` both read, written every frame. The Pixi-core kinds: their own class, written
+ * through their setters when the component changed. Every kind but `Blur` renders at
+ * `resolution: "inherit"`, the resolution of the canvas, so a filtered view stays sharp on DPR 2-3
+ * (decision 32). A destroy frees the uniform buffers first: `Filter.destroy()` leaves them to a GC
+ * that runs after a minute (P10).
  */
 import type { PixiModule } from "../../renderer/types";
 import type { EffectsCtx } from "../types";
@@ -109,8 +110,10 @@ function paddingOf(definition: FilterDefinition, value: Readonly<FilterFields>):
 }
 
 /**
- * Builds an instance of ours. `GpuProgram.from` caches by source, so every view of a kind shares
- * one program. No `glProgram`: the engine draws with WebGPU only.
+ * Builds an instance of ours with both programs; Pixi draws the one of the running backend. The
+ * one uniform group binds as `fu` on WebGPU and by bare uniform name on WebGL, where the GLSL
+ * header declares each name. `GpuProgram.from` and `GlProgram.from` cache by source, so every
+ * view of a kind shares its programs.
  *
  * @param pixi - The module the renderer loaded.
  * @param definition - The filter definition.
@@ -128,6 +131,11 @@ function createOurs(
     vertex: { source, entryPoint: "mainVertex" },
     fragment: { source, entryPoint: "mainFragment" }
   });
+  const glProgram = pixi.GlProgram.from({
+    name: definition.id,
+    vertex: pixi.defaultFilterVert,
+    fragment: definition.glsl
+  });
   const structures: Record<string, UniformStructure> = {};
 
   for (const uniform of definition.uniforms) {
@@ -137,6 +145,7 @@ function createOurs(
   const group = definition.uniforms.length > 0 ? new pixi.UniformGroup(structures) : undefined;
   const filter = new pixi.Filter({
     gpuProgram,
+    glProgram,
     resources: group === undefined ? {} : { fu: group },
     padding: paddingOf(definition, value),
     resolution: CANVAS_RESOLUTION

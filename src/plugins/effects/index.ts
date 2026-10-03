@@ -1,8 +1,8 @@
 /**
  * Effects plugin — Complex tier.
  *
- * Particles on Pixi's `ParticleContainer` and WGSL filters as flat components, both cosmetic and
- * stepped by world systems. Emits no events.
+ * Particles on Pixi's `ParticleContainer` and custom filters (WGSL with a GLSL twin) as flat
+ * components, both cosmetic and stepped by world systems. Emits no events.
  *
  * @see README.md
  */

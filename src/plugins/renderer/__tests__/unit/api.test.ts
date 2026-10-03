@@ -20,6 +20,7 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api.host).toSorted()).toEqual([
       "canvas",
       "device",
+      "gl",
       "kind",
       "pixi",
       "ready"

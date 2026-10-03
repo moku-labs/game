@@ -20,10 +20,30 @@ import type {
   ExternalPlayer,
   FxStep,
   HapticDescriptor,
+  HapticKind,
   PlayDescriptor,
   SfxDescriptor,
   Step
 } from "./types";
+
+/**
+ * Every haptic tick `haptic(kind)` takes, in one frozen list: the three impacts, the selection
+ * tick and the three notifications. `platform` checks a kind against it before it plays one.
+ *
+ * @example
+ * ```ts
+ * HAPTIC_KINDS.includes("light"); // true
+ * ```
+ */
+export const HAPTIC_KINDS = Object.freeze([
+  "light",
+  "medium",
+  "heavy",
+  "selection",
+  "success",
+  "warning",
+  "error"
+] as const);
 
 /** What a `tween` step runs on when the author named nothing else. */
 export const DEFAULT_EASE: Ease = "out";
@@ -392,14 +412,14 @@ export function sfx(key: string, options?: { bus?: string }): SfxDescriptor {
 /**
  * A haptic tick. `platform` owns the handler; a device without one stays still.
  *
- * @param kind - Which tick to play, for example `"light"`.
+ * @param kind - Which tick to play, one of `HAPTIC_KINDS`, for example `"light"`.
  * @returns The descriptor, usable as a timeline step and as `fx(...)` in a node.
  * @example
  * ```ts
  * haptic("light"); // { kind: "haptic", payload: { kind: "light" }, cosmetic: true }
  * ```
  */
-export function haptic(kind: string): HapticDescriptor {
+export function haptic(kind: HapticKind): HapticDescriptor {
   return Object.freeze({
     kind: "haptic" as const,
     payload: Object.freeze({ kind }),

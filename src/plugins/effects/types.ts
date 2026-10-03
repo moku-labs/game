@@ -58,11 +58,11 @@ export type State = {
   seedCounter: number;
   /** Live particles after the last step. */
   particles: number;
-  /** Filter kinds whose WGSL failed the dev check. */
+  /** Filter kinds whose shader failed the dev check on the running backend. */
   broken: Set<string>;
   /** The filter kinds, built-ins first, then the filters of every feature. */
   kinds: Map<string, FilterKind>;
-  /** The dev WGSL check per kind; `broken` holds the failed ones. */
+  /** The dev shader check per kind; `broken` holds the failed ones. */
   checks: Map<string, "pending" | "ok">;
   /** Entity to the filters the sync keeps for it. */
   views: Map<Entity, FilteredView>;

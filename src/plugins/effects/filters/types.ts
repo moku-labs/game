@@ -6,8 +6,9 @@ import type { FilterSlot, PixiFilter, PixiModule, PixiSprite } from "../../rende
 import type { ComponentHandle, ComponentType } from "../../world/types";
 
 /**
- * One uniform of a custom filter, as declared: a number is an `f32`, `{ color }` a `0xrrggbb`
- * hex sent as a `vec3<f32>`, a tuple of 2 to 4 numbers a `vecN<f32>`.
+ * One uniform of a custom filter, as declared: a number is an `f32` (`float` in GLSL), `{ color }`
+ * a `0xrrggbb` hex sent as a `vec3<f32>` (`vec3`), a tuple of 2 to 4 numbers a `vecN<f32>`
+ * (`vecN`).
  *
  * @example
  * ```ts
@@ -51,20 +52,29 @@ export type FilterValueOf<Uniforms extends Record<string, UniformDeclaration>> =
 } & { enabled: boolean; order: number };
 
 /**
- * What `defineFilter` takes besides the id. `wgsl` is the fragment body only; the engine
- * prepends the vertex stage, the input bindings and the `FilterUniforms` struct.
+ * What `defineFilter` takes besides the id. Both bodies are required, so the filter draws on
+ * WebGPU and on the WebGL fallback: `wgsl` is the WGSL fragment body only, the engine prepends the
+ * vertex stage, the input bindings and the `FilterUniforms` struct; `glsl` is its GLSL ES 3.0 twin
+ * over the same uniform names, the engine prepends the version, the inputs, `finalColor` and one
+ * `uniform` per declared uniform.
  *
  * @example
  * ```ts
  * const spec: FilterSpec<{ amount: number }> = {
  *   wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return textureSample(uTexture, uSampler, uv) * fu.amount; }",
+ *   glsl: "void main() { finalColor = texture(uTexture, vTextureCoord) * amount; }",
  *   uniforms: { amount: 1 }
  * };
  * ```
  */
 export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
-  /** The fragment body: `fn mainFragment` and its helpers, without the engine's header. */
+  /** The WGSL fragment body: `fn mainFragment` and its helpers, without the engine's header. */
   readonly wgsl: string;
+  /**
+   * The GLSL ES 3.0 fragment body: `void main()`, which sets `finalColor`, and its helpers, without
+   * the engine's header. It reads each uniform under its bare name: `amount`, not `fu.amount`.
+   */
+  readonly glsl: string;
   /** The uniforms in struct order. Default `{}`. */
   readonly uniforms?: Uniforms;
   /** Render passes one apply of the filter costs, an integer of at least 1. Default `1`. */
@@ -89,18 +99,23 @@ export type UniformSpec = {
 };
 
 /**
- * The filter a component made by `defineFilter` carries: the assembled WGSL, the uniforms in
- * struct order, the passes one apply costs and the padding.
+ * The filter a component made by `defineFilter` carries: the assembled WGSL in `source`, the
+ * assembled GLSL in `glsl`, the uniforms in struct order, the passes one apply costs and the
+ * padding.
  *
  * @example
  * ```ts
- * Tint.filter.passes; // 1
+ * Tint.filter.source.includes("fn mainFragment"); // true: the WGSL, drawn on WebGPU
+ * Tint.filter.glsl.startsWith("#version 300 es"); // true: the GLSL, drawn on WebGL
  * Tint.filter.uniforms.map(uniform => uniform.name); // ["amount", "color"]
  * ```
  */
 export type FilterDefinition = {
   readonly id: string;
+  /** The assembled WGSL: the engine's header, the uniform struct, the body. */
   readonly source: string;
+  /** The assembled GLSL ES 3.0: the engine's header, one `uniform` per uniform, the body. */
+  readonly glsl: string;
   readonly uniforms: readonly UniformSpec[];
   readonly passes: number;
   readonly padding: number | string;
@@ -113,7 +128,7 @@ export type FilterDefinition = {
  * @example
  * ```ts
  * const Tint: FilterComponent<{ amount: number; enabled: boolean; order: number }> =
- *   defineFilter("fx.tint", { wgsl: tintBody, uniforms: { amount: 0 } });
+ *   defineFilter("fx.tint", { wgsl: tintWgsl, glsl: tintGlsl, uniforms: { amount: 0 } });
  * Tint.componentName; // "fx.tint"
  * ```
  */
@@ -258,7 +273,8 @@ export type AlphaValue = { alpha: number; enabled: boolean; order: number };
 export type CoreKind = "blur" | "colorMatrix" | "noise" | "displacement" | "alpha";
 
 /**
- * Where a filter kind comes from: our or a game's WGSL, or a Pixi core filter.
+ * Where a filter kind comes from: our or a game's shaders (`"wgsl"`, with the GLSL twin beside
+ * it), or a Pixi core filter.
  */
 export type KindSource =
   | { readonly source: "wgsl"; readonly definition: FilterDefinition }

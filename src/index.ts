@@ -272,6 +272,7 @@ export {
   defineAnimation,
   external,
   frames,
+  HAPTIC_KINDS,
   haptic,
   mark,
   parallel,
@@ -286,6 +287,7 @@ export {
   use,
   wait
 } from "./plugins/anim/timeline/steps";
+export type { HapticKind } from "./plugins/anim/timeline/types";
 // i18n: messages as data
 export { tr } from "./plugins/i18n/tr";
 export type { DescriptionNode } from "./plugins/world/projection/types";

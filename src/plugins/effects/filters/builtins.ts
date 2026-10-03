@@ -1,11 +1,14 @@
 /**
  * @file effects/filters — the seven built-in filter components: `Glow` and `Outline` over our
- * WGSL, `Blur`, `ColorMatrix`, `Noise`, `Displacement` and `Alpha` over Pixi's core filters. The
- * plugin registers them before any feature, in this order. No `pixi-filters` dependency.
+ * WGSL and its GLSL twin, `Blur`, `ColorMatrix`, `Noise`, `Displacement` and `Alpha` over Pixi's
+ * core filters, which ship both. The plugin registers them before any feature, in this order. No
+ * `pixi-filters` dependency.
  */
 import { component } from "../../world/ecs/define";
 import { defineFilter } from "./define";
+import { GLOW_GLSL } from "./glow-glsl";
 import { GLOW_WGSL } from "./glow-wgsl";
+import { OUTLINE_GLSL } from "./outline-glsl";
 import { OUTLINE_WGSL } from "./outline-wgsl";
 import type {
   AlphaValue,
@@ -66,6 +69,7 @@ const alphaDefaults: AlphaValue = { alpha: 1, enabled: true, order: 0 };
  */
 export const Glow: FilterComponent<GlowValue> = /*#__PURE__*/ defineFilter("effects.glow", {
   wgsl: GLOW_WGSL,
+  glsl: GLOW_GLSL,
   uniforms: { strength: 2, distance: 10, color: { color: 0xff_ff_ff }, alpha: 1 },
   padding: "distance"
 });
@@ -84,6 +88,7 @@ export const Outline: FilterComponent<OutlineValue> = /*#__PURE__*/ defineFilter
   "effects.outline",
   {
     wgsl: OUTLINE_WGSL,
+    glsl: OUTLINE_GLSL,
     uniforms: { thickness: 2, color: { color: 0x00_00_00 }, alpha: 1 },
     padding: "thickness"
   }

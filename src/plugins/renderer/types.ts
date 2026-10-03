@@ -17,7 +17,8 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * The part of Pixi the engine uses: the classes `sync` builds views from (a `Rectangle` frames the
  * crop of a `"cover"` sprite), the bitmap-font pieces `fonts.install` needs, the `BitmapText` a
  * plugin above builds through `host.pixi()`, the filter and particle classes `effects` builds
- * through it, and the extension registry with the three WebGPU draw classes the dev draw-call
+ * through it (a custom filter carries a `GpuProgram` and a `GlProgram` over `defaultFilterVert`),
+ * and the extension registry with the three WebGPU draw classes the dev draw-call
  * counter swaps and the bitmap text pipe `host` swaps for one whose SDF shader applies the alpha
  * once (with the WGSL and GLSL shader pieces it compiles that shader from). The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
@@ -29,6 +30,7 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * pixi.Texture.WHITE.width; // 1
  * pixi.GpuBatchAdaptor.extension.name; // "batch"
  * pixi.BitmapTextPipe.extension.name; // "bitmapText"
+ * pixi.defaultFilterVert.startsWith("in vec2 aPosition;"); // true
  * ```
  */
 export type PixiModule = Pick<
@@ -44,6 +46,7 @@ export type PixiModule = Pick<
   | "Container"
   | "DisplacementFilter"
   | "Filter"
+  | "GlProgram"
   | "GpuBatchAdaptor"
   | "GpuEncoderSystem"
   | "GpuGraphicsAdaptor"
@@ -65,6 +68,7 @@ export type PixiModule = Pick<
   | "colorBitGl"
   | "compileHighShaderGlProgram"
   | "compileHighShaderGpuProgram"
+  | "defaultFilterVert"
   | "extensions"
   | "generateTextureBatchBit"
   | "generateTextureBatchBitGl"

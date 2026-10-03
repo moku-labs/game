@@ -852,7 +852,21 @@ export class FakeGlProgram {
   public constructor(options: Record<string, unknown>) {
     this.options = options;
   }
+
+  /**
+   * Builds a program, as Pixi's `GlProgram.from` does.
+   *
+   * @param options - Name, vertex and fragment sources.
+   * @returns A new program.
+   */
+  public static from(options: Record<string, unknown>): FakeGlProgram {
+    return new FakeGlProgram(options);
+  }
 }
+
+/** The fake of Pixi's `defaultFilterVert`: the vertex stage every filter's `GlProgram` takes. */
+export const FAKE_FILTER_VERT =
+  "in vec2 aPosition;\nout vec2 vTextureCoord;\n// fake filter vertex\n";
 
 /** One stage of a high-shader bit: the WGSL it adds at each hook. */
 export type FakeShaderStage = { header?: string; start?: string; main?: string; end?: string };
@@ -1185,6 +1199,48 @@ function compileShader(_descriptor: { code: string }): FakeShaderModule {
   return { getCompilationInfo: () => Promise.resolve({ messages: [] }) };
 }
 
+/** A shader of the fake WebGL context: the source it was given. */
+export type FakeGlShader = { source: string };
+
+/** The fake WebGL2 context of a WebGL renderer: the GLSL compile `effects` checks in dev. */
+export type FakeGlContext = {
+  readonly FRAGMENT_SHADER: number;
+  readonly COMPILE_STATUS: number;
+  /** Every GLSL source compiled, in order. */
+  compiled: string[];
+  createShader(type: number): FakeGlShader;
+  shaderSource(shader: FakeGlShader, source: string): void;
+  compileShader(shader: FakeGlShader): void;
+  getShaderParameter(shader: FakeGlShader, name: number): boolean;
+  getShaderInfoLog(shader: FakeGlShader): string;
+  deleteShader(shader: FakeGlShader): void;
+};
+
+/**
+ * Creates the fake WebGL2 context: every source compiles with an empty log.
+ *
+ * @returns The context, recording its compiles.
+ */
+export function createFakeGlContext(): FakeGlContext {
+  const context: FakeGlContext = {
+    FRAGMENT_SHADER: 0x8b_30,
+    COMPILE_STATUS: 0x8b_81,
+    compiled: [],
+    createShader: () => ({ source: "" }),
+    shaderSource: (shader, source) => {
+      shader.source = source;
+    },
+    compileShader: shader => {
+      context.compiled.push(shader.source);
+    },
+    getShaderParameter: () => true,
+    getShaderInfoLog: () => "",
+    deleteShader: () => undefined
+  };
+
+  return context;
+}
+
 /** What the fake renderer recorded. */
 export type FakeRenderer = FakeDrawTarget & {
   name: "webgpu" | "webgl";
@@ -1193,6 +1249,8 @@ export type FakeRenderer = FakeDrawTarget & {
   frameDraws: number;
   resizes: Array<{ width: number; height: number }>;
   gpu?: { device: FakeGpuDevice };
+  /** The WebGL2 context, as Pixi's `WebGLRenderer.gl`; only a WebGL renderer has one. */
+  gl?: FakeGlContext;
   /** The GPU texture sources, as Pixi's `renderer.texture.managedTextures`. */
   texture: { managedTextures: FakeManagedSource[] };
   /** Pixi's extract system: `base64` records its options and answers `FAKE_PNG`. */
@@ -1325,6 +1383,8 @@ export class FakeApplication {
       };
     }
 
+    if (FakeApplication.settings.kind === "webgl") renderer.gl = createFakeGlContext();
+
     this.textPipe = fakeExtensions.named(
       FakeApplication.settings.kind === "webgpu" ? WEBGPU_PIPES : WEBGL_PIPES,
       "bitmapText"
@@ -1412,6 +1472,8 @@ export function createFakePixi(
     bitmapFontXMLStringParser: fakeXmlParser,
     Filter: FakeFilter,
     GpuProgram: FakeGpuProgram,
+    GlProgram: FakeGlProgram,
+    defaultFilterVert: FAKE_FILTER_VERT,
     UniformGroup: FakeUniformGroup,
     BlurFilter: FakeBlurFilter,
     ColorMatrixFilter: FakeColorMatrixFilter,

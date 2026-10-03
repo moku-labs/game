@@ -1,6 +1,6 @@
 # effects
 
-> Complex plugin — cosmetic rendering extras as data. `defineEmitter` describes a particle effect; the `Emitter` component on an entity runs it on one Pixi `ParticleContainer` stepped by the engine clock. `defineFilter` turns a WGSL fragment body into a flat component type, so the existing `tween` drives it. Seven filters ship built in. Nothing here enters `model`, the journal or a save. Opt-in: a game composes `[...screen, effectsPlugin]`.
+> Complex plugin — cosmetic rendering extras as data. `defineEmitter` describes a particle effect; the `Emitter` component on an entity runs it on one Pixi `ParticleContainer` stepped by the engine clock. `defineFilter` turns a WGSL fragment body and its GLSL twin into a flat component type, so the existing `tween` drives it, on WebGPU and on the WebGL fallback alike. Seven filters ship built in. Nothing here enters `model`, the journal or a save. Opt-in: a game composes `[...screen, effectsPlugin]`.
 
 ```ts
 // kit.ts of a game: the ids and keys are checked by the compiler
@@ -17,11 +17,18 @@ export const steam = defineEmitter("fx.steam", {
   textures: ["fx.puff"], rate: 12, lifeMs: [900, 1400], space: "local", prewarmMs: 1000
 });
 export const Tint = defineFilter("fx.tint", {
+  // WebGPU: the uniforms are fields of `fu`.
   wgsl: /* wgsl */ `
     @fragment
     fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
       let c = textureSample(uTexture, uSampler, uv);
       return vec4<f32>(mix(c.rgb, fu.color * c.a, fu.amount), c.a);
+    }`,
+  // WebGL: the same math in GLSL ES 3.0; the uniforms go by their bare names.
+  glsl: /* glsl */ `
+    void main() {
+      vec4 c = texture(uTexture, vTextureCoord);
+      finalColor = vec4(mix(c.rgb, color * c.a, amount), c.a);
     }`,
   uniforms: { amount: 0, color: { color: 0xffd700 } }
 });
@@ -81,29 +88,34 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 
 ## Filters
 
-`defineFilter(id, { wgsl, uniforms?, passes?, padding? })` returns a component type named by its id with its `filter` attached. `wgsl` is the fragment body only; the engine prepends the vertex stage, the input bindings `gfu`, `uTexture`, `uSampler`, and a `FilterUniforms` struct in declaration order bound as `fu`.
+`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
 
-| Uniform declaration | WGSL | Component field |
-|---|---|---|
-| `amount: 0.5` | `f32` | a number, tweenable |
-| `color: { color: 0xffd700 }` | `vec3<f32>` | the hex number |
-| `offset: [2, 3]` (2 to 4 numbers) | `vec2<f32>` … `vec4<f32>` | an array, not tweenable |
+- `wgsl` is the WGSL fragment body only: `fn mainFragment` and its helpers. The engine prepends the vertex stage, the input bindings `gfu`, `uTexture`, `uSampler`, and a `FilterUniforms` struct in declaration order bound as `fu`. The body reads `fu.amount`.
+- `glsl` is the same math in GLSL ES 3.0: `void main()`, which sets `finalColor`, and its helpers. The engine prepends `#version 300 es`, `precision highp float;`, `in vec2 vTextureCoord;`, `out vec4 finalColor;`, `uniform sampler2D uTexture;`, Pixi's global filter uniforms `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture` as `vec4`, and one `uniform` per declared uniform under its bare name. The body reads `amount`. The vertex stage is Pixi's `defaultFilterVert`.
 
-Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is. A missing `mainFragment`, a reserved or badly named uniform, a bad `passes` or `padding` throw at definition; a duplicate id or the id of a built-in throws in `onStart`.
+`filter.source` holds the assembled WGSL and `filter.glsl` the assembled GLSL.
+
+| Uniform declaration | WGSL | GLSL | Component field |
+|---|---|---|---|
+| `amount: 0.5` | `f32` | `uniform float amount;` | a number, tweenable |
+| `color: { color: 0xffd700 }` | `vec3<f32>` | `uniform vec3 color;` | the hex number |
+| `offset: [2, 3]` (2 to 4 numbers) | `vec2<f32>` … `vec4<f32>` | `uniform vec2 offset;` … `vec4` | an array, not tweenable |
+
+Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is. A WGSL without `mainFragment`, a GLSL without `void main(`, a reserved or badly named uniform, a bad `passes` or `padding` throw at definition; a duplicate id or the id of a built-in throws in `onStart`. The reserved names are `enabled`, `order` and the names the headers declare: `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture`, `uTexture`, `uSampler`.
 
 ### Built-in filters
 
 | Component | Fields and defaults | Source | Passes |
 |---|---|---|---|
-| `Glow` | `strength: 2, distance: 10, color: 0xffffff, alpha: 1` | our WGSL, padded by `distance`; 64 probes per pixel | 1 |
-| `Outline` | `thickness: 2, color: 0x000000, alpha: 1` | our WGSL, padded by `thickness` | 1 |
+| `Glow` | `strength: 2, distance: 10, color: 0xffffff, alpha: 1` | our WGSL and GLSL, padded by `distance`; 64 probes per pixel | 1 |
+| `Outline` | `thickness: 2, color: 0x000000, alpha: 1` | our WGSL and GLSL, padded by `thickness` | 1 |
 | `Blur` | `strength: 8, quality: 0, resolution: 0, repeatEdgePixels: true` | Pixi `BlurFilter` | `2 × quality` |
 | `ColorMatrix` | `brightness: 1, saturation: 0, contrast: 0, hue: 0, grayscale: 0` | Pixi `ColorMatrixFilter` | 1 |
 | `Noise` | `amount: 0.5, seed: 0` | Pixi `NoiseFilter`, the seed always given | 1 |
 | `Displacement` | `map: "", scaleX: 20, scaleY: 20` | Pixi `DisplacementFilter` over a sprite of the asset `map` | 1 |
 | `Alpha` | `alpha: 1` | Pixi `AlphaFilter` | 1 |
 
-`Glow` is a soft halo that follows the shape: its alpha is `strength × alpha ×` the weighted share of the disc of radius `distance` around the pixel that the view covers, each probe weighted by `(1 − r / distance)²`. That share is about ½ next to a straight edge; it falls fast near the edge and then slowly to 0 at `distance`, with no step at the rim, so the halo reads as a glow, not as a flat band. `strength: 2` is full at the edge, rounded corners stay rounded, and the padding beyond `distance` stays clear. Most of the light sits in the inner half of `distance`: a wider glow takes a larger `distance`. The 64 probes sit on a golden-angle spiral, so no rings or spokes show; every probe is clamped to the input frame. The halo is premultiplied and drawn under the source pixel.
+`Glow` is a soft halo that follows the shape: its alpha is `strength × alpha ×` the weighted share of the disc of radius `distance` around the pixel that the view covers, each probe weighted by `(1 − r / distance)²`. That share is about ½ next to a straight edge; it falls fast near the edge and then slowly to 0 at `distance`, with no step at the rim, so the halo reads as a glow, not as a flat band. `strength: 2` is full at the edge, rounded corners stay rounded, and the padding beyond `distance` stays clear. Most of the light sits in the inner half of `distance`: a wider glow takes a larger `distance`. The 64 probes sit on a golden-angle spiral, so no rings or spokes show; every probe is clamped to the input frame. The halo is premultiplied and drawn under the source pixel. The GLSL of `Glow` and `Outline` does the same math as their WGSL, line for line; Pixi's core filters ship both languages themselves.
 
 Every filter but `Blur` renders at `resolution: "inherit"`: the resolution of the canvas, so a filtered view stays sharp on DPR 2–3. `Blur` keeps its own: with `quality: 0` it uses `config.blur.quality`; with `resolution: 0` it uses `config.blur.phoneResolution` on a phone, otherwise 1.
 
@@ -111,11 +123,11 @@ Every filter but `Blur` renders at `resolution: "inherit"`: the resolution of th
 
 One system, `effects:filters`, phase `sync`, in every world mode. It walks the views the world hooks recorded, never the whole world:
 
-- One instance per view and kind, made the first frame the kind is seen and kept until the component or the entity leaves. `GpuProgram.from` caches by source, so every view of a kind shares one program. WebGPU only: no `glProgram`.
+- One instance per view and kind, made the first frame the kind is seen and kept until the component or the entity leaves. An instance of ours carries both programs, a `GpuProgram` of the WGSL and a `GlProgram` of the GLSL over `defaultFilterVert`, and one uniform group: Pixi binds it as `fu` on WebGPU and by bare uniform name on WebGL. `GpuProgram.from` and `GlProgram.from` cache by source, so every view of a kind shares its programs.
 - Our kinds write every uniform every frame, no `update()`; the core kinds go through their setters when the component changed (`ColorMatrix` starts from `reset()`). `enabled` is written every frame.
 - `renderer.sync.filters.set(entity, slots)` with a new frozen list of `{ filter, passes }` only when the kinds, their order or their passes changed. A filter covers the entity's subtree: a glow on a button glows its label.
 - A removed kind, or a despawn, destroys every uniform buffer of the instance, then the instance; `Filter.destroy()` alone leaves the buffer to a GC that runs after a minute. A despawned entity gets no call: the renderer let its view go.
-- In a dev build a kind with its own WGSL is compiled once through `renderer.host.device()` before its first instance. Every error logs `effects:wgsl` with its line and column, and the kind never gets an instance, so the view renders as if it had none: one bad shader would otherwise blank the whole frame. A production build never asks the device.
+- In a dev build a kind with its own shaders is compiled once on the backend that draws, `renderer.host.kind()`, before its first instance. On WebGPU the WGSL goes through `renderer.host.device()`: every error logs `effects:wgsl` with its line and column, and the kind waits for the answer. On WebGL the GLSL goes through `renderer.host.gl()`, at once: every error line of the info log logs `effects:glsl` `{ filter, line, message }`, and the shader is deleted. Lines count in the assembled source. A broken kind never gets an instance, so the view renders as if it had none: one bad shader would otherwise blank the whole frame. A production build compiles nothing twice.
 
 ## Config
 
@@ -160,4 +172,4 @@ None. Nothing above `effects` needs to know a particle died or a filter was assi
 
 ## Dependencies
 
-`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.device()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)` and the `assets:bundle-unloaded` hook), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.
+`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)` and the `assets:bundle-unloaded` hook), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.

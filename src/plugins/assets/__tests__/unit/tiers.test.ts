@@ -620,3 +620,118 @@ describe("bootTiers", () => {
     expect(mock.ctx.state.manifest.bundles).toEqual({});
   });
 });
+
+/**
+ * Builds a manifest whose bundle `board` holds one texture at the given path.
+ *
+ * @param path - Path of the one file.
+ * @returns A v1 manifest.
+ */
+function oneFileManifest(path: string): Manifest {
+  return {
+    version: 1,
+    bundles: {
+      board: {
+        feature: "board",
+        tier: "scene",
+        mb: 0.063,
+        files: [{ key: "board.cell", path, width: 128, height: 128, mb: 0.063 }]
+      }
+    }
+  };
+}
+
+describe("a file the protocol answers with index.html", () => {
+  it("fails a 200 text/html file like a 404, naming the status and the type", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+
+    await mock.start();
+    mock.io.contentTypes.set("/features/board/assets/item.png", "text/html");
+
+    await expect(loadBundle(mock.assetsCtx, "board", undefined, "enter")).rejects.toThrow(
+      '[game] assets: bundle "board" failed at "features/board/assets/item.png" (200, text/html).'
+    );
+
+    expect(mock.ctx.state.records.get("board")?.status).toBe("idle");
+    expect(mock.io.destroyed).toHaveLength(mock.io.created.length);
+    expect(mock.log.error).toHaveBeenCalledWith("assets: bundle failed", {
+      bundle: "board",
+      file: "features/board/assets/item.png",
+      status: 200,
+      contentType: "text/html"
+    });
+  });
+
+  it("keeps the content type of a 404 in the log entry", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+
+    await mock.start();
+    mock.io.status.set("/features/board/assets/item.png", 404);
+    mock.io.contentTypes.set("/features/board/assets/item.png", "text/html; charset=utf-8");
+
+    await expect(loadBundle(mock.assetsCtx, "board", undefined, "enter")).rejects.toThrow(
+      "(404, text/html; charset=utf-8)."
+    );
+    expect(mock.log.error).toHaveBeenCalledWith(
+      "assets: bundle failed",
+      expect.objectContaining({ status: 404, contentType: "text/html; charset=utf-8" })
+    );
+  });
+
+  it("loads a .ktx2 served as application/octet-stream", async () => {
+    const mock = createMockAssets({
+      manifest: oneFileManifest("features/board/assets/cell.ktx2")
+    });
+
+    await mock.start();
+    mock.io.contentTypes.set("/features/board/assets/cell.ktx2", "application/octet-stream");
+
+    await loadBundle(mock.assetsCtx, "board", undefined, "enter");
+
+    expect(mock.ctx.state.records.get("board")?.status).toBe("loaded");
+    expect(mock.io.created.map(texture => texture.from)).toEqual([
+      "/features/board/assets/cell.ktx2"
+    ]);
+    expect(mock.log.error).not.toHaveBeenCalled();
+  });
+
+  it("loads an .html file served as text/html", async () => {
+    const mock = createMockAssets({
+      manifest: oneFileManifest("features/board/assets/help.html")
+    });
+
+    await mock.start();
+    mock.io.contentTypes.set("/features/board/assets/help.html", "text/html");
+
+    await loadBundle(mock.assetsCtx, "board", undefined, "enter");
+
+    expect(mock.ctx.state.records.get("board")?.status).toBe("loaded");
+  });
+
+  it("fails a manifest served as 200 text/html with the could-not-be-read error", async () => {
+    const mock = createMockAssets({ manifest: "/assets/manifest.json" }, boardManifest);
+
+    mock.io.contentTypes.set("/assets/manifest.json", "text/html");
+
+    await expect(mock.start()).rejects.toThrow(
+      '[game] assets: the manifest at "/assets/manifest.json" could not be read (200, text/html).'
+    );
+  });
+
+  it("fails a 404 manifest with the bare status", async () => {
+    const mock = createMockAssets({ manifest: "/assets/manifest.json" }, boardManifest);
+
+    mock.io.status.set("/assets/manifest.json", 404);
+
+    await expect(mock.start()).rejects.toThrow("could not be read (404).");
+  });
+
+  it("reads a manifest served as application/json", async () => {
+    const mock = createMockAssets({ manifest: "/assets/manifest.json" }, boardManifest);
+
+    mock.io.contentTypes.set("/assets/manifest.json", "application/json");
+    await mock.start();
+
+    expect(Object.keys(mock.ctx.state.manifest.bundles)).toEqual(["board"]);
+  });
+});

@@ -57,6 +57,8 @@ export type FakeIo = AssetsIo & {
   fetched: string[];
   /** URL to the status the fake answers with. Missing means `200`. */
   status: Map<string, number>;
+  /** URL to the `content-type` the fake answers with. Missing means no header. */
+  contentTypes: Map<string, string>;
   /** URL to the text a `.fnt` fetch answers with. Missing means the URL itself. */
   texts: Map<string, string>;
   /** URL to the bytes an `.mp3` fetch answers with. Missing means the URL as UTF-8. */
@@ -93,6 +95,7 @@ export function createFakeIo(manifest?: unknown): FakeIo {
   const destroyed: Array<FakeTexture | FakeSlice> = [];
   const fetched: string[] = [];
   const status = new Map<string, number>();
+  const contentTypes = new Map<string, string>();
   const texts = new Map<string, string>();
   const bodies = new Map<string, ArrayBuffer>();
   const control = { gated: false };
@@ -104,6 +107,7 @@ export function createFakeIo(manifest?: unknown): FakeIo {
     destroyed,
     fetched,
     status,
+    contentTypes,
     texts,
     bodies,
     control,
@@ -140,6 +144,11 @@ export function createFakeIo(manifest?: unknown): FakeIo {
       return {
         ok: code < 400,
         status: code,
+        headers: {
+          get: (name: string) =>
+            // eslint-disable-next-line unicorn/no-null -- a `Response` answers a missing header with null.
+            name.toLowerCase() === "content-type" ? (contentTypes.get(url) ?? null) : null
+        },
         json: async () => manifest,
         blob: async () => new Blob([url]),
         text: async () => texts.get(url) ?? url,

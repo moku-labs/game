@@ -23,12 +23,18 @@ fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   return textureSample(uTexture, uSampler, uv) * fu.amount;
 }`;
 
+const GLSL = `
+void main() {
+  finalColor = texture(uTexture, vTextureCoord) * amount;
+}`;
+
 const Tint = defineFilter("fx.tint", {
   wgsl: BODY,
+  glsl: GLSL,
   uniforms: { amount: 0, color: { color: 0xff_d7_00 } }
 });
 
-const Heavy = defineFilter("fx.heavy", { wgsl: BODY, passes: 3 });
+const Heavy = defineFilter("fx.heavy", { wgsl: BODY, glsl: GLSL, passes: 3 });
 
 /**
  * A started mock with the feature filters `fx.tint` and `fx.heavy`.

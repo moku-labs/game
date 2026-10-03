@@ -15,6 +15,7 @@ import { installFakeDom } from "../../../renderer/__tests__/fake-dom";
 import {
   type FakeContainer,
   type FakeFilter,
+  type FakeGlContext,
   FakeRectangle,
   FakeTexture,
   type FakeUniformGroup
@@ -29,6 +30,7 @@ import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import {
   createFakeEffectsPixi,
+  FakeFxGlProgram,
   FakeFxGpuProgram,
   FakeFxParticleContainer
 } from "../fake-effects-pixi";
@@ -61,6 +63,12 @@ fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
   return vec4<f32>(mix(c.rgb, fu.color * c.a, fu.amount), c.a);
 }`;
 
+const GLSL = `
+void main() {
+  vec4 c = texture(uTexture, vTextureCoord);
+  finalColor = vec4(mix(c.rgb, color * c.a, amount), c.a);
+}`;
+
 const starsBurst = defineEmitter("fx.starsBurst", {
   textures: ["fx.star", "fx.sparkle"],
   burst: 40,
@@ -88,6 +96,7 @@ const steam = defineEmitter("fx.steam", {
 
 const Tint = defineFilter("fx.tint", {
   wgsl: BODY,
+  glsl: GLSL,
   uniforms: { amount: 0, color: { color: 0xff_d7_00 } }
 });
 
@@ -180,6 +189,8 @@ function createIo(): AssetsIo {
       Promise.resolve({
         ok: true,
         status: 200,
+        // eslint-disable-next-line unicorn/no-null -- a Response answers a missing header with null.
+        headers: { get: () => null },
         json: () => Promise.resolve({}),
         blob: () => Promise.resolve(new Blob(["png"])),
         text: () => Promise.resolve(""),
@@ -209,12 +220,13 @@ async function tick(times = 60): Promise<void> {
  *
  * @param items - The items of the player.
  * @param mounted - Whether the renderer gets a mount.
+ * @param kind - The backend the fake Pixi draws with.
  * @returns The started app.
  */
-async function startApp(items: Item[], mounted = true) {
+async function startApp(items: Item[], mounted = true, kind: "webgpu" | "webgl" = "webgpu") {
   if (mounted) installFakeDom({ width: 1080, height: 1920 });
 
-  const pixi = createFakeEffectsPixi();
+  const pixi = createFakeEffectsPixi({ kind });
   const app = createApp({
     plugins: [worldPlugin, rendererPlugin, assetsPlugin, animPlugin, effectsPlugin, boardFeature],
     pluginConfigs: {
@@ -318,6 +330,32 @@ describe("effects plugin integration", () => {
     expect(glow?.destroyed).toBe(true);
     expect(tint?.destroyed).toBe(true);
     expect(buffers.every(buffer => buffer.destroyed)).toBe(true);
+  });
+
+  it("checks the GLSL on the WebGL fallback in a dev build and hangs both programs", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const app = await startApp([{ id: "card", kind: "card" }], true, "webgl");
+
+    step(app, 1);
+
+    const entity = app.world.projection.entityOf("board.items", "card") ?? 0;
+    const object = app.renderer.sync.displayOf(entity) as FakeContainer;
+    const [glow, tint] = (object.filters ?? []) as FakeFilter[];
+    const gl = app.renderer.host.gl() as unknown as FakeGlContext;
+
+    expect(app.renderer.host.kind()).toBe("webgl");
+    // The check is synchronous on WebGL: both kinds hang in the first frame they are seen.
+    expect(gl.compiled).toEqual([Glow.filter.glsl, Tint.filter.glsl]);
+    expect(FakeFxGlProgram.made.map(program => program.options.fragment)).toEqual([
+      Glow.filter.glsl,
+      Tint.filter.glsl
+    ]);
+    expect(glow?.options.glProgram).toBe(FakeFxGlProgram.made[0]);
+    expect(tint?.options.glProgram).toBe(FakeFxGlProgram.made[1]);
+    expect(glow?.options.gpuProgram).toBe(FakeFxGpuProgram.made[0]);
+
+    await app.stop();
   });
 
   it("freezes a stream in a paused world and emits nothing in a fast one", async () => {

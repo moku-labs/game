@@ -6,6 +6,7 @@ import {
   defineAnimation,
   external,
   frames,
+  HAPTIC_KINDS,
   haptic,
   mark,
   parallel,
@@ -122,6 +123,20 @@ describe("anim/timeline step builders", () => {
       payload: { kind: "light" },
       cosmetic: true
     });
+  });
+
+  it("lists the seven haptic kinds in one frozen list, each a haptic step", () => {
+    expect(HAPTIC_KINDS).toEqual([
+      "light",
+      "medium",
+      "heavy",
+      "selection",
+      "success",
+      "warning",
+      "error"
+    ]);
+    expect(Object.isFrozen(HAPTIC_KINDS)).toBe(true);
+    expect(HAPTIC_KINDS.map(kind => haptic(kind).payload.kind)).toEqual([...HAPTIC_KINDS]);
   });
 
   it("throws the reserved message for an external player", () => {

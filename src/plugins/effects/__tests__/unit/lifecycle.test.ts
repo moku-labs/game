@@ -20,13 +20,15 @@ afterEach(() => {
 const BODY =
   "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return textureSample(uTexture, uSampler, uv); }";
 
+const GLSL = "void main() { finalColor = texture(uTexture, vTextureCoord); }";
+
 const page = { width: 128, height: 128, destroyed: false };
 
 describe("startEffects", () => {
   it("registers the built-in kinds first, then the filters of every feature in order", () => {
     const mock = createMockEffects();
-    const Tint = defineFilter("fx.tint", { wgsl: BODY });
-    const Wave = defineFilter("fx.wave", { wgsl: BODY });
+    const Tint = defineFilter("fx.tint", { wgsl: BODY, glsl: GLSL });
+    const Wave = defineFilter("fx.wave", { wgsl: BODY, glsl: GLSL });
 
     mock.features.push(
       { name: "board", description: { filters: [Tint] } },
@@ -74,7 +76,7 @@ describe("startEffects", () => {
 
   it("throws on a filter id registered twice and on the id of a built-in", () => {
     const twice = createMockEffects();
-    const Tint = defineFilter("fx.tint", { wgsl: BODY });
+    const Tint = defineFilter("fx.tint", { wgsl: BODY, glsl: GLSL });
 
     twice.features.push({ name: "board", description: { filters: [Tint, Tint] } });
 
@@ -86,7 +88,7 @@ describe("startEffects", () => {
 
     builtIn.features.push({
       name: "board",
-      description: { filters: [defineFilter("effects.glow", { wgsl: BODY })] }
+      description: { filters: [defineFilter("effects.glow", { wgsl: BODY, glsl: GLSL })] }
     });
 
     expect(() => builtIn.start()).toThrow(

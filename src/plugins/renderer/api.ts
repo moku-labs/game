@@ -58,7 +58,8 @@ function exposeHost(host: HostModule): HostApi {
     kind: host.kind,
     canvas: host.canvas,
     pixi: host.pixi,
-    device: host.device
+    device: host.device,
+    gl: host.gl
   };
 }
 
