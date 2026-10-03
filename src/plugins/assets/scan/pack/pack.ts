@@ -368,6 +368,110 @@ async function copyOthers(
   return copies;
 }
 
+/** What the atlas groups of one bundle became: the pages and the textures cut out of them. */
+type PackedGroups = { pages: AtlasPage[]; files: ManifestFile[] };
+
+/**
+ * Hands one encoded page to the pack folder under its hashed name.
+ *
+ * @param run - The pack run, which collects the files to write.
+ * @param id - The id of the page.
+ * @param file - Its hashed file name.
+ * @param image - The encoded page.
+ * @returns The page entry of the manifest.
+ */
+function writePage(run: PackRun, id: string, file: string, image: CachedImage): AtlasPage {
+  run.outputs.set(file, image.bytes);
+
+  return {
+    id,
+    path: file,
+    width: image.width,
+    height: image.height,
+    mb: textureMb(image.width, image.height)
+  };
+}
+
+/**
+ * Writes the entries of the textures cut out of one page.
+ *
+ * @param image - The encoded page with its frames.
+ * @param page - The id of the page.
+ * @param byKey - The textures of the scan in its group, by key.
+ * @returns One packed entry per frame of a known texture.
+ */
+function framedFiles(
+  image: CachedImage,
+  page: string,
+  byKey: ReadonlyMap<string, ManifestFile>
+): ManifestFile[] {
+  return image.frames.flatMap(frame => {
+    const source = byKey.get(frame.key);
+
+    return source === undefined ? [] : [packedFile(source, page, frame)];
+  });
+}
+
+/**
+ * Packs the atlas groups of one bundle into pages, and writes the entry of every texture on them.
+ *
+ * @param run - The pack run, which collects the files to write.
+ * @param bundle - Name of the bundle.
+ * @param groups - The atlas groups of the bundle with their textures.
+ * @returns The pages and the packed textures.
+ */
+async function packGroups(
+  run: PackRun,
+  bundle: string,
+  groups: ReadonlyMap<Group, readonly Source[]>
+): Promise<PackedGroups> {
+  const packed: PackedGroups = { pages: [], files: [] };
+
+  for (const [group, members] of groups) {
+    const images = await packGroup(run, bundle, group, members);
+    const byKey = new Map(members.map(member => [member.key, member.file]));
+
+    // Each page is named by its content; its textures point at its id.
+    for (const [index, image] of images.entries()) {
+      const name = pageName(bundle, group, index, contentHash(image.bytes));
+      const page = writePage(run, pageId(bundle, group, index), name, image);
+
+      packed.pages.push(page);
+      packed.files.push(...framedFiles(image, page.id, byKey));
+    }
+  }
+
+  return packed;
+}
+
+/**
+ * Writes what stays a file of its own: the loose textures as WebP, the fonts and the sounds as
+ * copies.
+ *
+ * @param run - The pack run, which collects the files to write.
+ * @param bundle - Name of the bundle.
+ * @param loose - The textures no atlas group took.
+ * @param files - Every file of the bundle in the scan.
+ * @returns The entries of the written files.
+ */
+async function packLoose(
+  run: PackRun,
+  bundle: string,
+  loose: readonly Source[],
+  files: readonly ManifestFile[]
+): Promise<ManifestFile[]> {
+  const copies = [
+    ...(await Promise.all(loose.map(source => looseTexture(run, bundle, source)))),
+    ...(await copyOthers(run, bundle, files))
+  ];
+
+  for (const copy of copies) {
+    for (const output of copy.outputs) run.outputs.set(output.path, output.bytes);
+  }
+
+  return copies.map(copy => copy.file);
+}
+
 /**
  * Packs one bundle: its atlas groups become pages, the rest is written loose or copied.
  *
@@ -382,52 +486,21 @@ async function packBundle(
   bundle: ManifestBundle
 ): Promise<ManifestBundle> {
   const plan = planGroups(await readTextures(run, bundle));
-  const pages: AtlasPage[] = [];
-  const files: ManifestFile[] = [];
 
-  for (const [group, members] of plan.groups) {
-    const images = await packGroup(run, name, group, members);
-    const byKey = new Map(members.map(member => [member.key, member.file]));
+  // The atlas groups first, then what stays a file of its own.
+  const packed = await packGroups(run, name, plan.groups);
+  const files = [...packed.files, ...(await packLoose(run, name, plan.loose, bundle.files))];
 
-    for (const [index, image] of images.entries()) {
-      const id = pageId(name, group, index);
-      const file = pageName(name, group, index, contentHash(image.bytes));
-
-      run.outputs.set(file, image.bytes);
-      pages.push({
-        id,
-        path: file,
-        width: image.width,
-        height: image.height,
-        mb: textureMb(image.width, image.height)
-      });
-
-      for (const frame of image.frames) {
-        const source = byKey.get(frame.key);
-
-        if (source !== undefined) files.push(packedFile(source, id, frame));
-      }
-    }
-  }
-
-  const copies = [
-    ...(await Promise.all(plan.loose.map(source => looseTexture(run, name, source)))),
-    ...(await copyOthers(run, name, bundle.files))
-  ];
-
-  for (const copy of copies) {
-    files.push(copy.file);
-
-    for (const output of copy.outputs) run.outputs.set(output.path, output.bytes);
-  }
+  // A texture on a page costs nothing of its own: the bundle pays for its pages instead.
+  const mb = sumMb([...packed.pages, ...files.filter(file => file.atlas === undefined)]);
 
   return {
     feature: bundle.feature,
     tier: bundle.tier,
-    mb: sumMb([...pages, ...files.filter(file => file.atlas === undefined)]),
-    ...(pages.length === 0
+    mb,
+    ...(packed.pages.length === 0
       ? {}
-      : { pages: pages.toSorted((left, right) => left.id.localeCompare(right.id)) }),
+      : { pages: packed.pages.toSorted((left, right) => left.id.localeCompare(right.id)) }),
     files: files.toSorted((left, right) => left.key.localeCompare(right.key))
   };
 }
@@ -632,6 +705,39 @@ function holdsSources(out: string, root: string): boolean {
 }
 
 /**
+ * Tells whether a packed file is a texture written as a file of its own, not cut out of a page.
+ *
+ * @param file - A file of the packed manifest.
+ * @returns `true` for a loose texture.
+ */
+function isLooseFile(file: ManifestFile): boolean {
+  return file.kind === undefined && file.path !== undefined;
+}
+
+/**
+ * Counts the atlas pages of the packed bundles.
+ *
+ * @param bundles - The packed bundles.
+ * @returns How many pages they hold together.
+ */
+function countPages(bundles: readonly ManifestBundle[]): number {
+  return bundles.reduce((count, bundle) => count + (bundle.pages?.length ?? 0), 0);
+}
+
+/**
+ * Counts the loose textures of the packed bundles.
+ *
+ * @param bundles - The packed bundles.
+ * @returns How many textures stayed files of their own.
+ */
+function countLoose(bundles: readonly ManifestBundle[]): number {
+  return bundles.reduce(
+    (count, bundle) => count + bundle.files.filter(file => isLooseFile(file)).length,
+    0
+  );
+}
+
+/**
  * Packs the art of a game for production: per bundle, the textures of the `fx` group and of the
  * `main` group go onto WebP atlas pages (2048 px at most, 2 px padding and border, never trimmed
  * or rotated), a texture with a side above 512 px and a group of one stay loose files, fonts and
@@ -694,13 +800,8 @@ export async function packAssets(options: PackOptions): Promise<PackResult> {
 
   return {
     manifest,
-    pages: all.reduce((count, bundle) => count + (bundle.pages?.length ?? 0), 0),
-    loose: all.reduce(
-      (count, bundle) =>
-        count +
-        bundle.files.filter(file => file.kind === undefined && file.path !== undefined).length,
-      0
-    ),
+    pages: countPages(all),
+    loose: countLoose(all),
     bytes,
     cacheHits: run.cacheHits
   };

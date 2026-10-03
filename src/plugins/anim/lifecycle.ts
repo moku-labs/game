@@ -26,7 +26,7 @@ import {
   startTimeline
 } from "./timeline/play";
 import { localTargetOf } from "./timeline/space";
-import type { FxStep, TimelineRuntime } from "./timeline/types";
+import type { ErasedFields, FxStep, TimelineRuntime } from "./timeline/types";
 import { advanceTracks, beginFrame, finishAllTracks } from "./tween/advance";
 import { createDriver, startStepTrack } from "./tween/driver";
 import type {
@@ -127,12 +127,10 @@ export function createRuntime(actx: AnimCtx): TimelineRuntime {
     spawn: (components: readonly AnyComponentValue[]): Entity =>
       actx.deps.world.ecs.spawn(ANIM_OWNER, components),
 
-    read: (
-      entity: Entity,
-      component: AnyComponent
-    ): Readonly<Record<string, unknown>> | undefined => actx.deps.world.ecs.get(entity, component),
+    read: (entity: Entity, component: AnyComponent): Readonly<ErasedFields> | undefined =>
+      actx.deps.world.ecs.get(entity, component),
 
-    write: (entity: Entity, component: AnyComponent, patch: Record<string, unknown>): void => {
+    write: (entity: Entity, component: AnyComponent, patch: Partial<ErasedFields>): void => {
       actx.deps.world.ecs.set(entity, component, patch);
     },
 

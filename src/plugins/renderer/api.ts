@@ -4,9 +4,10 @@
  * half.
  */
 import { createHostApi } from "./host/api";
-import type { HostApi } from "./host/types";
+import type { HostApi, InstallDrawCounting } from "./host/types";
 import { resolveDeps } from "./lifecycle";
 import { createMonitorApi } from "./monitor/api";
+import { installDrawCounting } from "./monitor/draw-calls";
 import { createSyncApi } from "./sync/api";
 import type { SyncApi } from "./sync/types";
 import type { Api, HostModule, KernelSlice, Modules, RendererCtx, SyncModule } from "./types";
@@ -14,15 +15,29 @@ import { createViewportApi } from "./viewport/api";
 import type { ViewportApi } from "./viewport/types";
 
 /**
+ * The draw-call counter `host` installs before `new Application()`: the one of `monitor` in a dev
+ * build, none in production. A production `define` folds the guard, so the counter module leaves
+ * the bundle.
+ *
+ * @returns `installDrawCounting`, or `undefined` without the dev flag.
+ */
+function devDrawCounting(): InstallDrawCounting | undefined {
+  return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__
+    ? installDrawCounting
+    : undefined;
+}
+
+/**
  * Builds the four modules in the accepted order `host → viewport → sync → monitor`. Each keeps
  * its data in its branch of `ctx.state`, so these objects are views on the plugin state, not
- * owners of it.
+ * owners of it. `host` gets the draw-call counter of `monitor` up front, because it installs the
+ * counter before `monitor` exists.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @returns The four modules with their public and internal methods.
  */
 export function createModules(ctx: RendererCtx): Modules {
-  const host = createHostApi(ctx);
+  const host = createHostApi(ctx, { installDrawCounting: devDrawCounting() });
   const viewport = createViewportApi(ctx, { host });
   const sync = createSyncApi(ctx, { host, viewport });
   const monitor = createMonitorApi(ctx, { host, sync });

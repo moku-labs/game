@@ -119,9 +119,22 @@ export type FlowCtx = KernelSlice & { readonly deps: Deps };
 export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
 
 /**
+ * The bound of the `strings` slot of `GameTypes`: the key-to-parameters table every game's
+ * generated `strings.ts` exports, whatever its keys. `i18n` reads the keys and the parameters;
+ * `flow` only carries the type.
+ *
+ * @example
+ * ```ts
+ * const table: StringTableLike = { "hud.orders": { n: 3 }, "orders.complete": {} };
+ * ```
+ */
+export type StringTableLike = Record<string, unknown>;
+
+/**
  * The types of one game. `player` and `session` type the node context; `assets` and `bundles`
  * are the key unions the asset scanner generates (`string` while a game has none); `strings`
- * is used from V3. Every plugin binds its own helpers to them through its `…For` binder.
+ * is the game's string table, bound by `StringTableLike`. Every plugin binds its own helpers to
+ * them through its `…For` binder.
  *
  * @example
  * ```ts
@@ -134,7 +147,7 @@ export type GameTypes = {
   assets: string;
   bundles?: string;
   scenes?: string;
-  strings: Record<string, unknown>;
+  strings: StringTableLike;
   textStyles?: string;
   emitters?: string;
 };

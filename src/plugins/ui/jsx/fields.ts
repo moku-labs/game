@@ -479,6 +479,23 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
   }
 
   /**
+   * Reads the mirror of the hidden input into the editing, and wakes the frame when it changed.
+   *
+   * @param element - The hidden input, or nothing when the page has none.
+   * @param field - The edited field.
+   */
+  function readEditedMirror(element: HTMLInputElement | undefined, field: Field): void {
+    if (element === undefined) return;
+
+    const next = readMirror(element, field.maxLength);
+
+    if (sameMirror(next, text.mirror)) return;
+
+    text.mirror = next;
+    wake();
+  }
+
+  /**
    * The frame pull, before the dirty roots of the reconcile: the mirror is read from the element
    * and written into the local, so the component re-renders in this same reconcile. A focus no
    * tap resolved on is taken back; an editing whose field or root went away ends.
@@ -487,27 +504,26 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
     const element = text.element;
     const field = editingField();
 
+    // Nothing is edited: take back a focus no tap resolved on.
     if (text.editing === undefined) {
-      if (element !== undefined && hasFocus(element)) element.blur();
+      const hasStrayFocus = element !== undefined && hasFocus(element);
+
+      if (hasStrayFocus) element.blur();
 
       return;
     }
 
-    if (field === undefined || !editable(field)) {
+    // The field or its root went away: end the editing.
+    const isGone = field === undefined || !editable(field);
+
+    if (isGone) {
       done();
 
       return;
     }
 
-    if (element !== undefined) {
-      const next = readMirror(element, field.maxLength);
-
-      if (!sameMirror(next, text.mirror)) {
-        text.mirror = next;
-        wake();
-      }
-    }
-
+    // Read the mirror and write its value into the local of the component.
+    readEditedMirror(element, field);
     writeLocal(field, text.mirror.value);
   }
 
@@ -574,9 +590,11 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
    */
   function placeField(field: Field): void {
     const element = lookup(field.entity);
+    const isLive = element?.live === true;
 
-    if (element === undefined || !element.live) return;
+    if (!isLive) return;
 
+    // Lay the field out around the mirror while it is edited, around its value otherwise.
     const editing = text.editing === field.entity;
     const value = editing ? text.mirror.value : fieldValue(state, field);
     const look = ctx.config.textInput;
@@ -593,10 +611,13 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       underline: look.composingUnderline,
       prefix: piece => measure(piece).width
     });
+
+    // Resolve what the parts draw, and a fingerprint of it.
     const content = layout.content === "placeholder" ? (field.placeholder ?? "") : value;
     const values = partValues(layout, content, field.textStyle, look);
     const drawn = JSON.stringify({ layout, content, look, style: field.textStyle });
 
+    // Spawn the parts the first time.
     if (field.parts === undefined) {
       field.parts = spawnParts(field.entity, values);
       field.drawn = drawn;
@@ -604,6 +625,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       return;
     }
 
+    // Write them again only when what they draw changed.
     if (field.drawn === drawn) return;
 
     field.drawn = drawn;
@@ -630,9 +652,11 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
    * @param units - The lift in reference units.
    */
   function lift(root: Element | undefined, units: number): void {
+    // Give a root lifted before, that is not this one, its rest back.
     const lifted = text.lifted;
+    const isLiftedElsewhere = lifted !== undefined && lifted.element !== root?.entity;
 
-    if (lifted !== undefined && lifted.element !== root?.entity) {
+    if (isLiftedElsewhere) {
       const previous = lookup(lifted.element);
 
       if (previous !== undefined) links.layout.lift(previous, 0);
@@ -642,11 +666,15 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
 
     if (root === undefined) return;
 
+    // Write nothing when the root already stands where this lift puts it.
     const current = text.lifted;
+    const staysAtRest = current === undefined && units === 0;
+    const alreadyLifted =
+      current !== undefined && current.units === units && current.rest === root.rest;
 
-    if (current === undefined && units === 0) return;
-    if (current !== undefined && current.units === units && current.rest === root.rest) return;
+    if (staysAtRest || alreadyLifted) return;
 
+    // Move the root, and remember the lift until it is back to 0.
     links.layout.lift(root, units);
     text.lifted = units === 0 ? undefined : { element: root.entity, units, rest: root.rest };
   }
@@ -656,26 +684,31 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
    * lift when nothing is edited.
    */
   function placeInputAndLift(): void {
+    // Nothing live is edited: drop the lift.
     const element = text.element;
     const field = text.editing === undefined ? undefined : lookup(text.editing);
+    const isEditingLive = element !== undefined && field?.live === true;
 
-    if (element === undefined || field === undefined || !field.live) {
+    if (!isEditingLive) {
       lift(undefined, 0);
 
       return;
     }
 
+    // Find the rect the field is drawn at, in screen px.
     const viewport = ctx.deps.renderer.viewport;
     const drawn = visualRectOf(field, lookup);
     const topLeft = viewport.toScreen({ x: drawn.x, y: drawn.y });
     const bottomRight = viewport.toScreen({ x: drawn.x + drawn.w, y: drawn.y + drawn.h });
-    const keyboard = text.keyboard;
     const rect = {
       x: topLeft.x,
       y: topLeft.y,
       w: bottomRight.x - topLeft.x,
       h: bottomRight.y - topLeft.y
     };
+
+    // Lift by what the keyboard covers under the field.
+    const keyboard = text.keyboard;
 
     keyboard.lift =
       keyboard.inset <= 0
@@ -687,6 +720,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
             inset: keyboard.inset
           });
 
+    // Move the hidden input only when its rect or its lift changed.
     const placed = JSON.stringify({ rect, lift: keyboard.lift });
 
     if (placed !== text.placed) {
@@ -694,6 +728,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       placeInput(element, rect, keyboard.lift);
     }
 
+    // Lift the root of the field by the same amount, in reference units.
     const scale = viewport.size().scale;
 
     lift(rootElementOf(field), keyboard.lift / (scale > 0 ? scale : 1));
@@ -712,14 +747,18 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
 
     if (top === undefined) return undefined;
 
+    // Take the lift of the top root off the point.
     const point = ctx.deps.renderer.viewport.toReference(clientX, clientY);
-    const raise =
-      text.lifted !== undefined && text.lifted.element === top.element ? text.lifted.units : 0;
+    const lifted = text.lifted;
+    const isTopLifted = lifted !== undefined && lifted.element === top.element;
+    const raise = isTopLifted ? lifted.units : 0;
 
+    // Answer the first live field of the top root drawn under it.
     for (const field of state.fields.values()) {
       const element = lookup(field.entity);
+      const isTopField = element?.live === true && element.root === top.entity;
 
-      if (element === undefined || !element.live || element.root !== top.entity) continue;
+      if (!isTopField) continue;
       if (state.exiting.has(field.entity)) continue;
 
       const rect = visualRectOf(element, lookup);

@@ -122,7 +122,7 @@ One system, `effects:filters`, phase `sync`, in every world mode. It walks the v
 | `maxParticles` | `3000` | Live particles over all instances above which `effects:particle-budget` warns once per crossing |
 | `maxPasses` | `24` | Render passes per frame above which `effects:pass-budget` warns once per crossing |
 | `phone` | `"auto"` | Whether this device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once in `onStart` |
-| `blur` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to |
+| `blur` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to. Shallow merge: a game that sets `blur` gives both fields |
 
 More than one full-screen view with an enabled filter warns `effects:full-screen-filters` once per crossing. A view is full-screen when the box its `Sprite`, `NineSlice` or `Shape` declares, times its `Transform.scale`, covers the viewport.
 

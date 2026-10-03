@@ -141,10 +141,12 @@ function emptyPool(): PixiContainer[] {
 export function release(sctx: SyncCtx, view: View): void {
   const state = sctx.ctx.state.sync;
 
+  // Strip what the renderer added to the view: mask, debug outline and filters.
   dropMask(view);
   dropOutline(view);
   clearFilters(view.object);
 
+  // The wrapper is the renderer's own container, so it is destroyed, never pooled.
   if (view.wrapper !== undefined) {
     clearFilters(view.wrapper);
     detach(view.wrapper);
@@ -152,12 +154,14 @@ export function release(sctx: SyncCtx, view: View): void {
     view.wrapper = undefined;
   }
 
+  // A `Display` object belongs to the game: it only leaves the tree.
   if (view.kind === "Display") {
     detach(view.object);
 
     return;
   }
 
+  // An adapter object belongs to the plugin that drew it: its adapter destroys it.
   if (view.kind === "adapter") {
     detach(view.object);
     view.display?.adapter.destroy(view.object);
@@ -165,6 +169,7 @@ export function release(sctx: SyncCtx, view: View): void {
     return;
   }
 
+  // The renderer's own object goes back to its pool, reset for its next life.
   resetObject(view.object);
 
   const pool = state.pools.get(view.poolKey) ?? emptyPool();
@@ -173,6 +178,7 @@ export function release(sctx: SyncCtx, view: View): void {
   state.pools.set(view.poolKey, pool);
   state.pooled += 1;
 
+  // Past the limit, the object that has waited longest is destroyed.
   while (state.pooled > sctx.ctx.config.poolLimit) {
     const oldest = oldestPool(state);
 

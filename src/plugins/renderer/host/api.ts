@@ -6,7 +6,7 @@ import type { HostModule, PixiContainer, PixiModule, RendererCtx, RendererKind }
 import { liveDevice, watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
 import { extractStage, textureUsage } from "./readback";
-import type { TextureUsage } from "./types";
+import type { HostDeps, TextureUsage } from "./types";
 import { showUnsupported } from "./unsupported";
 import { watchVisibility } from "./visibility";
 
@@ -14,9 +14,10 @@ import { watchVisibility } from "./visibility";
  * Creates the host module: the one Pixi application and everything that can take it away.
  *
  * @param ctx - Domain context of the renderer plugin.
+ * @param deps - The draw-call counter the plugin root injects in a dev build.
  * @returns The host API and its internal half.
  */
-export function createHostApi(ctx: RendererCtx): HostModule {
+export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
   const state = ctx.state.host;
 
   /**
@@ -35,7 +36,7 @@ export function createHostApi(ctx: RendererCtx): HostModule {
     destroyApplication(state);
 
     try {
-      await createApplication(ctx, mount);
+      await createApplication(ctx, mount, deps.installDrawCounting);
     } catch (error) {
       showUnsupported(ctx, mount, error);
 
@@ -104,7 +105,7 @@ export function createHostApi(ctx: RendererCtx): HostModule {
       state.mount = mount;
 
       try {
-        await createApplication(ctx, mount);
+        await createApplication(ctx, mount, deps.installDrawCounting);
       } catch (error) {
         showUnsupported(ctx, mount, error);
 

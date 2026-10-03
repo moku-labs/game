@@ -1,4 +1,8 @@
+import { createRequire } from "node:module";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+/** Loads a package file the way Node resolves it from this test. */
+const load = createRequire(import.meta.url);
 
 afterEach(() => {
   vi.doUnmock("sharp");
@@ -11,7 +15,10 @@ describe("loadEncoder", () => {
 
     const encoder = await loadEncoder();
 
-    expect(encoder.version).toBe("0.34.5");
+    const installed: unknown = load("sharp/package.json");
+
+    expect(encoder.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(installed).toMatchObject({ version: encoder.version });
   });
 
   it("names the command that installs sharp when it is missing", async () => {

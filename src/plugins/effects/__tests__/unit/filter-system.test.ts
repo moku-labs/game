@@ -333,6 +333,17 @@ describe("the filter sync — budgets", () => {
     expect(mock.log.warn).toHaveBeenCalledTimes(2);
   });
 
+  it("checks the pass budget but reads no change set while no view carries a filter", () => {
+    const mock = started();
+    const changed = vi.spyOn(mock.world.ecs, "changed");
+
+    mock.renderer.passes = 30;
+    mock.frame();
+
+    expect(changed).not.toHaveBeenCalled();
+    expect(mock.log.warn).toHaveBeenCalledWith("effects:pass-budget", { passes: 30, budget: 24 });
+  });
+
   it("warns once per crossing of more than one full-screen filtered view", () => {
     const mock = started();
     const first = mock.spawn(cover());

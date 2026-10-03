@@ -1,6 +1,7 @@
 /**
  * @file renderer/host — type definitions: the one Pixi application, its backend and its listeners.
  */
+import type { DrawCounter } from "../monitor/types";
 import type { PixiApplication, PixiContainer, PixiModule, RendererKind } from "../types";
 
 /**
@@ -64,8 +65,9 @@ export type HostApi = {
    * @returns `"webgpu"`, `"webgl"`, or `"none"` while inert or unsupported.
    * @example
    * ```ts
-   * // A game picks the WGSL or the GLSL source of its own filter.
-   * const source = app.renderer.host.kind() === "webgpu" ? wgsl : glsl; // "webgpu" in Chrome
+   * // A game notes that a browser without WebGPU draws on the WebGL fallback.
+   * if (app.renderer.host.kind() === "webgl") showFallbackNote();
+   * app.renderer.host.kind(); // "webgpu" in Chrome
    * ```
    */
   kind(): RendererKind;
@@ -126,6 +128,18 @@ export type HostApi = {
  * ```
  */
 export type TextureUsage = { count: number; bytes: number };
+
+/**
+ * Swaps Pixi's three WebGPU draw classes for counting ones and returns the undo. The plugin root
+ * injects `installDrawCounting` of `monitor/draw-calls.ts` here in a dev build, because the
+ * counter must be in Pixi's registry before `new Application()`, earlier than `monitor` exists.
+ */
+export type InstallDrawCounting = (pixi: PixiModule, counter: DrawCounter) => () => void;
+
+/**
+ * What `host` gets injected: the draw-call counter of a dev build, `undefined` in production.
+ */
+export type HostDeps = { installDrawCounting: InstallDrawCounting | undefined };
 
 /**
  * host methods injected into `viewport`, `sync` and `monitor`, and driven by the plugin root. Not

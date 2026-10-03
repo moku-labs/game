@@ -522,26 +522,62 @@ export type SyncApi = {
 
   /**
    * The texture registry `assets` drives.
+   *
+   * @example
+   * ```ts
+   * // A lazy bundle arrived: `assets` turns the magenta placeholders into the art.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.textures.invalidate(["board.chain-1", "board.chain-2"]);
+   * ```
    */
   textures: TexturesApi;
 
   /**
    * The display registry a plugin above extends with its own component.
+   *
+   * @example
+   * ```ts
+   * // `text` draws its labels with BitmapText, and stops drawing them when it stops.
+   * const off = ctx.require(rendererPlugin).sync.displays.provide(Text, createTextAdapter(ctx));
+   *
+   * off(); // `text` stops: the renderer builds no new label
+   * ```
    */
   displays: DisplaysApi;
 
   /**
    * The bitmap fonts of the one application.
+   *
+   * @example
+   * ```ts
+   * // `text` measures with the real advance table only once the font is in the renderer.
+   * ctx.require(rendererPlugin).sync.fonts.installed("hud.body"); // false before the boot bundle landed
+   * ```
    */
   fonts: FontsApi;
 
   /**
    * The debug drawing: the nine-slice outline.
+   *
+   * @example
+   * ```ts
+   * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
+   * app.renderer.sync.debug.nineSlice(true);
+   * app.renderer.sync.debug.state(); // { nineSlice: true }
+   * ```
    */
   debug: DebugApi;
 
   /**
    * The filters `effects` hangs on entities' views.
+   *
+   * @example
+   * ```ts
+   * // `effects`: Glow appeared on a button, then left it.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.filters.set(button, [{ filter: glow, passes: 1 }]);
+   * renderer.sync.filters.set(button, []); // the Glow component left: the view draws plain
+   * ```
    */
   filters: FiltersApi;
 

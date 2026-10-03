@@ -223,11 +223,14 @@ export function pixelOutcome(compared: PageCompared, tolerance: VisualTolerance)
  * ```
  */
 export function withPixels(result: CheckpointResult, found: PixelFound): CheckpointResult {
+  // State and first: the page's state joins the headless one; the state's first wins.
   const pageDiffers = found.state?.outcome === "different";
   const state = pageDiffers ? "different" : result.state;
   const stateFirst = result.state === "different" ? result.first : found.state?.first;
   const describeFirst = result.state === "different" ? undefined : result.first;
   const first = stateFirst ?? describeFirst ?? found.pixels.first;
+
+  // Merged base: the headless result with the pixel outcome added.
   const merged: CheckpointResult = {
     name: result.name,
     state,
@@ -239,6 +242,7 @@ export function withPixels(result: CheckpointResult, found: PixelFound): Checkpo
 
   if (found.pixels.outcome !== "different") return merged;
 
+  // Verdict: pixels differ, so name the ratio and whether the state moved too.
   if (found.pixels.pixelRatio !== undefined) merged.pixelRatio = found.pixels.pixelRatio;
 
   merged.verdict = state === "same" && result.describe === "same" ? "rendering" : "behaviour";

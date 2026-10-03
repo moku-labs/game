@@ -43,21 +43,34 @@ function coreChanges(ectx: EffectsCtx): Map<string, Set<Entity>> {
 }
 
 /**
- * Tells whether a slot list differs from the last one handed over: other instances, another
- * order, or other passes.
+ * Sorts placed instances by their `order`, then by the index of their kind.
+ *
+ * @param a - One placed instance.
+ * @param b - The other.
+ * @returns Negative when `a` goes first.
+ */
+function byOrder(a: Placed, b: Placed): number {
+  return a.order - b.order || a.index - b.index;
+}
+
+/**
+ * Tells whether the sorted instances of this frame differ from the last list handed over: other
+ * instances, another order, or other passes.
  *
  * @param assigned - The last list handed over.
- * @param slots - The list of this frame.
- * @returns True when the renderer must get the new list.
+ * @param placed - The sorted instances of this frame.
+ * @returns True when the renderer must get a new list.
  */
-function differs(assigned: readonly FilterSlot[], slots: readonly FilterSlot[]): boolean {
-  return (
-    assigned.length !== slots.length ||
-    slots.some(
-      (slot, index) =>
-        slot.filter !== assigned[index]?.filter || slot.passes !== assigned[index]?.passes
-    )
-  );
+function differs(assigned: readonly FilterSlot[], placed: readonly Placed[]): boolean {
+  if (assigned.length !== placed.length) return true;
+
+  for (const [index, { instance }] of placed.entries()) {
+    const slot = assigned[index];
+
+    if (slot?.filter !== instance.filter || slot.passes !== instance.passes) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -119,6 +132,7 @@ function syncView(
   view: FilteredView,
   changes: ReadonlyMap<string, ReadonlySet<Entity>>
 ): void {
+  // Bring every kind of the view up to date and collect the instances it has.
   const placed: Placed[] = [];
 
   for (const id of view.kinds) {
@@ -130,14 +144,15 @@ function syncView(
     if (entry !== undefined) placed.push(entry);
   }
 
-  placed.sort((a, b) => a.order - b.order || a.index - b.index);
+  // Hand the renderer a new frozen list only when the sorted instances changed.
+  placed.sort(byOrder);
 
-  const slots = placed.map(({ instance }) => ({
-    filter: instance.filter,
-    passes: instance.passes
-  }));
+  if (differs(view.assigned, placed)) {
+    const slots = placed.map(({ instance }) => ({
+      filter: instance.filter,
+      passes: instance.passes
+    }));
 
-  if (differs(view.assigned, slots)) {
     // A despawned entity gets no call: the renderer forgot its slots when it let the view go.
     if (slots.length > 0 || ectx.deps.world.ecs.ownerOf(entity) !== undefined) {
       ectx.deps.renderer.sync.filters.set(entity, Object.freeze(slots));
@@ -146,8 +161,12 @@ function syncView(
     view.assigned = slots;
   }
 
-  for (const retired of view.retired.splice(0)) destroyFilter(retired);
+  // Destroy what left only now, after the renderer stopped drawing it.
+  if (view.retired.length > 0) {
+    for (const retired of view.retired.splice(0)) destroyFilter(retired);
+  }
 
+  // Forget a view with nothing left on it.
   if (view.kinds.size === 0 && view.instances.size === 0) ectx.state.views.delete(entity);
 }
 
@@ -196,6 +215,20 @@ function coversScreen(ectx: EffectsCtx, entity: Entity, size: ViewportSize): boo
 }
 
 /**
+ * Tells whether a view has at least one enabled filter instance.
+ *
+ * @param view - The view.
+ * @returns True when one of its instances is enabled.
+ */
+function hasEnabledFilter(view: FilteredView): boolean {
+  for (const instance of view.instances.values()) {
+    if (instance.filter.enabled) return true;
+  }
+
+  return false;
+}
+
+/**
  * Warns once per crossing of each filter budget: the renderer's render passes over
  * `config.maxPasses`, and more than one full-screen view with an enabled filter.
  *
@@ -203,6 +236,8 @@ function coversScreen(ectx: EffectsCtx, entity: Entity, size: ViewportSize): boo
  */
 function checkBudgets(ectx: EffectsCtx): void {
   const { state, config, deps } = ectx;
+
+  // The pass budget: warn once when the renderer's passes cross `maxPasses`.
   const passes = deps.renderer.stats().renderPasses;
   const overPasses = passes > config.maxPasses;
 
@@ -212,15 +247,15 @@ function checkBudgets(ectx: EffectsCtx): void {
 
   state.over.passes = overPasses;
 
+  // The full-screen budget: count the views that cover the viewport with an enabled filter.
   const size = deps.renderer.viewport.size();
   let count = 0;
 
   for (const [entity, view] of state.views) {
-    const enabled = [...view.instances.values()].some(instance => instance.filter.enabled);
-
-    if (enabled && coversScreen(ectx, entity, size)) count += 1;
+    if (hasEnabledFilter(view) && coversScreen(ectx, entity, size)) count += 1;
   }
 
+  // Warn once when more than one such view is on screen.
   const overScreen = count > 1;
 
   if (overScreen && !state.over.fullScreen) {
@@ -247,6 +282,12 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
       const pixi = host.ready() ? host.pixi() : undefined;
 
       if (pixi === undefined) return;
+
+      // With no filtered view only the pass budget needs a look: no change sets to build.
+      if (ectx.state.views.size === 0) {
+        checkBudgets(ectx);
+        return;
+      }
 
       const changes = coreChanges(ectx);
 

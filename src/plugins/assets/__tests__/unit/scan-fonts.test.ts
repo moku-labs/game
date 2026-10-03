@@ -149,6 +149,12 @@ describe("renamePages", () => {
     ).toEqual({ pages: [{ id: 0, file: "x-0.png" }] });
   });
 
+  it("turns a JSON page that is not a name into an object with the new name", () => {
+    expect(renamePages('{"pages":[null,{"id":1,"file":"a.png"}],"chars":[]}', ["x", "y"])).toBe(
+      '{"pages":[{"file":"x"},{"id":1,"file":"y"}],"chars":[]}'
+    );
+  });
+
   it("reads the same pages back after the rename", () => {
     const renamed = renamePages(bmfontText("a.png", "b.png"), ["x-0.png", "x-1.png"]);
 
@@ -172,6 +178,12 @@ describe("pagesOfFont", () => {
   it("refuses a JSON font without a pages list", () => {
     expect(() => pagesOfFont('{ "chars": [] }', "features/ui/assets/body.fnt")).toThrow(
       "declares no page."
+    );
+  });
+
+  it("refuses a JSON font whose only page is null", () => {
+    expect(() => pagesOfFont('{"pages":[null]}', "features/ui/assets/body.fnt")).toThrow(
+      '[game] assets: the font "features/ui/assets/body.fnt" declares no page.'
     );
   });
 });
