@@ -22,13 +22,17 @@ export function createHandlers(ctx: KernelSlice): {
 } {
   return {
     /**
-     * Serves the captures still waiting for a drawn frame once the game pauses.
+     * Serves the captures still waiting for a drawn frame once the game pauses. Dev builds only.
      *
      * @param payload - What changed on the pause stack.
      */
     "lifecycle:changed": (payload: LifecycleChanged): void => {
-      // The pause is the one signal a paused clock gives: no frame comes to serve the queue.
-      if (payload.paused) servePaused(ctx.state.monitor, ctx.require(timePlugin));
+      // The dev guard is inline and positive, not `isDev()`: Bun folds it under a production
+      // `define` and drops the capture code with it, as the renderer README explains. The pause is
+      // the one signal a paused clock gives: no frame comes to serve the queue.
+      if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__ && payload.paused) {
+        servePaused(ctx.state.monitor, ctx.require(timePlugin));
+      }
     }
   };
 }

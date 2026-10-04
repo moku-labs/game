@@ -224,7 +224,9 @@ test against the real module pins the three names, their `extension` metadata an
   the clock is paused. A capture still waiting when the game pauses is served by the
   `lifecycle:changed` hook (`paused: true`) one microtask later, so a pause inside a frame lets
   that frame end first: a plain capture is taken at once, a running sheet steps what is left of its
-  spacing. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame, in the same call as the extract's
+  spacing, or nothing when an earlier sheet served on the same pause stepped past it. The hook
+  carries the same positive dev guard as the draw-call counter, so a production build drops it with
+  the capture code. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame, in the same call as the extract's
   synchronous render; only the PNG encode comes later. Every option draws on the picture after the
   extract, on an `OffscreenCanvas` 2D context (`monitor/picture.ts`): the player never sees a toggle
   or a badge.

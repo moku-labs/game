@@ -2,7 +2,8 @@
  * @file renderer/monitor — the capture of a frame and its options: the checks of the options, the
  * drawn frame a picture is taken on, the legend measured on that very frame, the layers left out of
  * the extract, the frames of a contact sheet, and the answer drawn from them. Dev builds only: the
- * one caller, `capture()` in `monitor/api.ts`, starts with the inline dev guard.
+ * two callers start with the inline dev guard, `capture()` in `monitor/api.ts` and the
+ * `lifecycle:changed` hook in `handlers.ts`, which hands a pause to `servePaused`.
  */
 import type { Api as TimeApi } from "../../time/types";
 import type { PixiContainer, Point } from "../types";
@@ -337,7 +338,7 @@ async function steppedShot(
 /**
  * The next frame of a sheet, `everyMs` of game time after the last one. A paused clock is stepped
  * by `everyMs` once; a running one is waited for, and stepped by what is left of `everyMs` when
- * the game pauses first.
+ * the game pauses first, by nothing when an earlier capture stepped the clock past it.
  *
  * @param mctx - Domain context of the capture.
  * @param layers - The layers drawn.
@@ -360,7 +361,8 @@ function laterShot(
     mctx,
     take,
     () => time.snapshot().elapsed - since >= everyMs,
-    () => steppedShot(mctx, take, since + everyMs - time.snapshot().elapsed)
+    // Never back: an earlier sheet served on the same pause may have stepped past this one.
+    () => steppedShot(mctx, take, Math.max(0, since + everyMs - time.snapshot().elapsed))
   );
 }
 

@@ -855,6 +855,32 @@ describe("capture sheet", () => {
     expect(readFakePicture(shot?.png ?? "").width).toBe(8 * 2 + 3 * 8);
   });
 
+  it("never steps game time back when two waiting sheets are served on a pause", async () => {
+    installFakeCanvas();
+    const mock = await scene();
+    const times: number[] = [];
+
+    answerPictures(mock, fakePictureUrl(8, 4));
+    vi.mocked(mock.time.step).mockImplementation((deltaMs: number) => {
+      mock.setElapsed(mock.time.snapshot().elapsed + deltaMs);
+      times.push(mock.time.snapshot().elapsed);
+    });
+
+    const slow = mock.api.capture({ sheet: { frames: 2, everyMs: 100 } });
+    const fast = mock.api.capture({ sheet: { frames: 2, everyMs: 50 } });
+
+    frame(mock, 0, 2);
+    await settle();
+    mock.setElapsed(20);
+    frame(mock, 20, 2);
+    pause(mock);
+    await Promise.all([slow, fast]);
+
+    // The slow sheet steps to 100; the fast one is already past its 50 and steps nothing.
+    expect(vi.mocked(mock.time.step).mock.calls).toEqual([[80], [0]]);
+    expect(times).toEqual([100, 100]);
+  });
+
   it("lets the frame the game paused in end first, since time.step cannot run inside it", async () => {
     installFakeCanvas();
     const mock = await scene();

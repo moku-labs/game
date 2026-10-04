@@ -6,7 +6,8 @@
  *
  * Engine-internal, not a root export. `input`, `anim` and `ui` import `rootPoseOf` and
  * `localPoseOf` from this module path (`../renderer/sync/pose`) and never walk the `Parent` chain
- * themselves; `sync` places a box with `rootPointOf`.
+ * themselves; `input` places a carried view under the last pose of a despawned held view with
+ * `poseUnder`; `sync` places a box with `rootPointOf`.
  */
 import type { Entity } from "../../world/types";
 import { Parent, Transform, type TransformValue } from "../components";
@@ -74,6 +75,37 @@ function applyPose(pose: Readonly<TransformValue>, point: Point): Point {
 }
 
 /**
+ * Places a local pose under a parent pose: the pose in the space the parent sits in. The step
+ * `rootPoseOf` takes once per parent: the position through the parent's pivot, rotation, scale
+ * and position, the rotations added and the scales multiplied.
+ *
+ * @param above - The parent pose.
+ * @param local - The pose under it.
+ * @returns The composed pose; it keeps the local pivot.
+ * @example
+ * ```ts
+ * poseUnder(
+ *   { x: 400, y: 300, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } },
+ *   { x: 0, y: 30, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
+ * ); // { x: 400, y: 360, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } }
+ * ```
+ */
+export function poseUnder(
+  above: Readonly<TransformValue>,
+  local: Readonly<TransformValue>
+): TransformValue {
+  const landed = applyPose(above, local);
+
+  return {
+    x: landed.x,
+    y: landed.y,
+    rotation: local.rotation + above.rotation,
+    scale: local.scale * above.scale,
+    pivot: { x: local.pivot.x, y: local.pivot.y }
+  };
+}
+
+/**
  * Where an entity really is: its `Transform` composed through the `Parent` chain, every pivot on
  * the way applied. The answer keeps the entity's own pivot, so it can be written straight into the
  * `Transform` of an entity without a parent and the view does not move.
@@ -95,7 +127,7 @@ export function rootPoseOf(
   entity: Entity,
   own?: Readonly<TransformValue>
 ): TransformValue {
-  const pose = copyPose(own ?? ecs.get(entity, Transform) ?? Transform.defaults);
+  let pose = copyPose(own ?? ecs.get(entity, Transform) ?? Transform.defaults);
   let current = entity;
 
   for (let depth = 0; depth < MAX_DEPTH; depth += 1) {
@@ -103,13 +135,7 @@ export function rootPoseOf(
 
     if (parent === 0) break;
 
-    const above = ecs.get(parent, Transform) ?? Transform.defaults;
-    const landed = applyPose(above, pose);
-
-    pose.x = landed.x;
-    pose.y = landed.y;
-    pose.rotation += above.rotation;
-    pose.scale *= above.scale;
+    pose = poseUnder(ecs.get(parent, Transform) ?? Transform.defaults, pose);
     current = parent;
   }
 

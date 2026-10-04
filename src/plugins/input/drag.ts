@@ -8,7 +8,7 @@
  * whole stack; they leave it before any settle, or they would land at rest plus the held rest.
  */
 import { Parent, Transform, type TransformValue } from "../renderer/components";
-import { localPoseOf, parentOf, rootPoseOf } from "../renderer/sync/pose";
+import { localPoseOf, parentOf, poseUnder, rootPoseOf } from "../renderer/sync/pose";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
 import { dropAnswer, submit } from "./answers";
@@ -211,38 +211,6 @@ function carry(ctx: InputCtx, held: Entity): void {
 
     hang(ctx, held, entity);
   }
-}
-
-/**
- * Places a local pose under a parent pose: the pose in the space the parent sits in.
- *
- * @param above - The parent pose.
- * @param local - The pose under it.
- * @returns The composed pose; it keeps the local pivot.
- * @example
- * ```ts
- * poseUnder(
- *   { x: 400, y: 300, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } },
- *   { x: 0, y: 30, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
- * ); // { x: 400, y: 360, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } }
- * ```
- */
-function poseUnder(
-  above: Readonly<TransformValue>,
-  local: Readonly<TransformValue>
-): TransformValue {
-  const cos = Math.cos(above.rotation);
-  const sin = Math.sin(above.rotation);
-  const dx = local.x - above.pivot.x;
-  const dy = local.y - above.pivot.y;
-
-  return {
-    x: above.x + above.scale * (dx * cos - dy * sin),
-    y: above.y + above.scale * (dx * sin + dy * cos),
-    rotation: above.rotation + local.rotation,
-    scale: above.scale * local.scale,
-    pivot: { x: local.pivot.x, y: local.pivot.y }
-  };
 }
 
 /**
