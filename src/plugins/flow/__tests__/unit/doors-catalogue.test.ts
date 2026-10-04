@@ -26,12 +26,16 @@ describe("the base catalogue", () => {
       "entities",
       "projections",
       "ui",
-      "rect",
+      "locate",
       "render",
       "sounds",
       "effects",
       "assets",
-      "log"
+      "log",
+      "explain",
+      "diff",
+      "schema",
+      "at"
     ]);
     expect(Object.keys(commands)).toEqual([
       "answer",

@@ -8,9 +8,15 @@ import { assetsSource } from "../../assets/inspect";
 import { soundsSource } from "../../audio/inspect";
 import { effectsSource } from "../../effects/inspect";
 import { modelSource } from "../../model/inspect";
-import { renderSource } from "../../renderer/inspect";
-import { rectSource, uiSource } from "../../ui/inspect";
-import { entitiesSource, projectionsSource } from "../../world/inspect";
+import { atSource, renderSource } from "../../renderer/inspect";
+import { locateSource, uiSource } from "../../ui/inspect";
+import {
+  diffSource,
+  entitiesSource,
+  explainSource,
+  projectionsSource,
+  schemaSource
+} from "../../world/inspect";
 import {
   cheatsSource,
   graphSource,
@@ -41,10 +47,14 @@ export const sources = Object.freeze({
   entities: entitiesSource,
   projections: projectionsSource,
   ui: uiSource,
-  rect: rectSource,
+  locate: locateSource,
   render: renderSource,
   sounds: soundsSource,
   effects: effectsSource,
   assets: assetsSource,
-  log: logSource
+  log: logSource,
+  explain: explainSource,
+  diff: diffSource,
+  schema: schemaSource,
+  at: atSource
 });

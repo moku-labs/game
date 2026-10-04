@@ -1,7 +1,6 @@
 /**
  * @file ui plugin — the ui sources of the `/inspect` door: the live screen as data, and where an
- * element or a view is on the page. Production-safe: every one only reads. `game.rect` stays until
- * the flow catalogue moves to `game.locate`, which answers the same numbers for a key.
+ * element or a view is on the page. Production-safe: every one only reads.
  */
 import { defineSource } from "../flow/doors/define";
 import type { HeadlessApp } from "../flow/headless";
@@ -130,26 +129,6 @@ export const uiSource = defineSource({
   input: {},
   changes: "frame",
   read: (app: HeadlessApp & { readonly ui: UiApi }) => app.ui.tree()
-});
-
-/**
- * Where an element is on the page, in CSS px: its layout box, so a bare button with no fill has
- * one, scaled by every fitted element above it, through the viewport. In reference units while
- * the renderer is inert. Replaced by `game.locate`, which answers the same numbers for a key.
- *
- * @example
- * ```ts
- * // An e2e script clicks Home's Play plank on a 390 px wide phone.
- * read(app, sources.rect, { key: "play" }); // { x: 101.9, y: 469.2, w: 189.2, h: 54.6 }
- * read(app, sources.rect, { key: "nothing" }); // undefined: not on screen
- * ```
- */
-export const rectSource = defineSource({
-  id: "game.rect",
-  title: "Element rect",
-  input: { key: "string" },
-  changes: "frame",
-  read: (app: KeyApp, { key }) => locateKey(app, key)
 });
 
 /**

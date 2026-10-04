@@ -98,7 +98,7 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | Method | Behaviour |
 |---|---|
 | `toReference(clientX, clientY)` | `(client − canvas rect − frame offset) / scale`. The rectangle is read at call time. Inert: the input unchanged. |
-| `toScreen({ x, y })` | The inverse: reference units to client CSS pixels, `canvas rect + frame offset + point × scale`. The `game.rect` source places an element on the page with it. Inert: the same numbers, a fresh object. |
+| `toScreen({ x, y })` | The inverse: reference units to client CSS pixels, `canvas rect + frame offset + point × scale`. The `game.locate` source places an element or a view on the page with it. Inert: the same numbers, a fresh object. |
 | `size()` | Reference units, a fresh object. `scale = min(short / referenceSide, (long − safe insets) / referenceLong)`: the short side is at least `referenceSide` and grows on a wide screen, the long side inside the safe area is at least `referenceLong`. Inert: the `aspect.min` frame, `scale: 1`, zero safe area. |
 
 ### `sync` — `app.renderer.sync`

@@ -262,7 +262,9 @@ export {
   Pressed,
   Swipeable,
   Tappable,
-  Touchable
+  Touchable,
+  Traceable,
+  Traced
 } from "./plugins/input/components";
 // assets and scenes: declarations
 export { defineBundles, load } from "./plugins/assets/bundles";
