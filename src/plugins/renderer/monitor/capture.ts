@@ -4,6 +4,7 @@
  * the extract, the frames of a contact sheet, and the answer drawn from them. Dev builds only: the
  * one caller, `capture()` in `monitor/api.ts`, starts with the inline dev guard.
  */
+import type { Api as TimeApi } from "../../time/types";
 import type { PixiContainer, Point } from "../types";
 import { diffPicture, legendPicture, numberLegend, pictureRect, sheetPicture } from "./picture";
 import type {
@@ -284,11 +285,17 @@ async function takeShot(mctx: MonitorCtx, take: Take): Promise<Shot | undefined>
  * @param mctx - Domain context of the capture.
  * @param take - The layers drawn and whether the legend is measured.
  * @param due - True when the frame just drawn is the one to take.
+ * @param whilePaused - Takes the shot instead when the game pauses before that frame came.
  * @returns The shot, once that frame was drawn.
  */
-function queueShot(mctx: MonitorCtx, take: Take, due: () => boolean): Promise<Shot | undefined> {
+function queueShot(
+  mctx: MonitorCtx,
+  take: Take,
+  due: () => boolean,
+  whilePaused: () => Promise<Shot | undefined>
+): Promise<Shot | undefined> {
   return new Promise((resolve, reject) => {
-    mctx.ctx.state.monitor.captures.push({ ...take, due, waited: 0, resolve, reject });
+    mctx.ctx.state.monitor.captures.push({ ...take, due, whilePaused, waited: 0, resolve, reject });
   });
 }
 
@@ -300,14 +307,37 @@ function queueShot(mctx: MonitorCtx, take: Take, due: () => boolean): Promise<Sh
  * @returns The shot.
  */
 function nextShot(mctx: MonitorCtx, take: Take): Promise<Shot | undefined> {
-  if (mctx.ctx.deps.time.isPaused()) return takeShot(mctx, take);
+  const now = (): Promise<Shot | undefined> => takeShot(mctx, take);
 
-  return queueShot(mctx, take, () => true);
+  if (mctx.ctx.deps.time.isPaused()) return now();
+
+  return queueShot(mctx, take, () => true, now);
+}
+
+/**
+ * Steps the clock by some game time, the way `game.step` does, and takes the frame it drew.
+ * Async, so a throwing step rejects the shot instead of throwing at the caller.
+ *
+ * @param mctx - Domain context of the capture.
+ * @param take - The layers drawn and whether the legend is measured.
+ * @param stepMs - The game time to step, in milliseconds.
+ * @returns The shot.
+ */
+async function steppedShot(
+  mctx: MonitorCtx,
+  take: Take,
+  stepMs: number
+): Promise<Shot | undefined> {
+  mctx.ctx.log.debug("moku:dev", { command: "renderer.capture", step: stepMs });
+  mctx.ctx.deps.time.step(stepMs);
+
+  return takeShot(mctx, take);
 }
 
 /**
  * The next frame of a sheet, `everyMs` of game time after the last one. A paused clock is stepped
- * by `everyMs` once, the way `game.step` does; a running one is waited for.
+ * by `everyMs` once; a running one is waited for, and stepped by what is left of `everyMs` when
+ * the game pauses first.
  *
  * @param mctx - Domain context of the capture.
  * @param layers - The layers drawn.
@@ -324,14 +354,14 @@ function laterShot(
   const time = mctx.ctx.deps.time;
   const take: Take = { layers, legend: false };
 
-  if (time.isPaused()) {
-    mctx.ctx.log.debug("moku:dev", { command: "renderer.capture", step: everyMs });
-    time.step(everyMs);
+  if (time.isPaused()) return steppedShot(mctx, take, everyMs);
 
-    return takeShot(mctx, take);
-  }
-
-  return queueShot(mctx, take, () => time.snapshot().elapsed - since >= everyMs);
+  return queueShot(
+    mctx,
+    take,
+    () => time.snapshot().elapsed - since >= everyMs,
+    () => steppedShot(mctx, take, since + everyMs - time.snapshot().elapsed)
+  );
 }
 
 /**
@@ -393,6 +423,25 @@ export function serveCaptures(mctx: MonitorCtx): void {
       waitOn(state, request);
     }
   }
+}
+
+/**
+ * Serves the captures still waiting when the game pauses, since no frame comes to serve them: each
+ * takes its paused path, a plain capture at once and a sheet with `time.step`. It runs one
+ * microtask later, so a pause inside a frame lets that frame end first, as `time.step` throws
+ * inside one; a clock that runs again by then leaves them waiting for its next frame.
+ *
+ * @param state - The monitor branch of the plugin state.
+ * @param time - The time API, asked whether the clock is still paused.
+ */
+export function servePaused(state: MonitorState, time: TimeApi): void {
+  queueMicrotask(() => {
+    if (!time.isPaused()) return;
+
+    for (const request of state.captures.splice(0)) {
+      request.whilePaused().then(request.resolve, request.reject);
+    }
+  });
 }
 
 /**

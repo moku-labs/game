@@ -6,6 +6,7 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as FlowApi } from "../flow/types";
+import type { TransformValue } from "../renderer/components";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
 import type { AnyComponentType, Entity, Api as WorldApi } from "../world/types";
@@ -214,6 +215,11 @@ export type State = {
   parent: Entity | undefined;
   /** The rest scale of the held view in root space: the base of `heldScale`, set back on drop. */
   restScale: number | undefined;
+  /**
+   * The root pose of the held view, written at the grab and at every move. A carried view is
+   * placed from it when the held view despawns before the release and takes its `Transform`.
+   */
+  heldPose: TransformValue | undefined;
   /** The remover `world.projection.mute` returned, while a drag runs. */
   unmute: (() => void) | undefined;
   /** The views a drag carries on top of the held one, in `carry` order; empty outside a drag. */

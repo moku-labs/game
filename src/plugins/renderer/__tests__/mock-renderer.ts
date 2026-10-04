@@ -15,6 +15,7 @@ import { createModules as createWorldModules } from "../../world/api";
 import { createWorldState } from "../../world/state";
 import type { Api as WorldApi, KernelSlice as WorldKernelSlice } from "../../world/types";
 import { createModules, createRendererApi } from "../api";
+import { createHandlers } from "../handlers";
 import { startRenderer, stopRenderer, withDeps } from "../lifecycle";
 import { createRendererState } from "../state";
 import type { Api, Config, KernelSlice, Modules } from "../types";
@@ -28,6 +29,8 @@ export type FrameRegistration = { phase: Phase; callback: FrameCallback };
 export type MockRenderer = {
   ctx: KernelSlice;
   api: Api;
+  /** The hooks of the plugin, called by hand: the mock has no kernel to emit. */
+  hooks: ReturnType<typeof createHandlers>;
   modules: Modules;
   world: WorldApi & { clearChanges(): void };
   log: Log.LogApi;
@@ -264,6 +267,7 @@ export function createMockRenderer(
   return {
     ctx,
     api: createRendererApi(ctx),
+    hooks: createHandlers(ctx),
     modules,
     world,
     log,

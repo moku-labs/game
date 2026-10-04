@@ -1,7 +1,8 @@
 /**
  * Very Complex tier — pixels: one Pixi v8 application on one canvas. `host` creates it and
  * survives a lost device, `viewport` maps the window to the reference space, `sync` owns every
- * display object. Emits `renderer:device-lost`.
+ * display object. Emits `renderer:device-lost`. Hooks `lifecycle:changed`: a pause serves the
+ * captures still waiting for a drawn frame.
  *
  * @see README.md
  */
@@ -12,6 +13,7 @@ import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createRendererApi } from "./api";
+import { createHandlers } from "./handlers";
 import { startRenderer, stopRenderer } from "./lifecycle";
 import { createRendererState } from "./state";
 import type { Config, Events } from "./types";
@@ -54,6 +56,7 @@ export const rendererPlugin = /*#__PURE__*/ createPlugin("renderer", {
     }),
   createState: createRendererState,
   api: createRendererApi,
+  hooks: createHandlers,
   onStart: startRenderer,
   // @no-resource-check — onStop destroys the Pixi application and runs every cleanup.
   onStop: ({ config, state }) => stopRenderer({ config, state })

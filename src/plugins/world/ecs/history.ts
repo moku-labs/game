@@ -276,6 +276,29 @@ function recordChanges(
 }
 
 /**
+ * Records every entity that changed in one frame into that frame's slot: a new entity as a spawn,
+ * a known one as its component changes.
+ *
+ * @param state - ecs module state.
+ * @param history - The frame history.
+ * @param frame - The frame number.
+ */
+function recordChangedEntities(state: EcsState, history: History, frame: number): void {
+  const slot = slotFor(history, frame);
+
+  for (const entity of changedEntities(state)) {
+    const owner = state.owners.get(entity);
+    const entry = history.shadow.get(entity);
+
+    // An entity that died in this frame was recorded when it died.
+    if (owner === undefined) continue;
+
+    if (entry === undefined) recordSpawn(state, history, slot, entity, owner);
+    else recordChanges(state, slot, entity, entry);
+  }
+}
+
+/**
  * Records one frame, before its change sets are cleared: the first frame starts the recording,
  * every later one compares the changed entities with the shadow. Every frame gets a slot, also
  * an empty one. Dev builds only: the caller guards it inline.
@@ -294,22 +317,9 @@ export function recordFrame(ctx: WorldCtx, frame: number): void {
 
   state.history = history;
 
-  if (history.newest === undefined) {
-    startRecording(ctx, history, frame);
-  } else {
-    const slot = slotFor(history, frame);
-
-    for (const entity of changedEntities(state)) {
-      const owner = state.owners.get(entity);
-      const entry = history.shadow.get(entity);
-
-      // An entity that died in this frame was recorded when it died.
-      if (owner === undefined) continue;
-
-      if (entry === undefined) recordSpawn(state, history, slot, entity, owner);
-      else recordChanges(state, slot, entity, entry);
-    }
-  }
+  // The first frame starts the recording; every later one records what changed.
+  if (history.newest === undefined) startRecording(ctx, history, frame);
+  else recordChangedEntities(state, history, frame);
 
   history.newest = frame;
 }

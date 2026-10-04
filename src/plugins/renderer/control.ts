@@ -38,6 +38,9 @@ const REST_FRAMES = 600;
 /** Drawn frames after the rest, so the screen the gate opened is built and drawn. */
 const AFTER_REST_FRAMES = 2;
 
+/** The length of one frame at 60 fps: the step a paused clock takes per frame, as in `game.step`. */
+const FRAME_MS = 1000 / 60;
+
 /**
  * Builds the error of an input field of `game.capture` with the wrong shape.
  *
@@ -159,12 +162,19 @@ function atRest(state: FlowState): boolean {
 }
 
 /**
- * Waits for the next drawn frame: the end of its `render` phase.
+ * Waits for the next drawn frame: the end of its `render` phase. A paused clock runs no frame, so
+ * the frame is stepped here instead, one `time.step(1000 / 60)`, as `game.step` does.
  *
  * @param app - The app whose frames are waited on.
  * @returns Resolves after that frame.
  */
 function nextFrame(app: HeadlessApp): Promise<void> {
+  if (app.time.isPaused()) {
+    app.time.step(FRAME_MS);
+
+    return Promise.resolve();
+  }
+
   return new Promise(resolve => {
     const off = app.time.onFrame("render", () => {
       off();
@@ -277,7 +287,8 @@ async function captureDiff(
  * as they are. `diff`, a bookmark, is the one option the command runs itself: at rest, it journals
  * itself as a raw write (`tainted` turns true), restores the bookmark and waits for its gate, takes
  * that picture, restores where the game stood and waits again, and answers the pixel diff of now
- * against then. `undefined` while the renderer is inert, as in a headless test.
+ * against then. While the game is paused it steps each frame it waits on, 1000/60 ms of game time.
+ * `undefined` while the renderer is inert, as in a headless test.
  *
  * @example
  * ```ts

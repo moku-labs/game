@@ -158,6 +158,21 @@ function isNoted(value: object): value is { text: string; note?: string } {
 }
 
 /**
+ * Tells whether a parsed JSON value is a table of key to value: an object, not `null`, not an
+ * array.
+ *
+ * @param value - A parsed JSON value.
+ * @returns True when the value is a table.
+ * @example
+ * ```ts
+ * isTable(["hud.title"]); // false
+ * ```
+ */
+export function isTable(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
  * Tells whether one value of a string file is a message: a string, or `{ text, note }`.
  *
  * @param value - One value of a string file.
@@ -255,13 +270,13 @@ async function readTable(
   try {
     const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
 
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    if (!isTable(parsed)) {
       walk.problems.push(`${relative}: a string file is an object of key to message.`);
 
       return undefined;
     }
 
-    return parsed as Record<string, unknown>;
+    return parsed;
   } catch (error) {
     walk.problems.push(`${relative} could not be read: ${detailOf(error)}.`);
 

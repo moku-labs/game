@@ -303,6 +303,35 @@ describe("game.capture", () => {
     expect(frames).toEqual([5, 10]);
   });
 
+  it("steps the frames it waits on while the clock is paused, and comes back where it stood", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, flow, capture } = diffApp();
+    const frames: number[] = [];
+
+    // The editor paused the game: no frame comes, so the command steps each one it waits on.
+    app.time.pause();
+    flow.restore = async (bookmark: Bookmark) => {
+      flow.restoredPaths.push(bookmark.path);
+      flow.state = { ...flow.state, path: bookmark.path, pending: { fx: "fly" } };
+      flow.restFrames = 3;
+    };
+    capture.mockImplementation(async () => {
+      frames.push(app.time.snapshot().frame);
+
+      return { png: "data:image/png;base64,theirs" };
+    });
+
+    const ran = await run(app, captureCommand, { diff: bookmarkAt("shop") });
+
+    expect(ran.value).toEqual({ png: "data:image/png;base64,theirs" });
+    expect(frames).toEqual([5, 10]);
+    expect(flow.restoredPaths).toEqual(["shop", "home"]);
+    expect(app.flow.state()).toMatchObject({ path: "home", pending: { gate: ["play"] } });
+    expect(app.time.isPaused()).toBe(true);
+    // Ten frames of 1000 / 60 ms, the step of game.step.
+    expect(app.time.snapshot().elapsed).toBeCloseTo(10 * (1000 / 60), 6);
+  });
+
   it("gives up when the bookmark does not rest in 600 drawn frames, and goes back anyway", async () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const { app, flow, capture } = diffApp();

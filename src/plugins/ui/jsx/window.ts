@@ -1,7 +1,7 @@
 /**
  * @file ui/jsx — the windowed scroll: its props read and checked, the node a row callback answers
  * made into one keyed slot, and the spacers that stand for the rows that do not exist. Pure: the
- * reconcile logs what these functions report.
+ * range step in `range.ts` logs what these functions report.
  */
 import type { ResolvedStyle } from "../styles/types";
 import { flatten } from "./flatten";
@@ -61,6 +61,35 @@ function overscanOf(overscan: unknown): number {
 }
 
 /**
+ * Tells a row height `ui` can cut a range with: a finite number above 0.
+ *
+ * @param value - The `rowHeight` prop.
+ * @returns True for a finite number above 0.
+ * @example
+ * ```ts
+ * isUsableRowHeight(0); // false
+ * ```
+ */
+function isUsableRowHeight(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * Reads the `rows` prop as a whole number: rounded down, and 0 for a negative one or for anything
+ * that is not a finite number.
+ *
+ * @param rows - The `rows` prop.
+ * @returns The whole number of rows.
+ * @example
+ * ```ts
+ * wholeRowsOf(10.7); // 10
+ * ```
+ */
+function wholeRowsOf(rows: unknown): number {
+  return typeof rows === "number" && Number.isFinite(rows) ? Math.max(0, Math.floor(rows)) : 0;
+}
+
+/**
  * Reads the windowed form of a scroll: `rows`, `rowHeight` and `row` together. A scroll with none
  * of the three is the child form.
  *
@@ -74,6 +103,8 @@ function overscanOf(overscan: unknown): number {
  */
 export function windowFormOf(node: DescriptionNode): WindowForm | undefined {
   const { rows, rowHeight, overscan, row } = node.props;
+
+  // All three props or none: none is the child form, some of them is a mistake.
   const given = [rows !== undefined, rowHeight !== undefined, typeof row === "function"].filter(
     Boolean
   ).length;
@@ -87,14 +118,15 @@ export function windowFormOf(node: DescriptionNode): WindowForm | undefined {
     );
   }
 
-  if (typeof rowHeight !== "number" || !Number.isFinite(rowHeight) || rowHeight <= 0) {
+  // The range is cut in rows of this height, so it must be a finite number above 0.
+  if (!isUsableRowHeight(rowHeight)) {
     throw new Error(
       "[game] Scroll rowHeight must be above 0.\n  Give the row height in reference units."
     );
   }
 
-  const whole =
-    typeof rows === "number" && Number.isFinite(rows) ? Math.max(0, Math.floor(rows)) : 0;
+  // The row count is rounded down to a whole number; a rounded count is reported, not refused.
+  const whole = wholeRowsOf(rows);
 
   return {
     rows: whole,
@@ -103,6 +135,22 @@ export function windowFormOf(node: DescriptionNode): WindowForm | undefined {
     row: row as (index: number) => JsxChild,
     rounded: whole !== rows
   };
+}
+
+/**
+ * Refuses the props of a scroll its windowed form cannot take: some but not all of `rows`,
+ * `rowHeight` and `row`, or a row height that is not above 0. Called before anything is spawned or
+ * patched, so a refused scroll leaves no half-made element.
+ *
+ * @param node - The node being placed.
+ * @throws {Error} For a windowed scroll whose props do not hold.
+ * @example
+ * ```ts
+ * checkWindow({ type: "scroll", props: { rows: 3 }, children: [] }); // throws "[game] A windowed scroll needs rows, rowHeight and row."
+ * ```
+ */
+export function checkWindow(node: DescriptionNode): void {
+  if (node.type === "scroll") windowFormOf(node);
 }
 
 /**

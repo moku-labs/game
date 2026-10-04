@@ -13,6 +13,7 @@ import {
   compileFailure,
   detailOf,
   isMessageEntry,
+  isTable,
   type MessageEntry,
   PREFIX,
   type Walk,
@@ -122,7 +123,7 @@ function jsonText(table: object): string {
 }
 
 /**
- * Wraps a source locale no feature brings in the message shape of the framework.
+ * Builds the error of a source locale that no feature has a string file for.
  *
  * @param source - The locale the export was told to read from.
  * @returns The error to reject with.
@@ -280,13 +281,14 @@ async function readExchangeFile(
   try {
     const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
 
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    // An exchange file is a table of key to entry; anything else is a problem.
+    if (!isTable(parsed)) {
       review.problems.push(`${file}: an import file is an object of key to entry.`);
 
       return undefined;
     }
 
-    return { locale, file, table: parsed as Record<string, unknown> };
+    return { locale, file, table: parsed };
   } catch (error) {
     review.problems.push(`${file} could not be read: ${detailOf(error)}.`);
 

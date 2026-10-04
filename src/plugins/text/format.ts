@@ -7,6 +7,12 @@ import type { TextFormat } from "./types";
 /** Milliseconds in one second. */
 const SECOND_MS = 1000;
 
+/** Seconds in one minute. */
+const SECONDS_PER_MINUTE = 60;
+
+/** Seconds in one hour. */
+const SECONDS_PER_HOUR = 3600;
+
 /**
  * Tells whether a string is one of the four formats, for a bind that slipped past the type.
  *
@@ -92,10 +98,15 @@ export function formatBound(
       return String(unit);
     }
     case "mm:ss": {
-      return `${pad2(Math.floor(unit / 60))}:${pad2(unit % 60)}`;
+      const minutes = Math.floor(unit / SECONDS_PER_MINUTE);
+
+      return `${pad2(minutes)}:${pad2(unit % SECONDS_PER_MINUTE)}`;
     }
     case "h:mm:ss": {
-      return `${Math.floor(unit / 3600)}:${pad2(Math.floor(unit / 60) % 60)}:${pad2(unit % 60)}`;
+      const hours = Math.floor(unit / SECONDS_PER_HOUR);
+      const minutes = Math.floor(unit / SECONDS_PER_MINUTE) % SECONDS_PER_MINUTE;
+
+      return `${hours}:${pad2(minutes)}:${pad2(unit % SECONDS_PER_MINUTE)}`;
     }
     case "duration": {
       return duration(unit * SECOND_MS);

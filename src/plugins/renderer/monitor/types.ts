@@ -292,6 +292,8 @@ export type PictureRequest = {
   legend: boolean;
   /** True when the frame just drawn is the one to take. A plain capture takes the next one. */
   due: () => boolean;
+  /** Takes the shot instead when the game pauses before that frame came: at once, or stepped. */
+  whilePaused: () => Promise<Shot | undefined>;
   /** Drawn frames that went by while `due` said no. */
   waited: number;
   /** Hands the shot over; nothing when the renderer stopped first. */

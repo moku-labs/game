@@ -221,7 +221,10 @@ test against the real module pins the three names, their `extension` metadata an
   cleared with `config.background`. The captures due on one frame with the same layers and legend
   share one extract. `onStop` answers a capture still waiting with `undefined`.
 - **Timing.** A picture is taken right after the next drawn frame (`monitor.end()`), at once while
-  the clock is paused. The legend is measured on that same frame, in the same call as the extract's
+  the clock is paused. A capture still waiting when the game pauses is served by the
+  `lifecycle:changed` hook (`paused: true`) one microtask later, so a pause inside a frame lets
+  that frame end first: a plain capture is taken at once, a running sheet steps what is left of its
+  spacing. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame, in the same call as the extract's
   synchronous render; only the PNG encode comes later. Every option draws on the picture after the
   extract, on an `OffscreenCanvas` 2D context (`monitor/picture.ts`): the player never sees a toggle
   or a badge.
@@ -522,7 +525,8 @@ effect pending, else `[game] game.capture diff needs the game at rest.`; the com
 itself, `recordCheat(app, "game.capture", { diff }, frame)` of `flow/doors/session.ts`, so
 `tainted` turns true; it takes `flow.bookmark()`, restores `diff` and waits on drawn frames until the
 graph rests at a gate again (at most 600, else `[game] game.capture diff: the bookmark did not come
-to rest in 600 frames.`), then two drawn frames more; takes `capture({ layers })`; restores where it
+to rest in 600 frames.`), then two drawn frames more; while the clock is paused, each frame it waits
+on is a `time.step(1000 / 60)` of its own, as `game.step` does; takes `capture({ layers })`; restores where it
 started and waits the same way, also when something failed; and answers
 `capture({ layers, legend, against })` with the first picture as `against`. Every restore reconciles
 in direct mode, so motions in flight when the command started are finished afterwards.
@@ -531,7 +535,8 @@ in direct mode, so motions in flight when the command started are finished after
 
 `time` for `onFrame("input")` and `onFrame("render")`, `isPaused()` (a capture on a paused
 clock), and `snapshot()` and `step()` (the frames of a sheet), `lifecycle` for `push`/`pop` of
-`"background"` and `"device-lost"`, `clock` for `now()`, the time source of the frame counters,
+`"background"` and `"device-lost"` and for the `lifecycle:changed` hook that serves the captures a
+pause left waiting, `clock` for `now()`, the time source of the frame counters,
 `world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot` and
 `projection.layers`/`keyOf`. The doors read `world.ecs.ownerOf` and, for `game.capture` with
 `diff`, the app's `flow`. Core APIs: `ctx.log`. `pixi.js` is a peer dependency, reached only

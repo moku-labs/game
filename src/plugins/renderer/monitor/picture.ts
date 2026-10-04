@@ -29,6 +29,21 @@ const PIXEL_THRESHOLD = 24;
 /** How much of the way to white a matching grey pixel keeps: `255 - (255 - grey) × 0.4`. */
 const FADE_KEEP = 0.4;
 
+/** Bytes of one pixel: red, green, blue and alpha. */
+const CHANNELS = 4;
+
+/** The alpha of a pixel no one sees through: every pixel of the diff picture. */
+const OPAQUE = 255;
+
+/** The value of a channel in white, where a matching pixel fades to. */
+const WHITE = 255;
+
+/** A pixel that differs, on the diff picture: opaque `#ff0000`. */
+const DIFF_PIXEL = [255, 0, 0, OPAQUE] as const;
+
+/** The Rec. 601 luma weights: how much red, green and blue make the grey of a pixel. */
+const LUMA = { red: 0.299, green: 0.587, blue: 0.114 } as const;
+
 /** Bytes encoded per `String.fromCodePoint` call, well under the argument limit of an engine. */
 const ENCODE_CHUNK = 0x80_00;
 
@@ -203,12 +218,31 @@ function byteAt(data: Uint8ClampedArray, at: number): number {
  * ```
  */
 function pixelDiffers(current: Uint8ClampedArray, earlier: Uint8ClampedArray, at: number): boolean {
-  for (let channel = at; channel < at + 4; channel += 1) {
+  for (let channel = at; channel < at + CHANNELS; channel += 1) {
     if (Math.abs(byteAt(current, channel) - byteAt(earlier, channel)) > PIXEL_THRESHOLD)
       return true;
   }
 
   return false;
+}
+
+/**
+ * The grey of a pixel: its red, green and blue by the luma weights.
+ *
+ * @param data - The RGBA bytes.
+ * @param at - The index of the pixel's first byte.
+ * @returns The grey, 0 to 255.
+ * @example
+ * ```ts
+ * greyOf(new Uint8ClampedArray([10, 20, 30, 255]), 0); // 18.15
+ * ```
+ */
+function greyOf(data: Uint8ClampedArray, at: number): number {
+  return (
+    LUMA.red * byteAt(data, at) +
+    LUMA.green * byteAt(data, at + 1) +
+    LUMA.blue * byteAt(data, at + 2)
+  );
 }
 
 /**
@@ -230,20 +264,20 @@ export function diffPixels(current: Pixels, earlier: Pixels): Uint8ClampedArray<
     throw differentSizes();
   }
 
-  const out = new Uint8ClampedArray(current.width * current.height * 4);
+  const out = new Uint8ClampedArray(current.width * current.height * CHANNELS);
   const now = current.data;
 
-  for (let at = 0; at < out.length; at += 4) {
+  for (let at = 0; at < out.length; at += CHANNELS) {
+    // A pixel that differs turns red. A pixel that stayed the same keeps its grey, faded toward
+    // white, so the red is the one thing that stands out.
     if (pixelDiffers(now, earlier.data, at)) {
-      out.set([255, 0, 0, 255], at);
+      out.set(DIFF_PIXEL, at);
       continue;
     }
 
-    const grey =
-      0.299 * byteAt(now, at) + 0.587 * byteAt(now, at + 1) + 0.114 * byteAt(now, at + 2);
-    const faded = 255 - (255 - grey) * FADE_KEEP;
+    const faded = WHITE - (WHITE - greyOf(now, at)) * FADE_KEEP;
 
-    out.set([faded, faded, faded, 255], at);
+    out.set([faded, faded, faded, OPAQUE], at);
   }
 
   return out;

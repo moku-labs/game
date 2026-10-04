@@ -1,9 +1,11 @@
 /**
  * @file ui/jsx — the routing of a released hint to a keyed element: the rule of the world's
- * projections (`world/projection/hints.ts`) applied to the roots of `ui`. Pure.
+ * projections (`world/projection/hints.ts`) applied to the roots of `ui`. `hintFor` is pure;
+ * `hintOf` reads the buffered hints and the roots of the jsx state, and writes nothing.
  */
 import type { Hint } from "../../flow/types";
 import type { Json } from "../../model/types";
+import type { Element, JsxState } from "./types";
 
 /**
  * Reads the payload of a hint as a plain object. A hint without one routes nowhere.
@@ -50,4 +52,20 @@ export function hintFor(
   }
 
   return undefined;
+}
+
+/**
+ * The hint routed to an element in this frame step: the first hint released since the last one
+ * whose payload names its key, within its root.
+ *
+ * @param state - The jsx state: the hints released since the last frame step and the roots.
+ * @param element - The element whose hooks are about to run.
+ * @returns The hint, or `undefined`.
+ */
+export function hintOf(state: JsxState, element: Element): Hint | undefined {
+  if (state.hints.length === 0) return undefined;
+
+  const root = state.roots.get(element.root);
+
+  return root === undefined ? undefined : hintFor(state.hints, root.name, element.key);
 }

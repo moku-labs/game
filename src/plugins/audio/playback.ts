@@ -366,6 +366,10 @@ async function playStreamed(
   fadeOut(state, start.seconds);
   ramp(stream.gain, 1, start.seconds, context.currentTime);
   state.music = { key: start.key, gain: stream.gain, source: undefined, stream };
+
+  // A push that came while play() was on its way found no track to pause: pause it now.
+  if (state.paused) pauseStream(stream);
+
   recordSound(ctx, { key: start.key, bus: "music", kind: "music" });
 }
 

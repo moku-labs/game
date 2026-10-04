@@ -1,8 +1,10 @@
 /**
  * @file ui/jsx — the reconcile: a description tree diffed by identity into the entities `ui`
- * owns, and the solve that gives every one of them its rect before it is ever drawn.
+ * owns, and the solve that gives every one of them its rect before it is ever drawn. Beside it:
+ * the range of a windowed scroll (`range.ts`), the rest and the motion of the extras
+ * (`extras.ts`), the hint routed to a keyed element (`hints.ts`) and the bound-text remeasure
+ * (`remeasure.ts`).
  */
-import type { Hint } from "../../flow/types";
 import { PointerOver, Pressed, Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
 import {
@@ -15,45 +17,31 @@ import {
 } from "../../renderer/components";
 import { Text } from "../../text/components";
 import { Exiting, Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
-import type {
-  AnyComponentType,
-  AnyComponentValue,
-  ComponentType,
-  Entity,
-  MotionHandle
-} from "../../world/types";
+import type { AnyComponentType, AnyComponentValue, Entity, MotionHandle } from "../../world/types";
 import { Box, Escapable, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
-import type { LayoutModule, Rect, RowRange } from "../layout/types";
+import type { LayoutModule, Rect } from "../layout/types";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
 import { CONTENT, visualOf } from "../visual";
+import { cancelExtra, livePatch, recordRest } from "./extras";
 import type { Fields } from "./fields";
-import { hintFor } from "./hints";
+import { hintOf } from "./hints";
 import { hostViews, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
 import { settlePopups } from "./popups";
+import { createRange } from "./range";
+import { markResizedTexts } from "./remeasure";
 import type {
   DescriptionNode,
   Element,
   ElementMotion,
-  JsxChild,
   JsxState,
   PointerFlag,
   PopupLink,
-  Root,
-  ScrollWindow
+  Root
 } from "./types";
-import {
-  BOTTOM_SPACER,
-  emptySlot,
-  isOwnKey,
-  rowStyleOf,
-  slotOf,
-  spacerNode,
-  TOP_SPACER,
-  windowFormOf
-} from "./window";
+import { checkWindow, isOwnKey } from "./window";
 
 /** What the modules injected into `jsx` are. */
 export type JsxModules = { styles: StylesModule; layout: LayoutModule };
@@ -210,18 +198,6 @@ function styleOf(node: DescriptionNode): Style | undefined {
   const style = node.props.style;
 
   return typeof style === "object" && style !== null ? (style as Style) : undefined;
-}
-
-/**
- * Refuses the props of a scroll its windowed form cannot take: some but not all of `rows`,
- * `rowHeight` and `row`, or a row height that is not above 0. Called before anything is spawned or
- * patched, so a refused scroll leaves no half-made element.
- *
- * @param node - The node being placed.
- * @throws {Error} For a windowed scroll whose props do not hold.
- */
-function checkWindow(node: DescriptionNode): void {
-  if (node.type === "scroll") windowFormOf(node);
 }
 
 /**
@@ -458,44 +434,6 @@ function entitySet(entities: Iterable<Entity>): Set<Entity> {
 }
 
 /**
- * The patch a live element writes into one of its components: every field but the ones the
- * component type gives to a plugin. That plugin keeps such a field for the life of the entity, so
- * a re-render never puts it back to its default: a label keeps the string `text` resolved for it.
- *
- * @param value - The component value the element carries now.
- * @param owned - The fields the component type gives to a plugin.
- * @returns The fields to write.
- * @example
- * ```ts
- * livePatch({ content: "Play", resolved: "" }, ["resolved"]); // { content: "Play" }
- * ```
- */
-function livePatch(value: object, owned: readonly string[]): object {
-  if (owned.length === 0) return value;
-
-  return Object.fromEntries(Object.entries(value).filter(([field]) => !owned.includes(field)));
-}
-
-/**
- * The rest pose recorded for an extra component: the value of this render, but the fields the
- * component type gives to a plugin stay as the entity carries them, so a render never resets them.
- *
- * @param current - The value the entity carries now; none before the component is added.
- * @param value - The value of this render.
- * @param owned - The fields the component type gives to a plugin.
- * @returns The rest value.
- * @example
- * ```ts
- * restValueOf({ until: 2000, left: 42 }, { until: 5000, left: 0 }, ["left"]); // { until: 5000, left: 42 }
- * ```
- */
-function restValueOf(current: object | undefined, value: object, owned: readonly string[]): object {
-  if (current === undefined || owned.length === 0) return value;
-
-  return { ...current, ...livePatch(value, owned) };
-}
-
-/**
  * Builds the reconcile half of the jsx module: the two systems of the frame and the root
  * bookkeeping around them.
  *
@@ -513,10 +451,12 @@ export function createReconciler(
   const state: JsxState = ctx.state.jsx;
   const ecs = ctx.deps.world.ecs;
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
-
-  // The windowed scroll whose range is moving right now: while it is set, a row that leaves its
-  // content is dropped at once and an element that enters plays no `enter` hook.
-  let windowing: Entity | undefined;
+  const range = createRange(ctx, modules.layout, {
+    diffSlots: (root, scroll, slots) =>
+      diffChildren(root, scroll, childrenOf(scroll.node, slots), scroll.instance),
+    forgetSubtree,
+    despawnTree
+  });
 
   /**
    * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
@@ -538,45 +478,8 @@ export function createReconciler(
   }
 
   /**
-   * Logs one warning or error of an element once for its whole life, by event name.
-   *
-   * @param element - The element the log is about.
-   * @param event - The event name, also what makes it once.
-   * @param data - The payload.
-   * @param level - `warn`, or `error` for a broken row.
-   */
-  function logOnce(
-    element: Element,
-    event: string,
-    data: Record<string, unknown>,
-    level: "warn" | "error" = "warn"
-  ): void {
-    if (element.warned.has(event)) return;
-
-    element.warned.add(event);
-
-    if (level === "error") ctx.log.error(event, data);
-    else ctx.log.warn(event, data);
-  }
-
-  /**
-   * The windowed scroll whose rows the children of an element are: set when the element is the
-   * content of a windowed scroll.
-   *
-   * @param parent - The parent of the element being placed.
-   * @returns The scroll, or `undefined`.
-   */
-  function windowedScrollOf(parent: Element | undefined): Element | undefined {
-    if (parent?.type !== CONTENT || parent.parent === undefined) return undefined;
-
-    const scroll = lookup(parent.parent);
-
-    return scroll?.window === undefined ? undefined : scroll;
-  }
-
-  /**
    * The resolved style of an element. A row of a windowed scroll is laid out at the row height,
-   * whatever its style says; a row style with another height is one warning per scroll.
+   * whatever its style says.
    *
    * @param parent - The parent of the element.
    * @param node - The node of this render.
@@ -588,164 +491,7 @@ export function createReconciler(
     node: DescriptionNode,
     is: IsFlags
   ): ResolvedStyle {
-    const style = modules.styles.resolveElement(styleOf(node), is);
-    const scroll = windowedScrollOf(parent);
-
-    if (scroll?.window === undefined || isOwnKey(node.key)) return style;
-
-    const { rowHeight } = scroll.window;
-
-    if (style.height !== undefined && style.height !== rowHeight) {
-      logOnce(scroll, "ui:row-height-overridden", { key: scroll.key ?? scroll.identity });
-    }
-
-    return rowStyleOf(style, rowHeight);
-  }
-
-  /**
-   * The hint routed to an element in this frame step: the first hint released since the last one
-   * whose payload names its key, within its root.
-   *
-   * @param element - The element whose hooks are about to run.
-   * @returns The hint, or `undefined`.
-   */
-  function hintOf(element: Element): Hint | undefined {
-    if (state.hints.length === 0) return undefined;
-
-    const root = state.roots.get(element.root);
-
-    return root === undefined ? undefined : hintFor(state.hints, root.name, element.key);
-  }
-
-  /**
-   * Records the rest pose of one extra component with a value, so a `change` hook can bring it
-   * home with `view.toRest`; a tag has no rest. The fields the type gives to a plugin are skipped.
-   *
-   * @param element - The element that carries the extra.
-   * @param value - The value of this render.
-   */
-  function recordRest(element: Element, value: AnyComponentValue): void {
-    if (value.value === true) return;
-
-    // A value that is not `true` belongs to a component type, never to a tag.
-    const type = value.type as ComponentType<object>;
-    const rest = restValueOf(ecs.get(element.entity, type), value.value, type.owned);
-
-    ctx.deps.world.projection.setRest(element.entity, type, rest);
-  }
-
-  /**
-   * The height a windowed scroll cuts its first range with, before it has a rect: its style's
-   * height when that is a number, else the viewport's. The range step corrects it after the solve.
-   *
-   * @param element - The scroll that is entering.
-   * @returns The height in reference units.
-   */
-  function mountHeightOf(element: Element): number {
-    const height = element.style.height;
-
-    return typeof height === "number" ? height : ctx.deps.renderer.viewport.size().height;
-  }
-
-  /**
-   * The node of one spacer of a windowed scroll. The node of the last render is kept while its
-   * height holds, so a re-render with the same range writes no style and asks for no solve.
-   *
-   * @param scroll - The windowed scroll.
-   * @param key - `TOP_SPACER` or `BOTTOM_SPACER`.
-   * @param height - Its height now.
-   * @returns The node.
-   */
-  function spacerOf(scroll: Element, key: string, height: number): DescriptionNode {
-    const content = scroll.children[0] === undefined ? undefined : lookup(scroll.children[0]);
-    const at = key === TOP_SPACER ? content?.children[0] : content?.children.at(-1);
-    const spacer = at === undefined ? undefined : lookup(at);
-    const style = spacer?.node.props.style as Style | undefined;
-
-    return spacer?.key === key && style?.height === height ? spacer.node : spacerNode(key, height);
-  }
-
-  /**
-   * The slots of a windowed scroll's window: the top spacer, `row(index)` for every index of the
-   * range, the bottom spacer. A row that is not one node is one error per scroll, and an empty
-   * slot of the row height stands in for it.
-   *
-   * @param scroll - The windowed scroll.
-   * @param window - The window it is about to hold.
-   * @returns The slots, top to bottom.
-   */
-  function slotsOf(scroll: Element, window: ScrollWindow): DescriptionNode[] {
-    const { rows, rowHeight, first, last } = window;
-    const row = scroll.node.props.row as (index: number) => JsxChild;
-    const slots = [spacerOf(scroll, TOP_SPACER, first * rowHeight)];
-
-    for (let index = first; index <= last; index += 1) {
-      const slot = slotOf(row(index), index);
-
-      if (slot === undefined) {
-        logOnce(
-          scroll,
-          "ui:row-not-one-node",
-          { key: scroll.key ?? scroll.identity, index },
-          "error"
-        );
-      }
-
-      slots.push(slot ?? emptySlot(index, rowHeight));
-    }
-
-    slots.push(spacerOf(scroll, BOTTOM_SPACER, (rows - last - 1) * rowHeight));
-
-    return slots;
-  }
-
-  /**
-   * The children an element is diffed against. A windowed scroll reads its props, re-clamps its
-   * offset to the height of its rows, cuts the range at that offset and holds the slots of it; the
-   * offset of a scroll that has not solved yet is 0.
-   *
-   * @param element - The element, its node of this render already set.
-   * @returns The children.
-   */
-  function childrenFor(element: Element): readonly DescriptionNode[] {
-    const props = element.type === "scroll" ? windowFormOf(element.node) : undefined;
-
-    if (props === undefined) {
-      delete element.window;
-
-      return childrenOf(element.node);
-    }
-
-    const name = element.key ?? element.identity;
-
-    if (props.rounded) logOnce(element, "ui:scroll-rows-rounded", { key: name });
-    if (element.node.children.length > 0) {
-      logOnce(element, "ui:scroll-children-ignored", { key: name });
-    }
-
-    const height = element.live ? element.rect.h : mountHeightOf(element);
-    const offset = element.live
-      ? modules.layout.clampScroll(element, props.rows * props.rowHeight, lookup)
-      : 0;
-    const range = modules.layout.windowOf(
-      offset,
-      height,
-      props.rows,
-      props.rowHeight,
-      props.overscan
-    );
-    const window = {
-      rows: props.rows,
-      rowHeight: props.rowHeight,
-      overscan: props.overscan,
-      ...range
-    };
-
-    const slots = slotsOf(element, window);
-
-    element.window = window;
-
-    return childrenOf(element.node, slots);
+    return range.rowStyle(parent, node, modules.styles.resolveElement(styleOf(node), is));
   }
 
   /**
@@ -802,7 +548,7 @@ export function createReconciler(
       extraHandles: handleMap(),
       warnedOwned: nameSet(),
       warned: nameSet(),
-      scrolledIn: windowing !== undefined
+      scrolledIn: range.isMoving()
     };
 
     state.elements.set(entity, element);
@@ -814,7 +560,7 @@ export function createReconciler(
     if (element.type === "scroll") state.scrolls.add(entity);
 
     modules.layout.attach(element);
-    diffChildren(root, element, childrenFor(element), instance);
+    diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
     root.needsSolve = true;
 
     return entity;
@@ -904,8 +650,7 @@ export function createReconciler(
     for (const [name, previous] of element.extras) {
       if (next.has(name)) continue;
 
-      element.extraHandles.get(name)?.cancel();
-      element.extraHandles.delete(name);
+      cancelExtra(element, name);
       ecs.remove(element.entity, previous.type);
     }
 
@@ -924,16 +669,16 @@ export function createReconciler(
 
       if (needsAdd) {
         ecs.add(element.entity, value);
-        recordRest(element, value);
+        recordRest(ctx, element, value);
 
         continue;
       }
 
-      recordRest(element, value);
+      recordRest(ctx, element, value);
 
       const values = { previous: previous.value, next: value.value };
 
-      if (modules.layout.changeExtra(element, name, values, hintOf(element))) continue;
+      if (modules.layout.changeExtra(element, name, values, hintOf(state, element))) continue;
 
       const owned = ecs.typeOf(name)?.owned ?? [];
 
@@ -1039,10 +784,10 @@ export function createReconciler(
     if (element.live) writeLive(element);
     // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
     if (element.live && !moved) {
-      modules.layout.repose(element, parentRect(element), false, hintOf(element));
+      modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
     }
 
-    diffChildren(root, element, childrenFor(element), instance);
+    diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
   }
 
   /**
@@ -1141,7 +886,7 @@ export function createReconciler(
     // Start the exit of every old child this render left out. A row that a range change took out
     // of a windowed scroll is not removed: it is dropped at once, with no exit motion.
     const kept = entitySet(next);
-    const dropsRows = windowing !== undefined && parent.parent === windowing;
+    const dropsRows = range.dropsRowsOf(parent);
 
     for (const old of parent.children) {
       if (kept.has(old)) continue;
@@ -1149,7 +894,7 @@ export function createReconciler(
       const element = state.elements.get(old);
 
       if (element === undefined) continue;
-      if (dropsRows) dropRow(element);
+      if (dropsRows) range.dropRow(element);
       else exitElement(element);
     }
 
@@ -1180,19 +925,6 @@ export function createReconciler(
     forgetInstances(state, element.identity);
     state.exiting.add(element.entity);
     exitSubtree(element);
-  }
-
-  /**
-   * Drops a row that left the window of a windowed scroll: its keys and its instances are
-   * forgotten, so its local state is lost, and the subtree despawns and frees its Yoga nodes now.
-   * No `exit` hook plays and nothing is tagged `Exiting`: leaving the window is not a removal.
-   *
-   * @param element - The row that left the window.
-   */
-  function dropRow(element: Element): void {
-    forgetSubtree(element);
-    forgetInstances(state, element.identity);
-    despawnTree(element);
   }
 
   /**
@@ -1330,7 +1062,7 @@ export function createReconciler(
    */
   function applyLive(element: Element, parent: Rect | undefined): void {
     // Commit a moved rect, rewrite the components and play the `change` hook with the routed hint.
-    const hint = hintOf(element);
+    const hint = hintOf(state, element);
     let hooked = false;
 
     if (element.moved) {
@@ -1361,7 +1093,7 @@ export function createReconciler(
     element.extras = extrasOf(element);
     warnOwned(element);
 
-    for (const value of element.extras.values()) recordRest(element, value);
+    for (const value of element.extras.values()) recordRest(ctx, element, value);
     for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
 
     element.live = true;
@@ -1443,82 +1175,6 @@ export function createReconciler(
   }
 
   /**
-   * Moves the window of a windowed scroll to a new range: only the list's subtree is diffed, on
-   * the stored node of the scroll, so no view above it runs. Rows that leave are dropped, rows that
-   * enter play no `enter` hook, and the root solves once.
-   *
-   * @param root - The root of the scroll.
-   * @param scroll - The live windowed scroll.
-   * @param window - The window it held.
-   * @param range - The range it holds now.
-   */
-  function moveWindow(root: Root, scroll: Element, window: ScrollWindow, range: RowRange): void {
-    const moved = { ...window, ...range };
-
-    windowing = scroll.entity;
-
-    try {
-      // The window moves only once every row of it was built: a row callback that throws leaves
-      // the list as it was, and the next range step tries again.
-      const slots = slotsOf(scroll, moved);
-
-      scroll.window = moved;
-      diffChildren(root, scroll, childrenOf(scroll.node, slots), scroll.instance);
-    } finally {
-      windowing = undefined;
-    }
-
-    root.needsSolve = true;
-    state.windowRenders += 1;
-  }
-
-  /**
-   * The range step: every live windowed scroll cuts its range at this frame's offset, after the
-   * scroll step and before any root is diffed, so a row never arrives one frame late. A range that
-   * moved re-renders the list; a row callback that throws fails that root alone.
-   *
-   * @param containers - The live scroll containers of this frame.
-   */
-  function stepWindows(containers: readonly Element[]): void {
-    for (const scroll of containers) {
-      const window = scroll.window;
-      const root = state.roots.get(scroll.root);
-      const isGone = !state.scrolls.has(scroll.entity) || !state.elements.has(scroll.entity);
-
-      if (window === undefined || root === undefined || isGone) continue;
-      if (state.removing.has(root.entity)) continue;
-
-      const offset = ecs.get(scroll.entity, Scroll)?.offset ?? 0;
-      const { rows, rowHeight, overscan } = window;
-      const range = modules.layout.windowOf(offset, scroll.rect.h, rows, rowHeight, overscan);
-
-      if (range.first === window.first && range.last === window.last) continue;
-
-      try {
-        moveWindow(root, scroll, window, range);
-      } catch (error) {
-        ctx.log.error("ui:root-failed", { root: root.name }, asError(error));
-      }
-    }
-  }
-
-  /**
-   * Asks for a solve of every root with a bound text whose shown string measures to another size
-   * now. `text` writes `resolved` earlier in this phase, and only when the shown string changed,
-   * so a counter that stands still walks nothing. A leaving text is out of the flow: its roll
-   * solves nothing.
-   */
-  function markResizedTexts(): void {
-    for (const entity of ecs.changed(Text)) {
-      const element = state.elements.get(entity);
-      const root = element === undefined ? undefined : state.roots.get(element.root);
-
-      if (element === undefined || root === undefined || ecs.has(entity, Exiting)) continue;
-      if (modules.layout.remeasure(element)) root.needsSolve = true;
-    }
-  }
-
-  /**
    * Collects the roots that have work this frame: a changed tree, a dirty instance or style, and
    * every root when the viewport changed.
    *
@@ -1588,10 +1244,10 @@ export function createReconciler(
     const containers = scrollContainers();
 
     modules.layout.scroll(containers, lookup);
-    stepWindows(containers);
+    range.step(containers);
 
     // A bound text whose new string measures to another size asks its root for a solve.
-    markResizedTexts();
+    markResizedTexts(ctx, state, modules.layout);
 
     // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());

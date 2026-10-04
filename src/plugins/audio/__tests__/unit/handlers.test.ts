@@ -311,6 +311,29 @@ describe('lifecycle:changed at music: "stream"', () => {
     });
     expect(mock.state.music?.stream).toBe(stream);
   });
+
+  it("pauses an element whose play() resolves during a push, and the pop plays it", async () => {
+    const audio = installFakeAudio();
+    installFakeUrl();
+    const { mock, context } = started({ music: "stream" });
+
+    context.state = "running";
+    const pending = playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+
+    mock.hooks["lifecycle:changed"](push);
+    await pending;
+
+    const element = audio.elements[0];
+
+    expect(mock.state.music?.stream?.element).toBe(element);
+    expect(element?.plays).toBe(1);
+    expect(element?.pauses).toBe(1);
+
+    mock.hooks["lifecycle:changed"](pop);
+    await Promise.resolve();
+
+    expect(element?.plays).toBe(2);
+  });
 });
 
 describe('assets:bundle-unloaded at music: "stream"', () => {

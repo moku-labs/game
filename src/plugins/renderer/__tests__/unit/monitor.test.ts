@@ -47,6 +47,22 @@ async function settle(): Promise<void> {
   for (let index = 0; index < 5; index += 1) await Promise.resolve();
 }
 
+/**
+ * Pauses the game the way `lifecycle.push` does: the clock first, then `lifecycle:changed`.
+ *
+ * @param mock - The started mock renderer.
+ */
+function pause(mock: MockRenderer): void {
+  mock.setPaused(true);
+  mock.hooks["lifecycle:changed"]({
+    reason: "devtools",
+    action: "push",
+    reasons: ["devtools"],
+    paused: true,
+    resumed: false
+  });
+}
+
 describe("renderer stats", () => {
   it("answers zeros while inert, with no draw-call field", () => {
     const mock = createMockRenderer({ dom: false });
@@ -242,6 +258,33 @@ describe("renderer capture", () => {
     mock.setPaused(true);
 
     await expect(mock.api.capture()).resolves.toEqual({ png: FAKE_PNG });
+  });
+
+  it("takes a waiting capture at once when the game pauses before its frame came", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await started();
+    const waiting = mock.api.capture();
+
+    pause(mock);
+
+    await expect(waiting).resolves.toEqual({ png: FAKE_PNG });
+    expect(mock.ctx.state.monitor.captures).toHaveLength(0);
+  });
+
+  it("leaves a waiting capture to the next frame when the game runs again at once", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await started();
+    const waiting = mock.api.capture();
+
+    pause(mock);
+    mock.setPaused(false);
+    await settle();
+
+    expect(mock.ctx.state.monitor.captures).toHaveLength(1);
+
+    frame(mock, 0, 2);
+
+    await expect(waiting).resolves.toEqual({ png: FAKE_PNG });
   });
 
   it("leaves a moku:dev debug entry naming the command, like every dev command", async () => {
@@ -785,6 +828,60 @@ describe("capture sheet", () => {
     expect(seen).toEqual([0, 60]);
     expect(mock.time.step).not.toHaveBeenCalled();
     expect(readFakePicture(shot?.png ?? "").width).toBe(8 * 2 + 3 * 8);
+  });
+
+  it("steps the rest of the spacing when the game pauses in the middle of a sheet", async () => {
+    installFakeCanvas();
+    const mock = await scene();
+    const seen = answerPictures(mock, fakePictureUrl(8, 4));
+
+    vi.mocked(mock.time.step).mockImplementation((deltaMs: number) => {
+      mock.setElapsed(mock.time.snapshot().elapsed + deltaMs);
+    });
+
+    const pending = mock.api.capture({ sheet: { frames: 3, everyMs: 50 } });
+
+    frame(mock, 0, 2);
+    await settle();
+    mock.setElapsed(20);
+    frame(mock, 20, 2);
+    pause(mock);
+
+    const shot = await pending;
+
+    // 30 ms are left of the second spacing; the third is a whole step.
+    expect(vi.mocked(mock.time.step).mock.calls).toEqual([[30], [50]]);
+    expect(seen).toEqual([0, 50, 100]);
+    expect(readFakePicture(shot?.png ?? "").width).toBe(8 * 2 + 3 * 8);
+  });
+
+  it("lets the frame the game paused in end first, since time.step cannot run inside it", async () => {
+    installFakeCanvas();
+    const mock = await scene();
+    const seen = answerPictures(mock, fakePictureUrl(8, 4));
+    let inFrame = false;
+
+    vi.mocked(mock.time.step).mockImplementation((deltaMs: number) => {
+      if (inFrame) throw new Error("[game] time.step() called inside a frame.");
+
+      mock.setElapsed(mock.time.snapshot().elapsed + deltaMs);
+    });
+
+    const pending = mock.api.capture({ sheet: { frames: 2, everyMs: 50 } });
+
+    frame(mock, 0, 2);
+    await settle();
+
+    // A game plugin pauses in the input phase of the next frame.
+    mock.time.onFrame("input", () => pause(mock));
+    inFrame = true;
+    mock.setElapsed(20);
+    frame(mock, 20, 2);
+    inFrame = false;
+
+    await pending;
+
+    expect(seen).toEqual([0, 50]);
   });
 
   it("gives up after 600 drawn frames in which game time stood still", async () => {

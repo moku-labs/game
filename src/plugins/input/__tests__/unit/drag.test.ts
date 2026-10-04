@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Parent, Transform, type TransformValue } from "../../../renderer/components";
 import { rootPoseOf } from "../../../renderer/sync/pose";
 import { Exiting } from "../../../world/ecs/define";
@@ -896,6 +896,29 @@ describe("the carried stack", () => {
     ]);
     expect(rootOf(mock, c3).y).toBe(160);
     expect(mock.state.carried).toEqual([]);
+  });
+
+  it("sends the followers home from under the finger when the held card despawns mid-drag", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const { held, c3, c4 } = pile(mock);
+    const { projection } = mock.input.deps.world;
+    const settle = projection.settle;
+    const from = new Map<Entity, TransformValue>();
+
+    vi.spyOn(projection, "settle").mockImplementation(entity => {
+      from.set(entity, rootOf(mock, entity));
+      settle(entity);
+    });
+    grabPile(mock, held);
+    moveHeld(mock.input, { x: 400, y: 300 });
+    mock.kill(held);
+    abortDrag(mock.input);
+
+    expect(mock.has(c3, Parent)).toBe(false);
+    expect(from.get(c3)?.x).toBeCloseTo(400, 10);
+    expect(from.get(c3)?.y).toBeCloseTo(300 + 30 * 1.08, 10);
+    expect(from.get(c3)?.scale).toBeCloseTo(1.08, 10);
+    expect(from.get(c4)?.y).toBeCloseTo(300 + 60 * 1.08, 10);
   });
 
   it("lets a follower that left go mid-drag and carries on with the rest", () => {

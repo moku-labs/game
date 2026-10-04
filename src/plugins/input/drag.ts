@@ -7,7 +7,7 @@
  * `Draggable.carry` names hang under the held view for the drag, so one write per frame moves the
  * whole stack; they leave it before any settle, or they would land at rest plus the held rest.
  */
-import { Parent, Transform } from "../renderer/components";
+import { Parent, Transform, type TransformValue } from "../renderer/components";
 import { localPoseOf, parentOf, rootPoseOf } from "../renderer/sync/pose";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
@@ -214,6 +214,58 @@ function carry(ctx: InputCtx, held: Entity): void {
 }
 
 /**
+ * Places a local pose under a parent pose: the pose in the space the parent sits in.
+ *
+ * @param above - The parent pose.
+ * @param local - The pose under it.
+ * @returns The composed pose; it keeps the local pivot.
+ * @example
+ * ```ts
+ * poseUnder(
+ *   { x: 400, y: 300, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } },
+ *   { x: 0, y: 30, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
+ * ); // { x: 400, y: 360, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } }
+ * ```
+ */
+function poseUnder(
+  above: Readonly<TransformValue>,
+  local: Readonly<TransformValue>
+): TransformValue {
+  const cos = Math.cos(above.rotation);
+  const sin = Math.sin(above.rotation);
+  const dx = local.x - above.pivot.x;
+  const dy = local.y - above.pivot.y;
+
+  return {
+    x: above.x + above.scale * (dx * cos - dy * sin),
+    y: above.y + above.scale * (dx * sin + dy * cos),
+    rotation: above.rotation + local.rotation,
+    scale: above.scale * local.scale,
+    pivot: { x: local.pivot.x, y: local.pivot.y }
+  };
+}
+
+/**
+ * Where a carried view really is. A held view that despawned took its `Transform` with it, so the
+ * pose it had at the last move stands in for it; read through the chain, the carried view would
+ * sit at its offset from the top-left.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param entity - The carried view, still hung under the held view.
+ * @returns Its pose in root space.
+ */
+function carriedRootPose(ctx: InputCtx, entity: Entity): TransformValue {
+  const { ecs } = ctx.deps.world;
+  const { entity: held, heldPose } = ctx.state;
+
+  if (held === undefined || heldPose === undefined || ecs.has(held, Transform)) {
+    return rootPoseOf(ecs, entity);
+  }
+
+  return poseUnder(heldPose, ecs.get(entity, Transform) ?? Transform.defaults);
+}
+
+/**
  * Takes a carried view off the held view at its root pose, and hangs it back under the parent it
  * had at the grab, where it is now, while that parent still has a `Transform`. A view that stays
  * on the board is lifted, so it flies home above its neighbours. A view that is gone is skipped.
@@ -227,7 +279,7 @@ function uncarry(ctx: InputCtx, follower: Carried): void {
 
   if (!ecs.has(entity, Transform)) return;
 
-  const root = rootPoseOf(ecs, entity);
+  const root = carriedRootPose(ctx, entity);
 
   ecs.remove(entity, Parent);
   ecs.set(entity, Transform, root);
@@ -306,23 +358,27 @@ export function grab(ctx: InputCtx, entity: Entity, point: Point): void {
     x: (transform?.x ?? point.x) - point.x,
     y: (transform?.y ?? point.y) - point.y
   };
+  ctx.state.heldPose = rootPoseOf(ecs, entity);
 }
 
 /**
- * Writes the position of the held view once per frame, from the last sample of that frame.
+ * Writes the position of the held view once per frame, from the last sample of that frame, and
+ * remembers its root pose for the carried views.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - Where the finger is, in reference units.
  */
 export function moveHeld(ctx: InputCtx, point: Point): void {
   const { entity, grabOffset } = ctx.state;
+  const { ecs } = ctx.deps.world;
 
   if (entity === undefined) return;
 
-  ctx.deps.world.ecs.set(entity, Transform, {
+  ecs.set(entity, Transform, {
     x: point.x + grabOffset.x,
     y: point.y + grabOffset.y
   });
+  ctx.state.heldPose = rootPoseOf(ecs, entity);
 }
 
 /**
@@ -382,6 +438,7 @@ export function release(ctx: InputCtx, point?: Point): boolean {
   ctx.state.unmute = undefined;
   for (const follower of carried) follower.unmute();
   ctx.state.carried = [];
+  ctx.state.heldPose = undefined;
   // Always home: an accepted answer may still be refused by the node with no state change. A
   // commit that follows retargets the view from where it is; an exit motion cancels the settle.
   projection.settle(entity);
@@ -418,6 +475,7 @@ export function abortDrag(ctx: InputCtx): void {
     projection.lift(follower.entity, false);
   }
   ctx.state.carried = [];
+  ctx.state.heldPose = undefined;
   ctx.state.unmute?.();
   ctx.state.unmute = undefined;
   if (entity !== undefined) {

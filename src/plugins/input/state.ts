@@ -25,6 +25,7 @@ export function createInputState(_ctx: { readonly config: Readonly<Config> }): S
     pointerOver: undefined,
     parent: undefined,
     restScale: undefined,
+    heldPose: undefined,
     unmute: undefined,
     carried: [],
     path: [],
