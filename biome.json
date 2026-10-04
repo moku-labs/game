@@ -4,6 +4,7 @@
     "includes": [
       "src/**",
       "tests/**",
+      "bin/**",
       "*.config.ts",
       "!tests/visual/**/*.json",
       "!tests/integration/merge-game/dist"

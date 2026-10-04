@@ -128,10 +128,35 @@ it("plays two rolls and a reset without a screen", async () => {
 In a live game the same answer comes from the screen: `app.flow.gate.answer({ intent: "roll" })`.
 
 > [!TIP]
-> Types reach a game through one namespace per plugin: `import type { Flow, Model, Clock, Lifecycle, Time } from "@moku-labs/game"`, then `Flow.RouteStep`, `Model.PlayerStateProvider`, `Time.Phase`. The screen and interface plugins follow the same rule: `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`. `Text` is the component, so its type namespace is `TextTypes`.
+> Types reach a game through one namespace per plugin: `import type { Flow, Model, Clock, Lifecycle, Time } from "@moku-labs/game"`, then `Flow.RouteStep`, `Model.PlayerStateProvider`, `Time.Phase`. The screen and interface plugins follow the same rule: `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`, `Effects`, `Platform`. `Text` is the component, so its type namespace is `TextTypes`.
 
 > [!TIP]
 > A larger worked example lives in [`tests/integration/merge-game/`](../tests/integration/merge-game). It is a small game written on the public API only, with sub-flows, a slot, a feature and timers. It is an internal test fixture and is not published. Its scenario is [`tests/integration/template-merge.test.ts`](../tests/integration/template-merge.test.ts).
+
+## A screen: the body font and the asset keys
+
+A game with a screen keeps its files in `src/features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. The package ships it as the bin `moku-game-assets`. It runs under bun; with node only, run `bun node_modules/@moku-labs/game/dist/assets.mjs`. Add the script to the game's `package.json`:
+
+```json
+{
+  "scripts": {
+    "assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts"
+  }
+}
+```
+
+The same bin takes `--check`, which fails when an output is out of date, and `--pack <dir>` for the production build.
+
+The package also ships one MSDF body font, Pangolin Regular under the SIL Open Font License 1.1. Copy it into the game, do not reference it: the scanner reads keys only from `features/<feature>/assets/`. The licence goes next to `assets/`, not inside it.
+
+```bash
+mkdir -p src/features/ui/assets
+cp node_modules/@moku-labs/game/fonts/font-body.* src/features/ui/assets/
+cp node_modules/@moku-labs/game/fonts/LICENSE.txt src/features/ui/LICENSE-fonts.txt
+bun run assets:keys
+```
+
+The font gets the key `ui.font-body`. That is the default of `text` config `fonts.body`, so the built-in style `body` works with no config.
 
 ## The contract
 

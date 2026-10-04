@@ -34,11 +34,18 @@
     "./jsx-dev-runtime": {
       "types": "./dist/jsx-dev-runtime.d.mts",
       "default": "./dist/jsx-dev-runtime.mjs"
-    }
+    },
+    "./fonts/*": "./fonts/*"
+  },
+  "bin": {
+    "moku-game-assets": "./bin/moku-game-assets.mjs"
   },
   "license": "MIT",
   "files": [
     "dist",
+    "bin",
+    "fonts",
+    "llms.txt",
     "LICENSE",
     "README.md"
   ],

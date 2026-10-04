@@ -84,9 +84,7 @@ flowchart LR
 
 An arrow means "depends on"; from `renderer` on, most edges to `time` and `clock` and most edges a nearer plugin already implies are left out for space, the plugin READMEs list them in full. `time`, `model` and `clock` depend on nothing. The logic plugins are registered in this order: `time`, `lifecycle`, `model`, `clock`, `flow`; the screen set `screen` follows as `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`; a game that wants particles and filters appends `effectsPlugin`, one that wants sound appends `audioPlugin`, and one in a native shell appends `platformPlugin` last. A game without `effectsPlugin` carries none of its systems, filters or WGSL in its bundle. Without a document the screen plugins are inert: the same app starts in plain Bun, Yoga included.
 
-## Planned
-
-None at the moment: `platform`, the last planned plugin, is built. `defineFeature` refuses every engine plugin name as a feature name.
+`defineFeature` refuses every engine plugin name as a feature name.
 
 ## Root exports
 
@@ -119,7 +117,7 @@ None at the moment: `platform`, the last planned plugin, is built. `defineFeatur
 | Entry | Runs in | Exports |
 |---|---|---|
 | `@moku-labs/game/testing` | node and bun only | The headless helpers and the visual tests, see below. The visual runner reads and writes baseline files |
-| `@moku-labs/game/assets` | node and bun only | `scanAssets`, `emitKeys`, `emitManifest`, `compileStrings`, `checkStrings`, `packAssets`, `exportStrings`, `importStrings`, `runCli(argv, strings)` with `strings: StringsTools`. A game runs it as `bun run assets:keys`: it writes the manifest, the typed asset keys and, next to them, `generated/strings.ts` with one `strings.<locale>.ts` per locale; `--check` fails when any of them is out of date; `--pseudo` also writes the pseudo-locale `en-XA`; `--pack <dir>` writes the production build: WebP atlas pages, content-hashed names and a v2 manifest. `--export <dir>` and `--import <dir>` exchange strings with translators, `--source <locale>` names the locale they read from. Audio is `.mp3` or `.m4a` |
+| `@moku-labs/game/assets` | node and bun only | `scanAssets`, `emitKeys`, `emitManifest`, `compileStrings`, `checkStrings`, `packAssets`, `exportStrings`, `importStrings`, `runCli(argv, strings)` with `strings: StringsTools`. The package bin `moku-game-assets` is its CLI, so a game's script is `"assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts"`. `bun run assets:keys` writes the manifest, the typed asset keys and, next to them, `generated/strings.ts` with one `strings.<locale>.ts` per locale; `--check` fails when any of them is out of date; `--pseudo` also writes the pseudo-locale `en-XA`; `--pack <dir>` writes the production build: WebP atlas pages, content-hashed names and a v2 manifest. `--export <dir>` and `--import <dir>` exchange strings with translators, `--source <locale>` names the locale they read from. Audio is `.mp3` or `.m4a` |
 | `@moku-labs/game/inspect` | anywhere, production included | `read`, `watch`, `defineSource`, the catalogue `sources` and the types `Source`, `InputSchema`, `InputOf`. See [Doors for the editor](./doors.md) |
 | `@moku-labs/game/control` | dev builds only | `run`, `defineCommand`, `controlRefused`, the catalogue `commands` and the types `Command`, `Ran`. See [Doors for the editor](./doors.md) |
 | `@moku-labs/game/jsx-runtime`, `@moku-labs/game/jsx-dev-runtime` | anywhere | `jsx`, `jsxs`, `jsxDEV`, `Fragment` and the `JSX` namespace that `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand |

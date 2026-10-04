@@ -322,8 +322,8 @@ atlas pages with `--pack <dir>`:
 
 ```jsonc
 // game package.json
-"assets:keys": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts",
-"assets:pack": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --keys src/generated/assets.ts --pack dist/assets"
+"assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts",
+"assets:pack": "moku-game-assets --root src --keys src/generated/assets.ts --pack dist/assets"
 ```
 
 | Flag | Rule |
