@@ -25,4 +25,10 @@ describe("game.effects", () => {
       renderPasses: 0
     });
   });
+
+  it("throws a clear error when the app has no effectsPlugin", () => {
+    expect(() => read(createApp(), effectsSource, {})).toThrow(
+      "[game] The source game.effects needs effectsPlugin.\n  Add effectsPlugin to createApp({ plugins })."
+    );
+  });
 });

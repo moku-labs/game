@@ -165,6 +165,7 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 ## Doors
 
 `inspect.ts` holds `game.effects` (key `effects` in `sources`) of the editor's read door, safe in a production build: it reads `stats()` every frame.
+Without `effectsPlugin` in the app it throws `[game] The source game.effects needs effectsPlugin.`
 
 ## Events
 

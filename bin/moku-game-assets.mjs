@@ -1,4 +1,8 @@
 #!/usr/bin/env bun
-import { compileStrings, runCli } from "../dist/assets.mjs";
+import { compileStrings, exportStrings, importStrings, runCli } from "../dist/assets.mjs";
 
-process.exitCode = await runCli(process.argv.slice(2), compileStrings);
+process.exitCode = await runCli(process.argv.slice(2), {
+  compile: compileStrings,
+  exportStrings,
+  importStrings
+});

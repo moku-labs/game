@@ -53,3 +53,20 @@ export function controlRefused(): Error {
     "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
   );
 }
+
+/**
+ * Builds the error a door source throws when the opt-in plugin it reads is not installed.
+ *
+ * @param id - The id of the source.
+ * @param plugin - The export name of the plugin it reads.
+ * @returns The error, ready to throw.
+ * @example
+ * ```ts
+ * notInstalled("game.sounds", "audioPlugin").message; // "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
+ * ```
+ */
+export function notInstalled(id: string, plugin: string): Error {
+  return new Error(
+    `[game] The source ${id} needs ${plugin}.\n  Add ${plugin} to createApp({ plugins }).`
+  );
+}

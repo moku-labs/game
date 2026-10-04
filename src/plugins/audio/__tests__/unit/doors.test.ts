@@ -75,4 +75,10 @@ describe("game.sounds", () => {
 
     expect(read({ ...createApp(), audio: mock.api }, soundsSource)).toEqual([]);
   });
+
+  it("throws a clear error when the app has no audioPlugin", () => {
+    expect(() => read(createApp(), soundsSource)).toThrow(
+      "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
+    );
+  });
 });
