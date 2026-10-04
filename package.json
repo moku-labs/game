@@ -79,10 +79,20 @@
     "release:doctor": "moku-release doctor",
     "release": "moku-release"
   },
+  "dependencies": {
+    "immer": "11.1.18",
+    "maxrects-packer": "2.7.3",
+    "yoga-layout": "3.2.1"
+  },
   "peerDependencies": {
+    "@moku-labs/common": "^0.3.4",
+    "@moku-labs/core": "^1.7.1",
     "pixi.js": "^8.0.0",
     "playwright-core": ">=1.50.0",
     "sharp": "^0.34.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependenciesMeta": {
     "playwright-core": {
@@ -98,6 +108,8 @@
     "@biomejs/biome": "2.4.16",
     "@formatjs/icu-messageformat-parser": "3.5.20",
     "@moku-labs/ci": "1.2.6",
+    "@moku-labs/common": "0.3.4",
+    "@moku-labs/core": "1.7.1",
     "@moku-labs/native": "0.3.0",
     "@moku-labs/system": "0.3.0",
     "@tauri-apps/api": "2.12.1",
@@ -120,15 +132,5 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.58.0",
     "vitest": "4.0.18"
-  },
-  "dependencies": {
-    "@moku-labs/common": "0.3.3",
-    "@moku-labs/core": "1.7.0",
-    "immer": "11.1.18",
-    "maxrects-packer": "2.7.3",
-    "yoga-layout": "3.2.1"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }
