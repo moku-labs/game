@@ -11,17 +11,23 @@ import type {
 import { componentsFor, NineSlice, Shape, Sprite, Transform } from "../../components";
 import type {
   Api,
+  Captured,
+  CaptureOptions,
   Config,
   CreateTextureOptions,
   DebugSwitches,
   FilterSlot,
+  HitBox,
+  LegendEntry,
   Orientation,
+  PictureRect,
   PixiFilter,
   PixiTexture,
   Point,
   RenderStats,
   SafeArea,
   SliceFrame,
+  Under,
   ViewportSize
 } from "../../types";
 
@@ -176,7 +182,9 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   renderPasses: number;
   drawCalls?: number;
 }>();
-expectTypeOf(renderer.capture).toEqualTypeOf<() => Promise<string | undefined>>();
+expectTypeOf(renderer.capture).toEqualTypeOf<
+  (options?: CaptureOptions) => Promise<Captured | undefined>
+>();
 
 // @ts-expect-error — toScreen takes one point, not two numbers
 renderer.viewport.toScreen(540, 960);
@@ -228,3 +236,44 @@ renderer.sync.textures.slice(page, { x: 0, y: 0, width: 256 });
 
 // @ts-expect-error — the page is a texture, not its id
 renderer.sync.textures.slice("ui/main-0", { x: 0, y: 0, width: 256, height: 128 });
+
+// ─── engine features: the doors read what is under a point and where ───
+
+expectTypeOf(renderer.sync.hitAll).toEqualTypeOf<(x: number, y: number) => readonly Entity[]>();
+expectTypeOf(renderer.sync.boundsOf).toEqualTypeOf<(entity: Entity) => HitBox | undefined>();
+expectTypeOf(renderer.sync.hitBoxOf).toEqualTypeOf<(entity: Entity) => HitBox | undefined>();
+expectTypeOf<HitBox>().toEqualTypeOf<{ x: number; y: number; width: number; height: number }>();
+
+// @ts-expect-error — hitAll takes no filter: the caller filters the list
+renderer.sync.hitAll(540, 300, () => true);
+
+// @ts-expect-error — `layerOf` is sync's internal half, not on the public API
+renderer.sync.layerOf;
+
+// ─── engine features: capture options and the answer ──────────
+
+expectTypeOf<PictureRect>().toEqualTypeOf<{ x: number; y: number; w: number; h: number }>();
+expectTypeOf<LegendEntry>().toEqualTypeOf<{
+  n: number;
+  projection: string;
+  key: string;
+  rect: PictureRect;
+}>();
+expectTypeOf<Captured>().toEqualTypeOf<{ png: string; legend?: readonly LegendEntry[] }>();
+expectTypeOf<CaptureOptions>().toEqualTypeOf<{
+  legend?: boolean;
+  layers?: readonly string[];
+  sheet?: { frames: number; everyMs: number };
+  against?: string;
+}>();
+expectTypeOf<Under["key"]>().toEqualTypeOf<{ projection: string; key: string } | undefined>();
+expectTypeOf<Under["layer"]>().toEqualTypeOf<string | undefined>();
+
+renderer.capture({ legend: true, layers: ["board", "hud"] });
+renderer.capture({ sheet: { frames: 6, everyMs: 100 } });
+
+// @ts-expect-error — a sheet names its frames and their spacing
+renderer.capture({ sheet: { frames: 6 } });
+
+// @ts-expect-error — layers are names, not one name
+renderer.capture({ layers: "hud" });

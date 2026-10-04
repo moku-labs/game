@@ -1,7 +1,17 @@
 import { expectTypeOf } from "vitest";
+import { createApp, screen } from "../../../../index";
 import type { Events as ScenesEvents } from "../../../scenes/types";
 import { audioFor, music } from "../../descriptors";
-import type { AudioApi, Bus, Config, MusicDescriptor, SoundEntry, Volumes } from "../../types";
+import { audioPlugin } from "../../index";
+import type {
+  AudioApi,
+  AudioContextLike,
+  Bus,
+  Config,
+  MusicDescriptor,
+  SoundEntry,
+  Volumes
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -49,3 +59,26 @@ expectTypeOf(wrong).toMatchTypeOf<Config["volumes"]>();
 
 // The payload `audio` listens to: the music key of the next scene.
 expectTypeOf<ScenesEvents["scenes:changed"]["music"]>().toEqualTypeOf<string | undefined>();
+
+// The two fields of streamed music and the audio session.
+expectTypeOf<Config["music"]>().toEqualTypeOf<"decode" | "stream">();
+expectTypeOf<Config["session"]>().toEqualTypeOf<"ambient" | "playback" | "auto">();
+
+// A real context still satisfies the seam, `createMediaElementSource` included.
+expectTypeOf<AudioContext>().toExtend<AudioContextLike>();
+
+createApp({
+  plugins: [...screen, audioPlugin],
+  pluginConfigs: {
+    // @ts-expect-error — "buffer" is not a music mode.
+    audio: { music: "buffer" }
+  }
+});
+
+createApp({
+  plugins: [...screen, audioPlugin],
+  pluginConfigs: {
+    // @ts-expect-error — "solo" is not an audio session type.
+    audio: { session: "solo" }
+  }
+});

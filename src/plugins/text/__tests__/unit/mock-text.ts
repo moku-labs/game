@@ -1,14 +1,16 @@
 /**
  * @file text plugin — shared fakes for the unit tests. Not a test file: the unit project only
  * collects `*.test.ts`. The real state, API, handlers and lifecycle run over a fake world store,
- * a fake `i18n`, a fake `renderer` whose Pixi module is four tiny classes, a fake `assets` and a
- * fake `flow`, so every case runs in plain Bun. The real `world` runs the same code in the
- * integration test.
+ * a fake `i18n`, a fake `renderer` whose Pixi module is four tiny classes, a fake `assets`, a
+ * fake `flow` and a fake clock, so every case runs in plain Bun. The real `world` runs the same
+ * code in the integration test.
  */
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Api as AssetsApi, FontAsset } from "../../../assets/types";
+import { fakeClock } from "../../../clock/fake";
+import type { Api as ClockApi, FakeClock } from "../../../clock/types";
 import type { FeatureDescription, Api as FlowApi } from "../../../flow/types";
 import type { I18nApi, Message, Part } from "../../../i18n/types";
 import type { DisplayAdapter } from "../../../renderer/sync/types";
@@ -281,6 +283,8 @@ export type FakeI18n = {
   locale: string;
   messages: Record<string, Record<string, Part[]>>;
   formatted: string[];
+  /** The milliseconds every `duration` call was handed, in call order. */
+  durations: number[];
 };
 
 /**
@@ -294,7 +298,8 @@ function createFakeI18n(messages: Record<string, Record<string, Part[]>>): FakeI
     api: undefined as unknown as I18nApi,
     locale: "ru",
     messages,
-    formatted: []
+    formatted: [],
+    durations: []
   };
 
   fake.api = {
@@ -310,7 +315,13 @@ function createFakeI18n(messages: Record<string, Record<string, Part[]>>): FakeI
       fake.api
         .format(message)
         .map(part => (part.kind === "text" ? part.text : ""))
-        .join("")
+        .join(""),
+    // Reads like `${locale}:${seconds}s`, so a case sees both the locale and the value.
+    duration: (ms: number): string => {
+      fake.durations.push(ms);
+
+      return `${fake.locale}:${ms / 1000}s`;
+    }
   } as unknown as I18nApi;
 
   return fake;
@@ -405,6 +416,10 @@ export type MockText = {
   i18n: FakeI18n;
   assets: FakeAssets;
   renderer: FakeRenderer;
+  /** The trusted time the clock dep answers; a case moves it with `advance`. */
+  clock: FakeClock;
+  /** Counts the reads of `clock.now()` the plugin made. */
+  clockNow: ReturnType<typeof vi.fn>;
   wake: ReturnType<typeof vi.fn>;
   hooks: ReturnType<typeof createHandlers>;
   start(): void;
@@ -457,6 +472,9 @@ export function createMockText(
   const assets = createFakeAssets();
   const renderer = createFakeRenderer();
   const wake = vi.fn();
+  const clock = fakeClock(1_000_000);
+  const clockNow = vi.fn((): number => clock.now());
+  const clockApi = { now: clockNow } as unknown as ClockApi;
   const flow = {
     features: { all: () => options.features ?? [] }
   } as unknown as FlowApi;
@@ -468,7 +486,8 @@ export function createMockText(
     world: world.api,
     renderer: renderer.api,
     assets: assets.api,
-    i18n: i18n.api
+    i18n: i18n.api,
+    clock: clockApi
   };
 
   const kernel = {
@@ -491,6 +510,8 @@ export function createMockText(
     i18n,
     assets,
     renderer,
+    clock,
+    clockNow,
     wake,
     hooks: createHandlers(kernel as unknown as Parameters<typeof createHandlers>[0]),
     start: (): void => startText(kernel as unknown as Parameters<typeof startText>[0]),

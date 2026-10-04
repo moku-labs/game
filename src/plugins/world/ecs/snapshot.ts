@@ -31,13 +31,15 @@ export function isJson(value: unknown): value is Json {
 }
 
 /**
- * Builds the component map of one entity and names the values that are not JSON.
+ * Builds the component map of one entity and names the values that are not JSON. The frame
+ * history reads it too, so it records exactly what `snapshot()` shows. The values are the stored
+ * objects, not copies.
  *
  * @param state - ecs module state.
  * @param entity - The entity to read.
  * @returns The JSON components and the names of the skipped ones.
  */
-function componentsOf(
+export function componentsOf(
   state: EcsState,
   entity: Entity
 ): { components: Record<string, Json>; skipped: string[] } {

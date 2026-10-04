@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, createPlugin, defineGame, exit, type } from "../../../../index";
+import { read } from "../../../flow/doors/read";
 import { timePlugin } from "../../../time";
 import { component, system } from "../../ecs/define";
 import { worldPlugin } from "../../index";
+import { diffSource, explainSource, schemaSource } from "../../inspect";
 import { projection } from "../../projection/define";
 
 // ---------------------------------------------------------------------------
@@ -201,5 +203,53 @@ describe("world plugin integration", () => {
 
     expect(empty.entities).toEqual([]);
     expect(empty.resources).toEqual({});
+  });
+});
+
+describe("world doors integration", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the frame history of a dev build over real frames and resets it on stop", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const app = await startApp();
+
+    app.world.projection.setLayers([{ name: "items", sort: "y" }]);
+    app.world.projection.mount(["board.items"], { kind: "plugin", name: "test" });
+
+    const kept = app.world.projection.entityOf("board.items", "a") ?? 0;
+    const merged = app.world.projection.entityOf("board.items", "b") ?? 0;
+
+    app.time.step(16);
+
+    const before = app.time.snapshot().frame;
+
+    expect(app.flow.gate.answer({ intent: "merge", payload: { id: "a" } })).toBe(true);
+    await tick();
+    app.time.step(16);
+
+    const after = app.time.snapshot().frame;
+    const diff = read(app, diffSource, { from: before, to: after });
+
+    expect(diff.entities.map(entity => [entity.id, entity.change])).toEqual([
+      [kept, "changed"],
+      [merged, "despawned"]
+    ]);
+    expect(diff.entities[0]).toMatchObject({
+      key: { projection: "board.items", key: "a" },
+      components: { Level: { from: { level: 1 }, to: { level: 2 } } }
+    });
+    expect(diff.entities[1]?.key).toBeUndefined();
+    expect(read(app, explainSource, { entity: merged })).toBeUndefined();
+    expect(read(app, explainSource, { entity: kept })?.components.Level).toEqual({ level: 2 });
+    expect(read(app, schemaSource).map(entry => entry.name)).toEqual(
+      expect.arrayContaining(["Drifted", "Layer", "Level", "Transform"])
+    );
+
+    await app.stop();
+
+    expect(() => app.world.ecs.diff(before, after)).toThrow("starts with the next frame");
   });
 });

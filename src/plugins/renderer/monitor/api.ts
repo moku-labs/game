@@ -1,10 +1,19 @@
 /**
  * @file renderer/monitor — API factory. The module keeps its data in `ctx.state.monitor` and reads
- * its counters through the injected `host` and `sync`; the clock is the `clock` plugin's, since
- * the renderer never reads the device clock itself (lint L3).
+ * its counters through the injected `host` and `sync`; a capture places its legend through
+ * `viewport` too. The clock is the `clock` plugin's, since the renderer never reads the device
+ * clock itself (lint L3).
  */
 import type { MonitorModule, RendererCtx } from "../types";
-import type { MonitorDeps, MonitorState, RenderStats } from "./types";
+import { cancelCaptures, captureFrame, serveCaptures } from "./capture";
+import type {
+  Captured,
+  CaptureOptions,
+  MonitorCtx,
+  MonitorDeps,
+  MonitorState,
+  RenderStats
+} from "./types";
 import { beginFrame, endFrame, resetWindow, STALE_MS } from "./window";
 
 /** Bytes of one MiB. */
@@ -28,36 +37,16 @@ function roundTo(value: number, decimals: number): number {
 }
 
 /**
- * Hands one picture to every capture that waited for it.
- *
- * @param waiting - The resolvers of the waiting captures.
- * @param url - The picture, or `undefined`.
- */
-function settle(waiting: ReadonlyArray<(url: string | undefined) => void>, url?: string): void {
-  for (const resolve of waiting) resolve(url);
-}
-
-/**
  * Creates the monitor module: the counters of the renderer and the capture of a frame.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param deps - The injected `host` and `sync` modules.
+ * @param deps - The injected `host`, `viewport` and `sync` modules.
  * @returns The monitor API and its internal half.
  */
 export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorModule {
   const state = ctx.state.monitor;
   const clock = ctx.deps.clock;
-
-  /**
-   * Takes the picture the waiting captures asked for, once for all of them.
-   */
-  const flushCaptures = (): void => {
-    if (state.captures.length === 0) return;
-
-    const waiting = state.captures.splice(0);
-
-    deps.host.extract().then(url => settle(waiting, url));
-  };
+  const mctx: MonitorCtx = { ctx, deps };
 
   return {
     stats: (): RenderStats => {
@@ -80,20 +69,12 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       return { ...stats, drawCalls: state.draws.last };
     },
 
-    capture: async (): Promise<string | undefined> => {
+    capture: async (options: CaptureOptions = {}): Promise<Captured | undefined> => {
       // Inline, not `isDev()`: Bun folds this guard under `define: { __MOKU_GAME_DEV__: "false" }`
       // and drops the capture from a production bundle (`flow/doors/dev.ts` declares the global).
       if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return undefined;
 
-      if (!deps.host.ready()) return undefined;
-
-      ctx.log.debug("moku:dev", { command: "renderer.capture" });
-
-      if (ctx.deps.time.isPaused()) return deps.host.extract();
-
-      return new Promise(resolve => {
-        state.captures.push(resolve);
-      });
+      return captureFrame(mctx, options);
     },
 
     begin: (): void => {
@@ -106,7 +87,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       endFrame(state, clock.now());
       state.draws.last = state.draws.frame;
       state.draws.frame = 0;
-      flushCaptures();
+      serveCaptures(mctx);
     }
   };
 }
@@ -119,7 +100,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
  * @param state - The monitor branch of the plugin state.
  */
 export function stopMonitor(state: MonitorState): void {
-  settle(state.captures.splice(0));
+  cancelCaptures(state);
   resetWindow(state);
   state.draws.frame = 0;
   state.draws.last = 0;

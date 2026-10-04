@@ -1,12 +1,13 @@
 /**
  * @file text plugin — resolution: a `content` becomes one tagged string, a tagged string becomes
- * a cached layout, and the one world system of phase `layout` keeps `Text.resolved` and the
- * measured sizes true. This is also where every dev warning is written once.
+ * a cached layout, and the one world system of phase `layout` keeps `Text.resolved`, the measured
+ * sizes and `Countdown.left` true. This is also where every dev warning is written once.
  */
 import type { ElementNode, Message } from "../i18n/types";
 import { system } from "../world/ecs/define";
 import type { AnyComponent, AnySystem, Entity } from "../world/ecs/types";
-import { builtInStyles, Text } from "./components";
+import { builtInStyles, Countdown, Text } from "./components";
+import { formatBound, isTextFormat, unitOf } from "./format";
 import { layoutRuns } from "./measure";
 import { parseTags } from "./tags";
 import type {
@@ -14,6 +15,7 @@ import type {
   State,
   TextBind,
   TextCtx,
+  TextFormat,
   TextLayout,
   TextStyle,
   TextValue,
@@ -220,41 +222,116 @@ function bindTypeOf(ctx: TextCtx, name: string): AnyComponent | undefined {
 }
 
 /**
- * Reads the bound number off the entity.
+ * What one run of the system shares between its labels: the trusted time, read on the first
+ * countdown that asks and reset at the top of every run, so the clock is read at most once a frame.
+ */
+type Frame = { now: number | undefined };
+
+/**
+ * The trusted time of this frame, read from `clock` on the first call of the run.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param frame - What this run of the system shares.
+ * @returns The current moment in epoch milliseconds.
+ */
+function frameNow(ctx: TextCtx, frame: Frame): number {
+  frame.now ??= ctx.deps.clock.now();
+
+  return frame.now;
+}
+
+/**
+ * Tells whether a bind shows the time left of a `Countdown`, which is derived, not read.
+ *
+ * @param bind - What the label carries.
+ * @returns True for `bind(Countdown, "left", …)`.
+ */
+function isCountdownLeft(bind: TextBind): boolean {
+  return bind.component === Countdown.componentName && bind.field === "left";
+}
+
+/**
+ * Reads what a bind points at: the time left until `Countdown.until` for a countdown, the stored
+ * field for any other component.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity the label sits on.
  * @param bind - Which component field it shows.
- * @returns The number, or `undefined` when there is none to show.
+ * @param frame - What this run of the system shares.
+ * @returns The value, or `undefined` when the entity has nothing there.
  */
-function boundValue(ctx: TextCtx, entity: Entity, bind: TextBind): number | undefined {
+function readBound(ctx: TextCtx, entity: Entity, bind: TextBind, frame: Frame): unknown {
+  if (isCountdownLeft(bind)) {
+    const until = ctx.deps.world.ecs.get(entity, Countdown)?.until;
+
+    return typeof until === "number" ? Math.max(0, until - frameNow(ctx, frame)) : undefined;
+  }
+
   const type = bindTypeOf(ctx, bind.component);
 
-  if (type === undefined) return undefined;
+  return type === undefined ? undefined : ctx.deps.world.ecs.get(entity, type)?.[bind.field];
+}
 
-  const stored = ctx.deps.world.ecs.get(entity, type);
-  const value = stored?.[bind.field];
+/**
+ * Reads the bound number off the entity. A value that is not a number is reported once per
+ * entity; an unknown component was already reported by its name.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity the label sits on.
+ * @param bind - Which component field it shows.
+ * @param frame - What this run of the system shares.
+ * @returns The number, or `undefined` when there is none to show.
+ */
+function boundValue(
+  ctx: TextCtx,
+  entity: Entity,
+  bind: TextBind,
+  frame: Frame
+): number | undefined {
+  const value = readBound(ctx, entity, bind, frame);
 
-  if (typeof value !== "number") {
+  if (typeof value === "number") return value;
+
+  if (isCountdownLeft(bind) || ctx.state.bindTypes.get(bind.component) !== undefined) {
     warnOnce(ctx, `bind-field:${entity}`, "text: bound field is not a number", {
       component: bind.component,
       field: bind.field
     });
-
-    return undefined;
   }
 
-  return value;
+  return undefined;
 }
 
 /**
- * The key of a bind, so a changed binding is seen as a change.
+ * The format a bound value is shown in. An unknown format (a hand-built bind) or a value that is
+ * not finite is reported once per entity and shown as `"int"`.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity the label sits on.
+ * @param bind - What the label carries.
+ * @param value - The bound number.
+ * @returns The format to show the value in.
+ */
+function formatOf(ctx: TextCtx, entity: Entity, bind: TextBind, value: number): TextFormat {
+  if (isTextFormat(bind.format) && Number.isFinite(value)) return bind.format;
+
+  warnOnce(ctx, `bind-format:${entity}`, "text: bad bind format", {
+    component: bind.component,
+    field: bind.field,
+    format: bind.format
+  });
+
+  return "int";
+}
+
+/**
+ * The key of a bind, so a changed binding or format is seen as a change.
  *
  * @param bind - What the component carries.
  * @returns The key, or `undefined` for a label with no bind.
  */
 function bindKeyOf(bind: TextBind | undefined): string | undefined {
-  return bind === undefined ? undefined : `${bind.component}.${bind.field}`;
+  return bind === undefined ? undefined : `${bind.component}.${bind.field}:${bind.format}`;
 }
 
 /**
@@ -263,26 +340,124 @@ function bindKeyOf(bind: TextBind | undefined): string | undefined {
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
  * @param text - Its component value.
+ * @param unit - What a bound label's string was built from; `undefined` for any other label.
  */
-function remember(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): void {
+function remember(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, unit?: number): void {
   ctx.state.seen.set(entity, {
     content: text.content,
     style: text.style,
     bind: bindKeyOf(text.bind),
-    locale: ctx.deps.i18n.locale()
+    locale: ctx.deps.i18n.locale(),
+    unit
   });
 }
 
 /**
- * One frame of a bound label: the rounded field, read every frame, written only when it moved.
- * No locale is read and no tag is parsed here.
+ * Tells whether a bound label already shows what its value would build: the same unit, style and
+ * binding, and for a `"duration"` the same locale.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ * @param unit - The unit of the value this frame.
+ * @param format - The format it is shown in.
+ * @returns True when nothing has to be formatted or written.
+ */
+function isShown(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  unit: number | undefined,
+  format: TextFormat
+): boolean {
+  const seen = ctx.state.seen.get(entity);
+
+  return (
+    seen !== undefined &&
+    seen.unit === unit &&
+    seen.style === text.style &&
+    seen.bind === bindKeyOf(text.bind) &&
+    (format !== "duration" || seen.locale === ctx.deps.i18n.locale())
+  );
+}
+
+/**
+ * Writes the new string of a bound label, its measured size, and for a countdown the time left,
+ * in the same step: `changed(Countdown)` fires once per shown change, never per frame.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ * @param next - The string the label shows now.
+ * @param value - The bound number, the time left for a countdown.
+ */
+function showBound(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  next: string,
+  value: number | undefined
+): void {
+  const changed = next !== text.resolved;
+
+  if (changed) {
+    ctx.deps.world.ecs.set(entity, Text, { resolved: next });
+
+    if (value !== undefined && text.bind !== undefined && isCountdownLeft(text.bind)) {
+      ctx.deps.world.ecs.set(entity, Countdown, { left: value });
+    }
+  }
+
+  if (changed || !ctx.state.measured.has(entity)) {
+    ctx.state.measured.set(entity, sizeOf(layoutFor(ctx, next, text.style)));
+  }
+}
+
+/**
+ * Keeps `seen` of a bound label in step. Nothing is allocated while the binding stands: the
+ * entry is updated in place.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ * @param unit - What the shown string was built from.
+ */
+function rememberBound(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  unit: number | undefined
+): void {
+  const seen = ctx.state.seen.get(entity);
+
+  if (seen === undefined || seen.style !== text.style || seen.bind !== bindKeyOf(text.bind)) {
+    remember(ctx, entity, text, unit);
+
+    return;
+  }
+
+  seen.unit = unit;
+  seen.locale = ctx.deps.i18n.locale();
+}
+
+/**
+ * One frame of a bound label: the value read every frame, the string built and written only
+ * when its unit moved. A label that stands still costs a read and a few compares; no tag is
+ * parsed, and the locale is read only for a `"duration"`.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
  * @param text - Its component value.
  * @param bind - Which component field it shows.
+ * @param frame - What this run of the system shares.
  */
-function stepBound(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, bind: TextBind): void {
+function stepBound(
+  ctx: TextCtx,
+  entity: Entity,
+  text: Readonly<TextValue>,
+  bind: TextBind,
+  frame: Frame
+): void {
   const style = ctx.state.styles.get(text.style);
 
   if (style !== undefined && !style.digits) {
@@ -291,22 +466,19 @@ function stepBound(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, bind
     });
   }
 
-  const value = boundValue(ctx, entity, bind);
-  const next = value === undefined ? "" : String(Math.round(value));
-
-  if (next !== text.resolved) ctx.deps.world.ecs.set(entity, Text, { resolved: next });
-  if (next !== text.resolved || !ctx.state.measured.has(entity)) {
-    ctx.state.measured.set(entity, sizeOf(layoutFor(ctx, next, text.style)));
-  }
+  const value = boundValue(ctx, entity, bind, frame);
+  const format = value === undefined ? "int" : formatOf(ctx, entity, bind, value);
+  const unit = value === undefined ? undefined : unitOf(value, format);
 
   ctx.state.dirty.delete(entity);
 
-  // A bound label allocates nothing while the number stands still: `seen` moves with the binding.
-  const seen = ctx.state.seen.get(entity);
+  if (isShown(ctx, entity, text, unit, format)) return;
 
-  if (seen === undefined || seen.style !== text.style || seen.bind !== bindKeyOf(bind)) {
-    remember(ctx, entity, text);
-  }
+  const next =
+    value === undefined ? "" : formatBound(value, format, ms => ctx.deps.i18n.duration(ms));
+
+  showBound(ctx, entity, text, next, value);
+  rememberBound(ctx, entity, text, unit);
 }
 
 /**
@@ -339,10 +511,11 @@ function isStale(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): boole
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
  * @param text - Its component value.
+ * @param frame - What this run of the system shares.
  */
-function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): void {
+function stepText(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>, frame: Frame): void {
   if (text.bind !== undefined) {
-    stepBound(ctx, entity, text, text.bind);
+    stepBound(ctx, entity, text, text.bind, frame);
 
     return;
   }
@@ -378,18 +551,23 @@ export function resolveContent(ctx: TextCtx, entity: Entity, text: Readonly<Text
 }
 
 /**
- * The one system of the plugin: phase `layout`, before the two of `ui`, over every label.
+ * The one system of the plugin: phase `layout`, before the two of `ui`, over every label. The
+ * clock is read at most once per run, and only when a countdown label asks.
  *
  * @param ctx - Domain context of the text plugin.
  * @returns The system definition `world.ecs.system` takes.
  */
 export function createTextSystem(ctx: TextCtx): AnySystem {
+  const frame: Frame = { now: undefined };
+
   return system({
     name: TEXT_SYSTEM_NAME,
     phase: "layout",
     query: [Text],
     run: (entities): void => {
-      for (const [entity, text] of entities) stepText(ctx, entity, text);
+      frame.now = undefined;
+
+      for (const [entity, text] of entities) stepText(ctx, entity, text, frame);
     }
   });
 }

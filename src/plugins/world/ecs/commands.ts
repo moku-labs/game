@@ -5,11 +5,13 @@
 import type { WorldCtx } from "../types";
 import { forgetChanges } from "./changes";
 import { isAlive, ownerKey, releaseEntity } from "./entities";
+import { recordDespawn } from "./history";
 import { attachComponent, clearEntity, detachComponent } from "./storage";
 import type { Command, Entity, Owner } from "./types";
 
 /**
- * Removes every component of an entity and frees its index. A stale id is a no-op.
+ * Removes every component of an entity and frees its index. A stale id is a no-op. The frame
+ * history records the despawn first, while the components are still there.
  *
  * @param ctx - Domain context of the world plugin.
  * @param entity - The entity to remove.
@@ -17,6 +19,7 @@ import type { Command, Entity, Owner } from "./types";
 export function despawnEntity(ctx: WorldCtx, entity: Entity): void {
   if (!isAlive(ctx.state.ecs, entity)) return;
 
+  recordDespawn(ctx, entity);
   clearEntity(ctx, entity);
   releaseEntity(ctx.state.ecs, entity);
   forgetChanges(ctx.state.ecs, entity);

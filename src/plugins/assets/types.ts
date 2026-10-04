@@ -21,9 +21,9 @@ import type { Api as TimeApi } from "../time/types";
 export type Tier = "boot" | "core" | "scene" | "feature" | "lazy";
 
 /**
- * What one file of a bundle is. A `.fnt` with its `.png` pages is one `font`, an `.mp3` is
- * `audio`, everything else is a `texture`. A file of an older manifest that names no kind is a
- * texture.
+ * What one file of a bundle is. A `.fnt` with its `.png` pages is one `font`, an `.mp3` or an
+ * `.m4a` is `audio`, everything else is a `texture`. A file of an older manifest that names no
+ * kind is a texture.
  *
  * @example
  * ```ts
@@ -400,14 +400,37 @@ export type FontAsset = { fnt: string; texture: Texture };
 export type LoadedFont = FontAsset & { pages: readonly Texture[] };
 
 /**
+ * The container type of a sound, read from the extension of its file: `.mp3` is `"audio/mpeg"`,
+ * `.m4a` (AAC in an MP4 container) is `"audio/mp4"`. These are the two formats the scanner takes,
+ * and the two every browser and WebView decodes.
+ *
+ * @example
+ * ```ts
+ * const mime: AudioMime = "audio/mp4"; // the type of theme.m4a
+ * ```
+ */
+export type AudioMime = "audio/mpeg" | "audio/mp4";
+
+/**
+ * A loaded sound: the bytes exactly as they were fetched, never decoded here, and the MIME type
+ * of their container. A `Blob` of the bytes needs the type: Safari does not sniff a typeless one.
+ *
+ * @example
+ * ```ts
+ * const asset: AudioAsset = { bytes: new ArrayBuffer(12_288), mime: "audio/mpeg" }; // click.mp3
+ * ```
+ */
+export type AudioAsset = { bytes: ArrayBuffer; mime: AudioMime };
+
+/**
  * What one bundle brought: textures by asset key (a packed file's is a slice of its page), fonts
- * with their pages, the undecoded bytes of the audio files, and the atlas pages by page id. A
+ * with their pages, the undecoded sounds with their MIME types, and the atlas pages by page id. A
  * running load fills the same four maps before they are published.
  */
 export type LoadedAssets = {
   textures: Map<string, Texture>;
   fonts: Map<string, LoadedFont>;
-  audio: Map<string, ArrayBuffer>;
+  audio: Map<string, AudioAsset>;
   pages: Map<string, Texture>;
 };
 
@@ -630,20 +653,24 @@ export type Api = {
   font(key: string): FontAsset | undefined;
 
   /**
-   * The bytes of a loaded audio file, exactly as they were fetched: this plugin never decodes
-   * them. It touches the use counter of the bundle. A bundle that is not loaded, a key of
-   * another kind and every headless run answer `undefined`.
+   * The sound of a loaded audio key: its bytes exactly as they were fetched (this plugin never
+   * decodes them) and the MIME type of its container, `"audio/mpeg"` for an `.mp3` and
+   * `"audio/mp4"` for an `.m4a`. A packed file keeps its extension, so it keeps its type. It
+   * touches the use counter of the bundle. A bundle that is not loaded, a key of another kind and
+   * every headless run answer `undefined`.
    *
-   * @param key - Asset key of an `.mp3` file, as `generated/assets.ts` types it in `AudioKey`.
-   * @returns The undecoded bytes, or `undefined` while its bundle is not loaded.
+   * @param key - Asset key of an `.mp3` or `.m4a` file, as `generated/assets.ts` types it in
+   *   `AudioKey`.
+   * @returns The bytes and their type, or `undefined` while its bundle is not loaded.
    * @example
    * ```ts
-   * // `audio` decodes a sound once and keeps it until the bundle is unloaded.
-   * const bytes = app.assets.audio("ui.click"); // the ArrayBuffer of click.mp3
-   * const buffer = bytes === undefined ? undefined : await context.decodeAudioData(bytes);
+   * // The audio plugin decodes a sound, or streams a long track from a blob: URL of its bytes.
+   * const asset = ctx.require(assetsPlugin).audio("ui.click");
+   * // { bytes: ArrayBuffer(12 288), mime: "audio/mpeg" }
+   * if (asset !== undefined) URL.createObjectURL(new Blob([asset.bytes], { type: asset.mime }));
    * ```
    */
-  audio(key: string): ArrayBuffer | undefined;
+  audio(key: string): AudioAsset | undefined;
 
   /**
    * What the loaded bundles cost, sorted by name. `lastUsed` is the use counter, not a clock.

@@ -39,7 +39,7 @@ const PAGE = `<!doctype html>
     anim: { finishAll: () => {} },
     renderer: {
       host: { kind: () => (navigator.gpu === undefined ? "none" : "webgpu") },
-      capture: async () => canvas.toDataURL("image/png")
+      capture: async () => ({ png: canvas.toDataURL("image/png") })
     }
   };
   globalThis.doors = {

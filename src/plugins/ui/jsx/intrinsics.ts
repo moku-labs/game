@@ -5,9 +5,17 @@
  */
 import type { Message } from "../../i18n/types";
 import type { Json } from "../../model/types";
+import type { TextBind } from "../../text/types";
 import type { AnyComponentValue } from "../../world/types";
 import type { Style } from "../styles/types";
-import type { CommonProps as CommonProperties, ElementMotion, JsxChild } from "./types";
+import type {
+  CommonProps as CommonProperties,
+  DescriptionNode,
+  ElementMotion,
+  JsxChild
+} from "./types";
+
+export type { TextBind } from "../../text/types";
 
 /**
  * The optional brand that makes a wrong value print the name of the prop it was written on.
@@ -29,8 +37,6 @@ export type ButtonLocal = Record<string, unknown> & Brand<"ButtonLocal">;
 export type ButtonEscape = boolean & Brand<"ButtonEscape">;
 /** What a text draws: a plain string, or a message of the game's string table. */
 export type TextContent = (string | Message) & Brand<"TextContent">;
-/** The component field a text follows instead of a content. */
-export type TextBind = { component: string; field: string } & Brand<"TextBind">;
 /** The text style key, or a layout style when the built-in `body` is meant. */
 export type TextStyleProp = (string | Style) & Brand<"TextStyleProp">;
 /** The asset key of an image. */
@@ -41,6 +47,24 @@ export type IconName = string & Brand<"IconName">;
 export type ImageFit = ("contain" | "cover" | "fill") & Brand<"ImageFit">;
 /** The axis a scroll container moves on. `"x"` throws until V4. */
 export type ScrollAxis = ("x" | "y") & Brand<"ScrollAxis">;
+/** How many rows a windowed scroll has. */
+export type ScrollRows = number & Brand<"ScrollRows">;
+/** The height of every row, in reference units; above 0. */
+export type ScrollRowHeight = number & Brand<"ScrollRowHeight">;
+/** Rows kept alive beyond each edge of the viewport; 5 when left out. */
+export type ScrollOverscan = number & Brand<"ScrollOverscan">;
+
+/**
+ * Builds the row at an index; called at reconcile for the rows in the window, never at build time.
+ *
+ * @example
+ * ```tsx
+ * <scroll key="shop" style={list} rows={items.length} rowHeight={80} overscan={5}
+ *         row={index => <ShopRow key={items[index].id} item={items[index]} />} />;
+ * // at offset 0: rows 0 to 24 exist, 25 of the 1000, for 80 u rows in a 1600 u list with overscan 5
+ * ```
+ */
+export type ScrollRow = ((index: number) => DescriptionNode) & Brand<"ScrollRow">;
 /** The world projections whose live views a container draws inside itself. */
 export type HostedProjections = readonly string[] & Brand<"HostedProjections">;
 /** The local field of the nearest component instance a text field writes on every keystroke. */
@@ -117,11 +141,15 @@ export type ButtonTagProps = CommonProperties & { escape?: ButtonEscape } & (
   );
 
 /**
- * What a text takes: a content or a bind, and the style key that carries its size.
+ * What a text takes: a content or a bind, and the style key that carries its size. Only `bind()`
+ * makes a bind; the text shows the bound field of a component of its own entity, so the bound
+ * component goes in `components`.
  *
  * @example
  * ```ts
  * const props: TextTagProps = { content: "120", style: "digits" };
+ * // The coin counter: Counter is an extra component, the text shows Math.round of its value.
+ * const coins: TextTagProps = { bind: bind(Counter, "value"), components: [Counter({ value: 25 })] };
  * ```
  */
 export type TextTagProps = Omit<CommonProperties, "style"> & {
@@ -166,15 +194,38 @@ export type IconProps = CommonProperties & { name: IconName; fit?: ImageFit };
  */
 export type PanelProps = CommonProperties;
 
+/** The child form of a scroll: its children are the content, laid out whole. */
+type ScrollChildForm = { rows?: never; rowHeight?: never; overscan?: never; row?: never };
+
+/** The windowed form of a scroll: only the rows in view plus `overscan` exist. */
+type ScrollWindowForm = {
+  rows: ScrollRows;
+  rowHeight: ScrollRowHeight;
+  overscan?: ScrollOverscan;
+  row: ScrollRow;
+  children?: never;
+};
+
 /**
- * What a scroll container takes.
+ * What a scroll container takes: children for a short list, or `rows`, `rowHeight` and `row` for
+ * a long one, whose rows exist only in the window.
  *
  * @example
  * ```ts
  * const props: ScrollProps = { axis: "y" };
+ * // 1000 orders of 120 u in a 1600 u list: rows 0 to 18 exist at offset 0.
+ * const orders: ScrollProps = {
+ *   style: { height: 1600 },
+ *   rows: 1000,
+ *   rowHeight: 120,
+ *   row: index => ({ type: "row", key: `order${index}`, props: {}, children: [] })
+ * };
  * ```
  */
-export type ScrollProps = CommonProperties & { axis?: ScrollAxis };
+export type ScrollProps = CommonProperties & { axis?: ScrollAxis } & (
+    | ScrollChildForm
+    | ScrollWindowForm
+  );
 
 /**
  * What a text field takes. `local` is required: every keystroke writes that field of the local

@@ -126,10 +126,9 @@ export type ViewportApi = {
    *   units, since there is no canvas to place them on.
    * @example
    * ```ts
-   * // The `game.rect` source of the editor places Home's Play plank on the page. A 390x844
-   * // phone, the canvas at the top left: the scale is 390 / 1080.
-   * const renderer = ctx.require(rendererPlugin);
-   * renderer.viewport.toScreen({ x: 540, y: 960 }); // { x: 195, y: 346.666… }
+   * // The `game.locate` source places Home's Play plank on the page for an e2e script. A
+   * // 390x844 phone, the canvas at the top left: the scale is 390 / 1080.
+   * app.renderer.viewport.toScreen({ x: 540, y: 960 }); // { x: 195, y: 346.666… }
    * ```
    */
   toScreen(point: Point): Point;

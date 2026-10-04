@@ -21,7 +21,9 @@ const config: Config = {
   swipeMinPx: 48,
   swipeMaxMs: 300,
   heldScale: 1,
-  cursor: { control: "pointer", idle: "" }
+  cursor: { control: "pointer", idle: "" },
+  traceStepPx: 32,
+  traceInset: 0.4
 };
 
 /**

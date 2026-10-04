@@ -4,7 +4,15 @@
  * nothing — no coordinates, no frames, no `Held`, no `settle` — so it works headless.
  */
 import type { ComponentType } from "../world/types";
-import { addTapListener, dropAnswer, notifyTap, submit, swipeAnswer, tapAnswer } from "./answers";
+import {
+  addTapListener,
+  dropAnswer,
+  notifyTap,
+  submit,
+  swipeAnswer,
+  tapAnswer,
+  traceAnswer
+} from "./answers";
 import {
   type CarryValue,
   Draggable,
@@ -13,7 +21,8 @@ import {
   Pressable,
   Swipeable,
   Tappable,
-  Touchable
+  Touchable,
+  Traceable
 } from "./components";
 import { resolveTarget } from "./hit";
 import { addControl } from "./hover";
@@ -136,8 +145,45 @@ function answerSwipe(ctx: InputCtx, target: Target, direction: Direction): boole
 }
 
 /**
- * Creates the input API: `app.input.tap`, `.press`, `.drag`, `.swipe`, `.onTap`, `.onPointer`,
- * `.onKey`, `.pressKey`, `.cursor` and `.controls`.
+ * Answers a trace: every cell's `Traceable` read in path order, one intent for the whole path.
+ * An empty list, a cell with no `Traceable` and two intents are reported, and the gate is not
+ * called.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param path - The cells in the order the finger would go through them.
+ * @returns What `flow.gate.answer` returned.
+ */
+function answerTrace(ctx: InputCtx, path: readonly Target[]): boolean {
+  if (path.length === 0) {
+    ctx.log.warn("input: trace has no cells");
+
+    return false;
+  }
+
+  const cells: Array<Found<IntentValue>> = [];
+
+  for (const target of path) {
+    const found = find(ctx, target, Traceable);
+
+    if (found === undefined) return false;
+    cells.push(found);
+  }
+
+  const values = cells.map(cell => cell.value);
+  const [first] = cells;
+
+  if (new Set(values.map(value => value.intent)).size > 1) {
+    ctx.log.warn("input: trace mixes intents", { path });
+
+    return false;
+  }
+
+  return first !== undefined && submit(ctx, first.entity, traceAnswer(values));
+}
+
+/**
+ * Creates the input API: `app.input.tap`, `.press`, `.drag`, `.swipe`, `.trace`, `.onTap`,
+ * `.onPointer`, `.onKey`, `.pressKey`, `.cursor` and `.controls`.
  *
  * @param ctx - Kernel context of the input plugin.
  * @returns The plugin API.
@@ -150,6 +196,7 @@ export function createInputApi(ctx: KernelSlice): InputApi {
     press: target => answerIntent(inputCtx, target, Pressable),
     drag: (from, to) => answerDrop(inputCtx, from, to),
     swipe: (target, direction) => answerSwipe(inputCtx, target, direction),
+    trace: path => answerTrace(inputCtx, path),
     onTap: fn => addTapListener(inputCtx.state, fn),
     onPointer: fn => addPointerListener(inputCtx.state, fn),
     onKey: fn => addKeyListener(inputCtx.state, fn),

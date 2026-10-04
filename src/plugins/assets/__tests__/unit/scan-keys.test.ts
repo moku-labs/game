@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAssetFile, keyOf, parseTags } from "../../scan/keys";
+import { assetKindOf, isAssetFile, keyOf, parseTags } from "../../scan/keys";
 
 describe("isAssetFile", () => {
   it("takes PNG and WebP", () => {
@@ -15,6 +15,20 @@ describe("isAssetFile", () => {
     expect(isAssetFile("notes.md")).toBe(false);
     expect(isAssetFile("sheet.jpg")).toBe(false);
     expect(isAssetFile("LICENSE")).toBe(false);
+  });
+});
+
+describe("assetKindOf", () => {
+  it("reads an .mp3 and an .m4a as audio, in any case", () => {
+    expect(assetKindOf("click.mp3")).toBe("audio");
+    expect(assetKindOf("theme.m4a")).toBe("audio");
+    expect(assetKindOf("theme.M4A")).toBe("audio");
+  });
+
+  it("leaves raw AAC and the other audio formats out", () => {
+    for (const name of ["theme.aac", "theme.ogg", "theme.opus", "click.wav", "theme.flac"]) {
+      expect(assetKindOf(name)).toBeUndefined();
+    }
   });
 });
 
@@ -185,6 +199,12 @@ describe("keyOf", () => {
   it("keeps the whole name when the tag is malformed", () => {
     expect(keyOf("ui", "panel{nine=4,5,6}.png", "features/ui/assets/panel{nine=4,5,6}.png")).toBe(
       "ui.panel{nine=4,5,6}"
+    );
+  });
+
+  it("drops the .m4a extension like any other", () => {
+    expect(keyOf("ui", "music/theme.m4a", "features/ui/assets/music/theme.m4a")).toBe(
+      "ui.music.theme"
     );
   });
 

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { Transform } from "../../../renderer/components";
-import { builtInStyles, defineTextStyles, label, readStyle, Text, textFor } from "../../components";
+import { component } from "../../../world/ecs/define";
+import {
+  bind,
+  builtInStyles,
+  Countdown,
+  defineTextStyles,
+  label,
+  readStyle,
+  Text,
+  textFor
+} from "../../components";
 
 // ---------------------------------------------------------------------------
 // The pure half of the plugin: the component a game writes, the pair `label`
@@ -31,6 +41,46 @@ describe("Text", () => {
       anchor: { x: 0.5, y: 0.5 },
       alpha: 1,
       resolved: ""
+    });
+  });
+});
+
+/** A game's numeric component, as the HUD coin counter has it. */
+const Counter = component("Counter", { value: 0, name: "" });
+
+describe("bind", () => {
+  it("names the component and the field, and shows an int unless told otherwise", () => {
+    expect(bind(Counter, "value")).toEqual({ component: "Counter", field: "value", format: "int" });
+  });
+
+  it("keeps the format it was given", () => {
+    expect(bind(Countdown, "left", { format: "mm:ss" })).toEqual({
+      component: "Countdown",
+      field: "left",
+      format: "mm:ss"
+    });
+  });
+
+  it("is plain data a Text carries", () => {
+    expect(Text({ style: "digits", bind: bind(Counter, "value") }).value.bind).toEqual({
+      component: "Counter",
+      field: "value",
+      format: "int"
+    });
+  });
+});
+
+describe("Countdown", () => {
+  it("starts at zero, and leaves `left` to the engine", () => {
+    expect(Countdown().value).toEqual({ until: 0, left: 0 });
+    expect(Countdown.owned).toEqual(["left"]);
+    expect(Countdown.componentName).toBe("Countdown");
+  });
+
+  it("takes the moment a game writes", () => {
+    expect(Countdown({ until: 1_790_000_095_000 }).value).toEqual({
+      until: 1_790_000_095_000,
+      left: 0
     });
   });
 });

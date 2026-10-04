@@ -49,6 +49,8 @@
  * | input | swipeMaxMs | 300 |
  * | input | heldScale | 1 |
  * | input | cursor | { control: "pointer", idle: "" } |
+ * | input | traceStepPx | 32 |
+ * | input | traceInset | 0.4 |
  * | assets | manifest | undefined, a URL or an inline manifest |
  * | assets | textureBudgetMb | 192 |
  * | assets | preloadDepth | 2 |
@@ -69,6 +71,8 @@
  * | audio | volumes | undefined, the buses stay at `buses` |
  * | audio | context | undefined, the real AudioContext |
  * | audio | journal | 0, no started sound is kept |
+ * | audio | music | "decode", gapless; "stream" plays an `<audio>` element |
+ * | audio | session | "ambient", iOS only |
  * | effects | maxParticles | 3000, live particles above which one dev warning fires per crossing |
  * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
  * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |
@@ -265,7 +269,9 @@ export {
   Pressed,
   Swipeable,
   Tappable,
-  Touchable
+  Touchable,
+  Traceable,
+  Traced
 } from "./plugins/input/components";
 // assets and scenes: declarations
 export { defineBundles, load } from "./plugins/assets/bundles";
@@ -296,8 +302,9 @@ export type { HapticKind } from "./plugins/anim/timeline/types";
 // i18n: messages as data
 export { tr } from "./plugins/i18n/tr";
 export type { DescriptionNode } from "./plugins/world/projection/types";
-// text: the Text component, board labels and text styles
-export { defineTextStyles, label, Text } from "./plugins/text/components";
+// text: the Text component, board labels, text styles, bound numbers and countdowns
+export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
+export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
 export { Box, LocalWrite, popup } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";

@@ -1,6 +1,7 @@
 /**
  * @file renderer/sync — the hit test. Pure component math: Pixi updates its world matrices at
- * render time, one frame after the input phase asks.
+ * render time, one frame after the input phase asks. One walk yields every hit, topmost first:
+ * `hitTest` stops at the first one the caller accepts, `hitAll` lists them all.
  */
 import type { Entity } from "../../world/types";
 import { NineSlice, Shape } from "../components";
@@ -129,6 +130,18 @@ function effectiveAlpha(object: PixiContainer, root: PixiContainer): number {
 }
 
 /**
+ * Tells whether the player can see a display object: it hangs under the root of `sync`, nothing
+ * on its way there is hidden, and the alpha it draws with is above 0.01.
+ *
+ * @param object - The display object.
+ * @param root - The root container of `sync`.
+ * @returns True when the object is drawn.
+ */
+export function isShown(object: PixiContainer, root: PixiContainer): boolean {
+  return effectiveAlpha(object, root) > MIN_ALPHA;
+}
+
+/**
  * Collects the children of a container in draw order from the top: by `zIndex` descending, then
  * by insertion descending. The children of a wrapper come before the wrapper's own visual.
  *
@@ -155,22 +168,21 @@ function topFirst(container: PixiContainer, out: PixiContainer[], depth = 0): Pi
 }
 
 /**
- * The topmost accepted entity inside one layer container.
+ * Walks the views of one layer container whose hit box holds the point, topmost first. A view
+ * the player cannot see and a point outside a clipping ancestor are skipped.
  *
  * @param sctx - Domain context of the sync module.
  * @param container - The layer container.
  * @param root - The root container of `sync`.
  * @param point - The reference point.
- * @param accept - The filter of the caller.
- * @returns The entity, or `undefined`.
+ * @yields {Entity} Every entity hit inside the layer.
  */
-function pickIn(
+function* hitsIn(
   sctx: SyncCtx,
   container: PixiContainer,
   root: PixiContainer,
-  point: Point,
-  accept: (entity: Entity) => boolean
-): Entity | undefined {
+  point: Point
+): Generator<Entity> {
   const state = sctx.ctx.state.sync;
 
   for (const object of topFirst(container, [])) {
@@ -178,17 +190,40 @@ function pickIn(
     const view = entity === undefined ? undefined : state.views.get(entity);
 
     if (entity === undefined || view === undefined) continue;
-    if (effectiveAlpha(object, root) <= MIN_ALPHA) continue;
+    if (!isShown(object, root)) continue;
     if (!inBox(view.hitBox, localPoint(sctx, entity, point.x, point.y))) continue;
     if (clippedOut(sctx, entity, point.x, point.y)) continue;
-    if (accept(entity)) return entity;
-  }
 
-  return undefined;
+    yield entity;
+  }
 }
 
 /**
- * The topmost entity under a reference point that the caller accepts.
+ * Walks every view under a reference point, topmost first: the layers from the last one of the
+ * scene's list, inside a layer by draw order from the top. Nothing while inert or before the scene
+ * declared its layers.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param point - The reference point.
+ * @yields {Entity} Every entity hit.
+ */
+function* hitsAt(sctx: SyncCtx, point: Point): Generator<Entity> {
+  const state = sctx.ctx.state.sync;
+  const root = state.root;
+  const list = state.layerList;
+
+  if (root === undefined || list === undefined) return;
+
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const name = list[index]?.name;
+    const container = name === undefined ? undefined : state.layers.get(name)?.container;
+
+    if (container !== undefined) yield* hitsIn(sctx, container, root, point);
+  }
+}
+
+/**
+ * The topmost entity under a reference point that the caller accepts. The walk stops there.
  *
  * @param sctx - Domain context of the sync module.
  * @param x - Reference x.
@@ -202,22 +237,21 @@ export function hitTest(
   y: number,
   accept: (entity: Entity) => boolean
 ): Entity | undefined {
-  const state = sctx.ctx.state.sync;
-  const root = state.root;
-  const list = state.layerList;
-
-  if (root === undefined || list === undefined) return undefined;
-
-  for (let index = list.length - 1; index >= 0; index -= 1) {
-    const name = list[index]?.name;
-    const container = name === undefined ? undefined : state.layers.get(name)?.container;
-
-    if (container === undefined) continue;
-
-    const found = pickIn(sctx, container, root, { x, y }, accept);
-
-    if (found !== undefined) return found;
+  for (const entity of hitsAt(sctx, { x, y })) {
+    if (accept(entity)) return entity;
   }
 
   return undefined;
+}
+
+/**
+ * Every entity under a reference point, topmost first.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param x - Reference x.
+ * @param y - Reference y.
+ * @returns The entities, a fresh array; empty when nothing is there.
+ */
+export function hitAll(sctx: SyncCtx, x: number, y: number): Entity[] {
+  return [...hitsAt(sctx, { x, y })];
 }

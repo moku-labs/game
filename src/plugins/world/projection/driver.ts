@@ -4,7 +4,14 @@
  * once, so a composition without `anim` plays every motion instantly.
  */
 import type { AnyComponent, Entity } from "../ecs/types";
-import type { MotionHandle, ProjectionCtx, TrackOptions, TrackSegment, TweenDriver } from "./types";
+import type {
+  MotionHandle,
+  ProjectionCtx,
+  Track,
+  TrackOptions,
+  TrackSegment,
+  TweenDriver
+} from "./types";
 
 /**
  * The empty field set of an unmuted component. It lives in its own non-exported function because
@@ -230,4 +237,23 @@ export function drivenComponents(pctx: ProjectionCtx, entity: Entity): Set<strin
   }
 
   return driven;
+}
+
+/**
+ * The components a running track drives on one entity, in start order, each name once. It only
+ * reads: an ended track is skipped, not forgotten.
+ *
+ * @param tracks - The tracks the projection started.
+ * @param entity - The entity to ask about.
+ * @returns A new array of component names.
+ */
+export function runningComponents(tracks: readonly Track[], entity: Entity): string[] {
+  const names: string[] = [];
+
+  for (const track of tracks) {
+    if (track.entity !== entity || names.includes(track.component)) continue;
+    if (track.handle.active()) names.push(track.component);
+  }
+
+  return names;
 }

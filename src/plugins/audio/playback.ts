@@ -1,11 +1,20 @@
 /**
  * @file audio plugin — the two effect handlers and the decode cache. A sound is a new source
- * every time; music is one looping source on its own gain, which is what cross-fades.
+ * every time; music is one looping track on its own gain, which is what cross-fades. At
+ * `music: "decode"` the track is a buffer source, at `music: "stream"` a media element.
  */
 import type { Descriptor, Hint } from "../flow/types";
 import type { Json } from "../model/types";
 import { isBus, ramp } from "./graph";
 import { recordSound } from "./journal";
+import {
+  canStream,
+  disposeStream,
+  pauseStream,
+  resumeStream,
+  retireStream,
+  startStream
+} from "./stream";
 import type {
   AudioContextLike,
   AudioCtx,
@@ -14,6 +23,9 @@ import type {
   SfxRequest,
   State
 } from "./types";
+
+/** One music switch on its way: the key, the length of the cross-fade in seconds, and its token. */
+type TrackStart = { key: string; seconds: number; pending: MusicSwitch };
 
 /** The bus a sound goes to when the descriptor names none. */
 const DEFAULT_BUS = "sfx";
@@ -89,7 +101,7 @@ function warnOnce(ctx: AudioCtx, key: string, event: string): void {
  * same sound in one frame decode a single time.
  *
  * @param ctx - Domain context of the plugin.
- * @param key - Asset key of an `.mp3`.
+ * @param key - Asset key of an audio file, `.mp3` or `.m4a`.
  * @returns The pending buffer, or `undefined` when the bundle carries no such file.
  */
 export function decode(ctx: AudioCtx, key: string): Promise<AudioBuffer> | undefined {
@@ -102,16 +114,16 @@ export function decode(ctx: AudioCtx, key: string): Promise<AudioBuffer> | undef
 
   if (context === undefined) return undefined;
 
-  const bytes = ctx.deps.assets.audio(key);
+  const asset = ctx.deps.assets.audio(key);
 
-  if (bytes === undefined) {
+  if (asset === undefined) {
     warnOnce(ctx, key, "audio: no audio for key");
 
     return undefined;
   }
 
   // eslint-disable-next-line unicorn/prefer-spread -- an ArrayBuffer copy: decodeAudioData detaches what it gets.
-  const pending = context.decodeAudioData(bytes.slice(0));
+  const pending = context.decodeAudioData(asset.bytes.slice(0));
 
   state.decoded.set(key, pending);
 
@@ -122,7 +134,7 @@ export function decode(ctx: AudioCtx, key: string): Promise<AudioBuffer> | undef
  * Awaits the decoded buffer of one key. A file that does not decode warns once and plays nothing.
  *
  * @param ctx - Domain context of the plugin.
- * @param key - Asset key of an `.mp3`.
+ * @param key - Asset key of an audio file, `.mp3` or `.m4a`.
  * @returns The buffer, or `undefined` when there is nothing to play.
  */
 async function bufferOf(ctx: AudioCtx, key: string): Promise<AudioBuffer | undefined> {
@@ -199,7 +211,8 @@ export async function playRequest(ctx: AudioCtx, request: SfxRequest): Promise<v
 }
 
 /**
- * Fades the track that is playing out and stops its source at the end of the fade.
+ * Fades the track that is playing out. A decoded source stops at the end of the fade on the
+ * context clock; a streamed track retires and its element is freed when the fade ends.
  *
  * @param state - The plugin state.
  * @param seconds - Length of the fade, in seconds of the context clock.
@@ -213,17 +226,29 @@ function fadeOut(state: State, seconds: number): void {
   if (current.gain !== undefined) ramp(current.gain, 0, seconds, context.currentTime);
 
   current.source?.stop(context.currentTime + seconds);
+
+  if (current.stream !== undefined) retireStream(state, current.stream, seconds * 1000);
 }
 
 /**
- * Tells whether a key is the track that really plays, not one only remembered for the unlock.
+ * Tells whether a track really plays, not one only remembered for the unlock.
+ *
+ * @param state - The plugin state.
+ * @returns True when a decoded source or a streamed element is running.
+ */
+export function isMusicPlaying(state: State): boolean {
+  return state.music?.source !== undefined || state.music?.stream !== undefined;
+}
+
+/**
+ * Tells whether a key is the track that really plays.
  *
  * @param state - The plugin state.
  * @param key - The asset key a switch asks for.
- * @returns True when a source of that key is running.
+ * @returns True when a track of that key is running.
  */
 function isPlaying(state: State, key: string): boolean {
-  return state.music?.key === key && state.music.source !== undefined;
+  return state.music?.key === key && isMusicPlaying(state);
 }
 
 /**
@@ -259,17 +284,117 @@ function startTrack(
   ramp(gain, 1, track.seconds, context.currentTime);
   source.start();
 
-  state.music = { key: track.key, source, gain };
+  state.music = { key: track.key, gain, source, stream: undefined };
   recordSound(ctx, { key: track.key, bus: "music", kind: "music" });
+}
+
+/**
+ * Plays a key by the decode path: waits for its buffer, then cross-fades to a new looping source.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param context - The running audio context.
+ * @param start - The key, the length of the fade and the token of this switch.
+ */
+async function playDecoded(
+  ctx: AudioCtx,
+  context: AudioContextLike,
+  start: TrackStart
+): Promise<void> {
+  const state = ctx.state;
+  const buffer = await bufferOf(ctx, start.key);
+
+  // A later request replaced this switch: it neither starts nor fades anything.
+  if (state.musicPending !== start.pending) return;
+
+  state.musicPending = undefined;
+
+  // A key without a file changes nothing: the track that plays keeps playing.
+  if (buffer === undefined) return;
+
+  startTrack(ctx, context, { key: start.key, buffer, seconds: start.seconds });
+}
+
+/**
+ * Plays a key through a media element. The fades start when `play()` fulfilled, not at the
+ * request: the element makes sound only from then on, and a refused play leaves the old track
+ * untouched. A refused play warns once per key and remembers the key when no track plays, so the
+ * next switch to it, or the next unlock, tries again.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param context - The running audio context.
+ * @param start - The key, the length of the fade and the token of this switch.
+ */
+async function playStreamed(
+  ctx: AudioCtx,
+  context: AudioContextLike,
+  start: TrackStart
+): Promise<void> {
+  const state = ctx.state;
+  const bus = state.buses.music.gain;
+  const asset = ctx.deps.assets.audio(start.key);
+
+  if (asset === undefined) {
+    warnOnce(ctx, start.key, "audio: no audio for key");
+
+    return;
+  }
+
+  if (bus === undefined) return;
+
+  const stream = startStream(context, bus, asset);
+
+  state.musicPending = start.pending;
+
+  const played = await resumeStream(stream);
+
+  // A later request replaced this switch: its element is freed and nothing fades.
+  if (state.musicPending !== start.pending) {
+    disposeStream(state, stream);
+
+    return;
+  }
+
+  state.musicPending = undefined;
+
+  if (!played) {
+    disposeStream(state, stream);
+    refused(ctx, start.key);
+
+    return;
+  }
+
+  fadeOut(state, start.seconds);
+  ramp(stream.gain, 1, start.seconds, context.currentTime);
+  state.music = { key: start.key, gain: stream.gain, source: undefined, stream };
+
+  // A push that came while play() was on its way found no track to pause: pause it now.
+  if (state.paused) pauseStream(stream);
+
+  recordSound(ctx, { key: start.key, bus: "music", kind: "music" });
+}
+
+/**
+ * Handles a music element that refused to play: one warning per key, and the key is remembered
+ * when nothing else plays. A track that plays keeps playing and stays the one `stop` frees.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param key - The key whose element refused.
+ */
+function refused(ctx: AudioCtx, key: string): void {
+  warnOnce(ctx, key, "audio: the music element did not play");
+
+  if (isMusicPlaying(ctx.state)) return;
+
+  ctx.state.music = { key, gain: undefined, source: undefined, stream: undefined };
 }
 
 /**
  * Switches the music: the handler of the kind `"music"` and what `scenes:changed` calls. The same
  * key does nothing, a new key cross-fades, `null` fades out. While the context is locked the key
- * is only remembered; the first touch starts it. A key that is still decoding counts as the same
- * key, and every other request replaces it: the replaced switch starts nothing when its buffer
- * arrives, so one tap that unlocks the context and enters a scene with the same track starts it
- * once.
+ * is only remembered; the first touch starts it. A key that is still on its way counts as the
+ * same key, and every other request replaces it: the replaced switch starts nothing when its
+ * buffer or its element is ready, so one tap that unlocks the context and enters a scene with the
+ * same track starts it once. `config.music` picks the decode or the stream path.
  *
  * @param ctx - Domain context of the plugin.
  * @param request - The key to play and the length of the cross-fade.
@@ -295,36 +420,70 @@ export async function playMusic(ctx: AudioCtx, request: MusicRequest): Promise<v
   const context = state.context;
 
   if (context === undefined || !state.unlocked) {
-    state.music = { key, source: undefined, gain: undefined };
+    state.music = { key, gain: undefined, source: undefined, stream: undefined };
 
     return;
   }
 
-  const pending: MusicSwitch = { key };
+  const start: TrackStart = { key, seconds, pending: { key } };
 
-  state.musicPending = pending;
+  if (ctx.config.music === "stream") {
+    if (canStream()) {
+      await playStreamed(ctx, context, start);
 
-  const buffer = await bufferOf(ctx, key);
+      return;
+    }
 
-  // A later request replaced this switch: it neither starts nor fades anything.
-  if (state.musicPending !== pending) return;
+    warnOnce(ctx, key, "audio: no media element, music decodes");
+  }
 
-  state.musicPending = undefined;
-
-  // A key without a file changes nothing: the track that plays keeps playing.
-  if (buffer === undefined) return;
-
-  startTrack(ctx, context, { key, buffer, seconds });
+  state.musicPending = start.pending;
+  await playDecoded(ctx, context, start);
 }
 
 /**
- * Stops the music at once and forgets the track and the switch still decoding. `onStop` runs it: a
- * teardown has no time for a fade, and the context is closed right after.
+ * Pauses the streamed track that plays. A lifecycle push runs it once every bus is at zero;
+ * retiring tracks are left to their timers, and a decoded track needs nothing but the gains.
+ *
+ * @param state - The plugin state.
+ */
+export function pauseMusic(state: State): void {
+  const stream = state.music?.stream;
+
+  if (stream !== undefined) pauseStream(stream);
+}
+
+/**
+ * Plays the streamed track again when the pause ends. A refused `play()` warns once per key and
+ * the track stays as it is: the next switch replaces it.
+ *
+ * @param ctx - Domain context of the plugin.
+ */
+export function resumeMusic(ctx: AudioCtx): void {
+  const music = ctx.state.music;
+  const stream = music?.stream;
+
+  if (music === undefined || stream === undefined) return;
+
+  resumeStream(stream).then(played => {
+    if (!played) warnOnce(ctx, music.key, "audio: the music element did not play");
+  });
+}
+
+/**
+ * Stops the music at once and forgets the track and the switch still on its way. `onStop` runs
+ * it: a teardown has no time for a fade, and the context is closed right after. A streamed track
+ * is freed here, while its nodes can still disconnect.
  *
  * @param state - The plugin state.
  */
 export function stopMusic(state: State): void {
-  state.music?.source?.stop();
+  const music = state.music;
+
+  music?.source?.stop();
+
+  if (music?.stream !== undefined) disposeStream(state, music.stream);
+
   state.music = undefined;
   state.musicPending = undefined;
 }

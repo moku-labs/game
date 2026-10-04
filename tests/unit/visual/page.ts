@@ -211,7 +211,11 @@ export async function startPageGame(options: PageGameOptions = {}) {
     renderer: {
       ...app.renderer,
       host: { ...app.renderer.host, kind: () => options.kind ?? "webgpu" },
-      capture: () => Promise.resolve(options.screen === undefined ? pngOf(2, 2) : options.screen())
+      capture: () => {
+        const png = options.screen === undefined ? pngOf(2, 2) : options.screen();
+
+        return Promise.resolve(png === undefined ? undefined : { png });
+      }
     }
   };
 

@@ -3,7 +3,8 @@
  */
 import type { HostApi, HostInternal } from "../host/types";
 import type { SyncApi, SyncInternal } from "../sync/types";
-import type { PixiModule } from "../types";
+import type { PixiModule, RendererCtx } from "../types";
+import type { ViewportApi, ViewportInternal } from "../viewport/types";
 
 /**
  * The counters of the renderer, for a stats panel or a frame-budget check. Plain numbers, so the
@@ -67,7 +68,7 @@ export type CountingClasses = {
 
 /**
  * monitor module state: the open measuring window, the last closed one, and the captures that
- * wait for a frame.
+ * wait for a drawn frame.
  */
 export type MonitorState = {
   /** Clock time at the start of the frame being drawn; `undefined` between frames. */
@@ -86,8 +87,8 @@ export type MonitorState = {
   fps: number;
   /** Mean frame work of the last closed window, in milliseconds. */
   frameMs: number;
-  /** Callers of `capture()` waiting for the next drawn frame. */
-  captures: Array<(url: string | undefined) => void>;
+  /** Captures waiting for a drawn frame, served in `end()`. */
+  captures: PictureRequest[];
   /** The draws the dev counter saw; stays at 0 in a production build. */
   draws: DrawCounter;
 };
@@ -126,17 +127,43 @@ export type MonitorApi = {
    * picture shows the state the game just reached; at once while the clock is paused, since no
    * frame comes then. Dev builds only: `__MOKU_GAME_DEV__` must be `true`.
    *
-   * @returns A `data:image/png;base64,…` URL. `undefined` in a production build, while inert, lost
-   *   or unsupported, and when Pixi could not read the frame (logged with `ctx.log.error`).
+   * The options draw on the picture after the extract, on an `OffscreenCanvas`; the game never
+   * shows any of it. `layers` hides the other layer containers for the extract alone. `legend`
+   * numbers every keyed view the player can see with a badge at the top-left corner of its rect,
+   * sorted by `rect.y` then `rect.x`, and lists them. `sheet` takes `frames` pictures `everyMs` of
+   * game time apart (while the clock is paused, by one `time.step(everyMs)` each) and lays them out
+   * in `ceil(sqrt(frames))` columns. `against` answers the pixel diff: red where a channel differs
+   * by more than 24, the current picture faded to grey elsewhere. `legend` combines with `against`;
+   * `sheet` combines with `layers` only.
+   *
+   * @param options - What to draw on the picture; a plain picture when left out.
+   * @returns `{ png }`, with `legend` when asked for. `undefined` in a production build, while
+   *   inert, lost or unsupported, and when Pixi could not read the frame (logged with
+   *   `ctx.log.error`).
+   * @throws {Error} When a layer is not in the scene or the list is empty, when a sheet is out of
+   *   2 to 12 frames every 1 to 5000 ms or comes with `legend` or `against`, when there is no
+   *   `OffscreenCanvas` for an option, when the two pictures of `against` differ in size, and when
+   *   game time stood still for 600 drawn frames of a sheet.
    * @example
    * ```ts
    * // The editor's capture button, on the dev page that set globalThis.__MOKU_GAME_DEV__ = true.
-   * const url = await app.renderer.capture(); // "data:image/png;base64,iVBORw0KGgo…"
+   * await app.renderer.capture(); // { png: "data:image/png;base64,iVBORw0KGgo…" }
    * // The same call in a production build.
    * await app.renderer.capture(); // undefined
    * ```
+   * @example
+   * ```ts
+   * // An agent finds the claim button of the HUD on a 1080 x 1920 canvas drawn at resolution 2.
+   * await app.renderer.capture({ legend: true });
+   * // { png: "data:image/png;base64,…", legend: [{ n: 1, projection: "hud", key: "claim", rect: { x: 1140, y: 2310, w: 567, h: 164 } }] }
+   * ```
+   * @example
+   * ```ts
+   * // The coin flight of a merge, six frames 100 ms apart: 3 columns and 2 rows on one picture.
+   * await app.renderer.capture({ sheet: { frames: 6, everyMs: 100 } }); // { png: "data:image/png;base64,…" }
+   * ```
    */
-  capture(): Promise<string | undefined>;
+  capture(options?: CaptureOptions): Promise<Captured | undefined>;
 };
 
 /**
@@ -157,6 +184,120 @@ export type MonitorInternal = {
 };
 
 /**
- * What `monitor` gets injected: the modules it reads its counters from.
+ * What `monitor` gets injected: the modules it reads its counters from and places a legend with.
  */
-export type MonitorDeps = { host: HostApi & HostInternal; sync: SyncApi & SyncInternal };
+export type MonitorDeps = {
+  host: HostApi & HostInternal;
+  viewport: ViewportApi & ViewportInternal;
+  sync: SyncApi & SyncInternal;
+};
+
+/**
+ * Domain context of the capture: the plugin context and the injected modules.
+ */
+export type MonitorCtx = { ctx: RendererCtx; deps: MonitorDeps };
+
+/**
+ * A rectangle in picture pixels, from the top-left corner of the PNG: CSS pixels of the canvas
+ * times the resolution, so an agent draws on the picture with it.
+ *
+ * @example
+ * ```ts
+ * // The claim button of the HUD on a 1080 x 1920 canvas drawn at resolution 2.
+ * const rect: PictureRect = { x: 1140, y: 2310, w: 567, h: 164 };
+ * ```
+ */
+export type PictureRect = { x: number; y: number; w: number; h: number };
+
+/**
+ * One numbered view of a legend: the number on its badge, the projection and key that address
+ * it, and its rect on the picture.
+ *
+ * @example
+ * ```ts
+ * const entry: LegendEntry = {
+ *   n: 1, projection: "hud", key: "claim", rect: { x: 1140, y: 2310, w: 567, h: 164 }
+ * };
+ * ```
+ */
+export type LegendEntry = { n: number; projection: string; key: string; rect: PictureRect };
+
+/**
+ * What `capture()` draws on the picture. Every field is optional; none gives a plain picture.
+ *
+ * @example
+ * ```ts
+ * // The numbered board without the HUD over it.
+ * const options: CaptureOptions = { legend: true, layers: ["board", "items"] };
+ * // Six frames of a motion, 100 ms of game time apart.
+ * const sheet: CaptureOptions = { sheet: { frames: 6, everyMs: 100 } };
+ * ```
+ */
+export type CaptureOptions = {
+  /** Number every keyed view on the picture and list them in `legend` of the answer. */
+  legend?: boolean;
+  /** Draw only these layers of the scene; a `Parent` child follows its parent's layer. */
+  layers?: readonly string[];
+  /** A contact sheet: 2 to 12 frames, every 1 to 5000 ms of game time. */
+  sheet?: { frames: number; everyMs: number };
+  /** A PNG data URL of an earlier capture: the answer is the pixel diff against it. */
+  against?: string;
+};
+
+/**
+ * What `capture()` answers: the picture, and the legend when it was asked for.
+ *
+ * @example
+ * ```ts
+ * const plain: Captured = { png: "data:image/png;base64,iVBORw0KGgo=" };
+ * const numbered: Captured = {
+ *   png: "data:image/png;base64,iVBORw0KGgo=",
+ *   legend: [{ n: 1, projection: "hud", key: "claim", rect: { x: 1140, y: 2310, w: 567, h: 164 } }]
+ * };
+ * ```
+ */
+export type Captured = { png: string; legend?: readonly LegendEntry[] };
+
+/**
+ * A picture as RGBA bytes, the way `ImageData` holds it. Not public.
+ */
+export type Pixels = { width: number; height: number; data: Uint8ClampedArray };
+
+/**
+ * Where the cells of a contact sheet go: the grid, the scale of a cell, the size of the sheet and
+ * the rect of every cell, in sheet pixels. Not public.
+ */
+export type SheetLayout = {
+  columns: number;
+  rows: number;
+  scale: number;
+  width: number;
+  height: number;
+  cells: PictureRect[];
+};
+
+/**
+ * The picture of one drawn frame, the legend measured on that same frame when it was asked for,
+ * and the game time of the frame. Not public.
+ */
+export type Shot = { png: string; legend: LegendEntry[] | undefined; elapsed: number };
+
+/**
+ * A capture waiting for a drawn frame. Not public.
+ */
+export type PictureRequest = {
+  /** The layers to draw; every layer when `undefined`. */
+  layers: readonly string[] | undefined;
+  /** True to measure the legend on the frame of the picture. */
+  legend: boolean;
+  /** True when the frame just drawn is the one to take. A plain capture takes the next one. */
+  due: () => boolean;
+  /** Takes the shot instead when the game pauses before that frame came: at once, or stepped. */
+  whilePaused: () => Promise<Shot | undefined>;
+  /** Drawn frames that went by while `due` said no. */
+  waited: number;
+  /** Hands the shot over; nothing when the renderer stopped first. */
+  resolve: (shot?: Shot) => void;
+  /** Hands over why the shot cannot come. */
+  reject: (error: Error) => void;
+};

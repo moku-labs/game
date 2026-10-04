@@ -15,6 +15,7 @@ import { createModules as createWorldModules } from "../../world/api";
 import { createWorldState } from "../../world/state";
 import type { Api as WorldApi, KernelSlice as WorldKernelSlice } from "../../world/types";
 import { createModules, createRendererApi } from "../api";
+import { createHandlers } from "../handlers";
 import { startRenderer, stopRenderer, withDeps } from "../lifecycle";
 import { createRendererState } from "../state";
 import type { Api, Config, KernelSlice, Modules } from "../types";
@@ -28,6 +29,8 @@ export type FrameRegistration = { phase: Phase; callback: FrameCallback };
 export type MockRenderer = {
   ctx: KernelSlice;
   api: Api;
+  /** The hooks of the plugin, called by hand: the mock has no kernel to emit. */
+  hooks: ReturnType<typeof createHandlers>;
   modules: Modules;
   world: WorldApi & { clearChanges(): void };
   log: Log.LogApi;
@@ -37,8 +40,12 @@ export type MockRenderer = {
   frames: FrameRegistration[];
   /** Every `lifecycle.push` and `lifecycle.pop`, in call order. */
   pauses: Array<{ action: "push" | "pop"; reason: PauseReason }>;
+  /** The fake `time` the renderer reads: `step` is a spy that runs no frame. */
+  time: TimeApi;
   /** Sets what the fake `clock.now()` answers, in milliseconds. */
   setNow(ms: number): void;
+  /** Sets the game time `time.snapshot().elapsed` answers, in milliseconds. */
+  setElapsed(ms: number): void;
   /** Sets what the fake `time.isPaused()` answers. */
   setPaused(paused: boolean): void;
   /** Runs `onStart`. */
@@ -145,6 +152,7 @@ function createWorld(timeApi: TimeApi, log: Log.LogApi): WorldApi & { clearChang
  * @param options.failInit - True to make the fake `Application.init` reject.
  * @param options.width - CSS width of the fake mount.
  * @param options.height - CSS height of the fake mount.
+ * @param options.dpr - What `devicePixelRatio` answers; 1 when left out.
  * @param options.mountElement - True to pass the element itself instead of a selector.
  * @param options.orientation - The orientation the game is designed for.
  * @param options.referenceLong - The long side the layout needs inside the safe area.
@@ -159,6 +167,7 @@ export function createMockRenderer(
     failInit?: boolean;
     width?: number;
     height?: number;
+    dpr?: number;
     mountElement?: boolean;
     orientation?: "portrait" | "landscape";
     referenceLong?: number;
@@ -173,7 +182,11 @@ export function createMockRenderer(
   const dom =
     options.dom === false
       ? undefined
-      : installFakeDom({ width: options.width ?? 1080, height: options.height ?? 1920 });
+      : installFakeDom({
+          width: options.width ?? 1080,
+          height: options.height ?? 1920,
+          dpr: options.dpr ?? 1
+        });
   const selector = options.mountElement === true ? undefined : "#game";
   const config: Config = {
     mount: dom === undefined ? undefined : (selector ?? (dom.mount as unknown as HTMLElement)),
@@ -254,6 +267,7 @@ export function createMockRenderer(
   return {
     ctx,
     api: createRendererApi(ctx),
+    hooks: createHandlers(ctx),
     modules,
     world,
     log,
@@ -262,8 +276,12 @@ export function createMockRenderer(
     dom,
     frames,
     pauses,
+    time: timeApi,
     setNow: (ms: number): void => {
       clock.now = ms;
+    },
+    setElapsed: (ms: number): void => {
+      time.elapsed = ms;
     },
     setPaused: (paused: boolean): void => {
       clock.paused = paused;

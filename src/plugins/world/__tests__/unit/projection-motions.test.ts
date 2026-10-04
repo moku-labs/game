@@ -363,3 +363,112 @@ describe("projection motions — the spike cases", () => {
     );
   });
 });
+
+describe("projection.motionsOf", () => {
+  it("names a component two tracks drive once, in start order", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Level: view => view.toRest(Level, { ms: 200, ease: "linear" }),
+        Transform: view =>
+          view.all([
+            view.tween(Transform, { x: 50 }, { ms: 100, ease: "linear" }),
+            view.tween(Transform, { scale: 2 }, { ms: 300, ease: "linear" })
+          ])
+      }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 2, x: 50, y: 0 }]);
+    world.frame(16);
+
+    const transforms = world.ctx.state.projection.tracks.filter(
+      track => track.entity === entity && track.component === "Transform"
+    );
+
+    expect(transforms).toHaveLength(2);
+    expect(world.api.projection.motionsOf(entity)).toEqual(["Level", "Transform"]);
+  });
+
+  it("answers [] once the motion is finished", () => {
+    const world = createMockWorld();
+    const handles: MotionHandle[] = [];
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: {
+        Transform: view => {
+          const handle = view.toRest(Transform, { ms: 300, ease: "linear" });
+
+          handles.push(handle);
+
+          return handle;
+        }
+      }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 1, x: 80, y: 0 }]);
+    world.frame(16);
+
+    expect(world.api.projection.motionsOf(entity)).toEqual(["Transform"]);
+
+    handles[0]?.finish();
+
+    expect(world.api.projection.motionsOf(entity)).toEqual([]);
+  });
+
+  it("answers the scenario of its JSDoc: a 400 ms flight ends with one 400 ms frame", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "coin", level: 1, x: 0, y: 0 }], {
+      change: { Transform: view => view.toRest(Transform, { ms: 400, ease: "linear" }) }
+    });
+
+    const coin = world.api.projection.entityOf(BOARD, "coin") ?? 0;
+
+    commitItems(world, [{ id: "coin", level: 1, x: 40, y: 300 }]);
+    world.frame(0);
+
+    expect(world.api.projection.motionsOf(coin)).toEqual(["Transform"]);
+
+    world.frame(400);
+
+    expect(world.api.projection.motionsOf(coin)).toEqual([]);
+  });
+
+  it("answers [] for a resting view, an entity that is not a view and a stale id", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+
+    const view = world.api.projection.entityOf(BOARD, "a") ?? 0;
+    const plain = world.api.ecs.spawn({ kind: "plugin", name: "test" }, [Level()]);
+
+    world.api.ecs.despawn(plain);
+
+    expect(world.api.projection.motionsOf(view)).toEqual([]);
+    expect(world.api.projection.motionsOf(plain)).toEqual([]);
+    expect(world.api.projection.motionsOf(424_242)).toEqual([]);
+  });
+
+  it("hands out a new array on every call and forgets no track", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      change: { Transform: view => view.toRest(Transform, { ms: 300, ease: "linear" }) }
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, [{ id: "a", level: 1, x: 80, y: 0 }]);
+    world.frame(16);
+
+    const tracks = world.ctx.state.projection.tracks;
+
+    expect(world.api.projection.motionsOf(entity)).not.toBe(world.api.projection.motionsOf(entity));
+    expect(world.ctx.state.projection.tracks).toBe(tracks);
+  });
+});

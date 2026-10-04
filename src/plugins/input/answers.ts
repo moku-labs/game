@@ -1,5 +1,5 @@
 /**
- * @file input plugin — the Answer of a gesture. The three builders are pure, so the finger and
+ * @file input plugin — the Answer of a gesture. The four builders are pure, so the finger and
  * `app.input.*` produce the very same answer; `submit` is the one door to `flow.gate`.
  */
 import type { Answer } from "../flow/types";
@@ -54,7 +54,7 @@ export function tapAnswer(gesture: IntentValue): Answer {
  * // { intent: "merge", payload: { from: "c2", to: "c3" } }
  * ```
  */
-export function dropAnswer(draggable: CarryValue, target: IntentValue): Answer {
+export function dropAnswer(draggable: Pick<CarryValue, "payload">, target: IntentValue): Answer {
   return {
     intent: target.intent,
     payload: { ...asRecord(draggable.payload), ...asRecord(target.payload) }
@@ -75,6 +75,22 @@ export function dropAnswer(draggable: CarryValue, target: IntentValue): Answer {
  */
 export function swipeAnswer(gesture: IntentValue, direction: Direction): Answer {
   return { intent: gesture.intent, payload: { ...asRecord(gesture.payload), direction } };
+}
+
+/**
+ * Builds the answer of a trace: the intent of the first cell, and the payloads of every cell in
+ * path order under `path`. The finger and `app.input.trace` both build it here.
+ *
+ * @param cells - The `Traceable` value of every cell of the path, in path order.
+ * @returns The answer to hand to the gate.
+ * @example
+ * ```ts
+ * traceAnswer([{ intent: "word", payload: { cell: "b3" } }, { intent: "word", payload: { cell: "c3" } }]);
+ * // { intent: "word", payload: { path: [{ cell: "b3" }, { cell: "c3" }] } }
+ * ```
+ */
+export function traceAnswer(cells: readonly IntentValue[]): Answer {
+  return { intent: cells[0]?.intent ?? "", payload: { path: cells.map(cell => cell.payload) } };
 }
 
 /**

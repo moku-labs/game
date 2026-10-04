@@ -151,6 +151,19 @@ describe("i18n plugin integration — a live locale change", () => {
     await app.stop();
   });
 
+  it("formats a duration in the current locale, before and after a switch", async () => {
+    const app = await startApp();
+
+    expect(app.i18n.duration(95_000)).toBe("1 мин 35 с");
+
+    await app.i18n.setLocale("en");
+
+    expect(app.i18n.duration(95_000)).toBe("1 min, 35 sec");
+    expect(app.i18n.duration(95_000, "digital")).toBe("0:01:35");
+
+    await app.stop();
+  });
+
   it("refuses a locale no feature brought", async () => {
     const app = await startApp();
 

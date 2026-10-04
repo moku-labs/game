@@ -115,17 +115,19 @@ export function fontPageName(
 }
 
 /**
- * Names the file of a sound.
+ * Names the file of a sound. The sound keeps its format, and so its extension: the loader reads
+ * the MIME type of a sound from it.
  *
  * @param bundle - Name of the bundle.
  * @param key - Asset key of the sound.
  * @param hash - The content hash of the bytes.
+ * @param extension - The extension of the source, without the dot: `mp3` or `m4a`.
  * @returns The path inside the pack folder.
  * @example
  * ```ts
- * audioName("ui", "ui.click", "9c4e2b7a10"); // "ui/ui.click-9c4e2b7a10.mp3"
+ * audioName("ui", "ui.theme", "9c4e2b7a10", "m4a"); // "ui/ui.theme-9c4e2b7a10.m4a"
  * ```
  */
-export function audioName(bundle: string, key: string, hash: string): string {
-  return `${bundle}/${key}-${hash}.mp3`;
+export function audioName(bundle: string, key: string, hash: string, extension: string): string {
+  return `${bundle}/${key}-${hash}.${extension}`;
 }

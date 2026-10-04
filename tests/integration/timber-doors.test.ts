@@ -145,7 +145,7 @@ describe("timber-doors — an e2e script on the dev build", () => {
 
     expect(read(app, sources.position)).toMatchObject({ flow: "board", node: "awaitIntent" });
 
-    const deliver = read(app, sources.rect, { key: "deliver0" });
+    const deliver = read(app, sources.locate, { key: "deliver0" });
 
     expect(deliver).toBeDefined();
     expect(deliver?.w).toBeGreaterThan(0);

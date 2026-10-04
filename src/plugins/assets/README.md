@@ -21,7 +21,7 @@ only uses the texture *type*.
 | `isLoaded(bundle): boolean` | `status === "loaded"`. Headless: `true` for every bundle of the manifest. |
 | `texture(key): Texture \| undefined` | The texture of a loaded key; touches the use counter of its bundle. A key of a bundle that is not loaded: `undefined`, one dev warning naming key and bundle, and a background `load` of that bundle. Headless: `undefined`. |
 | `font(key): { fnt, texture } \| undefined` | The `.fnt` file as text and the texture of its first page; touches the use counter. `text` installs it with `renderer.sync.fonts.install`. A bundle that is not loaded, another kind and headless: `undefined`, silently — no warning and no background load. |
-| `audio(key): ArrayBuffer \| undefined` | The bytes of a loaded `.mp3`, undecoded: `audio` decodes them once and drops them when `assets:bundle-unloaded` names the key. Same silent miss as `font`. |
+| `audio(key): { bytes, mime } \| undefined` | A loaded sound: its bytes, undecoded, and the MIME type of its container, `"audio/mpeg"` for an `.mp3` and `"audio/mp4"` for an `.m4a`. `audio` decodes the bytes once, or streams them from a `blob:` URL built with `mime`, and drops them when `assets:bundle-unloaded` names the key. Same silent miss as `font`. |
 | `usage(): { textureMb, budgetMb, bundles }` | Loaded bundles only, sorted by name. `lastUsed` is the use counter, never a clock. |
 
 ```ts
@@ -185,7 +185,8 @@ controller aborts the fetches and the record goes back to `idle`.
 
 A file is loaded by what the manifest says it is: a texture is fetched, decoded and uploaded; a
 font reads its `.fnt` as text and uploads every page it lists; an audio file is kept as the raw
-`ArrayBuffer` and is never decoded here.
+`ArrayBuffer` with the MIME type its extension names (`.m4a` is `"audio/mp4"`, anything else
+`"audio/mpeg"`) and is never decoded here. A packed sound keeps its extension, so it keeps its type.
 
 A packed bundle starts one load per atlas page first (fetched and uploaded with no borders). A
 packed file waits for its page and becomes `io.sliceTexture(page, atlas, { nine })`: nothing is
@@ -292,8 +293,10 @@ work.
 |---|---|
 | `.png`, `.webp` | one texture per file |
 | `.fnt` with its `.png` pages | one font: the key is the `.fnt`'s, the pages are listed under it and are never keys of their own |
-| `.mp3` | one sound, sized by its bytes |
-| `.ogg`, `.wav`, `.ttf`, anything else | left out with a note. One audio format decodes on every target WebView, and text is drawn from bitmap fonts |
+| `.mp3`, `.m4a` | one sound, sized by its bytes. `.m4a` is AAC in an MP4 container |
+| `.aac`, `.ogg`, `.opus`, `.wav`, `.flac`, `.ttf`, anything else | left out with a note. Only MP3 and AAC in MP4 decode on every target WebView (a raw ADTS `.aac` has no container), and text is drawn from bitmap fonts |
+
+`click.mp3` next to `click.m4a` is one key from two files: the scan fails and names both.
 
 A nine-slice texture carries its borders in the file name. The key drops the tag.
 
@@ -310,7 +313,7 @@ A malformed tag (`{nine=4,5,6}`, `{nine}`) is not a problem: the key keeps the w
 key, so the scan fails with a message that names the malformed tag.
 
 `generated/assets.ts` carries `AssetKey` over every kind, plus the narrower `FontKey` and
-`AudioKey` next to it, so a text style takes only a font and a sound only an MP3.
+`AudioKey` next to it, so a text style takes only a font and a sound only an MP3 or an M4A.
 
 ## Production packing
 
@@ -347,7 +350,7 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 | Pages | WebP, `quality: 80, alphaQuality: 80`, composed from the sources decoded to RGBA. |
 | Loose textures | A `.webp` source is copied byte for byte; a `.png` source is encoded to WebP q80. |
 | Fonts | The pages are copied byte for byte and stay PNG (MSDF needs lossless); the `.fnt` is rewritten to name the hashed pages, then hashed. |
-| Audio | Copied byte for byte. |
+| Audio | Copied byte for byte, with the extension of its source. |
 | Hash | The first 10 hex characters of the SHA-256 of the written bytes, in every file name. |
 | Prune | After writing, every file under `<dir>` the manifest does not reference, except `manifest.json`, is deleted. |
 | Determinism | Inputs sorted by key, fixed packer options, `maxrects-packer` pinned: two runs on the same tree and the same `sharp` write the same bytes. |
@@ -367,7 +370,7 @@ dist/assets/
   ui/ui.bg-splash-5e0a71bd42.webp       # loose <bundle>/<key>-<hash>.webp
   ui/ui.font-body-7d2c90f1ab.fnt        # font <bundle>/<key>-<hash>.fnt
   ui/ui.font-body-0-c81f3e2d55.png      #   its pages <bundle>/<key>-<n>-<hash>.png
-  ui/ui.click-9c4e2b7a10.mp3            # audio <bundle>/<key>-<hash>.mp3
+  ui/ui.click-9c4e2b7a10.mp3            # audio <bundle>/<key>-<hash>.mp3, or .m4a for an .m4a
 ```
 
 The cache lives in `node_modules/.cache/moku-game-pack/` under the working directory: one entry
@@ -386,6 +389,34 @@ The command prints one line per bundle and a closing line through the branded co
 `packAssets({ root, manifest, out, manifestFile, cache })` is the same packer as a function on the
 door, for the editor and for tests: it takes the manifest of `scanAssets` and resolves
 `{ manifest, pages, loose, bytes, cacheHits }`.
+
+## Strings from the command line
+
+The same command runs the string tools of i18n. The shape of the string files and of the exchange
+files is in the i18n README, sections "Pseudo-locale" and "Export and import".
+
+```jsonc
+// game package.json
+"assets:keys": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts --pseudo",
+"assets:export": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --export translations",
+"assets:import": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --keys src/generated/assets.ts --import translations"
+```
+
+| Flag | Rule |
+|---|---|
+| `--pseudo` | Dev run and `--check` only. The compile writes `generated/strings.en-XA.ts` too, and `--check --pseudo` checks it. With `--pack`: `[game] assets: "--pseudo" is for a dev run; drop it from "--pack".` Exit 1. |
+| `--export <dir>` | Writes `<dir>/<locale>.json` for every locale, and nothing else: no asset scan, no generated module. `<dir>` is resolved against the working directory and created. One line per locale: `exported "<dir>/ru.json": 3 missing.` |
+| `--import <dir>` | Writes the translated texts of `<dir>/*.json` into the string files of the features, then compiles into the folder of `--keys` (`<root>/generated` by default). One line for the whole run: `imported "<dir>" (ru): 3 keys into 2 files.` A problem is one error, exit 1. |
+| `--source <locale>` | The locale translators read from, `"en"` by default. Only with `--export` or `--import`; elsewhere `[game] assets: "--source" goes with "--export" or "--import".` |
+
+`--export` and `--import` run alone. With each other, with `--check` or with `--pack` the run stops
+with `[game] assets: "--export" and "--import" run alone; drop the other flags.` `--pseudo` may join
+`--import` (the compile after the import writes `en-XA` too); with `--export` it gets the same
+refusal.
+
+`runCli(argv, { compile, exportStrings, importStrings })` takes the three tools as a parameter:
+i18n sits above assets, so the door `src/assets.ts` hands over `compileStrings`, `exportStrings`
+and `importStrings`, and `scan/cli.ts` imports nothing from `i18n/`.
 
 ## Doors
 

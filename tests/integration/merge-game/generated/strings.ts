@@ -9,7 +9,7 @@ export type Strings = {
   "board.level": { level: Argument };
   "board.sawmill": Record<string, never>;
   "energy.later": Record<string, never>;
-  "energy.refill": { time: Argument };
+  "energy.refill": { time: number };
   "energy.title": Record<string, never>;
   "energy.watch": Record<string, never>;
   "gift.claim": Record<string, never>;

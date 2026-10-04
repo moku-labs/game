@@ -268,8 +268,8 @@ describe("interface-merge — the order delivered through the HUD", () => {
     expect(resolvedOf(game, elementOf(game, "rewardCoins"))).toBe("+25");
 
     // The coins are still parked: the wallet is paid when the player takes the reward, so the
-    // counter — which is not a ui element but the projection the label binds to — stands still.
-    const counter = game.app.world.projection.entityOf("hud.coins", "coins") ?? 0;
+    // counter — the text of the coin pill, which carries `Counter` — stands still.
+    const counter = elementOf(game, "coinPillText");
 
     expect(resolvedOf(game, counter)).toBe("0");
     expect(game.app.model.store.snapshot().player).toMatchObject({

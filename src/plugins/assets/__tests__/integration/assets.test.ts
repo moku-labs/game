@@ -355,7 +355,10 @@ describe("assets plugin integration — with an io seam", () => {
 
     expect(loaded?.fnt).toBe(FNT);
     expect(io.created).toContain(loaded?.texture);
-    expect(app.assets.audio("board.click")).toBeInstanceOf(ArrayBuffer);
+    expect(app.assets.audio("board.click")).toEqual({
+      bytes: expect.any(ArrayBuffer),
+      mime: "audio/mpeg"
+    });
     // A page is part of its font: it is no texture key of its own.
     expect(app.assets.texture("board.body")).toBeUndefined();
 

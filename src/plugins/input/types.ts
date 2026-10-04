@@ -6,6 +6,7 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as FlowApi } from "../flow/types";
+import type { TransformValue } from "../renderer/components";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
 import type { AnyComponentType, Entity, Api as WorldApi } from "../world/types";
@@ -69,7 +70,7 @@ export type RawSample = {
  * const phase: GesturePhase = "dragging";
  * ```
  */
-export type GesturePhase = "idle" | "pressed" | "longPressed" | "dragging";
+export type GesturePhase = "idle" | "pressed" | "longPressed" | "dragging" | "tracing";
 
 /**
  * What `onTap` hands a listener: the view the finger let go on, inside the tap slop.
@@ -132,6 +133,9 @@ export type KeyListener = (key: KeyInput) => boolean | void;
  * createApp({ plugins: [...screen], pluginConfigs: { input: { heldScale: 1.08 } } });
  * // A game with its own cursors: the config merges shallowly, so both values are given.
  * createApp({ plugins: [...screen], pluginConfigs: { input: { cursor: { control: "grab", idle: "default" } } } });
+ * // A word grid with 40 px cells: the finger's path is hit-tested every 16 px, below the
+ * // shortest cell span, so a fast finger skips no letter.
+ * createApp({ plugins: [...screen], pluginConfigs: { input: { traceStepPx: 16 } } });
  * ```
  */
 export type Config = {
@@ -159,6 +163,29 @@ export type Config = {
    * `""` hands the cursor back to the page's own style.
    */
   cursor: { control: string; idle: string };
+  /**
+   * Reference px between two hit tests along the finger's path inside one frame of a trace. Keep
+   * it below the shortest cell span: a longer step jumps over a cell.
+   */
+  traceStepPx: number;
+  /**
+   * The hit circle of a trace cell: its radius is this times the short side of the cell's hit
+   * box, around the box centre. A diagonal then crosses no corner of a neighbour.
+   */
+  traceInset: number;
+};
+
+/**
+ * One view a drag carries on top of the held one: hung under the held view from the grab to the
+ * release.
+ */
+export type Carried = {
+  /** The carried view. */
+  entity: Entity;
+  /** The `Parent` it had at the grab, hung back under it on the release. */
+  parent: Entity | undefined;
+  /** The remover `world.projection.mute` returned for its root pose. */
+  unmute: () => void;
 };
 
 /**
@@ -188,8 +215,23 @@ export type State = {
   parent: Entity | undefined;
   /** The rest scale of the held view in root space: the base of `heldScale`, set back on drop. */
   restScale: number | undefined;
+  /**
+   * The root pose of the held view, written at the grab and at every move. A carried view is
+   * placed from it when the held view despawns before the release and takes its `Transform`.
+   */
+  heldPose: TransformValue | undefined;
   /** The remover `world.projection.mute` returned, while a drag runs. */
   unmute: (() => void) | undefined;
+  /** The views a drag carries on top of the held one, in `carry` order; empty outside a drag. */
+  carried: Carried[];
+  /** The cells of the trace in progress, in path order; empty outside a trace. */
+  path: Entity[];
+  /** The intent of the first cell of the trace; a cell of another intent closes the path. */
+  traceIntent: string | undefined;
+  /** True once a cell of another intent was crossed: the path neither grows nor pops. */
+  traceClosed: boolean;
+  /** Where the finger was at the last frame of the trace: the segment starts there. */
+  lastPoint: Point | undefined;
   canvas: HTMLCanvasElement | undefined;
   offFrame: (() => void) | undefined;
   detach: (() => void) | undefined;
@@ -280,6 +322,27 @@ export type InputApi = {
    * ```
    */
   swipe(target: Target, direction: Direction): boolean;
+
+  /**
+   * Reads the `Traceable` of every cell and answers one path, the way a finger drawn through the
+   * cells would: the intent of the cells and `{ path }`, the cell payloads in order. Every cell
+   * must name the same intent. An empty list, a cell with no `Traceable` and two intents warn and
+   * answer `false` without calling the gate. Nothing is tagged `Traced`.
+   *
+   * @param path - The cells in the order the finger goes through them.
+   * @returns What `flow.gate.answer` returned: true when the gate took the answer.
+   * @example
+   * ```ts
+   * // A word-game test spells a word without a finger.
+   * app.input.trace([
+   *   { projection: "board.cells", key: "b3" },
+   *   { projection: "board.cells", key: "c3" },
+   *   { projection: "board.cells", key: "d3" }
+   * ]);
+   * // true: answers { intent: "word", payload: { path: [{ cell: "b3" }, { cell: "c3" }, { cell: "d3" }] } }
+   * ```
+   */
+  trace(path: readonly Target[]): boolean;
 
   /**
    * Registers a listener called on every tap — a press and a release inside `tapSlopPx` — on the

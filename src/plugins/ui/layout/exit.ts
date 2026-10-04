@@ -11,7 +11,8 @@ import type { LayoutState } from "./types";
 
 /**
  * Starts the exit of one element: out of the Yoga tree at once, tagged `Exiting` so `input`
- * never hits it, then the hook plays over the siblings that already moved.
+ * never hits it, then the hook plays over the siblings that already moved. A `change` motion of
+ * an extra component that still runs, a counter's roll, is kept, so the sweep waits for it too.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state.
@@ -25,7 +26,7 @@ export function beginExit(ctx: UiCtx, state: LayoutState, element: Element): voi
   if (!element.live) return;
 
   ctx.deps.world.ecs.tag(element.entity, Exiting);
-  element.handles = [];
+  element.handles = [...element.extraHandles.values()].filter(handle => handle.active());
 
   const hook = element.motion?.exit;
 

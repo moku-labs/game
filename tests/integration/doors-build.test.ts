@@ -5,23 +5,27 @@ import { commands } from "../../src/plugins/flow/doors/commands";
 
 // ---------------------------------------------------------------------------
 // Integration: a production bundle of the doors carries none of the /control
-// command bodies (D1, D7), and an /inspect bundle no command at all
+// command bodies (D1, D7), an /inspect bundle no command at all, and a
+// production bundle of the engine no frame history recorder
 // ---------------------------------------------------------------------------
 
 /** Every dev branch of a command logs this marker, so a bundle that has it kept a body. */
 const marker = "moku:dev";
 
+/** The frame history logs this once when it starts, so a bundle that has it kept the recorder. */
+const historyMarker = "world:history-on";
+
 /**
- * Bundles one door the way a game does, minified, with the dev flag defined: from an entry
- * outside the package that re-exports the whole door. An entry inside the package would not do:
+ * Bundles one door, or the root of the engine, the way a game does, minified, with the dev flag
+ * defined: from an entry outside the package that re-exports the whole file. An entry inside the package would not do:
  * under `"sideEffects": false` Bun 1.3.14 drops the modules a re-export-only entry of the package
  * itself names. Vitest runs on Node, so the build runs in a Bun child process.
  *
- * @param door - The door file under `src/`.
+ * @param door - The door file under `src/`, or `index.ts` for the root.
  * @param dev - The value `__MOKU_GAME_DEV__` is defined as.
  * @returns The bundled code.
  */
-function bundle(door: "control.ts" | "inspect.ts", dev: "true" | "false"): string {
+function bundle(door: "control.ts" | "inspect.ts" | "index.ts", dev: "true" | "false"): string {
   const path = fileURLToPath(new URL(`../../src/${door}`, import.meta.url));
   const script = `
     const { mkdtempSync, rmSync } = await import("node:fs");
@@ -82,5 +86,18 @@ describe("the dev flag in a Bun build of src/inspect.ts", () => {
       expect(code).toContain("game.assets");
       for (const command of Object.values(commands)) expect(code).not.toContain(command.id);
     }
+  });
+});
+
+describe("the dev flag in a Bun build of src/index.ts", () => {
+  it("drops the frame history recorder when __MOKU_GAME_DEV__ is defined false", () => {
+    const code = bundle("index.ts", "false");
+
+    expect(code).toContain("Draggable");
+    expect(code).not.toContain(historyMarker);
+  });
+
+  it("keeps the frame history recorder when __MOKU_GAME_DEV__ is defined true", () => {
+    expect(bundle("index.ts", "true")).toContain(historyMarker);
   });
 });

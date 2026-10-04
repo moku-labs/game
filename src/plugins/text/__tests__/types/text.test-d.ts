@@ -1,11 +1,23 @@
 import { expectTypeOf } from "vitest";
+import { component } from "../../../world/ecs/define";
 import {
+  bind,
+  Countdown,
   label as looseLabel,
   defineTextStyles as looseStyles,
   Text,
   textFor
 } from "../../components";
-import type { Config, Size, TextStyles, TextValue } from "../../types";
+import type {
+  BindOptions,
+  Config,
+  CountdownValue,
+  Size,
+  TextBind,
+  TextFormat,
+  TextStyles,
+  TextValue
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -51,6 +63,30 @@ expectTypeOf<TextValue["alpha"]>().toEqualTypeOf<number>();
 
 // @ts-expect-error — alpha is a number from 0 to 1, not a string
 Text({ alpha: "0.5" });
+
+// ─── a bound number comes from bind(), on a numeric field only ─
+
+const Counter = component("Counter", { value: 0, name: "" });
+
+expectTypeOf(bind(Counter, "value")).toEqualTypeOf<TextBind>();
+expectTypeOf(bind(Countdown, "left", { format: "mm:ss" })).toEqualTypeOf<TextBind>();
+Text({ style: "digits", bind: bind(Counter, "value") });
+
+// @ts-expect-error — `name` is a string field, not a number
+bind(Counter, "name");
+
+// @ts-expect-error — a literal lacks the brand only bind() supplies
+Text({ bind: { component: "Counter", field: "value", format: "int" } });
+
+// @ts-expect-error — the old two-field literal does not compile either
+Text({ bind: { component: "Counter", field: "value" } });
+
+// @ts-expect-error — "ss" is not a TextFormat
+bind(Counter, "value", { format: "ss" });
+
+expectTypeOf<TextFormat>().toEqualTypeOf<"int" | "mm:ss" | "h:mm:ss" | "duration">();
+expectTypeOf<BindOptions>().toEqualTypeOf<{ format?: TextFormat }>();
+expectTypeOf(Countdown().value).toEqualTypeOf<Readonly<CountdownValue>>();
 
 // ─── the loose helpers take any name, as a plugin without a game does ─
 

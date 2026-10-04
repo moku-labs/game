@@ -9,7 +9,9 @@ const config: Config = {
   musicFadeMs: 600,
   volumes: undefined,
   context: undefined,
-  journal: 0
+  journal: 0,
+  music: "decode",
+  session: "ambient"
 };
 
 /** A state with a live graph on the fake context. */

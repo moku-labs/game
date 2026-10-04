@@ -2,7 +2,7 @@ import { expectTypeOf } from "vitest";
 import { createPlugin } from "../../../../config";
 import { i18nPlugin } from "../../index";
 import { i18nFor, tr as looseTr } from "../../tr";
-import type { ElementNode, Events, I18nCtx, Message } from "../../types";
+import type { DurationStyle, ElementNode, Events, I18nApi, I18nCtx, Message } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -10,8 +10,9 @@ import type { ElementNode, Events, I18nCtx, Message } from "../../types";
 // being an error. It stands in for what `defineGame<Types>()` hands a game.
 // ---------------------------------------------------------------------------
 
-/** What `compileStrings` would generate for a game with four messages. */
+/** What `compileStrings` would generate for a game with five messages. */
 type Strings = {
+  "chest.opens": { left: number };
   "hud.coins": { icon: string | number | readonly string[] | ElementNode; n: number };
   "hud.orders": { n: number };
   "orders.complete": Record<string, never>;
@@ -88,3 +89,22 @@ createPlugin("localeProbe", {
     }
   })
 });
+
+// ─── a duration parameter is milliseconds ─────────────────────
+
+tr("chest.opens", { left: 95_000 });
+
+// @ts-expect-error — `{left, duration}` takes milliseconds as a number, not a string.
+tr("chest.opens", { left: "95" });
+
+// ─── app.i18n.duration takes one of the four styles ───────────
+
+declare const i18n: I18nApi;
+
+expectTypeOf(i18n.duration(95_000)).toEqualTypeOf<string>();
+expectTypeOf<DurationStyle>().toEqualTypeOf<"long" | "short" | "narrow" | "digital">();
+
+i18n.duration(95_000, "digital");
+
+// @ts-expect-error — "tiny" is not a duration style.
+i18n.duration(95_000, "tiny");

@@ -8,6 +8,8 @@ import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
 import { applyAllGains, buildGraph } from "./graph";
 import { musicOf, playMusic, playSfx, stopMusic } from "./playback";
+import { applySession, resetSession } from "./session";
+import { disposeStream } from "./stream";
 import type { AudioContextLike, AudioCtx, Config, Deps, KernelSlice, State } from "./types";
 import { installUnlock, removeUnlock } from "./unlock";
 
@@ -62,13 +64,16 @@ function createContext(config: Config): AudioContextLike | undefined {
 }
 
 /**
- * Starts the plugin in `onStart`: both effect handlers, then the context with its graph and its
- * unlock. The handlers are registered even headless, so a node that awaits a sound resolves in
- * plain Bun exactly as it does in a browser.
+ * Starts the plugin in `onStart`: the audio session first, before any sound exists, then both
+ * effect handlers, then the context with its graph and its unlock. The handlers are registered
+ * even headless, so a node that awaits a sound resolves in plain Bun exactly as it does in a
+ * browser.
  *
  * @param ctx - Kernel context of the audio plugin.
  */
 export function startAudio(ctx: KernelSlice): void {
+  applySession(ctx);
+
   const audio = withDeps(ctx);
   const state = audio.state;
   const fx = audio.deps.flow.fx;
@@ -96,8 +101,10 @@ export function startAudio(ctx: KernelSlice): void {
 
 /**
  * Frees everything `onStart` opened: the two handler registrations, the two window listeners, the
- * music source, the journal and the context itself. A browser caps how many contexts a page may hold, so the
- * close is the point of this teardown.
+ * music track, every streamed track still fading with its timer, the journal, the audio session
+ * and the context itself. The tracks are freed before the close, while their nodes can still
+ * disconnect. A browser caps how many contexts a page may hold, so the close is the point of this
+ * teardown.
  *
  * @param state - The plugin state, all a teardown context carries.
  * @returns A promise that resolves when the context is closed.
@@ -107,9 +114,13 @@ export async function stopAudio(state: State): Promise<void> {
 
   removeUnlock(state);
   stopMusic(state);
+
+  for (const entry of state.retiring) disposeStream(state, entry.stream);
+
   state.decoded.clear();
   state.journal = Object.freeze([]);
   state.unlocked = false;
+  resetSession(state);
 
   const context = state.context;
 

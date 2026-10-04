@@ -9,7 +9,9 @@ const config: Config = {
   swipeMinPx: 48,
   swipeMaxMs: 300,
   heldScale: 1,
-  cursor: { control: "pointer", idle: "" }
+  cursor: { control: "pointer", idle: "" },
+  traceStepPx: 32,
+  traceInset: 0.4
 };
 
 describe("createInputState", () => {
@@ -72,5 +74,17 @@ describe("createInputState and the tap listeners", () => {
     first.tapListeners.push(() => undefined);
 
     expect(second.tapListeners).toEqual([]);
+  });
+});
+
+describe("createInputState and the stack and the trace", () => {
+  it("starts with nothing carried and no trace", () => {
+    const state = createInputState({ config });
+
+    expect(state.carried).toEqual([]);
+    expect(state.path).toEqual([]);
+    expect(state.traceIntent).toBeUndefined();
+    expect(state.traceClosed).toBe(false);
+    expect(state.lastPoint).toBeUndefined();
   });
 });

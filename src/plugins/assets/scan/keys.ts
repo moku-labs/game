@@ -10,7 +10,7 @@ const TEXTURE = /\.(?:png|webp)$/i;
 
 const FONT = /\.fnt$/i;
 
-const AUDIO = /\.mp3$/i;
+const AUDIO = /\.(?:mp3|m4a)$/i;
 
 const TAG_GROUPS = /^(?:\{[^{}]*\})*$/;
 
@@ -53,13 +53,15 @@ function problem(message: string): Error {
 
 /**
  * Tells what the scanner makes of a file: one texture per PNG or WebP, one font per `.fnt` with
- * the pages it names, one sound per MP3. Everything else is left out with a note.
+ * the pages it names, one sound per MP3 or M4A (AAC in an MP4 container). Everything else is left
+ * out with a note.
  *
  * @param fileName - Name of the file, with its extension.
  * @returns The kind of the asset, or `undefined` when the scanner reads no such file.
  * @example
  * ```ts
  * assetKindOf("body.fnt"); // "font"
+ * assetKindOf("theme.m4a"); // "audio"
  * assetKindOf("theme.ogg"); // undefined
  * ```
  */
@@ -75,7 +77,7 @@ export function assetKindOf(fileName: string): AssetKind | undefined {
  * Tells whether the scanner reads this file.
  *
  * @param fileName - Name of the file, with its extension.
- * @returns True for a PNG, a WebP, a `.fnt` or an MP3.
+ * @returns True for a PNG, a WebP, a `.fnt`, an MP3 or an M4A.
  * @example
  * ```ts
  * isAssetFile("star-on.webp"); // true

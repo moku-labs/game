@@ -639,7 +639,7 @@ describe("timber-screens — the board screen", () => {
 
   it("draws the coin counter inside the coin pill of the HUD", async () => {
     const game = await startOnBoard(readyPlayer);
-    const counter = game.app.world.projection.entityOf("hud.coins", "coins") ?? 0;
+    const counter = elementOf(game, "coinPillText");
 
     expect(game.app.world.ecs.get(counter, Parent)?.entity).toBe(elementOf(game, "coinPill"));
 

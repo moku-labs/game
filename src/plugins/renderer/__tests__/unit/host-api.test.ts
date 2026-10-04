@@ -72,3 +72,17 @@ describe("host.gl()", () => {
     expect(mock.api.host.gl()).toBe(live);
   });
 });
+
+describe("host.resolution()", () => {
+  it("answers 1 while inert and the resolution the application draws at once it does", async () => {
+    const inert = createMockRenderer({ dom: false });
+
+    expect(inert.modules.host.resolution()).toBe(1);
+
+    const mock = createMockRenderer({ dpr: 3, config: { maxResolution: 2 } });
+
+    await mock.start();
+
+    expect(mock.modules.host.resolution()).toBe(2);
+  });
+});

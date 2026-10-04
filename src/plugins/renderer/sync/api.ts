@@ -7,10 +7,11 @@ import type { ComponentHandle, Entity } from "../../world/types";
 import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../components";
 import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { provideDisplay, updateAdapterView } from "./adapters";
+import { boundsOf, hitBoxOf, layerOf } from "./bounds";
 import { forgetLeft, renderPassesOf, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
-import { hitTest } from "./hit-test";
-import { clearLayers, resort, syncLayers } from "./layers";
+import { hitAll, hitTest } from "./hit-test";
+import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
 import { destroyPools, detach, dropPooled } from "./pools";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
@@ -19,6 +20,7 @@ import type {
   DebugSwitches,
   DisplayAdapter,
   FilterSlot,
+  HitBox,
   SliceFrame,
   SyncCounts,
   SyncCtx,
@@ -397,6 +399,12 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     hitTest: (x: number, y: number, accept: (entity: Entity) => boolean): Entity | undefined =>
       hitTest(sctx, x, y, accept),
 
+    hitAll: (x: number, y: number): readonly Entity[] => hitAll(sctx, x, y),
+
+    boundsOf: (entity: Entity): HitBox | undefined => boundsOf(sctx, entity),
+
+    hitBoxOf: (entity: Entity): HitBox | undefined => hitBoxOf(state, entity),
+
     displayOf: (entity: Entity): unknown | undefined => state.views.get(entity)?.object,
 
     textures: {
@@ -467,6 +475,10 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     renderPasses: (): number => renderPassesOf(state),
 
     root: (): PixiContainer | undefined => state.root,
+
+    layerContainer: (name: string): PixiContainer | undefined => layerContainer(state, name),
+
+    layerOf: (entity: Entity): string | undefined => layerOf(sctx, entity),
 
     counts: (): SyncCounts => ({
       views: state.views.size,

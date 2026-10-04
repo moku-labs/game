@@ -1,6 +1,9 @@
 /**
  * @file ui/jsx — the reconcile: a description tree diffed by identity into the entities `ui`
- * owns, and the solve that gives every one of them its rect before it is ever drawn.
+ * owns, and the solve that gives every one of them its rect before it is ever drawn. Beside it:
+ * the range of a windowed scroll (`range.ts`), the rest and the motion of the extras
+ * (`extras.ts`), the hint routed to a keyed element (`hints.ts`) and the bound-text remeasure
+ * (`remeasure.ts`).
  */
 import { PointerOver, Pressed, Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
@@ -14,17 +17,21 @@ import {
 } from "../../renderer/components";
 import { Text } from "../../text/components";
 import { Exiting, Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
-import type { AnyComponentType, AnyComponentValue, Entity } from "../../world/types";
+import type { AnyComponentType, AnyComponentValue, Entity, MotionHandle } from "../../world/types";
 import { Box, Escapable, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
-import type { IsFlags, Style, StylesModule } from "../styles/types";
+import type { IsFlags, ResolvedStyle, Style, StylesModule } from "../styles/types";
 import type { UiCtx } from "../types";
 import { CONTENT, visualOf } from "../visual";
+import { cancelExtra, livePatch, recordRest } from "./extras";
 import type { Fields } from "./fields";
+import { hintOf } from "./hints";
 import { hostViews, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
 import { settlePopups } from "./popups";
+import { createRange } from "./range";
+import { markResizedTexts } from "./remeasure";
 import type {
   DescriptionNode,
   Element,
@@ -34,6 +41,7 @@ import type {
   PopupLink,
   Root
 } from "./types";
+import { checkWindow, isOwnKey } from "./window";
 
 /** What the modules injected into `jsx` are. */
 export type JsxModules = { styles: StylesModule; layout: LayoutModule };
@@ -88,19 +96,25 @@ type LiveFlags = Pick<IsFlags, "pressed" | "hover" | "focus" | "covered">;
 /**
  * The children one element is diffed against. A scroll container holds exactly one of them: the
  * content the finger moves, which keeps the rects of its own children and carries them along. Its
- * pivot is its top-left corner, so the scroll step writes its offset straight into `y`.
+ * pivot is its top-left corner, so the scroll step writes its offset straight into `y`; it lays
+ * its children out as a column. The content of a windowed scroll holds the slots of its window,
+ * the two spacers and the rows, instead of the markup's children.
  *
  * @param node - The node the markup wrote.
+ * @param slots - The slots of a windowed scroll, top spacer to bottom spacer.
  * @returns The children of the element.
  * @example
  * ```ts
  * childrenOf({ type: "scroll", props: {}, children: [] }).length; // 1
  * ```
  */
-export function childrenOf(node: DescriptionNode): readonly DescriptionNode[] {
+export function childrenOf(
+  node: DescriptionNode,
+  slots?: DescriptionNode[]
+): readonly DescriptionNode[] {
   if (node.type !== "scroll") return node.children;
 
-  return [{ type: CONTENT, props: { style: CONTENT_STYLE }, children: node.children }];
+  return [{ type: CONTENT, props: { style: CONTENT_STYLE }, children: slots ?? node.children }];
 }
 
 /**
@@ -187,11 +201,12 @@ function styleOf(node: DescriptionNode): Style | undefined {
 }
 
 /**
- * Refuses the two tags that cannot be placed: a text field that names no local field, and a
- * horizontal scroll.
+ * Refuses the tags that cannot be placed: a text field that names no local field, a horizontal
+ * scroll, and a windowed scroll whose props do not hold.
  *
  * @param node - The node being placed.
- * @throws {Error} For an `input` tag without `local` and for a horizontal scroll.
+ * @throws {Error} For an `input` tag without `local`, for a horizontal scroll and for a windowed
+ *   scroll whose props do not hold.
  */
 function checkTag(node: DescriptionNode): void {
   if (node.type === "input" && typeof node.props.local !== "string") {
@@ -201,6 +216,8 @@ function checkTag(node: DescriptionNode): void {
   if (node.type === "scroll" && node.props.axis === "x") {
     throw new Error('[game] Horizontal scroll arrives after V3.\n  Use axis "y".');
   }
+
+  checkWindow(node);
 }
 
 /**
@@ -266,6 +283,16 @@ function extrasMap(): Map<string, AnyComponentValue> {
  */
 function nameSet(): Set<string> {
   return new Set();
+}
+
+/**
+ * Creates the map of the motions the `change` hooks of an element's extras returned. Its own
+ * function, because lint rule L5 refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty map.
+ */
+function handleMap(): Map<string, MotionHandle> {
+  return new Map();
 }
 
 /**
@@ -407,25 +434,6 @@ function entitySet(entities: Iterable<Entity>): Set<Entity> {
 }
 
 /**
- * The patch a live element writes into one of its components: every field but the ones the
- * component type gives to a plugin. That plugin keeps such a field for the life of the entity, so
- * a re-render never puts it back to its default: a label keeps the string `text` resolved for it.
- *
- * @param value - The component value the element carries now.
- * @param owned - The fields the component type gives to a plugin.
- * @returns The fields to write.
- * @example
- * ```ts
- * livePatch({ content: "Play", resolved: "" }, ["resolved"]); // { content: "Play" }
- * ```
- */
-function livePatch(value: object, owned: readonly string[]): object {
-  if (owned.length === 0) return value;
-
-  return Object.fromEntries(Object.entries(value).filter(([field]) => !owned.includes(field)));
-}
-
-/**
  * Builds the reconcile half of the jsx module: the two systems of the frame and the root
  * bookkeeping around them.
  *
@@ -443,15 +451,22 @@ export function createReconciler(
   const state: JsxState = ctx.state.jsx;
   const ecs = ctx.deps.world.ecs;
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
+  const range = createRange(ctx, modules.layout, {
+    diffSlots: (root, scroll, slots) =>
+      diffChildren(root, scroll, childrenOf(scroll.node, slots), scroll.instance),
+    forgetSubtree,
+    despawnTree
+  });
 
   /**
-   * Registers the key of an element under its root, so `entityOf` and `find` answer for it.
+   * Registers the key of an element under its root, so `entityOf` and `find` answer for it. A key
+   * `ui` gave a node of its own, a spacer's, is never registered.
    *
    * @param root - The root the element belongs to.
    * @param element - The element that entered.
    */
   function registerKey(root: Root, element: Element): void {
-    if (element.key === undefined) return;
+    if (element.key === undefined || isOwnKey(element.key)) return;
 
     const keys = state.byKey.get(root.entity) ?? keyMap();
 
@@ -460,6 +475,23 @@ export function createReconciler(
 
     state.byKey.set(root.entity, keys);
     element.dropKey = ctx.deps.world.projection.registerKey(root.name, element.key, element.entity);
+  }
+
+  /**
+   * The resolved style of an element. A row of a windowed scroll is laid out at the row height,
+   * whatever its style says.
+   *
+   * @param parent - The parent of the element.
+   * @param node - The node of this render.
+   * @param is - The state flags of the element.
+   * @returns The style.
+   */
+  function styleFor(
+    parent: Element | undefined,
+    node: DescriptionNode,
+    is: IsFlags
+  ): ResolvedStyle {
+    return range.rowStyle(parent, node, modules.styles.resolveElement(styleOf(node), is));
   }
 
   /**
@@ -496,7 +528,7 @@ export function createReconciler(
       parentType: parent?.type,
       root: root.entity,
       node,
-      style: modules.styles.resolveElement(styleOf(node), is),
+      style: styleFor(parent, node, is),
       is,
       rect: { x: 0, y: 0, w: 0, h: 0 },
       previous: { x: 0, y: 0, w: 0, h: 0 },
@@ -513,7 +545,10 @@ export function createReconciler(
       entered: false,
       dropKey: undefined,
       extras: extrasMap(),
-      warnedOwned: nameSet()
+      extraHandles: handleMap(),
+      warnedOwned: nameSet(),
+      warned: nameSet(),
+      scrolledIn: range.isMoving()
     };
 
     state.elements.set(entity, element);
@@ -522,12 +557,23 @@ export function createReconciler(
     registerKey(root, element);
 
     if (element.type === "input") fields.enter(element);
+    if (element.type === "scroll") state.scrolls.add(entity);
 
     modules.layout.attach(element);
-    diffChildren(root, element, childrenOf(node), instance);
+    diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
     root.needsSolve = true;
 
     return entity;
+  }
+
+  /**
+   * The parent element of an element.
+   *
+   * @param element - The element.
+   * @returns The parent, or `undefined` for a root element.
+   */
+  function parentOf(element: Element): Element | undefined {
+    return element.parent === undefined ? undefined : lookup(element.parent);
   }
 
   /**
@@ -580,10 +626,13 @@ export function createReconciler(
   }
 
   /**
-   * Diffs the extras of a live element against the ones it added last time. A new name is added,
-   * a name whose fields changed is set without the fields its type gives to a plugin, and a name
-   * that left is removed. The same fields write nothing, so a tween a motion hook runs on one of
-   * them survives an unrelated re-render.
+   * Diffs the extras of a live element against the ones it added last time. A new name is added
+   * and its rest recorded; a name that left is removed and its motion cancelled. A name whose
+   * fields changed records its new rest and plays its `change` hook with the values before and
+   * after and the routed hint; when the hook returns a motion, the track brings the value home and
+   * nothing is written directly. Without a hook, or when it returns nothing or throws, the fields
+   * are set without the ones its type gives to a plugin. The same fields write nothing, so a tween
+   * a motion hook runs on one of them survives an unrelated re-render.
    *
    * @param element - The live element that changed.
    */
@@ -597,26 +646,39 @@ export function createReconciler(
 
     warnOwned(element);
 
-    // Remove the extras that left the `components` prop.
+    // Remove the extras that left the `components` prop, with the motion of their last change.
     for (const [name, previous] of element.extras) {
-      if (!next.has(name)) ecs.remove(element.entity, previous.type);
+      if (next.has(name)) continue;
+
+      cancelExtra(element, name);
+      ecs.remove(element.entity, previous.type);
     }
 
-    // Add a new, tag or missing extra whole; patch only the changed fields of the rest.
+    // Add a new, tag or missing extra whole; play or patch the changed fields of the rest.
     for (const [name, value] of next) {
       const previous = element.extras.get(name);
       const isUnchanged = previous !== undefined && sameFields(previous.value, value.value);
 
       if (isUnchanged) continue;
 
-      const isTag = value.value === true;
-      const needsAdd = previous === undefined || isTag || !ecs.has(element.entity, value.type);
+      const needsAdd =
+        previous === undefined ||
+        previous.value === true ||
+        value.value === true ||
+        !ecs.has(element.entity, value.type);
 
       if (needsAdd) {
         ecs.add(element.entity, value);
+        recordRest(ctx, element, value);
 
         continue;
       }
+
+      recordRest(ctx, element, value);
+
+      const values = { previous: previous.value, next: value.value };
+
+      if (modules.layout.changeExtra(element, name, values, hintOf(state, element))) continue;
 
       const owned = ecs.typeOf(name)?.owned ?? [];
 
@@ -683,6 +745,8 @@ export function createReconciler(
     node: DescriptionNode,
     instance: string | undefined
   ): void {
+    checkWindow(node);
+
     const previousNode = element.node;
     const is = isFlagsOf(node, {
       pressed: element.is.pressed,
@@ -690,7 +754,7 @@ export function createReconciler(
       focus: element.is.focus,
       covered: root.covered
     });
-    const style = modules.styles.resolveElement(styleOf(node), is);
+    const style = styleFor(parentOf(element), node, is);
     const moved = modules.layout.affectsRect(element.style, style);
     const contentChanged =
       previousNode.props.content !== node.props.content ||
@@ -719,9 +783,11 @@ export function createReconciler(
 
     if (element.live) writeLive(element);
     // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
-    if (element.live && !moved) modules.layout.repose(element, parentRect(element), false);
+    if (element.live && !moved) {
+      modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
+    }
 
-    diffChildren(root, element, childrenOf(node), instance);
+    diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
   }
 
   /**
@@ -817,15 +883,19 @@ export function createReconciler(
       if (entity !== undefined) next.push(entity);
     }
 
-    // Start the exit of every old child this render left out.
+    // Start the exit of every old child this render left out. A row that a range change took out
+    // of a windowed scroll is not removed: it is dropped at once, with no exit motion.
     const kept = entitySet(next);
+    const dropsRows = range.dropsRowsOf(parent);
 
     for (const old of parent.children) {
       if (kept.has(old)) continue;
 
       const element = state.elements.get(old);
 
-      if (element !== undefined) exitElement(element);
+      if (element === undefined) continue;
+      if (dropsRows) range.dropRow(element);
+      else exitElement(element);
     }
 
     // Keep the new list; the same children in the same order need no new placement.
@@ -865,6 +935,7 @@ export function createReconciler(
    */
   function exitSubtree(element: Element): void {
     state.hosts.delete(element.entity);
+    state.scrolls.delete(element.entity);
     modules.layout.exit(element);
 
     if (element.type === "input") fields.exit(element);
@@ -931,9 +1002,14 @@ export function createReconciler(
 
     modules.layout.free(element);
 
-    if (element.type === "input") fields.drop(element);
+    // A text field being edited is done before it goes: a dropped row never passed an exit.
+    if (element.type === "input") {
+      fields.exit(element);
+      fields.drop(element);
+    }
 
     state.hosts.delete(element.entity);
+    state.scrolls.delete(element.entity);
     state.exiting.delete(element.entity);
     state.elements.delete(element.entity);
     ecs.despawn(element.entity);
@@ -985,17 +1061,18 @@ export function createReconciler(
    * @param parent - The rect of its parent, or nothing for a root.
    */
   function applyLive(element: Element, parent: Rect | undefined): void {
-    // Commit a moved rect, rewrite the components and play the `change` hook.
+    // Commit a moved rect, rewrite the components and play the `change` hook with the routed hint.
+    const hint = hintOf(state, element);
     let hooked = false;
 
     if (element.moved) {
       modules.layout.commit(element, parent);
       writeLive(element);
-      hooked = modules.layout.change(element, element.previous);
+      hooked = modules.layout.change(element, element.previous, hint);
     }
 
     // Move the rest pose, which plays `change.Transform` only when no hook took it.
-    modules.layout.repose(element, parent, hooked);
+    modules.layout.repose(element, parent, hooked, hint);
   }
 
   /**
@@ -1016,6 +1093,7 @@ export function createReconciler(
     element.extras = extrasOf(element);
     warnOwned(element);
 
+    for (const value of element.extras.values()) recordRest(ctx, element, value);
     for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
 
     element.live = true;
@@ -1051,7 +1129,8 @@ export function createReconciler(
   /**
    * Plays the enter hook of an element whose spawn has just been applied. The world calls it from
    * the `Box` hook, at the flush of phase `layout`, so the entity carries every component and the
-   * first `sync` has not run: the element is never drawn at its rest pose by mistake.
+   * first `sync` has not run: the element is never drawn at its rest pose by mistake. A row a
+   * range change scrolled in is not new: it plays no `enter` hook, only its loop starts.
    *
    * @param entity - The entity the `Box` was attached to.
    */
@@ -1061,7 +1140,9 @@ export function createReconciler(
     if (element === undefined || element.entered) return;
 
     element.entered = true;
-    modules.layout.enter(element);
+
+    if (element.scrolledIn) modules.layout.loop(element);
+    else modules.layout.enter(element);
   }
 
   /**
@@ -1076,15 +1157,18 @@ export function createReconciler(
   }
 
   /**
-   * The live scroll containers, which the frame step moves with the finger.
+   * The live scroll containers, which the frame step moves with the finger. Read from the set the
+   * enter fills and the exit empties, so an idle frame walks no other element.
    *
-   * @returns Every element whose tag is `scroll`.
+   * @returns Every live element whose tag is `scroll`.
    */
   function scrollContainers(): Element[] {
     const containers: Element[] = [];
 
-    for (const element of state.elements.values()) {
-      if (element.type === "scroll" && element.live) containers.push(element);
+    for (const entity of state.scrolls) {
+      const element = state.elements.get(entity);
+
+      if (element?.live === true) containers.push(element);
     }
 
     return containers;
@@ -1141,8 +1225,8 @@ export function createReconciler(
 
   /**
    * The first of the two systems of phase `layout`: the sweep, the popups that may leave, the
-   * pull of the text being typed, the viewport, the dirty roots, the hosted views and the scroll
-   * offsets.
+   * pull of the text being typed, the scroll offsets and the windowed ranges, the bound texts that
+   * show a string of another size, the viewport, the dirty roots and the hosted views.
    */
   function reconcile(): void {
     // Despawn what finished exiting, and count this pass.
@@ -1155,16 +1239,24 @@ export function createReconciler(
     // The text being typed reaches the local of its component before the roots re-render.
     fields.pull();
 
+    // Move the scroll containers with the finger, then cut the windowed ranges at that offset,
+    // before any root is diffed.
+    const containers = scrollContainers();
+
+    modules.layout.scroll(containers, lookup);
+    range.step(containers);
+
+    // A bound text whose new string measures to another size asks its root for a solve.
+    markResizedTexts(ctx, state, modules.layout);
+
     // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());
 
     for (const root of dirtyRoots(viewportChanged)) reconcileDirtyRoot(root);
 
-    // Give the views a slot hosts their parent, and take it back where the slot left.
+    // Give the views a slot hosts their parent, take it back where the slot left, and publish the
+    // frame's counters.
     hostViews(ctx, state);
-
-    // Move the scroll containers with the finger, then publish the frame's counters.
-    modules.layout.scroll(scrollContainers(), lookup);
     writeCounters();
   }
 
@@ -1179,11 +1271,14 @@ export function createReconciler(
     counters.measured = measured;
     counters.solves = solves;
     counters.reconciles = state.reconciles;
+    counters.windowRenders = state.windowRenders;
   }
 
   /**
    * The second system of phase `layout`: one solve per marked root, then the rects, the rest
-   * poses and the hooks.
+   * poses and the hooks. The hints released since the last frame step are dropped at its end, so
+   * the `change.Box` and `change.Transform` hooks the solve plays get the hint the reconcile
+   * routed, and the next frame starts with none.
    */
   function solve(): void {
     const viewport = modules.styles.viewport();
@@ -1203,6 +1298,7 @@ export function createReconciler(
 
     if (changed) ctx.deps.time.wake();
 
+    state.hints.length = 0;
     writeCounters();
   }
 
@@ -1283,7 +1379,7 @@ export function createReconciler(
 
     element.is = { ...element.is, [flag]: on };
 
-    const style = modules.styles.resolveElement(styleOf(element.node), element.is);
+    const style = styleFor(parentOf(element), element.node, element.is);
     const root = state.roots.get(element.root);
     const moved = modules.layout.affectsRect(element.style, style);
 

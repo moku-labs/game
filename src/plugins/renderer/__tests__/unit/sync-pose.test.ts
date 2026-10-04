@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Entity } from "../../../world/types";
 import { Parent, Transform, type TransformValue } from "../../components";
-import { localPoseOf, rootPoseOf } from "../../sync/pose";
+import { localPoseOf, poseUnder, rootPointOf, rootPoseOf } from "../../sync/pose";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 const owner = { kind: "plugin", name: "test" } as const;
@@ -220,5 +220,53 @@ describe("sync pose", () => {
 
     expect(Number.isFinite(local.x)).toBe(true);
     expect(Number.isFinite(local.scale)).toBe(true);
+  });
+});
+
+describe("sync rootPointOf", () => {
+  it("brings a local point of a cell inside a scaled slot into root space", () => {
+    const mock = createMockRenderer({ dom: false });
+    const ecs = mock.world.ecs;
+    const slot = ecs.spawn(owner, [Transform({ x: 40, y: 60, scale: 0.5 })]);
+    const cell = ecs.spawn(owner, [Transform({ x: 100, y: 200 }), Parent({ entity: slot })]);
+
+    expect(rootPointOf(ecs, cell, { x: -32, y: -32 })).toEqual({ x: 74, y: 144 });
+  });
+
+  it("undoes what localPoseOf does to a point, through rotation, scale and pivots", () => {
+    const mock = createMockRenderer({ dom: false });
+    const { c } = chain(mock);
+    const local = localPoseOf(mock.world.ecs, c, {
+      x: 123,
+      y: -45,
+      rotation: 0,
+      scale: 1,
+      pivot: { x: 0, y: 0 }
+    });
+    const back = rootPointOf(mock.world.ecs, c, { x: local.x, y: local.y });
+
+    expect(back.x).toBeCloseTo(123, 9);
+    expect(back.y).toBeCloseTo(-45, 9);
+  });
+});
+
+describe("sync poseUnder", () => {
+  it("places a local pose under a parent pose and keeps the local pivot", () => {
+    expect(
+      poseUnder(
+        { x: 400, y: 300, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } },
+        { x: 0, y: 30, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }
+      )
+    ).toEqual({ x: 400, y: 360, rotation: 0, scale: 2, pivot: { x: 0, y: 0 } });
+  });
+
+  it("turns around the parent pivot, adds the rotations and multiplies the scales", () => {
+    expectPose(
+      poseUnder(
+        { x: 10, y: 20, rotation: Math.PI / 2, scale: 2, pivot: { x: 5, y: 0 } },
+        { x: 6, y: 0, rotation: 0.25, scale: 0.5, pivot: { x: 3, y: 4 } }
+      ),
+      { x: 10, y: 22, rotation: Math.PI / 2 + 0.25, scale: 1, pivot: { x: 3, y: 4 } }
+    );
   });
 });

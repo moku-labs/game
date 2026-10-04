@@ -75,7 +75,14 @@ export type DisplayEntry = {
 };
 
 /**
- * The rectangle a hit test checks, in the local space of the view: anchor already applied.
+ * A rectangle: the one a hit test checks, in the local space of the view with the anchor already
+ * applied, or the bounds of a view in reference units.
+ *
+ * @example
+ * ```ts
+ * // A 64 x 64 sprite with the default anchor, in its own units.
+ * const box: HitBox = { x: -32, y: -32, width: 64, height: 64 };
+ * ```
  */
 export type HitBox = { x: number; y: number; width: number; height: number };
 
@@ -495,6 +502,57 @@ export type SyncApi = {
   hitTest(x: number, y: number, accept: (entity: Entity) => boolean): Entity | undefined;
 
   /**
+   * Every entity whose hit box holds the point, topmost first: the walk and the skip rules of
+   * `hitTest` (a hidden or fully transparent view, a point outside a clipping ancestor), with no
+   * filter, so the caller filters. `hitTest` stays the fast path of a pointer event: it stops at
+   * the first accepted hit.
+   *
+   * @param x - Reference x.
+   * @param y - Reference y.
+   * @returns The entities, topmost first, as a fresh array. Inert, and where nothing is drawn: `[]`.
+   * @example
+   * ```ts
+   * // The `game.at` door lists what lies under a point: a coin drawn over its board cell.
+   * app.renderer.sync.hitAll(540, 300); // [1048581, 1048576]
+   * app.renderer.sync.hitAll(20, 20); // []: nothing is drawn there
+   * ```
+   */
+  hitAll(x: number, y: number): readonly Entity[];
+
+  /**
+   * Where a view is drawn, in reference units: the axis-aligned bounds of the four corners of its
+   * hit box brought through its `Transform` and its `Parent` chain, rotation and scale included.
+   * Only a view the player can see has bounds, so a located element is one a click reaches.
+   *
+   * @param entity - The entity to place.
+   * @returns The bounds, a fresh object. `undefined` for an entity without a view, a view that
+   *   hangs in no tree, a view hidden or with an effective alpha of 0.01 or less on the way to the
+   *   root, and bounds without area. Inert: always `undefined`.
+   * @example
+   * ```ts
+   * // The `game.locate` door finds a 64 x 64 coin drawn at (540, 300) with the default anchor.
+   * app.renderer.sync.boundsOf(coin); // { x: 508, y: 268, width: 64, height: 64 }
+   * ```
+   */
+  boundsOf(entity: Entity): HitBox | undefined;
+
+  /**
+   * The very box `hitTest` tests for a view, in the entity's own units: the anchor applied, before
+   * the `Transform` and the `Parent` chain, so no rotation. `boundsOf` is this box brought to
+   * reference units.
+   *
+   * @param entity - The entity to ask about.
+   * @returns The box, a fresh object, or `undefined` for an entity without a view.
+   * @example
+   * ```ts
+   * // `input` fits the hit circle of a trace inside a cell: a 64 x 64 Sprite, default anchor.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.hitBoxOf(cell); // { x: -32, y: -32, width: 64, height: 64 }
+   * ```
+   */
+  hitBoxOf(entity: Entity): HitBox | undefined;
+
+  /**
    * The texture registry `assets` drives.
    *
    * @example
@@ -626,6 +684,23 @@ export type SyncInternal = {
    * @returns The views of entities and the objects waiting in the pools.
    */
   counts(): SyncCounts;
+
+  /**
+   * The container of one layer of the scene, so `monitor` can leave a layer out of a picture.
+   *
+   * @param name - Layer name.
+   * @returns The container, or `undefined` for a name the scene does not declare and while inert.
+   */
+  layerContainer(name: string): PixiContainer | undefined;
+
+  /**
+   * The layer an entity is drawn in: the `Layer` of the root of its `Parent` chain, since a child
+   * draws with its parent. An entity without a parent names its own.
+   *
+   * @param entity - The entity.
+   * @returns The layer name, or `undefined` when the root of the chain has no `Layer`.
+   */
+  layerOf(entity: Entity): string | undefined;
 };
 
 /**

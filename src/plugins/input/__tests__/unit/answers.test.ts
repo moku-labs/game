@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropAnswer, submit, swipeAnswer, tapAnswer } from "../../answers";
+import { dropAnswer, submit, swipeAnswer, tapAnswer, traceAnswer } from "../../answers";
 import { Draggable, DropTarget, Swipeable, Tappable } from "../../components";
 import { createMockInput } from "./mock-input";
 
@@ -91,5 +91,24 @@ describe("submit", () => {
     expect(mock.log.warn).toHaveBeenCalledWith("input: empty intent", {
       view: { projection: "board.items", key: "i5" }
     });
+  });
+});
+
+describe("traceAnswer", () => {
+  it("keeps the cells in path order under one path key, with the intent of the first cell", () => {
+    const answer = traceAnswer([
+      { intent: "word", payload: { cell: "b3" } },
+      { intent: "word", payload: { cell: "c3" } },
+      { intent: "word", payload: { cell: "d3" } }
+    ]);
+
+    expect(answer).toEqual({
+      intent: "word",
+      payload: { path: [{ cell: "b3" }, { cell: "c3" }, { cell: "d3" }] }
+    });
+  });
+
+  it("answers an empty intent and an empty path for no cell", () => {
+    expect(traceAnswer([])).toEqual({ intent: "", payload: { path: [] } });
   });
 });

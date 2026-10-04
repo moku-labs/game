@@ -1,6 +1,15 @@
 import { expectTypeOf } from "vitest";
+import type { World } from "../../../../index";
 import { component, mut, system, tag } from "../../ecs/define";
-import type { EcsApi, Entity, Owner, QueryTuple } from "../../ecs/types";
+import type {
+  ComponentSchema,
+  EcsApi,
+  Entity,
+  EntityDiff,
+  FrameDiff,
+  Owner,
+  QueryTuple
+} from "../../ecs/types";
 import { projection } from "../../projection/define";
 import type {
   DescriptionNode,
@@ -9,7 +18,7 @@ import type {
   TrackOptions,
   TweenOptions
 } from "../../projection/types";
-import type { Events, KernelSlice } from "../../types";
+import type { Events, Explained, KernelSlice } from "../../types";
 
 type Position = { x: number; y: number };
 type Sprite = { texture: string };
@@ -157,3 +166,18 @@ expectTypeOf<TrackOptions["repeat"]>().toEqualTypeOf<number | "forever" | undefi
 const looping: TweenOptions = { ms: 100, repeat: true };
 
 expectTypeOf(looping).toEqualTypeOf<TweenOptions>();
+
+// The three members the doors read: two on ecs, one on projection.
+expectTypeOf(ecs.diff).toEqualTypeOf<(from: number, to: number) => FrameDiff>();
+expectTypeOf(ecs.schema).toEqualTypeOf<() => readonly ComponentSchema[]>();
+expectTypeOf(projectionApi.motionsOf).toEqualTypeOf<(entity: Entity) => readonly string[]>();
+expectTypeOf<EntityDiff["change"]>().toEqualTypeOf<"spawned" | "despawned" | "changed">();
+
+// @ts-expect-error — diff takes two frame numbers, not frame labels
+ecs.diff("120", "180");
+
+// The four new types reach a game through the World namespace of the package root.
+expectTypeOf<World.ComponentSchema>().toEqualTypeOf<ComponentSchema>();
+expectTypeOf<World.FrameDiff>().toEqualTypeOf<FrameDiff>();
+expectTypeOf<World.EntityDiff>().toEqualTypeOf<EntityDiff>();
+expectTypeOf<World.Explained>().toEqualTypeOf<Explained>();

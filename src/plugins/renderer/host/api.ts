@@ -82,13 +82,15 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       app.renderer.render(app.stage);
     },
 
-    extract: async (): Promise<string | undefined> => {
+    extract: async (hidden: readonly PixiContainer[]): Promise<string | undefined> => {
       const app = state.app;
 
       if (!state.ready || app === undefined) return undefined;
 
-      return extractStage(ctx, app);
+      return extractStage(ctx, app, hidden);
     },
+
+    resolution: (): number => state.app?.renderer.resolution ?? 1,
 
     textures: (): TextureUsage => {
       const app = state.app;

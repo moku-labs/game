@@ -1,0 +1,34 @@
+{
+  "chromium": [
+    {
+      "file": "track.mp3",
+      "playError": null,
+      "rmsFull": 0.182,
+      "rmsAfterFade": 0,
+      "afterSeek": 100
+    },
+    {
+      "file": "track.m4a",
+      "playError": null,
+      "rmsFull": 0.1899,
+      "rmsAfterFade": 0,
+      "afterSeek": 100
+    }
+  ],
+  "webkit": [
+    {
+      "file": "track.mp3",
+      "playError": null,
+      "rmsFull": 0.1823,
+      "rmsAfterFade": 0,
+      "afterSeek": 100.02
+    },
+    {
+      "file": "track.m4a",
+      "playError": null,
+      "rmsFull": 0.19,
+      "rmsAfterFade": 0,
+      "afterSeek": 100.01
+    }
+  ]
+}

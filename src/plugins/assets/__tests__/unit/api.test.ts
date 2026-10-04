@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { lookupTexture } from "../../api";
 import { loadBundle } from "../../tiers";
+import type { Manifest } from "../../types";
 import { createMockAssets, manifestOf, packedManifest } from "./mock-assets";
 
 const manifest = manifestOf({
@@ -8,6 +9,36 @@ const manifest = manifestOf({
   board: { feature: "board", tier: "scene", keys: ["board.cell", "board.item"] },
   "board.chains": { feature: "board", tier: "lazy", keys: ["board.chain"] }
 });
+
+/** One bundle of two sounds: an `.mp3` and an `.m4a`. */
+const soundManifest: Manifest = {
+  version: 1,
+  bundles: {
+    ui: {
+      feature: "ui",
+      tier: "scene",
+      mb: 0.02,
+      files: [
+        {
+          key: "ui.click",
+          path: "features/ui/assets/click.mp3",
+          kind: "audio",
+          width: 0,
+          height: 0,
+          mb: 0.01
+        },
+        {
+          key: "ui.theme",
+          path: "features/ui/assets/theme.m4a",
+          kind: "audio",
+          width: 0,
+          height: 0,
+          mb: 0.01
+        }
+      ]
+    }
+  }
+};
 
 /**
  * Lets the microtask queue run.
@@ -289,6 +320,35 @@ describe("texture of a packed key", () => {
 
     expect(mock.api.isLoaded("ui")).toBe(true);
     expect(mock.api.texture("ui.panel")).toBeUndefined();
+    expect(mock.io.fetched).toEqual([]);
+  });
+});
+
+describe("audio", () => {
+  it("answers the bytes and the MIME type of a loaded sound and touches the use counter", async () => {
+    const mock = createMockAssets({ manifest: soundManifest });
+
+    await mock.start();
+    await mock.api.load("ui");
+
+    const before = mock.ctx.state.useCounter;
+
+    expect(mock.api.audio("ui.theme")).toEqual({
+      bytes: expect.any(ArrayBuffer),
+      mime: "audio/mp4"
+    });
+    expect(mock.api.audio("ui.click")?.mime).toBe("audio/mpeg");
+    expect(mock.ctx.state.useCounter).toBe(before + 2);
+    expect(mock.ctx.state.records.get("ui")?.lastUsed).toBe(before + 2);
+  });
+
+  it("answers undefined while headless and fetches nothing", async () => {
+    const mock = createMockAssets({ manifest: soundManifest, io: undefined });
+
+    await mock.start();
+    await mock.api.load("ui");
+
+    expect(mock.api.audio("ui.click")).toBeUndefined();
     expect(mock.io.fetched).toEqual([]);
   });
 });

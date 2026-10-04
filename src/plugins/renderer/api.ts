@@ -32,7 +32,8 @@ function devDrawCounting(ctx: RendererCtx): InstallDrawCounting | undefined {
  * Builds the four modules in the accepted order `host → viewport → sync → monitor`. Each keeps
  * its data in its branch of `ctx.state`, so these objects are views on the plugin state, not
  * owners of it. `host` gets the draw-call counter of `monitor` up front, because it installs the
- * counter before `monitor` exists.
+ * counter before `monitor` exists; `monitor` gets the other three, since a legend places views
+ * on the picture.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @returns The four modules with their public and internal methods.
@@ -41,7 +42,7 @@ export function createModules(ctx: RendererCtx): Modules {
   const host = createHostApi(ctx, { installDrawCounting: devDrawCounting(ctx) });
   const viewport = createViewportApi(ctx, { host });
   const sync = createSyncApi(ctx, { host, viewport });
-  const monitor = createMonitorApi(ctx, { host, sync });
+  const monitor = createMonitorApi(ctx, { host, viewport, sync });
 
   return { host, viewport, sync, monitor };
 }
@@ -64,8 +65,9 @@ function exposeHost(host: HostModule): HostApi {
 }
 
 /**
- * Reduces the sync module to what `input`, `assets`, `effects` and a debugging game call. There is no
- * `layers` member: layers are declared by the scene, through `world.projection.setLayers`.
+ * Reduces the sync module to what `input`, `assets`, `effects`, the doors and a debugging game
+ * call. There is no `layers` member: layers are declared by the scene, through
+ * `world.projection.setLayers`.
  *
  * @param sync - The full sync module.
  * @returns The public sync API.
@@ -73,6 +75,9 @@ function exposeHost(host: HostModule): HostApi {
 function exposeSync(sync: SyncModule): SyncApi {
   return {
     hitTest: sync.hitTest,
+    hitAll: sync.hitAll,
+    boundsOf: sync.boundsOf,
+    hitBoxOf: sync.hitBoxOf,
     textures: sync.textures,
     displays: sync.displays,
     fonts: sync.fonts,

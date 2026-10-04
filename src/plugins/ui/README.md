@@ -6,14 +6,14 @@ rect from one Yoga solve per change.
 
 | Module | Owns |
 |---|---|
-| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()` |
+| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
-| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, scroll, the `popup` and `guide` handlers |
+| `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, scroll and the range of a windowed scroll, the `popup` and `guide` handlers |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `value` on a text field, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
 | `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
@@ -31,22 +31,29 @@ Emits nothing, listens to nothing. Depends on `time`, `flow`, `world`, `renderer
 `anim`, `i18n`, `text`. Yoga arrives through `await import("yoga-layout/load")` in `onStart`;
 nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
 the cursor shows a hand over a local-state button, one `input.onKey` listener for the focus, one
-`input.onPointer` listener for the text fields, and on a page the hidden input of the text
-fields; `onStop` removes all of them.
+`input.onPointer` listener for the text fields, one `flow.fx.onHint` listener that hands released
+hints to the `change` hooks of elements, and on a page the hidden input of the text fields;
+`onStop` removes all of them.
 
 ## What an element is drawn with
 
 | Tag | Visual | Input |
 |---|---|---|
 | `image`, `icon` | `Sprite` at the rect, `fit` prop `"contain"` (default), `"cover"` or `"fill"`, `style.tint`, `style.alpha` | none |
-| `text` | `Text`; a string `style` is the text style key | none |
+| `text` | `Text`; a string `style` is the text style key; `bind={bind(Counter, "value")}` shows a numeric field of a component the element carries (only `bind()` makes a bind) | none |
 | any other tag with `style.nineSlice` | `NineSlice` at the rect, `style.alpha`, `style.tint`, `style.debug` | as below |
 | any other tag | a rounded `Shape`, drawing nothing on a container with no fill and no stroke (no fill, stroke width 0, the alpha of its style); with no `fill` nothing is painted inside (`fillAlpha: 0`): a `stroke` alone draws a ring, a bare button such as a text link shows only its label. `style.shape: "triangle"` fills the box pointing right (turn it with `rotation`), `style.dash` dashes the stroke (gaps of half a dash) | as below |
 | `button` | as above | `Tappable` with `intent`, `Touchable` + `LocalWrite` with `local`, `Touchable` when disabled, covered or naming nothing; `Escapable` too with the `escape` prop, while it answers |
 | `panel` | as above | `Touchable`: it swallows every tap and answers nothing |
-| `scroll` | `Shape` with `clip` | `Touchable`, `Scroll` |
+| `scroll` | `Shape` with `clip`; children for a short list, or `rows`, `rowHeight`, `overscan`, `row` for a long one, see [Scroll windowing](#scroll-windowing) | `Touchable`, `Scroll` |
 | `input` | as any other tag, with `clip` on the `Shape` or on the `NineSlice` of `style.nineSlice`; four ui-owned children draw the text, the caret, the selection and the IME underline, see [Text input](#text-input) | `Touchable` |
 | any tag | `components` adds extra components to the element's entity, see [Extra components](#extra-components) | |
+
+A `text` without a fixed `width` and `height` is sized by `text.measure` of what it shows: its
+`content`, or for a bound text the string `text` shows for it, `Text.resolved`. Before the first
+resolve that is the bound field of its `components` value in the format of the bind, so a number
+a row centres is centred from the first frame. A new shown string asks for a solve only when it
+measures to another size: a counter that rolls through digits of one width solves nothing.
 
 `style.alpha` fades the element and everything inside it: a disabled button at `alpha: 0.6`
 draws its icon and its label at 0.6 too, and a column at `alpha: 0` hides its children. The
@@ -118,6 +125,92 @@ element and name. Nothing throws: the element keeps its own component and the sc
 ```
 
 An element without a key is logged with its identity as `key`.
+
+### `change` hooks for extras
+
+`ui` records the rest of every extra with a value at mount and whenever a name is added
+(`world.projection.setRest`), so `view.toRest(Counter)` has a rest from the first frame. When a
+re-render changes the fields of an extra and the element's `motion.change` has a hook of that
+component's name, `ui` records the new rest, cancels the motion the last change of that name
+started (the value stays where it is), and plays the hook with `(view, previous, next, hint)`.
+When the hook returns a motion, nothing is written directly: the track brings the value home from
+where it is. Without a hook, or when it returns nothing or throws (`ui:motion-failed`), the fields
+are written directly as before. A field the component type gives to a plugin (`Countdown.left`) is
+never written by a render, and its rest keeps the entity's value. The motion of an extra counts
+for the exit: an element that leaves while its counter rolls despawns when the roll ended.
+
+```tsx
+// the coin counter is the number of the pill, nothing else exists for it
+<text key="coinPillText" style="ui.number" bind={bind(Counter, "value")}
+      components={[Counter({ value: coins })]} motion={{ change: { Counter: rollCoins } }} />
+// a commit that raises coins re-renders the HUD: ui records the new rest of Counter, plays rollCoins
+// with the `coins.fly` hint of that commit, and the track rolls Counter.value; text shows Math.round of it
+```
+
+The hint is routed the way the world routes it to projection views: `ui` buffers every released
+hint, and while a root reconciles, an element gets the first hint whose payload has a top-level
+value equal to its key, narrowed to its root when the payload names a `projection` (the projection
+of a screen, the component of a popup). An unkeyed element gets none. The same hint reaches every
+`change` hook of that element in that frame step: the extras, `change.Box` and `change.Transform`.
+A hint no element takes is dropped; the buffer is empty at the end of every frame step.
+
+```ts
+fx.emit(hint("coins.fly", { projection: "hud", key: "coinPillText", ms: 400 }));
+```
+
+## Scroll windowing
+
+A long list keeps only the rows in view plus `overscan` on each side as elements, entities and
+Yoga nodes. Every row has the same height, so the range is arithmetic and the scroll range exact.
+
+```tsx
+<scroll key="shop" style={list} rows={items.length} rowHeight={80} overscan={5}
+        row={index => <ShopRow key={items[index].id} item={items[index]} />} />
+// at offset 0: rows 0 to 24 exist, 25 of the 1000, for 80 u rows in a 1600 u list with overscan 5
+```
+
+| Prop | Meaning |
+|---|---|
+| `rows` | how many rows the list has; rounded down to a whole number of 0 or more, with one warning `ui:scroll-rows-rounded` |
+| `rowHeight` | the height of every row in reference units; not above 0 throws `[game] Scroll rowHeight must be above 0.` |
+| `overscan` | rows kept beyond each edge of the viewport; 5 when left out, a negative one is 0 |
+| `row` | builds the row at an index; called at reconcile for the rows in the window, never at build time |
+
+- **The range.** `first = max(0, floor(−offset / h) − overscan)`, `last = min(rows − 1,
+  ceil((−offset + H) / h) − 1 + overscan)` with `H` the height of the scroll's rect. An empty list
+  holds no row. Before its first solve the scroll uses its style's `height` when it is a number,
+  else the viewport's; the next frame corrects it.
+- **The content** is one column: a spacer for the rows above, the rows of the window, a spacer for
+  the rows below. Its height is `rows × rowHeight`, so `Scroll.min` is exact. The spacers are never
+  listed by `tree()`, never keyed, never found.
+- **A row** is exactly one node; a row without a `key` is keyed by its index. `ui` writes the row
+  height over its style (`height`, `shrink: 0`); another height in its style is one warning
+  `ui:row-height-overridden` per scroll. A callback that answers none or several nodes is one error
+  `ui:row-not-one-node` with `{ key, index }` per scroll, and an empty slot of the row height stands
+  in. A callback that throws fails its root (`ui:root-failed`) like any view.
+- **Before the diff.** Each frame the scroll step moves the content with the finger, then every
+  windowed scroll cuts its range at that offset, before any root is diffed: a row never arrives a
+  frame late. A range that moved re-renders only the list, on the stored node of the scroll: no view
+  above it runs, the root solves once, and `UiCounters.windowRenders` counts it. A still window
+  re-renders and solves nothing.
+- **Rows that leave the window** despawn and free their nodes in the same frame, with no `exit`
+  hook and no `Exiting`: leaving the window is not a removal. Rows that enter by a range change play
+  no `enter` hook; a `loop` starts at once. When the list itself changes on a re-render, rows that
+  appear or vanish play `enter` and `exit` like any element.
+- **Row state belongs in the model: a row that leaves the window loses its local state.** Its
+  component instances are forgotten with it, and it comes back fresh. A focused row that leaves
+  drops the keyboard focus; a text field being edited in it is done; a pressed row takes `Pressed`
+  with it and its press answers nothing. No row is pinned.
+- **Keys and doors** know the live rows only: `find`, `world.projection.entityOf`, `input.tap` and a
+  `guide` target answer for a row inside the window and not for one outside it. `lint()` checks the
+  live rows. `tree()` lists them as the children of the content and adds `window: { first, last,
+  rows }` to the scroll node.
+- A list that shrinks below its window clamps the window and the offset in the same frame.
+- Some but not all of `rows`, `rowHeight` and `row` throws `[game] A windowed scroll needs rows,
+  rowHeight and row.`; children next to `row` are ignored with one warning
+  `ui:scroll-children-ignored`. `axis: "x"` still throws.
+
+The child form, a `scroll` with children and no `rows`, is unchanged: keep it for short lists.
 
 ## Draw order
 
@@ -329,29 +422,38 @@ the `Parent` chain, and its nine-slice or sprite size times that scale.
 ## Doors
 
 `inspect.ts` holds the two ui sources of the editor's read door, `@moku-labs/game/inspect`. Both
-only read, so they are safe in a production build. Both need an app with `ui` and `renderer`.
+only read, so they are safe in a production build. `game.ui` needs an app with `ui`; `game.locate`
+one with `ui`, `renderer` and `world`.
 
 | Key in `sources` | id | Input | Changes | Reads |
 |---|---|---|---|---|
 | `ui` | `game.ui` | none | frame | `app.ui.tree()`: the live screen as plain data |
-| `rect` | `game.rect` | `{ key: "string" }` | frame | `{ x, y, w, h }` of the element with that `key`, in CSS px of the page, or `undefined` |
+| `locate` | `game.locate` | `{ key: "string?", target: "json?" }`, exactly one | frame | `{ x, y, w, h }` of the element with that `key` or of the view `target: { projection, key }`, in CSS px of the page, or `undefined` |
 
-`game.rect` answers where an element is drawn at rest:
+`game.locate` answers where something is drawn, by either address the doors use. It replaces
+`game.rect`, which answered the key form only; `{ key }` answers the same numbers.
 
-1. Only a live element counts. When `app.ui.find(key)` has no entity, the answer is `undefined`.
-2. It starts from the element's `rect` in `tree()`: its layout box from Yoga, not the Pixi bounds.
-   So a bare button with no fill, such as a text link, has a rect too.
-3. Every fitted element on the way up, the element itself included, scales that rect by its
-   `fitScale` about the centre of its own rect, the way `fit: "contain"` draws it.
+1. Exactly one of `key` and `target`, else it throws `[game] game.locate takes a key or a target.`
+   `target` is read the way `game.tap` reads it.
+2. `key`: only a live element counts. When `app.ui.find(key)` has no entity, the answer is
+   `undefined`. It starts from the element's `rect` in `tree()`: its layout box from Yoga, not the
+   Pixi bounds, so a bare button with no fill, such as a text link, has a rect too. Every fitted
+   element on the way up, the element itself included, scales that rect by its `fitScale` about
+   the centre of its own rect, the way `fit: "contain"` draws it.
+3. `target`: `world.projection.entityOf(projection, key)`, then the box the renderer draws for that
+   entity (`renderer.sync.boundsOf`). `undefined` when the view is not live or has no drawn box, as
+   always while the renderer is inert.
 4. Both corners go through `renderer.viewport.toScreen`, so the rect is in CSS px of the page.
-   While the renderer is inert, as in a headless test, it stays in reference units.
+   While the renderer is inert, as in a headless test, a key's rect stays in reference units.
 
 ```ts
 import { read, sources } from "@moku-labs/game/inspect";
 
 // An e2e script finds the Play button on the page before it clicks there.
-read(app, sources.rect, { key: "play" }); // { x, y, w, h } in CSS px
-read(app, sources.rect, { key: "nothing" }); // undefined: no live element has this key
+read(app, sources.locate, { key: "play" }); // { x, y, w, h } in CSS px
+read(app, sources.locate, { key: "nothing" }); // undefined: no live element has this key
+// An agent finds a board item before it drags it.
+read(app, sources.locate, { target: { projection: "board.items", key: "c7" } }); // { x, y, w, h }
 ```
 
 `control.ts` holds the two ui commands of the editor's write door, `@moku-labs/game/control`,

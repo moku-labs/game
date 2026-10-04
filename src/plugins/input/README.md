@@ -1,6 +1,6 @@
 # input
 
-> Standard plugin — the finger of the game. Behaviour is data: a view carries `Tappable`, `Pressable`, `Draggable`, `DropTarget` or `Swipeable`, and the engine turns a gesture into one `Answer` for `flow.gate`.
+> Standard plugin — the finger of the game. Behaviour is data: a view carries `Tappable`, `Pressable`, `Draggable`, `DropTarget`, `Swipeable` or `Traceable`, and the engine turns a gesture into one `Answer` for `flow.gate`.
 
 The drop TARGET names the intent. The engine owns the pointer capture, the lifting, the target lookup, the closed gate and the way home through `world.projection.settle`. A game writes no drag code.
 
@@ -12,17 +12,19 @@ The drop TARGET names the intent. The engine owns the pointer capture, the lifti
 |---|---|---|---|
 | `Tappable({ intent, payload? })` | component | `{ intent: "", payload: {} }` | A tap answers `{ intent, payload }` |
 | `Pressable({ intent, payload? })` | component | same | A long press answers `{ intent, payload }` |
-| `Draggable({ payload? })` | component | `{ payload: {} }` | The view can be carried. It names no intent |
+| `Draggable({ payload?, carry? })` | component | `{ payload: {}, carry: [] }` | The view can be carried. It names no intent. `carry` lists projection keys of the same projection that ride along on top of it |
 | `DropTarget({ intent, payload? })` | component | same as `Tappable` | A drop here answers THIS intent |
 | `Swipeable({ intent, payload? })` | component | same as `Tappable` | A swipe answers `{ intent, payload: { ...payload, direction } }` |
+| `Traceable({ intent, payload? })` | component | same as `Tappable` | A finger drawn through these views answers once, on the release: `{ intent, payload: { path: [payload, …] } }` |
 | `Touchable` | tag | | Takes a press with no gesture component: a tap runs the `onTap` listeners and answers nothing. `ui` tags the buttons that write local state and name no intent |
 | `Held` | tag | | On the carried view, from grab to release |
 | `Hovered` | tag | | On the topmost drop target under the finger during a drag. At most one, never the held view |
 | `Pressed` | tag | | On the pressed view, until a tap, a long press, a grab, a swipe or a cancel |
+| `Traced` | tag | | On every view of the trace in progress. A popped cell loses it; every exit from the trace clears it |
 | `PointerOver` | tag | | On the topmost view a press would take, while a mouse or a pen moves over it with no press. At most one. A touch never hovers. `ui` reads it as `is.hover` |
 | `Pointer` | resource | `{ x: 0, y: 0, down: false, justPressed: false, justReleased: false }` | Reference coordinates. `justPressed` and `justReleased` last one frame |
 
-Payloads are plain JSON objects of model keys, never entity ids. An empty `intent` is a dev warning through `ctx.log.warn` that names the projection. `Draggable` plus `Swipeable` on one view: `Draggable` wins, one warning per press. A `Draggable` view with no projection key cannot be carried — `mute`, `lift` and `settle` belong to a projection — so the grab is refused with one warning.
+Payloads are plain JSON objects of model keys, never entity ids. An empty `intent` is a dev warning through `ctx.log.warn` that names the projection. `Draggable` plus `Swipeable` on one view: `Draggable` wins, one warning per press. `Traceable` wins over every other gesture component on one view, one warning per press; a trace is not a tap, so the `onTap` listeners never run for it. A `Draggable` view with no projection key cannot be carried — `mute`, `lift` and `settle` belong to a projection — so the grab is refused with one warning.
 
 ```ts
 // game side: behaviour inside a projection `view`
@@ -33,7 +35,7 @@ view: item => [
 ]
 ```
 
-Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `PointerOver` and `Pointer`: highlight legal cells, tilt the held item, light the item under the mouse. The lifted size of the held item is config: `heldScale`.
+Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Traced`, `PointerOver` and `Pointer`: highlight legal cells, tilt the held item, light the item under the mouse. The lifted size of the held item is config: `heldScale`.
 
 ## API
 
@@ -43,6 +45,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 | `press(target)` | The same with `Pressable` |
 | `drag(from, to)` | Reads `Draggable` of `from` and `DropTarget` of `to`, answers `{ intent: target.intent, payload: { ...draggable.payload, ...target.payload } }` |
 | `swipe(target, direction)` | Reads `Swipeable`, answers `{ intent, payload: { ...payload, direction } }` |
+| `trace(path)` | Reads the `Traceable` of every target, in order, answers `{ intent, payload: { path: [payload, …] } }`. An empty list, a target with no `Traceable` and two intents warn and return `false` |
 | `onTap(fn)` | Registers a listener called with the tapped entity before the `Tappable` answer; returns the remover |
 | `onPointer(fn)` | Registers a listener called with the raw sample inside the DOM listener, for `down`, `up` and `cancel`; returns the remover |
 | `onKey(fn)` | Registers a listener called with `{ key, shift }` on every key; returning `true` marks it handled; returns the remover |
@@ -50,7 +53,7 @@ Custom behaviour is an ordinary game system on `Held`, `Hovered`, `Pressed`, `Po
 | `cursor()` | The CSS cursor input last wrote on the canvas (`"pointer"` over a control, `""` elsewhere) |
 | `controls.add(component)` | Counts a component type of another plugin as a control for the cursor; returns the remover. `ui` registers `LocalWrite` in `onStart` and removes it in `onStop` |
 
-`tap`, `press`, `drag` and `swipe` return what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
+`tap`, `press`, `drag`, `swipe` and `trace` return what `flow.gate.answer` returned, synchronously. Nothing moves: no coordinates, no frames, no `Held`, no `settle`. `target` is `{ projection, key }` — resolved through `world.projection.entityOf`, so a view in the despawn queue is never addressed — or an `Entity`. A missing view or a missing component warns through `ctx.log.warn`, returns `false` and never calls the gate. Nothing throws.
 
 `onTap` is the seam `ui` uses for a button that carries `LocalWrite` and no intent: the listeners run on every tap — the finger's and `app.input.tap`'s — in registration order, before the answer. A listener that throws is logged through `ctx.log.error` with its entity, and the listeners after it still run.
 
@@ -95,15 +98,15 @@ The DOM handlers do one thing: turn a pointer event into a raw sample and queue 
 | 1 | `justPressed` and `justReleased` of `Pointer` are cleared |
 | 2 | The queued samples are drained in order, each through `renderer.viewport.toReference`. A move of an idle mouse or pen moves `PointerOver` |
 | 3 | `time.delta` is added to `pressedMs`, and the long press fires |
-| 4 | While dragging: the held view is checked, its `Transform` is written and `Hovered` moves |
+| 4 | While dragging: the held view is checked, a carried view that left is let go, the held `Transform` is written and `Hovered` moves. While tracing: a cell of the path that left ends the trace with no answer |
 
 Determinism: no `Date.now`, no `performance.now`, no `event.timeStamp`. Every duration is a sum of `time.delta`, so `time.step(dt)` drives the machine in a test and `time.setScale` and a pause apply to it.
 
 | World mode | The frame step |
 |---|---|
 | `live` | the five steps above |
-| `paused` | drops the queued samples; a running drag ends as a cancel and the view settles home; a press goes idle; `PointerOver` goes; `Pointer.down` becomes false |
-| `fast` | samples are dropped. With nothing in the hand no tag and no resource is written at all; a gesture that was running when the mode turned is let go like a cancel, so `Held`, the mute, the lift and the pointer gate are never left behind |
+| `paused` | drops the queued samples; a running drag ends as a cancel and the whole stack settles home; a trace ends with no answer and `Traced` goes; a press goes idle; `PointerOver` goes; `Pointer.down` becomes false |
+| `fast` | samples are dropped. With nothing in the hand no tag and no resource is written at all; a gesture that was running when the mode turned is let go like a cancel, so `Held`, `Traced`, the mutes, the lifts and the pointer gate are never left behind |
 
 ## Gesture state machine
 
@@ -113,6 +116,7 @@ One active pointer. A sample of any other pointer is dropped while a pointer is 
 |---|---|---|---|
 | `idle` | `down` | a view under the finger takes the press | `pressed` |
 | `idle` | `down` | nothing under the finger | `pressed` with no entity |
+| `idle` | `down` | the view carries `Traceable` | `tracing`: the path is that one cell, tagged `Traced`; `flow.gate.pointer(true)` |
 | `pressed` | `move` | `Draggable`, distance from `start` > `dragStartPx` | `dragging` |
 | `pressed` | frame | `Pressable`, `pressedMs` ≥ `longPressMs`, inside `tapSlopPx` | `longPressed`, answered |
 | `pressed` | `up` | inside `tapSlopPx` | `idle`: every `onTap` listener runs, then `Tappable` is answered. A `Touchable` view without `Tappable` answers nothing |
@@ -120,6 +124,10 @@ One active pointer. A sample of any other pointer is dropped while a pointer is 
 | `longPressed` | `up` | | `idle`: the release of a long press is not a tap |
 | `dragging` | `up` | | `idle`, released |
 | `dragging` | frame | the held view is `Exiting` or gone | `idle`, given up |
+| `dragging` | frame | a carried view is `Exiting` or gone | `dragging`: that view is let go, the drag goes on |
+| `tracing` | `move` | | `tracing`: the segment is sampled, the path reduced, `Traced` moves |
+| `tracing` | `up` | | `idle`: the segment to the release point is sampled, the path answered, `Traced` cleared, `flow.gate.pointer(false)` |
+| `tracing` | frame | a cell of the path is `Exiting` or gone | `idle`, no answer |
 | any but `idle` | `cancel` | `pointercancel` or a lost capture | `idle`, no answer |
 
 A view tagged `Exiting` — in the despawn queue, playing its exit — is never pressed, hovered or dropped on. A view with only a `DropTarget` takes no press; a view with only `Touchable` does.
@@ -157,6 +165,20 @@ Every queued sample calls `time.wake()`, so a finger on the screen always runs a
 | release | both components read NOW; the rest scale is written back; a view that left a parent is hung back under it; with a target: `flow.gate.answer(dropAnswer(...))`. Then always, in this order: `unmute()`; `settle(entity)`, always: an accepted answer may still be refused by the node with no state change, and a commit that follows retargets from where the view is; `lift(entity, false)`; the tags go; `flow.gate.pointer(false)` |
 | abort | the held view is `Exiting` or gone: `unmute()`, a view that still exists gets the rest scale back and, when it left a parent, is hung back under it, the tags go, `flow.gate.pointer(false)`. No answer, no `settle`, no `lift(false)`: the exit motion and its layer belong to the projection |
 
+### A carried stack
+
+`Draggable({ payload: { from: "c7" }, carry: ["c8", "c9"] })` takes the cards on top of a solitaire card along. The keys belong to the projection of the held view and are resolved once, at the grab. A key with no live view, the held view's own key and a view with no `Transform` are skipped with one warning each (`input: carried key has no view`); the rest is carried. Only the held view carries `Held`.
+
+| Step | Order |
+|---|---|
+| grab | tag `Held` → rest scale → the held view leaves its parent → **each carried view**: its parent is remembered, its root pose is muted (`x`, `y`, `rotation`, `scale`), it hangs under the held view at the local pose that keeps it in place → `heldScale` → mute and `lift` the held view → `flow.gate.pointer(true)` → grab offset |
+| move | one `Transform` write per frame, on the held view; the carried views ride in its wrapper and in the lift layer, with no write and no `lift` call |
+| hover and drop lookup | skip the held view AND every carried view: a carried view hangs under the held one and is hit before it where they overlap |
+| release | target and components read → rest scale back → **each carried view leaves the held view** at its root pose, is hung back under its old parent and is lifted → the held view is hung back → answer → `unmute` held, then each carried view → `settle` held, then each → `lift(false)` held, then each → tags, `flow.gate.pointer(false)` |
+| abort | each carried view leaves the held view first, is unmuted and, when it stays on the board, sent home; then the held steps above |
+
+A carried view must leave the held view before its `settle`: settled while still parented, its root rest reads as a local pose under the held view and it lands at rest plus the held rest. The cancel, a lost capture, a paused and a fast world send the whole stack home with one settle duration. A carried view that leaves mid-drag is let go and the drag goes on. `dropAnswer` and `app.input.drag(from, to)` are unchanged: the carried keys are not in the answer.
+
 ### A view with a parent
 
 A view hosted inside another entity, such as a board inside a `ui` slot, is carried in root space. At the grab the parent is remembered, the root pose (`rootPoseOf` of `renderer`) is written into the `Transform` and the `Parent` is removed. The finger then moves the view 1:1 whatever the scale of the slot, and `lift` reaches the lift layer, which `renderer` ignores under a `Parent`. The mute covers `x`, `y`, `rotation` and `scale`, so no motion writes a parent-local value into the root pose. On the release, the cancel and the abort, the `Parent` comes back with `localPoseOf(parent, current root pose)`, so the motion home starts under the finger. A parent that left the world meanwhile is forgotten and the view keeps its root pose. `Held` stays on the view for the whole drag: `ui` does not re-host a held view.
@@ -172,6 +194,21 @@ A timeline step of `anim` does not read the mute. A game whose look tween may st
 createApp({ plugins: [...screen], pluginConfigs: { input: { heldScale: 1.08 } } });
 ```
 
+## The trace
+
+`Traceable({ intent: "word", payload: { cell: "b3" } })` on every cell of a word grid. The finger goes down on a cell, goes through its neighbours and lets go: one answer, `{ intent: "word", payload: { path: [{ cell: "b3" }, { cell: "c3" }, { cell: "d3" }] } }`. A down and an up on one cell is a path of one.
+
+| Rule | What happens |
+|---|---|
+| hit test | `renderer.sync.hitTest`, never a Pixi event. The first cell is the one the press found with its full box; every later cell takes a sample only inside a circle of radius `traceInset` × the short side of `renderer.sync.hitBoxOf(cell)`, at the box centre, so a diagonal crosses no corner of a neighbour |
+| segment | the frame keeps only the last move, so the segment from the previous frame point is sampled every `traceStepPx` and each sample is hit-tested. Keep the step below the shortest cell span |
+| path | the last cell: nothing; the cell before the last: the last one pops (`Traced` goes); an older cell: ignored; a new cell: appended (`Traced` lands); a gap: nothing |
+| one intent | a cell of another intent closes the path with one warning (`input: trace mixes intents`). A closed path neither grows nor pops; the release still answers it |
+| release | every cell's `Traceable` is read now, in path order, and answered once through `traceAnswer`, the function `app.input.trace` uses too |
+| no answer | a cancel, a lost capture, a paused or fast world, a cell of the path that leaves: `Traced` is cleared, `flow.gate.pointer(false)` |
+
+`flow.gate.pointer(true)` lasts from the down to the release, as for a drag. No device clock: the segment is pure math on reference points.
+
 The grab never reads the gate: a gate that closes for a moment on a transit node does not cancel a running drag. `unmute()` comes before `settle`, otherwise the settle motion could not write the position. A release at a closed gate returns `false` and the view starts to settle; when the gate opens inside that frame and takes the answer, the projection retargets the motion from the current values, so the item is not lost and nothing jumps. `flow.gate.pointer(true)` lasts from grab to release, so an `over` node never appears mid-drag.
 
 ## Configuration
@@ -185,9 +222,13 @@ The grab never reads the gate: a gate that closes for a moment on a transit node
 | `swipeMaxMs` | `number` | `300` | Longest swipe, in ms of `time`, from pointer down to pointer up |
 | `cursor` | `{ control: string; idle: string }` | `{ control: "pointer", idle: "" }` | CSS cursor over a control and everywhere else |
 | `heldScale` | `number` | `1` | How much bigger than its rest size the view in the hand is drawn, from the grab to the release. `1` changes nothing |
+| `traceStepPx` | `number` | `32` | Reference px between two hit tests along the finger's path inside one frame of a trace |
+| `traceInset` | `number` | `0.4` | Radius of the trace hit circle, as a share of the short side of the cell's hit box |
 
 ```ts
 createApp({ plugins: [...screen], pluginConfigs: { input: { longPressMs: 300 } } });
+// a word grid with 40 px cells
+createApp({ plugins: [...screen], pluginConfigs: { input: { traceStepPx: 16 } } });
 ```
 
 ## Events
@@ -196,14 +237,16 @@ None. An answer goes down to `flow.gate` as a direct call; pointer work never go
 
 ## Doors
 
-`control.ts` holds two commands of the editor's write door, `@moku-labs/game/control`, dev builds
+`control.ts` holds three commands of the editor's write door, `@moku-labs/game/control`, dev builds
 only. Each goes through `app.input`, so the gate decides and the session stays clean (effect `route`).
 The tap command, `game.tap`, lives in ui, since it finds an element by its ui key; it reads a
-projection target with `readTarget` of this file.
+projection target with `readTarget` of `target.ts`, which holds no command, so an `/inspect` source
+reads a target without pulling command bodies into its bundle.
 
 | Key in `commands` | id | Input | Does |
 |---|---|---|---|
 | `drag` | `game.drag` | `{ from: "json", to: "json" }` | `input.drag(from, to)`, both `{ projection, key }` |
+| `trace` | `game.trace` | `{ path: "json" }` | `input.trace(path)`, a list of `{ projection, key }` |
 | `key` | `game.key` | `{ key: "string", shift: "boolean?" }` | `input.pressKey(key, { shift })` |
 
 ## Dependencies
@@ -215,14 +258,14 @@ projection target with `readTarget` of this file.
 | `time` | `onFrame("input", fn)`, `time.delta` of the callback, and `wake()` on every pointer sample |
 | `flow` | `gate.answer`, `gate.pointer` |
 | `world` | `ecs.get/set/add/remove/has/tag/untag/resource/mode`; `projection.mute/lift/settle/keyOf/entityOf/restOf`; the `Exiting` tag |
-| `renderer` | `sync.hitTest`, `viewport.toReference`, `host.canvas`, the `Transform` and `Parent` components, the pose helpers `rootPoseOf` and `localPoseOf` of `renderer/sync/pose` |
+| `renderer` | `sync.hitTest`, `sync.hitBoxOf`, `viewport.toReference`, `host.canvas`, the `Transform` and `Parent` components, the pose helpers `rootPoseOf` and `localPoseOf` of `renderer/sync/pose` |
 
 No `pixi.js` import: the canvas is a DOM element and hit tests go through `renderer`.
 
 ## Lifecycle
 
-`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`, and puts one `keydown` listener on `window`. The `pointerdown` listener calls `preventDefault()`: without it the compatibility `mousedown` blurs a text field right after an `onPointer` listener focused it. The engine uses no `click`, so nothing is lost. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the six listeners, the `keydown` listener, the frame callback, the `onTap`, `onKey` and `onPointer` listeners and a mute a drag still holds, and restores the touch action.
+`onInit` registers the frame step. `onStart` puts `pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture` and `pointerleave` on `renderer.host.canvas()` and sets `touch-action: none`, and puts one `keydown` listener on `window`. The `pointerdown` listener calls `preventDefault()`: without it the compatibility `mousedown` blurs a text field right after an `onPointer` listener focused it. The engine uses no `click`, so nothing is lost. Without a DOM the renderer has no canvas: nothing is attached, the plugin is inert, and `app.input.*` still answers the gate. `onStop` removes the six listeners, the `keydown` listener, the frame callback, the `onTap`, `onKey` and `onPointer` listeners and the mutes a drag still holds on the held view and on every carried view, forgets the path of a trace, and restores the touch action.
 
 ## Not in V2
 
-Pinch, gamepad, a second pointer, a dragged stack of cards (`Draggable({ carry })`) and a gesture through many entities.
+Pinch, gamepad and a second pointer.

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Exiting, Layer, Order } from "../../../world/ecs/define";
-import { Parent, Sprite, Transform } from "../../components";
+import { Parent, Shape, Sprite, Transform } from "../../components";
 import { FakeContainer, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
@@ -292,5 +292,170 @@ describe("sync hit test", () => {
 
     expect(mock.api.sync.hitTest(790, 590, anyEntity)).toBe(entity);
     expect(mock.api.sync.hitTest(810, 550, anyEntity)).toBeUndefined();
+  });
+});
+
+describe("sync hitAll", () => {
+  it("lists every view under the point, topmost first", async () => {
+    const mock = await started();
+    const cell = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 540, y: 300 }),
+      Sprite({ texture: "board.cell" })
+    ]);
+
+    // Four entities that draw nothing, so the coin gets index 5.
+    for (let index = 0; index < 4; index += 1) mock.world.ecs.spawn(owner, [Transform()]);
+
+    const coin = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 540, y: 300 }),
+      Sprite({ texture: "board.coin" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect([cell, coin]).toEqual([1_048_576, 1_048_581]);
+    expect(mock.api.sync.hitAll(540, 300)).toEqual([1_048_581, 1_048_576]);
+    expect(mock.api.sync.hitAll(20, 20)).toEqual([]);
+  });
+
+  it("walks the layers from the last one, as hitTest does", async () => {
+    const mock = await started([
+      { name: "board", sort: "none" },
+      { name: "items", sort: "none" }
+    ]);
+    const below = mock.world.ecs.spawn(owner, [
+      Layer({ name: "board" }),
+      Transform(),
+      Sprite({ texture: "a" })
+    ]);
+    const above = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitAll(0, 0)).toEqual([above, below]);
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(above);
+  });
+
+  it("skips a hidden view and keeps the one below it", async () => {
+    const mock = await started();
+    const below = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "a" })
+    ]);
+    const hidden = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const object = mock.ctx.state.sync.views.get(hidden)?.object;
+
+    if (object === undefined) throw new Error("the view is missing");
+
+    object.visible = false;
+
+    expect(mock.api.sync.hitAll(0, 0)).toEqual([below]);
+  });
+
+  it("skips a child outside the rectangle its clipping parent shows", async () => {
+    const mock = await started();
+    const panel = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 100, h: 100, clip: true })
+    ]);
+
+    mock.modules.sync.pass();
+
+    // The row's box spans x 58..122; the panel shows its children inside x 0..100 only.
+    const row = mock.world.ecs.spawn(owner, [
+      Transform({ x: 90, y: 50 }),
+      Sprite({ texture: "a" }),
+      Parent({ entity: panel })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitAll(110, 50)).toEqual([]);
+    expect(mock.api.sync.hitAll(95, 50)).toEqual([row, panel]);
+  });
+
+  it("answers a fresh empty list while inert and before a layer list exists", async () => {
+    const inert = createMockRenderer({ dom: false });
+
+    expect(inert.api.sync.hitAll(0, 0)).toEqual([]);
+
+    const mock = createMockRenderer();
+
+    await mock.start();
+
+    expect(mock.api.sync.hitAll(0, 0)).toEqual([]);
+    expect(mock.api.sync.hitAll(0, 0)).not.toBe(mock.api.sync.hitAll(0, 0));
+  });
+});
+
+describe("sync hitBoxOf", () => {
+  it("answers the local box of a sprite view: the anchor applied, no transform", async () => {
+    const mock = await started();
+    const cell = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 540, y: 300, rotation: Math.PI / 4, scale: 2 }),
+      Sprite({ texture: "board.cell" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitBoxOf(cell)).toEqual({ x: -32, y: -32, width: 64, height: 64 });
+  });
+
+  it("answers the box of a ui box view from its top-left corner", async () => {
+    const mock = await started();
+    const button = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 100, y: 200 }),
+      Shape({ w: 200, h: 80 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitBoxOf(button)).toEqual({ x: 0, y: 0, width: 200, height: 80 });
+  });
+
+  it("answers undefined for an entity without a view", async () => {
+    const mock = await started();
+    const bare = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform()]);
+
+    mock.modules.sync.pass();
+
+    expect(mock.api.sync.hitBoxOf(bare)).toBeUndefined();
+    expect(mock.api.sync.hitBoxOf(42)).toBeUndefined();
+  });
+
+  it("answers a copy, so a caller cannot move the box hitTest tests", async () => {
+    const mock = await started();
+    const cell = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite({ texture: "a" })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const box = mock.api.sync.hitBoxOf(cell);
+
+    if (box === undefined) throw new Error("the box is missing");
+
+    box.x = 1000;
+
+    expect(mock.api.sync.hitTest(0, 0, anyEntity)).toBe(cell);
   });
 });

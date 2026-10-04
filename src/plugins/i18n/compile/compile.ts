@@ -1,16 +1,21 @@
 /**
- * @file i18n plugin, build time — the walk over `features/*​/strings/<locale>.json` and the two
- * generated modules it writes. Every problem of a run is collected and reported in one error, so
- * a game fixes its messages in one round. Node and Bun only: nothing under `src/` outside this
- * folder and `src/assets.ts` imports it, so no game bundles the ICU parser.
+ * @file i18n plugin, build time — `compileStrings`: the walk over `features/*​/strings/<locale>.json`
+ * turned into the generated modules, and on request the pseudo-locale `en-XA` derived from English.
+ * Every problem of a run is collected and reported in one error, so a game fixes its messages in
+ * one round. Node and Bun only: nothing under `src/` outside this folder and `src/assets.ts`
+ * imports it, so no game bundles the ICU parser.
  */
-import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { emitLocale, emitTypes, type LocaleEntry, type TypeEntry, writeIfChanged } from "./emit";
-import { compileMessage, type ParameterType } from "./message";
+import { compileElements, type ParameterType, parseMessage } from "./message";
+import { pseudoMessage } from "./pseudo";
+import { compileFailure, listStringFiles, PREFIX, type Walk, walkStrings } from "./walk";
 
-/** How every problem of this compiler is prefixed. */
-const PREFIX = "[game] i18n: ";
+/** The locale the pseudo-locale is derived from. */
+const PSEUDO_SOURCE = "en";
+
+/** The pseudo-locale `--pseudo` writes. */
+const PSEUDO_LOCALE = "en-XA";
 
 /**
  * What one compile produced.
@@ -18,7 +23,7 @@ const PREFIX = "[game] i18n: ";
 export type CompileReport = {
   /** True when an output on disk differs from what the compile produced. */
   changed: boolean;
-  /** Every locale a feature brought a file for, sorted. */
+  /** Every locale a feature brought a file for, and `en-XA` with `pseudo`, sorted. */
   locales: readonly string[];
   /** Every message key, sorted. */
   keys: readonly string[];
@@ -34,272 +39,71 @@ export type CompileOptions = {
   check?: boolean;
   /** Name of the folder that holds the features. Default `"features"`. */
   features?: string;
-};
-
-/** Where one message came from. */
-type Source = { feature: string; locale: string; relative: string };
-
-/** One parameter of one key, with the file that first typed it that way. */
-type ParameterOrigin = { type: ParameterType; relative: string };
-
-/** Everything one compile collects. */
-type Walk = {
-  /** Compiled messages per locale. */
-  byLocale: Map<string, LocaleEntry[]>;
-  /** The feature and the file that first declared each key. */
-  owner: Map<string, Source>;
-  /** The merged parameters of each key. */
-  params: Map<string, Map<string, ParameterOrigin>>;
-  problems: string[];
+  /** True to also write `strings.en-XA.ts`, the pseudo-locale, from the `"en"` messages. */
+  pseudo?: boolean;
 };
 
 /**
- * Creates the table of compiled messages per locale. Its own function because lint rule L5
- * refuses a collection built inside an exported declaration.
+ * Wraps a pseudo run without English in the message shape of the framework.
  *
- * @returns An empty table.
- */
-function emptyLocales(): Map<string, LocaleEntry[]> {
-  return new Map();
-}
-
-/**
- * Creates the table of which feature owns which key.
- *
- * @returns An empty table.
- */
-function emptyOwners(): Map<string, Source> {
-  return new Map();
-}
-
-/**
- * Creates the table of merged parameters per key.
- *
- * @returns An empty table.
- */
-function emptyParameters(): Map<string, Map<string, ParameterOrigin>> {
-  return new Map();
-}
-
-/**
- * Reads the message of anything that was thrown.
- *
- * @param error - What the `catch` caught.
- * @returns The message.
- */
-function detailOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Collects every problem of a compile into one error.
- *
- * @param problems - The problems, in walk order.
  * @returns The error to reject with.
  */
-function collected(problems: readonly string[]): Error {
-  const only = problems[0];
-
-  if (problems.length === 1 && only !== undefined) {
-    return new Error(`${PREFIX}${only}\n  Fix the message or use a supported ICU feature.`);
-  }
-
-  const lines = problems.map(text => `  ${text}`).join("\n");
-
+function pseudoNeedsEnglish(): Error {
   return new Error(
-    `${PREFIX}the compile found ${problems.length} problems.\n${lines}\n` +
-      '  Fix them and run "bun run assets:keys" again.'
+    `${PREFIX}"--pseudo" needs an "en" string file in at least one feature.\n` +
+      '  Add features/<feature>/strings/en.json or drop "--pseudo".'
   );
 }
 
 /**
- * Lists the sub-folders of a folder that may not exist.
+ * Tells whether at least one feature brings a string file for a locale.
  *
- * @param folder - Path of the folder.
- * @returns The names, sorted.
+ * @param root - Game source root, the folder that holds the features.
+ * @param features - Name of the folder that holds the features.
+ * @param locale - The locale to look for.
+ * @returns True when a feature has `strings/<locale>.json`.
  */
-async function listFolders(folder: string): Promise<string[]> {
-  try {
-    const entries = await readdir(folder, { withFileTypes: true });
+async function bringsLocale(root: string, features: string, locale: string): Promise<boolean> {
+  const files = await listStringFiles(root, features);
 
-    return entries
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name)
-      .toSorted();
-  } catch {
-    return [];
-  }
+  return files.some(file => file.locale === locale);
 }
 
 /**
- * Lists the locales one feature brought, by the names of its string files.
+ * Derives the pseudo message of every English message. Each one compiled already in the walk, so
+ * nothing here can fail.
  *
- * @param folder - Path of the `strings` folder.
- * @returns The locale names, sorted.
+ * @param walk - What the walk collected.
+ * @returns One entry per English key.
  */
-async function listLocales(folder: string): Promise<string[]> {
-  try {
-    const entries = await readdir(folder, { withFileTypes: true });
+function pseudoEntries(walk: Walk): LocaleEntry[] {
+  const entries: LocaleEntry[] = [];
 
-    return entries
-      .filter(entry => entry.isFile() && entry.name.endsWith(".json"))
-      .map(entry => entry.name.slice(0, -".json".length))
-      .toSorted();
-  } catch {
-    return [];
+  for (const [key, texts] of walk.texts) {
+    const english = texts.get(PSEUDO_SOURCE);
+
+    if (english === undefined) continue;
+
+    entries.push({ key, compiled: compileElements(pseudoMessage(parseMessage(english))) });
   }
+
+  return entries;
 }
 
 /**
- * Reads one string file as a flat table of key to message.
+ * The locale modules one compile writes: what the features brought, and the pseudo-locale derived
+ * from English on request.
  *
- * @param file - Path of the file.
- * @param relative - The path a problem names it by.
- * @param walk - What the compile collects.
- * @returns The table, or `undefined` when the file is a problem.
+ * @param walk - What the walk collected.
+ * @param pseudo - Whether the pseudo-locale is written too.
+ * @returns The compiled messages per locale.
  */
-async function readTable(
-  file: string,
-  relative: string,
-  walk: Walk
-): Promise<Record<string, unknown> | undefined> {
-  try {
-    const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
+function localeModules(walk: Walk, pseudo: boolean): Map<string, LocaleEntry[]> {
+  const modules = new Map(walk.byLocale);
 
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      walk.problems.push(`${relative}: a string file is an object of key to message.`);
+  if (pseudo) modules.set(PSEUDO_LOCALE, pseudoEntries(walk));
 
-      return undefined;
-    }
-
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    walk.problems.push(`${relative} could not be read: ${detailOf(error)}.`);
-
-    return undefined;
-  }
-}
-
-/**
- * Records which feature owns a key, refusing the same key in two features.
- *
- * @param walk - What the compile collects.
- * @param key - The message key.
- * @param source - Where this message came from.
- * @returns True when the key belongs to this feature.
- */
-function claim(walk: Walk, key: string, source: Source): boolean {
-  const known = walk.owner.get(key);
-
-  if (known === undefined) {
-    walk.owner.set(key, source);
-
-    return true;
-  }
-
-  if (known.feature === source.feature) return true;
-
-  walk.problems.push(`the key "${key}" is in ${known.relative} and ${source.relative}.`);
-
-  return false;
-}
-
-/**
- * Sorts option names and drops the repeats.
- *
- * @param options - The option names of one select, from any number of locales.
- * @returns The names, unique and sorted.
- * @example
- * ```ts
- * unique(["language", "audio", "audio"]); // ["audio", "language"]
- * ```
- */
-function unique(options: readonly string[]): string[] {
-  return [...new Set(options)].toSorted();
-}
-
-/**
- * Creates the parameter table of one key.
- *
- * @returns An empty table.
- */
-function emptyOrigins(): Map<string, ParameterOrigin> {
-  return new Map();
-}
-
-/**
- * Merges the parameters one locale read for a key into what the other locales read.
- *
- * @param walk - What the compile collects.
- * @param key - The message key.
- * @param params - What this locale read.
- * @param relative - The file this locale came from.
- */
-function mergeParameters(
-  walk: Walk,
-  key: string,
-  params: Record<string, ParameterType>,
-  relative: string
-): void {
-  const merged = walk.params.get(key) ?? emptyOrigins();
-
-  walk.params.set(key, merged);
-
-  for (const [name, type] of Object.entries(params)) {
-    const known = merged.get(name);
-
-    if (known === undefined) {
-      merged.set(name, { type, relative });
-      continue;
-    }
-
-    if (known.type.kind !== type.kind) {
-      walk.problems.push(
-        `"${key}": the parameter "${name}" is a ${known.type.kind} in ${known.relative} ` +
-          `and a ${type.kind} in ${relative}.`
-      );
-      continue;
-    }
-
-    if (known.type.kind === "select" && type.kind === "select") {
-      merged.set(name, {
-        type: {
-          kind: "select",
-          options: unique([...known.type.options, ...type.options])
-        },
-        relative: known.relative
-      });
-    }
-  }
-}
-
-/**
- * Compiles one message into the locale it belongs to.
- *
- * @param walk - What the compile collects.
- * @param key - The message key.
- * @param text - The message.
- * @param source - Where this message came from.
- */
-function compileOne(walk: Walk, key: string, text: unknown, source: Source): void {
-  if (typeof text !== "string") {
-    walk.problems.push(`"${key}" in ${source.relative}: a message must be a string.`);
-
-    return;
-  }
-
-  if (!claim(walk, key, source)) return;
-
-  try {
-    const compiled = compileMessage(text);
-    const entries = walk.byLocale.get(source.locale) ?? [];
-
-    entries.push({ key, compiled });
-    walk.byLocale.set(source.locale, entries);
-    mergeParameters(walk, key, compiled.params, source.relative);
-  } catch (error) {
-    walk.problems.push(`"${key}" in ${source.relative}: ${detailOf(error)}.`);
-  }
+  return modules;
 }
 
 /**
@@ -351,18 +155,22 @@ function typeEntries(walk: Walk): TypeEntry[] {
 
 /**
  * Walks `features/*​/strings/<locale>.json` of a game, compiles every message and writes the
- * generated modules: the types module `strings.ts` and one `strings.<locale>.ts` per locale. A
- * check run writes nothing and only reports whether something would change.
+ * generated modules: the types module `strings.ts` and one `strings.<locale>.ts` per locale, plus
+ * `strings.en-XA.ts` with `pseudo`. A check run writes nothing and only reports whether something
+ * would change; it checks `strings.en-XA.ts` only with `pseudo`.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param out - The generated directory the modules are written into.
- * @param options - Whether this is a check run, and what the features folder is called.
+ * @param options - Whether this is a check run, what the features folder is called, and whether
+ *   the pseudo-locale is written.
  * @returns Whether an output differed, the locales, the keys and the notes.
- * @throws {Error} One error that lists every problem the compile found.
+ * @throws {Error} One error that lists every problem the compile found, or the pseudo error when
+ *   no feature brings an `en` string file.
  * @example
  * ```ts
- * const report = await compileStrings("src", "src/generated");
- * // report.locales: ["en", "ru"], report.changed: true on the first run
+ * // A dev build also writes the pseudo-locale, derived from the English messages.
+ * const report = await compileStrings("src", "src/generated", { pseudo: true });
+ * // report.locales: ["en", "en-XA", "ru"], report.changed: true on the first run
  * ```
  */
 export async function compileStrings(
@@ -370,46 +178,32 @@ export async function compileStrings(
   out: string,
   options: CompileOptions = {}
 ): Promise<CompileReport> {
-  // Collect every message from the string tables of every feature.
-  const walk: Walk = {
-    byLocale: emptyLocales(),
-    owner: emptyOwners(),
-    params: emptyParameters(),
-    problems: []
-  };
-  const featuresFolder = path.join(root, options.features ?? "features");
+  const features = options.features ?? "features";
+  const pseudo = options.pseudo === true;
 
-  for (const feature of await listFolders(featuresFolder)) {
-    const stringsFolder = path.join(featuresFolder, feature, "strings");
+  // The pseudo-locale is derived from English: without it, refuse before reading a message.
+  if (pseudo && !(await bringsLocale(root, features, PSEUDO_SOURCE))) throw pseudoNeedsEnglish();
 
-    for (const locale of await listLocales(stringsFolder)) {
-      const relative = `features/${feature}/strings/${locale}.json`;
-      const table = await readTable(path.join(stringsFolder, `${locale}.json`), relative, walk);
+  // Collect every message of every feature, and fail once with every problem the walk found.
+  const walk = await walkStrings(root, features);
 
-      if (table === undefined) continue;
-
-      for (const [key, text] of Object.entries(table)) {
-        compileOne(walk, key, text, { feature, locale, relative });
-      }
-    }
-  }
-
-  // Fail once, with every problem the walk found.
-  if (walk.problems.length > 0) throw collected(walk.problems);
+  if (walk.problems.length > 0) throw compileFailure(walk.problems);
 
   // Derive the locales and the keys. Without a locale there is nothing to emit.
-  const locales = [...walk.byLocale.keys()].toSorted();
+  const brought = [...walk.byLocale.keys()].toSorted();
   const keys = [...walk.owner.keys()].toSorted();
 
-  if (locales.length === 0) return { changed: false, locales, keys, notes: [] };
+  if (brought.length === 0) return { changed: false, locales: brought, keys, notes: [] };
 
-  // Build the types module and one module per locale.
+  // Build the types module and one module per locale, the pseudo-locale included on request.
+  const modules = localeModules(walk, pseudo);
+  const locales = [...modules.keys()].toSorted();
   const write = options.check !== true;
   const outputs = [
     { file: path.join(out, "strings.ts"), text: emitTypes(typeEntries(walk)) },
     ...locales.map(locale => ({
       file: path.join(out, `strings.${locale}.ts`),
-      text: emitLocale(walk.byLocale.get(locale) ?? [])
+      text: emitLocale(modules.get(locale) ?? [])
     }))
   ];
   let changed = false;
@@ -419,7 +213,7 @@ export async function compileStrings(
     changed = (await writeIfChanged(output.file, output.text, write)) || changed;
   }
 
-  return { changed, locales, keys, notes: missingNotes(walk, locales) };
+  return { changed, locales, keys, notes: missingNotes(walk, brought) };
 }
 
 /**

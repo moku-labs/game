@@ -139,9 +139,39 @@ describe("renderer plugin integration", () => {
 
     app.time.step(16);
 
-    await expect(capture).resolves.toBe(FAKE_PNG);
+    await expect(capture).resolves.toEqual({ png: FAKE_PNG });
     expect(app.renderer.stats()).toMatchObject({ views: 1, pooled: 0 });
     expect(app.renderer.viewport.toScreen({ x: 1080, y: 0 }).x).toBeCloseTo(390, 6);
+
+    await app.stop();
+  });
+
+  it("hands a waiting capture its PNG when the game pauses before the next frame", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    installFakeDom({ width: 390, height: 844 });
+    const pixi = createFakePixi();
+
+    const app = createApp({
+      plugins: [worldPlugin, rendererPlugin, boardFeature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        model: {
+          initialPlayer: { items: [{ id: "a", level: 1, x: 0 }] },
+          initialSession: { moves: 0 },
+          seed: 1
+        },
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+      }
+    });
+
+    await app.start();
+
+    const capture = app.renderer.capture();
+
+    // The editor's pause button: no frame comes after it.
+    app.lifecycle.push("devtools");
+
+    await expect(capture).resolves.toEqual({ png: FAKE_PNG });
 
     await app.stop();
   });

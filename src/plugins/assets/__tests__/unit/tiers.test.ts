@@ -53,6 +53,52 @@ const mixedManifest: Manifest = {
   }
 };
 
+/** A bundle of four sounds: an `.mp3` and an `.m4a` of a dev build, two hashed ones of a pack. */
+const soundsManifest: Manifest = {
+  version: 2,
+  bundles: {
+    ui: {
+      feature: "ui",
+      tier: "scene",
+      mb: 0.04,
+      files: [
+        {
+          key: "ui.click",
+          path: "features/ui/assets/click.mp3",
+          kind: "audio",
+          width: 0,
+          height: 0,
+          mb: 0.01
+        },
+        {
+          key: "ui.horn",
+          path: "features/ui/assets/HORN.M4A",
+          kind: "audio",
+          width: 0,
+          height: 0,
+          mb: 0.01
+        },
+        {
+          key: "ui.pop",
+          path: "ui/ui.pop-5e0a71bd42.mp3",
+          kind: "audio",
+          width: 0,
+          height: 0,
+          mb: 0.01
+        },
+        {
+          key: "ui.theme",
+          path: "ui/ui.theme-9c4e2b7a10.m4a",
+          kind: "audio",
+          width: 0,
+          height: 0,
+          mb: 0.01
+        }
+      ]
+    }
+  }
+};
+
 /**
  * Lets the microtask queue run, so a started-but-not-awaited load reaches its first fetch.
  *
@@ -439,6 +485,27 @@ describe("loadBundle of a packed bundle", () => {
     expect(mock.io.sliced).toEqual([]);
     expect(mock.ctx.state.records.get("ui")?.status).toBe("idle");
     expect(mock.log.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadBundle of sounds", () => {
+  it("keeps each sound as its fetched bytes and the MIME type of its container", async () => {
+    const mock = createMockAssets({ manifest: soundsManifest });
+
+    mock.io.bodies.set("/features/ui/assets/click.mp3", new Uint8Array([1, 2, 3]).buffer);
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "ui", undefined, "request");
+
+    const audio = mock.ctx.state.records.get("ui")?.audio;
+    const click = audio?.get("ui.click");
+
+    expect(click).toEqual({ bytes: expect.any(ArrayBuffer), mime: "audio/mpeg" });
+    expect([...new Uint8Array(click?.bytes ?? new ArrayBuffer(0))]).toEqual([1, 2, 3]);
+    // An upper-case extension is the same container.
+    expect(audio?.get("ui.horn")?.mime).toBe("audio/mp4");
+    // A hashed name of the packer keeps the extension, so it keeps the type.
+    expect(audio?.get("ui.pop")?.mime).toBe("audio/mpeg");
+    expect(audio?.get("ui.theme")?.mime).toBe("audio/mp4");
   });
 });
 

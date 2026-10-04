@@ -7,7 +7,8 @@ import type { Log } from "@moku-labs/common/browser";
 import { type Mock, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Answer, Api as FlowApi } from "../../../flow/types";
-import type { Api as RendererApi } from "../../../renderer/types";
+import { Transform } from "../../../renderer/components";
+import type { HitBox, Api as RendererApi } from "../../../renderer/types";
 import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/types";
 import type {
   AnyComponentType,
@@ -67,6 +68,11 @@ export type MockInput = {
   wake: Mock<() => void>;
   /** Every call the plugin made into `world.projection`, `world.ecs` and `flow.gate`, in order. */
   calls: string[];
+  /**
+   * The same calls into `world.ecs` and `world.projection`, each with the entity it touched:
+   * `"set:Transform:3"`, `"mute:3"`, `"unmute:3"`, `"settle:3"`, `"lift:true:3"`.
+   */
+  trail: string[];
   /** The fields of every `world.projection.mute` call, in order. */
   muted: Array<readonly string[]>;
   answers: Answer[];
@@ -79,8 +85,14 @@ export type MockInput = {
   spawn(values: readonly AnyComponentValue[], key?: { projection: string; key: string }): Entity;
   /** Gives an existing entity one more component, the way a commit or a reconcile would. */
   attachTo(entity: Entity, value: AnyComponentValue): void;
-  /** Records what `world.projection.restOf` answers for one component of an entity. */
+  /**
+   * Records what `world.projection.restOf` answers for one component of an entity. A `settle`
+   * of that entity then writes the recorded `Transform` rest into its `Transform`, as the settle
+   * motion lands.
+   */
   setRest(entity: Entity, value: AnyComponentValue): void;
+  /** Records what `renderer.sync.hitBoxOf` answers for an entity, in its local units. */
+  setHitBox(entity: Entity, box: HitBox): void;
   kill(entity: Entity): void;
   read(entity: Entity, component: AnyComponentType): object | true | undefined;
   has(entity: Entity, component: AnyComponentType): boolean;
@@ -177,6 +189,8 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     swipeMaxMs: 300,
     heldScale: 1,
     cursor: { control: "pointer", idle: "" },
+    traceStepPx: 32,
+    traceInset: 0.4,
     ...options
   };
   const state = createInputState({ config });
@@ -188,6 +202,8 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
   const keys = new Map<Entity, { projection: string; key: string }>();
   const rests = new Map<Entity, Map<string, object>>();
   const calls: string[] = [];
+  const trail: string[] = [];
+  const hitBoxes = new Map<Entity, HitBox>();
   const muted: Array<readonly string[]> = [];
   const answers: Answer[] = [];
   const gate = { open: true };
@@ -213,24 +229,29 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
 
       store.set(component.componentName, { ...current, ...patch });
       calls.push(`set:${component.componentName}`);
+      trail.push(`set:${component.componentName}:${String(entity)}`);
     },
     add: (entity: Entity, value: AnyComponentValue): void => {
       stores.get(entity)?.set(value.type.componentName, value.value);
       calls.push(`add:${value.type.componentName}`);
+      trail.push(`add:${value.type.componentName}:${String(entity)}`);
     },
     remove: (entity: Entity, component: AnyComponentType): void => {
       stores.get(entity)?.delete(component.componentName);
       calls.push(`remove:${component.componentName}`);
+      trail.push(`remove:${component.componentName}:${String(entity)}`);
     },
     has: (entity: Entity, component: AnyComponentType): boolean =>
       stores.get(entity)?.has(component.componentName) ?? false,
     tag: (entity: Entity, tagType: TagType): void => {
       stores.get(entity)?.set(tagType.componentName, true);
       calls.push(`tag:${tagType.componentName}`);
+      trail.push(`tag:${tagType.componentName}:${String(entity)}`);
     },
     untag: (entity: Entity, tagType: TagType): void => {
       stores.get(entity)?.delete(tagType.componentName);
       calls.push(`untag:${tagType.componentName}`);
+      trail.push(`untag:${tagType.componentName}:${String(entity)}`);
     },
     resource: (resourceType: ResourceType<object>): object => {
       const existing = resources.get(resourceType.resourceName);
@@ -256,20 +277,34 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
       return undefined;
     },
     mute: (
-      _entity: Entity,
+      entity: Entity,
       _component: AnyComponentType,
       fields: readonly string[]
     ): (() => void) => {
       calls.push("mute");
+      trail.push(`mute:${String(entity)}`);
       muted.push(fields);
 
-      return () => calls.push("unmute");
+      return () => {
+        calls.push("unmute");
+        trail.push(`unmute:${String(entity)}`);
+      };
     },
-    lift: (_entity: Entity, on: boolean): void => {
+    lift: (entity: Entity, on: boolean): void => {
       calls.push(`lift:${String(on)}`);
+      trail.push(`lift:${String(on)}:${String(entity)}`);
     },
-    settle: (): void => {
+    settle: (entity: Entity): void => {
       calls.push("settle");
+      trail.push(`settle:${String(entity)}`);
+
+      const store = stores.get(entity);
+      const current = store?.get(Transform.componentName);
+      const rest = rests.get(entity)?.get(Transform.componentName);
+
+      if (store !== undefined && typeof current === "object" && rest !== undefined) {
+        store.set(Transform.componentName, { ...current, ...rest });
+      }
     },
     restOf: (entity: Entity, component: AnyComponentType): object | undefined =>
       rests.get(entity)?.get(component.componentName)
@@ -292,6 +327,11 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
         }
 
         return undefined;
+      },
+      hitBoxOf: (entity: Entity): HitBox | undefined => {
+        const box = hitBoxes.get(entity);
+
+        return box === undefined ? undefined : { ...box };
       }
     }
   } as unknown as RendererApi;
@@ -358,6 +398,7 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
     time,
     wake,
     calls,
+    trail,
     muted,
     answers,
     gate,
@@ -385,6 +426,9 @@ export function createMockInput(options: Partial<Config> = {}): MockInput {
 
       table.set(value.type.componentName, value.value as object);
       rests.set(entity, table);
+    },
+    setHitBox: (entity, box) => {
+      hitBoxes.set(entity, { ...box });
     },
     kill: entity => {
       stores.delete(entity);

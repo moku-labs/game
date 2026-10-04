@@ -262,7 +262,7 @@ describe("timber-popups — the sawmill says why", () => {
 
     expect(game.app.flow.state().path).toBe("board/energy");
     // The wait sits on its own line of the parchment chip (design §6 E4).
-    expect(resolvedOf(game, "energyRefill")).toBe("Пополнится через\n10:00");
+    expect(resolvedOf(game, "energyRefill")).toBe("Пополнится через\n10 мин 0 с");
 
     await tap(game, "energyWatch");
     await frames(game, 30);
@@ -363,7 +363,7 @@ describe("timber-popups — the daily gift", () => {
     await frames(game, 90);
 
     expect(coinsInFlight(game)).toBe(0);
-    expect(counterOf(game)).toBe("50");
+    expect(counterOf(game, "homeCoinsText")).toBe("50");
 
     await game.app.stop();
   });

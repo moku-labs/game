@@ -1,7 +1,7 @@
 /**
  * @file The HUD row of the board (design §6 B1, F4): the round home button, the coin pill, the
- * energy pill and the round gear, spread across one row under the top safe edge. The coin pill hosts the counter
- * projection, so its number rolls in place; the energy is plain words, "7/10".
+ * energy pill and the round gear, spread across one row under the top safe edge. The text of the
+ * coin pill is the counter, so its number rolls in place; the energy is plain words, "7/10".
  */
 import { HudPill, RoundButton } from "../ui/kit";
 import { hudRow } from "./styles";
@@ -21,14 +21,15 @@ export type EnergyView = { value: number; max: number };
  * the board's rest node.
  *
  * @param props - What the row shows.
+ * @param props.coins - The coins of the save, which the counter rolls to.
  * @param props.energy - The energy of the save.
  * @returns The row element.
  */
-export function HudRow(props: { energy: EnergyView }) {
+export function HudRow(props: { coins: number; energy: EnergyView }) {
   return (
     <row key="hudRow" style={hudRow}>
       <RoundButton id="home" intent="leave" icon="ui.icon-home" />
-      <HudPill id="coinPill" icon="ui.icon-coin" hosts={["hud.coins"]} width="wide" />
+      <HudPill id="coinPill" icon="ui.icon-coin" coins={props.coins} width="wide" />
       <HudPill
         id="energyPill"
         icon="ui.icon-energy"

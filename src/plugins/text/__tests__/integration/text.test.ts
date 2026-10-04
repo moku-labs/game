@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createApp, defineGame, exit, screen, tr, type } from "../../../../index";
+import { fakeClock } from "../../../clock/fake";
+import type { FakeClock } from "../../../clock/types";
 import type { CompiledMessages } from "../../../i18n/types";
 import { component } from "../../../world/ecs/define";
 import { projection } from "../../../world/projection/define";
-import { defineTextStyles, label, Text } from "../../components";
+import { bind, Countdown, defineTextStyles, label, Text } from "../../components";
 
 // ---------------------------------------------------------------------------
 // Integration: the real time, lifecycle, model, clock, flow, world, an inert
@@ -12,7 +14,8 @@ import { defineTextStyles, label, Text } from "../../components";
 // ---------------------------------------------------------------------------
 
 type Bonus = { id: string; amount: number };
-type Player = { bonuses: Bonus[]; coins: number };
+type Chest = { id: string; opensAt: number };
+type Player = { bonuses: Bonus[]; coins: number; chestOpensAt: number };
 type Session = { visits: number };
 
 type Strings = { "board.bonus": { n: number } };
@@ -58,6 +61,21 @@ const boardBonuses = projection({
     })
 });
 
+/** The moment the fake clock starts at. */
+const START = 1_000_000;
+
+/** The chest timer of the board: a Countdown to the moment the chest opens, and its label. */
+const boardChest = projection({
+  name: "board.chest",
+  layer: "items",
+  from: (player: Player): Chest[] => [{ id: "chest", opensAt: player.chestOpensAt }],
+  key: (chest: Chest) => chest.id,
+  view: (chest: Chest) => [
+    Countdown({ until: chest.opensAt }),
+    Text({ style: "digits", bind: bind(Countdown, "left", { format: "h:mm:ss" }) })
+  ]
+});
+
 const home = defineNode({ rest: true, outcomes: { quit: type() } });
 
 const main = defineFlow("main", {
@@ -69,7 +87,7 @@ const main = defineFlow("main", {
 
 const boardFeature = defineFeature("board", {
   flows: [main],
-  projections: [boardBonuses],
+  projections: [boardBonuses, boardChest],
   textStyles: boardStyles,
   strings: { ru: russian, en: english }
 });
@@ -82,16 +100,22 @@ const tick = async (times = 40): Promise<void> => {
 /**
  * Starts the screen set plus `text` headless and mounts the board.
  *
+ * @param clock - The trusted time of the app.
  * @returns The started app.
  */
-async function startApp() {
+async function startApp(clock: FakeClock = fakeClock(START)) {
   const app = createApp({
     plugins: [...screen, boardFeature],
     pluginConfigs: {
+      clock: { source: clock },
       flow: { mainFlow: main },
       i18n: { locale: "ru", fallback: "ru" },
       model: {
-        initialPlayer: { bonuses: [{ id: "b1", amount: 5 }], coins: 0 },
+        initialPlayer: {
+          bonuses: [{ id: "b1", amount: 5 }],
+          coins: 0,
+          chestOpensAt: START + 3_661_000
+        },
         initialSession: { visits: 0 },
         seed: 1
       }
@@ -135,7 +159,7 @@ describe("text plugin integration", () => {
     const app = await startApp();
     const counter = app.world.ecs.spawn({ kind: "plugin", name: "test" }, [
       Counter({ value: 12.4 }),
-      Text({ style: "digits", bind: { component: "Counter", field: "value" } })
+      Text({ style: "digits", bind: bind(Counter, "value") })
     ]);
 
     app.time.step(16);
@@ -146,6 +170,34 @@ describe("text plugin integration", () => {
     app.time.step(16);
 
     expect(app.world.ecs.get(counter, Text)?.resolved).toBe("13");
+
+    await app.stop();
+  });
+
+  it("counts a projection's countdown down from one clock, and stops at zero", async () => {
+    const clock = fakeClock(START);
+    const app = await startApp(clock);
+
+    app.world.projection.mount(["board.chest"], { kind: "plugin", name: "test" });
+    app.time.step(16);
+
+    const chest = app.world.projection.entityOf("board.chest", "chest") ?? 0;
+
+    expect(app.world.ecs.get(chest, Text)?.resolved).toBe("1:01:01");
+    expect(app.world.ecs.get(chest, Countdown)?.left).toBe(3_661_000);
+
+    clock.advance(1000);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(chest, Text)?.resolved).toBe("1:01:00");
+    expect(app.world.ecs.get(chest, Countdown)?.left).toBe(3_660_000);
+
+    clock.advance(4_000_000);
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(app.world.ecs.get(chest, Text)?.resolved).toBe("0:00:00");
+    expect(app.world.ecs.get(chest, Countdown)?.left).toBe(0);
 
     await app.stop();
   });

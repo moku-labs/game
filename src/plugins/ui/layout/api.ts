@@ -3,35 +3,53 @@
  * fx handlers. It is injected into `jsx`; nothing it returns reaches the public API.
  */
 import type { FxHandler } from "../../flow/fx/types";
+import type { Hint } from "../../flow/types";
+import { Text } from "../../text/components";
 import { Box } from "../components";
 import type { Element, JsxModule } from "../jsx/types";
 import type { UiCtx } from "../types";
 import { applyStyleToNode, layoutChanged } from "./apply";
 import { beginExit, canDespawn } from "./exit";
 import { createGuideHandler } from "./guide";
-import { installMeasure, markMeasured } from "./measure";
-import { liftRest, play, repose, startLoop, writeRest } from "./motion";
+import { installMeasure, markMeasured, remeasureShown } from "./measure";
+import { liftRest, play, playExtraChange, repose, startLoop, writeRest } from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
-import { stepScroll } from "./scroll";
+import { clampScroll, stepScroll } from "./scroll";
 import { solveRoot } from "./solve";
-import type { ElementLookup, LayoutModule, LayoutState, Rect } from "./types";
+import type { ElementLookup, LayoutModule, LayoutState, Rect, TextSource } from "./types";
+import { windowOf } from "./window";
 import { loadYogaModule } from "./yoga";
+
+/**
+ * What the text elements are measured through: `text.measure`, the string `text` resolved for an
+ * entity, and the duration words of `i18n`.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @returns The source every measure function reads.
+ */
+function textSourceOf(ctx: UiCtx): TextSource {
+  return {
+    measure: (content, style) => ctx.deps.text.measure(content, style),
+    resolved: entity => ctx.deps.world.ecs.get(entity, Text)?.resolved,
+    duration: ms => ctx.deps.i18n.duration(ms)
+  };
+}
 
 /**
  * Writes the style of an element onto its node and keeps its measure function in step.
  *
- * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state.
+ * @param source - What a text element is measured through.
  * @param element - The element to write.
  */
-function writeStyle(ctx: UiCtx, state: LayoutState, element: Element): void {
+function writeStyle(state: LayoutState, source: TextSource, element: Element): void {
   const node = state.byEntity.get(element.entity);
 
   if (node === undefined || state.yoga === undefined) return;
 
   applyStyleToNode(state.yoga, node, element.style, element.type, element.parentType);
-  installMeasure(state, node, element, ctx.deps.text.measure);
+  installMeasure(state, node, element, source);
 }
 
 /**
@@ -42,6 +60,7 @@ function writeStyle(ctx: UiCtx, state: LayoutState, element: Element): void {
  */
 export function createLayoutApi(ctx: UiCtx): LayoutModule {
   const state = ctx.state.layout;
+  const source = textSourceOf(ctx);
 
   return {
     load: async (): Promise<void> => {
@@ -52,15 +71,17 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     attach: (element: Element): void => {
       createNode(state, element);
-      writeStyle(ctx, state, element);
+      writeStyle(state, source, element);
     },
 
     affectsRect: layoutChanged,
 
     applyStyle: (element: Element): void => {
-      writeStyle(ctx, state, element);
+      writeStyle(state, source, element);
       markMeasured(state, element);
     },
+
+    remeasure: (element: Element): boolean => remeasureShown(state, element, source),
 
     place: (parent: Element, children: readonly Element[]): void =>
       placeChildren(state, parent, children),
@@ -85,18 +106,25 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     loop: (element: Element): void => startLoop(ctx, element),
 
-    change: (element: Element, previous: Rect): boolean => {
+    change: (element: Element, previous: Rect, hint?: Hint): boolean => {
       const hook = element.motion?.change?.Box;
 
       if (hook === undefined) return false;
 
-      play(ctx, element, view => hook(view, previous, element.rect));
+      play(ctx, element, view => hook(view, previous, element.rect, hint));
 
       return true;
     },
 
-    repose: (element: Element, parent: Rect | undefined, hooked: boolean): void =>
-      repose(ctx, element, parent, hooked),
+    changeExtra: (
+      element: Element,
+      name: string,
+      values: { previous: object; next: object },
+      hint: Hint | undefined
+    ): boolean => playExtraChange(ctx, element, name, values, hint),
+
+    repose: (element: Element, parent: Rect | undefined, hooked: boolean, hint?: Hint): void =>
+      repose(ctx, element, parent, hooked, hint),
 
     lift: (element: Element, units: number): void => liftRest(ctx, element, units),
 
@@ -106,6 +134,11 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     scroll: (containers: readonly Element[], lookup: ElementLookup): void =>
       stepScroll(ctx, state, containers, lookup),
+
+    clampScroll: (container: Element, contentHeight: number, lookup: ElementLookup): number =>
+      clampScroll(ctx, container, contentHeight, lookup),
+
+    windowOf,
 
     popupHandler: (jsx: JsxModule): FxHandler => createPopupHandler(ctx, state, jsx),
 

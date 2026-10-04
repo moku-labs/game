@@ -82,12 +82,12 @@ export async function copyFont(
 }
 
 /**
- * Copies one sound byte for byte under its hashed name.
+ * Copies one sound byte for byte under its hashed name, with the extension of its source.
  *
  * @param root - The game source root.
  * @param bundle - Name of the bundle.
  * @param file - The sound of the scanned manifest.
- * @param soundPath - The path of its `.mp3` file.
+ * @param soundPath - The path of its `.mp3` or `.m4a` file.
  * @returns The packed entry and the file to write.
  */
 export async function copyAudio(
@@ -97,7 +97,7 @@ export async function copyAudio(
   soundPath: string
 ): Promise<Copied> {
   const bytes = await readSource(root, soundPath);
-  const name = audioName(bundle, file.key, contentHash(bytes));
+  const name = audioName(bundle, file.key, contentHash(bytes), extensionOf(soundPath));
 
   return { file: { ...file, path: name }, outputs: [{ path: name, bytes }] };
 }

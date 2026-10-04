@@ -2,7 +2,7 @@ import { expectTypeOf } from "vitest";
 import { LocalWrite } from "../../../ui/components";
 import type { AnyComponentType, EcsApi, Entity, TagType } from "../../../world/types";
 import type { PointerValue } from "../../components";
-import { PointerOver } from "../../components";
+import { Draggable, PointerOver, Traceable, Traced } from "../../components";
 import type {
   Config,
   InputApi,
@@ -152,3 +152,27 @@ input.onPointer(sample => {
 
 // @ts-expect-error — a pointer listener gets the raw sample, not an entity
 input.onPointer((entity: Entity) => entity + 1);
+
+// ─── the stack and the trace ──────────────────────────────────
+
+// A solitaire card carries the cards on top of it by their projection keys.
+export const card = Draggable({ payload: { from: "c7" }, carry: ["c8", "c9"] });
+export const plainCard = Draggable({ payload: { from: "c7" } });
+
+// @ts-expect-error — carry lists projection keys, not a word for "the children"
+Draggable({ carry: "children" });
+
+expectTypeOf(Traced).toEqualTypeOf<TagType>();
+export const letter = Traceable({ intent: "word", payload: { cell: "b3" } });
+
+expectTypeOf(input.trace).toEqualTypeOf<(path: readonly Target[]) => boolean>();
+input.trace([{ projection: "board.cells", key: "b3" }, button]);
+
+// @ts-expect-error — a trace is a list of targets, not one key
+input.trace("b3");
+
+expectTypeOf<Config["traceStepPx"]>().toEqualTypeOf<number>();
+expectTypeOf<Config["traceInset"]>().toEqualTypeOf<number>();
+
+// A word grid with 40 px cells samples the finger's path every 16 px.
+export const smallCells: Partial<Config> = { traceStepPx: 16 };

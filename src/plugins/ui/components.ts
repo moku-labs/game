@@ -84,12 +84,13 @@ export const Covered = /*#__PURE__*/ tag("Covered");
 export const Escapable = /*#__PURE__*/ tag("Escapable");
 
 /**
- * What the acceptance cases of the spike count. Internal to `ui`: the numbers are written once
+ * What the acceptance cases of the spikes count. Internal to `ui`: the numbers are written once
  * per frame step and read by the tests through `world.ecs.resource`, never by a game.
+ * `windowRenders` counts the re-renders of a windowed list its range made.
  *
  * @example
  * ```ts
- * const value: UiCountersValue = { solves: 1, nodes: 12, measured: 1, reconciles: 3 };
+ * const value: UiCountersValue = { solves: 1, nodes: 12, measured: 1, reconciles: 3, windowRenders: 0 };
  * ```
  */
 export type UiCountersValue = {
@@ -97,17 +98,20 @@ export type UiCountersValue = {
   nodes: number;
   measured: number;
   reconciles: number;
+  windowRenders: number;
 };
 
 /**
- * The three Yoga counters and the reconcile count of the frame. Written by the two systems of
- * `ui`, read by the acceptance tests. Not part of `app.ui`.
+ * The three Yoga counters, the reconcile count of the frame and the range re-renders of the
+ * windowed lists. Written by the two systems of `ui`, read by the acceptance tests. Not part of
+ * `app.ui`.
  */
 export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
   solves: 0,
   nodes: 0,
   measured: 0,
-  reconciles: 0
+  reconciles: 0,
+  windowRenders: 0
 });
 
 /**

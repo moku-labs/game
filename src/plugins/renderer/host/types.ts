@@ -220,11 +220,22 @@ export type HostInternal = {
   render(): void;
 
   /**
-   * Draws the stage into a PNG over the whole canvas. A failed read is logged.
+   * Draws the stage into a PNG over the whole canvas. Every container in `hidden` is set
+   * `visible = false` around the synchronous render inside Pixi's extract and set back right after
+   * that call returns its promise, so no drawn frame sees it hidden. A failed read is logged.
    *
+   * @param hidden - The layer containers to leave out of the picture; `[]` for the whole stage.
    * @returns A PNG data URL, or `undefined` while nothing draws or when Pixi could not read it.
    */
-  extract(): Promise<string | undefined>;
+  extract(hidden: readonly PixiContainer[]): Promise<string | undefined>;
+
+  /**
+   * The resolution the application draws at: device pixels per CSS pixel, capped by
+   * `maxResolution`. A picture of the canvas is its CSS size times this.
+   *
+   * @returns The resolution; 1 while inert.
+   */
+  resolution(): number;
 
   /**
    * The texture sources the GPU holds and their estimated memory, read at call time.

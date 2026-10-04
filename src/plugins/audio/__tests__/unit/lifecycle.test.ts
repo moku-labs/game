@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { playMusic } from "../../playback";
 import { createFakeContext, installFakeWindow } from "../fake-audio-context";
+import { installFakeAudio, installFakeNavigator, installFakeUrl } from "../fake-media";
 import { createMockAudio } from "./mock-audio";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("startAudio", () => {
@@ -93,5 +96,164 @@ describe("stopAudio", () => {
     mock.start();
 
     await expect(mock.stop()).resolves.toBeUndefined();
+  });
+});
+
+describe("the audio session", () => {
+  it("writes the configured type before the context is made", () => {
+    const order: string[] = [];
+    const context = createFakeContext();
+
+    installFakeNavigator({ type: "auto", order });
+
+    const mock = createMockAudio({
+      config: {
+        context: () => {
+          order.push("context");
+
+          return context;
+        }
+      }
+    });
+
+    mock.start();
+
+    expect(order).toEqual(["session:ambient", "context"]);
+  });
+
+  it.each(["playback", "auto"] as const)("writes %s as given", type => {
+    const session = installFakeNavigator({ type: "ambient" });
+    const mock = createMockAudio({ context: createFakeContext(), config: { session: type } });
+
+    mock.start();
+
+    expect(session.writes).toEqual([type]);
+  });
+
+  it("writes the type headless too, where a navigator has the API", () => {
+    const session = installFakeNavigator({ type: "auto" });
+    const mock = createMockAudio();
+
+    mock.start();
+
+    expect(session.writes).toEqual(["ambient"]);
+  });
+
+  it("does nothing and logs nothing where the navigator has no audioSession", () => {
+    installFakeNavigator();
+
+    const mock = createMockAudio({ context: createFakeContext() });
+
+    mock.start();
+
+    expect(mock.state.session).toBeUndefined();
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("does nothing and logs nothing where there is no navigator at all", () => {
+    vi.stubGlobal("navigator", undefined);
+
+    const mock = createMockAudio({ context: createFakeContext() });
+
+    mock.start();
+
+    expect(mock.state.session).toBeUndefined();
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("ignores an audioSession without a string type", () => {
+    vi.stubGlobal("navigator", { audioSession: { type: 3 } });
+
+    const mock = createMockAudio({ context: createFakeContext() });
+
+    mock.start();
+
+    expect(mock.state.session).toBeUndefined();
+  });
+
+  it("warns once when the setter refuses the type", () => {
+    installFakeNavigator({ type: "auto", refuse: true });
+
+    const mock = createMockAudio({ context: createFakeContext() });
+
+    mock.start();
+
+    expect(mock.log.warn).toHaveBeenCalledTimes(1);
+    expect(mock.log.warn).toHaveBeenCalledWith("audio: the audio session was refused", {
+      type: "ambient"
+    });
+    expect(mock.state.session).toBeUndefined();
+  });
+
+  it("writes auto back on stop", async () => {
+    const session = installFakeNavigator({ type: "auto" });
+    const mock = createMockAudio({ context: createFakeContext(), config: { session: "playback" } });
+
+    mock.start();
+    await mock.stop();
+
+    expect(session.writes).toEqual(["playback", "auto"]);
+    expect(mock.state.session).toBeUndefined();
+  });
+});
+
+describe("the audio session on stop", () => {
+  it("forgets the session and resolves when the setter refuses auto", async () => {
+    let current = "auto";
+
+    vi.stubGlobal("navigator", {
+      audioSession: {
+        get type(): string {
+          return current;
+        },
+        set type(value: string) {
+          if (value === "auto") throw new Error("NotAllowedError");
+
+          current = value;
+        }
+      }
+    });
+
+    const mock = createMockAudio({ context: createFakeContext() });
+
+    mock.start();
+
+    await expect(mock.stop()).resolves.toBeUndefined();
+    expect(current).toBe("ambient");
+    expect(mock.state.session).toBeUndefined();
+  });
+});
+
+describe('stopAudio at music: "stream"', () => {
+  it("disposes the playing element and every retiring one, timers cleared, before close", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const audio = installFakeAudio();
+    const urls = installFakeUrl();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context, config: { music: "stream" } });
+    const seen: { revoked: string[]; retiring: number; timers: number } = {
+      revoked: [],
+      retiring: -1,
+      timers: -1
+    };
+    const close = context.close;
+
+    context.close = (): Promise<void> => {
+      seen.revoked = [...urls.revoked];
+      seen.retiring = mock.state.retiring.size;
+      seen.timers = vi.getTimerCount();
+
+      return close();
+    };
+
+    mock.start();
+    mock.state.unlocked = true;
+    await playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+    await playMusic(mock.audio, { key: "home.theme", fadeMs: 600 });
+    await mock.stop();
+
+    expect(seen).toEqual({ revoked: ["blob:test/2", "blob:test/1"], retiring: 0, timers: 0 });
+    expect(audio.elements.map(element => element.pauses)).toEqual([1, 1]);
   });
 });

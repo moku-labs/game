@@ -5,6 +5,7 @@
 import type { WorldCtx } from "../types";
 import { forgetChanges, markChanged } from "./changes";
 import { isAlive } from "./entities";
+import { recordRemoval } from "./history";
 import type {
   AnyComponent,
   AnyComponentType,
@@ -150,7 +151,8 @@ export function attachComponent(ctx: WorldCtx, entity: Entity, value: AnyCompone
 }
 
 /**
- * Removes one component from an entity and fires `onRemoved` when it was there.
+ * Removes one component from an entity and fires `onRemoved` when it was there. The removal
+ * leaves the change set of that component, so the frame history records it here.
  *
  * @param ctx - Domain context of the world plugin.
  * @param entity - The entity to write.
@@ -166,6 +168,7 @@ export function detachComponent(ctx: WorldCtx, entity: Entity, name: string): vo
 
   store.delete(entity);
   state.changed.get(name)?.delete(entity);
+  recordRemoval(ctx, entity, name);
   fire(ctx, state.removed.get(name), "world:removed-hook-failed", entity, value);
 }
 

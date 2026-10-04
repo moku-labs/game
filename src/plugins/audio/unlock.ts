@@ -4,7 +4,7 @@
  * one. They sit on `window`, not on the canvas: the gesture may as well be a button of the
  * game's loading page, which `input` never sees.
  */
-import { playMusic, playRequest, trackMusic } from "./playback";
+import { isMusicPlaying, playMusic, playRequest, trackMusic } from "./playback";
 import type { AudioCtx, State } from "./types";
 
 /** The two gestures that unlock a context. The first of them to arrive wins. */
@@ -34,7 +34,7 @@ function onResumed(ctx: AudioCtx): void {
 
   const remembered = state.music;
 
-  if (remembered === undefined || remembered.source !== undefined) return;
+  if (remembered === undefined || isMusicPlaying(state)) return;
 
   trackMusic(ctx, playMusic(ctx, { key: remembered.key, fadeMs: ctx.config.musicFadeMs }));
 }

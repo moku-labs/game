@@ -4,7 +4,7 @@
  */
 import { createEcsApi } from "./ecs/api";
 import { Exiting, Layer, Order, Tree } from "./ecs/define";
-import type { EcsApi, WorldMode } from "./ecs/types";
+import type { EcsApi, FrameDiff, WorldMode } from "./ecs/types";
 import { resolveDeps } from "./lifecycle";
 import { createProjectionApi } from "./projection/api";
 import type { ProjectionApi, WorldComponents } from "./projection/types";
@@ -34,8 +34,29 @@ export function createModules(ctx: WorldCtx): {
 }
 
 /**
- * Reduces the ecs module to what a game may call, and makes `setMode("fast")` finish every motion
- * and flush every despawn queue, which is the one thing `ecs` cannot do alone.
+ * Names the live projection key of every entity of a frame diff: `ecs` keeps the history, only
+ * `projection` knows the addresses. An entity that is gone has no key, also when a stale one is
+ * still registered for it.
+ *
+ * @param diff - The frame diff of the ecs module, every key `undefined`.
+ * @param ecs - The full ecs module, for the liveness check.
+ * @param projection - The full projection module, for the addresses.
+ * @returns The same diff with the keys filled in.
+ */
+function withKeys(diff: FrameDiff, ecs: EcsModule, projection: ProjectionModule): FrameDiff {
+  return {
+    ...diff,
+    entities: diff.entities.map(entity => ({
+      ...entity,
+      key: ecs.ownerOf(entity.id) === undefined ? undefined : projection.keyOf(entity.id)
+    }))
+  };
+}
+
+/**
+ * Reduces the ecs module to what a game may call. Two members need both modules, which `ecs`
+ * cannot do alone: `setMode("fast")` finishes every motion and flushes every despawn queue, and
+ * `diff` names the projection key of every entity it reports.
  *
  * @param ecs - The full ecs module.
  * @param projection - The full projection module.
@@ -66,13 +87,15 @@ function exposeEcs(ecs: EcsModule, projection: ProjectionModule): EcsApi {
       ecs.setMode(mode);
       if (ecs.mode() === "fast") projection.flushAll();
     },
-    snapshot: ecs.snapshot
+    snapshot: ecs.snapshot,
+    diff: (from: number, to: number): FrameDiff => withKeys(ecs.diff(from, to), ecs, projection),
+    schema: ecs.schema
   };
 }
 
 /**
- * Reduces the projection module to what `scenes`, `input` and `i18n` call. The frame methods and
- * the dirty flag stay with the plugin root.
+ * Reduces the projection module to what `scenes`, `input`, `i18n` and the `/inspect` door call.
+ * The frame methods and the dirty flag stay with the plugin root.
  *
  * @param projection - The full projection module.
  * @returns The public projection API.
@@ -88,6 +111,7 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     mute: projection.mute,
     lift: projection.lift,
     keyOf: projection.keyOf,
+    motionsOf: projection.motionsOf,
     entityOf: projection.entityOf,
     entitiesOf: projection.entitiesOf,
     setDriver: projection.setDriver,

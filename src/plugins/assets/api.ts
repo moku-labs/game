@@ -8,6 +8,7 @@ import { ignoreFailure, isPermanent, loadBundle, touch } from "./tiers";
 import type {
   Api,
   AssetsCtx,
+  AudioAsset,
   BundleRecord,
   BundleUsage,
   FontAsset,
@@ -178,7 +179,7 @@ export function createAssetsApi(ctx: KernelSlice): Api {
     isLoaded: (bundle: string): boolean => isLoaded(assets, bundle),
     texture: (key: string): Texture | undefined => lookupTexture(assets, key),
     font: (key: string): FontAsset | undefined => loadedRecord(assets, key)?.fonts.get(key),
-    audio: (key: string): ArrayBuffer | undefined => loadedRecord(assets, key)?.audio.get(key),
+    audio: (key: string): AudioAsset | undefined => loadedRecord(assets, key)?.audio.get(key),
     usage: (): Usage => usage(assets)
   };
 }

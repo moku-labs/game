@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { Transform } from "../../../renderer/components";
+import { Parent, Transform } from "../../../renderer/components";
+import { rootPoseOf } from "../../../renderer/sync/pose";
 import { Exiting } from "../../../world/ecs/define";
 import { createInputApi } from "../../api";
 import {
@@ -14,7 +15,9 @@ import {
   Pressed,
   Swipeable,
   Tappable,
-  Touchable
+  Touchable,
+  Traceable,
+  Traced
 } from "../../components";
 import { direction, distance } from "../../gestures";
 import { record } from "../../pointer";
@@ -909,5 +912,117 @@ describe("a view that carries both Tappable and Draggable", () => {
 
     expect(mock.answers).toEqual([{ intent: "select", payload: { id: "i5" } }]);
     expect(mock.has(item, PointerOver)).toBe(true);
+  });
+});
+
+// A pile fanned 30 px: the finger takes c2 at (100, 130), c3 and c4 ride along at 160 and 190.
+// The rest poses are recorded, so a settle lands each card on its own rest.
+function fannedPile(mock: MockInput): { held: number; c3: number; c4: number } {
+  const card = (key: string, y: number, extra: Parameters<MockInput["spawn"]>[0] = []): number => {
+    const entity = mock.spawn([Transform({ x: 100, y }), ...extra], {
+      projection: "pile.cards",
+      key
+    });
+
+    mock.setRest(entity, Transform({ x: 100, y }));
+
+    return entity;
+  };
+  const held = card("c2", 130, [Draggable({ payload: { from: "c2" }, carry: ["c3", "c4"] })]);
+  const c3 = card("c3", 160);
+  const c4 = card("c4", 190);
+
+  mock.boxes.push({ entity: held, x: 68, y: 98, width: 64, height: 64 });
+  mock.start();
+
+  return { held, c3, c4 };
+}
+
+describe("the carried stack through the frame step", () => {
+  it("grabs at dragStartPx, carries the fan rigidly for two frames and sends it home on a cancel", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = fannedPile(mock);
+    const rootY = (entity: number): number => rootPoseOf(mock.input.deps.world.ecs, entity).y;
+
+    record(mock.state, down(100, 130));
+    mock.frame();
+    record(mock.state, moved(100, 140));
+    mock.frame();
+
+    expect(mock.state.phase).toBe("dragging");
+    expect(mock.read(c3, Parent)).toEqual({ entity: held });
+    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([130, 160, 190]);
+
+    record(mock.state, moved(300, 240));
+    mock.frame();
+
+    expect(mock.read(held, Transform)).toMatchObject({ x: 300, y: 230 });
+    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([230, 260, 290]);
+
+    record(mock.state, moved(400, 340));
+    mock.frame();
+
+    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([330, 360, 390]);
+
+    record(mock.state, sample("cancel", "touch", 400, 340));
+    mock.frame();
+
+    expect(mock.state.phase).toBe("idle");
+    expect(mock.has(c3, Parent)).toBe(false);
+    expect([rootY(held), rootY(c3), rootY(c4)]).toEqual([130, 160, 190]);
+    expect(mock.answers).toEqual([]);
+  });
+
+  it.each([
+    "paused",
+    "fast"
+  ] as const)("sends the whole stack home when the world turns %s", mode => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = fannedPile(mock);
+
+    record(mock.state, down(100, 130));
+    mock.frame();
+    record(mock.state, moved(300, 330));
+    mock.frame();
+    mock.world.mode = mode;
+    mock.trail.length = 0;
+    mock.frame();
+
+    expect(mock.state.phase).toBe("idle");
+    expect(mock.trail).toEqual(
+      expect.arrayContaining([`settle:${held}`, `settle:${c3}`, `settle:${c4}`])
+    );
+    expect(mock.has(c3, Parent)).toBe(false);
+    expect(mock.has(c4, Parent)).toBe(false);
+    expect(mock.state.carried).toEqual([]);
+  });
+});
+
+describe("Traceable over the other gestures", () => {
+  it("wins over Tappable with one warning, and the tap listeners never run", () => {
+    const mock = createMockInput();
+    const entity = view(
+      mock,
+      [Traceable({ intent: "word", payload: { cell: "b3" } }), Tappable({ intent: "pick" })],
+      { projection: "board.cells", key: "b3" }
+    );
+    const tapped = vi.fn();
+
+    mock.setHitBox(entity, { x: 0, y: 0, width: 200, height: 200 });
+    createInputApi(mock.ctx).onTap(tapped);
+    record(mock.state, down(50, 50));
+    mock.frame();
+
+    expect(mock.log.warn).toHaveBeenCalledTimes(1);
+    expect(mock.log.warn).toHaveBeenCalledWith("input: Traceable wins", {
+      view: { projection: "board.cells", key: "b3" }
+    });
+    expect(mock.has(entity, Traced)).toBe(true);
+
+    record(mock.state, up(50, 50));
+    mock.frame();
+
+    expect(tapped).not.toHaveBeenCalled();
+    expect(mock.answers).toEqual([{ intent: "word", payload: { path: [{ cell: "b3" }] } }]);
   });
 });

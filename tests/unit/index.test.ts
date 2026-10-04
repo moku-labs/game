@@ -66,6 +66,11 @@ describe("root index", () => {
     ]);
   });
 
+  it("exports the trace components of input", () => {
+    expect(engine.Traceable.componentName).toBe("Traceable");
+    expect(engine.Traced.componentName).toBe("Traced");
+  });
+
   it("exports no genre rules", () => {
     expect(Object.keys(engine)).not.toContain("rules");
   });

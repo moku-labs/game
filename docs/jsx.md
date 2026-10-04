@@ -11,6 +11,30 @@ The interface is one more projection. A screen is a projection whose `view` retu
 
 The tags are `screen`, `layer`, `row`, `column`, `stack`, `spacer`, `panel`, `image`, `icon`, `text`, `button`, `scroll` and `input`. A `button` either names an `intent` for the gate or writes `local` state of its nearest component, never both. An `input` is a text field: its text lives in the `local` field it names, every keystroke writes it, and Enter answers its `submit` intent with `{ [local]: value }`, the only thing the gate hears: `<input key="nameField" local="name" maxLength={16} submit="save" placeholder={tr("rename.hint")} />`. A `text` takes a string or a `Message` from `tr`; its size comes from a text style key, not from the layout style. Every tag takes `components`, a list of extra component values for the element's entity: `<button key="claim" intent="claim" components={[Glow({ strength: 2 })]} />` glows, and the glow covers the button and its label.
 
+A `text` can show a number instead of words. `bind={bind(Counter, "value")}` reads a numeric field of a component on the same entity, and `components={[Counter({ value })]}` puts that component there. The label is written only when the shown string changes. Formats are `int`, `mm:ss`, `h:mm:ss` and `duration`. A `change` hook in `motion` of the component's name rolls the number instead of jumping:
+
+```tsx
+// the coin counter of the HUD: a commit that raises coins plays rollCoins, text shows the rolling value
+<text key="coinPillText" style="hud.digits" bind={bind(Counter, "value")}
+      components={[Counter({ value: hud.coins })]} motion={{ change: { Counter: rollCoins } }} />
+
+// a chest timer: text keeps Countdown.left from clock.now(), 95 s left shows "01:35"
+<text key="chestTimer" style="hud.digits" bind={bind(Countdown, "left", { format: "mm:ss" })}
+      components={[Countdown({ until: chest.opensAt })]} />
+```
+
+`Counter` is the game's own component, `component("Counter", { value: 0 })`. `Countdown` is the engine's: a game writes `until`, a `clock` moment in epoch ms, and never `left`.
+
+A `scroll` takes children for a short list. A long list takes the windowed form: `rows`, `rowHeight`, `overscan` and `row`. Only the rows in view plus `overscan` on each side exist. Every row has the same height. `overscan` is 5 when left out.
+
+```tsx
+<scroll key="shop" style={list} rows={items.length} rowHeight={80} overscan={5}
+        row={index => <ShopRow key={items[index].id} item={items[index]} />} />
+// at offset 0: rows 0 to 24 exist, 25 of the 1000, for 80 u rows in a 1600 u list with overscan 5
+```
+
+Row state belongs in the model: a row that leaves the window loses its local state. The full rules are in the [ui README](../src/plugins/ui/README.md#scroll-windowing).
+
 ```tsx
 // features/hud/view.tsx — the HUD, a reward popup and the choreography they share
 import type { Anim } from "@moku-labs/game";

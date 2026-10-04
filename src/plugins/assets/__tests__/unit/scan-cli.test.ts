@@ -1,9 +1,9 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { StringsCompiler } from "../../scan/cli";
+import type { StringsCompiler, StringsExporter, StringsImporter } from "../../scan/cli";
 import { runCli } from "../../scan/cli";
-import { makeTree, pngBytes, removeTree } from "./scan-fixtures";
+import { makeTree, pngBytes, removeTree, stringsTools } from "./scan-fixtures";
 
 const roots: string[] = [];
 
@@ -34,25 +34,65 @@ function fakeUi(): { lines: string[]; info(m: string): void; warn(m: string): vo
   };
 }
 
-/** A strings compiler for tests that need no strings: nothing changed, no keys. */
-const noStrings: StringsCompiler = () =>
-  Promise.resolve({ changed: false, locales: [], keys: [], notes: [] });
+/** The tools of a game that needs no strings: nothing changed, no keys. */
+const noStrings = stringsTools();
 
 /** A compile that wrote two keys in two locales and has one note. */
-const twoLocales: StringsCompiler = () =>
-  Promise.resolve({
-    changed: true,
-    locales: ["en", "ru"],
-    keys: ["board.title", "board.score"],
-    notes: ['"ru" lacks "board.score"']
-  });
+const twoLocales = stringsTools({
+  compile: () =>
+    Promise.resolve({
+      changed: true,
+      locales: ["en", "ru"],
+      keys: ["board.title", "board.score"],
+      notes: ['"ru" lacks "board.score"']
+    })
+});
 
 /** A compile whose outputs differ from the disk. */
-const staleStrings: StringsCompiler = () =>
-  Promise.resolve({ changed: true, locales: ["en"], keys: ["board.title"], notes: [] });
+const staleStrings = stringsTools({
+  compile: () =>
+    Promise.resolve({ changed: true, locales: ["en"], keys: ["board.title"], notes: [] })
+});
 
 /** A compile that throws. */
-const brokenStrings: StringsCompiler = () => Promise.reject(new Error("[game] i18n: bad message."));
+const brokenStrings = stringsTools({
+  compile: () => Promise.reject(new Error("[game] i18n: bad message."))
+});
+
+/** A compile that writes the pseudo-locale when it is asked to. */
+const pseudoAware: StringsCompiler = (_root, _out, options) =>
+  Promise.resolve({
+    changed: true,
+    locales: options.pseudo ? ["en", "en-XA", "ru"] : ["en", "ru"],
+    keys: ["board.title", "board.score"],
+    notes: []
+  });
+
+/** An export of two locales, the second one three keys short. */
+const exportTwo: StringsExporter = () =>
+  Promise.resolve({ locales: ["en", "ru"], missing: { en: 0, ru: 3 } });
+
+/** An import of one locale that wrote three keys into two feature files. */
+const importRu: StringsImporter = () =>
+  Promise.resolve({
+    locales: ["ru"],
+    keys: 3,
+    files: ["features/hud/strings/ru.json", "features/shop/strings/ru.json"]
+  });
+
+/** An export whose source locale no feature brings. */
+const exportWithoutSource: StringsExporter = () =>
+  Promise.reject(new Error('[game] i18n: the source locale "en" has no string file.'));
+
+/** An import of one key of one locale into one file. */
+const importOne: StringsImporter = () =>
+  Promise.resolve({ locales: ["de"], keys: 1, files: ["features/hud/strings/de.json"] });
+
+/** An import of an empty folder. */
+const importNone: StringsImporter = () => Promise.resolve({ locales: [], keys: 0, files: [] });
+
+/** The one refusal of every flag that may not join `--export` or `--import`. */
+const RUN_ALONE = 'error [game] assets: "--export" and "--import" run alone; drop the other flags.';
 
 async function readText(file: string): Promise<string> {
   return await readFile(file, "utf8");
@@ -190,12 +230,13 @@ describe("runCli", () => {
   it("compiles the strings next to the key module and passes the check flag", async () => {
     const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
     const keys = path.join(root, "src", "generated", "assets.ts");
-    const compile = vi.fn(noStrings);
+    const compile = vi.fn(noStrings.compile);
 
-    await runCli(["--root", root, "--keys", keys, "--check"], compile, fakeUi());
+    await runCli(["--root", root, "--keys", keys, "--check"], stringsTools({ compile }), fakeUi());
 
     expect(compile).toHaveBeenCalledWith(path.resolve(root), path.join(root, "src", "generated"), {
-      check: true
+      check: true,
+      pseudo: false
     });
   });
 
@@ -232,5 +273,205 @@ describe("runCli", () => {
 
     expect(await runCli(["--sizes"], noStrings)).toBe(1);
     expect(error).toHaveBeenCalled();
+  });
+});
+
+describe("runCli --pseudo", () => {
+  it("compiles with pseudo and counts the pseudo-locale in the summary", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+    const compile = vi.fn(pseudoAware);
+    const ui = fakeUi();
+
+    expect(await runCli(["--root", root, "--pseudo"], stringsTools({ compile }), ui)).toBe(0);
+    expect(compile).toHaveBeenCalledWith(path.resolve(root), path.join(root, "generated"), {
+      check: false,
+      pseudo: true
+    });
+    expect(ui.lines).toContain("info 2 strings in 3 locales (en, en-XA, ru).");
+  });
+
+  it("checks the pseudo-locale too with --check --pseudo", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+    const compile = vi.fn(pseudoAware);
+
+    await runCli(["--root", root, "--check", "--pseudo"], stringsTools({ compile }), fakeUi());
+
+    expect(compile).toHaveBeenCalledWith(path.resolve(root), path.join(root, "generated"), {
+      check: true,
+      pseudo: true
+    });
+  });
+
+  it("refuses --pseudo with --pack and compiles nothing", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+    const compile = vi.fn(pseudoAware);
+    const ui = fakeUi();
+    const argv = ["--root", root, "--pack", path.join(root, "dist"), "--pseudo"];
+
+    expect(await runCli(argv, stringsTools({ compile }), ui)).toBe(1);
+    expect(ui.lines).toEqual([
+      'error [game] assets: "--pseudo" is for a dev run; drop it from "--pack".'
+    ]);
+    expect(compile).not.toHaveBeenCalled();
+  });
+});
+
+describe("runCli --export", () => {
+  it("runs the exporter alone and writes one line per locale", async () => {
+    const root = await tree({ "features/board/assets/cell.png": pngBytes(64, 64) });
+    const dir = path.join(root, "translations");
+    const compile = vi.fn(noStrings.compile);
+    const exportStrings = vi.fn(exportTwo);
+    const ui = fakeUi();
+
+    expect(
+      await runCli(["--root", root, "--export", dir], stringsTools({ compile, exportStrings }), ui)
+    ).toBe(0);
+    expect(exportStrings).toHaveBeenCalledWith(path.resolve(root), dir, { source: "en" });
+    expect(compile).not.toHaveBeenCalled();
+    await expect(readText(path.join(root, "manifest.json"))).rejects.toThrow();
+    expect(ui.lines).toEqual([
+      `info exported "${path.join(dir, "en.json")}": 0 missing.`,
+      `info exported "${path.join(dir, "ru.json")}": 3 missing.`
+    ]);
+  });
+
+  it("resolves the folder against the working directory and hands over --source", async () => {
+    const root = await tree({});
+    const exportStrings = vi.fn(exportTwo);
+    const argv = ["--root", root, "--export", "translations", "--source", "ru"];
+
+    expect(await runCli(argv, stringsTools({ exportStrings }), fakeUi())).toBe(0);
+    expect(exportStrings).toHaveBeenCalledWith(path.resolve(root), path.resolve("translations"), {
+      source: "ru"
+    });
+  });
+
+  it("reports a failed export as one error line and exit 1", async () => {
+    const root = await tree({});
+    const ui = fakeUi();
+    const argv = ["--root", root, "--export", path.join(root, "out")];
+
+    expect(await runCli(argv, stringsTools({ exportStrings: exportWithoutSource }), ui)).toBe(1);
+    expect(ui.lines).toEqual(['error [game] i18n: the source locale "en" has no string file.']);
+  });
+});
+
+describe("runCli --import", () => {
+  it("imports into the folder of the key module and sums it up in one line", async () => {
+    const root = await tree({});
+    const dir = path.join(root, "translations");
+    const keys = path.join(root, "src", "generated", "assets.ts");
+    const compile = vi.fn(noStrings.compile);
+    const importStrings = vi.fn(importRu);
+    const ui = fakeUi();
+    const argv = ["--root", root, "--keys", keys, "--import", dir];
+
+    expect(await runCli(argv, stringsTools({ compile, importStrings }), ui)).toBe(0);
+    expect(importStrings).toHaveBeenCalledWith(path.resolve(root), dir, {
+      source: "en",
+      pseudo: false,
+      out: path.join(root, "src", "generated")
+    });
+    expect(compile).not.toHaveBeenCalled();
+    await expect(readText(keys)).rejects.toThrow();
+    expect(ui.lines).toEqual([`info imported "${dir}" (ru): 3 keys into 2 files.`]);
+  });
+
+  it("compiles into <root>/generated by default, with --pseudo and --source", async () => {
+    const root = await tree({});
+    const dir = path.join(root, "translations");
+    const importStrings = vi.fn(importRu);
+    const argv = ["--root", root, "--import", dir, "--pseudo", "--source", "ru"];
+
+    expect(await runCli(argv, stringsTools({ importStrings }), fakeUi())).toBe(0);
+    expect(importStrings).toHaveBeenCalledWith(path.resolve(root), dir, {
+      source: "ru",
+      pseudo: true,
+      out: path.join(root, "generated")
+    });
+  });
+
+  it("counts one key into one file in the singular, and leaves out an empty locale list", async () => {
+    const root = await tree({});
+    const dir = path.join(root, "translations");
+    const ui = fakeUi();
+    const argv = ["--root", root, "--import", dir];
+
+    await runCli(argv, stringsTools({ importStrings: importOne }), ui);
+    await runCli(argv, stringsTools({ importStrings: importNone }), ui);
+
+    expect(ui.lines).toEqual([
+      `info imported "${dir}" (de): 1 key into 1 file.`,
+      `info imported "${dir}": 0 keys into 0 files.`
+    ]);
+  });
+
+  it("reports a failed import as one error line and exit 1", async () => {
+    const root = await tree({});
+    const ui = fakeUi();
+    const message =
+      '[game] i18n: "hud.delivr" in translations/ru.json is not a key of this game.\n' +
+      "  Fix the file and import again.";
+    const importStrings: StringsImporter = () => Promise.reject(new Error(message));
+
+    expect(
+      await runCli(
+        ["--root", root, "--import", path.join(root, "translations")],
+        stringsTools({ importStrings }),
+        ui
+      )
+    ).toBe(1);
+    expect(ui.lines).toEqual([`error ${message}`]);
+  });
+});
+
+describe("runCli refusals of the string flags", () => {
+  it.each([
+    ["--export with --import", ["--export", "a", "--import", "b"]],
+    ["--export with --check", ["--export", "a", "--check"]],
+    ["--import with --check", ["--import", "a", "--check"]],
+    ["--export with --pack", ["--export", "a", "--pack", "b"]],
+    ["--import with --pack", ["--import", "a", "--pack", "b"]],
+    ["--export with --pseudo", ["--export", "a", "--pseudo"]]
+  ])("refuses %s word for word and runs nothing", async (_name, flags) => {
+    const root = await tree({});
+    const tools = {
+      compile: vi.fn(noStrings.compile),
+      exportStrings: vi.fn(exportTwo),
+      importStrings: vi.fn(importRu)
+    };
+    const ui = fakeUi();
+    // Every path of the refused run lies inside the temp root.
+    const argv = flags.map(flag => (flag.startsWith("--") ? flag : path.join(root, flag)));
+
+    expect(await runCli(["--root", root, ...argv], tools, ui)).toBe(1);
+    expect(ui.lines).toEqual([RUN_ALONE]);
+    expect(tools.compile).not.toHaveBeenCalled();
+    expect(tools.exportStrings).not.toHaveBeenCalled();
+    expect(tools.importStrings).not.toHaveBeenCalled();
+  });
+
+  it("refuses --source without --export or --import", async () => {
+    const root = await tree({});
+    const ui = fakeUi();
+
+    expect(await runCli(["--root", root, "--source", "ru"], noStrings, ui)).toBe(1);
+    expect(ui.lines).toEqual([
+      'error [game] assets: "--source" goes with "--export" or "--import".'
+    ]);
+  });
+
+  it("names the value a string flag misses", async () => {
+    const ui = fakeUi();
+
+    expect(await runCli(["--export"], noStrings, ui)).toBe(1);
+    expect(await runCli(["--import", "--pseudo"], noStrings, ui)).toBe(1);
+    expect(await runCli(["--source"], noStrings, ui)).toBe(1);
+    expect(ui.lines).toEqual([
+      'error [game] assets: "--export" needs a path.',
+      'error [game] assets: "--import" needs a path.',
+      'error [game] assets: "--source" needs a locale.'
+    ]);
   });
 });

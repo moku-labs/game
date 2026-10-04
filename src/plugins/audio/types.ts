@@ -1,6 +1,7 @@
 /**
  * @file audio plugin — shared types: the three buses, the context seam that makes the plugin
- * testable, the signature of the authoring helper, the state the graph runs on and the public API.
+ * testable, the two ways music plays, the audio session, the signature of the authoring helper,
+ * the state the graph runs on and the public API.
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
@@ -42,6 +43,7 @@ export type AudioContextLike = Pick<
   | "createGain"
   | "createBufferSource"
   | "decodeAudioData"
+  | "createMediaElementSource"
   | "resume"
   | "close"
 > & { readonly state: AudioContext["state"] | "interrupted" };
@@ -82,13 +84,82 @@ export type MusicDescriptor<Asset extends string> = (
 export type Volumes = (player: Json) => Partial<Record<Bus, number>>;
 
 /**
+ * How a music track is played. `"decode"`: one AudioBuffer per track, gapless, about 58 MB per
+ * 150 s at 48 kHz. `"stream"`: an `<audio>` element on a `blob:` URL of the bytes `assets` holds,
+ * about 12 MB, and a gap at every loop: 5 to 49 ms in Chromium, about 0.4 s in WebKit. A tight
+ * loop keeps `"decode"`; a long track that tolerates a seam takes `"stream"`.
+ *
+ * @example
+ * ```ts
+ * const mode: MusicMode = "stream";
+ * ```
+ */
+export type MusicMode = "decode" | "stream";
+
+/**
+ * What the page asks iOS for. `"ambient"`: mixes with other apps, the silent switch mutes it.
+ * `"playback"`: stops other apps, plays through the switch. `"auto"`: WebKit picks.
+ *
+ * @example
+ * ```ts
+ * const session: AudioSessionType = "playback";
+ * ```
+ */
+export type AudioSessionType = "ambient" | "playback" | "auto";
+
+/**
+ * The part of `navigator.audioSession` the plugin writes. `lib.dom` has no type for it, and only
+ * WebKit has the object at all.
+ *
+ * @example
+ * ```ts
+ * // What Safari answers before the plugin started: no override.
+ * const session: AudioSessionLike = { type: "auto" };
+ * ```
+ */
+export type AudioSessionLike = { type: string };
+
+/**
+ * One music track played by an element at `music: "stream"`: the element, its source node in the
+ * graph, the track gain every level goes through, and the `blob:` URL the element reads.
+ *
+ * @example
+ * ```ts
+ * // `state.music.stream` once "board.theme" plays at `music: "stream"`.
+ * const { element, url }: StreamTrack = track;
+ * element.loop; // true
+ * url.startsWith("blob:"); // true
+ * ```
+ */
+export type StreamTrack = {
+  element: HTMLAudioElement;
+  node: MediaElementAudioSourceNode;
+  gain: GainNode;
+  url: string;
+};
+
+/**
+ * A streamed track that fades out. Its timer frees the element when the fade ends: an element has
+ * no `stop(when)` on the context clock.
+ *
+ * @example
+ * ```ts
+ * // A switch at `musicFadeMs: 600` keeps the old track here for 600 ms.
+ * const entry: RetiringTrack = { stream: oldTrack, timer: setTimeout(free, 600) };
+ * ```
+ */
+export type RetiringTrack = { stream: StreamTrack; timer: ReturnType<typeof setTimeout> };
+
+/**
  * audio plugin config.
  *
  * @example
  * ```ts
  * createApp({
  *   plugins: [...screen, audioPlugin],
- *   pluginConfigs: { audio: { musicFadeMs: 400, volumes: player => player.settings.audio } }
+ *   pluginConfigs: {
+ *     audio: { musicFadeMs: 400, music: "stream", session: "playback", volumes: player => player.settings.audio }
+ *   }
  * });
  * ```
  */
@@ -103,6 +174,10 @@ export type Config = {
   context: (() => AudioContextLike) | undefined;
   /** How many started sounds `journal()` keeps, newest last. `0` turns the journal off. */
   journal: number;
+  /** How music plays. `"stream"` needs MP3 or AAC: WebM Opus is silent through a media element in WebKit (bug 276813). Sounds always decode. */
+  music: MusicMode;
+  /** Set on `navigator.audioSession.type` in `onStart`, before the context exists. No-op where the API is missing (every Chromium, Firefox). */
+  session: AudioSessionType;
 };
 
 /**
@@ -134,17 +209,19 @@ export type BusState = { gain: GainNode | undefined; volume: number; muted: bool
 
 /**
  * The music that is playing, or the key remembered until the first touch unlocks the context.
- * `source` and `gain` are `undefined` exactly while the track is only remembered.
+ * `source` plays a decoded track, `stream` a streamed one; they are never both set. Both
+ * `undefined`: the key is only remembered (a locked context, or a refused `play()`).
  *
  * @example
  * ```ts
- * const track: MusicTrack = { key: "board.theme", source: undefined, gain: undefined };
+ * const track: MusicTrack = { key: "board.theme", gain: undefined, source: undefined, stream: undefined };
  * ```
  */
 export type MusicTrack = {
   key: string;
-  source: AudioBufferSourceNode | undefined;
   gain: GainNode | undefined;
+  source: AudioBufferSourceNode | undefined;
+  stream: StreamTrack | undefined;
 };
 
 /**
@@ -185,6 +262,10 @@ export type State = {
   unlock: (() => void) | undefined;
   /** The removers of the two fx handlers. */
   removers: Array<() => void>;
+  /** The `navigator.audioSession` that took `config.session`; `stop` writes `"auto"` back to it. */
+  session: AudioSessionLike | undefined;
+  /** Streamed tracks that fade out, each freed by its timer. */
+  retiring: Set<RetiringTrack>;
   /**
    * The sounds that started, oldest first, at most `config.journal` of them. Frozen: a write
    * replaces the whole list, so `journal()` hands it out without a copy.

@@ -11,7 +11,6 @@
  * included. The layers `cells`, `glows` and `items` are where a view falls back to when no slot
  * hosts it.
  */
-import { hudCoins } from "../features/hud/coins";
 import { hud } from "../features/hud/view";
 import { defineScene } from "../kit";
 import { boardBadges } from "./badges";
@@ -39,7 +38,6 @@ export const boardScene = defineScene("board", {
     boardClock,
     boardBadges,
     boardSteam,
-    hud,
-    hudCoins
+    hud
   ]
 });

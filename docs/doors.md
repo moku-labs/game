@@ -54,7 +54,7 @@ it("rolls, bookmarks and restores through the doors", async () => {
 - **`read(app, source, input?)`** calls the source once and returns what it reads.
 - **`watch(app, source, input, fn)`** reads on the first frame, in the `signals` phase, and again when the source's change key moved: `frame` every frame, `commit` when `model.store.snapshot()` is a new object, `edge` when `flow.state()` is. It returns the stop function. It runs on the frame loop, so a headless test steps frames with `app.time.step(16)`.
 - **`run(app, command, input?)`** resolves `{ value, state }`. `value` is what the command returned. `state` is the envelope `{ path, frame, tainted }`, read after the command.
-- **Screen sources need the screen.** `Source` and `Command` name the app they need. `read(app, sources.rect, { key: "play" })` on an app without `ui` and `renderer` is a compile error.
+- **Screen sources need the screen.** `Source` and `Command` name the app they need. `read(app, sources.locate, { key: "play" })` on an app without `ui`, `renderer` and `world` is a compile error. `game.at` needs `renderer` and `world`.
 
 ## Base sources
 
@@ -71,12 +71,16 @@ From `@moku-labs/game/inspect`. `Changes` is when `watch` reads the source again
 | `entities` | `game.entities` | `{ owner: "string?", component: "string?" }` | frame | `world.ecs.snapshot().entities`: all, the ones whose owner has that name, the ones that carry that component, or both |
 | `projections` | `game.projections` | none | commit | Projection name to key to entity, through `world.projection.keyOf` |
 | `ui` | `game.ui` | none | frame | `ui.tree()`: the live screen as plain data |
-| `rect` | `game.rect` | `{ key: "string" }` | frame | Where the element with that `key` is on the page, in CSS px; in reference units while the renderer is inert. `undefined` when it is not on screen |
+| `locate` | `game.locate` | `{ key: "string?", target: "json?" }`, exactly one | frame | Where a ui element (`key`) or a view (`target: { projection, key }`) is on the page: `{ x, y, w, h }` in CSS px. Reference units while the renderer is inert; a view has no box then. `undefined` when it is not on screen |
 | `render` | `game.render` | none | frame | `renderer.stats()`: `{ fps, frameMs, textures, textureMb, views, pooled, renderPasses }`, and `drawCalls` in a dev build. `renderPasses` is 1 for the frame plus, for every view with an enabled filter, 1 for its content and the passes of its filters |
 | `effects` | `game.effects` | none | frame | `effects.stats()`: `{ particles, emitters, filters, renderPasses }`. Only in a game that composes `effectsPlugin` |
 | `sounds` | `game.sounds` | `{ last: "number?" }` | frame | `audio.journal()`: all, or the last `last`. Empty unless `pluginConfigs.audio.journal` is above 0 |
 | `assets` | `game.assets` | none | frame | `assets.usage()`: `{ textureMb, budgetMb, bundles }` |
 | `log` | `game.log` | `{ level: "string?" }` | frame | `log.trace()`: every entry, or the entries at `level` and above. A level other than `debug`, `info`, `warn`, `error` throws |
+| `explain` | `game.explain` | `{ entity: "number" }` | frame | One entity in full: `{ id, owner, key, components, skipped, motions }`. `motions` lists the components a motion still drives. `undefined` for a stale id |
+| `diff` | `game.diff` | `{ from: "number", to: "number" }` | frame | `world.ecs.diff(from, to)`: `{ from, to, entities }`, what changed between the end of frame `from` and the end of frame `to`. Dev builds only, see "Frame history" |
+| `schema` | `game.schema` | none | frame | `world.ecs.schema()`: every component and tag the world met, sorted by name, with the JSON kind of each field |
+| `at` | `game.at` | `{ x: "number", y: "number" }` | frame | What lies under a page point in CSS px, topmost first: `[{ entity, owner, key, layer }]`. `[]` while the renderer is inert |
 
 ## Base commands
 
@@ -95,9 +99,39 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `step` | `game.step` | `{ frames: "number", deltaMs: "number?" }` | cosmetic | `time.step(deltaMs)` `frames` times, also while paused. `deltaMs` is 1000/60 by default. Value: `time.snapshot()` |
 | `pause` | `game.pause` | none | cosmetic | `lifecycle.push("devtools")`. Value: `lifecycle.isPaused()` |
 | `resume` | `game.resume` | none | cosmetic | `lifecycle.pop("devtools")`. Value: `lifecycle.isPaused()`, still true while another reason holds |
-| `capture` | `game.capture` | none | read | `renderer.capture()`: a PNG data URL of the canvas after the next drawn frame. `undefined` while the renderer is inert |
+| `capture` | `game.capture` | `{ legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" }` | read | `renderer.capture(options)`: `{ png, legend? }` of the canvas after the next drawn frame. `undefined` while the renderer is inert. See "Capture options" |
 | `debug` | `game.debug` | `{ nineSlice: "boolean" }` | cosmetic | `renderer.sync.debug.nineSlice(on)`. Value: the debug switches |
 | `reducedMotion` | `game.reducedMotion` | `{ on: "boolean" }` | cosmetic | `anim.setReducedMotion(on)`. Value: `anim.reducedMotion()` |
+| `timeScale` | `game.timeScale` | `{ scale: "number" }` | cosmetic | `time.setScale(scale)`. A scale below 0 or not finite throws. Value: `time.snapshot()` |
+| `trace` | `game.trace` | `{ path: "json" }` | route | `input.trace(path)`, a list of `{ projection, key }`. Value: whether the gate took the answer. See the [input README](../src/plugins/input/README.md) |
+
+### Capture options
+
+`png` is a PNG data URL. `legend` comes only with `legend: true`.
+
+| Option | Shape | Does |
+|---|---|---|
+| `legend` | `true` | Numbers every keyed view with a drawn box. Each entry is `{ n, projection, key, rect }`, `rect` in picture pixels. A badge with `n` sits on the picture |
+| `layers` | `["board", "hud"]` | Draws only these layers. An unknown name throws |
+| `sheet` | `{ frames, everyMs }` | A contact sheet of 2 to 12 frames, `everyMs` apart in game time. It takes no other option but `layers` |
+| `diff` | a bookmark | Red where the pixels differ from the screen of the bookmark |
+
+`diff` is a round trip. The game must wait at a gate with no effect pending, else it throws. The command journals itself, restores the bookmark and waits for its gate, takes that picture, restores where the game stood and waits again. Then it answers the picture of now against then. Every restore reconciles in direct mode, so motions in flight when the command started are finished afterwards. Full rules: the [renderer README](../src/plugins/renderer/README.md).
+
+```ts
+const { value: mark } = await run(app, commands.bookmark);
+// ... play a move ...
+(await run(app, commands.capture, { diff: mark })).value; // { png: "data:image/png;base64,…" }
+read(app, sources.cheats); // [{ id: "game.capture", input: { diff: { path: "home", ... } }, frame: 1 }]
+```
+
+## Frame history
+
+A dev build keeps the last 120 frames of world changes, about 2 s at 60 fps. A production build keeps none. `game.diff` reads it.
+
+- `from === to` answers no entity.
+- A production build throws `[game] game.diff needs a dev build.`
+- A frame outside the window, or `from` after `to`, throws `[game] game.diff: frame 7 is not in the history.` with the frames it keeps.
 
 ## Effects, taint and the cheat journal
 
@@ -109,7 +143,7 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `cheat` | Changes the state outside the rules. Taints the session and is journaled |
 | `raw` | Replaces the state outside the graph. Taints the session and is journaled |
 
-`run` journals a `cheat` or `raw` command as `{ id, input, frame }` before it runs, so a failing one still counts. The session and the journal belong to one app object: two apps in one process never share them. Read them with `sources.tainted` and `sources.cheats` (`game.cheats`), and in `state.tainted` of every `run`. Of the base commands only `game.restore` is `raw`; none is `cheat`.
+`run` journals a `cheat` or `raw` command as `{ id, input, frame }` before it runs, so a failing one still counts. The session and the journal belong to one app object: two apps in one process never share them. Read them with `sources.tainted` and `sources.cheats` (`game.cheats`), and in `state.tainted` of every `run`. Of the base commands only `game.restore` is `raw`; none is `cheat`. `game.capture` with `diff` journals itself as a raw write, `{ id: "game.capture", input: { diff }, frame }`. It is the one base command whose taint depends on its input.
 
 ## Turn the dev build on
 

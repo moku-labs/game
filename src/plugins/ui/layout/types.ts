@@ -4,6 +4,9 @@
  */
 import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { FxHandler } from "../../flow/fx/types";
+import type { Hint } from "../../flow/types";
+import type { Message } from "../../i18n/types";
+import type { Size } from "../../text/types";
 import type { Entity } from "../../world/types";
 import type { Element, JsxModule } from "../jsx/types";
 import type { ResolvedStyle } from "../styles/types";
@@ -19,6 +22,17 @@ import type { ResolvedStyle } from "../styles/types";
 export type Rect = { x: number; y: number; w: number; h: number };
 
 /**
+ * The rows of a windowed scroll that exist: the first and the last index; `last` is `first - 1`
+ * for an empty list.
+ *
+ * @example
+ * ```ts
+ * const range: RowRange = { first: 27, last: 50 };
+ * ```
+ */
+export type RowRange = { first: number; last: number };
+
+/**
  * How the solve finds the element of a child entity. The records live in the `jsx` state, so the
  * walk is handed a reader instead of reaching across the module border.
  *
@@ -28,6 +42,17 @@ export type Rect = { x: number; y: number; w: number; h: number };
  * ```
  */
 export type ElementLookup = (entity: Entity) => Element | undefined;
+
+/**
+ * What a text element is measured through: the advance table of `text`, the string `text`
+ * resolved for an entity (`undefined` before the entity carries its `Text`), and the duration
+ * words of `i18n`, for a bound `"duration"` before its first resolve.
+ */
+export type TextSource = {
+  measure(content: string | Message, style: string): Size;
+  resolved(entity: Entity): string | undefined;
+  duration(ms: number): string;
+};
 
 /**
  * layout module state. `nodes` is attach minus detach: Yoga 3.2.1 has no instance counter.
@@ -52,6 +77,7 @@ export type LayoutModule = {
   loaded(): boolean;
   attach(element: Element): void;
   applyStyle(element: Element): void;
+  remeasure(element: Element): boolean;
   affectsRect(first: ResolvedStyle, second: ResolvedStyle): boolean;
   place(parent: Element, children: readonly Element[]): void;
   free(element: Element): void;
@@ -59,12 +85,26 @@ export type LayoutModule = {
   commit(element: Element, parent: Rect | undefined): void;
   enter(element: Element): void;
   loop(element: Element): void;
-  change(element: Element, previous: Rect): boolean;
-  repose(element: Element, parent: Rect | undefined, hooked: boolean): void;
+  change(element: Element, previous: Rect, hint?: Hint): boolean;
+  changeExtra(
+    element: Element,
+    name: string,
+    values: { previous: object; next: object },
+    hint: Hint | undefined
+  ): boolean;
+  repose(element: Element, parent: Rect | undefined, hooked: boolean, hint?: Hint): void;
   lift(element: Element, units: number): void;
   exit(element: Element): void;
   settled(element: Element): boolean;
   scroll(containers: readonly Element[], lookup: ElementLookup): void;
+  clampScroll(container: Element, contentHeight: number, lookup: ElementLookup): number;
+  windowOf(
+    offset: number,
+    viewportHeight: number,
+    rows: number,
+    rowHeight: number,
+    overscan: number
+  ): RowRange;
   popupHandler(jsx: JsxModule): FxHandler;
   guideHandler(): FxHandler;
   counters(): { nodes: number; measured: number; solves: number };

@@ -3,6 +3,7 @@
  */
 import type { Json, Snapshot } from "../../model/types";
 import type { Time } from "../../time/types";
+import type { ProjectionKey } from "../projection/types";
 
 /**
  * Entity id: `generation * 2 ** 20 + index`, a safe integer. A freed index comes back with a
@@ -403,6 +404,151 @@ export type StructuralHook = (entity: Entity, value: unknown) => void;
 export type FrameSnapshot = { frame: number; snapshot: Snapshot };
 
 /**
+ * The JSON kind of one component field, read from its default value: what the editor's component
+ * palette shows next to the field name. A nested shape is not described; `defaults` carries it.
+ *
+ * @example
+ * ```ts
+ * const kinds: Record<string, FieldKind> = { x: "number", pivot: "object", tags: "array" };
+ * ```
+ */
+export type FieldKind = "number" | "string" | "boolean" | "object" | "array" | "null";
+
+/**
+ * One component or tag type the world met, as `ecs.schema()` lists it.
+ *
+ * @example
+ * ```ts
+ * const held: ComponentSchema = {
+ *   name: "Held", kind: "tag", json: true, fields: {}, defaults: true, owned: []
+ * };
+ * const display: ComponentSchema = {
+ *   name: "Display", kind: "component", json: false, fields: {}, defaults: null, owned: []
+ * };
+ * ```
+ */
+export type ComponentSchema = {
+  /** The storage name, `componentName`. */
+  name: string;
+  kind: "component" | "tag";
+  /** False when the defaults are not JSON, as `Display`'s: `fields` is then `{}` and `defaults` `null`. */
+  json: boolean;
+  /** Field name to the JSON kind of its default. */
+  fields: Record<string, FieldKind>;
+  /** The defaults as JSON; `true` for a tag. */
+  defaults: Json;
+  /** The fields a plugin writes and a view never does; `[]` for a tag. */
+  owned: readonly string[];
+};
+
+/**
+ * The first and the last value of one component inside a frame window. `null` on a side means
+ * the entity did not carry the component there: component values are objects or `true`, never
+ * `null`.
+ *
+ * @example
+ * ```ts
+ * const levelUp: ComponentChange = { from: { level: 2 }, to: { level: 3 } };
+ * const picked: ComponentChange = { from: null, to: true }; // the tag Held was added
+ * ```
+ */
+export type ComponentChange = { from: Json | null; to: Json | null };
+
+/**
+ * What happened to one entity between two frames: who owns it, where it lives now, whether it
+ * came, went or changed, and every component that really changed.
+ *
+ * @example
+ * ```ts
+ * const merged: EntityDiff = {
+ *   id: 1_048_577,
+ *   owner: { kind: "projection", name: "board.items" },
+ *   key: { projection: "board.items", key: "i7" },
+ *   change: "changed",
+ *   components: { Level: { from: { level: 2 }, to: { level: 3 } } }
+ * };
+ * ```
+ */
+export type EntityDiff = {
+  id: Entity;
+  owner: Owner;
+  /** The live address at read time; `undefined` once the entity is gone, or when it has no key. */
+  key: ProjectionKey | undefined;
+  change: "spawned" | "despawned" | "changed";
+  components: Record<string, ComponentChange>;
+};
+
+/**
+ * What changed between the world at the end of frame `from` and the world at the end of frame
+ * `to`, as `ecs.diff` answers it. The entities are sorted by id.
+ *
+ * @example
+ * ```ts
+ * const quiet: FrameDiff = { from: 120, to: 180, entities: [] };
+ * ```
+ */
+export type FrameDiff = { from: number; to: number; entities: readonly EntityDiff[] };
+
+/**
+ * One record of the frame history: one component of one entity, before and after. `null` means
+ * absent, so a spawn records `from: null` and a despawn `to: null`.
+ *
+ * @example
+ * ```ts
+ * const levelUp: HistoryChange = {
+ *   id: 1_048_577,
+ *   owner: { kind: "projection", name: "board.items" },
+ *   component: "Level",
+ *   from: { level: 2 },
+ *   to: { level: 3 }
+ * };
+ * ```
+ */
+export type HistoryChange = {
+  id: Entity;
+  owner: Owner;
+  component: string;
+  from: Json | null;
+  to: Json | null;
+};
+
+/**
+ * The records of one frame, and the entities that frame spawned and despawned: a record alone
+ * cannot tell a spawn from a component added to a live entity.
+ *
+ * @example
+ * ```ts
+ * const quiet: HistorySlot = { frame: 96, changes: [], spawned: [], despawned: [] };
+ * ```
+ */
+export type HistorySlot = {
+  frame: number;
+  changes: HistoryChange[];
+  spawned: Entity[];
+  despawned: Entity[];
+};
+
+/**
+ * The last recorded JSON of one live entity: its owner and its components by name.
+ */
+export type ShadowEntry = { owner: Owner; components: Map<string, Json> };
+
+/**
+ * The frame history of a dev build: one shadow copy of the world as JSON and a ring of the
+ * records of the last frames, one slot per frame at index `frame % HISTORY_FRAMES`.
+ */
+export type History = {
+  /** The last recorded JSON of every live entity. */
+  shadow: Map<Entity, ShadowEntry>;
+  /** `HISTORY_FRAMES` long. */
+  slots: Array<HistorySlot | undefined>;
+  /** The last frame recorded, `undefined` before the first one. */
+  newest: number | undefined;
+  /** The frame the recording started on: the shadow is the world at its end. */
+  started: number | undefined;
+};
+
+/**
  * ecs module state.
  */
 export type EcsState = {
@@ -424,6 +570,8 @@ export type EcsState = {
   mode: WorldMode;
   offFrame: Array<() => void>;
   frameSnapshot: FrameSnapshot | undefined;
+  /** The frame history: dev builds only, from the first frame on; `undefined` before it. */
+  history: History | undefined;
 };
 
 /**
@@ -831,6 +979,48 @@ export type EcsApi = {
    * ```
    */
   snapshot(): WorldSnapshot;
+
+  /**
+   * What changed between the world at the end of frame `from` and the world at the end of frame
+   * `to`: one entry per entity, sorted by id, with the first and the last value of every
+   * component that really changed. A value that went and came back inside the window is left
+   * out, and so is an entity spawned and despawned inside it. Dev builds only: the world keeps
+   * the change records of the last 120 frames.
+   *
+   * @param from - The frame the window starts after.
+   * @param to - The last frame of the window.
+   * @returns The entities that changed, spawned or despawned in the window.
+   * @throws {Error} In a production build, for a frame outside the last 120, and when `from` is
+   *   after `to`.
+   * @example
+   * ```ts
+   * // The editor asks what the last second of play changed: item i7 merged up to level 3.
+   * app.world.ecs.diff(120, 180);
+   * // { from: 120, to: 180, entities: [{ id: 1048577,
+   * //   owner: { kind: "projection", name: "board.items" },
+   * //   key: { projection: "board.items", key: "i7" }, change: "changed",
+   * //   components: { Level: { from: { level: 2 }, to: { level: 3 } } } }] }
+   * ```
+   */
+  diff(from: number, to: number): FrameDiff;
+
+  /**
+   * Every component and tag type the world met, sorted by name: its kind, whether its defaults
+   * are JSON, the JSON kind of each field, the defaults and the fields a plugin owns. A type
+   * registers on first use, so the list is what the world has met so far, not what the game
+   * declared. Every call builds a new list.
+   *
+   * @returns One entry per type.
+   * @example
+   * ```ts
+   * // The editor's component palette shows the fields of Transform.
+   * app.world.ecs.schema().find(entry => entry.name === "Transform");
+   * // { name: "Transform", kind: "component", json: true,
+   * //   fields: { x: "number", y: "number", rotation: "number", scale: "number", pivot: "object" },
+   * //   defaults: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }, owned: [] }
+   * ```
+   */
+  schema(): readonly ComponentSchema[];
 };
 
 /**

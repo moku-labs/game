@@ -1,7 +1,7 @@
 /**
- * @file time plugin — the time command of the `/control` door: step frames by hand. Dev builds
- * only: the body starts with the inline dev guard, so a bundler `define` of `false` drops it, and
- * logs the `moku:dev` marker.
+ * @file time plugin — the time commands of the `/control` door: step frames by hand and set the
+ * time scale. Dev builds only: every body starts with the inline dev guard, so a bundler `define`
+ * of `false` drops it, and logs the `moku:dev` marker.
  */
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
@@ -21,6 +21,21 @@ function checkFrames(frames: number): void {
 
   throw new Error(
     `[game] game.step takes a whole number of frames.\n  Pass 0 or a positive whole number, not ${String(frames)}.`
+  );
+}
+
+/**
+ * Refuses a time scale that is not a finite number of zero or more. `setScale` clamps silently;
+ * the command refuses, so an editor slider cannot pass `NaN`.
+ *
+ * @param scale - The time scale.
+ * @throws {Error} When it is negative or not finite.
+ */
+function checkScale(scale: number): void {
+  if (Number.isFinite(scale) && scale >= 0) return;
+
+  throw new Error(
+    `[game] game.timeScale takes a scale of 0 or more.\n  Pass a finite number, not ${String(scale)}.`
   );
 }
 
@@ -47,6 +62,32 @@ export const stepCommand = defineCommand({
     checkFrames(frames);
 
     for (let frame = 0; frame < frames; frame += 1) app.time.step(deltaMs);
+
+    return app.time.snapshot();
+  }
+});
+
+/**
+ * Sets the time scale and answers the time after the write. 0 freezes game time while the frames
+ * keep running; `game.step` still steps.
+ *
+ * @example
+ * ```ts
+ * // The editor slows a merge to a quarter speed to watch the item land.
+ * (await run(app, commands.timeScale, { scale: 0.25 })).value.scale; // 0.25
+ * ```
+ */
+export const timeScaleCommand = defineCommand({
+  id: "game.timeScale",
+  title: "Time scale",
+  input: { scale: "number" },
+  effect: "cosmetic",
+  run: (app: ControlApp, { scale }) => {
+    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+
+    app.log.debug("moku:dev", { command: "game.timeScale", scale });
+    checkScale(scale);
+    app.time.setScale(scale);
 
     return app.time.snapshot();
   }

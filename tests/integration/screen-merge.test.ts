@@ -17,8 +17,9 @@ import { promisify } from "node:util";
 import type { Assets, Flow, Model } from "@moku-labs/game";
 import { Transform } from "@moku-labs/game";
 import { createHeadless } from "@moku-labs/game/testing";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createScreenGame } from "./merge-game/game";
+import { tr } from "./merge-game/kit";
 import type { Player } from "./merge-game/state";
 import { startingPlayer } from "./merge-game/state";
 import { generatorId } from "./merge-game/tables";
@@ -316,7 +317,7 @@ describe("screen-merge — the fast walk", () => {
 });
 
 describe("screen-merge — the generated asset keys", () => {
-  it("has a manifest and a key module the scanner would write again", async () => {
+  it("has a manifest, a key module and string modules, en-XA included, the scanner would write again", async () => {
     const { stdout } = await runCommand(
       "bun",
       [
@@ -327,13 +328,50 @@ describe("screen-merge — the generated asset keys", () => {
         `${gameRoot}/manifest.json`,
         "--keys",
         `${gameRoot}/generated/assets.ts`,
-        "--check"
+        "--check",
+        "--pseudo"
       ],
       { cwd: repoRoot }
     );
 
     expect(stdout).toContain("up to date");
+    expect(stdout).toContain("in 3 locales (en, en-XA, ru).");
   }, 60_000);
+});
+
+describe("screen-merge — the pseudo-locale", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("registers en-XA in a dev build and formats the refill bracketed, accented and with its duration", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app } = createScreenGame({ manifest: await readManifest() });
+
+    await app.start();
+
+    expect(app.i18n.locales()).toContain("en-XA");
+
+    await app.i18n.setLocale("en-XA");
+
+    // The literal words are accented and padded inside brackets; the duration is Intl's own,
+    // and Intl reads "en-XA" as English.
+    expect(app.i18n.plain(tr("energy.refill", { time: 95_000 }))).toBe(
+      "[Ŕéƒíļļš íñ 1 min, 35 sec one two]"
+    );
+
+    await app.stop();
+  });
+
+  it("leaves en-XA out of a production build", async () => {
+    const { app } = createScreenGame({ manifest: await readManifest() });
+
+    await app.start();
+
+    expect(app.i18n.locales()).not.toContain("en-XA");
+
+    await app.stop();
+  });
 });
 
 /** What the pack test keeps between its cases: the temp folder and the manifest written there. */
