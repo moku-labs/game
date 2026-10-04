@@ -135,7 +135,7 @@ In a live game the same answer comes from the screen: `app.flow.gate.answer({ in
 
 ## A screen: the body font and the asset keys
 
-A game with a screen keeps its files in `src/features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. The package ships it as the bin `moku-game-assets`. Add the script to the game's `package.json`:
+A game with a screen keeps its files in `src/features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. The package ships it as the bin `moku-game-assets`. It runs under bun; with node only, run `bun node_modules/@moku-labs/game/dist/assets.mjs`. Add the script to the game's `package.json`:
 
 ```json
 {

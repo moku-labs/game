@@ -20,7 +20,7 @@ interface PackageJson {
 /** The repository root, the folder of `package.json`. */
 const ROOT = new URL("../../", import.meta.url);
 
-/** The fixture game's copy of the body font. */
+/** The fixture game's body font is the source; `fonts/` ships a byte copy, and this file keeps the two equal. */
 const FIXTURE_FONTS = new URL("tests/integration/merge-game/features/ui/assets/", ROOT);
 
 /**
@@ -85,9 +85,11 @@ describe("the shipped body font", () => {
 });
 
 describe("llms.txt", () => {
-  it("says neither 'not published' nor 'Planned, not built'", () => {
+  it("is a real guide that names the bin and says neither 'not published' nor 'Planned, not built'", () => {
     const guide = readText("llms.txt");
 
+    expect(guide.length).toBeGreaterThan(1000);
+    expect(guide).toContain("moku-game-assets");
     expect(guide).not.toContain("not published");
     expect(guide).not.toContain("Planned, not built");
   });
