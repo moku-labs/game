@@ -22,13 +22,28 @@ function argument(value: unknown, intl: I18n.IntlKit): I18n.Part {
   return { kind: "text", text: String(value) };
 }
 
+/** Milliseconds as Intl.DurationFormat reads them: whole seconds rounded up, seconds always. */
+function duration(ms: number): Partial<Record<Intl.DurationFormatUnit, number>> {
+  const total = Number.isFinite(ms) ? Math.max(0, Math.ceil(ms / 1000)) : 0;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const input: Partial<Record<Intl.DurationFormatUnit, number>> = {};
+
+  if (hours > 0) input.hours = hours;
+  if (minutes > 0) input.minutes = minutes;
+  input.seconds = total % 60;
+
+  return input;
+}
+
 export default {
   "board.full": () => [{ kind: "text", text: "Доска заполнена" }],
   "board.item": p => [{ kind: "text", text: (String(p.item) === "twig" ? "Щепка" : String(p.item) === "log" ? "Бревно" : String(p.item) === "plank" ? "Доска" : String(p.item) === "crate" ? "Ящик" : "Дерево") }],
   "board.level": (p, intl) => [{ kind: "text", text: "Уровень " }, argument(p.level, intl)],
   "board.sawmill": () => [{ kind: "text", text: "Лесопилка" }],
   "energy.later": () => [{ kind: "text", text: "Позже" }],
-  "energy.refill": (p, intl) => [{ kind: "text", text: "Пополнится через\n" }, argument(p.time, intl)],
+  "energy.refill": (p, intl) => [{ kind: "text", text: `Пополнится через
+${intl.duration({ style: "short", secondsDisplay: "always" }).format(duration(p.time as number))}` }],
   "energy.title": () => [{ kind: "text", text: "Нет энергии" }],
   "energy.watch": () => [{ kind: "text", text: "Смотреть и\nпополнить" }],
   "gift.claim": () => [{ kind: "text", text: "Забрать" }],

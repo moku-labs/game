@@ -6,7 +6,7 @@
 import type { Flow } from "@moku-labs/game";
 import { schedule, type } from "@moku-labs/game";
 import { OutOfEnergy } from "../features/energy/out-of-energy";
-import { clockOf, refillIn } from "../features/energy/refill";
+import { refillIn } from "../features/energy/refill";
 import { showPopup } from "../features/ui/popup";
 import { defineNode, popup } from "../kit";
 import { rules } from "../rules";
@@ -18,7 +18,7 @@ export const energy = defineNode({
   run: async ({ player, now, fx, out }) => {
     const caughtUp = rules.elapse(player.merge, now, tables);
     const wait = refillIn(caughtUp.energy, now, tables.energy.regenMs);
-    const answered = (await showPopup(fx, popup(OutOfEnergy, { refillIn: clockOf(wait) }))) as
+    const answered = (await showPopup(fx, popup(OutOfEnergy, { refillIn: wait }))) as
       | Flow.Answer
       | undefined;
 

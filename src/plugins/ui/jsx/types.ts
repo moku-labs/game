@@ -208,7 +208,9 @@ export type ScrollWindow = {
  * `change` hook of each of them returned; `warnedOwned` the names of the `components` values the
  * element owns that were already logged. A windowed scroll carries its `window` and the one-time
  * warnings of its props in `warned`; `scrolledIn` marks an element a range change of a windowed
- * scroll created: it plays no `enter` hook.
+ * scroll created: it plays no `enter` hook. A text or an icon that sizes itself keeps in
+ * `measuredSize` what its measure function last answered, before Yoga's clamp: a bound text whose
+ * new string measures the same asks for no solve.
  */
 export type Element = {
   entity: Entity;
@@ -240,6 +242,7 @@ export type Element = {
   warned: Set<string>;
   scrolledIn: boolean;
   window?: ScrollWindow;
+  measuredSize?: { width: number; height: number };
 };
 
 /**

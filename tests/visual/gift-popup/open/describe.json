@@ -1207,6 +1207,27 @@
                           "width": 110
                         },
                         "type": "icon"
+                      },
+                      {
+                        "children": [],
+                        "key": "homeCoinsText",
+                        "rect": {
+                          "h": 72,
+                          "w": 112,
+                          "x": 203,
+                          "y": 86
+                        },
+                        "state": {
+                          "active": false,
+                          "covered": false,
+                          "disabled": false,
+                          "focus": false,
+                          "hover": false,
+                          "pressed": false,
+                          "selected": false
+                        },
+                        "style": {},
+                        "type": "text"
                       }
                     ],
                     "key": "homeCoins",
@@ -2911,6 +2932,50 @@
     {
       "components": {
         "Box": {
+          "h": 72,
+          "w": 112,
+          "x": 203,
+          "y": 86
+        },
+        "Counter": {
+          "value": 125
+        },
+        "Parent": {
+          "key": "homeCoins",
+          "projection": "home.screen"
+        },
+        "Text": {
+          "alpha": 1,
+          "anchor": {
+            "x": 0,
+            "y": 0
+          },
+          "bind": {
+            "component": "Counter",
+            "field": "value",
+            "format": "int"
+          },
+          "content": "",
+          "resolved": "125",
+          "style": "ui.number"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 56,
+            "y": 36
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 175,
+          "y": 38
+        }
+      },
+      "key": "homeCoinsText",
+      "projection": "home.screen"
+    },
+    {
+      "components": {
+        "Box": {
           "h": 440,
           "w": 900,
           "x": 90,
@@ -3622,50 +3687,6 @@
       },
       "key": "playSprigRight",
       "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Counter": {
-          "value": 125
-        },
-        "Layer": {
-          "name": "ui"
-        },
-        "Order": {
-          "value": 1
-        },
-        "Parent": {
-          "key": "homeCoins",
-          "projection": "home.screen"
-        },
-        "Text": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0.5,
-            "y": 0.5
-          },
-          "bind": {
-            "component": "Counter",
-            "field": "value",
-            "format": "int"
-          },
-          "content": "",
-          "resolved": "125",
-          "style": "ui.number"
-        },
-        "Transform": {
-          "pivot": {
-            "x": 0,
-            "y": 0
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 175,
-          "y": 38
-        }
-      },
-      "key": "coins",
-      "projection": "hud.coins"
     }
   ]
 }

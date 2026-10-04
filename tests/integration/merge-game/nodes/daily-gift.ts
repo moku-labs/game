@@ -34,7 +34,7 @@ export const dailyGift = defineNode({
       })
     );
     // Released after this commit: the counter holds still while the coins fly, then rolls.
-    fx.emit(hint("coins.fly", { projection: "hud.coins", key: "coins", ms: FLIGHT_MS }));
+    fx.emit(hint("coins.fly", { projection: "home.screen", key: "homeCoinsText", ms: FLIGHT_MS }));
 
     return out.claim();
   }

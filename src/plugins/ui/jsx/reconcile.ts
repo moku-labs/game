@@ -1503,6 +1503,22 @@ export function createReconciler(
   }
 
   /**
+   * Asks for a solve of every root with a bound text whose shown string measures to another size
+   * now. `text` writes `resolved` earlier in this phase, and only when the shown string changed,
+   * so a counter that stands still walks nothing. A leaving text is out of the flow: its roll
+   * solves nothing.
+   */
+  function markResizedTexts(): void {
+    for (const entity of ecs.changed(Text)) {
+      const element = state.elements.get(entity);
+      const root = element === undefined ? undefined : state.roots.get(element.root);
+
+      if (element === undefined || root === undefined || ecs.has(entity, Exiting)) continue;
+      if (modules.layout.remeasure(element)) root.needsSolve = true;
+    }
+  }
+
+  /**
    * Collects the roots that have work this frame: a changed tree, a dirty instance or style, and
    * every root when the viewport changed.
    *
@@ -1553,8 +1569,8 @@ export function createReconciler(
 
   /**
    * The first of the two systems of phase `layout`: the sweep, the popups that may leave, the
-   * pull of the text being typed, the scroll offsets and the windowed ranges, the viewport, the
-   * dirty roots and the hosted views.
+   * pull of the text being typed, the scroll offsets and the windowed ranges, the bound texts that
+   * show a string of another size, the viewport, the dirty roots and the hosted views.
    */
   function reconcile(): void {
     // Despawn what finished exiting, and count this pass.
@@ -1573,6 +1589,9 @@ export function createReconciler(
 
     modules.layout.scroll(containers, lookup);
     stepWindows(containers);
+
+    // A bound text whose new string measures to another size asks its root for a solve.
+    markResizedTexts();
 
     // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());

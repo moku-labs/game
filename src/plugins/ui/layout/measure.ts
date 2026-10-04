@@ -1,11 +1,16 @@
 /**
  * @file ui/layout — the measure function of a text that sizes itself. Yoga calls it once per
- * invalidation; the answer comes from the advance table of `text`, never from a canvas.
+ * invalidation; the answer comes from the advance table of `text`, never from a canvas. A text
+ * with `bind` is sized by the string `text` shows for it, and its node is marked dirty when a new
+ * shown string measures to another size.
  */
 import type { MeasureFunction, Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Message } from "../../i18n/types";
+import { formatBound, isTextFormat } from "../../text/format";
+import type { Size, TextBind } from "../../text/types";
+import type { AnyComponentValue } from "../../world/types";
 import type { Element } from "../jsx/types";
-import type { LayoutState } from "./types";
+import type { LayoutState, TextSource } from "./types";
 
 /** What a text is drawn in when its `style` prop is a layout style instead of a style key. */
 const DEFAULT_TEXT_STYLE = "body";
@@ -63,6 +68,82 @@ export function contentOf(element: Element): {
 }
 
 /**
+ * The bind of a text, when the markup gave it one.
+ *
+ * @param element - The element to ask about.
+ * @returns What `bind()` built, or `undefined` for any other element.
+ */
+function bindOf(element: Element): TextBind | undefined {
+  const { bind } = element.node.props;
+  const isBound = element.type === "text" && typeof bind === "object" && bind !== null;
+
+  return isBound ? (bind as TextBind) : undefined;
+}
+
+/**
+ * The bound number as the `components` prop of a text lists it. Of two values of the bound
+ * component the last wins, as it does for the element.
+ *
+ * @param element - The bound text.
+ * @param bind - Its bind.
+ * @returns The number, or `undefined` when no listed value carries one in the bound field.
+ */
+function listedValueOf(element: Element, bind: TextBind): number | undefined {
+  const listed: unknown = element.node.props.components;
+
+  if (!Array.isArray(listed)) return undefined;
+
+  const value = (listed as readonly AnyComponentValue[]).findLast(
+    entry => entry.type.componentName === bind.component
+  )?.value;
+  const field: unknown =
+    value === undefined || value === true ? undefined : Reflect.get(value, bind.field);
+
+  return typeof field === "number" ? field : undefined;
+}
+
+/**
+ * The string a bound text shows: `Text.resolved` once the entity carries its `Text`. Before that,
+ * for the first solve, the bound field of its `components` value in the format of the bind, so
+ * `text` resolves what was measured. A `Countdown` shows the `left` it lists, 0, until `text`
+ * derives it.
+ *
+ * @param element - The text element.
+ * @param source - Where `Text.resolved` and the duration words are read.
+ * @returns The string, or `undefined` for a text with no bind.
+ */
+export function shownOf(element: Element, source: TextSource): string | undefined {
+  const bind = bindOf(element);
+
+  if (bind === undefined) return undefined;
+
+  const resolved = source.resolved(element.entity);
+
+  if (resolved !== undefined) return resolved;
+
+  const value = listedValueOf(element, bind);
+  const format = isTextFormat(bind.format) ? bind.format : "int";
+
+  return value === undefined ? "" : formatBound(value, format, ms => source.duration(ms));
+}
+
+/**
+ * The size a text or an icon takes before Yoga clamps it: an icon is square on one line of its
+ * text style, a bound text measures the string it shows, any other text its content.
+ *
+ * @param element - The text or icon element.
+ * @param source - What it is measured through.
+ * @returns The width and the height.
+ */
+function naturalSize(element: Element, source: TextSource): Size {
+  const { content, style } = contentOf(element);
+
+  if (element.type === "icon") return squareOf(source.measure(LINE_SAMPLE, style));
+
+  return source.measure(shownOf(element, source) ?? content, style);
+}
+
+/**
  * Clamps one axis of a measured size to what Yoga offered on that axis.
  *
  * @param yoga - The loaded Yoga module, for the three measure modes.
@@ -104,18 +185,19 @@ export function clampToMode(
 }
 
 /**
- * Installs the measure function of a text element, or drops it when the text is fixed.
+ * Installs the measure function of a text element, or drops it when the text is fixed. The
+ * function keeps the size it answered on the element, for `remeasureShown`.
  *
  * @param state - The layout state, for the Yoga module and the `measured` counter.
  * @param node - The node of the element.
  * @param element - The text element.
- * @param measure - What `text.measure` is reached through.
+ * @param source - What the text is measured through.
  */
 export function installMeasure(
   state: LayoutState,
   node: YogaNode,
   element: Element,
-  measure: (content: string | Message, style: string) => { width: number; height: number }
+  source: TextSource
 ): void {
   const yoga = state.yoga;
 
@@ -129,12 +211,10 @@ export function installMeasure(
   }
 
   const measureFunction: MeasureFunction = (width, widthMode, height, heightMode) => {
-    const { content, style } = contentOf(element);
+    const size = naturalSize(element, source);
 
     state.measured += 1;
-
-    const size =
-      element.type === "icon" ? squareOf(measure(LINE_SAMPLE, style)) : measure(content, style);
+    element.measuredSize = size;
 
     return clampToMode(yoga, size, { width, widthMode, height, heightMode });
   };
@@ -152,4 +232,30 @@ export function markMeasured(state: LayoutState, element: Element): void {
   if (!needsMeasure(element)) return;
 
   state.byEntity.get(element.entity)?.markDirty();
+}
+
+/**
+ * Marks the node of a bound text dirty when the string `text` shows for it now measures to another
+ * size than the node was laid out with. `text` writes `resolved` only when the shown string
+ * changes, and a counter that rolls through digits of one width asks for no solve.
+ *
+ * @param state - The layout state, for the node of the element.
+ * @param element - An element whose `Text` changed this frame.
+ * @param source - What the text is measured through.
+ * @returns True when the node was marked, so its root has to solve again.
+ */
+export function remeasureShown(state: LayoutState, element: Element, source: TextSource): boolean {
+  const node = state.byEntity.get(element.entity);
+  const before = element.measuredSize;
+
+  if (node === undefined || before === undefined) return false;
+  if (bindOf(element) === undefined || !needsMeasure(element)) return false;
+
+  const size = naturalSize(element, source);
+
+  if (size.width === before.width && size.height === before.height) return false;
+
+  node.markDirty();
+
+  return true;
 }

@@ -9,7 +9,7 @@
  * 44 pt on the smallest phone takes its taps on a taller, invisible box around unchanged art.
  */
 
-import { NineSlice, PointerOver, Pressed, Shape, Tappable, Text, Transform } from "@moku-labs/game";
+import { NineSlice, PointerOver, Pressed, Shape, Tappable, Transform } from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { TAP_MIN } from "./merge-game/features/ui/kit";
 import type { Game } from "./timber-helpers";
@@ -221,11 +221,15 @@ describe("timber-controls — the HUD row", () => {
       expect(icon.y + icon.h / 2, key).toBe(bar.y + bar.h / 2);
     }
 
-    // The coin counter sits in the middle of the bar right of the icon, in the pill's own units.
-    const counter = game.app.world.projection.entityOf("hud.coins", "coins") ?? 0;
+    // The coin counter is the text of the coin pill: the row centres it on the bar right of the
+    // icon, 175 units in and 38 down in the pill's own units.
+    const coins = rect("coinPill");
+    const counter = rect("coinPillText");
 
-    expect(game.app.world.ecs.get(counter, Text)?.anchor).toEqual({ x: 0.5, y: 0.5 });
-    expect(game.app.world.ecs.get(counter, Transform)).toMatchObject({ x: 175, y: 38 });
+    // A bound text is measured by the string it shows, so the rect has width.
+    expect(counter.w).toBeGreaterThan(0);
+    expect(counter.x + counter.w / 2 - coins.x).toBe(175);
+    expect(counter.y + counter.h / 2 - coins.y).toBe(38);
 
     await game.app.stop();
   });

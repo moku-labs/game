@@ -1,5 +1,5 @@
 /**
- * @file The HUD as a feature: the two projections of the top bar, the counter component, the
+ * @file The HUD as a feature: the projection of the board screen, the counter component, the
  * two coin flights, and the shared interface of the game — the text styles of every screen and the
  * boot bundle `ui` with the fonts, the 9-slice pieces, the icons and the click. A headless test
  * composes `hudFeature.logicOnly` and sees none of it.
@@ -13,11 +13,11 @@ import { defineFeature } from "../../kit";
 import { uiAssets } from "../ui/assets";
 import { uiStyles } from "../ui/styles";
 import { coinsFlyGift, coinsFlyReward } from "./animations";
-import { Counter, hudCoins } from "./coins";
+import { Counter } from "./coins";
 import { hud } from "./view";
 
 export const hudFeature = defineFeature("hud", {
-  projections: [hud, hudCoins],
+  projections: [hud],
   components: [Counter],
   animations: [coinsFlyReward, coinsFlyGift],
   textStyles: uiStyles,

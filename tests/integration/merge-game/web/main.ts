@@ -29,7 +29,7 @@ import { hapticsPlugin } from "@moku-labs/system/haptics";
 import { keepAwakePlugin } from "@moku-labs/system/keep-awake";
 import { lifecyclePlugin } from "@moku-labs/system/lifecycle";
 import { mainFlow } from "../flows/main";
-import { screenPlugins, volumesOf } from "../game";
+import { devLocales, screenPlugins, volumesOf } from "../game";
 import { fromSystem } from "../platform-bridge";
 import { startingSession } from "../state";
 import { rendererFor } from "./renderer";
@@ -51,7 +51,7 @@ const app = createApp({
     text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
     model: { initialPlayer: playerFor(location.search), initialSession: startingSession, seed: 42 },
     flow: { mainFlow, safeNode: "home" },
-    i18n: { locale: "ru", fallback: "ru" },
+    i18n: { locale: "ru", fallback: "ru", locales: devLocales() },
     audio: { volumes: volumesOf, journal: 200 },
     platform: { provider: platform, keepAwake: true },
     leaveExit: { exit: () => platform.exit() },

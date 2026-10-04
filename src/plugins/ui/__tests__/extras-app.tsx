@@ -2,10 +2,11 @@
  * @file ui plugin — the app of the `components` prop tests (Delta 8a): a test component and a
  * test tag that stand in for any game component, a screen that adds, changes and drops them, a
  * button that names components the element owns, an element that leaves with an exit motion,
- * every tag once, and a popup the flow shows again with a new level. Real flow runner, plain Bun,
- * inert renderer, real Yoga. Nothing here imports `effects`.
+ * every tag once, a popup the flow shows again with a new level, and a bound counter next to the
+ * same number as content. Real flow runner, plain Bun, inert renderer, real Yoga. Nothing here
+ * imports `effects`.
  */
-import { createApp, defineGame, hint, projection, type } from "../../../index";
+import { bind, createApp, defineGame, hint, projection, type } from "../../../index";
 import { animPlugin } from "../../anim";
 import { assetsPlugin } from "../../assets";
 import type { Answer } from "../../flow/gate/types";
@@ -34,6 +35,9 @@ export const Flag = tag("Flag");
 
 /** A game's own component with a field a plugin derives, as `Countdown.left` is. */
 export const Timer = component("Timer", { until: 0, left: 0 }, { owned: ["left"] });
+
+/** A game's own counter, as the fixture's `Counter` is: the number a bound text shows. */
+export const Tally = component("Tally", { value: 0 });
 
 /** What `Mark` holds. */
 type MarkValue = { level: number };
@@ -259,6 +263,51 @@ export const hintViews = projection({
   motion: { change: { Mark: recordHint("view.Mark") } }
 });
 
+/** A row that centres what it holds, as a HUD pill centres its number. */
+const centredRow = {
+  width: 300,
+  height: 60,
+  direction: "row",
+  align: "center",
+  justify: "center"
+} as const;
+
+/**
+ * A bound counter and the same number as content, each centred in a row of its own. Hidden, the
+ * counter slides out with the exit motion of the leaving row.
+ */
+export const Bound = defineComponent("Bound", {
+  local: { shown: true },
+  view: (_props: object, local) => (
+    <column key="boundRoot" style={{ width: 800, height: 400 }}>
+      <row key="boundRow" style={centredRow}>
+        {local.shown ? (
+          <text
+            key="bound"
+            style="digits"
+            bind={bind(Tally, "value")}
+            components={[Tally({ value: 9 })]}
+            motion={leaveMotion}
+          />
+        ) : undefined}
+      </row>
+      <row key="plainRow" style={centredRow}>
+        <text key="plain" style="digits" content="9" />
+      </row>
+      <button key="hideBound" local={{ shown: false }} style={control} />
+    </column>
+  )
+});
+
+/** A screen with the bound counter. */
+export const boundScreen = projection({
+  name: "boundScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "boundScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => <Bound key="boundCounter" />
+});
+
 /** The tags of `UiIntrinsicElements` the every-tag screen writes, each once. */
 export const TAGS = [
   "screen",
@@ -437,9 +486,10 @@ export const extrasFeature = defineFeature("extras", {
     everyTagScreen,
     rolledScreen,
     hintScreen,
-    hintViews
+    hintViews,
+    boundScreen
   ],
-  ui: [Marked, Clash, Leaving, MarkedPopup, Rolled],
+  ui: [Marked, Clash, Leaving, MarkedPopup, Rolled, Bound],
   strings: { en: english }
 });
 

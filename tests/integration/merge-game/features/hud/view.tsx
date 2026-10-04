@@ -20,14 +20,15 @@ import { HudRow } from "./row";
 /** The board screen as the view reads it: one row of the save. */
 export type HudView = {
   id: string;
+  coins: number;
   energy: EnergyView;
   orders: OrderCardView[];
   info: InfoView;
 };
 
 /**
- * Reads the board screen out of the save and the session: the energy, the three order cards and
- * what the info bar names, the selected item or the sawmill.
+ * Reads the board screen out of the save and the session: the coins, the energy, the three order
+ * cards and what the info bar names, the selected item or the sawmill.
  *
  * @param player - The saved player.
  * @param session - The session, which keeps the selected id.
@@ -38,6 +39,7 @@ function hudOf(player: Player, session: Session): HudView {
 
   return {
     id: "hud",
+    coins: state.wallet.coins ?? 0,
     energy: { value: state.energy.value, max: state.energy.max },
     orders: orderCardsOf(state),
     info: infoOf(player, session)
@@ -56,7 +58,7 @@ export const hud = projection({
   view: item => (
     <screen key="boardScreen" style={safeScreen}>
       <image key="boardBackground" texture="board.bg-forest-meadow" fit="cover" style={fullBleed} />
-      <HudRow energy={item.energy} />
+      <HudRow coins={item.coins} energy={item.energy} />
       <OrderStrip cards={item.orders} />
       <BoardTray />
       <InfoBar info={item.info} />

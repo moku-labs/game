@@ -15,9 +15,9 @@ export const grant = defineNode({
     player.pendingReward = "";
     player.pendingCoins = 0;
 
-    // Released after this commit. A hint finds its view by the key in its payload, so it names
-    // the counter: the number holds still while the coins fly, and then rolls to the new sum.
-    fx.emit(hint("coins.fly", { projection: "hud.coins", key: "coins", ms: FLIGHT_MS }));
+    // Released after this commit. A hint finds its element by the key in its payload, so it names
+    // the text of the coin pill: the number holds still while the coins fly, then rolls.
+    fx.emit(hint("coins.fly", { projection: "hud", key: "coinPillText", ms: FLIGHT_MS }));
 
     return out.done();
   }

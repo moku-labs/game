@@ -42,6 +42,8 @@ You write small nodes and edge tables. The engine runs them, saves on the edges 
 | V5 | Particles, WGSL filters, sprite frames, the production asset pack, a text field, visual tests. |
 | V6 | `platform`: Back button, haptics, keep-awake. Filters on WebGL. The game as a Tauri app on iOS and Android. |
 
+Strings are ICU messages with durations, translator notes, a pseudo-locale, and export and import for translators.
+
 Rendering is WebGPU first, with Pixi's WebGL fallback. A device with neither gets an honest "unsupported device" screen.
 
 ## Install

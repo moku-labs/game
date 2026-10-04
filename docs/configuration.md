@@ -45,6 +45,8 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `renderer` | `debug` | `{ nineSlice: boolean }` | `{ nineSlice: false }` | Outline every nine-slice from the start; `sync.debug.nineSlice(on)` switches it live |
 | `input` | `tapSlopPx`, `longPressMs`, `dragStartPx`, `swipeMinPx`, `swipeMaxMs` | `number` | `12`, `450`, `8`, `48`, `300` | Gesture thresholds in reference px and ms |
 | `input` | `cursor` | `{ control: string; idle: string }` | `{ control: "pointer", idle: "" }` | CSS cursor over a control and elsewhere |
+| `input` | `traceStepPx` | `number` | `32` | Reference px between two hit tests along the finger's path inside one frame of a trace. Keep it below the shortest cell span |
+| `input` | `traceInset` | `number` | `0.4` | Radius of a trace cell's hit circle, times the short side of its hit box. A diagonal then crosses no corner of a neighbour |
 | `assets` | `manifest` | `string \| Manifest \| undefined` | `undefined` | Manifest URL, or the parsed file in a test |
 | `assets` | `textureBudgetMb` | `number` | `192` | Texture memory budget for the LRU unload |
 | `assets` | `preloadDepth` | `number` | `2` | Graph edges walked for the preload at a rest node |
@@ -60,6 +62,8 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `audio` | `musicFadeMs` | `number` | `600` | Cross-fade of a music switch, in real milliseconds |
 | `audio` | `volumes` | `(player) => Partial<Record<Bus, number>> \| undefined` | `undefined` | Reads the player's choice from the committed player on every `model:committed`. Absent: the buses stay at `buses` |
 | `audio` | `context` | `() => AudioContext \| undefined` | `undefined` | The context factory, a test seam. Absent: `new AudioContext()` where the global exists |
+| `audio` | `music` | `"decode" \| "stream"` | `"decode"` | How a music track plays. `"decode"`: one AudioBuffer, gapless loop, about 58 MB per 150 s track. `"stream"`: an `<audio>` element, about 12 MB, a loop gap of 5 to 49 ms in Chromium and about 0.4 s in WebKit. MP3 or AAC only |
+| `audio` | `session` | `"ambient" \| "playback" \| "auto"` | `"ambient"` | What the page asks iOS for. `"ambient"` mixes with other apps and the silent switch mutes it. `"playback"` stops other apps and plays through the switch. A no-op where `navigator.audioSession` is missing |
 | `effects` | `maxParticles` | `number` | `3000` | Live particles over every instance above which `effects:particle-budget` warns once per crossing |
 | `effects` | `maxPasses` | `number` | `24` | Render passes per frame above which `effects:pass-budget` warns once per crossing |
 | `effects` | `phone` | `boolean \| "auto"` | `"auto"` | Whether the device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once at start |

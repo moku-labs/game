@@ -49,6 +49,12 @@ hints to the `change` hooks of elements, and on a page the hidden input of the t
 | `input` | as any other tag, with `clip` on the `Shape` or on the `NineSlice` of `style.nineSlice`; four ui-owned children draw the text, the caret, the selection and the IME underline, see [Text input](#text-input) | `Touchable` |
 | any tag | `components` adds extra components to the element's entity, see [Extra components](#extra-components) | |
 
+A `text` without a fixed `width` and `height` is sized by `text.measure` of what it shows: its
+`content`, or for a bound text the string `text` shows for it, `Text.resolved`. Before the first
+resolve that is the bound field of its `components` value in the format of the bind, so a number
+a row centres is centred from the first frame. A new shown string asks for a solve only when it
+measures to another size: a counter that rolls through digits of one width solves nothing.
+
 `style.alpha` fades the element and everything inside it: a disabled button at `alpha: 0.6`
 draws its icon and its label at 0.6 too, and a column at `alpha: 0` hides its children. The
 renderer applies it once, on the element's wrapper (see the renderer README).

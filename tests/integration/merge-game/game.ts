@@ -3,7 +3,7 @@
  * screen and one with it. A shipped game adds `onStart: ctx => { ctx.flow.run().catch(showFatal); }`;
  * here the headless runner owns `run()`, so a fatal error reaches the test instead of a handler.
  */
-import type { Assets, Audio, Model, PlatformProvider, Renderer } from "@moku-labs/game";
+import type { Assets, Audio, I18n, Model, PlatformProvider, Renderer } from "@moku-labs/game";
 import { audioPlugin, createApp, effectsPlugin, platformPlugin, screen } from "@moku-labs/game";
 import { fakeClock, memory } from "@moku-labs/game/testing";
 import { energyFeature } from "./features/energy";
@@ -38,6 +38,19 @@ import { boardLookPlugin } from "./view/looks";
  */
 export function volumesOf(player: Model.Json): Player["settings"]["audio"] {
   return (player as unknown as Player).settings.audio;
+}
+
+/**
+ * The locales a dev build adds: the pseudo-locale `en-XA` of `--pseudo`, so `ui.lint` measures
+ * the longest text and an untranslated literal shows up unaccented. A production build defines
+ * `__MOKU_GAME_DEV__` as `false`, the condition folds and the module is never imported.
+ *
+ * @returns `en-XA` in a dev build, nothing otherwise.
+ */
+export function devLocales(): Record<string, I18n.StringsLoader> {
+  if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return {};
+
+  return { "en-XA": () => import("./generated/strings.en-XA") };
 }
 
 /** The save seam, recording every call it gets. */
@@ -202,7 +215,7 @@ export function createScreenGame(options: ScreenGameOptions = {}): ScreenGame {
       renderer: options.renderer ?? {},
       assets: { manifest: options.manifest, io: options.io },
       text: { fonts: { body: "ui.font-body", digits: "ui.font-display" } },
-      i18n: { locale: "ru", fallback: "ru" },
+      i18n: { locale: "ru", fallback: "ru", locales: devLocales() },
       audio: { volumes: volumesOf, ...options.audio },
       input: { heldScale: 1.08 },
       // The keyboard focus ring of design §4: a dashed ink ring over a cream halo, 9 px of the

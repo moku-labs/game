@@ -28,15 +28,15 @@ import {
 } from "./styles";
 
 /**
- * Home as the view reads it: only whether the gift is still there. The coins are the counter
- * projection the coin pill hosts.
+ * Home as the view reads it: whether the gift is still there, and the coins the counter of the
+ * coin pill rolls to.
  *
  * @example
  * ```ts
- * const home: HomeView = { giftWaiting: true };
+ * const home: HomeView = { giftWaiting: true, coins: 0 };
  * ```
  */
-export type HomeView = { giftWaiting: boolean };
+export type HomeView = { giftWaiting: boolean; coins: number };
 
 /**
  * The Play sign: the green plank on two posts, a berry sprig on each end. The posts come first,
@@ -65,7 +65,10 @@ function PlaySign() {
 export const homeScreen = projection({
   name: "home.screen",
   layer: "ui",
-  from: (player: Player): HomeView => ({ giftWaiting: !player.giftClaimed }),
+  from: (player: Player): HomeView => ({
+    giftWaiting: !player.giftClaimed,
+    coins: player.merge.wallet.coins ?? 0
+  }),
   view: item => (
     <screen key="homeScreen" style={safeScreen}>
       <image key="homeBackground" texture="board.bg-forest-meadow" fit="cover" style={fullBleed} />
@@ -79,7 +82,7 @@ export const homeScreen = projection({
       </column>
       <column key="homeTop" style={homeTop}>
         <row key="homeBar" style={homeBar}>
-          <HudPill id="homeCoins" icon="ui.icon-coin" hosts={["hud.coins"]} width="wide" />
+          <HudPill id="homeCoins" icon="ui.icon-coin" coins={item.coins} width="wide" />
           <RoundButton id="homeSettings" intent="openSettings" icon="ui.icon-gear" />
         </row>
         <column key="giftCorner" style={giftCorner}>

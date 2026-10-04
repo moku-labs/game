@@ -23,8 +23,15 @@ async function fontFile(stem: string): Promise<string> {
   return readFile(new URL(`ui/assets/${stem}.fnt`, featuresFolder), "utf8");
 }
 
+/** One value of a string file: the message, or the message with a note for the translator. */
+type StringValue = string | { text: string; note: string };
+
+/** The locales the game ships. */
+const locales = ["ru", "en"] as const;
+
 /**
- * Reads every message of every feature, in every locale.
+ * Reads every message of every feature, in every locale. A noted value counts by its text: the
+ * note never reaches the screen.
  *
  * @returns The message texts, ICU syntax included.
  */
@@ -32,20 +39,37 @@ async function allMessages(): Promise<string[]> {
   const messages: string[] = [];
 
   for (const feature of await readdir(featuresFolder)) {
-    for (const locale of ["ru", "en"]) {
+    for (const locale of locales) {
       const file = new URL(`${feature}/strings/${locale}.json`, featuresFolder);
       const text = await readFile(file, "utf8").catch(() => "{}");
+      const values = Object.values(JSON.parse(text) as Record<string, StringValue>);
 
-      messages.push(...Object.values(JSON.parse(text) as Record<string, string>));
+      messages.push(...values.map(value => (typeof value === "string" ? value : value.text)));
     }
   }
 
   return messages;
 }
 
+/**
+ * The words `Intl` writes for a `{time, duration, short}` argument in every locale, hours to
+ * seconds: the refill of the Out of energy popup is drawn with them.
+ *
+ * @returns One formatted duration per locale.
+ */
+function durationWords(): string[] {
+  return locales.map(locale =>
+    new Intl.DurationFormat(locale, { style: "short", secondsDisplay: "always" }).format({
+      hours: 1,
+      minutes: 2,
+      seconds: 3
+    })
+  );
+}
+
 describe("the fonts of Timber Town", () => {
   it("has a glyph for every character of every string, in both fonts", async () => {
-    const messages = await allMessages();
+    const messages = [...(await allMessages()), ...durationWords()];
     // A line break is not drawn: `text` breaks the line there ("Смотреть и\nпополнить").
     const characters = new Set(
       messages.flatMap(message => [...message]).filter(character => character !== "\n")

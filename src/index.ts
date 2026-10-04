@@ -49,6 +49,8 @@
  * | input | swipeMaxMs | 300 |
  * | input | heldScale | 1 |
  * | input | cursor | { control: "pointer", idle: "" } |
+ * | input | traceStepPx | 32 |
+ * | input | traceInset | 0.4 |
  * | assets | manifest | undefined, a URL or an inline manifest |
  * | assets | textureBudgetMb | 192 |
  * | assets | preloadDepth | 2 |
@@ -69,6 +71,8 @@
  * | audio | volumes | undefined, the buses stay at `buses` |
  * | audio | context | undefined, the real AudioContext |
  * | audio | journal | 0, no started sound is kept |
+ * | audio | music | "decode", gapless; "stream" plays an `<audio>` element |
+ * | audio | session | "ambient", iOS only |
  * | effects | maxParticles | 3000, live particles above which one dev warning fires per crossing |
  * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
  * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |

@@ -431,13 +431,13 @@ export function coinsInFlight(game: Game): number {
 }
 
 /**
- * The number the coin counter shows.
+ * The number the coin counter shows: the text of a coin pill, on the board by default.
  *
  * @param game - The running game.
+ * @param key - The text element of the pill: `"coinPillText"` on the board, `"homeCoinsText"` on
+ *   Home.
  * @returns What its label resolved to.
  */
-export function counterOf(game: Game): string {
-  const counter = game.app.world.projection.entityOf("hud.coins", "coins") ?? 0;
-
-  return game.app.world.ecs.get(counter, Text)?.resolved ?? "";
+export function counterOf(game: Game, key = "coinPillText"): string {
+  return game.app.world.ecs.get(elementOf(game, key), Text)?.resolved ?? "";
 }

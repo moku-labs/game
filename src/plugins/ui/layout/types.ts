@@ -5,6 +5,8 @@
 import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
+import type { Message } from "../../i18n/types";
+import type { Size } from "../../text/types";
 import type { Entity } from "../../world/types";
 import type { Element, JsxModule } from "../jsx/types";
 import type { ResolvedStyle } from "../styles/types";
@@ -42,6 +44,17 @@ export type RowRange = { first: number; last: number };
 export type ElementLookup = (entity: Entity) => Element | undefined;
 
 /**
+ * What a text element is measured through: the advance table of `text`, the string `text`
+ * resolved for an entity (`undefined` before the entity carries its `Text`), and the duration
+ * words of `i18n`, for a bound `"duration"` before its first resolve.
+ */
+export type TextSource = {
+  measure(content: string | Message, style: string): Size;
+  resolved(entity: Entity): string | undefined;
+  duration(ms: number): string;
+};
+
+/**
  * layout module state. `nodes` is attach minus detach: Yoga 3.2.1 has no instance counter.
  */
 export type LayoutState = {
@@ -64,6 +77,7 @@ export type LayoutModule = {
   loaded(): boolean;
   attach(element: Element): void;
   applyStyle(element: Element): void;
+  remeasure(element: Element): boolean;
   affectsRect(first: ResolvedStyle, second: ResolvedStyle): boolean;
   place(parent: Element, children: readonly Element[]): void;
   free(element: Element): void;
