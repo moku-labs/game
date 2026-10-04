@@ -89,4 +89,15 @@ describe("the moku-game-assets bin", () => {
     expect(readFileSync(keys, "utf8")).toContain("ui.dot");
     expect(existsSync(path.join(root, "generated", "strings.ts"))).toBe(true);
   });
+
+  it("exports the strings for translators", () => {
+    const { bin, root } = layout();
+    const out = path.join(root, "translations");
+    // eslint-disable-next-line sonarjs/no-os-command-from-path -- the Bun on PATH is the one the project scripts run.
+    const ran = spawnSync("bun", [bin, "--root", root, "--export", out], { encoding: "utf8" });
+
+    expect(ran.stderr).not.toContain("is not a function");
+    expect(ran.status).toBe(0);
+    expect(existsSync(out)).toBe(true);
+  });
 });

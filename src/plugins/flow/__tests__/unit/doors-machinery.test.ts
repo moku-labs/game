@@ -76,7 +76,9 @@ describe("isDev", () => {
       "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
     );
   });
+});
 
+describe("notInstalled", () => {
   it("names the source and the missing plugin in the house error format", () => {
     expect(notInstalled("game.sounds", "audioPlugin").message).toBe(
       "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."

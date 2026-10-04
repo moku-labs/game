@@ -1,7 +1,7 @@
 /**
- * @file flow/doors — the dev flag. `__MOKU_GAME_DEV__` is a global the engine never replaces: a
- * game's dev build defines it `true` (bundler `define`) or sets `globalThis.__MOKU_GAME_DEV__`
- * before the engine runs; undefined means a production build.
+ * @file flow/doors — the dev flag and the errors a door throws. `__MOKU_GAME_DEV__` is a global
+ * the engine never replaces: a game's dev build defines it `true` (bundler `define`) or sets
+ * `globalThis.__MOKU_GAME_DEV__` before the engine runs; undefined means a production build.
  *
  * Bun does not inline `isDev()` across modules (checked on Bun 1.3.14), so a branch that must
  * vanish from a production bundle writes the guard inline:
