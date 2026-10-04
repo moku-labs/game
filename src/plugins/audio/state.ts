@@ -2,7 +2,17 @@
  * @file audio plugin — state factory. The buses start at the configured volumes, so a headless
  * run answers `volume()` with the same numbers a run with a context does.
  */
-import type { Bus, BusState, Config, MusicSwitch, MusicTrack, SfxRequest, State } from "./types";
+import type {
+  AudioSessionLike,
+  Bus,
+  BusState,
+  Config,
+  MusicSwitch,
+  MusicTrack,
+  RetiringTrack,
+  SfxRequest,
+  State
+} from "./types";
 
 /**
  * Creates the decode cache. Its own function because lint rule L5 refuses a collection built
@@ -30,6 +40,15 @@ function emptyWarned(): Set<string> {
  */
 function emptyPending(): Map<string, SfxRequest> {
   return new Map();
+}
+
+/**
+ * Creates the set of streamed tracks that fade out.
+ *
+ * @returns An empty set of retiring tracks.
+ */
+function emptyRetiring(): Set<RetiringTrack> {
+  return new Set();
 }
 
 /**
@@ -62,6 +81,7 @@ export function createAudioState(ctx: { readonly config: Config }): State {
   };
   const music: MusicTrack | undefined = undefined;
   const musicPending: MusicSwitch | undefined = undefined;
+  const session: AudioSessionLike | undefined = undefined;
 
   return {
     context: undefined,
@@ -77,6 +97,8 @@ export function createAudioState(ctx: { readonly config: Config }): State {
     musicPending,
     unlock: undefined,
     removers: [],
+    session,
+    retiring: emptyRetiring(),
     journal: Object.freeze([])
   };
 }

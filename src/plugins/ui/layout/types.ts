@@ -4,6 +4,7 @@
  */
 import type { Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { FxHandler } from "../../flow/fx/types";
+import type { Hint } from "../../flow/types";
 import type { Entity } from "../../world/types";
 import type { Element, JsxModule } from "../jsx/types";
 import type { ResolvedStyle } from "../styles/types";
@@ -17,6 +18,17 @@ import type { ResolvedStyle } from "../styles/types";
  * ```
  */
 export type Rect = { x: number; y: number; w: number; h: number };
+
+/**
+ * The rows of a windowed scroll that exist: the first and the last index; `last` is `first - 1`
+ * for an empty list.
+ *
+ * @example
+ * ```ts
+ * const range: RowRange = { first: 27, last: 50 };
+ * ```
+ */
+export type RowRange = { first: number; last: number };
 
 /**
  * How the solve finds the element of a child entity. The records live in the `jsx` state, so the
@@ -59,12 +71,26 @@ export type LayoutModule = {
   commit(element: Element, parent: Rect | undefined): void;
   enter(element: Element): void;
   loop(element: Element): void;
-  change(element: Element, previous: Rect): boolean;
-  repose(element: Element, parent: Rect | undefined, hooked: boolean): void;
+  change(element: Element, previous: Rect, hint?: Hint): boolean;
+  changeExtra(
+    element: Element,
+    name: string,
+    values: { previous: object; next: object },
+    hint: Hint | undefined
+  ): boolean;
+  repose(element: Element, parent: Rect | undefined, hooked: boolean, hint?: Hint): void;
   lift(element: Element, units: number): void;
   exit(element: Element): void;
   settled(element: Element): boolean;
   scroll(containers: readonly Element[], lookup: ElementLookup): void;
+  clampScroll(container: Element, contentHeight: number, lookup: ElementLookup): number;
+  windowOf(
+    offset: number,
+    viewportHeight: number,
+    rows: number,
+    rowHeight: number,
+    overscan: number
+  ): RowRange;
   popupHandler(jsx: JsxModule): FxHandler;
   guideHandler(): FxHandler;
   counters(): { nodes: number; measured: number; solves: number };

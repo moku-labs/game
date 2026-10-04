@@ -5,10 +5,11 @@
  * every tag once, and a popup the flow shows again with a new level. Real flow runner, plain Bun,
  * inert renderer, real Yoga. Nothing here imports `effects`.
  */
-import { createApp, defineGame, projection, type } from "../../../index";
+import { createApp, defineGame, hint, projection, type } from "../../../index";
 import { animPlugin } from "../../anim";
 import { assetsPlugin } from "../../assets";
 import type { Answer } from "../../flow/gate/types";
+import type { Hint } from "../../flow/types";
 import { i18nPlugin } from "../../i18n";
 import type { CompiledMessages } from "../../i18n/types";
 import { inputPlugin } from "../../input";
@@ -18,6 +19,7 @@ import { scenesPlugin } from "../../scenes";
 import { textPlugin } from "../../text";
 import { worldPlugin } from "../../world";
 import { component, Order, tag } from "../../world/ecs/define";
+import type { Motion, MotionHandle, ViewHandle } from "../../world/types";
 import { popup } from "../components";
 import { uiPlugin } from "../index";
 import { defineComponent } from "../jsx/component";
@@ -29,6 +31,56 @@ export const Mark = component("Mark", { level: 0 });
 
 /** A game's own tag, as `Held` is: no data. */
 export const Flag = tag("Flag");
+
+/** A game's own component with a field a plugin derives, as `Countdown.left` is. */
+export const Timer = component("Timer", { until: 0, left: 0 }, { owned: ["left"] });
+
+/** What `Mark` holds. */
+type MarkValue = { level: number };
+
+/** What one call of the `change.Mark` hook of the rolled row got. */
+export type MarkCall = { previous: MarkValue; next: MarkValue; hint: Hint | undefined };
+
+/**
+ * What the `change.Mark` hook of the rolled row does, set by a test: roll home over `ms`, return
+ * nothing, or throw. Every call and every motion it returned are recorded.
+ */
+export const markHook = {
+  mode: "roll" as "roll" | "none" | "throw",
+  ms: 200,
+  calls: [] as MarkCall[],
+  motions: [] as MotionHandle[]
+};
+
+/**
+ * The `change.Mark` hook of the rolled row: it records the call and does what `markHook` says.
+ *
+ * @param view - The handle of the row.
+ * @param previous - The value of the last render.
+ * @param next - The value of this render.
+ * @param given - The hint routed to the row.
+ * @returns The roll, or nothing.
+ */
+function rollMark(
+  view: ViewHandle<unknown>,
+  previous: MarkValue,
+  next: MarkValue,
+  given?: Hint
+): Motion {
+  markHook.calls.push({ previous, next, hint: given });
+
+  if (markHook.mode === "throw") throw new Error("bad roll");
+  if (markHook.mode === "none") return undefined;
+
+  const motion = view.toRest(Mark, { ms: markHook.ms });
+
+  markHook.motions.push(motion);
+
+  return motion;
+}
+
+/** The motion of the rolled row: a `change` hook for its extra `Mark`. */
+const rolledMotion: ElementMotion = { change: { Mark: rollMark } };
 
 /** The player of the extras fixture: the level the popup button carries. */
 export type ExtrasPlayer = { level: number };
@@ -130,6 +182,83 @@ export const Leaving = defineComponent("Leaving", {
   )
 });
 
+/** A row whose extra `Mark` rolls through a `change` hook, next to a tag and an owned field. */
+export const Rolled = defineComponent("Rolled", {
+  local: { level: 2, shown: true },
+  view: (_props: object, local) => (
+    <column key="rolledRoot" style={{ width: 800, height: 800 }}>
+      {local.shown ? (
+        <row
+          key="roller"
+          style={{ width: 100, height: 100 }}
+          components={[Mark({ level: local.level }), Flag(), Timer({ until: local.level * 1000 })]}
+          motion={rolledMotion}
+        />
+      ) : undefined}
+      <button key="rollFive" local={{ level: 5 }} style={control} />
+      <button key="rollNine" local={{ level: 9 }} style={control} />
+      <button key="hideRoller" local={{ shown: false }} style={control} />
+    </column>
+  )
+});
+
+/** What one call of a hook of the hinted text got: the hook and the hint. */
+export type HintCall = { hook: string; hint: Hint | undefined };
+
+/** Every hook call of the hinted text and of the hinted world view, in order. */
+export const hintCalls: HintCall[] = [];
+
+/**
+ * Builds a `change` hook that records the hint it got under a name and plays nothing.
+ *
+ * @param hook - The name the call is recorded under.
+ * @returns The hook.
+ */
+function recordHint(hook: string) {
+  return (_view: ViewHandle<unknown>, _previous: unknown, _next: unknown, given?: Hint): Motion => {
+    hintCalls.push({ hook, hint: given });
+
+    return undefined;
+  };
+}
+
+/** The motion of the hinted text: its extra `Mark` and its rect both record the hint. */
+const hintedMotion: ElementMotion = {
+  change: { Mark: recordHint("Mark"), Box: recordHint("Box") }
+};
+
+/** One item of the hint screen: the level the text carries and grows with. */
+type HintItem = { id: string; level: number };
+
+/** A screen whose keyed text carries the level as `Mark` and grows with it, so both hooks run. */
+export const hintScreen = projection({
+  name: "hintScreen",
+  layer: "ui",
+  from: (player: ExtrasPlayer): HintItem[] => [{ id: "hintScreen", level: player.level }],
+  key: (item: HintItem) => item.id,
+  view: (item: HintItem) => (
+    <column key="hintRoot" style={{ width: 800, height: 400 }}>
+      <text
+        key="coinPillText"
+        content="coins"
+        style={{ width: 100 + item.level * 10, height: 40 }}
+        components={[Mark({ level: item.level })]}
+        motion={hintedMotion}
+      />
+    </column>
+  )
+});
+
+/** A world projection of one view that carries the level, so the world's own routing is seen. */
+export const hintViews = projection({
+  name: "hintViews",
+  layer: "ui",
+  from: (player: ExtrasPlayer): HintItem[] => [{ id: "v1", level: player.level }],
+  key: (item: HintItem) => item.id,
+  view: (item: HintItem) => [Mark({ level: item.level })],
+  motion: { change: { Mark: recordHint("view.Mark") } }
+});
+
 /** The tags of `UiIntrinsicElements` the every-tag screen writes, each once. */
 export const TAGS = [
   "screen",
@@ -206,6 +335,15 @@ export const clashScreen = projection({
   view: () => <Clash key="clash" />
 });
 
+/** A screen with the rolled row. */
+export const rolledScreen = projection({
+  name: "rolledScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "rolledScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => <Rolled key="rolled" />
+});
+
 /** A screen with the leaving row. */
 export const leavingScreen = projection({
   name: "leavingScreen",
@@ -230,7 +368,10 @@ export const MarkedPopup = defineComponent("MarkedPopup", {
   )
 });
 
-const home = defineNode({ rest: true, outcomes: { openPopup: type() } });
+const home = defineNode({
+  rest: true,
+  outcomes: { openPopup: type(), grant: type(), bump: type() }
+});
 
 const shown = defineNode({
   rest: true,
@@ -251,22 +392,54 @@ const louder = defineNode({
   }
 });
 
+/** One commit that raises the level and releases two hints: one for the text, one for the view. */
+const grant = defineNode({
+  outcomes: { done: type() },
+  run: ({ player, fx, out }) => {
+    player.level += 1;
+    fx.emit(hint("coins.fly", { projection: "hintScreen", key: "coinPillText", ms: 400 }));
+    fx.emit(hint("view.bump", { projection: "hintViews", key: "v1" }));
+
+    return out.done();
+  }
+});
+
+/** One commit that raises the level and releases nothing. */
+const bump = defineNode({
+  outcomes: { done: type() },
+  run: ({ player, out }) => {
+    player.level += 1;
+
+    return out.done();
+  }
+});
+
 const main = defineFlow("main", {
-  nodes: { home, shown, louder },
+  nodes: { home, shown, louder, grant, bump },
   start: "home",
   outcomes: {},
   edges: {
-    home: { openPopup: "shown" },
+    home: { openPopup: "shown", grant: "grant", bump: "bump" },
     shown: { louder: "louder", close: "home" },
-    louder: { done: "shown" }
+    louder: { done: "shown" },
+    grant: { done: "home" },
+    bump: { done: "home" }
   }
 });
 
 /** The feature of the extras fixture. */
 export const extrasFeature = defineFeature("extras", {
   flows: [main],
-  projections: [markedScreen, clashScreen, leavingScreen, everyTagScreen],
-  ui: [Marked, Clash, Leaving, MarkedPopup],
+  projections: [
+    markedScreen,
+    clashScreen,
+    leavingScreen,
+    everyTagScreen,
+    rolledScreen,
+    hintScreen,
+    hintViews
+  ],
+  ui: [Marked, Clash, Leaving, MarkedPopup, Rolled],
   strings: { en: english }
 });
 

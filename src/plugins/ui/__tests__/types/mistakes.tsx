@@ -128,3 +128,37 @@ export const wrongKind = (
     kind="phone"
   />
 );
+
+/** A text bound by a hand-written literal instead of what `bind()` makes. */
+export const literalBind = (
+  <text
+    key="o"
+    // @ts-expect-error — `bind` is a TextBind, and only bind(Counter, "value") makes one.
+    bind={{ component: "Counter", field: "value", format: "int" }}
+  />
+);
+
+/** A windowed scroll that names how many rows it has but not how to build one. */
+export const rowsWithoutRow = (
+  // @ts-expect-error — `rows` needs `row`: a ScrollRow builds the row at an index.
+  <scroll key="p" rows={10} rowHeight={80} />
+);
+
+/** A windowed scroll whose row height is a string. */
+export const stringRowHeight = (
+  <scroll
+    key="q"
+    rows={10}
+    // @ts-expect-error — `rowHeight` is a ScrollRowHeight, a number of reference units.
+    rowHeight="80"
+    row={() => <row />}
+  />
+);
+
+/** A windowed scroll with children next to its row callback. */
+export const rowWithChildren = (
+  // @ts-expect-error — a scroll takes `row` or children, not both.
+  <scroll key="r" rows={10} rowHeight={80} row={() => <row />}>
+    <row key="extra" />
+  </scroll>
+);

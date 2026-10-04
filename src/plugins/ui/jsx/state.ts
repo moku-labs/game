@@ -73,6 +73,9 @@ export function createJsxState(): JsxState {
       ringless: false
     },
     fields: emptyMap(),
-    text: createTextState()
+    text: createTextState(),
+    hints: [],
+    scrolls: emptySet(),
+    windowRenders: 0
   };
 }

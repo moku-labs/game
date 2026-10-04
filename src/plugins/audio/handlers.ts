@@ -6,7 +6,7 @@
 import { setBusVolume } from "./api";
 import { applyAllGains, isBus } from "./graph";
 import { withDeps } from "./lifecycle";
-import { playMusic, trackMusic } from "./playback";
+import { pauseMusic, playMusic, resumeMusic, trackMusic } from "./playback";
 import type {
   AudioCtx,
   BundleUnloaded,
@@ -131,7 +131,8 @@ export function createHandlers(ctx: KernelSlice): {
 
     /**
      * Holds every bus at zero while the game is paused and puts the volumes back when it is not.
-     * The stored volumes and mutes are untouched, so nothing is lost over a pause.
+     * The stored volumes and mutes are untouched, so nothing is lost over a pause. A streamed
+     * track is paused once the gains are at zero and plays again when the pause ends.
      *
      * @param payload - What changed on the pause stack.
      */
@@ -141,12 +142,18 @@ export function createHandlers(ctx: KernelSlice): {
       audioCtx.state.paused = payload.paused;
       applyAllGains(audioCtx.state);
 
-      if (payload.resumed) resumeAfterPause(audioCtx);
+      if (payload.paused) pauseMusic(audioCtx.state);
+
+      if (payload.resumed) {
+        resumeAfterPause(audioCtx);
+        resumeMusic(audioCtx);
+      }
     },
 
     /**
-     * Drops the decoded sounds of a bundle that left. A source that is playing keeps its buffer;
-     * the next play of an evicted key decodes again once the bundle is back.
+     * Drops the decoded sounds of a bundle that left. A source that is playing keeps its buffer
+     * and a streamed track keeps its Blob, which copied the bytes; the next play of an evicted
+     * key decodes again once the bundle is back.
      *
      * @param payload - The bundle that left and the keys it carried.
      */

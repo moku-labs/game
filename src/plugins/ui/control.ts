@@ -8,7 +8,7 @@
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
-import { readTarget } from "../input/control";
+import { readTarget } from "../input/target";
 import type { InputApi } from "../input/types";
 import type { Entity } from "../world/types";
 import type { UiApi } from "./types";

@@ -39,6 +39,15 @@ export type FakeSource = {
   stop(when?: number): void;
 };
 
+/** A recorded media element source: the element it reads and where its output goes. */
+export type FakeMediaSource = {
+  element: unknown;
+  connectedTo: unknown;
+  disconnects: number;
+  connect(target: unknown): void;
+  disconnect(): void;
+};
+
 /** The decoded buffer of the fake: the text of the bytes it was decoded from. */
 export type FakeBuffer = { key: string };
 
@@ -50,12 +59,15 @@ export type FakeContext = {
   createGain(): GainNode;
   createBufferSource(): AudioBufferSourceNode;
   decodeAudioData(data: ArrayBuffer): Promise<AudioBuffer>;
+  createMediaElementSource(element: HTMLMediaElement): MediaElementAudioSourceNode;
   resume(): Promise<void>;
   close(): Promise<void>;
   /** Every gain the plugin made, in creation order: master, music, sfx, then one per track. */
   gains: FakeGain[];
   /** Every source the plugin made, in creation order. */
   sources: FakeSource[];
+  /** Every media element source the plugin made, in creation order. */
+  mediaSources: FakeMediaSource[];
   /** The text of every buffer that reached `decodeAudioData`. */
   decodes: string[];
   resumes: number;
@@ -136,6 +148,23 @@ function createFakeSource(): FakeSource {
   return source;
 }
 
+/** Creates one recorded media element source over the element the plugin handed in. */
+function createFakeMediaSource(element: unknown): FakeMediaSource {
+  const source: FakeMediaSource = {
+    element,
+    connectedTo: undefined,
+    disconnects: 0,
+    connect: (target: unknown): void => {
+      source.connectedTo = target;
+    },
+    disconnect: (): void => {
+      source.disconnects += 1;
+    }
+  };
+
+  return source;
+}
+
 /**
  * Creates the fake context: three counters, two lists and a `decodeAudioData` that answers with
  * the text of the bytes it got. Bytes whose text is `"bad"` reject, which is how a test plays an
@@ -145,6 +174,7 @@ export function createFakeContext(): FakeContext {
   const gains: FakeGain[] = [];
   const sources: FakeSource[] = [];
   const decodes: string[] = [];
+  const mediaSources: FakeMediaSource[] = [];
 
   const context: FakeContext = {
     destination: { id: "destination" } as unknown as AudioDestinationNode,
@@ -152,6 +182,7 @@ export function createFakeContext(): FakeContext {
     state: "suspended",
     gains,
     sources,
+    mediaSources,
     decodes,
     resumes: 0,
     closes: 0,
@@ -179,6 +210,13 @@ export function createFakeContext(): FakeContext {
       if (text.includes("bad")) return Promise.reject(new Error("cannot decode"));
 
       return Promise.resolve({ key: text } as unknown as AudioBuffer);
+    },
+    createMediaElementSource: (element: HTMLMediaElement): MediaElementAudioSourceNode => {
+      const source = createFakeMediaSource(element);
+
+      mediaSources.push(source);
+
+      return source as unknown as MediaElementAudioSourceNode;
     },
     resume: (): Promise<void> => {
       context.resumes += 1;

@@ -4,6 +4,7 @@
  */
 import { fieldValue } from "./fields";
 import type { Element, JsxState, Root, UiNode } from "./types";
+import { isOwnKey } from "./window";
 
 /** What `tree()` answers with when nothing is mounted. */
 const EMPTY: UiNode = {
@@ -25,7 +26,8 @@ const EMPTY: UiNode = {
 
 /**
  * Turns one element and its subtree into snapshot nodes. The rect is natural; a fitted element
- * adds the scale it is drawn at; a text field adds its value.
+ * adds the scale it is drawn at; a text field adds its value; a windowed scroll adds its window.
+ * The spacers of a windowed scroll are left out: its content lists the live rows.
  *
  * @param state - The jsx state.
  * @param element - The element to read.
@@ -37,7 +39,9 @@ function nodeOf(state: JsxState, element: Element): UiNode {
   for (const child of element.children) {
     const childElement = state.elements.get(child);
 
-    if (childElement !== undefined) children.push(nodeOf(state, childElement));
+    if (childElement !== undefined && !isOwnKey(childElement.key)) {
+      children.push(nodeOf(state, childElement));
+    }
   }
 
   const local =
@@ -53,8 +57,13 @@ function nodeOf(state: JsxState, element: Element): UiNode {
   const fitted = element.style.fit === "contain" ? { ...node, fitScale: element.fit } : node;
   const field = state.fields.get(element.entity);
   const valued = field === undefined ? fitted : { ...fitted, value: fieldValue(state, field) };
+  const window = element.window;
+  const windowed =
+    window === undefined
+      ? valued
+      : { ...valued, window: { first: window.first, last: window.last, rows: window.rows } };
 
-  return local === undefined ? valued : { ...valued, local: { ...local } };
+  return local === undefined ? windowed : { ...windowed, local: { ...local } };
 }
 
 /**

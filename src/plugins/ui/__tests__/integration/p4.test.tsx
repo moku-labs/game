@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Order } from "../../../world/ecs/define";
+import { UiCounters } from "../../components";
 import { startUiApp, tick } from "../app";
+import { moveTo, press, startWindowApp } from "../window-app";
 
 // ---------------------------------------------------------------------------
 // The acceptance cases of the P4 spike, with the numbers of `RESULT.md` as the
@@ -85,6 +87,26 @@ describe("P4 case: two renders, one reconcile", () => {
     app.time.step(16);
 
     expect(app.ui.find("coins")).toBe(before);
+
+    await app.stop();
+  });
+});
+
+describe("P4 case: window solves", () => {
+  it("solves once per range change over a 240-frame drag of a windowed list, never between", async () => {
+    const app = await startWindowApp();
+    const counters = app.world.ecs.resource(UiCounters);
+
+    press(app, "shop", 4000);
+
+    const before = { solves: counters.solves, renders: counters.windowRenders };
+
+    for (let frame = 1; frame <= 240; frame += 1) moveTo(app, 4000 - 16 * frame);
+
+    const renders = counters.windowRenders - before.renders;
+
+    expect(renders).toBeGreaterThan(0);
+    expect(counters.solves - before.solves).toBe(renders);
 
     await app.stop();
   });

@@ -69,7 +69,10 @@ function elementOf(patch: Partial<Element>): Element {
     entered: true,
     dropKey: undefined,
     extras: new Map(),
+    extraHandles: new Map(),
     warnedOwned: new Set(),
+    warned: new Set(),
+    scrolledIn: false,
     ...patch
   };
 }

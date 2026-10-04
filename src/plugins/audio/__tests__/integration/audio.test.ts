@@ -12,7 +12,9 @@ import type { Json } from "../../../model/types";
 import { defineScene } from "../../../scenes/define";
 import { music } from "../../descriptors";
 import { audioPlugin } from "../../index";
+import type { Config } from "../../types";
 import { createFakeContext, type FakeContext, installFakeWindow } from "../fake-audio-context";
+import { installFakeAudio, installFakeNavigator, installFakeUrl } from "../fake-media";
 
 // ---------------------------------------------------------------------------
 // Integration: the real time, lifecycle, model, clock, flow, world, renderer,
@@ -151,7 +153,7 @@ async function tick(times = 120): Promise<void> {
 }
 
 /** Starts the screen set plus `audio`, with or without the fake context. */
-async function startApp(context?: FakeContext, journal = 0) {
+async function startApp(context?: FakeContext, journal = 0, extra: Partial<Config> = {}) {
   const app = createApp({
     plugins: [...screen, audioPlugin, boardFeature],
     pluginConfigs: {
@@ -165,7 +167,8 @@ async function startApp(context?: FakeContext, journal = 0) {
       audio: {
         volumes: (player: Json) => (player as unknown as Player).settings.audio,
         journal,
-        ...(context === undefined ? {} : { context: () => context })
+        ...(context === undefined ? {} : { context: () => context }),
+        ...extra
       }
     }
   });
@@ -178,7 +181,9 @@ async function startApp(context?: FakeContext, journal = 0) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("audio plugin integration — a live walk with a context", () => {
@@ -340,5 +345,59 @@ describe("audio plugin integration — headless, with no context at all", () => 
     expect(app.audio.volume("sfx")).toBe(0.5);
 
     await app.stop();
+  });
+});
+
+describe("audio plugin integration — streamed music and the audio session", () => {
+  it("streams the scene track through the music bus, fades it out and frees it", async () => {
+    const fakeWindow = installFakeWindow();
+    const audio = installFakeAudio();
+    const urls = installFakeUrl();
+    const session = installFakeNavigator({ type: "auto" });
+    const context = createFakeContext();
+    const app = await startApp(context, 10, { music: "stream", session: "playback" });
+
+    expect(session.writes).toEqual(["playback"]);
+
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+
+    const at = app.time.snapshot().elapsed;
+
+    expect(app.flow.gate.answer({ intent: "play" })).toBe(true);
+    await tick();
+
+    const track = context.mediaSources[0]?.connectedTo;
+
+    expect(audio.elements).toHaveLength(1);
+    expect(audio.elements[0]?.src).toBe("blob:test/1");
+    expect(urls.created[0]?.type).toBe("audio/mpeg");
+    expect(context.mediaSources[0]?.element).toBe(audio.elements[0]);
+    expect(context.gains).toContain(track);
+    expect(context.gains.find(gain => gain === track)?.connectedTo).toBe(context.gains[1]);
+    expect(app.audio.journal()).toContainEqual({
+      key: "board.theme",
+      bus: "music",
+      kind: "music",
+      at
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(app.flow.gate.answer({ intent: "quiet" })).toBe(true);
+    await tick();
+
+    expect(context.gains.find(gain => gain === track)?.gain.ramps.at(-1)?.[0]).toBe(0);
+    expect(urls.revoked).toEqual([]);
+
+    vi.advanceTimersByTime(600);
+
+    expect(audio.elements[0]?.pauses).toBe(1);
+    expect(urls.revoked).toEqual(["blob:test/1"]);
+
+    vi.useRealTimers();
+    await app.stop();
+
+    expect(session.writes).toEqual(["playback", "auto"]);
+    expect(context.closes).toBe(1);
   });
 });

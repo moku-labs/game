@@ -2,6 +2,8 @@ import { describe, expectTypeOf, it } from "vitest";
 import { defineMotion } from "../../../anim/motion";
 import type { Descriptor } from "../../../flow/fx/types";
 import { Transform, type TransformValue } from "../../../renderer/components";
+import { bind } from "../../../text/components";
+import type { TextBind as TextPluginBind } from "../../../text/types";
 import { component, tag } from "../../../world/ecs/define";
 import type { Entity, Motion, ViewHandle } from "../../../world/types";
 import type { BoxValue } from "../../components";
@@ -10,9 +12,13 @@ import { defineComponent } from "../../jsx/component";
 import type {
   ElementComponents,
   IntrinsicElementsFor,
+  ScrollRow,
+  ScrollRowHeight,
+  ScrollRows,
+  TextBind,
   UiIntrinsicElements
 } from "../../jsx/intrinsics";
-import type { Finding, UiNode } from "../../jsx/types";
+import type { DescriptionNode, Finding, UiNode } from "../../jsx/types";
 import { defineStyle } from "../../styles/define";
 import type { Config, ElementChange, ElementMotion, UiApi } from "../../types";
 
@@ -290,5 +296,111 @@ describe("the components prop", () => {
 
     expectTypeOf<Taken>().toEqualTypeOf<{ [Tag in keyof Tags]: ElementComponents | undefined }>();
     expectTypeOf(image.components).toEqualTypeOf<ElementComponents | undefined>();
+  });
+});
+
+/** A counter component, as the coin pill of a game carries it. */
+const Counter = component("Counter", { value: 0 });
+
+/** What `Counter` holds. */
+type CounterValue = { value: number };
+
+/**
+ * A `change` hook typed with the value of the extra component it rolls.
+ *
+ * @param view - The handle of the element.
+ * @param _previous - The counter before.
+ * @param _next - The counter after.
+ * @returns The roll home.
+ */
+function rollCounter(
+  view: ViewHandle<unknown>,
+  _previous: CounterValue,
+  _next: CounterValue
+): Motion {
+  return view.toRest(Counter, { ms: 200 });
+}
+
+describe("the text bind", () => {
+  it("is the text plugin's TextBind, made by bind()", () => {
+    expectTypeOf<TextBind>().toEqualTypeOf<TextPluginBind>();
+
+    const label: UiIntrinsicElements["text"] = {
+      bind: bind(Counter, "value"),
+      components: [Counter({ value: 25 })]
+    };
+    const themed: IntrinsicElementsFor<"ui.coin", "ui.number", "hud.coins">["text"] = {
+      style: "ui.number",
+      bind: bind(Counter, "value")
+    };
+
+    expectTypeOf(label.bind).toEqualTypeOf<TextBind | undefined>();
+    expectTypeOf(themed.bind).toEqualTypeOf<TextBind | undefined>();
+  });
+
+  it("takes a change hook typed with the value of the extra component", () => {
+    const motion: ElementMotion = { change: { Counter: rollCounter } };
+
+    expectTypeOf(motion.change).not.toBeUndefined();
+  });
+});
+
+/** One item of a shop list. */
+type ShopItem = { id: string; price: number };
+
+/**
+ * The row of the design snippet, as a description node.
+ *
+ * @param item - The item the row shows.
+ * @returns The row.
+ */
+function shopRow(item: ShopItem): DescriptionNode {
+  return { type: "row", key: item.id, props: { price: item.price }, children: [] };
+}
+
+describe("the windowed scroll", () => {
+  const items: ShopItem[] = [{ id: "sword", price: 120 }];
+
+  it("takes rows, rowHeight, overscan and row, and still the child form", () => {
+    const shop: UiIntrinsicElements["scroll"] = {
+      style: { height: 1600 },
+      rows: items.length,
+      rowHeight: 80,
+      overscan: 5,
+      row: index => shopRow(items[index] ?? { id: "none", price: 0 })
+    };
+    const short: UiIntrinsicElements["scroll"] = { axis: "y", children: [] };
+
+    type Windowed = Extract<UiIntrinsicElements["scroll"], { row: ScrollRow }>;
+
+    expectTypeOf<Windowed["rows"]>().toEqualTypeOf<ScrollRows>();
+    expectTypeOf<Windowed["rowHeight"]>().toEqualTypeOf<ScrollRowHeight>();
+    expectTypeOf<Windowed["row"]>().toEqualTypeOf<ScrollRow>();
+    expectTypeOf(shop).not.toBeUndefined();
+    expectTypeOf(short).not.toBeUndefined();
+  });
+
+  it("keeps both forms through IntrinsicElementsFor", () => {
+    type Tags = IntrinsicElementsFor<"ui.list", "body", "shop.title">;
+
+    const shop: Tags["scroll"] = {
+      style: { nineSlice: "ui.list" },
+      rows: 1000,
+      rowHeight: 80,
+      row: index => shopRow({ id: `item${index}`, price: index })
+    };
+    // @ts-expect-error — a windowed scroll needs `row` next to `rows`.
+    const half: Tags["scroll"] = { rows: 1000, rowHeight: 80 };
+
+    expectTypeOf(shop).not.toBeUndefined();
+    expectTypeOf(half).not.toBeUndefined();
+  });
+});
+
+describe("the snapshot of a windowed scroll", () => {
+  it("reports the window on the scroll node", () => {
+    expectTypeOf<UiNode["window"]>().toEqualTypeOf<
+      { first: number; last: number; rows: number } | undefined
+    >();
   });
 });

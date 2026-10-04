@@ -1,8 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
-import type { Bus, Config, Volumes } from "../../types";
+import { playMusic } from "../../playback";
+import type { Bus, Config, LifecycleChanged, Volumes } from "../../types";
 import { createFakeContext, type FakeContext } from "../fake-audio-context";
+import { type FakeAudio, type FakeUrls, installFakeAudio, installFakeUrl } from "../fake-media";
 import { createMockAudio, type MockAudio } from "./mock-audio";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 /** Reads `player.settings.audio`, the way the fixture game configures it. */
 const volumes: Volumes = (player: Json) =>
@@ -215,5 +222,111 @@ describe("assets:bundle-unloaded", () => {
 
     expect([...mock.state.decoded.keys()]).toEqual(["ui.click"]);
     expect([...mock.state.warned]).toEqual([]);
+  });
+});
+
+/** The pause payload `lifecycle` emits for a push of the background reason. */
+const push: LifecycleChanged = {
+  reason: "background",
+  action: "push",
+  reasons: ["background"],
+  paused: true,
+  resumed: false
+};
+
+/** The pause payload `lifecycle` emits for the pop that ends the pause. */
+const pop: LifecycleChanged = {
+  reason: "background",
+  action: "pop",
+  reasons: [],
+  paused: false,
+  resumed: true
+};
+
+/** A started plugin at `music: "stream"` with "board.theme" playing through one element. */
+async function streaming(): Promise<{
+  mock: MockAudio;
+  context: FakeContext;
+  audio: FakeAudio;
+  urls: FakeUrls;
+}> {
+  const audio = installFakeAudio();
+  const urls = installFakeUrl();
+  const { mock, context } = started({ music: "stream" });
+
+  context.state = "running";
+  await playMusic(mock.audio, { key: "board.theme", fadeMs: 600 });
+
+  return { mock, context, audio, urls };
+}
+
+describe('lifecycle:changed at music: "stream"', () => {
+  it("pauses the playing element once every bus is at zero", async () => {
+    const { mock, context, audio } = await streaming();
+    const element = audio.elements[0];
+    const masterAtPause: Array<[number, number] | undefined> = [];
+
+    if (element !== undefined) {
+      const pause = element.pause;
+
+      element.pause = (): void => {
+        masterAtPause.push(context.gains[0]?.gain.ramps.at(-1));
+        pause();
+      };
+    }
+
+    mock.hooks["lifecycle:changed"](push);
+
+    expect(element?.pauses).toBe(1);
+    expect(masterAtPause).toEqual([[0, 0]]);
+  });
+
+  it("plays the element again on the pop that ends the pause", async () => {
+    const { mock, audio } = await streaming();
+
+    mock.hooks["lifecycle:changed"](push);
+    mock.hooks["lifecycle:changed"](pop);
+    await Promise.resolve();
+
+    expect(audio.elements[0]?.plays).toBe(2);
+  });
+
+  it("warns once and keeps the track when play() is refused on a pop", async () => {
+    const { mock, audio } = await streaming();
+    const element = audio.elements[0];
+    const stream = mock.state.music?.stream;
+
+    if (element !== undefined) element.playFails = true;
+
+    for (let round = 0; round < 2; round += 1) {
+      mock.hooks["lifecycle:changed"](push);
+      mock.hooks["lifecycle:changed"](pop);
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+
+    expect(mock.log.warn).toHaveBeenCalledTimes(1);
+    expect(mock.log.warn).toHaveBeenCalledWith("audio: the music element did not play", {
+      key: "board.theme"
+    });
+    expect(mock.state.music?.stream).toBe(stream);
+  });
+});
+
+describe('assets:bundle-unloaded at music: "stream"', () => {
+  it("leaves the playing element alone and revokes nothing", async () => {
+    const { mock, audio, urls } = await streaming();
+
+    mock.hooks["assets:bundle-unloaded"]({
+      bundle: "board",
+      tier: "scene",
+      mb: 1,
+      reason: "budget",
+      keys: ["board.theme"]
+    });
+
+    expect(audio.elements[0]?.pauses).toBe(0);
+    expect(urls.revoked).toEqual([]);
+    expect(mock.state.music?.stream?.element).toBe(audio.elements[0]);
   });
 });

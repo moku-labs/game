@@ -3,9 +3,10 @@
  * is written through `world.projection.setRest`, and the hook plays on the `ViewHandle` the
  * projection hands out for a ui-owned entity. Nothing but a track writes the pose between hooks.
  */
+import type { Hint } from "../../flow/types";
 import { Transform, type TransformValue } from "../../renderer/components";
 import type { Point } from "../../renderer/types";
-import type { Motion, ViewHandle } from "../../world/projection/types";
+import type { Motion, MotionHandle, ViewHandle } from "../../world/projection/types";
 import type { ComponentType } from "../../world/types";
 import { UI_OWNER } from "../components";
 import { asError } from "../errors";
@@ -139,25 +140,77 @@ export function handleOf(ctx: UiCtx, element: Element): ViewHandle<unknown> | un
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element the hook belongs to.
  * @param hook - What to run with the handle.
+ * @returns The motion the hook returned; `undefined` without a hook, a handle, or a motion.
  */
 export function play(
   ctx: UiCtx,
   element: Element,
   hook: ((view: ViewHandle<unknown>) => Motion) | undefined
-): void {
-  if (hook === undefined) return;
+): MotionHandle | undefined {
+  if (hook === undefined) return undefined;
 
   const handle = handleOf(ctx, element);
 
-  if (handle === undefined) return;
+  if (handle === undefined) return undefined;
 
   try {
     const motion = hook(handle);
 
-    if (motion !== undefined) element.handles.push(motion);
+    if (motion === undefined) return undefined;
+
+    element.handles.push(motion);
+
+    return motion;
   } catch (error) {
     ctx.log.error("ui:motion-failed", { key: element.key, type: element.type }, asError(error));
+
+    return undefined;
   }
+}
+
+/** A `change` hook of an extra component, as `ui` calls it: the values before and after. */
+type ExtraChange = (
+  view: ViewHandle<unknown>,
+  previous: object,
+  next: object,
+  hint?: Hint
+) => Motion;
+
+/**
+ * Plays the `change` hook of one extra component whose fields changed. The motion the last change
+ * of that name started is cancelled first, so its value stays where it is and the new motion
+ * starts from there; the new motion is kept with the element's handles, so an exit waits for it.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param element - The element that carries the extra.
+ * @param name - The component name of the extra.
+ * @param values - The value of the last render and of this one.
+ * @param values.previous - The value of the last render.
+ * @param values.next - The value of this render.
+ * @param hint - The hint routed to the element in this frame step.
+ * @returns True when the hook returned a motion: the caller writes nothing directly.
+ */
+export function playExtraChange(
+  ctx: UiCtx,
+  element: Element,
+  name: string,
+  values: { previous: object; next: object },
+  hint: Hint | undefined
+): boolean {
+  element.extraHandles.get(name)?.cancel();
+  element.extraHandles.delete(name);
+
+  const hook = element.motion?.change?.[name] as ExtraChange | undefined;
+
+  if (hook === undefined) return false;
+
+  const motion = play(ctx, element, view => hook(view, values.previous, values.next, hint));
+
+  if (motion === undefined) return false;
+
+  element.extraHandles.set(name, motion);
+
+  return true;
 }
 
 /**
@@ -213,12 +266,14 @@ export function still(element: Element): boolean {
  * @param element - The element whose rect, style or fit may have changed.
  * @param parent - The rect of its parent, or nothing.
  * @param hooked - Whether a `change.Box` motion already played for this change.
+ * @param hint - The hint routed to the element in this frame step, handed to `change.Transform`.
  */
 export function repose(
   ctx: UiCtx,
   element: Element,
   parent: Rect | undefined,
-  hooked: boolean
+  hooked: boolean,
+  hint?: Hint
 ): void {
   const next = restTransform(element.rect, parent, element.style, element.fit);
 
@@ -234,7 +289,7 @@ export function repose(
   const hook = element.motion?.change?.Transform;
 
   if (hook !== undefined) {
-    play(ctx, element, view => hook(view, previous, next));
+    play(ctx, element, view => hook(view, previous, next, hint));
 
     return;
   }

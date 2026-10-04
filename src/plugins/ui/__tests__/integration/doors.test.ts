@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { read } from "../../../flow/doors/read";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { Box } from "../../components";
-import { rectSource, uiSource } from "../../inspect";
+import { locateSource, uiSource } from "../../inspect";
 import { fitBars, startUiApp } from "../app";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ function boardOf(app: App): { fit: number; x: number; y: number } {
   };
 }
 
-describe("game.rect on the real ui", () => {
+describe("game.locate on the real ui", () => {
   it("places a cell of the fitted board on an SE where it is drawn, in reference units headless", async () => {
     const app = await startUiApp();
 
@@ -68,7 +68,7 @@ describe("game.rect on the real ui", () => {
 
     const board = boardOf(app);
     const centre = { x: board.x + 970 / 2, y: board.y + 970 / 2 };
-    const rect = read(app, rectSource, { key: "cell" });
+    const rect = read(app, locateSource, { key: "cell" });
 
     expect(board.fit).toBeLessThan(1);
     expect(rect?.x).toBeCloseTo(centre.x + board.fit * (board.x + CELL.left - centre.x), 5);
@@ -84,14 +84,14 @@ describe("game.rect on the real ui", () => {
 
     fitOnSe(app);
 
-    const inReference = read(app, rectSource, { key: "cell" });
+    const inReference = read(app, locateSource, { key: "cell" });
 
     vi.spyOn(app.renderer.viewport, "toScreen").mockImplementation(point => ({
       x: 10 + point.x * SE.scale,
       y: 20 + point.y * SE.scale
     }));
 
-    const onPage = read(app, rectSource, { key: "cell" });
+    const onPage = read(app, locateSource, { key: "cell" });
 
     expect(onPage?.x).toBeCloseTo(10 + (inReference?.x ?? 0) * SE.scale, 5);
     expect(onPage?.y).toBeCloseTo(20 + (inReference?.y ?? 0) * SE.scale, 5);
@@ -105,8 +105,8 @@ describe("game.rect on the real ui", () => {
     const app = await startUiApp();
     const settings = app.world.ecs.get(app.ui.find("settings") ?? 0, Box);
 
-    expect(read(app, rectSource, { key: "settings" })).toEqual(settings);
-    expect(read(app, rectSource, { key: "settings" })).toMatchObject({ w: 100, h: 100 });
+    expect(read(app, locateSource, { key: "settings" })).toEqual(settings);
+    expect(read(app, locateSource, { key: "settings" })).toMatchObject({ w: 100, h: 100 });
 
     await app.stop();
   });
@@ -114,7 +114,35 @@ describe("game.rect on the real ui", () => {
   it("answers undefined for a key that is not on screen", async () => {
     const app = await startUiApp();
 
-    expect(read(app, rectSource, { key: "cell" })).toBeUndefined();
+    expect(read(app, locateSource, { key: "cell" })).toBeUndefined();
+
+    await app.stop();
+  });
+
+  it("finds a target through the world's projection keys and the drawn box of its view", async () => {
+    const app = await startUiApp();
+    const settings = app.ui.find("settings") ?? 0;
+    const target = { projection: "hud", key: "settings" };
+
+    // Inert, the renderer draws nothing, so there is no box to answer with.
+    expect(read(app, locateSource, { target })).toBeUndefined();
+
+    vi.spyOn(app.renderer.sync, "boundsOf").mockImplementation(entity =>
+      entity === settings ? { x: 210, y: 10, width: 100, height: 100 } : undefined
+    );
+
+    expect(read(app, locateSource, { target })).toEqual({ x: 210, y: 10, w: 100, h: 100 });
+    expect(read(app, locateSource, { target: { projection: "hud", key: "gone" } })).toBeUndefined();
+
+    await app.stop();
+  });
+
+  it("throws unless exactly one of key and target is given", async () => {
+    const app = await startUiApp();
+
+    expect(() => read(app, locateSource, {})).toThrow(
+      "[game] game.locate takes a key or a target.\n  Pass exactly one of { key } and { target }."
+    );
 
     await app.stop();
   });

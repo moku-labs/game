@@ -6,7 +6,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../../config";
-import type { Api as AssetsApi, AudioAsset } from "../../../assets/types";
+import type { Api as AssetsApi, AudioAsset, AudioMime } from "../../../assets/types";
 import type { Descriptor, Api as FlowApi, FxHandler } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
 import type { Api as TimeApi } from "../../../time/types";
@@ -23,8 +23,16 @@ export type Registered = { kind: string; run: FxHandler; runInFast: boolean };
 /** The fake `flow`: the one member `audio` calls, plus what it registered. */
 export type FakeFlow = { registered: Registered[]; removed: string[]; api: FlowApi };
 
-/** The fake `assets`: `audio(key)` answers an `.mp3` whose bytes are the text of the key itself. */
-export type FakeAssets = { asked: string[]; missing: Set<string>; api: AssetsApi };
+/**
+ * The fake `assets`: `audio(key)` answers an `.mp3` whose bytes are the text of the key itself, or
+ * the MIME type a test wrote in `mimes` for that key (an `.m4a` is `"audio/mp4"`).
+ */
+export type FakeAssets = {
+  asked: string[];
+  missing: Set<string>;
+  mimes: Map<string, AudioMime>;
+  api: AssetsApi;
+};
 
 /** The fake `model`: one committed player a test writes. */
 export type FakeModel = { player: Json; api: ModelApi };
@@ -102,6 +110,7 @@ function createFakeAssets(): FakeAssets {
   const fake: FakeAssets = {
     asked: [],
     missing: new Set<string>(),
+    mimes: new Map<string, AudioMime>(),
     api: undefined as unknown as AssetsApi
   };
 
@@ -109,7 +118,9 @@ function createFakeAssets(): FakeAssets {
     audio: (key: string): AudioAsset | undefined => {
       fake.asked.push(key);
 
-      return fake.missing.has(key) ? undefined : { bytes: bytesOf(key), mime: "audio/mpeg" };
+      if (fake.missing.has(key)) return undefined;
+
+      return { bytes: bytesOf(key), mime: fake.mimes.get(key) ?? "audio/mpeg" };
     }
   } as unknown as AssetsApi;
 
@@ -145,7 +156,9 @@ function defaultConfig(): Config {
     musicFadeMs: 600,
     volumes: undefined,
     context: undefined,
-    journal: 0
+    journal: 0,
+    music: "decode",
+    session: "ambient"
   };
 }
 

@@ -171,7 +171,8 @@ export type UiApi = {
    * The live screen as plain data: every root in layer order, every element in child order, with
    * its rect in root coordinates, its resolved style and its seven state flags. A rect is natural:
    * under a `fit: "contain"` element it is the rect before that scale, and the fitted element
-   * adds `fitScale`. Works headless.
+   * adds `fitScale`. A windowed scroll adds `window`, and its content lists the live rows only.
+   * Works headless.
    *
    * @returns The root node; several roots come back under one `screen` node.
    * @example

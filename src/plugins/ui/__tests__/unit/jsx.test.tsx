@@ -13,10 +13,12 @@ import {
   Flag,
   leaveMs,
   Mark,
+  markHook,
   mountScreen,
   settle,
   startExtrasApp,
-  TAGS
+  TAGS,
+  Timer
 } from "../extras-app";
 
 // ─── The runtime ──────────────────────────────────────────────
@@ -36,6 +38,15 @@ describe("jsx runtime", () => {
     const node = jsxDEV("row", {}, "tabs", false, { fileName: "hud.tsx" }, undefined);
 
     expect(node).toEqual({ type: "row", key: "tabs", props: {}, children: [] });
+  });
+
+  it("passes a function-valued prop through jsx() and jsxDEV() untouched", () => {
+    const row = (index: number) => jsx("row", {}, String(index));
+
+    expect(jsx("scroll", { rows: 3, row }).props.row).toBe(row);
+    expect(jsxDEV("scroll", { rows: 3, row }, "list", false, undefined, undefined).props.row).toBe(
+      row
+    );
   });
 
   it("calls a plain function component at build time", () => {
@@ -497,5 +508,157 @@ describe("the components prop on every tag", () => {
 
     expect(content).toHaveLength(1);
     expect(app.world.ecs.has(content[0] ?? -1, Mark)).toBe(false);
+  });
+});
+
+// ─── The change hooks of extras (Delta 10 Part A) ──────────────
+
+/**
+ * Mounts the rolled screen with the hook in the given mode, the calls and motions cleared.
+ *
+ * @param mode - What the `change.Mark` hook does.
+ * @param ms - How long a roll takes.
+ * @returns The app and the entity of the rolled row.
+ */
+async function rolled(
+  mode: typeof markHook.mode,
+  ms = 200
+): Promise<{ app: ExtrasApp; entity: number }> {
+  markHook.mode = mode;
+  markHook.ms = ms;
+  markHook.calls.length = 0;
+  markHook.motions.length = 0;
+
+  const app = await startExtrasApp();
+
+  mountScreen(app, "rolledScreen");
+
+  return { app, entity: find(app, "roller") };
+}
+
+describe("the change hook of an extra component", () => {
+  it("records the rest of every extra with a value at mount, and none for a tag", async () => {
+    const { app, entity } = await rolled("roll");
+
+    expect(app.world.projection.restOf(entity, Mark)).toEqual({ level: 2 });
+    expect(app.world.projection.restOf(entity, Timer)).toEqual({ until: 2000, left: 0 });
+    expect(app.world.projection.restOf(entity, Flag as unknown as typeof Mark)).toBeUndefined();
+    expect(markHook.calls).toEqual([]);
+
+    await app.stop();
+  });
+
+  it("plays the hook once with (view, previous, next, undefined) and writes nothing directly", async () => {
+    const { app, entity } = await rolled("roll");
+    const seen = watchMark(app);
+
+    tapAndStep(app, "rollFive", 1);
+
+    expect(markHook.calls).toEqual([
+      { previous: { level: 2 }, next: { level: 5 }, hint: undefined }
+    ]);
+    expect(app.world.ecs.get(entity, Mark)).toEqual({ level: 2 });
+    expect(seen.flat()).toEqual([]);
+    expect(app.world.projection.restOf(entity, Mark)).toEqual({ level: 5 });
+
+    for (let elapsed = 0; elapsed <= 200; elapsed += 16) app.time.step(16);
+
+    expect(app.world.ecs.get(entity, Mark)).toEqual({ level: 5 });
+
+    await app.stop();
+  });
+
+  it("writes the value directly when the hook returns nothing", async () => {
+    const { app, entity } = await rolled("none");
+
+    tapAndStep(app, "rollFive", 1);
+
+    expect(markHook.calls).toHaveLength(1);
+    expect(app.world.ecs.get(entity, Mark)).toEqual({ level: 5 });
+
+    await app.stop();
+  });
+
+  it("cancels a running roll and starts the next one from the current value", async () => {
+    const { app, entity } = await rolled("roll", 400);
+
+    tapAndStep(app, "rollFive", 6);
+
+    const between = app.world.ecs.get(entity, Mark)?.level ?? 0;
+
+    expect(between).toBeGreaterThan(2);
+    expect(between).toBeLessThan(5);
+
+    // The first roll moves once more in this frame's animate, then the change cancels it.
+    tapAndStep(app, "rollNine", 1);
+
+    const cancelledAt = app.world.ecs.get(entity, Mark)?.level ?? 0;
+
+    expect(markHook.calls.at(-1)).toEqual({
+      previous: { level: 5 },
+      next: { level: 9 },
+      hint: undefined
+    });
+    expect(markHook.motions[0]?.active()).toBe(false);
+    expect(markHook.motions[1]?.active()).toBe(true);
+    expect(cancelledAt).toBeGreaterThanOrEqual(between);
+    expect(cancelledAt).toBeLessThan(5);
+
+    // The second roll starts where the first one stopped and goes past 5 to 9.
+    app.time.step(16);
+
+    const next = app.world.ecs.get(entity, Mark)?.level ?? 0;
+
+    expect(next).toBeGreaterThan(cancelledAt);
+    expect(next).toBeLessThan(9);
+
+    for (let elapsed = 0; elapsed <= 400; elapsed += 16) app.time.step(16);
+
+    expect(app.world.ecs.get(entity, Mark)).toEqual({ level: 9 });
+
+    await app.stop();
+  });
+
+  it("logs a hook that throws as ui:motion-failed and writes the value", async () => {
+    const { app, entity } = await rolled("throw");
+
+    tapAndStep(app, "rollFive", 1);
+
+    const failures = app.log.trace().filter(entry => entry.event === "ui:motion-failed");
+
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.data).toMatchObject({ key: "roller", type: "row" });
+    expect(app.world.ecs.get(entity, Mark)).toEqual({ level: 5 });
+
+    await app.stop();
+  });
+
+  it("never writes back a field the component type gives to a plugin", async () => {
+    const { app, entity } = await rolled("none");
+
+    app.world.ecs.set(entity, Timer, { left: 42 });
+    app.time.step(16);
+    tapAndStep(app, "rollFive", 1);
+
+    expect(app.world.ecs.get(entity, Timer)).toEqual({ until: 5000, left: 42 });
+    expect(app.world.projection.restOf(entity, Timer)).toEqual({ until: 5000, left: 42 });
+
+    await app.stop();
+  });
+
+  it("keeps an exiting element until its roll ended", async () => {
+    const { app, entity } = await rolled("roll", 400);
+
+    tapAndStep(app, "rollFive", 1);
+    tapAndStep(app, "hideRoller", 3);
+
+    expect(app.world.ecs.has(entity, Exiting)).toBe(true);
+    expect(app.world.ecs.has(entity, Box)).toBe(true);
+
+    for (let elapsed = 0; elapsed <= 400; elapsed += 16) app.time.step(16);
+
+    expect(app.world.ecs.has(entity, Box)).toBe(false);
+
+    await app.stop();
   });
 });

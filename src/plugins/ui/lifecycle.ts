@@ -75,7 +75,8 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 
 /**
  * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
- * `PointerOver`, the two effect handlers, the three tap listeners (the `LocalWrite` patch, the
+ * `PointerOver`, the two effect handlers, the hint listener that buffers every released hint for
+ * the `change` hooks of the next frame step, the three tap listeners (the `LocalWrite` patch, the
  * pointer tap that clears the keyboard focus, and the tap that starts or ends the editing of a
  * text field), the pointer door that opens the keyboard inside the DOM listener, the key listener
  * of the focus and `LocalWrite` as an input control, so the cursor shows a hand over a local-state
@@ -106,6 +107,9 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     ecs.onRemoved(PointerOver, entity => jsx.markPointer(entity, "hover", false)),
     ctx.deps.flow.fx.handle("popup", layout.popupHandler(jsx)),
     ctx.deps.flow.fx.handle("guide", layout.guideHandler()),
+    ctx.deps.flow.fx.onHint(hint => {
+      ctx.state.jsx.hints.push(hint);
+    }),
     ctx.deps.input.onTap(jsx.applyTap),
     ctx.deps.input.onTap(() => jsx.blur()),
     ctx.deps.input.onTap(jsx.tapped),
@@ -176,6 +180,8 @@ export function stopUi(state: State): void {
   state.jsx.removing.clear();
   state.jsx.hosts.clear();
   state.jsx.hosted.clear();
+  state.jsx.scrolls.clear();
+  state.jsx.hints.length = 0;
   // The ring entities went with the ui owner above.
   state.jsx.focus.entity = undefined;
   state.jsx.focus.ring = undefined;

@@ -73,9 +73,10 @@ export type ElementChange<Value> = (
 
 /**
  * The motion hooks of one element: the hook triple of `world.projection`, which `defineMotion`
- * of `anim` returns. `ui` plays two `change` hooks itself and hands them typed values: `Box` gets
- * the rects, `Transform` the rest poses. A hook for any other component name is accepted, so every
- * `defineMotion` result fits, and `ui` never plays it.
+ * of `anim` returns. `ui` plays the `change` hooks of `Box` (the rects), of `Transform` (the rest
+ * poses) and of every extra component of the `components` prop (its values before and after). A
+ * hook for any other component name is accepted, so every `defineMotion` result fits, and `ui`
+ * never plays it. Every hook gets the hint routed to the element's key in that frame step.
  *
  * @example
  * ```ts
@@ -179,13 +180,35 @@ export type Instance = {
 };
 
 /**
+ * The range a windowed scroll holds and what it was cut with: `rows` rows of `rowHeight`, the
+ * indexes `first` to `last` alive, `overscan` of them beyond each edge of the viewport. `last` is
+ * `first - 1` for an empty list.
+ *
+ * @example
+ * ```ts
+ * // P18's list scrolled to -3840 u: 24 of its 1000 rows exist.
+ * const window: ScrollWindow = { rows: 1000, rowHeight: 120, overscan: 5, first: 27, last: 50 };
+ * ```
+ */
+export type ScrollWindow = {
+  rows: number;
+  rowHeight: number;
+  overscan: number;
+  first: number;
+  last: number;
+};
+
+/**
  * One live element: the entity, the Yoga node, the resolved style and the place in the tree.
  * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit`
  * is the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform`
  * last written for it. `loop` is the motion of the running `loop` hook, kept apart from
  * `handles`: it never ends, so the exit sweep must not wait for it. `extras` holds the values of
- * the `components` prop added last time, by component name; `warnedOwned` the names of the
- * `components` values the element owns that were already logged.
+ * the `components` prop added last time, by component name; `extraHandles` the motion the last
+ * `change` hook of each of them returned; `warnedOwned` the names of the `components` values the
+ * element owns that were already logged. A windowed scroll carries its `window` and the one-time
+ * warnings of its props in `warned`; `scrolledIn` marks an element a range change of a windowed
+ * scroll created: it plays no `enter` hook.
  */
 export type Element = {
   entity: Entity;
@@ -212,7 +235,11 @@ export type Element = {
   entered: boolean;
   dropKey: (() => void) | undefined;
   extras: ReadonlyMap<string, AnyComponentValue>;
+  extraHandles: Map<string, MotionHandle>;
   warnedOwned: Set<string>;
+  warned: Set<string>;
+  scrolledIn: boolean;
+  window?: ScrollWindow;
 };
 
 /**
@@ -362,7 +389,9 @@ export type TextState = {
 
 /**
  * jsx module state. `hosts` holds the elements with a `hosts` prop; `hosted` maps a world view to
- * the element that hosts it; `fields` holds the text fields by entity.
+ * the element that hosts it; `fields` holds the text fields by entity. `hints` buffers the hints
+ * released since the last frame step; `scrolls` holds the scroll containers; `windowRenders`
+ * counts the re-renders of a windowed list its range made.
  */
 export type JsxState = {
   components: Map<string, AnyComponentDefinition>;
@@ -379,13 +408,17 @@ export type JsxState = {
   focus: FocusState;
   fields: Map<Entity, Field>;
   text: TextState;
+  hints: Hint[];
+  scrolls: Set<Entity>;
+  windowRenders: number;
 };
 
 /**
  * One node of the snapshot `tree()` answers with. `rect` is natural: under a `fit` ancestor it
  * is the rect before that ancestor's scale. An element with `fit: "contain"` adds `fitScale`,
  * the scale it is drawn at. An `input` adds `value`: the text being typed while it is edited,
- * else the local field it writes.
+ * else the local field it writes. A windowed `scroll` adds `window`: the rows that exist, which
+ * are the children of its content, and how many the list has.
  *
  * @example
  * ```ts
@@ -406,6 +439,16 @@ export type UiNode = {
   local?: Record<string, unknown>;
   fitScale?: number;
   value?: string;
+  /**
+   * The rows of a windowed scroll that exist and how many the list has.
+   *
+   * @example
+   * ```ts
+   * // P18's shop list of 1000 rows, 120 u each in 1600 u, scrolled to -3840 u: 24 rows exist.
+   * const window: UiNode["window"] = { first: 27, last: 50, rows: 1000 };
+   * ```
+   */
+  window?: { first: number; last: number; rows: number };
   children: UiNode[];
 };
 

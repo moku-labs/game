@@ -3,6 +3,7 @@
  * fx handlers. It is injected into `jsx`; nothing it returns reaches the public API.
  */
 import type { FxHandler } from "../../flow/fx/types";
+import type { Hint } from "../../flow/types";
 import { Box } from "../components";
 import type { Element, JsxModule } from "../jsx/types";
 import type { UiCtx } from "../types";
@@ -10,12 +11,13 @@ import { applyStyleToNode, layoutChanged } from "./apply";
 import { beginExit, canDespawn } from "./exit";
 import { createGuideHandler } from "./guide";
 import { installMeasure, markMeasured } from "./measure";
-import { liftRest, play, repose, startLoop, writeRest } from "./motion";
+import { liftRest, play, playExtraChange, repose, startLoop, writeRest } from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
-import { stepScroll } from "./scroll";
+import { clampScroll, stepScroll } from "./scroll";
 import { solveRoot } from "./solve";
 import type { ElementLookup, LayoutModule, LayoutState, Rect } from "./types";
+import { windowOf } from "./window";
 import { loadYogaModule } from "./yoga";
 
 /**
@@ -85,18 +87,25 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     loop: (element: Element): void => startLoop(ctx, element),
 
-    change: (element: Element, previous: Rect): boolean => {
+    change: (element: Element, previous: Rect, hint?: Hint): boolean => {
       const hook = element.motion?.change?.Box;
 
       if (hook === undefined) return false;
 
-      play(ctx, element, view => hook(view, previous, element.rect));
+      play(ctx, element, view => hook(view, previous, element.rect, hint));
 
       return true;
     },
 
-    repose: (element: Element, parent: Rect | undefined, hooked: boolean): void =>
-      repose(ctx, element, parent, hooked),
+    changeExtra: (
+      element: Element,
+      name: string,
+      values: { previous: object; next: object },
+      hint: Hint | undefined
+    ): boolean => playExtraChange(ctx, element, name, values, hint),
+
+    repose: (element: Element, parent: Rect | undefined, hooked: boolean, hint?: Hint): void =>
+      repose(ctx, element, parent, hooked, hint),
 
     lift: (element: Element, units: number): void => liftRest(ctx, element, units),
 
@@ -106,6 +115,11 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     scroll: (containers: readonly Element[], lookup: ElementLookup): void =>
       stepScroll(ctx, state, containers, lookup),
+
+    clampScroll: (container: Element, contentHeight: number, lookup: ElementLookup): number =>
+      clampScroll(ctx, container, contentHeight, lookup),
+
+    windowOf,
 
     popupHandler: (jsx: JsxModule): FxHandler => createPopupHandler(ctx, state, jsx),
 
