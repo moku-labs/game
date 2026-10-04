@@ -218,10 +218,54 @@ describe("audio", () => {
 
     expect(notes).toEqual([
       'ignored "features/ui/assets/body.ttf": a font is a .fnt file with its .png pages.',
-      'ignored "features/ui/assets/click.wav": audio is .mp3 only.',
-      'ignored "features/ui/assets/theme.ogg": audio is .mp3 only.'
+      'ignored "features/ui/assets/click.wav": audio is .mp3 or .m4a only.',
+      'ignored "features/ui/assets/theme.ogg": audio is .mp3 or .m4a only.'
     ]);
     expect(manifest.bundles.ui?.files.map(file => file.key)).toEqual(["ui.click"]);
+  });
+
+  it("takes an .m4a as an audio asset sized by its bytes", async () => {
+    const root = await tree({ "features/ui/assets/theme.m4a": audioBytes(4096) });
+
+    const { manifest } = await scan(root);
+
+    expect(manifest.bundles.ui?.files).toEqual([
+      {
+        key: "ui.theme",
+        path: "features/ui/assets/theme.m4a",
+        kind: "audio",
+        width: 0,
+        height: 0,
+        mb: 0.004
+      }
+    ]);
+  });
+
+  it("ignores a raw .aac with a note: the AAC form is .m4a", async () => {
+    const root = await tree({
+      "features/ui/assets/theme.aac": audioBytes(1024),
+      "features/ui/assets/voice.opus": audioBytes(1024),
+      "features/ui/assets/drum.flac": audioBytes(1024)
+    });
+
+    const { notes } = await scan(root);
+
+    expect(notes).toEqual([
+      'ignored "features/ui/assets/drum.flac": audio is .mp3 or .m4a only.',
+      'ignored "features/ui/assets/theme.aac": audio is .mp3 or .m4a only.',
+      'ignored "features/ui/assets/voice.opus": audio is .mp3 or .m4a only.'
+    ]);
+  });
+
+  it("refuses an .mp3 and an .m4a of one name: one key, two files", async () => {
+    const root = await tree({
+      "features/ui/assets/click.mp3": audioBytes(1024),
+      "features/ui/assets/click.m4a": audioBytes(1024)
+    });
+
+    await expect(scan(root)).rejects.toThrow(
+      'key "ui.click" comes from two files: features/ui/assets/click.m4a and features/ui/assets/click.mp3.'
+    );
   });
 
   it("says which extensions it reads when it leaves another file out", async () => {
@@ -233,7 +277,7 @@ describe("audio", () => {
     const { notes } = await scan(root);
 
     expect(notes).toEqual([
-      'ignored "features/ui/assets/notes.md": the scanner reads .png, .webp, .fnt and .mp3 only.'
+      'ignored "features/ui/assets/notes.md": the scanner reads .png, .webp, .fnt, .mp3 and .m4a only.'
     ]);
   });
 });
@@ -255,6 +299,17 @@ describe("generated keys", () => {
     expect(keysSource).toContain('export type FontKey =\n  | "ui.body";');
     expect(keysSource).toContain('export type AudioKey =\n  | "ui.click";');
     expect(emitKeys(manifest)).toBe(keysSource);
+  });
+
+  it("lists an .m4a in AudioKey next to an .mp3", async () => {
+    const root = await tree({
+      "features/ui/assets/click.mp3": audioBytes(1024),
+      "features/ui/assets/theme.m4a": audioBytes(1024)
+    });
+
+    const { keysSource } = await scan(root);
+
+    expect(keysSource).toContain('export type AudioKey =\n  | "ui.click"\n  | "ui.theme";');
   });
 
   it("writes never for a game without fonts or audio", async () => {

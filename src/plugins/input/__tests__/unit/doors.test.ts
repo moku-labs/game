@@ -3,8 +3,8 @@ import { createApp } from "../../../../index";
 import { run } from "../../../flow/doors/run";
 import type { Json } from "../../../model/types";
 import { createInputApi } from "../../api";
-import { Draggable, DropTarget } from "../../components";
-import { dragCommand, keyCommand } from "../../control";
+import { Draggable, DropTarget, Traceable } from "../../components";
+import { dragCommand, keyCommand, readTarget, traceCommand } from "../../control";
 import type { InputApi } from "../../types";
 import { createMockInput, type MockInput } from "./mock-input";
 
@@ -30,6 +30,12 @@ function board(): { mock: MockInput; app: ReturnType<typeof createApp> & { input
     projection: "board.items",
     key: "i7"
   });
+  for (const key of ["b3", "c3"]) {
+    mock.spawn([Traceable({ intent: "word", payload: { cell: key } })], {
+      projection: "board.cells",
+      key
+    });
+  }
 
   return { mock, app: { ...createApp(), input: createInputApi(mock.ctx) } };
 }
@@ -110,5 +116,57 @@ describe("game.key", () => {
       { key: "Tab", shift: true },
       { key: "q", shift: false }
     ]);
+  });
+});
+
+describe("game.trace", () => {
+  it("is the route command game.trace and refuses outside a dev build", () => {
+    const { mock, app } = board();
+
+    expect(traceCommand.id).toBe("game.trace");
+    expect(traceCommand.effect).toBe("route");
+    expect(() => traceCommand.run(app, { path: [] })).toThrow("dev builds only");
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("traces the cells by their projection keys and leaves a moku:dev entry", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { mock, app } = board();
+
+    const ran = await run(app, traceCommand, {
+      path: [
+        { projection: "board.cells", key: "b3" },
+        { projection: "board.cells", key: "c3" }
+      ]
+    });
+
+    expect(ran.value).toBe(true);
+    expect(mock.answers).toEqual([
+      { intent: "word", payload: { path: [{ cell: "b3" }, { cell: "c3" }] } }
+    ]);
+    expect(app.log.trace().at(-1)).toMatchObject({
+      event: "moku:dev",
+      data: { command: "game.trace" }
+    });
+  });
+
+  it.each([
+    ["not a list", { projection: "board.cells", key: "b3" }],
+    ["a list with a bad element", [{ projection: "board.cells", key: "b3" }, "c3"]]
+  ])("refuses a path that is %s", async (_name, path: Json) => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { mock, app } = board();
+
+    await expect(run(app, traceCommand, { path })).rejects.toThrow(
+      /^\[game] The path is not a list of projection keys\.\n {2}.*\.$/
+    );
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("keeps readTarget on the control module for the game.tap command of ui", () => {
+    expect(readTarget({ projection: "board.items", key: "i5" })).toEqual({
+      projection: "board.items",
+      key: "i5"
+    });
   });
 });

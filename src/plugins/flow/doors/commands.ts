@@ -4,7 +4,7 @@
  * by the door `src/control.ts` only, so no plugin reaches it and no import cycle forms.
  */
 import { reducedMotionCommand } from "../../anim/control";
-import { dragCommand, keyCommand } from "../../input/control";
+import { dragCommand, keyCommand, traceCommand } from "../../input/control";
 import { pauseCommand, resumeCommand } from "../../lifecycle/control";
 import { captureCommand, debugCommand } from "../../renderer/control";
 import { stepCommand, timeScaleCommand } from "../../time/control";
@@ -37,5 +37,6 @@ export const commands = Object.freeze({
   debug: debugCommand,
   reducedMotion: reducedMotionCommand,
   fill: fillCommand,
-  timeScale: timeScaleCommand
+  timeScale: timeScaleCommand,
+  trace: traceCommand
 });

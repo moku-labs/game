@@ -144,15 +144,15 @@ describe("font", () => {
 });
 
 describe("audio", () => {
-  it("keeps the bytes of an .mp3 undecoded until the bundle is unloaded", async () => {
+  it("keeps the bytes of an .mp3 undecoded, with its MIME type, until the bundle is unloaded", async () => {
     const mock = await startUi();
 
     await mock.api.load("ui");
 
-    const bytes = mock.api.audio("ui.click");
+    const asset = mock.api.audio("ui.click");
 
-    expect(bytes).toBeInstanceOf(ArrayBuffer);
-    expect([...new Uint8Array(bytes ?? new ArrayBuffer(0))]).toEqual([1, 2, 3, 4]);
+    expect(asset?.mime).toBe("audio/mpeg");
+    expect([...new Uint8Array(asset?.bytes ?? new ArrayBuffer(0))]).toEqual([1, 2, 3, 4]);
 
     mock.api.unload("ui");
 

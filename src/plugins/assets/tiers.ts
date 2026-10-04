@@ -9,6 +9,7 @@ import type {
   AssetsIo,
   AtlasFrame,
   AtlasPage,
+  AudioMime,
   BundleMap,
   BundleRecord,
   CreateTextureOptions,
@@ -25,6 +26,9 @@ import type {
   Texture,
   Tier
 } from "./types";
+
+/** The extension of an AAC sound in an MP4 container; every other sound is an MP3. */
+const M4A = /\.m4a$/i;
 
 /** A load failure that knows which file of which bundle broke, for the log entry. */
 type BundleFailure = Error & {
@@ -314,6 +318,21 @@ function pathOf(bundle: string, file: ManifestFile): string {
 }
 
 /**
+ * Reads the container type of a sound from the extension of its path. A hashed name of the packer
+ * keeps the extension, so a packed sound has the type of its source.
+ *
+ * @param soundPath - Path of the sound, as the manifest names it.
+ * @returns `"audio/mp4"` for an `.m4a`, `"audio/mpeg"` for everything else.
+ * @example
+ * ```ts
+ * mimeOf("ui/ui.theme-9c4e2b7a10.m4a"); // "audio/mp4"
+ * ```
+ */
+function mimeOf(soundPath: string): AudioMime {
+  return M4A.test(soundPath) ? "audio/mp4" : "audio/mpeg";
+}
+
+/**
  * Loads one font: the `.fnt` file as text and every page it names as a texture. The pages go up
  * in parallel, the first one is what `text` installs.
  *
@@ -420,9 +439,10 @@ async function loadFile(run: Running, file: ManifestFile): Promise<void> {
   }
 
   if (kind === "audio") {
-    const response = await fetchFile(run, pathOf(run.bundle, file));
+    const soundPath = pathOf(run.bundle, file);
+    const response = await fetchFile(run, soundPath);
 
-    assets.audio.set(file.key, await response.arrayBuffer());
+    assets.audio.set(file.key, { bytes: await response.arrayBuffer(), mime: mimeOf(soundPath) });
 
     return;
   }
@@ -469,7 +489,7 @@ function reportSettled(ctx: AssetsCtx, progress: Progress, signal: AbortSignal):
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
  * @param entry - Its manifest entry.
- * @param assets - The textures, fonts and audio bytes the load produced.
+ * @param assets - The textures, fonts, sounds and pages the load produced.
  * @param reason - Why the load was started.
  */
 function finish(

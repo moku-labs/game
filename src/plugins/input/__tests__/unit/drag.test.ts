@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { Parent, Transform } from "../../../renderer/components";
+import { Parent, Transform, type TransformValue } from "../../../renderer/components";
+import { rootPoseOf } from "../../../renderer/sync/pose";
 import { Exiting } from "../../../world/ecs/define";
+import type { Entity } from "../../../world/types";
 import { Draggable, DropTarget, Held, Hovered } from "../../components";
 import { abortDrag, grab, moveHeld, moveHover, release } from "../../drag";
+import { stopInput } from "../../lifecycle";
 import { record } from "../../pointer";
 import { createMockInput, type MockInput } from "./mock-input";
 
@@ -622,5 +625,321 @@ describe("the lifted look of the view in the hand (heldScale)", () => {
 
     expect(mock.read(item, Parent)).toEqual({ entity: slot });
     expect(mock.read(item, Transform)).toMatchObject({ x: 100, y: 200, scale: 1 });
+  });
+});
+
+// A solitaire pile fanned 30 px: the finger takes c2 at (100, 130); c3 and c4 lie on top of it at
+// 160 and 190 and ride along. Every card is a drop target, as in a real pile. The rest poses are
+// recorded, so a settle lands each card on its own rest.
+type Pile = { held: Entity; c3: Entity; c4: Entity };
+
+/**
+ * Spawns the pile; the held card carries the keys it is given.
+ *
+ * @param mock - The mock plugin.
+ * @param carry - The projection keys the held card carries.
+ * @returns The three cards.
+ */
+function pile(mock: MockInput, carry: readonly string[] = ["c3", "c4"]): Pile {
+  const card = (key: string, y: number, extra: Parameters<MockInput["spawn"]>[0] = []): Entity => {
+    const entity = mock.spawn(
+      [Transform({ x: 100, y }), DropTarget({ intent: "stack", payload: { to: key } }), ...extra],
+      { projection: "pile.cards", key }
+    );
+
+    mock.setRest(entity, Transform({ x: 100, y }));
+
+    return entity;
+  };
+  const held = card("c2", 130, [Draggable({ payload: { from: "c2" }, carry })]);
+
+  return { held, c3: card("c3", 160), c4: card("c4", 190) };
+}
+
+/**
+ * Grabs the held card of a pile where it lies.
+ *
+ * @param mock - The mock plugin.
+ * @param held - The held card.
+ */
+function grabPile(mock: MockInput, held: Entity): void {
+  mock.state.entity = held;
+  mock.state.phase = "dragging";
+  grab(mock.input, held, { x: 100, y: 130 });
+}
+
+/**
+ * Where a card really is.
+ *
+ * @param mock - The mock plugin.
+ * @param entity - The card.
+ * @returns Its pose in root space.
+ */
+function rootOf(mock: MockInput, entity: Entity): TransformValue {
+  return rootPoseOf(mock.input.deps.world.ecs, entity);
+}
+
+describe("the carried stack", () => {
+  it("hangs every carried card under the held card at its root pose, its pose muted", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+
+    grabPile(mock, held);
+
+    expect(mock.trail).toEqual([
+      `tag:Held:${held}`,
+      `mute:${c3}`,
+      `add:Parent:${c3}`,
+      `set:Transform:${c3}`,
+      `mute:${c4}`,
+      `add:Parent:${c4}`,
+      `set:Transform:${c4}`,
+      `mute:${held}`,
+      `lift:true:${held}`
+    ]);
+    expect(mock.read(c3, Parent)).toEqual({ entity: held });
+    expect(mock.read(c3, Transform)).toMatchObject({ x: 0, y: 30 });
+    expect(mock.read(c4, Transform)).toMatchObject({ x: 0, y: 60 });
+    expect(mock.muted).toEqual([
+      ["x", "y", "rotation", "scale"],
+      ["x", "y", "rotation", "scale"],
+      ["x", "y"]
+    ]);
+    expect(mock.state.carried.map(follower => [follower.entity, follower.parent])).toEqual([
+      [c3, undefined],
+      [c4, undefined]
+    ]);
+    expect(mock.has(c3, Held)).toBe(false);
+  });
+
+  it("writes the held card once per move and no follower at all: the wrapper carries them", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+
+    grabPile(mock, held);
+    mock.trail.length = 0;
+    moveHeld(mock.input, { x: 400, y: 300 });
+
+    expect(mock.trail).toEqual([`set:Transform:${held}`]);
+    expect(rootOf(mock, c3)).toMatchObject({ x: 400, y: 330 });
+    expect(rootOf(mock, c4)).toMatchObject({ x: 400, y: 360 });
+  });
+
+  it("P17 bug 1 regression: a cancel sends each card to its own rest, never rest plus held rest", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+
+    grabPile(mock, held);
+    moveHeld(mock.input, { x: 400, y: 300 });
+    release(mock.input);
+
+    expect(mock.has(c3, Parent)).toBe(false);
+    expect(mock.has(c4, Parent)).toBe(false);
+    expect(rootOf(mock, held).y).toBe(130);
+    expect(rootOf(mock, c3).y).toBe(160);
+    expect(rootOf(mock, c4).y).toBe(190);
+    expect(mock.state.carried).toEqual([]);
+  });
+
+  it("P17 bug 2 regression: the drop lookup skips the whole stack and finds the target under it", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+    const column = mock.spawn([DropTarget({ intent: "move", payload: { to: "col3" } })]);
+
+    mock.boxes.push(
+      { entity: column, x: 0, y: 0, width: 300, height: 400 },
+      { entity: held, x: 68, y: 98, width: 64, height: 64 },
+      { entity: c3, x: 68, y: 128, width: 64, height: 64 },
+      { entity: c4, x: 68, y: 158, width: 64, height: 64 }
+    );
+    grabPile(mock, held);
+    moveHover(mock.input, { x: 100, y: 200 });
+
+    expect(mock.state.hovered).toBe(column);
+    expect(mock.has(c4, Hovered)).toBe(false);
+    expect(mock.has(c3, Hovered)).toBe(false);
+
+    release(mock.input, { x: 100, y: 200 });
+
+    expect(mock.answers).toEqual([{ intent: "move", payload: { from: "c2", to: "col3" } }]);
+  });
+
+  it("names no carried key in the drop answer", () => {
+    const mock = createMockInput();
+    const { held } = pile(mock);
+    const column = mock.spawn([DropTarget({ intent: "move", payload: { to: "col3" } })]);
+
+    mock.boxes.push({ entity: column, x: 500, y: 0, width: 100, height: 100 });
+    grabPile(mock, held);
+    release(mock.input, { x: 550, y: 50 });
+
+    expect(mock.answers).toEqual([{ intent: "move", payload: { from: "c2", to: "col3" } }]);
+  });
+
+  it("unparents every card before any settle, and unmutes each before its settle", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+
+    grabPile(mock, held);
+    mock.trail.length = 0;
+    release(mock.input);
+
+    expect(mock.trail).toEqual([
+      `remove:Parent:${c3}`,
+      `set:Transform:${c3}`,
+      `lift:true:${c3}`,
+      `remove:Parent:${c4}`,
+      `set:Transform:${c4}`,
+      `lift:true:${c4}`,
+      `unmute:${held}`,
+      `unmute:${c3}`,
+      `unmute:${c4}`,
+      `settle:${held}`,
+      `settle:${c3}`,
+      `settle:${c4}`,
+      `lift:false:${held}`,
+      `lift:false:${c3}`,
+      `lift:false:${c4}`,
+      `untag:Held:${held}`
+    ]);
+  });
+
+  it("warns once for an unknown key, the held key and a view with no Transform, and carries the rest", () => {
+    const mock = createMockInput();
+    const { held, c3 } = pile(mock, ["ghost", "c2", "c5", "c3"]);
+
+    mock.spawn([DropTarget({ intent: "stack" })], { projection: "pile.cards", key: "c5" });
+    grabPile(mock, held);
+
+    const view = { projection: "pile.cards", key: "c2" };
+
+    expect(mock.log.warn).toHaveBeenCalledTimes(3);
+    expect(mock.log.warn).toHaveBeenCalledWith("input: carried key has no view", {
+      view,
+      key: "ghost"
+    });
+    expect(mock.log.warn).toHaveBeenCalledWith("input: carried key has no view", {
+      view,
+      key: "c2"
+    });
+    expect(mock.log.warn).toHaveBeenCalledWith("input: carried key has no view", {
+      view,
+      key: "c5"
+    });
+    expect(mock.state.carried.map(follower => follower.entity)).toEqual([c3]);
+  });
+
+  it("hangs the followers before the lifted scale, so the fan scales around the held pivot", () => {
+    const mock = createMockInput({ heldScale: 1.08 });
+    const { held, c3, c4 } = pile(mock);
+
+    grabPile(mock, held);
+
+    expect(mock.trail.indexOf(`add:Parent:${c4}`)).toBeLessThan(
+      mock.trail.indexOf(`set:Transform:${held}`)
+    );
+    expect(rootOf(mock, c3).y).toBeCloseTo(130 + 30 * 1.08, 10);
+    expect(rootOf(mock, c4).y).toBeCloseTo(130 + 60 * 1.08, 10);
+    expect(rootOf(mock, c4).scale).toBeCloseTo(1.08, 10);
+
+    release(mock.input);
+
+    expect(rootOf(mock, c4)).toMatchObject({ x: 100, y: 190, scale: 1 });
+  });
+
+  it("takes a parented follower out at its root pose and hangs it back under its parent on the drop", () => {
+    const mock = createMockInput();
+    const { held, c3 } = pile(mock, ["c3"]);
+    const slot = mock.spawn([Transform({ x: 40, y: 60, scale: 0.5 })]);
+
+    // c3 sits in the slot: local (120, 200) is root (100, 160).
+    mock.attachTo(c3, Parent({ entity: slot }));
+    mock.attachTo(c3, Transform({ x: 120, y: 200 }));
+    mock.setRest(c3, Transform({ x: 120, y: 200 }));
+    grabPile(mock, held);
+
+    expect(mock.read(c3, Parent)).toEqual({ entity: held });
+    expect(rootOf(mock, c3)).toMatchObject({ x: 100, y: 160, scale: 0.5 });
+    expect(mock.state.carried[0]?.parent).toBe(slot);
+
+    moveHeld(mock.input, { x: 400, y: 300 });
+    release(mock.input, { x: 900, y: 900 });
+
+    expect(mock.read(c3, Parent)).toEqual({ entity: slot });
+    expect(rootOf(mock, c3)).toMatchObject({ x: 100, y: 160, scale: 0.5 });
+  });
+
+  it("uncarries first when the drag is given up, settles the followers, and keeps the held steps", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+
+    grabPile(mock, held);
+    mock.attachTo(held, Exiting());
+    mock.trail.length = 0;
+    abortDrag(mock.input);
+
+    expect(mock.trail).toEqual([
+      `remove:Parent:${c3}`,
+      `set:Transform:${c3}`,
+      `lift:true:${c3}`,
+      `remove:Parent:${c4}`,
+      `set:Transform:${c4}`,
+      `lift:true:${c4}`,
+      `unmute:${c3}`,
+      `settle:${c3}`,
+      `lift:false:${c3}`,
+      `unmute:${c4}`,
+      `settle:${c4}`,
+      `lift:false:${c4}`,
+      `unmute:${held}`,
+      `untag:Held:${held}`
+    ]);
+    expect(rootOf(mock, c3).y).toBe(160);
+    expect(mock.state.carried).toEqual([]);
+  });
+
+  it("lets a follower that left go mid-drag and carries on with the rest", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+    const at = (kind: "down" | "move", x: number, y: number): void =>
+      record(mock.state, { kind, pointerType: "touch", pointerId: 1, clientX: x, clientY: y });
+
+    mock.boxes.push({ entity: held, x: 68, y: 98, width: 64, height: 64 });
+    mock.start();
+    at("down", 100, 130);
+    mock.frame();
+    at("move", 120, 130);
+    mock.frame();
+
+    expect(mock.state.carried).toHaveLength(2);
+
+    mock.kill(c3);
+    mock.attachTo(c4, Exiting());
+    mock.trail.length = 0;
+    mock.frame();
+
+    expect(mock.state.phase).toBe("dragging");
+    expect(mock.state.carried).toEqual([]);
+    expect(mock.trail).toEqual([
+      `unmute:${c3}`,
+      `unmute:${c4}`,
+      `remove:Parent:${c4}`,
+      `set:Transform:${c4}`,
+      `set:Transform:${held}`
+    ]);
+    expect(mock.has(c4, Parent)).toBe(false);
+    expect(rootOf(mock, c4)).toMatchObject({ x: 100, y: 190 });
+  });
+
+  it("lifts the followers' mutes on stop", () => {
+    const mock = createMockInput();
+    const { held, c3, c4 } = pile(mock);
+
+    grabPile(mock, held);
+    mock.trail.length = 0;
+    stopInput(mock.state);
+
+    expect(mock.trail).toEqual([`unmute:${held}`, `unmute:${c3}`, `unmute:${c4}`]);
+    expect(mock.state.carried).toEqual([]);
   });
 });

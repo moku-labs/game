@@ -1,10 +1,12 @@
 /**
- * @file Test fixtures of the asset key scanner: real PNG and WebP header bytes and a temp tree.
- * The scanner reads the first 30 bytes of a file, so these headers are enough.
+ * @file Test fixtures of the asset key scanner: real PNG and WebP header bytes, a temp tree and
+ * the string tools of a game with no strings. The scanner reads the first 30 bytes of a file, so
+ * these headers are enough.
  */
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { StringsTools } from "../../scan/cli";
 
 function viewOf(bytes: Uint8Array): DataView {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -141,4 +143,17 @@ export async function makeTree(files: Record<string, string | Uint8Array>): Prom
 /** Deletes a tree made by `makeTree`. */
 export async function removeTree(root: string): Promise<void> {
   await rm(root, { recursive: true, force: true });
+}
+
+/**
+ * The string tools of a game with no strings: the compile finds nothing, the export writes no
+ * locale, the import takes no key. A test overrides the one tool it drives.
+ */
+export function stringsTools(overrides: Partial<StringsTools> = {}): StringsTools {
+  return {
+    compile: () => Promise.resolve({ changed: false, locales: [], keys: [], notes: [] }),
+    exportStrings: () => Promise.resolve({ locales: [], missing: {} }),
+    importStrings: () => Promise.resolve({ locales: [], keys: 0, files: [] }),
+    ...overrides
+  };
 }

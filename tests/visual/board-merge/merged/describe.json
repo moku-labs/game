@@ -3077,6 +3077,7 @@
     {
       "components": {
         "Draggable": {
+          "carry": [],
           "payload": {
             "from": "c1_0"
           }
@@ -3137,6 +3138,7 @@
     {
       "components": {
         "Draggable": {
+          "carry": [],
           "payload": {
             "from": "c0_2"
           }
@@ -3197,6 +3199,7 @@
     {
       "components": {
         "Draggable": {
+          "carry": [],
           "payload": {
             "from": "c2_2"
           }
@@ -5888,7 +5891,8 @@
           },
           "bind": {
             "component": "Counter",
-            "field": "value"
+            "field": "value",
+            "format": "int"
           },
           "content": "",
           "resolved": "125",

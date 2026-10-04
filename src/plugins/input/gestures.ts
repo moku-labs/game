@@ -16,12 +16,14 @@ import {
   Pressable,
   Pressed,
   Swipeable,
-  Tappable
+  Tappable,
+  Traceable
 } from "./components";
-import { abortDrag, grab, moveHeld, moveHover, release } from "./drag";
+import { abortDrag, grab, letGoOfLeavers, moveHeld, moveHover, release } from "./drag";
 import { findPressed } from "./hit";
 import { clearPointerOver, endsHover, isHover, movePointerOver, syncCursor } from "./hover";
 import { attach, detach, record } from "./pointer";
+import { abortTrace, beginTrace, endTrace, extendTrace, traceLost } from "./trace";
 import type { Direction, InputCtx, Point, RawSample } from "./types";
 
 /**
@@ -99,7 +101,8 @@ function toIdle(ctx: InputCtx): void {
 
 /**
  * Takes the pointer and looks for the view under it. The pointer is taken even where no view is,
- * so a second finger stays ignored for the whole gesture.
+ * so a second finger stays ignored for the whole gesture. A view that carries `Traceable` starts
+ * a trace instead of a press: it is not tagged `Pressed`.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -120,6 +123,11 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
   const entity = findPressed(ctx, point.x, point.y);
 
   if (entity === undefined) return;
+  if (ecs.has(entity, Traceable)) {
+    beginTrace(ctx, entity, point);
+
+    return;
+  }
 
   ctx.state.entity = entity;
   ctx.state.key = projection.keyOf(entity);
@@ -198,8 +206,8 @@ function answerRelease(ctx: InputCtx, entity: Entity, point: Point): void {
 }
 
 /**
- * The finger let go: a drag is released over whatever is under it, a press is answered, a long
- * press is already done and answers nothing more.
+ * The finger let go: a drag is released over whatever is under it, a trace answers its path, a
+ * press is answered, a long press is already done and answers nothing more.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -212,6 +220,7 @@ function onUp(ctx: InputCtx, pointer: PointerValue, point: Point): void {
   pointer.justReleased = true;
 
   if (phase === "dragging") release(ctx, point);
+  else if (phase === "tracing") endTrace(ctx, point);
   else if (phase === "pressed" && entity !== undefined) answerRelease(ctx, entity, point);
 
   toIdle(ctx);
@@ -219,15 +228,27 @@ function onUp(ctx: InputCtx, pointer: PointerValue, point: Point): void {
 
 /**
  * The gesture was taken away: `pointercancel`, or the capture was lost. A drag is released with
- * no target, so the view settles home; a press just lets go. Nothing is answered.
+ * no target, so the view settles home; a trace forgets its path; a press just lets go. Nothing
+ * is answered.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
  */
 function onCancel(ctx: InputCtx, pointer: PointerValue): void {
   pointer.down = false;
-  if (ctx.state.phase === "dragging") release(ctx);
+  letGestureGo(ctx);
   toIdle(ctx);
+}
+
+/**
+ * Lets a running drag or trace go with no answer: the drag is released with no target, so the
+ * stack settles home, and the trace drops its `Traced` tags.
+ *
+ * @param ctx - Domain context of the input plugin.
+ */
+function letGestureGo(ctx: InputCtx): void {
+  if (ctx.state.phase === "dragging") release(ctx);
+  if (ctx.state.phase === "tracing") abortTrace(ctx);
 }
 
 /**
@@ -259,7 +280,8 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
     }
     case "move": {
       if (isHover(ctx, pointer, sample)) return point;
-      onMove(ctx, point);
+      if (ctx.state.phase === "tracing") extendTrace(ctx, point);
+      else onMove(ctx, point);
       break;
     }
     case "up": {
@@ -325,8 +347,9 @@ function advanceTime(ctx: InputCtx, pointer: PointerValue, deltaMs: number): voi
 }
 
 /**
- * The per-frame half of a running drag: a view that left or is playing its exit ends the drag,
- * otherwise the held view follows the finger and the hover tag moves with it.
+ * The per-frame half of a running drag: a held view that left or is playing its exit ends the
+ * drag, a carried view that left is let go, and the held view follows the finger with the rest
+ * of the stack while the hover tag moves with it.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -345,8 +368,22 @@ function followDrag(ctx: InputCtx, pointer: PointerValue): void {
     return;
   }
 
+  letGoOfLeavers(ctx);
   moveHeld(ctx, pointer);
   moveHover(ctx, pointer);
+}
+
+/**
+ * The per-frame half of a running trace: a cell of the path that left or is playing its exit
+ * means the board changed under the finger, so the trace ends with no answer.
+ *
+ * @param ctx - Domain context of the input plugin.
+ */
+function followTrace(ctx: InputCtx): void {
+  if (!traceLost(ctx)) return;
+
+  abortTrace(ctx);
+  toIdle(ctx);
 }
 
 /**
@@ -377,8 +414,8 @@ function syncCanvas(ctx: InputCtx): void {
 }
 
 /**
- * The world stands still: the queued samples are dropped, a running drag ends as a cancel, the
- * hover goes and the pointer is reported up. A settle written in this mode lands as the rest pose
+ * The world stands still: the queued samples are dropped, a running drag ends as a cancel, a
+ * running trace ends with no answer, the hover goes and the pointer is reported up. A settle written in this mode lands as the rest pose
  * at once.
  *
  * @param ctx - Domain context of the input plugin.
@@ -388,7 +425,7 @@ function pauseGestures(ctx: InputCtx): void {
 
   ctx.state.samples = [];
   clearPointerOver(ctx);
-  if (ctx.state.phase === "dragging") release(ctx);
+  letGestureGo(ctx);
   pointer.down = false;
   pointer.justPressed = false;
   pointer.justReleased = false;
@@ -438,4 +475,5 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
 
   advanceTime(ctx, pointer, time.delta);
   if (ctx.state.phase === "dragging") followDrag(ctx, pointer);
+  if (ctx.state.phase === "tracing") followTrace(ctx);
 }

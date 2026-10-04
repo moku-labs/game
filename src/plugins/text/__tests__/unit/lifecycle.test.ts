@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { defineTextStyles } from "../../components";
+import { clockPlugin } from "../../../clock";
+import { component } from "../../../world/ecs/define";
+import { bind, defineTextStyles, Text } from "../../components";
+import { textPlugin } from "../../index";
 import type { TextStyles } from "../../types";
 import { miniFontJson } from "../fixtures/mini-font";
 import { createMockText, type MockText } from "./mock-text";
@@ -104,6 +107,26 @@ describe("startText", () => {
     expect(mock.world.systems[0]?.phase).toBe("layout");
     expect(mock.renderer.provided).toHaveLength(1);
     expect(mock.state.removers).toHaveLength(4);
+  });
+});
+
+describe("the clock dependency", () => {
+  it("is listed in depends", () => {
+    expect(textPlugin.spec.depends).toContain(clockPlugin);
+  });
+
+  it("is never read by a system run with no countdown label", () => {
+    const mock = withFeatures();
+    const Counter = component("Counter", { value: 0 });
+
+    mock.world.put(1, Counter, { value: 3 });
+    mock.world.put(1, Text, Text({ style: "digits", bind: bind(Counter, "value") }).value);
+    mock.world.put(2, Text, Text({ content: "+5" }).value);
+    mock.step();
+    mock.step();
+
+    expect(mock.world.read(1, Text)?.resolved).toBe("3");
+    expect(mock.clockNow).not.toHaveBeenCalled();
   });
 });
 

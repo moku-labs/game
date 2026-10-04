@@ -1,13 +1,24 @@
 /**
- * @file text plugin — the component a game writes and the two pure helpers `defineGame` binds to
- * one game's keys. Pure: no ctx, no state, no Pixi. Made with the `component()` helper of `world`,
- * so nothing has to be registered.
+ * @file text plugin — the components a game writes (`Text`, `Countdown`), the `bind` of a numeric
+ * field, and the two pure helpers `defineGame` binds to one game's keys. Pure: no ctx, no state,
+ * no Pixi. Made with the `component()` helper of `world`, so nothing has to be registered.
  */
 import type { Message } from "../i18n/types";
 import { Transform, type TransformValue } from "../renderer/components";
 import { component } from "../world/ecs/define";
-import type { ComponentValue } from "../world/ecs/types";
-import type { Point, TextShadow, TextStyle, TextStyleInput, TextStyles, TextValue } from "./types";
+import type { ComponentHandle, ComponentValue } from "../world/ecs/types";
+import type {
+  BindField,
+  BindOptions,
+  CountdownValue,
+  Point,
+  TextBind,
+  TextShadow,
+  TextStyle,
+  TextStyleInput,
+  TextStyles,
+  TextValue
+} from "./types";
 
 /** What a `Text` starts as. Its own const, because a component takes a typed defaults object. */
 const textDefaults: TextValue = {
@@ -26,6 +37,59 @@ const textDefaults: TextValue = {
  * is patched in place, so a tween on it rebuilds nothing.
  */
 export const Text = /*#__PURE__*/ component("Text", textDefaults, { owned: ["resolved"] });
+
+/** What a `Countdown` starts as. Its own const, because a component takes a typed defaults object. */
+const countdownDefaults: CountdownValue = { until: 0, left: 0 };
+
+/**
+ * Shows a numeric component field of the label's own entity: read every frame, written to
+ * `Text.resolved` only when the shown string changes. The field must hold a number; the format
+ * is `"int"` (rounded) unless named. Reads the component's own name, so a renamed component
+ * cannot drift from its label.
+ *
+ * @param component - The component whose field the label shows.
+ * @param field - A numeric field of that component.
+ * @param options - How the number is shown.
+ * @returns The bind a `Text` carries.
+ * @example
+ * ```ts
+ * const Counter = component("Counter", { value: 0 });
+ *
+ * bind(Counter, "value"); // { component: "Counter", field: "value", format: "int" }
+ *
+ * // The chest timer: the time left, as minutes and seconds.
+ * Text({ style: "digits", bind: bind(Countdown, "left", { format: "mm:ss" }) });
+ * // bind is { component: "Countdown", field: "left", format: "mm:ss" }; 95 s left shows "01:35"
+ * ```
+ */
+export function bind<Value extends object>(
+  component: ComponentHandle<Value>,
+  field: BindField<Value>,
+  options: BindOptions = {}
+): TextBind {
+  // The one place the brand is put on: the stored value is the three plain fields.
+  return { component: component.componentName, field, format: options.format ?? "int" } as TextBind;
+}
+
+/**
+ * A moment to count down to. A game writes `until`, a moment of `clock` in epoch milliseconds;
+ * `text` keeps `left` at the time that is left, computed from one `clock.now()` per frame on the
+ * render side, and writes it only when the label bound to it changes. At zero both stay at zero.
+ * Nothing of it reaches the save.
+ *
+ * @example
+ * ```ts
+ * // The chest of the board opens at a moment of the save; clock.now() is 1_790_000_000_000.
+ * view: chest => [
+ *   Countdown({ until: chest.opensAt }), // opensAt: 1_790_000_095_000
+ *   Text({ style: "digits", bind: bind(Countdown, "left", { format: "mm:ss" }) })
+ * ]
+ * // after the frame that spawns it: Text.resolved is "01:35", Countdown.left is 95000
+ * ```
+ */
+export const Countdown = /*#__PURE__*/ component("Countdown", countdownDefaults, {
+  owned: ["left"]
+});
 
 /**
  * What `label` takes: the two things every label needs, and the anchor that has a default.

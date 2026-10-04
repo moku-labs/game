@@ -26,8 +26,11 @@ const PREFIX = "[game] assets: ";
 
 const ESCAPE = /[.+^${}()|[\]\\]/g;
 
-/** The formats a game brings instead of an MP3. One format decodes everywhere, so MP3 it is. */
-const OTHER_AUDIO = /\.(?:ogg|wav|m4a|aac|opus|flac)$/i;
+/**
+ * The formats a game brings instead of an MP3 or an M4A. Only those two decode in every browser
+ * and WebView; a raw ADTS `.aac` is AAC without its MP4 container, so it stays out too.
+ */
+const OTHER_AUDIO = /\.(?:ogg|wav|aac|opus|flac)$/i;
 
 /** A vector font. The engine draws bitmap text, so a font arrives as a `.fnt` with its pages. */
 const OTHER_FONT = /\.(?:ttf|otf|woff2?)$/i;
@@ -445,14 +448,14 @@ function draftOf(scan: ScanState, name: string, feature: string, tier: Tier): Bu
  * @example
  * ```ts
  * ignoredNote("features/ui/assets/click.wav");
- * // 'ignored "features/ui/assets/click.wav": audio is .mp3 only.'
+ * // 'ignored "features/ui/assets/click.wav": audio is .mp3 or .m4a only.'
  * ```
  */
 function ignoredNote(file: string): string {
-  if (OTHER_AUDIO.test(file)) return `ignored "${file}": audio is .mp3 only.`;
+  if (OTHER_AUDIO.test(file)) return `ignored "${file}": audio is .mp3 or .m4a only.`;
   if (OTHER_FONT.test(file)) return `ignored "${file}": a font is a .fnt file with its .png pages.`;
 
-  return `ignored "${file}": the scanner reads .png, .webp, .fnt and .mp3 only.`;
+  return `ignored "${file}": the scanner reads .png, .webp, .fnt, .mp3 and .m4a only.`;
 }
 
 /**

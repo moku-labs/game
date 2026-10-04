@@ -102,16 +102,16 @@ export function decode(ctx: AudioCtx, key: string): Promise<AudioBuffer> | undef
 
   if (context === undefined) return undefined;
 
-  const bytes = ctx.deps.assets.audio(key);
+  const asset = ctx.deps.assets.audio(key);
 
-  if (bytes === undefined) {
+  if (asset === undefined) {
     warnOnce(ctx, key, "audio: no audio for key");
 
     return undefined;
   }
 
   // eslint-disable-next-line unicorn/prefer-spread -- an ArrayBuffer copy: decodeAudioData detaches what it gets.
-  const pending = context.decodeAudioData(bytes.slice(0));
+  const pending = context.decodeAudioData(asset.bytes.slice(0));
 
   state.decoded.set(key, pending);
 

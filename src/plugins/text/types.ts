@@ -1,18 +1,20 @@
 /**
  * @file text plugin — shared types: the component a game writes, the style table a feature
  * brings, the runs and lines a tagged string becomes, the advance table a `.fnt` is read into,
- * the plugin state, and the two-member API `ui.layout` stands on.
+ * the plugin state, the API `ui.layout` stands on, and the bound numbers and countdowns a label
+ * shows.
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
+import type { Api as ClockApi } from "../clock/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { I18nApi, Events as I18nEvents, Message } from "../i18n/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
 import type { AnyComponent, Entity } from "../world/ecs/types";
-import type { Api as WorldApi } from "../world/types";
+import type { NumericFields, Api as WorldApi } from "../world/types";
 
 /**
  * A point in reference units: where a label sits, and which point of the block sits there.
@@ -35,15 +37,68 @@ export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };
 
 /**
- * Which numeric component field a label shows. The component is named, not imported: a HUD is
- * written before the game's components are in scope.
+ * How a bound number is shown. `"int"` rounds it; the three time formats take milliseconds and
+ * show whole seconds, rounded up, so a timer never reads zero while time is left.
  *
  * @example
  * ```ts
- * const bind: TextBind = { component: "Counter", field: "value" };
+ * const format: TextFormat = "mm:ss"; // 95_000 ms shows "01:35"
  * ```
  */
-export type TextBind = { component: string; field: string };
+export type TextFormat = "int" | "mm:ss" | "h:mm:ss" | "duration";
+
+/** The brand only `bind()` puts on a `TextBind`. Type-only: nothing is emitted for it. */
+declare const textBind: unique symbol;
+
+/**
+ * Which numeric component field a label shows, and how. Plain data in the component, so a
+ * snapshot lists it; nominal, so only `bind()` makes one and a hand-written literal does not
+ * compile.
+ *
+ * @example
+ * ```ts
+ * const Counter = component("Counter", { value: 0 });
+ * const coins: TextBind = bind(Counter, "value");
+ * // { component: "Counter", field: "value", format: "int" }
+ * ```
+ */
+export type TextBind = {
+  readonly component: string;
+  readonly field: string;
+  readonly format: TextFormat;
+} & { readonly [textBind]: true };
+
+/**
+ * The numeric fields of a component value, by name: what `bind()` takes as its field.
+ *
+ * @example
+ * ```ts
+ * type Fields = BindField<{ value: number; name: string }>; // "value"
+ * ```
+ */
+export type BindField<Value extends object> = keyof NumericFields<Value> & string;
+
+/**
+ * What `bind()` takes after the field. The format is `"int"` when left out.
+ *
+ * @example
+ * ```ts
+ * const options: BindOptions = { format: "mm:ss" };
+ * ```
+ */
+export type BindOptions = { format?: TextFormat };
+
+/**
+ * A moment to count down to, and how much is left. A game writes `until`, a moment of `clock` in
+ * epoch milliseconds; `left` is engine-owned and follows what the label shows.
+ *
+ * @example
+ * ```ts
+ * // clock.now() is 1_790_000_000_000: the chest opens in 95 s.
+ * const chest: CountdownValue = { until: 1_790_000_095_000, left: 95_000 };
+ * ```
+ */
+export type CountdownValue = { until: number; left: number };
 
 /**
  * What the `Text` component holds. `resolved` is engine-owned: a game writes `content`, `style`,
@@ -273,11 +328,15 @@ export type Warn = (key: string, message: string, data?: Record<string, unknown>
 export type LayoutOptions = { warn: Warn };
 
 /**
- * What was resolved for one entity last, so the frame step knows whether anything moved.
+ * What was resolved for one entity last, so the frame step knows whether anything moved. `unit`
+ * is what the shown string of a bound label was built from: the rounded value for `"int"`, whole
+ * seconds for a time format.
  *
  * @example
  * ```ts
- * const seen: SeenText = { content: "+5", style: "body", bind: undefined, locale: "ru" };
+ * const seen: SeenText = {
+ *   content: "", style: "digits", bind: "Countdown.left:mm:ss", locale: "ru", unit: 95
+ * };
  * ```
  */
 export type SeenText = {
@@ -285,6 +344,7 @@ export type SeenText = {
   style: string;
   bind: string | undefined;
   locale: string;
+  unit: number | undefined;
 };
 
 /**
@@ -405,6 +465,7 @@ export type Deps = {
   renderer: RendererApi;
   assets: AssetsApi;
   i18n: I18nApi;
+  clock: ClockApi;
 };
 
 /**

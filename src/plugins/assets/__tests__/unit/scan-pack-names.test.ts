@@ -42,8 +42,9 @@ describe("the name rules", () => {
     );
   });
 
-  it("names a sound by its key", () => {
-    expect(audioName("ui", "ui.click", "9c4e2b7a10")).toBe("ui/ui.click-9c4e2b7a10.mp3");
+  it("names a sound by its key and keeps the extension of its source", () => {
+    expect(audioName("ui", "ui.click", "9c4e2b7a10", "mp3")).toBe("ui/ui.click-9c4e2b7a10.mp3");
+    expect(audioName("ui", "ui.theme", "9c4e2b7a10", "m4a")).toBe("ui/ui.theme-9c4e2b7a10.m4a");
   });
 
   it("keeps a bundle name with a dot as one folder", () => {

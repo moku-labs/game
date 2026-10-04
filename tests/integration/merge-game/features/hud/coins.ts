@@ -9,7 +9,7 @@
  * land where the number really is.
  */
 import type { Flow, World } from "@moku-labs/game";
-import { component, Order, Text, Transform } from "@moku-labs/game";
+import { bind, component, Order, Text, Transform } from "@moku-labs/game";
 import { projection } from "../../kit";
 import type { Player } from "../../state";
 import { pillNumberAt } from "../ui/kit";
@@ -83,7 +83,7 @@ export const hudCoins = projection({
     Counter({ value: item.value }),
     Text({
       style: "ui.number",
-      bind: { component: "Counter", field: "value" },
+      bind: bind(Counter, "value"),
       anchor: { x: 0.5, y: 0.5 }
     }),
     Transform({ x: pillNumberAt.x, y: pillNumberAt.y }),

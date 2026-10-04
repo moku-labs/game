@@ -1,6 +1,15 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { createInputApi } from "../../api";
-import { Draggable, DropTarget, Pressable, Swipeable, Tappable, Touchable } from "../../components";
+import {
+  Draggable,
+  DropTarget,
+  Pressable,
+  Swipeable,
+  Tappable,
+  Touchable,
+  Traceable,
+  Traced
+} from "../../components";
 import type { Direction, RawSample, Target } from "../../types";
 import { createMockInput, createStubCanvas } from "./mock-input";
 
@@ -318,5 +327,101 @@ describe("app.input.onPointer", () => {
 
     expectTypeOf(api.onPointer).parameter(0).toEqualTypeOf<(sample: RawSample) => void>();
     expectTypeOf(api.onPointer).returns.toEqualTypeOf<() => void>();
+  });
+});
+
+/**
+ * Spawns three word cells, one cell of another intent and one cell that only takes taps.
+ *
+ * @returns The mock plugin.
+ */
+function wordRow(): ReturnType<typeof createMockInput> {
+  const mock = createMockInput();
+
+  for (const key of ["b3", "c3", "d3"]) {
+    mock.spawn([Traceable({ intent: "word", payload: { cell: key } })], {
+      projection: "board.cells",
+      key
+    });
+  }
+  mock.spawn([Traceable({ intent: "bonus", payload: { cell: "e3" } })], {
+    projection: "board.cells",
+    key: "e3"
+  });
+  mock.spawn([Tappable({ intent: "pick" })], { projection: "board.cells", key: "f3" });
+
+  return mock;
+}
+
+/**
+ * A cell of the word grid by its key.
+ *
+ * @param key - The cell key.
+ * @returns The target.
+ */
+function at(key: string): Target {
+  return { projection: "board.cells", key };
+}
+
+describe("app.input.trace", () => {
+  it("answers the path of the cells in order, the way the finger does, and tags nothing", () => {
+    const mock = wordRow();
+    const api = createInputApi(mock.ctx);
+
+    expect(api.trace([at("b3"), at("c3"), at("d3")])).toBe(true);
+    expect(mock.answers).toEqual([
+      { intent: "word", payload: { path: [{ cell: "b3" }, { cell: "c3" }, { cell: "d3" }] } }
+    ]);
+    expect(mock.calls).toEqual(["answer"]);
+    expect(mock.calls).not.toContain(`tag:${Traced.componentName}`);
+  });
+
+  it("returns what the gate returned", () => {
+    const mock = wordRow();
+
+    mock.gate.open = false;
+
+    expect(createInputApi(mock.ctx).trace([at("b3")])).toBe(false);
+    expect(mock.answers).toHaveLength(1);
+  });
+
+  it("warns and answers false with no gate call for an empty list", () => {
+    const mock = wordRow();
+
+    expect(createInputApi(mock.ctx).trace([])).toBe(false);
+    expect(mock.log.warn).toHaveBeenCalledWith("input: trace has no cells");
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("warns and answers false with no gate call for a cell with no Traceable", () => {
+    const mock = wordRow();
+    const api = createInputApi(mock.ctx);
+
+    expect(api.trace([at("b3"), at("f3")])).toBe(false);
+    expect(api.trace([at("b3"), at("gone")])).toBe(false);
+    expect(mock.log.warn).toHaveBeenCalledWith("input: target has no Traceable", {
+      target: at("f3")
+    });
+    expect(mock.log.warn).toHaveBeenCalledWith("input: target has no Traceable", {
+      target: at("gone")
+    });
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("warns and answers false with no gate call for two different intents", () => {
+    const mock = wordRow();
+    const path = [at("b3"), at("e3")];
+
+    expect(createInputApi(mock.ctx).trace(path)).toBe(false);
+    expect(mock.log.warn).toHaveBeenCalledWith("input: trace mixes intents", { path });
+    expect(mock.answers).toEqual([]);
+  });
+
+  it("takes a list of targets", () => {
+    const mock = wordRow();
+
+    expectTypeOf(createInputApi(mock.ctx).trace).toEqualTypeOf<
+      (path: readonly Target[]) => boolean
+    >();
   });
 });

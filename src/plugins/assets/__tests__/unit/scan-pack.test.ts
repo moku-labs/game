@@ -3,11 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runCli, type ScanUi, type StringsCompiler } from "../../scan/cli";
+import { runCli, type ScanUi } from "../../scan/cli";
 import { type PackResult, packAssets } from "../../scan/pack/pack";
 import { scanAssets } from "../../scan/scan";
 import type { Manifest, ManifestBundle, ManifestFile } from "../../types";
-import { audioBytes, bmfontText, makeTree, removeTree } from "./scan-fixtures";
+import { audioBytes, bmfontText, makeTree, removeTree, stringsTools } from "./scan-fixtures";
 
 const folders: string[] = [];
 
@@ -160,9 +160,8 @@ function recorder(): ScanUi & { lines: string[] } {
   };
 }
 
-/** A strings compiler for a game with no strings. */
-const noStrings: StringsCompiler = () =>
-  Promise.resolve({ changed: false, locales: [], keys: [], notes: [] });
+/** The string tools of a game with no strings. */
+const noStrings = stringsTools();
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -286,6 +285,22 @@ describe("packAssets", () => {
     expect(click.path).toMatch(/^ui\/ui\.click-[0-9a-f]{10}\.mp3$/);
     expect(await readFile(path.join(out, click.path ?? ""))).toEqual(
       await readFile(path.join(root, "features/ui/assets/click.mp3"))
+    );
+  });
+
+  it("copies an .m4a byte for byte under a hashed name that keeps its extension", async () => {
+    const root = await makeTree({ "features/ui/assets/theme.m4a": audioBytes(4096) });
+
+    folders.push(root);
+
+    const out = await temp();
+    const { manifest } = await pack(root, out, false);
+    const theme = fileOf(bundleOf(manifest, "ui"), "ui.theme");
+
+    expect(theme).toMatchObject({ kind: "audio", mb: 0.004 });
+    expect(theme.path).toMatch(/^ui\/ui\.theme-[0-9a-f]{10}\.m4a$/);
+    expect(await readFile(path.join(out, theme.path ?? ""))).toEqual(
+      await readFile(path.join(root, "features/ui/assets/theme.m4a"))
     );
   });
 

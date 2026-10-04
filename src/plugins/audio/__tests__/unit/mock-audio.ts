@@ -6,7 +6,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../../config";
-import type { Api as AssetsApi } from "../../../assets/types";
+import type { Api as AssetsApi, AudioAsset } from "../../../assets/types";
 import type { Descriptor, Api as FlowApi, FxHandler } from "../../../flow/types";
 import type { Json, Api as ModelApi } from "../../../model/types";
 import type { Api as TimeApi } from "../../../time/types";
@@ -23,7 +23,7 @@ export type Registered = { kind: string; run: FxHandler; runInFast: boolean };
 /** The fake `flow`: the one member `audio` calls, plus what it registered. */
 export type FakeFlow = { registered: Registered[]; removed: string[]; api: FlowApi };
 
-/** The fake `assets`: `audio(key)` answers bytes whose text is the key itself. */
+/** The fake `assets`: `audio(key)` answers an `.mp3` whose bytes are the text of the key itself. */
 export type FakeAssets = { asked: string[]; missing: Set<string>; api: AssetsApi };
 
 /** The fake `model`: one committed player a test writes. */
@@ -97,7 +97,7 @@ function createFakeFlow(): FakeFlow {
   return fake;
 }
 
-/** Creates the fake `assets`: every key has bytes whose text is the key, unless it is `missing`. */
+/** Creates the fake `assets`: every key is an `.mp3` whose bytes are the key, unless it is `missing`. */
 function createFakeAssets(): FakeAssets {
   const fake: FakeAssets = {
     asked: [],
@@ -106,10 +106,10 @@ function createFakeAssets(): FakeAssets {
   };
 
   fake.api = {
-    audio: (key: string): ArrayBuffer | undefined => {
+    audio: (key: string): AudioAsset | undefined => {
       fake.asked.push(key);
 
-      return fake.missing.has(key) ? undefined : bytesOf(key);
+      return fake.missing.has(key) ? undefined : { bytes: bytesOf(key), mime: "audio/mpeg" };
     }
   } as unknown as AssetsApi;
 

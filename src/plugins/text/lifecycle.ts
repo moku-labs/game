@@ -4,6 +4,7 @@
  * exactly those.
  */
 import { assetsPlugin } from "../assets";
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { i18nPlugin } from "../i18n";
 import { rendererPlugin } from "../renderer";
@@ -18,10 +19,10 @@ import type { Deps, KernelSlice, State, TextCtx } from "./types";
 const BUILT_IN = "text";
 
 /**
- * Resolves the six dependency APIs with `ctx.require`.
+ * Resolves the seven dependency APIs with `ctx.require`.
  *
  * @param ctx - Kernel context of the text plugin.
- * @returns The six dependency APIs.
+ * @returns The seven dependency APIs.
  */
 function resolveDeps(ctx: KernelSlice): Deps {
   return {
@@ -30,7 +31,8 @@ function resolveDeps(ctx: KernelSlice): Deps {
     world: ctx.require(worldPlugin),
     renderer: ctx.require(rendererPlugin),
     assets: ctx.require(assetsPlugin),
-    i18n: ctx.require(i18nPlugin)
+    i18n: ctx.require(i18nPlugin),
+    clock: ctx.require(clockPlugin)
   };
 }
 

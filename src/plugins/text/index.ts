@@ -6,6 +6,7 @@
  */
 import { createPlugin } from "../../config";
 import { assetsPlugin } from "../assets";
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { i18nPlugin } from "../i18n";
 import { rendererPlugin } from "../renderer";
@@ -36,7 +37,15 @@ const config: Config = { fonts: { body: "ui.font-body", digits: "ui.font-digits"
  * ```
  */
 export const textPlugin = /*#__PURE__*/ createPlugin("text", {
-  depends: [timePlugin, flowPlugin, worldPlugin, rendererPlugin, assetsPlugin, i18nPlugin],
+  depends: [
+    timePlugin,
+    flowPlugin,
+    worldPlugin,
+    rendererPlugin,
+    assetsPlugin,
+    i18nPlugin,
+    clockPlugin
+  ],
   config,
   createState: createTextState,
   api: createTextApi,

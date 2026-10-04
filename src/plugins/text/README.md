@@ -13,7 +13,8 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
 - **Missing glyphs:** a character the loaded font has no glyph for (an emoji, CJK) is drawn as
   nothing by Pixi, so it measures 0 wide, letter spacing included, and is reported once per font
   and character. `"ab😀"` measures as `"ab"`, and a label is as wide as what is drawn.
-- **Helpers:** `Text`, `label({ text, style, at, anchor? })`, `defineTextStyles(map)`,
+- **Helpers:** `Text`, `Countdown`, `bind(Component, field, { format })`,
+  `label({ text, style, at, anchor? })`, `defineTextStyles(map)`,
   `textFor<TextStyles, Fonts>()` for `defineGame`.
 - **Styles:** `font`, `size` and `fill` are required. `bold`, `italic`, `stroke`, `strokeWidth`,
   `letterSpacing`, `align`, `wrap`, `digits` and `shadow` have defaults.
@@ -36,8 +37,19 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   on a distance-field font too: the renderer's own SDF shader applies every alpha once, where Pixi
   8.21's applies it twice (renderer README, "Distance-field text"). `ui` draws a field's
   placeholder at `alpha: 0.5`.
-- **Numbers:** `bind: { component, field }` shows `Math.round` of a numeric component field,
-  read every frame, written only when the rounded value moved.
+- **Numbers:** `bind(Component, field, { format })` shows a numeric component field of the same
+  entity, read every frame, written only when the shown string changes. Formats: `int` (the
+  default, `Math.round`), `mm:ss`, `h:mm:ss` and `duration`. The time formats take milliseconds
+  and show whole seconds rounded up, so a timer reads `00:01` until it is really at zero.
+  `duration` reads as words in the current locale through `i18n.duration(ms)` and is built again
+  after a locale change. `bind(Counter, "name")` on a string field does not compile, and neither
+  does a hand-written `{ component, field }`: only `bind()` makes a `TextBind`.
+- **Countdown:** `Countdown({ until })` plus `bind(Countdown, "left", { format })` on the same
+  entity. `until` is a moment of `clock` in epoch ms. `left` is engine-owned: computed from one
+  `clock.now()` per frame on the render side, written with the label and only when its string
+  changes, never committed to the save. At zero both stay at zero and nothing fires; a node that
+  needs the moment schedules it with `clock.scheduleAt`. Phase `layout` does not run while the
+  world is paused, so a countdown does not tick there.
 - **Screen:** a `DisplayAdapter` registered with `renderer.sync.displays.provide(Text, …)` builds
   one `BitmapText` per run and one `Sprite` per icon, through `renderer.host.pixi()`. With a
   shadow, each glyph run gets a second `BitmapText` drawn first: the same glyphs in white,
@@ -46,5 +58,5 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `text-shadow`. Drawing order per run: shadow, outline copies, synthetic bold copies (a `<b>` run
   of a style with no `bold` font: 8 copies at `size / 20`, in the run colour), the glyphs. No
   stroke is handed to Pixi `BitmapText`: it draws nothing on an MSDF font. Headless nothing is built and no font is installed.
-- **Depends:** `time`, `flow`, `world`, `renderer`, `assets`, `i18n`. Emits nothing; listens to
+- **Depends:** `time`, `flow`, `world`, `renderer`, `assets`, `i18n`, `clock`. Emits nothing; listens to
   `assets:bundle-loaded`, `assets:bundle-unloaded` and `i18n:locale-changed`.

@@ -3646,7 +3646,8 @@
           },
           "bind": {
             "component": "Counter",
-            "field": "value"
+            "field": "value",
+            "format": "int"
           },
           "content": "",
           "resolved": "125",

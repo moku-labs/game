@@ -293,8 +293,9 @@ export type { HapticKind } from "./plugins/anim/timeline/types";
 // i18n: messages as data
 export { tr } from "./plugins/i18n/tr";
 export type { DescriptionNode } from "./plugins/world/projection/types";
-// text: the Text component, board labels and text styles
-export { defineTextStyles, label, Text } from "./plugins/text/components";
+// text: the Text component, board labels, text styles, bound numbers and countdowns
+export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
+export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
 export { Box, LocalWrite, popup } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";

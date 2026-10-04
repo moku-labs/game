@@ -48,7 +48,8 @@ describe("the base catalogue", () => {
       "debug",
       "reducedMotion",
       "fill",
-      "timeScale"
+      "timeScale",
+      "trace"
     ]);
   });
 
