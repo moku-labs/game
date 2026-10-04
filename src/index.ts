@@ -84,6 +84,9 @@
  * | `@moku-labs/game/assets` | the build-time asset key scanner and the production packer (`packAssets`, `--pack <dir>`), node and bun only |
  * | `@moku-labs/game/inspect` | the editor's read door: `read`, `watch`, `defineSource`, the `sources` catalogue |
  * | `@moku-labs/game/control` | the editor's write door, dev builds only: `run`, `defineCommand`, the `commands` catalogue |
+ * | `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | the JSX runtimes `jsxImportSource: "@moku-labs/game"` names |
+ * | `@moku-labs/game/fonts/*` | the MSDF body font `font-body.fnt` + `.png` and its OFL licence; a game copies them into `features/ui/assets/` |
+ * | bin `moku-game-assets` | the asset scanner CLI, bun only |
  *
  * @file The package root: the composed framework and its public exports.
  * @example
