@@ -1244,6 +1244,8 @@ export function createFakeGlContext(): FakeGlContext {
 /** What the fake renderer recorded. */
 export type FakeRenderer = FakeDrawTarget & {
   name: "webgpu" | "webgl";
+  /** Device pixels per CSS pixel: the `resolution` the application was created with, 1 by default. */
+  resolution: number;
   renders: number;
   /** Native draws of the last `render`. */
   frameDraws: number;
@@ -1337,6 +1339,7 @@ export class FakeApplication {
     const renderer: FakeRenderer = {
       ...createDrawTarget(),
       name: FakeApplication.settings.kind,
+      resolution: typeof options.resolution === "number" ? options.resolution : 1,
       renders: 0,
       frameDraws: 0,
       resizes: [],

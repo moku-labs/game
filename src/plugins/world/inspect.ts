@@ -1,10 +1,12 @@
 /**
  * @file world plugin — the world sources of the `/inspect` door: the entities, filtered by owner
- * and component, and the projection keys. Production-safe: every source only reads.
+ * and component, the projection keys, one entity in full, what changed between two frames and
+ * the component schema. Every source only reads; `game.diff` answers in a dev build only, because
+ * only a dev build keeps the frame history.
  */
 import { defineSource } from "../flow/doors/define";
 import type { HeadlessApp } from "../flow/headless";
-import type { Api, Entity, EntitySnapshot } from "./types";
+import type { Api, Entity, EntitySnapshot, Explained } from "./types";
 
 /** What the world sources need of an app: the headless app plus the world. */
 type WorldApp = HeadlessApp & { readonly world: Api };
@@ -74,4 +76,87 @@ export const projectionsSource = defineSource({
 
     return keys;
   }
+});
+
+/**
+ * One entity in full: its owner, its projection key, every JSON component, the names of the
+ * skipped ones and the components a motion still drives. `undefined` for a stale id. The source
+ * reads the whole snapshot once per read and picks the row.
+ *
+ * @example
+ * ```ts
+ * // The editor explains item i7 while it slides to its new cell.
+ * read(app, sources.explain, { entity: 1048577 });
+ * // { id: 1048577, owner: { kind: "projection", name: "board.items" },
+ * //   key: { projection: "board.items", key: "i7" },
+ * //   components: { Transform: { x: 64, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } },
+ * //     Layer: { name: "items" } }, skipped: [], motions: ["Transform"] }
+ * read(app, sources.explain, { entity: 42 }); // undefined: a stale id
+ * ```
+ */
+export const explainSource = defineSource({
+  id: "game.explain",
+  title: "Entity",
+  input: { entity: "number" },
+  changes: "frame",
+  read: (app: WorldApp, { entity }): Explained | undefined => {
+    const row = app.world.ecs.snapshot().entities.find(candidate => candidate.id === entity);
+
+    if (row === undefined) return undefined;
+
+    return {
+      id: row.id,
+      owner: row.owner,
+      key: app.world.projection.keyOf(row.id),
+      components: row.components,
+      skipped: row.skipped,
+      motions: app.world.projection.motionsOf(row.id)
+    };
+  }
+});
+
+/**
+ * What changed between the world at the end of frame `from` and at the end of frame `to`, from
+ * the frame history of a dev build: one entry per entity, sorted by id. Throws in a production
+ * build and for a frame outside the last 120.
+ *
+ * @example
+ * ```ts
+ * // The editor asks what the last second of play changed: item i7 merged up to level 3.
+ * read(app, sources.diff, { from: 120, to: 180 });
+ * // { from: 120, to: 180, entities: [{ id: 1048577,
+ * //   owner: { kind: "projection", name: "board.items" },
+ * //   key: { projection: "board.items", key: "i7" }, change: "changed",
+ * //   components: { Level: { from: { level: 2 }, to: { level: 3 } } } }] }
+ * ```
+ */
+export const diffSource = defineSource({
+  id: "game.diff",
+  title: "Frame diff",
+  input: { from: "number", to: "number" },
+  changes: "frame",
+  read: (app: WorldApp, { from, to }) => app.world.ecs.diff(from, to)
+});
+
+/**
+ * Every component and tag type the world met so far, sorted by name, with the JSON kind of each
+ * field: the editor's component palette. A system may write a new component on any frame, so it
+ * is read again every frame.
+ *
+ * @example
+ * ```ts
+ * // The editor's component palette, in a world that has met Transform and the tag Held.
+ * read(app, sources.schema);
+ * // [{ name: "Held", kind: "tag", json: true, fields: {}, defaults: true, owned: [] },
+ * //  { name: "Transform", kind: "component", json: true,
+ * //    fields: { x: "number", y: "number", rotation: "number", scale: "number", pivot: "object" },
+ * //    defaults: { x: 0, y: 0, rotation: 0, scale: 1, pivot: { x: 0, y: 0 } }, owned: [] }]
+ * ```
+ */
+export const schemaSource = defineSource({
+  id: "game.schema",
+  title: "Components",
+  input: {},
+  changes: "frame",
+  read: (app: WorldApp) => app.world.ecs.schema()
 });

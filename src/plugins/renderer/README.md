@@ -19,7 +19,7 @@ app.renderer.stats();                            // monitor
 ```
 
 No module imports a sibling's run-time code: `api.ts` injects `host` into `viewport`, both into
-`sync`, and `host` and `sync` into `monitor`. `api.ts` also injects `installDrawCounting` of
+`sync`, and all three into `monitor`, which places a legend through `viewport`. `api.ts` also injects `installDrawCounting` of
 `monitor/draw-calls.ts` into `host` in a dev build, already bound to the draw counter in
 `state.monitor`, because `host/init.ts` must put the counter in Pixi's registry before
 `new Application()`, before `monitor` exists. `host` never reads the monitor branch of the state. No file imports `pixi.js` as a value; the module object arrives from `config.loadPixi()`
@@ -106,6 +106,9 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | Method | Behaviour |
 |---|---|
 | `hitTest(x, y, accept)` | Reference coordinates, topmost first. Component math, never a Pixi world matrix. Inert: `undefined`. |
+| `hitAll(x, y)` | Every entity whose hit box holds the point, topmost first, with the walk and the skip rules of `hitTest` and no filter: the caller filters. `hitTest` stays the per-pointer fast path that stops at the first accepted hit. A fresh array. Inert: `[]`. The `game.at` source reads it. |
+| `boundsOf(entity)` | The axis-aligned bounds, in reference units, of the four corners of the view's hit box brought through its `Transform` and `Parent` chain, rotation included. `undefined` without a view, for a view in no tree, hidden or at an effective alpha of 0.01 or less, and for bounds without area (a scale of 0 too), so a located element is one the player sees. A fresh object. Inert: `undefined`. The `game.locate` source of `ui` and the legend of `capture()` read it. |
+| `hitBoxOf(entity)` | The very box `hitTest` tests for the view, in the entity's own units, before the `Transform` and the `Parent` chain: `{ x: -32, y: -32, width: 64, height: 64 }` for a 64 x 64 `Sprite` with the default anchor, `{ x: 0, y: 0, width: w, height: h }` for a `Shape`. A fresh object; `undefined` without a view. `input` fits the circle of a trace in it. |
 | `textures.provide(fn)` | Adds a provider to the chain; the newest is asked first. Returns the remover. Works while inert. |
 | `textures.create(image, { nine? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. Throws while the renderer does not draw. |
 | `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
@@ -150,7 +153,7 @@ the same frame (a `ui` element that trades its shape for a nine-slice keeps its 
 | Method | Behaviour |
 |---|---|
 | `stats()` | `{ fps, frameMs, textures, textureMb, views, pooled, renderPasses }`, plus `drawCalls` in a dev build, a fresh object. Inert: all 0. |
-| `capture()` | Dev builds only. A PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). |
+| `capture(options?)` | Dev builds only. `{ png }`: a PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `{ png, legend }` with `legend: true`. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). Options: `legend`, `layers`, `sheet`, `against`; see "Capture". |
 
 - `fps` counts frame starts over one second of `clock` time; 0 before the first full second and
   when no frame was drawn in the last second. A gap over one second, a pause or a hidden tab,
@@ -212,21 +215,66 @@ test against the real module pins the three names, their `extension` metadata an
 - `capture()` guards with `typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__` inline,
   not with `isDev()`: Bun does not inline a function across modules, and the inline guard folds under
   a production `define`, so the capture code leaves the bundle. The dev branch logs `"moku:dev"`
-  with `{ command: "renderer.capture" }` at debug level. `renderer.extract.base64` exists on the
+  with `{ command: "renderer.capture" }` at debug level, plus `options: [...]` with the names of the
+  options given (`legend` counts when true). `renderer.extract.base64` exists on the
   shared systems of both backends (8.21); it draws the stage into a texture over `app.screen`,
-  cleared with `config.background`. All captures waiting for one frame share one extract.
-  `onStop` answers a capture still waiting with `undefined`.
+  cleared with `config.background`. The captures due on one frame with the same layers and legend
+  share one extract. `onStop` answers a capture still waiting with `undefined`.
+- **Timing.** A picture is taken right after the next drawn frame (`monitor.end()`), at once while
+  the clock is paused. The legend is measured on that same frame, in the same call as the extract's
+  synchronous render; only the PNG encode comes later. Every option draws on the picture after the
+  extract, on an `OffscreenCanvas` 2D context (`monitor/picture.ts`): the player never sees a toggle
+  or a badge.
+- **`layers`** draws only these layers of the scene. Every name must be in
+  `world.projection.layers()`, else `[game] game.capture: layer "sky" is not in the scene.` with the
+  names to use; `[]` throws `[game] game.capture takes at least one layer.` `host.extract(hidden)`
+  sets `visible = false` on the containers of the other layers (`sync.layerContainer`) around the
+  synchronous `extract.base64` call and sets them back right after it returns its promise, also when
+  it throws; a container hidden already stays hidden. A `Parent` child follows its parent's layer.
+- **`legend`** numbers every entity of `world.ecs.snapshot().entities` that has a
+  `projection.keyOf` address and a `sync.boundsOf` box, in a layer drawn: a ui element with a visual,
+  a board view. A bare button without a fill has no box and no number. `rect` is the box through
+  `viewport.toScreen`, minus the canvas's `getBoundingClientRect` origin, times the Pixi resolution,
+  rounded: picture pixels. Entries are sorted by `rect.y`, then `rect.x`; `n` counts from 1 in that
+  order. A badge sits at each rect's top-left corner: the number in a `12 × resolution` px
+  sans-serif, white on a black box with 2 px padding. Without the option the answer has no `legend`.
+- **`sheet: { frames, everyMs }`** takes 2 to 12 whole frames, `everyMs` above 0 and at most 5000,
+  else `[game] game.capture takes a sheet of 2 to 12 frames, every 1 to 5000 ms.` Frame 1 is taken as
+  above. Between frames, a paused clock runs `time.step(everyMs)` once, what `game.step` does, with
+  a `moku:dev` entry `{ command: "renderer.capture", step: everyMs }`; this is the only thing a
+  capture does to the game, dev only. A running clock is waited for until `time.snapshot().elapsed`
+  grew by `everyMs` (scaled game time, so `game.timeScale` stretches a sheet), and the frame drawn
+  then is taken; after 600 drawn frames without that, `[game] game.capture sheet: game time did not
+  advance.` The sheet has `ceil(sqrt(frames))` columns and as many rows as needed; every cell is the
+  picture scaled by `min(1, 2048 / (columns × width))`, aspect kept, with an 8 px gutter around and
+  between the cells on `#202020`, left to right and top to bottom, and a badge with the frame number
+  at each cell's top-left corner. The answer is `{ png }` of the sheet.
+- **`against`** is a PNG data URL of an earlier capture. Both pictures are decoded with
+  `createImageBitmap`; different sizes throw `[game] game.capture: the pictures differ in size.` A
+  pixel differs when one RGBA channel differs by more than 24, the visual runner's default. The
+  answer shows `#ff0000` where pixels differ and the current picture faded elsewhere: its grey
+  (`0.299 r + 0.587 g + 0.114 b`), then `255 - (255 - grey) × 0.4`. `monitor/picture.ts` has its
+  own compare: `src/visual/page-script.ts` keeps its copy, since Playwright serialises that file's
+  functions and lint L12 keeps `src/visual/**` out of the plugins.
+- **Combinations.** `layers` combines with everything. `legend` combines with `against`: the badges
+  of the current frame on the diff picture. `sheet` with `legend` or `against` throws
+  `[game] game.capture takes a sheet on its own.`
+- **No 2D canvas.** Where `OffscreenCanvas` is missing, a capture with no option still answers
+  `{ png }`; one with an option throws `[game] game.capture needs OffscreenCanvas for legend.` with
+  the first option given. While inert the answer is `undefined` before that check; the values of
+  the options are checked first, in every state.
 
 ### Pose helpers (engine-internal)
 
-`sync/pose.ts` exports two pure functions over `world.ecs`. They are not root exports: `input`,
-`anim` and `ui` import them from `../renderer/sync/pose` and never walk the `Parent` chain
-themselves.
+`sync/pose.ts` exports pure functions over `world.ecs`. They are not root exports: `input`,
+`anim` and `ui` import `rootPoseOf` and `localPoseOf` from `../renderer/sync/pose` and never walk
+the `Parent` chain themselves; `sync` places the corners of a box with `rootPointOf`.
 
 | Function | Answers |
 |---|---|
 | `rootPoseOf(ecs, entity, own?)` | The entity's `Transform` composed through its `Parent` chain, every pivot applied: where it really is in reference space. `own` replaces its own `Transform` (the rest pose, for `anim.at`). The answer keeps the entity's pivot, so writing it into the `Transform` of an entity without a parent does not move the view. |
 | `localPoseOf(ecs, parent, root)` | The inverse: the local pose under `parent` that lands on `root`. `parent` 0 answers `root` itself. A parent collapsed to scale 0 counts as scale 1. |
+| `rootPointOf(ecs, entity, point)` | Where a local point of the entity lands in reference space: the point through the entity's `Transform` and its `Parent` chain, with the real scale. `boundsOf` brings the four corners of a hit box through it. |
 
 ```ts
 // A board cell at (100, 200) inside a slot at (40, 60) scaled 0.5.
@@ -268,7 +316,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then `app.renderer.render(app.stage)` when `ready`, then `monitor` closes the frame and its draw count and hands it to a waiting `capture()`. |
+| `render` | A pending resize is applied, then `app.renderer.render(app.stage)` when `ready`, then `monitor` closes the frame and its draw count and hands it to the `capture()` calls due on it. |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -446,24 +494,47 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
 
 ## Doors
 
-`inspect.ts` holds `game.render` (key `render` in `sources`) of the editor's read door,
-`@moku-labs/game/inspect`, safe in a production build. No input. It reads `stats()` and is read
-again every frame (`changes: "frame"`): `renderPasses` always, `drawCalls` in a dev build.
+`inspect.ts` holds two sources of the editor's read door, `@moku-labs/game/inspect`, safe in a
+production build. Both are read again every frame (`changes: "frame"`).
+
+| Key in `sources` | id | Input | Reads |
+|---|---|---|---|
+| `render` | `game.render` | none | `stats()`: `renderPasses` always, `drawCalls` in a dev build |
+| `at` | `game.at` | `{ x: "number", y: "number" }`, page CSS px in client coordinates | What lies under the point, topmost first: `viewport.toReference(x, y)`, then `sync.hitAll`, each entity named `{ entity, owner, key, layer }` (`Under`): `world.ecs.ownerOf`, `world.projection.keyOf`, and `Layer.name` of its own `Layer` (`undefined` for a `Parent` child). An entity that despawned this frame is left out. `[]` while inert |
 
 `control.ts` holds two commands of the editor's write door, `@moku-labs/game/control`, dev builds
-only. Each logs a `moku:dev` debug entry.
+only. Each logs a `moku:dev` debug entry; the one of `game.capture` lists the option names given.
 
 | Key in `commands` | id | Input | Effect | Does |
 |---|---|---|---|---|
-| `capture` | `game.capture` | none | read | `capture()`: a PNG data URL of the canvas after the next drawn frame. `undefined` while inert |
+| `capture` | `game.capture` | `{ legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" }` | read | `capture(options)`: `{ png, legend? }` of the canvas after the next drawn frame. `undefined` while inert |
 | `debug` | `game.debug` | `{ nineSlice: "boolean" }` | cosmetic | `sync.debug.nineSlice(on)`. Answers `sync.debug.state()` |
+
+`game.capture` checks the shapes, `renderer.capture()` the values: `layers` must be a JSON array of
+strings, `sheet` an object of two numbers `{ frames, everyMs }`, `diff` a bookmark (`readBookmark`
+of `flow/json.ts`); a wrong shape throws `[game] game.capture: sheet has the wrong shape.` with what
+to pass, before anything runs, and so does `diff` with `sheet`. `legend`, `layers` and `sheet` go to
+`renderer.capture()` as they are.
+
+`diff` is the one option the command runs itself, because it needs `flow`. While the renderer is
+inert it answers `undefined` and touches nothing. Otherwise: the graph must wait at a gate with no
+effect pending, else `[game] game.capture diff needs the game at rest.`; the command journals
+itself, `recordCheat(app, "game.capture", { diff }, frame)` of `flow/doors/session.ts`, so
+`tainted` turns true; it takes `flow.bookmark()`, restores `diff` and waits on drawn frames until the
+graph rests at a gate again (at most 600, else `[game] game.capture diff: the bookmark did not come
+to rest in 600 frames.`), then two drawn frames more; takes `capture({ layers })`; restores where it
+started and waits the same way, also when something failed; and answers
+`capture({ layers, legend, against })` with the first picture as `against`. Every restore reconciles
+in direct mode, so motions in flight when the command started are finished afterwards.
 
 ## Dependencies
 
-`time` for `onFrame("input")` and `onFrame("render")` and `isPaused()` (a capture on a paused
-clock), `lifecycle` for `push`/`pop` of `"background"` and `"device-lost"`, `clock` for `now()`, the
-time source of the frame counters, `world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query` and
-`projection.layers`/`keyOf`. Core APIs: `ctx.log`. `pixi.js` is a peer dependency, reached only
+`time` for `onFrame("input")` and `onFrame("render")`, `isPaused()` (a capture on a paused
+clock), and `snapshot()` and `step()` (the frames of a sheet), `lifecycle` for `push`/`pop` of
+`"background"` and `"device-lost"`, `clock` for `now()`, the time source of the frame counters,
+`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot` and
+`projection.layers`/`keyOf`. The doors read `world.ecs.ownerOf` and, for `game.capture` with
+`diff`, the app's `flow`. Core APIs: `ctx.log`. `pixi.js` is a peer dependency, reached only
 through `config.loadPixi`.
 
 ## What the unit tests cannot see
@@ -475,7 +546,10 @@ device rotation, the safe area on a mobile profile, a real device loss through `
 and `WEBGL_lose_context`, a really hidden tab, the labels in the Pixi DevTools tree, and that the
 bundle of a game without `...screen` carries no Pixi import. Also for the e2e station: `stats()` on
 a real frame loop (fps near the cap, a real `managedTextures` list), and `capture()` giving a PNG
-that shows the board, under WebGPU and WebGL. The real `drawCalls` number needs a GPU: the
+that shows the board, under WebGPU and WebGL. The unit tests draw the options on a fake 2D canvas;
+the real `OffscreenCanvas`, `createImageBitmap` and PNG encode, the badges on the picture, a sheet
+and a diff picture, and a `layers` capture that leaves the drawn frame pixel-identical for the
+player, belong to the e2e station too. The real `drawCalls` number needs a GPU: the
 fixture's board screen with no filter and no emitter pins it in `tests/integration/merge-game/run.mjs`
 once measured, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
 How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,

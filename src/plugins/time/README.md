@@ -70,7 +70,19 @@ None. Frame work is never an event.
 
 ## Doors
 
-`control.ts` holds `game.step` (key `step` in `commands`) of the editor's write door,
-`@moku-labs/game/control`, dev builds only. Input `{ frames: "number", deltaMs: "number?" }`: it
-calls `step(deltaMs)` `frames` times, also while paused, with `deltaMs` 1000/60 by default, and
-answers `snapshot()`. `frames` must be a whole number of 0 or more, or it throws. Effect `cosmetic`.
+`control.ts` holds `game.step` (key `step` in `commands`) and `game.timeScale` (key `timeScale`)
+of the editor's write door, `@moku-labs/game/control`, dev builds only. Both are effect
+`cosmetic`: the session stays clean.
+
+- `game.step` — input `{ frames: "number", deltaMs: "number?" }`. It calls `step(deltaMs)`
+  `frames` times, also while paused, with `deltaMs` 1000/60 by default, and answers `snapshot()`.
+  `frames` must be a whole number of 0 or more, or it throws.
+- `game.timeScale` — input `{ scale: "number" }`. It calls `setScale(scale)` and answers
+  `snapshot()`. `scale` must be a finite number of 0 or more, or it throws: `setScale` clamps
+  silently, the command refuses, so an editor slider cannot pass `NaN`. At 0 game time stands
+  still while frames keep running, and `game.step` still steps.
+
+```ts
+// The editor slows a merge to a quarter speed.
+(await run(app, commands.timeScale, { scale: 0.25 })).value.scale; // 0.25
+```

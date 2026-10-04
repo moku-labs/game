@@ -10,20 +10,22 @@ import {
   type Skeleton,
   TYPE
 } from "@formatjs/icu-messageformat-parser";
+import type { DurationStyle } from "../types";
 
 /**
  * What one parameter of a message is typed as. `select` carries its option names, which become
- * the union a game may pass.
+ * the union a game may pass. A `duration` is milliseconds.
  */
 export type ParameterType =
   | { kind: "argument" }
   | { kind: "number" }
   | { kind: "date" }
+  | { kind: "duration" }
   | { kind: "select"; options: readonly string[] };
 
 /**
  * What one compiled message carries: the arrow source the build writes, the parameters it reads
- * and whether it needs the `argument` helper of the generated module.
+ * and which helpers of the generated module it needs.
  */
 export type CompiledSource = {
   /** The arrow function source, as it appears in the generated module. */
@@ -32,6 +34,8 @@ export type CompiledSource = {
   params: Record<string, ParameterType>;
   /** True when the message uses a plain argument, so the module needs the `argument` helper. */
   usesArgument: boolean;
+  /** True when the message uses a `duration`, so the module needs the `duration` helper. */
+  usesDuration: boolean;
 };
 
 /** One piece of a message while it is being compiled. */
@@ -51,12 +55,31 @@ type Branch = { test: string; value: string };
 type Scan = {
   params: Record<string, ParameterType>;
   usesArgument: boolean;
+  usesDuration: boolean;
   usesParams: boolean;
   usesIntl: boolean;
 };
 
 /** The style a `{d, date}` with no style means. */
 const DEFAULT_DATE_STYLE = "medium";
+
+/** The style a `{left, duration}` with no style means, the `Intl.DurationFormat` default. */
+const DEFAULT_DURATION_STYLE: DurationStyle = "short";
+
+/**
+ * The number style a `{left, duration, short}` is rewritten to before the parser reads it: the
+ * parser knows no `duration` type, and refuses it.
+ */
+const DURATION_PREFIX = "duration-";
+
+/**
+ * One `duration` argument at the start of a string: `{name, duration}` or
+ * `{name, duration, style}`. It has no sub-messages, so it never crosses a brace.
+ */
+const DURATION_ARGUMENT = /^\{\s*([^\s{},]+)\s*,\s*duration\s*(?:,\s*([^\s{},]+)\s*)?\}/;
+
+/** The characters an apostrophe quotes when it stands right before one of them. */
+const QUOTABLE = "{}<>#";
 
 /** A parameter name that can be read with a dot. */
 const PLAIN_NAME = /^[A-Za-z_$][\w$]*$/;
@@ -96,15 +119,114 @@ function detailOf(error: unknown): string {
 }
 
 /**
- * Parses one message, turning a parser failure into a compile problem.
+ * Measures the run at one position that the pre-pass copies untouched: `''`, one literal
+ * apostrophe, or a run an apostrophe quotes because a syntax character follows it, up to the
+ * closing apostrophe or the end of the message.
+ *
+ * @param text - The message as the game wrote it.
+ * @param index - Where the run may start.
+ * @returns Where the run ends, or the same index when none starts there.
+ * @example
+ * ```ts
+ * quotedRunEnd("'{x}' left", 0); // 5
+ * ```
+ */
+function quotedRunEnd(text: string, index: number): number {
+  const next = text[index + 1];
+
+  if (text[index] !== "'" || next === undefined) return index;
+  if (next === "'") return index + 2;
+  if (!QUOTABLE.includes(next)) return index;
+
+  let cursor = index + 2;
+
+  while (cursor < text.length) {
+    if (text[cursor] !== "'") cursor += 1;
+    else if (text[cursor + 1] === "'") cursor += 2;
+    else return cursor + 1;
+  }
+
+  return text.length;
+}
+
+/**
+ * Reads a `duration` argument at one position and writes, in its place, the number style the
+ * parser accepts.
+ *
+ * @param text - The message as the game wrote it.
+ * @param index - Where the argument may start.
+ * @returns The rewritten argument and the length it replaces, or `undefined` when none starts there.
+ * @example
+ * ```ts
+ * durationAt("{left, duration}", 0); // { text: "{left, number, duration-short}", length: 16 }
+ * ```
+ */
+function durationAt(text: string, index: number): { text: string; length: number } | undefined {
+  const match = DURATION_ARGUMENT.exec(text.slice(index));
+
+  if (match === null) return undefined;
+
+  const [whole, name, style = DEFAULT_DURATION_STYLE] = match;
+
+  return { text: `{${name}, number, ${DURATION_PREFIX}${style}}`, length: whole.length };
+}
+
+/**
+ * The pre-pass the parser needs: every `duration` argument outside a quoted run becomes a number
+ * with a `duration-<style>` style, which `numberPiece` turns back into a duration.
+ *
+ * @param text - The message as the game wrote it.
+ * @returns The message the parser reads.
+ * @example
+ * ```ts
+ * rewriteDurations("Opens in {left, duration, long}"); // "Opens in {left, number, duration-long}"
+ * ```
+ */
+function rewriteDurations(text: string): string {
+  let rewritten = "";
+  let index = 0;
+
+  while (index < text.length) {
+    // A quoted run or a literal apostrophe is text: it is copied as it is.
+    const quoted = quotedRunEnd(text, index);
+
+    if (quoted > index) {
+      rewritten += text.slice(index, quoted);
+      index = quoted;
+      continue;
+    }
+
+    // A duration argument becomes the number style the parser reads.
+    const argument = text[index] === "{" ? durationAt(text, index) : undefined;
+
+    if (argument !== undefined) {
+      rewritten += argument.text;
+      index += argument.length;
+      continue;
+    }
+
+    rewritten += text.charAt(index);
+    index += 1;
+  }
+
+  return rewritten;
+}
+
+/**
+ * Parses one message, turning a parser failure into a compile problem. The `duration` pre-pass
+ * runs first, so the elements carry a duration as a number with a `duration-<style>` style.
  *
  * @param text - The message as the game wrote it.
  * @returns The elements of the message.
  * @throws {Error} When the message does not parse.
+ * @example
+ * ```ts
+ * parseMessage("{left, duration}"); // [{ type: TYPE.number, value: "left", style: "duration-short" }]
+ * ```
  */
-function parseMessage(text: string): MessageFormatElement[] {
+export function parseMessage(text: string): MessageFormatElement[] {
   try {
-    return parse(text, { ignoreTag: true });
+    return parse(rewriteDurations(text), { ignoreTag: true });
   } catch (error) {
     throw problem(detailOf(error));
   }
@@ -118,6 +240,20 @@ function parseMessage(text: string): MessageFormatElement[] {
  */
 function isDateStyle(style: string): boolean {
   return style === "short" || style === "medium" || style === "long" || style === "full";
+}
+
+/**
+ * Tells whether a style is one of the four `Intl.DurationFormat` names.
+ *
+ * @param style - The style the message asked for, without the `duration-` prefix.
+ * @returns True for "long", "short", "narrow" and "digital".
+ * @example
+ * ```ts
+ * isDurationStyle("tiny"); // false
+ * ```
+ */
+function isDurationStyle(style: string): style is DurationStyle {
+  return style === "long" || style === "short" || style === "narrow" || style === "digital";
 }
 
 /**
@@ -437,7 +573,38 @@ function numberOptions(style: string): string {
 }
 
 /**
- * Compiles a `number` argument.
+ * Compiles a `duration` argument, which the pre-pass handed over as a number with a `duration-`
+ * style. The kit's formatter reads the record of the module's `duration` helper, with the seconds
+ * always shown: `format({ seconds: 0 })` is empty by default, and a countdown at zero must read
+ * "0 sec".
+ *
+ * @param element - The argument the parser read.
+ * @param scan - What the walk collects.
+ * @param style - The style the message named, without the `duration-` prefix.
+ * @returns The piece it becomes.
+ * @throws {Error} When the style is not one of the four `Intl.DurationFormat` styles.
+ */
+function durationPiece(
+  element: Extract<MessageFormatElement, { type: TYPE.number }>,
+  scan: Scan,
+  style: string
+): Piece {
+  if (!isDurationStyle(style)) {
+    throw problem(`the duration style "${style}" is not supported`);
+  }
+
+  addParameter(scan, element.value, { kind: "duration" });
+  scan.usesIntl = true;
+  scan.usesDuration = true;
+
+  const options = `{ style: ${JSON.stringify(style)}, secondsDisplay: "always" }`;
+  const value = cast(access(element.value), "number");
+
+  return { kind: "expr", code: `intl.duration(${options}).format(duration(${value}))` };
+}
+
+/**
+ * Compiles a `number` argument, or a `duration` the pre-pass rewrote into one.
  *
  * @param element - The argument the parser read.
  * @param scan - What the walk collects.
@@ -449,6 +616,10 @@ function numberPiece(
   scan: Scan
 ): Piece {
   const style = styleName(element.style);
+
+  if (style.startsWith(DURATION_PREFIX)) {
+    return durationPiece(element, scan, style.slice(DURATION_PREFIX.length));
+  }
 
   if (style !== "" && style !== "integer" && style !== "percent") {
     throw problem(`the number style "${style}" is not supported`);
@@ -564,10 +735,40 @@ function headOf(scan: Scan): string {
 }
 
 /**
+ * Compiles the parsed elements of one message into the arrow the build writes. The pseudo-locale
+ * hands its rewritten elements here directly.
+ *
+ * @param elements - What `parseMessage` read, or a rewrite of it.
+ * @returns The arrow source, the parameter types and the helpers the module needs.
+ * @throws {Error} When the elements use an unsupported ICU feature.
+ * @example
+ * ```ts
+ * compileElements([{ type: TYPE.literal, value: "Play" }]).source; // '() => [{ kind: "text", text: "Play" }]'
+ * ```
+ */
+export function compileElements(elements: readonly MessageFormatElement[]): CompiledSource {
+  const scan: Scan = {
+    params: {},
+    usesArgument: false,
+    usesDuration: false,
+    usesParams: false,
+    usesIntl: false
+  };
+  const pieces = piecesOf(elements, scan);
+
+  return {
+    source: `${headOf(scan)} => ${toParts(pieces)}`,
+    params: scan.params,
+    usesArgument: scan.usesArgument,
+    usesDuration: scan.usesDuration
+  };
+}
+
+/**
  * Compiles one ICU message into the arrow the build writes into `generated/strings.<locale>.ts`.
  *
  * @param text - The message as the game wrote it.
- * @returns The arrow source, the parameter types and whether the module needs the helper.
+ * @returns The arrow source, the parameter types and the helpers the module needs.
  * @throws {Error} When the message does not parse or uses an unsupported ICU feature.
  * @example
  * ```ts
@@ -575,12 +776,5 @@ function headOf(scan: Scan): string {
  * ```
  */
 export function compileMessage(text: string): CompiledSource {
-  const scan: Scan = { params: {}, usesArgument: false, usesParams: false, usesIntl: false };
-  const pieces = piecesOf(parseMessage(text), scan);
-
-  return {
-    source: `${headOf(scan)} => ${toParts(pieces)}`,
-    params: scan.params,
-    usesArgument: scan.usesArgument
-  };
+  return compileElements(parseMessage(text));
 }

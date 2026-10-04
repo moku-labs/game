@@ -197,3 +197,91 @@ describe("tags", () => {
     expect(textOf("<b>{n, number}</b>", "en", { n: 7 })).toBe("<b>7</b>");
   });
 });
+
+describe("duration", () => {
+  // Every literal below was checked under Bun 1.3.14 and Node 26.9: both runtimes agree on it.
+  it.each([
+    ["{left, duration}", "1 min, 35 sec"],
+    ["{left, duration, short}", "1 min, 35 sec"],
+    ["{left, duration, long}", "1 minute, 35 seconds"],
+    ["{left, duration, narrow}", "1m 35s"],
+    ["{left, duration, digital}", "0:01:35"]
+  ])("formats 95 000 ms of %s in English", (message, expected) => {
+    expect(textOf(message, "en", { left: 95_000 })).toBe(expected);
+  });
+
+  it("rounds up to whole seconds and always shows the seconds", () => {
+    expect(textOf("{t, duration, long}", "en", { t: 3_605_000 })).toBe("1 hour, 5 seconds");
+    expect(textOf("{t, duration, short}", "en", { t: 0 })).toBe("0 sec");
+    expect(textOf("{t, duration}", "en", { t: 500 })).toBe("1 sec");
+    expect(textOf("{t, duration}", "en", { t: -5 })).toBe("0 sec");
+  });
+
+  it("formats in Russian", () => {
+    expect(textOf("{t, duration, short}", "ru", { t: 95_000 })).toBe("1 мин 35 с");
+    expect(textOf("{t, duration, long}", "ru", { t: 95_000 })).toBe("1 минута 35 секунд");
+    expect(textOf("{t, duration, short}", "ru", { t: 3_605_000 })).toBe("1 ч 5 с");
+  });
+
+  it("splits hours, minutes and seconds for Intl.DurationFormat", () => {
+    // The list separator of "ru" short differs by ICU data: Bun 1.3.14 writes "2 ч, 1 мин, 35 с",
+    // Node 26.9 writes "2 ч 1 мин 35 с". The split is the engine's part, so it is compared here.
+    const expected = kitOf("ru")
+      .duration({ style: "short", secondsDisplay: "always" })
+      .format({ hours: 2, minutes: 1, seconds: 35 });
+
+    expect(textOf("{t, duration, short}", "ru", { t: 7_295_000 })).toBe(expected);
+  });
+
+  it("compiles to the kit's formatter and the module's helper", () => {
+    expect(compileMessage("{left, duration}").source).toBe(
+      '(p, intl) => [{ kind: "text", text: intl.duration({ style: "short", secondsDisplay: "always" }).format(duration(p.left as number)) }]'
+    );
+  });
+
+  it("types the parameter as a duration and asks for the helper only when used", () => {
+    const compiled = compileMessage("Opens in {left, duration, digital}");
+
+    expect(compiled.params).toEqual({ left: { kind: "duration" } });
+    expect(compiled.usesDuration).toBe(true);
+    expect(compileMessage(ORDERS_EN).usesDuration).toBe(false);
+    expect(compileMessage("{n, number}").usesDuration).toBe(false);
+  });
+
+  it("nests inside a plural branch", () => {
+    const message =
+      "{n, plural, one {# chest opens in {left, duration}} other {# chests open in {left, duration}}}";
+
+    expect(textOf(message, "en", { n: 2, left: 95_000 })).toBe("2 chests open in 1 min, 35 sec");
+    expect(compileMessage(message).params).toEqual({
+      n: { kind: "number" },
+      left: { kind: "duration" }
+    });
+  });
+
+  it("reads spaces around the parts of the argument", () => {
+    expect(textOf("{ left , duration , narrow }", "en", { left: 95_000 })).toBe("1m 35s");
+  });
+
+  it("leaves a quoted duration as text", () => {
+    expect(textOf("'{x, duration}' is the syntax", "en")).toBe("{x, duration} is the syntax");
+    expect(compileMessage("'{x, duration}'").params).toEqual({});
+  });
+
+  it("still reads a duration after a literal apostrophe", () => {
+    expect(textOf("it''s {t, duration}", "en", { t: 1000 })).toBe("it's 1 sec");
+    expect(textOf("it's {t, duration}", "en", { t: 1000 })).toBe("it's 1 sec");
+  });
+
+  it("refuses a style it does not know", () => {
+    expect(() => compileMessage("Opens in {left, duration, tiny}")).toThrow(
+      'the duration style "tiny" is not supported'
+    );
+  });
+
+  it("refuses one parameter used as a duration and as a number", () => {
+    expect(() => compileMessage("{t, duration} or {t, number}")).toThrow(
+      'the parameter "t" is used as duration and as number'
+    );
+  });
+});

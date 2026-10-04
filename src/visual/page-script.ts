@@ -409,7 +409,7 @@ export async function pageCheckpoint(
     await pageTick(handles);
 
     const captured = await game.renderer.capture();
-    const screen = captured === undefined ? undefined : await pageWebp(captured);
+    const screen = captured === undefined ? undefined : await pageWebp(captured.png);
     const state = {
       path: doors.read(game, doors.sources.position).path,
       ...doors.read(game, doors.sources.model)
@@ -559,7 +559,8 @@ async function pageEncode(pixels: Pixels): Promise<string> {
 }
 
 /**
- * Turns the PNG data URL of `renderer.capture()` into the lossless WebP of the baselines.
+ * Turns the PNG data URL of `renderer.capture()`, its `png`, into the lossless WebP of the
+ * baselines.
  *
  * @param url - The PNG data URL.
  * @returns The WebP data URL of the same pixels.

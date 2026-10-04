@@ -26,11 +26,14 @@ describe("renderer api", () => {
       "ready"
     ]);
     expect(Object.keys(mock.api.sync).toSorted()).toEqual([
+      "boundsOf",
       "debug",
       "displayOf",
       "displays",
       "filters",
       "fonts",
+      "hitAll",
+      "hitBoxOf",
       "hitTest",
       "renderPasses",
       "textures"

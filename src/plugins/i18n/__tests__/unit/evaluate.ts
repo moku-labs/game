@@ -6,7 +6,7 @@
  */
 import ts from "typescript";
 import { emitLocale } from "../../compile/emit";
-import { compileMessage } from "../../compile/message";
+import { type CompiledSource, compileMessage } from "../../compile/message";
 import { createIntlKit } from "../../intl";
 import type { CompiledMessage, CompiledMessages, IntlKit, Part } from "../../types";
 
@@ -26,18 +26,28 @@ export function evaluateModule(source: string): CompiledMessages {
 }
 
 /**
+ * Emits one compiled message into a module and evaluates it.
+ *
+ * @param source - What the compiler produced for the message.
+ * @returns The function the build would have written for it.
+ */
+export function evaluateCompiled(source: CompiledSource): CompiledMessage {
+  const module = evaluateModule(emitLocale([{ key: "sample", compiled: source }]));
+  const compiled = module.sample;
+
+  if (compiled === undefined) throw new Error('the emitted module has no key "sample"');
+
+  return compiled;
+}
+
+/**
  * Compiles one message and evaluates it.
  *
  * @param text - The ICU message.
  * @returns The function the build would have written for it.
  */
 export function messageOf(text: string): CompiledMessage {
-  const module = evaluateModule(emitLocale([{ key: "sample", compiled: compileMessage(text) }]));
-  const compiled = module.sample;
-
-  if (compiled === undefined) throw new Error('the emitted module has no key "sample"');
-
-  return compiled;
+  return evaluateCompiled(compileMessage(text));
 }
 
 /**

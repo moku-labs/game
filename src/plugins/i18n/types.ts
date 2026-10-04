@@ -85,7 +85,32 @@ export type IntlKit = {
   list(options?: Intl.ListFormatOptions): Intl.ListFormat;
   /** The date and time format of the locale. */
   date(options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormat;
+  /**
+   * The duration format of the locale. A compiled `{left, duration}` reads it with
+   * `secondsDisplay: "always"`, so a countdown at zero still says "0 sec".
+   *
+   * @param options - The `Intl.DurationFormat` options.
+   * @returns The memoised formatter for these options.
+   * @throws {Error} When the runtime has no `Intl.DurationFormat`.
+   * @example
+   * ```ts
+   * const intl = createIntlKit("en");
+   * intl.duration({ style: "short" }).format({ minutes: 1, seconds: 35 }); // "1 min, 35 sec"
+   * ```
+   */
+  duration(options?: Intl.DurationFormatOptions): Intl.DurationFormat;
 };
+
+/**
+ * How a duration reads: `"long"` (1 minute, 35 seconds), `"short"` (1 min, 35 sec), `"narrow"`
+ * (1m 35s) or `"digital"` (0:01:35). A string file names one in `{left, duration, short}`.
+ *
+ * @example
+ * ```ts
+ * const style: DurationStyle = "digital"; // app.i18n.duration(95_000, style) is "0:01:35"
+ * ```
+ */
+export type DurationStyle = "long" | "short" | "narrow" | "digital";
 
 /**
  * One message as the build wrote it: a plain function of the parameters and the locale's kit.
@@ -283,6 +308,26 @@ export type I18nApi = {
    * ```
    */
   has(key: string): boolean;
+
+  /**
+   * Formats milliseconds in the current locale through `Intl.DurationFormat`. The value is rounded
+   * up to whole seconds, so a countdown never reads zero while time is left; a negative or
+   * non-finite value reads as zero; the seconds are always shown. `text` formats a field bound
+   * with `format: "duration"` through this call.
+   *
+   * @param ms - The duration in milliseconds.
+   * @param style - How the duration reads. Default `"short"`.
+   * @returns The duration as text.
+   * @throws {Error} When the runtime has no `Intl.DurationFormat`.
+   * @example
+   * ```ts
+   * // The out-of-energy popup shows when the next refill comes, locale "en".
+   * app.i18n.duration(95_000); // "1 min, 35 sec"
+   * app.i18n.duration(95_000, "digital"); // "0:01:35"
+   * app.i18n.duration(500); // "1 sec": rounded up
+   * ```
+   */
+  duration(ms: number, style?: DurationStyle): string;
 
   /**
    * Every locale at least one feature or the config brought a module for, sorted.

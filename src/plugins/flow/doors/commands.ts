@@ -7,7 +7,7 @@ import { reducedMotionCommand } from "../../anim/control";
 import { dragCommand, keyCommand } from "../../input/control";
 import { pauseCommand, resumeCommand } from "../../lifecycle/control";
 import { captureCommand, debugCommand } from "../../renderer/control";
-import { stepCommand } from "../../time/control";
+import { stepCommand, timeScaleCommand } from "../../time/control";
 import { fillCommand, tapCommand } from "../../ui/control";
 import { answerCommand, bookmarkCommand, restoreCommand, walkCommand } from "../control";
 
@@ -36,5 +36,6 @@ export const commands = Object.freeze({
   capture: captureCommand,
   debug: debugCommand,
   reducedMotion: reducedMotionCommand,
-  fill: fillCommand
+  fill: fillCommand,
+  timeScale: timeScaleCommand
 });

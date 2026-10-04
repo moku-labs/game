@@ -750,6 +750,23 @@ export type ProjectionApi = {
   keyOf(entity: Entity): ProjectionKey | undefined;
 
   /**
+   * The components a motion still drives on an entity: its running tracks, in start order, each
+   * name once. An entity no motion drives answers `[]`: a resting view, an entity that is not a
+   * view, a stale id. Every call hands out a new array.
+   *
+   * @param entity - The entity to ask about.
+   * @returns The component names, or `[]`.
+   * @example
+   * ```ts
+   * // The editor explains a coin in flight: its Transform still tweens, its Sprite rests.
+   * app.world.projection.motionsOf(coin); // ["Transform"]
+   * app.time.step(400);
+   * app.world.projection.motionsOf(coin); // []
+   * ```
+   */
+  motionsOf(entity: Entity): readonly string[];
+
+  /**
    * The rest value of one component of an entity: what a view holds when nothing animates it, or
    * what `setRest` recorded for an element. Read-only and owner-free, so a plugin that owns no
    * entity can aim at one.

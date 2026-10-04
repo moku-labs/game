@@ -6,7 +6,7 @@ import type { Hint } from "../../flow/types";
 import type { Root } from "../../model/types";
 import type { ComponentType, Entity, Owner } from "../ecs/types";
 import type { ProjectionModule, WorldCtx } from "../types";
-import { cancelTracks, forgetEndedTracks } from "./driver";
+import { cancelTracks, forgetEndedTracks, runningComponents } from "./driver";
 import {
   cancelHandles,
   createViewHandle,
@@ -383,6 +383,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         ? state.keysByEntity.get(entity)
         : { projection: view.projection, key: view.key };
     },
+
+    motionsOf: (entity: Entity): readonly string[] => runningComponents(state.tracks, entity),
 
     entityOf: (projection: string, key: string): Entity | undefined =>
       state.mounted.get(projection)?.live.get(key)?.entity ?? state.keys.get(projection)?.get(key),

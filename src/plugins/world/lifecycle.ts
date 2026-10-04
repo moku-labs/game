@@ -7,6 +7,7 @@ import type { FeatureDescription } from "../flow/types";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
 import { createModules } from "./api";
+import { recordFrame, resetHistory } from "./ecs/history";
 import { registerType } from "./ecs/storage";
 import type { AnyComponentType, AnySystem } from "./ecs/types";
 import type { AnyProjectionSpec } from "./projection/types";
@@ -144,7 +145,8 @@ function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionM
 
 /**
  * Connects the world in `onStart`: it reads every feature description, registers the five frame
- * callbacks of the phases and listens to the released hints. `onStart` has no access to the
+ * callbacks of the phases and listens to the released hints. In a dev build the `signals`
+ * callback records the frame history before it clears the change sets. `onStart` has no access to the
  * plugin's own API, so it builds its own module objects — they are views on `ctx.state`, which is
  * the one place the modules keep their data.
  *
@@ -171,7 +173,15 @@ export function connectWorld(ctx: KernelSlice): void {
     }),
     time.onFrame("layout", frame => ecs.runPhase("layout", frame)),
     time.onFrame("sync", frame => ecs.runPhase("sync", frame)),
-    time.onFrame("signals", () => ecs.clearChanges())
+    time.onFrame("signals", frame => {
+      // Inline and positive, as renderer's capture: Bun folds this guard under a production
+      // `define` and drops the recorder; `flow/doors/dev.ts` declares the global.
+      if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+        recordFrame(worldCtx, frame.frame);
+      }
+
+      ecs.clearChanges();
+    })
   );
 
   worldCtx.state.projection.offHints.push(
@@ -181,8 +191,8 @@ export function connectWorld(ctx: KernelSlice): void {
 
 /**
  * Empties the world in `onStop`: the frame callbacks and the hint listener are removed, then
- * every track, view, queued view, entity and resource is dropped. No `onRemoved` fires, because
- * `renderer` stopped earlier and destroyed its own objects.
+ * every track, view, queued view, entity and resource is dropped and the frame history is reset.
+ * No `onRemoved` fires, because `renderer` stopped earlier and destroyed its own objects.
  *
  * @param state - The plugin state, the only thing a teardown context carries.
  */
@@ -225,4 +235,5 @@ export function clearWorld(state: State): void {
   state.ecs.running = undefined;
   state.ecs.frameSnapshot = undefined;
   state.ecs.mode = "live";
+  resetHistory(state.ecs);
 }

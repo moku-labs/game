@@ -139,7 +139,7 @@ describe("renderer plugin integration", () => {
 
     app.time.step(16);
 
-    await expect(capture).resolves.toBe(FAKE_PNG);
+    await expect(capture).resolves.toEqual({ png: FAKE_PNG });
     expect(app.renderer.stats()).toMatchObject({ views: 1, pooled: 0 });
     expect(app.renderer.viewport.toScreen({ x: 1080, y: 0 }).x).toBeCloseTo(390, 6);
 

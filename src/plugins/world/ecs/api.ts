@@ -7,7 +7,9 @@ import type { EcsModule, WorldCtx } from "../types";
 import { changesOf, clearAllChanges } from "./changes";
 import { despawnEntity, flushCommands, queueOrApply } from "./commands";
 import { reserveEntity } from "./entities";
+import { diffHistory, resetHistory } from "./history";
 import { runQuery } from "./query";
+import { schemaOf } from "./schema";
 import { snapshotWorld } from "./snapshot";
 import {
   addHook,
@@ -35,8 +37,8 @@ import type {
 } from "./types";
 
 /**
- * Empties the world in place: entities, components, resources, systems and hooks. The state
- * object keeps its identity, so every view on it stays valid.
+ * Empties the world in place: entities, components, resources, systems, hooks and the frame
+ * history. The state object keeps its identity, so every view on it stays valid.
  *
  * @param ctx - Domain context of the world plugin.
  */
@@ -64,6 +66,7 @@ function clearWorldState(ctx: WorldCtx): void {
   state.ownerLeft.length = 0;
   state.mode = "live";
   state.frameSnapshot = undefined;
+  resetHistory(state);
 }
 
 /**
@@ -187,6 +190,10 @@ export function createEcsApi(ctx: WorldCtx): EcsModule {
     typeOf: (name: string) => asComponent(state.types.get(name)),
 
     snapshot: () => snapshotWorld(state, effectiveMode(ctx)),
+
+    diff: (from: number, to: number) => diffHistory(state.history, from, to),
+
+    schema: () => schemaOf(state.types.values()),
 
     ownerOf: (entity: Entity): Owner | undefined => state.owners.get(entity),
 

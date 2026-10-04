@@ -54,6 +54,71 @@ function emptyCache<Formatter>(): Map<string, Formatter> {
   return new Map();
 }
 
+/** Milliseconds in one second. */
+const SECOND = 1000;
+
+/** Seconds in one minute. */
+const MINUTE = 60;
+
+/** Seconds in one hour. */
+const HOUR = 3600;
+
+/**
+ * Wraps a runtime without `Intl.DurationFormat` in the message shape of the framework.
+ *
+ * @returns The error to throw.
+ */
+function durationFormatMissing(): Error {
+  return new Error(
+    "[game] i18n: Intl.DurationFormat is missing in this runtime.\n" +
+      "  Use Bun 1.3.14+, Node 24+ or a WebGPU browser."
+  );
+}
+
+/**
+ * Builds one duration formatter, refusing a runtime that has none. There is no polyfill: every
+ * runtime the engine supports ships `Intl.DurationFormat`.
+ *
+ * @param locale - The locale of the formatter.
+ * @param options - What the caller asked for.
+ * @returns The formatter.
+ * @throws {Error} When the runtime has no `Intl.DurationFormat`.
+ */
+function buildDurationFormat(
+  locale: string,
+  options: Intl.DurationFormatOptions | undefined
+): Intl.DurationFormat {
+  if (typeof Intl.DurationFormat === "undefined") throw durationFormatMissing();
+
+  return new Intl.DurationFormat(locale, options);
+}
+
+/**
+ * Splits milliseconds into the record `Intl.DurationFormat` reads. The value is rounded up to
+ * whole seconds, so a countdown never reads zero while time is left; a negative or non-finite
+ * value is zero. Hours and minutes appear when above zero, seconds always, because `format({})`
+ * throws. The generated `duration(ms)` helper of a locale module does the same split.
+ *
+ * @param ms - The duration in milliseconds.
+ * @returns The hours, minutes and seconds of the duration.
+ * @example
+ * ```ts
+ * durationInput(95_000); // { minutes: 1, seconds: 35 }
+ * ```
+ */
+export function durationInput(ms: number): Partial<Record<Intl.DurationFormatUnit, number>> {
+  const total = Number.isFinite(ms) ? Math.max(0, Math.ceil(ms / SECOND)) : 0;
+  const hours = Math.floor(total / HOUR);
+  const minutes = Math.floor((total % HOUR) / MINUTE);
+  const input: Partial<Record<Intl.DurationFormatUnit, number>> = {};
+
+  if (hours > 0) input.hours = hours;
+  if (minutes > 0) input.minutes = minutes;
+  input.seconds = total % MINUTE;
+
+  return input;
+}
+
 /**
  * Creates the formatter kit of one locale. Every kit is built once, on first use of its locale,
  * and kept in `state.intl`.
@@ -72,12 +137,14 @@ export function createIntlKit(locale: string): IntlKit {
   const numbers = emptyCache<Intl.NumberFormat>();
   const lists = emptyCache<Intl.ListFormat>();
   const dates = emptyCache<Intl.DateTimeFormat>();
+  const durations = emptyCache<Intl.DurationFormat>();
 
   return {
     locale,
     plural: options => memo(plurals, options, () => new Intl.PluralRules(locale, options)),
     number: options => memo(numbers, options, () => new Intl.NumberFormat(locale, options)),
     list: options => memo(lists, options, () => new Intl.ListFormat(locale, options)),
-    date: options => memo(dates, options, () => new Intl.DateTimeFormat(locale, options))
+    date: options => memo(dates, options, () => new Intl.DateTimeFormat(locale, options)),
+    duration: options => memo(durations, options, () => buildDurationFormat(locale, options))
   };
 }

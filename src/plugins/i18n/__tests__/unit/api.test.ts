@@ -289,3 +289,47 @@ describe("setLocale", () => {
     expect(mock.emitted.map(entry => entry.payload)).toEqual([{ locale: "en" }, { locale: "de" }]);
   });
 });
+
+/**
+ * A mock that starts in English, with Russian registered eagerly.
+ *
+ * @returns The started mock.
+ */
+async function englishMock(): Promise<MockI18n> {
+  const mock = createMockI18n({ locale: "en", fallback: "en" });
+
+  mock.flow.features.push({
+    name: "hud",
+    description: { strings: { ru: russian, en: english } }
+  });
+  await mock.start();
+
+  return mock;
+}
+
+describe("duration", () => {
+  it("formats milliseconds in the current locale, short by default", async () => {
+    const mock = await englishMock();
+
+    expect(mock.api.duration(95_000)).toBe("1 min, 35 sec");
+    expect(mock.api.duration(95_000, "digital")).toBe("0:01:35");
+    expect(mock.api.duration(3_605_000, "long")).toBe("1 hour, 5 seconds");
+    expect(mock.api.duration(95_000, "narrow")).toBe("1m 35s");
+  });
+
+  it("rounds up to whole seconds and always shows the seconds", async () => {
+    const mock = await englishMock();
+
+    expect(mock.api.duration(0)).toBe("0 sec");
+    expect(mock.api.duration(500)).toBe("1 sec");
+    expect(mock.api.duration(-5)).toBe("0 sec");
+  });
+
+  it("follows a locale switch", async () => {
+    const mock = await englishMock();
+
+    await mock.api.setLocale("ru");
+
+    expect(mock.api.duration(95_000)).toBe("1 мин 35 с");
+  });
+});

@@ -5,10 +5,15 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as FlowApi } from "../flow/types";
-import type { Api as ModelApi, Events as ModelEvents } from "../model/types";
+import type { Json, Api as ModelApi, Events as ModelEvents } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
-import type { EcsApi, EcsInternal, EcsState } from "./ecs/types";
-import type { ProjectionApi, ProjectionInternal, ProjectionState } from "./projection/types";
+import type { EcsApi, EcsInternal, EcsState, Entity, Owner } from "./ecs/types";
+import type {
+  ProjectionApi,
+  ProjectionInternal,
+  ProjectionKey,
+  ProjectionState
+} from "./projection/types";
 
 /**
  * world plugin events.
@@ -97,6 +102,35 @@ export type WorldCtx = KernelSlice & { readonly deps: Deps };
 export type ModelCommitted = ModelEvents["model:committed"];
 
 /**
+ * One entity in full, as the `/inspect` source `game.explain` reads it: its row of
+ * `ecs.snapshot()`, its projection key and the components a motion still drives.
+ *
+ * @example
+ * ```ts
+ * const sliding: Explained = {
+ *   id: 1_048_577,
+ *   owner: { kind: "projection", name: "board.items" },
+ *   key: { projection: "board.items", key: "i7" },
+ *   components: { Layer: { name: "items" } },
+ *   skipped: ["Display"],
+ *   motions: ["Transform"]
+ * };
+ * ```
+ */
+export type Explained = {
+  id: Entity;
+  owner: Owner;
+  /** `projection.keyOf`: the view address, also for an element registered under a key. */
+  key: ProjectionKey | undefined;
+  /** The JSON components, as `EntitySnapshot.components`. */
+  components: Record<string, Json>;
+  /** The names of the components that are not JSON, as `EntitySnapshot.skipped`. */
+  skipped: string[];
+  /** `projection.motionsOf`: the components a running track drives, in start order. */
+  motions: readonly string[];
+};
+
+/**
  * Both halves of the `ecs` module: what a game calls and what `projection` gets injected.
  */
 export type EcsModule = EcsApi & EcsInternal;
@@ -111,11 +145,14 @@ export type {
   AnyComponentValue,
   AnySystem,
   ComponentHandle,
+  ComponentSchema,
   ComponentType,
   ComponentValue,
   EcsApi,
   Entity,
+  EntityDiff,
   EntitySnapshot,
+  FrameDiff,
   Mut,
   Narrowed,
   Owner,

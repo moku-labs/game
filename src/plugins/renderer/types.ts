@@ -7,7 +7,7 @@ import type { Config as GameConfig, Require } from "../../config";
 import type { Api as ClockApi } from "../clock/types";
 import type { Api as LifecycleApi } from "../lifecycle/types";
 import type { Api as TimeApi } from "../time/types";
-import type { Api as WorldApi } from "../world/types";
+import type { Entity, Owner, ProjectionKey, Api as WorldApi } from "../world/types";
 import type { HostApi, HostInternal, HostState } from "./host/types";
 import type { MonitorApi, MonitorInternal, MonitorState } from "./monitor/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
@@ -226,6 +226,27 @@ export type State = {
 export type Api = { host: HostApi; viewport: ViewportApi; sync: SyncApi } & MonitorApi;
 
 /**
+ * One entity under a point of the page, what the `game.at` door answers: the entity, its owner,
+ * the projection and key that address it when it has them, and the layer its own `Layer` names
+ * (`undefined` for a `Parent` child, which draws in its parent's layer).
+ *
+ * @example
+ * ```ts
+ * // A coin of the board under the pointer.
+ * const under: Under = {
+ *   entity: 1_048_581, owner: { kind: "projection", name: "board.items" },
+ *   key: { projection: "board.items", key: "c7" }, layer: "items"
+ * };
+ * ```
+ */
+export type Under = {
+  entity: Entity;
+  owner: Owner;
+  key: ProjectionKey | undefined;
+  layer: string | undefined;
+};
+
+/**
  * Resolved dependency APIs. `clock` is the time source of the frame counters.
  */
 export type Deps = { time: TimeApi; lifecycle: LifecycleApi; world: WorldApi; clock: ClockApi };
@@ -285,12 +306,16 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
 export type {
+  Captured,
+  CaptureOptions,
   CountingClasses,
   DrawCounter,
+  LegendEntry,
   MonitorApi,
   MonitorDeps,
   MonitorInternal,
   MonitorState,
+  PictureRect,
   RenderStats
 } from "./monitor/types";
 export type {

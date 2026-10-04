@@ -1,12 +1,12 @@
 /**
  * @file i18n plugin — the public API factory: the current locale, the switch that loads a module
- * and sends the one event, and the two `format` forms every label goes through. This is the only
- * place in the engine where a locale is read.
+ * and sends the one event, the two `format` forms every label goes through, and the duration a
+ * countdown reads. This is the only place in the engine where a locale is read.
  */
-import { createIntlKit } from "./intl";
+import { createIntlKit, durationInput } from "./intl";
 import { loadLocale, notLoaded, notRegistered } from "./lifecycle";
 import { mergeParts, missingParts, resolve } from "./messages";
-import type { I18nApi, I18nCtx, IntlKit, Message, Part, State } from "./types";
+import type { DurationStyle, I18nApi, I18nCtx, IntlKit, Message, Part, State } from "./types";
 
 /**
  * Answers the formatter kit of one locale, building it on first use.
@@ -123,7 +123,7 @@ async function setLocale(ctx: I18nCtx, locale: string): Promise<void> {
  * Builds the API of the plugin.
  *
  * @param ctx - Kernel context of the i18n plugin.
- * @returns The six members of `app.i18n`.
+ * @returns The seven members of `app.i18n`.
  */
 export function createI18nApi(ctx: I18nCtx): I18nApi {
   return {
@@ -135,6 +135,10 @@ export function createI18nApi(ctx: I18nCtx): I18nApi {
         .map(part => (part.kind === "text" ? part.text : ""))
         .join(""),
     has: key => resolve(ctx.state, key, ctx.state.locale, ctx.config.fallback) !== undefined,
+    duration: (ms: number, style: DurationStyle = "short"): string =>
+      kitOf(ctx.state, ctx.state.locale)
+        .duration({ style, secondsDisplay: "always" })
+        .format(durationInput(ms)),
     locales: () => [...ctx.state.registered.keys()].toSorted()
   };
 }

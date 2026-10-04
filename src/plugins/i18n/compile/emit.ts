@@ -61,6 +61,31 @@ function argumentHelper(): string {
 }
 
 /**
+ * The helper a compiled `duration` calls: milliseconds into the record `Intl.DurationFormat`
+ * reads. The same split as `durationInput` of the plugin: whole seconds rounded up, a negative or
+ * non-finite value as zero, hours and minutes when above zero, seconds always.
+ *
+ * @returns The helper as source.
+ */
+function durationHelper(): string {
+  return [
+    "/** Milliseconds as Intl.DurationFormat reads them: whole seconds rounded up, seconds always. */",
+    "function duration(ms: number): Partial<Record<Intl.DurationFormatUnit, number>> {",
+    "  const total = Number.isFinite(ms) ? Math.max(0, Math.ceil(ms / 1000)) : 0;",
+    "  const hours = Math.floor(total / 3600);",
+    "  const minutes = Math.floor((total % 3600) / 60);",
+    "  const input: Partial<Record<Intl.DurationFormatUnit, number>> = {};",
+    "",
+    "  if (hours > 0) input.hours = hours;",
+    "  if (minutes > 0) input.minutes = minutes;",
+    "  input.seconds = total % 60;",
+    "",
+    "  return input;",
+    "}"
+  ].join("\n");
+}
+
+/**
  * Compares two keys, so every list the compiler writes has one order.
  *
  * @param left - First key.
@@ -74,7 +99,7 @@ function byName(left: string, right: string): number {
 }
 
 /**
- * Writes `generated/strings.<locale>.ts`: one arrow per key, keys sorted, the helper only when a
+ * Writes `generated/strings.<locale>.ts`: one arrow per key, keys sorted, each helper only when a
  * message needs it.
  *
  * @param entries - The keys of the locale, in any order.
@@ -91,6 +116,7 @@ export function emitLocale(entries: readonly LocaleEntry[]): string {
   const blocks = [`${HEADER}\nimport type { I18n } from "@moku-labs/game";`];
 
   if (sorted.some(entry => entry.compiled.usesArgument)) blocks.push(argumentHelper());
+  if (sorted.some(entry => entry.compiled.usesDuration)) blocks.push(durationHelper());
 
   blocks.push(`export default {\n${rows.join(",\n")}\n} satisfies I18n.CompiledMessages;`);
 
@@ -109,7 +135,7 @@ export function emitLocale(entries: readonly LocaleEntry[]): string {
  */
 function typeOf(type: ParameterType): string {
   if (type.kind === "argument") return ARGUMENT;
-  if (type.kind === "number") return "number";
+  if (type.kind === "number" || type.kind === "duration") return "number";
   if (type.kind === "date") return "Date | number";
 
   return type.options.map(option => JSON.stringify(option)).join(" | ");

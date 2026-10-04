@@ -14,8 +14,9 @@ function emptyMap<Key, Value>(): Map<Key, Value> {
 }
 
 /**
- * Creates the initial ecs state: no entity, no type, no system and no resource. Every collection
- * is its own object, so two apps in one process never share a world.
+ * Creates the initial ecs state: no entity, no type, no system, no resource and no frame history:
+ * a dev build starts one on its first frame. Every collection is its own object, so two apps in
+ * one process never share a world.
  *
  * @returns The ecs branch of the plugin state.
  */
@@ -37,6 +38,7 @@ export function createEcsState(): EcsState {
     ownerLeft: [],
     mode: "live",
     offFrame: [],
-    frameSnapshot: undefined
+    frameSnapshot: undefined,
+    history: undefined
   };
 }

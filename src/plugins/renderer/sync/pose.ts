@@ -4,8 +4,9 @@
  * the same math the renderer draws with: `position` is where the `pivot` lands, and the pivot is
  * the local point the view turns and scales around.
  *
- * Engine-internal, not a root export. `input`, `anim` and `ui` import these two from this module
- * path (`../renderer/sync/pose`) and never walk the `Parent` chain themselves.
+ * Engine-internal, not a root export. `input`, `anim` and `ui` import `rootPoseOf` and
+ * `localPoseOf` from this module path (`../renderer/sync/pose`) and never walk the `Parent` chain
+ * themselves; `sync` places a box with `rootPointOf`.
  */
 import type { Entity } from "../../world/types";
 import { Parent, Transform, type TransformValue } from "../components";
@@ -154,4 +155,23 @@ export function localPoseOf(
     scale: root.scale / scale,
     pivot: { x: root.pivot.x, y: root.pivot.y }
   };
+}
+
+/**
+ * Where a local point of an entity lands in root (reference) space: the point posed through the
+ * entity's own `Transform` and its whole `Parent` chain, the forward walk of the hit test's
+ * `localPoseOf`. The scale is the real one, so a view collapsed to scale 0 lands on one point.
+ *
+ * @param ecs - The world read, `world.ecs`.
+ * @param entity - The entity whose local space the point is in.
+ * @param point - The local point.
+ * @returns The point in root space, a fresh object.
+ * @example
+ * ```ts
+ * // The corner of a 64 x 64 cell at (100, 200) inside a slot at (40, 60) scaled 0.5.
+ * rootPointOf(ctx.require(worldPlugin).ecs, cell, { x: -32, y: -32 }); // { x: 74, y: 144 }
+ * ```
+ */
+export function rootPointOf(ecs: PoseReader, entity: Entity, point: Point): Point {
+  return applyPose(rootPoseOf(ecs, entity), point);
 }

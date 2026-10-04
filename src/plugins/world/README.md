@@ -37,8 +37,12 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
 | `snapshot(): WorldSnapshot` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
+| `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. The caller is `game.diff`. |
+| `schema(): ComponentSchema[]` | Every component and tag type the world met so far, sorted by name, with the JSON kind of each field. A new list on every call. The caller is `game.schema`, the editor's component palette. |
 
-`snapshot()` is typed. Both types reach a game as `World.WorldSnapshot` and `World.EntitySnapshot`.
+`snapshot()` is typed. Both types reach a game as `World.WorldSnapshot` and `World.EntitySnapshot`;
+`diff()` and `schema()` answer `World.FrameDiff` (with `World.EntityDiff` entries) and
+`World.ComponentSchema`.
 
 | Type | Field | Holds |
 |---|---|---|
@@ -70,6 +74,7 @@ app.world.ecs.snapshot().entities[0];
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. |
+| `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
 | `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. |
 | `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
@@ -105,7 +110,7 @@ const app = createApp({
 | `animate` | sweep ended motions (the driver advanced its tracks first) → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
-| `signals` | clear every change set |
+| `signals` | record the frame history (dev builds only) → clear every change set |
 
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
@@ -162,17 +167,22 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
-  views, registered keys, recorded rest poses, the despawn queue, entities and resources. No `onRemoved` fires: `renderer` stopped earlier.
+  views, registered keys, recorded rest poses, the despawn queue, entities and resources, and resets
+  the frame history. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Doors
 
-`inspect.ts` holds the two world sources of the editor's read door, `@moku-labs/game/inspect`.
-Both only read, so they are safe in a production build.
+`inspect.ts` holds the five world sources of the editor's read door, `@moku-labs/game/inspect`.
+Every one only reads through `app.world`. `game.diff` answers in a dev build only, because only a
+dev build keeps the frame history; the other four are safe in a production build.
 
 | Key in `sources` | id | Input | Changes | Reads |
 |---|---|---|---|---|
 | `entities` | `game.entities` | `{ owner: "string?", component: "string?" }` | frame | `ecs.snapshot().entities`: all of them, the ones whose owner has the name `owner`, the ones that carry `component`, or both. A component counts when it is in `components` or in `skipped` |
 | `projections` | `game.projections` | none | commit | Projection name to key to entity: every entity of the snapshot for which `projection.keyOf` answers. That includes a view in the despawn queue and a key registered with `registerKey` |
+| `explain` | `game.explain` | `{ entity: "number" }` | frame | One entity in full, `Explained \| undefined`: `{ id, owner, key, components, skipped, motions }`. `components` and `skipped` are its row of `ecs.snapshot()`, `key` is `projection.keyOf`, `motions` is `projection.motionsOf`. `undefined` for a stale id |
+| `diff` | `game.diff` | `{ from: "number", to: "number" }` | frame | `ecs.diff(from, to)`: `{ from, to, entities }`, each entity `{ id, owner, key, change, components }` with `change` `"spawned"`, `"despawned"` or `"changed"` and `components` name to `{ from, to }`, `null` for "not there". Sorted by id. Throws, see below |
+| `schema` | `game.schema` | none | frame | `ecs.schema()`: `[{ name, kind, json, fields, defaults, owned }]`, sorted by name. `kind` is `"component"` or `"tag"`; `fields` maps a field to the JSON kind of its default (`"number"`, `"string"`, `"boolean"`, `"object"`, `"array"`, `"null"`); `json: false` (as `Display`) has `fields: {}` and `defaults: null`; a tag has `defaults: true` |
 
 ```ts
 import { read, sources } from "@moku-labs/game/inspect";
@@ -181,6 +191,38 @@ import { read, sources } from "@moku-labs/game/inspect";
 read(app, sources.entities, { owner: "board.items" }); // EntitySnapshot[] of that projection
 read(app, sources.projections)["board.items"]?.i5; // its Entity, or undefined
 ```
+
+### Frame history
+
+A dev build keeps the history `game.diff` reads; a production build keeps none. The recorder runs
+in the `signals` callback, before the change sets are cleared, behind the inline dev guard, so a
+production `define` drops it from the bundle. Its first frame logs
+`ctx.log.debug("world:history-on", { frames: 120 })`, the marker the doors build check looks for.
+
+- **What it keeps.** One shadow copy of the world as JSON, and a ring of 120 slots of change
+  records, 2 s at 60 fps. A record is one component of one entity with its JSON before and after;
+  a slot also names the entities its frame spawned and despawned, since a record alone cannot tell
+  a spawn from a component added to a live entity. Records cost memory only when something
+  changes: 120 full snapshots of a 400-cell board would hold about 48 MB.
+- **When it records.** The first frame copies the whole world into the shadow and records
+  nothing: it is the start of the window. Every later frame compares each changed entity with the
+  shadow, with the filter of `snapshot()` (a value that is not JSON is never recorded) and deep JSON
+  equality, so a write of the same value records nothing. A despawn, and a removed component,
+  record at once, into the frame that is open: a write after `signals` belongs to the next frame.
+  Every frame gets a slot, also an empty one.
+- **What `diff(from, to)` answers.** The records of frames `from + 1 .. to`, folded per entity and
+  component: the first `from` and the last `to`. A round trip inside the window is left out, and so
+  is an entity spawned and despawned inside it. `from === to` answers no entity. `key` is the live
+  address at read time, `undefined` once the entity is gone.
+- **What it throws.** In a production build:
+  `[game] game.diff needs a dev build.\n  Define __MOKU_GAME_DEV__ as true in the dev build.` For
+  `from` after `to`, or a frame outside the window:
+  `[game] game.diff: frame 7 is not in the history.\n  The history keeps the last 120 frames, 61 to 180.`
+  The window starts at the first recorded frame, or 119 frames before the newest when that is later;
+  `from > to` names `to`. Before the first frame of a recording the second line reads
+  `The history keeps the last 120 frames and starts with the next frame.`
+- **Reset.** `onStop` and `ecs.clear` empty the shadow and the ring; the next frame starts a new
+  recording.
 
 ## Dependencies
 
