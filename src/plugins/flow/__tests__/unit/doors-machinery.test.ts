@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import { defineCommand, defineSource } from "../../doors/define";
-import { controlRefused, isDev } from "../../doors/dev";
+import { controlRefused, isDev, notInstalled } from "../../doors/dev";
 import { read, watch } from "../../doors/read";
 import { run } from "../../doors/run";
 import { cheatsOf, isTainted } from "../../doors/session";
@@ -74,6 +74,14 @@ describe("isDev", () => {
   it("builds the refusal in the house error format", () => {
     expect(controlRefused().message).toBe(
       "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
+    );
+  });
+});
+
+describe("notInstalled", () => {
+  it("names the source and the missing plugin in the house error format", () => {
+    expect(notInstalled("game.sounds", "audioPlugin").message).toBe(
+      "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
     );
   });
 });

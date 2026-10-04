@@ -113,6 +113,7 @@ Without a context (plain Bun, no `AudioContext`) no element and no URL is ever m
 `@moku-labs/game/inspect`, safe in a production build. Input `{ last: "number?" }`: it reads
 `journal()`, all of it or the last `last` entries, and is read again every frame
 (`changes: "frame"`). Empty unless `journal` is above 0.
+Without `audioPlugin` in the app it throws `[game] The source game.sounds needs audioPlugin.`
 
 ## Events
 

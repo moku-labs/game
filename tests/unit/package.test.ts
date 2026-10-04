@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { commands } from "../../src/plugins/flow/doors/commands";
+import { sources } from "../../src/plugins/flow/doors/sources";
 
 // ---------------------------------------------------------------------------
 // Unit test: what npm ships beside `dist`. The agent guide, the body font
@@ -41,6 +43,35 @@ function readBytes(path: string): Buffer {
  */
 function readText(path: string): string {
   return readFileSync(new URL(path, ROOT), "utf8");
+}
+
+/**
+ * Find the one line of llms.txt that lists the keys of a door catalogue.
+ *
+ * @param guide - The text of llms.txt.
+ * @param catalogue - `sources` or `commands`.
+ * @returns The list, from after the colon up to the `;` or `.` that ends it.
+ * @throws {Error} When the guide has no such list.
+ */
+function keysLine(guide: string, catalogue: "sources" | "commands"): string {
+  const found = new RegExp(`Keys of \`${catalogue}\`: ([^;.]*)[;.]`).exec(guide);
+
+  if (found?.[1] === undefined) throw new Error(`llms.txt has no "Keys of \`${catalogue}\`" list.`);
+
+  return found[1];
+}
+
+/**
+ * Read the keys a llms.txt list names, each one in backticks, sorted.
+ *
+ * @param guide - The text of llms.txt.
+ * @param catalogue - `sources` or `commands`.
+ * @returns The keys, sorted, duplicates kept.
+ */
+function listedKeys(guide: string, catalogue: "sources" | "commands"): string[] {
+  return [...keysLine(guide, catalogue).matchAll(/`([^`]+)`/g)]
+    .map(match => match[1] ?? "")
+    .toSorted();
 }
 
 /** The parsed `package.json`. */
@@ -92,5 +123,13 @@ describe("llms.txt", () => {
     expect(guide).toContain("moku-game-assets");
     expect(guide).not.toContain("not published");
     expect(guide).not.toContain("Planned, not built");
+  });
+
+  it("the doors section lists exactly the keys of sources and commands, and no rect", () => {
+    const guide = readText("llms.txt");
+
+    expect(listedKeys(guide, "sources")).toEqual(Object.keys(sources).toSorted());
+    expect(listedKeys(guide, "commands")).toEqual(Object.keys(commands).toSorted());
+    expect(keysLine(guide, "sources")).not.toContain("`rect`");
   });
 });

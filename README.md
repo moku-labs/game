@@ -31,7 +31,7 @@ You write small nodes and edge tables. The engine runs them, saves on the edges 
 ## Status
 
 > [!NOTE]
-> **`0.1.0`: the first working release.** It runs on our machines, two emulators and one very patient fixture game. The API may still change before `1.0`.
+> **`0.4`: working, still young.** It runs on our machines, two emulators and one very patient fixture game. The API may still change before `1.0`.
 
 | Milestone | What it added |
 |---|---|

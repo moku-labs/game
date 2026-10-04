@@ -1,7 +1,7 @@
 /**
- * @file flow/doors — the dev flag. `__MOKU_GAME_DEV__` is a global the engine never replaces: a
- * game's dev build defines it `true` (bundler `define`) or sets `globalThis.__MOKU_GAME_DEV__`
- * before the engine runs; undefined means a production build.
+ * @file flow/doors — the dev flag and the errors a door throws. `__MOKU_GAME_DEV__` is a global
+ * the engine never replaces: a game's dev build defines it `true` (bundler `define`) or sets
+ * `globalThis.__MOKU_GAME_DEV__` before the engine runs; undefined means a production build.
  *
  * Bun does not inline `isDev()` across modules (checked on Bun 1.3.14), so a branch that must
  * vanish from a production bundle writes the guard inline:
@@ -51,5 +51,22 @@ export function isDev(): boolean {
 export function controlRefused(): Error {
   return new Error(
     "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
+  );
+}
+
+/**
+ * Builds the error a door source throws when the opt-in plugin it reads is not installed.
+ *
+ * @param id - The id of the source.
+ * @param plugin - The export name of the plugin it reads.
+ * @returns The error, ready to throw.
+ * @example
+ * ```ts
+ * notInstalled("game.sounds", "audioPlugin").message; // "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
+ * ```
+ */
+export function notInstalled(id: string, plugin: string): Error {
+  return new Error(
+    `[game] The source ${id} needs ${plugin}.\n  Add ${plugin} to createApp({ plugins }).`
   );
 }
