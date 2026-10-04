@@ -115,6 +115,8 @@ app.model.store.snapshot().session; // { rolls: 2 }
 
 The full version, with a reset node and a vitest file, is in [docs/quick-start.md](./docs/quick-start.md). A bigger game lives in [`tests/integration/merge-game/`](./tests/integration/merge-game). It is a test fixture and is not published.
 
+A game with a screen gets two more things from the package. The body font `fonts/font-body.*` (Pangolin, SIL OFL 1.1) is the default of the built-in text style `body` once copied into `src/features/ui/assets/`. The bin `moku-game-assets` writes the typed asset keys, the manifest and the strings. Both are in [docs/quick-start.md](./docs/quick-start.md#a-screen-the-body-font-and-the-asset-keys).
+
 ## How it works
 
 ```mermaid
