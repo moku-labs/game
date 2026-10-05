@@ -39,14 +39,19 @@ describe("game.mute", () => {
     expect(mock.api.muted("master")).toBe(false);
   });
 
-  it("refuses outside a dev build and leaves a moku:dev entry inside one", async () => {
+  it("refuses outside a dev build and leaves the flag as it was", () => {
     const mock = createMockAudio();
     const app = { ...createApp(), audio: mock.api };
 
     expect(() => muteCommand.run(app, { muted: true })).toThrow("dev builds only");
     expect(mock.api.muted("master")).toBe(false);
+  });
 
+  it("leaves a moku:dev entry in a dev build", async () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = createMockAudio();
+    const app = { ...createApp(), audio: mock.api };
+
     await run(app, muteCommand, { muted: true });
 
     expect(app.log.trace().at(-1)).toMatchObject({
