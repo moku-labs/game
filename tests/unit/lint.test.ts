@@ -81,3 +81,75 @@ describe("L5: no module-scope collections", () => {
     expect(messages).toEqual([]);
   });
 });
+
+/**
+ * Lint a snippet and keep the messages of the core `no-restricted-imports` rule (L9, L10, L12 and
+ * the project index boundary).
+ *
+ * @param code - The source text.
+ * @param path - The path the snippet pretends to live at, relative to the root.
+ * @returns The messages of that rule.
+ */
+async function lintBoundary(code: string, path: string): Promise<string[]> {
+  const eslint = new ESLint({ cwd: ROOT });
+  const [result] = await eslint.lintText(code, { filePath: `${ROOT}${path}` });
+
+  return (result?.messages ?? [])
+    .filter(message => message.ruleId === "no-restricted-imports")
+    .map(message => message.message);
+}
+
+describe("L2: typescript is an optional peer", () => {
+  it.each([
+    "src/plugins/model/x/probe.ts",
+    "src/project/probe.ts"
+  ])("reports a static value import of typescript in %s", async path => {
+    const messages = await lint(
+      'import ts from "typescript";\n\nexport const version = ts.version;\n',
+      path
+    );
+
+    expect(messages).toEqual([
+      "'typescript' import is restricted from being used. typescript is an optional peer. Load it with await import() in src/project/typescript.ts only."
+    ]);
+  });
+
+  it("allows a type import of typescript under src/project/", async () => {
+    const messages = await lint(
+      'import type ts from "typescript";\n\nexport type Node = ts.Node;\n',
+      "src/project/probe.ts"
+    );
+
+    expect(messages).toEqual([]);
+  });
+});
+
+describe("the project index is node-only", () => {
+  const message = "The project index is node-only. Only src/project.ts imports it.";
+
+  it.each([
+    "src/plugins/flow/probe.ts",
+    "src/plugins/ui/probe.ts"
+  ])("reports an import of src/project/ from %s", async path => {
+    const messages = await lintBoundary(
+      'import { openProject } from "../../project/open";\n\nexport const open = openProject;\n',
+      path
+    );
+
+    expect(messages.some(text => text.includes(message))).toBe(true);
+  });
+
+  it("allows the door src/project.ts and the files of src/project/", async () => {
+    const door = await lintBoundary(
+      'import { openProject } from "./project/open";\n\nexport const open = openProject;\n',
+      "src/project.ts"
+    );
+    const inside = await lintBoundary(
+      'import { findKey } from "../project/find";\n\nexport const find = findKey;\n',
+      "src/project/extract/probe.ts"
+    );
+
+    expect(door).toEqual([]);
+    expect(inside).toEqual([]);
+  });
+});

@@ -17,6 +17,10 @@ interface PackageJson {
   bin: Record<string, string>;
   /** The subpath exports. */
   exports: Record<string, string | { types: string; default: string }>;
+  /** The peers a game brings. */
+  peerDependencies: Record<string, string>;
+  /** Which peers are optional. */
+  peerDependenciesMeta: Record<string, { optional: boolean }>;
 }
 
 /** The repository root, the folder of `package.json`. */
@@ -89,6 +93,23 @@ describe("package.json", () => {
     expect(readText(bin ?? "").startsWith("#!/usr/bin/env bun\n")).toBe(true);
   });
 
+  it("the moku-game-index bin is a bun script that runs the built project door", () => {
+    const bin = pkg.bin["moku-game-index"];
+
+    expect(bin).toBe("./bin/moku-game-index.mjs");
+    expect(readText(bin ?? "").startsWith("#!/usr/bin/env bun\n")).toBe(true);
+    expect(readText(bin ?? "")).toContain('from "../dist/project.mjs"');
+  });
+
+  it("exports the project index by subpath, with typescript as an optional peer", () => {
+    expect(pkg.exports["./project"]).toEqual({
+      types: "./dist/project.d.mts",
+      default: "./dist/project.mjs"
+    });
+    expect(pkg.peerDependencies.typescript).toBe(">=5.5");
+    expect(pkg.peerDependenciesMeta.typescript).toEqual({ optional: true });
+  });
+
   it("exports the fonts folder by subpath", () => {
     expect(pkg.exports["./fonts/*"]).toBe("./fonts/*");
   });
@@ -116,11 +137,13 @@ describe("the shipped body font", () => {
 });
 
 describe("llms.txt", () => {
-  it("is a real guide that names the bin and says neither 'not published' nor 'Planned, not built'", () => {
+  it("is a real guide that names the bins and says neither 'not published' nor 'Planned, not built'", () => {
     const guide = readText("llms.txt");
 
     expect(guide.length).toBeGreaterThan(1000);
     expect(guide).toContain("moku-game-assets");
+    expect(guide).toContain("moku-game-index");
+    expect(guide).toContain("@moku-labs/game/project");
     expect(guide).not.toContain("not published");
     expect(guide).not.toContain("Planned, not built");
   });
