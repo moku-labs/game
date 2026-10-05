@@ -4,6 +4,26 @@ import sonarjs from "eslint-plugin-sonarjs";
 import eslintPluginUnicorn from "eslint-plugin-unicorn";
 import tseslint from "typescript-eslint";
 
+// L2 — no static Pixi, Yoga or Playwright import. Blocks 6c and 6d both set
+// `@typescript-eslint/no-restricted-imports`, and a later block replaces the whole rule, so both carry these paths.
+const l2Paths = [
+  {
+    name: "pixi.js",
+    allowTypeImports: true,
+    message: "Load Pixi lazily with import() in renderer onStart. Types may be imported."
+  },
+  {
+    name: "yoga-layout",
+    allowTypeImports: true,
+    message: "Load Yoga lazily with import() in ui onStart. Types may be imported."
+  },
+  {
+    name: "playwright-core",
+    message:
+      "playwright-core is an optional peer. Load it with await import() in src/visual/leg-browser.ts only."
+  }
+];
+
 export default [
   // 1. Global ignores
   {
@@ -441,23 +461,7 @@ export default [
       "@typescript-eslint/no-restricted-imports": [
         "error",
         {
-          paths: [
-            {
-              name: "pixi.js",
-              allowTypeImports: true,
-              message: "Load Pixi lazily with import() in renderer onStart. Types may be imported."
-            },
-            {
-              name: "yoga-layout",
-              allowTypeImports: true,
-              message: "Load Yoga lazily with import() in ui onStart. Types may be imported."
-            },
-            {
-              name: "playwright-core",
-              message:
-                "playwright-core is an optional peer. Load it with await import() in src/visual/leg-browser.ts only."
-            }
-          ]
+          paths: l2Paths
         }
       ],
       "no-restricted-syntax": [
@@ -468,7 +472,12 @@ export default [
         },
         {
           selector:
-            "Program > :matches(VariableDeclaration, ExportNamedDeclaration) NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
+            "Program > VariableDeclaration > VariableDeclarator > NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
+          message: "No module-scope collections."
+        },
+        {
+          selector:
+            "Program > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
           message: "No module-scope collections."
         }
       ]
@@ -476,6 +485,7 @@ export default [
   },
 
   // 6d. L1 — a module of model or flow imports a sibling module only as `import type` from its types.ts.
+  // It sets the rule 6c sets, so it carries the L2 paths again.
   {
     files: [
       "src/plugins/model/*/**/*.ts",
@@ -491,6 +501,7 @@ export default [
       "@typescript-eslint/no-restricted-imports": [
         "error",
         {
+          paths: l2Paths,
           patterns: [
             {
               regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline|jsx|styles|layout)/(?!types$)`,
@@ -547,7 +558,12 @@ export default [
         },
         {
           selector:
-            "Program > :matches(VariableDeclaration, ExportNamedDeclaration) NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
+            "Program > VariableDeclaration > VariableDeclarator > NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
+          message: "No module-scope collections."
+        },
+        {
+          selector:
+            "Program > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
           message: "No module-scope collections."
         }
       ]
