@@ -98,6 +98,33 @@ describe("hot()", () => {
     expect(filter.test("/game/features/home/index.ts")).toBe(false);
   });
 
+  it("matches animations.ts, effects.ts and the generated strings of a locale", () => {
+    const { filter } = register(hot());
+
+    expect(filter.test("/game/features/board/animations.ts")).toBe(true);
+    expect(filter.test("/game/features/board/effects.ts")).toBe(true);
+    expect(filter.test("/game/generated/strings.ru.ts")).toBe(true);
+    expect(filter.test("/game/generated/strings.pt-BR.ts")).toBe(true);
+    expect(filter.test("/game/generated/assets.ts")).toBe(false);
+  });
+
+  it("appends the footer to animations.ts, effects.ts and a generated strings file", async () => {
+    const load = register(hot()).load;
+
+    for (const relative of [
+      "features/board/animations.ts",
+      "features/board/effects.ts",
+      "generated/strings.ru.ts"
+    ]) {
+      const file = await writeTemp(relative);
+      const loaded = await load({ path: file });
+
+      expect(loaded.loader).toBe("ts");
+      expect(loaded.contents.startsWith(SOURCE)).toBe(true);
+      expect(loaded.contents).toContain(`swap(next, ${JSON.stringify(file)});`);
+    }
+  });
+
   it("appends the footer to a .tsx file with loader tsx", async () => {
     const file = await writeTemp("features/home/logo.tsx");
     const loaded = await register(hot()).load({ path: file });

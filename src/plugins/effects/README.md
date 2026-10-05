@@ -158,6 +158,12 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 
 `assets:bundle-unloaded` retires every particle instance and every `Displacement` drawn with one of its keys, whatever their space, drops their bakes, and lets the keys warn again. An effect is baked again once its bundle is back.
 
+`ui:hot-swap` (global, so no `depends` on `ui`) takes the exports of a module the dev server swapped. Each `defineEmitter` export whose id a feature registered replaces it, and its bake is dropped. A live instance keeps its own bake; the next instance bakes the new config. An id no feature registered warns `effects:hot-unknown-emitter`. Other exports are ignored.
+
+### Hot swap (dev)
+
+Save `features/board/effects.ts` while the dev server runs: a changed `starsBurst` plays its new config on the next burst, with no reload. A flying particle finishes with the old one. A new emitter id only warns: list it in a feature and reload the page.
+
 ## Lifecycle
 
 `onStart` resolves the four dependencies and the phone flag, registers the built-in kinds and then the `filters` of every feature, reads the `emitters`, and opens the two systems with the world hooks. `onStop` runs from state alone: it destroys every container, orphan, filter and uniform buffer and clears the filters of every view, while `world` and `renderer` still run.

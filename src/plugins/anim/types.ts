@@ -438,6 +438,25 @@ export type AnimApi = {
    * ```
    */
   onMark(fn: MarkListener): () => void;
+
+  /**
+   * Swaps a registered animation for a new definition of the same id. The dev hot swap of `ui`
+   * calls it when a saved `animations.ts` exports one. The next `play` effect of a node builds
+   * the new definition; a timeline that runs now keeps the tree it was built with.
+   *
+   * @param definition - The new definition; its id names the animation it replaces.
+   * @throws {Error} When no feature registered an animation with that id.
+   * @example
+   * ```ts
+   * // The ui hot swap: a save of `board/animations.ts` brings a bigger merge burst.
+   * const mergeBurst = defineAnimation("board.mergeBurst", { slots: { cell: type<Target>() },
+   *   build: ({ cell }) => tween(cell, Transform, { scale: 1.4 }, { ms: 300 }) });
+   * ctx.require(animPlugin).replace(mergeBurst);
+   * // A node then runs fx(play(mergeBurst, { cell: { projection: "board.items", key: "i3" } })):
+   * // the play effect builds the new tree, and item i3 grows to scale 1.4 in 300 ms.
+   * ```
+   */
+  replace(definition: AnyAnimationDefinition): void;
 };
 
 /**

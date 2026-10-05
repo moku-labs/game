@@ -32,9 +32,19 @@ export type Config = {
 };
 
 /**
- * Global events. Empty: every event belongs to a plugin.
+ * Global events: the few that cross plugins with no `depends` edge. Every other event belongs to a
+ * plugin.
+ *
+ * @example
+ * ```ts
+ * // ui, after a dev save of features/board/effects.ts; effects hooks it with no depends on ui.
+ * ctx.emit("ui:hot-swap", { file: "features/board/effects.ts", module: { starsBurst } });
+ * ```
  */
-export type Events = Record<never, never>;
+export type Events = {
+  /** A dev hot swap was applied: the saved module's new exports. `ui` emits it, `effects` replaces its emitters on it. */
+  "ui:hot-swap": { file: string; module: Readonly<Record<string, unknown>> };
+};
 
 /**
  * Public API type of a plugin instance, read from its phantom carrier.

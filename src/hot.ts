@@ -2,10 +2,12 @@
  * @file Hot entry (subpath `./hot`): the Bun plugin of the dev server that hot swaps the views of
  * a running game. It appends a footer to every view module it loads: the module accepts its own
  * update and hands the new exports to the running game through `globalThis.__moku_hot`. The `ui`
- * plugin installs that handler in dev builds only. A view module is a `.tsx` file, a `styles.ts`
- * or a `view.ts`; a logic module never gets the footer, so its save reaches the root and the page
- * reloads and restores its state. The plugin lives in `[serve.static]` of `bunfig.toml`, the dev
- * server only: `Bun.build` of a production build never loads it.
+ * plugin installs that handler in dev builds only. What swaps: styles, components, projections,
+ * animations, text styles, emitters and generated strings. A view module is a `.tsx` file, a
+ * `styles.ts`, a `view.ts`, an `animations.ts`, an `effects.ts` or a generated
+ * `generated/strings.<locale>.ts`; a logic module never gets the footer, so its save reaches the
+ * root and the page reloads and restores its state. The plugin lives in `[serve.static]` of
+ * `bunfig.toml`, the dev server only: `Bun.build` of a production build never loads it.
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -24,15 +26,17 @@ import path from "node:path";
  */
 export type HotOptions = {
   /**
-   * The files that get the footer. Default: `.tsx` files, `styles.ts` and `view.ts`. Bun runs it
-   * as the load filter on the absolute path, so it should not anchor at the start.
+   * The files that get the footer. Default: `.tsx` files, `styles.ts`, `view.ts`,
+   * `animations.ts`, `effects.ts` and `generated/strings.<locale>.ts`. Bun runs it as the load
+   * filter on the absolute path, so it should not anchor at the start.
    */
   include?: RegExp;
   /**
    * The files that load unchanged although they match `include`. Default: anything under
    * `node_modules/`, `web/`, `generated/`, `__tests__/` or `tests/`, and `.test`/`.spec` files.
    * Tested on the path relative to the game root with a leading `/` and `/` separators, also on
-   * Windows: `/features/home/view.tsx`. A folder above the game root never excludes a file.
+   * Windows: `/features/home/view.tsx`. A folder above the game root never excludes a file. A
+   * `generated/strings.<locale>.ts` file is never excluded: the generated strings swap.
    */
   exclude?: RegExp;
 };
@@ -69,8 +73,15 @@ export type HotPlugin = {
   setup(build: HotBuild): void;
 };
 
-/** The default view modules: `.tsx` files, `styles.ts` and `view.ts`. */
-const DEFAULT_INCLUDE = /(\.tsx|\/styles\.ts|\/view\.ts)$/;
+/**
+ * The default view modules: `.tsx` files, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`
+ * and the generated strings of a locale.
+ */
+const DEFAULT_INCLUDE =
+  /(\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.[\w-]+\.ts)$/;
+
+/** The generated strings of one locale, the one file under `generated/` that swaps. */
+const STRINGS = /\/generated\/strings\.[\w-]+\.ts$/;
 
 /** The default folders and test files that never hot swap. The outer group only scopes the `$`. */
 const DEFAULT_EXCLUDE = /(\/(node_modules|web|generated|__tests__|tests)\/|\.(test|spec)\.tsx?$)/;
@@ -155,8 +166,11 @@ export function hot(options: HotOptions = {}): HotPlugin {
         const loader = file.endsWith(".tsx") ? "tsx" : "ts";
 
         const inGame = gamePath(file, process.cwd());
+        const strings = STRINGS.test(inGame ?? "");
 
-        if (inGame === undefined || exclude.test(inGame)) return { contents: source, loader };
+        if (inGame === undefined || (!strings && exclude.test(inGame))) {
+          return { contents: source, loader };
+        }
 
         return { contents: `${source}\n${footerOf(file)}`, loader };
       });

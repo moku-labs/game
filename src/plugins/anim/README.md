@@ -32,6 +32,7 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 | `onMark(fn)` | Direct subscription next to the event. Returns the remover. |
 | `reducedMotion()` | Whether reduced motion is on. |
 | `setReducedMotion(on)` | Switches reduced motion on or off for every track started afterwards. |
+| `replace(definition)` | Dev hot swap: swaps the registered animation of `definition.id`. The next `play` effect builds the new tree; a running timeline keeps its own. An unknown id throws. |
 
 ## Events
 

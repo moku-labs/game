@@ -32,7 +32,7 @@ export const i18nPlugin = /*#__PURE__*/ createPlugin("i18n", {
   depends: [flowPlugin],
   events: (register: RegisterFunction) =>
     register.map<Events>({
-      "i18n:locale-changed": "The current locale changed and its messages are loaded"
+      "i18n:locale-changed": "The current locale changed, or its messages were replaced"
     }),
   config,
   createState: createI18nState,

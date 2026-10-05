@@ -72,7 +72,7 @@ function messagesOf(value: unknown): CompiledMessages {
  * @param entry - The registered module.
  * @returns True when the messages are there already.
  */
-function isReady(entry: RegisteredModule): entry is ResolvedModule {
+export function isReady(entry: RegisteredModule): entry is ResolvedModule {
   return typeof entry.messages !== "function";
 }
 
@@ -136,7 +136,8 @@ function mergeEager(state: State): void {
 }
 
 /**
- * Runs the loaders of one locale, once, and merges everything registered for it.
+ * Runs the loaders of one locale, once, and merges everything registered for it. The resolved
+ * modules replace the loaders in the registry, so `replace` finds the keys of a lazy locale too.
  *
  * @param state - The plugin state.
  * @param locale - The locale to load.
@@ -155,7 +156,10 @@ export async function loadLocale(state: State, locale: string): Promise<void> {
     resolved.push({ from: entry.from, messages });
   }
 
-  state.loaded.set(locale, mergeLocales(resolved));
+  const merged = mergeLocales(resolved);
+
+  state.registered.set(locale, resolved);
+  state.loaded.set(locale, merged);
 }
 
 /**

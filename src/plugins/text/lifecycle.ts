@@ -1,7 +1,7 @@
 /**
  * @file text plugin — lifecycle: the dependency resolution, the style table read out of the
- * feature descriptions, the four registrations `onStart` opens, and the teardown that closes
- * exactly those.
+ * feature descriptions and written again by the dev hot swap, the four registrations `onStart`
+ * opens, and the teardown that closes exactly those.
  */
 import { assetsPlugin } from "../assets";
 import { clockPlugin } from "../clock";
@@ -12,11 +12,14 @@ import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { builtInStyles, readStyle, Text } from "./components";
 import { createTextAdapter, installFonts } from "./display";
-import { createTextSystem, forgetText } from "./resolve";
-import type { Deps, KernelSlice, State, TextCtx } from "./types";
+import { createTextSystem, forgetText, markDirty } from "./resolve";
+import type { Deps, KernelSlice, State, TextCtx, TextStyles } from "./types";
 
 /** The owner of the two built-in styles, which no feature can collide with. */
 const BUILT_IN = "text";
+
+/** The owner of a style name the dev hot swap added, which no feature registered at start. */
+const HOT_SWAP = "hot swap";
 
 /**
  * Resolves the seven dependency APIs with `ctx.require`.
@@ -118,6 +121,33 @@ function collectFonts(ctx: TextCtx): void {
     if (style.bold !== undefined) ctx.state.fontKeys.add(style.bold);
     if (style.italic !== undefined) ctx.state.fontKeys.add(style.italic);
   }
+}
+
+/**
+ * Writes the styles of a saved styles file over the table: a known name keeps its owner, a new
+ * name is added. Then the fonts of the new styles are read, the layouts measured with the old
+ * styles are dropped, and every label is marked, so the next frame lays it out again and the
+ * display adapter redraws it with the new style object.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param styles - What `defineTextStyles` returned in the saved module.
+ */
+export function replaceStyles(ctx: TextCtx, styles: TextStyles): void {
+  for (const [name, value] of Object.entries(styles.map)) {
+    const style = readStyle(name, value);
+
+    if (style === undefined) continue;
+
+    ctx.state.styles.set(name, style);
+
+    if (!ctx.state.styleOwner.has(name)) ctx.state.styleOwner.set(name, HOT_SWAP);
+  }
+
+  collectFonts(ctx);
+  installFonts(ctx);
+  ctx.state.cache.clear();
+  markDirty(ctx);
+  ctx.deps.time.wake();
 }
 
 /**

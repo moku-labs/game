@@ -618,10 +618,12 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
       // The alpha fades the container, so a tween on it never touches the runs.
       container.alpha = next.alpha;
 
+      // A replaced style is a new object under the same name, so the label redraws with it.
       if (
         previous.resolved === next.resolved &&
         previous.style === next.style &&
-        samePoint(previous.anchor, next.anchor)
+        samePoint(previous.anchor, next.anchor) &&
+        ctx.state.drawn.get(container)?.style === styleOf(ctx, next.style)
       ) {
         return;
       }

@@ -10,6 +10,11 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
 - **API:** `measure(content, style)`, `hasGlyph(char, style)`, `styles()`. `hasGlyph` answers
   whether the loaded font of a style has a character, the lookup Pixi draws by; it is true while
   the font is not loaded. `ui` measures a text field's caret over the characters it is true for.
+  `replaceStyles(styles)` is the dev hot swap of a saved styles file, called by `ui`: every style
+  of the map is written over the table (a new name is added, a known one keeps its owner), the
+  fonts are read, the layout cache is dropped, every label is marked and the loop is woken. The
+  next frame redraws a label with the new style even when its text and its style name did not
+  change: the display adapter compares the drawn style object with the current one.
 - **Missing glyphs:** a character the loaded font has no glyph for (an emoji, CJK) is drawn as
   nothing by Pixi, so it measures 0 wide, letter spacing included, and is reported once per font
   and character. `"ab😀"` measures as `"ab"`, and a label is as wide as what is drawn.
