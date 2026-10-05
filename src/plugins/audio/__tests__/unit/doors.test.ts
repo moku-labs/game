@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../../../../index";
 import { read } from "../../../flow/doors/read";
 import type { Descriptor } from "../../../flow/types";
-import { soundsSource } from "../../inspect";
+import { audioMutedSource, soundsSource } from "../../inspect";
 import { playMusic } from "../../playback";
 import { createFakeContext } from "../fake-audio-context";
 import { createMockAudio } from "./mock-audio";
@@ -79,6 +79,29 @@ describe("game.sounds", () => {
   it("throws a clear error when the app has no audioPlugin", () => {
     expect(() => read(createApp(), soundsSource)).toThrow(
       "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
+    );
+  });
+});
+
+describe("game.audioMuted", () => {
+  it("is a frame source with no input", () => {
+    expect(audioMutedSource.id).toBe("game.audioMuted");
+    expect(audioMutedSource.changes).toBe("frame");
+    expect(audioMutedSource.input).toEqual({});
+  });
+
+  it("reads the mute flag of the master bus", () => {
+    const mock = createMockAudio();
+    const app = { ...createApp(), audio: mock.api };
+
+    expect(read(app, audioMutedSource)).toBe(false);
+    mock.api.mute("master", true);
+    expect(read(app, audioMutedSource)).toBe(true);
+  });
+
+  it("throws a clear error when the app has no audioPlugin", () => {
+    expect(() => read(createApp(), audioMutedSource)).toThrow(
+      "[game] The source game.audioMuted needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
     );
   });
 });

@@ -1,6 +1,6 @@
 /**
- * @file audio plugin — the audio source of the `/inspect` door: the journal of started sounds.
- * Production-safe: it only reads.
+ * @file audio plugin — the audio sources of the `/inspect` door: the journal of started sounds
+ * and the mute flag of the master bus. Production-safe: they only read.
  */
 import { defineSource } from "../flow/doors/define";
 import { notInstalled } from "../flow/doors/dev";
@@ -30,5 +30,29 @@ export const soundsSource = defineSource({
     const entries = app.audio.journal();
 
     return last === undefined ? entries : entries.slice(Math.max(0, entries.length - last));
+  }
+});
+
+/**
+ * Whether the whole game is muted: the mute flag of the `master` bus. The `game.mute` command
+ * writes it.
+ *
+ * @throws {Error} `[game] The source game.audioMuted needs audioPlugin.` when the app has no `audioPlugin`.
+ * @example
+ * ```ts
+ * // The editor muted the game, and an e2e script checks the switch took.
+ * await run(app, commands.mute, { muted: true });
+ * read(app, sources.audioMuted); // true
+ * ```
+ */
+export const audioMutedSource = defineSource({
+  id: "game.audioMuted",
+  title: "Audio muted",
+  input: {},
+  changes: "frame",
+  read: (app: HeadlessApp & { readonly audio?: AudioApi }) => {
+    if (app.audio === undefined) throw notInstalled("game.audioMuted", "audioPlugin");
+
+    return app.audio.muted("master");
   }
 });

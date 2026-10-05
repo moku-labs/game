@@ -94,6 +94,25 @@ describe("mute", () => {
   });
 });
 
+describe("muted", () => {
+  it("is false by default, true after a mute and false after an unmute", () => {
+    const mock = createMockAudio();
+
+    expect(mock.api.muted("master")).toBe(false);
+    mock.api.mute("master", true);
+    expect(mock.api.muted("master")).toBe(true);
+    expect(mock.api.muted("music")).toBe(false);
+    mock.api.mute("master", false);
+    expect(mock.api.muted("master")).toBe(false);
+  });
+
+  it("throws for a bus that does not exist", () => {
+    const mock = createMockAudio();
+
+    expect(() => mock.api.muted("voice" as Bus)).toThrow("does not exist");
+  });
+});
+
 describe("unlocked", () => {
   it("is false before the first pointer event and headless", () => {
     const mock = createMockAudio();

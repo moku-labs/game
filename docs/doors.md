@@ -75,6 +75,7 @@ From `@moku-labs/game/inspect`. `Changes` is when `watch` reads the source again
 | `render` | `game.render` | none | frame | `renderer.stats()`: `{ fps, frameMs, textures, textureMb, views, pooled, renderPasses }`, and `drawCalls` in a dev build. `renderPasses` is 1 for the frame plus, for every view with an enabled filter, 1 for its content and the passes of its filters |
 | `effects` | `game.effects` | none | frame | `effects.stats()`: `{ particles, emitters, filters, renderPasses }`. Only in a game that composes `effectsPlugin` |
 | `sounds` | `game.sounds` | `{ last: "number?" }` | frame | `audio.journal()`: all, or the last `last`. Empty unless `pluginConfigs.audio.journal` is above 0 |
+| `audioMuted` | `game.audioMuted` | none | frame | `audio.muted("master")`: whether the whole game is muted. Only in a game that composes `audioPlugin` |
 | `assets` | `game.assets` | none | frame | `assets.usage()`: `{ textureMb, budgetMb, bundles }` |
 | `log` | `game.log` | `{ level: "string?" }` | frame | `log.trace()`: every entry, or the entries at `level` and above. A level other than `debug`, `info`, `warn`, `error` throws |
 | `explain` | `game.explain` | `{ entity: "number" }` | frame | One entity in full: `{ id, owner, key, components, skipped, motions }`. `motions` lists the components a motion still drives. `undefined` for a stale id |
@@ -103,6 +104,7 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `debug` | `game.debug` | `{ nineSlice: "boolean" }` | cosmetic | `renderer.sync.debug.nineSlice(on)`. Value: the debug switches |
 | `reducedMotion` | `game.reducedMotion` | `{ on: "boolean" }` | cosmetic | `anim.setReducedMotion(on)`. Value: `anim.reducedMotion()` |
 | `timeScale` | `game.timeScale` | `{ scale: "number" }` | cosmetic | `time.setScale(scale)`. A scale below 0 or not finite throws. Value: `time.snapshot()` |
+| `mute` | `game.mute` | `{ muted: "boolean" }` | cosmetic | `audio.mute("master", muted)`: music and sfx go silent, the stored volumes stay. Value: `audio.muted("master")`. Only in a game that composes `audioPlugin` |
 | `trace` | `game.trace` | `{ path: "json" }` | route | `input.trace(path)`, a list of `{ projection, key }`. Value: whether the gate took the answer. See the [input README](../src/plugins/input/README.md) |
 
 ### Capture options

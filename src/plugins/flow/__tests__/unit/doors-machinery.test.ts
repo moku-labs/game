@@ -84,6 +84,12 @@ describe("notInstalled", () => {
       "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
     );
   });
+
+  it("names a command when the kind says so", () => {
+    expect(notInstalled("game.mute", "audioPlugin", "command").message).toBe(
+      "[game] The command game.mute needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
+    );
+  });
 });
 
 describe("defineSource and defineCommand", () => {

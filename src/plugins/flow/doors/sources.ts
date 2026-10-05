@@ -5,7 +5,7 @@
  * `/inspect` bundle carries no command.
  */
 import { assetsSource } from "../../assets/inspect";
-import { soundsSource } from "../../audio/inspect";
+import { audioMutedSource, soundsSource } from "../../audio/inspect";
 import { effectsSource } from "../../effects/inspect";
 import { modelSource } from "../../model/inspect";
 import { atSource, renderSource } from "../../renderer/inspect";
@@ -50,6 +50,7 @@ export const sources = Object.freeze({
   locate: locateSource,
   render: renderSource,
   sounds: soundsSource,
+  audioMuted: audioMutedSource,
   effects: effectsSource,
   assets: assetsSource,
   log: logSource,

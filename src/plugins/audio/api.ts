@@ -70,6 +70,7 @@ export function createAudioApi(ctx: KernelSlice): AudioApi {
       state.buses[checked].muted = on;
       applyGain(state, checked);
     },
+    muted: (bus: Bus): boolean => state.buses[busOf(state, bus)].muted,
     unlocked: (): boolean => state.unlocked,
     journal: (): readonly SoundEntry[] => state.journal
   };

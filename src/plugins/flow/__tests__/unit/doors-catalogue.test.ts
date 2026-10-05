@@ -29,6 +29,7 @@ describe("the base catalogue", () => {
       "locate",
       "render",
       "sounds",
+      "audioMuted",
       "effects",
       "assets",
       "log",
@@ -53,6 +54,7 @@ describe("the base catalogue", () => {
       "reducedMotion",
       "fill",
       "timeScale",
+      "mute",
       "trace"
     ]);
   });
