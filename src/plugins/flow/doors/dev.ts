@@ -55,18 +55,25 @@ export function controlRefused(): Error {
 }
 
 /**
- * Builds the error a door source throws when the opt-in plugin it reads is not installed.
+ * Builds the error a door source or command throws when the opt-in plugin it uses is not
+ * installed.
  *
- * @param id - The id of the source.
- * @param plugin - The export name of the plugin it reads.
+ * @param id - The id of the source or the command.
+ * @param plugin - The export name of the plugin it uses.
+ * @param kind - What the door descriptor is. A source by default.
  * @returns The error, ready to throw.
  * @example
  * ```ts
  * notInstalled("game.sounds", "audioPlugin").message; // "[game] The source game.sounds needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
+ * notInstalled("game.mute", "audioPlugin", "command").message; // "[game] The command game.mute needs audioPlugin.\n  Add audioPlugin to createApp({ plugins })."
  * ```
  */
-export function notInstalled(id: string, plugin: string): Error {
+export function notInstalled(
+  id: string,
+  plugin: string,
+  kind: "source" | "command" = "source"
+): Error {
   return new Error(
-    `[game] The source ${id} needs ${plugin}.\n  Add ${plugin} to createApp({ plugins }).`
+    `[game] The ${kind} ${id} needs ${plugin}.\n  Add ${plugin} to createApp({ plugins }).`
   );
 }

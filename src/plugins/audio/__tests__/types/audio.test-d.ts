@@ -41,12 +41,17 @@ const api = {} as AudioApi;
 expectTypeOf(api.setVolume).parameter(0).toEqualTypeOf<Bus>();
 expectTypeOf(api.volume("music")).toEqualTypeOf<number>();
 expectTypeOf(api.unlocked()).toEqualTypeOf<boolean>();
+expectTypeOf(api.muted).parameter(0).toEqualTypeOf<Bus>();
+expectTypeOf(api.muted("master")).toEqualTypeOf<boolean>();
 expectTypeOf(api.journal()).toEqualTypeOf<readonly SoundEntry[]>();
 expectTypeOf<SoundEntry["kind"]>().toEqualTypeOf<"sfx" | "music">();
 expectTypeOf<Config["journal"]>().toEqualTypeOf<number>();
 
 // @ts-expect-error — "voice" is not one of the three buses.
 api.setVolume("voice", 1);
+
+// @ts-expect-error — "voice" is not one of the three buses.
+api.muted("voice");
 
 const volumes: Volumes = () => ({ music: 0.5, master: 1 });
 

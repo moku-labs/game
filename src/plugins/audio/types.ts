@@ -335,6 +335,22 @@ export type AudioApi = {
   mute(bus: Bus, on: boolean): void;
 
   /**
+   * Tells whether one bus is muted: the stored flag `mute` wrote. A pause does not change it, and
+   * a headless run answers it too.
+   *
+   * @param bus - The bus to read.
+   * @returns True while the bus is muted.
+   * @throws {Error} When the bus does not exist.
+   * @example
+   * ```ts
+   * // The settings screen draws the Sound switch off after the player muted the game.
+   * app.audio.mute("master", true);
+   * app.audio.muted("master"); // true
+   * ```
+   */
+  muted(bus: Bus): boolean;
+
+  /**
    * Tells whether the browser let the audio context run. It is false until the first pointer
    * event on the page resumed it, and false for the whole of a headless run.
    *

@@ -38,7 +38,7 @@ Both handlers are registered with `{ runInFast: false }`: a fast walk never wait
 
 The settings node commits `player.settings.audio`; on every `model:committed` this plugin reads `config.volumes(player)` and applies the buses it names. There is no intent plumbing and no `audio` in a node's context: what the player chose is saved with the player, and a reload applies it before the first scene.
 
-`setVolume`, `volume` and `mute` stay for tests and dev tools. With `volumes` configured, the next commit overwrites what `setVolume` set.
+`setVolume`, `volume`, `mute` and `muted` stay for tests and dev tools. `muted(bus)` answers the stored flag; a pause does not change it. With `volumes` configured, the next commit overwrites what `setVolume` set.
 
 ## Config
 
@@ -105,7 +105,7 @@ At `"stream"` every level goes through the track gain, never `element.volume`, w
 
 ## Headless
 
-Without a context (plain Bun, no `AudioContext`) no element and no URL is ever made, and both handlers are still registered, so every `await fx(sfx(…))` resolves at once. Every member keeps its state and does nothing: `setVolume` stores, `volume` reads it back, `mute` stores the flag, `unlocked()` is `false`. The hooks write state only — `model:committed` still updates the stored volumes, and the scene's music key is still remembered.
+Without a context (plain Bun, no `AudioContext`) no element and no URL is ever made, and both handlers are still registered, so every `await fx(sfx(…))` resolves at once. Every member keeps its state and does nothing: `setVolume` stores, `volume` reads it back, `mute` stores the flag, `muted` reads it back, `unlocked()` is `false`. The hooks write state only — `model:committed` still updates the stored volumes, and the scene's music key is still remembered.
 
 ## Doors
 
@@ -114,6 +114,16 @@ Without a context (plain Bun, no `AudioContext`) no element and no URL is ever m
 `journal()`, all of it or the last `last` entries, and is read again every frame
 (`changes: "frame"`). Empty unless `journal` is above 0.
 Without `audioPlugin` in the app it throws `[game] The source game.sounds needs audioPlugin.`
+
+`inspect.ts` also holds `game.audioMuted` (key `audioMuted` in `sources`). No input, read every
+frame: it answers `muted("master")`. Without `audioPlugin` it throws
+`[game] The source game.audioMuted needs audioPlugin.`
+
+`control.ts` holds `game.mute` (key `mute` in `commands`) of the editor's control door,
+`@moku-labs/game/control`, dev builds only. Input `{ muted: "boolean" }`, effect `cosmetic`: it
+calls `mute("master", muted)`, so music and sfx both go silent and the stored volumes stay. Value:
+`muted("master")` after the write. Without `audioPlugin` it throws
+`[game] The command game.mute needs audioPlugin.`
 
 ## Events
 
