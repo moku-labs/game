@@ -70,7 +70,7 @@ From `@moku-labs/game/inspect`. `Changes` is when `watch` reads the source again
 | `model` | `game.model` | none | commit | `model.store.snapshot()`: the committed `{ player, session, rng }` |
 | `entities` | `game.entities` | `{ owner: "string?", component: "string?" }` | frame | `world.ecs.snapshot().entities`: all, the ones whose owner has that name, the ones that carry that component, or both |
 | `projections` | `game.projections` | none | commit | Projection name to key to entity, through `world.projection.keyOf` |
-| `ui` | `game.ui` | none | frame | `ui.tree()`: the live screen as plain data |
+| `ui` | `game.ui` | none | frame | `ui.tree()`: the live screen as plain data. Each node has `key`, `type`, `rect`, `style`, `state`, `children`; a text adds `content`, the words it draws after `tr()` and `bind`; a text field adds `value` |
 | `locate` | `game.locate` | `{ key: "string?", target: "json?" }`, exactly one | frame | Where a ui element (`key`) or a view (`target: { projection, key }`) is on the page: `{ x, y, w, h }` in CSS px. Reference units while the renderer is inert; a view has no box then. `undefined` when it is not on screen |
 | `render` | `game.render` | none | frame | `renderer.stats()`: `{ fps, frameMs, textures, textureMb, views, pooled, renderPasses }`, and `drawCalls` in a dev build. `renderPasses` is 1 for the frame plus, for every view with an enabled filter, 1 for its content and the passes of its filters |
 | `effects` | `game.effects` | none | frame | `effects.stats()`: `{ particles, emitters, filters, renderPasses }`. Only in a game that composes `effectsPlugin` |

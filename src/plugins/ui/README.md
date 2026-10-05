@@ -13,7 +13,7 @@ rect from one Yoga solve per change.
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `value` on a text field, `window` on a windowed scroll, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
 | `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
@@ -427,7 +427,7 @@ one with `ui`, `renderer` and `world`.
 
 | Key in `sources` | id | Input | Changes | Reads |
 |---|---|---|---|---|
-| `ui` | `game.ui` | none | frame | `app.ui.tree()`: the live screen as plain data |
+| `ui` | `game.ui` | none | frame | `app.ui.tree()`: the live screen as plain data; a text node carries `content`, the words it draws |
 | `locate` | `game.locate` | `{ key: "string?", target: "json?" }`, exactly one | frame | `{ x, y, w, h }` of the element with that `key` or of the view `target: { projection, key }`, in CSS px of the page, or `undefined` |
 
 `game.locate` answers where something is drawn, by either address the doors use. It replaces
