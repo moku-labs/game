@@ -32,3 +32,36 @@ describe("current", () => {
     expect(mock.api.current()).toBeUndefined();
   });
 });
+
+describe("expect", () => {
+  it("records the scene the next rest node without its own scene mounts", () => {
+    const mock = createMockScenes();
+
+    mock.flow.features.push({ name: "menu", description: { scenes: [homeScene] } });
+    mock.start();
+    mock.api.expect("home");
+
+    expect(mock.state.pending).toBe("home");
+    expect(mock.api.current()).toBeUndefined();
+  });
+
+  it("throws for an id no feature declared and records nothing", () => {
+    const mock = createMockScenes();
+
+    mock.flow.features.push({ name: "menu", description: { scenes: [homeScene] } });
+    mock.start();
+
+    expect(() => mock.api.expect("hom")).toThrow(
+      '[game] Scene "hom" is not registered.\n  List it in the scenes of a feature.'
+    );
+    expect(mock.state.pending).toBeUndefined();
+  });
+
+  it("throws before onStart filled the registry", () => {
+    const mock = createMockScenes();
+
+    mock.flow.features.push({ name: "menu", description: { scenes: [homeScene] } });
+
+    expect(() => mock.api.expect("home")).toThrow('[game] Scene "home" is not registered.');
+  });
+});

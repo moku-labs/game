@@ -27,6 +27,10 @@
       "types": "./dist/control.d.mts",
       "default": "./dist/control.mjs"
     },
+    "./hot": {
+      "types": "./dist/hot.d.mts",
+      "default": "./dist/hot.mjs"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.mts",
       "default": "./dist/jsx-runtime.mjs"

@@ -103,6 +103,7 @@ function exposeEcs(ecs: EcsModule, projection: ProjectionModule): EcsApi {
 function exposeProjection(projection: ProjectionModule): ProjectionApi {
   return {
     register: projection.register,
+    replace: projection.replace,
     setLayers: projection.setLayers,
     layers: projection.layers,
     mount: projection.mount,

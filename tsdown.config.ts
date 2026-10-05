@@ -10,6 +10,8 @@ export default defineConfig({
     // Subpaths: the editor doors, reads and dev-only commands; re-exports only.
     inspect: "src/inspect.ts",
     control: "src/control.ts",
+    // Subpath: the Bun plugin of the dev server that hot swaps views; bun only.
+    hot: "src/hot.ts",
     // Subpaths: the JSX runtimes `jsxImportSource: "@moku-labs/game"` names; re-exports only.
     "jsx-runtime": "src/jsx-runtime.ts",
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts"

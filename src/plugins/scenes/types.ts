@@ -1,6 +1,6 @@
 /**
  * @file scenes plugin — type definitions: the scene declaration, the signature of the authoring
- * helper with its layer check, the state the switch runs on and the one public API member.
+ * helper with its layer check, the state the switch runs on and the public API.
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
@@ -212,7 +212,11 @@ export type State = {
   scenes: Map<string, SceneDefinition>;
   /** Id of the scene that is mounted now. */
   current: string | undefined;
-  /** Fast mode: the scene a transit node named, applied at the next rest node. */
+  /**
+   * The scene the next rest node without its own `scene` mounts: the one a transit node named in
+   * fast mode, or the one the restore door expected with `expect`. A rest node clears it; an over
+   * rest node takes it only while nothing is mounted.
+   */
   pending: string | undefined;
   owner: SceneOwner;
   /** The remover of the `onEnter` callback: set in `onStart`, run in `onStop`. */
@@ -238,7 +242,7 @@ export type Events = {
 
 /**
  * scenes plugin API, `app.scenes`. A scene is switched by the graph, never by a call, so the
- * plugin answers one question and takes no orders.
+ * plugin answers one question and takes one order, for the restore door.
  *
  * @example
  * ```ts
@@ -259,6 +263,24 @@ export type ScenesApi = {
    * ```
    */
   current(): string | undefined;
+  /**
+   * Names the scene the next rest node without its own `scene` mounts. The restore door calls it
+   * with the scene of a bookmark, so a bookmark at a popup comes back with the scene under it.
+   * An over rest node takes the expected scene only while nothing is mounted; it never switches a
+   * mounted one.
+   *
+   * @param id - Id of a scene a feature declared.
+   * @throws {Error} For an id no feature declared, also before `onStart` filled the registry.
+   * @example
+   * ```ts
+   * // A fresh page restores a bookmark taken at the Settings popup over Home.
+   * app.scenes.expect("home");
+   * await app.flow.restore(bookmark);
+   * await app.flow.walk([]); // the scene stage runs after restore resolves
+   * app.scenes.current(); // "home"
+   * ```
+   */
+  expect(id: string): void;
 };
 
 /**
