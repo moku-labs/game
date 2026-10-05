@@ -192,6 +192,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | `@moku-labs/game/assets` | Node and Bun | Asset keys, the manifest, strings, the pack |
 | `@moku-labs/game/inspect` | anywhere | Read a running game |
 | `@moku-labs/game/control` | dev builds | Drive a running game |
+| `@moku-labs/game/hot` | the Bun dev server | The `bunfig.toml` plugin that hot swaps views. See [Hot swap](./docs/hot-swap.md) |
 | `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | anywhere | The JSX runtime. A game never imports it by hand. |
 
 ## Docs
@@ -202,6 +203,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | [Plugins](./docs/plugins.md) | The dependency graph, the plugin table, every root export |
 | [Interface in JSX](./docs/jsx.md) | Tags, components, styles, popups |
 | [Doors for the editor](./docs/doors.md) | `/inspect` and `/control`, base sources and commands |
+| [Hot swap](./docs/hot-swap.md) | Save a view, see it in the running page, no reload |
 | [Events](./docs/events.md) | Every event and its payload |
 | [Configuration](./docs/configuration.md) | Every config field and its default |
 | [Testing](./docs/testing.md) | Headless and visual tests, all scripts, test layout, lint rules |
@@ -224,6 +226,17 @@ bun run release          # moku-release
 ```
 
 Every script is in [docs/testing.md](./docs/testing.md#scripts).
+
+### Hot swap
+
+A save of a view file swaps it in the running page, with the same state. One line in the game's `bunfig.toml`:
+
+```toml
+[serve.static]
+plugins = ["@moku-labs/game/hot"]
+```
+
+A save of a logic file reloads the page. What swaps and what reloads: [docs/hot-swap.md](./docs/hot-swap.md).
 
 ## Requirements
 

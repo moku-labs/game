@@ -95,8 +95,8 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `key` | `game.key` | `{ key: "string", shift: "boolean?" }` | route | `input.pressKey(key, { shift })`. Value: whether a listener handled the key |
 | `fill` | `game.fill` | `{ key: "string", value: "string" }` | route | `ui.fill(key, value)`: types into the `input` with that `key`, cut to its `maxLength`. Value: whether the field took the text |
 | `walk` | `game.walk` | `{ route: "json" }` | route | `flow.walk(route)`. Value: the flow state after the walk |
-| `bookmark` | `game.bookmark` | none | read | `flow.bookmark()`. Value: the bookmark, plain JSON |
-| `restore` | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `flow.restore(bookmark)`, or a `/testing` repro: its state at its checkpoint, then `flow.walk(repro.route)`. Value: the flow state |
+| `bookmark` | `game.bookmark` | none | read | `flow.bookmark()`, plus `scene`, the mounted scene, when the app has `scenes` and a scene is mounted. Value: the bookmark, plain JSON |
+| `restore` | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `scenes.expect(bookmark.scene)` when the bookmark has a `scene`, then `flow.restore(bookmark)`. Or a `/testing` repro: its state at its checkpoint, then `flow.walk(repro.route)`. Value: the flow state |
 | `step` | `game.step` | `{ frames: "number", deltaMs: "number?" }` | cosmetic | `time.step(deltaMs)` `frames` times, also while paused. `deltaMs` is 1000/60 by default. Value: `time.snapshot()` |
 | `pause` | `game.pause` | none | cosmetic | `lifecycle.push("devtools")`. Value: `lifecycle.isPaused()` |
 | `resume` | `game.resume` | none | cosmetic | `lifecycle.pop("devtools")`. Value: `lifecycle.isPaused()`, still true while another reason holds |
@@ -106,6 +106,8 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `timeScale` | `game.timeScale` | `{ scale: "number" }` | cosmetic | `time.setScale(scale)`. A scale below 0 or not finite throws. Value: `time.snapshot()` |
 | `mute` | `game.mute` | `{ muted: "boolean" }` | cosmetic | `audio.mute("master", muted)`: music and sfx go silent, the stored volumes stay. Value: `audio.muted("master")`. Only in a game that composes `audioPlugin` |
 | `trace` | `game.trace` | `{ path: "json" }` | route | `input.trace(path)`, a list of `{ projection, key }`. Value: whether the gate took the answer. See the [input README](../src/plugins/input/README.md) |
+
+A bookmark at a popup comes back with its scene. The Settings popup over Home is a rest node with no `scene` of its own. In a fresh page nothing is mounted, so `game.restore` names the bookmark's `scene` first and the restored node mounts it under the popup. A `scene` that is not a string makes `game.restore` throw. `flow.restore` itself ignores `scene`.
 
 ### Capture options
 
