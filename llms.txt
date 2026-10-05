@@ -152,7 +152,7 @@ type NodeContext = {
 - `moku-game/lazy-imports` (L2): no static value import of `pixi.js` or `yoga-layout`. `import type` and `import()` pass. Default files `**`.
 - `moku-game/native-imports` (L13): no `@moku-labs/system`, `@moku-labs/native`, `@tauri-apps/*` in the logic, `kit.ts` and `game.ts`. Use `platform-bridge.ts`.
 - `moku-game/dev-imports`: `@moku-labs/editor` and `@moku-labs/game/control` only in `web/main.ts`, `web/dev*.ts`, `web/editor*.ts`, `*.dev.ts(x)` and tests.
-- `moku-game/no-module-state` (L5): no module-scope `let`, no module-scope `new Map/Set/WeakMap/WeakSet`. Default files `**`.
+- `moku-game/no-module-state` (L5): no module-scope `let` or `var`, no module-scope `new Map/Set/WeakMap/WeakSet`. Default files `**`.
 - `moku-game/determinism` (L3): no `Math.random`, `Date.now`, `performance.now`, `new Date()`, `setTimeout`, `setInterval` in the logic. `new Date(now)` passes.
 - `moku-game/rules-siblings` (L4): a file under `rules/` imports only `./` siblings.
 - Logic = `**/state.ts`, `**/tables.ts`, `**/{nodes,flows,rules,features}/**`. Tests (`tests/**`, `**/__tests__/**`, `*.test.ts`) are skipped by every rule.

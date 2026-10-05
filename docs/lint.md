@@ -30,7 +30,7 @@ oxlint 1.86.0 or later. The rules use the ESLint rule API, so ESLint 9 loads the
 | `moku-game/lazy-imports` | L2 | `import { Application } from "pixi.js"`, `export … from "yoga-layout"`, subpaths too | `import type …`, `await import("pixi.js")` |
 | `moku-game/native-imports` | L13 | any import or `import()` of `@moku-labs/system`, `@moku-labs/native`, `@tauri-apps/*` | the same import in `platform-bridge.ts`, `native.ts`, `web/` |
 | `moku-game/dev-imports` | dev only | any import or `import()` of `@moku-labs/editor` (and subpaths) or `@moku-labs/game/control` | the same import in a dev file or a test |
-| `moku-game/no-module-state` | L5 | a module-scope `let`, a module-scope `new Map/Set/WeakMap/WeakSet` (exported too) | the same inside a function |
+| `moku-game/no-module-state` | L5 | a module-scope `let` or `var`, a module-scope `new Map/Set/WeakMap/WeakSet` (exported too) | the same inside a function |
 | `moku-game/determinism` | L3 | `Math.random`, `Date.now`, `performance.now`, `new Date()`, `setTimeout`, `setInterval` (bare or on `globalThis`, `window`, `self`) | `new Date(now)`: it formats a stored moment |
 | `moku-game/rules-siblings` | L4 | an import in `rules/` that does not start with `./` | `import { cost } from "./cost"` |
 

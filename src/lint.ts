@@ -293,8 +293,8 @@ function reportModuleState(context: GameLintContext, statement: GameLintNode): v
 
   if (declaration?.type !== "VariableDeclaration") return;
 
-  // A `let` binding is state that outlives every app.
-  if (declaration.kind === "let") {
+  // A `let` or `var` binding is state that outlives every app.
+  if (declaration.kind === "let" || declaration.kind === "var") {
     context.report({
       node: declaration,
       message: "L5: no module-scope state. State lives in player and session."
@@ -388,11 +388,13 @@ const rulesSiblings = importRule(
   ]
 );
 
-/** L5: no module-scope `let` and no module-scope collection. */
+/** L5: no module-scope `let` or `var` and no module-scope collection. */
 const noModuleState: GameLintRule = {
   meta: {
     type: "problem",
-    docs: { description: "No module-scope let and no module-scope Map, Set, WeakMap, WeakSet." },
+    docs: {
+      description: "No module-scope let or var and no module-scope Map, Set, WeakMap, WeakSet."
+    },
     schema: SCHEMA
   },
   /**

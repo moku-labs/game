@@ -131,7 +131,7 @@ const FIXTURE: Record<string, string> = {
   "tests/play.test.ts": 'import { run } from "@moku-labs/game/control";\nexport const go = run;\n',
   // L5
   "state.ts":
-    "let count = 0;\nexport let total = count;\nexport const cache = new Map<string, number>();\nconst seen = new WeakSet<object>();\nexport const size = seen;\n",
+    "let count = 0;\nvar legacy = 0;\nexport let total = count + legacy;\nexport const cache = new Map<string, number>();\nconst seen = new WeakSet<object>();\nexport const size = seen;\n",
   "features/ok-state.ts":
     'export function build(): Map<string, number> {\n  const map = new Map<string, number>();\n  let n = 0;\n  n += 1;\n  map.set("n", n);\n  return map;\n}\n',
   // L3
@@ -159,7 +159,7 @@ describe("@moku-labs/game/lint under oxlint", () => {
       "nodes/native.ts native-imports": 1,
       "rules/bad-import.ts rules-siblings": 2,
       "rules/bad-random.ts determinism": 6,
-      "state.ts no-module-state": 4,
+      "state.ts no-module-state": 5,
       "web/bad-yoga.ts lazy-imports": 1,
       "web/view.ts dev-imports": 1
     });
@@ -374,11 +374,12 @@ describe("@moku-labs/game/lint rules in process", () => {
     ).toEqual([]);
   });
 
-  it("no-module-state: let and collections at module scope, nothing else", () => {
+  it("no-module-state: let, var and collections at module scope, nothing else", () => {
     const program: GameLintNode = {
       type: "Program",
       body: [
         { type: "VariableDeclaration", kind: "let", declarations: [] },
+        { type: "VariableDeclaration", kind: "var", declarations: [] },
         {
           type: "ExportNamedDeclaration",
           declaration: {
@@ -397,6 +398,7 @@ describe("@moku-labs/game/lint rules in process", () => {
     };
 
     expect(check("no-module-state", "state.ts", [["Program", program]])).toEqual([
+      "L5: no module-scope state. State lives in player and session.",
       "L5: no module-scope state. State lives in player and session.",
       "L5: no module-scope collections. Create them inside a function."
     ]);
