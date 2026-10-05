@@ -33,7 +33,7 @@ nothing solves before it. `onStart` also registers `LocalWrite` through `input.c
 the cursor shows a hand over a local-state button, one `input.onKey` listener for the focus, one
 `input.onPointer` listener for the text fields, one `flow.fx.onHint` listener that hands released
 hints to the `change` hooks of elements, and on a page the hidden input of the text fields;
-`onStop` removes all of them.
+`onStop` removes all of them. A dev build also installs the [hot swap](#hot-swap-dev) handler.
 
 ## What an element is drawn with
 
@@ -474,6 +474,66 @@ import { commands, run } from "@moku-labs/game/control";
 // The Rename popup rests: type the name, then submit it with the Enter key.
 (await run(app, commands.fill, { key: "nameField", value: "Alex" })).value; // true
 await run(app, commands.key, { key: "Enter" }); // the gate takes { intent: "save", payload: { name: "Alex" } }
+```
+
+## Hot swap (dev)
+
+`hot.ts` takes the save of a view module while the game runs, with no reload. Only a dev build
+installs it: `onStart` checks the inline guard `typeof __MOKU_GAME_DEV__ !== "undefined" &&
+__MOKU_GAME_DEV__`, so a production `define` folds it and the module leaves the bundle. It sets
+`globalThis.__moku_hot(next, file)`, which the footer of `@moku-labs/game/hot` calls with the new
+exports of the saved module. `onStop` deletes it while it is still this app's handler, so a second
+app on the page keeps its own.
+
+The dev server appends the footer through `bunfig.toml`:
+
+```toml
+[serve.static]
+plugins = ["@moku-labs/game/hot"]
+```
+
+Every export of the saved module is sorted:
+
+| Export | What happens |
+|---|---|
+| a `defineComponent` definition | replaces the component of that name, or adds it |
+| a projection spec: string `name` and `layer`, `from`, `view`, and `key` unless `from` returns one object | `world.projection.replace`: a mounted one runs its new `view` |
+| an object or a function with an own string `kind`, an object with an own string `id` or `name` | refused: a scene, animation, emitter, flow, node, system, ECS component, filter, text styles or plugin is registered by value at start |
+| anything else: styles, tokens, motions, numbers, plain functions, function components | nothing: Bun already gave the importers the new binding |
+
+Then every ui root reconciles and solves on the next frame, `world.projection.rerunAll()` runs
+every projection again, `time.wake()` lifts the idle cap, and `ui:hot-swap` is logged at info
+with `{ file, components, projections }`. This runs for a module that swapped nothing too, so a
+saved `styles.ts` shows on the next frame. Component instances keep their identity, so their
+`local` stays. The flow is not touched.
+
+A refusal logs `ui:hot-refused` at info with `{ file, reason }` and throws
+`[game] Hot swap refused for <file>: <reason>.\n  The page reloads and restores its state.` Bun
+turns the throw into a full reload, which restores the state. The reasons:
+
+| Reason | When |
+|---|---|
+| `exports "<export>", registered at start` | the module exports a value of the refused row |
+| `"<name>" is a new projection, a scene mounts it` | `world` has no projection of that name |
+| the first line of the `world` error | a mounted projection names a `layer` or `lift` the scene does not declare |
+| `the module did not evaluate` | a syntax error: there is no namespace |
+| `no exports` | the module exports nothing |
+
+Every export is sorted and every projection is replaced before any component is written, so a
+refused module changes no component. In a module with two projections whose second is refused, the
+first is already replaced; the reload drops it.
+
+```ts
+// The footer `@moku-labs/game/hot` appends to a saved `settings.tsx`. Its `Settings` component
+// is swapped: the open popup repaints on the next frame with the tab the player picked.
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.accept(next => {
+    const swap = globalThis.__moku_hot;
+    if (typeof swap !== "function") throw new Error("[game] No running game takes the hot swap.");
+    swap(next, "/game/features/settings/settings.tsx");
+  });
+}
 ```
 
 ## Text input

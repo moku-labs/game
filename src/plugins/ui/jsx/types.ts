@@ -530,6 +530,10 @@ export type JsxModule = {
   reconcile(): void;
   solve(): void;
   register(definition: AnyComponentDefinition): void;
+  /** Swaps the registered definition of that name, or adds it; the dev hot swap calls it. */
+  replace(definition: AnyComponentDefinition): void;
+  /** Marks every root for a reconcile and a solve, so each view runs again on the next frame. */
+  refreshAll(): void;
   mountRoot(entity: Entity, name: string, layer: string, popup?: PopupLink): void;
   unmountRoot(entity: Entity): void;
   reclaimPopup(component: string, props: object, link: PopupLink): Entity | undefined;

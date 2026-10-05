@@ -14,6 +14,7 @@ import { worldPlugin } from "../world";
 import { Layer, system, Tree } from "../world/ecs/define";
 import { createModules } from "./api";
 import { Box, LocalWrite, UI_OWNER } from "./components";
+import { installHot } from "./hot";
 import { stopFields } from "./jsx/fields";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import type { LayoutModule } from "./layout/types";
@@ -123,8 +124,9 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
 
 /**
  * Loads Yoga, reads the components of every feature, opens the registrations and, on a page,
- * makes the hidden input of the text fields. Nothing solves before the wasm module resolved; a
- * tree seen earlier waits and is reconciled on the next frame.
+ * makes the hidden input of the text fields. A dev build also installs the hot swap handler the
+ * view modules call. Nothing solves before the wasm module resolved; a tree seen earlier waits
+ * and is reconciled on the next frame.
  *
  * @param ctx - Kernel context of the ui plugin.
  * @throws {Error} When two features define the same component name.
@@ -136,6 +138,12 @@ export async function startUi(ctx: KernelSlice): Promise<void> {
   registerComponents(uctx, jsx);
   openRegistrations(uctx, jsx, layout);
   jsx.open();
+
+  // The dev guard is inline and positive, not `isDev()`: Bun folds it under a production `define`
+  // and drops the hot swap module with it, as the renderer README explains.
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+    uctx.state.layout.cleanups.push(installHot(uctx, jsx));
+  }
 
   await layout.load();
 }

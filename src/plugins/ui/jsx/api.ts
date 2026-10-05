@@ -115,6 +115,18 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
       state.components.set(definition.name, definition);
     },
 
+    // The instances stay: their identity does not change, so the new view gets their local.
+    replace: (definition: AnyComponentDefinition): void => {
+      state.components.set(definition.name, definition);
+    },
+
+    refreshAll: (): void => {
+      for (const root of state.roots.values()) {
+        root.dirty = true;
+        root.needsSolve = true;
+      }
+    },
+
     mountRoot: frame.mountRoot,
 
     unmountRoot: frame.unmountRoot,
