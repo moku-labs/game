@@ -4,7 +4,7 @@ import sonarjs from "eslint-plugin-sonarjs";
 import eslintPluginUnicorn from "eslint-plugin-unicorn";
 import tseslint from "typescript-eslint";
 
-// L2 — no static Pixi, Yoga or Playwright import. Blocks 6c and 6d both set
+// L2 — no static Pixi, Yoga or Playwright import. Blocks 6c and 6d2 both set
 // `@typescript-eslint/no-restricted-imports`, and a later block replaces the whole rule, so both carry these paths.
 const l2Paths = [
   {
@@ -151,7 +151,7 @@ export default [
       "jsdoc/require-param-description": "error",
       "jsdoc/require-returns": "error",
       "jsdoc/require-returns-description": "error",
-      // An example is required only where a game reads it: see block 6d.
+      // An example is required only where a game reads it: see block 6d (L7).
       "jsdoc/require-example": "off",
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
       "unicorn/require-module-specifiers": "off"
@@ -484,7 +484,7 @@ export default [
     }
   },
 
-  // 6d. L1 — a module of model or flow imports a sibling module only as `import type` from its types.ts.
+  // 6d2. L1 — a module of model or flow imports a sibling module only as `import type` from its types.ts.
   // It sets the rule 6c sets, so it carries the L2 paths again.
   {
     files: [
@@ -519,7 +519,7 @@ export default [
     }
   },
 
-  // 6e. L3 — determinism: no device clock, timers or unseeded randomness in the logic set.
+  // 6e2. L3 — determinism: no device clock, timers or unseeded randomness in the logic set.
   {
     files: [
       "src/plugins/model/**/*.ts",

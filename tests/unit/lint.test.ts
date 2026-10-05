@@ -10,10 +10,10 @@ import { describe, expect, it } from "vitest";
 /** The repository root, where eslint.config.ts lives. */
 const ROOT = new URL("../../", import.meta.url).pathname;
 
-/** The folders of block 6d (L1), which sets the L2 rule again, and one folder only block 6c covers. */
+/** The folders of block 6d2 (L1), which sets the L2 rule again, and one folder only block 6c covers. */
 const L2_FOLDERS = ["model", "flow", "world", "renderer", "anim", "ui", "effects", "i18n"];
 
-/** One folder where block 6e (L3) sets the L5 rule again, and one where only block 6c sets it. */
+/** One folder where block 6e2 (L3) sets the L5 rule again, and one where only block 6c sets it. */
 const L5_FOLDERS = ["model", "i18n"];
 
 /**
