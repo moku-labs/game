@@ -502,8 +502,8 @@ Every export of the saved module is sorted, in this order:
 | an emitter: own string `id`, a `config` object | nothing in ui: `effects` takes it from the `ui:hot-swap` event; live particles keep their bake |
 | the `default` export of `generated/strings.<locale>.ts`, a record of functions | `i18n.replace(locale, messages)`, the locale read from the path: every label re-resolves |
 | text styles: `{ kind: "textStyles", map }` | `text.replaceStyles`: every label is laid out again and redrawn with the new style |
-| an object or a function with an own string `kind`, an object with an own string `id` or `name` | refused: a scene, flow, node, system, ECS component, filter, feature or plugin is registered by value at start |
-| anything else: styles, tokens, motions, numbers, plain functions, function components | nothing: Bun already gave the importers the new binding |
+| an own string `kind` of `component`, `tag`, `node`, `slot`, `flow`, `bundles` or `plugin`; without a `kind`, an object with an own string `id` or `name` | refused: a flow, node, slot, ECS component or tag, filter, bundles, scene, system, feature or plugin is registered by value at start |
+| anything else: styles, tokens, motions, effect descriptors (`sfx`, `haptic`, `popup`, `play`, `music`, `guide`), timeline steps (`tween`, `mark`), numbers, plain functions, function components | nothing: Bun already gave the importers the new binding, and a node reads a descriptor through it |
 
 The strings files are written by `bun run assets:keys`, which compiles
 `features/*/strings/<locale>.json` into `generated/strings.<locale>.ts`. After a JSON edit, run it

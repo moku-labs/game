@@ -21,6 +21,21 @@ const HOT_GLOBAL = "__moku_hot";
 /** A strings module `assets:keys` generates; the group is its locale. */
 const STRINGS_FILE = /\/generated\/strings\.([\w-]+)\.ts$/;
 
+/**
+ * The `kind` of every value a game registers by value at start: ECS component and tag types
+ * (filters too), nodes, slots, flows, asset bundles and plugin owners. Any other `kind` marks
+ * data, an effect descriptor or a timeline step, which a node reads through the live binding.
+ */
+const REGISTERED_KINDS: Readonly<Record<string, true>> = {
+  component: true,
+  tag: true,
+  node: true,
+  slot: true,
+  flow: true,
+  bundles: true,
+  plugin: true
+};
+
 /** The handler on the global: the new module namespace and the path of the saved module. */
 type HotSwap = (next: unknown, file: string) => void;
 
@@ -190,22 +205,29 @@ function isTextStyles(value: unknown): value is TextStyles {
 }
 
 /**
- * Tells whether an export is something the game registers by value at start: a scene, a flow,
- * a node, a system, an ECS component, a filter, a feature or a plugin. A function counts by its
- * `kind` only, since every function has an own `name`.
+ * Tells whether an export is something the game registers by value at start. An own string
+ * `kind` decides alone: a flow, a node, a slot, an ECS component or tag, a filter, bundles or a
+ * plugin owner refuse, a descriptor such as `sfx(...)` or a step such as `mark(...)` passes.
+ * Without a `kind`, an object with an own string `id` or `name` refuses: a scene, a system, a
+ * feature or a plugin. A function without a `kind` passes, since every function has an own `name`.
  *
  * @param value - One export of the module.
  * @returns True when swapping the binding would not reach the running game.
  * @example
  * ```ts
- * isRegisteredAtStart({ id: "home", layers: [] }); // true
+ * isRegisteredAtStart({ kind: "sfx", payload: { key: "ui.pop" } }); // false
  * ```
  */
 function isRegisteredAtStart(value: unknown): boolean {
   if (!hasMembers(value)) return false;
-  if (typeof value === "function") return hasOwnString(value, "kind");
 
-  return hasOwnString(value, "kind") || hasOwnString(value, "id") || hasOwnString(value, "name");
+  // A kind says what the value is: only the kinds registered at start refuse.
+  const kind: unknown = Object.hasOwn(value, "kind") ? Reflect.get(value, "kind") : undefined;
+
+  if (typeof kind === "string") return Object.hasOwn(REGISTERED_KINDS, kind);
+  if (typeof value === "function") return false;
+
+  return hasOwnString(value, "id") || hasOwnString(value, "name");
 }
 
 /**

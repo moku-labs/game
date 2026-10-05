@@ -2,14 +2,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   component,
   defineAnimation,
+  defineBundles,
   defineFeature,
   defineGame,
   defineMotion,
   defineTextStyles,
+  exit,
   Glow,
+  guide,
+  haptic,
   mark,
+  music,
+  play,
   projection,
-  system
+  sfx,
+  slot,
+  system,
+  Transform,
+  tag,
+  tween
 } from "../../../../index";
 import type { AnyAnimationDefinition } from "../../../anim/types";
 import type { CompiledMessages } from "../../../i18n/types";
@@ -391,6 +402,34 @@ describe("the swap: what it replaces", () => {
     expect(info).toHaveBeenCalledExactlyOnceWith("ui:hot-swap", summary(FILE));
   });
 
+  it("lets effect descriptors and timeline steps pass: a node reads them through the binding", () => {
+    const { swap, info, replace, replaceAnimation, replaceComponent, refreshAll, wake } =
+      installed();
+    const next = {
+      popupSound: { kind: "sfx", key: "ui.pop" },
+      chime: sfx("ui.chime"),
+      buzz: haptic("light"),
+      theme: music("music.home"),
+      fly: play(coinsFly, {}),
+      landed: mark("landed"),
+      settle: tween({ projection: "hud", key: "coins" }, Transform, { scale: 1 }, { ms: 200 }),
+      tip: guide({ allow: { intent: "ok" } }),
+      done: exit("over")
+    };
+
+    swap(next, "/game/features/ui/popup.tsx");
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(replaceAnimation).not.toHaveBeenCalled();
+    expect(replaceComponent).not.toHaveBeenCalled();
+    expect(refreshAll).toHaveBeenCalledOnce();
+    expect(wake).toHaveBeenCalledOnce();
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      "ui:hot-swap",
+      summary("/game/features/ui/popup.tsx")
+    );
+  });
+
   it("runs the replaces that may throw first, then the writes, the repaint, the event and the log", () => {
     const parts = installed();
 
@@ -426,11 +465,15 @@ const registeredAtStart: ReadonlyArray<readonly [string, unknown]> = [
     })
   ],
   ["homeNode", defineNode({ rest: true, outcomes: {} })],
+  ["afterOrder", slot("afterOrder")],
   ["spin", system({ name: "spin", phase: "animate", query: [], run: () => undefined })],
   ["Health", component("Health", { hp: 0 })],
+  ["Hero", tag("Hero")],
   ["Glow", Glow],
+  ["hudBundles", defineBundles({ hud: { tier: "feature" } })],
   ["hudFeature", defineFeature("hud", {})],
-  ["uiPlugin", uiPlugin]
+  ["uiPlugin", uiPlugin],
+  ["owner", { kind: "plugin", name: "hud" }]
 ];
 
 describe("the swap: what it refuses", () => {
