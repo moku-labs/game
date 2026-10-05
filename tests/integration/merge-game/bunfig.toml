@@ -1,0 +1,2 @@
+[serve.static]
+plugins = ["@moku-labs/game/hot"]

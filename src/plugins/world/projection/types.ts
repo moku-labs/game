@@ -620,6 +620,24 @@ export type ProjectionApi = {
   register(spec: AnyProjectionSpec): void;
 
   /**
+   * Swaps the stored spec of a registered projection. A mounted one has its layers checked against
+   * the current scene and runs the new `view` for every item on the next frame, directly. An
+   * unmounted one is only stored; its next `mount` uses it. Nothing changes when the call throws.
+   *
+   * @param spec - The new projection, under the name it was registered with.
+   * @throws {Error} When no projection of that name is registered, or when a mounted one names a
+   * `layer` or `lift` the scene does not declare.
+   * @example
+   * ```ts
+   * // The dev hot swap in `ui`: the saved `view.ts` exports a new `boardItems`.
+   * const world = ctx.require(worldPlugin);
+   * world.projection.replace(boardItems); // the next frame draws every item with the new view
+   * world.projection.replace(shopItems); // throws: Projection "shop.items" is not registered
+   * ```
+   */
+  replace(spec: AnyProjectionSpec): void;
+
+  /**
    * Stores the layer list of the scene. The order of the list is draw order; every call stores a
    * new frozen array.
    *
@@ -903,9 +921,10 @@ export type ProjectionApi = {
    *
    * @example
    * ```ts
-   * // `i18n` switched the locale: every label has to be projected again.
+   * // The ui hot swap replaced the saved `hud` projection: every mounted view runs `view` again.
    * const world = ctx.require(worldPlugin);
-   * world.projection.rerunAll(); // the next frame writes the new strings with no motion
+   * world.projection.replace(hud);
+   * world.projection.rerunAll(); // the next frame draws the new view, with no motion
    * ```
    */
   rerunAll(): void;

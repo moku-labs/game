@@ -313,3 +313,52 @@ describe("the synchronous block of the switch", () => {
     expect(mock.emitted).toEqual([]);
   });
 });
+
+describe("the switch after the restore door expected a scene", () => {
+  it("mounts the expected scene at a rest node that names none", async () => {
+    const mock = startedMock();
+
+    mock.api.expect("home");
+    await mock.enter({ path: "main/home", rest: true });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.world.calls).toEqual(["setLayers", "mount"]);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("mounts the expected scene under an over rest node when nothing is mounted", async () => {
+    const mock = startedMock();
+
+    mock.api.expect("home");
+    await mock.enter({ path: "settings/open", rest: true, over: true });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.emitted).toEqual([
+      { name: "scenes:changed", payload: { from: undefined, to: "home", music: "home.theme" } }
+    ]);
+  });
+
+  it("keeps the mounted scene under an over rest node, whatever is expected", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+    mock.world.calls.length = 0;
+    mock.api.expect("board");
+    await mock.enter({ path: "settings/open", rest: true, over: true });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.world.calls).toEqual([]);
+  });
+
+  it("does nothing for an over rest node with nothing mounted and nothing expected", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ path: "settings/open", rest: true, over: true });
+
+    expect(mock.state.current).toBeUndefined();
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+});

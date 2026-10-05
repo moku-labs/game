@@ -2,7 +2,7 @@
  * Ui plugin — Very Complex tier.
  *
  * JSX trees into entities: reconcile by key, one Yoga solve per change, `Box` as the rest pose.
- * Emits no events.
+ * Emits the global `ui:hot-swap` in a dev build only, after a hot swap.
  *
  * @see README.md
  */
@@ -56,8 +56,8 @@ const config: Config = {
  * ```
  */
 export const uiPlugin = /*#__PURE__*/ createPlugin("ui", {
-  // animPlugin: no API is required; the edge orders the plugins, so the tween driver behind every
-  // motion handle is installed before ui plays its first motion.
+  // animPlugin: its API replaces animations in the dev hot swap, and the edge orders the plugins,
+  // so the tween driver behind every motion handle is installed before ui plays its first motion.
   depends: [
     timePlugin,
     flowPlugin,

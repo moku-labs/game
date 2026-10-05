@@ -4,6 +4,7 @@
  * `layout` injected.
  */
 import type { KeyInput, RawSample } from "../../input/types";
+import { Text } from "../../text/components";
 import type { Entity, LayerSpec } from "../../world/types";
 import type { UiCtx } from "../types";
 import { createFields } from "./fields";
@@ -55,6 +56,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   });
   const frame = createReconciler(ctx, modules, fields);
   const focus = createFocus(ctx, frame.markPointer, layerNames, fields);
+  const resolvedOf = (entity: Entity): string | undefined =>
+    ctx.deps.world.ecs.get(entity, Text)?.resolved;
   const find = (key: string): Entity | undefined => {
     for (const root of sortedRoots(state, layerNames())) {
       const entity = state.byKey.get(root.entity)?.get(key);
@@ -66,7 +69,7 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   };
 
   return {
-    tree: (): UiNode => readTree(state, layerNames()),
+    tree: (): UiNode => readTree(state, layerNames(), resolvedOf),
 
     find,
 
@@ -113,6 +116,18 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
       }
 
       state.components.set(definition.name, definition);
+    },
+
+    // The instances stay: their identity does not change, so the new view gets their local.
+    replace: (definition: AnyComponentDefinition): void => {
+      state.components.set(definition.name, definition);
+    },
+
+    refreshAll: (): void => {
+      for (const root of state.roots.values()) {
+        root.dirty = true;
+        root.needsSolve = true;
+      }
     },
 
     mountRoot: frame.mountRoot,

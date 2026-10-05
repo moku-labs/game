@@ -43,7 +43,7 @@ function read(target: object, name: string): unknown {
  * @param entry - What the feature put in its `emitters` list.
  * @returns True when it carries an id and a config with textures.
  */
-function isEmitterDefinition(entry: unknown): entry is EmitterDefinition {
+export function isEmitterDefinition(entry: unknown): entry is EmitterDefinition {
   if (typeof entry !== "object" || entry === null) return false;
 
   const config = read(entry, "config");

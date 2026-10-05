@@ -5,7 +5,7 @@
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
-import type { Require } from "../../config";
+import type { Events as GlobalEvents, Require } from "../../config";
 import type { AnimApi } from "../anim/types";
 import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
@@ -152,6 +152,11 @@ export type EffectsCtx = KernelSlice & { readonly deps: Deps };
  * Payload of the `assets:bundle-unloaded` hook: `keys` names every texture that is gone.
  */
 export type BundleUnloaded = AssetsEvents["assets:bundle-unloaded"];
+
+/**
+ * Payload of the global `ui:hot-swap` hook: the saved file and its new exports.
+ */
+export type HotSwap = GlobalEvents["ui:hot-swap"];
 
 export type {
   AlphaValue,

@@ -6,7 +6,15 @@ import { Sprite, Transform } from "../../../renderer/components";
 import { Frames } from "../../components";
 import { defineMotion } from "../../motion";
 import { defineAnimation, haptic, mark, play, sequence, set, tween } from "../../timeline/steps";
-import type { AnimApi, Config, KernelSlice, MotionKeyframe, PlayHandle, Target } from "../../types";
+import type {
+  AnimApi,
+  AnyAnimationDefinition,
+  Config,
+  KernelSlice,
+  MotionKeyframe,
+  PlayHandle,
+  Target
+} from "../../types";
 
 const card: Target = { projection: "hud", key: "order" };
 
@@ -165,6 +173,11 @@ api.reducedMotion(true);
 // @ts-expect-error — the switch takes a boolean
 api.setReducedMotion("on");
 expectTypeOf<Config["reducedMotion"]>().toEqualTypeOf<boolean>();
+
+// The dev hot swap replaces a registered animation by its definition.
+expectTypeOf(api.replace).parameter(0).toEqualTypeOf<AnyAnimationDefinition>();
+// @ts-expect-error — replace takes a definition, not its id
+api.replace("board.mergeBurst");
 
 // Delta 8: the Frames component. The kit narrows its keys to the game's asset keys.
 const coinKit = defineGame<{

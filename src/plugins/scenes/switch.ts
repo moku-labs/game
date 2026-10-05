@@ -81,6 +81,31 @@ function targetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | und
 }
 
 /**
+ * Reads the scene an `over` node asks for. An over node never switches a mounted scene; a rest
+ * one takes the expected scene while nothing is mounted, so a restore at a popup builds the scene
+ * under it. A scene the over node names itself is only warned about.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param node - The over node being entered.
+ * @returns The expected scene id, or `undefined` when nothing has to happen.
+ */
+function overTargetOf(ctx: ScenesCtx, node: NodeInfo): string | undefined {
+  const state = ctx.state;
+
+  if (node.scene !== undefined) {
+    ctx.log.warn("scenes: an over node cannot name a scene", { path: node.path });
+  }
+
+  if (!node.rest || state.current !== undefined) return undefined;
+
+  const target = state.pending;
+
+  state.pending = undefined;
+
+  return target;
+}
+
+/**
  * Builds the scene in one synchronous block: the layers, then the projections of the old scene
  * out, then the ones of the new scene in, then the frame loop out of its idle cap, and only then
  * the event.
@@ -107,8 +132,9 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
 }
 
 /**
- * The `scene` stage of entering a node: the whole switch. An `over` node never switches, a node
- * without a scene keeps the current one, and an aborted node returns without touching anything.
+ * The `scene` stage of entering a node: the whole switch. An `over` node never switches a mounted
+ * scene, a node without a scene keeps the current one, and an aborted node returns without
+ * touching anything.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
@@ -125,15 +151,7 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
  * ```
  */
 export async function enterScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): Promise<void> {
-  if (node.over) {
-    if (node.scene !== undefined) {
-      ctx.log.warn("scenes: an over node cannot name a scene", { path: node.path });
-    }
-
-    return;
-  }
-
-  const target = targetOf(ctx, node, run);
+  const target = node.over ? overTargetOf(ctx, node) : targetOf(ctx, node, run);
 
   if (target === undefined || target === ctx.state.current) return;
 

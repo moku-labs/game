@@ -3,7 +3,17 @@
  * in JSX, a settings component with local state and a reward popup with one outcome. Plain Bun,
  * inert renderer, real Yoga.
  */
-import { createApp, defineGame, exit, guide, projection, Transform, type } from "../../../index";
+import {
+  createApp,
+  defineAnimation,
+  defineGame,
+  exit,
+  guide,
+  mark,
+  projection,
+  Transform,
+  type
+} from "../../../index";
 import { animPlugin } from "../../anim";
 import { defineMotion } from "../../anim/motion";
 import { assetsPlugin } from "../../assets";
@@ -492,7 +502,10 @@ const main = defineFlow("main", {
   }
 });
 
-/** The one feature of the fixture: the HUD, the flow and the two ui components. */
+/** The animation the HUD registers: it reaches the mark "v1". The hot swap test brings a v2. */
+export const coinsPop = defineAnimation("hud.coinsPop", { slots: {}, build: () => mark("v1") });
+
+/** The one feature of the fixture: the HUD, the flow, the ui components and one animation. */
 export const hudFeature = defineFeature("hud", {
   flows: [main],
   projections: [
@@ -509,6 +522,7 @@ export const hudFeature = defineFeature("hud", {
   ],
   // The fourth entry is not a `defineComponent` result: `ui` skips what it cannot register.
   ui: [Settings, RewardPopup, Broken, { name: "NotAComponent" } as never],
+  animations: [coinsPop],
   strings: { en: english }
 });
 

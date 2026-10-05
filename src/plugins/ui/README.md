@@ -13,7 +13,7 @@ rect from one Yoga solve per change.
 
 | Member | Answers |
 |---|---|
-| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `value` on a text field, `window` on a windowed scroll, children |
+| `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
 | `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
@@ -27,13 +27,13 @@ Config:
 | `focusRing` | `{ stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }` | the keyboard focus ring: a dashed ring `offset` outside the control, over a solid halo of `haloWidth` on the same path |
 | `textInput` | `{ caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35, composingUnderline: 3, keyboardMargin: 16 }` | a text field while it is edited: the caret (it does not blink) and the IME underline in `caret`, the selection box, and the CSS px kept between the field and the keyboard. Shallow merge: a game that sets it gives all six fields |
 
-Emits nothing, listens to nothing. Depends on `time`, `flow`, `world`, `renderer`, `input`,
-`anim`, `i18n`, `text`. Yoga arrives through `await import("yoga-layout/load")` in `onStart`;
-nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
+Emits the global `ui:hot-swap` in a dev build only, listens to nothing. Depends on `time`,
+`flow`, `world`, `renderer`, `input`, `anim`, `i18n`, `text`. Yoga arrives through
+`await import("yoga-layout/load")` in `onStart`; nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
 the cursor shows a hand over a local-state button, one `input.onKey` listener for the focus, one
 `input.onPointer` listener for the text fields, one `flow.fx.onHint` listener that hands released
 hints to the `change` hooks of elements, and on a page the hidden input of the text fields;
-`onStop` removes all of them.
+`onStop` removes all of them. A dev build also installs the [hot swap](#hot-swap-dev) handler.
 
 ## What an element is drawn with
 
@@ -427,7 +427,7 @@ one with `ui`, `renderer` and `world`.
 
 | Key in `sources` | id | Input | Changes | Reads |
 |---|---|---|---|---|
-| `ui` | `game.ui` | none | frame | `app.ui.tree()`: the live screen as plain data |
+| `ui` | `game.ui` | none | frame | `app.ui.tree()`: the live screen as plain data; a text node carries `content`, the words it draws |
 | `locate` | `game.locate` | `{ key: "string?", target: "json?" }`, exactly one | frame | `{ x, y, w, h }` of the element with that `key` or of the view `target: { projection, key }`, in CSS px of the page, or `undefined` |
 
 `game.locate` answers where something is drawn, by either address the doors use. It replaces
@@ -474,6 +474,79 @@ import { commands, run } from "@moku-labs/game/control";
 // The Rename popup rests: type the name, then submit it with the Enter key.
 (await run(app, commands.fill, { key: "nameField", value: "Alex" })).value; // true
 await run(app, commands.key, { key: "Enter" }); // the gate takes { intent: "save", payload: { name: "Alex" } }
+```
+
+## Hot swap (dev)
+
+`hot.ts` takes the save of a view module while the game runs, with no reload. Only a dev build
+installs it: `onStart` checks the inline guard `typeof __MOKU_GAME_DEV__ !== "undefined" &&
+__MOKU_GAME_DEV__`, so a production `define` folds it and the module leaves the bundle. It sets
+`globalThis.__moku_hot(next, file)`, which the footer of `@moku-labs/game/hot` calls with the new
+exports of the saved module. `onStop` deletes it while it is still this app's handler, so a second
+app on the page keeps its own.
+
+The dev server appends the footer through `bunfig.toml`:
+
+```toml
+[serve.static]
+plugins = ["@moku-labs/game/hot"]
+```
+
+Every export of the saved module is sorted, in this order:
+
+| Export | What happens |
+|---|---|
+| a `defineComponent` definition | replaces the component of that name, or adds it |
+| a projection spec: string `name` and `layer`, `from`, `view`, and `key` unless `from` returns one object | `world.projection.replace`: a mounted one runs its new `view` |
+| an animation: own string `id`, a `build` function, `slots` | `anim.replace`: the next `play` builds the new tree; a running timeline keeps its own |
+| an emitter: own string `id`, a `config` object | nothing in ui: `effects` takes it from the `ui:hot-swap` event; live particles keep their bake |
+| the `default` export of `generated/strings.<locale>.ts`, a record of functions | `i18n.replace(locale, messages)`, the locale read from the path: every label re-resolves |
+| text styles: `{ kind: "textStyles", map }` | `text.replaceStyles`: every label is laid out again and redrawn with the new style |
+| an own string `kind` of `component`, `tag`, `node`, `slot`, `flow`, `bundles` or `plugin`; without a `kind`, an object with an own string `id` or `name` | refused: a flow, node, slot, ECS component or tag, filter, bundles, scene, system, feature or plugin is registered by value at start |
+| anything else: styles, tokens, motions, effect descriptors (`sfx`, `haptic`, `popup`, `play`, `music`, `guide`), timeline steps (`tween`, `mark`), numbers, plain functions, function components | nothing: Bun already gave the importers the new binding, and a node reads a descriptor through it |
+
+The strings files are written by `bun run assets:keys`, which compiles
+`features/*/strings/<locale>.json` into `generated/strings.<locale>.ts`. After a JSON edit, run it
+again: its save is what the hot swap takes.
+
+The replaces that may throw run first: projections, then animations, then strings. Then the
+components and the text styles are written, every ui root reconciles and solves on the next
+frame, `world.projection.rerunAll()` runs every projection again, and `time.wake()` lifts the idle
+cap. Last, the global event `ui:hot-swap` carries `{ file, module }` with the exports, and
+`ui:hot-swap` is logged at info with `{ file, components, projections, animations, emitters,
+strings, textStyles }`: names, ids, locales and style names. This runs for a module that swapped
+nothing too, so a saved `styles.ts` shows on the next frame. Component instances keep their
+identity, so their `local` stays. The flow is not touched.
+
+A refusal logs `ui:hot-refused` at info with `{ file, reason }` and throws
+`[game] Hot swap refused for <file>: <reason>.\n  The page reloads and restores its state.` Bun
+turns the throw into a full reload, which restores the state. The reasons:
+
+| Reason | When |
+|---|---|
+| `exports "<export>", registered at start` | the module exports a value of the refused row |
+| `Projection "<name>" is not registered` | `world` has no projection of that name |
+| `Animation "<id>" is not registered` | `anim` has no animation of that id |
+| the first line of the `world` error | a mounted projection names a `layer` or `lift` the scene does not declare |
+| the first line of the `i18n` error | the strings match no registered module of the locale, or more than one |
+| `the module did not evaluate` | a syntax error: there is no namespace |
+| `no exports` | the module exports nothing |
+
+Every export is sorted and every replace that may throw has run before any component or text
+style is written, so a refused module changes no component and no style. A replace that ran
+before the refused one stands until the reload drops it.
+
+```ts
+// The footer `@moku-labs/game/hot` appends to a saved `settings.tsx`. Its `Settings` component
+// is swapped: the open popup repaints on the next frame with the tab the player picked.
+if (import.meta.hot) {
+  import.meta.hot.accept();
+  import.meta.hot.accept(next => {
+    const swap = globalThis.__moku_hot;
+    if (typeof swap !== "function") throw new Error("[game] No running game takes the hot swap.\n  Open the game page, then save again.");
+    swap(next, "/game/features/settings/settings.tsx");
+  });
+}
 ```
 
 ## Text input

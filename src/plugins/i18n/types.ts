@@ -207,7 +207,7 @@ export type State = {
  * i18n plugin events.
  */
 export type Events = {
-  /** The current locale changed and its messages are loaded. */
+  /** The current locale changed, or its messages were replaced. */
   "i18n:locale-changed": { locale: string };
 };
 
@@ -340,6 +340,25 @@ export type I18nApi = {
    * ```
    */
   locales(): readonly string[];
+
+  /**
+   * Swaps the compiled module of one feature in a loaded locale, for the dev hot swap. The one
+   * registered module whose keys overlap `messages` takes them, the locale is merged again and
+   * every key may warn once more. When the locale is the current one or the fallback,
+   * `i18n:locale-changed` is emitted with the current locale, so `text` re-resolves every label.
+   * A locale not loaded yet is left alone: its loader imports the new module later.
+   *
+   * @param locale - The locale of the saved `generated/strings.<locale>.ts`.
+   * @param messages - The `default` export of the new module.
+   * @throws {Error} When no registered module, or more than one, shares a key with `messages`.
+   * @example
+   * ```ts
+   * // ui's hot swap: generated/strings.ru.ts was written again with "hud.orders" as "3 заказа!".
+   * ctx.require(i18nPlugin).replace("ru", next.default); // emits i18n:locale-changed
+   * app.i18n.plain(tr("hud.orders", { n: 3 })); // "3 заказа!": text redraws the label
+   * ```
+   */
+  replace(locale: string, messages: CompiledMessages): void;
 };
 
 /**

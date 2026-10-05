@@ -72,8 +72,22 @@ function messagesOf(value: unknown): CompiledMessages {
  * @param entry - The registered module.
  * @returns True when the messages are there already.
  */
-function isReady(entry: RegisteredModule): entry is ResolvedModule {
+export function isReady(entry: RegisteredModule): entry is ResolvedModule {
   return typeof entry.messages !== "function";
+}
+
+/**
+ * Tells a lazy strings module, a loader that fetches it, from the module itself.
+ *
+ * @param value - The module, or the loader that fetches it.
+ * @returns True for a function.
+ * @example
+ * ```ts
+ * isLoader(async () => ({ "hud.orders": "Orders" })); // true
+ * ```
+ */
+function isLoader(value: unknown): value is () => Promise<unknown> {
+  return typeof value === "function";
 }
 
 /**
@@ -87,9 +101,8 @@ function isReady(entry: RegisteredModule): entry is ResolvedModule {
 function register(state: State, locale: string, from: string, value: unknown): void {
   const entries = state.registered.get(locale) ?? [];
 
-  if (typeof value === "function") {
-    const load = value as () => Promise<unknown>;
-    const loader: StringsLoader = async () => messagesOf(await load());
+  if (isLoader(value)) {
+    const loader: StringsLoader = async () => messagesOf(await value());
 
     entries.push({ from, messages: loader });
   } else entries.push({ from, messages: messagesOf(value) });
@@ -136,7 +149,8 @@ function mergeEager(state: State): void {
 }
 
 /**
- * Runs the loaders of one locale, once, and merges everything registered for it.
+ * Runs the loaders of one locale, once, and merges everything registered for it. The resolved
+ * modules replace the loaders in the registry, so `replace` finds the keys of a lazy locale too.
  *
  * @param state - The plugin state.
  * @param locale - The locale to load.
@@ -155,7 +169,10 @@ export async function loadLocale(state: State, locale: string): Promise<void> {
     resolved.push({ from: entry.from, messages });
   }
 
-  state.loaded.set(locale, mergeLocales(resolved));
+  const merged = mergeLocales(resolved);
+
+  state.registered.set(locale, resolved);
+  state.loaded.set(locale, merged);
 }
 
 /**

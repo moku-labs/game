@@ -18,6 +18,10 @@ export default defineConfig({
         replacement: new URL("src/control.ts", import.meta.url).pathname
       },
       {
+        find: "@moku-labs/game/hot",
+        replacement: new URL("src/hot.ts", import.meta.url).pathname
+      },
+      {
         find: "@moku-labs/game/lint",
         replacement: new URL("src/lint.ts", import.meta.url).pathname
       },

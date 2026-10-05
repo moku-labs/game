@@ -8,6 +8,7 @@ import { startTimeline } from "./timeline/play";
 import type {
   AnimApi,
   AnimationDefinition,
+  AnyAnimationDefinition,
   KernelSlice,
   MarkListener,
   PlayHandle,
@@ -16,8 +17,8 @@ import type {
 } from "./types";
 
 /**
- * Creates the anim API: `app.anim.play`, `finishAll`, `active`, `onMark`, `reducedMotion` and
- * `setReducedMotion`.
+ * Creates the anim API: `app.anim.play`, `finishAll`, `active`, `onMark`, `reducedMotion`,
+ * `setReducedMotion` and `replace`.
  *
  * @param ctx - Kernel context of the anim plugin.
  * @returns The plugin API.
@@ -48,6 +49,17 @@ export function createAnimApi(ctx: KernelSlice): AnimApi {
 
     setReducedMotion: (on: boolean): void => {
       actx.state.reducedMotion = on;
+    },
+
+    replace: (definition: AnyAnimationDefinition): void => {
+      if (!actx.state.registry.has(definition.id)) {
+        throw new Error(
+          `[game] Animation "${definition.id}" is not registered.\n` +
+            "  Register it before replacing it."
+        );
+      }
+
+      actx.state.registry.set(definition.id, definition);
     }
   };
 }

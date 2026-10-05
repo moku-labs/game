@@ -36,6 +36,7 @@ export const hudFeature = defineFeature("hud", {
 | `has(key)` | The key exists in the current locale or in the fallback |
 | `duration(ms, style?)` | Milliseconds as text in the current locale: `"1 min, 35 sec"` for `95_000`. Style `"short"` by default. For `text`'s `format: "duration"` |
 | `locales()` | Every registered locale, sorted |
+| `replace(locale, messages)` | Dev hot swap: the one registered module whose keys overlap `messages` takes them, and the locale is merged again. Emits `i18n:locale-changed` when the locale is the current one or the fallback. A locale not loaded yet is left alone. Zero or several overlapping modules throw, so the page reloads |
 
 Resolution order is the current locale, then `config.fallback`, then missing. A missing key gives `[{ kind: "text", text: "⟦key⟧" }]` and one `ctx.log.warn` per key over the app's life. `format` is synchronous: `onStart` awaits the start locale and the fallback, so nothing waits at a label.
 
@@ -148,4 +149,4 @@ From the command line, through the assets CLI: `--export <dir>`, `--import <dir>
 
 ## Events and dependencies
 
-Emits `i18n:locale-changed` after the module of the new locale is loaded, never at start. `text` listens and re-resolves. `depends` is `flow` only, for the `strings` key of every feature description; `i18n` never calls `text`, `world` or `ui`.
+Emits `i18n:locale-changed` after the module of the new locale is loaded, never at start, and after `replace` swapped a module of the current locale or the fallback; the payload is always the current locale. `text` listens and re-resolves. `depends` is `flow` only, for the `strings` key of every feature description; `i18n` never calls `text`, `world` or `ui`.

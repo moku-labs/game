@@ -419,9 +419,10 @@ export type JsxState = {
 /**
  * One node of the snapshot `tree()` answers with. `rect` is natural: under a `fit` ancestor it
  * is the rect before that ancestor's scale. An element with `fit: "contain"` adds `fitScale`,
- * the scale it is drawn at. An `input` adds `value`: the text being typed while it is edited,
- * else the local field it writes. A windowed `scroll` adds `window`: the rows that exist, which
- * are the children of its content, and how many the list has.
+ * the scale it is drawn at. A `text` adds `content`: the words it draws. An `input` adds `value`:
+ * the text being typed while it is edited, else the local field it writes. A windowed `scroll`
+ * adds `window`: the rows that exist, which are the children of its content, and how many the
+ * list has.
  *
  * @example
  * ```ts
@@ -441,6 +442,19 @@ export type UiNode = {
   state: IsFlags;
   local?: Record<string, unknown>;
   fitScale?: number;
+  /**
+   * The words a `text` draws, as one plain string: the string `text` resolved after `tr()` and
+   * `bind`, its tags and icons left out, else its `content` prop while that is a plain string.
+   * Absent on any other tag and on a text that draws nothing.
+   *
+   * @example
+   * ```ts
+   * // Home in Russian: `<text key="title" content={tr("home.title")} />` under the root row.
+   * const title = app.ui.tree().children.find(node => node.key === "title");
+   * title?.content; // "Лесной городок"
+   * ```
+   */
+  content?: string;
   value?: string;
   /**
    * The rows of a windowed scroll that exist and how many the list has.
@@ -530,6 +544,14 @@ export type JsxModule = {
   reconcile(): void;
   solve(): void;
   register(definition: AnyComponentDefinition): void;
+  /**
+   * Swaps the registered definition of that name, or adds it; the dev hot swap calls it.
+   *
+   * @param definition - The new definition, registered under its `name`.
+   */
+  replace(definition: AnyComponentDefinition): void;
+  /** Marks every root for a reconcile and a solve, so each view runs again on the next frame. */
+  refreshAll(): void;
   mountRoot(entity: Entity, name: string, layer: string, popup?: PopupLink): void;
   unmountRoot(entity: Entity): void;
   reclaimPopup(component: string, props: object, link: PopupLink): Entity | undefined;

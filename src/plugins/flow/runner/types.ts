@@ -675,6 +675,11 @@ export type Bookmark = {
   session: Json;
   rng: RngState;
   graph: string;
+  /**
+   * The scene mounted when the bookmark was taken. Written by the `game.bookmark` door, read by
+   * `game.restore`; `flow.restore` ignores it.
+   */
+  scene?: string;
 };
 
 /**

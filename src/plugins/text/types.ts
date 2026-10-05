@@ -394,7 +394,8 @@ export type State = {
 
 /**
  * text plugin API, `app.text`. Two questions: how big a piece of text is, and which styles the
- * game registered. Everything else happens in the frame.
+ * game registered; and one order, the dev hot swap of a styles file. Everything else happens in
+ * the frame.
  *
  * @example
  * ```ts
@@ -453,6 +454,27 @@ export type TextApi = {
    * ```
    */
   styles(): readonly string[];
+
+  /**
+   * The dev hot swap of a styles file: writes every style of the map over the table. A known
+   * name keeps the feature that owns it, a new name is added and usable at once. The fonts the
+   * styles name are read, the measured layouts are dropped, and every label is laid out again
+   * on the next frame and redrawn with the new style, even when its text and its style name did
+   * not change. The game loop is woken for that frame.
+   *
+   * @param styles - What `defineTextStyles` returned in the saved module.
+   * @example
+   * ```ts
+   * // `ui` hot swaps a saved `hud/styles.ts`: the "hud.title" labels redraw at 64 px.
+   * const uiStyles = defineTextStyles({
+   *   "hud.title": { font: "ui.font-body", size: 64, fill: 0xff0000 }
+   * });
+   *
+   * ctx.require(textPlugin).replaceStyles(uiStyles);
+   * ctx.require(textPlugin).measure("12", "hud.title").height; // 76.8 on the 0.6 em fallback
+   * ```
+   */
+  replaceStyles(styles: TextStyles): void;
 };
 
 /**

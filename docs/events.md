@@ -2,7 +2,7 @@
 
 Every event a plugin emits, and how a game listens.
 
-Global events are empty: every event belongs to a plugin. `time` and `clock` emit nothing.
+One event is global: `ui:hot-swap`, so `effects` can hook it with no `depends` on `ui`. Every other event belongs to a plugin. `time` and `clock` emit nothing.
 
 | Event | Emitted by | Payload | When |
 |---|---|---|---|
@@ -17,9 +17,10 @@ Global events are empty: every event belongs to a plugin. `time` and `clock` emi
 | `scenes:changed` | `scenes` | `{ from, to, music }` | The scene switched on entering a node |
 | `anim:mark` | `anim` | `{ animation, mark }` | A `mark` step was reached, or jumped by `finish()` |
 | `anim:finished` | `anim` | `{ animation }` | A timeline ended or was finished. Never on `cancel()` |
-| `i18n:locale-changed` | `i18n` | `{ locale }` | The module of the new locale is loaded; `text` re-resolves. Never at start |
+| `i18n:locale-changed` | `i18n` | `{ locale }` | The module of the new locale is loaded, or `replace` swapped messages of the current locale or the fallback; `text` re-resolves. Never at start |
+| `ui:hot-swap` | `ui`, global | `{ file: string; module: Readonly<Record<string, unknown>> }` | Dev only: a saved view module was swapped, `module` is its new exports. `effects` replaces its emitters. See [Hot swap](./hot-swap.md) |
 
-`text`, `ui`, `audio`, `effects` and `platform` emit nothing; the `effects` budgets are log warnings.
+`text`, `audio`, `effects` and `platform` emit nothing, and `ui` only the dev `ui:hot-swap`; the `effects` budgets are log warnings.
 
 ```ts
 import { createPlugin, flowPlugin } from "@moku-labs/game";

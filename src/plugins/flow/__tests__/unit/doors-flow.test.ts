@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
+import type { ScenesApi } from "../../../scenes/types";
 import { answerCommand, bookmarkCommand, restoreCommand, walkCommand } from "../../control";
 import { read } from "../../doors/read";
 import { run } from "../../doors/run";
@@ -11,7 +12,7 @@ import {
   taintedSource
 } from "../../inspect";
 import type { JournalEntry } from "../../types";
-import { createDoorsFake } from "./doors-fake";
+import { createDoorsFake, type DoorsFake } from "./doors-fake";
 
 // ---------------------------------------------------------------------------
 // Unit test: the flow sources and commands over a hand-written app
@@ -54,6 +55,32 @@ const bookmarkWith = (changes: Record<string, Json>, without = ""): Json =>
   Object.fromEntries(
     Object.entries({ ...bookmark, ...changes }).filter(([key]) => key !== without)
   );
+
+/**
+ * Gives the fake app a scenes API that records its calls next to the restores.
+ *
+ * @param fake - The fake app.
+ * @param mounted - The scene `current()` reports.
+ * @returns The app with scenes, and the calls in order.
+ */
+const withScenes = (fake: DoorsFake, mounted: string | undefined) => {
+  const calls: string[] = [];
+  const scenes: ScenesApi = {
+    current: () => mounted,
+    expect: (id: string): void => {
+      calls.push(`expect ${id}`);
+    }
+  };
+  const flow = {
+    ...fake.app.flow,
+    restore: async (entered: Parameters<DoorsFake["app"]["flow"]["restore"]>[0]) => {
+      calls.push(`restore ${entered.path}`);
+      await fake.app.flow.restore(entered);
+    }
+  };
+
+  return { app: { ...fake.app, flow, scenes }, calls };
+};
 
 const sources = [graphSource, positionSource, historySource, taintedSource, cheatsSource];
 
@@ -250,6 +277,57 @@ describe("flow commands", () => {
     expect(read(fake.app, cheatsSource)).toEqual([
       { id: "game.restore", input: { bookmark }, frame: 0 }
     ]);
+  });
+
+  it("game.bookmark adds the mounted scene when the app has scenes", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+    const { app } = withScenes(fake, "home");
+
+    const ran = await run(app, bookmarkCommand);
+
+    expect(ran.value).toEqual({ ...fake.app.flow.bookmark(), scene: "home" });
+  });
+
+  it("game.bookmark leaves the scene out while no scene is mounted", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+    const { app } = withScenes(fake, undefined);
+
+    const ran = await run(app, bookmarkCommand);
+
+    expect(ran.value).toEqual(fake.app.flow.bookmark());
+    expect("scene" in ran.value).toBe(false);
+  });
+
+  it("game.restore expects the scene of the bookmark before it restores", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+    const { app, calls } = withScenes(fake, undefined);
+
+    await run(app, restoreCommand, { bookmark: { ...bookmark, scene: "home" } });
+
+    expect(calls).toEqual(["expect home", "restore board/awaitIntent"]);
+    expect(fake.restored).toEqual([{ ...bookmark, scene: "home" }]);
+  });
+
+  it("game.restore expects nothing for a bookmark without a scene", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+    const { app, calls } = withScenes(fake, undefined);
+
+    await run(app, restoreCommand, { bookmark });
+
+    expect(calls).toEqual(["restore board/awaitIntent"]);
+  });
+
+  it("game.restore enters a bookmark with a scene on an app without scenes", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+
+    const ran = await run(fake.app, restoreCommand, { bookmark: { ...bookmark, scene: "home" } });
+
+    expect(ran.state.path).toBe("board/awaitIntent");
   });
 
   it("game.restore turns a repro into a bookmark, then walks its route", async () => {

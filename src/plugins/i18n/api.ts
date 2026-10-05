@@ -1,12 +1,23 @@
 /**
  * @file i18n plugin — the public API factory: the current locale, the switch that loads a module
  * and sends the one event, the two `format` forms every label goes through, and the duration a
- * countdown reads. This is the only place in the engine where a locale is read.
+ * countdown reads, and the swap of one module the dev hot swap calls. This is the only place in the
+ * engine where a locale is read.
  */
 import { createIntlKit, durationInput } from "./intl";
-import { loadLocale, notLoaded, notRegistered } from "./lifecycle";
-import { mergeParts, missingParts, resolve } from "./messages";
-import type { DurationStyle, I18nApi, I18nCtx, IntlKit, Message, Part, State } from "./types";
+import { isReady, loadLocale, notLoaded, notRegistered } from "./lifecycle";
+import { mergeLocales, mergeParts, missingParts, resolve } from "./messages";
+import type {
+  CompiledMessages,
+  DurationStyle,
+  I18nApi,
+  I18nCtx,
+  IntlKit,
+  Message,
+  Part,
+  RegisteredModule,
+  State
+} from "./types";
 
 /**
  * Answers the formatter kit of one locale, building it on first use.
@@ -120,10 +131,66 @@ async function setLocale(ctx: I18nCtx, locale: string): Promise<void> {
 }
 
 /**
+ * Wraps a module that matches no single registered module in the message shape of the framework.
+ *
+ * @param locale - The locale of the module.
+ * @returns The error to throw.
+ */
+function noSingleModule(locale: string): Error {
+  return new Error(
+    `[game] Strings for "${locale}" match no single registered module.\n` +
+      "  Replace them with the module of one feature, or reload the page."
+  );
+}
+
+/**
+ * Tells whether a registered module is resolved and carries at least one key of `messages`.
+ *
+ * @param entry - The registered module.
+ * @param messages - The new module.
+ * @returns True when the entry is the one `messages` replaces, or one of several.
+ */
+function overlaps(entry: RegisteredModule, messages: CompiledMessages): boolean {
+  return isReady(entry) && Object.keys(entry.messages).some(key => Object.hasOwn(messages, key));
+}
+
+/**
+ * Swaps the one registered module of a loaded locale whose keys overlap the new module, merges
+ * the locale again and tells `text` when a label may read it.
+ *
+ * @param ctx - Kernel context of the i18n plugin.
+ * @param locale - The locale of the new module.
+ * @param messages - The new module.
+ * @throws {Error} When no registered module, or more than one, shares a key with the new one.
+ */
+function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages): void {
+  const { state } = ctx;
+
+  if (!state.loaded.has(locale)) return;
+
+  const entries = state.registered.get(locale) ?? [];
+  const owners = entries.filter(entry => overlaps(entry, messages));
+  const [owner] = owners;
+
+  if (owner === undefined || owners.length > 1) throw noSingleModule(locale);
+
+  const next = entries.map(entry => (entry === owner ? { from: owner.from, messages } : entry));
+  const merged = mergeLocales(next.filter(entry => isReady(entry)));
+
+  state.registered.set(locale, next);
+  state.loaded.set(locale, merged);
+  state.warned.clear();
+
+  if (locale === state.locale || locale === ctx.config.fallback) {
+    ctx.emit("i18n:locale-changed", { locale: state.locale });
+  }
+}
+
+/**
  * Builds the API of the plugin.
  *
  * @param ctx - Kernel context of the i18n plugin.
- * @returns The seven members of `app.i18n`.
+ * @returns The eight members of `app.i18n`.
  */
 export function createI18nApi(ctx: I18nCtx): I18nApi {
   return {
@@ -139,6 +206,7 @@ export function createI18nApi(ctx: I18nCtx): I18nApi {
       kitOf(ctx.state, ctx.state.locale)
         .duration({ style, secondsDisplay: "always" })
         .format(durationInput(ms)),
-    locales: () => [...ctx.state.registered.keys()].toSorted()
+    locales: () => [...ctx.state.registered.keys()].toSorted(),
+    replace: (locale, messages) => replaceModule(ctx, locale, messages)
   };
 }

@@ -45,6 +45,7 @@ const PROJECTION_MEMBERS = [
   "mute",
   "register",
   "registerKey",
+  "replace",
   "rerunAll",
   "restOf",
   "setDriver",

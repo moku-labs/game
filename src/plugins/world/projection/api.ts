@@ -211,6 +211,19 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     state.hints.length = 0;
   };
 
+  /**
+   * Marks every mounted projection dirty and forces `view` for every item on the next frame.
+   */
+  const forceRerun = (): void => {
+    const dirty = state.dirty ?? emptyDirty();
+
+    dirty.causes.push("rerun");
+    dirty.roots.add("player");
+    dirty.roots.add("session");
+    dirty.force = true;
+    state.dirty = dirty;
+  };
+
   const restOf = (entity: Entity): RestPose => state.rests.get(entity) ?? emptyRest();
 
   // The view record a handle of a plugin-owned element runs on. It never reaches `byEntity`, so
@@ -237,6 +250,21 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       }
 
       state.specs.set(spec.name, spec);
+    },
+
+    replace: (spec: AnyProjectionSpec): void => {
+      if (!state.specs.has(spec.name)) {
+        throw new Error(
+          `[game] Projection "${spec.name}" is not registered.\n` +
+            "  Register it before replacing it."
+        );
+      }
+
+      const mounted = state.mounted.has(spec.name);
+
+      if (mounted) checkLayers(pctx, spec);
+      state.specs.set(spec.name, spec);
+      if (mounted) forceRerun();
     },
 
     setLayers: (list: ReadonlyArray<LayerSpec>): void => {
@@ -449,15 +477,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       };
     },
 
-    rerunAll: (): void => {
-      const dirty = state.dirty ?? emptyDirty();
-
-      dirty.causes.push("rerun");
-      dirty.roots.add("player");
-      dirty.roots.add("session");
-      dirty.force = true;
-      state.dirty = dirty;
-    },
+    rerunAll: forceRerun,
 
     markDirty: (roots: readonly Root[], cause: Cause): void => {
       const dirty = state.dirty ?? emptyDirty();

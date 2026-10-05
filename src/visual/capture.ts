@@ -8,6 +8,7 @@
 import { read } from "../plugins/flow/doors/read";
 import { sources } from "../plugins/flow/doors/sources";
 import type { Json } from "../plugins/model/types";
+import type { UiNode } from "../plugins/ui/types";
 import type { Entity } from "../plugins/world/types";
 import type { ReaderApp, VisualDescribe, VisualState, VisualView } from "./types";
 
@@ -58,7 +59,9 @@ function addressesOf(keys: Record<string, Record<string, Entity>>): Map<Entity, 
  * ```
  */
 function parentOf(parent: Json | undefined): Entity | undefined {
-  if (typeof parent !== "object" || parent === null || Array.isArray(parent)) return undefined;
+  const isRecord = typeof parent === "object" && parent !== null && !Array.isArray(parent);
+
+  if (!isRecord) return undefined;
 
   return typeof parent.entity === "number" ? parent.entity : undefined;
 }
@@ -96,6 +99,20 @@ export function stateOf(app: ReaderApp): VisualState {
 }
 
 /**
+ * The ui tree without the words of its texts, at every depth.
+ *
+ * @param node - A node of the ui source.
+ * @returns The node and its children, none with `content`.
+ */
+function withoutContent(node: UiNode): UiNode {
+  const copy: UiNode = { ...node, children: node.children.map(child => withoutContent(child)) };
+
+  delete copy.content;
+
+  return copy;
+}
+
+/**
  * Reads the screen a checkpoint saves: the ui tree, and every entity a projection names as
  * `{ projection, key, components }`, sorted by projection then key. Ui parts, rings and unkeyed
  * views appear through the tree only, or not at all.
@@ -110,10 +127,11 @@ export function describeOf(app: ReaderApp): VisualDescribe {
   for (const entity of read(app, sources.entities)) {
     const address = addresses.get(entity.id);
 
-    if (address !== undefined) {
-      views.push({ ...address, components: withParentAddress(entity.components, addresses) });
-    }
+    if (address === undefined) continue;
+
+    views.push({ ...address, components: withParentAddress(entity.components, addresses) });
   }
 
-  return { ui: read(app, sources.ui), views: views.toSorted(byAddress) };
+  // describe.json keeps rects and styles, not label text: a changed number is a state difference.
+  return { ui: withoutContent(read(app, sources.ui)), views: views.toSorted(byAddress) };
 }

@@ -67,6 +67,7 @@ app.world.ecs.snapshot().entities[0];
 | Method | Behaviour |
 |---|---|
 | `register(spec)` | Stores a projection. A duplicate name throws. Nothing is drawn until `mount`. |
+| `replace(spec)` | Swaps the spec of a registered projection. A mounted one has its layers checked and runs the new `view` for every item on the next frame, directly. An unmounted one is only stored. An unknown name throws; a throw changes nothing. The caller is the dev hot swap in `ui`. |
 | `setLayers(list)` / `layers()` | The layer list of the scene; order is draw order. Every call stores a new frozen array, so a reader compares by identity. |
 | `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. Throws for an unknown name and for a `layer` or `lift` the scene does not declare; nothing is mounted then. |
 | `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call. |
