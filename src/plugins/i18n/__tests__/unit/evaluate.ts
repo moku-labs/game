@@ -1,10 +1,9 @@
 /**
  * @file i18n plugin — the golden-test harness. Not a test file: the unit project only collects
  * `*.test.ts`. It compiles a message, emits the module the build would write, transpiles it with
- * the TypeScript the repository already ships, and evaluates it. So the goldens assert the real
- * generated code, casts and `argument` helper included, not a second implementation of it.
+ * Bun, and evaluates it. So the goldens assert the real generated code, casts and `argument`
+ * helper included, not a second implementation of it.
  */
-import ts from "typescript";
 import { emitLocale } from "../../compile/emit";
 import { type CompiledSource, compileMessage } from "../../compile/message";
 import { createIntlKit } from "../../intl";
@@ -17,9 +16,7 @@ import type { CompiledMessage, CompiledMessages, IntlKit, Part } from "../../typ
  * @returns The compiled messages of the module.
  */
 export function evaluateModule(source: string): CompiledMessages {
-  const javascript = ts.transpileModule(source, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext }
-  }).outputText;
+  const javascript = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
   const body = javascript.replace("export default", "return");
 
   return new Function(body)() as CompiledMessages;
