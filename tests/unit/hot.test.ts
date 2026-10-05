@@ -136,7 +136,7 @@ describe("hot()", () => {
     expect(loaded.contents).toContain("  import.meta.hot.accept(next => {");
     expect(loaded.contents).toContain("const swap = globalThis.__moku_hot;");
     expect(loaded.contents).toContain(
-      'throw new Error("[game] No running game takes the hot swap.");'
+      String.raw`throw new Error("[game] No running game takes the hot swap.\n  Open the game page, then save again.");`
     );
     expect(loaded.contents).toContain(`swap(next, ${JSON.stringify(file)});`);
   });

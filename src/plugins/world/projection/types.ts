@@ -921,9 +921,10 @@ export type ProjectionApi = {
    *
    * @example
    * ```ts
-   * // `i18n` switched the locale: every label has to be projected again.
+   * // The ui hot swap replaced the saved `hud` projection: every mounted view runs `view` again.
    * const world = ctx.require(worldPlugin);
-   * world.projection.rerunAll(); // the next frame writes the new strings with no motion
+   * world.projection.replace(hud);
+   * world.projection.rerunAll(); // the next frame draws the new view, with no motion
    * ```
    */
   rerunAll(): void;

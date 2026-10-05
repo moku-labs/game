@@ -59,7 +59,9 @@ function addressesOf(keys: Record<string, Record<string, Entity>>): Map<Entity, 
  * ```
  */
 function parentOf(parent: Json | undefined): Entity | undefined {
-  if (typeof parent !== "object" || parent === null || Array.isArray(parent)) return undefined;
+  const isRecord = typeof parent === "object" && parent !== null && !Array.isArray(parent);
+
+  if (!isRecord) return undefined;
 
   return typeof parent.entity === "number" ? parent.entity : undefined;
 }
@@ -125,9 +127,9 @@ export function describeOf(app: ReaderApp): VisualDescribe {
   for (const entity of read(app, sources.entities)) {
     const address = addresses.get(entity.id);
 
-    if (address !== undefined) {
-      views.push({ ...address, components: withParentAddress(entity.components, addresses) });
-    }
+    if (address === undefined) continue;
+
+    views.push({ ...address, components: withParentAddress(entity.components, addresses) });
   }
 
   // describe.json keeps rects and styles, not label text: a changed number is a state difference.

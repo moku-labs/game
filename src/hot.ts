@@ -123,7 +123,7 @@ function footerOf(file: string): string {
     "  import.meta.hot.accept();",
     "  import.meta.hot.accept(next => {",
     "    const swap = globalThis.__moku_hot;",
-    '    if (typeof swap !== "function") throw new Error("[game] No running game takes the hot swap.");',
+    String.raw`    if (typeof swap !== "function") throw new Error("[game] No running game takes the hot swap.\n  Open the game page, then save again.");`,
     `    swap(next, ${JSON.stringify(file)});`,
     "  });",
     "}",
@@ -155,23 +155,20 @@ export function hot(options: HotOptions = {}): HotPlugin {
 
   return {
     name: "@moku-labs/game/hot",
-    /**
-     * Registers the load callback on the include filter.
-     *
-     * @param build - Bun's plugin builder.
-     */
-    setup(build) {
+    setup: build => {
       build.onLoad({ filter: include }, async ({ path: file }) => {
+        // Read the module and pick the loader from its extension.
         const source = await readFile(file, "utf8");
         const loader = file.endsWith(".tsx") ? "tsx" : "ts";
 
+        // A file outside the game, or an excluded one that is not generated strings, loads unchanged.
         const inGame = gamePath(file, process.cwd());
         const strings = STRINGS.test(inGame ?? "");
+        const unchanged = inGame === undefined || (!strings && exclude.test(inGame));
 
-        if (inGame === undefined || (!strings && exclude.test(inGame))) {
-          return { contents: source, loader };
-        }
+        if (unchanged) return { contents: source, loader };
 
+        // Any other file gets the footer that hands its new exports to the running game.
         return { contents: `${source}\n${footerOf(file)}`, loader };
       });
     }

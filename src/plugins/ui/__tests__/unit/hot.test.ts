@@ -456,7 +456,7 @@ describe("the swap: what it refuses", () => {
 
   it("refuses a projection no feature registered, before any component is written", () => {
     const { swap, info, replaceComponent, refreshAll, wake } = installed();
-    const reason = '"shop.items" is a new projection, a scene mounts it';
+    const reason = 'Projection "shop.items" is not registered';
 
     expect(() => swap({ Settings, shop }, FILE)).toThrow(refusal(reason));
     expect(info).toHaveBeenCalledExactlyOnceWith("ui:hot-refused", { file: FILE, reason });
@@ -481,9 +481,32 @@ describe("the swap: what it refuses", () => {
     expect(replaceComponent).not.toHaveBeenCalled();
   });
 
+  it("refuses a replace that throws a value that is not an Error, with its first line", () => {
+    const { swap, info, replace, replaceComponent } = installed();
+    const reason = 'Projection "hud" is busy';
+
+    replace.mockImplementation(() => {
+      throw '[game] Projection "hud" is busy.\n  Save again.';
+    });
+
+    expect(() => swap({ Settings, hud }, FILE)).toThrow(refusal(reason));
+    expect(info).toHaveBeenCalledExactlyOnceWith("ui:hot-refused", { file: FILE, reason });
+    expect(replaceComponent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a replace whose message has one line, without the prefix and the period", () => {
+    const { swap, replaceAnimation } = installed();
+
+    replaceAnimation.mockImplementation(() => {
+      throw new Error("[game] Animation registry is frozen.");
+    });
+
+    expect(() => swap({ coinsFly }, FILE)).toThrow(refusal("Animation registry is frozen"));
+  });
+
   it("refuses an animation no feature registered, before any component or style is written", () => {
     const { swap, info, replaceComponent, replaceStyles, emit } = installed();
-    const reason = '"hud.sparkle" is a new animation, a feature registers it';
+    const reason = 'Animation "hud.sparkle" is not registered';
 
     expect(() => swap({ Settings, digits, sparkle }, FILE)).toThrow(refusal(reason));
     expect(info).toHaveBeenCalledExactlyOnceWith("ui:hot-refused", { file: FILE, reason });

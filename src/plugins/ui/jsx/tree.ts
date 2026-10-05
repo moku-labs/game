@@ -88,6 +88,7 @@ function contentOf(element: Element, resolvedOf: ResolvedOf | undefined): string
  * @returns The node, with its children in child order.
  */
 function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | undefined): UiNode {
+  // The children, in child order; the spacers of a windowed scroll are skipped.
   const children: UiNode[] = [];
 
   for (const child of element.children) {
@@ -98,8 +99,7 @@ function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | unde
     }
   }
 
-  const local =
-    element.instance === undefined ? undefined : state.instances.get(element.instance)?.local;
+  // The base node every element has: key, type, natural rect, style, state flags, children.
   const node: UiNode = {
     key: element.key,
     type: element.type,
@@ -108,6 +108,10 @@ function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | unde
     state: { ...element.is },
     children
   };
+
+  // The optional fields, each only when it applies: the words of a text, the fit scale of a
+  // fitted element, the value of a text field, the window of a windowed scroll, the local of a
+  // component root.
   const content = contentOf(element, resolvedOf);
   const worded = content === undefined ? node : { ...node, content };
   const fitted = element.style.fit === "contain" ? { ...worded, fitScale: element.fit } : worded;
@@ -118,6 +122,8 @@ function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | unde
     window === undefined
       ? valued
       : { ...valued, window: { first: window.first, last: window.last, rows: window.rows } };
+  const local =
+    element.instance === undefined ? undefined : state.instances.get(element.instance)?.local;
 
   return local === undefined ? windowed : { ...windowed, local: { ...local } };
 }

@@ -525,8 +525,8 @@ turns the throw into a full reload, which restores the state. The reasons:
 | Reason | When |
 |---|---|
 | `exports "<export>", registered at start` | the module exports a value of the refused row |
-| `"<name>" is a new projection, a scene mounts it` | `world` has no projection of that name |
-| `"<id>" is a new animation, a feature registers it` | `anim` has no animation of that id |
+| `Projection "<name>" is not registered` | `world` has no projection of that name |
+| `Animation "<id>" is not registered` | `anim` has no animation of that id |
 | the first line of the `world` error | a mounted projection names a `layer` or `lift` the scene does not declare |
 | the first line of the `i18n` error | the strings match no registered module of the locale, or more than one |
 | `the module did not evaluate` | a syntax error: there is no namespace |
@@ -543,7 +543,7 @@ if (import.meta.hot) {
   import.meta.hot.accept();
   import.meta.hot.accept(next => {
     const swap = globalThis.__moku_hot;
-    if (typeof swap !== "function") throw new Error("[game] No running game takes the hot swap.");
+    if (typeof swap !== "function") throw new Error("[game] No running game takes the hot swap.\n  Open the game page, then save again.");
     swap(next, "/game/features/settings/settings.tsx");
   });
 }

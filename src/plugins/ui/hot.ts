@@ -18,9 +18,6 @@ import type { UiCtx } from "./types";
 /** The global the footer of `@moku-labs/game/hot` calls. */
 const HOT_GLOBAL = "__moku_hot";
 
-/** The message of a replace whose name no feature registered, in `world` and in `anim`. */
-const NOT_REGISTERED = "is not registered";
-
 /** A strings module `assets:keys` generates; the group is its locale. */
 const STRINGS_FILE = /\/generated\/strings\.([\w-]+)\.ts$/;
 
@@ -242,6 +239,8 @@ function fileExport(
   const [name, value] = entry;
   const isStrings = name === "default" && locale !== undefined && isCompiledMessages(value);
 
+  // First match wins: component, projection, animation, emitter, strings, text styles, then
+  // anything registered at start is refused; any other value swaps nothing.
   if (isComponentDefinition(value)) {
     swaps.components.push(value);
   } else if (isProjectionSpec(value)) {
@@ -303,25 +302,23 @@ function sortExports(next: unknown, file: string): Swaps | Refusal {
 }
 
 /**
- * The reason of a refused replace: a name no feature registered gets `unregistered` when it is
- * given, any other error keeps the first line of its message.
+ * The reason of a refused replace: the first line of what it threw, without the `[game] ` prefix
+ * and the closing period.
  *
  * @param error - What the replace threw.
- * @param unregistered - The reason for a name that is not registered.
  * @returns The reason of the refusal.
  * @example
  * ```ts
  * refusalOf(new Error('[game] Strings for "ru" match no single registered module.\n  Reload.')); // 'Strings for "ru" match no single registered module'
  * ```
  */
-function refusalOf(error: unknown, unregistered?: string): string {
+function refusalOf(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
 
-  if (unregistered !== undefined && message.includes(NOT_REGISTERED)) return unregistered;
-
-  const [headline = message] = message.split("\n");
-
-  return headline.replace(/^\[game\] /, "").replace(/\.$/, "");
+  return message
+    .replace(/\n.*/s, "")
+    .replace(/^\[game\] /, "")
+    .replace(/\.$/, "");
 }
 
 /**
@@ -346,19 +343,13 @@ function refuse(ctx: UiCtx, file: string, reason: string): never {
  * @param ctx - Domain context of the ui plugin.
  * @param file - The path of the saved module.
  * @param replace - The replace of `world`, `anim` or `i18n`.
- * @param unregistered - The reason when the name is not registered.
  * @throws {Error} When the replace throws.
  */
-function replaceOrRefuse(
-  ctx: UiCtx,
-  file: string,
-  replace: () => void,
-  unregistered?: string
-): void {
+function replaceOrRefuse(ctx: UiCtx, file: string, replace: () => void): void {
   try {
     replace();
   } catch (error) {
-    refuse(ctx, file, refusalOf(error, unregistered));
+    refuse(ctx, file, refusalOf(error));
   }
 }
 
@@ -377,15 +368,11 @@ function replaceRefusable(ctx: UiCtx, file: string, swaps: Swaps): void {
   const { world, anim, i18n } = ctx.deps;
 
   for (const spec of swaps.projections) {
-    const unregistered = `"${spec.name}" is a new projection, a scene mounts it`;
-
-    replaceOrRefuse(ctx, file, () => world.projection.replace(spec), unregistered);
+    replaceOrRefuse(ctx, file, () => world.projection.replace(spec));
   }
 
   for (const definition of swaps.animations) {
-    const unregistered = `"${definition.id}" is a new animation, a feature registers it`;
-
-    replaceOrRefuse(ctx, file, () => anim.replace(definition), unregistered);
+    replaceOrRefuse(ctx, file, () => anim.replace(definition));
   }
 
   for (const { locale, messages } of swaps.strings) {

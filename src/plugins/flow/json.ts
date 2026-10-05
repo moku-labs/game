@@ -156,9 +156,10 @@ export function readBookmark(value: Json): Bookmark {
 
   const { path, input, player, session, graph } = value;
   const rng = readRng(value.rng);
+  const hasText = typeof path === "string" && typeof graph === "string";
   const complete = input !== undefined && player !== undefined && session !== undefined;
 
-  if (typeof path !== "string" || typeof graph !== "string" || !complete || rng === undefined) {
+  if (!hasText || !complete || rng === undefined) {
     throw invalidBookmark();
   }
 

@@ -77,6 +77,20 @@ export function isReady(entry: RegisteredModule): entry is ResolvedModule {
 }
 
 /**
+ * Tells a lazy strings module, a loader that fetches it, from the module itself.
+ *
+ * @param value - The module, or the loader that fetches it.
+ * @returns True for a function.
+ * @example
+ * ```ts
+ * isLoader(async () => ({ "hud.orders": "Orders" })); // true
+ * ```
+ */
+function isLoader(value: unknown): value is () => Promise<unknown> {
+  return typeof value === "function";
+}
+
+/**
  * Records one module under its locale, keeping the name it can be blamed under.
  *
  * @param state - The plugin state.
@@ -87,9 +101,8 @@ export function isReady(entry: RegisteredModule): entry is ResolvedModule {
 function register(state: State, locale: string, from: string, value: unknown): void {
   const entries = state.registered.get(locale) ?? [];
 
-  if (typeof value === "function") {
-    const load = value as () => Promise<unknown>;
-    const loader: StringsLoader = async () => messagesOf(await load());
+  if (isLoader(value)) {
+    const loader: StringsLoader = async () => messagesOf(await value());
 
     entries.push({ from, messages: loader });
   } else entries.push({ from, messages: messagesOf(value) });

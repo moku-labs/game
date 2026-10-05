@@ -201,7 +201,7 @@ describe("dev hot swap", () => {
     [
       "sparkle",
       defineAnimation("hud.sparkle", { slots: {}, build: () => mark("shone") }),
-      '"hud.sparkle" is a new animation, a feature registers it'
+      'Animation "hud.sparkle" is not registered'
     ]
   ])("refuses a module exporting %s and writes no component", async (name, value, reason) => {
     const app = await startDevApp();

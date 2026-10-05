@@ -544,7 +544,11 @@ export type JsxModule = {
   reconcile(): void;
   solve(): void;
   register(definition: AnyComponentDefinition): void;
-  /** Swaps the registered definition of that name, or adds it; the dev hot swap calls it. */
+  /**
+   * Swaps the registered definition of that name, or adds it; the dev hot swap calls it.
+   *
+   * @param definition - The new definition, registered under its `name`.
+   */
   replace(definition: AnyComponentDefinition): void;
   /** Marks every root for a reconcile and a solve, so each view runs again on the next frame. */
   refreshAll(): void;
