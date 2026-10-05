@@ -192,7 +192,29 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | `@moku-labs/game/assets` | Node and Bun | Asset keys, the manifest, strings, the pack |
 | `@moku-labs/game/inspect` | anywhere | Read a running game |
 | `@moku-labs/game/control` | dev builds | Drive a running game |
+| `@moku-labs/game/lint` | oxlint | The game lint rules, as an oxlint JS plugin |
 | `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | anywhere | The JSX runtime. A game never imports it by hand. |
+
+### Lint for games
+
+`@moku-labs/game/lint` is an oxlint JS plugin, `moku-game`. It checks the engine rules in a game: lazy Pixi and Yoga, no native package in the logic, the editor only in dev files, no module-scope state, determinism and pure rules.
+
+```json
+// .oxlintrc.json
+{
+  "jsPlugins": ["@moku-labs/game/lint"],
+  "rules": {
+    "moku-game/lazy-imports": "error",
+    "moku-game/native-imports": "error",
+    "moku-game/dev-imports": "error",
+    "moku-game/no-module-state": "error",
+    "moku-game/determinism": "error",
+    "moku-game/rules-siblings": "error"
+  }
+}
+```
+
+Each rule takes `{ "files": [...], "ignores": [...] }`. The defaults follow the template layout. See [Lint for games](./docs/lint.md).
 
 ## Docs
 
@@ -204,6 +226,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | [Doors for the editor](./docs/doors.md) | `/inspect` and `/control`, base sources and commands |
 | [Events](./docs/events.md) | Every event and its payload |
 | [Configuration](./docs/configuration.md) | Every config field and its default |
+| [Lint for games](./docs/lint.md) | The `moku-game` oxlint rules, their options and defaults |
 | [Testing](./docs/testing.md) | Headless and visual tests, all scripts, test layout, lint rules |
 | [`llms.txt`](./llms.txt) | The engine in one page, for an AI that writes a game |
 
