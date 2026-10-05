@@ -3,6 +3,7 @@
  * read out of the feature descriptions, the registrations `onStart` opens and the teardown that
  * closes exactly those.
  */
+import { animPlugin } from "../anim";
 import { flowPlugin } from "../flow";
 import { i18nPlugin } from "../i18n";
 import { inputPlugin } from "../input";
@@ -21,14 +22,15 @@ import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
 
 /**
- * Resolves the seven dependency APIs with `ctx.require`. `anim` is required for the edge only:
- * its work reaches `ui` through the tween driver behind every handle.
+ * Resolves the eight dependency APIs with `ctx.require`. `anim` serves the dev hot swap, which
+ * replaces animations; the motions reach `anim` through the tween driver behind every handle.
  *
  * @param ctx - Kernel context of the ui plugin.
- * @returns The seven dependency APIs.
+ * @returns The eight dependency APIs.
  */
 function resolveDeps(ctx: KernelSlice): Deps {
   return {
+    anim: ctx.require(animPlugin),
     time: ctx.require(timePlugin),
     flow: ctx.require(flowPlugin),
     world: ctx.require(worldPlugin),

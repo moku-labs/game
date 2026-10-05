@@ -27,9 +27,9 @@ Config:
 | `focusRing` | `{ stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }` | the keyboard focus ring: a dashed ring `offset` outside the control, over a solid halo of `haloWidth` on the same path |
 | `textInput` | `{ caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35, composingUnderline: 3, keyboardMargin: 16 }` | a text field while it is edited: the caret (it does not blink) and the IME underline in `caret`, the selection box, and the CSS px kept between the field and the keyboard. Shallow merge: a game that sets it gives all six fields |
 
-Emits nothing, listens to nothing. Depends on `time`, `flow`, `world`, `renderer`, `input`,
-`anim`, `i18n`, `text`. Yoga arrives through `await import("yoga-layout/load")` in `onStart`;
-nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
+Emits the global `ui:hot-swap` in a dev build only, listens to nothing. Depends on `time`,
+`flow`, `world`, `renderer`, `input`, `anim`, `i18n`, `text`. Yoga arrives through
+`await import("yoga-layout/load")` in `onStart`; nothing solves before it. `onStart` also registers `LocalWrite` through `input.controls.add`, so
 the cursor shows a hand over a local-state button, one `input.onKey` listener for the focus, one
 `input.onPointer` listener for the text fields, one `flow.fx.onHint` listener that hands released
 hints to the `change` hooks of elements, and on a page the hidden input of the text fields;
@@ -492,20 +492,31 @@ The dev server appends the footer through `bunfig.toml`:
 plugins = ["@moku-labs/game/hot"]
 ```
 
-Every export of the saved module is sorted:
+Every export of the saved module is sorted, in this order:
 
 | Export | What happens |
 |---|---|
 | a `defineComponent` definition | replaces the component of that name, or adds it |
 | a projection spec: string `name` and `layer`, `from`, `view`, and `key` unless `from` returns one object | `world.projection.replace`: a mounted one runs its new `view` |
-| an object or a function with an own string `kind`, an object with an own string `id` or `name` | refused: a scene, animation, emitter, flow, node, system, ECS component, filter, text styles or plugin is registered by value at start |
+| an animation: own string `id`, a `build` function, `slots` | `anim.replace`: the next `play` builds the new tree; a running timeline keeps its own |
+| an emitter: own string `id`, a `config` object | nothing in ui: `effects` takes it from the `ui:hot-swap` event; live particles keep their bake |
+| the `default` export of `generated/strings.<locale>.ts`, a record of functions | `i18n.replace(locale, messages)`, the locale read from the path: every label re-resolves |
+| text styles: `{ kind: "textStyles", map }` | `text.replaceStyles`: every label is laid out again and redrawn with the new style |
+| an object or a function with an own string `kind`, an object with an own string `id` or `name` | refused: a scene, flow, node, system, ECS component, filter, feature or plugin is registered by value at start |
 | anything else: styles, tokens, motions, numbers, plain functions, function components | nothing: Bun already gave the importers the new binding |
 
-Then every ui root reconciles and solves on the next frame, `world.projection.rerunAll()` runs
-every projection again, `time.wake()` lifts the idle cap, and `ui:hot-swap` is logged at info
-with `{ file, components, projections }`. This runs for a module that swapped nothing too, so a
-saved `styles.ts` shows on the next frame. Component instances keep their identity, so their
-`local` stays. The flow is not touched.
+The strings files are written by `bun run assets:keys`, which compiles
+`features/*/strings/<locale>.json` into `generated/strings.<locale>.ts`. After a JSON edit, run it
+again: its save is what the hot swap takes.
+
+The replaces that may throw run first: projections, then animations, then strings. Then the
+components and the text styles are written, every ui root reconciles and solves on the next
+frame, `world.projection.rerunAll()` runs every projection again, and `time.wake()` lifts the idle
+cap. Last, the global event `ui:hot-swap` carries `{ file, module }` with the exports, and
+`ui:hot-swap` is logged at info with `{ file, components, projections, animations, emitters,
+strings, textStyles }`: names, ids, locales and style names. This runs for a module that swapped
+nothing too, so a saved `styles.ts` shows on the next frame. Component instances keep their
+identity, so their `local` stays. The flow is not touched.
 
 A refusal logs `ui:hot-refused` at info with `{ file, reason }` and throws
 `[game] Hot swap refused for <file>: <reason>.\n  The page reloads and restores its state.` Bun
@@ -515,13 +526,15 @@ turns the throw into a full reload, which restores the state. The reasons:
 |---|---|
 | `exports "<export>", registered at start` | the module exports a value of the refused row |
 | `"<name>" is a new projection, a scene mounts it` | `world` has no projection of that name |
+| `"<id>" is a new animation, a feature registers it` | `anim` has no animation of that id |
 | the first line of the `world` error | a mounted projection names a `layer` or `lift` the scene does not declare |
+| the first line of the `i18n` error | the strings match no registered module of the locale, or more than one |
 | `the module did not evaluate` | a syntax error: there is no namespace |
 | `no exports` | the module exports nothing |
 
-Every export is sorted and every projection is replaced before any component is written, so a
-refused module changes no component. In a module with two projections whose second is refused, the
-first is already replaced; the reload drops it.
+Every export is sorted and every replace that may throw has run before any component or text
+style is written, so a refused module changes no component and no style. A replace that ran
+before the refused one stands until the reload drops it.
 
 ```ts
 // The footer `@moku-labs/game/hot` appends to a saved `settings.tsx`. Its `Settings` component

@@ -1,20 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defineAnimation, projection, Transform, tween } from "../../../../index";
+import { defineAnimation, mark, play, projection } from "../../../../index";
+import type { CompiledMessages } from "../../../i18n/types";
 import { defineScene } from "../../../scenes/define";
 import { Text } from "../../../text/components";
 import type { TextValue } from "../../../text/types";
 import { defineComponent } from "../../jsx/component";
-import { type Player, startUiApp } from "../app";
+import { coinsPop, type Player, startUiApp } from "../app";
 
 // ---------------------------------------------------------------------------
 // Integration: the dev hot swap on the real screen set. The footer of
 // `@moku-labs/game/hot` calls `globalThis.__moku_hot` with the new exports of
-// a saved view module; here the test calls it the same way. The HUD of the
-// fixture holds the Settings component, whose tab is local state.
+// a saved module; here the test calls it the same way. The HUD of the fixture
+// holds the Settings component, whose tab is local state; the fixture also
+// registers the animation `hud.coinsPop` and the English `hud.coins`.
 // ---------------------------------------------------------------------------
 
 /** The handler the footer calls. */
 type Swap = (next: unknown, file: string) => void;
+
+/** The started fixture. */
+type App = Awaited<ReturnType<typeof startUiApp>>;
 
 /** The path of the saved module every swap is reported with. */
 const FILE = "/game/features/hud/view.tsx";
@@ -37,7 +42,7 @@ function hotSwap(): Swap {
  *
  * @returns The started app with the HUD mounted.
  */
-async function startDevApp() {
+async function startDevApp(): Promise<App> {
   vi.stubGlobal("__MOKU_GAME_DEV__", true);
 
   return startUiApp();
@@ -79,20 +84,28 @@ const newHud = projection({
 });
 
 /**
- * Reads the string a label of the screen shows.
+ * Reads the text a label of the screen holds.
  *
  * @param app - The started app.
  * @param key - The key of the label.
- * @returns The content of its `Text`, or `undefined`.
+ * @returns Its `Text`, or `undefined`.
  */
-function labelOf(
-  app: Awaited<ReturnType<typeof startUiApp>>,
-  key: string
-): TextValue["content"] | undefined {
+function textOf(app: App, key: string): TextValue | undefined {
   // eslint-disable-next-line unicorn/no-array-callback-reference -- `ui.find` takes a key, not a callback.
   const entity = app.ui.find(key) ?? 0;
 
-  return app.world.ecs.get(entity, Text)?.content;
+  return app.world.ecs.get(entity, Text);
+}
+
+/**
+ * Reads the data of the last log entry with that event.
+ *
+ * @param app - The started app.
+ * @param event - The event of the entry.
+ * @returns Its data, or `undefined`.
+ */
+function loggedData(app: App, event: string): unknown {
+  return app.log.trace().findLast(entry => entry.event === event)?.data;
 }
 
 describe("dev hot swap", () => {
@@ -102,18 +115,22 @@ describe("dev hot swap", () => {
     app.input.tap(app.ui.find("video") ?? 0);
     app.time.step(16);
 
-    expect(labelOf(app, "which")).toBe("video:3");
+    expect(textOf(app, "which")?.content).toBe("video:3");
 
     hotSwap()({ Settings: NewSettings }, FILE);
     app.time.step(16);
 
     expect(app.ui.find("heading")).toBeDefined();
-    expect(labelOf(app, "which")).toBe("tab video, volume 3");
+    expect(textOf(app, "which")?.content).toBe("tab video, volume 3");
     expect(app.ui.tree().children[2]?.local).toEqual({ tab: "video" });
-    expect(app.log.trace().find(entry => entry.event === "ui:hot-swap")?.data).toEqual({
+    expect(loggedData(app, "ui:hot-swap")).toEqual({
       file: FILE,
       components: ["Settings"],
-      projections: []
+      projections: [],
+      animations: [],
+      emitters: [],
+      strings: [],
+      textStyles: []
     });
 
     await app.stop();
@@ -122,51 +139,86 @@ describe("dev hot swap", () => {
   it("re-renders a mounted projection with the new view", async () => {
     const app = await startDevApp();
 
-    expect(labelOf(app, "coins")).toBe("7");
+    expect(textOf(app, "coins")?.content).toBe("7");
 
     hotSwap()({ hud: newHud }, FILE);
     app.time.step(16);
 
-    expect(labelOf(app, "coins")).toBe("coins 7");
-    expect(app.log.trace().find(entry => entry.event === "ui:hot-swap")?.data).toEqual({
-      file: FILE,
-      components: [],
-      projections: ["hud"]
-    });
+    expect(textOf(app, "coins")?.content).toBe("coins 7");
+    expect(loggedData(app, "ui:hot-swap")).toMatchObject({ projections: ["hud"] });
+
+    await app.stop();
+  });
+
+  it("re-renders a label with the strings of a regenerated strings file", async () => {
+    const app = await startDevApp();
+
+    app.world.projection.mount(["hud", "rich"], { kind: "plugin", name: "test" });
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(textOf(app, "auto")?.resolved).toBe("coins 3");
+
+    const english: CompiledMessages = {
+      "hud.coins": params => [{ kind: "text", text: `${String(params.n)} gold` }]
+    };
+
+    hotSwap()({ default: english }, "/game/generated/strings.en.ts");
+    app.time.step(16);
+
+    expect(textOf(app, "auto")?.resolved).toBe("3 gold");
+    expect(loggedData(app, "ui:hot-swap")).toMatchObject({ strings: ["en"] });
+
+    await app.stop();
+  });
+
+  it("plays the new build of a swapped animation the next time it plays", async () => {
+    const app = await startDevApp();
+    const reached: string[] = [];
+
+    app.anim.onMark((_animation, name) => reached.push(name));
+    app.flow.fx.dispatch(play(coinsPop, {}));
+    app.time.step(16);
+
+    hotSwap()(
+      { coinsPop: defineAnimation("hud.coinsPop", { slots: {}, build: () => mark("v2") }) },
+      "/game/features/hud/animations.ts"
+    );
+    app.flow.fx.dispatch(play(coinsPop, {}));
+    app.time.step(16);
+
+    expect(reached).toEqual(["v1", "v2"]);
 
     await app.stop();
   });
 
   it.each([
-    ["homeScene", defineScene("home", { bundle: "home", layers: { board: {} }, projections: [] })],
     [
-      "coinsFly",
-      defineAnimation("hud.coinsFly", {
-        slots: {},
-        build: () =>
-          tween({ projection: "hud", key: "coins" }, Transform, { scale: 0.4 }, { ms: 600 })
-      })
+      "homeScene",
+      defineScene("home", { bundle: "home", layers: { board: {} }, projections: [] }),
+      'exports "homeScene", registered at start'
+    ],
+    [
+      "sparkle",
+      defineAnimation("hud.sparkle", { slots: {}, build: () => mark("shone") }),
+      '"hud.sparkle" is a new animation, a feature registers it'
     ]
-  ])("refuses a module exporting %s and changes nothing", async (name, value) => {
+  ])("refuses a module exporting %s and writes no component", async (name, value, reason) => {
     const app = await startDevApp();
 
     expect(() => hotSwap()({ Settings: NewSettings, hud: newHud, [name]: value }, FILE)).toThrow(
-      `[game] Hot swap refused for ${FILE}: exports "${name}", registered at start.\n` +
+      `[game] Hot swap refused for ${FILE}: ${reason}.\n` +
         "  The page reloads and restores its state."
     );
 
-    // The local write re-renders the panel: with the old view, through the old projection.
+    // The local write re-renders the panel: the registry still holds the old Settings.
     app.input.tap(app.ui.find("video") ?? 0);
     app.time.step(16);
     app.time.step(16);
 
-    expect(labelOf(app, "which")).toBe("video:3");
-    expect(labelOf(app, "coins")).toBe("7");
+    expect(textOf(app, "which")?.content).toBe("video:3");
     expect(app.ui.find("heading")).toBeUndefined();
-    expect(app.log.trace().find(entry => entry.event === "ui:hot-refused")?.data).toEqual({
-      file: FILE,
-      reason: `exports "${name}", registered at start`
-    });
+    expect(loggedData(app, "ui:hot-refused")).toEqual({ file: FILE, reason });
 
     await app.stop();
   });

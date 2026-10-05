@@ -4,7 +4,8 @@
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
-import type { Require } from "../../config";
+import type { Events as GlobalEvents, Require } from "../../config";
+import type { AnimApi } from "../anim/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { I18nApi } from "../i18n/types";
 import type { InputApi } from "../input/types";
@@ -124,10 +125,11 @@ export type Config = {
 export type State = { jsx: JsxState; styles: StylesState; layout: LayoutState };
 
 /**
- * Resolved dependency APIs. `anim` is not here: its edge is validation only, and its work
- * reaches `ui` through the tween driver behind every `ViewHandle`.
+ * Resolved dependency APIs. `anim` is here for the dev hot swap, which replaces animations; the
+ * motions of `ui` reach `anim` through the tween driver behind every `ViewHandle`.
  */
 export type Deps = {
+  anim: AnimApi;
   time: TimeApi;
   flow: FlowApi;
   world: WorldApi;
@@ -140,9 +142,9 @@ export type Deps = {
 /**
  * What the kernel context offers before the deps are attached.
  *
- * `ui` owns no event, so `emit` is the kernel's and never called here.
+ * `ui` owns no event of its own; `emit` sends the global `ui:hot-swap` of the dev hot swap.
  */
-export type KernelSlice = PluginCtx<Config, State> & {
+export type KernelSlice = PluginCtx<Config, State, GlobalEvents> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;
