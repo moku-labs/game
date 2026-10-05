@@ -28,8 +28,8 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `run(): Promise<void>` | Validates the graph, seals `features`, loads the save and enters `mainFlow.start`. Called once, by the consumer's `onStart`. Rejects on a fatal error; resolves when `onStop` aborts the loop. |
 | `onEnter(stage, fn): () => void` | Registry for the plugins above: `assets` preloads at `"load"`, `scenes` switches at `"scene"`. The callback gets `NodeInfo`, which carries `scene` when the node was defined with `defineNode({ scene: "board", ... })`; a game that passes `scenes: "home" | "board"` to `defineGame` gets the id checked by the compiler. A node without `scene` keeps the current scene; an `over` node must not name one. |
 | `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. |
-| `bookmark(): Bookmark` | The current rest point as serialisable data. |
-| `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. |
+| `bookmark(): Bookmark` | The current rest point as serialisable data. Flow does not know scenes: the optional `scene` field is written by the `game.bookmark` door only. |
+| `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. Ignores `scene`. Resolves before the scene stage of the restored node runs; `walk([])` waits for the gate it opens after that stage. |
 | `describe(): FlowGraph` | The whole graph as JSON, built without running the game. |
 | `state(): FlowState` | `{ running, path, stack, pending, mode }`, frozen. The same object comes back while the graph did not move: no edge, no gate opened or closed, no mode switch. |
 | `history(): readonly JournalEntry[]` | Edges since the last checkpoint. |
@@ -106,8 +106,14 @@ Flow commands:
 |---|---|---|---|
 | `game.answer` | `{ intent: "string", payload: "json?" }` | route | `flow.gate.answer` |
 | `game.walk` | `{ route: "json" }` | route | `flow.walk` with the route read from JSON |
-| `game.bookmark` | — | read | `flow.bookmark()` |
-| `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `flow.restore(bookmark)`, or `flow.restore(reproBookmark(app, repro))` then `flow.walk(repro.route)` |
+| `game.bookmark` | — | read | `flow.bookmark()`, plus `scene: scenes.current()` when the app has `scenes` and a scene is mounted |
+| `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `scenes.expect(bookmark.scene)` when the bookmark has a scene, then `flow.restore(bookmark)`; or `flow.restore(reproBookmark(app, repro))` then `flow.walk(repro.route)` |
+
+The `scene` of a bookmark is what makes a restore at a popup work in a fresh page. A rest node
+without a scene of its own (`settings/open`, the Settings popup over Home) keeps the mounted
+scene; in a fresh page nothing is mounted, so the restore door names the scene first and the
+node mounts it. A `scene` that is not a string makes `game.restore` refuse the bookmark. Flow
+imports the `ScenesApi` type only, never the scenes plugin.
 
 ## The signal of an effect handler
 

@@ -140,7 +140,8 @@ function invalidBookmark(): Error {
 }
 
 /**
- * Reads a bookmark out of JSON, the value `flow.bookmark()` made and the editor kept.
+ * Reads a bookmark out of JSON, the value `flow.bookmark()` made and the editor kept. The
+ * `scene` the `game.bookmark` door added is kept when present.
  *
  * @param value - The JSON the editor sent.
  * @returns The bookmark.
@@ -161,7 +162,12 @@ export function readBookmark(value: Json): Bookmark {
     throw invalidBookmark();
   }
 
-  return { path, input, player, session, rng, graph };
+  const { scene } = value;
+
+  if (scene === undefined) return { path, input, player, session, rng, graph };
+  if (typeof scene !== "string") throw invalidBookmark();
+
+  return { path, input, player, session, rng, graph, scene };
 }
 
 /**

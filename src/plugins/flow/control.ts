@@ -4,17 +4,22 @@
  * inline dev guard, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
  */
 import type { Json } from "../model/types";
+import type { ScenesApi } from "../scenes/types";
 import { defineCommand } from "./doors/define";
 import { controlRefused } from "./doors/dev";
 import type { ControlApp } from "./doors/types";
 import { type HeadlessApp, reproBookmark } from "./headless";
 import { readBookmark, readRepro, readRoute } from "./json";
-import type { FlowState } from "./types";
+import type { Bookmark, FlowState } from "./types";
+
+/** An app that may carry the screen plugins: the doors read and set its scene when it has one. */
+type SceneApp = { readonly scenes?: ScenesApi };
 
 /**
- * Enters a bookmark, or a repro's bookmark followed by its route.
+ * Enters a bookmark, or a repro's bookmark followed by its route. A bookmark's `scene` is handed
+ * to `scenes.expect` first, so a rest node without a scene of its own mounts it.
  *
- * @param app - The app.
+ * @param app - The app; with `scenes`, the bookmark's scene is expected before the restore.
  * @param input - Exactly one of a bookmark and a repro, as JSON.
  * @param input.bookmark - A `flow.bookmark()` value.
  * @param input.repro - A `/testing` repro.
@@ -22,13 +27,17 @@ import type { FlowState } from "./types";
  * @throws {Error} When both or neither are given, or the JSON is not of its shape.
  */
 async function restoreFrom(
-  app: HeadlessApp,
+  app: HeadlessApp & SceneApp,
   input: { bookmark?: Json | undefined; repro?: Json | undefined }
 ): Promise<FlowState> {
   const { bookmark, repro } = input;
 
   if (bookmark !== undefined && repro === undefined) {
-    await app.flow.restore(readBookmark(bookmark));
+    const read = readBookmark(bookmark);
+
+    if (read.scene !== undefined) app.scenes?.expect(read.scene);
+
+    await app.flow.restore(read);
 
     return app.flow.state();
   }
@@ -97,13 +106,15 @@ export const walkCommand = defineCommand({
 });
 
 /**
- * Takes a bookmark of the rest point: the node plus the committed state, plain JSON.
+ * Takes a bookmark of the rest point: the node plus the committed state, plain JSON. An app with
+ * the screen plugins adds the mounted `scene`, so a restore in a fresh page builds it again.
  *
  * @example
  * ```ts
- * // The editor keeps the position before a risky test.
+ * // The editor keeps the position while the Settings popup stands over Home.
  * const { value } = await run(app, commands.bookmark);
- * value.path; // "board/awaitIntent"
+ * value.path; // "settings/open"
+ * value.scene; // "home"
  * ```
  */
 export const bookmarkCommand = defineCommand({
@@ -111,18 +122,22 @@ export const bookmarkCommand = defineCommand({
   title: "Bookmark",
   input: {},
   effect: "read",
-  run: (app: ControlApp) => {
+  run: (app: ControlApp & SceneApp): Bookmark => {
     if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
 
     app.log.debug("moku:dev", { command: "game.bookmark" });
 
-    return app.flow.bookmark();
+    const bookmark = app.flow.bookmark();
+    const scene = app.scenes?.current();
+
+    return scene === undefined ? bookmark : { ...bookmark, scene };
   }
 });
 
 /**
  * Restores a bookmark, or a repro: its state at its checkpoint, then its route. Replaces the
- * state outside the graph, so the session is tainted and the command journaled.
+ * state outside the graph, so the session is tainted and the command journaled. A bookmark's
+ * `scene` goes to `scenes.expect` first: a bookmark at a popup comes back with the scene under it.
  *
  * @example
  * ```ts
@@ -130,6 +145,12 @@ export const bookmarkCommand = defineCommand({
  * const repro = { player: { coins: 40 }, checkpoint: "home", route: [{ at: "home", intent: "play" }] };
  * const ran = await run(app, commands.restore, { repro });
  * ran.state; // { path: "board/awaitIntent", frame: 12, tainted: true }
+ *
+ * // A fresh page restores the bookmark game.bookmark took at the Settings popup over Home.
+ * bookmark.scene; // "home"
+ * await run(app, commands.restore, { bookmark });
+ * await app.flow.walk([]); // the scene stage runs after the restore resolved
+ * app.scenes.current(); // "home"
  * ```
  */
 export const restoreCommand = defineCommand({
@@ -137,7 +158,7 @@ export const restoreCommand = defineCommand({
   title: "Restore",
   input: { bookmark: "json?", repro: "json?" },
   effect: "raw",
-  run: (app: ControlApp, input) => {
+  run: (app: ControlApp & SceneApp, input) => {
     if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
 
     app.log.debug("moku:dev", { command: "game.restore" });
