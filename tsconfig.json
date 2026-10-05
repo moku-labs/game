@@ -22,6 +22,7 @@
       "@moku-labs/game/inspect": ["./src/inspect.ts"],
       "@moku-labs/game/control": ["./src/control.ts"],
       "@moku-labs/game/hot": ["./src/hot.ts"],
+      "@moku-labs/game/lint": ["./src/lint.ts"],
       "@moku-labs/game/jsx-runtime": ["./src/jsx-runtime.ts"],
       "@moku-labs/game/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
     }

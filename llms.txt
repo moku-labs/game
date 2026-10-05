@@ -12,6 +12,7 @@ Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer 
 - `@moku-labs/game/inspect`: the read door of the editor, safe in a production build. See "Doors for the editor".
 - `@moku-labs/game/control`: the write door of the editor, dev builds only. See "Doors for the editor".
 - `@moku-labs/game/hot` (the Bun dev server only): the `bunfig.toml` plugin that hot swaps views in a running page. See "Hot swap".
+- `@moku-labs/game/lint`: the oxlint JS plugin `moku-game` with the game lint rules. See "Lint for games".
 - `@moku-labs/game/fonts/*`: the shipped MSDF body font and its licence. See "Fonts".
 - `@moku-labs/game/jsx-runtime` and `@moku-labs/game/jsx-dev-runtime`: what `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand.
 
@@ -130,6 +131,33 @@ type NodeContext = {
 - Keep rules as pure functions `(state, input, tables) => result`. The node calls the rule and writes the result into the draft.
 - A node never calls `app.model`, `app.clock` or `app.time`. Everything outside logic goes through `fx`.
 - A timer is a moment stored in player state. How long is left is computed from `now`.
+
+## Lint for games
+
+`.oxlintrc.json` of a game (oxlint 1.86.0 or later):
+
+```json
+{
+  "jsPlugins": ["@moku-labs/game/lint"],
+  "rules": {
+    "moku-game/lazy-imports": "error",
+    "moku-game/native-imports": "error",
+    "moku-game/dev-imports": "error",
+    "moku-game/no-module-state": "error",
+    "moku-game/determinism": "error",
+    "moku-game/rules-siblings": "error"
+  }
+}
+```
+
+- `moku-game/lazy-imports` (L2): no static value import of `pixi.js` or `yoga-layout`. `import type` and `import()` pass. Default files `**`.
+- `moku-game/native-imports` (L13): no `@moku-labs/system`, `@moku-labs/native`, `@tauri-apps/*` in the logic, `kit.ts` and `game.ts`. Use `platform-bridge.ts`.
+- `moku-game/dev-imports`: `@moku-labs/editor` and `@moku-labs/game/control` only in `web/main.ts`, `web/dev*.ts`, `web/editor*.ts`, `*.dev.ts(x)` and tests.
+- `moku-game/no-module-state` (L5): no module-scope `let` or `var`, no module-scope `new Map/Set/WeakMap/WeakSet`. Default files `**`.
+- `moku-game/determinism` (L3): no `Math.random`, `Date.now`, `performance.now`, `new Date()`, `setTimeout`, `setInterval` in the logic. `new Date(now)` passes.
+- `moku-game/rules-siblings` (L4): a file under `rules/` imports only `./` siblings.
+- Logic = `**/state.ts`, `**/tables.ts`, `**/{nodes,flows,rules,features}/**`. Tests (`tests/**`, `**/__tests__/**`, `*.test.ts`) are skipped by every rule.
+- Every rule takes `["error", { "files": [...], "ignores": [...] }]`. Globs are relative to the directory oxlint runs in; a key given replaces the default.
 
 ## Minimal game
 

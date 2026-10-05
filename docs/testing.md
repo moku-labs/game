@@ -124,3 +124,5 @@ The project rules live in [`eslint.config.ts`](../eslint.config.ts).
 | L8 | No signature echo: an `@example` whose whole body is one call with bare identifiers is an error | `src/**` |
 | L9 | The JSX runtime module is reached only through `src/jsx-runtime.ts` and `src/jsx-dev-runtime.ts`, and those two import nothing else | `src/**` outside `ui` |
 | L13 | No import of `@moku-labs/system`, `@moku-labs/native` or `@tauri-apps/*`, type imports included. The game builds the `PlatformProvider` in its own layer | every file under `src/`, tests included |
+
+A game gets L2, L3, L4, L5, L13 and the dev-only imports from the oxlint plugin `@moku-labs/game/lint`, see [Lint for games](./lint.md). Its tests run the real oxlint on fixtures: `tests/unit/lint-plugin.test.ts`.

@@ -31,6 +31,10 @@
       "types": "./dist/hot.d.mts",
       "default": "./dist/hot.mjs"
     },
+    "./lint": {
+      "types": "./dist/lint.d.mts",
+      "default": "./dist/lint.mjs"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.mts",
       "default": "./dist/jsx-runtime.mjs"
@@ -128,6 +132,7 @@
     "globals": "17.4.0",
     "jiti": "2.6.1",
     "lefthook": "2.1.1",
+    "oxlint": "1.86.0",
     "pixi.js": "8.21.0",
     "playwright-core": "1.60.0",
     "publint": "0.3.21",

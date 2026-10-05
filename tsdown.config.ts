@@ -12,6 +12,8 @@ export default defineConfig({
     control: "src/control.ts",
     // Subpath: the Bun plugin of the dev server that hot swaps views; bun only.
     hot: "src/hot.ts",
+    // Subpath: the oxlint JS plugin `moku-game` a game loads in `.oxlintrc.json`.
+    lint: "src/lint.ts",
     // Subpaths: the JSX runtimes `jsxImportSource: "@moku-labs/game"` names; re-exports only.
     "jsx-runtime": "src/jsx-runtime.ts",
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts"
