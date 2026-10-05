@@ -8,25 +8,34 @@
 import path from "node:path";
 import { buildIndex, type Catalog, createCatalog, dropFile, putFile } from "./catalog";
 import { diffIndexes } from "./change";
+import type { JsxShapes } from "./find";
 import { isIndexedFile, openRoot, readInside, resolveInside, toPosix } from "./paths";
 import type { ProjectChange, ProjectIndex, ProjectOptions } from "./types";
 import { loadTypeScript } from "./typescript";
 import { type Stamp, sameStamp, stampOf, walkRoot } from "./walk";
 
-/** An open project. */
+/**
+ * Everything one open project holds behind its handle: the real root, the catalog of its files
+ * and parses, the stamps and folders of the last walk, the current index, the JSX shapes `find`
+ * read from it, and the queue that runs one update at a time. It never leaves `src/project/`;
+ * a game sees only the `ProjectApi` built on it.
+ */
 export type Session = {
   /** The real absolute root every read is held to. */
   readonly root: string;
   /** The root-relative manifest path the index reports when the file exists. */
   readonly manifest: string;
+  /** One record per indexed file with its last good parse, and the cache of parses. */
   readonly catalog: Catalog;
-  /** The stamp of every file of the last walk. */
+  /** The size and time stamp of every file of the last walk; a moved stamp means hash again. */
   stamps: Map<string, Stamp>;
   /** The folders of the last walk, root-relative; `""` is the root. */
   folders: string[];
-  /** The current index. */
+  /** The current index, frozen; an update replaces it with a new object. */
   index: ProjectIndex;
-  /** The tail of the update queue. */
+  /** The JSX patterns and `id=` props of each index `find` read, computed once per index. */
+  readonly shapes: WeakMap<ProjectIndex, JsxShapes>;
+  /** The tail of the update queue: the next update runs after it settles. */
   queue: Promise<unknown>;
 };
 
@@ -108,6 +117,7 @@ export async function openSession(options: ProjectOptions): Promise<Session> {
     stamps: walk.files,
     folders: walk.folders,
     index: buildIndex(catalog),
+    shapes: new WeakMap(),
     queue: Promise.resolve()
   };
 

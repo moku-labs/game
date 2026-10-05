@@ -137,6 +137,28 @@ function readCall(
 }
 
 /**
+ * Reads a template: its literal parts stay, each span is read into a pattern.
+ *
+ * @param typescript - The TypeScript module.
+ * @param template - The template expression.
+ * @param bindings - The parameters bound by the call being read.
+ * @param depth - How deep the reading is.
+ * @returns The pattern.
+ */
+function readTemplate(
+  typescript: TypeScript,
+  template: ts.TemplateExpression,
+  bindings: Bindings,
+  depth: number
+): string {
+  const spans = template.templateSpans.map(
+    span => read(typescript, span.expression, bindings, depth + 1) + span.literal.text
+  );
+
+  return template.head.text + spans.join("");
+}
+
+/**
  * Reads one expression into a pattern.
  *
  * @param typescript - The TypeScript module.
@@ -153,23 +175,24 @@ function read(
 ): string {
   const expression = unwrap(typescript, node);
 
+  // Too deep: give the hole up.
   if (depth > MAX_DEPTH) return ANY;
+
+  // A string or number literal: its text as it is.
   if (typescript.isStringLiteralLike(expression) || typescript.isNumericLiteral(expression)) {
     return expression.text;
   }
 
+  // A template: the literal parts, each span read.
   if (typescript.isTemplateExpression(expression)) {
-    const spans = expression.templateSpans.map(
-      span => read(typescript, span.expression, bindings, depth + 1) + span.literal.text
-    );
-
-    return expression.head.text + spans.join("");
+    return readTemplate(typescript, expression, bindings, depth);
   }
 
   const isConcat =
     typescript.isBinaryExpression(expression) &&
     expression.operatorToken.kind === typescript.SyntaxKind.PlusToken;
 
+  // A `+` concatenation: both sides read and joined.
   if (isConcat) {
     return (
       read(typescript, expression.left, bindings, depth + 1) +
@@ -177,12 +200,18 @@ function read(
     );
   }
 
+  // A name: a bound parameter, a const or the `id` prop.
   if (typescript.isIdentifier(expression)) return readName(typescript, expression, bindings, depth);
+
+  // `props.id`: the `id` of a parameter object.
   if (typescript.isPropertyAccessExpression(expression))
     return readAccess(typescript, expression, bindings);
+
+  // A call of a same-file function: its one returned expression.
   if (typescript.isCallExpression(expression))
     return readCall(typescript, expression, bindings, depth);
 
+  // Anything else is a hole.
   return ANY;
 }
 

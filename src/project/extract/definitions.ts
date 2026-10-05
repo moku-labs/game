@@ -147,16 +147,12 @@ function objectOf(
 function bindingOf(typescript: TypeScript, call: ts.CallExpression): string | undefined {
   let node: ts.Node = call.parent;
 
-  while (
-    typescript.isParenthesizedExpression(node) ||
-    typescript.isAsExpression(node) ||
-    typescript.isSatisfiesExpression(node) ||
-    typescript.isNonNullExpression(node)
-  ) {
-    node = node.parent;
-  }
+  // Up out of the expression the call sits in; the call must be the whole initializer there.
+  while (typescript.isExpression(node)) node = node.parent;
 
   if (!typescript.isVariableDeclaration(node) || !typescript.isIdentifier(node.name))
+    return undefined;
+  if (node.initializer === undefined || unwrap(typescript, node.initializer) !== call)
     return undefined;
 
   const list = node.parent;

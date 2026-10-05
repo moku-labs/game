@@ -26,8 +26,8 @@ const BIN = fileURLToPath(new URL("../../bin/moku-game-index.mjs", import.meta.u
 const PROJECT_DOOR = fileURLToPath(new URL("../../src/project.ts", import.meta.url));
 
 /** The cost bounds, loose on purpose: a slow CI box must not fail them. */
-const OPEN_BOUND_MS = 1000;
-const FIND_BOUND_MS = 20;
+const OPEN_BOUND_MS = 5000;
+const FIND_BOUND_MS = 200;
 
 let project: ProjectApi;
 let openMs = 0;

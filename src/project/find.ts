@@ -7,18 +7,22 @@
  */
 import type ts from "typescript";
 import { parseCached } from "./catalog";
+import { collectJsx, type JsxHit } from "./extract/jsx";
 import { ANY, ID } from "./extract/pattern";
 import { sha1 } from "./hash";
-import { locate } from "./locate";
+import { type JsxHitsOf, locate } from "./locate";
 import { readInside } from "./paths";
 import type { Session } from "./session";
 import type { Anchor, Found, ProjectIndex } from "./types";
+import type { TypeScript } from "./typescript";
 
-/** The parse a file answers from, and the hash of the bytes it came from. */
+/** The parse a file answers from, the hash of the bytes it came from, and its JSX hits. */
 type View = {
   readonly source: ts.SourceFile;
   readonly hash: string;
   readonly broken: boolean;
+  /** The JSX hits of the parse, collected on the first JSX anchor of the call. */
+  readonly jsx: JsxHitsOf;
 };
 
 /** The prefix of a JSX key. */
@@ -46,7 +50,7 @@ export function matchesPattern(pattern: string, key: string): boolean {
 }
 
 /** The JSX anchors of an index by shape. */
-type Shapes = { idPatterns: Anchor[]; wildPatterns: Anchor[]; idAttributes: Anchor[] };
+export type JsxShapes = { idPatterns: Anchor[]; wildPatterns: Anchor[]; idAttributes: Anchor[] };
 
 /**
  * The anchors of the JSX patterns and of the literal `id=` props of an index.
@@ -54,8 +58,8 @@ type Shapes = { idPatterns: Anchor[]; wildPatterns: Anchor[]; idAttributes: Anch
  * @param index - The index.
  * @returns The `{id}` patterns, the `*` patterns and the `id=` props.
  */
-function jsxShapes(index: ProjectIndex): Shapes {
-  const shapes: Shapes = { idPatterns: [], wildPatterns: [], idAttributes: [] };
+function jsxShapes(index: ProjectIndex): JsxShapes {
+  const shapes: JsxShapes = { idPatterns: [], wildPatterns: [], idAttributes: [] };
 
   for (const [key, entry] of Object.entries(index.symbols)) {
     if (!key.startsWith(JSX)) continue;
@@ -68,6 +72,25 @@ function jsxShapes(index: ProjectIndex): Shapes {
       else if (pattern.includes(ANY)) shapes.wildPatterns.push(anchor);
     }
   }
+
+  return shapes;
+}
+
+/**
+ * The JSX shapes of the current index, read once per index: an index is frozen, and an update
+ * replaces it with a new object.
+ *
+ * @param session - The open project.
+ * @returns The shapes of `session.index`.
+ */
+function shapesOf(session: Session): JsxShapes {
+  const cached = session.shapes.get(session.index);
+
+  if (cached !== undefined) return cached;
+
+  const shapes = jsxShapes(session.index);
+
+  session.shapes.set(session.index, shapes);
 
   return shapes;
 }
@@ -119,12 +142,12 @@ function bySpecificity(first: Anchor, second: Anchor): number {
  * prop (the pattern, then the prop), then each `*` pattern as a wildcard. Within each tier the
  * pattern with more literal text comes first: `card*Picture` before `card*`.
  *
- * @param index - The index.
+ * @param shapes - The JSX shapes of the index.
  * @param wanted - The runtime key, without its prefix.
  * @returns The anchors, in that order.
  */
-function patternAnchors(index: ProjectIndex, wanted: string): Anchor[] {
-  const { idPatterns, wildPatterns, idAttributes } = jsxShapes(index);
+function patternAnchors(shapes: JsxShapes, wanted: string): Anchor[] {
+  const { idPatterns, wildPatterns, idAttributes } = shapes;
   const reached: Anchor[] = [];
 
   for (const pattern of idPatterns.toSorted(bySpecificity)) {
@@ -144,16 +167,33 @@ function patternAnchors(index: ProjectIndex, wanted: string): Anchor[] {
  * The anchors of a key, in the order `find` answers them: the exact key, then, for a JSX key as
  * the game reports it (no `*`, no `{id}`), the patterns that read as it.
  *
- * @param index - The index.
+ * @param session - The open project.
  * @param key - The key.
  * @returns The anchors, each once.
  */
-export function anchorsOf(index: ProjectIndex, key: string): Anchor[] {
-  const exact = index.symbols[key]?.def ?? [];
+export function anchorsOf(session: Session, key: string): Anchor[] {
+  const exact = session.index.symbols[key]?.def ?? [];
   const isRuntimeJsx = key.startsWith(JSX) && !key.includes(ANY) && !key.includes(ID);
-  const reached = isRuntimeJsx ? patternAnchors(index, key.slice(JSX.length)) : [];
+  const reached = isRuntimeJsx ? patternAnchors(shapesOf(session), key.slice(JSX.length)) : [];
 
   return [...new Set([...exact, ...reached])];
+}
+
+/**
+ * The JSX hits of one parse, collected on the first call and kept for the next ones.
+ *
+ * @param typescript - The TypeScript module.
+ * @param source - The parse.
+ * @returns A function that answers the hits.
+ */
+function jsxHitsOnce(typescript: TypeScript, source: ts.SourceFile): JsxHitsOf {
+  let hits: readonly JsxHit[] | undefined;
+
+  return () => {
+    hits ??= collectJsx(typescript, source);
+
+    return hits;
+  };
 }
 
 /**
@@ -176,16 +216,36 @@ async function viewOf(session: Session, file: string): Promise<View | undefined>
   const text = hash === good?.hash ? good.text : new TextDecoder().decode(bytes);
   const fresh = parseCached(catalog, file, hash, text);
 
-  if (fresh.error === undefined) return { source: fresh.source, hash, broken: false };
+  if (fresh.error === undefined) {
+    return {
+      source: fresh.source,
+      hash,
+      broken: false,
+      jsx: jsxHitsOnce(catalog.typescript, fresh.source)
+    };
+  }
 
   // Else the last good parse, if the file ever had one.
   if (good === undefined) return undefined;
 
-  return {
-    source: parseCached(catalog, file, good.hash, good.text).source,
-    hash: good.hash,
-    broken: true
-  };
+  const { source } = parseCached(catalog, file, good.hash, good.text);
+
+  return { source, hash: good.hash, broken: true, jsx: jsxHitsOnce(catalog.typescript, source) };
+}
+
+/**
+ * The identity of an answer: two anchors that land on the same element with the same key answer
+ * once.
+ *
+ * @param answer - One answer of `find`.
+ * @returns The path, the range, the kind and the key, joined.
+ * @example
+ * ```ts
+ * identityOf({ path: "a.tsx", key: "row", kind: "literal", line: 3, range: [3, 1, 3, 9], hash: "h" }); // "a.tsx|3,1,3,9|literal|row"
+ * ```
+ */
+function identityOf(answer: Found): string {
+  return `${answer.path}|${answer.range.join(",")}|${answer.kind ?? ""}|${answer.key ?? ""}`;
 }
 
 /**
@@ -197,25 +257,31 @@ async function viewOf(session: Session, file: string): Promise<View | undefined>
  */
 export async function findKey(session: Session, key: string): Promise<Found[]> {
   const views = new Map<string, View | undefined>();
-  const found: Found[] = [];
   const seen = new Set<string>();
+  const found: Found[] = [];
 
-  for (const anchor of anchorsOf(session.index, key)) {
-    // Each file is read once per call.
+  for (const anchor of anchorsOf(session, key)) {
+    // Read each anchor's file once per call.
     if (!views.has(anchor.path)) views.set(anchor.path, await viewOf(session, anchor.path));
 
     const view = views.get(anchor.path);
 
     if (view === undefined) continue;
 
-    for (const place of locate(session.catalog.typescript, view.source, anchor)) {
-      const answer: Found = {
+    // Turn each place of the anchor into an answer.
+    const places = locate(session.catalog.typescript, view.source, anchor, view.jsx);
+    const answers = places.map(
+      (place): Found => ({
         ...anchor,
         ...place,
         hash: view.hash,
         ...(view.broken ? { broken: true } : {})
-      };
-      const identity = `${answer.path}|${answer.range.join(",")}|${answer.kind ?? ""}|${answer.key ?? ""}`;
+      })
+    );
+
+    // Drop the answers already seen: two anchors of one file can read the same element.
+    for (const answer of answers) {
+      const identity = identityOf(answer);
 
       if (seen.has(identity)) continue;
 

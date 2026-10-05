@@ -144,14 +144,14 @@ function refreshExtractions(catalog: Catalog, modules: ReadonlyMap<string, Modul
 
     const definers = definersOf(modules, path);
     const signature = [...definers].map(([callee, definer]) => `${callee}=${definer}`).join(";");
-    const isCurrent = record.extracted?.definers === `${good.hash}|${signature}`;
+    const stamp = `${good.hash}|${signature}`;
 
-    if (isCurrent) continue;
+    if (record.extracted?.definers === stamp) continue;
 
     const { source } = parseCached(catalog, path, good.hash, good.text);
 
     record.extracted = {
-      definers: `${good.hash}|${signature}`,
+      definers: stamp,
       result: extractFile(catalog.typescript, source, path, definers)
     };
   }

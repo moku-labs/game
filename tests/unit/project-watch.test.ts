@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  utimesSync,
+  watch,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,9 +19,22 @@ import { createBatcher, createHub, type WatchFunction, watchTree } from "../../s
 // ---------------------------------------------------------------------------
 // Unit test: how the index follows the disk. The batch walk runs directly, no
 // OS events: the test edits the files of a temp game and calls the walk. The
-// watcher and the debounce run against a fake fs.watch and fake timers; one
-// test goes through the real fs.watch of the platform.
+// watcher and the debounce run against a fake fs.watch and fake timers; the
+// real-watcher tests wait in windows scaled by PROJECT_TIMING_SLACK (1 by
+// default, more on a slow box).
 // ---------------------------------------------------------------------------
+
+/** How much longer a slow box may take: every real-watcher window is multiplied by it. */
+const TIMING_SLACK = Number(process.env.PROJECT_TIMING_SLACK ?? 1);
+
+/** How long a real-watcher test waits for its batch before it fails. */
+const WAIT_MS = 8000 * TIMING_SLACK;
+
+/** How long a real-watcher test waits for the walk at start to run. */
+const QUIET_MS = 300 * TIMING_SLACK;
+
+/** A backstop period no test reaches: the hub walks only when the platform reports an event. */
+const NO_BACKSTOP_MS = 10 * 60 * 1000;
 
 /** The kit of the tiny game. */
 const KIT = `import { defineGame } from "@moku-labs/game";
@@ -93,8 +114,12 @@ function indexOf(symbols: Record<string, string[]>): ProjectIndex {
   };
 }
 
-/** One watcher of the fake fs.watch: its listener, and whether it was closed. */
-type FakeWatcher = { listener: (event: string, file: string | null) => void; closed: boolean };
+/** One watcher of the fake fs.watch: its listener, its error listener, and whether it was closed. */
+type FakeWatcher = {
+  listener: (event: string, file: string | null) => void;
+  onError?: (error: Error) => void;
+  closed: boolean;
+};
 
 /**
  * A fake fs.watch: records each watcher and lets the test fire its events.
@@ -118,7 +143,10 @@ function fakeWatch(recursive: boolean): {
       close: () => {
         entry.closed = true;
       },
-      on: () => entry
+      on: (_event, onError) => {
+        entry.onError = onError;
+        return entry;
+      }
     };
   };
 
@@ -266,6 +294,30 @@ describe("watchTree", () => {
 
     expect([...watchers.values()].every(entry => entry.closed)).toBe(true);
   });
+
+  it("re-arms a folder whose watcher errored on the next walk", () => {
+    const { watchers, watchFunction } = fakeWatch(false);
+    const onEvent = vi.fn();
+    const tree = watchTree("/game", onEvent, watchFunction);
+
+    tree.rearm(["", "nodes"]);
+
+    const failed = watchers.get("/game/nodes");
+
+    failed?.onError?.(new Error("EPERM"));
+    tree.rearm(["", "nodes"]);
+
+    const again = watchers.get("/game/nodes");
+
+    again?.listener("rename", "merge.ts");
+
+    expect(failed?.closed).toBe(true);
+    expect(again).not.toBe(failed);
+    expect(again?.closed).toBe(false);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+
+    tree.close();
+  });
 });
 
 describe("createBatcher", () => {
@@ -342,11 +394,11 @@ describe("createHub", () => {
     put(root, "features/home.ts", `// before watch\n${HOME}`);
     hub.add(listener);
 
-    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1), { timeout: WAIT_MS });
 
     put(root, "features/home.ts", `// after the first walk\n${HOME}`);
 
-    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2), { timeout: 3000 });
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2), { timeout: WAIT_MS });
 
     hub.close();
 
@@ -355,6 +407,36 @@ describe("createHub", () => {
       ["features/home.ts"]
     ]);
   });
+
+  it.skipIf(process.platform !== "darwin")(
+    "hears a write through the native fs.watch with no backstop walk",
+    { timeout: WAIT_MS * 2 },
+    async () => {
+      const root = writeGame();
+      const session = await openSession({ root });
+      const reported: (string | null)[] = [];
+      const native: WatchFunction = (folder, options, listener) =>
+        watch(folder, options, (event, file) => {
+          reported.push(file);
+          listener(event, file);
+        });
+      const hub = createHub(session, 20, native, NO_BACKSTOP_MS);
+      const listener = vi.fn();
+
+      hub.add(listener);
+
+      // The walk at start finds nothing; the write comes after it, so only the watcher can report it.
+      await new Promise(resolve => setTimeout(resolve, QUIET_MS));
+      put(root, "features/home.ts", `// heard by the watcher\n${HOME}`);
+
+      await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(1), { timeout: WAIT_MS });
+
+      hub.close();
+
+      expect(reported.length).toBeGreaterThan(0);
+      expect(listener.mock.calls[0]?.[1]).toMatchObject({ files: ["features/home.ts"] });
+    }
+  );
 
   it("stops the watcher with the last caller and starts it again with the next", async () => {
     const root = writeGame();
@@ -376,7 +458,7 @@ describe("createHub", () => {
 
 describe("ProjectApi.watch", () => {
   it("calls every caller once per batch, stops one caller, and closes", {
-    timeout: 20_000
+    timeout: WAIT_MS * 2.5
   }, async () => {
     const root = writeGame();
     const project = await openProject({ root, debounceMs: 20 });
@@ -390,7 +472,7 @@ describe("ProjectApi.watch", () => {
     project.watch(second);
     put(root, "features/home.ts", `// one line down\n${HOME}`);
 
-    await vi.waitFor(() => expect(first).toHaveBeenCalledTimes(1), { timeout: 8000 });
+    await vi.waitFor(() => expect(first).toHaveBeenCalledTimes(1), { timeout: WAIT_MS });
 
     expect(second).toHaveBeenCalledTimes(1);
     expect(first.mock.calls[0]?.[1]).toMatchObject({ files: ["features/home.ts"] });
@@ -398,7 +480,7 @@ describe("ProjectApi.watch", () => {
     stopFirst();
     put(root, "features/home.ts", `// two lines down\n\n${HOME}`);
 
-    await vi.waitFor(() => expect(second).toHaveBeenCalledTimes(2), { timeout: 8000 });
+    await vi.waitFor(() => expect(second).toHaveBeenCalledTimes(2), { timeout: WAIT_MS });
 
     expect(first).toHaveBeenCalledTimes(1);
 

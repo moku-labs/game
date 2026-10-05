@@ -6,12 +6,15 @@
  * first place the key is written.
  */
 import type ts from "typescript";
-import { collectJsx } from "./extract/jsx";
+import { collectJsx, type JsxHit } from "./extract/jsx";
 import type { Anchor, Found } from "./types";
 import type { TypeScript } from "./typescript";
 
 /** A line and a range, 1-based, the end column exclusive. */
 export type Place = Pick<Found, "line" | "range">;
+
+/** The JSX hits of one parse; a caller that reads many anchors on it collects them once. */
+export type JsxHitsOf = () => readonly JsxHit[];
 
 /**
  * The place of a node: the line of one node and the range of another.
@@ -134,12 +137,18 @@ function writtenAt(typescript: TypeScript, source: ts.SourceFile, key: string): 
  * @param typescript - The TypeScript module.
  * @param source - The parsed file.
  * @param anchor - The anchor.
+ * @param jsxHits - The JSX hits of the parse; collected on this call by default.
  * @returns Every place of the anchor in the file; none when the file no longer holds it.
  */
-export function locate(typescript: TypeScript, source: ts.SourceFile, anchor: Anchor): Place[] {
+export function locate(
+  typescript: TypeScript,
+  source: ts.SourceFile,
+  anchor: Anchor,
+  jsxHits: JsxHitsOf = () => collectJsx(typescript, source)
+): Place[] {
   // A JSX key: every element whose key reads the same pattern, kind and component.
   if (anchor.kind !== undefined) {
-    return collectJsx(typescript, source)
+    return jsxHits()
       .filter(
         hit =>
           hit.key === anchor.key && hit.kind === anchor.kind && hit.component === anchor.component

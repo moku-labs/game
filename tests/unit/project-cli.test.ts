@@ -51,7 +51,6 @@ function recorder(): Recorded {
     ui: {
       line: text => lines.push(`line ${text}`),
       info: text => lines.push(`info ${text}`),
-      warn: text => lines.push(`warn ${text}`),
       error: text => lines.push(`error ${text}`)
     }
   };

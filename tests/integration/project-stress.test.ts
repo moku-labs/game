@@ -38,11 +38,14 @@ const FIXTURE = fileURLToPath(new URL("merge-game/", import.meta.url));
 /** How long the burst runs. */
 const STRESS_MS = Number(process.env.PROJECT_STRESS_MS ?? 10_000);
 
+/** How much longer a slow box may take: every wait window and quiet period is multiplied by it. */
+const TIMING_SLACK = Number(process.env.PROJECT_TIMING_SLACK ?? 1);
+
 /** How long a step waits for its batch before it fails. */
-const BATCH_TIMEOUT_MS = 5000;
+const BATCH_TIMEOUT_MS = 5000 * TIMING_SLACK;
 
 /** How long a step waits with no batch to be sure no other batch comes. */
-const QUIET_MS = 300;
+const QUIET_MS = 300 * TIMING_SLACK;
 
 /** The folders the copy leaves out. */
 const LEFT_OUT = /[/\\](?:dist|node_modules)(?:[/\\]|$)/;
@@ -237,7 +240,7 @@ afterAll(() => {
 
 describe("the project index under an agent burst", () => {
   it(`keeps every key on the right line for ${STRESS_MS} ms`, {
-    timeout: STRESS_MS + 30_000
+    timeout: STRESS_MS + 30_000 * TIMING_SLACK
   }, async ({ annotate }) => {
     const random = seeded(7);
     const pool = Object.keys(project.index.files).filter(file =>

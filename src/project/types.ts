@@ -141,7 +141,15 @@ export type Found = Anchor & {
  * the lines of a key read from disk at the call. Close it when the game closes.
  */
 export type ProjectApi = {
-  /** The current index. A watch batch or `changed` replaces it with a new frozen object. */
+  /**
+   * The current index. A watch batch or `changed` replaces it with a new frozen object.
+   *
+   * @example
+   * ```ts
+   * // The editor checks a node file before it opens it.
+   * project.index.files["nodes/merge.ts"]?.state; // "ok"
+   * ```
+   */
   readonly index: ProjectIndex;
 
   /**
@@ -222,7 +230,11 @@ export type ProjectApi = {
  * ```ts
  * // A test records what the command printed.
  * const lines: string[] = [];
- * const ui: IndexUi = { line: text => lines.push(text), info: text => lines.push(text), warn: text => lines.push(text), error: text => lines.push(text) };
+ * const ui: IndexUi = {
+ *   line: text => lines.push(text),
+ *   info: text => lines.push(text),
+ *   error: text => lines.push(text)
+ * };
  * ```
  */
 export type IndexUi = {
@@ -230,8 +242,6 @@ export type IndexUi = {
   line(text: string): void;
   /** Writes one neutral line of the `--check` report. */
   info(message: string): void;
-  /** Writes one warning line. */
-  warn(message: string): void;
   /** Writes one error line: a broken file, a conflict, an unknown key, a bad flag. */
   error(message: string): void;
 };

@@ -88,7 +88,11 @@ function watchFolders(
     try {
       const handle = watchFunction(path.join(root, folder), { recursive: false }, listener);
 
-      handle.on("error", () => handle.close());
+      // A watcher that errored is dropped, so the next walk arms the folder again.
+      handle.on("error", () => {
+        handle.close();
+        if (watchers.get(folder) === handle) watchers.delete(folder);
+      });
       watchers.set(folder, handle);
     } catch {
       // The folder vanished after the walk: the next walk does not list it.
