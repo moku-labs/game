@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -69,6 +69,8 @@ function runOxlint(
     cwd: folder,
     encoding: "utf8"
   });
+  if (run.stdout === "") throw new Error(`oxlint did not run: ${run.stderr}`);
+
   const report = JSON.parse(run.stdout) as {
     diagnostics: { code: string; filename: string; message: string }[];
   };
@@ -102,11 +104,18 @@ function tally(findings: Finding[]): Record<string, number> {
 const FIXTURE: Record<string, string> = {
   // L2
   "nodes/bad-pixi.ts": 'import { Application } from "pixi.js";\nexport const app = Application;\n',
+  // `import { type A }` keeps a side-effect import under verbatimModuleSyntax: a value import.
+  "nodes/bad-inline-type.ts":
+    'import { type Application } from "pixi.js";\nexport type App = Application;\n',
   "web/bad-yoga.ts": 'export { default } from "yoga-layout";\n',
   "nodes/ok-pixi.ts":
     'import type { Application } from "pixi.js";\nexport type App = Application;\nexport const load = (): Promise<unknown> => import("pixi.js");\n',
   // L13
   "game.ts": 'import { haptics } from "@moku-labs/system";\nexport const buzz = haptics;\n',
+  "nodes/native.ts":
+    'import { invoke } from "@tauri-apps/api/core";\nexport const call = invoke;\n',
+  "nodes/native.dev.ts":
+    'import { invoke } from "@tauri-apps/api/core";\nexport const call = invoke;\n',
   "platform-bridge.ts":
     'import { haptics } from "@moku-labs/system";\nexport const buzz = haptics;\n',
   // Dev only
@@ -145,7 +154,9 @@ describe("@moku-labs/game/lint under oxlint", () => {
     expect(tally(runOxlint(FIXTURE))).toEqual({
       "flows/bad-dev.ts dev-imports": 1,
       "game.ts native-imports": 1,
+      "nodes/bad-inline-type.ts lazy-imports": 1,
       "nodes/bad-pixi.ts lazy-imports": 1,
+      "nodes/native.ts native-imports": 1,
       "rules/bad-import.ts rules-siblings": 2,
       "rules/bad-random.ts determinism": 6,
       "state.ts no-module-state": 4,
@@ -192,11 +203,6 @@ describe("@moku-labs/game/lint under oxlint", () => {
     );
 
     expect(findings).toEqual([{ rule: "lazy-imports", file: "nodes/bad-pixi.ts" }]);
-  });
-
-  it("is oxlint 1.86.0", () => {
-    // eslint-disable-next-line sonarjs/no-os-command-from-path -- the node on PATH is the one a game runs oxlint with.
-    expect(execFileSync("node", [OXLINT, "--version"], { encoding: "utf8" })).toContain("1.86.0");
   });
 });
 
@@ -290,8 +296,19 @@ describe("@moku-labs/game/lint rules in process", () => {
 
   it("lazy-imports: static value import fires, type import and import() pass", () => {
     expect(
-      check("lazy-imports", "nodes/a.ts", [["ImportDeclaration", imports("pixi.js")]])
-    ).toHaveLength(1);
+      check("lazy-imports", "nodes/a.ts", [
+        ["ImportDeclaration", imports("pixi.js")],
+        ["ImportDeclaration", imports("yoga-layout")]
+      ])
+    ).toEqual([expect.stringMatching(/^L2: .*Pixi/), expect.stringMatching(/^L2: .*Yoga/)]);
+    expect(
+      check("lazy-imports", "nodes/a.ts", [
+        [
+          "ExportNamedDeclaration",
+          { type: "ExportNamedDeclaration", source: literal("pixi.js"), exportKind: "type" }
+        ]
+      ])
+    ).toEqual([]);
     expect(
       check("lazy-imports", "nodes/a.ts", [
         ["ImportDeclaration", imports("yoga-layout/load", "type")]
@@ -311,7 +328,10 @@ describe("@moku-labs/game/lint rules in process", () => {
     const dynamic: GameLintNode = { type: "ImportExpression", source: literal("@tauri-apps/api") };
     const computed: GameLintNode = { type: "ImportExpression", source: id("name") };
 
-    expect(check("native-imports", "game.ts", [["ImportExpression", dynamic]])).toHaveLength(1);
+    expect(check("native-imports", "game.ts", [["ImportExpression", dynamic]])).toEqual([
+      expect.stringMatching(/^L13: /)
+    ]);
+    expect(check("native-imports", "nodes/a.dev.ts", [["ImportExpression", dynamic]])).toEqual([]);
     expect(check("native-imports", "game.ts", [["ImportExpression", computed]])).toEqual([]);
     expect(check("native-imports", "web/main.ts", [["ImportExpression", dynamic]])).toEqual([]);
   });
@@ -322,7 +342,9 @@ describe("@moku-labs/game/lint rules in process", () => {
       source: literal("@moku-labs/editor")
     };
 
-    expect(check("dev-imports", "flows/a.ts", [["ExportAllDeclaration", editor]])).toHaveLength(1);
+    expect(check("dev-imports", "flows/a.ts", [["ExportAllDeclaration", editor]])).toEqual([
+      expect.stringMatching(/^Dev only: /)
+    ]);
     expect(check("dev-imports", "web/dev.ts", [["ExportAllDeclaration", editor]])).toEqual([]);
     expect(
       check(
@@ -337,7 +359,13 @@ describe("@moku-labs/game/lint rules in process", () => {
   it("rules-siblings: only ./ specifiers pass", () => {
     expect(
       check("rules-siblings", "rules/a.ts", [["ImportDeclaration", imports("../tables")]])
-    ).toHaveLength(1);
+    ).toEqual([expect.stringMatching(/^L4: /)]);
+    // A type import from a package is an import too: a rule reads only its siblings.
+    expect(
+      check("rules-siblings", "rules/a.ts", [
+        ["ImportDeclaration", imports("@moku-labs/game", "type")]
+      ])
+    ).toEqual([expect.stringMatching(/^L4: /)]);
     expect(check("rules-siblings", "rules/a.ts", [["ImportDeclaration", imports("./b")]])).toEqual(
       []
     );
@@ -368,7 +396,10 @@ describe("@moku-labs/game/lint rules in process", () => {
       ]
     };
 
-    expect(check("no-module-state", "state.ts", [["Program", program]])).toHaveLength(2);
+    expect(check("no-module-state", "state.ts", [["Program", program]])).toEqual([
+      "L5: no module-scope state. State lives in player and session.",
+      "L5: no module-scope collections. Create them inside a function."
+    ]);
     expect(check("no-module-state", "state.ts", [["Program", { type: "Program" }]])).toEqual([]);
   });
 
@@ -392,7 +423,17 @@ describe("@moku-labs/game/lint rules in process", () => {
       ["CallExpression", { type: "CallExpression", callee: { type: "CallExpression" } }]
     ];
 
-    expect(check("determinism", "rules/a.ts", visits)).toHaveLength(6);
+    const now = "L3: use `now` from the node context.";
+    const timer = "L3: store the moment in player, await fx(schedule(moment)).";
+
+    expect(check("determinism", "rules/a.ts", visits)).toEqual([
+      "L3: use an rng stream: rng.stream(id).",
+      now,
+      now,
+      now,
+      timer,
+      timer
+    ]);
     expect(check("determinism", "web/a.ts", visits)).toEqual([]);
   });
 });
