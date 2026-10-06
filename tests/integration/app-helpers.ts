@@ -67,14 +67,15 @@ export function removeCopies(copies: string[]): void {
 }
 
 /**
- * Starts the test bin in a Bun child process from the repo root.
+ * Starts the test bin in a Bun child process, from the repo root unless another folder is given.
  *
  * @param args - The arguments after the bin.
+ * @param cwd - The working directory of the bin.
  * @returns The started bin.
  */
-export function startBin(args: readonly string[]): StartedBin {
+export function startBin(args: readonly string[], cwd = REPO): StartedBin {
   // eslint-disable-next-line sonarjs/no-os-command-from-path -- the Bun on PATH is the one the project scripts run.
-  const child = spawn("bun", [BIN, ...args], { cwd: REPO });
+  const child = spawn("bun", [BIN, ...args], { cwd });
   const out: string[] = [];
   const errors: string[] = [];
 
@@ -117,13 +118,61 @@ export function urlOf(started: StartedBin): Promise<string> {
  * Runs the test bin to its end.
  *
  * @param args - The arguments after the bin.
+ * @param cwd - The working directory of the bin.
  * @returns The exit code and what it printed.
  */
 export async function runBin(
-  args: readonly string[]
+  args: readonly string[],
+  cwd = REPO
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
-  const started = startBin(args);
+  const started = startBin(args, cwd);
   const code = await started.exit;
 
   return { code, stdout: started.stdout(), stderr: started.stderr() };
+}
+
+/** A port held by this process on every address `localhost` resolves to. */
+export type HeldPort = {
+  /** The port, as `--port` takes it. */
+  port: string;
+  /** Stops the servers that hold it. */
+  release: () => Promise<void>;
+};
+
+/**
+ * Starts a server on one free address of `localhost` that answers "taken".
+ *
+ * @param port - The port, `0` for any.
+ * @returns The server.
+ */
+function serveTaken(port: number): ReturnType<typeof Bun.serve> {
+  return Bun.serve({ hostname: "localhost", port, fetch: () => new Response("taken") });
+}
+
+/**
+ * Holds a free port on every address `localhost` resolves to. The dev server binds `localhost`,
+ * and Bun binds the first of its addresses that is free, so a port is taken for it only when
+ * every one of them is.
+ *
+ * @returns The port and its release.
+ */
+export function holdLocalhostPort(): HeldPort {
+  const first = serveTaken(0);
+  const held = [first];
+
+  // Each bind takes the next free address of localhost; the one after the last one fails.
+  for (let tries = 0; tries < 8; tries += 1) {
+    try {
+      held.push(serveTaken(first.port ?? 0));
+    } catch {
+      break;
+    }
+  }
+
+  return {
+    port: String(first.port),
+    release: async () => {
+      await Promise.all(held.map(server => server.stop(true)));
+    }
+  };
 }

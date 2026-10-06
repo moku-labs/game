@@ -1,13 +1,14 @@
 /**
  * @file `moku-game build`: the assets packed with the config's layers, then the production page
- * bundled by `Bun.build` with its HTML and `main.ts` in memory under a virtual
+ * bundled by `Bun.build` in the game folder, with its HTML and `main.ts` in memory under a virtual
  * `<game>/.moku/build/` that is never written, then the packed assets copied beside the page. The
  * output works from any http sub-path and from the Tauri protocol: every link starts with `./`,
  * and the page reads `manifest.json` next to itself. Node and Bun only: the bin bundles it.
  */
 import {
+  constants,
   copyFileSync,
-  cpSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -35,6 +36,9 @@ export type BuildRun = {
 /** The link prefix of the in-memory page, two folders under the game. */
 const TO_ROOT = "../../";
 
+/** Bytes in a kilobyte, for the size line of a run. */
+const BYTES_PER_KB = 1024;
+
 /**
  * The scan flags of a game: its root, its key module and one `--layer` per config layer.
  *
@@ -56,6 +60,20 @@ function scanArguments(root: string, settings: ResolvedGameConfig): string[] {
 }
 
 /**
+ * Lists the folders right inside a folder.
+ *
+ * @param folder - The folder.
+ * @returns Their absolute paths; none when the folder is missing.
+ */
+function foldersIn(folder: string): string[] {
+  if (statSync(folder, { throwIfNoEntry: false })?.isDirectory() !== true) return [];
+
+  return readdirSync(folder, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => path.join(folder, entry.name));
+}
+
+/**
  * Tells whether a game has an English string file to derive the pseudo-locale from: a
  * `strings/en.json` in a feature folder or in a layer folder of the config.
  *
@@ -64,15 +82,11 @@ function scanArguments(root: string, settings: ResolvedGameConfig): string[] {
  * @returns True when at least one such file exists.
  */
 function hasEnglishStrings(root: string, settings: ResolvedGameConfig): boolean {
-  const features = path.join(root, "features");
-  const featureFolders =
-    statSync(features, { throwIfNoEntry: false })?.isDirectory() === true
-      ? readdirSync(features, { withFileTypes: true })
-          .filter(entry => entry.isDirectory())
-          .map(entry => path.join(features, entry.name))
-      : [];
+  // Strings live in each feature folder and in each layer folder the config names.
+  const featureFolders = foldersIn(path.join(root, "features"));
   const layerFolders = Object.keys(settings.assets.layers).map(folder => path.join(root, folder));
 
+  // One English file is enough: the pseudo-locale is derived from English.
   return [...featureFolders, ...layerFolders].some(
     folder =>
       statSync(path.join(folder, "strings", "en.json"), { throwIfNoEntry: false })?.isFile() ===
@@ -135,36 +149,40 @@ export function packArguments(
 }
 
 /**
- * Tells whether a folder is another folder or holds it.
+ * Tells whether a folder is another folder or lies inside it.
  *
- * @param folder - The outer folder.
- * @param inner - The folder that may sit inside it.
- * @returns True when `inner` is `folder` or lies under it.
+ * @param folder - The folder that may sit inside.
+ * @param outer - The outer folder.
+ * @returns True when `folder` is `outer` or lies under it.
  * @example
  * ```ts
- * holds("/g/dist/web", "/g"); // false
+ * isInside("/g", "/g/dist/web"); // false
  * ```
  */
-function holds(folder: string, inner: string): boolean {
-  const relative = path.relative(folder, inner);
+function isInside(folder: string, outer: string): boolean {
+  const relative = path.relative(outer, folder);
+  const climbs = relative === ".." || relative.startsWith(`..${path.sep}`);
 
-  return (
-    relative === "" ||
-    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
-  );
+  return relative === "" || (!climbs && !path.isAbsolute(relative));
 }
 
 /**
- * Refuses an output folder whose removal would take the game or its packed assets with it.
+ * Refuses an output folder whose removal would take the game or its packed assets with it. Inside
+ * the game, only a folder under `dist` is the build's.
  *
  * @param root - The game folder.
  * @param out - The output folder.
- * @throws {Error} When the folder is the game, holds it, or is, holds or lies in the pack.
+ * @throws {Error} When the folder is the game, holds it, is, holds or lies in the pack, or lies in
+ *   the game outside `dist`.
  */
 function refuseOut(root: string, out: string): void {
   const pack = path.join(root, "dist", "assets");
+  const replacesGame = isInside(root, out);
+  const touchesPack = isInside(out, pack) || isInside(pack, out);
+  const outsideBuildFolder = isInside(out, root) && !isInside(out, path.join(root, "dist"));
+  const refused = replacesGame || touchesPack || outsideBuildFolder;
 
-  if (holds(out, root) || holds(out, pack) || holds(pack, out)) {
+  if (refused) {
     throw new Error(
       `[game] build: --out "${out}" would replace the game or its packed assets. Name another folder.`
     );
@@ -262,12 +280,14 @@ function relinkIcons(run: BuildRun, settings: ResolvedGameConfig): void {
   const file = path.join(run.out, "index.html");
   let html = readFileSync(file, "utf8");
 
+  // Bun rewrote every link it bundled: a page with no link into the game stays as built.
   if (!html.includes(`"${TO_ROOT}`)) return;
 
   for (const icon of Object.values(settings.page.icons)) {
     const linked = icon?.replaceAll("\\", "/");
+    const leftInGame = linked !== undefined && html.includes(`"${TO_ROOT}${linked}"`);
 
-    if (linked === undefined || !html.includes(`"${TO_ROOT}${linked}"`)) continue;
+    if (!leftInGame) continue;
 
     const name = path.basename(linked);
 
@@ -298,7 +318,9 @@ function filesUnder(folder: string, relative = ""): string[] {
 }
 
 /**
- * Copies the packed assets beside the page, `manifest.json` next to `index.html`.
+ * Copies the packed assets beside the page, `manifest.json` next to `index.html`. File by file:
+ * the output folder and its page folders exist already, and a packed file never replaces a page
+ * file.
  *
  * @param run - The flags of the run.
  * @throws {Error} When a packed file has the path of a page file.
@@ -306,13 +328,38 @@ function filesUnder(folder: string, relative = ""): string[] {
 function copyPack(run: BuildRun): void {
   const pack = path.join(run.root, "dist", "assets");
   const page = new Set(filesUnder(run.out));
-  const clash = filesUnder(pack).find(file => page.has(file));
+  const packed = filesUnder(pack);
+  const clash = packed.find(file => page.has(file));
 
   if (clash !== undefined) {
     throw new Error(`[game] build: "${clash}" is both a page file and a packed asset.`);
   }
 
-  cpSync(pack, run.out, { recursive: true, errorOnExist: true, force: false });
+  for (const file of packed) {
+    const target = path.join(run.out, file);
+
+    mkdirSync(path.dirname(target), { recursive: true });
+    copyFileSync(path.join(pack, file), target, constants.COPYFILE_EXCL);
+  }
+}
+
+/**
+ * Runs a step with a folder as the working directory, then returns to the one before.
+ *
+ * @param folder - The folder the step runs in.
+ * @param step - The step.
+ * @returns What the step resolves to.
+ */
+async function inFolder<Result>(folder: string, step: () => Promise<Result>): Promise<Result> {
+  const before = process.cwd();
+
+  process.chdir(folder);
+
+  try {
+    return await step();
+  } finally {
+    process.chdir(before);
+  }
 }
 
 /**
@@ -334,7 +381,10 @@ export async function runBuild(run: BuildRun, deps: CliDeps): Promise<number> {
   if (packed !== 0) return packed;
 
   rmSync(run.out, { recursive: true, force: true });
-  await bundlePage(run, settings);
+
+  // The page bundles in the game folder, as the dev child serves from it: a `--serve-plugin` such
+  // as the tree recipe resolves the game's packages from the working directory.
+  await inFolder(run.root, () => bundlePage(run, settings));
   relinkIcons(run, settings);
   copyPack(run);
 
@@ -343,7 +393,9 @@ export async function runBuild(run: BuildRun, deps: CliDeps): Promise<number> {
     .map(file => statSync(path.join(run.out, file)).size)
     .reduce((sum, size) => sum + size, 0);
 
-  deps.ui.info(`built "${run.out}": ${files.length} files, ${Math.round(bytes / 1024)} KB.`);
+  deps.ui.info(
+    `built "${run.out}": ${files.length} files, ${Math.round(bytes / BYTES_PER_KB)} KB.`
+  );
 
   return 0;
 }

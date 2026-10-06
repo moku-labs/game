@@ -39,6 +39,21 @@ function isDocument(value: Json | undefined): value is JsonDocument {
 }
 
 /**
+ * Tells whether a parsed JSON value is a save: a document under `state` and a number under
+ * `version`.
+ *
+ * @param value - The parsed text.
+ * @returns True for a save.
+ * @example
+ * ```ts
+ * isStored({ state: {}, version: "1" }); // false
+ * ```
+ */
+function isStored(value: Json): value is Stored {
+  return isDocument(value) && isDocument(value.state) && typeof value.version === "number";
+}
+
+/**
  * Reads the stored text as a save: the document and its schema version.
  *
  * @param text - What `localStorage` holds under the key.
@@ -52,11 +67,7 @@ function parseStored(text: string): Stored | undefined {
   try {
     const value = JSON.parse(text) as Json;
 
-    if (!isDocument(value) || !isDocument(value.state) || typeof value.version !== "number") {
-      return undefined;
-    }
-
-    return { state: value.state, version: value.version };
+    return isStored(value) ? { state: value.state, version: value.version } : undefined;
   } catch {
     return undefined;
   }

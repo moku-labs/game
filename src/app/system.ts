@@ -440,7 +440,7 @@ export function storeSave(
  * @throws {Error} When `@moku-labs/system` is not installed.
  * @example
  * ```ts
- * // .moku/build/main.ts, written by moku-game build for a game whose config.ts names system plugins.
+ * // The in-memory .moku/build/main.ts of moku-game build, for a game whose config.ts names system plugins.
  * import { startPage } from "@moku-labs/game/app/page";
  * import { systemShell } from "@moku-labs/game/app/system";
  * import game from "../../index.ts";

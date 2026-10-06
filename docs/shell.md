@@ -320,6 +320,7 @@ The global flags go before or after the command word. The exit code is `0` on su
 http://localhost:3000/
 ```
 
+- The server listens on `localhost` only, never on the network.
 - `/` is the page, `/manifest.json` the manifest of the game, or of `dist/assets` with `--packed`. Any other path is a file of the game, or of `dist/assets` with `--packed`. A segment that starts with a dot, such as `.moku` or `..`, and `node_modules` answer 404.
 - The bunfig lists the engine's hot plugin first and defines `__MOKU_GAME_DEV__` as `true`. `dev.ts` sets the global too. See [Hot swap](./hot-swap.md).
 - `main.ts` lists `tests/scenarios/*.ts`, sorted, by file stem. Test files, `.d.ts` and `index.ts` are skipped. A new or removed scenario file rewrites `main.ts`, and the page reloads. A `tests/scenarios/` folder created after the start needs a restart.
@@ -330,7 +331,7 @@ http://localhost:3000/
 
 `moku-game build` packs the assets with the layers of `config.ts`, then bundles the production page into `--out`: the HTML and `main.ts` in memory, minified, for the browser, `__MOKU_GAME_DEV__` defined `false`, no hot plugin. It copies the pack beside the page, `manifest.json` next to `index.html`. It writes nothing under `.moku/`.
 
-The page carries no scenario, no agent, no `.dev` module and no `/control`. Every link starts with `./`, so the build runs from any http sub-path and from the Tauri protocol, not from `file://`. It prints `built "<out>": <n> files, <kb> KB.` An `--out` that is the game, holds it, or touches `dist/assets` is refused.
+The page carries no scenario, no agent, no `.dev` module and no `/control`. Every link starts with `./`, so the build runs from any http sub-path and from the Tauri protocol, not from `file://`. It prints `built "<out>": <n> files, <kb> KB.` An `--out` that is the game, holds it, touches `dist/assets`, or lies in the game outside `dist/` is refused.
 
 ### native
 

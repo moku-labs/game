@@ -8,6 +8,9 @@ import path from "node:path";
 import type { Cli, Config, Target } from "@moku-labs/native";
 import type { ResolvedGameConfig } from "./types";
 
+/** The port of the dev server Tauri's shell starts and loads. */
+const DEV_PORT = 5173;
+
 /** A native verb of `moku-game native`. */
 export type NativeVerb = "build" | "dev" | "doctor" | "clean";
 
@@ -82,7 +85,8 @@ function systemRowsOf(settings: ResolvedGameConfig): Config["system"] {
  * @throws {Error} When `config.ts` has no native section.
  * @example
  * ```ts
- * nativeConfigOf(settings, { cwd: "/g", command: "bun /g/node_modules/@moku-labs/game/bin/moku-game.mjs" }, "ios").web.dist; // "/g/dist/web"
+ * const where = { cwd: "/g", command: '"/usr/local/bin/bun" "/g/node_modules/@moku-labs/game/bin/moku-game.mjs" "--root" "/g"' };
+ * nativeConfigOf(resolveConfig({ page: { title: "T" }, native: { name: "T", identifier: "com.x.t" } }), where, "ios").web.dist; // "/g/dist/web"
  * ```
  */
 export function nativeConfigOf(
@@ -101,8 +105,8 @@ export function nativeConfigOf(
     web: {
       cwd: where.cwd,
       build: `${where.command} build`,
-      devCommand: `${where.command} dev --port 5173`,
-      devUrl: "http://localhost:5173",
+      devCommand: `${where.command} dev --port ${DEV_PORT}`,
+      devUrl: `http://localhost:${DEV_PORT}`,
       dist: path.join(where.cwd, "dist/web")
     },
     system: systemRowsOf(settings),

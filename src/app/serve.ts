@@ -235,6 +235,21 @@ function scenarioNamesOf(root: string): string[] {
 }
 
 /**
+ * Tells whether the search for `.dev.ts` modules skips a folder: a dot folder, or a folder of
+ * tools and tests.
+ *
+ * @param name - The folder name.
+ * @returns True for a skipped folder.
+ * @example
+ * ```ts
+ * isSkippedFolder("node_modules"); // true
+ * ```
+ */
+function isSkippedFolder(name: string): boolean {
+  return name.startsWith(".") || NO_DEV_MODULES.test(name);
+}
+
+/**
  * Lists the `.dev.ts` modules under a folder of the game, outside the dot folders and the folders
  * of tools and tests.
  *
@@ -248,11 +263,8 @@ function devModulesOf(root: string, relative = ""): string[] {
   return entries.flatMap(entry => {
     const inGame = relative === "" ? entry.name : `${relative}/${entry.name}`;
 
-    if (entry.isDirectory()) {
-      return entry.name.startsWith(".") || NO_DEV_MODULES.test(entry.name)
-        ? []
-        : devModulesOf(root, inGame);
-    }
+    if (entry.isDirectory() && isSkippedFolder(entry.name)) return [];
+    if (entry.isDirectory()) return devModulesOf(root, inGame);
 
     return entry.isFile() && entry.name.endsWith(".dev.ts") ? [inGame] : [];
   });
@@ -362,9 +374,10 @@ function ignoresMoku(folder: string, own = true): boolean {
 
   const parent = path.dirname(folder);
 
-  return existsSync(path.join(folder, ".git")) || parent === folder
-    ? false
-    : ignoresMoku(parent, false);
+  // The walk ends at the repository, or at the top of the disk.
+  if (existsSync(path.join(folder, ".git")) || parent === folder) return false;
+
+  return ignoresMoku(parent, false);
 }
 
 /**
@@ -401,57 +414,77 @@ function watchScenarios(
 }
 
 /**
- * The dev parent: checks the game, writes the page, watches the scenarios, and re-runs the bin
- * under the generated bunfig with the game as its working directory. It hands Ctrl+C and the
- * other stop signals to the child and answers the child's exit code.
+ * The command that runs the bin again as the dev child: the Bun under the page's bunfig, then
+ * `dev` with the game, the port and `--packed`.
+ *
+ * @param run - The flags of the run.
+ * @param page - The written page, for its bunfig.
+ * @param deps - The Bun and the bin.
+ * @returns The words of the command.
+ */
+function devChildCommand(run: ServeRun, page: PageFiles, deps: CliDeps): string[] {
+  return [
+    deps.execPath,
+    `--config=${page.bunfig}`,
+    ...deps.self,
+    "dev",
+    "--root",
+    run.root,
+    "--port",
+    String(run.port),
+    ...(run.packed ? ["--packed"] : [])
+  ];
+}
+
+/**
+ * The dev parent: checks the game, writes the page, re-runs the bin under the generated bunfig
+ * with the game as its working directory, and watches the scenarios while the child runs. It
+ * hands Ctrl+C and the other stop signals to the child and answers the child's exit code.
  *
  * @param run - The flags of the run.
  * @param deps - The process seams.
  * @returns The exit code of the child.
- * @throws {Error} When the game, a flag or the page is refused.
+ * @throws {Error} When the game, a flag or the page is refused, or the child does not start.
  */
 export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number> {
   const settings = await loadGame(run.root);
+  const hasPack = isFile(path.join(run.root, "dist", "assets", "manifest.json"));
+  const hasManifest = isFile(path.join(run.root, "manifest.json"));
 
-  if (run.packed && !isFile(path.join(run.root, "dist", "assets", "manifest.json"))) {
+  // A packed run serves the pack, so it needs one; a raw run only warns without the dev manifest.
+  if (run.packed && !hasPack) {
     throw new Error(
       `[game] dev: no packed build in "${path.join(run.root, "dist", "assets")}".\n  Run "moku-game pack" first.`
     );
   }
 
-  if (!run.packed && !isFile(path.join(run.root, "manifest.json"))) {
+  if (!run.packed && !hasManifest) {
     deps.ui.warn(`[game] dev: no manifest.json in "${run.root}".\n  Run "moku-game keys" first.`);
   }
 
+  // The page is written before the child imports it, into a folder git should not see.
   const page = writePage(run.root, settings, run, deps.resolve);
-  const watcher = watchScenarios(run.root, settings, deps);
 
   if (!ignoresMoku(run.root)) {
     deps.ui.warn('[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.');
   }
 
-  const child = deps.spawn(
-    [
-      deps.execPath,
-      `--config=${page.bunfig}`,
-      ...deps.self,
-      "dev",
-      "--root",
-      run.root,
-      "--port",
-      String(run.port),
-      ...(run.packed ? ["--packed"] : [])
-    ],
-    {
-      cwd: run.root,
-      env: { ...deps.env, MOKU_GAME_CHILD: "1" },
-      stdio: ["inherit", "inherit", "inherit"],
-      detached: true
-    }
-  );
+  // The child serves the page from the game folder in its own process group: Ctrl+C reaches the
+  // parent, which hands it on.
+  const child = deps.spawn(devChildCommand(run, page, deps), {
+    cwd: run.root,
+    env: { ...deps.env, MOKU_GAME_CHILD: "1" },
+    stdio: ["inherit", "inherit", "inherit"],
+    detached: true
+  });
   const removers = FORWARDED.map(signal => deps.onSignal(signal, () => child.kill(signal)));
+  let watcher: Watcher | undefined;
 
+  // The scenario watcher lives exactly as long as the child: it opens once the child runs and
+  // closes when it exits.
   try {
+    watcher = watchScenarios(run.root, settings, deps);
+
     return await child.exited;
   } finally {
     watcher?.close();
@@ -508,15 +541,14 @@ function safeDecode(pathname: string): string | undefined {
  */
 function fileResponse(file: string | undefined): Response {
   const found = file === undefined ? undefined : statSync(file, { throwIfNoEntry: false });
+  const isServable = file !== undefined && found?.isFile() === true && found.size > 0;
 
-  return file !== undefined && found?.isFile() === true && found.size > 0
-    ? new Response(Bun.file(file))
-    : new Response("Not found", { status: 404 });
+  return isServable ? new Response(Bun.file(file)) : new Response("Not found", { status: 404 });
 }
 
 /**
- * Starts the dev server: the page on `/`, the manifest of the served folder on
- * `/manifest.json`, and its files as static files.
+ * Starts the dev server on `localhost` only, never on every interface: the page on `/`, the
+ * manifest of the served folder on `/manifest.json`, and its files as static files.
  *
  * @param run - The flags of the run.
  * @param page - The page bundle the child imported.
@@ -528,6 +560,7 @@ function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
 
   try {
     return Bun.serve({
+      hostname: "localhost",
       port: run.port,
       development: true,
       routes: {
@@ -560,15 +593,18 @@ function untilStopped(server: PageServer, deps: CliDeps): Promise<number> {
 
   return new Promise(resolve => {
     const removers: (() => void)[] = [];
+    // A parent that died hands the child to another process: the parent id changes.
     const timer = setInterval(() => {
       if (process.ppid !== parent) stop();
     }, PARENT_CHECK_MS);
+    // Every cause stops the same way: no more checks, no more listeners, then the server.
     const stop = (): void => {
       clearInterval(timer);
       for (const remove of removers.splice(0)) remove();
       resolve(server.stop(true).then(() => 0));
     };
 
+    // Ctrl+C and SIGTERM stop the child; SIGHUP is the parent's to hand on.
     for (const signal of STOPPING) removers.push(deps.onSignal(signal, stop));
   });
 }

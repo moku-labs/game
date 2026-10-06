@@ -246,6 +246,24 @@ describe("devMain", () => {
     expect(withAgents).toContain("  agents: [agent0],\n  devModules: [devModule0, devModule1]\n");
   });
 
+  it.skipIf(typeof Bun === "undefined")(
+    "devMain writes a scenario or .dev file name with a quote or a backslash as a valid import",
+    () => {
+      const text = devMain(plain, {
+        scenarios: ['it"s.ts', String.raw`back\slash.ts`],
+        devModules: ['features/a"b/x.dev.ts'],
+        agents: ["@moku-labs/editor/agent/page"]
+      });
+      const imports = new Bun.Transpiler({ loader: "ts" })
+        .scanImports(text)
+        .map(found => found.path);
+
+      expect(imports).toContain('../tests/scenarios/it"s.ts');
+      expect(imports).toContain(String.raw`../tests/scenarios/back\slash.ts`);
+      expect(imports).toContain('../features/a"b/x.dev.ts');
+    }
+  );
+
   it("devMain writes the main.ts of the startPage example line for line", () => {
     const page = readFileSync(new URL("../../src/app/page.ts", import.meta.url), "utf8");
     const block = /\* ```ts\n((?: \*.*\n)+?) \* ```\n \*\/\nexport async function startPage/.exec(

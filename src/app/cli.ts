@@ -304,8 +304,9 @@ function refuseExtra(parsed: Parsed, count: number): void {
 function portOf(given: string | undefined): number {
   const text = given ?? DEFAULT_PORT;
   const port = Number(text);
+  const isPort = /^\d+$/.test(text) && port <= MAX_PORT;
 
-  if (!/^\d+$/.test(text) || port > MAX_PORT) {
+  if (!isPort) {
     throw new Error(`[game] dev: --port must be an integer 0-65535, got "${text}".`);
   }
 

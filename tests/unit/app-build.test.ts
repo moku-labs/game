@@ -1,8 +1,9 @@
 /**
- * @file `moku-game build` in this process, over a stub asset scanner: the refused output folders,
- * a failed pack, the bundled page beside the pack, a pack file at a page path, the bundler
- * plugins of `--serve-plugin`, and the icon fallback for links Bun left into the game. The bundle
- * runs `Bun.build` on a copy of the mini game, so those cases need Bun.
+ * @file `moku-game build` in this process, over a stub asset scanner: the refused output folders
+ * (the game, a folder above it, the pack, a folder of the game outside `dist`), a failed pack, the
+ * bundled page beside the pack, a pack file at a page path, the bundler plugins of
+ * `--serve-plugin`, and the icon fallback for links Bun left into the game. The bundle runs
+ * `Bun.build` on a copy of the mini game, so those cases need Bun.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -122,6 +123,23 @@ describe("moku-game build, the checks", () => {
     }
   });
 
+  it("refuses an --out inside the game but outside dist, and deletes nothing", async () => {
+    const root = game();
+
+    for (const out of ["features", "tests", "web", ".moku"]) {
+      const { code, seen } = await build(["--out", out], root);
+
+      expect(code, out).toBe(1);
+      expect(seen.errors).toEqual([
+        `[game] build: --out "${path.resolve(root, out)}" would replace the game or its packed assets. Name another folder.`
+      ]);
+      expect(seen.scans).toEqual([]);
+    }
+
+    expect(existsSync(path.join(root, "features", "ui", "assets", "fx-spark.webp"))).toBe(true);
+    expect(existsSync(path.join(root, "tests", "scenarios"))).toBe(true);
+  });
+
   it("a failed pack stops the build with its code", async () => {
     const root = game();
     const { code, seen } = await build([], root, {}, 2);
@@ -186,13 +204,13 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build, the bundle", () =>
       ].join("\n")
     );
 
-    const { code, seen } = await build(["--serve-plugin", plugin, "--out", "web"], root);
-    const html = readFileSync(path.join(root, "web", "index.html"), "utf8");
+    const { code, seen } = await build(["--serve-plugin", plugin, "--out", "dist/web"], root);
+    const html = readFileSync(path.join(root, "dist", "web", "index.html"), "utf8");
 
     expect(seen.errors).toEqual([]);
     expect(code).toBe(0);
     expect(html).toContain('<link rel="icon" href="./fx-spark.webp" />');
-    expect(existsSync(path.join(root, "web", "fx-spark.webp"))).toBe(true);
+    expect(existsSync(path.join(root, "dist", "web", "fx-spark.webp"))).toBe(true);
   });
 
   it("a --serve-plugin without a Bun plugin is refused", async () => {

@@ -30,6 +30,20 @@ const l2Paths = [
   }
 ];
 
+/**
+ * Tells whether an import or export declaration is `import type` or `export type`: erased by
+ * TypeScript, so it loads nothing. Used by L13.
+ *
+ * @param node - The declaration.
+ * @returns True for a type-only declaration.
+ */
+function isTypeOnly(node: import("estree").Node): boolean {
+  return (
+    ("importKind" in node && node.importKind === "type") ||
+    ("exportKind" in node && node.exportKind === "type")
+  );
+}
+
 export default [
   // 1. Global ignores
   {
@@ -315,8 +329,10 @@ export default [
 
   // 6b6. L13 — the engine imports a native package in one home each: `@moku-labs/system` only in
   // `src/app/system.ts` and `@moku-labs/native` only in `src/app/native.ts`, the two optional peers
-  // of the game shell. Every other file under `src/`, tests included, and type imports too, never
-  // reaches them or `@tauri-apps/*`. A rule of its own for the same reason as L11.
+  // of the game shell. The home reaches its package only by `import()` or `import type` /
+  // `export type`: a static value import would load the package with the file. Every other file
+  // under `src/`, tests included, and type imports too, never reaches them or `@tauri-apps/*`. A
+  // rule of its own for the same reason as L11.
   {
     files: ["src/**/*.{ts,tsx}"],
     plugins: {
@@ -328,7 +344,8 @@ export default [
               schema: [],
               messages: {
                 native:
-                  "Only src/app/system.ts imports @moku-labs/system and only src/app/native.ts imports @moku-labs/native; no engine file imports @tauri-apps/*. Reach them through the game shell."
+                  "Only src/app/system.ts imports @moku-labs/system and only src/app/native.ts imports @moku-labs/native; no engine file imports @tauri-apps/*. Reach them through the game shell.",
+                lazy: "The home of a native package loads it only with import() and names its types only with import type or export type: a static import loads it with the file."
               }
             },
             create: (
@@ -343,24 +360,31 @@ export default [
               const home = Object.entries(homes).find(([end]) => file.endsWith(end))?.[1];
               const check = (
                 node: import("estree").Node,
-                source: import("estree").Node | null | undefined
+                source: import("estree").Node | null | undefined,
+                loadsNothing: boolean
               ): void => {
                 const name = source?.type === "Literal" ? source.value : undefined;
 
                 if (
-                  typeof name === "string" &&
-                  home?.test(name) !== true &&
-                  /^(?:@moku-labs\/(?:system|native)(?:\/|$)|@tauri-apps\/)/.test(name)
+                  typeof name !== "string" ||
+                  !/^(?:@moku-labs\/(?:system|native)(?:\/|$)|@tauri-apps\/)/.test(name)
                 ) {
+                  return;
+                }
+
+                if (home?.test(name) !== true) {
                   context.report({ node, messageId: "native" });
+                } else if (!loadsNothing) {
+                  context.report({ node, messageId: "lazy" });
                 }
               };
 
               return {
-                ImportDeclaration: node => check(node, node.source),
-                ImportExpression: node => check(node, node.source),
-                ExportAllDeclaration: node => check(node, node.source),
-                ExportNamedDeclaration: node => check(node, node.source)
+                ImportDeclaration: node => check(node, node.source, isTypeOnly(node)),
+                // `import()` loads the package only when the page or the verb needs it.
+                ImportExpression: node => check(node, node.source, true),
+                ExportAllDeclaration: node => check(node, node.source, isTypeOnly(node)),
+                ExportNamedDeclaration: node => check(node, node.source, isTypeOnly(node))
               };
             }
           }

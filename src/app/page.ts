@@ -38,6 +38,9 @@ type LateReporter = {
 /** The screen app of any game, as the page runs it. */
 type PageApp = ScreenAppOfGame<AnyGameApp>;
 
+/** How many started sounds the audio journal of the dev page keeps. */
+const DEV_AUDIO_JOURNAL = 200;
+
 /** The player and the session a `?player=` scenario returns. */
 type ScenarioStart = ReturnType<Scenario>;
 
@@ -149,7 +152,10 @@ function screenOf(game: AnyGameApp, runtime: PageRuntime): PageApp {
     ...(start?.session === undefined ? {} : { session: start.session }),
     clock: runtime.clock,
     // The guard stays inline: a build defines the flag false and folds it (src/plugins/flow/doors/dev.ts).
-    audio: typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__ ? { journal: 200 } : {}
+    audio:
+      typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__
+        ? { journal: DEV_AUDIO_JOURNAL }
+        : {}
   }).app;
 }
 
@@ -261,10 +267,12 @@ export async function startPage<Game extends AnyGameApp>(
   const start = scenarioStart(query.get("player"), options.scenarios ?? {}, clock.now(), report);
   const shell = options.system === undefined ? undefined : await options.system(settings, report);
   const namespace = settings.native?.identifier ?? "moku-game";
+  // A scenario plays on a fresh memory save: the stored player is never touched.
   const provider =
     start === undefined ? pageSave(settings.save, { namespace, shell, report }) : memory();
   const app = screenOf(game, { settings, query, clock, shell, provider, start });
 
+  // The app exists now: the problems kept so far go to its log, the handles go on globalThis.
   attach(app.log);
   await setHandles(app, shell);
   followReducedMotion(app);
@@ -277,6 +285,7 @@ export async function startPage<Game extends AnyGameApp>(
     app.log.error("[game] The graph stopped.", undefined, toError(error));
   });
 
+  // The agents come last, on the running game. The guard stays inline: the build folds it.
   if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
     await startAgents(app, settings, options);
   }

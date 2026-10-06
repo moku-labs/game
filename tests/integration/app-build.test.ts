@@ -1,14 +1,15 @@
 /**
  * @file `moku-game build` end to end, the test bin on a copy of the mini game with an icon and a
  * marked scenario: the assets packed, the page bundled with every link `./`, the packed manifest
- * beside it, and no dev code in the output. Plus the refusal of an output folder at the game root
- * and the Bun log of a page that does not bundle.
+ * beside it, and no dev code in the output. Plus the refusal of an output folder at the game root,
+ * a build run from another folder with the tree plugin, and the Bun log of a page that does not
+ * bundle.
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { copyMiniGame, removeCopies, runBin } from "./app-helpers";
+import { copyMiniGame, REPO, removeCopies, runBin } from "./app-helpers";
 
 /** A string only the marked scenario holds: a build that ships scenarios carries it. */
 const SCENARIO_MARKER = "scenario-marker-7f3a2c";
@@ -122,6 +123,33 @@ describe("moku-game build", () => {
     );
     expect(existsSync(path.join(built.root, "index.ts"))).toBe(true);
   }, 60_000);
+
+  it("build --root from another folder bundles with the tree plugin from the game root", async () => {
+    const root = iconGame("build-elsewhere");
+    const away = mkdtempSync(path.join(tmpdir(), "moku-game-away-"));
+    const out = path.join(away, "web");
+
+    made.push(away);
+
+    // The tree plugin resolves Pixi, core and common from the working directory: the game's.
+    const ran = await runBin(
+      [
+        "build",
+        "--root",
+        root,
+        "--serve-plugin",
+        path.join(REPO, "scripts", "tree", "bundle.ts"),
+        "--out",
+        out
+      ],
+      away
+    );
+
+    expect(ran.stderr).toBe("");
+    expect(ran.code).toBe(0);
+    expect(existsSync(path.join(out, "index.html"))).toBe(true);
+    expect(existsSync(path.join(out, "manifest.json"))).toBe(true);
+  }, 180_000);
 
   it("a failed bundle exits 1 with the Bun log", async () => {
     const root = iconGame("build-broken");

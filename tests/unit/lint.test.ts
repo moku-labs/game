@@ -153,3 +153,51 @@ describe("the project index is node-only", () => {
     expect(inside).toEqual([]);
   });
 });
+
+/**
+ * Lint a snippet and keep the messages of the engine's own L13 rule.
+ *
+ * @param code - The source text.
+ * @param path - The path the snippet pretends to live at, relative to the root.
+ * @returns The messages of that rule.
+ */
+async function lintNative(code: string, path: string): Promise<string[]> {
+  const eslint = new ESLint({ cwd: ROOT });
+  const [result] = await eslint.lintText(code, { filePath: `${ROOT}${path}` });
+
+  return (result?.messages ?? [])
+    .filter(message => message.ruleId === "l13/native-imports")
+    .map(message => message.message);
+}
+
+describe("L13: a native package only in its home, and there only lazily", () => {
+  it.each([
+    ["src/app/system.ts", "@moku-labs/system"],
+    ["src/app/native.ts", "@moku-labs/native"]
+  ])("%s reaches %s by import() and import type only", async (path, name) => {
+    const valueImport = await lintNative(
+      `import { createApp } from "${name}";\n\nexport const make = createApp;\n`,
+      path
+    );
+    const valueExport = await lintNative(`export { createApp } from "${name}";\n`, path);
+    const typeImport = await lintNative(
+      `import type { Config } from "${name}";\n\nexport type Probe = Config;\n`,
+      path
+    );
+    const typeExport = await lintNative(`export type { Config } from "${name}";\n`, path);
+    const lazy = await lintNative(`export const load = () => import("${name}");\n`, path);
+
+    expect(valueImport).toHaveLength(1);
+    expect(valueExport).toHaveLength(1);
+    expect([...typeImport, ...typeExport, ...lazy]).toEqual([]);
+  });
+
+  it("refuses a type import of a native package outside its home", async () => {
+    const messages = await lintNative(
+      'import type { Config } from "@moku-labs/native";\n\nexport type Probe = Config;\n',
+      "src/app/page.ts"
+    );
+
+    expect(messages).toHaveLength(1);
+  });
+});

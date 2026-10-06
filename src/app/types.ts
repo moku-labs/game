@@ -391,8 +391,10 @@ export type ScreenSeams<Player, Session, Source, Provider> = HeadlessSeams<
    *
    * @example
    * ```ts
-   * const { app } = game.screen({ platform: provider }); // started, resting on Home
-   * app.platform.back(); // "exit": Home does not list "back"
+   * const { app } = game.screen({ platform: provider });
+   * await app.start();
+   * void app.flow.run();
+   * app.platform.back(); // "exit" once the graph rests on Home: Home does not list "back"
    * ```
    */
   platform?: Platform.PlatformProvider;

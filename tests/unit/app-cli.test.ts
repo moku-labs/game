@@ -13,7 +13,6 @@ import {
   utimesSync,
   writeFileSync
 } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +22,7 @@ import type { NativeVerb, NativeVerbOptions, NativeWhere } from "../../src/app/n
 import { staticPath } from "../../src/app/serve";
 import type { ResolvedGameConfig } from "../../src/app/types";
 import { runCli } from "../../src/cli";
-import { copyMiniGame, removeCopies } from "../integration/app-helpers";
+import { copyMiniGame, holdLocalhostPort, removeCopies } from "../integration/app-helpers";
 
 /** What the stub seams saw. */
 type Seen = {
@@ -474,6 +473,19 @@ describe("moku-game dev, the parent", () => {
     );
   });
 
+  it("a spawn that throws leaves no scenario watcher open", async () => {
+    const root = makeGame({ "tests/scenarios/ready.ts": "export default () => ({});\n" });
+    const { code, seen } = await run(["dev"], root, {
+      spawn: () => {
+        throw new Error("[game] spawn failed.");
+      }
+    });
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual(["[game] spawn failed."]);
+    expect(seen.watches.filter(watched => !watched.closed)).toEqual([]);
+  });
+
   it("a game without tests/scenarios gets no watcher", async () => {
     const root = makeGame();
     const { seen } = await run(["dev"], root);
@@ -570,6 +582,23 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
     await expect(fetch(url)).rejects.toThrow();
   });
 
+  it("binds the server to localhost, never to every interface", async () => {
+    const root = makeGame();
+    const serve = vi.spyOn(Bun, "serve");
+
+    try {
+      const { running, seen, url } = await startChild(root);
+
+      expect(serve.mock.calls[0]?.[0]).toMatchObject({ hostname: "localhost" });
+      expect(new URL(url).hostname).toBe("localhost");
+
+      interrupt(seen);
+      expect(await running).toBe(0);
+    } finally {
+      serve.mockRestore();
+    }
+  });
+
   it("--packed serves the manifest and the files of dist/assets", async () => {
     const root = makeGame({
       "dist/assets/manifest.json": '{ "version": 2, "bundles": {} }\n',
@@ -588,23 +617,16 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
 
   it("a taken port exits 1 with the --port 0 advice", async () => {
     const root = makeGame();
-    const taken = createServer();
-    const port = await new Promise<number>(resolve => {
-      taken.listen(0, () => {
-        const address = taken.address();
-
-        resolve(typeof address === "object" && address !== null ? address.port : 0);
-      });
-    });
+    const { port, release } = holdLocalhostPort();
     const { deps, seen } = fakeDeps(root, { env: { MOKU_GAME_CHILD: "1" } });
 
     try {
-      expect(await runCommand(["dev", "--port", String(port)], deps)).toBe(1);
+      expect(await runCommand(["dev", "--port", port], deps)).toBe(1);
       expect(seen.errors).toEqual([
         `[game] dev: port ${port} is in use.\n  Pass --port 0 for a free port.`
       ]);
     } finally {
-      taken.close();
+      await release();
     }
   });
 });

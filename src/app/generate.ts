@@ -102,8 +102,9 @@ function safeValue(value: string, problem: string): string {
 function iconPath(name: IconName, file: string): string {
   const slashed = file.replaceAll("\\", "/");
   const absolute = slashed.startsWith("/") || /^[a-z]:/i.test(slashed);
+  const escapesGame = absolute || slashed.split("/").includes("..") || slashed === "";
 
-  if (absolute || slashed.split("/").includes("..") || slashed === "") {
+  if (escapesGame) {
     throw new Error(`[game] moku-game: page.icons.${name} "${file}" is not a file in the game.`);
   }
 
@@ -251,6 +252,22 @@ function numbered(prefix: string, count: number): string {
 }
 
 /**
+ * One import line of a generated file. The specifier is written by `JSON.stringify`: a file name
+ * may hold a quote or a backslash.
+ *
+ * @param binding - What the line imports, such as `scenario0` or `* as devModule0`.
+ * @param specifier - The module.
+ * @returns The line.
+ * @example
+ * ```ts
+ * importLine("* as devModule0", "../features/board/board.dev.ts"); // 'import * as devModule0 from "../features/board/board.dev.ts";'
+ * ```
+ */
+function importLine(binding: string, specifier: string): string {
+  return `import ${binding} from ${JSON.stringify(specifier)};`;
+}
+
+/**
  * The `main.ts` of the dev page: the dev flag first, then the page entry, the game, its config,
  * one import per scenario, and, with agents, one per `.dev` module and one per agent. It calls
  * `startPage` with the scenarios by file stem, the shell when the game needs it, the agents and
@@ -268,6 +285,8 @@ export function devMain(settings: ResolvedGameConfig, sources: MainSources): str
   const scenarios = scenarioFiles(sources.scenarios);
   const agents = sources.agents ?? [];
   const devModules = agents.length === 0 ? [] : sources.devModules.toSorted();
+  // The options of startPage: the scenarios by file stem, then the shell, the agents and the
+  // `.dev` modules, each only when the page has it.
   const keys = scenarios.map(
     (file, index) => `${JSON.stringify(file.slice(0, -".ts".length))}: scenario${index}`
   );
@@ -281,13 +300,14 @@ export function devMain(settings: ResolvedGameConfig, sources: MainSources): str
       : [`  devModules: [${numbered("devModule", devModules.length)}]`])
   ];
 
+  // The dev flag is imported first, so the global is set before the game's modules run.
   return [
     WRITTEN,
     'import "./dev.ts";',
     ...pageImports(settings, "../"),
-    ...scenarios.map((file, index) => `import scenario${index} from "../tests/scenarios/${file}";`),
-    ...devModules.map((file, index) => `import * as devModule${index} from "../${file}";`),
-    ...agents.map((agent, index) => `import agent${index} from ${JSON.stringify(agent)};`),
+    ...scenarios.map((file, index) => importLine(`scenario${index}`, `../tests/scenarios/${file}`)),
+    ...devModules.map((file, index) => importLine(`* as devModule${index}`, `../${file}`)),
+    ...agents.map((agent, index) => importLine(`agent${index}`, agent)),
     "",
     "await startPage(game, config, {",
     options.join(",\n"),

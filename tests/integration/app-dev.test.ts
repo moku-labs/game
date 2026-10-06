@@ -5,11 +5,11 @@
  * stops on Ctrl+C. The scenario watcher, `--packed` and a taken port run on copies.
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   copyMiniGame,
+  holdLocalhostPort,
   MINI_GAME,
   REPO,
   removeCopies,
@@ -248,23 +248,16 @@ describe("moku-game dev on copies of the mini game", () => {
 
   it("a taken port exits 1 with the --port 0 advice", async () => {
     const root = game("dev-taken");
-    const taken = createServer();
-    const port = await new Promise<number>(resolve => {
-      taken.listen(0, () => {
-        const address = taken.address();
-
-        resolve(typeof address === "object" && address !== null ? address.port : 0);
-      });
-    });
+    const { port, release } = holdLocalhostPort();
 
     try {
-      const ran = await runBin(["dev", "--root", root, "--port", String(port)]);
+      const ran = await runBin(["dev", "--root", root, "--port", port]);
 
       expect(ran.code).toBe(1);
       expect(ran.stderr).toContain(`[game] dev: port ${port} is in use.`);
       expect(ran.stderr).toContain("Pass --port 0 for a free port.");
     } finally {
-      taken.close();
+      await release();
     }
   }, 60_000);
 });
