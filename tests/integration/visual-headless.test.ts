@@ -1,37 +1,28 @@
 /**
- * @file The visual tests of the fixture game, headless, in every `bun run test`: each test plays
+ * @file The visual tests of the mini game, headless, in every `bun run test`: each test plays
  * live in plain Bun and every checkpoint answers `same` against the committed `state.json` and
  * `describe.json` under `tests/visual/`. `argv: []`, so the flags vitest got never steer the run;
  * `pixels: false`, so no browser opens. A checkpoint with no baseline is written and fails here:
- * write the baselines with `bun run fixture:visual --update` and commit them.
+ * write the baselines with `bun run mini:visual --no-pixels --update` and commit them.
  */
 import { fileURLToPath } from "node:url";
 import type { VisualReport } from "@moku-labs/game/visual";
 import { runVisualTests } from "@moku-labs/game/visual";
 import { beforeAll, describe, expect, it } from "vitest";
-import { fixtureApp } from "../visual/fixture";
-import { fixtureVisualTests } from "../visual/tests";
+import { miniApp } from "../visual/fixture";
+import { miniVisualTests } from "../visual/tests";
 
 /** The folder of the visual tests and their baselines. */
 const dir = fileURLToPath(new URL("../visual/", import.meta.url));
 
-/** Every checkpoint of every fixture visual test, as `test/checkpoint`, in run order. */
-const checkpoints = [
-  "home/rest",
-  "board-merge/merged",
-  "reward-popup/open",
-  "rename-popup/typed",
-  "rename-popup/saved",
-  "gift-popup/open",
-  "settings/open",
-  "leave-popup/open"
-];
+/** Every checkpoint of every visual test of the mini game, as `test/checkpoint`, in run order. */
+const checkpoints = ["home/rest", "info-popup/open"];
 
-describe("visual tests of the fixture game, headless", () => {
+describe("visual tests of the mini game, headless", () => {
   let report: VisualReport;
 
   beforeAll(async () => {
-    report = await runVisualTests({ app: fixtureApp }, fixtureVisualTests, {
+    report = await runVisualTests({ app: miniApp }, miniVisualTests, {
       dir,
       pixels: false,
       argv: []
@@ -51,7 +42,7 @@ describe("visual tests of the fixture game, headless", () => {
   }
 
   it("runs every test without an error", () => {
-    expect(report.tests.map(test => test.error)).toEqual(fixtureVisualTests.map(() => undefined));
+    expect(report.tests.map(test => test.error)).toEqual(miniVisualTests.map(() => undefined));
   });
 
   it("reaches exactly the expected checkpoints, in order", () => {

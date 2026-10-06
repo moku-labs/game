@@ -35,7 +35,7 @@ function checkId(kind: "source" | "command", id: string): void {
  * ```ts
  * // A game's .dev module: the orders on the board, re-read after every edge.
  * export const orders = defineSource({
- *   id: "timber.orders",
+ *   id: "mini.orders",
  *   title: "Orders",
  *   input: {},
  *   changes: "edge",
@@ -64,7 +64,7 @@ export function defineSource<S extends InputSchema, O, App = HeadlessApp>(
  * ```ts
  * // A game's .dev module: open the shop from anywhere, through the graph.
  * export const openShop = defineCommand({
- *   id: "timber.openShop",
+ *   id: "mini.openShop",
  *   title: "Open the shop",
  *   input: {},
  *   effect: "route",

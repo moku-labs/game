@@ -22,10 +22,10 @@ const DEFAULT_DEBOUNCE_MS = 75;
  *   installed: `[game] The project index needs the "typescript" package.`
  * @example
  * ```ts
- * // The editor opens the fixture game and answers where a node and a text style live.
- * const project = await openProject({ root: "tests/integration/merge-game" });
- * Object.keys(project.index.files).length; // 111
- * (await project.find("textStyle:ui.title"))[0]?.line; // 39, in "features/ui/styles.ts"
+ * // The editor opens the mini game and answers where a node and a text style live.
+ * const project = await openProject({ root: "tests/fixtures/mini-game" });
+ * Object.keys(project.index.files).length; // 21
+ * (await project.find("textStyle:ui.counter"))[0]?.line; // 16, in "features/home/styles.ts"
  * project.close();
  * ```
  */

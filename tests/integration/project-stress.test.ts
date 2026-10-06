@@ -23,7 +23,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Integration: the project index under an agent burst, on a temp copy of the
-// fixture game (no dist). A scripted burst runs for PROJECT_STRESS_MS (10 s by
+// mini game (no dist). A scripted burst runs for PROJECT_STRESS_MS (10 s by
 // default, 60 s locally when set): edits, lines inserted above definitions, a
 // renamed binding, a node file moved to another folder, a deleted file, a file
 // left broken then fixed, 20 files touched within 100 ms, and saves with the
@@ -32,8 +32,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // move and the delete; a save with the same bytes calls nobody.
 // ---------------------------------------------------------------------------
 
-/** The fixture game, copied and never written. */
-const FIXTURE = fileURLToPath(new URL("merge-game/", import.meta.url));
+/** The mini game, copied and never written. */
+const FIXTURE = fileURLToPath(new URL("../fixtures/mini-game/", import.meta.url));
 
 /** How long the burst runs. */
 const STRESS_MS = Number(process.env.PROJECT_STRESS_MS ?? 10_000);
@@ -46,6 +46,9 @@ const BATCH_TIMEOUT_MS = 5000 * TIMING_SLACK;
 
 /** How long a step waits with no batch to be sure no other batch comes. */
 const QUIET_MS = 300 * TIMING_SLACK;
+
+/** The node file the burst moves to another folder and back: no other step touches it. */
+const MOVED = "nodes/count.ts";
 
 /** The folders the copy leaves out. */
 const LEFT_OUT = /[/\\](?:dist|node_modules)(?:[/\\]|$)/;
@@ -246,9 +249,8 @@ describe("the project index under an agent burst", () => {
     timeout: STRESS_MS + 30_000 * TIMING_SLACK
   }, async ({ annotate }) => {
     const random = seeded(7);
-    const pool = Object.keys(project.index.files).filter(file =>
-      /^(?:nodes|features|view)\//.test(file)
-    );
+    // Every file of the game but the one that moves: twenty files.
+    const pool = Object.keys(project.index.files).filter(file => file !== MOVED);
     const pick = (): string => pool[Math.floor(random() * pool.length)] ?? "kit.ts";
     const started = Date.now();
     let cycles = 0;
@@ -274,13 +276,16 @@ describe("the project index under an agent burst", () => {
       {
         const before = calls.length;
 
-        put("nodes/merge.ts", `// above ${cycles}\n// and again\n${readText("nodes/merge.ts")}`);
-        put("features/ui/styles.ts", `// above ${cycles}\n${readText("features/ui/styles.ts")}`);
+        put("nodes/home.ts", `// above ${cycles}\n// and again\n${readText("nodes/home.ts")}`);
+        put(
+          "features/home/styles.ts",
+          `// above ${cycles}\n${readText("features/home/styles.ts")}`
+        );
         await settle(before);
 
-        const [merge] = await project.find("node:board/merge");
+        const [home] = await project.find("node:main/home");
 
-        expect(merge?.line).toBe(17 + cycles * 2);
+        expect(home?.line).toBe(8 + cycles * 2);
         expect(await verify()).toEqual([]);
       }
 
@@ -307,9 +312,7 @@ describe("the project index under an agent burst", () => {
       {
         const before = calls.length;
         const away = cycles % 2 === 1;
-        const [from, to] = away
-          ? ["nodes/toast.ts", "nodes/board/toast.ts"]
-          : ["nodes/board/toast.ts", "nodes/toast.ts"];
+        const [from, to] = away ? [MOVED, "nodes/info/count.ts"] : ["nodes/info/count.ts", MOVED];
         const text = readText(from);
         const shifted = away
           ? text.replaceAll('from "../', 'from "../../')
@@ -317,28 +320,28 @@ describe("the project index under an agent burst", () => {
 
         put(to, shifted);
         put(
-          "flows/board.ts",
-          readText("flows/board.ts").replace(`"../${from.slice(0, -3)}"`, `"../${to.slice(0, -3)}"`)
+          "flows/info.ts",
+          readText("flows/info.ts").replace(`"../${from.slice(0, -3)}"`, `"../${to.slice(0, -3)}"`)
         );
         rmSync(path.join(root, from));
 
         const brought = await settle(before);
 
-        expect(netMoves(brought)).toContainEqual({ key: "node:board/toast", from, to });
+        expect(netMoves(brought)).toContainEqual({ key: "node:infoPopup/count", from, to });
         moves += 1;
         expect(await verify()).toEqual([]);
       }
 
       // A file deleted, then written back.
       {
-        const file = "features/leave/index.ts";
+        const file = "features/info/index.ts";
         const text = readText(file);
         const before = calls.length;
 
         rmSync(path.join(root, file));
         const deleted = await settle(before);
 
-        expect(deleted.flatMap(call => call.change.removed)).toContain("feature:leave");
+        expect(deleted.flatMap(call => call.change.removed)).toContain("feature:info");
         removes += 1;
         expect(await verify()).toEqual([]);
 
@@ -346,12 +349,12 @@ describe("the project index under an agent burst", () => {
 
         put(file, text);
         await settle(again);
-        expect(project.index.symbols["feature:leave"]).toBeDefined();
+        expect(project.index.symbols["feature:info"]).toBeDefined();
       }
 
       // A file left broken, then fixed: its keys stay, find answers from its last good parse.
       {
-        const file = "view/effects.ts";
+        const file = "features/info/effects.ts";
         const text = readText(file);
         const keys = Object.keys(project.index.symbols).filter(key =>
           project.index.symbols[key]?.def.some(anchor => anchor.path === file)
@@ -361,15 +364,15 @@ describe("the project index under an agent burst", () => {
         put(
           file,
           text.replace(
-            "export const stars = defineEmitter(",
-            "export const stars = defineEmitter(("
+            "export const spark = defineEmitter(",
+            "export const spark = defineEmitter(("
           )
         );
         await settle(before);
 
         expect(project.index.files[file]?.state).toBe("broken");
         expect(keys.filter(key => project.index.symbols[key] === undefined)).toEqual([]);
-        expect(await project.find("emitter:fx.stars")).toMatchObject([
+        expect(await project.find("emitter:fx.spark")).toMatchObject([
           { path: file, broken: true }
         ]);
 
@@ -385,6 +388,8 @@ describe("the project index under an agent burst", () => {
       {
         const before = calls.length;
         const touched = pool.slice(0, 20);
+
+        expect(touched).toHaveLength(20);
 
         for (const file of touched) put(file, `${readText(file)}// burst ${cycles}\n`);
         const brought = await settle(before);

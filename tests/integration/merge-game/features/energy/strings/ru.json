@@ -1,6 +1,0 @@
-{
-  "energy.title": "Нет энергии",
-  "energy.refill": "Пополнится через\n{time, duration, short}",
-  "energy.watch": "Смотреть и\nпополнить",
-  "energy.later": "Позже"
-}

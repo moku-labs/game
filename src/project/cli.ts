@@ -256,9 +256,9 @@ async function runCommand(project: ProjectApi, options: Options, ui: IndexUi): P
  *   `--check` that found a broken file or a conflict; else `0`.
  * @example
  * ```ts
- * // An agent asks where a node of the fixture game lives.
- * await runCli(["--root", "tests/integration/merge-game", "where", "node:board/merge"]);
- * // 0, and the console printed "nodes/merge.ts:17"
+ * // An agent asks where a node of the mini game lives.
+ * await runCli(["--root", "tests/fixtures/mini-game", "where", "node:infoPopup/count"]);
+ * // 0, and the console printed "nodes/count.ts:7"
  * ```
  */
 export async function runCli(

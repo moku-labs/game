@@ -45,8 +45,8 @@ export default [
       "declarations.d.ts",
       // Tool output: the asset scanner and compileStrings write these files.
       "**/generated/**",
-      // Build output of the fixture game: the pack, the static page and the native app.
-      "tests/integration/merge-game/dist/**"
+      // Build output of the mini game: the pack of `bun run mini:pack`.
+      "tests/fixtures/mini-game/dist/**"
     ]
   },
 
@@ -545,14 +545,9 @@ export default [
       "src/plugins/renderer/**/*.ts",
       "src/plugins/anim/**/*.ts",
       "src/plugins/effects/**/*.ts",
-      "src/plugins/clock/**/*.ts",
-      "tests/integration/merge-game/rules/**/*.ts"
+      "src/plugins/clock/**/*.ts"
     ],
-    ignores: [
-      "src/plugins/clock/system.ts",
-      "src/**/__tests__/**",
-      "tests/integration/merge-game/rules/__tests__/**"
-    ],
+    ignores: ["src/plugins/clock/system.ts", "src/**/__tests__/**"],
     rules: {
       "no-restricted-properties": [
         "error",
@@ -582,26 +577,6 @@ export default [
           selector:
             "Program > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > NewExpression[callee.name=/^(Map|Set|WeakMap|WeakSet)$/]",
           message: "No module-scope collections."
-        }
-      ]
-    }
-  },
-
-  // 6f. L4 — the rules of the fixture merge game import nothing but their siblings, so they stay
-  // a model of pure game rules.
-  {
-    files: ["tests/integration/merge-game/rules/**/*.ts"],
-    ignores: ["tests/integration/merge-game/rules/__tests__/**"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              regex: String.raw`^(\.\./|@moku-labs/|pixi\.js$|yoga-layout$)`,
-              message: "The fixture rules import only their siblings."
-            }
-          ]
         }
       ]
     }

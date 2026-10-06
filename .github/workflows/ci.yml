@@ -3,10 +3,14 @@ name: CI
 # Thin caller. All logic lives in moku-labs/ci, pinned to the moving @v1 major tag.
 # Required status checks land as "ci / lint", "ci / types", "ci / test", "ci / build"
 # (GitHub prefixes a reusable workflow's jobs with the CALLER's job id) — see rulesets/main.json.
+# `demos` runs the moku demos (moku-labs/demos) against this PR's pkg.pr.new preview:
+# "demos / fast" on every PR, "demos / full" (pixels on macOS + editor scenarios) with the label
+# `demos:full` or a `/demos full` comment (demos-comment.yml).
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   # No `workflow_call:` needed — publish.yml reaches the same checks through
   # package-release.yml, which calls package-ci.yml itself.
 
@@ -20,3 +24,12 @@ permissions:
 jobs:
   ci:
     uses: moku-labs/ci/.github/workflows/package-ci.yml@v1
+
+  demos:
+    needs: ci
+    if: github.event_name == 'pull_request'
+    uses: moku-labs/ci/.github/workflows/demos.yml@v1
+    with:
+      # The preview job of `ci` published this commit; a full sha resolves on pkg.pr.new.
+      game: https://pkg.pr.new/@moku-labs/game@${{ github.event.pull_request.head.sha }}
+      tier: ${{ contains(github.event.pull_request.labels.*.name, 'demos:full') && 'full' || 'fast' }}

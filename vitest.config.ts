@@ -1,8 +1,8 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  // The fixture game in tests/integration imports the engine by its package name, as a real game
-  // does. The name must resolve to the source, not to a built dist.
+  // The mini game in tests/fixtures imports the engine by its package name, as a real game does.
+  // The name must resolve to the source, not to a built dist.
   resolve: {
     alias: [
       {

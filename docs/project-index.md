@@ -21,25 +21,24 @@ It is loaded by a dynamic import on the first `openProject`. Without it `openPro
 ```ts
 import { openProject } from "@moku-labs/game/project";
 
-const project = await openProject({ root: "tests/integration/merge-game" });
+const project = await openProject({ root: "tests/fixtures/mini-game" });
 
 project.index.revision;                        // sha1 over the sorted per-file hashes
 
-await project.find("node:board/merge");
-// [{ path: "nodes/merge.ts", binding: "merge", line: 17, range: [17, 1, 38, 4], hash: "…" }]
+await project.find("node:infoPopup/count");
+// [{ path: "nodes/count.ts", binding: "count", line: 7, range: [7, 1, 14, 4], hash: "…" }]
 
-await project.find("jsx:settingsBoard");
-// [{ path: "features/settings/settings.tsx", key: "settingsBoard", kind: "idProp",
-//    component: "Signboard", prop: "id", line: 290, range: [289, 7, 310, 19], hash: "…" }, …]
+await project.find("jsx:infoPanel");
+// [{ path: "features/info/popup.tsx", key: "infoPanel", kind: "idProp",
+//    component: "Panel", prop: "id", line: 79, range: [79, 7, 82, 15], hash: "…" }, …]
 
-await project.find("component:RoundButton");
-// [{ path: "features/ui/kit.tsx", binding: "RoundButton", line: 418, range: [418, 1, 431, 2], hash: "…" }]
-project.index.symbols["component:RoundButton"].uses;
-// [{ path: "features/home/view.tsx", binding: "RoundButton" },
-//  { path: "features/hud/row.tsx", binding: "RoundButton" }]
+await project.find("component:Panel");
+// [{ path: "features/info/popup.tsx", binding: "Panel", line: 62, range: [62, 1, 69, 2], hash: "…" }]
+project.index.symbols["component:Panel"].uses;
+// [{ path: "features/info/popup.tsx", binding: "Panel" }]
 
 const stop = project.watch((index, change) => refresh(index, change));
-await project.changed("nodes/merge.ts");       // a caller with its own file watcher
+await project.changed("nodes/count.ts");       // a caller with its own file watcher
 stop();
 project.close();
 ```
@@ -82,20 +81,22 @@ A file hash is the sha1 hex of its bytes, the same value the editor uses as a fi
 
 ## Keys
 
-| Key | Example in merge-game | Defined by | `find` answers |
+The examples are keys of the engine's own fixture, `tests/fixtures/mini-game/`, with the lines `find` answers there. The mini game builds no style in a function without a property, so that row names a file of a bigger game and no line.
+
+| Key | Example | Defined by | `find` answers |
 |---|---|---|---|
-| `flow:<id>` | `flow:board` | `defineFlow("board", …)` | the declaration, `flows/board.ts:21` |
-| `node:<flow>/<node>` | `node:board/merge` | an entry of the flow's `nodes` table | the declaration of the node, `nodes/merge.ts:17` |
+| `flow:<id>` | `flow:main` | `defineFlow("main", …)` | the declaration, `flows/main.ts:9` |
+| `node:<flow>/<node>` | `node:infoPopup/count` | an entry of the flow's `nodes` table | the declaration of the node, `nodes/count.ts:7` |
 | `feature:<id>` | `feature:home` | `defineFeature("home", …)` | the declaration |
 | `scene:<id>` | `scene:home` | `defineScene("home", …)` | the declaration, `features/home/scene.ts:8` |
-| `projection:<name>` | `projection:board.items` | `projection({ name: "board.items", … })` | the `name` property, `view/projections.ts:179` |
-| `emitter:<id>` | `emitter:fx.stars` | `defineEmitter("fx.stars", …)` | the declaration |
-| `textStyle:<key>` | `textStyle:ui.title` | a key of `defineTextStyles({ … })` | the property, `features/ui/styles.ts:39` |
-| `style:<path>#<binding>` | `style:features/ui/popup.tsx#popupScreen` | `const popupScreen = defineStyle(…)` at module scope | the declaration, `features/ui/popup.tsx:20` |
-| `style:<path>#<function>` | `style:features/ui/kit.tsx#boardStyle` | a `defineStyle(…)` call anywhere inside a module-level function or function-valued const | every style call of the function, `features/ui/kit.tsx:666` and `features/ui/kit.tsx:668` |
-| `style:<path>#<function>.<property>` | `style:features/ui/kit.tsx#roundStylesOf.icon` | a `defineStyle(…)` call that is the value of the property `icon` inside that function | the property, the call as the range, `features/ui/kit.tsx:358` |
-| `component:<Name>` | `component:RoundButton` | in a `.tsx` file, a module-level `function RoundButton(…)`, `const Name = (…) => …` or `const Name = function …` with an upper-case name, exported or not; anywhere, `defineComponent("Settings", …)` | the declaration, `features/ui/kit.tsx:418`; `component:Settings` answers `features/settings/settings.tsx:278` |
-| `jsx:<key>` | `jsx:settingsBoard` | a JSX `key`, or a literal key-carrying prop on a component (`id=`, `amountKey=`) | the attribute line, the element as the range |
+| `projection:<name>` | `projection:home.screen` | `projection({ name: "home.screen", … })` | the `name` property, `features/home/view.tsx:21` |
+| `emitter:<id>` | `emitter:fx.spark` | `defineEmitter("fx.spark", …)` | the declaration, `features/info/effects.ts:8` |
+| `textStyle:<key>` | `textStyle:ui.counter` | a key of `defineTextStyles({ … })` | the property, `features/home/styles.ts:16` |
+| `style:<path>#<binding>` | `style:features/info/popup.tsx#popupScreen` | `const popupScreen = defineStyle(…)` at module scope | the declaration, `features/info/popup.tsx:11` |
+| `style:<path>#<function>` | `style:features/ui/kit.tsx#boardStyle` | a `defineStyle(…)` call anywhere inside a module-level function or function-valued const | every style call of the function, the call as the range |
+| `style:<path>#<function>.<property>` | `style:features/home/styles.ts#roundStylesOf.disc` | a `defineStyle(…)` call that is the value of the property `disc` inside that function | the property, the call as the range, `features/home/styles.ts:38` |
+| `component:<Name>` | `component:Panel` | in a `.tsx` file, a module-level `function Panel(…)`, `const Name = (…) => …` or `const Name = function …` with an upper-case name, exported or not; anywhere, `defineComponent("InfoPopup", …)` | the declaration, `features/info/popup.tsx:62`; `component:InfoPopup` answers `features/info/popup.tsx:74` |
+| `jsx:<key>` | `jsx:infoPanel` | a JSX `key`, or a literal key-carrying prop on a component (`id=`, `amountKey=`) | the attribute line, the element as the range |
 
 - **Definers are recognised by binding.** The names destructured from `defineGame()` in the kit are the definers, under any local name an importer gives them. The definers imported from `@moku-labs/game` directly count too. A call whose callee is not a definer binding is not a definition.
 - **Nothing is guessed.** A definer with a non-literal id goes to `unresolved` with the reason, for example `defineFlow id is not a string literal`.
@@ -114,12 +115,13 @@ A **key-carrying prop** is `id`, or a prop whose name ends in `Key` (`amountKey`
 
 | Written | Key | Kind | Stem |
 |---|---|---|---|
-| `key="hudRow"` | `jsx:hudRow` | `literal` | |
+| `key="counter"` | `jsx:counter` | `literal` | |
 | `` key={`${id}Picture`} `` with `const id = cardKey(card.slot)` and `cardKey` returning `` `card${slot}` `` | `jsx:card*Picture` | `template` | `card` |
 | `key={id}` with the same `id` | `jsx:card*` | `ident` | `card` |
-| `` key={`${props.id}Close`} `` in `Signboard` | `jsx:{id}Close` | `template` | |
+| `` key={`${props.id}Spark`} `` in `Panel` | `jsx:{id}Spark` | `template` | |
+| `key={props.id}` in `Panel` | `jsx:{id}` | `ident` | |
 | `key={props.amountKey}` in `Amount` | `jsx:{amountKey}` | `ident` | |
-| `id="settingsBoard"` on `<Signboard>` | `jsx:settingsBoard` | `idProp` | |
+| `id="infoPanel"` on `<Panel>` | `jsx:infoPanel` | `idProp` | |
 | `amountKey="giftReward"` on `<Amount>` | `jsx:giftReward` | `idProp` | |
 | `key={entry.key}` | none: `*` alone goes to `unresolved` | | |
 
@@ -127,10 +129,10 @@ A pattern with a prop hole written in a component carries that component's name,
 
 The lint rule `moku-game/static-keys` reports the key shapes this reading cannot follow, such as `tabKeys[props.tab]` or `a ?? b`. See [Lint for games](./lint.md).
 
-`find` on a key the game reports at run time (what `game.locate` names, such as `jsx:settingsBoardClose` or `jsx:card2Picture`) answers in three tiers:
+`find` on a key the game reports at run time (what `game.locate` names, such as `jsx:infoPanelSpark` or `jsx:card2Picture`) answers in three tiers:
 
 1. The exact `jsx:` entries.
-2. Each pattern with a prop hole whose filled form reads as the key, with the hole set to an indexed literal prop of the same name: the pattern and the prop both answer. `jsx:settingsBoardClose` answers `features/ui/kit.tsx:844` (`{id}Close`) and `features/settings/settings.tsx:290` (the `idProp`). `jsx:giftRewardUnit` answers `features/gift/daily-gift.tsx:28` (`unitKey="giftRewardUnit"`, an exact entry) and `features/ui/popup.tsx:186` (`{unitKey}`).
+2. Each pattern with a prop hole whose filled form reads as the key, with the hole set to an indexed literal prop of the same name: the pattern and the prop both answer. In the mini game `jsx:infoPanelSpark` answers `features/info/popup.tsx:65` (`{id}Spark`) and `features/info/popup.tsx:79` (the `idProp`). A literal prop is an exact entry of its own: `jsx:giftRewardUnit` answers `unitKey="giftRewardUnit"` first, then the `{unitKey}` pattern it fills.
 3. Each `*` pattern matched as a wildcard. `jsx:card2Picture` answers `card*Picture` before `card*`: within a tier, the pattern with more literal text comes first.
 
 A key that holds `*` or a prop hole such as `{id}` itself is looked up exactly.
@@ -167,16 +169,16 @@ type Found = Anchor & {
 The package bin `moku-game-index` opens the project of `--root` and runs one command.
 
 ```bash
-moku-game-index --root tests/integration/merge-game where node:board/merge
-# nodes/merge.ts:17
-moku-game-index --root tests/integration/merge-game where component:RoundButton
-# features/ui/kit.tsx:418
-moku-game-index --root tests/integration/merge-game where jsx:settingsBoardClose
-# features/ui/kit.tsx:844
-# features/settings/settings.tsx:290
-moku-game-index --root tests/integration/merge-game --json
-moku-game-index --root tests/integration/merge-game --check
-#   › 111 files, 366 keys: 0 broken, 0 in conflict, 0 unresolved.
+moku-game-index --root tests/fixtures/mini-game where node:infoPopup/count
+# nodes/count.ts:7
+moku-game-index --root tests/fixtures/mini-game where component:Panel
+# features/info/popup.tsx:62
+moku-game-index --root tests/fixtures/mini-game where jsx:infoPanelSpark
+# features/info/popup.tsx:65
+# features/info/popup.tsx:79
+moku-game-index --root tests/fixtures/mini-game --json
+moku-game-index --root tests/fixtures/mini-game --check
+#   › 21 files, 35 keys: 0 broken, 0 in conflict, 0 unresolved.
 ```
 
 | Command | Prints | Exit |
@@ -189,6 +191,6 @@ moku-game-index --root tests/integration/merge-game --check
 - Output goes through the branded console of `@moku-labs/common/cli`.
 - The same CLI runs from source: `bun src/project.ts --root <dir> where <key>`.
 
-## Cost on merge-game
+## Cost on the mini game
 
-111 files. A full `openProject`, the TypeScript load included, takes about 150 ms. `find` on an unchanged file takes under 5 ms. The integration test logs both and holds them under 1000 ms and 20 ms.
+21 files. A full `openProject`, the TypeScript load included, takes about 120 ms. `find` on an unchanged file takes under 2 ms. `tests/integration/project-mini-game.test.ts` logs both and holds them under 5000 ms and 200 ms, loose on purpose for a slow CI box. The merge game in [moku-labs/demos](https://github.com/moku-labs/demos) is a bigger game to measure on.

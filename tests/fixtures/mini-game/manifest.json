@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "bundles": {
+    "ui": {
+      "feature": "ui",
+      "tier": "boot",
+      "mb": 1.036,
+      "files": [
+        {
+          "key": "ui.font-body",
+          "path": "features/ui/assets/font-body.fnt",
+          "kind": "font",
+          "mb": 1,
+          "pages": [
+            {
+              "path": "features/ui/assets/font-body.png",
+              "width": 512,
+              "height": 512,
+              "mb": 1
+            }
+          ]
+        },
+        {
+          "key": "ui.fx-spark",
+          "path": "features/ui/assets/fx-spark.webp",
+          "width": 85,
+          "height": 96,
+          "mb": 0.031
+        },
+        {
+          "key": "ui.popup",
+          "path": "features/ui/assets/popup.mp3",
+          "kind": "audio",
+          "mb": 0.005
+        }
+      ]
+    }
+  }
+}

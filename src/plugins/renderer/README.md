@@ -556,9 +556,9 @@ a real frame loop (fps near the cap, a real `managedTextures` list), and `captur
 that shows the board, under WebGPU and WebGL. The unit tests draw the options on a fake 2D canvas;
 the real `OffscreenCanvas`, `createImageBitmap` and PNG encode, the badges on the picture, a sheet
 and a diff picture, and a `layers` capture that leaves the drawn frame pixel-identical for the
-player, belong to the e2e station too. The real `drawCalls` number needs a GPU: the
-fixture's board screen with no filter and no emitter pins it in `tests/integration/merge-game/run.mjs`
-once measured, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
+player, belong to the e2e station too. The real `drawCalls` number needs a GPU: it is pinned once
+measured on the board screen of the merge game in moku-labs/demos, which has no filter and no
+emitter, and `renderPasses` reads 1 there. CI pins only the class names and their metadata.
 How distance-field text draws needs a GPU too: a 0.5 label measured at 0.5, a 0.55 shadow at 0.55,
 a label under a 0.6 parent at 0.6, and the same pixels for full-alpha text, in the browser, under
 WebGPU and under WebGL. So does the alpha of a parent: the icon of a disabled round button measured

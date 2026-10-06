@@ -117,7 +117,7 @@ describe("defineSource and defineCommand", () => {
     expect(command).toThrow(/^\[game] The command id ".*" is not a dotted name\.\n {2}.*\.$/);
   });
 
-  it.each(["game.position", "timber.jumpToLevel", "game.ui.rect2"])("accept the id %s", id => {
+  it.each(["game.position", "mini.jumpToLevel", "game.ui.rect2"])("accept the id %s", id => {
     expect(defineSource({ id, title: "Ok", input: {}, changes: "frame", read: () => 0 }).id).toBe(
       id
     );

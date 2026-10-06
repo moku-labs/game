@@ -1,8 +1,0 @@
-{
-  "orders.done": "Заказ выполнен",
-  "orders.reward": "{coins, plural, one {# монета} few {# монеты} other {# монет}}",
-  "orders.claim": "Забрать",
-  "orders.title": "Заказ #{number}",
-  "orders.deliver": "Отдать",
-  "orders.stamp": "Готово!"
-}

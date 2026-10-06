@@ -115,7 +115,7 @@ await game.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]
 app.model.store.snapshot().session; // { rolls: 2 }
 ```
 
-The full version, with a reset node and a vitest file, is in [docs/quick-start.md](./docs/quick-start.md). A bigger game lives in [`tests/integration/merge-game/`](./tests/integration/merge-game). It is a test fixture and is not published.
+The full version, with a reset node and a vitest file, is in [docs/quick-start.md](./docs/quick-start.md). A bigger game, the merge game, lives in [moku-labs/demos](https://github.com/moku-labs/demos) with its tests.
 
 A game with a screen gets two more things from the package. The body font `fonts/font-body.*` (Pangolin, SIL OFL 1.1) is the default of the built-in text style `body` once copied into `src/features/ui/assets/`. The bin `moku-game-assets` writes the typed asset keys, the manifest and the strings. It runs under bun; with node only, run `bun node_modules/@moku-labs/game/dist/assets.mjs`. Both are in [docs/quick-start.md](./docs/quick-start.md#a-screen-the-body-font-and-the-asset-keys).
 
@@ -247,8 +247,8 @@ bun run lint             # biome check . && eslint .
 bun run test             # vitest, unit and integration
 bun run test:coverage    # with the 90% threshold
 bun run validate         # publint and attw
-bun run fixture:visual   # visual tests of the fixture game
-bun run fixture:native   # the fixture as a native app
+bun run mini:pack        # pack the mini game of tests/fixtures
+bun run mini:visual      # visual tests of the mini game
 bun run release          # moku-release
 ```
 

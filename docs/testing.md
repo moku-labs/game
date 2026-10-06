@@ -65,16 +65,16 @@ The pixel leg runs on a Mac only. `pixels` is on by default when the setup has a
 - **`--update`** rewrites `state.json`, `describe.json` and `screen.webp` of every test it runs. A pixel difference writes `screen.actual.webp` and `screen.diff.webp` beside the baseline, red where a pixel differs. Git ignores both.
 - **Tolerance.** A pixel differs when one of its channels moves by more than 24. A checkpoint differs when more than 0.1% of its pixels do. Both are `tolerance` in the options.
 
-The fixture game keeps its visual tests in `tests/visual/`: one `*.visual.ts` per test, the list in `tests.ts`, the script in `run.ts` and the baselines next to them. The script imports the runner from `src/visual`, so a stale `dist/` never writes baselines. `bun run test` runs the headless leg through `tests/integration/visual-headless.test.ts`. Both legs run against the dev page:
+The mini game keeps its visual tests in `tests/visual/`: one `*.visual.ts` per test, the list in `tests.ts`, the script in `run.ts` and the baselines next to them. The script imports the runner from `src/visual`, so a stale `dist/` never writes baselines. `bun run test` runs the headless leg through `tests/integration/visual-headless.test.ts`. The engine commits the headless baselines only, `state.json` and `describe.json`; the pixel baselines of a real game live with the game, as in the merge game of [moku-labs/demos](https://github.com/moku-labs/demos). Both legs run against the dev page:
 
 ```sh
-# terminal 1: the dev page of the fixture on a free port
-cd tests/integration/merge-game && bun ./web/serve.ts --port 4173
+# terminal 1: the dev page of the mini game on a free port
+cd tests/fixtures/mini-game && bun ./web/serve.ts --port 4173
 
 # terminal 2: from the root of the repository
-bun run fixture:visual --url http://localhost:4173/            # compare with the baselines
-bun run fixture:visual --url http://localhost:4173/ --update   # write the baselines again
-bun run fixture:visual --only gift-popup --no-pixels           # one test, headless only
+bun run mini:visual --url http://localhost:4173/            # compare with the baselines
+bun run mini:visual --no-pixels --update                    # write the headless baselines again
+bun run mini:visual --only info-popup --no-pixels           # one test, headless only
 ```
 
 Without `--url` the page is `http://localhost:3000/`. The exit code is 1 when a checkpoint differs.
@@ -95,9 +95,8 @@ bun run test:unit          # vitest project "unit"
 bun run test:integration   # vitest project "integration"
 bun run test:coverage      # both projects with coverage, 90% thresholds
 bun run validate           # publint and attw with the esm-only profile
-bun run fixture:pack       # pack the fixture game into tests/integration/merge-game/dist/assets
-bun run fixture:visual     # the fixture's visual tests, both legs: --url <dev page>, --update, --only <name>, --no-pixels, --webgl
-bun run fixture:native     # the fixture as a native app on @moku-labs/native: <target> [--simulator] [--page <html>]
+bun run mini:pack          # pack the mini game into tests/fixtures/mini-game/dist/assets
+bun run mini:visual        # the mini game's visual tests, both legs: --url <dev page>, --update, --only <name>, --no-pixels, --webgl
 bun run release:setup      # moku-release setup
 bun run release:doctor     # moku-release doctor
 bun run release            # moku-release
@@ -109,8 +108,8 @@ bun run release            # moku-release
 |---|---|
 | `tests/unit/` | Framework-level unit tests: root index, setup |
 | `tests/integration/` | Framework-level scenarios across plugins |
-| `tests/integration/merge-game/` | The fixture game, written on the public API only. Not published |
-| `tests/visual/` | The visual tests of the fixture game and their baselines: `<test>/<checkpoint>/state.json`, `describe.json`, `screen.webp` |
+| `tests/fixtures/mini-game/` | The mini game, written on the public API only: one rest node, one popup flow, two features, one bundle. Not published |
+| `tests/visual/` | The visual tests of the mini game and their headless baselines: `<test>/<checkpoint>/state.json`, `describe.json` |
 | `src/plugins/<name>/__tests__/unit/` | Unit tests of one plugin |
 | `src/plugins/<name>/__tests__/integration/` | Integration tests of one plugin |
 | `src/plugins/flow/__tests__/types/` | Type-level tests of the graph typing |
@@ -125,8 +124,7 @@ The project rules live in [`eslint.config.ts`](../eslint.config.ts).
 |---|---|---|
 | L1 | A module imports a sibling module only as `import type` from its `types.ts`. The plugin `index.ts` injects sibling APIs | Modules of `model` and `flow` |
 | L2 | No static import of `pixi.js` or `yoga-layout`. They are loaded lazily with `import()` | `src/**` |
-| L3 | Determinism: no `Date.now`, `performance.now`, `new Date`, `Math.random`, `setTimeout`, `setInterval` | `model`, `flow`, `clock` except `clock/system.ts`, and the rules of the fixture game |
-| L4 | The rules of the fixture game import only their siblings | `tests/integration/merge-game/rules/` |
+| L3 | Determinism: no `Date.now`, `performance.now`, `new Date`, `Math.random`, `setTimeout`, `setInterval` | `model`, `flow`, `clock` except `clock/system.ts` |
 | L5 | No module-scope state: no top-level `let`, no top-level `Map`, `Set`, `WeakMap`, `WeakSet`. No allowlist | `src/**` |
 | L6 | Plugin wiring files need no JSDoc on small inline arrows. Every function declaration and every exported type needs JSDoc with description, params and returns | `src/plugins/*/index.ts` |
 | L7 | The public contract carries the docs: every member of a `…Api` type in `types.ts` has JSDoc and a scenario `@example` (when it is called, literal arguments, the result). A member another plugin calls is shown from that plugin's point of view; there is no private tier and no exemption. The implementation of an API method has no JSDoc. Elsewhere an example is allowed, never required | `src/plugins/**/types.ts` |

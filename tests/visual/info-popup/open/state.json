@@ -1,0 +1,13 @@
+{
+  "path": "info/show",
+  "player": {
+    "count": 3
+  },
+  "rng": {
+    "seed": 1,
+    "streams": {}
+  },
+  "session": {
+    "opened": 0
+  }
+}

@@ -1,22 +1,19 @@
 /**
- * @file The visual tests of the fixture game on the command line: the headless leg, then the
- * pixel leg in Chrome with WebGPU against the dev page (Mac only). Run from the root of the
- * repository while the dev page is served (`bun tests/integration/merge-game/web/serve.ts`).
- * The runner comes from `src/`, not from the package name, so a stale `dist/` never writes
- * baselines:
+ * @file The visual tests of the mini game on the command line: the headless leg, then the pixel
+ * leg in Chrome with WebGPU against the dev page (Mac only). Run from the root of the repository
+ * while the dev page is served (`cd tests/fixtures/mini-game && bun ./web/serve.ts`). The runner
+ * comes from `src/`, not from the package name, so a stale `dist/` never writes baselines:
  *
- * - `bun run fixture:visual` compares with the baselines; the page is http://localhost:3000/.
+ * - `bun run mini:visual` compares with the baselines; the page is http://localhost:3000/.
  * - `--url <url>` names another page, such as one served with `--port 4173`.
  * - `--update` rewrites the baselines, `--only <name>` runs one test, `--no-pixels` the headless
- *   leg only.
- * - `--webgl` runs the tests with `webgl: true` on the page with `?renderer=webgl`, against their
- *   `screen.webgl.webp` baselines; `runVisualTests` reads the flag itself.
+ *   leg only. The engine commits the headless baselines only: `--no-pixels --update`.
  *
  * The exit code is 1 when a checkpoint differs or a test fails.
  */
 import { runVisualTests } from "../../src/visual";
-import { fixtureApp } from "./fixture";
-import { fixtureVisualTests } from "./tests";
+import { miniApp } from "./fixture";
+import { miniVisualTests } from "./tests";
 
 /** The page `web/serve.ts` serves when no port is given. */
 const DEFAULT_URL = "http://localhost:3000/";
@@ -34,8 +31,8 @@ function pageUrl(argv: readonly string[]): string {
 }
 
 const report = await runVisualTests(
-  { app: fixtureApp, page: { url: pageUrl(process.argv.slice(2)) } },
-  fixtureVisualTests
+  { app: miniApp, page: { url: pageUrl(process.argv.slice(2)) } },
+  miniVisualTests
 );
 
 process.exitCode = report.ok ? 0 : 1;

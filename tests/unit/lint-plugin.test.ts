@@ -30,7 +30,7 @@ const SOURCE = path.join(ROOT, "src/lint.ts");
 const OXLINT = path.join(ROOT, "node_modules/oxlint/bin/oxlint");
 
 /** The fixture game the JSX key rule runs on. */
-const MERGE_GAME = path.join(ROOT, "tests/integration/merge-game");
+const MINI_GAME = path.join(ROOT, "tests/fixtures/mini-game");
 
 /** Every rule of the plugin, on. */
 const ALL_RULES = Object.fromEntries(
@@ -274,7 +274,7 @@ export function Keys(props: {
 }
 `;
 
-/** The three key shapes of the fixture game before it passed its keys in as props. */
+/** Three key shapes a game wrote before it passed its keys in as props. */
 const OLD_KEYS: Record<string, string> = {
   "features/settings/settings.tsx": `type Tab = "audio" | "language" | "profile";
 
@@ -297,12 +297,7 @@ export function TabButton(props: { tab: Tab }) {
 };
 
 /** The files of the fixture game whose JSX keys the rule reads. */
-const GAME_KEY_FILES = [
-  "features/settings/settings.tsx",
-  "features/ui/popup.tsx",
-  "features/orders/strip.tsx",
-  "features/ui/kit.tsx"
-];
+const GAME_KEY_FILES = ["features/home/view.tsx", "features/info/popup.tsx"];
 
 describe("moku-game/static-keys under oxlint", () => {
   const rules = { "moku-game/static-keys": "error" };
@@ -316,12 +311,12 @@ describe("moku-game/static-keys under oxlint", () => {
     expect(findings.every(item => item.rule === "static-keys")).toBe(true);
   });
 
-  it("reports the old keys of the fixture game and none of its keys now", () => {
+  it("reports the old key shapes and none of the keys of the fixture game", () => {
     const old = runOxlint(OLD_KEYS, rules);
     const now = runOxlint({}, rules, SOURCE, folder => {
       for (const file of GAME_KEY_FILES) {
         mkdirSync(path.dirname(path.join(folder, file)), { recursive: true });
-        copyFileSync(path.join(MERGE_GAME, file), path.join(folder, file));
+        copyFileSync(path.join(MINI_GAME, file), path.join(folder, file));
       }
     });
 

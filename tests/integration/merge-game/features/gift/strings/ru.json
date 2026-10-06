@@ -1,6 +1,0 @@
-{
-  "gift.title": "Подарок дня",
-  "gift.coins": "{coins, plural, one {монета} few {монеты} other {монет}}",
-  "gift.note": "Заходи завтра за новыми <icon=ui.icon-coin>",
-  "gift.claim": "Забрать"
-}

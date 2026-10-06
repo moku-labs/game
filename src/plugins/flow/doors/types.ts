@@ -120,7 +120,7 @@ export type Effect = "read" | "route" | "cosmetic" | "cheat" | "raw";
  * ```ts
  * // A game's .dev module: the coins a panel shows, re-read on every commit.
  * const coins = defineSource({
- *   id: "timber.coins",
+ *   id: "mini.coins",
  *   title: "Coins",
  *   input: {},
  *   changes: "commit",
@@ -145,7 +145,7 @@ export type Source<S extends InputSchema, O, App = HeadlessApp> = {
  * ```ts
  * // A game's .dev module: jump to a level through the graph, the session stays clean.
  * const jumpToLevel = defineCommand({
- *   id: "timber.jumpToLevel",
+ *   id: "mini.jumpToLevel",
  *   title: "Go to level",
  *   input: { level: "number" },
  *   effect: "route",
