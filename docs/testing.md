@@ -4,7 +4,7 @@ Headless tests, visual tests, the test layout of this repository and its lint ru
 
 ## Testing entry
 
-`@moku-labs/game/testing` re-exports the headless helpers and the visual tests.
+`@moku-labs/game/testing` re-exports the headless helpers. It imports no `node:` module, so a test that runs in a browser can import it. The visual tests live in `@moku-labs/game/visual`, see [Visual tests](#visual-tests).
 
 | Export | Signature | Purpose |
 |---|---|---|
@@ -14,18 +14,27 @@ Headless tests, visual tests, the test layout of this repository and its lint ru
 | `fakeClock` | `(start = 0) => FakeClock` | A `ClockSource` with `advance(ms)` and `set(moment)` |
 | `memory` | `(fixture?: { state: SaveDoc; version: number }) => PlayerStateProvider & { calls: ProviderCall[] }` | In-memory save provider. It keeps what it was committed and records every call |
 | `saveOf` | `(player: Json, seed?: number) => SaveDoc` | Builds a save document for a fixture |
-| `defineVisualTest` | `(name: string, test: { start: VisualStart; steps: readonly VisualStep[]; webgl?: boolean }) => VisualTest` | A visual test as frozen data: where it starts, its steps, and whether it also runs in the WebGL leg |
-| `runVisualTests` | `(setup: VisualSetup, tests: readonly VisualTest[], options?: VisualOptions) => Promise<VisualReport>` | Plays the tests and compares every checkpoint with its baseline files |
-| `parseVisualArgv` | `(argv: readonly string[]) => { update?; pixels?; only?; dir?; renderer? }` | Reads `--update`, `--no-pixels`, `--webgl`, `--only <name>` and `--dir <path>` from a command line. `--webgl` runs only the tests with `webgl: true`, on the page with `?renderer=webgl`: such a test writes its picture to `screen.webgl.webp` and shares `state.json` and `describe.json` with the WebGPU leg |
 
 A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`.
 
 ## Visual tests
 
+`@moku-labs/game/visual` re-exports the visual tests. Its runner reads and writes baseline files, so it runs in node and bun only.
+
+| Export | Signature | Purpose |
+|---|---|---|
+| `defineVisualTest` | `(name: string, test: { start: VisualStart; steps: readonly VisualStep[]; webgl?: boolean }) => VisualTest` | A visual test as frozen data: where it starts, its steps, and whether it also runs in the WebGL leg |
+| `runVisualTests` | `(setup: VisualSetup, tests: readonly VisualTest[], options?: VisualOptions) => Promise<VisualReport>` | Plays the tests and compares every checkpoint with its baseline files |
+| `parseVisualArgv` | `(argv: readonly string[]) => { update?; pixels?; only?; dir?; renderer? }` | Reads `--update`, `--no-pixels`, `--webgl`, `--only <name>` and `--dir <path>` from a command line. `--webgl` runs only the tests with `webgl: true`, on the page with `?renderer=webgl`: such a test writes its picture to `screen.webgl.webp` and shares `state.json` and `describe.json` with the WebGPU leg |
+
+The types `VisualTest`, `VisualStart`, `VisualStep`, `VisualSetup`, `VisualApp`, `VisualPage`, `VisualOptions`, `VisualRenderer`, `VisualTolerance`, `VisualReport`, `VisualTestResult` and `CheckpointResult` come from the same entry.
+
 A visual test is data: where the game starts, then steps. A step is a `/control` command by its short name (`answer`, `tap`, `drag`, `key`, `fill`, `walk`, `restore`, `step`, `pause`, `resume`, `reducedMotion`) with that command's input, or a checkpoint.
 
 ```ts
 // tests/visual/reward-popup.visual.ts
+import { defineVisualTest } from "@moku-labs/game/visual";
+
 export const rewardPopup = defineVisualTest("reward-popup", {
   start: { player: fixtures.ready, checkpoint: "home" },
   steps: [
@@ -56,7 +65,7 @@ The pixel leg runs on a Mac only. `pixels` is on by default when the setup has a
 - **`--update`** rewrites `state.json`, `describe.json` and `screen.webp` of every test it runs. A pixel difference writes `screen.actual.webp` and `screen.diff.webp` beside the baseline, red where a pixel differs. Git ignores both.
 - **Tolerance.** A pixel differs when one of its channels moves by more than 24. A checkpoint differs when more than 0.1% of its pixels do. Both are `tolerance` in the options.
 
-The fixture game keeps its visual tests in `tests/visual/`: one `*.visual.ts` per test, the list in `tests.ts`, the script in `run.ts` and the baselines next to them. The script imports the runner from `src/testing`, so a stale `dist/` never writes baselines. `bun run test` runs the headless leg through `tests/integration/visual-headless.test.ts`. Both legs run against the dev page:
+The fixture game keeps its visual tests in `tests/visual/`: one `*.visual.ts` per test, the list in `tests.ts`, the script in `run.ts` and the baselines next to them. The script imports the runner from `src/visual`, so a stale `dist/` never writes baselines. `bun run test` runs the headless leg through `tests/integration/visual-headless.test.ts`. Both legs run against the dev page:
 
 ```sh
 # terminal 1: the dev page of the fixture on a free port
@@ -76,7 +85,7 @@ The test of the browser leg itself opens a real Chrome only on request: `MOKU_VI
 ## Scripts
 
 ```sh
-bun run build              # build with tsdown: dist/index.mjs, testing.mjs, assets.mjs, inspect.mjs, control.mjs, jsx-runtime.mjs, jsx-dev-runtime.mjs
+bun run build              # build with tsdown: dist/index.mjs, testing.mjs, visual.mjs, assets.mjs, inspect.mjs, control.mjs, jsx-runtime.mjs, jsx-dev-runtime.mjs
 bun run typecheck          # tsc --noEmit
 bun run lint               # biome check . && eslint .
 bun run lint:fix           # biome check --write . && eslint --fix .

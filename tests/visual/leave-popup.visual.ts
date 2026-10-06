@@ -3,7 +3,7 @@
  * (the page has no phone, so the test answers it as the Back chain does) and the popup asks
  * "Выйти из игры?" with the wood Leave and the green Stay, which glows (V6 `Glow` on WebGL too).
  */
-import { defineVisualTest } from "@moku-labs/game/testing";
+import { defineVisualTest } from "@moku-labs/game/visual";
 import { atHome } from "./fixture";
 
 export const leavePopup = defineVisualTest("leave-popup", {

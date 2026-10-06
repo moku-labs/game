@@ -5,6 +5,8 @@ export default defineConfig({
     index: "src/index.ts",
     // Subpath: the headless test helpers.
     testing: "src/testing.ts",
+    // Subpath: the visual tests, node and bun only.
+    visual: "src/visual.ts",
     // Subpath: the build-time asset key scanner, node and bun only.
     assets: "src/assets.ts",
     // Subpaths: the editor doors, reads and dev-only commands; re-exports only.

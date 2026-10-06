@@ -3,7 +3,7 @@
  * `describe.json` and `screen.webp`, with `screen.actual.webp` and `screen.diff.webp` beside them
  * on a pixel difference. The pictures are lossless WebP, encoded in the page. The only module of
  * the runner that touches the disk, so `node:fs/promises` and `node:path` are imported here and
- * nowhere else; the `./testing` entry is node and bun only.
+ * nowhere else; the `./visual` entry is node and bun only.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";

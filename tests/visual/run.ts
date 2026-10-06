@@ -14,7 +14,7 @@
  *
  * The exit code is 1 when a checkpoint differs or a test fails.
  */
-import { runVisualTests } from "../../src/testing";
+import { runVisualTests } from "../../src/visual";
 import { fixtureApp } from "./fixture";
 import { fixtureVisualTests } from "./tests";
 

@@ -4,7 +4,7 @@
  * (V5 icons in wrapped text).
  * The green Claim glows, so the test also runs in the WebGL leg (`--webgl`).
  */
-import { defineVisualTest } from "@moku-labs/game/testing";
+import { defineVisualTest } from "@moku-labs/game/visual";
 import { atHome } from "./fixture";
 
 export const giftPopup = defineVisualTest("gift-popup", {

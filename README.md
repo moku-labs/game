@@ -188,7 +188,8 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | Import | Runs in | For |
 |---|---|---|
 | `@moku-labs/game` | anywhere | The engine: plugins, helpers, components |
-| `@moku-labs/game/testing` | Node and Bun | Headless games and visual tests |
+| `@moku-labs/game/testing` | anywhere | Headless games, the fake clock, the in-memory save |
+| `@moku-labs/game/visual` | Node and Bun | Visual tests: baselines of state, describe and pixels |
 | `@moku-labs/game/assets` | Node and Bun | Asset keys, the manifest, strings, the pack |
 | `@moku-labs/game/inspect` | anywhere | Read a running game |
 | `@moku-labs/game/control` | dev builds | Drive a running game |

@@ -15,6 +15,10 @@
       "types": "./dist/testing.d.mts",
       "default": "./dist/testing.mjs"
     },
+    "./visual": {
+      "types": "./dist/visual.d.mts",
+      "default": "./dist/visual.mjs"
+    },
     "./assets": {
       "types": "./dist/assets.d.mts",
       "default": "./dist/assets.mjs"
