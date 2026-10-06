@@ -37,6 +37,10 @@ export default defineConfig({
         find: "@moku-labs/game/jsx-runtime",
         replacement: new URL("src/jsx-runtime.ts", import.meta.url).pathname
       },
+      {
+        find: "@moku-labs/game/visual",
+        replacement: new URL("src/visual.ts", import.meta.url).pathname
+      },
       { find: "@moku-labs/game", replacement: new URL("src/index.ts", import.meta.url).pathname }
     ]
   },

@@ -5,7 +5,7 @@
  * The green Save and the Play plank under the popups glow, so the test also runs in the WebGL
  * leg (`--webgl`).
  */
-import { defineVisualTest } from "@moku-labs/game/testing";
+import { defineVisualTest } from "@moku-labs/game/visual";
 import { atHome } from "./fixture";
 
 export const renamePopup = defineVisualTest("rename-popup", {

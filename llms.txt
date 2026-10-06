@@ -7,7 +7,8 @@ Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer 
 ## Entry points
 
 - `@moku-labs/game`: everything a game imports.
-- `@moku-labs/game/testing`: headless play, repro runs, fake clock, in-memory save provider.
+- `@moku-labs/game/testing`: headless play, repro runs, fake clock, in-memory save provider. No `node:` import.
+- `@moku-labs/game/visual` (node and bun only): the visual tests `defineVisualTest`, `runVisualTests`, `parseVisualArgv`.
 - `@moku-labs/game/assets` (node and bun only): the asset key scanner, the production packer and the string compiler. The package bin `moku-game-assets` runs it.
 - `@moku-labs/game/inspect`: the read door of the editor, safe in a production build. See "Doors for the editor".
 - `@moku-labs/game/control`: the write door of the editor, dev builds only. See "Doors for the editor".
@@ -556,7 +557,7 @@ The scanner keys it `ui.font-body`, which is the `text` config default `fonts.bo
 
 ## Testing entry
 
-Exports of `@moku-labs/game/testing`: `createHeadless`, `runRepro`, `stepFrames`, `fakeClock`, `memory`, `saveOf`, and the visual tests `defineVisualTest`, `runVisualTests`, `parseVisualArgv` (see `docs/testing.md` in the engine repository).
+Exports of `@moku-labs/game/testing`: `createHeadless`, `runRepro`, `stepFrames`, `fakeClock`, `memory`, `saveOf`. The visual tests `defineVisualTest`, `runVisualTests`, `parseVisualArgv` come from `@moku-labs/game/visual`, node and bun only (see `docs/testing.md` in the engine repository).
 
 - `createHeadless(app): Promise<HeadlessGame>`. Pass an app that is not started. It sets mode `"fast"`, awaits `app.start()`, starts `flow.run()` unless the app's `onStart` already did, and resolves when the loop rests for the first time: `game.state().path` already names the first rest node. A fatal error of `run()` rejects the call.
 - `HeadlessGame`: `walk(route): Promise<FlowState>`, `answer(answer): boolean`, `state()`, `history()`, `stop()`. `walk` and `stop` throw a fatal error of the loop again when the headless runner owns `run()`.

@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { Assets } from "@moku-labs/game";
-import type { VisualSetup, VisualStart } from "@moku-labs/game/testing";
+import type { VisualSetup, VisualStart } from "@moku-labs/game/visual";
 import { createScreenGame, startMoment } from "../integration/merge-game/game";
 import type { Item } from "../integration/merge-game/rules";
 import type { Player } from "../integration/merge-game/state";

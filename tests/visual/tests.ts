@@ -3,7 +3,7 @@
  * runs them in `bun run test` (`tests/integration/visual-headless.test.ts`); both legs run with
  * `bun run fixture:visual` (`run.ts`). The baselines live next to them: `<test>/<checkpoint>/`.
  */
-import type { VisualTest } from "@moku-labs/game/testing";
+import type { VisualTest } from "@moku-labs/game/visual";
 import { boardMerge } from "./board-merge.visual";
 import { giftPopup } from "./gift-popup.visual";
 import { home } from "./home.visual";

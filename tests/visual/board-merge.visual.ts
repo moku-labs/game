@@ -5,7 +5,7 @@
  * motions, and the particles left in the air would be a different picture on every run.
  * The ready order card and its green Deliver glow, so the test also runs in the WebGL leg.
  */
-import { defineVisualTest } from "@moku-labs/game/testing";
+import { defineVisualTest } from "@moku-labs/game/visual";
 import { atHome } from "./fixture";
 
 export const boardMerge = defineVisualTest("board-merge", {

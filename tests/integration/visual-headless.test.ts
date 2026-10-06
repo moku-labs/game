@@ -6,8 +6,8 @@
  * write the baselines with `bun run fixture:visual --update` and commit them.
  */
 import { fileURLToPath } from "node:url";
-import type { VisualReport } from "@moku-labs/game/testing";
-import { runVisualTests } from "@moku-labs/game/testing";
+import type { VisualReport } from "@moku-labs/game/visual";
+import { runVisualTests } from "@moku-labs/game/visual";
 import { beforeAll, describe, expect, it } from "vitest";
 import { fixtureApp } from "../visual/fixture";
 import { fixtureVisualTests } from "../visual/tests";

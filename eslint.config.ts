@@ -401,13 +401,13 @@ export default [
   },
 
   // 6b4. L12 — the visual test runner `src/visual/` is node-only and reaches the whole `/control`
-  // catalogue: only the door `src/testing.ts` imports it. The project index `src/project/` is
+  // catalogue: only the door `src/visual.ts` imports it. The project index `src/project/` is
   // node-only too: only the door `src/project.ts` imports it. A later block replaces the whole rule,
   // so the patterns these files carry now are repeated: L9's outside `ui`, L10's inside it.
   {
     files: ["src/**/*.ts"],
     ignores: [
-      "src/testing.ts",
+      "src/visual.ts",
       "src/visual/**",
       "src/project.ts",
       "src/project/**",
@@ -428,7 +428,7 @@ export default [
             },
             {
               group: ["**/visual/**"],
-              message: "The visual test runner is node-only. Only src/testing.ts imports it."
+              message: "The visual test runner is node-only. Only src/visual.ts imports it."
             },
             {
               group: ["**/project/**"],
@@ -458,7 +458,7 @@ export default [
             },
             {
               group: ["**/visual/**"],
-              message: "The visual test runner is node-only. Only src/testing.ts imports it."
+              message: "The visual test runner is node-only. Only src/visual.ts imports it."
             },
             {
               group: ["**/project/**"],

@@ -10,7 +10,8 @@ import { describe, expect, it } from "vitest";
 // decision 7 of V5), and a production build carries no draw-call counter of
 // the renderer, which a dev build does (07-renderer Delta 8 §2). And what the
 // package build carries: `dist/index.mjs` never names the two packages of the
-// production packer, which only `dist/assets.mjs` imports (09-assets Delta 8).
+// production packer, which only `dist/assets.mjs` imports (09-assets Delta 8),
+// and `dist/testing.mjs` imports no `node:` module, which `dist/visual.mjs` does.
 // ---------------------------------------------------------------------------
 
 /** The root module of the package, as a game imports it. */
@@ -170,7 +171,7 @@ describe("the draw-call counter of the renderer in a game build", () => {
  * @param source - The entry file under `src/`.
  * @returns The built code.
  */
-function packageBuild(source: "index.ts" | "assets.ts"): string {
+function packageBuild(source: "index.ts" | "assets.ts" | "testing.ts" | "visual.ts"): string {
   const file = fileURLToPath(new URL(`../../src/${source}`, import.meta.url));
   const script = `
     const { mkdtempSync, rmSync } = await import("node:fs");
@@ -211,5 +212,31 @@ describe("the packages of the production packer in the package build", () => {
 
     expect(code).toContain('from "maxrects-packer"');
     expect(code).toContain('import("sharp")');
+  }, 60_000);
+});
+
+/**
+ * The `node:` modules a built entry imports, statically or with `import()`.
+ *
+ * @param code - The built code.
+ * @returns The module specifiers, such as `node:path`.
+ */
+function nodeImports(code: string): string[] {
+  return [...code.matchAll(/(?:from|import\(?)\s*"(node:[^"]+)"/g)].map(match => match[1] ?? "");
+}
+
+describe("the node modules of the testing and visual entries in the package build", () => {
+  it("are imported nowhere by dist/testing.mjs: a browser test can import it", () => {
+    const code = packageBuild("testing.ts");
+
+    expect(code).toContain("createHeadless");
+    expect(nodeImports(code)).toEqual([]);
+  }, 60_000);
+
+  it("are imported by dist/visual.mjs: the check above would see them", () => {
+    const code = packageBuild("visual.ts");
+
+    expect(code).toContain("runVisualTests");
+    expect(nodeImports(code)).toContain("node:path");
   }, 60_000);
 });
