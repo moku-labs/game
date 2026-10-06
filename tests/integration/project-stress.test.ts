@@ -26,7 +26,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 // mini game (no dist). A scripted burst runs for PROJECT_STRESS_MS (10 s by
 // default, 60 s locally when set): edits, lines inserted above definitions, a
 // renamed binding, a node file moved to another folder, a deleted file, a file
-// left broken then fixed, 20 files touched within 100 ms, and saves with the
+// left broken then fixed, 17 files touched within 100 ms, and saves with the
 // same bytes. After each step the index must match the disk, every key must
 // answer a line that holds its binding or key, and the change must report the
 // move and the delete; a save with the same bytes calls nobody.
@@ -384,12 +384,12 @@ describe("the project index under an agent burst", () => {
         expect(await verify()).toEqual([]);
       }
 
-      // Twenty files touched within 100 ms.
+      // Seventeen files touched within 100 ms: every file of the index but the moved one.
       {
         const before = calls.length;
-        const touched = pool.slice(0, 20);
+        const touched = pool.slice(0, 17);
 
-        expect(touched).toHaveLength(20);
+        expect(touched).toHaveLength(17);
 
         for (const file of touched) put(file, `${readText(file)}// burst ${cycles}\n`);
         const brought = await settle(before);

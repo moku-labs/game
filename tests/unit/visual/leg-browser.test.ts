@@ -648,7 +648,7 @@ describe("runBrowserLeg", () => {
     const { chromium, log } = fakeChromium({ ready: false });
 
     await expect(bothLegs([openPopup(7)], chromium)).rejects.toThrow(
-      `[game] The page at ${URL} exposes no game and doors.\n  Serve the dev page (bun ./web/serve.ts) and set globalThis.game and globalThis.doors in it.`
+      `[game] The page at ${URL} exposes no game and doors.\n  Serve the dev page (moku-game dev) and set globalThis.game and globalThis.doors in it.`
     );
     expect(log.pagesClosed).toBe(1);
     expect(log.browsersClosed).toBe(1);
@@ -723,7 +723,7 @@ describe("runBrowserLeg", () => {
     const { chromium } = fakeChromium({ goto: `net::ERR_CONNECTION_REFUSED at ${URL}` });
 
     await expect(bothLegs([openPopup(7)], chromium)).rejects.toThrow(
-      `[game] The page at ${URL} did not open: net::ERR_CONNECTION_REFUSED at ${URL}.\n  Serve the dev page (bun ./web/serve.ts), or run with --no-pixels.`
+      `[game] The page at ${URL} did not open: net::ERR_CONNECTION_REFUSED at ${URL}.\n  Serve the dev page (moku-game dev), or run with --no-pixels.`
     );
   });
 

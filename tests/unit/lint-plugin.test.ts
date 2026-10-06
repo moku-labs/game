@@ -224,6 +224,53 @@ describe("@moku-labs/game/lint under oxlint", () => {
     });
   });
 
+  it("native-imports reads the root index.ts and config.ts", () => {
+    const findings = runOxlint(
+      {
+        "index.ts": 'import { haptics } from "@moku-labs/system";\nexport const buzz = haptics;\n',
+        "config.ts": 'export const config = { name: "Merge", system: ["haptics"] };\n',
+        "features/home/config.ts":
+          'import { invoke } from "@tauri-apps/api/core";\nexport const call = invoke;\n',
+        // Today's homes stay until the demos leave them.
+        "platform-bridge.ts":
+          'import { haptics } from "@moku-labs/system";\nexport const buzz = haptics;\n',
+        "native.ts": 'import { run } from "@moku-labs/native";\nexport const go = run;\n',
+        "web/main.ts":
+          'import { haptics } from "@moku-labs/system";\nexport const buzz = haptics;\n'
+      },
+      { "moku-game/native-imports": "error" }
+    );
+
+    expect(findings).toEqual([
+      { rule: "native-imports", file: "features/home/config.ts", line: 1 },
+      { rule: "native-imports", file: "index.ts", line: 1 }
+    ]);
+    expect(
+      runOxlint(
+        { "config.ts": 'import { run } from "@moku-labs/native";\nexport const go = run;\n' },
+        { "moku-game/native-imports": "error" }
+      )
+    ).toEqual([{ rule: "native-imports", file: "config.ts", line: 1 }]);
+  });
+
+  it("dev-imports leaves the generated .moku page", () => {
+    // The static Pixi import proves oxlint reads the page: lazy-imports still fires there.
+    const findings = runOxlint(
+      {
+        ".moku/main.ts":
+          'import { commands } from "@moku-labs/game/control";\nimport { Application } from "pixi.js";\nexport const all = [commands, Application];\n',
+        "index.ts":
+          'import { commands } from "@moku-labs/game/control";\nexport const all = commands;\n'
+      },
+      { "moku-game/dev-imports": "error", "moku-game/lazy-imports": "error" }
+    );
+
+    expect(findings).toEqual([
+      { rule: "lazy-imports", file: ".moku/main.ts", line: 2 },
+      { rule: "dev-imports", file: "index.ts", line: 1 }
+    ]);
+  });
+
   it("takes files and ignores from the options", () => {
     const findings = runOxlint(
       {
@@ -721,6 +768,7 @@ describe("@moku-labs/game/lint rules in process", () => {
       expect.stringMatching(/^Dev only: /)
     ]);
     expect(check("dev-imports", "web/dev.ts", [["ExportAllDeclaration", editor]])).toEqual([]);
+    expect(check("dev-imports", ".moku/main.ts", [["ExportAllDeclaration", editor]])).toEqual([]);
     expect(
       check(
         "dev-imports",
@@ -814,22 +862,37 @@ describe("@moku-labs/game/lint rules in process", () => {
     expect(check("determinism", "web/a.ts", visits)).toEqual([]);
   });
 
-  it("determinism reads core, shared and game.ts and leaves the plugins; native-imports reads plugins", () => {
+  it("determinism reads core, shared, game.ts and index.ts and leaves the plugins; native-imports reads plugins, index.ts and config.ts", () => {
     const random: [string, GameLintNode][] = [["MemberExpression", member("Math", "random")]];
     const native: [string, GameLintNode][] = [["ImportDeclaration", imports("@tauri-apps/api")]];
 
-    for (const file of ["core/state.ts", "shared/motion/x.ts", "game.ts", "src/core/rng.ts"]) {
+    for (const file of [
+      "core/state.ts",
+      "shared/motion/x.ts",
+      "game.ts",
+      "index.ts",
+      "src/core/rng.ts"
+    ]) {
       expect(check("determinism", file, random), file).toHaveLength(1);
     }
     for (const file of ["plugins/loading/handlers.ts", "features/energy/plugin/api.ts"]) {
       expect(check("determinism", file, random), file).toEqual([]);
     }
-    for (const file of ["plugins/platform/index.ts", "core/kit.ts", "shared/x.ts", "kit.ts"]) {
+    for (const file of [
+      "plugins/platform/index.ts",
+      "core/kit.ts",
+      "shared/x.ts",
+      "kit.ts",
+      "index.ts",
+      "config.ts"
+    ]) {
       expect(check("native-imports", file, native), file).toEqual([
-        "L13: a native package is imported only where the platform is wired: platform-bridge.ts, native.ts or web/. Pass a PlatformProvider."
+        "L13: a game imports no native package. Name the capability in config.ts system; the engine page wires it."
       ]);
     }
-    expect(check("native-imports", "platform-bridge.ts", native)).toEqual([]);
+    for (const file of ["platform-bridge.ts", "native.ts", "web/main.ts", "src/index.ts"]) {
+      expect(check("native-imports", file, native), file).toEqual([]);
+    }
   });
 
   it("rules-siblings: siblings, @core/types and @shared/rules pass in any spelling", () => {

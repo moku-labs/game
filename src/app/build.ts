@@ -56,8 +56,33 @@ function scanArguments(root: string, settings: ResolvedGameConfig): string[] {
 }
 
 /**
+ * Tells whether a game has an English string file to derive the pseudo-locale from: a
+ * `strings/en.json` in a feature folder or in a layer folder of the config.
+ *
+ * @param root - The game folder.
+ * @param settings - The resolved config, for its layer folders.
+ * @returns True when at least one such file exists.
+ */
+function hasEnglishStrings(root: string, settings: ResolvedGameConfig): boolean {
+  const features = path.join(root, "features");
+  const featureFolders =
+    statSync(features, { throwIfNoEntry: false })?.isDirectory() === true
+      ? readdirSync(features, { withFileTypes: true })
+          .filter(entry => entry.isDirectory())
+          .map(entry => path.join(features, entry.name))
+      : [];
+  const layerFolders = Object.keys(settings.assets.layers).map(folder => path.join(root, folder));
+
+  return [...featureFolders, ...layerFolders].some(
+    folder =>
+      statSync(path.join(folder, "strings", "en.json"), { throwIfNoEntry: false })?.isFile() ===
+      true
+  );
+}
+
+/**
  * The flags of the asset scan for `moku-game keys`: the dev manifest beside the game, the
- * pseudo-locale, and `--check` for a check run.
+ * pseudo-locale when the game has an English string file, and `--check` for a check run.
  *
  * @param root - The game folder.
  * @param settings - The resolved config.
@@ -65,7 +90,8 @@ function scanArguments(root: string, settings: ResolvedGameConfig): string[] {
  * @returns The flags for the scanner's command line.
  * @example
  * ```ts
- * keysArguments("/g", resolveConfig({ page: { title: "T" } }), true).slice(4); // ["--manifest", "/g/manifest.json", "--pseudo", "--check"]
+ * keysArguments("/g", resolveConfig({ page: { title: "T" } }), true).slice(4); // ["--manifest", "/g/manifest.json", "--check"]: no strings
+ * keysArguments("/g", resolveConfig({ page: { title: "T" } }), false).at(-1); // "--pseudo" once /g/features/home/strings/en.json exists
  * ```
  */
 export function keysArguments(
@@ -77,7 +103,7 @@ export function keysArguments(
     ...scanArguments(root, settings),
     "--manifest",
     path.join(root, "manifest.json"),
-    "--pseudo",
+    ...(hasEnglishStrings(root, settings) ? ["--pseudo"] : []),
     ...(check ? ["--check"] : [])
   ];
 }

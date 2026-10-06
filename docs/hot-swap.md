@@ -6,16 +6,28 @@ You open the Settings popup over Home, change `settings/styles.ts` and save. The
 
 ## Setup
 
-One line in the `bunfig.toml` of the game:
+None. `moku-game dev` writes `.moku/bunfig.toml` with the hot plugin first, resolved from the game, and runs the dev server under it in the game folder:
+
+```toml
+# Written by moku-game dev. Do not edit.
+
+[serve.static]
+plugins = ["/abs/game/node_modules/@moku-labs/game/dist/hot.mjs"]
+define = { "__MOKU_GAME_DEV__" = "true" }
+```
+
+The game keeps no `bunfig.toml`. `--serve-plugin <path>` adds a Bun plugin after the hot one, `--preload <path>` a `preload` line.
+
+- **The dev server runs in the game root.** The plugin reads paths relative to the working directory. A file outside it, such as the engine source or a linked package, loads unchanged.
+- **A dev build only.** `ui` installs the swap handler only when `__MOKU_GAME_DEV__` is `true`, see [Turn the dev build on](./doors.md#turn-the-dev-build-on).
+- **Production never loads it.** `[serve.static]` is read by the dev server only. `moku-game build` bundles without the plugin.
+
+A game without the shell, with a page and a Bun server of its own, lists the plugin in its own `bunfig.toml`:
 
 ```toml
 [serve.static]
 plugins = ["@moku-labs/game/hot"]
 ```
-
-- **Run the dev server in the game root.** The plugin reads paths relative to the working directory. A file outside it, such as the engine source or a linked package, loads unchanged.
-- **A dev build only.** `ui` installs the swap handler only when `__MOKU_GAME_DEV__` is `true`, see [Turn the dev build on](./doors.md#turn-the-dev-build-on).
-- **Production never loads it.** `[serve.static]` is read by the dev server only. `Bun.build` of a production build never runs the plugin.
 
 The plugin appends a short footer to every view module it loads. The footer accepts the module's own update and hands the new exports to `ui`. Game code never writes `import.meta.hot`.
 
@@ -54,7 +66,7 @@ A swap that worked logs `ui:hot-swap` at info with `{ file, components, projecti
 
 ## Another folder layout
 
-The default filters fit the usual layouts: `features/<name>/view.tsx`, `animations.ts` and the rest, and the kind folders of the layered layout (`features/board/world/projections/cells.ts`, `shared/styles/text.ts`). A game that keeps its views elsewhere exports its own plugin and lists that file instead:
+The default filters fit the usual layouts: `features/<name>/view.tsx`, `animations.ts` and the rest, and the kind folders of the layered layout (`features/board/world/projections/cells.ts`, `shared/styles/text.ts`). A game that keeps its views elsewhere exports its own plugin and lists that file in a `bunfig.toml` of its own, on a server of its own: `moku-game dev` always lists the default `hot()`.
 
 ```ts
 // hot.ts in the game root

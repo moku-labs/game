@@ -3,14 +3,15 @@
 > Standard plugin — the phone is a provider. A game passes a `PlatformProvider`; the plugin turns its pause and resume into the `"background"` reason of `lifecycle`, its Back press into the Back chain, the `haptic` effect into a tick, and `keepAwake: true` into a screen that stays on while the game runs. Opt-in and last in the array: `[...screen, effectsPlugin, audioPlugin, platformPlugin]`.
 
 ```ts
-// app.ts, the application layer: the bridge is the game's, the engine never imports a native package
-import { createApp, screen, effectsPlugin, audioPlugin, platformPlugin } from "@moku-labs/game";
-import { fromSystem } from "./platform-bridge";
+// config.ts of a game: name the capabilities; the engine page builds the provider from them
+// (systemShell of @moku-labs/game/app/system over @moku-labs/system) and passes it to the plugin.
+export default {
+  page: { title: "Timber Town" },
+  system: ["lifecycle", "back", "haptics", "keepAwake"]
+} satisfies GameConfig;
 
-export const app = createApp({
-  plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin, ...features],
-  pluginConfigs: { platform: { provider: fromSystem(system), keepAwake: true } }
-});
+// a test or a custom page passes its own provider through the screen seam
+const { app } = game.screen({ platform: fromSystem(systemApp) });
 
 // a node or an animation, the same on the web and in the shell
 await fx(haptic("success"));                                   // flow effect, handled here

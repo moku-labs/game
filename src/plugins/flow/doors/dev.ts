@@ -1,7 +1,8 @@
 /**
  * @file flow/doors — the dev flag and the errors a door throws. `__MOKU_GAME_DEV__` is a global
- * the engine never replaces: a game's dev build defines it `true` (bundler `define`) or sets
- * `globalThis.__MOKU_GAME_DEV__` before the engine runs; undefined means a production build.
+ * the engine never replaces: `moku-game dev` defines it `true` (bunfig `define`) and sets
+ * `globalThis.__MOKU_GAME_DEV__` in `.moku/dev.ts` before the engine runs; `moku-game build`
+ * defines it `false`; undefined means a production build.
  *
  * Bun does not inline `isDev()` across modules (checked on Bun 1.3.14), so a branch that must
  * vanish from a production bundle writes the guard inline:
@@ -11,12 +12,12 @@
 
 declare global {
   /**
-   * The dev flag of a game. A game never re-declares it: it defines it in the bundler, or sets
-   * `globalThis.__MOKU_GAME_DEV__ = true` in its dev entry.
+   * The dev flag of a game. A game never re-declares it: `moku-game dev` sets it, `moku-game
+   * build` defines it `false`, and a test stubs it.
    *
    * @example
    * ```ts
-   * // web/dev.ts, imported first by the dev page: /control commands run from here on.
+   * // .moku/dev.ts, written by moku-game dev, the first import of the dev page: /control commands run from here on.
    * globalThis.__MOKU_GAME_DEV__ = true;
    * ```
    */
@@ -29,7 +30,7 @@ declare global {
  * @returns True only when `__MOKU_GAME_DEV__` is exactly `true`.
  * @example
  * ```ts
- * // The dev page set the flag in web/dev.ts before the engine started.
+ * // The dev page set the flag in .moku/dev.ts before the engine started.
  * globalThis.__MOKU_GAME_DEV__ = true;
  * isDev(); // true
  * ```

@@ -19,11 +19,11 @@ import { commands, run } from "@moku-labs/game/control";
 import { read, sources, watch } from "@moku-labs/game/inspect";
 import { createHeadless } from "@moku-labs/game/testing";
 import { it, vi } from "vitest";
-import { createGame } from "./game";
+import dice from "./index";
 
 it("rolls, bookmarks and restores through the doors", async () => {
   vi.stubGlobal("__MOKU_GAME_DEV__", true);
-  const app = createGame(42);
+  const { app } = dice.headless({ seed: 42 });
   const game = await createHeadless(app);
 
   read(app, sources.position); // { path: "home", flow: "main", node: "home", waiting: ["roll", "reset"] }
@@ -153,47 +153,47 @@ A dev build keeps the last 120 frames of world changes, about 2 s at 60 fps. A p
 
 `__MOKU_GAME_DEV__` is a global the engine reads and never sets. Only `true` turns the dev build on; undefined means production, and `run` throws `[game] Control commands run in dev builds only.` The package ships its declaration, `var __MOKU_GAME_DEV__: boolean | undefined`. A game never re-declares it.
 
-**Preferred: a bundler `define`**, `true` in dev and `false` in production.
+**`moku-game` sets it.** `moku-game dev` defines it `true` in the bunfig of the dev page, `define = { "__MOKU_GAME_DEV__" = "true" }`, and its `.moku/dev.ts`, the first import of `.moku/main.ts`, sets the global for code that reads `globalThis`:
 
 ```ts
-// build.ts of the game
+// Written by moku-game dev. Do not edit.
+globalThis.__MOKU_GAME_DEV__ = true;
+```
+
+`moku-game build` defines it `false`. A test sets it with `vi.stubGlobal("__MOKU_GAME_DEV__", true)`.
+
+**A game without the shell** does the same with a bundler `define`, `true` in dev and `false` in production:
+
+```ts
+// build.ts of a game with a page of its own
 const production = Bun.argv.includes("--production");
 
 await Bun.build({
-  entrypoints: ["web/main.ts"],
+  entrypoints: ["index.html"],
   outdir: "dist",
   minify: true,
   define: { __MOKU_GAME_DEV__: production ? "false" : "true" }
 });
 ```
 
-**Or set the global** in a module the dev entry imports before the engine. The fixture page does this in [`tests/fixtures/mini-game/web/dev.ts`](../tests/fixtures/mini-game/web/dev.ts):
-
-```ts
-// web/dev.ts, the first import of web/main.ts
-globalThis.__MOKU_GAME_DEV__ = true;
-```
-
-A test sets it with `vi.stubGlobal("__MOKU_GAME_DEV__", true)`.
-
 **What the `define` strips.** Every command body starts with the inline guard `if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();`. A `define` of `false` folds the condition, and the minifier drops the body behind it. [`tests/integration/doors-build.test.ts`](../tests/integration/doors-build.test.ts) proves it with a minified Bun build of each door: with `false` no command body of `/control` is left, with `true` every body is there, and an `/inspect` bundle carries no command id at all. The descriptors stay, so an editor can still list the commands. Without a `define` the bodies stay in the bundle, and `run` still refuses them while the flag is undefined.
 
 ## A game's own sources and commands
 
-`defineSource` and `defineCommand` take the same shape as the base catalogue. The id is camelCase words joined by dots, at least two (`dice.rolls`); any other id throws. Keep them in `.dev` modules that only the dev entry and the tests import, so a production bundle never reaches them. `defineCommand` adds no guard: a command writes the inline guard itself, because Bun does not inline a guard function across modules.
+`defineSource` and `defineCommand` take the same shape as the base catalogue. The id is camelCase words joined by dots, at least two (`dice.rolls`); any other id throws. Keep them in `.dev` modules that only the dev page and the tests import, so a production bundle never reaches them. `moku-game build` imports none. The dev page of the editor (`preparePage` with agents) imports every `**/*.dev.ts` of the game and hands them to the agents. `defineCommand` adds no guard: a command writes the inline guard itself, because Bun does not inline a guard function across modules.
 
 ```ts
 // dice.dev.ts
 import { controlRefused, defineCommand } from "@moku-labs/game/control";
 import { defineSource } from "@moku-labs/game/inspect";
-import type { createGame } from "./game";
+import type dice from "./index";
 
 export const rolls = defineSource({
   id: "dice.rolls",
   title: "Rolls",
   input: {},
   changes: "commit",
-  read: (app: ReturnType<typeof createGame>) => app.model.store.snapshot().session
+  read: (app: ReturnType<typeof dice.headless>["app"]) => app.model.store.snapshot().session
 });
 
 export const rollTwice = defineCommand({

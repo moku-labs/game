@@ -8,8 +8,9 @@
  * `styles/`, `motion/`, `effects/` or `views/` folder, any `.ts` directly in `world/projections/`
  * or `world/layout/`, or a generated `generated/strings.<locale>.ts`; a logic module never gets
  * the footer (`world/components/` and `world/systems/` included: they are registered at start), so
- * its save reaches the root and the page reloads and restores its state. The plugin lives in `[serve.static]` of
- * `bunfig.toml`, the dev server only: `Bun.build` of a production build never loads it.
+ * its save reaches the root and the page reloads and restores its state. `moku-game dev` lists the
+ * plugin first in `[serve.static]` of the bunfig it writes, `.moku/bunfig.toml`; a game without the
+ * shell lists it in its own `bunfig.toml`. The dev server only: `moku-game build` never loads it.
  */
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -160,11 +161,9 @@ function footerOf(file: string): string {
  * @returns The Bun plugin object.
  * @example
  * ```ts
- * // bunfig.toml of a game with the default layout:
- * //   [serve.static]
- * //   plugins = ["@moku-labs/game/hot"]
- * // A game that keeps its views in `look/` folders exports its own plugin from `hot.ts`
- * // and lists `plugins = ["./hot.ts"]` instead:
+ * // `moku-game dev` lists the default plugin in `.moku/bunfig.toml`: a game sets nothing.
+ * // A game with a server of its own and its views in `look/` folders exports its own plugin
+ * // from `hot.ts` and lists `plugins = ["./hot.ts"]` in its own bunfig.toml:
  * export default hot({ include: /\/look\/.*\.ts$/ });
  * ```
  */
@@ -194,5 +193,5 @@ export function hot(options: HotOptions = {}): HotPlugin {
   };
 }
 
-/** The Bun plugin with the default filters, for `plugins = ["@moku-labs/game/hot"]` in `bunfig.toml`. */
+/** The Bun plugin with the default filters: the one `moku-game dev` lists, or `plugins = ["@moku-labs/game/hot"]` in a game's own `bunfig.toml`. */
 export default hot();

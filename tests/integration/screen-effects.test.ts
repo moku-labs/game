@@ -15,8 +15,8 @@ import {
 } from "../../src/plugins/effects/__tests__/fake-effects-pixi";
 import { installFakeDom } from "../../src/plugins/renderer/__tests__/fake-dom";
 import { FakeRectangle, FakeTexture } from "../../src/plugins/renderer/__tests__/fake-pixi";
-import type { MiniGame } from "../fixtures/mini-game/game";
-import { createMiniGame } from "../fixtures/mini-game/game";
+import miniGame from "../fixtures/mini-game/index";
+import type { MiniGame } from "./mini-helpers";
 import { frames, miniFolder, readManifest, until } from "./mini-helpers";
 
 afterEach(() => {
@@ -97,7 +97,7 @@ async function startDrawn(): Promise<MiniGame> {
   const manifest = await readManifest();
   // The shared fake draws the labels of `text` and compiles the WGSL of `Glow` with no error.
   const pixi = createFakeEffectsPixi();
-  const app = createMiniGame({
+  const { app } = miniGame.screen({
     manifest,
     io: diskIo(manifest),
     renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }

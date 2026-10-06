@@ -220,10 +220,12 @@ const TESTS = ["tests/**", "**/__tests__/**", "**/*.{test,spec}.{ts,tsx}"];
 const DEV_MODULES = ["**/*.dev.{ts,tsx}"];
 
 /**
- * The logic of a game: state, tables, the root flow in game.ts, core, nodes, flows, rules,
- * features, shared. `**` so `src/` matches too.
+ * The logic of a game: state, tables, the game in the root index.ts, the root flow in game.ts,
+ * core, nodes, flows, rules, features, shared. `**` so `src/` matches too; `index.ts` is the root
+ * file only.
  */
 const LOGIC = [
+  "index.ts",
   "**/state.ts",
   "**/tables.ts",
   "**/game.ts",
@@ -689,15 +691,18 @@ const lazyImports = importRule(
   true
 );
 
-/** L13: native packages stay out of the engine-facing layers. */
+/** L13: a game imports no native package; config.ts names the capability, the engine page wires it. */
 const nativeImports = importRule(
-  "No @moku-labs/system, @moku-labs/native or @tauri-apps/* in the engine-facing layers.",
-  { files: [...LOGIC, "**/kit.ts", "**/plugins/**"], ignores: [...DEV_MODULES, ...TESTS] },
+  "No @moku-labs/system, @moku-labs/native or @tauri-apps/* in a game: the engine page wires them.",
+  {
+    files: [...LOGIC, "config.ts", "**/kit.ts", "**/plugins/**"],
+    ignores: [...DEV_MODULES, ...TESTS]
+  },
   [
     {
       pattern: /^(?:@moku-labs\/(?:system|native)(?:\/|$)|@tauri-apps\/)/,
       message:
-        "L13: a native package is imported only where the platform is wired: platform-bridge.ts, native.ts or web/. Pass a PlatformProvider."
+        "L13: a game imports no native package. Name the capability in config.ts system; the engine page wires it."
     }
   ]
 );
@@ -707,7 +712,8 @@ const developmentImports = importRule(
   "@moku-labs/editor and @moku-labs/game/control only in dev files and tests.",
   {
     files: ["**"],
-    ignores: ["web/main.ts", "web/dev*.ts", "web/editor*.ts", ...DEV_MODULES, ...TESTS]
+    // `.moku/` is the page moku-game generates: it imports the editor agent.
+    ignores: [".moku/**", "web/main.ts", "web/dev*.ts", "web/editor*.ts", ...DEV_MODULES, ...TESTS]
   },
   [
     {

@@ -2,6 +2,26 @@
 
 Headless tests, visual tests, the test layout of this repository and its lint rules.
 
+## The apps of a game
+
+A test makes its app from the game's `index.ts`. `game.headless()` composes the logic only; `game.screen()` composes the screen set, the features and the game's plugins. Both return `{ app, clock, provider }`, the app not started, on a fake clock at `startMoment` and a fresh in-memory save unless a seam passes one. See [The game shell](./shell.md#tests-gameheadless-and-gamescreen).
+
+```ts
+// a test of the mini game in tests/fixtures/mini-game
+import { createHeadless } from "@moku-labs/game/testing";
+import game from "../../index";
+import ready from "../scenarios/ready";
+
+const { app } = game.headless({ seed: 7, player: ready(1_000_000).player });
+const run = await createHeadless(app);
+
+run.state().path; // "home"
+app.model.store.snapshot().player; // { count: 3 }
+await run.stop();
+```
+
+A screen test passes the parsed manifest and a file seam, `game.screen({ manifest, io }).app`. Without a mount the renderer is inert, so it runs in plain Bun.
+
 ## Testing entry
 
 `@moku-labs/game/testing` re-exports the headless helpers and the isolated feature tests. It imports no `node:` module, so a test that runs in a browser can import it. The visual tests live in `@moku-labs/game/visual`, see [Visual tests](#visual-tests).
@@ -91,7 +111,7 @@ export const rewardPopup = defineVisualTest("reward-popup", {
 });
 
 // tests/visual/run.ts, `bun tests/visual/run.ts --update`
-const report = await runVisualTests({ app: () => createScreenGame().app, page: { url: "http://localhost:3000/" } }, [rewardPopup]);
+const report = await runVisualTests({ app: () => game.screen({ manifest, io }).app, page: { url: "http://localhost:3000/" } }, [rewardPopup]);
 process.exitCode = report.ok ? 0 : 1;
 ```
 
@@ -109,19 +129,16 @@ The pixel leg runs on a Mac only. `pixels` is on by default when the setup has a
 - **`--update`** rewrites `state.json`, `describe.json` and `screen.webp` of every test it runs. A pixel difference writes `screen.actual.webp` and `screen.diff.webp` beside the baseline, red where a pixel differs. Git ignores both.
 - **Tolerance.** A pixel differs when one of its channels moves by more than 24. A checkpoint differs when more than 0.1% of its pixels do. Both are `tolerance` in the options.
 
-The mini game keeps its visual tests in `tests/visual/`: one `*.visual.ts` per test, the list in `tests.ts`, the script in `run.ts` and the baselines next to them. The script imports the runner from `src/visual`, so a stale `dist/` never writes baselines. `bun run test` runs the headless leg through `tests/integration/visual-headless.test.ts`. The engine commits the headless baselines only, `state.json` and `describe.json`; the pixel baselines of a real game live with the game, as in the merge game of [moku-labs/demos](https://github.com/moku-labs/demos). Both legs run against the dev page:
+The mini game keeps its visual tests in `tests/visual/`: one `*.visual.ts` per test, the list in `tests.ts`, the script in `run.ts` and the baselines next to them. The script imports the runner from `src/visual`, so a stale `dist/` never writes baselines. `bun run test` runs the headless leg through `tests/integration/visual-headless.test.ts`. The engine commits the headless baselines only, `state.json` and `describe.json`; the pixel baselines of a real game live with the game, as in the merge game of [moku-labs/demos](https://github.com/moku-labs/demos). The pixel leg plays on the dev page of `moku-game dev`; `bun run mini:visual` starts it on a free port and stops it at the end:
 
 ```sh
-# terminal 1: the dev page of the mini game on a free port
-cd tests/fixtures/mini-game && bun ./web/serve.ts --port 4173
-
-# terminal 2: from the root of the repository
-bun run mini:visual --url http://localhost:4173/            # compare with the baselines
-bun run mini:visual --no-pixels --update                    # write the headless baselines again
-bun run mini:visual --only info-popup --no-pixels           # one test, headless only
+bun run mini:visual                                  # compare with the baselines
+bun run mini:visual --no-pixels --update             # write the headless baselines again
+bun run mini:visual --only info-popup --no-pixels    # one test, headless only
+bun run mini:visual --url http://localhost:3000/     # a page already served by bun run mini:dev
 ```
 
-Without `--url` the page is `http://localhost:3000/`. The exit code is 1 when a checkpoint differs.
+The exit code is 1 when a checkpoint differs.
 
 The test of the browser leg itself opens a real Chrome only on request: `MOKU_VISUAL_BROWSER=1 bunx vitest run tests/unit/visual/browser.test.ts`. It also proves the WebP is lossless: random opaque pixels come back byte for byte. Without the variable it skips with its reason, so `bun run test` opens no browser.
 
@@ -129,7 +146,7 @@ The test of the browser leg itself opens a real Chrome only on request: `MOKU_VI
 ## Scripts
 
 ```sh
-bun run build              # build with tsdown: dist/index.mjs, testing.mjs, visual.mjs, assets.mjs, inspect.mjs, control.mjs, jsx-runtime.mjs, jsx-dev-runtime.mjs
+bun run build              # build with tsdown: dist/index.mjs, testing.mjs, app.mjs, app/page.mjs, app/system.mjs, cli.mjs, visual.mjs, assets.mjs, inspect.mjs, control.mjs, hot.mjs, lint.mjs, project.mjs, jsx-runtime.mjs, jsx-dev-runtime.mjs
 bun run typecheck          # tsc --noEmit
 bun run lint               # biome check . && eslint .
 bun run lint:fix           # biome check --write . && eslint --fix .
@@ -139,8 +156,9 @@ bun run test:unit          # vitest project "unit"
 bun run test:integration   # vitest project "integration"
 bun run test:coverage      # both projects with coverage, 90% thresholds
 bun run validate           # publint and attw with the esm-only profile
-bun run mini:pack          # pack the mini game into tests/fixtures/mini-game/dist/assets
-bun run mini:visual        # the mini game's visual tests, both legs: --url <dev page>, --update, --only <name>, --no-pixels, --webgl
+bun run mini:pack          # moku-game pack of the mini game: tests/fixtures/mini-game/dist/assets
+bun run mini:dev           # moku-game dev of the mini game, from the source: http://localhost:3000/
+bun run mini:visual        # the mini game's visual tests, both legs: --update, --only <name>, --no-pixels, --webgl, --url <dev page>
 bun run release:setup      # moku-release setup
 bun run release:doctor     # moku-release doctor
 bun run release            # moku-release
@@ -150,9 +168,10 @@ bun run release            # moku-release
 
 | Path | Holds |
 |---|---|
-| `tests/unit/` | Framework-level unit tests: root index, setup, the isolated feature tests in `tests/unit/testing/` |
-| `tests/integration/` | Framework-level scenarios across plugins |
-| `tests/fixtures/mini-game/` | The mini game, written on the public API only: one rest node, one popup flow, two features, one bundle. Not published |
+| `tests/unit/` | Framework-level unit tests: root index, setup, the isolated feature tests in `tests/unit/testing/`, the game shell in `tests/unit/app/` |
+| `tests/integration/` | Framework-level scenarios across plugins; the mini game in its folder, the page bundle and the local save in `tests/integration/app/`; the `moku-game` commands in `app-*.test.ts` |
+| `tests/fixtures/mini-game/` | The mini game in the layout of a game, written on the public API only: `index.ts`, `config.ts`, `tests/scenarios/`, one rest node, one popup flow, two features, one bundle. Not published |
+| `tests/fixtures/moku-game.ts` | The `moku-game` bin on the source: `bun tests/fixtures/moku-game.ts dev --root tests/fixtures/mini-game` |
 | `tests/visual/` | The visual tests of the mini game and their headless baselines: `<test>/<checkpoint>/state.json`, `describe.json` |
 | `src/plugins/<name>/__tests__/unit/` | Unit tests of one plugin |
 | `src/plugins/<name>/__tests__/integration/` | Integration tests of one plugin |
@@ -174,6 +193,6 @@ The project rules live in [`eslint.config.ts`](../eslint.config.ts).
 | L7 | The public contract carries the docs: every member of a `…Api` type in `types.ts` has JSDoc and a scenario `@example` (when it is called, literal arguments, the result). A member another plugin calls is shown from that plugin's point of view; there is no private tier and no exemption. The implementation of an API method has no JSDoc. Elsewhere an example is allowed, never required | `src/plugins/**/types.ts` |
 | L8 | No signature echo: an `@example` whose whole body is one call with bare identifiers is an error | `src/**` |
 | L9 | The JSX runtime module is reached only through `src/jsx-runtime.ts` and `src/jsx-dev-runtime.ts`, and those two import nothing else | `src/**` outside `ui` |
-| L13 | No import of `@moku-labs/system`, `@moku-labs/native` or `@tauri-apps/*`, type imports included. The game builds the `PlatformProvider` in its own layer | every file under `src/`, tests included |
+| L13 | `@moku-labs/system` is imported only in `src/app/system.ts` and `@moku-labs/native` only in `src/app/native.ts`, the two optional peers of the game shell. `@tauri-apps/*` nowhere. Type imports and `import()` count | every file under `src/`, tests included |
 
 A game gets L2, L3, L4, L5, L13, the dev-only imports and the layout rules (layers, feature doors, test suffixes) from the oxlint plugin `@moku-labs/game/lint`, see [Lint for games](./lint.md). Its tests run the real oxlint on fixtures: `tests/unit/lint-plugin.test.ts`.

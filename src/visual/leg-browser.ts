@@ -372,12 +372,12 @@ async function openPage(context: ChromeContext, url: string, run: VisualRun): Pr
     await page.addInitScript({ content: pageScript() });
     await page.goto(url).catch((error: unknown) => {
       throw new Error(
-        `[game] The page at ${url} did not open: ${firstLine(error)}.\n  Serve the dev page (bun ./web/serve.ts), or run with --no-pixels.`
+        `[game] The page at ${url} did not open: ${firstLine(error)}.\n  Serve the dev page (moku-game dev), or run with --no-pixels.`
       );
     });
     await page.waitForFunction(pageReady, undefined, { timeout: READY_MS }).catch(() => {
       throw new Error(
-        `[game] The page at ${url} exposes no game and doors.\n  Serve the dev page (bun ./web/serve.ts) and set globalThis.game and globalThis.doors in it.`
+        `[game] The page at ${url} exposes no game and doors.\n  Serve the dev page (moku-game dev) and set globalThis.game and globalThis.doors in it.`
       );
     });
 

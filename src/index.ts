@@ -77,21 +77,30 @@
  * | effects | maxPasses | 24, render passes per frame above which one dev warning fires per crossing |
  * | effects | phone | "auto", a coarse pointer and a short side of at most 820 CSS px |
  * | effects | blur | { quality: 2, phoneResolution: 0.5 }, what a Blur with quality 0 and resolution 0 resolves to; shallow merge: a game that sets `blur` gives both fields |
- * | platform | provider | undefined, inert: no subscription, no haptic handler, `back()` answers "none" |
+ * | platform | provider | undefined, inert: no subscription, no haptic handler, `back()` answers "none"; the engine page passes the system shell's provider |
  * | platform | keepAwake | false |
  *
  * Subpaths next to the root:
  *
  * | Subpath | What |
  * |---|---|
+ * | `@moku-labs/game/app` | `defineGameApp`, the game as one data object with `headless()` and `screen()`; `startMoment`; the types of `index.ts` and `config.ts` (`GameConfig`) |
+ * | `@moku-labs/game/app/page` | `startPage`, the page the generated `.moku/main.ts` calls: `?player=` scenarios, the system shell, the dev agents |
+ * | `@moku-labs/game/app/system` | the system shell over the optional peer `@moku-labs/system`: `systemShell`, `fromSystem`, `storeSave`, `createSystemApp` |
+ * | `@moku-labs/game/cli` | `runCli` of the bin `moku-game` and `preparePage` for the editor, node and bun only |
  * | `@moku-labs/game/testing` | headless play, repro runs, isolated feature tests (`isolate`, `stub`), the in-memory save, the fake clock |
  * | `@moku-labs/game/visual` | the visual tests, node and bun only |
  * | `@moku-labs/game/assets` | the build-time asset key scanner and the production packer (`packAssets`, `--pack <dir>`), node and bun only |
  * | `@moku-labs/game/inspect` | the editor's read door: `read`, `watch`, `defineSource`, the `sources` catalogue |
  * | `@moku-labs/game/control` | the editor's write door, dev builds only: `run`, `defineCommand`, the `commands` catalogue |
+ * | `@moku-labs/game/hot` | the Bun plugin that hot swaps views; `moku-game dev` lists it in its bunfig |
+ * | `@moku-labs/game/lint` | the oxlint JS plugin `moku-game` with the game lint rules |
+ * | `@moku-labs/game/project` | the project index of a game's sources, node and bun only |
  * | `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | the JSX runtimes `jsxImportSource: "@moku-labs/game"` names |
  * | `@moku-labs/game/fonts/*` | the MSDF body font `font-body.fnt` + `.png` and its OFL licence; a game copies them into `features/ui/assets/` |
+ * | bin `moku-game` | `dev`, `build`, `native <verb>`, `keys`, `pack`: serves, builds, packages and packs a game folder, bun only |
  * | bin `moku-game-assets` | the asset scanner CLI, bun only |
+ * | bin `moku-game-index` | the project index CLI, bun only |
  *
  * @file The package root: the composed framework and its public exports.
  * @example

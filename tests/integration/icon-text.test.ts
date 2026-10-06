@@ -5,7 +5,7 @@
  * takes two lines, and the spark rides in a line with its words.
  */
 import { describe, expect, it } from "vitest";
-import { createMiniGame } from "../fixtures/mini-game/game";
+import miniGame from "../fixtures/mini-game/index";
 import { tr } from "../fixtures/mini-game/kit";
 import { folderIo, readManifest, startOnHome } from "./mini-helpers";
 
@@ -18,7 +18,7 @@ const note = tr("home.note");
  * @returns The game, resting on `home`.
  */
 async function startWithFonts() {
-  const app = createMiniGame({ manifest: await readManifest(), io: folderIo().io });
+  const { app } = miniGame.screen({ manifest: await readManifest(), io: folderIo().io });
 
   await startOnHome(app);
   expect(app.assets.isLoaded("ui")).toBe(true);

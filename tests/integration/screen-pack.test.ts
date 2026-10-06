@@ -2,11 +2,11 @@
  * @file The production build of the mini game, headless: the committed manifest and generated
  * modules are what the scanner would write again; the fixture is packed into a temp folder with
  * `--pack`, the game plays on the packed manifest, every bundle loads from the pack folder, and
- * the dev server hands the page the packed build with `--packed`.
+ * `moku-game dev --packed` hands the page the packed build.
  */
 
-import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,7 +14,8 @@ import { promisify } from "node:util";
 import type { Assets, Flow } from "@moku-labs/game";
 import { createHeadless } from "@moku-labs/game/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createMiniGame } from "../fixtures/mini-game/game";
+import miniGame from "../fixtures/mini-game/index";
+import { copyMiniGame, removeCopies, type StartedBin, startBin, urlOf } from "./app-helpers";
 import { folderIo, miniFolder, startOnHome } from "./mini-helpers";
 
 const runCommand = promisify(execFile);
@@ -78,58 +79,16 @@ describe("screen-pack — the generated asset keys", () => {
   }, 60_000);
 });
 
-/** A dev server of the fixture page started by a test, and everything it printed so far. */
-type Server = { child: ChildProcess; printed: () => string };
-
 /**
- * Starts the dev server of the fixture page from the fixture's folder, as a person does.
+ * Stops a started `moku-game dev` the way Ctrl+C does and waits for its end.
  *
- * @param args - The flags after the script.
- * @returns The process and what it printed.
- */
-function launchServer(args: readonly string[]): Server {
-  // eslint-disable-next-line sonarjs/no-os-command-from-path -- the Bun on PATH is the one the project scripts run.
-  const child = spawn("bun", ["./web/serve.ts", ...args], { cwd: fileURLToPath(miniFolder) });
-  const chunks: string[] = [];
-  const keep = (chunk: Buffer): void => {
-    chunks.push(chunk.toString("utf8"));
-  };
-
-  child.stdout.on("data", keep);
-  child.stderr.on("data", keep);
-
-  return { child, printed: () => chunks.join("") };
-}
-
-/**
- * Waits for the line in which the server names its URL.
- *
- * @param server - The started server.
- * @returns The URL, ending in `/`.
- */
-function urlOf(server: Server): Promise<string> {
-  return new Promise((resolve, reject) => {
-    server.child.stdout?.on("data", () => {
-      const url = /https?:\/\/\S+\//.exec(server.printed())?.[0];
-
-      if (url !== undefined) resolve(url);
-    });
-    server.child.on("close", code => {
-      reject(new Error(`serve.ts ended with ${code}: ${server.printed()}`));
-    });
-  });
-}
-
-/**
- * Waits for the server to end.
- *
- * @param server - The started server.
+ * @param started - The started bin.
  * @returns The exit code.
  */
-function exitOf(server: Server): Promise<number | null> {
-  return new Promise(resolve => {
-    server.child.on("close", resolve);
-  });
+async function interrupt(started: StartedBin): Promise<number | null> {
+  started.child.kill("SIGINT");
+
+  return started.exit;
 }
 
 /** What the pack test keeps between its cases: the temp folder and the manifest written there. */
@@ -137,6 +96,9 @@ type PackRun = { folder: string; manifest: Assets.Manifest };
 
 /** The packed build of the fixture, made once for the cases below. */
 const packed: PackRun = { folder: "", manifest: { version: 1, bundles: {} } };
+
+/** The copies of the mini game the dev server runs on, removed after the file. */
+const copies: string[] = [];
 
 describe("screen-pack — the packed build", () => {
   beforeAll(async () => {
@@ -163,6 +125,7 @@ describe("screen-pack — the packed build", () => {
 
   afterAll(async () => {
     await rm(packed.folder, { recursive: true, force: true });
+    removeCopies(copies);
   });
 
   it("packs every key of the game once, with the same key module as a dev run", async () => {
@@ -192,7 +155,7 @@ describe("screen-pack — the packed build", () => {
   });
 
   it("plays the game on the packed manifest, every bundle loaded", async () => {
-    const app = createMiniGame({ manifest: packed.manifest });
+    const { app } = miniGame.screen({ manifest: packed.manifest });
     const game = await createHeadless(app);
 
     for (const bundle of Object.keys(packed.manifest.bundles)) {
@@ -209,7 +172,7 @@ describe("screen-pack — the packed build", () => {
 
   it("loads every bundle from the pack folder: each file fetched once, the font from the rewritten .fnt", async () => {
     const disk = folderIo(pathToFileURL(`${path.join(packed.folder, "assets")}/`));
-    const app = createMiniGame({ manifest: packed.manifest, io: disk.io });
+    const { app } = miniGame.screen({ manifest: packed.manifest, io: disk.io });
 
     await startOnHome(app);
     await Promise.all(Object.keys(packed.manifest.bundles).map(bundle => app.assets.load(bundle)));
@@ -233,8 +196,15 @@ describe("screen-pack — the packed build", () => {
     await app.stop();
   });
 
-  it("serves the packed build to the dev page with --packed", async () => {
-    const server = launchServer(["--packed", path.join(packed.folder, "assets"), "--port", "0"]);
+  it("serves the packed build to the dev page with moku-game dev --packed", async () => {
+    const root = copyMiniGame("screen-pack");
+
+    copies.push(root);
+    await cp(path.join(packed.folder, "assets"), path.join(root, "dist", "assets"), {
+      recursive: true
+    });
+
+    const server = startBin(["dev", "--root", root, "--packed", "--port", "0"]);
 
     try {
       const url = await urlOf(server);
@@ -252,14 +222,18 @@ describe("screen-pack — the packed build", () => {
       expect(loose.status).toBe(404);
       expect(await html.text()).toContain('<div id="game"></div>');
     } finally {
-      server.child.kill();
+      expect(await interrupt(server)).toBe(0);
     }
   }, 60_000);
 
-  it("refuses --packed without a pack and names the script that makes one", async () => {
-    const server = launchServer(["--packed", path.join(packed.folder, "missing"), "--port", "0"]);
+  it("refuses --packed without a pack and names the command that makes one", async () => {
+    const root = copyMiniGame("screen-unpacked");
 
-    expect(await exitOf(server)).toBe(1);
-    expect(server.printed()).toContain('Run "bun run mini:pack"');
+    copies.push(root);
+
+    const server = startBin(["dev", "--root", root, "--packed", "--port", "0"]);
+
+    expect(await server.exit).toBe(1);
+    expect(server.stderr()).toContain('Run "moku-game pack" first.');
   }, 60_000);
 });

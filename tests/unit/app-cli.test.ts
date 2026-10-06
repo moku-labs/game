@@ -726,8 +726,11 @@ describe("keys and pack", () => {
   const layered =
     'export default { page: { title: "t" }, assets: { layers: { shared: "ui" } } };\n';
 
+  /** An English string file. */
+  const english = '{ "home.title": "Home" }\n';
+
   it("keys passes the config layers and --pseudo to the scan", async () => {
-    const root = makeGame({ "config.ts": layered });
+    const root = makeGame({ "config.ts": layered, "shared/strings/en.json": english });
     const { code, seen } = await run(["keys"], root);
 
     expect(code).toBe(0);
@@ -743,6 +746,27 @@ describe("keys and pack", () => {
         path.join(root, "manifest.json"),
         "--pseudo"
       ]
+    ]);
+  });
+
+  it("keys passes --pseudo for a feature's en strings, and none without an en string file", async () => {
+    const featured = makeGame({ "features/home/strings/en.json": english });
+    const russianOnly = makeGame({ "features/home/strings/ru.json": english });
+    const bare = makeGame();
+
+    const withEnglish = await run(["keys"], featured);
+    const withRussian = await run(["keys"], russianOnly);
+    const without = await run(["keys"], bare);
+
+    expect(withEnglish.seen.scans[0]?.at(-1)).toBe("--pseudo");
+    expect(withRussian.seen.scans[0]).not.toContain("--pseudo");
+    expect(without.seen.scans[0]).toEqual([
+      "--root",
+      bare,
+      "--keys",
+      path.join(bare, "generated", "assets.ts"),
+      "--manifest",
+      path.join(bare, "manifest.json")
     ]);
   });
 
@@ -926,6 +950,22 @@ describe.skipIf(typeof Bun === "undefined")("runCli", () => {
 
       expect(code).toBe(0);
       expect(lines.join("\n")).toContain("are up to date.");
+    } finally {
+      removeCopies(copies);
+    }
+  });
+
+  it("runs keys through the real scanner on a game with no string file", async () => {
+    const copies = [copyMiniGame("cli-keys-bare")];
+    const root = copies[0] ?? "";
+
+    try {
+      rmSync(path.join(root, "features", "home", "strings"), { recursive: true });
+
+      const { code, lines } = await runReal(["keys", "--root", root]);
+
+      expect(code).toBe(0);
+      expect(lines.join("\n")).not.toContain("--pseudo");
     } finally {
       removeCopies(copies);
     }

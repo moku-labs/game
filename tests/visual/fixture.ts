@@ -6,10 +6,11 @@
  */
 import { readFileSync } from "node:fs";
 import type { Assets } from "@moku-labs/game";
+import { startMoment } from "@moku-labs/game/app";
 import type { VisualSetup, VisualStart } from "@moku-labs/game/visual";
-import { createMiniGame } from "../fixtures/mini-game/game";
+import miniGame from "../fixtures/mini-game/index";
 import { startingSession } from "../fixtures/mini-game/state";
-import { ready } from "../fixtures/mini-game/web/scenarios";
+import ready from "../fixtures/mini-game/tests/scenarios/ready";
 import { folderIo, miniFolder } from "../integration/mini-helpers";
 
 /** The dev manifest, the file the dev server hands the page. */
@@ -19,15 +20,16 @@ const manifest = JSON.parse(
 
 /**
  * A fresh mini game with its screen, not started: the setup of every visual test. Headless the
- * renderer is inert; the page of the pixel leg builds the same app in `web/main.ts`.
+ * renderer is inert; the page `moku-game dev` serves builds the same app with `miniGame.screen()`.
  *
  * @returns The app.
  */
-export const miniApp: VisualSetup["app"] = () => createMiniGame({ manifest, io: folderIo().io });
+export const miniApp: VisualSetup["app"] = () =>
+  miniGame.screen({ manifest, io: folderIo().io }).app;
 
 /** Where every visual test starts: the `ready` save of the dev page at Home, the counter at 3. */
 export const atHome: VisualStart = {
-  player: ready,
+  player: ready(startMoment).player,
   session: startingSession,
   checkpoint: "home"
 };

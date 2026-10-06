@@ -4,6 +4,8 @@
  * sits and what the player heard, and taps OK. The game runs with its screen, the fixture's own
  * files behind the assets seam and a fake audio context, unlocked by a first pointer event.
  */
+
+import { startMoment } from "@moku-labs/game/app";
 import { commands, run } from "@moku-labs/game/control";
 import { read, sources } from "@moku-labs/game/inspect";
 import type { Repro } from "@moku-labs/game/testing";
@@ -12,10 +14,10 @@ import {
   createFakeContext,
   installFakeWindow
 } from "../../src/plugins/audio/__tests__/fake-audio-context";
-import type { MiniGame } from "../fixtures/mini-game/game";
-import { createMiniGame } from "../fixtures/mini-game/game";
+import miniGame from "../fixtures/mini-game/index";
 import { startingSession } from "../fixtures/mini-game/state";
-import { ready } from "../fixtures/mini-game/web/scenarios";
+import ready from "../fixtures/mini-game/tests/scenarios/ready";
+import type { MiniGame } from "./mini-helpers";
 import { folderIo, frames, readManifest, startOnHome, tick, until } from "./mini-helpers";
 
 /** What a production build throws for every `/control` command. */
@@ -23,7 +25,7 @@ const refused = "[game] Control commands run in dev builds only.";
 
 /** The bug report an e2e script loads: the `ready` save, entered at Home, with no route. */
 const repro = {
-  player: ready,
+  player: ready(startMoment).player,
   session: startingSession,
   checkpoint: "home",
   route: []
@@ -39,7 +41,7 @@ const repro = {
 async function startDevGame(): Promise<MiniGame> {
   const page = installFakeWindow();
   const context = createFakeContext();
-  const app = createMiniGame({
+  const { app } = miniGame.screen({
     manifest: await readManifest(),
     io: folderIo().io,
     audio: { context: () => context, journal: 200 }
@@ -101,7 +103,7 @@ describe("doors — an e2e script on the dev build", () => {
     expect(answered.value).toBe(true);
     await until(app, () => read(app, sources.position).path === "home");
 
-    expect(app.model.store.snapshot().player).toEqual({ count: ready.count + 1 });
+    expect(app.model.store.snapshot().player).toEqual({ count: repro.player.count + 1 });
 
     await app.stop();
   });
