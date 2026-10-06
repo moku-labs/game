@@ -826,7 +826,7 @@ describe("@moku-labs/game/lint rules in process", () => {
     }
     for (const file of ["plugins/platform/index.ts", "core/kit.ts", "shared/x.ts", "kit.ts"]) {
       expect(check("native-imports", file, native), file).toEqual([
-        "L13: a native package is imported only where the platform is wired: platform-bridge.ts, native.ts, web/ today; the engine CLI after B3. Pass a PlatformProvider."
+        "L13: a native package is imported only where the platform is wired: platform-bridge.ts, native.ts or web/. Pass a PlatformProvider."
       ]);
     }
     expect(check("native-imports", "platform-bridge.ts", native)).toEqual([]);

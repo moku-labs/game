@@ -652,7 +652,7 @@ const nativeImports = importRule(
     {
       pattern: /^(?:@moku-labs\/(?:system|native)(?:\/|$)|@tauri-apps\/)/,
       message:
-        "L13: a native package is imported only where the platform is wired: platform-bridge.ts, native.ts, web/ today; the engine CLI after B3. Pass a PlatformProvider."
+        "L13: a native package is imported only where the platform is wired: platform-bridge.ts, native.ts or web/. Pass a PlatformProvider."
     }
   ]
 );

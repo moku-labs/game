@@ -84,7 +84,7 @@
  *
  * | Subpath | What |
  * |---|---|
- * | `@moku-labs/game/testing` | headless play, repro runs, the in-memory save, the fake clock |
+ * | `@moku-labs/game/testing` | headless play, repro runs, isolated feature tests (`isolate`, `stub`), the in-memory save, the fake clock |
  * | `@moku-labs/game/visual` | the visual tests, node and bun only |
  * | `@moku-labs/game/assets` | the build-time asset key scanner and the production packer (`packAssets`, `--pack <dir>`), node and bun only |
  * | `@moku-labs/game/inspect` | the editor's read door: `read`, `watch`, `defineSource`, the `sources` catalogue |
