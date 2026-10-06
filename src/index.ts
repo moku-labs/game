@@ -227,6 +227,9 @@ export const screen = [
 
 // ─── Plugins + Types ──────────────────────────────────────────
 export * from "./plugins";
+// Bun's dev bundler drops values reached only through `export *`; a page built from src needs
+// every plugin value named here.
+export { audioPlugin, effectsPlugin, platformPlugin } from "./plugins";
 
 // ─── Helpers (explicit, never export *) ───────────────────────
 // flow: nodes, flows, features, effect descriptors

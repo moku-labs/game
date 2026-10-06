@@ -1,6 +1,27 @@
+import { readFileSync } from "node:fs";
 import * as engine from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
 import { defineFlow, defineNode } from "../../src/plugins/flow/runner/define";
+
+/** The `src` folder of the repository. */
+const SRC = new URL("../../src/", import.meta.url);
+
+/**
+ * Collect the names in every `import { … } from "./plugins"` and `export { … } from "./plugins"`
+ * of a source text.
+ *
+ * @param source - The text of a TypeScript file.
+ * @returns The names inside the braces, without `type` imports.
+ */
+function namedFromPlugins(source: string): string[] {
+  const statements = source.matchAll(/(?:import|export) \{([^}]*)\} from "\.\/plugins";/g);
+  return [...statements].flatMap(([, names = ""]) =>
+    names
+      .split(",")
+      .map(name => name.trim())
+      .filter(name => name !== "")
+  );
+}
 
 describe("root index", () => {
   it("exports no teardown registry: a plugin frees its resource in onStop from its state", () => {
@@ -73,5 +94,14 @@ describe("root index", () => {
 
   it("exports no genre rules", () => {
     expect(Object.keys(engine)).not.toContain("rules");
+  });
+
+  it("names every plugin value of the barrel, so Bun's dev bundler keeps it", () => {
+    const barrel = readFileSync(new URL("plugins/index.ts", SRC), "utf8");
+    const plugins = [...barrel.matchAll(/export \{ (\w+Plugin) \} from/g)].map(([, name]) => name);
+    const named = namedFromPlugins(readFileSync(new URL("index.ts", SRC), "utf8"));
+
+    expect(plugins).toHaveLength(17);
+    expect(plugins.filter(name => name !== undefined && !named.includes(name))).toEqual([]);
   });
 });
