@@ -34,13 +34,13 @@ oxlint 1.86.0 or later. The rules use the ESLint rule API, so ESLint 9 loads the
 | `moku-game/no-module-state` | L5 | a module-scope `let` or `var`, a module-scope `new Map/Set/WeakMap/WeakSet` (exported too) | the same inside a function |
 | `moku-game/determinism` | L3 | `Math.random`, `Date.now`, `performance.now`, `new Date()`, `setTimeout`, `setInterval` (bare or on `globalThis`, `window`, `self`) | `new Date(now)`: it formats a stored moment |
 | `moku-game/rules-siblings` | L4 | an import in `rules/` that does not start with `./` | `import { cost } from "./cost"` |
-| `moku-game/static-keys` | keys | a JSX `key` the project index cannot follow: `tabKeys[props.tab]`, `a ?? b`, `a \|\| b`, `a && b`, `a ? b : c`, `props.tab`, `item.name`, a `let`, a `const` of one of these | `key="row"`, `` key={`${props.id}Label`} ``, `props.id`, `props.amountKey`, `cardKey(card.slot)`, a parameter, an import, a `const` of one of these |
+| `moku-game/static-keys` | keys | a JSX `key` the project index cannot follow: `tabKeys[props.tab]`, `a ?? b`, `a \|\| b`, `a && b`, `a ? b : c`, `props.tab`, `item.name`, a `let`, a function, a class or a catch parameter, a `const` of one of these | `key="row"`, `key={3}`, `` key={`${props.id}Label`} ``, `props.id`, `props.amountKey`, `cardKey(card.slot)`, a parameter, an import, a `const` of one of these |
 
 `import { type A } from "pixi.js"` is reported. Under `verbatimModuleSyntax` it keeps a side-effect import, which loads Pixi. Write `import type { A } from "pixi.js"`.
 
 ### Static keys
 
-The game reports a JSX key at run time; `find` turns it back into the line that wrote it. That works when the key is written so the index can read it. A name is followed through up to three `const` initializers in the file; a parameter, an import and a call are left to the index, and `--check` lists what it still cannot read.
+The game reports a JSX key at run time; `find` turns it back into the line that wrote it. That works when the key is written so the index can read it. A key may be a string or number literal; the index reads both. A name is followed through up to three `const` initializers in the file. A parameter, an import, a global and a call are left to the index, and `--check` lists what it still cannot read. Any other name is reported: a `let`, a `var`, a function, a class, a catch parameter.
 
 ```tsx
 // Reported: the key is picked out of a table at run time.

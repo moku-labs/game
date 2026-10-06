@@ -13,7 +13,11 @@ import { type FunctionNode, meaningOf, unwrap } from "./scope";
 /** A hole nothing in the file can fill. */
 export const ANY = "*";
 
-/** A hole filled at run time by a key-carrying prop of the component: `{id}`, `{amountKey}`. */
+/**
+ * A hole filled at run time by a key-carrying prop of the component: `{id}`, `{amountKey}`. The
+ * regex is global, so `.test` keeps `lastIndex` between calls: test a pattern with `hasHole`, never
+ * `HOLE.test`.
+ */
 export const HOLE = /\{\w+\}/g;
 
 /** A key-carrying prop: `id`, or a name that ends in `Key`. */

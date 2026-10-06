@@ -11,6 +11,8 @@ import type {
 } from "@moku-labs/game/lint";
 import plugin, { globToRegExp } from "@moku-labs/game/lint";
 import { afterAll, describe, expect, it } from "vitest";
+import { buildIndex, createCatalog, putFile } from "../../src/project/catalog";
+import { loadTypeScript } from "../../src/project/typescript";
 
 // ---------------------------------------------------------------------------
 // Unit test: the `@moku-labs/game/lint` oxlint plugin. The end-to-end cases run
@@ -612,7 +614,8 @@ describe("@moku-labs/game/lint rules in process", () => {
         far: constOf(id("chain")),
         farther: constOf(id("far")),
         props: { type: "Parameter", node: { type: "ArrowFunctionExpression" } },
-        slotKey: { type: "ImportBinding", node: { type: "ImportSpecifier" } }
+        slotKey: { type: "ImportBinding", node: { type: "ImportSpecifier" } },
+        someFunction: { type: "FunctionName", node: { type: "FunctionDeclaration" } }
       }).map(([name, definition]) => [name, { defs: [definition] }])
     );
     // The names are declared one scope out, as a module scope is from a function body.
@@ -648,16 +651,22 @@ describe("@moku-labs/game/lint rules in process", () => {
       }),
       keyOf({ type: "ChainExpression", expression: member("props", "unitKey") })
     ];
+    // The rule reads only the type of these; the other fields make them real nodes.
+    const nullish = { type: "LogicalExpression", operator: "??", left: id("a"), right: id("b") };
+    const either = { type: "LogicalExpression", operator: "||", left: id("a"), right: id("b") };
+    const choice = { type: "ConditionalExpression", test: id("a") };
     const fails: [string, GameLintNode][] = [
       keyOf(member("tabKeys", "tab", true)),
-      keyOf({ type: "LogicalExpression", operator: "??", left: id("a"), right: id("b") }),
-      keyOf({ type: "ConditionalExpression", test: id("a") }),
+      keyOf(nullish),
+      keyOf(either),
+      keyOf(choice),
       keyOf(member("props", "tab")),
       keyOf({ type: "MemberExpression", object: member("props", "item"), property: id("id") }),
       keyOf(literal(true)),
       keyOf(id("lookup")),
       keyOf(id("moving")),
       keyOf(template(id("lookup"))),
+      keyOf(id("someFunction")),
       keyOf({ type: "JSXEmptyExpression" })
     ];
     const message =
@@ -669,5 +678,37 @@ describe("@moku-labs/game/lint rules in process", () => {
     );
     expect(check("static-keys", "features/a.ts", fails, [], scope)).toEqual([]);
     expect(check("static-keys", "tests/a.tsx", fails, [], scope)).toEqual([]);
+  });
+});
+
+describe("static-keys and the project index", () => {
+  it("accept props.<name> exactly when the index turns it into a {<name>} hole", async () => {
+    const names = ["id", "amountKey", "unitKey", "Key", "idx", "keyName", "monkey", "tab"];
+    const catalog = createCatalog(await loadTypeScript());
+
+    for (const name of names) {
+      const text = `export const Row = (props: { ${name}: string }) => <row key={props.${name}} />;\n`;
+
+      putFile(catalog, `features/ui/${name}.tsx`, Buffer.from(text));
+    }
+
+    const index = buildIndex(catalog);
+    const holes = names.filter(name => index.symbols[`jsx:{${name}}`] !== undefined);
+    const accepted = names.filter(
+      name =>
+        check("static-keys", "features/a.tsx", [
+          [
+            "JSXAttribute",
+            {
+              type: "JSXAttribute",
+              name: { type: "JSXIdentifier", name: "key" },
+              value: { type: "JSXExpressionContainer", expression: member("props", name) }
+            }
+          ]
+        ]).length === 0
+    );
+
+    expect(accepted).toEqual(["id", "amountKey", "unitKey"]);
+    expect(holes).toEqual(accepted);
   });
 });

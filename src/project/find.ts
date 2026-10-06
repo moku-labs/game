@@ -80,10 +80,14 @@ function shapesOf(session: Session): JsxShapes {
  * @returns True when the filled pattern reads as the key.
  */
 function fills(pattern: Anchor, filler: Anchor, wanted: string): boolean {
-  const isSameComponent = pattern.component === undefined || pattern.component === filler.component;
-  const filled = (pattern.key ?? "").replaceAll(holeOf(filler.prop ?? "id"), filler.key ?? "");
+  if (pattern.component !== undefined && pattern.component !== filler.component) return false;
 
-  return isSameComponent && matchesPattern(filled, wanted);
+  const key = pattern.key ?? "";
+  const hole = holeOf(filler.prop ?? "id");
+
+  if (!key.includes(hole)) return false;
+
+  return matchesPattern(key.replaceAll(hole, filler.key ?? ""), wanted);
 }
 
 /**

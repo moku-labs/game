@@ -26,7 +26,6 @@ export type GameLintNode = {
   readonly computed?: boolean;
   readonly importKind?: string;
   readonly exportKind?: string;
-  readonly operator?: string;
   readonly source?: GameLintNode | null;
   readonly body?: readonly GameLintNode[];
   readonly declarations?: readonly GameLintNode[];
@@ -38,9 +37,6 @@ export type GameLintNode = {
   readonly property?: GameLintNode;
   readonly expression?: GameLintNode;
   readonly expressions?: readonly GameLintNode[];
-  readonly left?: GameLintNode;
-  readonly right?: GameLintNode;
-  readonly test?: GameLintNode;
 };
 
 /** One declaration of a name, as the scope manager of oxlint and ESLint hands it over. */
@@ -143,7 +139,11 @@ const CLOCK_READS = [
 /** The collections a module may not hold at module scope (L5). */
 const COLLECTION = /^(?:Map|Set|WeakMap|WeakSet)$/;
 
-/** A key-carrying prop the project index fills a key from: `id`, or a name that ends in `Key`. */
+/**
+ * A key-carrying prop the project index fills a key from: `id`, or a name that ends in `Key`. The
+ * index holds its own copy; a behavioural unit test keeps the two in step: the rule accepts
+ * `props.<name>` exactly when the index turns it into a `{<name>}` hole.
+ */
 const KEY_PROP = /^(?:id|\w+Key)$/;
 
 /** The wrappers a key is read through, as the index reads them: casts, parentheses, `?.` chains. */
@@ -570,6 +570,9 @@ function definitionOf(
   return undefined;
 }
 
+/** The declarations a key name is left to the index for: `--check` lists what it cannot read. */
+const OUT_OF_REACH = /^(?:Parameter|ImportBinding)$/;
+
 /**
  * Whether a key name is one the project index reads: a `const` whose value is a static key, or a
  * name out of reach here (a parameter, an import, a global), which `--check` lists when the index
@@ -578,12 +581,16 @@ function definitionOf(
  * @param context - The rule context.
  * @param identifier - The name.
  * @param hops - How many `const` initializers were followed to reach it.
- * @returns False for a `let`, a `var`, or a `const` whose value the index cannot follow.
+ * @returns False for a `let`, a `var`, a `const` whose value the index cannot follow, and a
+ *   function, a class or a catch parameter.
  */
 function isStaticName(context: GameLintContext, identifier: GameLintNode, hops: number): boolean {
   const definition = definitionOf(context, identifier);
 
-  if (definition?.type !== "Variable" || hops >= KEY_HOPS) return true;
+  if (definition === undefined || OUT_OF_REACH.test(definition.type) || hops >= KEY_HOPS) {
+    return true;
+  }
+  if (definition.type !== "Variable") return false;
 
   return (
     definition.parent?.kind === "const" && isStaticKey(context, definition.node.init, hops + 1)
