@@ -18,6 +18,9 @@ const DEFAULT_TEXT_STYLE = "body";
 /** The glyph an icon is sized from: one line of the text style it sits in. */
 const LINE_SAMPLE = "M";
 
+/** Below this a measured length counts as whole: the tolerance Yoga's own rounding uses. */
+const WHOLE_EPSILON = 0.0001;
+
 /**
  * Makes an icon square on the line height of the text next to it.
  *
@@ -127,9 +130,6 @@ export function shownOf(element: Element, source: TextSource): string | undefine
   return value === undefined ? "" : formatBound(value, format, ms => source.duration(ms));
 }
 
-/** Below this a measured length counts as whole: the tolerance Yoga's own rounding uses. */
-const WHOLE_EPSILON = 0.0001;
-
 /**
  * The size a text or an icon takes before Yoga clamps it: an icon is square on one line of its
  * text style, a bound text measures the string it shows, any other text its content. The size is
@@ -142,11 +142,14 @@ const WHOLE_EPSILON = 0.0001;
  */
 function naturalSize(element: Element, source: TextSource): Size {
   const { content, style } = contentOf(element);
+
+  // An icon is one line of its style squared; a text is the string it shows.
   const size =
     element.type === "icon"
       ? squareOf(source.measure(LINE_SAMPLE, style))
       : source.measure(shownOf(element, source) ?? content, style);
 
+  // Whole units, so Yoga sizes the parent from the same length it draws the text at.
   return {
     width: Math.ceil(size.width - WHOLE_EPSILON),
     height: Math.ceil(size.height - WHOLE_EPSILON)
