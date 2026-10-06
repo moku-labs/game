@@ -78,6 +78,7 @@ export type LayoutModule = {
   attach(element: Element): void;
   applyStyle(element: Element): void;
   remeasure(element: Element): boolean;
+  markMeasured(element: Element): void;
   affectsRect(first: ResolvedStyle, second: ResolvedStyle): boolean;
   place(parent: Element, children: readonly Element[]): void;
   free(element: Element): void;
