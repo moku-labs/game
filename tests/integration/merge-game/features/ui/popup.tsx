@@ -168,23 +168,22 @@ const amountCoin = defineStyle({ width: 104, height: 104 });
  * @param props.id - The key of the row; the coin is keyed `<id>Coin`.
  * @param props.amountKey - The key of the big number.
  * @param props.amount - The number, already signed: `"+25"`.
- * @param props.unitKey - The key of the word after it.
+ * @param props.unitKey - The key of the word after it; given with the word, and only then.
  * @param props.unit - The word after the number; none when left out.
  * @returns The row element.
  */
-export function Amount(props: {
-  id: string;
-  amountKey: string;
-  amount: string;
-  unitKey?: string;
-  unit?: Label;
-}) {
+export function Amount(
+  props: { id: string; amountKey: string; amount: string } & (
+    | { unitKey?: undefined; unit?: undefined }
+    | { unitKey: string; unit: Label }
+  )
+) {
   return (
     <row key={props.id} style={amountRow}>
       <icon key={`${props.id}Coin`} name="ui.icon-coin" style={amountCoin} />
       <text key={props.amountKey} style="ui.amount" content={props.amount} />
       {props.unit === undefined ? undefined : (
-        <text key={props.unitKey ?? `${props.id}Unit`} style="ui.title" content={props.unit} />
+        <text key={props.unitKey} style="ui.title" content={props.unit} />
       )}
     </row>
   );

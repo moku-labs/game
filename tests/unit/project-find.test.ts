@@ -156,6 +156,7 @@ describe("find", () => {
         key: "settingsBoard",
         kind: "idProp",
         component: "Signboard",
+        prop: "id",
         line: 4,
         range: [3, 5, 8, 17],
         hash: project.index.files["features/settings/settings.tsx"]?.hash
@@ -178,6 +179,57 @@ describe("find", () => {
       "features/ui/kit.tsx:16:card"
     ]);
     expect(await project.find("jsx:nothingClose")).toEqual([]);
+  });
+
+  it("fills a {<name>Key} pattern only with literal props of that name, and {id} as before", async () => {
+    const popup = `export function Amount(props: { id: string; amountKey: string }) {
+  return (
+    <row key={props.id}>
+      <text key={props.amountKey} />
+      <text key={\`\${props.amountKey}Unit\`} />
+    </row>
+  );
+}
+`;
+    const gift = `export function Gift() {
+  return (
+    <Amount
+      id="giftAmount"
+      amountKey="giftReward"
+    />
+  );
+}
+`;
+    const project = await openProject({
+      root: writeGame({ "features/ui/popup.tsx": popup, "features/gift/gift.tsx": gift })
+    });
+
+    /**
+     * The answers of `find` as `path:line:key`.
+     *
+     * @param key - The runtime key.
+     * @returns The answers.
+     */
+    const answers = async (key: string): Promise<string[]> => {
+      const found = await project.find(key);
+
+      return found.map(place => `${place.path}:${place.line}:${place.key}`);
+    };
+
+    expect(await answers("jsx:giftReward")).toEqual([
+      "features/gift/gift.tsx:5:giftReward",
+      "features/ui/popup.tsx:4:{amountKey}"
+    ]);
+    expect(await answers("jsx:giftRewardUnit")).toEqual([
+      "features/ui/popup.tsx:5:{amountKey}Unit",
+      "features/gift/gift.tsx:5:giftReward"
+    ]);
+    expect(await answers("jsx:giftAmount")).toEqual([
+      "features/gift/gift.tsx:4:giftAmount",
+      "features/ui/popup.tsx:3:{id}"
+    ]);
+    expect(await answers("jsx:giftAmountUnit")).toEqual([]);
+    project.close();
   });
 
   it("answers every call of a style factory, and a property style at its call", async () => {

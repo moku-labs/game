@@ -581,7 +581,8 @@ export const Badge = ({ id }: { id: string }) => <text key={\`\${id}Badge\`} />;
         path: "features/orders/strip.tsx",
         key: "stripBoard",
         kind: "idProp",
-        component: "Signboard"
+        component: "Signboard",
+        prop: "id"
       }
     ]);
     expect(index.symbols["jsx:lowercase"]).toBeUndefined();
@@ -616,6 +617,74 @@ export const Badge = ({ id }: { id: string }) => <text key={\`\${id}Badge\`} />;
     expect(index.symbols["jsx:{id}Badge"]?.def).toEqual([
       { path: "features/ui/kit.tsx", key: "{id}Badge", kind: "template", component: "Badge" }
     ]);
+  });
+
+  it("turns props.<name>Key into a {<name>Key} hole and keeps any other prop a *", () => {
+    const index = indexOf({
+      "features/ui/popup.tsx": `export function Amount(props: { id: string; amountKey: string; tab: string }) {
+  return (
+    <row key={props.id}>
+      <text key={props.amountKey} />
+      <text key={\`\${props.amountKey}Unit\`} />
+      <text key={props.tab} />
+    </row>
+  );
+}
+
+export const Coin = ({ coinKey }: { coinKey: string }) => <icon key={coinKey} />;
+`
+    });
+
+    expect(index.symbols["jsx:{amountKey}"]?.def).toEqual([
+      { path: "features/ui/popup.tsx", key: "{amountKey}", kind: "ident", component: "Amount" }
+    ]);
+    expect(index.symbols["jsx:{amountKey}Unit"]?.def).toEqual([
+      {
+        path: "features/ui/popup.tsx",
+        key: "{amountKey}Unit",
+        kind: "template",
+        component: "Amount"
+      }
+    ]);
+    expect(index.symbols["jsx:{coinKey}"]?.def).toEqual([
+      { path: "features/ui/popup.tsx", key: "{coinKey}", kind: "ident", component: "Coin" }
+    ]);
+    expect(index.unresolved).toEqual([
+      { path: "features/ui/popup.tsx", reason: 'JSX key "props.tab" on <text> resolves to "*"' }
+    ]);
+  });
+
+  it("indexes a literal key-carrying prop on a component with its prop, and no other prop", () => {
+    const index = indexOf({
+      "features/gift/gift.tsx": `export function Gift() {
+  return (
+    <Amount id="giftAmount" amountKey="giftReward" title="Gift" picture="ui.gift">
+      <panel unitKey="lowercase" />
+    </Amount>
+  );
+}
+`
+    });
+
+    expect(index.symbols["jsx:giftReward"]?.def).toEqual([
+      {
+        path: "features/gift/gift.tsx",
+        key: "giftReward",
+        kind: "idProp",
+        component: "Amount",
+        prop: "amountKey"
+      }
+    ]);
+    expect(index.symbols["jsx:giftAmount"]?.def).toEqual([
+      {
+        path: "features/gift/gift.tsx",
+        key: "giftAmount",
+        kind: "idProp",
+        component: "Amount",
+        prop: "id"
+      }
+    ]);
+    expect(keysOf(index, "jsx:")).toEqual(["jsx:giftAmount", "jsx:giftReward"]);
   });
 
   it("repeats a JSX key without a conflict and sends a bare * to unresolved", () => {

@@ -179,10 +179,10 @@ function netMoves(brought: readonly Call[]): ProjectChange["moved"] {
 function lineProblem(key: string, found: Found): string | undefined {
   const bytes = readFileSync(path.join(root, found.path));
   const line = bytes.toString("utf8").split("\n")[found.line - 1] ?? "";
-  const literals = (found.key ?? "").split(/\*|\{id\}/).filter(part => part !== "");
+  const literals = (found.key ?? "").split(/\*|\{\w+\}/).filter(part => part !== "");
   const isJsx = found.kind !== undefined;
   const holdsJsx =
-    (found.kind === "idProp" ? line.includes("id=") : line.includes("key=")) &&
+    (found.kind === "idProp" ? line.includes(`${found.prop ?? "id"}=`) : line.includes("key=")) &&
     literals.every(part => line.includes(part) || found.kind !== "literal");
   const holdsBinding = found.binding !== undefined && line.includes(found.binding);
   const holdsKey = found.key !== undefined && line.includes(found.key);

@@ -57,16 +57,6 @@ export const SEGMENTS = 10;
 /** How much one press of − or + moves a bus: one segment. */
 export const VOLUME_STEP = 1 / SEGMENTS;
 
-/** The tabs in the order they are drawn. */
-const tabs: readonly Tab[] = ["audio", "language", "profile"];
-
-/** The key of every tab's button; its words are keyed `<key>Label`. */
-const tabKeys: Record<Tab, string> = {
-  audio: "tabSound",
-  language: "tabLanguage",
-  profile: "tabProfile"
-};
-
 /** The two buses in the order they are drawn, with their icons. */
 const buses: readonly { bus: Bus; icon: AssetKey }[] = [
   { bus: "music", icon: "ui.icon-music" },
@@ -104,22 +94,21 @@ function litOf(volume: number): number {
  * tab that reaches down over the border of the parchment.
  *
  * @param props - The tab and whether it is on show.
+ * @param props.id - The key of the button, `tab<Name>`; its words are keyed `<id>Label`.
  * @param props.tab - The tab.
  * @param props.open - Whether its pane is the one on show.
- * @returns The button element, keyed `tab<Name>`.
+ * @returns The button element.
  */
-function TabButton(props: { tab: Tab; open: boolean }) {
-  const key = tabKeys[props.tab];
-
+function TabButton(props: { id: string; tab: Tab; open: boolean }) {
   return (
     <button
-      key={key}
+      key={props.id}
       local={{ tab: props.tab }}
       state={{ selected: props.open }}
       style={props.open ? tabOpen : tabIdle}
     >
       <text
-        key={`${key}Label`}
+        key={`${props.id}Label`}
         style={props.open ? "ui.tab" : "ui.button"}
         content={tr("settings.tab", { tab: props.tab })}
       />
@@ -309,9 +298,9 @@ export const Settings = defineComponent("Settings", {
         <Parchment id="settingsPane">
           {paneOf(local.tab, props)}
           <row key="settingsTabs" style={tabRow}>
-            {tabs.map(tab => (
-              <TabButton tab={tab} open={local.tab === tab} />
-            ))}
+            <TabButton id="tabSound" tab="audio" open={local.tab === "audio"} />
+            <TabButton id="tabLanguage" tab="language" open={local.tab === "language"} />
+            <TabButton id="tabProfile" tab="profile" open={local.tab === "profile"} />
           </row>
         </Parchment>
         <button key="settingsReset" intent="reset" style={linkStyle}>

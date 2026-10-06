@@ -146,7 +146,8 @@ type NodeContext = {
     "moku-game/dev-imports": "error",
     "moku-game/no-module-state": "error",
     "moku-game/determinism": "error",
-    "moku-game/rules-siblings": "error"
+    "moku-game/rules-siblings": "error",
+    "moku-game/static-keys": "error"
   }
 }
 ```
@@ -157,6 +158,7 @@ type NodeContext = {
 - `moku-game/no-module-state` (L5): no module-scope `let` or `var`, no module-scope `new Map/Set/WeakMap/WeakSet`. Default files `**`.
 - `moku-game/determinism` (L3): no `Math.random`, `Date.now`, `performance.now`, `new Date()`, `setTimeout`, `setInterval` in the logic. `new Date(now)` passes.
 - `moku-game/rules-siblings` (L4): a file under `rules/` imports only `./` siblings.
+- `moku-game/static-keys`: a JSX `key` is a literal, a template of such parts, `props.id` or `props.<name>Key`, a call, or a `const` of one. `tabKeys[props.tab]`, `a ?? b`, `a || b`, `a ? b : c` and `props.tab` are reported: pass the key in as a prop, `<TabButton id="tabSound" />`. Default files `**/*.tsx`.
 - Logic = `**/state.ts`, `**/tables.ts`, `**/{nodes,flows,rules,features}/**`. Tests (`tests/**`, `**/__tests__/**`, `*.test.ts`) are skipped by every rule.
 - Every rule takes `["error", { "files": [...], "ignores": [...] }]`. Globs are relative to the directory oxlint runs in; a key given replaces the default.
 
@@ -520,7 +522,7 @@ project.close();
 
 - `openProject({ root, manifest?, debounceMs? })` resolves `ProjectApi`: `index` (frozen, replaced per batch), `find(key)` (a `Found[]`: the anchor plus `line`, `range` `[startLine, startCol, endLine, endCol]` 1-based with an exclusive end column, `hash`, and `broken: true` when the file does not parse now), `watch(onIndex)` (one call per batch that changed bytes, with `(index, change)`; returns the stop function), `changed(path)` (re-index one root-relative path now, no watch call), `close()`. Without `typescript` it rejects with `[game] The project index needs the "typescript" package.`
 - Keys: `flow:<id>`, `node:<flow>/<node>` (every entry of a `nodes` table: node, sub-flow, slot), `feature:<id>`, `scene:<id>`, `projection:<name>`, `emitter:<id>`, `textStyle:<key>`, `style:<path>#<binding>` (a module-level `const` of `defineStyle`), `style:<path>#<function>` (every `defineStyle` call inside a module-level function or function-valued const; `find` answers each call) and `style:<path>#<function>.<property>` (a call under an object property there; a style in a class, an object const or at module scope stays unresolved), `component:<Name>` (in a `.tsx` file a module-level upper-case `function Name` or function-valued `const Name`; anywhere `defineComponent("Name", …)`, bound to its const; `uses` are the files that render `<binding>`), `jsx:<key>`. Definers are recognised by binding from the kit's `defineGame()` destructure, renamed imports too. A non-literal id goes to `index.unresolved` with the reason, never guessed.
-- JSX keys are patterns: literal text stays, same-file consts and functions are followed, `props.id` becomes `{id}`, any other hole `*`. `` key={`${id}Picture`} `` reads `jsx:card*Picture` (stem `card`); `id="settingsBoard"` on `<Signboard>` reads `jsx:settingsBoard` (kind `idProp`, component `Signboard`). `find("jsx:settingsBoardClose")`, a key `game.locate` reports, answers the `{id}Close` pattern of the kit and the `id=` prop that fills it.
+- JSX keys are patterns: literal text stays, same-file consts and functions are followed, a key-carrying prop (`id`, or a name that ends in `Key`) becomes a hole of its name, `props.id` reads `{id}` and `props.amountKey` reads `{amountKey}`, any other hole `*`. `` key={`${id}Picture`} `` reads `jsx:card*Picture` (stem `card`); `id="settingsBoard"` on `<Signboard>` reads `jsx:settingsBoard` (kind `idProp`, component `Signboard`, prop `id`); `amountKey="giftReward"` on `<Amount>` reads `jsx:giftReward` (prop `amountKey`). `find("jsx:settingsBoardClose")`, a key `game.locate` reports, answers the `{id}Close` pattern of the kit and the `id=` prop that fills it; a hole takes only the props of its own name.
 - `ProjectChange` is `{ revision, files, moved: [{ key, from, to }], removed }`. A broken file keeps its last good keys and gets `files[path].state === "broken"`. Paths are root-relative POSIX; a path that leaves the root is refused.
 - CLI: `moku-game-index --root <dir> where <key>` prints `<path>:<line>` per place (exit 1 for an unknown key); `--json` prints the index; `--check` exits 1 on a broken file or a key in conflict and lists the unresolved items as info. `--root` is required, `--manifest <path>` is root-relative.
 
