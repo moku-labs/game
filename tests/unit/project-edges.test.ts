@@ -320,6 +320,25 @@ console.info("bare" + "loose");
   });
 });
 
+describe("locate on a style key", () => {
+  it("answers a style function at its statement when it holds no known style call", () => {
+    const { source } = parseFile(
+      ts,
+      "a.ts",
+      "export function boardStyle() {\n  return { disc: 1 };\n}\n"
+    );
+    const linesOf = (anchor: Omit<Anchor, "path">): number[] =>
+      locate(ts, source, { path: "a.ts", ...anchor }, { keyKind: "style" }).map(
+        place => place.line
+      );
+
+    expect(linesOf({ binding: "boardStyle" })).toEqual([1]);
+    expect(linesOf({ binding: "boardStyle", key: "missing" })).toEqual([1]);
+    expect(linesOf({ binding: "boardStyle", key: "disc" })).toEqual([2]);
+    expect(linesOf({ binding: "gone" })).toEqual([]);
+  });
+});
+
 describe("parseFile and loadTypeScript", () => {
   it("takes the namespace when the module has no default, and reads a parse without errors", async () => {
     const namespace = { version: "6.0.3" } as unknown as TypeScript;

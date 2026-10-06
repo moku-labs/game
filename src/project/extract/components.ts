@@ -9,56 +9,13 @@ import type ts from "typescript";
 import type { Anchor } from "../types";
 import type { TypeScript } from "../typescript";
 import { COMPONENT_TAG } from "./jsx";
-import { unwrap } from "./scope";
+import { declaredFunctions } from "./scope";
 
 /** The prefix of a component key. */
 export const COMPONENT = "component:";
 
 /** The extension of the files whose plain functions can be components. */
 const JSX_FILE = ".tsx";
-
-/**
- * The function-valued consts of one statement: `const Name = (…) => …` and `const Name = function …`.
- *
- * @param typescript - The TypeScript module.
- * @param statement - A module-level variable statement.
- * @returns The names; none for a `let`, a `var` or a const of any other value.
- */
-function functionConsts(typescript: TypeScript, statement: ts.VariableStatement): string[] {
-  const isConst = (statement.declarationList.flags & typescript.NodeFlags.Const) !== 0;
-
-  if (!isConst) return [];
-
-  return statement.declarationList.declarations.flatMap(declaration => {
-    const value =
-      declaration.initializer === undefined
-        ? undefined
-        : unwrap(typescript, declaration.initializer);
-    const isFunction =
-      value !== undefined &&
-      (typescript.isArrowFunction(value) || typescript.isFunctionExpression(value));
-
-    return isFunction && typescript.isIdentifier(declaration.name) ? [declaration.name.text] : [];
-  });
-}
-
-/**
- * The functions one module-level statement declares: a function with a body, or function-valued
- * consts. An overload signature has no body and declares nothing here.
- *
- * @param typescript - The TypeScript module.
- * @param statement - A statement directly under the file.
- * @returns The names.
- */
-function functionsOf(typescript: TypeScript, statement: ts.Statement): string[] {
-  if (typescript.isFunctionDeclaration(statement)) {
-    const name = statement.name?.text;
-
-    return name !== undefined && statement.body !== undefined ? [name] : [];
-  }
-
-  return typescript.isVariableStatement(statement) ? functionConsts(typescript, statement) : [];
-}
 
 /**
  * Reads the plain components of a file: the module-level upper-case functions of a `.tsx` file.
@@ -76,7 +33,7 @@ export function readComponents(
   if (!path.endsWith(JSX_FILE)) return [];
 
   return source.statements
-    .flatMap(statement => functionsOf(typescript, statement))
+    .flatMap(statement => declaredFunctions(typescript, statement).map(item => item.name))
     .filter(name => COMPONENT_TAG.test(name))
     .map(binding => ({ key: `${COMPONENT}${binding}`, anchor: { path, binding } }));
 }

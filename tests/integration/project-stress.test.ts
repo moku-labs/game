@@ -169,12 +169,14 @@ function netMoves(brought: readonly Call[]): ProjectChange["moved"] {
 }
 
 /**
- * Whether the line a key answers holds its binding or its key, on the bytes it was read from.
+ * Whether the line a key answers holds its binding or its key, on the bytes it was read from. A
+ * style built in a function answers its style calls, so that line holds the call.
  *
+ * @param key - The key asked for.
  * @param found - One answer of `find`.
  * @returns A problem, or `undefined` when the line is right.
  */
-function lineProblem(found: Found): string | undefined {
+function lineProblem(key: string, found: Found): string | undefined {
   const bytes = readFileSync(path.join(root, found.path));
   const line = bytes.toString("utf8").split("\n")[found.line - 1] ?? "";
   const literals = (found.key ?? "").split(/\*|\{id\}/).filter(part => part !== "");
@@ -184,7 +186,8 @@ function lineProblem(found: Found): string | undefined {
     literals.every(part => line.includes(part) || found.kind !== "literal");
   const holdsBinding = found.binding !== undefined && line.includes(found.binding);
   const holdsKey = found.key !== undefined && line.includes(found.key);
-  const holds = isJsx ? holdsJsx : holdsBinding || holdsKey;
+  const holdsStyleCall = key.startsWith("style:") && line.includes("defineStyle(");
+  const holds = isJsx ? holdsJsx : holdsBinding || holdsKey || holdsStyleCall;
 
   if (sha1(bytes) !== found.hash) return `${found.path}: the bytes moved during the check`;
 
@@ -214,7 +217,7 @@ async function verify(): Promise<string[]> {
 
   for (const key of Object.keys(index.symbols)) {
     for (const found of await project.find(key)) {
-      const problem = found.broken === true ? undefined : lineProblem(found);
+      const problem = found.broken === true ? undefined : lineProblem(key, found);
 
       if (problem !== undefined) problems.push(`${key}: ${problem}`);
     }

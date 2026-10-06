@@ -70,7 +70,7 @@ type ProjectIndex = {
 type Anchor = {
   path: string;              // root-relative, POSIX
   binding?: string;          // the const, function or export the definition is bound to
-  key?: string;              // a text style key, the `name` of a projection, a JSX key
+  key?: string;              // a text style key, the `name` of a projection, a JSX key, the property of a built style
   component?: string;        // JSX: the component of an `id=` prop, or of an `{id}` pattern
   kind?: "literal" | "template" | "idProp" | "ident";   // JSX only
   stem?: string;             // JSX templates and identifiers: "card" for card*Picture
@@ -91,12 +91,15 @@ A file hash is the sha1 hex of its bytes, the same value the editor uses as a fi
 | `emitter:<id>` | `emitter:fx.stars` | `defineEmitter("fx.stars", …)` | the declaration |
 | `textStyle:<key>` | `textStyle:ui.title` | a key of `defineTextStyles({ … })` | the property, `features/ui/styles.ts:39` |
 | `style:<path>#<binding>` | `style:features/ui/popup.tsx#popupScreen` | `const popupScreen = defineStyle(…)` at module scope | the declaration, `features/ui/popup.tsx:20` |
+| `style:<path>#<function>` | `style:features/ui/kit.tsx#boardStyle` | a `defineStyle(…)` call anywhere inside a module-level function or function-valued const | every style call of the function, `features/ui/kit.tsx:666` and `features/ui/kit.tsx:668` |
+| `style:<path>#<function>.<property>` | `style:features/ui/kit.tsx#roundStylesOf.icon` | a `defineStyle(…)` call that is the value of the property `icon` inside that function | the property, the call as the range, `features/ui/kit.tsx:358` |
 | `component:<Name>` | `component:RoundButton` | in a `.tsx` file, a module-level `function RoundButton(…)`, `const Name = (…) => …` or `const Name = function …` with an upper-case name, exported or not; anywhere, `defineComponent("Settings", …)` | the declaration, `features/ui/kit.tsx:418`; `component:Settings` answers `features/settings/settings.tsx:289` |
 | `jsx:<key>` | `jsx:settingsBoard` | a JSX `key`, or a literal `id=` on a component | the attribute line, the element as the range |
 
 - **Definers are recognised by binding.** The names destructured from `defineGame()` in the kit are the definers, under any local name an importer gives them. The definers imported from `@moku-labs/game` directly count too. A call whose callee is not a definer binding is not a definition.
 - **Nothing is guessed.** A definer with a non-literal id goes to `unresolved` with the reason, for example `defineFlow id is not a string literal`.
 - **Nodes.** Every entry of a `nodes` table is a key, as `Object.entries(flow.nodes)` lists it at run time: a node, a sub-flow and a slot alike. A plain name is followed through relative imports, re-exports and barrels to the file that declares it, and the flow table is its use. A slot or an inline node is anchored at the table. A name that cannot be followed is anchored at the table and listed as unresolved.
+- **Style factories.** A `defineStyle` call that is not the value of a module-level const is keyed by the module-level function it sits in, at any depth: inner arrows and callbacks count. Several calls in one function share one key and one anchor `{ path, binding: "<function>" }`; a call under an object property gets `key: "<property>"` and its own key. A call in a class, in an object const (`const table = { disc: defineStyle(…) }`) or at module scope outside any function stays `unresolved`.
 - **Components.** A plain upper-case function of a `.ts` file, a SCREAMING_CASE constant and a lower-case function are not components. A `defineComponent` key takes the literal id and is bound to its const: `const Foo = defineComponent("Bar", …)` makes `component:Bar` with `binding: "Foo"`.
 - **Uses.** A node's `uses` is the flow table that names it. A style's `uses` are the files that import its binding. A component's `uses` are the files that render its binding, `<Foo …>` or `<ui.Foo …>` (the last segment of a member tag counts), one `{ path, binding }` per file, sorted by path. One level, no transitive closure.
 - **Conflict.** A key other than `jsx:` defined twice sets `conflict: true` and keeps both anchors: two components of one name in two files are a conflict. `jsx:` keys repeat across files by design.
@@ -128,7 +131,7 @@ A key that holds `*` or `{id}` itself is looked up exactly.
 ## Behaviour
 
 1. **Lines come from disk.** `find` reads each file, compares its sha1 with the indexed hash and parses it again when they differ. The index and `index.files[path].hash` stay as they are, so the next watch batch still sees the change and calls `onIndex`.
-2. **Lines and columns are 1-based.** The end column of `range` is exclusive. A binding answers its declaration statement; a text style key, a projection `name` and a slot answer their property; a JSX key answers the line of its attribute with the whole element as the range.
+2. **Lines and columns are 1-based.** The end column of `range` is exclusive. A binding answers its declaration statement; a text style key, a projection `name` and a slot answer their property; a style built in a function answers each of its style calls, with the call as the range, and one under a property answers that property, with the call as the range; a JSX key answers the line of its attribute with the whole element as the range.
 3. **Events only trigger a walk.** `watch` runs one `fs.watch(root, { recursive: true })` per handle; where the platform cannot watch recursively, one watcher per folder, re-armed after each walk. Events in skipped folders are ignored. A batch closes after a quiet period of `debounceMs` (75 by default) or after the longest wait, ten quiet periods and at least one second, during an endless burst. The batch walks the root, hashes every file whose size, inode or time stamps moved and every new file, and drops the vanished ones. Event paths are never trusted: Bun on macOS reports every edit as `rename`, drops the destination of a move and names the `.tmp` of an atomic save. The platform watcher can also miss a write made as it starts, so a handle walks once when watching starts (for what changed since the index was built) and then every two seconds as a backstop.
 4. **One call per batch.** A batch that changed bytes calls every caller once with the new index and a `ProjectChange`. A save with the same bytes calls nobody. An error thrown by a caller is dropped, so the other callers still hear the batch.
 5. **Moves and deletes.** `change.moved` lists a key that left one file and appeared in another in the batch; `change.removed` lists the keys gone from every file. `change.files` lists the paths whose bytes changed, appeared or vanished.
@@ -166,8 +169,8 @@ moku-game-index --root tests/integration/merge-game where jsx:settingsBoardClose
 # features/settings/settings.tsx:301
 moku-game-index --root tests/integration/merge-game --json
 moku-game-index --root tests/integration/merge-game --check
-#   › 111 files, 346 keys: 0 broken, 0 in conflict, 16 unresolved.
-#   › unresolved features/ui/kit.tsx: defineStyle in "plankStyle" is not bound to a module-level const
+#   › 111 files, 358 keys: 0 broken, 0 in conflict, 3 unresolved.
+#   › unresolved features/settings/settings.tsx: JSX key "key" on <button> resolves to "*"
 ```
 
 | Command | Prints | Exit |

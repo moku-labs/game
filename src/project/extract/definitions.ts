@@ -3,8 +3,9 @@
  * definer binding of the file (`definersOf`): `defineFlow("board", …)` makes `flow:board`, and its
  * `nodes` table is kept for the cross-file pass that makes the `node:` keys; `defineFeature`,
  * `defineScene`, `defineEmitter`, `projection`, `defineTextStyles`, `defineStyle` and
- * `defineComponent` make their own keys. A definer whose id is not a literal goes to `unresolved`
- * with the reason; nothing is guessed. The plain components and the JSX keys of the file join the
+ * `defineComponent` make their own keys; a `defineStyle` built in a module-level function is keyed
+ * by that function. A definer whose id is not a literal goes to `unresolved` with the reason;
+ * nothing is guessed. The plain components and the JSX keys of the file join the
  * same lists, and the component names the file renders are kept for their `uses`.
  */
 import type ts from "typescript";
@@ -13,7 +14,14 @@ import type { TypeScript } from "../typescript";
 import { readComponents, renderedOf } from "./components";
 import { anchorOfHit, collectJsx, isOpaque, opaqueReason } from "./jsx";
 import type { Definer } from "./module";
-import { enclosingName, meaningOf, unwrap } from "./scope";
+import {
+  enclosingFunction,
+  enclosingName,
+  meaningOf,
+  propertyNameOf,
+  propertyOfValue,
+  unwrap
+} from "./scope";
 
 /** One key a file defines, and where. */
 export type Definition = { readonly key: string; readonly anchor: Anchor };
@@ -59,6 +67,8 @@ type Reading = {
   readonly definitions: Definition[];
   readonly tables: NodeTable[];
   readonly unresolved: Unresolved[];
+  /** The style keys and anchors added so far, as JSON. */
+  readonly styles: Set<string>;
 };
 
 /**
@@ -75,29 +85,6 @@ function literalOf(typescript: TypeScript, node: ts.Expression | undefined): str
 }
 
 /**
- * The name of an object property when it is written literally.
- *
- * @param typescript - The TypeScript module.
- * @param property - The property.
- * @returns The name, or `undefined` for a spread or a computed name.
- */
-function propertyName(
-  typescript: TypeScript,
-  property: ts.ObjectLiteralElementLike
-): string | undefined {
-  const name = property.name;
-
-  if (name === undefined) return undefined;
-
-  const isLiteral =
-    typescript.isIdentifier(name) ||
-    typescript.isStringLiteral(name) ||
-    typescript.isNumericLiteral(name);
-
-  return isLiteral ? name.text : undefined;
-}
-
-/**
  * The value of a named property of an object literal; for a shorthand, the name itself.
  *
  * @param typescript - The TypeScript module.
@@ -111,7 +98,7 @@ function propertyValue(
   name: string
 ): ts.Expression | undefined {
   for (const property of object.properties) {
-    if (propertyName(typescript, property) !== name) continue;
+    if (propertyNameOf(typescript, property) !== name) continue;
     if (typescript.isPropertyAssignment(property)) return property.initializer;
     if (typescript.isShorthandPropertyAssignment(property)) return property.name;
   }
@@ -177,7 +164,7 @@ function bindingOf(typescript: TypeScript, call: ts.CallExpression): string | un
  * @param definers - The definers of the file.
  * @returns The definer, or `undefined` for any other call.
  */
-function definerOfCall(
+export function definerOfCall(
   typescript: TypeScript,
   call: ts.CallExpression,
   definers: ReadonlyMap<string, Definer>
@@ -272,7 +259,7 @@ function readTable(reading: Reading, call: ts.CallExpression, flow: string): voi
       continue;
     }
 
-    const name = propertyName(typescript, property);
+    const name = propertyNameOf(typescript, property);
 
     if (name === undefined) {
       unresolve(reading, `defineFlow "${flow}" node name is not a literal`);
@@ -354,7 +341,7 @@ function readTextStyles(reading: Reading, call: ts.CallExpression): void {
   const binding = bindingOf(typescript, call);
 
   for (const property of table.properties) {
-    const key = propertyName(typescript, property);
+    const key = propertyNameOf(typescript, property);
 
     if (key === undefined) {
       unresolve(reading, "defineTextStyles key is not a literal");
@@ -369,23 +356,73 @@ function readTextStyles(reading: Reading, call: ts.CallExpression): void {
 }
 
 /**
- * Reads a style: only one bound to a module const has a key, `style:<path>#<binding>`.
+ * Adds a style key; the same key and anchor twice in one file is one anchor, since `find`
+ * answers every style call of a factory.
+ *
+ * @param reading - The file being read.
+ * @param key - The key.
+ * @param anchor - The anchor.
+ */
+function addStyle(reading: Reading, key: string, anchor: Anchor): void {
+  const identity = JSON.stringify({ key, anchor });
+
+  if (reading.styles.has(identity)) return;
+
+  reading.styles.add(identity);
+  reading.definitions.push({ key, anchor });
+}
+
+/**
+ * The key and anchor of a style built in a module-level function: `style:<path>#<function>`, or
+ * `style:<path>#<function>.<property>` when the call is the value of an object property there.
+ *
+ * @param reading - The file being read.
+ * @param call - The `defineStyle` call.
+ * @param factory - The name of the function the call sits in.
+ * @returns The key and its anchor.
+ */
+function styleKeyIn(reading: Reading, call: ts.CallExpression, factory: string): Definition {
+  const { typescript, path } = reading;
+  const property = propertyOfValue(typescript, call);
+
+  if (property === undefined) {
+    return { key: `style:${path}#${factory}`, anchor: { path, binding: factory } };
+  }
+
+  return {
+    key: `style:${path}#${factory}.${property}`,
+    anchor: { path, binding: factory, key: property }
+  };
+}
+
+/**
+ * Reads a style. One bound to a module const is `style:<path>#<binding>`. One built in a
+ * module-level function, at any depth, is `style:<path>#<function>`, or
+ * `style:<path>#<function>.<property>` when it is the value of an object property there. Any
+ * other style is unresolved.
  *
  * @param reading - The file being read.
  * @param call - The call.
  */
 function readStyle(reading: Reading, call: ts.CallExpression): void {
-  const binding = bindingOf(reading.typescript, call);
+  const { typescript, path } = reading;
+  const binding = bindingOf(typescript, call);
 
   if (binding !== undefined) {
-    reading.definitions.push({
-      key: `style:${reading.path}#${binding}`,
-      anchor: { path: reading.path, binding }
-    });
+    addStyle(reading, `style:${path}#${binding}`, { path, binding });
     return;
   }
 
-  const around = enclosingName(reading.typescript, call);
+  const factory = enclosingFunction(typescript, call);
+
+  if (factory !== undefined) {
+    const style = styleKeyIn(reading, call, factory);
+
+    addStyle(reading, style.key, style.anchor);
+    return;
+  }
+
+  const around = enclosingName(typescript, call);
   const where = around === undefined ? "" : ` in "${around}"`;
 
   unresolve(reading, `defineStyle${where} is not bound to a module-level const`);
@@ -455,7 +492,8 @@ export function extractFile(
     definers,
     definitions: [],
     tables: [],
-    unresolved: []
+    unresolved: [],
+    styles: new Set()
   };
   const visit = (node: ts.Node): void => {
     const definer = typescript.isCallExpression(node)

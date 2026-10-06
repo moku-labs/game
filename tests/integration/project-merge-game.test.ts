@@ -97,17 +97,6 @@ async function linesOf(key: string): Promise<string[]> {
   return found.map(place => `${place.path}:${place.line}`);
 }
 
-/**
- * The unresolved item of a style built inside a function.
- *
- * @param file - The file.
- * @param around - The function the style is built in.
- * @returns The item.
- */
-function builtStyle(file: string, around: string): { path: string; reason: string } {
-  return { path: file, reason: `defineStyle in "${around}" is not bound to a module-level const` };
-}
-
 describe("the project index of merge-game", () => {
   it("opens in under a second, the TypeScript load included", async ({ annotate }) => {
     await annotate(
@@ -198,7 +187,47 @@ describe("the project index of merge-game", () => {
     // SCREAMING_CASE constants are values, not components.
     expect(project.index.symbols["component:ROUND_SIZE"]).toBeUndefined();
     expect(project.index.symbols["component:SEGMENTS"]).toBeUndefined();
-    expect(Object.keys(project.index.symbols)).toHaveLength(346);
+    expect(Object.keys(project.index.symbols)).toHaveLength(358);
+  });
+
+  it("keys every style a module-level function builds, by the function and its property", () => {
+    const built = [
+      "features/home/logo.tsx#ropeStyle",
+      "features/home/styles.ts#postStyle",
+      "features/splash/view.tsx#bladeStyle",
+      "features/splash/view.tsx#fillStyle",
+      "features/ui/kit.tsx#boardStyle",
+      "features/ui/kit.tsx#hungRopeStyle",
+      "features/ui/kit.tsx#pillStyle",
+      "features/ui/kit.tsx#plankStyle",
+      "features/ui/kit.tsx#roundStylesOf.badge",
+      "features/ui/kit.tsx#roundStylesOf.disc",
+      "features/ui/kit.tsx#roundStylesOf.icon",
+      "features/ui/kit.tsx#tapBoxStyle"
+    ].map(item => `style:${item}`);
+
+    expect(keysOf("style:")).toHaveLength(99);
+    expect(keysOf("style:").filter(key => built.includes(key))).toEqual(built);
+    // boardStyle builds its style in two places: one key, one anchor, no conflict.
+    expect(project.index.symbols["style:features/ui/kit.tsx#boardStyle"]).toEqual({
+      def: [{ path: "features/ui/kit.tsx", binding: "boardStyle" }]
+    });
+    expect(project.index.symbols["style:features/ui/kit.tsx#roundStylesOf.icon"]).toEqual({
+      def: [{ path: "features/ui/kit.tsx", binding: "roundStylesOf", key: "icon" }]
+    });
+  });
+
+  it("finds a built style at its calls, not at the function", async () => {
+    expect(await linesOf("style:features/ui/kit.tsx#boardStyle")).toEqual([
+      "features/ui/kit.tsx:666",
+      "features/ui/kit.tsx:668"
+    ]);
+    expect(await linesOf("style:features/ui/kit.tsx#roundStylesOf.icon")).toEqual([
+      "features/ui/kit.tsx:358"
+    ]);
+    expect(await linesOf("style:features/home/logo.tsx#ropeStyle")).toEqual([
+      "features/home/logo.tsx:55"
+    ]);
   });
 
   it("finds a component at its declaration and lists the files that render it", async () => {
@@ -276,25 +305,12 @@ describe("the project index of merge-game", () => {
     expect(board?.range[0]).toBe(300);
   });
 
-  it("pins the unresolved list: function-built styles and computed JSX keys", () => {
+  it("pins the unresolved list: the three props-driven JSX keys", () => {
     expect(project.index.unresolved).toEqual([
-      builtStyle("features/home/logo.tsx", "ropeStyle"),
-      builtStyle("features/home/styles.ts", "postStyle"),
       {
         path: "features/settings/settings.tsx",
         reason: 'JSX key "key" on <button> resolves to "*"'
       },
-      builtStyle("features/splash/view.tsx", "fillStyle"),
-      builtStyle("features/splash/view.tsx", "bladeStyle"),
-      builtStyle("features/ui/kit.tsx", "plankStyle"),
-      builtStyle("features/ui/kit.tsx", "tapBoxStyle"),
-      builtStyle("features/ui/kit.tsx", "roundStylesOf"),
-      builtStyle("features/ui/kit.tsx", "roundStylesOf"),
-      builtStyle("features/ui/kit.tsx", "roundStylesOf"),
-      builtStyle("features/ui/kit.tsx", "pillStyle"),
-      builtStyle("features/ui/kit.tsx", "boardStyle"),
-      builtStyle("features/ui/kit.tsx", "boardStyle"),
-      builtStyle("features/ui/kit.tsx", "hungRopeStyle"),
       {
         path: "features/ui/popup.tsx",
         reason: 'JSX key "props.amountKey" on <text> resolves to "*"'
@@ -379,6 +395,6 @@ describe("the moku-game-index bin", () => {
     expect(where.status).toBe(0);
     expect(where.stdout).toBe("nodes/merge.ts:17\n");
     expect(check.status).toBe(0);
-    expect(check.stdout).toContain("111 files, 346 keys: 0 broken, 0 in conflict, 16 unresolved.");
+    expect(check.stdout).toContain("111 files, 358 keys: 0 broken, 0 in conflict, 3 unresolved.");
   });
 });
