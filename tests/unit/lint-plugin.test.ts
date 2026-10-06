@@ -1,5 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
@@ -9,8 +20,9 @@ import type {
   GameLintRuleName,
   GameLintScope
 } from "@moku-labs/game/lint";
-import plugin, { globToRegExp } from "@moku-labs/game/lint";
+import plugin, { aliasTargetsOf, globToRegExp } from "@moku-labs/game/lint";
 import { afterAll, describe, expect, it } from "vitest";
+import { aliasTargets, readAliases } from "../../src/project/aliases";
 import { buildIndex, createCatalog, putFile } from "../../src/project/catalog";
 import { loadTypeScript } from "../../src/project/typescript";
 
@@ -32,6 +44,9 @@ const OXLINT = path.join(ROOT, "node_modules/oxlint/bin/oxlint");
 /** The fixture game the JSX key rule runs on. */
 const MINI_GAME = path.join(ROOT, "tests/fixtures/mini-game");
 
+/** The fixture game in the v15 layout the layout rules run on: clean, with its tsconfig `paths`. */
+const LAYOUT_GAME = path.join(ROOT, "tests/fixtures/layout-game");
+
 /** Every rule of the plugin, on. */
 const ALL_RULES = Object.fromEntries(
   Object.keys(plugin.rules).map(name => [`moku-game/${name}`, "error"])
@@ -43,6 +58,32 @@ const folders: string[] = [];
 afterAll(() => {
   for (const folder of folders) rmSync(folder, { recursive: true, force: true });
 });
+
+/**
+ * A fresh temp folder, removed after the file, by its real path.
+ *
+ * @returns The folder.
+ */
+function tempFolder(): string {
+  const folder = realpathSync(mkdtempSync(path.join(tmpdir(), "moku-game-lint-")));
+
+  folders.push(folder);
+
+  return folder;
+}
+
+/**
+ * Write files into a folder.
+ *
+ * @param folder - The folder.
+ * @param files - Relative path to text.
+ */
+function writeFiles(folder: string, files: Record<string, string>): void {
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(folder, file)), { recursive: true });
+    writeFileSync(path.join(folder, file), text);
+  }
+}
 
 /** A finding of the plugin: rule name, file relative to the fixture root and line. */
 type Finding = { rule: string; file: string; line: number };
@@ -62,13 +103,9 @@ function runOxlint(
   jsPlugin = SOURCE,
   setup?: (folder: string) => void
 ): Finding[] {
-  const folder = mkdtempSync(path.join(tmpdir(), "moku-game-lint-"));
+  const folder = tempFolder();
 
-  folders.push(folder);
-  for (const [file, text] of Object.entries(files)) {
-    mkdirSync(path.dirname(path.join(folder, file)), { recursive: true });
-    writeFileSync(path.join(folder, file), text);
-  }
+  writeFiles(folder, files);
   writeFileSync(
     path.join(folder, ".oxlintrc.json"),
     JSON.stringify({ categories: { correctness: "off" }, jsPlugins: [jsPlugin], rules })
@@ -347,6 +384,115 @@ describe("moku-game/static-keys under oxlint", () => {
   });
 });
 
+/** One planted violation per case of the layout rules, written into a copy of the layout game. */
+const LAYOUT_BAD: Record<string, string> = {
+  // feature-door: a relative deep import, the barrel, the own door, a deep alias.
+  "features/home/flow/bad-door.ts": `import { show } from "../../info/flow/show";
+import { homeNode } from "@features";
+import { homeFeature } from "@features/home";
+import { show as deep } from "@features/info/flow/show";
+export const all = [show, homeNode, homeFeature, deep];
+`,
+  // layer-imports: shared, core and plugins reach above their layer.
+  "shared/views/bad-layer.ts":
+    'import { homeFeature } from "@features/home";\nexport const feature = homeFeature;\n',
+  "core/bad-layer.ts": 'import { Panel } from "@shared";\nexport const panel = Panel;\n',
+  "plugins/loading/bad-layer.ts":
+    'import { homeFeature } from "@features/home";\nexport const feature = homeFeature;\n',
+  // rules-siblings: a rule reads the kit.
+  "features/home/rules/bad-rule.ts":
+    'import { defineNode } from "@core/kit";\nexport const node = defineNode;\n',
+  // test-suffix: an e2e named as a unit test, a helper lying in tests/visual/, an isolated test.
+  "tests/e2e/first.test.ts": "export const first = 1;\n",
+  "tests/visual/run.ts": "export const run = 1;\n",
+  "features/home/__tests__/isolated/home.test.ts": "export const home = 1;\n"
+};
+
+/** What the ten rules find in the layout game with `LAYOUT_BAD` planted: nothing else. */
+const LAYOUT_TALLY = {
+  "core/bad-layer.ts layer-imports": 1,
+  "features/home/__tests__/isolated/home.test.ts test-suffix": 1,
+  "features/home/flow/bad-door.ts feature-door": 4,
+  "features/home/rules/bad-rule.ts rules-siblings": 1,
+  "plugins/loading/bad-layer.ts layer-imports": 1,
+  "shared/views/bad-layer.ts layer-imports": 1,
+  "tests/e2e/first.test.ts test-suffix": 1,
+  "tests/visual/run.ts test-suffix": 1
+};
+
+/**
+ * Copy the layout game into a fixture folder.
+ *
+ * @param into - The sub-folder to copy it into, relative to the fixture folder.
+ * @param withTsconfig - False to leave its tsconfig.json out.
+ * @returns The setup step of `runOxlint`.
+ */
+function layoutGame(into = ".", withTsconfig = true): (folder: string) => void {
+  return folder => {
+    cpSync(LAYOUT_GAME, path.join(folder, into), { recursive: true });
+    if (!withTsconfig) rmSync(path.join(folder, into, "tsconfig.json"));
+  };
+}
+
+describe("the layout rules under oxlint", () => {
+  it("find nothing in the clean layout game with all ten rules on", () => {
+    expect(Object.keys(ALL_RULES)).toHaveLength(10);
+    expect(runOxlint({}, ALL_RULES, SOURCE, layoutGame())).toEqual([]);
+  });
+
+  it("fire once on each planted violation and on nothing else", () => {
+    expect(tally(runOxlint(LAYOUT_BAD, ALL_RULES, SOURCE, layoutGame()))).toEqual(LAYOUT_TALLY);
+  });
+
+  it("read the v15 aliases when the game has no tsconfig", () => {
+    expect(tally(runOxlint(LAYOUT_BAD, ALL_RULES, SOURCE, layoutGame(".", false)))).toEqual(
+      LAYOUT_TALLY
+    );
+  });
+
+  it("take root, tsconfig and suffixes from the options", () => {
+    const paths = (
+      JSON.parse(readFileSync(path.join(LAYOUT_GAME, "tsconfig.json"), "utf8")) as {
+        compilerOptions: { paths: Record<string, string[]> };
+      }
+    ).compilerOptions.paths;
+    // `@home` exists only in this tsconfig: core importing it proves the option is read.
+    const tsconfig = {
+      compilerOptions: {
+        baseUrl: "./src",
+        paths: { ...paths, "@home": ["./features/home/index.ts"] }
+      }
+    };
+    const files = Object.fromEntries(
+      Object.entries({
+        ...LAYOUT_BAD,
+        "core/bad-alias.ts":
+          'import { homeFeature } from "@home";\nexport const home = homeFeature;\n',
+        "tests/e2e/first.spec.ts": "export const first = 1;\n"
+      }).map(([file, text]) => [`src/${file}`, text])
+    );
+    const layout = { root: "src", tsconfig: "tsconfig.game.json" };
+    const rules = {
+      "moku-game/layer-imports": ["error", layout],
+      "moku-game/feature-door": ["error", layout],
+      "moku-game/rules-siblings": ["error", layout],
+      "moku-game/test-suffix": ["error", { root: "src", suffixes: { "tests/e2e/": ".spec.ts" } }]
+    };
+
+    files["tsconfig.game.json"] = JSON.stringify(tsconfig);
+
+    expect(tally(runOxlint(files, rules, SOURCE, layoutGame("src")))).toEqual({
+      "src/core/bad-alias.ts layer-imports": 1,
+      "src/core/bad-layer.ts layer-imports": 1,
+      "src/features/home/flow/bad-door.ts feature-door": 4,
+      "src/features/home/rules/bad-rule.ts rules-siblings": 1,
+      "src/plugins/loading/bad-layer.ts layer-imports": 1,
+      "src/shared/views/bad-layer.ts layer-imports": 1,
+      "src/tests/e2e/first.test.ts test-suffix": 1
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // In-process: the same rules with hand-built ESTree nodes.
 // ---------------------------------------------------------------------------
@@ -362,6 +508,7 @@ const NO_NAMES: GameLintScope = { set: new Map() };
  * @param visits - Node type and node, in visit order.
  * @param options - The rule options.
  * @param scope - The scope every node sits in.
+ * @param cwd - The folder lint runs in; `/game` does not exist, so the v15 aliases apply.
  * @returns The messages reported.
  */
 function check(
@@ -369,12 +516,13 @@ function check(
   file: string,
   visits: [string, GameLintNode][],
   options: unknown[] = [],
-  scope: GameLintScope = NO_NAMES
+  scope: GameLintScope = NO_NAMES,
+  cwd = "/game"
 ): string[] {
   const messages: string[] = [];
   const context: GameLintContext = {
-    cwd: "/game",
-    filename: `/game/${file}`,
+    cwd,
+    filename: `${cwd}/${file}`,
     options,
     sourceCode: { getScope: () => scope },
     report: ({ message }) => messages.push(message)
@@ -429,6 +577,86 @@ const member = (object: string, property: string, computed = false): GameLintNod
   property: computed ? literal(property) : id(property),
   computed
 });
+
+/**
+ * Run a rule on one file that holds one import.
+ *
+ * @param name - The rule.
+ * @param file - The file path relative to the fake root.
+ * @param from - The specifier of the import.
+ * @param options - The rule options.
+ * @param cwd - The folder lint runs in.
+ * @returns The messages reported.
+ */
+function importsIn(
+  name: GameLintRuleName,
+  file: string,
+  from: string,
+  options: unknown[] = [],
+  cwd = "/game"
+): string[] {
+  return check(
+    name,
+    file,
+    [
+      ["Program", { type: "Program" }],
+      ["ImportDeclaration", imports(from)]
+    ],
+    options,
+    NO_NAMES,
+    cwd
+  );
+}
+
+/** The second sentence of every layer-imports report. */
+const ORDER = "Order: core ← shared ← features ← game.ts; plugins import core and shared.";
+
+/** What feature-door says about a barrel below game.ts. */
+const BARREL = "Door: only game.ts imports the @features and @plugins barrels.";
+
+/** What feature-door says about a feature that imports its own door. */
+const OWN_DOOR = "Door: a feature does not import its own index.ts. Import the file: ./flow/merge.";
+
+/**
+ * What feature-door says about an import that goes deep into another unit.
+ *
+ * @param kind - `feature` or `plugin`.
+ * @param unit - The unit, as `features/info`.
+ * @returns The message.
+ */
+const deep = (kind: string, unit: string): string =>
+  `Door: another ${kind} is imported from its index.ts only: @${unit}.`;
+
+/**
+ * What feature-door says about a relative import that leaves its unit.
+ *
+ * @param unit - The unit, as `features/home`.
+ * @returns The message.
+ */
+const leaves = (unit: string): string =>
+  `Door: an import that leaves ${unit} is written as an alias: @features/<f>, @shared, @core/<file>.`;
+
+/**
+ * What test-suffix says about a misnamed file.
+ *
+ * @param folder - The kind folder.
+ * @param suffix - Its suffix.
+ * @param name - The file name.
+ * @param renamed - The name it should have.
+ * @returns The message.
+ */
+const misnamed = (folder: string, suffix: string, name: string, renamed: string): string =>
+  `Tests: a file in ${folder} ends with ${suffix}. Rename ${name} to ${renamed}, or move a helper to ${folder.includes("__tests__") ? "__tests__/fixtures/" : "tests/helpers/"}.`;
+
+/**
+ * What test-suffix says about one file.
+ *
+ * @param file - The file path relative to the fake root.
+ * @param options - The rule options.
+ * @returns The messages reported.
+ */
+const named = (file: string, options: unknown[] = []): string[] =>
+  check("test-suffix", file, [["Program", { type: "Program" }]], options);
 
 describe("@moku-labs/game/lint rules in process", () => {
   it("matches globs: **, *, ?, braces, root-only names", () => {
@@ -503,7 +731,7 @@ describe("@moku-labs/game/lint rules in process", () => {
     ).toEqual([]);
   });
 
-  it("rules-siblings: only ./ specifiers pass", () => {
+  it("rules-siblings: ./ specifiers pass, ../ and packages fire", () => {
     expect(
       check("rules-siblings", "rules/a.ts", [["ImportDeclaration", imports("../tables")]])
     ).toEqual([expect.stringMatching(/^L4: /)]);
@@ -584,6 +812,287 @@ describe("@moku-labs/game/lint rules in process", () => {
       timer
     ]);
     expect(check("determinism", "web/a.ts", visits)).toEqual([]);
+  });
+
+  it("determinism reads core, shared and game.ts and leaves the plugins; native-imports reads plugins", () => {
+    const random: [string, GameLintNode][] = [["MemberExpression", member("Math", "random")]];
+    const native: [string, GameLintNode][] = [["ImportDeclaration", imports("@tauri-apps/api")]];
+
+    for (const file of ["core/state.ts", "shared/motion/x.ts", "game.ts", "src/core/rng.ts"]) {
+      expect(check("determinism", file, random), file).toHaveLength(1);
+    }
+    for (const file of ["plugins/loading/handlers.ts", "features/energy/plugin/api.ts"]) {
+      expect(check("determinism", file, random), file).toEqual([]);
+    }
+    for (const file of ["plugins/platform/index.ts", "core/kit.ts", "shared/x.ts", "kit.ts"]) {
+      expect(check("native-imports", file, native), file).toEqual([
+        "L13: a native package is imported only where the platform is wired: platform-bridge.ts, native.ts, web/ today; the engine CLI after B3. Pass a PlatformProvider."
+      ]);
+    }
+    expect(check("native-imports", "platform-bridge.ts", native)).toEqual([]);
+  });
+
+  it("rules-siblings: siblings, @core/types and @shared/rules pass in any spelling", () => {
+    const passes = [
+      "./merge",
+      "@core/types",
+      "@shared/rules",
+      "@core/types/cell",
+      "../../../core/types",
+      "../../../core/types.ts",
+      "../../../core/types/cell",
+      "../../../shared/rules",
+      "../../../shared/rules/index.ts"
+    ];
+    const fails = [
+      "@core/kit",
+      "../tables",
+      "@features/board",
+      "@shared",
+      "../../../shared/rules/clamp",
+      "../../../core/typesafe",
+      "pixi.js"
+    ];
+    const message =
+      "L4: a rule imports only its siblings in rules/, @core/types and @shared/rules: (state, input, tables) => result.";
+
+    for (const from of passes) {
+      expect(importsIn("rules-siblings", "features/home/rules/a.ts", from), from).toEqual([]);
+    }
+    for (const from of fails) {
+      expect(importsIn("rules-siblings", "features/home/rules/a.ts", from), from).toEqual([
+        message
+      ]);
+    }
+    expect(
+      check("rules-siblings", "features/home/rules/a.ts", [
+        ["ImportDeclaration", imports("@moku-labs/game", "type")]
+      ])
+    ).toEqual([message]);
+  });
+
+  it("layer-imports: each layer imports the layers below it", () => {
+    // importer, specifier, what the rule says (empty when the import passes)
+    const cases: [string, string, string][] = [
+      ["core/kit.ts", "@core/types", ""],
+      ["core/kit.ts", "./types", ""],
+      ["core/kit.ts", "@generated/assets", ""],
+      ["core/kit.ts", "@shared", "core does not import shared"],
+      ["core/kit.ts", "../features/home", "core does not import features"],
+      ["shared/views/panel.tsx", "@core/kit", ""],
+      ["shared/views/panel.tsx", "@shared/rules", ""],
+      ["shared/views/panel.tsx", "@generated/assets", ""],
+      ["shared/views/panel.tsx", "@features/home", "shared does not import features"],
+      ["shared/views/panel.tsx", "@plugins", "shared does not import plugins"],
+      ["features/home/flow/home.ts", "@core/kit", ""],
+      ["features/home/flow/home.ts", "@shared", ""],
+      ["features/home/flow/home.ts", "@features/info", ""],
+      ["features/home/flow/home.ts", "@generated/assets", ""],
+      ["features/home/flow/home.ts", "@plugins", "features does not import plugins"],
+      ["features/home/flow/home.ts", "../../../game", "features does not import game.ts"],
+      ["features/home/flow/home.ts", "@tests/helpers/board", "features does not import tests"],
+      ["plugins/loading/index.ts", "@core/kit", ""],
+      ["plugins/loading/index.ts", "@shared", ""],
+      ["plugins/loading/index.ts", "../index", ""],
+      ["plugins/loading/index.ts", "@features", "plugins does not import features"],
+      ["game.ts", "@features", ""],
+      ["game.ts", "@plugins", ""],
+      ["game.ts", "@tests/helpers/board", ""],
+      // Outside the layout, a package, a generated file and a test: not checked.
+      ["nodes/home.ts", "@features/home", ""],
+      ["features/x.ts", "@plugins", ""],
+      ["shared/views/panel.tsx", "pixi.js", ""],
+      ["shared/views/panel.tsx", "../../kit", ""],
+      ["generated/assets.ts", "@features", ""],
+      ["features/home/__tests__/home.test.ts", "@plugins", ""]
+    ];
+
+    for (const [file, from, says] of cases) {
+      expect(importsIn("layer-imports", file, from), `${file} ${from}`).toEqual(
+        says === "" ? [] : [`Layers: ${says}. ${ORDER}`]
+      );
+    }
+  });
+
+  it("layer-imports: type-only statements, export-from and import() count", () => {
+    const visits: [string, GameLintNode][] = [
+      ["ImportDeclaration", imports("@features", "type")],
+      [
+        "ExportNamedDeclaration",
+        { type: "ExportNamedDeclaration", source: literal("@features/home"), exportKind: "type" }
+      ],
+      ["ExportAllDeclaration", { type: "ExportAllDeclaration", source: literal("@plugins") }],
+      ["ImportExpression", { type: "ImportExpression", source: literal("@features/info") }],
+      ["ImportExpression", { type: "ImportExpression", source: id("name") }],
+      ["ExportNamedDeclaration", { type: "ExportNamedDeclaration" }]
+    ];
+
+    expect(check("layer-imports", "shared/index.ts", visits)).toEqual([
+      `Layers: shared does not import features. ${ORDER}`,
+      `Layers: shared does not import features. ${ORDER}`,
+      `Layers: shared does not import plugins. ${ORDER}`,
+      `Layers: shared does not import features. ${ORDER}`
+    ]);
+  });
+
+  it("feature-door: barrels, own doors, deep imports and relative escapes", () => {
+    // importer, specifier, what the rule says (empty when the import passes)
+    const cases: [string, string, string][] = [
+      // The barrels belong to game.ts.
+      ["features/home/flow/home.ts", "@features", BARREL],
+      ["shared/index.ts", "@plugins", BARREL],
+      ["core/kit.ts", "@features", BARREL],
+      ["features/home/flow/home.ts", "../..", BARREL],
+      ["features/index.ts", "@features", ""],
+      // A unit does not import its own door.
+      ["features/home/flow/home.ts", "@features/home", OWN_DOOR],
+      ["features/home/flow/home.ts", "../index", OWN_DOOR],
+      ["features/home/flow/home.ts", "..", OWN_DOOR],
+      [
+        "shared/views/panel.tsx",
+        "@shared",
+        "Door: shared does not import its own index.ts. Import the file: ./flow/merge."
+      ],
+      [
+        "plugins/loading/api.ts",
+        "./index.ts",
+        "Door: a plugin does not import its own index.ts. Import the file: ./flow/merge."
+      ],
+      ["features/home/index.ts", "./index", ""],
+      // Another unit is reached through its door.
+      ["features/home/flow/home.ts", "@features/info/flow/show", deep("feature", "features/info")],
+      ["features/home/flow/home.ts", "../../info/flow/show", deep("feature", "features/info")],
+      ["shared/views/panel.tsx", "@features/home/views/screen", deep("feature", "features/home")],
+      [
+        "features/home/flow/home.ts",
+        "../../../plugins/loading/api",
+        deep("plugin", "plugins/loading")
+      ],
+      ["features/home/flow/home.ts", "@features/info", ""],
+      ["plugins/loading/api.ts", "@features/home", ""],
+      // An import that leaves the unit is an alias.
+      ["features/home/flow/home.ts", "../../info", leaves("features/home")],
+      ["features/home/flow/home.ts", "../../../shared/rules", leaves("features/home")],
+      ["features/home/flow/home.ts", "../../../core/kit", leaves("features/home")],
+      ["features/home/flow/home.ts", "../../../generated/assets", leaves("features/home")],
+      ["shared/views/panel.tsx", "../../core/kit", leaves("shared")],
+      ["features/home/flow/home.ts", "@shared/rules", ""],
+      ["features/home/flow/home.ts", "@core/kit", ""],
+      ["features/home/flow/home.ts", "@generated/assets", ""],
+      // Inside one unit every relative import passes, at any depth.
+      ["features/home/flow/home.ts", "../rules/pick", ""],
+      ["features/home/index.ts", "./flow/home", ""],
+      ["features/home/views/deep/a.tsx", "../../rules/pick", ""],
+      ["shared/index.ts", "./views/panel", ""],
+      ["shared/views/panel.tsx", "../rules", ""],
+      // The barrels import the doors of their layer by relative path; a deep one is reported.
+      ["features/index.ts", "./home", ""],
+      ["features/index.ts", "./home/index.ts", ""],
+      ["plugins/index.ts", "./loading", ""],
+      ["features/index.ts", "./home/flow/home", deep("feature", "features/home")],
+      ["features/index.ts", "../shared", leaves("features")],
+      // Core has no door: inside core and @core/* pass, a relative import out of core is reported.
+      ["core/kit.ts", "./types", ""],
+      ["core/kit.ts", "@core/types", ""],
+      ["core/kit.ts", "@shared", ""],
+      ["core/kit.ts", "../shared/rules", leaves("core")],
+      // Outside the layout and packages: quiet.
+      ["features/home/flow/home.ts", "pixi.js", ""],
+      ["features/home/flow/home.ts", "../../../kit", ""],
+      ["features/x.ts", "../shared/rules", ""],
+      ["features/home/__tests__/home.test.ts", "@features/home", ""]
+    ];
+
+    for (const [file, from, says] of cases) {
+      expect(importsIn("feature-door", file, from), `${file} ${from}`).toEqual(
+        says === "" ? [] : [says]
+      );
+    }
+  });
+
+  it("test-suffix: each kind folder takes its suffix; helpers and unknown kinds pass", () => {
+    const cases: [string, string][] = [
+      ["tests/e2e/board.e2e.ts", ""],
+      [
+        "tests/e2e/board.test.ts",
+        misnamed("tests/e2e/", ".e2e.ts", "board.test.ts", "board.e2e.ts")
+      ],
+      ["tests/e2e/flows/board.ts", misnamed("tests/e2e/", ".e2e.ts", "board.ts", "board.e2e.ts")],
+      ["tests/visual/home.visual.ts", ""],
+      ["tests/visual/run.ts", misnamed("tests/visual/", ".visual.ts", "run.ts", "run.visual.ts")],
+      ["tests/editor/flow.editor.ts", ""],
+      [
+        "tests/editor/e2e/game.spec.ts",
+        misnamed("tests/editor/", ".editor.ts", "game.spec.ts", "game.editor.ts")
+      ],
+      ["features/home/__tests__/home.test.ts", ""],
+      [
+        "features/home/__tests__/home.ts",
+        misnamed("__tests__/", ".test.ts", "home.ts", "home.test.ts")
+      ],
+      ["rules/__tests__/unit/merge.test.ts", ""],
+      [
+        "rules/__tests__/integration/merge.ts",
+        misnamed("__tests__/integration/", ".test.ts", "merge.ts", "merge.test.ts")
+      ],
+      ["features/home/__tests__/isolated/home.isolated.ts", ""],
+      [
+        "features/home/__tests__/isolated/home.test.ts",
+        misnamed("__tests__/isolated/", ".isolated.ts", "home.test.ts", "home.isolated.ts")
+      ],
+      ["features/home/__tests__/visual/home.visual.ts", ""],
+      [
+        "features/home/__tests__/visual/home.test.ts",
+        misnamed("__tests__/visual/", ".visual.ts", "home.test.ts", "home.visual.ts")
+      ],
+      // `.tsx` takes the suffix with an x.
+      ["tests/e2e/board.e2e.tsx", ""],
+      ["tests/e2e/board.tsx", misnamed("tests/e2e/", ".e2e.tsx", "board.tsx", "board.e2e.tsx")],
+      // Helpers, fixtures, baselines, scenarios and unknown kinds are not checked.
+      ["tests/helpers/board.ts", ""],
+      ["tests/scenarios/merge.ts", ""],
+      ["tests/e2e/helpers/board.ts", ""],
+      ["tests/editor/fixtures/game.ts", ""],
+      ["tests/visual/baselines/home/rest.ts", ""],
+      ["features/home/__tests__/fixtures/board.ts", ""],
+      ["tests/fixtures/game/tests/e2e/board.ts", ""],
+      ["tests/integration/flow.ts", ""],
+      ["tests/play.ts", ""],
+      ["features/home/__tests__/other/home.ts", ""],
+      ["tests/e2e/data.json", ""],
+      ["src/game.ts", ""]
+    ];
+
+    for (const [file, says] of cases) {
+      expect(named(file), file).toEqual(says === "" ? [] : [says]);
+    }
+
+    // `suffixes` replaces the table; a key may leave out its trailing slash.
+    const spec = [{ suffixes: { "tests/e2e": ".spec.ts" } }];
+
+    expect(named("tests/e2e/board.test.ts", spec)).toEqual([
+      misnamed("tests/e2e/", ".spec.ts", "board.test.ts", "board.spec.ts")
+    ]);
+    expect(named("tests/e2e/board.spec.ts", spec)).toEqual([]);
+    expect(named("tests/visual/run.ts", spec)).toEqual([]);
+
+    // `root` names the game folder; a test outside it is not checked.
+    expect(named("game/tests/e2e/board.ts", [{ root: "game" }])).toEqual([
+      misnamed("tests/e2e/", ".e2e.ts", "board.ts", "board.e2e.ts")
+    ]);
+    expect(named("tests/e2e/board.ts", [{ root: "game" }])).toEqual([]);
+  });
+
+  it("layout rules take root and an outside importer stays quiet", () => {
+    const options = [{ root: "src" }];
+
+    expect(importsIn("layer-imports", "src/core/kit.ts", "@shared", options)).toEqual([
+      `Layers: core does not import shared. ${ORDER}`
+    ]);
+    expect(importsIn("layer-imports", "core/kit.ts", "@shared", options)).toEqual([]);
+    expect(importsIn("feature-door", "src/features/home/a.ts", "@features", options)).toEqual([
+      BARREL
+    ]);
   });
 
   it("static-keys: literals, templates, key props, calls and out-of-reach names pass", () => {
@@ -705,5 +1214,250 @@ describe("static-keys and the project index", () => {
 
     expect(accepted).toEqual(["id", "amountKey", "unitKey"]);
     expect(holes).toEqual(accepted);
+  });
+});
+
+/** `@x` lands in features when the tsconfig is read, and is a package without it. */
+const toFeatures = { "@x": ["./features/home/index.ts"] };
+
+/**
+ * What layer-imports says about `core/kit.ts` importing a specifier in a game folder.
+ *
+ * @param cwd - The game folder.
+ * @param from - The specifier.
+ * @param options - The rule options.
+ * @returns The messages.
+ */
+const fromCore = (cwd: string, from = "@x", options: unknown[] = []): string[] =>
+  importsIn("layer-imports", "core/kit.ts", from, options, cwd);
+
+/** What layer-imports says when `@x` reaches features. */
+const reaches = [`Layers: core does not import features. ${ORDER}`];
+
+/**
+ * What the layout rules say about a config that does not parse.
+ *
+ * @param file - The config, relative to the folder lint runs in.
+ * @returns The message.
+ */
+const broken = (file: string): string =>
+  `Lint: ${file} does not parse. The layout rules read the v15 aliases until it does.`;
+
+describe("the tsconfig the layout rules read", () => {
+  it("maps an alias as aliasTargetsOf says, the v15 table without a tsconfig", () => {
+    // The scenario of the aliasTargetsOf example: /game holds no tsconfig.
+    expect(aliasTargetsOf("/game/tsconfig.json", "/game", "@features/orders")).toEqual([
+      "/game/features/orders/index.ts"
+    ]);
+    expect(aliasTargetsOf("/game/tsconfig.json", "/game", "./features/orders")).toEqual([]);
+    expect(aliasTargetsOf("/game/tsconfig.json", "/game", "@moku-labs/game/testing")).toEqual([]);
+    expect(aliasTargetsOf("/game/tsconfig.json", "/game", "@x")).toEqual([]);
+  });
+
+  it("reads JSONC: comments, trailing commas, and both kept inside strings", () => {
+    const cwd = tempFolder();
+    const tsconfig = `// the game
+{
+  /* compiler */ "compilerOptions": {
+    "paths": {
+      "@x": ["./features/home/index.ts",], // home
+      "@a//b": ["./features/info/index.ts"],
+      "@c/*,]": ["./features/*/index.ts"],
+    },
+  },
+} // end`;
+
+    writeFiles(cwd, { "tsconfig.json": tsconfig });
+
+    const file = path.join(cwd, "tsconfig.json");
+
+    expect(fromCore(cwd)).toEqual(reaches);
+    expect(aliasTargetsOf(file, cwd, "@a//b")).toEqual([path.join(cwd, "features/info/index.ts")]);
+    expect(aliasTargetsOf(file, cwd, "@c/home,]")).toEqual([
+      path.join(cwd, "features/home/index.ts")
+    ]);
+    // A `paths` block replaces the v15 table whole.
+    expect(fromCore(cwd, "@shared")).toEqual([]);
+  });
+
+  it("follows relative extends, the later entry and the nearest config winning", () => {
+    const cwd = tempFolder();
+
+    writeFiles(cwd, {
+      // A package in `extends` ends that branch; a path without .json takes it.
+      "tsconfig.json": JSON.stringify({ extends: ["@tsconfig/strictest", "./configs/base"] }),
+      "configs/base.json": JSON.stringify({
+        extends: ["./first.json", "./second.json"],
+        compilerOptions: { baseUrl: ".." }
+      }),
+      "configs/first.json": JSON.stringify({
+        compilerOptions: { paths: { "@y": ["./core/y.ts"] } }
+      }),
+      "configs/second.json": JSON.stringify({ compilerOptions: { paths: toFeatures } })
+    });
+
+    expect(fromCore(cwd)).toEqual(reaches);
+    expect(fromCore(cwd, "@y")).toEqual([]);
+    // baseUrl resolves against the config that declares it: `..` from configs/ is the game.
+    expect(aliasTargetsOf(path.join(cwd, "tsconfig.json"), cwd, "@x")).toEqual([
+      path.join(cwd, "features/home/index.ts")
+    ]);
+  });
+
+  it("takes the extends path as written when it exists, and an absolute one", () => {
+    const cwd = tempFolder();
+    const base = path.join(cwd, "configs/base");
+
+    writeFiles(cwd, {
+      "tsconfig.json": JSON.stringify({ extends: "./configs/base" }),
+      "configs/base": JSON.stringify({ extends: `${base}.json` }),
+      "configs/base.json": JSON.stringify({ compilerOptions: { paths: toFeatures } })
+    });
+
+    expect(fromCore(cwd)).toEqual(reaches);
+  });
+
+  it("reads the v15 table when the tsconfig is missing, has no paths or extends a package", () => {
+    const cwd = tempFolder();
+
+    expect(fromCore(cwd, "@shared")).toEqual([`Layers: core does not import shared. ${ORDER}`]);
+    writeFiles(cwd, { "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }) });
+    expect(fromCore(cwd, "@shared")).toHaveLength(1);
+    writeFiles(cwd, { "tsconfig.json": JSON.stringify({ extends: "@moku-labs/tsconfig" }) });
+    expect(fromCore(cwd, "@shared")).toHaveLength(1);
+    // Keys and targets with two `*`, and keys with no target, are dropped like TypeScript drops them.
+    writeFiles(cwd, {
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: { paths: { "@a/*/*": ["./a/*"], "@b/*": ["./b/*/*", 3], "@c": "./c" } }
+      })
+    });
+    expect(fromCore(cwd, "@shared")).toHaveLength(1);
+  });
+
+  it("ends an extends cycle and stops at eight configs", () => {
+    const cwd = tempFolder();
+
+    writeFiles(cwd, { "tsconfig.json": JSON.stringify({ extends: "./tsconfig.json" }) });
+
+    expect(fromCore(cwd, "@shared")).toHaveLength(1);
+  });
+
+  it("keeps the read until a config moves, appears or vanishes", () => {
+    const cwd = tempFolder();
+    const file = path.join(cwd, "tsconfig.json");
+    const toCore = { "@x": ["./core/x.ts"] };
+    const write = (paths: Record<string, string[]>, seconds: number): void => {
+      writeFiles(cwd, { "tsconfig.json": JSON.stringify({ compilerOptions: { paths } }) });
+      utimesSync(file, seconds, seconds);
+    };
+
+    write(toFeatures, 1_000_000);
+    expect(fromCore(cwd)).toEqual(reaches);
+    // New text with the same stamp: the rule keeps its read.
+    write(toCore, 1_000_000);
+    expect(fromCore(cwd)).toEqual(reaches);
+    // The stamp moves: the rule reads again.
+    write(toCore, 1_000_010);
+    expect(fromCore(cwd)).toEqual([]);
+    rmSync(file);
+    expect(fromCore(cwd, "@shared")).toHaveLength(1);
+  });
+
+  it("reports a config that does not parse once per file and reads the v15 table", () => {
+    const cwd = tempFolder();
+
+    writeFiles(cwd, { "tsconfig.json": '{ "compilerOptions": { "paths": ' });
+    expect(fromCore(cwd, "@shared")).toEqual([
+      broken("tsconfig.json"),
+      `Layers: core does not import shared. ${ORDER}`
+    ]);
+    // An extended config that does not parse is named.
+    writeFiles(cwd, {
+      "tsconfig.json": JSON.stringify({ extends: "./base.json" }),
+      "base.json": "{ /* open"
+    });
+    expect(fromCore(cwd, "@core/kit")).toEqual([broken("base.json")]);
+    // A config that parses to no object, an open string and a folder in its place do not parse.
+    writeFiles(cwd, { "base.json": "[]" });
+    expect(fromCore(cwd, "@core/kit")).toEqual([broken("base.json")]);
+    writeFiles(cwd, { "base.json": '{ "compilerOptions": "open' });
+    expect(fromCore(cwd, "@core/kit")).toEqual([broken("base.json")]);
+    rmSync(path.join(cwd, "base.json"));
+    mkdirSync(path.join(cwd, "base.json"));
+    expect(fromCore(cwd, "@core/kit")).toEqual([broken("base.json")]);
+  });
+
+  it("reads the tsconfig the options name, relative to the folder lint runs in", () => {
+    const cwd = tempFolder();
+    const options = [{ tsconfig: "configs/game.json" }];
+
+    writeFiles(cwd, {
+      "configs/game.json": JSON.stringify({ compilerOptions: { baseUrl: "..", paths: toFeatures } })
+    });
+
+    expect(fromCore(cwd, "@x", options)).toEqual(reaches);
+    expect(fromCore(cwd)).toEqual([]);
+  });
+});
+
+describe("layout rules and the project index", () => {
+  it("map every specifier to the same files", async () => {
+    const root = tempFolder();
+    const paths = {
+      "@core/*": ["./core/*"],
+      "@shared": ["./shared/index.ts"],
+      "@shared/rules": ["./shared/rules/index.ts"],
+      "@features": ["./features/index.ts"],
+      "@features/*": ["./features/*/index.ts"],
+      "@plugins": ["./plugins/index.ts"],
+      "@generated/*": ["./generated/*"],
+      "@tests/*": ["./tests/*"],
+      "@kit": ["./core/kit.ts"],
+      "@kit/*": ["./core/kit/*", "./core/alt/*"],
+      "@art/*.png": ["./generated/png/*.ts"],
+      "@two/*/*": ["./two/*"],
+      "@none": [],
+      "@moku-labs/game/testing": ["./tests/helpers/testing.ts"]
+    };
+    const specifiers = [
+      "@core/kit",
+      "@core/types/cell",
+      "@shared",
+      "@shared/rules",
+      "@shared/views/panel",
+      "@features",
+      "@features/home",
+      "@features/home/flow/home",
+      "@plugins",
+      "@generated/assets",
+      "@tests/helpers/board",
+      "@kit",
+      "@kit/x",
+      "@art/logo.png",
+      "@art/logo.jpg",
+      "@two/a/b",
+      "@none",
+      "@moku-labs/game/testing",
+      "@moku-labs/game",
+      "./local",
+      "../up",
+      "pixi.js"
+    ];
+
+    writeFiles(root, {
+      "tsconfig.json": `// extends a sibling, as a game may\n{ "extends": "./tsconfig.base.json", }\n`,
+      "tsconfig.base.json": JSON.stringify({ compilerOptions: { paths } })
+    });
+
+    const map = await readAliases(await loadTypeScript(), root, "tsconfig.json");
+    const index = specifiers.map(specifier =>
+      aliasTargets(map, specifier).map(target => path.join(root, target))
+    );
+    const lint = specifiers.map(specifier =>
+      aliasTargetsOf(path.join(root, "tsconfig.json"), root, specifier)
+    );
+
+    expect(lint).toEqual(index);
+    expect(index.filter(targets => targets.length > 0)).toHaveLength(13);
   });
 });
