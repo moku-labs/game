@@ -19,6 +19,14 @@
       "types": "./dist/app.d.mts",
       "default": "./dist/app.mjs"
     },
+    "./app/page": {
+      "types": "./dist/app/page.d.mts",
+      "default": "./dist/app/page.mjs"
+    },
+    "./app/system": {
+      "types": "./dist/app/system.d.mts",
+      "default": "./dist/app/system.mjs"
+    },
     "./visual": {
       "types": "./dist/visual.d.mts",
       "default": "./dist/visual.mjs"

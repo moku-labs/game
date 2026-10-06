@@ -311,10 +311,10 @@ export default [
     rules: { "l11/packer-imports": "error" }
   },
 
-  // 6b6. L13 — the engine never imports a native package: `@moku-labs/system`, `@moku-labs/native`
-  // and `@tauri-apps/*` are reached by the game through the `PlatformProvider` it builds in the
-  // application layer. Every file under `src/`, tests included, and type imports too. A rule of its
-  // own for the same reason as L11.
+  // 6b6. L13 — the engine imports a native package in one home each: `@moku-labs/system` only in
+  // `src/app/system.ts` and `@moku-labs/native` only in `src/app/native.ts`, the two optional peers
+  // of the game shell. Every other file under `src/`, tests included, and type imports too, never
+  // reaches them or `@tauri-apps/*`. A rule of its own for the same reason as L11.
   {
     files: ["src/**/*.{ts,tsx}"],
     plugins: {
@@ -326,12 +326,19 @@ export default [
               schema: [],
               messages: {
                 native:
-                  "The engine never imports @moku-labs/system, @moku-labs/native or @tauri-apps/*. The game passes a PlatformProvider in pluginConfigs.platform."
+                  "Only src/app/system.ts imports @moku-labs/system and only src/app/native.ts imports @moku-labs/native; no engine file imports @tauri-apps/*. Reach them through the game shell."
               }
             },
             create: (
               context: import("eslint").Rule.RuleContext
             ): import("eslint").Rule.RuleListener => {
+              const file = context.filename.replaceAll("\\", "/");
+              // The one package each home file may reach.
+              const homes: Record<string, RegExp> = {
+                "/src/app/system.ts": /^@moku-labs\/system(?:\/|$)/,
+                "/src/app/native.ts": /^@moku-labs\/native(?:\/|$)/
+              };
+              const home = Object.entries(homes).find(([end]) => file.endsWith(end))?.[1];
               const check = (
                 node: import("estree").Node,
                 source: import("estree").Node | null | undefined
@@ -340,6 +347,7 @@ export default [
 
                 if (
                   typeof name === "string" &&
+                  home?.test(name) !== true &&
                   /^(?:@moku-labs\/(?:system|native)(?:\/|$)|@tauri-apps\/)/.test(name)
                 ) {
                   context.report({ node, messageId: "native" });
