@@ -74,12 +74,14 @@ const CLOSED = "[game] The project is closed.\n  Open it again with openProject(
  *
  * @param root - The real root.
  * @param listener - Gets every event.
+ * @param onError - Called when a folder watcher errors.
  * @param watchFunction - `fs.watch`.
  * @returns The tree watcher.
  */
 function watchFolders(
   root: string,
   listener: (event: string, file: string | null) => void,
+  onError: () => void,
   watchFunction: WatchFunction
 ): TreeWatcher {
   const watchers = new Map<string, WatchHandle>();
@@ -88,10 +90,11 @@ function watchFolders(
     try {
       const handle = watchFunction(path.join(root, folder), { recursive: false }, listener);
 
-      // A watcher that errored is dropped, so the next walk arms the folder again.
+      // A watcher that errored is dropped and pokes a walk at once, which arms the folder again.
       handle.on("error", () => {
         handle.close();
         if (watchers.get(folder) === handle) watchers.delete(folder);
+        onError();
       });
       watchers.set(folder, handle);
     } catch {
@@ -146,7 +149,7 @@ export function watchTree(
       close: () => handle.close()
     };
   } catch {
-    return watchFolders(root, listener, watchFunction);
+    return watchFolders(root, listener, onEvent, watchFunction);
   }
 }
 

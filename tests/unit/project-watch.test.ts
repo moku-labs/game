@@ -305,6 +305,10 @@ describe("watchTree", () => {
     const failed = watchers.get("/game/nodes");
 
     failed?.onError?.(new Error("EPERM"));
+
+    // The error itself pokes the walk: no wait for the backstop.
+    expect(onEvent).toHaveBeenCalledTimes(1);
+
     tree.rearm(["", "nodes"]);
 
     const again = watchers.get("/game/nodes");
@@ -314,7 +318,7 @@ describe("watchTree", () => {
     expect(failed?.closed).toBe(true);
     expect(again).not.toBe(failed);
     expect(again?.closed).toBe(false);
-    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledTimes(2);
 
     tree.close();
   });

@@ -8,8 +8,8 @@
 import path from "node:path";
 import { buildIndex, type Catalog, createCatalog, dropFile, putFile } from "./catalog";
 import { diffIndexes } from "./change";
-import type { JsxShapes } from "./find";
 import { isIndexedFile, openRoot, readInside, resolveInside, toPosix } from "./paths";
+import type { JsxShapes } from "./shapes";
 import type { ProjectChange, ProjectIndex, ProjectOptions } from "./types";
 import { loadTypeScript } from "./typescript";
 import { type Stamp, sameStamp, stampOf, walkRoot } from "./walk";

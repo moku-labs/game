@@ -13,7 +13,8 @@ import { sha1 } from "./hash";
 import { type JsxHitsOf, locate } from "./locate";
 import { readInside } from "./paths";
 import type { Session } from "./session";
-import type { Anchor, Found, ProjectIndex } from "./types";
+import { JSX, type JsxShapes, jsxShapes } from "./shapes";
+import type { Anchor, Found } from "./types";
 import type { TypeScript } from "./typescript";
 
 /** The parse a file answers from, the hash of the bytes it came from, and its JSX hits. */
@@ -24,9 +25,6 @@ type View = {
   /** The JSX hits of the parse, collected on the first JSX anchor of the call. */
   readonly jsx: JsxHitsOf;
 };
-
-/** The prefix of a JSX key. */
-const JSX = "jsx:";
 
 /**
  * Whether a key matches a pattern whose `*` holes stand for any text.
@@ -47,33 +45,6 @@ export function matchesPattern(pattern: string, key: string): boolean {
     .map(part => part.replaceAll(/[$()*+.?[\\\]^{|}]/g, String.raw`\$&`));
 
   return new RegExp(`^${parts.join(".*")}$`).test(key);
-}
-
-/** The JSX anchors of an index by shape. */
-export type JsxShapes = { idPatterns: Anchor[]; wildPatterns: Anchor[]; idAttributes: Anchor[] };
-
-/**
- * The anchors of the JSX patterns and of the literal `id=` props of an index.
- *
- * @param index - The index.
- * @returns The `{id}` patterns, the `*` patterns and the `id=` props.
- */
-function jsxShapes(index: ProjectIndex): JsxShapes {
-  const shapes: JsxShapes = { idPatterns: [], wildPatterns: [], idAttributes: [] };
-
-  for (const [key, entry] of Object.entries(index.symbols)) {
-    if (!key.startsWith(JSX)) continue;
-
-    for (const anchor of entry.def) {
-      const pattern = anchor.key ?? "";
-
-      if (anchor.kind === "idProp") shapes.idAttributes.push(anchor);
-      else if (pattern.includes(ID)) shapes.idPatterns.push(anchor);
-      else if (pattern.includes(ANY)) shapes.wildPatterns.push(anchor);
-    }
-  }
-
-  return shapes;
 }
 
 /**
