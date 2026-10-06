@@ -194,6 +194,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | `@moku-labs/game/control` | dev builds | Drive a running game |
 | `@moku-labs/game/hot` | the Bun dev server | The `bunfig.toml` plugin that hot swaps views. See [Hot swap](./docs/hot-swap.md) |
 | `@moku-labs/game/lint` | oxlint | The game lint rules, as an oxlint JS plugin |
+| `@moku-labs/game/project` | Node and Bun | Where every engine id of a game is defined, line fresh at the call. The bin `moku-game-index`. See [Project index](./docs/project-index.md) |
 | `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | anywhere | The JSX runtime. A game never imports it by hand. |
 
 ### Lint for games
@@ -229,6 +230,7 @@ Each rule takes `{ "files": [...], "ignores": [...] }`. The defaults follow the 
 | [Events](./docs/events.md) | Every event and its payload |
 | [Configuration](./docs/configuration.md) | Every config field and its default |
 | [Lint for games](./docs/lint.md) | The `moku-game` oxlint rules, their options and defaults |
+| [Project index](./docs/project-index.md) | `openProject`, the key scheme, `find` and `watch`, the `moku-game-index` bin |
 | [Testing](./docs/testing.md) | Headless and visual tests, all scripts, test layout, lint rules |
 | [`llms.txt`](./llms.txt) | The engine in one page, for an AI that writes a game |
 
@@ -265,7 +267,7 @@ A save of a logic file reloads the page. What swaps and what reloads: [docs/hot-
 
 - **Node `>= 24`** and **Bun `>= 1.3.14`**. Use `bun` only.
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
-- **`pixi.js` `^8.0.0`** as a peer dependency. `playwright-core` for visual tests and `sharp` for the asset pack are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
+- **`pixi.js` `^8.0.0`** as a peer dependency. `playwright-core` for visual tests, `sharp` for the asset pack and `typescript` for the project index are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
 - **[`@moku-labs/core`](https://github.com/moku-labs/core)** is the kernel. **[`@moku-labs/common`](https://github.com/moku-labs/common)** brings `log` and `env`.
 
 ## License

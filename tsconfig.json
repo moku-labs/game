@@ -23,6 +23,7 @@
       "@moku-labs/game/control": ["./src/control.ts"],
       "@moku-labs/game/hot": ["./src/hot.ts"],
       "@moku-labs/game/lint": ["./src/lint.ts"],
+      "@moku-labs/game/project": ["./src/project.ts"],
       "@moku-labs/game/jsx-runtime": ["./src/jsx-runtime.ts"],
       "@moku-labs/game/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
     }

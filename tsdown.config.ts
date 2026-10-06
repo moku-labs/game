@@ -14,6 +14,8 @@ export default defineConfig({
     hot: "src/hot.ts",
     // Subpath: the oxlint JS plugin `moku-game` a game loads in `.oxlintrc.json`.
     lint: "src/lint.ts",
+    // Subpath: the project index of a game's sources and `moku-game-index`; node and bun only.
+    project: "src/project.ts",
     // Subpaths: the JSX runtimes `jsxImportSource: "@moku-labs/game"` names; re-exports only.
     "jsx-runtime": "src/jsx-runtime.ts",
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts"

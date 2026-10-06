@@ -47,10 +47,12 @@
         "pixi.js": "^8.0.0",
         "playwright-core": ">=1.50.0",
         "sharp": "^0.34.0",
+        "typescript": ">=5.5",
       },
       "optionalPeers": [
         "playwright-core",
         "sharp",
+        "typescript",
       ],
     },
   },

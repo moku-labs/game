@@ -2,7 +2,7 @@
 
 > 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state. V1 is the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry; V2 adds the screen plugins `world`, `renderer`, `input`, `assets`, `scenes`, a Pixi v8 renderer loaded lazily, and the `@moku-labs/game/assets` entry that generates typed asset keys. V3 adds the interface plugins `anim`, `i18n`, `text`, `ui` (`screen` lists all nine) and the opt-in `audio`: choreographies as data, strings as data, text from MSDF fonts, screens in JSX laid out by Yoga, sound as an effect a node awaits. V4 adds two doors for the editor: `@moku-labs/game/inspect` reads a running game, `@moku-labs/game/control` drives a dev build. V5 adds the opt-in plugin `effects`: particles and WGSL/GLSL filters as components. V6 adds the opt-in plugin `platform`: the Back button, haptics and keep-awake through a provider the game passes. The package is published on npm as `@moku-labs/game`, and this file ships inside it.
 
-Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer dependency, no V1 code imports it. `playwright-core` (visual tests) and `sharp` (the asset pack) are optional peers. Node >= 24, Bun >= 1.3.14. TypeScript strict with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. The engine ships no genre rules: no merge, no match-3, no physics. A game brings its own pure rule functions.
+Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer dependency, no V1 code imports it. `playwright-core` (visual tests), `sharp` (the asset pack) and `typescript` (the project index) are optional peers. Node >= 24, Bun >= 1.3.14. TypeScript strict with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. The engine ships no genre rules: no merge, no match-3, no physics. A game brings its own pure rule functions.
 
 ## Entry points
 
@@ -13,6 +13,7 @@ Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer 
 - `@moku-labs/game/control`: the write door of the editor, dev builds only. See "Doors for the editor".
 - `@moku-labs/game/hot` (the Bun dev server only): the `bunfig.toml` plugin that hot swaps views in a running page. See "Hot swap".
 - `@moku-labs/game/lint`: the oxlint JS plugin `moku-game` with the game lint rules. See "Lint for games".
+- `@moku-labs/game/project` (node and bun only): the project index, where every engine id of a game is defined, line read fresh at the call. The package bin `moku-game-index` runs it. See "Project index".
 - `@moku-labs/game/fonts/*`: the shipped MSDF body font and its licence. See "Fonts".
 - `@moku-labs/game/jsx-runtime` and `@moku-labs/game/jsx-dev-runtime`: what `"jsxImportSource": "@moku-labs/game"` resolves to. A game never imports them by hand.
 
@@ -502,6 +503,26 @@ Two subpaths, neither on the root (V4). An editor, MCP tools and e2e scripts rea
 - Commands run in dev builds only. Only `__MOKU_GAME_DEV__ === true` turns the dev build on: a bundler `define` (`true` in dev, `false` in production), `globalThis.__MOKU_GAME_DEV__ = true` in the dev entry, or `vi.stubGlobal("__MOKU_GAME_DEV__", true)` in a test. Otherwise `run` throws `[game] Control commands run in dev builds only.`
 - A command's effect is `read`, `route`, `cosmetic`, `cheat` or `raw`. A `cheat` or `raw` command taints the session and is journaled; read it with `sources.tainted` and `sources.cheats`. Of the base commands only `restore` is `raw`. `bookmark` answers `flow.bookmark()` plus `scene`, the mounted scene; `restore` calls `scenes.expect(scene)` before `flow.restore`, so a bookmark at a popup restores the scene under it.
 - A game's own: `defineSource({ id, title, input, changes, read })` with `changes` `"frame"`, `"commit"` or `"edge"`, and `defineCommand({ id, title, input, effect, run })`. The id is camelCase words joined by dots, at least two: `dice.rolls`. An input schema maps field names to `"string"`, `"number"`, `"boolean"` or `"json"`; a trailing `?` makes one optional. A command body starts with `if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();`. Keep them in `.dev` modules that only the dev entry and the tests import.
+
+## Project index
+
+`@moku-labs/game/project` maps every engine id of a game to anchors (a path plus a binding, a key or a component), never to line numbers; `find` reads the line from the file on disk at the call. `typescript` (`>=5.5`) is an optional peer: a game that uses the index adds it as a dev dependency. Nothing is persisted. The contract is in `docs/project-index.md`.
+
+```ts
+import { openProject } from "@moku-labs/game/project";
+
+const project = await openProject({ root: "tests/integration/merge-game" });
+(await project.find("node:board/merge"))[0]?.line; // 17, in "nodes/merge.ts"
+const stop = project.watch((index, change) => refresh(index.revision, change.moved));
+stop();
+project.close();
+```
+
+- `openProject({ root, manifest?, debounceMs? })` resolves `ProjectApi`: `index` (frozen, replaced per batch), `find(key)` (a `Found[]`: the anchor plus `line`, `range` `[startLine, startCol, endLine, endCol]` 1-based with an exclusive end column, `hash`, and `broken: true` when the file does not parse now), `watch(onIndex)` (one call per batch that changed bytes, with `(index, change)`; returns the stop function), `changed(path)` (re-index one root-relative path now, no watch call), `close()`. Without `typescript` it rejects with `[game] The project index needs the "typescript" package.`
+- Keys: `flow:<id>`, `node:<flow>/<node>` (every entry of a `nodes` table: node, sub-flow, slot), `feature:<id>`, `scene:<id>`, `projection:<name>`, `emitter:<id>`, `textStyle:<key>`, `style:<path>#<binding>` (a module-level `const` of `defineStyle`), `jsx:<key>`. Definers are recognised by binding from the kit's `defineGame()` destructure, renamed imports too. A non-literal id goes to `index.unresolved` with the reason, never guessed.
+- JSX keys are patterns: literal text stays, same-file consts and functions are followed, `props.id` becomes `{id}`, any other hole `*`. `` key={`${id}Picture`} `` reads `jsx:card*Picture` (stem `card`); `id="settingsBoard"` on `<Signboard>` reads `jsx:settingsBoard` (kind `idProp`, component `Signboard`). `find("jsx:settingsBoardClose")`, a key `game.locate` reports, answers the `{id}Close` pattern of the kit and the `id=` prop that fills it.
+- `ProjectChange` is `{ revision, files, moved: [{ key, from, to }], removed }`. A broken file keeps its last good keys and gets `files[path].state === "broken"`. Paths are root-relative POSIX; a path that leaves the root is refused.
+- CLI: `moku-game-index --root <dir> where <key>` prints `<path>:<line>` per place (exit 1 for an unknown key); `--json` prints the index; `--check` exits 1 on a broken file or a key in conflict and lists the unresolved items as info. `--root` is required, `--manifest <path>` is root-relative.
 
 ## Hot swap
 

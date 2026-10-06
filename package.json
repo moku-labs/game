@@ -35,6 +35,10 @@
       "types": "./dist/lint.d.mts",
       "default": "./dist/lint.mjs"
     },
+    "./project": {
+      "types": "./dist/project.d.mts",
+      "default": "./dist/project.mjs"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.mts",
       "default": "./dist/jsx-runtime.mjs"
@@ -46,7 +50,8 @@
     "./fonts/*": "./fonts/*"
   },
   "bin": {
-    "moku-game-assets": "./bin/moku-game-assets.mjs"
+    "moku-game-assets": "./bin/moku-game-assets.mjs",
+    "moku-game-index": "./bin/moku-game-index.mjs"
   },
   "license": "MIT",
   "files": [
@@ -97,7 +102,8 @@
     "@moku-labs/core": "^1.7.1",
     "pixi.js": "^8.0.0",
     "playwright-core": ">=1.50.0",
-    "sharp": "^0.34.0"
+    "sharp": "^0.34.0",
+    "typescript": ">=5.5"
   },
   "publishConfig": {
     "access": "public"
@@ -107,6 +113,9 @@
       "optional": true
     },
     "sharp": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     }
   },

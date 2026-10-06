@@ -4,7 +4,7 @@ import sonarjs from "eslint-plugin-sonarjs";
 import eslintPluginUnicorn from "eslint-plugin-unicorn";
 import tseslint from "typescript-eslint";
 
-// L2 — no static Pixi, Yoga or Playwright import. Blocks 6c and 6d2 both set
+// L2 — no static Pixi, Yoga, Playwright or TypeScript import. Blocks 6c and 6d2 both set
 // `@typescript-eslint/no-restricted-imports`, and a later block replaces the whole rule, so both carry these paths.
 const l2Paths = [
   {
@@ -21,6 +21,12 @@ const l2Paths = [
     name: "playwright-core",
     message:
       "playwright-core is an optional peer. Load it with await import() in src/visual/leg-browser.ts only."
+  },
+  {
+    name: "typescript",
+    allowTypeImports: true,
+    message:
+      "typescript is an optional peer. Load it with await import() in src/project/typescript.ts only."
   }
 ];
 
@@ -184,7 +190,7 @@ export default [
   // nobody can write an honest example for leaves the API (a plain function) or is deleted. Everywhere
   // else an example is allowed, never required: a required one becomes a copy of the signature.
   {
-    files: ["src/plugins/**/types.ts"],
+    files: ["src/plugins/**/types.ts", "src/project/types.ts"],
     rules: {
       "jsdoc/require-jsdoc": [
         "error",
@@ -395,13 +401,16 @@ export default [
   },
 
   // 6b4. L12 — the visual test runner `src/visual/` is node-only and reaches the whole `/control`
-  // catalogue: only the door `src/testing.ts` imports it. A later block replaces the whole rule,
+  // catalogue: only the door `src/testing.ts` imports it. The project index `src/project/` is
+  // node-only too: only the door `src/project.ts` imports it. A later block replaces the whole rule,
   // so the patterns these files carry now are repeated: L9's outside `ui`, L10's inside it.
   {
     files: ["src/**/*.ts"],
     ignores: [
       "src/testing.ts",
       "src/visual/**",
+      "src/project.ts",
+      "src/project/**",
       "src/jsx-runtime.ts",
       "src/jsx-dev-runtime.ts",
       "src/plugins/ui/**",
@@ -420,6 +429,10 @@ export default [
             {
               group: ["**/visual/**"],
               message: "The visual test runner is node-only. Only src/testing.ts imports it."
+            },
+            {
+              group: ["**/project/**"],
+              message: "The project index is node-only. Only src/project.ts imports it."
             }
           ]
         }
@@ -446,6 +459,10 @@ export default [
             {
               group: ["**/visual/**"],
               message: "The visual test runner is node-only. Only src/testing.ts imports it."
+            },
+            {
+              group: ["**/project/**"],
+              message: "The project index is node-only. Only src/project.ts imports it."
             }
           ]
         }
