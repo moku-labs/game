@@ -9,7 +9,11 @@ import { COMPONENT } from "./extract/components";
 import type { NodeTable, Unresolved } from "./extract/definitions";
 import { type Modules, resolveBinding } from "./extract/resolve";
 import { revisionOf } from "./hash";
+import { JSX } from "./shapes";
 import type { Anchor, ProjectIndex } from "./types";
+
+/** The prefix of a node key. */
+const NODE = "node:";
 
 /** What the pass reads: every record sorted by path, and the module facts of the good files. */
 export type Assembly = {
@@ -64,7 +68,7 @@ function addTable(
     table.binding === undefined ? { path: file } : { path: file, binding: table.binding };
 
   for (const { name, ref } of table.entries) {
-    const entry = entryOf(symbols, `node:${table.flow}/${name}`);
+    const entry = entryOf(symbols, `${NODE}${table.flow}/${name}`);
     const atTable: Anchor = { ...use, key: name };
     const target = ref === undefined ? undefined : resolveBinding(assembly.modules, file, ref);
 
@@ -128,6 +132,27 @@ function componentsByBinding(symbols: Symbols): Map<string, Entry[]> {
 }
 
 /**
+ * The component names one file renders.
+ *
+ * @param record - The record of the file.
+ * @returns The names; none for a broken file.
+ */
+function renderedBy(record: FileRecord): readonly string[] {
+  return record.good === undefined ? [] : (record.extracted?.result.rendered ?? []);
+}
+
+/**
+ * Adds one use of a rendered binding to every component entry bound to it.
+ *
+ * @param byBinding - Binding to the component entries bound to it.
+ * @param file - The file that renders the binding.
+ * @param binding - The rendered name.
+ */
+function useComponent(byBinding: Map<string, Entry[]>, file: string, binding: string): void {
+  for (const entry of byBinding.get(binding) ?? []) entry.uses.push({ path: file, binding });
+}
+
+/**
  * Adds, to every component key, the files that render its binding: one use per file and binding,
  * in path order. A member tag `<ui.RoundButton>` renders `RoundButton`.
  *
@@ -138,11 +163,7 @@ function addComponentUses(assembly: Assembly, symbols: Symbols): void {
   const byBinding = componentsByBinding(symbols);
 
   for (const [file, record] of assembly.files) {
-    const rendered = record.good === undefined ? [] : (record.extracted?.result.rendered ?? []);
-
-    for (const binding of rendered) {
-      for (const entry of byBinding.get(binding) ?? []) entry.uses.push({ path: file, binding });
-    }
+    for (const binding of renderedBy(record)) useComponent(byBinding, file, binding);
   }
 }
 
@@ -159,7 +180,7 @@ function finishSymbols(symbols: Symbols): ProjectIndex["symbols"] {
   const sorted = [...symbols].toSorted(([first], [second]) => (first < second ? -1 : 1));
 
   for (const [key, { def, uses }] of sorted) {
-    const isConflict = !key.startsWith("jsx:") && def.length > 1;
+    const isConflict = !key.startsWith(JSX) && def.length > 1;
 
     finished[key] = {
       def,
