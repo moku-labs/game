@@ -13,7 +13,7 @@ import type { Definer } from "./extract/module";
 import {
   declaredFunctions,
   type FunctionNode,
-  literalNameOf,
+  propertyNameOf,
   propertyOfValue,
   unwrap
 } from "./extract/scope";
@@ -79,24 +79,6 @@ function declares(typescript: TypeScript, statement: ts.Statement, binding: stri
       element => typescript.isBindingElement(element) && element.name.getText() === binding
     );
   });
-}
-
-/**
- * The name of a property-like node, when it is written literally.
- *
- * @param typescript - The TypeScript module.
- * @param node - Any node.
- * @returns The name of a property, a shorthand or a method; `undefined` for anything else.
- */
-function propertyNameOf(typescript: TypeScript, node: ts.Node): string | undefined {
-  const isProperty =
-    typescript.isPropertyAssignment(node) ||
-    typescript.isShorthandPropertyAssignment(node) ||
-    typescript.isMethodDeclaration(node);
-
-  if (!isProperty) return undefined;
-
-  return literalNameOf(typescript, node.name);
 }
 
 /**

@@ -17,8 +17,8 @@ import type { Definer } from "./module";
 import {
   enclosingFunction,
   enclosingName,
-  literalNameOf,
   meaningOf,
+  propertyNameOf,
   propertyOfValue,
   unwrap
 } from "./scope";
@@ -85,22 +85,6 @@ function literalOf(typescript: TypeScript, node: ts.Expression | undefined): str
 }
 
 /**
- * The name of an object property when it is written literally.
- *
- * @param typescript - The TypeScript module.
- * @param property - The property.
- * @returns The name, or `undefined` for a spread or a computed name.
- */
-function propertyName(
-  typescript: TypeScript,
-  property: ts.ObjectLiteralElementLike
-): string | undefined {
-  const name = property.name;
-
-  return name === undefined ? undefined : literalNameOf(typescript, name);
-}
-
-/**
  * The value of a named property of an object literal; for a shorthand, the name itself.
  *
  * @param typescript - The TypeScript module.
@@ -114,7 +98,7 @@ function propertyValue(
   name: string
 ): ts.Expression | undefined {
   for (const property of object.properties) {
-    if (propertyName(typescript, property) !== name) continue;
+    if (propertyNameOf(typescript, property) !== name) continue;
     if (typescript.isPropertyAssignment(property)) return property.initializer;
     if (typescript.isShorthandPropertyAssignment(property)) return property.name;
   }
@@ -275,7 +259,7 @@ function readTable(reading: Reading, call: ts.CallExpression, flow: string): voi
       continue;
     }
 
-    const name = propertyName(typescript, property);
+    const name = propertyNameOf(typescript, property);
 
     if (name === undefined) {
       unresolve(reading, `defineFlow "${flow}" node name is not a literal`);
@@ -357,7 +341,7 @@ function readTextStyles(reading: Reading, call: ts.CallExpression): void {
   const binding = bindingOf(typescript, call);
 
   for (const property of table.properties) {
-    const key = propertyName(typescript, property);
+    const key = propertyNameOf(typescript, property);
 
     if (key === undefined) {
       unresolve(reading, "defineTextStyles key is not a literal");

@@ -59,6 +59,25 @@ export function literalNameOf(typescript: TypeScript, name: ts.PropertyName): st
 }
 
 /**
+ * The name of a property-like node, when it is written literally: a property, a shorthand, a
+ * method or an accessor.
+ *
+ * @param typescript - The TypeScript module.
+ * @param node - Any node.
+ * @returns The name, or `undefined` for a spread, a computed name or a node without a name.
+ */
+export function propertyNameOf(typescript: TypeScript, node: ts.Node): string | undefined {
+  const isProperty =
+    typescript.isPropertyAssignment(node) ||
+    typescript.isShorthandPropertyAssignment(node) ||
+    typescript.isMethodDeclaration(node) ||
+    typescript.isGetAccessorDeclaration(node) ||
+    typescript.isSetAccessorDeclaration(node);
+
+  return isProperty ? literalNameOf(typescript, node.name) : undefined;
+}
+
+/**
  * Whether a node holds statements: a block, a source file, a module block or a case clause.
  *
  * @param node - A node.
