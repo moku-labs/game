@@ -33,7 +33,7 @@ export type JsxHit = {
 const QUOTE_LENGTH = 60;
 
 /** A component tag: its name starts upper-case. */
-const COMPONENT_TAG = /^[A-Z]/;
+export const COMPONENT_TAG = /^[A-Z]/;
 
 /**
  * The expression a JSX attribute holds: the string of `key="x"` or the code of `key={x}`.

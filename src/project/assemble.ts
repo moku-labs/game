@@ -1,14 +1,19 @@
 /**
  * @file project — the cross-file pass that turns the records of a catalog into the index: every
  * definition, the `node:` keys of each flow table followed to the file that declares the node,
- * the files that import each style, conflicts, the files with their hashes, the unresolved items
+ * the files that import each style, the files that render each component, conflicts, the files with their hashes, the unresolved items
  * and the revision. The result is frozen: a watch batch replaces it, nothing mutates it.
  */
 import type { FileRecord } from "./catalog";
+import { COMPONENT } from "./extract/components";
 import type { NodeTable, Unresolved } from "./extract/definitions";
 import { type Modules, resolveBinding } from "./extract/resolve";
 import { revisionOf } from "./hash";
+import { JSX } from "./shapes";
 import type { Anchor, ProjectIndex } from "./types";
+
+/** The prefix of a node key. */
+const NODE = "node:";
 
 /** What the pass reads: every record sorted by path, and the module facts of the good files. */
 export type Assembly = {
@@ -63,7 +68,7 @@ function addTable(
     table.binding === undefined ? { path: file } : { path: file, binding: table.binding };
 
   for (const { name, ref } of table.entries) {
-    const entry = entryOf(symbols, `node:${table.flow}/${name}`);
+    const entry = entryOf(symbols, `${NODE}${table.flow}/${name}`);
     const atTable: Anchor = { ...use, key: name };
     const target = ref === undefined ? undefined : resolveBinding(assembly.modules, file, ref);
 
@@ -105,6 +110,64 @@ function addStyleUses(assembly: Assembly, symbols: Symbols): void {
 }
 
 /**
+ * The component entries by the binding they are rendered as. Two anchors of one name in a
+ * conflict share one binding, so a file that renders it is one use.
+ *
+ * @param symbols - The keys so far.
+ * @returns Binding to the component entries bound to it.
+ */
+function componentsByBinding(symbols: Symbols): Map<string, Entry[]> {
+  const byBinding = new Map<string, Entry[]>();
+
+  for (const [key, entry] of symbols) {
+    if (!key.startsWith(COMPONENT)) continue;
+
+    const bindings = new Set(entry.def.flatMap(anchor => anchor.binding ?? []));
+
+    for (const binding of bindings)
+      byBinding.set(binding, [...(byBinding.get(binding) ?? []), entry]);
+  }
+
+  return byBinding;
+}
+
+/**
+ * The component names one file renders.
+ *
+ * @param record - The record of the file.
+ * @returns The names; none for a broken file.
+ */
+function renderedBy(record: FileRecord): readonly string[] {
+  return record.good === undefined ? [] : (record.extracted?.result.rendered ?? []);
+}
+
+/**
+ * Adds one use of a rendered binding to every component entry bound to it.
+ *
+ * @param byBinding - Binding to the component entries bound to it.
+ * @param file - The file that renders the binding.
+ * @param binding - The rendered name.
+ */
+function useComponent(byBinding: Map<string, Entry[]>, file: string, binding: string): void {
+  for (const entry of byBinding.get(binding) ?? []) entry.uses.push({ path: file, binding });
+}
+
+/**
+ * Adds, to every component key, the files that render its binding: one use per file and binding,
+ * in path order. A member tag `<ui.RoundButton>` renders `RoundButton`.
+ *
+ * @param assembly - The records and module facts.
+ * @param symbols - The keys so far.
+ */
+function addComponentUses(assembly: Assembly, symbols: Symbols): void {
+  const byBinding = componentsByBinding(symbols);
+
+  for (const [file, record] of assembly.files) {
+    for (const binding of renderedBy(record)) useComponent(byBinding, file, binding);
+  }
+}
+
+/**
  * The symbols as the index holds them: sorted by key, `uses` only when there are some, and
  * `conflict` on a key other than `jsx:` defined twice.
  *
@@ -117,7 +180,7 @@ function finishSymbols(symbols: Symbols): ProjectIndex["symbols"] {
   const sorted = [...symbols].toSorted(([first], [second]) => (first < second ? -1 : 1));
 
   for (const [key, { def, uses }] of sorted) {
-    const isConflict = !key.startsWith("jsx:") && def.length > 1;
+    const isConflict = !key.startsWith(JSX) && def.length > 1;
 
     finished[key] = {
       def,
@@ -178,6 +241,7 @@ export function assembleIndex(assembly: Assembly, manifest: string | undefined):
   }
 
   addStyleUses(assembly, symbols);
+  addComponentUses(assembly, symbols);
 
   return deepFreeze({
     schemaVersion: 1,
