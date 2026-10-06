@@ -516,6 +516,162 @@ export const Badge = ({ id }: { id: string }) => <text key={\`\${id}Badge\`} />;
   });
 });
 
+describe("components", () => {
+  it("keys a module-level upper-case function or function-valued const of a .tsx file", () => {
+    const index = indexOf({
+      "features/ui/kit.tsx": `export const ROUND_SIZE = 120;
+const TAP = { width: 10 };
+
+export function RoundButton(props: { id: string }) {
+  return <button key={props.id} />;
+}
+
+export const Badge = (props: { id: string }) => <text key={props.id} />;
+export const Plaque = function (props: { id: string }) {
+  return <panel key={props.id} />;
+};
+function Rope() {
+  return <rope />;
+}
+
+export function roundStyle() {
+  return TAP;
+}
+const helper = () => <row />;
+`
+    });
+
+    expect(keysOf(index, "component:")).toEqual([
+      "component:Badge",
+      "component:Plaque",
+      "component:Rope",
+      "component:RoundButton"
+    ]);
+    expect(index.symbols["component:RoundButton"]).toEqual({
+      def: [{ path: "features/ui/kit.tsx", binding: "RoundButton" }]
+    });
+    expect(index.symbols["component:Rope"]?.def).toEqual([
+      { path: "features/ui/kit.tsx", binding: "Rope" }
+    ]);
+    expect(index.unresolved).toEqual([]);
+  });
+
+  it("ignores a plain upper-case function of a .ts file and an overload signature", () => {
+    const index = indexOf({
+      "features/ui/size.ts":
+        "export function Measure(width: number): number {\n  return width;\n}\n",
+      "features/ui/pill.tsx": `export function Pill(props: { id: string }): unknown;
+export function Pill(props: { id: string }) {
+  return <row key={props.id} />;
+}
+`
+    });
+
+    expect(keysOf(index, "component:")).toEqual(["component:Pill"]);
+    expect(index.symbols["component:Pill"]).toEqual({
+      def: [{ path: "features/ui/pill.tsx", binding: "Pill" }]
+    });
+  });
+
+  it("keys defineComponent by its literal id, bound to its const, under a renamed import", () => {
+    const index = indexOf({
+      "kit.ts": KIT,
+      "features/settings/settings.ts": `import { defineComponent as component } from "../../kit";
+
+export const SettingsPanel = component("Settings", { view: () => undefined });
+`,
+      "features/settings/view.tsx": `import { SettingsPanel } from "./settings";
+
+export function SettingsScreen() {
+  return <SettingsPanel />;
+}
+`
+    });
+
+    expect(index.symbols["component:Settings"]).toEqual({
+      def: [{ path: "features/settings/settings.ts", binding: "SettingsPanel" }],
+      uses: [{ path: "features/settings/view.tsx", binding: "SettingsPanel" }]
+    });
+    expect(index.symbols["component:SettingsPanel"]).toBeUndefined();
+  });
+
+  it("sends a defineComponent with a non-literal id to unresolved", () => {
+    const index = indexOf({
+      "kit.ts": KIT,
+      "features/leave/leave.tsx": `import { defineComponent } from "../../kit";
+
+const id = "Leave";
+export const Leave = defineComponent(id, { view: () => undefined });
+`
+    });
+
+    expect(keysOf(index, "component:")).toEqual([]);
+    expect(index.unresolved).toEqual([
+      { path: "features/leave/leave.tsx", reason: "defineComponent id is not a string literal" }
+    ]);
+  });
+
+  it("lists one use per file that renders the binding, member tags too, sorted by path", () => {
+    const index = indexOf({
+      "features/ui/kit.tsx": `export function RoundButton(props: { id: string }) {
+  return <button key={props.id} />;
+}
+
+export function Bar() {
+  return (
+    <row>
+      <RoundButton id="a" />
+      <RoundButton id="b">x</RoundButton>
+    </row>
+  );
+}
+`,
+      "features/hud/row.tsx": `import * as ui from "../ui/kit";
+
+export function HudRow() {
+  return <ui.RoundButton id="hud" />;
+}
+`,
+      "features/home/view.tsx": `import { RoundButton } from "../ui/kit";
+
+export function Home() {
+  return <RoundButton id="play"></RoundButton>;
+}
+`,
+      "features/home/text.tsx": `export function Words() {
+  return <roundButton key="lower" />;
+}
+`
+    });
+
+    expect(index.symbols["component:RoundButton"]?.uses).toEqual([
+      { path: "features/home/view.tsx", binding: "RoundButton" },
+      { path: "features/hud/row.tsx", binding: "RoundButton" },
+      { path: "features/ui/kit.tsx", binding: "RoundButton" }
+    ]);
+    expect(index.symbols["component:Bar"]?.uses).toBeUndefined();
+  });
+
+  it("marks one name declared in two files as a conflict and keeps both anchors", () => {
+    const index = indexOf({
+      "kit.ts": KIT,
+      "features/a.tsx": "export function Panel() {\n  return <row />;\n}\n",
+      "features/b.tsx": `import { defineComponent } from "../kit";
+
+export const Box = defineComponent("Panel", { view: () => undefined });
+`
+    });
+
+    expect(index.symbols["component:Panel"]).toEqual({
+      def: [
+        { path: "features/a.tsx", binding: "Panel" },
+        { path: "features/b.tsx", binding: "Box" }
+      ],
+      conflict: true
+    });
+  });
+});
+
 describe("conflicts, broken files and the revision", () => {
   it("marks a key defined twice as a conflict and keeps both anchors", () => {
     const index = indexOf({

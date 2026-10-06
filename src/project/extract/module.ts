@@ -18,7 +18,8 @@ export const DEFINERS = [
   "projection",
   "defineEmitter",
   "defineTextStyles",
-  "defineStyle"
+  "defineStyle",
+  "defineComponent"
 ] as const;
 
 /** One definer whose calls make keys. */

@@ -32,6 +32,12 @@ await project.find("jsx:settingsBoard");
 // [{ path: "features/settings/settings.tsx", key: "settingsBoard", kind: "idProp",
 //    component: "Signboard", line: 301, range: [300, 7, 321, 19], hash: "…" }, …]
 
+await project.find("component:RoundButton");
+// [{ path: "features/ui/kit.tsx", binding: "RoundButton", line: 418, range: [418, 1, 431, 2], hash: "…" }]
+project.index.symbols["component:RoundButton"].uses;
+// [{ path: "features/home/view.tsx", binding: "RoundButton" },
+//  { path: "features/hud/row.tsx", binding: "RoundButton" }]
+
 const stop = project.watch((index, change) => refresh(index, change));
 await project.changed("nodes/merge.ts");       // a caller with its own file watcher
 stop();
@@ -85,13 +91,15 @@ A file hash is the sha1 hex of its bytes, the same value the editor uses as a fi
 | `emitter:<id>` | `emitter:fx.stars` | `defineEmitter("fx.stars", …)` | the declaration |
 | `textStyle:<key>` | `textStyle:ui.title` | a key of `defineTextStyles({ … })` | the property, `features/ui/styles.ts:39` |
 | `style:<path>#<binding>` | `style:features/ui/popup.tsx#popupScreen` | `const popupScreen = defineStyle(…)` at module scope | the declaration, `features/ui/popup.tsx:20` |
+| `component:<Name>` | `component:RoundButton` | in a `.tsx` file, a module-level `function RoundButton(…)`, `const Name = (…) => …` or `const Name = function …` with an upper-case name, exported or not; anywhere, `defineComponent("Settings", …)` | the declaration, `features/ui/kit.tsx:418`; `component:Settings` answers `features/settings/settings.tsx:289` |
 | `jsx:<key>` | `jsx:settingsBoard` | a JSX `key`, or a literal `id=` on a component | the attribute line, the element as the range |
 
 - **Definers are recognised by binding.** The names destructured from `defineGame()` in the kit are the definers, under any local name an importer gives them. The definers imported from `@moku-labs/game` directly count too. A call whose callee is not a definer binding is not a definition.
 - **Nothing is guessed.** A definer with a non-literal id goes to `unresolved` with the reason, for example `defineFlow id is not a string literal`.
 - **Nodes.** Every entry of a `nodes` table is a key, as `Object.entries(flow.nodes)` lists it at run time: a node, a sub-flow and a slot alike. A plain name is followed through relative imports, re-exports and barrels to the file that declares it, and the flow table is its use. A slot or an inline node is anchored at the table. A name that cannot be followed is anchored at the table and listed as unresolved.
-- **Uses.** A node's `uses` is the flow table that names it. A style's `uses` are the files that import its binding. One level, no transitive closure.
-- **Conflict.** A key other than `jsx:` defined twice sets `conflict: true` and keeps both anchors. `jsx:` keys repeat across files by design.
+- **Components.** A plain upper-case function of a `.ts` file, a SCREAMING_CASE constant and a lower-case function are not components. A `defineComponent` key takes the literal id and is bound to its const: `const Foo = defineComponent("Bar", …)` makes `component:Bar` with `binding: "Foo"`.
+- **Uses.** A node's `uses` is the flow table that names it. A style's `uses` are the files that import its binding. A component's `uses` are the files that render its binding, `<Foo …>` or `<ui.Foo …>` (the last segment of a member tag counts), one `{ path, binding }` per file, sorted by path. One level, no transitive closure.
+- **Conflict.** A key other than `jsx:` defined twice sets `conflict: true` and keeps both anchors: two components of one name in two files are a conflict. `jsx:` keys repeat across files by design.
 - **Files.** `**/*.{ts,tsx}` under the root, without `node_modules`, `dist`, `generated`, `.moku`, `.git`, `__tests__`, `tests` and `*.{test,spec}.{ts,tsx}`. Symlinks are not followed.
 
 ## JSX keys
@@ -151,12 +159,14 @@ The package bin `moku-game-index` opens the project of `--root` and runs one com
 ```bash
 moku-game-index --root tests/integration/merge-game where node:board/merge
 # nodes/merge.ts:17
+moku-game-index --root tests/integration/merge-game where component:RoundButton
+# features/ui/kit.tsx:418
 moku-game-index --root tests/integration/merge-game where jsx:settingsBoardClose
 # features/ui/kit.tsx:844
 # features/settings/settings.tsx:301
 moku-game-index --root tests/integration/merge-game --json
 moku-game-index --root tests/integration/merge-game --check
-#   › 111 files, 316 keys: 0 broken, 0 in conflict, 16 unresolved.
+#   › 111 files, 346 keys: 0 broken, 0 in conflict, 16 unresolved.
 #   › unresolved features/ui/kit.tsx: defineStyle in "plankStyle" is not bound to a module-level const
 ```
 

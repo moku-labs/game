@@ -160,6 +160,65 @@ describe("the project index of merge-game", () => {
     expect(Object.values(project.index.files).filter(file => file.state === "broken")).toEqual([]);
   });
 
+  it("keys every module-level component of a .tsx file and every defineComponent", () => {
+    expect(keysOf("component:")).toEqual(
+      [
+        "Amount",
+        "BoardTray",
+        "CardPicture",
+        "Confirm",
+        "DailyGift",
+        "HudPill",
+        "HudRow",
+        "InfoBar",
+        "LanguagePane",
+        "Leave",
+        "LogoSign",
+        "OrderCard",
+        "OrderStrip",
+        "OutOfEnergy",
+        "Parchment",
+        "PlankButton",
+        "PlaySign",
+        "PopupScreen",
+        "Prize",
+        "ProfilePane",
+        "Rename",
+        "RewardPopup",
+        "Rope",
+        "RoundButton",
+        "Settings",
+        "Signboard",
+        "StepButton",
+        "StepGlyph",
+        "TabButton",
+        "VolumeRow"
+      ].map(name => `component:${name}`)
+    );
+    // SCREAMING_CASE constants are values, not components.
+    expect(project.index.symbols["component:ROUND_SIZE"]).toBeUndefined();
+    expect(project.index.symbols["component:SEGMENTS"]).toBeUndefined();
+    expect(Object.keys(project.index.symbols)).toHaveLength(346);
+  });
+
+  it("finds a component at its declaration and lists the files that render it", async () => {
+    expect(await linesOf("component:RoundButton")).toEqual(["features/ui/kit.tsx:418"]);
+    expect(await linesOf("component:HudPill")).toEqual(["features/ui/kit.tsx:535"]);
+    expect(await linesOf("component:LogoSign")).toEqual(["features/home/logo.tsx:94"]);
+
+    const [settings] = await project.find("component:Settings");
+
+    expect(settings).toMatchObject({
+      path: "features/settings/settings.tsx",
+      binding: "Settings",
+      line: 289
+    });
+    expect(project.index.symbols["component:RoundButton"]?.uses).toEqual([
+      { path: "features/home/view.tsx", binding: "RoundButton" },
+      { path: "features/hud/row.tsx", binding: "RoundButton" }
+    ]);
+  });
+
   it("indexes every literal JSX key and every literal id= prop of a component", () => {
     const keys = literalAttributes(/\bkey="([^"]+)"/g);
     const props = literalAttributes(/\sid="([^"]+)"/g);
@@ -320,6 +379,6 @@ describe("the moku-game-index bin", () => {
     expect(where.status).toBe(0);
     expect(where.stdout).toBe("nodes/merge.ts:17\n");
     expect(check.status).toBe(0);
-    expect(check.stdout).toContain("111 files, 316 keys: 0 broken, 0 in conflict, 16 unresolved.");
+    expect(check.stdout).toContain("111 files, 346 keys: 0 broken, 0 in conflict, 16 unresolved.");
   });
 });

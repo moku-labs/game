@@ -2,13 +2,15 @@
  * @file project, extract — the keys one file defines. A call is a definition when its callee is a
  * definer binding of the file (`definersOf`): `defineFlow("board", …)` makes `flow:board`, and its
  * `nodes` table is kept for the cross-file pass that makes the `node:` keys; `defineFeature`,
- * `defineScene`, `defineEmitter`, `projection`, `defineTextStyles` and `defineStyle` make their own
- * keys. A definer whose id is not a literal goes to `unresolved` with the reason; nothing is
- * guessed. The JSX keys of the file join the same lists.
+ * `defineScene`, `defineEmitter`, `projection`, `defineTextStyles`, `defineStyle` and
+ * `defineComponent` make their own keys. A definer whose id is not a literal goes to `unresolved`
+ * with the reason; nothing is guessed. The plain components and the JSX keys of the file join the
+ * same lists, and the component names the file renders are kept for their `uses`.
  */
 import type ts from "typescript";
 import type { Anchor } from "../types";
 import type { TypeScript } from "../typescript";
+import { readComponents, renderedOf } from "./components";
 import { anchorOfHit, collectJsx, isOpaque, opaqueReason } from "./jsx";
 import type { Definer } from "./module";
 import { enclosingName, meaningOf, unwrap } from "./scope";
@@ -36,6 +38,8 @@ export type Extracted = {
   readonly definitions: readonly Definition[];
   readonly tables: readonly NodeTable[];
   readonly unresolved: readonly Unresolved[];
+  /** The component names the file renders, sorted: `RoundButton` for `<RoundButton>` and `<ui.RoundButton>`. */
+  readonly rendered: readonly string[];
 };
 
 /** The key prefix of each definer that takes its id as the first argument. */
@@ -43,7 +47,8 @@ const ID_PREFIXES: Partial<Record<Definer, string>> = {
   defineFlow: "flow",
   defineFeature: "feature",
   defineScene: "scene",
-  defineEmitter: "emitter"
+  defineEmitter: "emitter",
+  defineComponent: "component"
 };
 
 /** One file being read: the module, its path, its definers and the lists being filled. */
@@ -286,7 +291,8 @@ function readTable(reading: Reading, call: ts.CallExpression, flow: string): voi
 }
 
 /**
- * Reads a definer that takes its id as the first argument; a flow also brings its table.
+ * Reads a definer that takes its id as the first argument; a flow also brings its table. A
+ * component is bound to its const, and the key takes the literal id.
  *
  * @param reading - The file being read.
  * @param call - The call.
@@ -434,7 +440,8 @@ function readJsx(reading: Reading, source: ts.SourceFile): void {
  * @param source - The parsed file.
  * @param path - The root-relative path of the file.
  * @param definers - The definers the file can call, from `definersOf`.
- * @returns The definitions, the node tables and the unresolved items, in source order.
+ * @returns The definitions, the node tables and the unresolved items in source order, and the
+ *   component names the file renders.
  */
 export function extractFile(
   typescript: TypeScript,
@@ -461,11 +468,13 @@ export function extractFile(
   };
 
   if (definers.size > 0) visit(source);
+  reading.definitions.push(...readComponents(typescript, source, path));
   readJsx(reading, source);
 
   return {
     definitions: reading.definitions,
     tables: reading.tables,
-    unresolved: reading.unresolved
+    unresolved: reading.unresolved,
+    rendered: renderedOf(typescript, source)
   };
 }

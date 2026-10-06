@@ -2,7 +2,7 @@
  * @file project — the public types of the project index: the options of `openProject`, the index
  * it holds, the anchors of a key, the fresh lines `find` answers and the handle itself. The index
  * maps every engine id of a game (flows, nodes, features, scenes, projections, emitters, text
- * styles, styles and JSX keys) to anchors: a path plus a binding, a key or a component. It never
+ * styles, styles, components and JSX keys) to anchors: a path plus a binding, a key or a component. It never
  * holds a line number; `find` reads the line from the file as it is on disk at the call. No type
  * here names a `typescript` type, so the shipped declarations need no TypeScript.
  */
@@ -80,8 +80,8 @@ export type ProjectIndex = {
   /** The asset manifest, root-relative, when that file exists. */
   manifest?: string;
   /**
-   * Every key: where it is defined (`def`), where its binding is used (`uses`, nodes and styles,
-   * one level), and `conflict` when a key other than `jsx:` is defined twice.
+   * Every key: where it is defined (`def`), where its binding is used (`uses`, nodes, styles and
+   * components, one level), and `conflict` when a key other than `jsx:` is defined twice.
    */
   symbols: Record<string, { def: Anchor[]; uses?: Anchor[]; conflict?: true }>;
   /** Every indexed file: the sha1 of its bytes, and `broken` with the first parse error. */
