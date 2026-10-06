@@ -43,6 +43,22 @@ export function unwrap(typescript: TypeScript, node: ts.Expression): ts.Expressi
 }
 
 /**
+ * The text of a property name written literally: an identifier, a string or a number.
+ *
+ * @param typescript - The TypeScript module.
+ * @param name - A property name.
+ * @returns The text, or `undefined` for a computed or a private name.
+ */
+export function literalNameOf(typescript: TypeScript, name: ts.PropertyName): string | undefined {
+  const isLiteral =
+    typescript.isIdentifier(name) ||
+    typescript.isStringLiteral(name) ||
+    typescript.isNumericLiteral(name);
+
+  return isLiteral ? name.text : undefined;
+}
+
+/**
  * Whether a node holds statements: a block, a source file, a module block or a case clause.
  *
  * @param node - A node.
@@ -241,6 +257,26 @@ export function enclosingName(typescript: TypeScript, node: ts.Node): string | u
 }
 
 /**
+ * The function a const declarator holds, through parentheses, `as` and `satisfies`.
+ *
+ * @param typescript - The TypeScript module.
+ * @param declaration - The declarator.
+ * @returns The arrow or function expression, or `undefined` for any other value.
+ */
+function functionValueOf(
+  typescript: TypeScript,
+  declaration: ts.VariableDeclaration
+): ts.ArrowFunction | ts.FunctionExpression | undefined {
+  const value =
+    declaration.initializer === undefined ? undefined : unwrap(typescript, declaration.initializer);
+  const isFunction =
+    value !== undefined &&
+    (typescript.isArrowFunction(value) || typescript.isFunctionExpression(value));
+
+  return isFunction ? value : undefined;
+}
+
+/**
  * The functions one module-level statement declares: a named function with a body, or the
  * consts whose value is an arrow or a function expression. An overload signature, a `let`, a
  * `var` and a const of any other value declare none.
@@ -260,17 +296,11 @@ export function declaredFunctions(typescript: TypeScript, statement: ts.Node): D
   if ((statement.declarationList.flags & typescript.NodeFlags.Const) === 0) return [];
 
   return statement.declarationList.declarations.flatMap(declaration => {
-    const value =
-      declaration.initializer === undefined
-        ? undefined
-        : unwrap(typescript, declaration.initializer);
-    const isFunction =
-      value !== undefined &&
-      (typescript.isArrowFunction(value) || typescript.isFunctionExpression(value));
+    const node = functionValueOf(typescript, declaration);
 
-    return isFunction && typescript.isIdentifier(declaration.name)
-      ? [{ name: declaration.name.text, node: value }]
-      : [];
+    if (node === undefined || !typescript.isIdentifier(declaration.name)) return [];
+
+    return [{ name: declaration.name.text, node }];
   });
 }
 
@@ -311,11 +341,5 @@ export function propertyOfValue(typescript: TypeScript, node: ts.Expression): st
 
   if (!typescript.isPropertyAssignment(holder) || holder.initializer !== outer) return undefined;
 
-  const name = holder.name;
-  const isLiteral =
-    typescript.isIdentifier(name) ||
-    typescript.isStringLiteral(name) ||
-    typescript.isNumericLiteral(name);
-
-  return isLiteral ? name.text : undefined;
+  return literalNameOf(typescript, holder.name);
 }

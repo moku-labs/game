@@ -10,7 +10,13 @@ import type ts from "typescript";
 import { definerOfCall } from "./extract/definitions";
 import { collectJsx, type JsxHit } from "./extract/jsx";
 import type { Definer } from "./extract/module";
-import { declaredFunctions, type FunctionNode, propertyOfValue, unwrap } from "./extract/scope";
+import {
+  declaredFunctions,
+  type FunctionNode,
+  literalNameOf,
+  propertyOfValue,
+  unwrap
+} from "./extract/scope";
 import type { Anchor, Found } from "./types";
 import type { TypeScript } from "./typescript";
 
@@ -90,13 +96,7 @@ function propertyNameOf(typescript: TypeScript, node: ts.Node): string | undefin
 
   if (!isProperty) return undefined;
 
-  const name = node.name;
-  const isLiteral =
-    typescript.isIdentifier(name) ||
-    typescript.isStringLiteral(name) ||
-    typescript.isNumericLiteral(name);
-
-  return isLiteral ? name.text : undefined;
+  return literalNameOf(typescript, node.name);
 }
 
 /**

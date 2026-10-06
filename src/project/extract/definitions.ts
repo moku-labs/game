@@ -14,7 +14,14 @@ import type { TypeScript } from "../typescript";
 import { readComponents, renderedOf } from "./components";
 import { anchorOfHit, collectJsx, isOpaque, opaqueReason } from "./jsx";
 import type { Definer } from "./module";
-import { enclosingFunction, enclosingName, meaningOf, propertyOfValue, unwrap } from "./scope";
+import {
+  enclosingFunction,
+  enclosingName,
+  literalNameOf,
+  meaningOf,
+  propertyOfValue,
+  unwrap
+} from "./scope";
 
 /** One key a file defines, and where. */
 export type Definition = { readonly key: string; readonly anchor: Anchor };
@@ -90,14 +97,7 @@ function propertyName(
 ): string | undefined {
   const name = property.name;
 
-  if (name === undefined) return undefined;
-
-  const isLiteral =
-    typescript.isIdentifier(name) ||
-    typescript.isStringLiteral(name) ||
-    typescript.isNumericLiteral(name);
-
-  return isLiteral ? name.text : undefined;
+  return name === undefined ? undefined : literalNameOf(typescript, name);
 }
 
 /**
@@ -389,6 +389,29 @@ function addStyle(reading: Reading, key: string, anchor: Anchor): void {
 }
 
 /**
+ * The key and anchor of a style built in a module-level function: `style:<path>#<function>`, or
+ * `style:<path>#<function>.<property>` when the call is the value of an object property there.
+ *
+ * @param reading - The file being read.
+ * @param call - The `defineStyle` call.
+ * @param factory - The name of the function the call sits in.
+ * @returns The key and its anchor.
+ */
+function styleKeyIn(reading: Reading, call: ts.CallExpression, factory: string): Definition {
+  const { typescript, path } = reading;
+  const property = propertyOfValue(typescript, call);
+
+  if (property === undefined) {
+    return { key: `style:${path}#${factory}`, anchor: { path, binding: factory } };
+  }
+
+  return {
+    key: `style:${path}#${factory}.${property}`,
+    anchor: { path, binding: factory, key: property }
+  };
+}
+
+/**
  * Reads a style. One bound to a module const is `style:<path>#<binding>`. One built in a
  * module-level function, at any depth, is `style:<path>#<function>`, or
  * `style:<path>#<function>.<property>` when it is the value of an object property there. Any
@@ -409,16 +432,9 @@ function readStyle(reading: Reading, call: ts.CallExpression): void {
   const factory = enclosingFunction(typescript, call);
 
   if (factory !== undefined) {
-    const property = propertyOfValue(typescript, call);
+    const style = styleKeyIn(reading, call, factory);
 
-    if (property === undefined)
-      addStyle(reading, `style:${path}#${factory}`, { path, binding: factory });
-    else
-      addStyle(reading, `style:${path}#${factory}.${property}`, {
-        path,
-        binding: factory,
-        key: property
-      });
+    addStyle(reading, style.key, style.anchor);
     return;
   }
 
