@@ -3,6 +3,7 @@
   "files": {
     "includes": [
       "src/**",
+      "scripts/**",
       "tests/**",
       "bin/**",
       "*.config.ts",

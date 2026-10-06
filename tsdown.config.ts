@@ -5,6 +5,8 @@ export default defineConfig({
     index: "src/index.ts",
     // Subpath: the headless test helpers.
     testing: "src/testing.ts",
+    // Subpath: defineGameApp, the game definition and its config.
+    app: "src/app.ts",
     // Subpath: the visual tests, node and bun only.
     visual: "src/visual.ts",
     // Subpath: the build-time asset key scanner, node and bun only.

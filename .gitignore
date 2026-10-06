@@ -36,6 +36,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Claude Code
 .claude
 
+# Files moku-game dev writes beside a game
+.moku
+
 # Planning artifacts
 .planning
 

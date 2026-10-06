@@ -19,6 +19,10 @@
     "paths": {
       "@moku-labs/game": ["./src/index.ts"],
       "@moku-labs/game/testing": ["./src/testing.ts"],
+      "@moku-labs/game/app": ["./src/app.ts"],
+      "@moku-labs/game/app/page": ["./src/app/page.ts"],
+      "@moku-labs/game/app/system": ["./src/app/system.ts"],
+      "@moku-labs/game/cli": ["./src/cli.ts"],
       "@moku-labs/game/visual": ["./src/visual.ts"],
       "@moku-labs/game/inspect": ["./src/inspect.ts"],
       "@moku-labs/game/control": ["./src/control.ts"],

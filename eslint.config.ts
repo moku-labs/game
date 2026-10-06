@@ -137,7 +137,7 @@ export default [
 
   // 6. Source files: strict JSDoc requirements
   {
-    files: ["src/**/*.ts"],
+    files: ["src/**/*.ts", "scripts/**/*.ts"],
     rules: {
       "jsdoc/require-jsdoc": [
         "error",

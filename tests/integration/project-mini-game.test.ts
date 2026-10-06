@@ -106,7 +106,7 @@ describe("the project index of the mini game", () => {
     );
 
     expect(openMs).toBeLessThan(OPEN_BOUND_MS);
-    expect(Object.keys(project.index.files)).toHaveLength(21);
+    expect(Object.keys(project.index.files)).toHaveLength(23);
     expect(project.index.manifest).toBe("manifest.json");
   });
 
@@ -303,6 +303,6 @@ describe("the moku-game-index bin", () => {
     expect(where.status).toBe(0);
     expect(where.stdout).toBe("nodes/count.ts:7\n");
     expect(check.status).toBe(0);
-    expect(check.stdout).toContain("21 files, 35 keys: 0 broken, 0 in conflict, 0 unresolved.");
+    expect(check.stdout).toContain("23 files, 35 keys: 0 broken, 0 in conflict, 0 unresolved.");
   });
 });
