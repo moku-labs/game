@@ -6,9 +6,11 @@
  * is parsed again into the cache; one that does not parse answers from its last good parse.
  */
 import type ts from "typescript";
-import { parseCached } from "./catalog";
+import { type Catalog, parseCached } from "./catalog";
 import { collectJsx, type JsxHit } from "./extract/jsx";
+import type { Definer, ModuleFacts } from "./extract/module";
 import { ANY, ID } from "./extract/pattern";
+import { definersOf } from "./extract/resolve";
 import { sha1 } from "./hash";
 import { type JsxHitsOf, locate } from "./locate";
 import { readInside } from "./paths";
@@ -205,6 +207,40 @@ async function viewOf(session: Session, file: string): Promise<View | undefined>
 }
 
 /**
+ * The definers a file can call, recognised by binding on the module facts of the catalog, as
+ * extraction does.
+ *
+ * @param catalog - The catalog of the project.
+ * @param file - The root-relative path.
+ * @returns The callee text to the definer.
+ */
+function definersAt(catalog: Catalog, file: string): ReadonlyMap<string, Definer> {
+  const modules = new Map<string, ModuleFacts>();
+
+  for (const [path, record] of catalog.records) {
+    if (record.good !== undefined) modules.set(path, record.good.module);
+  }
+
+  return definersOf(modules, file);
+}
+
+/**
+ * The kind of a key: the text before its first colon.
+ *
+ * @param key - A key.
+ * @returns The kind, or the whole key when it has no colon.
+ * @example
+ * ```ts
+ * kindOf("style:features/ui/kit.tsx#boardStyle"); // "style"
+ * ```
+ */
+function kindOf(key: string): string {
+  const colon = key.indexOf(":");
+
+  return colon === -1 ? key : key.slice(0, colon);
+}
+
+/**
  * The identity of an answer: two anchors that land on the same element with the same key answer
  * once.
  *
@@ -230,6 +266,7 @@ export async function findKey(session: Session, key: string): Promise<Found[]> {
   const views = new Map<string, View | undefined>();
   const seen = new Set<string>();
   const found: Found[] = [];
+  const keyKind = kindOf(key);
 
   for (const anchor of anchorsOf(session, key)) {
     // Read each anchor's file once per call.
@@ -240,7 +277,11 @@ export async function findKey(session: Session, key: string): Promise<Found[]> {
     if (view === undefined) continue;
 
     // Turn each place of the anchor into an answer.
-    const places = locate(session.catalog.typescript, view.source, anchor, view.jsx);
+    const places = locate(session.catalog.typescript, view.source, anchor, {
+      keyKind,
+      jsxHits: view.jsx,
+      definers: () => definersAt(session.catalog, anchor.path)
+    });
     const answers = places.map(
       (place): Found => ({
         ...anchor,

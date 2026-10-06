@@ -52,7 +52,10 @@ export type Anchor = {
   path: string;
   /** The const, function or export the definition is bound to. */
   binding?: string;
-  /** The property or attribute key: a text style key, the `name` of a projection, a JSX key. */
+  /**
+   * The property or attribute key: a text style key, the `name` of a projection, a JSX key, or
+   * the property a style function builds a style under (`icon` of `roundStylesOf`).
+   */
   key?: string;
   /** JSX: the component an `id=` prop sits on, or the component an `{id}` pattern is written in. */
   component?: string;
@@ -116,7 +119,8 @@ export type ProjectChange = {
 /**
  * One answer of `find`: the anchor with its line read from the file now. Lines and columns are
  * 1-based; the end column is exclusive. A binding answers its declaration statement, a text style
- * key its property, a JSX key the line of its attribute with the whole element as the range.
+ * key its property, a style built in a function each of its style calls, a JSX key the line of its
+ * attribute with the whole element as the range.
  *
  * @example
  * ```ts

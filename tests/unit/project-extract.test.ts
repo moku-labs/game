@@ -382,6 +382,7 @@ export const look = board;
     });
 
     expect(keysOf(index, "style:")).toEqual([
+      "style:features/ui/popup.tsx#built",
       "style:features/ui/popup.tsx#popupBoard",
       "style:features/ui/popup.tsx#popupScreen"
     ]);
@@ -392,12 +393,123 @@ export const look = board;
     expect(index.unresolved).toEqual([
       {
         path: "features/ui/popup.tsx",
-        reason: 'defineStyle in "built" is not bound to a module-level const'
-      },
-      {
-        path: "features/ui/popup.tsx",
         reason: 'defineStyle in "table" is not bound to a module-level const'
       }
+    ]);
+  });
+});
+
+describe("style factories", () => {
+  /** Styles built inside module-level functions, and two that are not. */
+  const LOOKS = `import { defineStyle } from "../../kit";
+
+function plankStyle(size: number) {
+  return defineStyle({ width: size });
+}
+
+export const pillStyle = (width: number) => defineStyle({ width });
+
+function roundStylesOf(size: number) {
+  return {
+    disc: defineStyle({ width: size }),
+    icon: defineStyle({ width: size / 2 }) as const
+  };
+}
+
+function boardStyle(hung: boolean) {
+  if (!hung) return defineStyle({ width: 1 });
+
+  return defineStyle({ width: 2 });
+}
+
+const ropeStyles = function (count: number) {
+  return Array.from({ length: count }, (_, at) => defineStyle({ top: at }));
+};
+
+export const table = { disc: defineStyle({ width: 3 }) };
+
+register(defineStyle({ width: 4 }));
+`;
+
+  /** The path the looks are indexed at. */
+  const LOOKS_PATH = "features/ui/looks.ts";
+
+  it("keys a style a function returns by the function, and one under a property by both", () => {
+    const index = indexOf({ "kit.ts": KIT, [LOOKS_PATH]: LOOKS });
+
+    expect(keysOf(index, "style:")).toEqual([
+      `style:${LOOKS_PATH}#boardStyle`,
+      `style:${LOOKS_PATH}#pillStyle`,
+      `style:${LOOKS_PATH}#plankStyle`,
+      `style:${LOOKS_PATH}#ropeStyles`,
+      `style:${LOOKS_PATH}#roundStylesOf.disc`,
+      `style:${LOOKS_PATH}#roundStylesOf.icon`
+    ]);
+    expect(index.symbols[`style:${LOOKS_PATH}#plankStyle`]).toEqual({
+      def: [{ path: LOOKS_PATH, binding: "plankStyle" }]
+    });
+    expect(index.symbols[`style:${LOOKS_PATH}#roundStylesOf.icon`]).toEqual({
+      def: [{ path: LOOKS_PATH, binding: "roundStylesOf", key: "icon" }]
+    });
+  });
+
+  it("gives two calls of one function one key and one anchor, with no conflict", () => {
+    const index = indexOf({ "kit.ts": KIT, [LOOKS_PATH]: LOOKS });
+
+    expect(index.symbols[`style:${LOOKS_PATH}#boardStyle`]).toEqual({
+      def: [{ path: LOOKS_PATH, binding: "boardStyle" }]
+    });
+  });
+
+  it("resolves a call inside an inner arrow of a module-level function", () => {
+    const index = indexOf({ "kit.ts": KIT, [LOOKS_PATH]: LOOKS });
+
+    expect(index.symbols[`style:${LOOKS_PATH}#ropeStyles`]?.def).toEqual([
+      { path: LOOKS_PATH, binding: "ropeStyles" }
+    ]);
+  });
+
+  it("leaves a call in an object const and a call at module scope unresolved", () => {
+    const index = indexOf({ "kit.ts": KIT, [LOOKS_PATH]: LOOKS });
+
+    expect(index.symbols[`style:${LOOKS_PATH}#table`]).toBeUndefined();
+    expect(index.symbols[`style:${LOOKS_PATH}#table.disc`]).toBeUndefined();
+    expect(index.unresolved).toEqual([
+      {
+        path: LOOKS_PATH,
+        reason: 'defineStyle in "table" is not bound to a module-level const'
+      },
+      { path: LOOKS_PATH, reason: "defineStyle is not bound to a module-level const" }
+    ]);
+  });
+
+  it("leaves a call in a class, a let function and a top-level IIFE unresolved", () => {
+    const index = indexOf({
+      "kit.ts": KIT,
+      [LOOKS_PATH]: `import { defineStyle } from "../../kit";
+
+export class Looks {
+  card() {
+    return defineStyle({ width: 1 });
+  }
+}
+
+let later = () => defineStyle({ width: 2 });
+
+export const once = (() => defineStyle({ width: 3 }))();
+
+export default function () {
+  return defineStyle({ width: 4 });
+}
+`
+    });
+
+    expect(keysOf(index, "style:")).toEqual([]);
+    expect(index.unresolved.map(item => item.reason)).toEqual([
+      'defineStyle in "Looks" is not bound to a module-level const',
+      'defineStyle in "later" is not bound to a module-level const',
+      'defineStyle in "once" is not bound to a module-level const',
+      "defineStyle is not bound to a module-level const"
     ]);
   });
 });

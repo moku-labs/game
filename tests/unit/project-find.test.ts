@@ -180,6 +180,52 @@ describe("find", () => {
     expect(await project.find("jsx:nothingClose")).toEqual([]);
   });
 
+  it("answers every call of a style factory, and a property style at its call", async () => {
+    const looks = `import { defineStyle as style } from "@moku-labs/game";
+
+export function boardStyle(hung: boolean) {
+  const base = Object.freeze({ width: 1 });
+
+  if (!hung) return style(base);
+
+  return style({
+    ...base,
+    height: 2
+  });
+}
+
+function roundStylesOf(size: number) {
+  return {
+    disc: style({ width: size }),
+    icon: style({ width: size / 2 })
+  };
+}
+
+export const popupScreen = style({ width: 3 });
+`;
+    const project = await openProject({ root: writeGame({ "features/ui/looks.ts": looks }) });
+
+    const board = await project.find("style:features/ui/looks.ts#boardStyle");
+    const [disc] = await project.find("style:features/ui/looks.ts#roundStylesOf.disc");
+    const [screen] = await project.find("style:features/ui/looks.ts#popupScreen");
+
+    expect(project.index.symbols["style:features/ui/looks.ts#boardStyle"]).toEqual({
+      def: [{ path: "features/ui/looks.ts", binding: "boardStyle" }]
+    });
+    expect(board.map(found => [found.line, found.range])).toEqual([
+      [6, [6, 21, 6, 32]],
+      [8, [8, 10, 11, 5]]
+    ]);
+    expect(disc).toMatchObject({
+      binding: "roundStylesOf",
+      key: "disc",
+      line: 16,
+      range: [16, 11, 16, 33]
+    });
+    expect(screen).toMatchObject({ line: 21, range: [21, 1, 21, 48] });
+    project.close();
+  });
+
   it("answers [] for an unknown key", async () => {
     const project = await openProject({ root: writeGame() });
 

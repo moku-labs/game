@@ -1,7 +1,8 @@
 /**
  * @file project, extract — what a name means inside one file: a `const` with its initializer, a
  * function, or a parameter of an enclosing function. The lookup walks up from the place the name
- * is used, block by block, as the language does; shadowing inside a block is not modelled.
+ * is used, block by block, as the language does; shadowing inside a block is not modelled. Also
+ * the module-level declaration or function a node sits in, and the property a value is under.
  */
 import type ts from "typescript";
 import type { TypeScript } from "../typescript";
@@ -197,6 +198,26 @@ export function meaningOf(typescript: TypeScript, identifier: ts.Identifier): Me
   return undefined;
 }
 
+/** A function a module-level statement declares, by its name. */
+export type DeclaredFunction = { readonly name: string; readonly node: FunctionNode };
+
+/**
+ * The statement directly under the file that a node sits in.
+ *
+ * @param typescript - The TypeScript module.
+ * @param node - Any node.
+ * @returns The statement, or the file itself for the file.
+ */
+function topStatementOf(typescript: TypeScript, node: ts.Node): ts.Node {
+  let statement: ts.Node = node;
+
+  while (statement.parent !== undefined && !typescript.isSourceFile(statement.parent)) {
+    statement = statement.parent;
+  }
+
+  return statement;
+}
+
 /**
  * The name of the top-level declaration a node sits in: the function, class or first const of
  * the statement directly under the file.
@@ -206,11 +227,7 @@ export function meaningOf(typescript: TypeScript, identifier: ts.Identifier): Me
  * @returns The declared name, or `undefined` for a statement that declares none.
  */
 export function enclosingName(typescript: TypeScript, node: ts.Node): string | undefined {
-  let statement: ts.Node = node;
-
-  while (statement.parent !== undefined && !typescript.isSourceFile(statement.parent)) {
-    statement = statement.parent;
-  }
+  const statement = topStatementOf(typescript, node);
 
   if (typescript.isFunctionDeclaration(statement) || typescript.isClassDeclaration(statement)) {
     return statement.name?.text;
@@ -221,4 +238,84 @@ export function enclosingName(typescript: TypeScript, node: ts.Node): string | u
   const [first] = statement.declarationList.declarations;
 
   return first !== undefined && typescript.isIdentifier(first.name) ? first.name.text : undefined;
+}
+
+/**
+ * The functions one module-level statement declares: a named function with a body, or the
+ * consts whose value is an arrow or a function expression. An overload signature, a `let`, a
+ * `var` and a const of any other value declare none.
+ *
+ * @param typescript - The TypeScript module.
+ * @param statement - A statement directly under the file.
+ * @returns The functions, in source order.
+ */
+export function declaredFunctions(typescript: TypeScript, statement: ts.Node): DeclaredFunction[] {
+  if (typescript.isFunctionDeclaration(statement)) {
+    const name = statement.name?.text;
+
+    return name !== undefined && statement.body !== undefined ? [{ name, node: statement }] : [];
+  }
+
+  if (!typescript.isVariableStatement(statement)) return [];
+  if ((statement.declarationList.flags & typescript.NodeFlags.Const) === 0) return [];
+
+  return statement.declarationList.declarations.flatMap(declaration => {
+    const value =
+      declaration.initializer === undefined
+        ? undefined
+        : unwrap(typescript, declaration.initializer);
+    const isFunction =
+      value !== undefined &&
+      (typescript.isArrowFunction(value) || typescript.isFunctionExpression(value));
+
+    return isFunction && typescript.isIdentifier(declaration.name)
+      ? [{ name: declaration.name.text, node: value }]
+      : [];
+  });
+}
+
+/**
+ * The module-level function a node sits in, at any depth: a named function declaration, or a
+ * const whose value is a function. A node in a class, an object const or a statement that
+ * declares no function has none.
+ *
+ * @param typescript - The TypeScript module.
+ * @param node - Any node.
+ * @returns The name of the function, or `undefined`.
+ */
+export function enclosingFunction(typescript: TypeScript, node: ts.Node): string | undefined {
+  const statement = topStatementOf(typescript, node);
+  const around = declaredFunctions(typescript, statement).find(
+    item => item.node.pos <= node.pos && node.end <= item.node.end
+  );
+
+  return around?.name;
+}
+
+/**
+ * The name of the object property whose value an expression is: `disc` for the call in
+ * `{ disc: defineStyle(…) }`, through parentheses, `as` and `satisfies`.
+ *
+ * @param typescript - The TypeScript module.
+ * @param node - An expression.
+ * @returns The property name when it is written literally; `undefined` for anything else.
+ */
+export function propertyOfValue(typescript: TypeScript, node: ts.Expression): string | undefined {
+  let outer: ts.Node = node;
+
+  while (typescript.isExpression(outer.parent) && unwrap(typescript, outer.parent) === node) {
+    outer = outer.parent;
+  }
+
+  const holder = outer.parent;
+
+  if (!typescript.isPropertyAssignment(holder) || holder.initializer !== outer) return undefined;
+
+  const name = holder.name;
+  const isLiteral =
+    typescript.isIdentifier(name) ||
+    typescript.isStringLiteral(name) ||
+    typescript.isNumericLiteral(name);
+
+  return isLiteral ? name.text : undefined;
 }

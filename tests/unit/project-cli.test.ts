@@ -24,12 +24,10 @@ const HOME = `import { defineScene } from "./kit";
 export const homeScene = defineScene("home", {});
 `;
 
-/** A style built by a function: unresolved, never a failure. */
+/** A style in an object const: unresolved, never a failure. */
 const LOOKS = `import { defineStyle } from "./kit";
 
-export function look(size: number) {
-  return defineStyle({ width: size });
-}
+export const look = { card: defineStyle({ width: 1 }) };
 `;
 
 /** The temp folders of this file, removed after each test. */
