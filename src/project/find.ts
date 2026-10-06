@@ -1,15 +1,16 @@
 /**
  * @file project — `find`: the anchors of a key, read on the files as they are on disk now. A JSX
- * key the game reports at run time is matched in three tiers: the exact key, then the `{id}`
- * patterns filled with a literal `id=` prop of the same component (the pattern and the prop both
- * answer), then the `*` patterns as wildcards. A file whose bytes moved since the index was built
- * is parsed again into the cache; one that does not parse answers from its last good parse.
+ * key the game reports at run time is matched in three tiers: the exact key, then the `{id}` and
+ * `{amountKey}` patterns filled with a literal prop of the same name on the same component (the
+ * pattern and the prop both answer), then the `*` patterns as wildcards. A file whose bytes moved
+ * since the index was built is parsed again into the cache; one that does not parse answers from
+ * its last good parse.
  */
 import type ts from "typescript";
 import { type Catalog, parseCached } from "./catalog";
 import { collectJsx, type JsxHit } from "./extract/jsx";
 import type { Definer, ModuleFacts } from "./extract/module";
-import { ANY, ID } from "./extract/pattern";
+import { ANY, HOLE, hasHole, holeOf } from "./extract/pattern";
 import { definersOf } from "./extract/resolve";
 import { sha1 } from "./hash";
 import { type JsxHitsOf, locate } from "./locate";
@@ -31,7 +32,7 @@ type View = {
 /**
  * Whether a key matches a pattern whose `*` holes stand for any text.
  *
- * @param pattern - A pattern, `{id}` already filled.
+ * @param pattern - A pattern, its prop holes already filled.
  * @param key - The key without its prefix.
  * @returns True when the key reads as the pattern.
  * @example
@@ -69,20 +70,24 @@ function shapesOf(session: Session): JsxShapes {
 }
 
 /**
- * Whether an `id=` prop fills an `{id}` pattern into the wanted key. A pattern written in a
- * component takes only the props of that component; one written in a helper takes any.
+ * Whether a literal prop fills the holes of its name in a pattern into the wanted key: `id=` fills
+ * `{id}`, `amountKey=` fills `{amountKey}`. A pattern written in a component takes only the props
+ * of that component; one written in a helper takes any.
  *
- * @param pattern - The anchor of the `{id}` pattern.
- * @param idAttribute - The anchor of the `id=` prop.
+ * @param pattern - The anchor of the pattern.
+ * @param filler - The anchor of the prop: an `idProp` anchor.
  * @param wanted - The runtime key, without its prefix.
  * @returns True when the filled pattern reads as the key.
  */
-function fills(pattern: Anchor, idAttribute: Anchor, wanted: string): boolean {
-  const isSameComponent =
-    pattern.component === undefined || pattern.component === idAttribute.component;
-  const filled = (pattern.key ?? "").replaceAll(ID, idAttribute.key ?? "");
+function fills(pattern: Anchor, filler: Anchor, wanted: string): boolean {
+  if (pattern.component !== undefined && pattern.component !== filler.component) return false;
 
-  return isSameComponent && matchesPattern(filled, wanted);
+  const key = pattern.key ?? "";
+  const hole = holeOf(filler.prop ?? "id");
+
+  if (!key.includes(hole)) return false;
+
+  return matchesPattern(key.replaceAll(hole, filler.key ?? ""), wanted);
 }
 
 /**
@@ -96,7 +101,7 @@ function fills(pattern: Anchor, idAttribute: Anchor, wanted: string): boolean {
  * ```
  */
 function specificityOf(anchor: Anchor): number {
-  return (anchor.key ?? "").replaceAll(ID, "").replaceAll(ANY, "").length;
+  return (anchor.key ?? "").replaceAll(HOLE, "").replaceAll(ANY, "").length;
 }
 
 /**
@@ -111,21 +116,21 @@ function bySpecificity(first: Anchor, second: Anchor): number {
 }
 
 /**
- * The anchors a runtime JSX key reaches through patterns: each `{id}` pattern filled with an `id=`
- * prop (the pattern, then the prop), then each `*` pattern as a wildcard. Within each tier the
- * pattern with more literal text comes first: `card*Picture` before `card*`.
+ * The anchors a runtime JSX key reaches through patterns: each prop-hole pattern filled with a
+ * literal prop of its name (the pattern, then the prop), then each `*` pattern as a wildcard.
+ * Within each tier the pattern with more literal text comes first: `card*Picture` before `card*`.
  *
  * @param shapes - The JSX shapes of the index.
  * @param wanted - The runtime key, without its prefix.
  * @returns The anchors, in that order.
  */
 function patternAnchors(shapes: JsxShapes, wanted: string): Anchor[] {
-  const { idPatterns, wildPatterns, idAttributes } = shapes;
+  const { holePatterns, wildPatterns, idProps } = shapes;
   const reached: Anchor[] = [];
 
-  for (const pattern of idPatterns.toSorted(bySpecificity)) {
-    for (const idAttribute of idAttributes.filter(item => fills(pattern, item, wanted))) {
-      reached.push(pattern, idAttribute);
+  for (const pattern of holePatterns.toSorted(bySpecificity)) {
+    for (const filler of idProps.filter(item => fills(pattern, item, wanted))) {
+      reached.push(pattern, filler);
     }
   }
 
@@ -138,7 +143,7 @@ function patternAnchors(shapes: JsxShapes, wanted: string): Anchor[] {
 
 /**
  * The anchors of a key, in the order `find` answers them: the exact key, then, for a JSX key as
- * the game reports it (no `*`, no `{id}`), the patterns that read as it.
+ * the game reports it (no `*`, no prop hole), the patterns that read as it.
  *
  * @param session - The open project.
  * @param key - The key.
@@ -146,7 +151,7 @@ function patternAnchors(shapes: JsxShapes, wanted: string): Anchor[] {
  */
 export function anchorsOf(session: Session, key: string): Anchor[] {
   const exact = session.index.symbols[key]?.def ?? [];
-  const isRuntimeJsx = key.startsWith(JSX) && !key.includes(ANY) && !key.includes(ID);
+  const isRuntimeJsx = key.startsWith(JSX) && !key.includes(ANY) && !hasHole(key);
   const reached = isRuntimeJsx ? patternAnchors(shapesOf(session), key.slice(JSX.length)) : [];
 
   return [...new Set([...exact, ...reached])];

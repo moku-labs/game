@@ -210,14 +210,17 @@ export function locate(
   anchor: Anchor,
   context: LocateContext = {}
 ): Place[] {
-  // A JSX key: every element whose key reads the same pattern, kind and component.
+  // A JSX key: every element whose key reads the same pattern, kind, component and prop.
   if (anchor.kind !== undefined) {
     const hits = context.jsxHits?.() ?? collectJsx(typescript, source);
 
     return hits
       .filter(
         hit =>
-          hit.key === anchor.key && hit.kind === anchor.kind && hit.component === anchor.component
+          hit.key === anchor.key &&
+          hit.kind === anchor.kind &&
+          hit.component === anchor.component &&
+          hit.prop === anchor.prop
       )
       .map(hit => placeOf(source, hit.attribute, hit.element));
   }

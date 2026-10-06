@@ -30,7 +30,7 @@ await project.find("node:board/merge");
 
 await project.find("jsx:settingsBoard");
 // [{ path: "features/settings/settings.tsx", key: "settingsBoard", kind: "idProp",
-//    component: "Signboard", line: 301, range: [300, 7, 321, 19], hash: "…" }, …]
+//    component: "Signboard", prop: "id", line: 290, range: [289, 7, 310, 19], hash: "…" }, …]
 
 await project.find("component:RoundButton");
 // [{ path: "features/ui/kit.tsx", binding: "RoundButton", line: 418, range: [418, 1, 431, 2], hash: "…" }]
@@ -71,9 +71,10 @@ type Anchor = {
   path: string;              // root-relative, POSIX
   binding?: string;          // the const, function or export the definition is bound to
   key?: string;              // a text style key, the `name` of a projection, a JSX key, the property of a built style
-  component?: string;        // JSX: the component of an `id=` prop, or of an `{id}` pattern
+  component?: string;        // JSX: the component of a key-carrying prop, or of a `{id}` / `{amountKey}` pattern
   kind?: "literal" | "template" | "idProp" | "ident";   // JSX only
   stem?: string;             // JSX templates and identifiers: "card" for card*Picture
+  prop?: string;             // JSX idProp: the prop the value sits on, "id" or "amountKey"
 };
 ```
 
@@ -93,8 +94,8 @@ A file hash is the sha1 hex of its bytes, the same value the editor uses as a fi
 | `style:<path>#<binding>` | `style:features/ui/popup.tsx#popupScreen` | `const popupScreen = defineStyle(…)` at module scope | the declaration, `features/ui/popup.tsx:20` |
 | `style:<path>#<function>` | `style:features/ui/kit.tsx#boardStyle` | a `defineStyle(…)` call anywhere inside a module-level function or function-valued const | every style call of the function, `features/ui/kit.tsx:666` and `features/ui/kit.tsx:668` |
 | `style:<path>#<function>.<property>` | `style:features/ui/kit.tsx#roundStylesOf.icon` | a `defineStyle(…)` call that is the value of the property `icon` inside that function | the property, the call as the range, `features/ui/kit.tsx:358` |
-| `component:<Name>` | `component:RoundButton` | in a `.tsx` file, a module-level `function RoundButton(…)`, `const Name = (…) => …` or `const Name = function …` with an upper-case name, exported or not; anywhere, `defineComponent("Settings", …)` | the declaration, `features/ui/kit.tsx:418`; `component:Settings` answers `features/settings/settings.tsx:289` |
-| `jsx:<key>` | `jsx:settingsBoard` | a JSX `key`, or a literal `id=` on a component | the attribute line, the element as the range |
+| `component:<Name>` | `component:RoundButton` | in a `.tsx` file, a module-level `function RoundButton(…)`, `const Name = (…) => …` or `const Name = function …` with an upper-case name, exported or not; anywhere, `defineComponent("Settings", …)` | the declaration, `features/ui/kit.tsx:418`; `component:Settings` answers `features/settings/settings.tsx:278` |
+| `jsx:<key>` | `jsx:settingsBoard` | a JSX `key`, or a literal key-carrying prop on a component (`id=`, `amountKey=`) | the attribute line, the element as the range |
 
 - **Definers are recognised by binding.** The names destructured from `defineGame()` in the kit are the definers, under any local name an importer gives them. The definers imported from `@moku-labs/game` directly count too. A call whose callee is not a definer binding is not a definition.
 - **Nothing is guessed.** A definer with a non-literal id goes to `unresolved` with the reason, for example `defineFlow id is not a string literal`.
@@ -107,7 +108,9 @@ A file hash is the sha1 hex of its bytes, the same value the editor uses as a fi
 
 ## JSX keys
 
-Every JSX `key` attribute is reduced to a pattern. Literal text stays. An expression is followed through same-file `const` initializers and same-file functions that return one expression, with their parameters bound to the arguments. The `id` of a parameter object (`props.id`, or a destructured `{ id }`) becomes `{id}`; any other hole becomes `*`.
+Every JSX `key` attribute is reduced to a pattern. Literal text stays. An expression is followed through same-file `const` initializers and same-file functions that return one expression, with their parameters bound to the arguments.
+
+A **key-carrying prop** is `id`, or a prop whose name ends in `Key` (`amountKey`, `unitKey`). This is a convention: a component that keys an element from a prop names that prop so. A key-carrying prop of a parameter object (`props.id`, `props.amountKey`, or a destructured `{ id }`) becomes a hole of its name, `{id}` or `{amountKey}`; any other hole becomes `*`, `props.tab` too. On a component, a key-carrying prop with a string literal value is indexed as an `idProp` entry with `prop` set to its name. Other props (`title=`, `picture=`) are not indexed.
 
 | Written | Key | Kind | Stem |
 |---|---|---|---|
@@ -115,18 +118,22 @@ Every JSX `key` attribute is reduced to a pattern. Literal text stays. An expres
 | `` key={`${id}Picture`} `` with `const id = cardKey(card.slot)` and `cardKey` returning `` `card${slot}` `` | `jsx:card*Picture` | `template` | `card` |
 | `key={id}` with the same `id` | `jsx:card*` | `ident` | `card` |
 | `` key={`${props.id}Close`} `` in `Signboard` | `jsx:{id}Close` | `template` | |
+| `key={props.amountKey}` in `Amount` | `jsx:{amountKey}` | `ident` | |
 | `id="settingsBoard"` on `<Signboard>` | `jsx:settingsBoard` | `idProp` | |
+| `amountKey="giftReward"` on `<Amount>` | `jsx:giftReward` | `idProp` | |
 | `key={entry.key}` | none: `*` alone goes to `unresolved` | | |
 
-An `{id}` pattern written in a component carries that component's name, so it only takes the `id=` props of that component. One written in a lower-case helper takes any.
+A pattern with a prop hole written in a component carries that component's name, so it only takes the props of that component. One written in a lower-case helper takes any. A hole takes only the props of its own name: `{amountKey}` is filled by `amountKey=`, never by `id=`.
+
+The lint rule `moku-game/static-keys` reports the key shapes this reading cannot follow, such as `tabKeys[props.tab]` or `a ?? b`. See [Lint for games](./lint.md).
 
 `find` on a key the game reports at run time (what `game.locate` names, such as `jsx:settingsBoardClose` or `jsx:card2Picture`) answers in three tiers:
 
 1. The exact `jsx:` entries.
-2. Each `{id}` pattern whose filled form reads as the key, with `{id}` set to an indexed `id=` prop: the pattern and the prop both answer. `jsx:settingsBoardClose` answers `features/ui/kit.tsx:844` (`{id}Close`) and `features/settings/settings.tsx:301` (the `idProp`).
+2. Each pattern with a prop hole whose filled form reads as the key, with the hole set to an indexed literal prop of the same name: the pattern and the prop both answer. `jsx:settingsBoardClose` answers `features/ui/kit.tsx:844` (`{id}Close`) and `features/settings/settings.tsx:290` (the `idProp`). `jsx:giftRewardUnit` answers `features/gift/daily-gift.tsx:28` (`unitKey="giftRewardUnit"`, an exact entry) and `features/ui/popup.tsx:186` (`{unitKey}`).
 3. Each `*` pattern matched as a wildcard. `jsx:card2Picture` answers `card*Picture` before `card*`: within a tier, the pattern with more literal text comes first.
 
-A key that holds `*` or `{id}` itself is looked up exactly.
+A key that holds `*` or a prop hole such as `{id}` itself is looked up exactly.
 
 ## Behaviour
 
@@ -166,11 +173,10 @@ moku-game-index --root tests/integration/merge-game where component:RoundButton
 # features/ui/kit.tsx:418
 moku-game-index --root tests/integration/merge-game where jsx:settingsBoardClose
 # features/ui/kit.tsx:844
-# features/settings/settings.tsx:301
+# features/settings/settings.tsx:290
 moku-game-index --root tests/integration/merge-game --json
 moku-game-index --root tests/integration/merge-game --check
-#   › 111 files, 358 keys: 0 broken, 0 in conflict, 3 unresolved.
-#   › unresolved features/settings/settings.tsx: JSX key "key" on <button> resolves to "*"
+#   › 111 files, 366 keys: 0 broken, 0 in conflict, 0 unresolved.
 ```
 
 | Command | Prints | Exit |

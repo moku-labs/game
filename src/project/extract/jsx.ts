@@ -1,24 +1,27 @@
 /**
  * @file project, extract — the JSX keys of one file. Every `key` attribute becomes a hit with its
- * pattern and how it is written; a literal `id` attribute on a component (an element whose name
- * starts upper-case) becomes an `idProp` hit named after that component. Extraction turns hits
- * into keys; `find` collects them again on a fresh parse to read their lines.
+ * pattern and how it is written; a literal key-carrying attribute on a component (an element whose
+ * name starts upper-case), `id="settingsBoard"` or `amountKey="giftReward"`, becomes an `idProp`
+ * hit named after that component and the prop. Extraction turns hits into keys; `find` collects
+ * them again on a fresh parse to read their lines.
  */
 import type ts from "typescript";
 import type { Anchor, JsxKind } from "../types";
 import type { TypeScript } from "../typescript";
-import { ANY, ID, patternOf, stemOf } from "./pattern";
+import { ANY, hasHole, KEY_PROP, patternOf, stemOf } from "./pattern";
 import { enclosingName, unwrap } from "./scope";
 
 /** One JSX key of a file. */
 export type JsxHit = {
-  /** The pattern of a `key`, or the value of an `id` prop. */
+  /** The pattern of a `key`, or the value of a key-carrying prop. */
   readonly key: string;
   readonly kind: JsxKind;
   /** The literal head of a template or identifier key. */
   readonly stem?: string;
-  /** The component of an `id` prop, or the component an `{id}` pattern is written in. */
+  /** The component of a key-carrying prop, or the component a `{prop}` pattern is written in. */
   readonly component?: string;
+  /** The key-carrying prop the value of an `idProp` hit sits on: `id`, `amountKey`. */
+  readonly prop?: string;
   /** The attribute: its line is the line of the key. */
   readonly attribute: ts.JsxAttribute;
   /** The whole element: the range of the key. */
@@ -71,7 +74,7 @@ function kindOf(typescript: TypeScript, expression: ts.Expression): JsxKind {
 }
 
 /**
- * The upper-case top-level declaration a node sits in: the component an `{id}` pattern belongs to.
+ * The upper-case top-level declaration a node sits in: the component a `{prop}` pattern belongs to.
  *
  * @param typescript - The TypeScript module.
  * @param node - The attribute.
@@ -121,7 +124,7 @@ function keyHit(
   const kind = kindOf(typescript, expression);
   const key = patternOf(typescript, expression);
   const stem = kind === "literal" ? "" : stemOf(key);
-  const component = key.includes(ID) ? componentAround(typescript, attribute) : undefined;
+  const component = hasHole(key) ? componentAround(typescript, attribute) : undefined;
   const written = quoteOf(expression.getText());
 
   return {
@@ -136,10 +139,12 @@ function keyHit(
 }
 
 /**
- * The hit of a literal `id` prop on a component.
+ * The hit of a literal key-carrying prop on a component: `id="settingsBoard"`,
+ * `amountKey="giftReward"`.
  *
  * @param typescript - The TypeScript module.
  * @param attribute - The attribute.
+ * @param property - The name of the attribute.
  * @param place - The element and its tag.
  * @param place.element - The whole element.
  * @param place.tag - The tag as written.
@@ -148,6 +153,7 @@ function keyHit(
 function idHit(
   typescript: TypeScript,
   attribute: ts.JsxAttribute,
+  property: string,
   place: { element: ts.Node; tag: string }
 ): JsxHit | undefined {
   const expression = attributeValue(typescript, attribute);
@@ -159,6 +165,7 @@ function idHit(
     key: value.text,
     kind: "idProp",
     component: place.tag,
+    prop: property,
     attribute,
     ...place,
     written: value.text
@@ -183,7 +190,8 @@ function hitsOf(typescript: TypeScript, opening: ts.JsxOpeningLikeElement): JsxH
 
     const name = attribute.name.text;
     const keyEntry = name === "key" ? keyHit(typescript, attribute, place) : undefined;
-    const idEntry = name === "id" && isComponent ? idHit(typescript, attribute, place) : undefined;
+    const idEntry =
+      isComponent && KEY_PROP.test(name) ? idHit(typescript, attribute, name, place) : undefined;
 
     if (keyEntry !== undefined) hits.push(keyEntry);
     if (idEntry !== undefined) hits.push(idEntry);
@@ -229,7 +237,7 @@ export function isOpaque(hit: JsxHit): boolean {
  *
  * @param file - The root-relative path of the file.
  * @param hit - The hit.
- * @returns The anchor: path, key, kind, and the stem and component when there are.
+ * @returns The anchor: path, key, kind, and the stem, component and prop when there are.
  */
 export function anchorOfHit(file: string, hit: JsxHit): Anchor {
   return {
@@ -237,7 +245,8 @@ export function anchorOfHit(file: string, hit: JsxHit): Anchor {
     key: hit.key,
     kind: hit.kind,
     ...(hit.stem === undefined ? {} : { stem: hit.stem }),
-    ...(hit.component === undefined ? {} : { component: hit.component })
+    ...(hit.component === undefined ? {} : { component: hit.component }),
+    ...(hit.prop === undefined ? {} : { prop: hit.prop })
   };
 }
 

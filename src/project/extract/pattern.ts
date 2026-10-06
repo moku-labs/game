@@ -1,9 +1,10 @@
 /**
  * @file project, extract — a JSX key expression reduced to a pattern. Literal text stays; a name is
  * followed through same-file initializers, and a call through a same-file function that returns
- * one expression, with its parameters bound to the arguments. A hole that is the `id` of a
- * component's props becomes `{id}`; any other hole becomes `*`. `` `${id}Picture` `` with
- * `const id = cardKey(card.slot)` and `cardKey` returning `` `card${slot}` `` reads `card*Picture`.
+ * one expression, with its parameters bound to the arguments. A hole that is a key-carrying prop
+ * of a component (`id`, or a name that ends in `Key`) becomes `{id}` or `{amountKey}`; any other
+ * hole becomes `*`. `` `${id}Picture` `` with `const id = cardKey(card.slot)` and `cardKey`
+ * returning `` `card${slot}` `` reads `card*Picture`.
  */
 import type ts from "typescript";
 import type { TypeScript } from "../typescript";
@@ -12,14 +13,63 @@ import { type FunctionNode, meaningOf, unwrap } from "./scope";
 /** A hole nothing in the file can fill. */
 export const ANY = "*";
 
-/** A hole filled by the `id` prop of the component, at run time. */
-export const ID = "{id}";
+/**
+ * A hole filled at run time by a key-carrying prop of the component: `{id}`, `{amountKey}`. The
+ * regex is global, so `.test` keeps `lastIndex` between calls: test a pattern with `hasHole`, never
+ * `HOLE.test`.
+ */
+export const HOLE = /\{\w+\}/g;
+
+/** A key-carrying prop: `id`, or a name that ends in `Key`. */
+export const KEY_PROP = /^(?:id|\w+Key)$/;
 
 /** How deep names and calls are followed before a hole is given up on. */
 const MAX_DEPTH = 8;
 
 /** Parameter name to the pattern of its argument, inside a function read through a call. */
 type Bindings = ReadonlyMap<string, string>;
+
+/**
+ * The hole a prop of a component leaves in a key.
+ *
+ * @param property - The name of the prop.
+ * @returns The hole: `{amountKey}` for `amountKey`.
+ * @example
+ * ```ts
+ * holeOf("amountKey"); // "{amountKey}"
+ * ```
+ */
+export function holeOf(property: string): string {
+  return `{${property}}`;
+}
+
+/**
+ * Whether a pattern holds a hole a prop fills.
+ *
+ * @param pattern - A pattern or a key.
+ * @returns True when it holds `{id}`, `{amountKey}` or another prop hole.
+ * @example
+ * ```ts
+ * hasHole("{id}Close"); // true
+ * ```
+ */
+export function hasHole(pattern: string): boolean {
+  return pattern.search(HOLE) !== -1;
+}
+
+/**
+ * The hole a prop of a parameter object leaves: its own hole for a key-carrying prop, `*` else.
+ *
+ * @param property - The name of the prop, when the parameter is read through one.
+ * @returns The hole.
+ * @example
+ * ```ts
+ * propertyHole("tab"); // "*"
+ * ```
+ */
+function propertyHole(property: string | undefined): string {
+  return property !== undefined && KEY_PROP.test(property) ? holeOf(property) : ANY;
+}
 
 /**
  * The one expression a function returns, when it has exactly one.
@@ -46,7 +96,7 @@ function returnedBy(typescript: TypeScript, node: FunctionNode): ts.Expression |
 }
 
 /**
- * Reads a name: a bound parameter, a const, or a destructured `id` prop.
+ * Reads a name: a bound parameter, a const, or a destructured key-carrying prop.
  *
  * @param typescript - The TypeScript module.
  * @param identifier - The name.
@@ -67,13 +117,14 @@ function readName(
   const meaning = meaningOf(typescript, identifier);
 
   if (meaning?.kind === "const") return read(typescript, meaning.initializer, bindings, depth + 1);
-  if (meaning?.kind === "param" && meaning.property === "id") return ID;
+  if (meaning?.kind === "param") return propertyHole(meaning.property);
 
   return ANY;
 }
 
 /**
- * Reads `props.id`: the `id` of a parameter object becomes `{id}`.
+ * Reads `props.id` or `props.amountKey`: a key-carrying prop of a parameter object becomes its
+ * hole, any other prop `*`.
  *
  * @param typescript - The TypeScript module.
  * @param access - The property access.
@@ -86,13 +137,12 @@ function readAccess(
   bindings: Bindings
 ): string {
   const owner = access.expression;
-  const isIdOfParameter =
-    access.name.text === "id" &&
+  const isOfParameter =
     typescript.isIdentifier(owner) &&
     !bindings.has(owner.text) &&
     meaningOf(typescript, owner)?.kind === "param";
 
-  return isIdOfParameter ? ID : ANY;
+  return isOfParameter ? propertyHole(access.name.text) : ANY;
 }
 
 /**
@@ -200,10 +250,10 @@ function read(
     );
   }
 
-  // A name: a bound parameter, a const or the `id` prop.
+  // A name: a bound parameter, a const or a key-carrying prop.
   if (typescript.isIdentifier(expression)) return readName(typescript, expression, bindings, depth);
 
-  // `props.id`: the `id` of a parameter object.
+  // `props.id`, `props.amountKey`: a key-carrying prop of a parameter object.
   if (typescript.isPropertyAccessExpression(expression))
     return readAccess(typescript, expression, bindings);
 
@@ -220,7 +270,8 @@ function read(
  *
  * @param typescript - The TypeScript module.
  * @param expression - The expression of a JSX `key` attribute.
- * @returns The pattern: `card*Picture`, `{id}Close`, `hudRow`, or `*` when nothing is literal.
+ * @returns The pattern: `card*Picture`, `{id}Close`, `{amountKey}`, `hudRow`, or `*` when nothing
+ * is literal.
  */
 export function patternOf(typescript: TypeScript, expression: ts.Expression): string {
   return read(typescript, expression, new Map(), 0).replaceAll(/\*+/g, ANY);
@@ -237,7 +288,7 @@ export function patternOf(typescript: TypeScript, expression: ts.Expression): st
  * ```
  */
 export function stemOf(pattern: string): string {
-  const holes = [pattern.indexOf(ANY), pattern.indexOf(ID)].filter(at => at >= 0);
+  const holes = [pattern.indexOf(ANY), pattern.search(HOLE)].filter(at => at >= 0);
 
   return pattern.slice(0, holes.length === 0 ? undefined : Math.min(...holes));
 }

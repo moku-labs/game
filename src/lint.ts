@@ -19,7 +19,8 @@ export type GameLintOptions = {
 /** The part of an ESTree node the rules read. oxlint and ESLint hand over full nodes. */
 export type GameLintNode = {
   readonly type: string;
-  readonly name?: string;
+  /** A string on an `Identifier`; the `JSXIdentifier` node on a `JSXAttribute`. */
+  readonly name?: string | GameLintNode;
   readonly value?: unknown;
   readonly kind?: string;
   readonly computed?: boolean;
@@ -34,13 +35,35 @@ export type GameLintNode = {
   readonly arguments?: readonly GameLintNode[];
   readonly object?: GameLintNode;
   readonly property?: GameLintNode;
+  readonly expression?: GameLintNode;
+  readonly expressions?: readonly GameLintNode[];
 };
 
-/** The part of the rule context the rules read: where the file is, the options, the report. */
+/** One declaration of a name, as the scope manager of oxlint and ESLint hands it over. */
+export type GameLintDefinition = {
+  /** `Variable`, `Parameter`, `ImportBinding`, `FunctionName` and the other ESLint kinds. */
+  readonly type: string;
+  /** The declarator of a `Variable`: its `init` is the value. */
+  readonly node: GameLintNode;
+  /** The declaration of a `Variable`: its `kind` is `const`, `let` or `var`. */
+  readonly parent?: GameLintNode | null;
+};
+
+/** The part of a scope the rules read: the names it declares and the scope around it. */
+export type GameLintScope = {
+  readonly set: ReadonlyMap<string, { readonly defs: readonly GameLintDefinition[] }>;
+  readonly upper?: GameLintScope | null;
+};
+
+/**
+ * The part of the rule context the rules read: where the file is, the options, the scopes of the
+ * file and the report.
+ */
 export type GameLintContext = {
   readonly cwd: string;
   readonly filename: string;
   readonly options: readonly unknown[];
+  readonly sourceCode: { getScope(node: GameLintNode): GameLintScope };
   report(descriptor: { node: GameLintNode; message: string }): void;
 };
 
@@ -57,7 +80,7 @@ export type GameLintRule = {
   create(context: GameLintContext): GameLintListeners;
 };
 
-/** The plugin object: `moku-game` and its six rules. */
+/** The plugin object: `moku-game` and its seven rules. */
 export type GameLintPlugin = {
   readonly meta: { readonly name: "moku-game" };
   readonly rules: Readonly<Record<GameLintRuleName, GameLintRule>>;
@@ -70,7 +93,8 @@ export type GameLintRuleName =
   | "dev-imports"
   | "no-module-state"
   | "determinism"
-  | "rules-siblings";
+  | "rules-siblings"
+  | "static-keys";
 
 /** A rule's default globs. */
 type Scope = { readonly files: readonly string[]; readonly ignores: readonly string[] };
@@ -114,6 +138,24 @@ const CLOCK_READS = [
 
 /** The collections a module may not hold at module scope (L5). */
 const COLLECTION = /^(?:Map|Set|WeakMap|WeakSet)$/;
+
+/**
+ * A key-carrying prop the project index fills a key from: `id`, or a name that ends in `Key`. The
+ * index holds its own copy; a behavioural unit test keeps the two in step: the rule accepts
+ * `props.<name>` exactly when the index turns it into a `{<name>}` hole.
+ */
+const KEY_PROP = /^(?:id|\w+Key)$/;
+
+/** The wrappers a key is read through, as the index reads them: casts, parentheses, `?.` chains. */
+const KEY_WRAPPER =
+  /^(?:TSAsExpression|TSSatisfiesExpression|TSNonNullExpression|TSTypeAssertion|ParenthesizedExpression|ChainExpression)$/;
+
+/** How many `const` initializers a key name is followed through. */
+const KEY_HOPS = 3;
+
+/** What static-keys says about a key the project index cannot follow. */
+const STATIC_KEYS_MESSAGE =
+  'Keys: a JSX key must be a literal, a template, or props.id / props.<name>Key. Pass the key in as a prop: <X id="…">.';
 
 /**
  * Turn a glob into an anchored regular expression: `**`, `*`, `?` and one level of `{a,b}`.
@@ -267,6 +309,21 @@ function importRule(
 }
 
 /**
+ * The name a node carries: the name of an `Identifier`, the name of the `JSXIdentifier` of a
+ * `JSXAttribute`.
+ *
+ * @param node - Any node.
+ * @returns The name, or undefined for a node without one.
+ */
+function nameOf(node: GameLintNode | null | undefined): string | undefined {
+  const name = node?.name;
+
+  if (typeof name === "string") return name;
+
+  return typeof name?.name === "string" ? name.name : undefined;
+}
+
+/**
  * The name of a member's property: `a.b` and `a["b"]`.
  *
  * @param node - A MemberExpression.
@@ -276,7 +333,7 @@ function propertyName(node: GameLintNode): string | undefined {
   const key = node.property;
 
   if (key === undefined) return undefined;
-  if (!node.computed) return key.name;
+  if (!node.computed) return nameOf(key);
 
   return typeof key.value === "string" ? key.value : undefined;
 }
@@ -305,7 +362,8 @@ function reportModuleState(context: GameLintContext, statement: GameLintNode): v
   // A collection is state too, even behind a `const`.
   for (const declarator of declaration.declarations ?? []) {
     const init = declarator.init;
-    const isCollection = init?.type === "NewExpression" && COLLECTION.test(init.callee?.name ?? "");
+    const isCollection =
+      init?.type === "NewExpression" && COLLECTION.test(nameOf(init.callee) ?? "");
 
     if (isCollection) {
       context.report({
@@ -323,10 +381,10 @@ function reportModuleState(context: GameLintContext, statement: GameLintNode): v
  * @returns True for a timer.
  */
 function isTimer(callee: GameLintNode | undefined): boolean {
-  if (callee?.type === "Identifier") return TIMER.test(callee.name ?? "");
+  if (callee?.type === "Identifier") return TIMER.test(nameOf(callee) ?? "");
   if (callee?.type !== "MemberExpression") return false;
 
-  return GLOBAL_OBJECT.test(callee.object?.name ?? "") && TIMER.test(propertyName(callee) ?? "");
+  return GLOBAL_OBJECT.test(nameOf(callee.object) ?? "") && TIMER.test(propertyName(callee) ?? "");
 }
 
 /** L2: static value imports of the packages the engine loads lazily. */
@@ -437,13 +495,13 @@ const determinism: GameLintRule = {
       MemberExpression: node => {
         const property = propertyName(node);
         const read = CLOCK_READS.find(
-          item => item.object === node.object?.name && item.property === property
+          item => item.object === nameOf(node.object) && item.property === property
         );
 
         if (read !== undefined) context.report({ node, message: read.message });
       },
       NewExpression: node => {
-        if (node.callee?.name === "Date" && (node.arguments ?? []).length === 0) {
+        if (nameOf(node.callee) === "Date" && (node.arguments ?? []).length === 0) {
           context.report({ node, message: "L3: use `now` from the node context." });
         }
       },
@@ -453,6 +511,157 @@ const determinism: GameLintRule = {
             node,
             message: "L3: store the moment in player, await fx(schedule(moment))."
           });
+        }
+      }
+    };
+  }
+};
+
+/**
+ * Whether a value an attribute holds is a node: the `JSXExpressionContainer` of `key={…}`.
+ *
+ * @param value - The `value` of a node.
+ * @returns True for a node.
+ */
+function isNode(value: unknown): value is GameLintNode {
+  return typeof value === "object" && value !== null && "type" in value;
+}
+
+/**
+ * A key expression without the wrappers around it: `props.id as string` and `props?.id` read
+ * `props.id`.
+ *
+ * @param node - The key expression.
+ * @returns The expression inside.
+ */
+function unwrapKey(node: GameLintNode | null | undefined): GameLintNode | null | undefined {
+  let inner = node;
+
+  while (inner !== null && inner !== undefined && KEY_WRAPPER.test(inner.type)) {
+    inner = inner.expression;
+  }
+
+  return inner;
+}
+
+/**
+ * The declaration of a name where it is used, read scope by scope outwards.
+ *
+ * @param context - The rule context.
+ * @param identifier - The name where it is used.
+ * @returns Its first declaration, or undefined for a name the file does not declare.
+ */
+function definitionOf(
+  context: GameLintContext,
+  identifier: GameLintNode
+): GameLintDefinition | undefined {
+  const name = nameOf(identifier) ?? "";
+
+  for (
+    let scope: GameLintScope | null | undefined = context.sourceCode.getScope(identifier);
+    scope;
+    scope = scope.upper
+  ) {
+    const variable = scope.set.get(name);
+
+    if (variable !== undefined) return variable.defs[0];
+  }
+
+  return undefined;
+}
+
+/** The declarations a key name is left to the index for: `--check` lists what it cannot read. */
+const OUT_OF_REACH = /^(?:Parameter|ImportBinding)$/;
+
+/**
+ * Whether a key name is one the project index reads: a `const` whose value is a static key, or a
+ * name out of reach here (a parameter, an import, a global), which `--check` lists when the index
+ * cannot read it.
+ *
+ * @param context - The rule context.
+ * @param identifier - The name.
+ * @param hops - How many `const` initializers were followed to reach it.
+ * @returns False for a `let`, a `var`, a `const` whose value the index cannot follow, and a
+ *   function, a class or a catch parameter.
+ */
+function isStaticName(context: GameLintContext, identifier: GameLintNode, hops: number): boolean {
+  const definition = definitionOf(context, identifier);
+
+  if (definition === undefined || OUT_OF_REACH.test(definition.type) || hops >= KEY_HOPS) {
+    return true;
+  }
+  if (definition.type !== "Variable") return false;
+
+  return (
+    definition.parent?.kind === "const" && isStaticKey(context, definition.node.init, hops + 1)
+  );
+}
+
+/**
+ * Whether a key expression is one the project index reads: a literal, a template of static parts,
+ * `props.id` or `props.<name>Key`, a call, or a name that holds one.
+ *
+ * @param context - The rule context.
+ * @param node - The key expression.
+ * @param hops - How many `const` initializers were followed to reach it.
+ * @returns False for an element access, `??`, `||`, `&&`, `?:` and any other member.
+ */
+function isStaticKey(
+  context: GameLintContext,
+  node: GameLintNode | null | undefined,
+  hops: number
+): boolean {
+  const expression = unwrapKey(node);
+
+  switch (expression?.type) {
+    case "Literal": {
+      return typeof expression.value === "string" || typeof expression.value === "number";
+    }
+    case "TemplateLiteral": {
+      return (expression.expressions ?? []).every(part => isStaticKey(context, part, hops));
+    }
+    case "MemberExpression": {
+      const isPlainMember = !expression.computed && expression.object?.type === "Identifier";
+
+      return isPlainMember && KEY_PROP.test(propertyName(expression) ?? "");
+    }
+    case "Identifier": {
+      return isStaticName(context, expression, hops);
+    }
+    case "CallExpression": {
+      return true;
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** Keys: a JSX key is a shape the project index reads, so `find` reaches it from a runtime key. */
+const staticKeys: GameLintRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "A JSX key is a literal, a template, props.id or props.<name>Key, or a call."
+    },
+    schema: SCHEMA
+  },
+  /**
+   * Visit the file when the rule's globs match it.
+   *
+   * @param context - The rule context.
+   * @returns The node visitors, none for a file out of scope.
+   */
+  create(context) {
+    if (!inScope(context, { files: ["**/*.tsx"], ignores: TESTS })) return {};
+
+    return {
+      JSXAttribute: node => {
+        const container = isNode(node.value) ? node.value : undefined;
+        const isKey = nameOf(node) === "key" && container?.type === "JSXExpressionContainer";
+
+        if (isKey && !isStaticKey(context, container.expression, 0)) {
+          context.report({ node, message: STATIC_KEYS_MESSAGE });
         }
       }
     };
@@ -475,7 +684,8 @@ const plugin: GameLintPlugin = {
     "dev-imports": developmentImports,
     "no-module-state": noModuleState,
     determinism,
-    "rules-siblings": rulesSiblings
+    "rules-siblings": rulesSiblings,
+    "static-keys": staticKeys
   }
 };
 
