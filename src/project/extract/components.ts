@@ -6,8 +6,8 @@
  * list the files that render a component's binding.
  */
 import type ts from "typescript";
+import type { Anchor } from "../types";
 import type { TypeScript } from "../typescript";
-import type { Definition } from "./definitions";
 import { COMPONENT_TAG } from "./jsx";
 import { unwrap } from "./scope";
 
@@ -72,7 +72,7 @@ export function readComponents(
   typescript: TypeScript,
   source: ts.SourceFile,
   path: string
-): Definition[] {
+): { readonly key: string; readonly anchor: Anchor }[] {
   if (!path.endsWith(JSX_FILE)) return [];
 
   return source.statements

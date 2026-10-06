@@ -652,6 +652,26 @@ export function Home() {
     expect(index.symbols["component:Bar"]?.uses).toBeUndefined();
   });
 
+  it("reads the last name of a namespaced tag and no name from a this tag", () => {
+    const index = indexOf({
+      "features/ui/kit.tsx": "export function Badge() {\n  return <row />;\n}\n",
+      "features/hud/badge.tsx": `export function HudBadge() {
+  return (
+    <row>
+      <ui:Badge />
+      <this />
+    </row>
+  );
+}
+`
+    });
+
+    expect(index.symbols["component:Badge"]?.uses).toEqual([
+      { path: "features/hud/badge.tsx", binding: "Badge" }
+    ]);
+    expect(index.unresolved).toEqual([]);
+  });
+
   it("marks one name declared in two files as a conflict and keeps both anchors", () => {
     const index = indexOf({
       "kit.ts": KIT,
