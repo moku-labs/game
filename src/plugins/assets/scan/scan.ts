@@ -274,8 +274,7 @@ function layerRefusal(
  * @returns The refusal, or `undefined` when no earlier layer took the name.
  * @example
  * ```ts
- * nameTakenRefusal("common", "shared", "ui");
- * // 'the layers "common" and "shared" are both mapped to "ui".'
+ * nameTakenRefusal("common", "shared", "ui"); // 'the layers "common" and "shared" are both mapped to "ui".'
  * ```
  */
 function nameTakenRefusal(
