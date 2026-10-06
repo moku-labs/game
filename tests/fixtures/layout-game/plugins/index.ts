@@ -1,0 +1,1 @@
+export { loadingPlugin } from "./loading";

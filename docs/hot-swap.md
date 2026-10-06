@@ -21,7 +21,7 @@ The plugin appends a short footer to every view module it loads. The footer acce
 
 ## What swaps and what reloads
 
-A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts` or a generated `generated/strings.<locale>.ts`. Anything under `node_modules/`, `web/`, `generated/`, `__tests__/` or `tests/`, and `.test` or `.spec` files, never swap. The generated strings files are the one exception in `generated/`.
+A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts` or a generated `generated/strings.<locale>.ts`. On the layered layout it is also any `.ts` directly in a kind folder: `styles/`, `motion/`, `effects/`, `views/`, `world/projections/` and `world/layout/`, in a feature or in `shared/`. A file one folder deeper, such as `views/deep/x.ts`, is not. Anything under `node_modules/`, `web/`, `generated/`, `__tests__/` or `tests/`, and `.test` or `.spec` files, never swap. The generated strings files are the one exception in `generated/`.
 
 | Saved | What happens |
 |---|---|
@@ -33,11 +33,11 @@ A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effect
 | Text styles (`defineTextStyles`) | Swap through `text.replaceStyles`. Every label is redrawn with the new style |
 | Emitters (`defineEmitter`) | Swap. `effects` takes them from the `ui:hot-swap` event; live particles keep their old config |
 | Generated strings | Swap through `i18n.replace`. Every label resolves its message again |
-| Logic: `rules/`, `nodes/`, `flows/`, `state.ts`, `tables.ts`, `kit.ts`, a feature `index.ts` | Reload and restore. These files never get the footer |
+| Logic: `rules/`, `nodes/`, `flows/`, `state.ts`, `tables.ts`, `kit.ts`, a feature `index.ts`, `world/components/`, `world/systems/` | Reload and restore. These files never get the footer. A `world/layout/` module gets it: plain functions swap and repaint, but one that exports an object with its own `name` or `id` is refused and reloads |
 | Scenes, systems, ECS components, filters, features, flows, nodes, plugins | Reload and restore. They are registered by value at start |
 | A new projection or a new animation | Reload and restore. A scene mounts a projection, a feature registers an animation |
 
-Strings come from `features/*/strings/<locale>.json`. After a JSON edit, run `bun run assets:keys`. It writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin has no watch mode.
+Strings come from `features/*/strings/<locale>.json` and the `strings/` of every layer of `--layer`. After a JSON edit, run `bun run assets:keys`. It writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin has no watch mode.
 
 ## A refusal
 
@@ -54,7 +54,7 @@ A swap that worked logs `ui:hot-swap` at info with `{ file, components, projecti
 
 ## Another folder layout
 
-The default filters fit the usual layout: `features/<name>/view.tsx`, `animations.ts` and the rest. A game that keeps its views elsewhere exports its own plugin and lists that file instead:
+The default filters fit the usual layouts: `features/<name>/view.tsx`, `animations.ts` and the rest, and the kind folders of the layered layout (`features/board/world/projections/cells.ts`, `shared/styles/text.ts`). A game that keeps its views elsewhere exports its own plugin and lists that file instead:
 
 ```ts
 // hot.ts in the game root
@@ -70,7 +70,7 @@ plugins = ["./hot.ts"]
 
 | Option | Default | Tested on |
 |---|---|---|
-| `include` | `.tsx`, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`, `generated/strings.<locale>.ts` | The absolute path. Do not anchor it at the start |
+| `include` | `.tsx`, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`, `generated/strings.<locale>.ts`, and any `.ts` directly in `styles/`, `motion/`, `effects/`, `views/`, `world/projections/` or `world/layout/` | The absolute path. Do not anchor it at the start |
 | `exclude` | `node_modules/`, `web/`, `generated/`, `__tests__/`, `tests/`, `.test` and `.spec` files | The path relative to the game root, with a leading `/`: `/features/home/view.tsx` |
 
 ## Keep view helpers next to their projection

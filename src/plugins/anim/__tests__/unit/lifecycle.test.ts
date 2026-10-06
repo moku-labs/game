@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type } from "../../../flow/runner/define";
 import { Transform } from "../../../renderer/components";
+import { AnimPlayer } from "../../components";
 import { stopAnim } from "../../lifecycle";
 import {
   defineAnimation,
@@ -16,6 +17,18 @@ const flight = defineAnimation("hud.coinsFly", {
   slots: { it: type<Target>() },
   build: ({ it }) =>
     sequence(wait(50), tween(it, Transform, { x: 100 }, { ms: 100, ease: "linear" }))
+});
+
+/** The sentence a system gets when it plays before `anim` started. */
+const NOT_READY =
+  "[game] AnimPlayer is not ready: anim has not started.\n" +
+  "  Add animPlugin to the app before a system plays an animation.";
+
+/** The same id as `flight`, landing farther: what a hot swap of `hud/animations.ts` brings. */
+const fartherFlight = defineAnimation("hud.coinsFly", {
+  slots: { it: type<Target>() },
+  build: ({ it }) =>
+    sequence(wait(50), tween(it, Transform, { x: 300 }, { ms: 100, ease: "linear" }))
 });
 
 describe("anim lifecycle", () => {
@@ -186,5 +199,64 @@ describe("anim lifecycle", () => {
 
     // The track was born in the anim step of this frame, so the sweep of world saw it active.
     expect(mock.api.active()).toBe(1);
+  });
+
+  it("leaves the AnimPlayer default in place before onStart: its play throws the sentence", () => {
+    const mock = createMockAnim();
+    const entity = spawnTestEntity(mock, [Transform()]);
+
+    expect(() => mock.world.ecs.resource(AnimPlayer).play(flight, { it: entity })).toThrow(
+      NOT_READY
+    );
+    expect(mock.api.active()).toBe(0);
+  });
+
+  it("writes play onto the AnimPlayer resource of the world in onStart", () => {
+    const mock = createMockAnim();
+    const before = mock.world.ecs.resource(AnimPlayer);
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const handle = mock.world.ecs.resource(AnimPlayer).play(flight, { it: entity });
+
+    expect(mock.world.ecs.resource(AnimPlayer)).toBe(before);
+    expect(handle.active()).toBe(true);
+
+    mock.frame(50);
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
+    expect(handle.active()).toBe(false);
+  });
+
+  it("plays the registered animation of the id, so a hot swap reaches a system", () => {
+    const mock = createMockAnim();
+
+    mock.features.push({ name: "hud", description: { animations: [flight] } });
+    mock.start();
+    mock.api.replace(fartherFlight);
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+
+    mock.world.ecs.resource(AnimPlayer).play(flight, { it: entity });
+    mock.frame(50);
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(300);
+  });
+
+  it("plays the animation it is given when no feature registered its id", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+
+    mock.world.ecs.resource(AnimPlayer).play(fartherFlight, { it: entity });
+    mock.frame(50);
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(300);
   });
 });

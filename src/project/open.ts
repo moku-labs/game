@@ -16,7 +16,8 @@ const DEFAULT_DEBOUNCE_MS = 75;
  * path), loads TypeScript, parses every source file and builds the index. Nothing is written to
  * disk and nothing is inferred from the working directory but the root itself.
  *
- * @param options - The game root, the manifest path and the quiet period of `watch`.
+ * @param options - The game root, the manifest path, the tsconfig whose `paths` the index follows
+ *   (`tsconfig`, root-relative, `tsconfig.json` by default) and the quiet period of `watch`.
  * @returns The handle; close it when the game closes.
  * @throws {Error} When the root is missing or not a directory, or the `typescript` package is not
  *   installed: `[game] The project index needs the "typescript" package.`

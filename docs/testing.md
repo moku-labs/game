@@ -4,7 +4,7 @@ Headless tests, visual tests, the test layout of this repository and its lint ru
 
 ## Testing entry
 
-`@moku-labs/game/testing` re-exports the headless helpers. It imports no `node:` module, so a test that runs in a browser can import it. The visual tests live in `@moku-labs/game/visual`, see [Visual tests](#visual-tests).
+`@moku-labs/game/testing` re-exports the headless helpers and the isolated feature tests. It imports no `node:` module, so a test that runs in a browser can import it. The visual tests live in `@moku-labs/game/visual`, see [Visual tests](#visual-tests).
 
 | Export | Signature | Purpose |
 |---|---|---|
@@ -14,8 +14,52 @@ Headless tests, visual tests, the test layout of this repository and its lint ru
 | `fakeClock` | `(start = 0) => FakeClock` | A `ClockSource` with `advance(ms)` and `set(moment)` |
 | `memory` | `(fixture?: { state: SaveDoc; version: number }) => PlayerStateProvider & { calls: ProviderCall[] }` | In-memory save provider. It keeps what it was committed and records every call |
 | `saveOf` | `(player: Json, seed?: number) => SaveDoc` | Builds a save document for a fixture |
+| `isolate` | `(feature: FeaturePlugin, options: IsolateOptions<Nodes>) => (seams?: IsolateSeams) => App` | Composes one feature with the shared layer and nothing else of the game. Returns a factory of apps, not started. See [Isolated feature tests](#isolated-feature-tests) |
+| `stub` | `(outcome: string, payload?: Json) => Stub` | Replaces a node or a sub-flow of the isolated flow: it ends at once with this outcome and payload |
 
-A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`.
+A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`. The types `HeadlessApp`, `HeadlessGame`, `Repro`, `ReproResult`, `IsolateOptions`, `IsolateSeams`, `Stub` and `StubsOf` come from the same entry.
+
+### Isolated feature tests
+
+`isolate(feature, options)` plays one feature without the rest of the game. It composes `options.shared` and the feature as `logicOnly`, then `options.plugins`. The feature's flow becomes a node of a harness main flow `isolated`. Each node listed in `stubs` is replaced by a stub that ends with the given outcome.
+
+```ts
+// features/board/__tests__/fixtures/board-only.ts
+export const boardOnly = isolate(boardFeature, {
+  shared: sharedLayer,
+  flow: boardFlow,
+  stubs: { settings: stub("closed"), energy: stub("later"), giveToOrder: stub("orderComplete", { rewardId: "r1" }) },
+  player: fresh
+});
+
+// features/board/__tests__/isolated/tap.isolated.ts
+const game = await createHeadless(boardOnly({ player: { ...fresh, energy: 0 } }));
+await game.walk([{ at: "board/awaitIntent", intent: "tap" }]); // noEnergy, the stubbed energy ends with later
+game.state().path; // "board/awaitIntent"
+await game.walk([{ at: "board/awaitIntent", intent: "give" }]);
+game.state().path; // "exited": the flow left with orderComplete { rewardId: "r1" }
+await game.stop();
+```
+
+| Option | Default | What |
+|---|---|---|
+| `flow` | required | The feature's flow |
+| `as` | `flow.id` | The key the game's main flow holds the flow under. The harness uses it as the node name, so paths read as in the game: `as: "info"` for `info: infoFlow` gives `info/show` |
+| `shared` | none | The shared layer, composed as `logicOnly` before the feature |
+| `stubs` | `{}` | Node name of `flow` to `stub(outcome, payload?)` |
+| `plugins` | `[]` | More plugins the feature needs headless |
+| `player` | required | The player a new save starts from |
+| `session` | `{}` | The session at start |
+| `seed` | `1` | The rng seed |
+
+The factory takes the seams of one app: `player`, `session`, `seed` and `clock`, for example `boardOnly({ clock: fakeClock(1_000_000) })`. They win over the options.
+
+- **Exits.** For a flow with outcomes, every exit lands on the rest node `exited`. The journal keeps the outcome and its payload. `{ at: "exited", intent: "again" }` enters the flow once more. A flow without outcomes gets no `exited` node.
+- **A node that is not stubbed runs for real.** That holds for the flow of another feature too: the board reaches `settingsFlow` by object, so it runs although the settings feature is not composed. Stub what the test does not want to run.
+- **A stub is a sub-flow.** It holds one transit node `end` with the input and outcomes of the replaced node. So a route may still substitute it for one visit: `{ at: "board/energy", result: { outcome: "watch" } }`.
+- **A checkpoint compacts `history()`.** After the walk returns to a checkpoint the journal starts again there. Assert on `state()`, on the bookmark, or on the `flow:edge` events of a plugin passed in `plugins`.
+- **Typed stubs.** A stub key that is not a node of the flow, and an outcome the node does not declare, are compile errors. `isolate()` refuses them at run time too: `[game] isolate: no node "enrgy" in flow "board".` and `[game] stub at "energy" ends with "done", which "energy" does not declare.`
+- **Names.** A feature and a flow share one namespace: name the feature `boardScreen` when its flow is `board`. With stubs the flow is rebuilt, so `describe()` names no owner feature for its nodes.
 
 ## Visual tests
 
@@ -106,7 +150,7 @@ bun run release            # moku-release
 
 | Path | Holds |
 |---|---|
-| `tests/unit/` | Framework-level unit tests: root index, setup |
+| `tests/unit/` | Framework-level unit tests: root index, setup, the isolated feature tests in `tests/unit/testing/` |
 | `tests/integration/` | Framework-level scenarios across plugins |
 | `tests/fixtures/mini-game/` | The mini game, written on the public API only: one rest node, one popup flow, two features, one bundle. Not published |
 | `tests/visual/` | The visual tests of the mini game and their headless baselines: `<test>/<checkpoint>/state.json`, `describe.json` |
@@ -132,4 +176,4 @@ The project rules live in [`eslint.config.ts`](../eslint.config.ts).
 | L9 | The JSX runtime module is reached only through `src/jsx-runtime.ts` and `src/jsx-dev-runtime.ts`, and those two import nothing else | `src/**` outside `ui` |
 | L13 | No import of `@moku-labs/system`, `@moku-labs/native` or `@tauri-apps/*`, type imports included. The game builds the `PlatformProvider` in its own layer | every file under `src/`, tests included |
 
-A game gets L2, L3, L4, L5, L13 and the dev-only imports from the oxlint plugin `@moku-labs/game/lint`, see [Lint for games](./lint.md). Its tests run the real oxlint on fixtures: `tests/unit/lint-plugin.test.ts`.
+A game gets L2, L3, L4, L5, L13, the dev-only imports and the layout rules (layers, feature doors, test suffixes) from the oxlint plugin `@moku-labs/game/lint`, see [Lint for games](./lint.md). Its tests run the real oxlint on fixtures: `tests/unit/lint-plugin.test.ts`.

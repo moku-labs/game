@@ -63,14 +63,16 @@ describe("the ./visual entry", () => {
 });
 
 describe("the ./testing entry", () => {
-  it("exports the headless helpers only", () => {
+  it("exports the headless helpers and the isolated feature tests only", () => {
     expect(Object.keys(testing).toSorted()).toEqual([
       "createHeadless",
       "fakeClock",
+      "isolate",
       "memory",
       "runRepro",
       "saveOf",
-      "stepFrames"
+      "stepFrames",
+      "stub"
     ]);
   });
 

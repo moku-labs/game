@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import * as engine from "@moku-labs/game";
 import { describe, expect, it } from "vitest";
+import { AnimPlayer } from "../../src/plugins/anim/components";
 import { defineFlow, defineNode } from "../../src/plugins/flow/runner/define";
 
 /** The `src` folder of the repository. */
@@ -85,6 +86,11 @@ describe("root index", () => {
       "sprite",
       "tr"
     ]);
+  });
+
+  it("exports the AnimPlayer resource a system plays animations through", () => {
+    expect(engine.AnimPlayer.resourceName).toBe("AnimPlayer");
+    expect(engine.AnimPlayer).toBe(AnimPlayer);
   });
 
   it("exports the trace components of input", () => {

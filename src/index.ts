@@ -84,7 +84,7 @@
  *
  * | Subpath | What |
  * |---|---|
- * | `@moku-labs/game/testing` | headless play, repro runs, the in-memory save, the fake clock |
+ * | `@moku-labs/game/testing` | headless play, repro runs, isolated feature tests (`isolate`, `stub`), the in-memory save, the fake clock |
  * | `@moku-labs/game/visual` | the visual tests, node and bun only |
  * | `@moku-labs/game/assets` | the build-time asset key scanner and the production packer (`packAssets`, `--pack <dir>`), node and bun only |
  * | `@moku-labs/game/inspect` | the editor's read door: `read`, `watch`, `defineSource`, the `sources` catalogue |
@@ -280,8 +280,8 @@ export {
 // assets and scenes: declarations
 export { defineBundles, load } from "./plugins/assets/bundles";
 export { defineScene } from "./plugins/scenes/define";
-// anim: choreography as data, the motion sugar, the Animation component
-export { Animation, Frames } from "./plugins/anim/components";
+// anim: choreography as data, the motion sugar, its components, the AnimPlayer resource of systems
+export { Animation, AnimPlayer, Frames } from "./plugins/anim/components";
 export { defineMotion } from "./plugins/anim/motion";
 export {
   defineAnimation,

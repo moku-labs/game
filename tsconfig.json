@@ -29,5 +29,6 @@
       "@moku-labs/game/jsx-dev-runtime": ["./src/jsx-dev-runtime.ts"]
     }
   },
-  "include": ["src", "tests", "declarations.d.ts", "*.config.ts"]
+  "include": ["src", "tests", "declarations.d.ts", "*.config.ts"],
+  "exclude": ["tests/fixtures/layout-game"]
 }

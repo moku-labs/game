@@ -416,3 +416,113 @@ describe("importStrings", () => {
     expect(await readFile(stringFile(root, "hud", "ru"), "utf8")).toContain("Несколько");
   });
 });
+
+/** The layer of the layer tests: `shared/` keeps the `ui.*` keys. */
+const LAYERS = { shared: "ui" };
+
+/**
+ * The fixture game with a `shared/` layer that brings one English key.
+ *
+ * @returns The game source root and a folder for the translation files.
+ */
+async function layeredFixture(): Promise<{ root: string; dir: string }> {
+  const game = await fixture();
+
+  await writeJson(path.join(game.root, "shared", "strings", "en.json"), { "ui.ok": "OK" });
+
+  return game;
+}
+
+describe("exchange with layers", () => {
+  it("exports the keys of a layer with the rest", async () => {
+    const { root, dir } = await layeredFixture();
+    const report = await exportStrings(root, dir, { layers: LAYERS });
+    const russian: unknown = JSON.parse(await readFile(path.join(dir, "ru.json"), "utf8"));
+
+    expect(report.missing).toEqual({ en: 0, ru: 4 });
+    expect(russian).toMatchObject({ "ui.ok": { text: "", source: "OK" } });
+  });
+
+  it("exports no key of a layer by default", async () => {
+    const { root, dir } = await layeredFixture();
+
+    await exportStrings(root, dir);
+
+    expect(await readFile(path.join(dir, "ru.json"), "utf8")).not.toContain("ui.ok");
+  });
+
+  it("imports a translated layer text into the layer's string file and reports that path", async () => {
+    const { root, dir } = await layeredFixture();
+
+    await writeJson(path.join(dir, "ru.json"), { "ui.ok": { text: "ОК" } });
+
+    const report = await importStrings(root, dir, { layers: LAYERS });
+    const russian = evaluateModule(
+      await readFile(path.join(root, "generated", "strings.ru.ts"), "utf8")
+    );
+
+    expect(report).toEqual({ locales: ["ru"], keys: 1, files: ["shared/strings/ru.json"] });
+    expect(await readFile(path.join(root, "shared", "strings", "ru.json"), "utf8")).toBe(
+      jsonText({ "ui.ok": "ОК" })
+    );
+    expect(russian["ui.ok"]?.({}, createIntlKit("ru"))).toEqual([{ kind: "text", text: "ОК" }]);
+  });
+
+  it("keeps a feature's file and a layer's file apart on import", async () => {
+    const { root, dir } = await layeredFixture();
+
+    await writeJson(path.join(dir, "ru.json"), {
+      "hud.title": { text: "Список заказов" },
+      "ui.ok": { text: "ОК" }
+    });
+
+    const report = await importStrings(root, dir, { layers: LAYERS });
+
+    expect(report).toEqual({
+      locales: ["ru"],
+      keys: 2,
+      files: ["features/hud/strings/ru.json", "shared/strings/ru.json"]
+    });
+    expect(await readFile(stringFile(root, "hud", "ru"), "utf8")).toContain("Список заказов");
+    expect(await readFile(path.join(root, "shared", "strings", "ru.json"), "utf8")).not.toContain(
+      "hud.title"
+    );
+  });
+
+  it("refuses a layer folder that leads out of the root: the import writes nothing there", async () => {
+    const outside = await createFolder();
+    const root = path.join(outside, "game");
+    const dir = path.join(outside, "translations");
+    const other = path.join(outside, "other", "strings");
+
+    await writeJson(stringFile(root, "hud", "en"), { "hud.title": "Orders" });
+    await writeJson(path.join(other, "en.json"), { "ui.ok": "OK" });
+    await writeJson(path.join(dir, "ru.json"), { "ui.ok": { text: "ОК" } });
+
+    await expect(importStrings(root, dir, { layers: { "../other": "ui" } })).rejects.toThrow(
+      '[game] i18n: the layer "../other" is not a folder name.\n' +
+        String.raw`  Use a name without "/", "\" or ".".`
+    );
+    await expect(exportStrings(root, dir, { layers: { "../other": "ui" } })).rejects.toThrow(
+      'the layer "../other" is not a folder name.'
+    );
+    expect(await readdir(other)).toEqual(["en.json"]);
+  });
+
+  it("writes into the features folder the options name", async () => {
+    const root = await createFolder();
+    const dir = path.join(await createFolder(), "translations");
+
+    await writeJson(path.join(root, "mods", "hud", "strings", "en.json"), {
+      "hud.title": "Orders"
+    });
+    await writeJson(path.join(dir, "ru.json"), { "hud.title": { text: "Заказы" } });
+
+    const report = await importStrings(root, dir, { features: "mods" });
+
+    expect(report.files).toEqual(["mods/hud/strings/ru.json"]);
+    expect(await readFile(path.join(root, "mods", "hud", "strings", "ru.json"), "utf8")).toBe(
+      jsonText({ "hud.title": "Заказы" })
+    );
+  });
+});

@@ -3,8 +3,9 @@
  * it holds, the anchors of a key, the fresh lines `find` answers and the handle itself. The index
  * maps every engine id of a game (flows, nodes, features, scenes, projections, emitters, text
  * styles, styles, components and JSX keys) to anchors: a path plus a binding, a key or a component. It never
- * holds a line number; `find` reads the line from the file as it is on disk at the call. No type
- * here names a `typescript` type, so the shipped declarations need no TypeScript.
+ * holds a line number; `find` reads the line from the file as it is on disk at the call. Names are
+ * followed through relative imports and the tsconfig `paths` of the game. No type here names a
+ * `typescript` type, so the shipped declarations need no TypeScript.
  */
 
 /**
@@ -15,6 +16,8 @@
  * ```ts
  * // The editor opens the mini game with the default manifest and a slower debounce.
  * const options: ProjectOptions = { root: "tests/fixtures/mini-game", debounceMs: 120 };
+ * // A v15 game whose aliases live in a second tsconfig.
+ * const game: ProjectOptions = { root: "games/orders", tsconfig: "tsconfig.game.json" };
  * ```
  */
 export type ProjectOptions = {
@@ -22,6 +25,11 @@ export type ProjectOptions = {
   root: string;
   /** The asset manifest, root-relative. Default `manifest.json`, the scanner's default. */
   manifest?: string;
+  /**
+   * The tsconfig whose `paths` the index follows, root-relative. Default `tsconfig.json`. A path
+   * that leaves the root or a file that does not parse rejects `openProject`.
+   */
+  tsconfig?: string;
   /** The quiet period, in milliseconds, that closes a batch of file events. Default 75. */
   debounceMs?: number;
 };
@@ -79,6 +87,8 @@ export type Anchor = {
  * ```ts
  * index.symbols["flow:infoPopup"]; // { def: [{ path: "flows/info.ts", binding: "infoFlow" }] }
  * index.files["nodes/count.ts"]?.state; // "ok"
+ * // A game whose tsconfig.json holds paths, such as tests/fixtures/layout-game.
+ * index.tsconfig; // "tsconfig.json"
  * ```
  */
 export type ProjectIndex = {
@@ -88,6 +98,8 @@ export type ProjectIndex = {
   revision: string;
   /** The asset manifest, root-relative, when that file exists. */
   manifest?: string;
+  /** The tsconfig, root-relative, when that file exists and holds `paths` the index follows. */
+  tsconfig?: string;
   /**
    * Every key: where it is defined (`def`), where its binding is used (`uses`, nodes, styles and
    * components, one level), and `conflict` when a key other than `jsx:` is defined twice.
@@ -163,12 +175,13 @@ export type ProjectApi = {
   readonly index: ProjectIndex;
 
   /**
-   * Answers where a key is defined, with lines read from the file on disk now. A file whose bytes
-   * changed since the index was built is parsed again for the answer; the index itself stays as
-   * it is until the next watch batch. A JSX key the game reports at run time also finds the
-   * patterns it was built from: exact keys first, then `{id}` and `{amountKey}` patterns filled
-   * with a literal prop of the same name on their component (both the pattern and the prop come
-   * back), then `*` patterns. An unknown key answers `[]`.
+   * Answers where a key is defined, with lines read from the file on disk now. A name is followed
+   * through relative imports and the tsconfig aliases, so `@features/home` reaches the file that
+   * declares the node. A file whose bytes changed since the index was built is parsed again for
+   * the answer; the index itself stays as it is until the next watch batch. A JSX key the game
+   * reports at run time also finds the patterns it was built from: exact keys first, then `{id}`
+   * and `{amountKey}` patterns filled with a literal prop of the same name on their component
+   * (both the pattern and the prop come back), then `*` patterns. An unknown key answers `[]`.
    *
    * @param key - An engine id: `node:infoPopup/count`, `flow:main`, `textStyle:ui.counter`, `jsx:infoPanelSpark`.
    * @returns One entry per place, in the order above; `broken` when the file does not parse now.
@@ -205,8 +218,9 @@ export type ProjectApi = {
 
   /**
    * Re-indexes one root-relative path now, for a caller that watches files itself. A deleted
-   * file drops its entries; a path that is not a `.ts` or `.tsx` source of the index changes
-   * nothing. The watch callers are not called.
+   * file drops its entries. The tsconfig, or a file it extends, reads the aliases again, and the
+   * index is rebuilt when names now follow them elsewhere. Any other path that is not a `.ts` or
+   * `.tsx` source of the index changes nothing. The watch callers are not called.
    *
    * @param path - The root-relative POSIX path of the file.
    * @returns The index after the file was read.
@@ -216,6 +230,8 @@ export type ProjectApi = {
    * // The editor saved nodes/count.ts through its own file layer.
    * const index = await project.changed("nodes/count.ts");
    * index.files["nodes/count.ts"]?.state; // "ok"
+   * // It added a paths block to tsconfig.json: the keys behind the aliases join the index.
+   * (await project.changed("tsconfig.json")).tsconfig; // "tsconfig.json"
    * ```
    */
   changed(path: string): Promise<ProjectIndex>;

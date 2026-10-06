@@ -108,6 +108,93 @@ describe("hot()", () => {
     expect(filter.test("/game/generated/assets.ts")).toBe(false);
   });
 
+  it("matches a .ts file directly in a styles/, motion/, effects/ or views/ folder", () => {
+    const { filter } = register(hot());
+
+    for (const file of [
+      "/game/features/board/motion/motions.ts",
+      "/game/features/board/effects/stars.ts",
+      "/game/features/board/styles/board.ts",
+      "/game/features/board/views/cell.ts",
+      "/game/shared/styles/text.ts",
+      "/game/shared/styles/tokens.ts",
+      "/game/shared/motion/pop-in.ts",
+      "/game/shared/views/item-look.ts"
+    ]) {
+      expect(filter.test(file), file).toBe(true);
+    }
+  });
+
+  it("matches world/projections and world/layout, and no world/components or world/systems", () => {
+    const { filter } = register(hot());
+
+    expect(filter.test("/game/features/board/world/projections/cells.ts")).toBe(true);
+    expect(filter.test("/game/features/board/world/layout/grid.ts")).toBe(true);
+    expect(filter.test("/game/features/board/world/components/item.ts")).toBe(false);
+    expect(filter.test("/game/features/board/world/systems/hover-look.ts")).toBe(false);
+  });
+
+  it("matches no logic folder and nothing nested deeper in a kind folder", () => {
+    const { filter } = register(hot());
+
+    for (const file of [
+      "/game/features/board/flow/board.ts",
+      "/game/features/board/rules/merge.ts",
+      "/game/features/board/index.ts",
+      "/game/shared/flow/confirm.ts",
+      "/game/plugins/loading/index.ts",
+      "/game/features/board/views/deep/x.ts",
+      "/game/features/board/world/projections/deep/x.ts",
+      "/game/generated/assets.ts"
+    ]) {
+      expect(filter.test(file), file).toBe(false);
+    }
+  });
+
+  it("appends the footer to a kind-folder module with loader ts", async () => {
+    const load = register(hot()).load;
+
+    for (const relative of [
+      "shared/styles/text.ts",
+      "features/board/motion/motions.ts",
+      "features/board/world/projections/cells.ts",
+      "features/board/world/layout/grid.ts"
+    ]) {
+      const file = await writeTemp(relative);
+      const loaded = await load({ path: file });
+
+      expect(loaded.loader).toBe("ts");
+      expect(loaded.contents.startsWith(SOURCE)).toBe(true);
+      expect(loaded.contents).toContain(`swap(next, ${JSON.stringify(file)});`);
+    }
+  });
+
+  it("loads a test file of a kind folder unchanged", async () => {
+    const load = register(hot()).load;
+
+    for (const relative of [
+      "features/board/styles/styles.test.ts",
+      "features/board/__tests__/unit/styles.test.ts",
+      "features/board/__tests__/isolated/views/cell.ts"
+    ]) {
+      const file = await writeTemp(relative);
+      const loaded = await load({ path: file });
+
+      expect(loaded.contents).toBe(SOURCE);
+    }
+  });
+
+  it("keeps the default include when only exclude is given", () => {
+    expect(register(hot({ exclude: /x/ })).filter.source).toBe(register(hot()).filter.source);
+  });
+
+  it("anchors the view names and the kind folders in one default filter", () => {
+    expect(register(hot()).filter.source).toBe(
+      String.raw`(\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.[\w-]+\.ts|` +
+        String.raw`\/(?:styles|motion|effects|views)\/[^/]+\.ts|\/world\/(?:projections|layout)\/[^/]+\.ts)$`
+    );
+  });
+
   it("appends the footer to animations.ts, effects.ts and a generated strings file", async () => {
     const load = register(hot()).load;
 

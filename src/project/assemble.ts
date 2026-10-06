@@ -2,12 +2,14 @@
  * @file project — the cross-file pass that turns the records of a catalog into the index: every
  * definition, the `node:` keys of each flow table followed to the file that declares the node,
  * the files that import each style, the files that render each component, conflicts, the files with their hashes, the unresolved items
- * and the revision. The result is frozen: a watch batch replaces it, nothing mutates it.
+ * and the revision. Names are followed through relative imports and the tsconfig aliases. The
+ * result is frozen: a watch batch replaces it, nothing mutates it.
  */
+import type { AliasMap } from "./aliases";
 import type { FileRecord } from "./catalog";
 import { COMPONENT } from "./extract/components";
 import type { NodeTable, Unresolved } from "./extract/definitions";
-import { type Modules, resolveBinding } from "./extract/resolve";
+import { type Modules, missedAlias, type Resolution, resolveBinding } from "./extract/resolve";
 import { revisionOf } from "./hash";
 import { JSX } from "./shapes";
 import type { Anchor, ProjectIndex } from "./types";
@@ -15,10 +17,14 @@ import type { Anchor, ProjectIndex } from "./types";
 /** The prefix of a node key. */
 const NODE = "node:";
 
-/** What the pass reads: every record sorted by path, and the module facts of the good files. */
+/**
+ * What the pass reads: every record sorted by path, the module facts of the good files, and the
+ * tsconfig aliases when the game declares some.
+ */
 export type Assembly = {
   readonly files: readonly (readonly [path: string, record: FileRecord])[];
   readonly modules: Modules;
+  readonly aliases?: AliasMap | undefined;
 };
 
 /** One key while it is collected. */
@@ -47,6 +53,24 @@ function entryOf(symbols: Symbols, key: string): Entry {
 }
 
 /**
+ * Why a name of a flow table cannot be followed: the alias it is imported through reaches no
+ * file, or it is declared in no file of the root.
+ *
+ * @param resolution - The module facts and the aliases.
+ * @param file - The flow file.
+ * @param node - The key of the entry, `main/home`.
+ * @param ref - The name the entry holds.
+ * @returns The reason for the unresolved list.
+ */
+function unfollowed(resolution: Resolution, file: string, node: string, ref: string): string {
+  const alias = missedAlias(resolution, file, ref);
+
+  return alias === undefined
+    ? `node "${node}": "${ref}" is not declared in a file of the root`
+    : `node "${node}": "${ref}" is imported from "${alias}", which names no file of the root`;
+}
+
+/**
  * Adds the `node:` keys of one flow table. A plain name is followed to the file that declares
  * it, and the table is its use; a slot or an inline node is anchored at the table. A name that
  * cannot be followed is anchored at the table and listed as unresolved.
@@ -66,11 +90,12 @@ function addTable(
 ): void {
   const use: Anchor =
     table.binding === undefined ? { path: file } : { path: file, binding: table.binding };
+  const resolution: Resolution = { modules: assembly.modules, aliases: assembly.aliases };
 
   for (const { name, ref } of table.entries) {
     const entry = entryOf(symbols, `${NODE}${table.flow}/${name}`);
     const atTable: Anchor = { ...use, key: name };
-    const target = ref === undefined ? undefined : resolveBinding(assembly.modules, file, ref);
+    const target = ref === undefined ? undefined : resolveBinding(resolution, file, ref);
 
     if (target?.kind === "declared") {
       entry.def.push({ path: target.path, binding: target.binding });
@@ -81,9 +106,10 @@ function addTable(
     entry.def.push(atTable);
 
     if (ref !== undefined) {
-      const reason = `node "${table.flow}/${name}": "${ref}" is not declared in a file of the root`;
-
-      unresolved.push({ path: file, reason });
+      unresolved.push({
+        path: file,
+        reason: unfollowed(resolution, file, `${table.flow}/${name}`, ref)
+      });
     }
   }
 }
@@ -95,10 +121,11 @@ function addTable(
  * @param symbols - The keys so far.
  */
 function addStyleUses(assembly: Assembly, symbols: Symbols): void {
+  const resolution: Resolution = { modules: assembly.modules, aliases: assembly.aliases };
+
   for (const [file, record] of assembly.files) {
     for (const [local, ref] of record.good?.module.imports ?? []) {
-      const target =
-        ref.imported === "*" ? undefined : resolveBinding(assembly.modules, file, local);
+      const target = ref.imported === "*" ? undefined : resolveBinding(resolution, file, local);
       const style =
         target?.kind === "declared"
           ? symbols.get(`style:${target.path}#${target.binding}`)
@@ -208,9 +235,9 @@ function deepFreeze<T>(value: T): T {
 }
 
 /**
- * Assembles the index of a catalog.
+ * Assembles the index of a catalog. The index names the tsconfig when the assembly has aliases.
  *
- * @param assembly - The records sorted by path, and the module facts of the good files.
+ * @param assembly - The records sorted by path, the module facts of the good files, the aliases.
  * @param manifest - The root-relative manifest path when the file exists.
  * @returns The index, frozen.
  */
@@ -247,6 +274,7 @@ export function assembleIndex(assembly: Assembly, manifest: string | undefined):
     schemaVersion: 1,
     revision: revisionOf(files),
     ...(manifest === undefined ? {} : { manifest }),
+    ...(assembly.aliases === undefined ? {} : { tsconfig: assembly.aliases.file }),
     symbols: finishSymbols(symbols),
     files,
     unresolved

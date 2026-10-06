@@ -3,7 +3,8 @@ import type { Anim, HAPTIC_KINDS, HapticKind } from "../../../../index";
 import { defineGame } from "../../../../index";
 import { type } from "../../../flow/runner/define";
 import { Sprite, Transform } from "../../../renderer/components";
-import { Frames } from "../../components";
+import type { ResourceType } from "../../../world/ecs/types";
+import { AnimPlayer, Frames } from "../../components";
 import { defineMotion } from "../../motion";
 import { defineAnimation, haptic, mark, play, sequence, set, tween } from "../../timeline/steps";
 import type {
@@ -212,3 +213,15 @@ expectTypeOf<HapticKind>().toEqualTypeOf<
   "light" | "medium" | "heavy" | "selection" | "success" | "warning" | "error"
 >();
 expectTypeOf<Anim.HapticDescriptor["payload"]["kind"]>().toEqualTypeOf<HapticKind>();
+
+// A system plays through the AnimPlayer resource: the same play as app.anim, typed by the slots.
+expectTypeOf(AnimPlayer).toEqualTypeOf<ResourceType<Anim.AnimPlayerValue>>();
+expectTypeOf<Anim.AnimPlayerValue["play"]>().toEqualTypeOf<AnimApi["play"]>();
+const lift = defineAnimation("look.hover", {
+  slots: { thing: type<Target>() },
+  build: ({ thing }) => tween(thing, Transform, { scale: 1.1 }, { ms: 100 })
+});
+const player: Anim.AnimPlayerValue = { play: () => ({}) as PlayHandle };
+player.play(lift, { thing: 1 });
+// @ts-expect-error — the slot `thing` is required
+player.play(lift, {});

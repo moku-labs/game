@@ -185,6 +185,86 @@ describe("moku-game-index --check", () => {
   });
 });
 
+describe("moku-game-index and the tsconfig", () => {
+  /** A scene that reaches the kit through the alias `@kit`, declared on line 3. */
+  const ALIASED = `import { defineScene } from "@kit";
+
+export const aliasScene = defineScene("alias", {});
+`;
+
+  /** A tsconfig that maps `@kit` to the kit. */
+  const TSCONFIG = JSON.stringify({ compilerOptions: { paths: { "@kit": ["./kit.ts"] } } });
+
+  it("reads --tsconfig, and --check names the aliases after the summary", async () => {
+    const root = writeGame({
+      "kit.ts": KIT,
+      "alias.ts": ALIASED,
+      "tsconfig.game.json": TSCONFIG
+    });
+    const where = recorder();
+    const check = recorder();
+
+    expect(
+      await runCli(
+        ["--root", root, "--tsconfig", "tsconfig.game.json", "where", "scene:alias"],
+        where.ui
+      )
+    ).toBe(0);
+    expect(where.lines).toEqual(["line alias.ts:3"]);
+    expect(
+      await runCli(["--root", root, "--tsconfig", "tsconfig.game.json", "--check"], check.ui)
+    ).toBe(0);
+    expect(check.lines).toEqual([
+      "info 2 files, 1 key: 0 broken, 0 in conflict, 0 unresolved.",
+      "info aliases: tsconfig.game.json, 1 pattern"
+    ]);
+  });
+
+  it("reads tsconfig.json by default and carries it through --json", async () => {
+    const root = writeGame({ "kit.ts": KIT, "alias.ts": ALIASED, "tsconfig.json": TSCONFIG });
+    const { ui, lines } = recorder();
+
+    expect(await runCli(["--root", root, "--json"], ui)).toBe(0);
+
+    const index = JSON.parse(lines[0]?.replace(/^line /, "") ?? "") as {
+      tsconfig: string;
+      symbols: object;
+    };
+
+    expect(index.tsconfig).toBe("tsconfig.json");
+    expect(index.symbols).toHaveProperty("scene:alias");
+  });
+
+  it("says so when the tsconfig holds no paths, and stays quiet when there is none", async () => {
+    const plain = writeGame({ "kit.ts": KIT, "tsconfig.json": "{}" });
+    const bare = writeGame({ "kit.ts": KIT });
+    const first = recorder();
+    const second = recorder();
+
+    expect(await runCli(["--root", plain, "--check"], first.ui)).toBe(0);
+    expect(first.lines).toEqual([
+      "info 1 file, 0 keys: 0 broken, 0 in conflict, 0 unresolved.",
+      "info aliases: none (no tsconfig paths)"
+    ]);
+    expect(await runCli(["--root", bare, "--check"], second.ui)).toBe(0);
+    expect(second.lines).toEqual(["info 1 file, 0 keys: 0 broken, 0 in conflict, 0 unresolved."]);
+  });
+
+  it("refuses a --tsconfig that leaves the root, by name, and one without its path", async () => {
+    const root = writeGame({ "kit.ts": KIT });
+    const outside = recorder();
+    const missing = recorder();
+
+    expect(
+      await runCli(["--root", root, "--tsconfig", "../tsconfig.json", "--check"], outside.ui)
+    ).toBe(1);
+    expect(outside.lines[0]).toContain('The path "../tsconfig.json" leaves the project root');
+    expect(await runCli(["--root", root, "--tsconfig"], missing.ui)).toBe(1);
+    expect(missing.lines[0]).toContain('"--tsconfig" needs a path');
+    expect(missing.lines[0]).toContain("[--tsconfig <path>]");
+  });
+});
+
 describe("moku-game-index flags", () => {
   it("needs --root", async () => {
     const { ui, lines } = recorder();

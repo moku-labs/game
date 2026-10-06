@@ -147,7 +147,9 @@ A game with a screen keeps its files in `src/features/<feature>/assets/`. The sc
 
 The same bin takes `--check`, which fails when an output is out of date, and `--pack <dir>` for the production build.
 
-The package also ships one MSDF body font, Pangolin Regular under the SIL Open Font License 1.1. Copy it into the game, do not reference it: the scanner reads keys only from `features/<feature>/assets/`. The licence goes next to `assets/`, not inside it.
+A game on the layered layout adds `--layer shared=ui`, so `shared/assets/*` keeps the `ui.*` keys.
+
+The package also ships one MSDF body font, Pangolin Regular under the SIL Open Font License 1.1. Copy it into the game, do not reference it: the scanner reads keys only from `features/<feature>/assets/` and from the layers of `--layer`. The licence goes next to `assets/`, not inside it.
 
 ```bash
 mkdir -p src/features/ui/assets

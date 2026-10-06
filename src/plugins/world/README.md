@@ -22,7 +22,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 
 | Method | Behaviour |
 |---|---|
-| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. |
+| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. |
 | `spawn(owner, components): Entity` | The id is reserved and returned at once. Owner is required by the type. |
 | `despawn(entity)` / `despawnOwnedBy(owner)` | Removes every component (each fires `onRemoved`), frees the index, bumps the generation. A stale id is a no-op. |
 | `get(entity, Component)` | The stored value, read-only, or `undefined`. A stale id gives `undefined`. |
@@ -30,7 +30,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `add(entity, value)` / `remove(entity, Component)` | Structural. `add` on an existing component replaces the value and marks changed, no `onAdded`. |
 | `has(entity, Component)` / `tag` / `untag` | Structural and idempotent. False for a stale id. |
 | `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C`. |
-| `resource(Resource)` | The one mutable value per world, cloned from the defaults on first read. |
+| `resource(Resource)` | The one mutable value per world, made on first read: a deep clone of plain defaults, or one call of a factory default. |
 | `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied, for a component or a tag. A component listener gets the entity and the value; a tag listener gets the entity. A throwing listener is logged; the others still run. |
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
 | `typeOf(name)` | The component type behind a storage name, registered on first use, or `undefined`. |
@@ -88,6 +88,15 @@ The authoring helpers are pure and exported from the package root:
 `Tree`. A projection whose `from` returns one plain object needs no `key`: it draws one item under
 the name of the projection, and a `view` that returns one description node instead of components is
 wrapped as `Tree({ node })`, which `ui` reconciles into child entities.
+
+`resource(name, defaults | () => value)` takes plain JSON defaults, cloned into every world, or a
+factory, called once per world on first read. A factory value may hold a `Map` or a function, so a
+system keeps its own state in a resource. `snapshot()` leaves a value that is not JSON out.
+
+```ts
+// Per-system state of the hover look: one Map per world, dropped when the world stops.
+const Looks = resource("boardLooks", () => ({ shown: new Map<Entity, { look: string }>() }));
+```
 
 ## Configuration
 

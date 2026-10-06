@@ -1,9 +1,9 @@
 /**
  * @file i18n plugin, build time — `compileStrings`: the walk over `features/*​/strings/<locale>.json`
- * turned into the generated modules, and on request the pseudo-locale `en-XA` derived from English.
- * Every problem of a run is collected and reported in one error, so a game fixes its messages in
- * one round. Node and Bun only: nothing under `src/` outside this folder and `src/assets.ts`
- * imports it, so no game bundles the ICU parser.
+ * and the `strings/` of every layer turned into the generated modules, and on request the
+ * pseudo-locale `en-XA` derived from English. Every problem of a run is collected and reported in
+ * one error, so a game fixes its messages in one round. Node and Bun only: nothing under `src/`
+ * outside this folder and `src/assets.ts` imports it, so no game bundles the ICU parser.
  */
 import path from "node:path";
 import { emitLocale, emitTypes, type LocaleEntry, type TypeEntry, writeIfChanged } from "./emit";
@@ -33,6 +33,12 @@ export type CompileReport = {
 
 /**
  * What one compile is told beyond its two paths.
+ *
+ * @example
+ * ```ts
+ * // A v15 game: the dev build writes en-XA, and shared/strings/ compiles next to the features.
+ * const options: CompileOptions = { pseudo: true, layers: { shared: "ui" } };
+ * ```
  */
 export type CompileOptions = {
   /** True for a check run: nothing is written. */
@@ -41,6 +47,13 @@ export type CompileOptions = {
   features?: string;
   /** True to also write `strings.en-XA.ts`, the pseudo-locale, from the `"en"` messages. */
   pseudo?: boolean;
+  /**
+   * Layers walked next to the features: folder under `root` to the name its keys take.
+   * `{ shared: "ui" }` reads `<root>/shared/strings/<locale>.json` exactly as a feature's
+   * `strings/` is read. A folder is one name, without "/", "\" or ".". Default `{}`: features
+   * only.
+   */
+  layers?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -56,15 +69,21 @@ function pseudoNeedsEnglish(): Error {
 }
 
 /**
- * Tells whether at least one feature brings a string file for a locale.
+ * Tells whether at least one feature or layer brings a string file for a locale.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param features - Name of the folder that holds the features.
+ * @param layers - Folder under the root to the name its keys take.
  * @param locale - The locale to look for.
- * @returns True when a feature has `strings/<locale>.json`.
+ * @returns True when a feature or a layer has `strings/<locale>.json`.
  */
-async function bringsLocale(root: string, features: string, locale: string): Promise<boolean> {
-  const files = await listStringFiles(root, features);
+async function bringsLocale(
+  root: string,
+  features: string,
+  layers: Readonly<Record<string, string>>,
+  locale: string
+): Promise<boolean> {
+  const files = await listStringFiles(root, features, layers);
 
   return files.some(file => file.locale === locale);
 }
@@ -124,9 +143,7 @@ function missingNotes(walk: Walk, locales: readonly string[]): string[] {
 
       if (entries.some(entry => entry.key === key)) continue;
 
-      notes.push(
-        `the key "${key}" is missing from features/${source.feature}/strings/${locale}.json.`
-      );
+      notes.push(`the key "${key}" is missing from ${source.folder}/strings/${locale}.json.`);
     }
   }
 
@@ -154,23 +171,29 @@ function typeEntries(walk: Walk): TypeEntry[] {
 }
 
 /**
- * Walks `features/*​/strings/<locale>.json` of a game, compiles every message and writes the
- * generated modules: the types module `strings.ts` and one `strings.<locale>.ts` per locale, plus
- * `strings.en-XA.ts` with `pseudo`. A check run writes nothing and only reports whether something
- * would change; it checks `strings.en-XA.ts` only with `pseudo`.
+ * Walks `features/*​/strings/<locale>.json` of a game and the `strings/` of every layer, compiles
+ * every message and writes the generated modules: the types module `strings.ts` and one
+ * `strings.<locale>.ts` per locale, plus `strings.en-XA.ts` with `pseudo`. A check run writes
+ * nothing and only reports whether something would change; it checks `strings.en-XA.ts` only with
+ * `pseudo`.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param out - The generated directory the modules are written into.
- * @param options - Whether this is a check run, what the features folder is called, and whether
- *   the pseudo-locale is written.
+ * @param options - Whether this is a check run, what the features folder is called, whether the
+ *   pseudo-locale is written, and the layers.
  * @returns Whether an output differed, the locales, the keys and the notes.
- * @throws {Error} One error that lists every problem the compile found, or the pseudo error when
- *   no feature brings an `en` string file.
+ * @throws {Error} One error that lists every problem the compile found, the pseudo error when
+ *   no feature or layer brings an `en` string file, or the layer error when a layer folder is not
+ *   one folder name: nothing is read then.
  * @example
  * ```ts
  * // A dev build also writes the pseudo-locale, derived from the English messages.
  * const report = await compileStrings("src", "src/generated", { pseudo: true });
  * // report.locales: ["en", "en-XA", "ru"], report.changed: true on the first run
+ * // A v15 game: features/board/strings/en.json { "board.full": "Full" } and the layer file
+ * // shared/strings/en.json { "ui.ok": "OK" } compile together.
+ * const layered = await compileStrings("src", "src/generated", { layers: { shared: "ui" } });
+ * // layered.keys: ["board.full", "ui.ok"]
  * ```
  */
 export async function compileStrings(
@@ -179,13 +202,16 @@ export async function compileStrings(
   options: CompileOptions = {}
 ): Promise<CompileReport> {
   const features = options.features ?? "features";
+  const layers = options.layers ?? {};
   const pseudo = options.pseudo === true;
 
   // The pseudo-locale is derived from English: without it, refuse before reading a message.
-  if (pseudo && !(await bringsLocale(root, features, PSEUDO_SOURCE))) throw pseudoNeedsEnglish();
+  if (pseudo && !(await bringsLocale(root, features, layers, PSEUDO_SOURCE))) {
+    throw pseudoNeedsEnglish();
+  }
 
-  // Collect every message of every feature, and fail once with every problem the walk found.
-  const walk = await walkStrings(root, features);
+  // Collect every message of every feature and layer, and fail once with every problem found.
+  const walk = await walkStrings(root, features, layers);
 
   if (walk.problems.length > 0) throw compileFailure(walk.problems);
 
@@ -218,7 +244,8 @@ export async function compileStrings(
 
 /**
  * Tells whether the generated modules of a game are current, without writing anything. The
- * `--check` run of `bun run assets:keys` covers the strings with it.
+ * `--check` run of `bun run assets:keys` covers the strings with it. It walks the features only: a
+ * game with layers checks through `runCli` with `--check --layer …`.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param out - The generated directory the modules live in.

@@ -70,4 +70,16 @@ describe("ecs snapshot", () => {
     expect(snapshot.entities[0]?.components).toEqual({});
     expect(snapshot.entities[0]?.skipped).toEqual(["Display"]);
   });
+
+  it("leaves a resource that holds a function or a Map out of the resources", () => {
+    const world = createMockWorld();
+    const Player = resource("AnimPlayer", () => ({ play: (): number => 1 }));
+    const Looks = resource("boardLooks", () => ({ shown: new Map<number, string>() }));
+
+    world.api.ecs.resource(Player);
+    world.api.ecs.resource(Looks).shown.set(1, "hover");
+    world.api.ecs.resource(Pointer).down = true;
+
+    expect(world.api.ecs.snapshot().resources).toEqual({ Pointer: { x: 0, down: true } });
+  });
 });

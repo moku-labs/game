@@ -292,6 +292,32 @@ first one, removed at zero. `anim` never reads it; the inspector and `ui.lint` d
 
 `Frames({ keys, fps, loop, playing })` — the frame loop above. A game writes it; `anim` reads it.
 
+## AnimPlayer resource
+
+A system cannot `require` a plugin, so `anim` hands it one method through the world:
+`res(AnimPlayer).play(animation, slots)`. It is the `play` of `app.anim`, with one difference: the
+registered animation of `animation.id` wins, as in the `play` effect, so a hot swap of
+`animations.ts` reaches a system that holds the old definition object. `app.anim.play` keeps
+building the object it is given. `Anim.AnimPlayerValue` is the value type.
+
+```ts
+// A fresh item pops once: the system plays, then takes the Fresh tag away.
+const popIn = system({ name: "popIn", phase: "input", query: [Fresh], run: (items, { world, res }) => {
+  for (const [entity] of items) {
+    res(AnimPlayer).play(pop, { thing: entity });
+    world.untag(entity, Fresh);
+  }
+} });
+```
+
+- Play on a change, never on every frame: keep the handle in a resource of the system and cancel it
+  before the next play, or take away the tag that asked for the play.
+- Play from phase `input`: the tree moves in `animate` of the same frame. From a later phase it
+  moves from the next frame. Phase `sync` runs in fast mode too, where the next step finishes it.
+- Before `anim` started, and after the world stopped, `play` throws
+  `[game] AnimPlayer is not ready: anim has not started.` A system that plays in an app without
+  `anim` is logged as `world:system-failed` with that sentence.
+
 ## How a frame runs
 
 `time.onFrame("animate")`, registered in `onInit`, so it runs before world's own `animate`
@@ -302,6 +328,9 @@ callback and the sweep of the same frame sees the tracks it just advanced.
 | `"live"` | The timelines consume `time.delta` first — a track a step just started takes the remainder at once — then every other track advances, then every `Frames` loop. |
 | `"paused"` | Nothing moves. |
 | `"fast"` | `finishAll()`. The `Frames` loops stand. |
+
+A system of phase `input` that plays through `res(AnimPlayer)` runs before this step, so its tree
+moves in `animate` of the same frame.
 
 Additive tracks advance before the absolute ones, so the absolute owner of a field writes the sum
 of this frame's offsets. Determinism: no `Date.now`, no `performance.now`, no `Math.random`, no
@@ -320,12 +349,14 @@ additive track leaves, the field is written once more without offsets.
 
 - **onInit** — registers the one `animate` frame step.
 - **onStart** — reads the `animations` of every feature into the registry (a duplicate id throws),
-  installs the `TweenDriver` through `world.projection.setDriver`, registers
+  writes `play` onto `world.ecs.resource(AnimPlayer)`, installs the `TweenDriver` through
+  `world.projection.setDriver`, registers
   `flow.fx.handle("play", …, { runInFast: false })`, registers `ecs.onAdded` and `ecs.onRemoved`
   on `Frames` and seeds the loop table with the entities that carry it already.
 - **onStop** — finishes everything, so every pending `done` resolves and every `frames` step
   releases its hold, then removes the driver, the frame callback, the handler and the two `Frames`
-  hooks and clears the tables.
+  hooks and clears the tables. `AnimPlayer` is left to `world`, which drops every resource when it
+  stops after `anim`.
 
 ## Doors
 
@@ -337,6 +368,6 @@ door, `@moku-labs/game/control`, dev builds only. Input `{ on: "boolean" }`: it 
 
 `time` (the frame step, `delta`, `wake()`), `flow` (`fx.handle`, `fx.dispatch`, `features.all()`),
 `world` (the driver seam, `projection.entityOf`, `restOf`, `mute` for `Sprite.texture`, the ecs with `spawn` and `despawn`,
-`onAdded`, `onRemoved` and `query` for `Frames`, the `Layer` and `Order` components), `renderer`
+`onAdded`, `onRemoved` and `query` for `Frames`, `resource` for `AnimPlayer`, the `Layer` and `Order` components), `renderer`
 (its `Sprite`, `Transform` and `Parent` components and
 the `rootPoseOf`, `localPoseOf` and `parentOf` pose helpers of `sync/pose.ts`; no API call).

@@ -232,7 +232,8 @@ export function writeComponent(ctx: WorldCtx, entity: Entity, name: string, patc
 }
 
 /**
- * Returns the one mutable value of a resource, cloned from its defaults on first read.
+ * Returns the one mutable value of a resource, made on first read: the factory default is called,
+ * plain defaults are deep-cloned.
  *
  * @param state - ecs module state.
  * @param resourceType - The resource type.
@@ -246,7 +247,8 @@ export function resourceValue<Value extends object>(
 
   if (known !== undefined) return known as Value;
 
-  const fresh = structuredClone(resourceType.defaults) as Value;
+  const defaults = resourceType.defaults;
+  const fresh = typeof defaults === "function" ? defaults() : (structuredClone(defaults) as Value);
 
   state.resources.set(resourceType.resourceName, fresh);
 

@@ -12,7 +12,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openProject } from "../../src/project";
 import { diffIndexes } from "../../src/project/change";
-import { openSession, syncWithDisk } from "../../src/project/session";
+import { openSession, reindexPath, syncWithDisk } from "../../src/project/session";
 import type { ProjectChange, ProjectIndex } from "../../src/project/types";
 import { createBatcher, createHub, type WatchFunction, watchTree } from "../../src/project/watch";
 
@@ -221,6 +221,206 @@ describe("the batch walk", () => {
     expect(session.index.symbols["scene:board"]).toBeDefined();
     expect(session.index.symbols["scene:home"]).toBeDefined();
     expect(session.index.files["features/home.ts"]?.state).toBe("broken");
+  });
+});
+
+/** A scene file that reaches the kit through the alias `@kit`. */
+const ALIASED = `import { defineScene } from "@kit";
+
+export const aliasScene = defineScene("alias", {});
+`;
+
+/** A tsconfig that maps `@kit` to the kit of the tiny game. */
+const TSCONFIG = JSON.stringify({ compilerOptions: { paths: { "@kit": ["./kit.ts"] } } });
+
+/**
+ * Move the time stamps of a file a few seconds ahead, so a rewrite with the same size and the
+ * same second still moves its stamp.
+ *
+ * @param root - The game root.
+ * @param file - The root-relative path.
+ * @param seconds - How far ahead.
+ */
+function touch(root: string, file: string, seconds: number): void {
+  const later = new Date(Date.now() + seconds * 1000);
+
+  utimesSync(path.join(root, file), later, later);
+}
+
+describe("the batch walk and the tsconfig", () => {
+  it("reads a tsconfig that appears, ignores the same bytes, and drops the aliases of a deleted one", async () => {
+    const root = writeGame();
+
+    put(root, "features/alias.ts", ALIASED);
+
+    const session = await openSession({ root });
+
+    expect(session.index.symbols["scene:alias"]).toBeUndefined();
+
+    put(root, "tsconfig.json", TSCONFIG);
+
+    expect(await syncWithDisk(session)).toEqual({
+      revision: session.index.revision,
+      files: ["tsconfig.json"],
+      moved: [],
+      removed: []
+    });
+    expect(session.index.symbols["scene:alias"]?.def).toEqual([
+      { path: "features/alias.ts", binding: "aliasScene" }
+    ]);
+    expect(session.index.tsconfig).toBe("tsconfig.json");
+
+    put(root, "tsconfig.json", TSCONFIG);
+    touch(root, "tsconfig.json", 5);
+
+    expect(await syncWithDisk(session)).toBeUndefined();
+
+    rmSync(path.join(root, "tsconfig.json"));
+
+    expect(await syncWithDisk(session)).toMatchObject({
+      files: ["tsconfig.json"],
+      removed: ["scene:alias"]
+    });
+    expect(session.index.tsconfig).toBeUndefined();
+  });
+
+  it("rebuilds when a file the tsconfig extends changes its paths, and not for a comment", async () => {
+    const root = writeGame();
+
+    put(root, "features/alias.ts", ALIASED);
+    put(root, "tsconfig.json", JSON.stringify({ extends: "./tsconfig.base.json" }));
+    put(root, "tsconfig.base.json", TSCONFIG);
+
+    const session = await openSession({ root });
+
+    expect(session.index.symbols["scene:alias"]).toBeDefined();
+
+    put(
+      root,
+      "tsconfig.json",
+      `// the game\n${JSON.stringify({ extends: "./tsconfig.base.json" })}`
+    );
+
+    expect(await syncWithDisk(session)).toBeUndefined();
+
+    put(root, "tsconfig.base.json", TSCONFIG.replace("./kit.ts", "./lib/kit.ts"));
+
+    expect(await syncWithDisk(session)).toMatchObject({
+      files: ["tsconfig.json"],
+      removed: ["scene:alias"]
+    });
+  });
+
+  it("reads the paths a base file without them gains later: the base is stamped from the start", async () => {
+    const root = writeGame();
+
+    put(root, "features/alias.ts", ALIASED);
+    put(root, "tsconfig.json", JSON.stringify({ extends: "./tsconfig.base.json" }));
+    put(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { strict: true } }));
+
+    const session = await openSession({ root });
+
+    expect([...session.configStamps.keys()]).toEqual(["tsconfig.json", "tsconfig.base.json"]);
+    expect(session.index.tsconfig).toBeUndefined();
+    expect(await syncWithDisk(session)).toBeUndefined();
+
+    put(root, "tsconfig.base.json", TSCONFIG);
+
+    expect(await syncWithDisk(session)).toEqual({
+      revision: session.index.revision,
+      files: ["tsconfig.json"],
+      moved: [],
+      removed: []
+    });
+    expect(session.index.symbols["scene:alias"]?.def).toEqual([
+      { path: "features/alias.ts", binding: "aliasScene" }
+    ]);
+    expect(session.index.tsconfig).toBe("tsconfig.json");
+  });
+
+  it("changes nothing for a tsconfig without paths that appears", async () => {
+    const root = writeGame();
+    const session = await openSession({ root });
+
+    put(root, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true } }));
+
+    expect(await syncWithDisk(session)).toBeUndefined();
+    expect(session.index.tsconfig).toBeUndefined();
+  });
+
+  it("keeps the last good aliases while the tsconfig does not parse, and still reads the sources", async () => {
+    const root = writeGame();
+
+    put(root, "features/alias.ts", ALIASED);
+    put(root, "tsconfig.json", TSCONFIG);
+
+    const session = await openSession({ root });
+
+    put(root, "tsconfig.json", TSCONFIG.slice(0, -1));
+    put(root, "features/home.ts", `// moved down\n${HOME}`);
+
+    const change = await syncWithDisk(session);
+
+    expect(change?.files).toEqual(["features/home.ts"]);
+    expect(session.index.symbols["scene:alias"]).toBeDefined();
+    expect(await syncWithDisk(session)).toBeUndefined();
+
+    put(root, "tsconfig.json", TSCONFIG.replace("@kit", "@engine"));
+
+    expect(await syncWithDisk(session)).toMatchObject({
+      files: ["tsconfig.json"],
+      removed: ["scene:alias"]
+    });
+  });
+
+  it("re-reads the tsconfig on reindexPath and rebuilds only when the aliases changed", async () => {
+    const root = writeGame();
+
+    put(root, "features/alias.ts", ALIASED);
+
+    const session = await openSession({ root });
+
+    put(root, "tsconfig.json", TSCONFIG);
+
+    const index = await reindexPath(session, "tsconfig.json");
+
+    expect(index.symbols["scene:alias"]).toBeDefined();
+    expect(index.tsconfig).toBe("tsconfig.json");
+    expect(await reindexPath(session, "tsconfig.json")).toBe(index);
+    expect(await syncWithDisk(session)).toBeUndefined();
+  });
+
+  it("reads the tsconfig the options name, and the editor's changed() reaches it", async () => {
+    const root = writeGame();
+
+    put(root, "features/alias.ts", ALIASED);
+    put(root, "tsconfig.json", TSCONFIG.replace("@kit", "@other"));
+
+    const project = await openProject({ root, tsconfig: "tsconfig.game.json" });
+
+    expect(project.index.symbols["scene:alias"]).toBeUndefined();
+
+    put(root, "tsconfig.game.json", TSCONFIG);
+
+    const index = await project.changed("tsconfig.game.json");
+
+    expect(index.tsconfig).toBe("tsconfig.game.json");
+    expect(index.symbols["scene:alias"]).toBeDefined();
+    expect(await project.changed("tsconfig.json")).toBe(index);
+    project.close();
+  });
+
+  it("refuses a tsconfig that does not parse or leaves the root when the project opens", async () => {
+    const root = writeGame();
+
+    put(root, "tsconfig.json", "{");
+
+    await expect(openSession({ root })).rejects.toThrow(
+      "[game] The tsconfig \"tsconfig.json\" does not parse: tsconfig.json:1:2 '}' expected."
+    );
+    await expect(openSession({ root, tsconfig: "../tsconfig.json" })).rejects.toThrow(
+      'The path "../tsconfig.json" leaves the project root'
+    );
   });
 });
 

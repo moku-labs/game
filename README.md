@@ -188,7 +188,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | Import | Runs in | For |
 |---|---|---|
 | `@moku-labs/game` | anywhere | The engine: plugins, helpers, components |
-| `@moku-labs/game/testing` | anywhere | Headless games, the fake clock, the in-memory save |
+| `@moku-labs/game/testing` | anywhere | Headless and isolated games, the fake clock, the in-memory save |
 | `@moku-labs/game/visual` | Node and Bun | Visual tests: baselines of state, describe and pixels |
 | `@moku-labs/game/assets` | Node and Bun | Asset keys, the manifest, strings, the pack |
 | `@moku-labs/game/inspect` | anywhere | Read a running game |
@@ -200,7 +200,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 
 ### Lint for games
 
-`@moku-labs/game/lint` is an oxlint JS plugin, `moku-game`. It checks the engine rules in a game: lazy Pixi and Yoga, no native package in the logic, the editor only in dev files, no module-scope state, determinism, pure rules and JSX keys the project index can follow.
+`@moku-labs/game/lint` is an oxlint JS plugin, `moku-game`. It checks the engine rules in a game: lazy Pixi and Yoga, no native package in the logic, the editor only in dev files, no module-scope state, determinism, pure rules and JSX keys the project index can follow. Three layout rules check a game on the layered layout: the order of the layers, the doors of the features and the suffix of each test file.
 
 ```json
 // .oxlintrc.json
@@ -213,12 +213,15 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
     "moku-game/no-module-state": "error",
     "moku-game/determinism": "error",
     "moku-game/rules-siblings": "error",
-    "moku-game/static-keys": "error"
+    "moku-game/static-keys": "error",
+    "moku-game/layer-imports": "error",
+    "moku-game/feature-door": "error",
+    "moku-game/test-suffix": "error"
   }
 }
 ```
 
-Each rule takes `{ "files": [...], "ignores": [...] }`. The defaults follow the template layout. See [Lint for games](./docs/lint.md).
+Each rule takes `{ "files": [...], "ignores": [...] }`. `layer-imports`, `feature-door` and `rules-siblings` also take `root` and `tsconfig`; `test-suffix` takes `root` and `suffixes`. The defaults follow the layout of a game. See [Lint for games](./docs/lint.md).
 
 ## Docs
 
@@ -233,7 +236,7 @@ Each rule takes `{ "files": [...], "ignores": [...] }`. The defaults follow the 
 | [Configuration](./docs/configuration.md) | Every config field and its default |
 | [Lint for games](./docs/lint.md) | The `moku-game` oxlint rules, their options and defaults |
 | [Project index](./docs/project-index.md) | `openProject`, the key scheme, `find` and `watch`, the `moku-game-index` bin |
-| [Testing](./docs/testing.md) | Headless and visual tests, all scripts, test layout, lint rules |
+| [Testing](./docs/testing.md) | Headless, isolated and visual tests, all scripts, test layout, lint rules |
 | [`llms.txt`](./llms.txt) | The engine in one page, for an AI that writes a game |
 
 Each plugin has its own README, linked in the table above. The kernel is specified in the [Moku Core specification](https://github.com/moku-labs/core/tree/main/specification).
