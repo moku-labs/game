@@ -45,6 +45,8 @@ export default [
       "declarations.d.ts",
       // Tool output: the asset scanner and compileStrings write these files.
       "**/generated/**",
+      // moku-game dev writes the page of a game here; it is regenerated on every run.
+      "**/.moku/**",
       // Build output of the mini game: the pack of `bun run mini:pack`.
       "tests/fixtures/mini-game/dist/**",
       // A v15-layout game for the project index and the lint e2e: its own tsconfig `paths`.

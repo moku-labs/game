@@ -9,7 +9,8 @@
       "*.config.ts",
       "!tests/visual/**/*.json",
       "!tests/fixtures/mini-game/dist",
-      "!tests/fixtures/layout-game"
+      "!tests/fixtures/layout-game",
+      "!**/.moku"
     ]
   },
   "formatter": {

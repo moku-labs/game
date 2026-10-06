@@ -27,6 +27,10 @@
       "types": "./dist/app/system.d.mts",
       "default": "./dist/app/system.mjs"
     },
+    "./cli": {
+      "types": "./dist/cli.d.mts",
+      "default": "./dist/cli.mjs"
+    },
     "./visual": {
       "types": "./dist/visual.d.mts",
       "default": "./dist/visual.mjs"
@@ -66,6 +70,7 @@
     "./fonts/*": "./fonts/*"
   },
   "bin": {
+    "moku-game": "./bin/moku-game.mjs",
     "moku-game-assets": "./bin/moku-game-assets.mjs",
     "moku-game-index": "./bin/moku-game-index.mjs"
   },
@@ -100,7 +105,7 @@
     "test:integration": "bun --bun vitest run --project integration",
     "test:coverage": "bun --bun vitest run --project unit --project integration --coverage",
     "build": "tsdown",
-    "mini:pack": "bun src/assets.ts --root tests/fixtures/mini-game --keys tests/fixtures/mini-game/generated/assets.ts --pack tests/fixtures/mini-game/dist/assets",
+    "mini:pack": "bun tests/fixtures/moku-game.ts pack --root tests/fixtures/mini-game",
     "mini:dev": "bun tests/fixtures/moku-game.ts dev --root tests/fixtures/mini-game",
     "mini:visual": "bun tests/visual/run.ts",
     "validate": "publint && attw --pack . --profile esm-only",
