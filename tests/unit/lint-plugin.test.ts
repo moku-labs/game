@@ -1,10 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { GameLintContext, GameLintNode, GameLintRuleName } from "@moku-labs/game/lint";
+import type {
+  GameLintContext,
+  GameLintDefinition,
+  GameLintNode,
+  GameLintRuleName,
+  GameLintScope
+} from "@moku-labs/game/lint";
 import plugin, { globToRegExp } from "@moku-labs/game/lint";
 import { afterAll, describe, expect, it } from "vitest";
+import { buildIndex, createCatalog, putFile } from "../../src/project/catalog";
+import { loadTypeScript } from "../../src/project/typescript";
 
 // ---------------------------------------------------------------------------
 // Unit test: the `@moku-labs/game/lint` oxlint plugin. The end-to-end cases run
@@ -21,6 +29,9 @@ const SOURCE = path.join(ROOT, "src/lint.ts");
 /** The oxlint entry of the devDependency, run with the real node binary. */
 const OXLINT = path.join(ROOT, "node_modules/oxlint/bin/oxlint");
 
+/** The fixture game the JSX key rule runs on. */
+const MERGE_GAME = path.join(ROOT, "tests/integration/merge-game");
+
 /** Every rule of the plugin, on. */
 const ALL_RULES = Object.fromEntries(
   Object.keys(plugin.rules).map(name => [`moku-game/${name}`, "error"])
@@ -33,8 +44,8 @@ afterAll(() => {
   for (const folder of folders) rmSync(folder, { recursive: true, force: true });
 });
 
-/** A finding of the plugin: rule name and file relative to the fixture root. */
-type Finding = { rule: string; file: string };
+/** A finding of the plugin: rule name, file relative to the fixture root and line. */
+type Finding = { rule: string; file: string; line: number };
 
 /**
  * Write a fixture project and run oxlint on it.
@@ -72,14 +83,25 @@ function runOxlint(
   if (run.stdout === "") throw new Error(`oxlint did not run: ${run.stderr}`);
 
   const report = JSON.parse(run.stdout) as {
-    diagnostics: { code: string; filename: string; message: string }[];
+    diagnostics: {
+      code: string;
+      filename: string;
+      message: string;
+      labels: { span: { line: number } }[];
+    }[];
   };
 
   expect(report.diagnostics.filter(item => !item.code.startsWith("moku-game("))).toEqual([]);
 
   return report.diagnostics
-    .map(item => ({ rule: item.code.slice("moku-game(".length, -1), file: item.filename }))
-    .toSorted((a, b) => `${a.file}${a.rule}`.localeCompare(`${b.file}${b.rule}`));
+    .map(item => ({
+      rule: item.code.slice("moku-game(".length, -1),
+      file: item.filename,
+      line: item.labels[0]?.span.line ?? 0
+    }))
+    .toSorted(
+      (a, b) => `${a.file}${a.rule}`.localeCompare(`${b.file}${b.rule}`) || a.line - b.line
+    );
 }
 
 /**
@@ -175,7 +197,7 @@ describe("@moku-labs/game/lint under oxlint", () => {
       { "moku-game/determinism": ["error", { files: ["web/**"], ignores: ["**/*.skip.ts"] }] }
     );
 
-    expect(findings).toEqual([{ rule: "determinism", file: "web/random.ts" }]);
+    expect(findings).toEqual([{ rule: "determinism", file: "web/random.ts", line: 1 }]);
   });
 
   it("loads by package name from node_modules", () => {
@@ -202,13 +224,140 @@ describe("@moku-labs/game/lint under oxlint", () => {
       }
     );
 
-    expect(findings).toEqual([{ rule: "lazy-imports", file: "nodes/bad-pixi.ts" }]);
+    expect(findings).toEqual([{ rule: "lazy-imports", file: "nodes/bad-pixi.ts", line: 1 }]);
+  });
+});
+
+/** Every JSX key shape, one per line: the rule reports the lines the index cannot follow. */
+const KEYS = `import { slotKey } from "./slots";
+
+const tabKeys: Record<string, string> = { audio: "tabSound" };
+const fixed = "fixedRow";
+const tabKey = tabKeys["audio"];
+const chained = fixed;
+let moving = "moving";
+
+export function Keys(props: {
+  id: string;
+  amountKey: string;
+  tab: string;
+  open: boolean;
+  items: { name: string }[];
+}) {
+  moving += "!";
+
+  return (
+    <row key="row">
+      <text key={\`\${props.id}Label\`} />
+      <text key={props.id} />
+      <text key={props.amountKey} />
+      <text key={slotKey(2)} />
+      <text key={slotKey} />
+      <text key={chained} />
+      <text key={props.id as string} />
+      <text key={tabKeys[props.tab]} />
+      <text key={props.tab ?? "tab"} />
+      <text key={props.tab || "tab"} />
+      <text key={props.open ? "on" : "off"} />
+      <text key={props.tab} />
+      <text key={tabKey} />
+      <text key={moving} />
+      <text key={\`\${tabKey}Label\`} />
+      {props.items.map(item => (
+        <text key={item.name} />
+      ))}
+      {props.items.map(({ name }) => (
+        <text key={name} />
+      ))}
+    </row>
+  );
+}
+`;
+
+/** The three key shapes of the fixture game before it passed its keys in as props. */
+const OLD_KEYS: Record<string, string> = {
+  "features/settings/settings.tsx": `type Tab = "audio" | "language" | "profile";
+
+const tabKeys: Record<Tab, string> = { audio: "tabSound", language: "tabLanguage", profile: "tabProfile" };
+
+export function TabButton(props: { tab: Tab }) {
+  const key = tabKeys[props.tab];
+
+  return (
+    <button key={key}>
+      <text key={\`\${key}Label\`} />
+    </button>
+  );
+}
+`,
+  "features/ui/popup.tsx": `export function Amount(props: { id: string; unitKey?: string }) {
+  return <text key={props.unitKey ?? \`\${props.id}Unit\`} />;
+}
+`
+};
+
+/** The files of the fixture game whose JSX keys the rule reads. */
+const GAME_KEY_FILES = [
+  "features/settings/settings.tsx",
+  "features/ui/popup.tsx",
+  "features/orders/strip.tsx",
+  "features/ui/kit.tsx"
+];
+
+describe("moku-game/static-keys under oxlint", () => {
+  const rules = { "moku-game/static-keys": "error" };
+
+  it("reports the keys the index cannot follow and passes the ones it reads", () => {
+    const findings = runOxlint({ "features/keys.tsx": KEYS, "features/slots.ts": "" }, rules);
+
+    expect(findings.map(item => `${item.file}:${item.line}`)).toEqual(
+      [27, 28, 29, 30, 31, 32, 33, 34, 36].map(line => `features/keys.tsx:${line}`)
+    );
+    expect(findings.every(item => item.rule === "static-keys")).toBe(true);
+  });
+
+  it("reports the old keys of the fixture game and none of its keys now", () => {
+    const old = runOxlint(OLD_KEYS, rules);
+    const now = runOxlint({}, rules, SOURCE, folder => {
+      for (const file of GAME_KEY_FILES) {
+        mkdirSync(path.dirname(path.join(folder, file)), { recursive: true });
+        copyFileSync(path.join(MERGE_GAME, file), path.join(folder, file));
+      }
+    });
+
+    expect(old.map(item => `${item.file}:${item.line}`)).toEqual([
+      "features/settings/settings.tsx:9",
+      "features/settings/settings.tsx:10",
+      "features/ui/popup.tsx:2"
+    ]);
+    expect(now).toEqual([]);
+  });
+
+  it("checks .tsx outside tests by default, and takes files and ignores from the options", () => {
+    const bad = "export const Row = (props: { tab: string }) => <row key={props.tab} />;\n";
+    const files = { "web/row.tsx": bad, "web/row.skip.tsx": bad, "tests/row.tsx": bad };
+
+    expect(runOxlint(files, rules)).toEqual([
+      { rule: "static-keys", file: "web/row.skip.tsx", line: 1 },
+      { rule: "static-keys", file: "web/row.tsx", line: 1 }
+    ]);
+    expect(
+      runOxlint(files, {
+        "moku-game/static-keys": ["error", { files: ["**/*.tsx"], ignores: ["**/*.skip.tsx"] }]
+      })
+    ).toEqual([
+      { rule: "static-keys", file: "tests/row.tsx", line: 1 },
+      { rule: "static-keys", file: "web/row.tsx", line: 1 }
+    ]);
   });
 });
 
 // ---------------------------------------------------------------------------
 // In-process: the same rules with hand-built ESTree nodes.
 // ---------------------------------------------------------------------------
+
+/** The scope of a file that declares nothing: every name is out of reach. */
+const NO_NAMES: GameLintScope = { set: new Map() };
 
 /**
  * Run one rule on one file with hand-built nodes.
@@ -217,19 +366,22 @@ describe("@moku-labs/game/lint under oxlint", () => {
  * @param file - The file path relative to the fake root.
  * @param visits - Node type and node, in visit order.
  * @param options - The rule options.
+ * @param scope - The scope every node sits in.
  * @returns The messages reported.
  */
 function check(
   name: GameLintRuleName,
   file: string,
   visits: [string, GameLintNode][],
-  options: unknown[] = []
+  options: unknown[] = [],
+  scope: GameLintScope = NO_NAMES
 ): string[] {
   const messages: string[] = [];
   const context: GameLintContext = {
     cwd: "/game",
     filename: `/game/${file}`,
     options,
+    sourceCode: { getScope: () => scope },
     report: ({ message }) => messages.push(message)
   };
   const listeners = plugin.rules[name].create(context);
@@ -437,5 +589,126 @@ describe("@moku-labs/game/lint rules in process", () => {
       timer
     ]);
     expect(check("determinism", "web/a.ts", visits)).toEqual([]);
+  });
+
+  it("static-keys: literals, templates, key props, calls and out-of-reach names pass", () => {
+    const keyOf = (expression: GameLintNode): [string, GameLintNode] => [
+      "JSXAttribute",
+      {
+        type: "JSXAttribute",
+        name: { type: "JSXIdentifier", name: "key" },
+        value: { type: "JSXExpressionContainer", expression }
+      }
+    ];
+    const constOf = (init: GameLintNode | null, kind = "const"): GameLintDefinition => ({
+      type: "Variable",
+      node: { type: "VariableDeclarator", init },
+      parent: { type: "VariableDeclaration", kind }
+    });
+    const declared = new Map(
+      Object.entries({
+        fixed: constOf(literal("row")),
+        chain: constOf(id("fixed")),
+        lookup: constOf(member("tabKeys", "tab", true)),
+        moving: constOf(literal("row"), "let"),
+        far: constOf(id("chain")),
+        farther: constOf(id("far")),
+        props: { type: "Parameter", node: { type: "ArrowFunctionExpression" } },
+        slotKey: { type: "ImportBinding", node: { type: "ImportSpecifier" } },
+        someFunction: { type: "FunctionName", node: { type: "FunctionDeclaration" } }
+      }).map(([name, definition]) => [name, { defs: [definition] }])
+    );
+    // The names are declared one scope out, as a module scope is from a function body.
+    const scope: GameLintScope = { set: new Map(), upper: { set: declared } };
+    const template = (...expressions: GameLintNode[]): GameLintNode => ({
+      type: "TemplateLiteral",
+      expressions
+    });
+
+    const passes: [string, GameLintNode][] = [
+      ["JSXAttribute", { type: "JSXAttribute", name: { type: "JSXIdentifier", name: "key" } }],
+      [
+        "JSXAttribute",
+        { type: "JSXAttribute", name: { type: "JSXIdentifier", name: "key" }, value: literal("a") }
+      ],
+      [
+        "JSXAttribute",
+        { type: "JSXAttribute", name: { type: "JSXIdentifier", name: "style" }, value: id("x") }
+      ],
+      keyOf(literal("row")),
+      keyOf(literal(3)),
+      keyOf(template(member("props", "id"), id("fixed"))),
+      keyOf(member("props", "amountKey")),
+      keyOf({ type: "CallExpression", callee: id("slotKey") }),
+      keyOf(id("slotKey")),
+      keyOf(id("props")),
+      keyOf(id("unknown")),
+      keyOf(id("chain")),
+      keyOf(id("farther")),
+      keyOf({
+        type: "TSAsExpression",
+        expression: { type: "TSNonNullExpression", expression: member("props", "id") }
+      }),
+      keyOf({ type: "ChainExpression", expression: member("props", "unitKey") })
+    ];
+    // The rule reads only the type of these; the other fields make them real nodes.
+    const nullish = { type: "LogicalExpression", operator: "??", left: id("a"), right: id("b") };
+    const either = { type: "LogicalExpression", operator: "||", left: id("a"), right: id("b") };
+    const choice = { type: "ConditionalExpression", test: id("a") };
+    const fails: [string, GameLintNode][] = [
+      keyOf(member("tabKeys", "tab", true)),
+      keyOf(nullish),
+      keyOf(either),
+      keyOf(choice),
+      keyOf(member("props", "tab")),
+      keyOf({ type: "MemberExpression", object: member("props", "item"), property: id("id") }),
+      keyOf(literal(true)),
+      keyOf(id("lookup")),
+      keyOf(id("moving")),
+      keyOf(template(id("lookup"))),
+      keyOf(id("someFunction")),
+      keyOf({ type: "JSXEmptyExpression" })
+    ];
+    const message =
+      'Keys: a JSX key must be a literal, a template, or props.id / props.<name>Key. Pass the key in as a prop: <X id="…">.';
+
+    expect(check("static-keys", "features/a.tsx", passes, [], scope)).toEqual([]);
+    expect(check("static-keys", "features/a.tsx", fails, [], scope)).toEqual(
+      fails.map(() => message)
+    );
+    expect(check("static-keys", "features/a.ts", fails, [], scope)).toEqual([]);
+    expect(check("static-keys", "tests/a.tsx", fails, [], scope)).toEqual([]);
+  });
+});
+
+describe("static-keys and the project index", () => {
+  it("accept props.<name> exactly when the index turns it into a {<name>} hole", async () => {
+    const names = ["id", "amountKey", "unitKey", "Key", "idx", "keyName", "monkey", "tab"];
+    const catalog = createCatalog(await loadTypeScript());
+
+    for (const name of names) {
+      const text = `export const Row = (props: { ${name}: string }) => <row key={props.${name}} />;\n`;
+
+      putFile(catalog, `features/ui/${name}.tsx`, Buffer.from(text));
+    }
+
+    const index = buildIndex(catalog);
+    const holes = names.filter(name => index.symbols[`jsx:{${name}}`] !== undefined);
+    const accepted = names.filter(
+      name =>
+        check("static-keys", "features/a.tsx", [
+          [
+            "JSXAttribute",
+            {
+              type: "JSXAttribute",
+              name: { type: "JSXIdentifier", name: "key" },
+              value: { type: "JSXExpressionContainer", expression: member("props", name) }
+            }
+          ]
+        ]).length === 0
+    );
+
+    expect(accepted).toEqual(["id", "amountKey", "unitKey"]);
+    expect(holes).toEqual(accepted);
   });
 });

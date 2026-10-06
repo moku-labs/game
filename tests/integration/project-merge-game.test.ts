@@ -187,7 +187,7 @@ describe("the project index of merge-game", () => {
     // SCREAMING_CASE constants are values, not components.
     expect(project.index.symbols["component:ROUND_SIZE"]).toBeUndefined();
     expect(project.index.symbols["component:SEGMENTS"]).toBeUndefined();
-    expect(Object.keys(project.index.symbols)).toHaveLength(358);
+    expect(Object.keys(project.index.symbols)).toHaveLength(366);
   });
 
   it("keys every style a module-level function builds, by the function and its property", () => {
@@ -240,7 +240,7 @@ describe("the project index of merge-game", () => {
     expect(settings).toMatchObject({
       path: "features/settings/settings.tsx",
       binding: "Settings",
-      line: 289
+      line: 278
     });
     expect(project.index.symbols["component:RoundButton"]?.uses).toEqual([
       { path: "features/home/view.tsx", binding: "RoundButton" },
@@ -281,7 +281,45 @@ describe("the project index of merge-game", () => {
 
     expect(found.map(place => `${place.path}:${place.line}:${place.kind}`)).toEqual([
       "features/ui/kit.tsx:844:template",
-      "features/settings/settings.tsx:301:idProp"
+      "features/settings/settings.tsx:290:idProp"
+    ]);
+  });
+
+  it("finds the amount of the daily gift through the {amountKey} and {unitKey} holes", async () => {
+    expect(await linesOf("jsx:giftReward")).toEqual([
+      "features/gift/daily-gift.tsx:26",
+      "features/ui/popup.tsx:184"
+    ]);
+    expect(await linesOf("jsx:giftRewardUnit")).toEqual([
+      "features/gift/daily-gift.tsx:28",
+      "features/ui/popup.tsx:186"
+    ]);
+    // The {id} pattern of Amount takes only id= props: amountKey="giftReward" never fills it.
+    expect(await linesOf("jsx:giftAmount")).toEqual([
+      "features/gift/daily-gift.tsx:25",
+      "features/ui/popup.tsx:182"
+    ]);
+    expect(project.index.symbols["jsx:giftReward"]?.def).toEqual([
+      {
+        path: "features/gift/daily-gift.tsx",
+        key: "giftReward",
+        kind: "idProp",
+        component: "Amount",
+        prop: "amountKey"
+      }
+    ]);
+  });
+
+  it("finds a settings tab through the {id} pattern of TabButton and its literal id", async () => {
+    expect(await linesOf("jsx:tabSound")).toEqual([
+      "features/settings/settings.tsx:301",
+      "features/settings/settings.tsx:105"
+    ]);
+    // The `*Label` of the sound rows reads as any label: it answers last, as a wildcard.
+    expect(await linesOf("jsx:tabSoundLabel")).toEqual([
+      "features/settings/settings.tsx:111",
+      "features/settings/settings.tsx:301",
+      "features/settings/settings.tsx:183"
     ]);
   });
 
@@ -298,29 +336,15 @@ describe("the project index of merge-game", () => {
 
     expect(board).toMatchObject({
       path: "features/settings/settings.tsx",
-      line: 301,
+      line: 290,
       kind: "idProp",
       component: "Signboard"
     });
-    expect(board?.range[0]).toBe(300);
+    expect(board?.range[0]).toBe(289);
   });
 
-  it("pins the unresolved list: the three props-driven JSX keys", () => {
-    expect(project.index.unresolved).toEqual([
-      {
-        path: "features/settings/settings.tsx",
-        reason: 'JSX key "key" on <button> resolves to "*"'
-      },
-      {
-        path: "features/ui/popup.tsx",
-        reason: 'JSX key "props.amountKey" on <text> resolves to "*"'
-      },
-      {
-        path: "features/ui/popup.tsx",
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: the reason quotes the source text
-        reason: 'JSX key "props.unitKey ?? `${props.id}Unit`" on <text> resolves to "*"'
-      }
-    ]);
+  it("has nothing unresolved: every JSX key of the game reads as a pattern", () => {
+    expect(project.index.unresolved).toEqual([]);
   });
 
   it("finds on an unchanged file in under 20 ms", async ({ annotate }) => {
@@ -387,7 +411,7 @@ describe("the moku-game-index bin", () => {
     return bin;
   };
 
-  it("answers where a node lives, and --check passes with the unresolved items as info", () => {
+  it("answers where a node lives, and --check passes with nothing unresolved", () => {
     const bin = layout();
     const where = runBin(bin, ["--root", ROOT, "where", "node:board/merge"]);
     const check = runBin(bin, ["--root", ROOT, "--check"]);
@@ -395,6 +419,6 @@ describe("the moku-game-index bin", () => {
     expect(where.status).toBe(0);
     expect(where.stdout).toBe("nodes/merge.ts:17\n");
     expect(check.status).toBe(0);
-    expect(check.stdout).toContain("111 files, 358 keys: 0 broken, 0 in conflict, 3 unresolved.");
+    expect(check.stdout).toContain("111 files, 366 keys: 0 broken, 0 in conflict, 0 unresolved.");
   });
 });

@@ -28,7 +28,8 @@ export type ProjectOptions = {
 
 /**
  * How a JSX key is written: a string literal `key="hudRow"`, a template `` key={`${id}Picture`} ``,
- * any other expression `key={id}`, or a literal `id=` prop on a component (`id="settingsBoard"`).
+ * any other expression `key={id}`, or a literal key-carrying prop on a component: `id=`, or a prop
+ * whose name ends in `Key` (`id="settingsBoard"`, `amountKey="giftReward"`).
  *
  * @example
  * ```ts
@@ -57,12 +58,17 @@ export type Anchor = {
    * the property a style function builds a style under (`icon` of `roundStylesOf`).
    */
   key?: string;
-  /** JSX: the component an `id=` prop sits on, or the component an `{id}` pattern is written in. */
+  /**
+   * JSX: the component a key-carrying prop sits on, or the component a `{id}` or `{amountKey}`
+   * pattern is written in.
+   */
   component?: string;
   /** JSX only: how the key is written. */
   kind?: JsxKind;
   /** JSX templates and identifiers: the literal head of the pattern, `card` for `card*Picture`. */
   stem?: string;
+  /** JSX idProp: the prop the value sits on, `id` or `amountKey`. */
+  prop?: string;
 };
 
 /**
@@ -160,9 +166,9 @@ export type ProjectApi = {
    * Answers where a key is defined, with lines read from the file on disk now. A file whose bytes
    * changed since the index was built is parsed again for the answer; the index itself stays as
    * it is until the next watch batch. A JSX key the game reports at run time also finds the
-   * patterns it was built from: exact keys first, then `{id}` patterns filled with a literal
-   * `id=` prop (both the pattern and the prop come back), then `*` patterns. An unknown key
-   * answers `[]`.
+   * patterns it was built from: exact keys first, then `{id}` and `{amountKey}` patterns filled
+   * with a literal prop of the same name on their component (both the pattern and the prop come
+   * back), then `*` patterns. An unknown key answers `[]`.
    *
    * @param key - An engine id: `node:board/merge`, `flow:board`, `textStyle:ui.title`, `jsx:card2Picture`.
    * @returns One entry per place, in the order above; `broken` when the file does not parse now.
@@ -171,7 +177,7 @@ export type ProjectApi = {
    * // The editor jumps to the node the flow view clicked, and to the X of the settings board.
    * (await project.find("node:board/merge"))[0]?.line; // 17, in "nodes/merge.ts"
    * (await project.find("jsx:settingsBoardClose")).map(found => `${found.path}:${found.line}`);
-   * // ["features/ui/kit.tsx:844", "features/settings/settings.tsx:301"]
+   * // ["features/ui/kit.tsx:844", "features/settings/settings.tsx:290"]
    * ```
    */
   find(key: string): Promise<Found[]>;

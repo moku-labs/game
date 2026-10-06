@@ -33,7 +33,7 @@ export type Session = {
   folders: string[];
   /** The current index, frozen; an update replaces it with a new object. */
   index: ProjectIndex;
-  /** The JSX patterns and `id=` props of each index `find` read, computed once per index. */
+  /** The JSX patterns and key-carrying props of each index `find` read, built once per index. */
   readonly shapes: WeakMap<ProjectIndex, JsxShapes>;
   /** The tail of the update queue: the next update runs after it settles. */
   queue: Promise<unknown>;

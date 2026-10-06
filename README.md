@@ -199,7 +199,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 
 ### Lint for games
 
-`@moku-labs/game/lint` is an oxlint JS plugin, `moku-game`. It checks the engine rules in a game: lazy Pixi and Yoga, no native package in the logic, the editor only in dev files, no module-scope state, determinism and pure rules.
+`@moku-labs/game/lint` is an oxlint JS plugin, `moku-game`. It checks the engine rules in a game: lazy Pixi and Yoga, no native package in the logic, the editor only in dev files, no module-scope state, determinism, pure rules and JSX keys the project index can follow.
 
 ```json
 // .oxlintrc.json
@@ -211,7 +211,8 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
     "moku-game/dev-imports": "error",
     "moku-game/no-module-state": "error",
     "moku-game/determinism": "error",
-    "moku-game/rules-siblings": "error"
+    "moku-game/rules-siblings": "error",
+    "moku-game/static-keys": "error"
   }
 }
 ```
