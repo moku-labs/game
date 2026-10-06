@@ -123,7 +123,10 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
       state.components.set(definition.name, definition);
     },
 
+    // A swapped text style keeps its name, so every measured text is measured again.
     refreshAll: (): void => {
+      for (const element of state.elements.values()) modules.layout.markMeasured(element);
+
       for (const root of state.roots.values()) {
         root.dirty = true;
         root.needsSolve = true;

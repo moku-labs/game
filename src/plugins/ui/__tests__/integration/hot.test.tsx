@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineAnimation, mark, play, projection } from "../../../../index";
 import type { CompiledMessages } from "../../../i18n/types";
 import { defineScene } from "../../../scenes/define";
-import { Text } from "../../../text/components";
+import { defineTextStyles, Text } from "../../../text/components";
 import type { TextValue } from "../../../text/types";
+import { Box } from "../../components";
 import { defineComponent } from "../../jsx/component";
 import { coinsPop, type Player, startUiApp } from "../app";
 
@@ -168,6 +169,34 @@ describe("dev hot swap", () => {
 
     expect(textOf(app, "auto")?.resolved).toBe("3 gold");
     expect(loggedData(app, "ui:hot-swap")).toMatchObject({ strings: ["en"] });
+
+    await app.stop();
+  });
+
+  it("lays a label out again at the size of a swapped text style", async () => {
+    const app = await startDevApp();
+
+    app.world.projection.mount(["hud", "rich"], { kind: "plugin", name: "test" });
+    app.time.step(16);
+    app.time.step(16);
+
+    const styled = app.ui.find("styled") ?? 0;
+    const swapped = (size: number): void => {
+      hotSwap()(
+        { styles: defineTextStyles({ body: { font: "ui.font-body", size, fill: 0xff_ff_ff } }) },
+        "/game/features/ui/styles.ts"
+      );
+      app.time.step(16);
+      app.time.step(16);
+    };
+
+    // The row is narrower than the label, so the height shows the new size.
+    swapped(100);
+    expect(app.world.ecs.get(styled, Box)?.h).toBe(120);
+
+    swapped(50);
+    expect(app.world.ecs.get(styled, Box)?.h).toBe(60);
+    expect(loggedData(app, "ui:hot-swap")).toMatchObject({ textStyles: ["body"] });
 
     await app.stop();
   });

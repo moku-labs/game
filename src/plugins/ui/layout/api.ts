@@ -83,6 +83,8 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     remeasure: (element: Element): boolean => remeasureShown(state, element, source),
 
+    markMeasured: (element: Element): void => markMeasured(state, element),
+
     place: (parent: Element, children: readonly Element[]): void =>
       placeChildren(state, parent, children),
 

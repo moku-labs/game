@@ -550,7 +550,10 @@ export type JsxModule = {
    * @param definition - The new definition, registered under its `name`.
    */
   replace(definition: AnyComponentDefinition): void;
-  /** Marks every root for a reconcile and a solve, so each view runs again on the next frame. */
+  /**
+   * Marks every root for a reconcile and a solve and every measured text for a new measure, so
+   * each view runs again on the next frame at the size of the current text styles.
+   */
   refreshAll(): void;
   mountRoot(entity: Entity, name: string, layer: string, popup?: PopupLink): void;
   unmountRoot(entity: Entity): void;
