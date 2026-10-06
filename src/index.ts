@@ -280,8 +280,8 @@ export {
 // assets and scenes: declarations
 export { defineBundles, load } from "./plugins/assets/bundles";
 export { defineScene } from "./plugins/scenes/define";
-// anim: choreography as data, the motion sugar, the Animation component
-export { Animation, Frames } from "./plugins/anim/components";
+// anim: choreography as data, the motion sugar, its components, the AnimPlayer resource of systems
+export { Animation, AnimPlayer, Frames } from "./plugins/anim/components";
 export { defineMotion } from "./plugins/anim/motion";
 export {
   defineAnimation,

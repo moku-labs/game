@@ -475,3 +475,169 @@ describe("runCli refusals of the string flags", () => {
     ]);
   });
 });
+
+/** A game with one feature and a `shared/` layer, one image each. */
+async function layered(): Promise<string> {
+  return await tree({
+    "features/board/assets/a.png": pngBytes(16, 16),
+    "shared/assets/b.png": pngBytes(16, 16)
+  });
+}
+
+describe("runCli --layer", () => {
+  it("reads --layer folder=name and hands the layers to the scan and the compile", async () => {
+    const root = await layered();
+    const compile = vi.fn(noStrings.compile);
+
+    expect(
+      await runCli(["--root", root, "--layer", "shared=ui"], stringsTools({ compile }), fakeUi())
+    ).toBe(0);
+
+    const manifest = JSON.parse(await readText(path.join(root, "manifest.json"))) as {
+      bundles: Record<string, { feature: string; files: { key: string; path: string }[] }>;
+    };
+
+    expect(manifest.bundles.ui).toMatchObject({
+      feature: "ui",
+      files: [{ key: "ui.b", path: "shared/assets/b.png" }]
+    });
+    expect(compile).toHaveBeenCalledWith(path.resolve(root), path.join(root, "generated"), {
+      check: false,
+      pseudo: false,
+      layers: { shared: "ui" }
+    });
+  });
+
+  it("takes --layer folder as folder=folder", async () => {
+    const root = await layered();
+
+    expect(await runCli(["--root", root, "--layer", "shared"], noStrings, fakeUi())).toBe(0);
+    expect(await readText(path.join(root, "generated", "assets.ts"))).toContain('| "shared.b"');
+  });
+
+  it("collects several --layer flags in order", async () => {
+    const root = await layered();
+    const compile = vi.fn(noStrings.compile);
+    const argv = ["--root", root, "--layer", "shared=ui", "--layer", "common"];
+
+    expect(await runCli(argv, stringsTools({ compile }), fakeUi())).toBe(0);
+    expect(compile.mock.calls[0]?.[2].layers).toEqual({ shared: "ui", common: "common" });
+  });
+
+  it("warns about a layer that has no folder and still writes the rest", async () => {
+    const root = await tree({ "features/board/assets/a.png": pngBytes(16, 16) });
+    const ui = fakeUi();
+
+    expect(await runCli(["--root", root, "--layer", "shared=ui"], noStrings, ui)).toBe(0);
+    expect(ui.lines).toContain(
+      'warn the layer "shared" has no folder "shared/" under the root; nothing was read for it.'
+    );
+    expect(await readText(path.join(root, "generated", "assets.ts"))).toContain('"board.a"');
+  });
+
+  it("passes the pseudo flag and the layers together", async () => {
+    const root = await layered();
+    const compile = vi.fn(pseudoAware);
+    const argv = ["--root", root, "--pseudo", "--layer", "shared=ui"];
+
+    expect(await runCli(argv, stringsTools({ compile }), fakeUi())).toBe(0);
+    expect(compile).toHaveBeenCalledWith(path.resolve(root), path.join(root, "generated"), {
+      check: false,
+      pseudo: true,
+      layers: { shared: "ui" }
+    });
+  });
+
+  it("hands the layers to --export and to --import", async () => {
+    const root = await tree({});
+    const dir = path.join(root, "translations");
+    const exportStrings = vi.fn(exportTwo);
+    const importStrings = vi.fn(importRu);
+    const tools = stringsTools({ exportStrings, importStrings });
+
+    expect(
+      await runCli(["--root", root, "--export", dir, "--layer", "shared=ui"], tools, fakeUi())
+    ).toBe(0);
+    expect(
+      await runCli(["--root", root, "--import", dir, "--layer", "shared=ui"], tools, fakeUi())
+    ).toBe(0);
+    expect(exportStrings).toHaveBeenCalledWith(path.resolve(root), dir, {
+      source: "en",
+      layers: { shared: "ui" }
+    });
+    expect(importStrings).toHaveBeenCalledWith(path.resolve(root), dir, {
+      source: "en",
+      pseudo: false,
+      out: path.join(root, "generated"),
+      layers: { shared: "ui" }
+    });
+  });
+
+  it("fails --check after an asset of a layer was added", async () => {
+    const root = await layered();
+    const argv = ["--root", root, "--layer", "shared=ui"];
+
+    expect(await runCli(argv, noStrings, fakeUi())).toBe(0);
+    await writeFile(path.join(root, "shared", "assets", "c.png"), pngBytes(16, 16));
+
+    const ui = fakeUi();
+
+    expect(await runCli([...argv, "--check"], noStrings, ui)).toBe(1);
+    expect(ui.lines.join("\n")).toContain("are out of date");
+  });
+
+  it("passes --check with the layer on an up-to-date tree", async () => {
+    const root = await layered();
+    const argv = ["--root", root, "--layer", "shared=ui"];
+
+    await runCli(argv, noStrings, fakeUi());
+
+    expect(await runCli([...argv, "--check"], noStrings, fakeUi())).toBe(0);
+  });
+
+  it("refuses --layer without a value", async () => {
+    const ui = fakeUi();
+
+    expect(await runCli(["--layer"], noStrings, ui)).toBe(1);
+    expect(await runCli(["--layer", "--check"], noStrings, ui)).toBe(1);
+    expect(ui.lines).toEqual([
+      'error [game] assets: "--layer" needs "<folder>[=<name>]".',
+      'error [game] assets: "--layer" needs "<folder>[=<name>]".'
+    ]);
+  });
+
+  it.each([
+    "shared=",
+    "=ui",
+    "a=b=c"
+  ])("refuses the --layer value %s with an empty side or two names", async value => {
+    const ui = fakeUi();
+
+    expect(await runCli(["--layer", value], noStrings, ui)).toBe(1);
+    expect(ui.lines).toEqual([
+      `error [game] assets: "--layer ${value}" needs a folder and a name: "<folder>[=<name>]".`
+    ]);
+  });
+
+  it("refuses the same folder twice", async () => {
+    const ui = fakeUi();
+
+    expect(await runCli(["--layer", "shared=ui", "--layer", "shared=x"], noStrings, ui)).toBe(1);
+    expect(ui.lines).toEqual(['error [game] assets: "--layer" names the folder "shared" twice.']);
+  });
+
+  it("reports a layer problem of the scan as a failed run and compiles nothing", async () => {
+    const root = await layered();
+    const compile = vi.fn(noStrings.compile);
+    const ui = fakeUi();
+
+    expect(
+      await runCli(["--root", root, "--layer", "features=x"], stringsTools({ compile }), ui)
+    ).toBe(1);
+    expect(ui.lines.join("\n")).toContain(
+      "error [game] assets: the scan found 1 problem.\n" +
+        '  the layer "features" is the features folder "features"; the features are scanned already.'
+    );
+    expect(compile).not.toHaveBeenCalled();
+  });
+});

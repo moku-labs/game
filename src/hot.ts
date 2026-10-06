@@ -4,9 +4,11 @@
  * update and hands the new exports to the running game through `globalThis.__moku_hot`. The `ui`
  * plugin installs that handler in dev builds only. What swaps: styles, components, projections,
  * animations, text styles, emitters and generated strings. A view module is a `.tsx` file, a
- * `styles.ts`, a `view.ts`, an `animations.ts`, an `effects.ts` or a generated
- * `generated/strings.<locale>.ts`; a logic module never gets the footer, so its save reaches the
- * root and the page reloads and restores its state. The plugin lives in `[serve.static]` of
+ * `styles.ts`, a `view.ts`, an `animations.ts`, an `effects.ts`, any `.ts` directly in a
+ * `styles/`, `motion/`, `effects/` or `views/` folder, any `.ts` directly in `world/projections/`
+ * or `world/layout/`, or a generated `generated/strings.<locale>.ts`; a logic module never gets
+ * the footer (`world/components/` and `world/systems/` included: they are registered at start), so
+ * its save reaches the root and the page reloads and restores its state. The plugin lives in `[serve.static]` of
  * `bunfig.toml`, the dev server only: `Bun.build` of a production build never loads it.
  */
 import { readFile } from "node:fs/promises";
@@ -27,8 +29,10 @@ import path from "node:path";
 export type HotOptions = {
   /**
    * The files that get the footer. Default: `.tsx` files, `styles.ts`, `view.ts`,
-   * `animations.ts`, `effects.ts` and `generated/strings.<locale>.ts`. Bun runs it as the load
-   * filter on the absolute path, so it should not anchor at the start.
+   * `animations.ts`, `effects.ts`, any `.ts` directly in a `styles/`, `motion/`, `effects/` or
+   * `views/` folder, and in `world/projections/` or `world/layout/`, and
+   * `generated/strings.<locale>.ts`. Bun runs it as the load filter on the absolute path, so it
+   * should not anchor at the start.
    */
   include?: RegExp;
   /**
@@ -74,11 +78,26 @@ export type HotPlugin = {
 };
 
 /**
- * The default view modules: `.tsx` files, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`
+ * The view files by name: `.tsx` files, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`
  * and the generated strings of a locale.
  */
-const DEFAULT_INCLUDE =
-  /(\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.[\w-]+\.ts)$/;
+const VIEW_FILES =
+  /\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.[\w-]+\.ts/;
+
+/**
+ * The view files by folder, the kind folders of the layered layout: a `.ts` directly in
+ * `styles/`, `motion/`, `effects/` or `views/`, or in `world/projections/` or `world/layout/`.
+ * `world/components/` and `world/systems/` stay out: they are registered at start, so a save
+ * reloads.
+ */
+const KIND_FOLDERS =
+  /\/(?:styles|motion|effects|views)\/[^/]+\.ts|\/world\/(?:projections|layout)\/[^/]+\.ts/;
+
+/**
+ * The default view modules: the view files by name or by kind folder. Two literals joined, so
+ * each stays readable.
+ */
+const DEFAULT_INCLUDE = new RegExp(`(${VIEW_FILES.source}|${KIND_FOLDERS.source})$`);
 
 /** The generated strings of one locale, the one file under `generated/` that swaps. */
 const STRINGS = /\/generated\/strings\.[\w-]+\.ts$/;

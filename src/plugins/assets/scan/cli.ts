@@ -50,19 +50,20 @@ export type StringsReport = {
 
 /**
  * Compiles the feature strings of a root into a folder, or checks them in a check run; with
- * `pseudo` it writes the pseudo-locale `en-XA` too. `compileStrings` of i18n fits it, and a test
- * passes a stub instead.
+ * `pseudo` it writes the pseudo-locale `en-XA` too, and with `layers` it walks the `strings/` of
+ * every layer as well. `compileStrings` of i18n fits it, and a test passes a stub instead.
  *
  * @example
  * ```ts
  * // A test of a wrapper script: a game with one English key.
  * const compile: StringsCompiler = async () => ({ changed: false, locales: ["en"], keys: ["hud.title"], notes: [] });
+ * // runCli passes { check: false, pseudo: true, layers: { shared: "ui" } } for "--pseudo --layer shared=ui"
  * ```
  */
 export type StringsCompiler = (
   root: string,
   out: string,
-  options: { check: boolean; pseudo: boolean }
+  options: { check: boolean; pseudo: boolean; layers?: Readonly<Record<string, string>> }
 ) => Promise<StringsReport>;
 
 /**
@@ -78,7 +79,7 @@ export type StringsCompiler = (
 export type StringsExporter = (
   root: string,
   dir: string,
-  options: { source: string }
+  options: { source: string; layers?: Readonly<Record<string, string>> }
 ) => Promise<{ locales: readonly string[]; missing: Readonly<Record<string, number>> }>;
 
 /**
@@ -95,7 +96,12 @@ export type StringsExporter = (
 export type StringsImporter = (
   root: string,
   dir: string,
-  options: { source: string; pseudo: boolean; out: string }
+  options: {
+    source: string;
+    pseudo: boolean;
+    out: string;
+    layers?: Readonly<Record<string, string>>;
+  }
 ) => Promise<{ locales: readonly string[]; keys: number; files: readonly string[] }>;
 
 /**
@@ -119,6 +125,9 @@ export type StringsTools = {
 /** What one import reports back, as its console line reads it. */
 type ImportTotals = Awaited<ReturnType<StringsImporter>>;
 
+/** A layer map: folder under the root to the name its keys and bundles take. */
+type Layers = Readonly<Record<string, string>>;
+
 /** What the flags asked for. */
 type Options = {
   root: string;
@@ -137,6 +146,8 @@ type Options = {
   exportDir: string | undefined;
   /** The folder of `--import`, resolved, or `undefined`. */
   importDir: string | undefined;
+  /** The layers of every `--layer`, folder to name. Empty by default. */
+  layers: Layers;
 };
 
 /** The flags that take a value: a path, or the locale of `--source`. */
@@ -153,7 +164,15 @@ type ValueFlag =
 type Switch = "--check" | "--no-cache" | "--pseudo";
 
 /** The flags as they were given, before anything is resolved. */
-type Flags = { values: Partial<Record<ValueFlag, string>>; switches: ReadonlySet<Switch> };
+type Flags = {
+  values: Partial<Record<ValueFlag, string>>;
+  switches: ReadonlySet<Switch>;
+  /** The values of every `--layer`, in order: the one flag that repeats. */
+  layers: readonly string[];
+};
+
+/** The flag that maps a folder under the root to the name its keys take. It repeats. */
+const LAYER_FLAG = "--layer";
 
 /**
  * Wraps a command line problem in the message shape of the framework.
@@ -207,12 +226,13 @@ function isSwitch(flag: string | undefined): flag is Switch {
  * Reads the flags as they were given.
  *
  * @param argv - The arguments after the script name.
- * @returns The value of each flag that takes one, and the switches.
+ * @returns The value of each flag that takes one, the switches and the `--layer` values.
  * @throws {Error} When an option is unknown or misses its value.
  */
 function readFlags(argv: readonly string[]): Flags {
   const values: Partial<Record<ValueFlag, string>> = {};
   const switches = new Set<Switch>();
+  const layers: string[] = [];
   let index = 0;
 
   while (index < argv.length) {
@@ -221,6 +241,18 @@ function readFlags(argv: readonly string[]): Flags {
     if (isSwitch(flag)) {
       switches.add(flag);
       index += 1;
+      continue;
+    }
+
+    if (flag === LAYER_FLAG) {
+      const value = argv[index + 1];
+
+      if (value === undefined || value.startsWith("--")) {
+        throw problem('"--layer" needs "<folder>[=<name>]".');
+      }
+
+      layers.push(value);
+      index += 2;
       continue;
     }
 
@@ -236,7 +268,56 @@ function readFlags(argv: readonly string[]): Flags {
     index += 2;
   }
 
-  return { values, switches };
+  return { values, switches, layers };
+}
+
+/**
+ * Reads the `--layer` values into the layer map. `shared=ui` maps the folder to the name,
+ * `shared` alone maps it to itself. Only the syntax is checked here; the scan refuses a folder or
+ * a name that cannot be a layer.
+ *
+ * @param raw - The values as given, in order.
+ * @returns Folder to name.
+ * @throws {Error} When a value has an empty side or a folder repeats.
+ * @example
+ * ```ts
+ * parseLayers(["shared=ui", "common"]); // { shared: "ui", common: "common" }
+ * ```
+ */
+function parseLayers(raw: readonly string[]): Record<string, string> {
+  const layers = new Map<string, string>();
+
+  for (const value of raw) {
+    const cut = value.indexOf("=");
+    const folder = cut === -1 ? value : value.slice(0, cut);
+    const name = cut === -1 ? value : value.slice(cut + 1);
+
+    if (folder === "" || name === "" || name.includes("=")) {
+      throw problem(`"--layer ${value}" needs a folder and a name: "<folder>[=<name>]".`);
+    }
+
+    if (layers.has(folder)) throw problem(`"--layer" names the folder "${folder}" twice.`);
+
+    layers.set(folder, name);
+  }
+
+  return Object.fromEntries(layers);
+}
+
+/**
+ * The layer member of the options a tool is handed: none for a run without `--layer`, so such a
+ * run calls every tool exactly as before layers existed.
+ *
+ * @param layers - The layers of the run.
+ * @returns `{ layers }`, or an empty object when there is no layer.
+ * @example
+ * ```ts
+ * withLayers({}); // {}
+ * withLayers({ shared: "ui" }); // { layers: { shared: "ui" } }
+ * ```
+ */
+function withLayers(layers: Layers): { layers?: Layers } {
+  return Object.keys(layers).length === 0 ? {} : { layers };
 }
 
 /**
@@ -291,8 +372,9 @@ function resolveGiven(given: string | undefined): string | undefined {
  * `manifest.json` inside the root, or inside the pack folder with `--pack`; `--source` to `"en"`.
  *
  * @param argv - The arguments after the script name.
- * @returns The resolved paths, the folders of the three modes and the switches.
- * @throws {Error} When an option is unknown, misses its value or does not go with another.
+ * @returns The resolved paths, the folders of the three modes, the switches and the layers.
+ * @throws {Error} When an option is unknown, misses its value, does not go with another, or a
+ *   `--layer` value is not `<folder>[=<name>]`.
  */
 function parseArgv(argv: readonly string[]): Options {
   const flags = readFlags(argv);
@@ -313,7 +395,8 @@ function parseArgv(argv: readonly string[]): Options {
     pseudo: switches.has("--pseudo"),
     source: values["--source"] ?? DEFAULT_SOURCE,
     exportDir: resolveGiven(values["--export"]),
-    importDir: resolveGiven(values["--import"])
+    importDir: resolveGiven(values["--import"]),
+    layers: parseLayers(flags.layers)
   };
 }
 
@@ -458,9 +541,9 @@ function packSummary(file: string, result: PackResult, cache: boolean): string {
 }
 
 /**
- * The dev run of `bun run assets:keys`: walk the features, write the manifest and the key module, then compile the
- * feature strings next to the key module (the pseudo-locale too with `--pseudo`). With `--check`
- * nothing is written and a difference fails the run.
+ * The dev run of `bun run assets:keys`: walk the features and the layers, write the manifest and
+ * the key module, then compile the strings next to the key module (the pseudo-locale too with
+ * `--pseudo`). With `--check` nothing is written and a difference fails the run.
  *
  * @param options - The parsed flags.
  * @param compile - The strings compiler.
@@ -473,13 +556,15 @@ async function runKeys(options: Options, compile: StringsCompiler, ui: ScanUi): 
     root: options.root,
     manifest: options.manifest,
     keys: options.keys,
-    write: !options.check
+    write: !options.check,
+    ...withLayers(options.layers)
   });
 
   // The strings live next to the key module: one generated folder per game.
   const strings = await compile(options.root, path.dirname(options.keys), {
     check: options.check,
-    pseudo: options.pseudo
+    pseudo: options.pseudo,
+    ...withLayers(options.layers)
   });
 
   for (const note of [...notes, ...strings.notes]) ui.warn(note);
@@ -523,14 +608,16 @@ async function runPack(
     root: options.root,
     manifest: options.manifest,
     keys: options.keys,
-    write: false
+    write: false,
+    ...withLayers(options.layers)
   });
 
   await applyOutputs([{ file: options.keys, text: scan.keysSource }], true);
 
   const strings = await compile(options.root, path.dirname(options.keys), {
     check: false,
-    pseudo: false
+    pseudo: false,
+    ...withLayers(options.layers)
   });
 
   for (const note of [...scan.notes, ...strings.notes]) ui.warn(note);
@@ -569,7 +656,10 @@ async function runExport(
   exportStrings: StringsExporter,
   ui: ScanUi
 ): Promise<number> {
-  const report = await exportStrings(options.root, dir, { source: options.source });
+  const report = await exportStrings(options.root, dir, {
+    source: options.source,
+    ...withLayers(options.layers)
+  });
 
   for (const locale of report.locales) {
     ui.info(exportLine(dir, locale, report.missing[locale] ?? 0));
@@ -598,7 +688,8 @@ async function runImport(
   const report = await importStrings(options.root, dir, {
     source: options.source,
     pseudo: options.pseudo,
-    out: path.dirname(options.keys)
+    out: path.dirname(options.keys),
+    ...withLayers(options.layers)
   });
 
   ui.info(importLine(dir, report));
@@ -611,8 +702,10 @@ async function runImport(
  * compile the feature strings next to the key module, or check that all of it is current. With
  * `--pack <dir>` it packs the art for production on the same scan (`--no-cache` for a cold run);
  * `--pseudo` adds the pseudo-locale to a dev run. `--export <dir>` and `--import <dir>` exchange
- * the strings with translators and run alone, from the locale of `--source`. Nothing here calls
- * `process.exit`; the caller does.
+ * the strings with translators and run alone, from the locale of `--source`.
+ * `--layer <folder>[=<name>]` (repeatable) scans a folder under the root like one more feature,
+ * its keys and bundles under `<name>` (`<folder>` by default); it goes with every mode. Nothing
+ * here calls `process.exit`; the caller does.
  *
  * @param argv - The arguments after the script name.
  * @param strings - The string tools of i18n: compile, export and import.
@@ -626,6 +719,8 @@ async function runImport(
  * // 0, and dist/assets holds the pages, the loose files and the packed manifest.json
  * await runCli(["--root", "src", "--export", "translations"], strings);
  * // 0, and translations/ holds one <locale>.json per locale for the translators
+ * await runCli(["--root", "src", "--layer", "shared=ui"], strings);
+ * // 0, shared/assets/* keyed ui.*, shared/strings/* compiled
  * ```
  */
 export async function runCli(

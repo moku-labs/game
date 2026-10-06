@@ -74,16 +74,34 @@ async function gameTree(): Promise<string> {
 }
 
 /** Scans a tree without writing anything, for the v1 manifest the packer reads. */
-async function scanOf(root: string): Promise<Manifest> {
+async function scanOf(root: string, layers?: Readonly<Record<string, string>>): Promise<Manifest> {
   const scratch = await temp();
   const { manifest } = await scanAssets({
     root,
     manifest: path.join(scratch, "manifest.json"),
     keys: path.join(scratch, "assets.ts"),
-    write: false
+    write: false,
+    ...(layers === undefined ? {} : { layers })
   });
 
   return manifest;
+}
+
+/**
+ * A game tree on the layered layout: `board` is a feature with one texture, `shared/` is a layer
+ * with two small textures (one page) and a loose WebP by size.
+ */
+async function layeredTree(): Promise<string> {
+  const root = await makeTree({
+    "features/board/assets/cell.png": await png(40, 40, GREEN),
+    "shared/assets/icon-a.png": await png(20, 20, BLUE),
+    "shared/assets/icon-b.png": await png(24, 10, YELLOW),
+    "shared/assets/bg.webp": await webp(600, 20, GREY)
+  });
+
+  folders.push(root);
+
+  return root;
 }
 
 /** Packs a tree into a folder, with a cache folder or none. */
@@ -461,6 +479,30 @@ describe("packAssets", () => {
     await expect(stat(path.join(root, "features/ui/assets/icon-a.png"))).resolves.toBeDefined();
   });
 
+  it("packs the files of a layer under the bundle of its mapped name", async () => {
+    const root = await layeredTree();
+    const out = await temp();
+    const source = await scanOf(root, { shared: "ui" });
+    const { manifest } = await packAssets({
+      root,
+      manifest: source,
+      out,
+      manifestFile: path.join(out, "manifest.json"),
+      cache: false
+    });
+    const ui = bundleOf(manifest, "ui");
+    const bg = fileOf(ui, "ui.bg");
+
+    expect(keysOf(manifest)).toEqual(keysOf(source));
+    expect(ui.feature).toBe("ui");
+    expect(ui.pages?.map(page => page.id)).toEqual(["ui/main-0"]);
+    expect(fileOf(ui, "ui.icon-a").atlas?.page).toBe("ui/main-0");
+    expect(bg.path).toMatch(/^ui\/ui\.bg-[0-9a-f]{10}\.webp$/);
+    expect(await readFile(path.join(out, bg.path ?? ""))).toEqual(
+      await readFile(path.join(root, "shared/assets/bg.webp"))
+    );
+  });
+
   it("refuses a manifest that is already packed", async () => {
     const root = await gameTree();
     const out = await temp();
@@ -551,6 +593,22 @@ describe("runCli --pack", () => {
       stat(path.join(work, "node_modules", ".cache", "moku-game-pack"))
     ).resolves.toBeDefined();
     expect(ui.lines.at(-1)).toMatch(/cache: 2 of 2 pages\.$/);
+  });
+
+  it("scans the layers of --layer before it packs", async () => {
+    const root = await layeredTree();
+    const out = path.join(await temp(), "assets");
+    const argv = ["--root", root, "--pack", out, "--no-cache", "--layer", "shared=ui"];
+
+    expect(await runCli(argv, noStrings, recorder())).toBe(0);
+
+    const packed = JSON.parse(await readFile(path.join(out, "manifest.json"), "utf8")) as Manifest;
+
+    expect(Object.keys(packed.bundles)).toEqual(["board", "ui"]);
+    expect(bundleOf(packed, "ui").feature).toBe("ui");
+    expect(await readFile(path.join(root, "generated", "assets.ts"), "utf8")).toContain(
+      '"ui.icon-a"'
+    );
   });
 
   it("reports a pack problem as one error line and exit 1", async () => {

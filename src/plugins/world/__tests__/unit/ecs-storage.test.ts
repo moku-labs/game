@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { component, tag } from "../../ecs/define";
+import { createModules } from "../../api";
+import { component, resource, tag } from "../../ecs/define";
 import type { Owner } from "../../ecs/types";
+import { withDeps } from "../../lifecycle";
 import { createMockWorld } from "./mock-world";
 
 const Transform = component("Transform", { x: 0, y: 0 });
 const Sprite = component("Sprite", { texture: "" });
 const Held = tag("Held");
 const test: Owner = { kind: "plugin", name: "test" };
+
+/** A function a resource value holds: a structured clone would refuse it. */
+const lift = (): string => "lift";
 
 describe("ecs storage", () => {
   it("reads, merges and replaces component values", () => {
@@ -148,5 +153,57 @@ describe("ecs storage", () => {
 
     expect(world.api.ecs.typeOf("Held")?.componentName).toBe("Held");
     expect(world.api.ecs.typeOf("Nothing")).toBeUndefined();
+  });
+
+  it("calls a factory default once per world, on the first read, and keeps its value uncloned", () => {
+    const make = vi.fn(() => ({ shown: new Map<number, string>(), play: lift }));
+    const Looks = resource("boardLooks", make);
+    const world = createMockWorld();
+
+    expect(make).not.toHaveBeenCalled();
+
+    const looks = world.api.ecs.resource(Looks);
+
+    looks.shown.set(1, "hover");
+
+    expect(world.api.ecs.resource(Looks)).toBe(looks);
+    expect(world.api.ecs.resource(Looks).play).toBe(lift);
+    expect(make).toHaveBeenCalledTimes(1);
+    expect(make.mock.results[0]?.value).toBe(looks);
+  });
+
+  it("gives two worlds two values of one factory", () => {
+    const Looks = resource("boardLooks", () => ({ shown: new Map<number, string>() }));
+    const first = createMockWorld();
+    const second = createMockWorld();
+
+    first.api.ecs.resource(Looks).shown.set(1, "hover");
+
+    expect(second.api.ecs.resource(Looks)).not.toBe(first.api.ecs.resource(Looks));
+    expect(second.api.ecs.resource(Looks).shown.size).toBe(0);
+  });
+
+  it("forgets a factory value on clear, so the next read calls the factory again", () => {
+    const make = vi.fn(() => ({ shown: new Map<number, string>() }));
+    const Looks = resource("boardLooks", make);
+    const { ecs } = createModules(withDeps(createMockWorld().ctx));
+    const before = ecs.resource(Looks);
+
+    ecs.clear();
+
+    expect(ecs.resource(Looks)).not.toBe(before);
+    expect(make).toHaveBeenCalledTimes(2);
+  });
+
+  it("still clones a plain default deeply, so no world writes into another", () => {
+    const Seen = resource("Seen", { ids: [0] });
+    const first = createMockWorld();
+    const second = createMockWorld();
+
+    first.api.ecs.resource(Seen).ids.push(7);
+
+    expect(first.api.ecs.resource(Seen).ids).toEqual([0, 7]);
+    expect(second.api.ecs.resource(Seen).ids).toEqual([0]);
+    expect(Seen.defaults).toEqual({ ids: [0] });
   });
 });

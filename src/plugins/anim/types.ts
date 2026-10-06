@@ -460,6 +460,48 @@ export type AnimApi = {
 };
 
 /**
+ * What a system may do with anim, read with `res(AnimPlayer)`: play. A system that needs more
+ * than play is a plugin. Play on a change, never on every frame: keep the handle in a resource, or
+ * take away the tag that asked for the play.
+ *
+ * @example
+ * ```ts
+ * // A fresh item pops once: the system plays, then takes the Fresh tag away.
+ * const popIn = system({ name: "popIn", phase: "input", query: [Fresh], run: (items, { world, res }) => {
+ *   for (const [entity] of items) {
+ *     res(AnimPlayer).play(pop, { thing: entity });
+ *     world.untag(entity, Fresh);
+ *   }
+ * } });
+ * ```
+ */
+export type AnimPlayerValue = {
+  /**
+   * Plays an animation from a system, the way `app.anim.play` does. The registered animation of
+   * `animation.id` wins when a feature brought one, so a hot swap reaches the system. Played from
+   * phase `input`, the tree moves in `animate` of the same frame; from a later phase it moves
+   * from the next frame.
+   *
+   * @param animation - What `defineAnimation` returned.
+   * @param slots - One target, or a list of targets, per declared slot.
+   * @returns The handle: `cancel()`, `finish()`, `active()`, `done`, `marks()`.
+   * @throws {Error} Before `anim` started: `[game] AnimPlayer is not ready: anim has not started.`
+   * @example
+   * ```ts
+   * const lift = defineAnimation("look.hover", { slots: { thing: type<Target>() },
+   *   build: ({ thing }) => tween(thing, Transform, { scale: 1.1 }, { ms: 100 }) });
+   * // Inside a system of phase "input": entity 1048576 is the item under the pointer.
+   * const handle = res(AnimPlayer).play(lift, { thing: 1_048_576 });
+   * handle.active(); // true until the lift lands 100 ms later, then false
+   * ```
+   */
+  play<Tags extends SlotTags>(
+    animation: AnimationDefinition<Tags>,
+    slots: SlotValues<Tags>
+  ): PlayHandle;
+};
+
+/**
  * Resolved dependency APIs. `renderer` is not among them: `anim` writes its `Sprite` and reads
  * its `Transform` through the component objects, which are plain data, composes the root pose
  * of `at` with the pure `rootPoseOf` of `renderer/sync/pose.ts`, and turns the target of a

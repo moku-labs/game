@@ -56,6 +56,7 @@ await fx(load("board.chains")); // { loaded: ["board.chains"], mb: 1.25 }
 | Default | A feature without `assets.ts` has one bundle, named as the feature, tier `"feature"`, all files of `assets/`. |
 | Names | A bundle name is the feature name, or starts with `feature.`. Anything else is a scanner error. |
 | `files` | A bundle with `files` takes the matching files out of the feature's default bundle. A file matched by two bundles is a scanner error naming both bundles. |
+| Layers | A folder under the root scanned like one more feature, under a mapped name: `--layer shared=ui` (`layers: { shared: "ui" }` for `scanAssets`) reads `shared/assets.ts` and `shared/assets/` exactly as `features/ui/` would be read, so every key and bundle stays `ui.*`. The layer's `assets.ts` names its bundles after the mapped name. |
 
 ## Configuration
 
@@ -289,6 +290,10 @@ work.
 
 ## What the scanner reads
 
+The scanner reads the `assets/` of every feature, and the `assets/` of every layer of `--layer`
+after the features. A layer is keyed by its mapped name: `shared/assets/button/primary.png` with
+`--layer shared=ui` is `ui.button.primary`, in the bundle `ui` whose `feature` is `"ui"`.
+
 | File | Becomes |
 |---|---|
 | `.png`, `.webp` | one texture per file |
@@ -324,6 +329,9 @@ atlas pages with `--pack <dir>`:
 // game package.json
 "assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts",
 "assets:pack": "moku-game-assets --root src --keys src/generated/assets.ts --pack dist/assets"
+// a game on the layered layout passes its shared/ layer to both
+"assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts --layer shared=ui",
+"assets:pack": "moku-game-assets --root src --keys src/generated/assets.ts --pack dist/assets --layer shared=ui"
 ```
 
 | Flag | Rule |
@@ -333,6 +341,7 @@ atlas pages with `--pack <dir>`:
 | `--keys <file>` | Written as in a dev run, same bytes: keys do not change between the two modes. The strings compile runs as in a dev run. |
 | `--no-cache` | Skips the cache, reads and writes. |
 | `--check` | Refused with `--pack`: `[game] assets: "--pack" writes files; drop "--check".` Exit 1. |
+| `--layer <folder>[=<name>]` | Repeatable, goes with every mode. Scans `<root>/<folder>/` like one more feature under `<name>` (`<folder>` alone maps to itself). Refused before anything runs, exit 1: no value, `[game] assets: "--layer" needs "<folder>[=<name>]".`; an empty side or two `=`, `[game] assets: "--layer shared=" needs a folder and a name: "<folder>[=<name>]".`; a folder twice, `[game] assets: "--layer" names the folder "shared" twice.` A folder that is missing is a warning, so a typo does not drop the keys in silence. A folder with `/`, `\` or `.`, the features folder, a name with `.`, a name that is also a feature folder and two layers on one name are scan problems. |
 
 `sharp` is an optional peer dependency: a game that packs runs `bun add -d sharp`; without it the
 pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".`
@@ -400,6 +409,9 @@ files is in the i18n README, sections "Pseudo-locale" and "Export and import".
 "assets:keys": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts --pseudo",
 "assets:export": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --export translations",
 "assets:import": "bun node_modules/@moku-labs/game/dist/assets.mjs --root src --keys src/generated/assets.ts --import translations"
+// a game on the layered layout adds the layer to each
+"assets:export": "moku-game-assets --root src --export translations --layer shared=ui",
+"assets:import": "moku-game-assets --root src --keys src/generated/assets.ts --import translations --layer shared=ui"
 ```
 
 | Flag | Rule |
@@ -408,6 +420,7 @@ files is in the i18n README, sections "Pseudo-locale" and "Export and import".
 | `--export <dir>` | Writes `<dir>/<locale>.json` for every locale, and nothing else: no asset scan, no generated module. `<dir>` is resolved against the working directory and created. One line per locale: `exported "<dir>/ru.json": 3 missing.` |
 | `--import <dir>` | Writes the translated texts of `<dir>/*.json` into the string files of the features, then compiles into the folder of `--keys` (`<root>/generated` by default). One line for the whole run: `imported "<dir>" (ru): 3 keys into 2 files.` A problem is one error, exit 1. |
 | `--source <locale>` | The locale translators read from, `"en"` by default. Only with `--export` or `--import`; elsewhere `[game] assets: "--source" goes with "--export" or "--import".` |
+| `--layer <folder>[=<name>]` | The compile, the export and the import walk `<folder>/strings/<locale>.json` too. An imported text of a layer key lands in the layer's own file, `shared/strings/ru.json`. The same three refusals as in "Production packing". |
 
 `--export` and `--import` run alone. With each other, with `--check` or with `--pack` the run stops
 with `[game] assets: "--export" and "--import" run alone; drop the other flags.` `--pseudo` may join

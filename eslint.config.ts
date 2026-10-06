@@ -46,7 +46,9 @@ export default [
       // Tool output: the asset scanner and compileStrings write these files.
       "**/generated/**",
       // Build output of the mini game: the pack of `bun run mini:pack`.
-      "tests/fixtures/mini-game/dist/**"
+      "tests/fixtures/mini-game/dist/**",
+      // A v15-layout game for the project index and the lint e2e: its own tsconfig `paths`.
+      "tests/fixtures/layout-game/**"
     ]
   },
 

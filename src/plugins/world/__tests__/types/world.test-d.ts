@@ -1,6 +1,6 @@
 import { expectTypeOf } from "vitest";
 import type { World } from "../../../../index";
-import { component, mut, system, tag } from "../../ecs/define";
+import { component, mut, resource, system, tag } from "../../ecs/define";
 import type {
   ComponentSchema,
   EcsApi,
@@ -8,7 +8,8 @@ import type {
   EntityDiff,
   FrameDiff,
   Owner,
-  QueryTuple
+  QueryTuple,
+  ResourceType
 } from "../../ecs/types";
 import { projection } from "../../projection/define";
 import type {
@@ -181,3 +182,11 @@ expectTypeOf<World.ComponentSchema>().toEqualTypeOf<ComponentSchema>();
 expectTypeOf<World.FrameDiff>().toEqualTypeOf<FrameDiff>();
 expectTypeOf<World.EntityDiff>().toEqualTypeOf<EntityDiff>();
 expectTypeOf<World.Explained>().toEqualTypeOf<Explained>();
+
+// A resource is typed by its defaults, or by what its factory returns: the factory is the default.
+expectTypeOf(resource("Pointer", { x: 0, down: false })).toEqualTypeOf<
+  ResourceType<{ x: number; down: boolean }>
+>();
+expectTypeOf(resource("boardLooks", () => ({ shown: new Map<Entity, string>() }))).toEqualTypeOf<
+  ResourceType<{ shown: Map<Entity, string> }>
+>();

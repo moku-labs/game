@@ -38,6 +38,32 @@ async function createRoot(): Promise<string> {
 }
 
 /**
+ * Writes one string file of one owner folder: a feature folder or a layer.
+ *
+ * @param root - The game source root.
+ * @param owner - POSIX path of the owner folder under the root, `features/hud` or `shared`.
+ * @param locale - The locale.
+ * @param table - The messages, or the raw text of the file.
+ * @returns The POSIX path of the file, relative to the root.
+ */
+async function writeIn(
+  root: string,
+  owner: string,
+  locale: string,
+  table: Record<string, unknown> | string
+): Promise<string> {
+  const folder = path.join(root, ...owner.split("/"), "strings");
+
+  await mkdir(folder, { recursive: true });
+
+  const text = typeof table === "string" ? table : `${JSON.stringify(table, undefined, 2)}\n`;
+
+  await writeFile(path.join(folder, `${locale}.json`), text);
+
+  return `${owner}/strings/${locale}.json`;
+}
+
+/**
  * Writes one string file of one feature.
  *
  * @param root - The game source root.
@@ -52,15 +78,7 @@ async function write(
   locale: string,
   table: Record<string, unknown> | string
 ): Promise<string> {
-  const folder = path.join(root, "features", feature, "strings");
-
-  await mkdir(folder, { recursive: true });
-
-  const text = typeof table === "string" ? table : `${JSON.stringify(table, undefined, 2)}\n`;
-
-  await writeFile(path.join(folder, `${locale}.json`), text);
-
-  return path.join("features", feature, "strings", `${locale}.json`);
+  return await writeIn(root, `features/${feature}`, locale, table);
 }
 
 /**
@@ -421,5 +439,126 @@ describe("compileStrings with the pseudo-locale", () => {
         '  Add features/<feature>/strings/en.json or drop "--pseudo".'
     );
     await expect(readFile(path.join(root, "generated", "strings.ts"), "utf8")).rejects.toThrow();
+  });
+});
+
+describe("compileStrings with layers", () => {
+  it("compiles the strings of a layer next to the features", async () => {
+    const root = await createRoot();
+    const out = path.join(root, "generated");
+
+    await write(root, "hud", "en", { "hud.title": "Orders" });
+    await writeIn(root, "shared", "en", { "ui.ok": "OK" });
+
+    const report = await compileStrings(root, out, { layers: { shared: "ui" } });
+    const english = evaluateModule(await readFile(path.join(out, "strings.en.ts"), "utf8"));
+
+    expect(report.keys).toEqual(["hud.title", "ui.ok"]);
+    expect(english["ui.ok"]?.({}, createIntlKit("en"))).toEqual([{ kind: "text", text: "OK" }]);
+  });
+
+  it("walks no layer by default", async () => {
+    const root = await createRoot();
+
+    await write(root, "hud", "en", { "hud.title": "Orders" });
+    await writeIn(root, "shared", "en", { "ui.ok": "OK" });
+
+    const report = await compileStrings(root, path.join(root, "generated"));
+
+    expect(report.keys).toEqual(["hud.title"]);
+  });
+
+  it("reads nothing of a layer without a strings folder", async () => {
+    const root = await createRoot();
+
+    await write(root, "hud", "en", { "hud.title": "Orders" });
+
+    const report = await compileStrings(root, path.join(root, "generated"), {
+      layers: { shared: "ui" }
+    });
+
+    expect(report.keys).toEqual(["hud.title"]);
+  });
+
+  it("names both files when a layer and a feature carry the same key", async () => {
+    const root = await createRoot();
+
+    await writeIn(root, "shared", "en", { "hud.title": "Orders" });
+    await write(root, "hud", "en", { "hud.title": "Orders" });
+
+    await expect(
+      compileStrings(root, path.join(root, "generated"), { layers: { shared: "ui" } })
+    ).rejects.toThrow(
+      'the key "hud.title" is in features/hud/strings/en.json and shared/strings/en.json.'
+    );
+  });
+
+  it("names both layer files when two layers carry the same key", async () => {
+    const root = await createRoot();
+
+    await writeIn(root, "shared", "en", { "ui.ok": "OK" });
+    await writeIn(root, "common", "en", { "ui.ok": "OK" });
+
+    await expect(
+      compileStrings(root, path.join(root, "generated"), {
+        layers: { shared: "ui", common: "common" }
+      })
+    ).rejects.toThrow('the key "ui.ok" is in common/strings/en.json and shared/strings/en.json.');
+  });
+
+  it("names the layer file a locale lacks", async () => {
+    const root = await createRoot();
+
+    await write(root, "hud", "en", { "hud.title": "Orders" });
+    await write(root, "hud", "ru", { "hud.title": "Заказы" });
+    await writeIn(root, "shared", "en", { "ui.ok": "OK" });
+
+    const report = await compileStrings(root, path.join(root, "generated"), {
+      layers: { shared: "ui" }
+    });
+
+    expect(report.notes).toEqual(['the key "ui.ok" is missing from shared/strings/ru.json.']);
+  });
+
+  it("finds the English file of a layer for the pseudo-locale", async () => {
+    const root = await createRoot();
+    const out = path.join(root, "generated");
+
+    await write(root, "hud", "ru", { "hud.title": "Заказы" });
+    await writeIn(root, "shared", "en", { "ui.ok": "OK" });
+
+    await expect(compileStrings(root, out, { pseudo: true })).rejects.toThrow(
+      '"--pseudo" needs an "en" string file in at least one feature.'
+    );
+
+    const report = await compileStrings(root, out, { pseudo: true, layers: { shared: "ui" } });
+
+    expect(report.locales).toEqual(["en", "en-XA", "ru"]);
+  });
+
+  it("names a file by the features folder the options name", async () => {
+    const root = await createRoot();
+
+    await writeIn(root, "mods/hud", "en", { "hud.price": "{n, number, currency}" });
+
+    await expect(
+      compileStrings(root, path.join(root, "generated"), { features: "mods" })
+    ).rejects.toThrow(
+      '[game] i18n: "hud.price" in mods/hud/strings/en.json: the number style "currency" is not supported.'
+    );
+  });
+
+  it("names the missing file under the features folder the options name", async () => {
+    const root = await createRoot();
+
+    await writeIn(root, "mods/hud", "en", { "hud.title": "Orders" });
+    await writeIn(root, "mods/shop", "ru", { "shop.title": "Магазин" });
+
+    const report = await compileStrings(root, path.join(root, "generated"), { features: "mods" });
+
+    expect(report.notes).toEqual([
+      'the key "hud.title" is missing from mods/hud/strings/ru.json.',
+      'the key "shop.title" is missing from mods/shop/strings/en.json.'
+    ]);
   });
 });

@@ -1,8 +1,8 @@
 /**
  * @file anim plugin — lifecycle functions: the dependency resolution, the
  * runtime the timelines reach the engine through, the one frame step registered in `onInit`, the
- * driver, the `play` handler and the `Frames` hooks opened in `onStart`, and the teardown that
- * closes exactly what was opened.
+ * driver, the `play` handler, the `play` of the `AnimPlayer` resource and the `Frames` hooks
+ * opened in `onStart`, and the teardown that closes exactly what was opened.
  */
 import { flowPlugin } from "../flow";
 import type { Descriptor, FxHandler } from "../flow/types";
@@ -12,6 +12,7 @@ import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
 import type { AnyComponent, AnyComponentValue } from "../world/ecs/types";
 import type { Entity, Owner, TrackOptions } from "../world/types";
+import { AnimPlayer } from "./components";
 import {
   closeFrameLoops,
   holdFrames,
@@ -334,6 +335,19 @@ function createPlayHandler(actx: AnimCtx, rt: TimelineRuntime): FxHandler {
 }
 
 /**
+ * Writes `play` onto the `AnimPlayer` resource of the world, so a system plays through it. The
+ * registered animation of the id wins, as in the `play` effect, so a hot swap reaches a system
+ * that holds the old definition object. `world` drops the resource when it stops, after `anim`.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param rt - The timeline runtime.
+ */
+function openPlayer(actx: AnimCtx, rt: TimelineRuntime): void {
+  actx.deps.world.ecs.resource(AnimPlayer).play = (animation, slots) =>
+    startTimeline(actx, rt, actx.state.registry.get(animation.id) ?? animation, slots);
+}
+
+/**
  * Registers the one frame step in `onInit`, which runs before every `onStart`. `world` registers
  * its own `animate` callback in its `onStart` and `time` runs the callbacks of a phase in
  * registration order, so the tracks advance before the sweep of `world` looks at them.
@@ -349,8 +363,9 @@ export function initAnim(ctx: KernelSlice): void {
 }
 
 /**
- * Opens what the plugin owns: the animations of every feature, the tween driver of `world`, the
- * handler of the `play` effect and the two world hooks that keep the `Frames` loops.
+ * Opens what the plugin owns: the animations of every feature, the `play` of the `AnimPlayer`
+ * resource, the tween driver of `world`, the handler of the `play` effect and the two world hooks
+ * that keep the `Frames` loops.
  *
  * @param ctx - Kernel context of the anim plugin.
  */
@@ -359,6 +374,7 @@ export function startAnim(ctx: KernelSlice): void {
   const rt = createRuntime(actx);
 
   registerAnimations(actx);
+  openPlayer(actx, rt);
   actx.state.removeDriver = actx.deps.world.projection.setDriver(createDriver(actx));
   actx.state.offPlay = actx.deps.flow.fx.handle("play", createPlayHandler(actx, rt), {
     runInFast: false

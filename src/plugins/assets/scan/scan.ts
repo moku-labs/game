@@ -1,7 +1,8 @@
 /**
- * @file assets plugin, build time — the walk. `features/*` with an `assets/` folder becomes the
- * manifest: one bundle per feature, split by the optional `assets.ts` that feature exports.
- * Node and Bun only. Nothing under `src/` outside `scan/` imports it, so no game bundles it.
+ * @file assets plugin, build time — the walk. `features/*` with an `assets/` folder, and every
+ * layer the options map (a folder under the root read like one more feature), becomes the manifest:
+ * one bundle per feature or layer, split by the optional `assets.ts` it exports. Node and Bun only.
+ * Nothing under `src/` outside `scan/` imports it, so no game bundles it.
  */
 import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -39,7 +40,19 @@ const OTHER_FONT = /\.(?:ttf|otf|woff2?)$/i;
 const HERE = /^\.\//;
 
 /**
- * What one scan is told: where the features are and where the two generated files go.
+ * What one scan is told: where the features and the layers are and where the two generated files
+ * go.
+ *
+ * @example
+ * ```ts
+ * // A v15 game: shared/ is a layer whose assets keep the ui.* keys.
+ * const options: ScanOptions = {
+ *   root: "src",
+ *   manifest: "public/assets/manifest.json",
+ *   keys: "src/generated/assets.ts",
+ *   layers: { shared: "ui" }
+ * };
+ * ```
  */
 export type ScanOptions = {
   /** Path of the game source root, the folder that holds the features. */
@@ -52,6 +65,12 @@ export type ScanOptions = {
   keys: string;
   /** False for a check run: nothing is written. Default true. */
   write?: boolean;
+  /**
+   * Layers scanned next to the features: folder under `root` to the name its keys and its default
+   * bundle take. `{ shared: "ui" }` reads `<root>/shared/assets.ts` and `<root>/shared/assets/`
+   * exactly as `features/ui/` is read, so every key stays `ui.*`. Default `{}`: features only.
+   */
+  layers?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -79,6 +98,12 @@ type Split = { name: string; patterns: readonly RegExp[] };
 
 /** The page images of every font of one feature, by the path of the `.fnt` inside `assets/`. */
 type FontPages = ReadonlyMap<string, readonly string[]>;
+
+/** One folder the walk reads as a feature: its folder on disk and the name its keys take. */
+type Owner = { name: string; dir: string };
+
+/** One layer of the map, and the problem that keeps it out of the walk when it has one. */
+type LayerCheck = { folder: string; name: string; problem: string | undefined };
 
 /** What one feature's files are read with: everything the walk decided before it started. */
 type FeaturePass = {
@@ -174,6 +199,131 @@ async function listFeatures(dir: string): Promise<string[]> {
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name)
     .toSorted(byName);
+}
+
+/**
+ * Tells whether a path is a folder.
+ *
+ * @param dir - The path to look at.
+ * @returns True for a folder; false for a file or nothing.
+ */
+async function isFolder(dir: string): Promise<boolean> {
+  return await stat(dir).then(
+    entry => entry.isDirectory(),
+    () => false
+  );
+}
+
+/**
+ * Says why one layer cannot be read, by its own folder and name alone.
+ *
+ * @param folder - The layer folder under the root.
+ * @param name - The name its keys and bundles take.
+ * @param features - Name of the features folder.
+ * @param featureNames - The feature folders found under it.
+ * @returns The problem, or `undefined` when the layer is fine on its own.
+ * @example
+ * ```ts
+ * layerRefusal("shared", "u.i", "features", []);
+ * // 'the layer "shared" is mapped to "u.i", which is empty or has a "." that would fake a folder.'
+ * ```
+ */
+function layerRefusal(
+  folder: string,
+  name: string,
+  features: string,
+  featureNames: readonly string[]
+): string | undefined {
+  if (folder === "" || /[/\\.]/.test(folder)) {
+    return (
+      `the layer "${folder}" is not a folder name: ` +
+      String.raw`use a name without "/", "\" or ".".`
+    );
+  }
+
+  if (folder === features) {
+    return (
+      `the layer "${folder}" is the features folder "${features}"; ` +
+      "the features are scanned already."
+    );
+  }
+
+  if (name === "" || name.includes(".")) {
+    return (
+      `the layer "${folder}" is mapped to "${name}", ` +
+      'which is empty or has a "." that would fake a folder.'
+    );
+  }
+
+  if (featureNames.includes(name)) {
+    return (
+      `the layer "${folder}" is mapped to "${name}", which is also a feature folder: ` +
+      "their keys and bundles would merge."
+    );
+  }
+
+  return undefined;
+}
+
+/**
+ * Checks every layer of a map, sorted by folder: one problem at most per layer, and a name that an
+ * earlier layer took is a problem of the later one.
+ *
+ * @param layers - Folder to name.
+ * @param features - Name of the features folder.
+ * @param featureNames - The feature folders found under it.
+ * @returns Every layer with its problem, in the order of the sorted folders.
+ */
+function checkLayers(
+  layers: Readonly<Record<string, string>>,
+  features: string,
+  featureNames: readonly string[]
+): LayerCheck[] {
+  const taken = new Map<string, string>();
+  const checks: LayerCheck[] = [];
+
+  for (const [folder, name] of Object.entries(layers).toSorted((left, right) =>
+    byName(left[0], right[0])
+  )) {
+    const first = taken.get(name);
+    const problem =
+      layerRefusal(folder, name, features, featureNames) ??
+      (first === undefined
+        ? undefined
+        : `the layers "${first}" and "${folder}" are both mapped to "${name}".`);
+
+    if (problem === undefined) taken.set(name, folder);
+
+    checks.push({ folder, name, problem });
+  }
+
+  return checks;
+}
+
+/**
+ * Lists what is wrong with a layer map before anything is read: a folder with a separator or a
+ * ".", an empty side, the features folder itself, a name with a "." (it would fake a folder), a
+ * name that is also a feature folder (its keys and bundles would merge in silence), two layers
+ * mapped to one name.
+ *
+ * @param layers - Folder to name.
+ * @param features - Name of the features folder.
+ * @param featureNames - The feature folders found under it.
+ * @returns One line per problem, in the order of the sorted folders.
+ * @example
+ * ```ts
+ * layerProblems({ shared: "ui" }, "features", ["board", "ui"]);
+ * // ['the layer "shared" is mapped to "ui", which is also a feature folder: their keys and bundles would merge.']
+ * ```
+ */
+export function layerProblems(
+  layers: Readonly<Record<string, string>>,
+  features: string,
+  featureNames: readonly string[]
+): string[] {
+  return checkLayers(layers, features, featureNames).flatMap(check =>
+    check.problem === undefined ? [] : [check.problem]
+  );
 }
 
 /**
@@ -288,15 +438,16 @@ function readSpec(
 }
 
 /**
- * Reads the bundles a feature declares. Every export that is a `defineBundles` result counts.
+ * Reads the bundles a feature or a layer declares. Every export that is a `defineBundles` result
+ * counts.
  *
  * @param scan - State of the scan.
- * @param feature - Name of the feature.
- * @returns The declared bundles, empty when the feature brought no description.
+ * @param owner - The feature or layer: its folder and the name its bundles take.
+ * @returns The declared bundles, empty when the owner brought no description.
  */
-async function readBundleSpecs(scan: ScanState, feature: string): Promise<Map<string, BundleSpec>> {
+async function readBundleSpecs(scan: ScanState, owner: Owner): Promise<Map<string, BundleSpec>> {
   const specs = new Map<string, BundleSpec>();
-  const file = path.join(scan.featuresFolder, feature, "assets.ts");
+  const file = path.join(owner.dir, "assets.ts");
 
   try {
     const loaded = await importDescription(file);
@@ -305,7 +456,7 @@ async function readBundleSpecs(scan: ScanState, feature: string): Promise<Map<st
       if (!isRecord(value) || value.kind !== "bundles" || !isRecord(value.map)) continue;
 
       for (const [name, raw] of Object.entries(value.map))
-        readSpec(scan, feature, name, raw, specs);
+        readSpec(scan, owner.name, name, raw, specs);
     }
   } catch (error) {
     const relative = toPosix(path.relative(scan.root, file));
@@ -644,14 +795,16 @@ async function addFile(scan: ScanState, pass: FeaturePass, relative: string): Pr
 }
 
 /**
- * Reads one feature: its description first, then its fonts, then every file of its `assets/`.
+ * Reads one feature or layer: its description first, then its fonts, then every file of its
+ * `assets/`.
  *
  * @param scan - State of the scan.
- * @param feature - Name of the feature folder.
+ * @param owner - The feature or layer: its folder and the name its keys and bundles take.
  */
-async function scanFeature(scan: ScanState, feature: string): Promise<void> {
-  const specs = await readBundleSpecs(scan, feature);
-  const assetsFolder = path.join(scan.featuresFolder, feature, "assets");
+async function scanOwner(scan: ScanState, owner: Owner): Promise<void> {
+  const feature = owner.name;
+  const specs = await readBundleSpecs(scan, owner);
+  const assetsFolder = path.join(owner.dir, "assets");
 
   for (const [name, spec] of specs) draftOf(scan, name, feature, spec.tier);
 
@@ -769,27 +922,62 @@ export async function applyOutputs(outputs: readonly Output[], write: boolean): 
 }
 
 /**
- * Walks the features of a game and writes its two generated files: one bundle per feature, split
- * by the optional `assets.ts` of that feature, every file keyed by the key rule. A check run
+ * Reads the layers that passed their checks, sorted by folder. A layer without its folder is a
+ * note, not a problem: a typo in `--layer` would otherwise drop its keys without a word.
+ *
+ * @param scan - State of the scan.
+ * @param checks - Every layer with its problem; a layer with one is not read.
+ */
+async function scanLayers(scan: ScanState, checks: readonly LayerCheck[]): Promise<void> {
+  for (const { folder, name, problem } of checks) {
+    if (problem !== undefined) continue;
+
+    const dir = path.join(scan.root, folder);
+
+    if (!(await isFolder(dir))) {
+      scan.notes.push(
+        `the layer "${folder}" has no folder "${folder}/" under the root; nothing was read for it.`
+      );
+      continue;
+    }
+
+    await scanOwner(scan, { name, dir });
+  }
+}
+
+/**
+ * Walks the features and the layers of a game and writes its two generated files: one bundle per
+ * feature or layer, split by its optional `assets.ts`, every file keyed by the key rule. A layer is
+ * read like one more feature under its mapped name, after the features. A check run
  * (`write: false`) writes nothing and only reports whether something would change.
  *
- * @param options - The game source root, the two output paths and whether to write.
+ * @param options - The game source root, the layers, the two output paths and whether to write.
  * @returns The manifest, the text of the key module and whether an output differed.
- * @throws {Error} One error that lists every problem the scan found.
+ * @throws {Error} One error that lists every problem the scan found, the layer problems first.
  * @example
  * ```ts
  * const { manifest, changed } = await scanAssets({
  *   root: "src",
  *   manifest: "public/assets/manifest.json",
- *   keys: "src/generated/assets.ts"
+ *   keys: "src/generated/assets.ts",
+ *   layers: { shared: "ui" } // shared/assets/button/primary.png keeps the key "ui.button.primary"
  * });
  * // manifest.bundles.ui.files[0].key: "ui.button.primary", changed: true on the first run
  * ```
  */
 export async function scanAssets(options: ScanOptions): Promise<ScanResult> {
-  const scan = createState(options.root, options.features ?? "features");
+  const features = options.features ?? "features";
+  const scan = createState(options.root, features);
+  const featureNames = await listFeatures(scan.featuresFolder);
+  const checks = checkLayers(options.layers ?? {}, features, featureNames);
 
-  for (const feature of await listFeatures(scan.featuresFolder)) await scanFeature(scan, feature);
+  for (const check of checks) if (check.problem !== undefined) scan.problems.push(check.problem);
+
+  for (const feature of featureNames) {
+    await scanOwner(scan, { name: feature, dir: path.join(scan.featuresFolder, feature) });
+  }
+
+  await scanLayers(scan, checks);
 
   if (scan.problems.length > 0) throw collected(scan.problems);
 

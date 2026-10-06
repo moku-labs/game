@@ -1,8 +1,8 @@
 /**
  * @file i18n plugin, build time — the exchange with translators. `exportStrings` writes one JSON
  * file per locale with every key, the source text and the note beside it; `importStrings` checks
- * the translated files against the game, writes them into the string files of the features that
- * own the keys, and compiles. Node and Bun only, reached through `src/assets.ts`.
+ * the translated files against the game, writes them into the string files of the features and
+ * layers that own the keys, and compiles. Node and Bun only, reached through `src/assets.ts`.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,6 +26,9 @@ const DEFAULT_SOURCE = "en";
 /** The folder that holds the features when none is named. */
 const DEFAULT_FEATURES = "features";
 
+/** A layer map: folder under the root to the name its keys take. */
+type Layers = Readonly<Record<string, string>>;
+
 /** The extension of every string file and every exchange file. */
 const JSON_EXTENSION = ".json";
 
@@ -35,6 +38,8 @@ const JSON_EXTENSION = ".json";
  * @example
  * ```ts
  * const options: ExchangeOptions = { source: "ru" }; // the translators read the Russian text
+ * // A v15 game: the keys of shared/strings/ go out and come back with the rest.
+ * const layered: ExchangeOptions = { source: "ru", layers: { shared: "ui" } };
  * ```
  */
 export type ExchangeOptions = {
@@ -42,6 +47,12 @@ export type ExchangeOptions = {
   source?: string;
   /** Name of the folder that holds the features. Default `"features"`. */
   features?: string;
+  /**
+   * Layers read next to the features: folder under `root` to the name its keys take.
+   * `{ shared: "ui" }` exports the keys of `<root>/shared/strings/` and imports their texts back
+   * into that folder. Default `{}`: features only.
+   */
+  layers?: Layers;
 };
 
 /**
@@ -88,15 +99,15 @@ export type ImportReport = {
   locales: readonly string[];
   /** How many keys were written. */
   keys: number;
-  /** The string files of the features that were rewritten, relative to the root, sorted. */
+  /** The string files of the features and layers rewritten, relative to the root, sorted. */
   files: readonly string[];
 };
 
 /** One key of an exchange file. */
 type ExchangeEntry = { text: string; source: string; note?: string };
 
-/** One translated text the import will write. */
-type Change = { feature: string; locale: string; key: string; text: string };
+/** One translated text the import will write, and the root-relative folder that owns its key. */
+type Change = { folder: string; locale: string; key: string; text: string };
 
 /** One exchange file, read. */
 type ExchangeFile = { locale: string; file: string; table: Record<string, unknown> };
@@ -104,7 +115,7 @@ type ExchangeFile = { locale: string; file: string; table: Record<string, unknow
 /** What the review of the exchange files found. */
 type Review = { locales: string[]; changes: Change[]; problems: string[] };
 
-/** The new texts of one string file of a feature. */
+/** The new texts of one string file of a feature or layer. */
 type FileChanges = { file: string; texts: Map<string, string> };
 
 /**
@@ -161,11 +172,12 @@ function importFailure(problems: readonly string[]): Error {
  *
  * @param root - Game source root, the folder that holds the features.
  * @param features - Name of the folder that holds the features.
+ * @param layers - Folder under the root to the name its keys take.
  * @returns What the walk collected.
  * @throws {Error} One error that lists every problem the compile found.
  */
-async function readGame(root: string, features: string): Promise<Walk> {
-  const walk = await walkStrings(root, features);
+async function readGame(root: string, features: string, layers: Layers): Promise<Walk> {
+  const walk = await walkStrings(root, features, layers);
 
   if (walk.problems.length > 0) throw compileFailure(walk.problems);
 
@@ -192,14 +204,14 @@ function exchangeEntry(walk: Walk, key: string, locale: string, source: string):
 }
 
 /**
- * Writes the files translators work in: one `<dir>/<locale>.json` per locale the features bring,
- * the source locale included, so a new language starts as a copy of `en.json`. Every key of the
- * game is in every file, sorted: `{ text, source, note? }`, with `text: ""` where the locale has no
- * message yet. The game tree is not touched, and a second run writes the same bytes.
+ * Writes the files translators work in: one `<dir>/<locale>.json` per locale the features and
+ * layers bring, the source locale included, so a new language starts as a copy of `en.json`. Every
+ * key of the game is in every file, sorted: `{ text, source, note? }`, with `text: ""` where the
+ * locale has no message yet. The game tree is not touched, and a second run writes the same bytes.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param dir - The folder the exchange files are written into; created when missing.
- * @param options - The source locale and the name of the features folder.
+ * @param options - The source locale, the name of the features folder and the layers.
  * @returns The exported locales and how many keys each one lacks.
  * @throws {Error} When the game's strings do not compile, or no feature brings the source locale.
  * @example
@@ -215,7 +227,7 @@ export async function exportStrings(
   options: ExchangeOptions = {}
 ): Promise<ExportReport> {
   const source = options.source ?? DEFAULT_SOURCE;
-  const walk = await readGame(root, options.features ?? DEFAULT_FEATURES);
+  const walk = await readGame(root, options.features ?? DEFAULT_FEATURES, options.layers ?? {});
 
   // Translators read from the source locale: it must be one the features bring.
   const locales = [...walk.byLocale.keys()].toSorted();
@@ -345,7 +357,7 @@ function reviewEntry(walk: Walk, review: Review, exchange: ExchangeFile, key: st
   // The text must compile, so a broken translation never lands in the game.
   try {
     compileMessage(text);
-    review.changes.push({ feature: owner.feature, locale: exchange.locale, key, text });
+    review.changes.push({ folder: owner.folder, locale: exchange.locale, key, text });
   } catch (error) {
     review.problems.push(`"${key}" in ${exchange.file}: ${detailOf(error)}.`);
   }
@@ -422,20 +434,21 @@ async function rewriteStrings(file: string, texts: ReadonlyMap<string, string>):
 }
 
 /**
- * Groups the changes of an import by the string file they land in.
+ * Groups the changes of an import by the string file they land in: the `strings/` of the feature
+ * or layer folder that owns each key.
  *
  * @param changes - Every text the import writes.
- * @param folder - Path of the folder that holds the features.
- * @returns The path and the new texts of each file, by its path relative to the root.
+ * @param root - Game source root.
+ * @returns The path and the new texts of each file, by its POSIX path relative to the root.
  */
-function groupByFile(changes: readonly Change[], folder: string): Map<string, FileChanges> {
+function groupByFile(changes: readonly Change[], root: string): Map<string, FileChanges> {
   const files = new Map<string, FileChanges>();
 
   for (const change of changes) {
     const name = `${change.locale}${JSON_EXTENSION}`;
-    const relative = `features/${change.feature}/strings/${name}`;
+    const relative = `${change.folder}/strings/${name}`;
     const group = files.get(relative) ?? {
-      file: path.join(folder, change.feature, "strings", name),
+      file: path.join(root, ...change.folder.split("/"), "strings", name),
       texts: new Map<string, string>()
     };
 
@@ -448,13 +461,14 @@ function groupByFile(changes: readonly Change[], folder: string): Map<string, Fi
 
 /**
  * Takes translated exchange files back into the game: every `<dir>/<locale>.json` is checked
- * against the game first, then each new text is written into the string file of the feature that
- * owns its key, and the strings are compiled into `out` as a dev run does. An empty text and a
- * text equal to the current message are skipped. With any problem nothing is written.
+ * against the game first, then each new text is written into the string file of the feature or
+ * layer that owns its key, and the strings are compiled into `out` as a dev run does. An empty text
+ * and a text equal to the current message are skipped. With any problem nothing is written.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param dir - The folder the translators handed back.
- * @param options - The features folder, where the compile writes, and whether it writes `en-XA`.
+ * @param options - The features folder, the layers, where the compile writes, and whether it
+ *   writes `en-XA`.
  * @returns The locales read, how many keys were written and the files rewritten.
  * @throws {Error} One error that lists every problem of the exchange files, or the compile's own
  *   error after the files are written (a parameter kind that differs across locales).
@@ -463,6 +477,9 @@ function groupByFile(changes: readonly Change[], folder: string): Map<string, Fi
  * // The translators handed back translations/ru.json with two hud texts filled in.
  * await importStrings("src", "translations", { out: "src/generated" });
  * // { locales: ["ru"], keys: 2, files: ["features/hud/strings/ru.json"] }
+ * // A v15 game: the translated ui.ok lands in the layer's own file.
+ * await importStrings("src", "translations", { out: "src/generated", layers: { shared: "ui" } });
+ * // { locales: ["ru"], keys: 1, files: ["shared/strings/ru.json"] }
  * ```
  */
 export async function importStrings(
@@ -471,22 +488,24 @@ export async function importStrings(
   options: ImportOptions = {}
 ): Promise<ImportReport> {
   const features = options.features ?? DEFAULT_FEATURES;
-  const walk = await readGame(root, features);
+  const layers = options.layers ?? {};
+  const walk = await readGame(root, features, layers);
 
   // Check every exchange file before anything is written.
   const review = await reviewImport(walk, dir);
 
   if (review.problems.length > 0) throw importFailure(review.problems);
 
-  // Write the new texts into the string files of the features that own them.
-  const byFile = groupByFile(review.changes, path.join(root, features));
+  // Write the new texts into the string files of the features and layers that own them.
+  const byFile = groupByFile(review.changes, root);
 
   for (const group of byFile.values()) await rewriteStrings(group.file, group.texts);
 
   // Compile as a dev run does, so the generated modules match the files just written.
   await compileStrings(root, options.out ?? path.join(root, "generated"), {
     features,
-    pseudo: options.pseudo === true
+    pseudo: options.pseudo === true,
+    layers
   });
 
   return {

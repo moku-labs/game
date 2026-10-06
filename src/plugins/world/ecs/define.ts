@@ -76,20 +76,29 @@ export function tag(name: string): TagType {
 }
 
 /**
- * Declares a resource: one mutable object per world, created from a deep clone of the defaults
- * on first read.
+ * Declares a resource: one mutable object per world, made on first read. Plain defaults are
+ * deep-cloned. A factory is called instead, once per world, so the value may hold a function or a
+ * `Map`.
  *
  * @param name - Storage name, unique per world.
- * @param defaults - The value a fresh world starts with.
+ * @param defaults - The value a fresh world starts with, or the factory that makes it.
  * @returns The resource type.
  * @example
  * ```ts
  * const Pointer = resource("Pointer", { x: 0, y: 0, down: false });
  * Pointer.defaults; // { x: 0, y: 0, down: false }
+ *
+ * // A resource that holds a Map: a factory, called once per world on first read.
+ * const Looks = resource("boardLooks", () => ({ shown: new Map<Entity, { look: string }>() }));
  * ```
  */
-export function resource<Value extends object>(name: string, defaults: Value): ResourceType<Value> {
-  return { resourceName: name, defaults: Object.freeze({ ...defaults }) };
+export function resource<Value extends object>(
+  name: string,
+  defaults: Value | (() => Value)
+): ResourceType<Value> {
+  const kept = typeof defaults === "function" ? defaults : Object.freeze({ ...defaults });
+
+  return { resourceName: name, defaults: kept };
 }
 
 /**

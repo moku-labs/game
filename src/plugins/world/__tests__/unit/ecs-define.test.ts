@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { component, Exiting, Layer, mut, Order, resource, system, tag } from "../../ecs/define";
 import { createMockWorld } from "./mock-world";
 
@@ -29,6 +29,16 @@ describe("ecs/define", () => {
   it("keeps the resource defaults", () => {
     expect(Pointer.resourceName).toBe("Pointer");
     expect(Pointer.defaults).toEqual({ x: 0, y: 0, down: false });
+    expect(Object.isFrozen(Pointer.defaults)).toBe(true);
+  });
+
+  it("keeps a factory default as it is, uncalled", () => {
+    const make = vi.fn(() => ({ shown: new Map<number, string>() }));
+    const Looks = resource("boardLooks", make);
+
+    expect(Looks.resourceName).toBe("boardLooks");
+    expect(Looks.defaults).toBe(make);
+    expect(make).not.toHaveBeenCalled();
   });
 
   it("marks a term as written", () => {

@@ -20,7 +20,7 @@ export const hudFeature = defineFeature("hud", {
 
 ## The two halves
 
-**Build time** (`compile/`, node only, reached through `@moku-labs/game/assets`): `compileStrings(root, out, { pseudo? })` walks `features/*/strings/<locale>.json`, parses every message once and writes `generated/strings.ts` (the `Strings` type a game hands `defineGame`) and one `generated/strings.<locale>.ts` per locale, plus `strings.en-XA.ts` with `pseudo`. `bun run assets:keys` runs it next to the asset scanner; `--check` covers both. `exportStrings` and `importStrings` exchange the strings with translators.
+**Build time** (`compile/`, node only, reached through `@moku-labs/game/assets`): `compileStrings(root, out, { pseudo?, layers? })` walks `features/*/strings/<locale>.json` and the `strings/` of every layer (`layers`, `--layer`), parses every message once and writes `generated/strings.ts` (the `Strings` type a game hands `defineGame`) and one `generated/strings.<locale>.ts` per locale, plus `strings.en-XA.ts` with `pseudo`. `bun run assets:keys` runs it next to the asset scanner; `--check` covers both. `exportStrings` and `importStrings` exchange the strings with translators.
 
 **Run time**: `format(message)` calls the function the build wrote and returns `Part[]`, never a joined string. `Intl.PluralRules`, `Intl.NumberFormat`, `Intl.ListFormat`, `Intl.DateTimeFormat` and `Intl.DurationFormat` come from a kit memoised per locale.
 
@@ -143,9 +143,18 @@ await app.i18n.setLocale("en-XA"); // every label reads accented and bracketed
 
 `text` is the locale's message, `""` when it has none yet. `source` is the message of the source locale, `"en"` by default. `note` is the source's note, else the locale's own.
 
-`importStrings(root, dir, { out, pseudo })` reads every `<dir>/*.json` back. Each new `text` is checked first: an unknown key, an entry without a string `text` and a message that does not compile are problems, all listed in one error, and then nothing is written. An empty `text` and an unchanged one are skipped; `source` and `note` are ignored. Each text is written into the string file of the feature that owns its key: an existing key keeps its place and its note, a new key is appended. Then the strings are compiled into `out`, `<root>/generated` by default.
+`importStrings(root, dir, { out, pseudo })` reads every `<dir>/*.json` back. Each new `text` is checked first: an unknown key, an entry without a string `text` and a message that does not compile are problems, all listed in one error, and then nothing is written. An empty `text` and an unchanged one are skipped; `source` and `note` are ignored. Each text is written into the string file of the feature or layer that owns its key: an existing key keeps its place and its note, a new key is appended. Then the strings are compiled into `out`, `<root>/generated` by default.
 
-From the command line, through the assets CLI: `--export <dir>`, `--import <dir>`, `--source <locale>`. A new language: export, copy `en.json` to `de.json`, fill in every `text`, import.
+A game on the layered layout passes its layers to both, `{ layers: { shared: "ui" } }` or `--layer shared=ui`. The keys of `shared/strings/` go out with the rest, and a translated `ui.ok` comes back into `shared/strings/ru.json`:
+
+```ts
+await importStrings("src", "translations", { out: "src/generated", layers: { shared: "ui" } });
+// { locales: ["ru"], keys: 1, files: ["shared/strings/ru.json"] }
+```
+
+A key is owned by one folder: the same key in `features/hud/strings/en.json` and `shared/strings/en.json` is a compile problem naming both files.
+
+From the command line, through the assets CLI: `--export <dir>`, `--import <dir>`, `--source <locale>`, `--layer <folder>[=<name>]`. A new language: export, copy `en.json` to `de.json`, fill in every `text`, import.
 
 ## Events and dependencies
 

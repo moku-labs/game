@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@moku-labs/game",
+    "paths": {
+      "@core/*": ["./core/*"],
+      "@shared": ["./shared/index.ts"],
+      "@shared/rules": ["./shared/rules/index.ts"],
+      "@features": ["./features/index.ts"],
+      "@features/*": ["./features/*/index.ts"],
+      "@plugins": ["./plugins/index.ts"],
+      "@generated/*": ["./generated/*"],
+      "@tests/*": ["./tests/*"]
+    }
+  }
+}

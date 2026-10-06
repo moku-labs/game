@@ -212,8 +212,8 @@ export type Narrowed<Value extends object, Patch> = Omit<ComponentType<Value>, n
   ((patch?: Patch) => ComponentValue<Value>);
 
 /**
- * A resource type made by `resource()`: one mutable object per world, created from a deep clone
- * of the defaults on first read.
+ * A resource type made by `resource()`: one mutable object per world, made on first read from a
+ * deep clone of the plain defaults, or by one call of the factory default.
  *
  * @example
  * ```ts
@@ -223,7 +223,8 @@ export type Narrowed<Value extends object, Patch> = Omit<ComponentType<Value>, n
  */
 export type ResourceType<Value extends object> = {
   readonly resourceName: string;
-  readonly defaults: Readonly<Value>;
+  /** The frozen plain defaults, or the factory a world calls once on first read. */
+  readonly defaults: Readonly<Value> | (() => Value);
 };
 
 /**
@@ -303,7 +304,8 @@ export type QueryTuple<Terms extends readonly QueryTerm[]> = [Entity, ...QueryVa
 /**
  * What a system receives next to its entities: the world, the mutable resources, the frozen model
  * snapshot of the frame and the frame's `Time`. A system may read pure game rules; it never
- * writes the model.
+ * writes the model. A system plays animations through `res(AnimPlayer)`, the resource `anim`
+ * writes when it starts.
  *
  * @example
  * ```ts
@@ -785,8 +787,8 @@ export type EcsApi = {
   query<const Terms extends readonly QueryTerm[]>(...terms: Terms): Iterable<QueryTuple<Terms>>;
 
   /**
-   * Returns the one mutable value of a resource, created from a deep clone of its defaults on
-   * first read.
+   * Returns the one mutable value of a resource, made on first read: a deep clone of its plain
+   * defaults, or what its factory default returns, called once per world.
    *
    * @param resourceType - The resource type.
    * @returns The mutable resource value.

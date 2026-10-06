@@ -75,4 +75,19 @@ describe("anim.replace", () => {
     expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
     expect(mock.api.active()).toBe(0);
   });
+
+  it("leaves app.anim.play on the definition it is given", () => {
+    const mock = createMockAnim();
+
+    mock.features.push({ name: "board", description: { animations: [slide] } });
+    mock.start();
+    mock.api.replace(longer);
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+
+    mock.api.play(slide, { it: entity });
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
+  });
 });
