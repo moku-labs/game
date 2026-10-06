@@ -420,7 +420,7 @@ files is in the i18n README, sections "Pseudo-locale" and "Export and import".
 | `--export <dir>` | Writes `<dir>/<locale>.json` for every locale, and nothing else: no asset scan, no generated module. `<dir>` is resolved against the working directory and created. One line per locale: `exported "<dir>/ru.json": 3 missing.` |
 | `--import <dir>` | Writes the translated texts of `<dir>/*.json` into the string files of the features, then compiles into the folder of `--keys` (`<root>/generated` by default). One line for the whole run: `imported "<dir>" (ru): 3 keys into 2 files.` A problem is one error, exit 1. |
 | `--source <locale>` | The locale translators read from, `"en"` by default. Only with `--export` or `--import`; elsewhere `[game] assets: "--source" goes with "--export" or "--import".` |
-| `--layer <folder>[=<name>]` | The compile, the export and the import walk `<folder>/strings/<locale>.json` too. An imported text of a layer key lands in the layer's own file, `shared/strings/ru.json`. The same three refusals as in "Production packing". |
+| `--layer <folder>[=<name>]` | The compile, the export and the import walk `<folder>/strings/<locale>.json` too. An imported text of a layer key lands in the layer's own file, `shared/strings/ru.json`. The same three refusals as in "Production packing". A folder with `/`, `\` or `.` is refused before a string file is read or written: `[game] i18n: the layer "../other" is not a folder name.` |
 
 `--export` and `--import` run alone. With each other, with `--check` or with `--pack` the run stops
 with `[game] assets: "--export" and "--import" run alone; drop the other flags.` `--pseudo` may join

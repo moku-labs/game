@@ -116,7 +116,7 @@ The index follows an import through the `compilerOptions.paths` of the game's ts
 
 - **Which file.** `tsconfig.json` at the root, or the root-relative path of `tsconfig` / `--tsconfig`. A path that leaves the root is refused by name. A missing file, or one without `paths`, means no aliases: every import that is not relative is a package, as before.
 - **How it is read.** TypeScript parses the file, comments and trailing commas included, and merges its `extends` chain. A file that does not parse rejects `openProject` with `[game] The tsconfig "tsconfig.json" does not parse: tsconfig.json:3:1 '}' expected.`
-- **Where targets point.** Against `baseUrl` when it is set, else against the folder of the tsconfig, which is the root for `tsconfig.json`. A `paths` block declared by an extended config resolves there too, where TypeScript would take the folder of that config. A target outside the root never names an indexed file.
+- **Where targets point.** Against `baseUrl` when it is set, else against the folder of the config that declares `paths`, as TypeScript does: the root for `tsconfig.json`, the folder of the extended config when that config holds the block. A target outside the root never names an indexed file.
 - **Matching.** A key without `*` that equals the specifier wins. Else the `*` key with the longest prefix, its `*` filled into each target. Each target is tried as written, then with `.ts`, `.tsx`, `/index.ts` and `/index.tsx`; the first file the index holds wins. A key or a target with two `*` is ignored, as in TypeScript.
 - **The engine stays a package.** `@moku-labs/game` and its subpaths are never matched, even when `paths` maps them, so its definers keep counting.
 

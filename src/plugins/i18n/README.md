@@ -154,6 +154,8 @@ await importStrings("src", "translations", { out: "src/generated", layers: { sha
 
 A key is owned by one folder: the same key in `features/hud/strings/en.json` and `shared/strings/en.json` is a compile problem naming both files.
 
+A layer folder is one folder name under the root. A folder that is empty or holds `/`, `\` or `.` is refused by the compile, the export and the import before a string file is read or written: `[game] i18n: the layer "../other" is not a folder name.`
+
 From the command line, through the assets CLI: `--export <dir>`, `--import <dir>`, `--source <locale>`, `--layer <folder>[=<name>]`. A new language: export, copy `en.json` to `de.json`, fill in every `text`, import.
 
 ## Events and dependencies

@@ -235,6 +235,7 @@ export function withStubs(
  * @throws {Error} When a flow with outcomes is to be held under the name `exited`.
  */
 export function harnessOf(flow: Flow.AnyFlow, name: string = flow.id): Flow.AnyFlow {
+  // The harness starts on the feature's flow, held under the name the game's main flow uses.
   const outcomes = Object.keys(flow.outcomes);
   const harness: Omit<Flow.AnyFlow, "nodes" | "edges"> = {
     kind: "flow",
@@ -244,14 +245,17 @@ export function harnessOf(flow: Flow.AnyFlow, name: string = flow.id): Flow.AnyF
     start: name
   };
 
+  // A flow without outcomes never exits: it is the one node of the harness.
   if (outcomes.length === 0) return { ...harness, nodes: { [name]: flow }, edges: { [name]: {} } };
 
+  // `exited` is the name of the rest node, so the flow cannot be held under it.
   if (name === exitedName) {
     throw new Error(
       `[game] isolate: "${exitedName}" is the rest node of the harness.\n  Pass another name in as.`
     );
   }
 
+  // The rest node every exit lands on; its intent `again` enters the flow once more.
   const exited: Flow.AnyNode = {
     kind: "node",
     input: type<Model.Json>(),
@@ -264,6 +268,7 @@ export function harnessOf(flow: Flow.AnyFlow, name: string = flow.id): Flow.AnyF
   };
   const toExited = Object.fromEntries(outcomes.map(outcome => [outcome, exitedName]));
 
+  // The flow and the rest node, each leading to the other.
   return {
     ...harness,
     nodes: { [name]: flow, [exitedName]: exited },
@@ -285,16 +290,13 @@ export function harnessOf(flow: Flow.AnyFlow, name: string = flow.id): Flow.AnyF
  * @throws {Error} For a stub key that is not a node of the flow, or an outcome the node does not declare.
  * @example
  * ```ts
- * // features/board/__tests__/isolated/give.isolated.ts: energy and giveToOrder belong to other features.
- * const boardOnly = isolate(boardFeature, {
- *   shared: sharedLayer, flow: boardFlow, player: fresh,
- *   stubs: { energy: stub("later"), giveToOrder: stub("orderComplete", { rewardId: "r1" }) }
+ * // tests/fixtures/mini-game: Home alone; its info popup is stubbed to end with ok at once.
+ * const homeOnly = isolate(homeFeature, {
+ *   flow: mainFlow, stubs: { info: stub("ok") }, player: startingPlayer, session: startingSession
  * });
- * const game = await createHeadless(boardOnly({ player: { ...fresh, energy: 0 } }));
- * await game.walk([{ at: "board/awaitIntent", intent: "tap" }]); // noEnergy, the stubbed energy ends with later
- * game.state().path; // "board/awaitIntent"
- * await game.walk([{ at: "board/awaitIntent", intent: "give" }]);
- * game.state().path; // "exited": the flow left with orderComplete { rewardId: "r1" }
+ * const game = await createHeadless(homeOnly());
+ * const state = await game.walk([{ at: "main/home", intent: "info" }]);
+ * state.path; // "main/home"
  * ```
  */
 export function isolate<Nodes extends Flow.NodeTable>(

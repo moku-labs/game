@@ -105,7 +105,7 @@ describe("readAliases", () => {
     expect(await readAliases(ts, root, "tsconfig.json")).toEqual({
       file: "tsconfig.json",
       sources: ["tsconfig.json", "configs/base.json"],
-      patterns: [{ prefix: "@core/", suffix: "", targets: ["core/*"] }]
+      patterns: [{ prefix: "@core/", suffix: "", targets: ["configs/core/*"] }]
     });
   });
 
@@ -121,17 +121,49 @@ describe("readAliases", () => {
     expect(aliases?.patterns).toEqual([{ prefix: "@core/", suffix: "", targets: ["src/core/*"] }]);
   });
 
-  it("answers undefined for a missing file, a file without paths and an empty paths block", async () => {
+  it("resolves a paths block of an extended config against that config's folder, as TypeScript does", async () => {
     const root = writeRoot({
-      "plain.json": JSON.stringify({ compilerOptions: { strict: true } }),
+      "tsconfig.json": JSON.stringify({ extends: "./configs/base.json" }),
+      "configs/base.json": tsconfigOf({ "@core/*": ["../core/*"], "@kit": ["./kit.ts"] })
+    });
+
+    const aliases = await readAliases(ts, root, "tsconfig.json");
+
+    expect(aliases?.patterns).toEqual([
+      { prefix: "@core/", suffix: "", targets: ["core/*"] },
+      { prefix: "@kit", targets: ["configs/kit.ts"] }
+    ]);
+  });
+
+  it("answers undefined for a missing file only", async () => {
+    const root = writeRoot({});
+
+    expect(await readAliases(ts, root, "tsconfig.json")).toBeUndefined();
+  });
+
+  it("reads a file without paths, an empty paths block and an empty file as no patterns, sources kept", async () => {
+    const root = writeRoot({
+      "plain.json": JSON.stringify({ extends: "./base.json", compilerOptions: { strict: true } }),
+      "base.json": JSON.stringify({ compilerOptions: { jsx: "react-jsx" } }),
       "empty.json": tsconfigOf({}),
       "blank.json": ""
     });
 
-    expect(await readAliases(ts, root, "tsconfig.json")).toBeUndefined();
-    expect(await readAliases(ts, root, "plain.json")).toBeUndefined();
-    expect(await readAliases(ts, root, "empty.json")).toBeUndefined();
-    expect(await readAliases(ts, root, "blank.json")).toBeUndefined();
+    expect(await readAliases(ts, root, "plain.json")).toEqual({
+      file: "plain.json",
+      sources: ["plain.json", "base.json"],
+      patterns: []
+    });
+    expect(await readAliases(ts, root, "empty.json")).toEqual({
+      file: "empty.json",
+      sources: ["empty.json"],
+      patterns: []
+    });
+    expect(await readAliases(ts, root, "blank.json")).toEqual({
+      file: "blank.json",
+      sources: ["blank.json"],
+      patterns: []
+    });
   });
 
   it("lists an extended file that is not there among the sources, so its arrival is seen", async () => {

@@ -1311,7 +1311,10 @@ describe("the tsconfig the layout rules read", () => {
     writeFiles(cwd, {
       "tsconfig.json": JSON.stringify({ extends: "./configs/base" }),
       "configs/base": JSON.stringify({ extends: `${base}.json` }),
-      "configs/base.json": JSON.stringify({ compilerOptions: { paths: toFeatures } })
+      // The targets resolve against configs/, the folder of the config that declares them.
+      "configs/base.json": JSON.stringify({
+        compilerOptions: { paths: { "@x": ["../features/home/index.ts"] } }
+      })
     });
 
     expect(fromCore(cwd)).toEqual(reaches);
@@ -1459,5 +1462,39 @@ describe("layout rules and the project index", () => {
 
     expect(lint).toEqual(index);
     expect(index.filter(targets => targets.length > 0)).toHaveLength(13);
+  });
+
+  it("resolve a paths block of a base config in a sub-folder against that folder", async () => {
+    const root = tempFolder();
+    const specifiers = ["@core/kit", "@kit", "@features/home", "@shared"];
+
+    writeFiles(root, {
+      "tsconfig.json": JSON.stringify({ extends: "./configs/base.json" }),
+      "configs/base.json": JSON.stringify({
+        compilerOptions: {
+          paths: {
+            "@core/*": ["../core/*"],
+            "@kit": ["./kit.ts"],
+            "@features/*": ["../features/*/index.ts"]
+          }
+        }
+      })
+    });
+
+    const map = await readAliases(await loadTypeScript(), root, "tsconfig.json");
+    const index = specifiers.map(specifier =>
+      aliasTargets(map, specifier).map(target => path.join(root, target))
+    );
+    const lint = specifiers.map(specifier =>
+      aliasTargetsOf(path.join(root, "tsconfig.json"), root, specifier)
+    );
+
+    expect(lint).toEqual(index);
+    expect(index).toEqual([
+      [path.join(root, "core/kit")],
+      [path.join(root, "configs/kit.ts")],
+      [path.join(root, "features/home/index.ts")],
+      []
+    ]);
   });
 });

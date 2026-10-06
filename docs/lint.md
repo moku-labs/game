@@ -136,7 +136,7 @@ The layout rules read the `paths` of the game's tsconfig, `tsconfig.json` by def
 
 - Comments and trailing commas are allowed, as in TypeScript.
 - `extends` is followed when it is a relative path, a string or an array, up to 8 configs deep. A package name in `extends` ends the chain: lint resolves no node module.
-- The nearest `paths` and the nearest `baseUrl` win. Targets resolve against `baseUrl` when one is set, else against the folder of the tsconfig.
+- The nearest `paths` and the nearest `baseUrl` win. Targets resolve against `baseUrl` when one is set, else against the folder of the config that declares `paths`, as TypeScript does.
 - Each rule reads the tsconfig once per lint run. A config that moves, appears or vanishes is read again.
 
 When the tsconfig is missing or declares no `paths`, the rules read the v15 aliases, relative to the game root. A `paths` block replaces the table whole.

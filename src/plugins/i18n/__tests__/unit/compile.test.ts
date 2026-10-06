@@ -520,6 +520,31 @@ describe("compileStrings with layers", () => {
     expect(report.notes).toEqual(['the key "ui.ok" is missing from shared/strings/ru.json.']);
   });
 
+  it("refuses a layer folder that is not one folder name, before a file is read or written", async () => {
+    const outside = await createRoot();
+    const root = path.join(outside, "game");
+    const out = path.join(root, "generated");
+
+    await write(root, "hud", "en", { "hud.title": "Orders" });
+    await writeIn(outside, "other", "en", { "ui.ok": "OK" });
+
+    await expect(compileStrings(root, out, { layers: { "../other": "ui" } })).rejects.toThrow(
+      '[game] i18n: the layer "../other" is not a folder name.\n' +
+        String.raw`  Use a name without "/", "\" or ".".`
+    );
+    await expect(
+      compileStrings(root, out, { pseudo: true, layers: { "../other": "ui" } })
+    ).rejects.toThrow('the layer "../other" is not a folder name.');
+
+    for (const folder of ["", ".", "shared/ui", String.raw`shared\ui`]) {
+      await expect(compileStrings(root, out, { layers: { [folder]: "ui" } })).rejects.toThrow(
+        `the layer "${folder}" is not a folder name.`
+      );
+    }
+
+    await expect(readFile(path.join(out, "strings.ts"), "utf8")).rejects.toThrow();
+  });
+
   it("finds the English file of a layer for the pseudo-locale", async () => {
     const root = await createRoot();
     const out = path.join(root, "generated");

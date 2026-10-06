@@ -489,6 +489,26 @@ describe("exchange with layers", () => {
     );
   });
 
+  it("refuses a layer folder that leads out of the root: the import writes nothing there", async () => {
+    const outside = await createFolder();
+    const root = path.join(outside, "game");
+    const dir = path.join(outside, "translations");
+    const other = path.join(outside, "other", "strings");
+
+    await writeJson(stringFile(root, "hud", "en"), { "hud.title": "Orders" });
+    await writeJson(path.join(other, "en.json"), { "ui.ok": "OK" });
+    await writeJson(path.join(dir, "ru.json"), { "ui.ok": { text: "ОК" } });
+
+    await expect(importStrings(root, dir, { layers: { "../other": "ui" } })).rejects.toThrow(
+      '[game] i18n: the layer "../other" is not a folder name.\n' +
+        String.raw`  Use a name without "/", "\" or ".".`
+    );
+    await expect(exportStrings(root, dir, { layers: { "../other": "ui" } })).rejects.toThrow(
+      'the layer "../other" is not a folder name.'
+    );
+    expect(await readdir(other)).toEqual(["en.json"]);
+  });
+
   it("writes into the features folder the options name", async () => {
     const root = await createFolder();
     const dir = path.join(await createFolder(), "translations");

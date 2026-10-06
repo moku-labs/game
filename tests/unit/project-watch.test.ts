@@ -311,6 +311,43 @@ describe("the batch walk and the tsconfig", () => {
     });
   });
 
+  it("reads the paths a base file without them gains later: the base is stamped from the start", async () => {
+    const root = writeGame();
+
+    put(root, "features/alias.ts", ALIASED);
+    put(root, "tsconfig.json", JSON.stringify({ extends: "./tsconfig.base.json" }));
+    put(root, "tsconfig.base.json", JSON.stringify({ compilerOptions: { strict: true } }));
+
+    const session = await openSession({ root });
+
+    expect([...session.configStamps.keys()]).toEqual(["tsconfig.json", "tsconfig.base.json"]);
+    expect(session.index.tsconfig).toBeUndefined();
+    expect(await syncWithDisk(session)).toBeUndefined();
+
+    put(root, "tsconfig.base.json", TSCONFIG);
+
+    expect(await syncWithDisk(session)).toEqual({
+      revision: session.index.revision,
+      files: ["tsconfig.json"],
+      moved: [],
+      removed: []
+    });
+    expect(session.index.symbols["scene:alias"]?.def).toEqual([
+      { path: "features/alias.ts", binding: "aliasScene" }
+    ]);
+    expect(session.index.tsconfig).toBe("tsconfig.json");
+  });
+
+  it("changes nothing for a tsconfig without paths that appears", async () => {
+    const root = writeGame();
+    const session = await openSession({ root });
+
+    put(root, "tsconfig.json", JSON.stringify({ compilerOptions: { strict: true } }));
+
+    expect(await syncWithDisk(session)).toBeUndefined();
+    expect(session.index.tsconfig).toBeUndefined();
+  });
+
   it("keeps the last good aliases while the tsconfig does not parse, and still reads the sources", async () => {
     const root = writeGame();
 

@@ -32,8 +32,9 @@ export type Session = {
   /** The tsconfig aliases every name is followed through; none when the file holds no `paths`. */
   aliases: AliasMap | undefined;
   /**
-   * The stamp of every config file the aliases were read from, the tsconfig alone when it holds
-   * no `paths`; `undefined` for a file that is not there. A moved stamp means read them again.
+   * The stamp of every config file the last read of the tsconfig touched, with or without
+   * `paths`; the tsconfig alone when it is missing. `undefined` for a file that is not there. A
+   * moved stamp means read them again.
    */
   configStamps: Map<string, Stamp | undefined>;
   /** One record per indexed file with its last good parse, and the cache of parses. */
@@ -90,25 +91,51 @@ async function configStampOf(root: string, file: string): Promise<Stamp | undefi
 }
 
 /**
- * The stamps of the config files the aliases come from: their sources, or the tsconfig alone.
+ * The stamps of config files.
  *
  * @param root - The real root.
- * @param tsconfig - The root-relative tsconfig path.
- * @param aliases - The aliases, if the tsconfig holds `paths`.
+ * @param files - The root-relative config files.
  * @returns Path to stamp, `undefined` for a file that is not there.
  */
 async function stampConfigs(
   root: string,
-  tsconfig: string,
-  aliases: AliasMap | undefined
+  files: readonly string[]
 ): Promise<Map<string, Stamp | undefined>> {
   const stamps = new Map<string, Stamp | undefined>();
 
-  for (const file of aliases?.sources ?? [tsconfig]) {
-    stamps.set(file, await configStampOf(root, file));
-  }
+  for (const file of files) stamps.set(file, await configStampOf(root, file));
 
   return stamps;
+}
+
+/**
+ * The config files a read of the tsconfig touched: its sources, or the tsconfig alone when it is
+ * missing.
+ *
+ * @param tsconfig - The root-relative tsconfig path.
+ * @param read - The read, `undefined` for a missing tsconfig.
+ * @returns The root-relative files to stamp.
+ * @example
+ * ```ts
+ * configsOf("tsconfig.json", undefined); // ["tsconfig.json"]
+ * ```
+ */
+function configsOf(tsconfig: string, read: AliasMap | undefined): readonly string[] {
+  return read?.sources ?? [tsconfig];
+}
+
+/**
+ * The aliases the index follows: a tsconfig without patterns maps nothing, as no tsconfig does.
+ *
+ * @param read - The read, `undefined` for a missing tsconfig.
+ * @returns The read when it holds a pattern, else `undefined`.
+ * @example
+ * ```ts
+ * followedAliases({ file: "tsconfig.json", sources: ["tsconfig.json"], patterns: [] }); // undefined
+ * ```
+ */
+function followedAliases(read: AliasMap | undefined): AliasMap | undefined {
+  return read === undefined || read.patterns.length === 0 ? undefined : read;
 }
 
 /**
@@ -130,22 +157,27 @@ async function configsMoved(session: Session): Promise<boolean> {
 }
 
 /**
- * Reads the aliases again and stamps their config files. A tsconfig that stops parsing keeps the
- * aliases it had until it parses again, as a broken source file keeps its keys.
+ * Reads the aliases again and stamps the config files the read touched. A tsconfig that stops
+ * parsing keeps the aliases it had until it parses again, as a broken source file keeps its keys,
+ * and the files of the last good read are stamped again.
  *
  * @param session - The project.
  * @returns True when the aliases resolve differently now.
  */
 async function rereadAliases(session: Session): Promise<boolean> {
   const before = session.aliases;
+  let configs: readonly string[] = [...session.configStamps.keys()];
 
   try {
-    session.aliases = await readAliases(session.catalog.typescript, session.root, session.tsconfig);
+    const read = await readAliases(session.catalog.typescript, session.root, session.tsconfig);
+
+    session.aliases = followedAliases(read);
+    configs = configsOf(session.tsconfig, read);
   } catch {
     // The tsconfig does not parse now: the last good aliases stay.
   }
 
-  session.configStamps = await stampConfigs(session.root, session.tsconfig, session.aliases);
+  session.configStamps = await stampConfigs(session.root, configs);
 
   return !sameAliases(before, session.aliases);
 }
@@ -202,8 +234,10 @@ export async function openSession(options: ProjectOptions): Promise<Session> {
   await resolveInside(root, manifest);
   await resolveInside(root, tsconfig);
 
-  // The aliases come first: every build of the index follows names through them.
-  const aliases = await readAliases(typescript, root, tsconfig);
+  // The aliases come first: every build of the index follows names through them. Every config
+  // file of the read is stamped, with or without `paths`.
+  const read = await readAliases(typescript, root, tsconfig);
+  const aliases = followedAliases(read);
 
   // One walk lists the files; each is read through the guard and parsed once.
   const walk = await walkRoot(root);
@@ -213,7 +247,7 @@ export async function openSession(options: ProjectOptions): Promise<Session> {
     manifest,
     tsconfig,
     aliases,
-    configStamps: await stampConfigs(root, tsconfig, aliases),
+    configStamps: await stampConfigs(root, configsOf(tsconfig, read)),
     catalog,
     stamps: walk.files,
     folders: walk.folders,
@@ -275,11 +309,18 @@ export async function syncWithDisk(session: Session): Promise<ProjectChange | un
     const known = previous.get(file);
     const isUnmoved = known !== undefined && sameStamp(known, stamp);
 
-    if (!isUnmoved && (await readIntoCatalog(session, file))) files.push(file);
+    if (isUnmoved) continue;
+
+    const isChanged = await readIntoCatalog(session, file);
+
+    if (isChanged) files.push(file);
   }
 
   // The config files of the aliases: a moved one reads them again.
-  if ((await configsMoved(session)) && (await rereadAliases(session))) files.push(session.tsconfig);
+  const moved = await configsMoved(session);
+  const aliasesChanged = moved && (await rereadAliases(session));
+
+  if (aliasesChanged) files.push(session.tsconfig);
 
   const manifest = await presentManifest(session.root, session.manifest);
 

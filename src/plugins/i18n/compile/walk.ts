@@ -13,6 +13,9 @@ import { compileMessage, type ParameterType } from "./message";
 /** How every problem of the string compiler is prefixed. */
 export const PREFIX = "[game] i18n: ";
 
+/** What a layer folder may not hold: a separator or a ".", which would lead out of the root. */
+const NOT_ONE_FOLDER = /[/\\.]/;
+
 /**
  * What one value of a string file may be: the message, or the message with a note for the
  * translators. The note is read by people only and never reaches a generated file.
@@ -261,19 +264,43 @@ async function listOwnerFiles(
 }
 
 /**
+ * The error for a layer folder that is not one folder name under the root: empty, or with a
+ * separator or a "." that would read and write outside it.
+ *
+ * @param folder - The layer folder as given.
+ * @returns The error to throw.
+ */
+function notAFolderName(folder: string): Error {
+  return new Error(
+    `${PREFIX}the layer "${folder}" is not a folder name.\n` +
+      String.raw`  Use a name without "/", "\" or ".".`
+  );
+}
+
+/**
  * Lists every string file of a game: features sorted, then the layers sorted by folder; inside
- * each, locales sorted.
+ * each, locales sorted. Every layer folder is checked before anything is read.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param features - Name of the folder that holds the features.
  * @param layers - Folder under the root to the name its keys take. Default `{}`: features only.
  * @returns The files, in walk order.
+ * @throws {Error} When a layer folder is empty or holds "/", "\" or ".".
  */
 export async function listStringFiles(
   root: string,
   features: string,
   layers: Readonly<Record<string, string>> = {}
 ): Promise<StringFile[]> {
+  // A layer folder is one folder name under the root: a path would reach outside it.
+  const sortedLayers = Object.entries(layers).toSorted((left, right) =>
+    left[0] < right[0] ? -1 : 1
+  );
+  const outside = sortedLayers.find(([folder]) => folder === "" || NOT_ONE_FOLDER.test(folder));
+
+  if (outside !== undefined) throw notAFolderName(outside[0]);
+
+  // The features first, then the layers.
   const files: StringFile[] = [];
   const featuresFolder = path.join(root, features);
   const featuresPath = features.split(path.sep).join("/");
@@ -282,9 +309,7 @@ export async function listStringFiles(
     files.push(...(await listOwnerFiles(root, feature, `${featuresPath}/${feature}`)));
   }
 
-  for (const [folder, name] of Object.entries(layers).toSorted((left, right) =>
-    left[0] < right[0] ? -1 : 1
-  )) {
+  for (const [folder, name] of sortedLayers) {
     files.push(...(await listOwnerFiles(root, name, folder)));
   }
 
@@ -475,6 +500,7 @@ function compileOne(walk: Walk, key: string, value: unknown, source: Source): vo
  * @param layers - Folder under the root to the name its keys take. Default `{}`: features only.
  * @returns The compiled messages per locale, the owner and parameters of each key, the texts and
  *   notes of each key per locale, and every problem.
+ * @throws {Error} When a layer folder is empty or holds "/", "\" or ".": nothing is read.
  */
 export async function walkStrings(
   root: string,

@@ -50,7 +50,7 @@ export type ExchangeOptions = {
   /**
    * Layers read next to the features: folder under `root` to the name its keys take.
    * `{ shared: "ui" }` exports the keys of `<root>/shared/strings/` and imports their texts back
-   * into that folder. Default `{}`: features only.
+   * into that folder. A folder is one name, without "/", "\" or ".". Default `{}`: features only.
    */
   layers?: Layers;
 };
@@ -174,7 +174,8 @@ function importFailure(problems: readonly string[]): Error {
  * @param features - Name of the folder that holds the features.
  * @param layers - Folder under the root to the name its keys take.
  * @returns What the walk collected.
- * @throws {Error} One error that lists every problem the compile found.
+ * @throws {Error} One error that lists every problem the compile found, or the layer error when a
+ *   layer folder is not one folder name.
  */
 async function readGame(root: string, features: string, layers: Layers): Promise<Walk> {
   const walk = await walkStrings(root, features, layers);
@@ -213,7 +214,8 @@ function exchangeEntry(walk: Walk, key: string, locale: string, source: string):
  * @param dir - The folder the exchange files are written into; created when missing.
  * @param options - The source locale, the name of the features folder and the layers.
  * @returns The exported locales and how many keys each one lacks.
- * @throws {Error} When the game's strings do not compile, or no feature brings the source locale.
+ * @throws {Error} When the game's strings do not compile, a layer folder is not one folder name,
+ *   or no feature brings the source locale.
  * @example
  * ```ts
  * // Before a release, the game hands its strings to the translators.
@@ -470,8 +472,9 @@ function groupByFile(changes: readonly Change[], root: string): Map<string, File
  * @param options - The features folder, the layers, where the compile writes, and whether it
  *   writes `en-XA`.
  * @returns The locales read, how many keys were written and the files rewritten.
- * @throws {Error} One error that lists every problem of the exchange files, or the compile's own
- *   error after the files are written (a parameter kind that differs across locales).
+ * @throws {Error} One error that lists every problem of the exchange files, the layer error
+ *   before anything is read when a layer folder is not one folder name, or the compile's own error
+ *   after the files are written (a parameter kind that differs across locales).
  * @example
  * ```ts
  * // The translators handed back translations/ru.json with two hud texts filled in.

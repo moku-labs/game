@@ -223,6 +223,30 @@ function isSwitch(flag: string | undefined): flag is Switch {
 }
 
 /**
+ * Reads the value after a flag that takes one: the next argument, unless it is missing or is
+ * another flag.
+ *
+ * @param argv - The arguments after the script name.
+ * @param at - Where the flag is.
+ * @param what - What the value is, as the refusal names it: `a path`, `a locale`.
+ * @returns The value.
+ * @throws {Error} When the value is missing or is another flag.
+ * @example
+ * ```ts
+ * valueAt(["--root", "src"], 0, "a path"); // "src"
+ * ```
+ */
+function valueAt(argv: readonly string[], at: number, what: string): string {
+  const value = argv[at + 1];
+
+  if (value === undefined || value.startsWith("--")) {
+    throw problem(`"${String(argv[at])}" needs ${what}.`);
+  }
+
+  return value;
+}
+
+/**
  * Reads the flags as they were given.
  *
  * @param argv - The arguments after the script name.
@@ -238,33 +262,24 @@ function readFlags(argv: readonly string[]): Flags {
   while (index < argv.length) {
     const flag = argv[index];
 
+    // A switch stands alone.
     if (isSwitch(flag)) {
       switches.add(flag);
       index += 1;
       continue;
     }
 
+    // `--layer` repeats: every value is kept, in order.
     if (flag === LAYER_FLAG) {
-      const value = argv[index + 1];
-
-      if (value === undefined || value.startsWith("--")) {
-        throw problem('"--layer" needs "<folder>[=<name>]".');
-      }
-
-      layers.push(value);
+      layers.push(valueAt(argv, index, '"<folder>[=<name>]"'));
       index += 2;
       continue;
     }
 
+    // Every other flag takes one value; the last one given wins.
     if (!isValueFlag(flag)) throw problem(`unknown option "${String(flag)}".`);
 
-    const value = argv[index + 1];
-
-    if (value === undefined || value.startsWith("--")) {
-      throw problem(`"${flag}" needs ${flag === "--source" ? "a locale" : "a path"}.`);
-    }
-
-    values[flag] = value;
+    values[flag] = valueAt(argv, index, flag === "--source" ? "a locale" : "a path");
     index += 2;
   }
 

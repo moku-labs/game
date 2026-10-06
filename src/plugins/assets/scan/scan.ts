@@ -102,8 +102,8 @@ type FontPages = ReadonlyMap<string, readonly string[]>;
 /** One folder the walk reads as a feature: its folder on disk and the name its keys take. */
 type Owner = { name: string; dir: string };
 
-/** One layer of the map, and the problem that keeps it out of the walk when it has one. */
-type LayerCheck = { folder: string; name: string; problem: string | undefined };
+/** One layer of the map, and the refusal that keeps it out of the walk when it has one. */
+type LayerCheck = { folder: string; name: string; refusal: string | undefined };
 
 /** What one feature's files are read with: everything the walk decided before it started. */
 type FeaturePass = {
@@ -266,13 +266,36 @@ function layerRefusal(
 }
 
 /**
- * Checks every layer of a map, sorted by folder: one problem at most per layer, and a name that an
- * earlier layer took is a problem of the later one.
+ * Says that a layer is mapped to a name an earlier layer took.
+ *
+ * @param first - The folder of the earlier layer with that name, if one took it.
+ * @param folder - The layer folder.
+ * @param name - The name it is mapped to.
+ * @returns The refusal, or `undefined` when no earlier layer took the name.
+ * @example
+ * ```ts
+ * nameTakenRefusal("common", "shared", "ui");
+ * // 'the layers "common" and "shared" are both mapped to "ui".'
+ * ```
+ */
+function nameTakenRefusal(
+  first: string | undefined,
+  folder: string,
+  name: string
+): string | undefined {
+  if (first === undefined) return undefined;
+
+  return `the layers "${first}" and "${folder}" are both mapped to "${name}".`;
+}
+
+/**
+ * Checks every layer of a map, sorted by folder: one refusal at most per layer, and a name that an
+ * earlier layer took is a refusal of the later one.
  *
  * @param layers - Folder to name.
  * @param features - Name of the features folder.
  * @param featureNames - The feature folders found under it.
- * @returns Every layer with its problem, in the order of the sorted folders.
+ * @returns Every layer with its refusal, in the order of the sorted folders.
  */
 function checkLayers(
   layers: Readonly<Record<string, string>>,
@@ -281,20 +304,17 @@ function checkLayers(
 ): LayerCheck[] {
   const taken = new Map<string, string>();
   const checks: LayerCheck[] = [];
+  const sorted = Object.entries(layers).toSorted((left, right) => byName(left[0], right[0]));
 
-  for (const [folder, name] of Object.entries(layers).toSorted((left, right) =>
-    byName(left[0], right[0])
-  )) {
-    const first = taken.get(name);
-    const problem =
+  for (const [folder, name] of sorted) {
+    // A layer is refused for its own folder and name first, then for a name taken before it.
+    const refusal =
       layerRefusal(folder, name, features, featureNames) ??
-      (first === undefined
-        ? undefined
-        : `the layers "${first}" and "${folder}" are both mapped to "${name}".`);
+      nameTakenRefusal(taken.get(name), folder, name);
 
-    if (problem === undefined) taken.set(name, folder);
+    if (refusal === undefined) taken.set(name, folder);
 
-    checks.push({ folder, name, problem });
+    checks.push({ folder, name, refusal });
   }
 
   return checks;
@@ -322,7 +342,7 @@ export function layerProblems(
   featureNames: readonly string[]
 ): string[] {
   return checkLayers(layers, features, featureNames).flatMap(check =>
-    check.problem === undefined ? [] : [check.problem]
+    check.refusal === undefined ? [] : [check.refusal]
   );
 }
 
@@ -802,12 +822,14 @@ async function addFile(scan: ScanState, pass: FeaturePass, relative: string): Pr
  * @param owner - The feature or layer: its folder and the name its keys and bundles take.
  */
 async function scanOwner(scan: ScanState, owner: Owner): Promise<void> {
+  // The description first: the bundles it declares, with their tiers.
   const feature = owner.name;
   const specs = await readBundleSpecs(scan, owner);
   const assetsFolder = path.join(owner.dir, "assets");
 
   for (const [name, spec] of specs) draftOf(scan, name, feature, spec.tier);
 
+  // Then the fonts: their page images belong to them.
   const files = await walkAssets(assetsFolder, "");
   const fonts = await readFonts(scan, assetsFolder, files);
   const pages = new Set([...fonts.values()].flat());
@@ -819,6 +841,7 @@ async function scanOwner(scan: ScanState, owner: Owner): Promise<void> {
     fonts
   };
 
+  // Then every other file, into the bundle that claims it.
   for (const relative of files) {
     // A page image is part of its font: it is neither a key nor a note.
     if (pages.has(relative)) continue;
@@ -926,11 +949,11 @@ export async function applyOutputs(outputs: readonly Output[], write: boolean): 
  * note, not a problem: a typo in `--layer` would otherwise drop its keys without a word.
  *
  * @param scan - State of the scan.
- * @param checks - Every layer with its problem; a layer with one is not read.
+ * @param checks - Every layer with its refusal; a refused layer is not read.
  */
 async function scanLayers(scan: ScanState, checks: readonly LayerCheck[]): Promise<void> {
-  for (const { folder, name, problem } of checks) {
-    if (problem !== undefined) continue;
+  for (const { folder, name, refusal } of checks) {
+    if (refusal !== undefined) continue;
 
     const dir = path.join(scan.root, folder);
 
@@ -966,21 +989,27 @@ async function scanLayers(scan: ScanState, checks: readonly LayerCheck[]): Promi
  * ```
  */
 export async function scanAssets(options: ScanOptions): Promise<ScanResult> {
+  // The layers are checked against the features before anything is read.
   const features = options.features ?? "features";
   const scan = createState(options.root, features);
   const featureNames = await listFeatures(scan.featuresFolder);
   const checks = checkLayers(options.layers ?? {}, features, featureNames);
 
-  for (const check of checks) if (check.problem !== undefined) scan.problems.push(check.problem);
+  for (const check of checks) {
+    if (check.refusal !== undefined) scan.problems.push(check.refusal);
+  }
 
+  // The features first, then every layer that passed, each like one more feature.
   for (const feature of featureNames) {
     await scanOwner(scan, { name: feature, dir: path.join(scan.featuresFolder, feature) });
   }
 
   await scanLayers(scan, checks);
 
+  // Every problem in one error: nothing is written while there is one.
   if (scan.problems.length > 0) throw collected(scan.problems);
 
+  // The manifest and the key module: written when their text changed, never by a check run.
   const manifest = toManifest(scan);
   const manifestSource = emitManifest(manifest);
   const keysSource = emitKeys(manifest);

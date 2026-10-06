@@ -50,7 +50,8 @@ export type CompileOptions = {
   /**
    * Layers walked next to the features: folder under `root` to the name its keys take.
    * `{ shared: "ui" }` reads `<root>/shared/strings/<locale>.json` exactly as a feature's
-   * `strings/` is read. Default `{}`: features only.
+   * `strings/` is read. A folder is one name, without "/", "\" or ".". Default `{}`: features
+   * only.
    */
   layers?: Readonly<Record<string, string>>;
 };
@@ -181,8 +182,9 @@ function typeEntries(walk: Walk): TypeEntry[] {
  * @param options - Whether this is a check run, what the features folder is called, whether the
  *   pseudo-locale is written, and the layers.
  * @returns Whether an output differed, the locales, the keys and the notes.
- * @throws {Error} One error that lists every problem the compile found, or the pseudo error when
- *   no feature or layer brings an `en` string file.
+ * @throws {Error} One error that lists every problem the compile found, the pseudo error when
+ *   no feature or layer brings an `en` string file, or the layer error when a layer folder is not
+ *   one folder name: nothing is read then.
  * @example
  * ```ts
  * // A dev build also writes the pseudo-locale, derived from the English messages.

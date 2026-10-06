@@ -219,10 +219,10 @@ export function missedAlias(
   local: string
 ): string | undefined {
   const ref = resolution.modules.get(file)?.imports.get(local);
+  const isAlias =
+    ref !== undefined && !isRelative(ref.specifier) && !isPackage(resolution, ref.specifier);
 
-  if (ref === undefined || isRelative(ref.specifier) || isPackage(resolution, ref.specifier)) {
-    return undefined;
-  }
+  if (!isAlias) return undefined;
 
   return resolveModulePath(resolution, file, ref.specifier) === undefined
     ? ref.specifier

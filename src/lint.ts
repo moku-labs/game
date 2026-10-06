@@ -11,7 +11,14 @@
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
-/** The options every rule takes: which files it checks. A key given replaces the rule's default. */
+/**
+ * The options every rule takes: which files it checks. A key given replaces the rule's default.
+ *
+ * @example
+ * ```json
+ * "moku-game/determinism": ["error", { "files": ["src/logic/**"], "ignores": ["src/logic/*.dev.ts"] }]
+ * ```
+ */
 export type GameLintOptions = {
   /** Globs of the files the rule checks, relative to the directory oxlint runs in. */
   files?: string[];
@@ -22,6 +29,11 @@ export type GameLintOptions = {
 /**
  * The options of the layout rules `layer-imports`, `feature-door` and `rules-siblings`: the files,
  * where the layers sit and which tsconfig names the aliases.
+ *
+ * @example
+ * ```json
+ * "moku-game/layer-imports": ["error", { "root": "src", "tsconfig": "tsconfig.game.json" }]
+ * ```
  */
 export type GameLintLayoutOptions = GameLintOptions & {
   /** The folder of `core/`, `shared/`, `features/`, `plugins/` and `game.ts`, relative to the directory oxlint runs in. Default `.`. */
@@ -30,7 +42,14 @@ export type GameLintLayoutOptions = GameLintOptions & {
   tsconfig?: string;
 };
 
-/** The options of `test-suffix`: the files, the game root and the suffix of each test kind folder. */
+/**
+ * The options of `test-suffix`: the files, the game root and the suffix of each test kind folder.
+ *
+ * @example
+ * ```json
+ * "moku-game/test-suffix": ["error", { "root": "src", "suffixes": { "tests/e2e/": ".spec.ts" } }]
+ * ```
+ */
 export type GameLintSuffixOptions = GameLintOptions & {
   /** The folder whose test files the rule reads, relative to the directory oxlint runs in. Default `.`. */
   root?: string;
@@ -144,6 +163,9 @@ type AliasPattern = {
   readonly targets: readonly string[];
 };
 
+/** A key of `paths` with its `*`: the text after the `*` is always there. */
+type StarPattern = AliasPattern & { readonly suffix: string };
+
 /** One read of a tsconfig and the configs it extends. */
 type TsconfigRead = {
   /** The patterns of the nearest `paths`; undefined when there is none or a config does not parse. */
@@ -154,9 +176,17 @@ type TsconfigRead = {
   readonly stamps: ReadonlyMap<string, number>;
 };
 
+/** A `paths` block and the folder of the config that declares it. */
+type PathsBlock = {
+  /** The keys of `paths` and their values, as the JSON holds them. */
+  readonly entries: Readonly<Record<string, unknown>>;
+  /** Absolute: without `baseUrl`, TypeScript resolves the targets against this folder. */
+  readonly folder: string;
+};
+
 /** What the configs of an `extends` chain say: the nearest `paths` and `baseUrl`. */
 type Chain = {
-  readonly paths: Readonly<Record<string, unknown>> | undefined;
+  readonly paths: PathsBlock | undefined;
   /** Absolute: TypeScript resolves `baseUrl` against the config that declares it. */
   readonly baseUrl: string | undefined;
   /** The absolute path of the config that does not parse, if one does not. */
@@ -360,6 +390,21 @@ const HELPER_FOLDER = /^(?:helpers|fixtures|baselines)$/;
 
 /** A source file `test-suffix` reads. */
 const SCRIPT = /\.tsx?$/;
+
+/** The extension of a JSX test file: a `.ts` suffix of its kind takes an `x` for it. */
+const TSX_EXTENSION = ".tsx";
+
+/** The extension a suffix of a TypeScript kind ends with. */
+const TS_EXTENSION = ".ts";
+
+/** The folder of a colocated test root. */
+const COLOCATED_TESTS = "__tests__";
+
+/** Where a helper of a colocated `__tests__/` kind goes. */
+const COLOCATED_HELPERS = "__tests__/fixtures/";
+
+/** Where a helper of a root `tests/` kind goes. */
+const ROOT_HELPERS = "tests/helpers/";
 
 /** The test word a misnamed file may carry already: `board.test.ts` becomes `board.e2e.ts`. */
 const TEST_WORD = /\.(?:test|spec|e2e|visual|editor|isolated)$/;
@@ -1081,9 +1126,12 @@ function parentsOf(file: string, value: unknown): string[] {
     .filter((name): name is string => typeof name === "string")
     .filter(name => RELATIVE.test(name) || path.isAbsolute(name))
     .map(name => path.resolve(path.dirname(file), name))
-    .map(parent =>
-      parent.endsWith(".json") || stampOf(parent) !== MISSING ? parent : `${parent}.json`
-    );
+    .map(parent => {
+      // A path that names a file as written is kept; else TypeScript adds `.json`.
+      const isResolvable = parent.endsWith(".json") || stampOf(parent) !== MISSING;
+
+      return isResolvable ? parent : `${parent}.json`;
+    });
 }
 
 /**
@@ -1105,15 +1153,18 @@ function readChain(file: string, depth: number, stamps: Map<string, number>): Ch
 
   if (config === undefined) return { paths: undefined, baseUrl: undefined, broken: file };
 
+  // What this config says itself, resolved against its own folder.
+  const folder = path.dirname(file);
   const options = isObject(config.compilerOptions) ? config.compilerOptions : {};
-  let paths = isObject(options.paths) ? options.paths : undefined;
+  let paths = isObject(options.paths) ? { entries: options.paths, folder } : undefined;
   let baseUrl =
-    typeof options.baseUrl === "string"
-      ? path.resolve(path.dirname(file), options.baseUrl)
-      : undefined;
+    typeof options.baseUrl === "string" ? path.resolve(folder, options.baseUrl) : undefined;
 
+  // What it leaves out comes from the configs it extends, the later one first.
   for (const parent of parentsOf(file, config.extends).toReversed()) {
-    if ((paths !== undefined && baseUrl !== undefined) || depth >= MAX_EXTENDS) break;
+    const isSettled = (paths !== undefined && baseUrl !== undefined) || depth >= MAX_EXTENDS;
+
+    if (isSettled) break;
 
     const inherited = readChain(parent, depth + 1, stamps);
 
@@ -1190,7 +1241,8 @@ function patternsOf(base: string, paths: Readonly<Record<string, unknown>>): Ali
 
 /**
  * Read a tsconfig for the layout rules: the patterns of its nearest `paths`, resolved against
- * `baseUrl` when one is set, else against the folder of the tsconfig, as the project index does.
+ * `baseUrl` when one is set, else against the folder of the config that declares `paths`, as
+ * TypeScript and the project index do.
  *
  * @param file - The absolute path of the tsconfig.
  * @returns The read, with the stamps of every config it touched.
@@ -1199,7 +1251,9 @@ function readTsconfig(file: string): TsconfigRead {
   const stamps = new Map<string, number>();
   const chain = readChain(file, 0, stamps);
   const patterns =
-    chain.paths === undefined ? [] : patternsOf(chain.baseUrl ?? path.dirname(file), chain.paths);
+    chain.paths === undefined
+      ? []
+      : patternsOf(chain.baseUrl ?? chain.paths.folder, chain.paths.entries);
 
   return {
     patterns: patterns.length === 0 ? undefined : patterns,
@@ -1241,6 +1295,48 @@ function matchesStar(prefix: string, suffix: string, specifier: string): boolean
 }
 
 /**
+ * Whether a specifier is never an alias: a path relative to the importing file, an absolute path,
+ * or the engine.
+ *
+ * @param specifier - The module specifier as written.
+ * @returns True when no key of `paths` may match it.
+ * @example
+ * ```ts
+ * isNeverAlias("@moku-labs/game/testing"); // true
+ * ```
+ */
+function isNeverAlias(specifier: string): boolean {
+  return NOT_BARE.test(specifier) || ENGINE.test(specifier);
+}
+
+/**
+ * Whether a key of `paths` is a `*` key that matches a specifier with a longer prefix than the
+ * best match so far.
+ *
+ * @param pattern - A key of `paths`.
+ * @param best - The best `*` match so far, if any.
+ * @param specifier - The module specifier.
+ * @returns True when the key is the better match.
+ * @example
+ * ```ts
+ * isBetterMatch({ prefix: "@core/", suffix: "", targets: ["/game/core/*"] }, undefined, "@core/kit"); // true
+ * ```
+ */
+function isBetterMatch(
+  pattern: AliasPattern,
+  best: StarPattern | undefined,
+  specifier: string
+): pattern is StarPattern {
+  const isLonger = best === undefined || pattern.prefix.length > best.prefix.length;
+
+  return (
+    pattern.suffix !== undefined &&
+    isLonger &&
+    matchesStar(pattern.prefix, pattern.suffix, specifier)
+  );
+}
+
+/**
  * The targets a specifier maps to, the way TypeScript maps it: a key without `*` equal to the
  * specifier wins; else the `*` key with the longest prefix, its `*` filled into every target. A
  * copy of `aliasTargets` in `src/project/aliases.ts`, which reads the tsconfig with TypeScript; this
@@ -1255,30 +1351,28 @@ function matchesStar(prefix: string, suffix: string, specifier: string): boolean
  * ```
  */
 function targetsFor(patterns: readonly AliasPattern[], specifier: string): string[] {
-  if (NOT_BARE.test(specifier) || ENGINE.test(specifier)) return [];
+  if (isNeverAlias(specifier)) return [];
 
+  // A key without `*` equal to the specifier wins outright.
   const exact = patterns.find(
     pattern => pattern.suffix === undefined && pattern.prefix === specifier
   );
 
   if (exact !== undefined) return [...exact.targets];
 
-  let best: { readonly pattern: AliasPattern; readonly suffix: string } | undefined;
+  // Else the `*` key with the longest prefix that matches.
+  let best: StarPattern | undefined;
 
   for (const pattern of patterns) {
-    const { suffix } = pattern;
-    const isLonger = best === undefined || pattern.prefix.length > best.pattern.prefix.length;
-
-    if (suffix !== undefined && isLonger && matchesStar(pattern.prefix, suffix, specifier)) {
-      best = { pattern, suffix };
-    }
+    if (isBetterMatch(pattern, best, specifier)) best = pattern;
   }
 
   if (best === undefined) return [];
 
-  const hole = specifier.slice(best.pattern.prefix.length, specifier.length - best.suffix.length);
+  // What the `*` stood for fills the `*` of every target.
+  const hole = specifier.slice(best.prefix.length, specifier.length - best.suffix.length);
 
-  return best.pattern.targets.map(target => target.replace("*", () => hole));
+  return best.targets.map(target => target.replace("*", () => hole));
 }
 
 /**
@@ -1331,10 +1425,12 @@ function isDoor(inner: readonly string[]): boolean {
  */
 function unitOf(layer: "features" | "plugins", below: readonly string[]): Place {
   const [name, ...inner] = below;
+  const isBarrelPath = name === undefined || (inner.length === 0 && INDEX_FILE.test(name));
 
-  if (name === undefined || (inner.length === 0 && INDEX_FILE.test(name))) {
-    return { layer, unit: layer, door: true };
-  }
+  // The layer folder itself and its `index` are the barrel of the layer.
+  if (isBarrelPath) return { layer, unit: layer, door: true };
+
+  // Any other file directly in the layer folder is outside the layout.
   if (inner.length === 0 && path.extname(name) !== "") return OTHER;
 
   return { layer, unit: `${layer}/${name}`, door: isDoor(inner) };
@@ -1735,6 +1831,7 @@ function isHelper(folders: readonly string[]): boolean {
  * ```
  */
 function suffixMessage(file: string, table: Readonly<Record<string, string>>): string | undefined {
+  // Only a script in a test kind folder is checked; a helper never is.
   const name = path.posix.basename(file);
   const extension = SCRIPT.exec(name)?.[0];
   const folder = path.posix.dirname(file);
@@ -1742,13 +1839,15 @@ function suffixMessage(file: string, table: Readonly<Record<string, string>>): s
 
   if (extension === undefined || kind === undefined) return undefined;
 
-  const suffix =
-    extension === ".tsx" && kind.suffix.endsWith(".ts") ? `${kind.suffix}x` : kind.suffix;
+  // A `.tsx` file of a `.ts` kind ends with the suffix and an `x`.
+  const isTsxOfTsKind = extension === TSX_EXTENSION && kind.suffix.endsWith(TS_EXTENSION);
+  const suffix = isTsxOfTsKind ? `${kind.suffix}x` : kind.suffix;
 
   if (name.endsWith(suffix)) return undefined;
 
+  // The report names the new name and where a helper goes instead.
   const renamed = `${name.slice(0, -extension.length).replace(TEST_WORD, "")}${suffix}`;
-  const helpers = kind.folder.includes("__tests__") ? "__tests__/fixtures/" : "tests/helpers/";
+  const helpers = kind.folder.includes(COLOCATED_TESTS) ? COLOCATED_HELPERS : ROOT_HELPERS;
 
   return `Tests: a file in ${kind.folder} ends with ${suffix}. Rename ${name} to ${renamed}, or move a helper to ${helpers}.`;
 }
