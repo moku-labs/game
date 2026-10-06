@@ -11,7 +11,9 @@ import { describe, expect, it } from "vitest";
 // the renderer, which a dev build does (07-renderer Delta 8 §2). And what the
 // package build carries: `dist/index.mjs` never names the two packages of the
 // production packer, which only `dist/assets.mjs` imports (09-assets Delta 8),
-// and `dist/testing.mjs` imports no `node:` module, which `dist/visual.mjs` does.
+// and `dist/testing.mjs` imports no `node:` module, which `dist/visual.mjs` does. `isolate` in
+// `/testing` reaches the root for `createApp`: the root is tree-shaken to the logic set, so the
+// entry still imports no `node:` module and names no Pixi.
 // ---------------------------------------------------------------------------
 
 /** The root module of the package, as a game imports it. */
@@ -168,10 +170,12 @@ describe("the draw-call counter of the renderer in a game build", () => {
  * the package and re-exports the source file, for the `"sideEffects": false` reason of
  * `doors-build.test.ts`. Vitest runs on Node, so the build runs in a Bun child process.
  *
- * @param source - The entry file under `src/`.
+ * @param source - The entry file under `src/`, or a module of one.
  * @returns The built code.
  */
-function packageBuild(source: "index.ts" | "assets.ts" | "testing.ts" | "visual.ts"): string {
+function packageBuild(
+  source: "index.ts" | "assets.ts" | "testing.ts" | "testing/isolate.ts" | "visual.ts"
+): string {
   const file = fileURLToPath(new URL(`../../src/${source}`, import.meta.url));
   const script = `
     const { mkdtempSync, rmSync } = await import("node:fs");
@@ -225,11 +229,37 @@ function nodeImports(code: string): string[] {
   return [...code.matchAll(/(?:from|import\(?)\s*"(node:[^"]+)"/g)].map(match => match[1] ?? "");
 }
 
+/**
+ * The names a built entry exports, read from its `export { … }` clauses.
+ *
+ * @param code - The built code.
+ * @returns The exported names, sorted: `isolate`, `stub` and the rest.
+ */
+function exportedNames(code: string): string[] {
+  return [...code.matchAll(/export\s*\{([^}]*)\}/g)]
+    .flatMap(match => (match[1] ?? "").split(","))
+    .map(item => item.trim().split(" as ").at(-1) ?? "")
+    .filter(name => name !== "")
+    .toSorted();
+}
+
 describe("the node modules of the testing and visual entries in the package build", () => {
   it("are imported nowhere by dist/testing.mjs: a browser test can import it", () => {
     const code = packageBuild("testing.ts");
 
-    expect(code).toContain("createHeadless");
+    expect(exportedNames(code)).toEqual(
+      expect.arrayContaining(["createHeadless", "fakeClock", "isolate", "stub"])
+    );
+    expect(nodeImports(code)).toEqual([]);
+    // `isolate` reaches the root for `createApp` only: the screen set, and Pixi with it, stays out.
+    expect(code).not.toContain("pixi.js");
+  }, 60_000);
+
+  it("are imported nowhere by the isolate module of the testing entry", () => {
+    const code = packageBuild("testing/isolate.ts");
+
+    expect(exportedNames(code)).toEqual(expect.arrayContaining(["isolate", "stub"]));
+    expect(code).toContain("createApp");
     expect(nodeImports(code)).toEqual([]);
   }, 60_000);
 

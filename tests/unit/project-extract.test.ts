@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
+import type { AliasMap } from "../../src/project/aliases";
 import { buildIndex, createCatalog, dropFile, putFile } from "../../src/project/catalog";
 import type { ProjectIndex } from "../../src/project/types";
 import { loadTypeScript, type TypeScript } from "../../src/project/typescript";
@@ -47,14 +48,34 @@ function sha1(text: string): string {
  * Index a set of in-memory files.
  *
  * @param files - Root-relative path to source text.
+ * @param aliases - The tsconfig aliases, when the game declares some.
  * @returns The index.
  */
-function indexOf(files: Record<string, string>): ProjectIndex {
+function indexOf(files: Record<string, string>, aliases?: AliasMap): ProjectIndex {
   const catalog = createCatalog(ts);
 
   for (const [path, text] of Object.entries(files)) putFile(catalog, path, Buffer.from(text));
 
-  return buildIndex(catalog, undefined);
+  return buildIndex(catalog, undefined, aliases);
+}
+
+/**
+ * The alias map of an in-memory `paths` block whose targets are already root-relative, as
+ * `readAliases` reads it from a root `tsconfig.json`.
+ *
+ * @param paths - Key to targets, one `*` at most in each.
+ * @returns The alias map.
+ */
+function aliasesOf(paths: Record<string, string[]>): AliasMap {
+  const patterns = Object.entries(paths).map(([key, targets]) => {
+    const star = key.indexOf("*");
+
+    return star === -1
+      ? { prefix: key, targets }
+      : { prefix: key.slice(0, star), suffix: key.slice(star + 1), targets };
+  });
+
+  return { file: "tsconfig.json", sources: ["tsconfig.json"], patterns };
 }
 
 /**
@@ -959,5 +980,240 @@ describe("conflicts, broken files and the revision", () => {
     expect(index.revision).toBe(sha1(lines));
     expect(index.schemaVersion).toBe(1);
     expect(Object.isFrozen(index.symbols)).toBe(true);
+  });
+});
+
+/**
+ * The root flow of a v15 game, naming the node `homeNode` through one import.
+ *
+ * @param specifier - The module the node is imported from.
+ * @returns The source of `game.ts`.
+ */
+function mainFlowOf(specifier: string): string {
+  return `import { defineFlow } from "@core/kit";
+import { homeNode } from "${specifier}";
+
+export const mainFlow = defineFlow("main", { nodes: { home: homeNode }, start: "home", edges: {} });
+`;
+}
+
+describe("tsconfig aliases", () => {
+  /** The v15 aliases, targets root-relative. */
+  const v15 = aliasesOf({
+    "@core/*": ["core/*"],
+    "@shared": ["shared/index.ts"],
+    "@shared/rules": ["shared/rules/index.ts"],
+    "@features": ["features/index.ts"],
+    "@features/*": ["features/*/index.ts"],
+    "@plugins": ["plugins/index.ts"],
+    "@generated/*": ["generated/*"],
+    "@tests/*": ["tests/*"]
+  });
+
+  /** A node declared in a feature folder, from the kit at `core/kit.ts`. */
+  const HOME_NODE = `import { defineNode } from "@core/kit";
+
+export const homeNode = defineNode({ outcomes: {} });
+`;
+
+  it("takes the definers of a kit at core/kit.ts imported as @core/kit", () => {
+    const files = {
+      "core/kit.ts": KIT,
+      "features/home/flow/home.ts": HOME_NODE,
+      "features/home/index.ts": `import { defineFeature, defineFlow, defineTextStyles, projection } from "@core/kit";
+import { homeNode } from "./flow/home";
+
+export const homeFeature = defineFeature("home", {});
+export const homeFlow = defineFlow("home", { nodes: { home: homeNode }, start: "home", edges: {} });
+export const homeScreen = projection({ name: "home.screen", layer: "ui" });
+export const styles = defineTextStyles({ "ui.body": { size: 12 } });
+`
+    };
+    const index = indexOf(files, v15);
+
+    expect(Object.keys(index.symbols)).toEqual([
+      "feature:home",
+      "flow:home",
+      "node:home/home",
+      "projection:home.screen",
+      "textStyle:ui.body"
+    ]);
+    expect(index.unresolved).toEqual([]);
+    expect(Object.keys(indexOf(files).symbols)).toEqual([]);
+  });
+
+  it("follows a node through the door of a feature to its declaration, the table its use", () => {
+    const index = indexOf(
+      {
+        "core/kit.ts": KIT,
+        "game.ts": mainFlowOf("@features/home"),
+        "features/home/index.ts": `export { homeNode } from "./flow/home";\n`,
+        "features/home/flow/home.ts": HOME_NODE
+      },
+      v15
+    );
+
+    expect(index.symbols["node:main/home"]).toEqual({
+      def: [{ path: "features/home/flow/home.ts", binding: "homeNode" }],
+      uses: [{ path: "game.ts", binding: "mainFlow", key: "home" }]
+    });
+    expect(index.unresolved).toEqual([]);
+  });
+
+  it("maps a deep @features spelling to the index.ts of its folder, and names the alias that reaches no file", () => {
+    const deep = mainFlowOf("@features/home/flow/home");
+    const found = indexOf(
+      {
+        "core/kit.ts": KIT,
+        "game.ts": deep,
+        "features/home/flow/home/index.ts": HOME_NODE
+      },
+      v15
+    );
+    const missed = indexOf(
+      { "core/kit.ts": KIT, "game.ts": deep, "features/home/flow/home.ts": HOME_NODE },
+      v15
+    );
+
+    expect(found.symbols["node:main/home"]?.def).toEqual([
+      { path: "features/home/flow/home/index.ts", binding: "homeNode" }
+    ]);
+    expect(missed.symbols["node:main/home"]?.def).toEqual([
+      { path: "game.ts", binding: "mainFlow", key: "home" }
+    ]);
+    expect(missed.unresolved).toEqual([
+      {
+        path: "game.ts",
+        reason:
+          'node "main/home": "homeNode" is imported from "@features/home/flow/home", which names no file of the root'
+      }
+    ]);
+  });
+
+  it("prefers an exact key over a `*` key, then the longest prefix", () => {
+    const index = indexOf(
+      {
+        "kit.ts": KIT,
+        "game.ts": `import { defineFlow } from "./kit";
+import { pick } from "@shared/rules";
+import { panel } from "@shared/views";
+import { tiny } from "@sx";
+
+export const mainFlow = defineFlow("main", { nodes: { pick, panel, tiny }, start: "pick", edges: {} });
+`,
+        "shared/rules/main.ts": "export const pick = 1;\n",
+        "shared/rules/index.ts": "export const pick = 2;\n",
+        "shared/views/index.ts": "export const panel = 1;\n",
+        "s/hared/views.ts": "export const panel = 2;\n",
+        "s/x.ts": "export const tiny = 1;\n"
+      },
+      aliasesOf({
+        "@s*": ["s/*.ts"],
+        "@shared/*": ["shared/*/index.ts"],
+        "@shared/rules": ["shared/rules/main.ts"]
+      })
+    );
+
+    expect(index.symbols["node:main/pick"]?.def).toEqual([
+      { path: "shared/rules/main.ts", binding: "pick" }
+    ]);
+    expect(index.symbols["node:main/panel"]?.def).toEqual([
+      { path: "shared/views/index.ts", binding: "panel" }
+    ]);
+    expect(index.symbols["node:main/tiny"]?.def).toEqual([{ path: "s/x.ts", binding: "tiny" }]);
+  });
+
+  it("keeps the engine a package when the paths map it: its definers count, its names are not followed", () => {
+    const index = indexOf(
+      {
+        "engine/index.ts": "export const defineScene = () => ({});\n",
+        "engine/testing.ts": "export const isolate = 1;\n",
+        "home.ts": `import { defineScene } from "@moku-labs/game";
+
+export const homeScene = defineScene("home", {});
+`,
+        "flows/test.ts": `import { defineFlow } from "@moku-labs/game";
+import { isolate } from "@moku-labs/game/testing";
+
+export const testFlow = defineFlow("test", { nodes: { isolate }, start: "isolate", edges: {} });
+`
+      },
+      aliasesOf({
+        "@moku-labs/game": ["engine/index.ts"],
+        "@moku-labs/game/*": ["engine/*.ts"]
+      })
+    );
+
+    expect(index.symbols["scene:home"]?.def).toEqual([{ path: "home.ts", binding: "homeScene" }]);
+    expect(index.symbols["node:test/isolate"]?.def).toEqual([
+      { path: "flows/test.ts", binding: "testFlow", key: "isolate" }
+    ]);
+    expect(index.unresolved).toEqual([
+      {
+        path: "flows/test.ts",
+        reason: 'node "test/isolate": "isolate" is not declared in a file of the root'
+      }
+    ]);
+  });
+
+  it("follows a namespace import, a re-export and a star export written as aliases", () => {
+    const index = indexOf(
+      {
+        "core/kit.ts": KIT,
+        "features/home/index.ts": `import * as kit from "@core/kit";
+
+export const homeScene = kit.defineScene("home", {});
+export const homeNode = kit.defineNode({ outcomes: {} });
+`,
+        "features/info/index.ts": HOME_NODE.replaceAll("homeNode", "infoNode"),
+        "features/index.ts": `export { homeNode } from "@features/home";
+export * from "@features/info";
+`,
+        "game.ts": `import { defineFlow } from "@core/kit";
+import { homeNode, infoNode } from "@features";
+
+export const mainFlow = defineFlow("main", { nodes: { home: homeNode, info: infoNode }, start: "home", edges: {} });
+`
+      },
+      v15
+    );
+
+    expect(index.symbols["scene:home"]?.def).toEqual([
+      { path: "features/home/index.ts", binding: "homeScene" }
+    ]);
+    expect(index.symbols["node:main/home"]?.def).toEqual([
+      { path: "features/home/index.ts", binding: "homeNode" }
+    ]);
+    expect(index.symbols["node:main/info"]?.def).toEqual([
+      { path: "features/info/index.ts", binding: "infoNode" }
+    ]);
+    expect(index.unresolved).toEqual([]);
+  });
+
+  it("names the tsconfig in the index, and re-reads the files whose definers an alias change moved", () => {
+    const catalog = createCatalog(ts);
+    const scene = `import { defineScene } from "@core/kit";\n\nexport const s = defineScene("home", {});\n`;
+
+    putFile(catalog, "core/kit.ts", Buffer.from(KIT));
+    putFile(catalog, "scene.ts", Buffer.from(scene));
+
+    const aliased = buildIndex(catalog, undefined, v15);
+
+    expect(aliased.tsconfig).toBe("tsconfig.json");
+    expect(Object.keys(aliased.symbols)).toEqual(["scene:home"]);
+
+    const plain = buildIndex(catalog, "manifest.json", undefined);
+
+    expect(plain.tsconfig).toBeUndefined();
+    expect(Object.keys(plain)).toEqual([
+      "schemaVersion",
+      "revision",
+      "manifest",
+      "symbols",
+      "files",
+      "unresolved"
+    ]);
+    expect(plain.symbols).toEqual({});
+    expect(Object.keys(buildIndex(catalog, undefined, v15).symbols)).toEqual(["scene:home"]);
   });
 });

@@ -16,6 +16,8 @@ bun add -d typescript
 
 It is loaded by a dynamic import on the first `openProject`. Without it `openProject` rejects with `[game] The project index needs the "typescript" package.`
 
+A game that imports through tsconfig `paths`, as the v15 layout does with `@core/kit` and `@features/home`, needs nothing more: the index reads `tsconfig.json` at the root. See [Aliases](#aliases).
+
 ## The API
 
 ```ts
@@ -45,14 +47,14 @@ project.close();
 
 | Member | What it does |
 |---|---|
-| `openProject({ root, manifest?, debounceMs? })` | Checks the root, loads TypeScript, parses every source file, builds the index. Rejects when the root is missing or not a directory, naming the path |
+| `openProject({ root, manifest?, tsconfig?, debounceMs? })` | Checks the root, loads TypeScript, reads the tsconfig aliases, parses every source file, builds the index. Rejects when the root is missing or not a directory, when the manifest or the tsconfig path leaves the root, and when the tsconfig does not parse, naming the path |
 | `index` | The current index. Frozen. A watch batch or `changed` replaces it |
 | `find(key)` | The places of a key, with lines read from disk now. `[]` for an unknown key |
 | `watch(onIndex)` | Calls back once per batch that changed the index, with `(index, change)`. Returns the stop function |
-| `changed(path)` | Re-indexes one root-relative path now and resolves with the new index. Does not call the watch callers |
+| `changed(path)` | Re-indexes one root-relative path now and resolves with the new index. The tsconfig, or a file it extends, reads the aliases again. Does not call the watch callers |
 | `close()` | Stops the watcher and drops every caller. `find` and `changed` keep working; `watch` throws |
 
-The root is always explicit: `root` or `--root`. Nothing is inferred from the working directory. The manifest defaults to `manifest.json` at the root, the asset scanner's default; `index.manifest` is set only when that file exists.
+The root is always explicit: `root` or `--root`. Nothing is inferred from the working directory. The manifest defaults to `manifest.json` at the root, the asset scanner's default; `index.manifest` is set only when that file exists. The tsconfig defaults to `tsconfig.json` at the root; `index.tsconfig` is set only when that file exists and holds `paths`.
 
 ## The index
 
@@ -61,6 +63,7 @@ type ProjectIndex = {
   schemaVersion: 1;
   revision: string;          // sha1 hex over the sorted lines `${path}\0${hash}\n`
   manifest?: string;         // root-relative, when the file exists
+  tsconfig?: string;         // root-relative, when the file exists and holds `paths`
   symbols: Record<string, { def: Anchor[]; uses?: Anchor[]; conflict?: true }>;
   files: Record<string, { hash: string; state: "ok" | "broken"; error?: string }>;
   unresolved: { path: string; reason: string }[];
@@ -100,12 +103,31 @@ The examples are keys of the engine's own fixture, `tests/fixtures/mini-game/`, 
 
 - **Definers are recognised by binding.** The names destructured from `defineGame()` in the kit are the definers, under any local name an importer gives them. The definers imported from `@moku-labs/game` directly count too. A call whose callee is not a definer binding is not a definition.
 - **Nothing is guessed.** A definer with a non-literal id goes to `unresolved` with the reason, for example `defineFlow id is not a string literal`.
-- **Nodes.** Every entry of a `nodes` table is a key, as `Object.entries(flow.nodes)` lists it at run time: a node, a sub-flow and a slot alike. A plain name is followed through relative imports, re-exports and barrels to the file that declares it, and the flow table is its use. A slot or an inline node is anchored at the table. A name that cannot be followed is anchored at the table and listed as unresolved.
+- **Nodes.** Every entry of a `nodes` table is a key, as `Object.entries(flow.nodes)` lists it at run time: a node, a sub-flow and a slot alike. A plain name is followed through relative imports, tsconfig `paths`, re-exports and barrels to the file that declares it, and the flow table is its use. A slot or an inline node is anchored at the table. A name that cannot be followed is anchored at the table and listed as unresolved; when it is imported through an alias that names no file, the reason names that alias.
 - **Style factories.** A `defineStyle` call that is not the value of a module-level const is keyed by the module-level function it sits in, at any depth: inner arrows and callbacks count. Several calls in one function share one key and one anchor `{ path, binding: "<function>" }`; a call under an object property gets `key: "<property>"` and its own key. A call in a class, in an object const (`const table = { disc: defineStyle(…) }`) or at module scope outside any function stays `unresolved`.
 - **Components.** A plain upper-case function of a `.ts` file, a SCREAMING_CASE constant and a lower-case function are not components. A `defineComponent` key takes the literal id and is bound to its const: `const Foo = defineComponent("Bar", …)` makes `component:Bar` with `binding: "Foo"`.
 - **Uses.** A node's `uses` is the flow table that names it. A style's `uses` are the files that import its binding. A component's `uses` are the files that render its binding, `<Foo …>` or `<ui.Foo …>` (the last segment of a member tag counts), one `{ path, binding }` per file, sorted by path. One level, no transitive closure.
 - **Conflict.** A key other than `jsx:` defined twice sets `conflict: true` and keeps both anchors: two components of one name in two files are a conflict. `jsx:` keys repeat across files by design.
 - **Files.** `**/*.{ts,tsx}` under the root, without `node_modules`, `dist`, `generated`, `.moku`, `.git`, `__tests__`, `tests` and `*.{test,spec}.{ts,tsx}`. Symlinks are not followed.
+
+## Aliases
+
+The index follows an import through the `compilerOptions.paths` of the game's tsconfig, as TypeScript does. A v15 game reaches its kit as `@core/kit`, a feature as `@features/home` and the shared layer as `@shared`; every definer, node, feature and text style behind those imports is in the index.
+
+- **Which file.** `tsconfig.json` at the root, or the root-relative path of `tsconfig` / `--tsconfig`. A path that leaves the root is refused by name. A missing file, or one without `paths`, means no aliases: every import that is not relative is a package, as before.
+- **How it is read.** TypeScript parses the file, comments and trailing commas included, and merges its `extends` chain. A file that does not parse rejects `openProject` with `[game] The tsconfig "tsconfig.json" does not parse: tsconfig.json:3:1 '}' expected.`
+- **Where targets point.** Against `baseUrl` when it is set, else against the folder of the tsconfig, which is the root for `tsconfig.json`. A `paths` block declared by an extended config resolves there too, where TypeScript would take the folder of that config. A target outside the root never names an indexed file.
+- **Matching.** A key without `*` that equals the specifier wins. Else the `*` key with the longest prefix, its `*` filled into each target. Each target is tried as written, then with `.ts`, `.tsx`, `/index.ts` and `/index.tsx`; the first file the index holds wins. A key or a target with two `*` is ignored, as in TypeScript.
+- **The engine stays a package.** `@moku-labs/game` and its subpaths are never matched, even when `paths` maps them, so its definers keep counting.
+
+```jsonc
+// tests/fixtures/layout-game/tsconfig.json, three of its eight keys
+"paths": {
+  "@core/*": ["./core/*"],                       // @core/kit      -> core/kit.ts
+  "@shared": ["./shared/index.ts"],              // @shared        -> shared/index.ts
+  "@features/*": ["./features/*/index.ts"]       // @features/home -> features/home/index.ts
+}
+```
 
 ## JSX keys
 
@@ -147,6 +169,7 @@ A key that holds `*` or a prop hole such as `{id}` itself is looked up exactly.
 6. **Broken files keep their keys.** A file whose parse has errors keeps its last good entries. `files[path]` becomes `{ state: "broken", error: "<path>:<line>:<col> <message>" }`, and `find` on its keys answers from the last good parse with `broken: true`. A file broken from its first parse has no entries and one `unresolved` item.
 7. **Paths stay inside the root.** Paths in and out are root-relative POSIX. Every read resolves against the real root with `realpath`. A path that leaves the root, by `..`, as an absolute path or by a symlink, is refused with an error naming it.
 8. **In process.** No worker, no persisted file, no network. One update runs at a time.
+9. **A tsconfig change rebuilds.** A batch also checks the stamps of the tsconfig and of every file it extends inside the root. When one moved, appeared or vanished, the aliases are read again; when names now follow them elsewhere, the index is rebuilt and `change.files` lists the tsconfig. A comment or a save with the same `paths` changes nothing. While the tsconfig does not parse, the last good aliases stay and the source files keep updating. `changed("tsconfig.json")` does the same for a caller with its own file watcher.
 
 ```ts
 type ProjectChange = {
@@ -179,18 +202,26 @@ moku-game-index --root tests/fixtures/mini-game where jsx:infoPanelSpark
 moku-game-index --root tests/fixtures/mini-game --json
 moku-game-index --root tests/fixtures/mini-game --check
 #   › 21 files, 35 keys: 0 broken, 0 in conflict, 0 unresolved.
+moku-game-index --root tests/fixtures/layout-game --check
+#   › 16 files, 12 keys: 0 broken, 0 in conflict, 0 unresolved.
+#   › aliases: tsconfig.json, 8 patterns
+moku-game-index --root tests/fixtures/layout-game where node:main/home
+# features/home/flow/home.ts:3
 ```
 
 | Command | Prints | Exit |
 |---|---|---|
 | `--json` | The index, pretty, 2 spaces | 0 |
 | `where <key>` | One `<path>:<line>` per place, ` (broken)` for a last good parse | 1 and a message for an unknown key |
-| `--check` | A summary, every broken file and conflict as an error, every unresolved item as info | 1 on a broken file or a conflict; unresolved items never fail |
+| `--check` | A summary, the aliases line, every broken file and conflict as an error, every unresolved item as info | 1 on a broken file or a conflict; unresolved items never fail |
 
-- `--root <dir>` is required. `--manifest <path>` is root-relative.
+- `--root <dir>` is required. `--manifest <path>` and `--tsconfig <path>` are root-relative.
+- The aliases line of `--check` names the tsconfig and how many keys of `paths` it holds: `aliases: tsconfig.json, 8 patterns`. A tsconfig without `paths` prints `aliases: none (no tsconfig paths)`; a root without a tsconfig prints no line.
 - Output goes through the branded console of `@moku-labs/common/cli`.
 - The same CLI runs from source: `bun src/project.ts --root <dir> where <key>`.
 
 ## Cost on the mini game
 
 21 files. A full `openProject`, the TypeScript load included, takes about 120 ms. `find` on an unchanged file takes under 2 ms. `tests/integration/project-mini-game.test.ts` logs both and holds them under 5000 ms and 200 ms, loose on purpose for a slow CI box. The merge game in [moku-labs/demos](https://github.com/moku-labs/demos) is a bigger game to measure on.
+
+The layout game, `tests/fixtures/layout-game/`, has 16 files and 8 aliases; reading the tsconfig adds one parse of a small JSON file, and `openProject` with the TypeScript load stays at about 120 ms.

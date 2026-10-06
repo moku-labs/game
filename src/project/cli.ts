@@ -1,13 +1,15 @@
 /**
  * @file project — the command line `moku-game-index`. It opens the project of `--root` and runs one
  * command: `--json` prints the index, `where <key>` prints one `path:line` per place, `--check`
- * reports broken files and conflicts (exit 1) and lists the unresolved items as info. Output goes
- * through the branded console of `@moku-labs/common`; `runCli` returns the exit code instead of
- * taking it.
+ * reports broken files and conflicts (exit 1), names the tsconfig aliases and lists the
+ * unresolved items as info. A run answers once and watches nothing, so it opens a session, not a
+ * handle. Output goes through the branded console of `@moku-labs/common`; `runCli` returns the
+ * exit code instead of taking it.
  */
 import { createBrandConsole } from "@moku-labs/common/cli";
-import { openProject } from "./open";
-import type { Found, IndexUi, ProjectApi, ProjectIndex, ProjectOptions } from "./types";
+import { findKey } from "./find";
+import { openSession, type Session } from "./session";
+import type { Found, IndexUi, ProjectOptions } from "./types";
 
 /** One command of the line. */
 type Command =
@@ -16,14 +18,19 @@ type Command =
   | { readonly kind: "where"; readonly key: string };
 
 /** What the flags asked for. */
-type Options = { readonly root: string; readonly manifest?: string; readonly command: Command };
+type Options = {
+  readonly root: string;
+  readonly manifest?: string;
+  readonly tsconfig?: string;
+  readonly command: Command;
+};
 
 /** The flags as they were read. */
-type Flags = { root?: string; manifest?: string; commands: Command[] };
+type Flags = { root?: string; manifest?: string; tsconfig?: string; commands: Command[] };
 
 /** The usage line under every flag error. */
 const USAGE =
-  "Run: moku-game-index --root <dir> [--manifest <path>] --json | --check | where <key>.";
+  "Run: moku-game-index --root <dir> [--manifest <path>] [--tsconfig <path>] --json | --check | where <key>.";
 
 /** Pretty JSON indent of `--json`. */
 const JSON_INDENT = 2;
@@ -102,6 +109,10 @@ function readFlag(argv: readonly string[], at: number, flags: Flags): number {
       flags.manifest = valueAfter(argv, at, "a path");
       return 2;
     }
+    case "--tsconfig": {
+      flags.tsconfig = valueAfter(argv, at, "a path");
+      return 2;
+    }
     default: {
       throw problem(`unknown option "${String(flag)}".`);
     }
@@ -112,7 +123,7 @@ function readFlag(argv: readonly string[], at: number, flags: Flags): number {
  * Reads the arguments.
  *
  * @param argv - The arguments after the script name.
- * @returns The root, the manifest and the one command.
+ * @returns The root, the manifest, the tsconfig and the one command.
  * @throws {Error} When a flag is unknown, a value is missing, `--root` is missing or the commands
  *   are not exactly one.
  */
@@ -136,7 +147,8 @@ function parseArgv(argv: readonly string[]): Options {
   return {
     root: flags.root,
     command,
-    ...(flags.manifest === undefined ? {} : { manifest: flags.manifest })
+    ...(flags.manifest === undefined ? {} : { manifest: flags.manifest }),
+    ...(flags.tsconfig === undefined ? {} : { tsconfig: flags.tsconfig })
   };
 }
 
@@ -170,14 +182,35 @@ function plural(count: number, word: string): string {
 }
 
 /**
- * The `--check` report: a summary, every broken file and conflict as an error, every unresolved
- * item as info.
+ * The line of `--check` that names the aliases: the tsconfig and how many keys of `paths` it
+ * holds, or `none` for a tsconfig without them. A root with no tsconfig gets no line.
  *
- * @param index - The index.
+ * @param session - The open project.
+ * @returns The line, or `undefined`.
+ */
+function aliasesLine(session: Session): string | undefined {
+  const { aliases } = session;
+
+  if (aliases !== undefined) {
+    return `aliases: ${aliases.file}, ${plural(aliases.patterns.length, "pattern")}`;
+  }
+
+  const hasTsconfig = session.configStamps.get(session.tsconfig) !== undefined;
+
+  return hasTsconfig ? "aliases: none (no tsconfig paths)" : undefined;
+}
+
+/**
+ * The `--check` report: a summary, the aliases, every broken file and conflict as an error, every
+ * unresolved item as info.
+ *
+ * @param session - The open project.
  * @param ui - Where the lines go.
  * @returns `1` when a file is broken or a key is in conflict, else `0`.
  */
-function printCheck(index: ProjectIndex, ui: IndexUi): number {
+function printCheck(session: Session, ui: IndexUi): number {
+  const { index } = session;
+  const aliases = aliasesLine(session);
   const files = Object.entries(index.files);
   const symbols = Object.entries(index.symbols);
   const broken = files.filter(([, file]) => file.state === "broken");
@@ -187,6 +220,8 @@ function printCheck(index: ProjectIndex, ui: IndexUi): number {
     `${plural(files.length, "file")}, ${plural(symbols.length, "key")}: ` +
       `${broken.length} broken, ${conflicts.length} in conflict, ${index.unresolved.length} unresolved.`
   );
+
+  if (aliases !== undefined) ui.info(aliases);
 
   for (const [file, entry] of broken) ui.error(`broken ${file}: ${entry.error ?? ""}`);
   for (const [key, symbol] of conflicts) {
@@ -200,19 +235,19 @@ function printCheck(index: ProjectIndex, ui: IndexUi): number {
 /**
  * The `where` answer: one line per place of the key.
  *
- * @param project - The open project.
+ * @param session - The open project.
  * @param key - The key.
  * @param root - The root as given, for the message.
  * @param ui - Where the lines go.
  * @returns `1` when the key is unknown, else `0`.
  */
 async function printWhere(
-  project: ProjectApi,
+  session: Session,
   key: string,
   root: string,
   ui: IndexUi
 ): Promise<number> {
-  const found = await project.find(key);
+  const found = await findKey(session, key);
 
   if (found.length === 0) {
     ui.error(
@@ -230,18 +265,18 @@ async function printWhere(
 /**
  * Runs the one command of the line on an open project.
  *
- * @param project - The open project.
+ * @param session - The open project.
  * @param options - What the flags asked for.
  * @param ui - Where the lines go.
  * @returns The exit code.
  */
-async function runCommand(project: ProjectApi, options: Options, ui: IndexUi): Promise<number> {
+async function runCommand(session: Session, options: Options, ui: IndexUi): Promise<number> {
   const { command } = options;
 
-  if (command.kind === "where") return printWhere(project, command.key, options.root, ui);
-  if (command.kind === "check") return printCheck(project.index, ui);
+  if (command.kind === "where") return printWhere(session, command.key, options.root, ui);
+  if (command.kind === "check") return printCheck(session, ui);
 
-  ui.line(JSON.stringify(project.index, undefined, JSON_INDENT));
+  ui.line(JSON.stringify(session.index, undefined, JSON_INDENT));
 
   return 0;
 }
@@ -269,15 +304,11 @@ export async function runCli(
     const options = parseArgv(argv);
     const projectOptions: ProjectOptions = {
       root: options.root,
-      ...(options.manifest === undefined ? {} : { manifest: options.manifest })
+      ...(options.manifest === undefined ? {} : { manifest: options.manifest }),
+      ...(options.tsconfig === undefined ? {} : { tsconfig: options.tsconfig })
     };
-    const project = await openProject(projectOptions);
 
-    try {
-      return await runCommand(project, options, ui);
-    } finally {
-      project.close();
-    }
+    return await runCommand(await openSession(projectOptions), options, ui);
   } catch (error) {
     ui.error(messageOf(error));
 

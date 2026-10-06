@@ -2,7 +2,8 @@
  * @file The project door of the engine (subpath `./project`, node and bun only): the static index
  * of a game's sources. `openProject` parses the game with TypeScript (an optional peer, loaded on
  * the first open) and maps every engine id (flows, nodes, features, scenes, projections, emitters,
- * text styles, styles and JSX keys) to anchors; `find` reads the line of a key from the file on
+ * text styles, styles and JSX keys) to anchors, following names through relative imports and the
+ * tsconfig `paths` aliases of the game; `find` reads the line of a key from the file on
  * disk at the call, `watch` keeps the index fresh while agents edit files. The package bin
  * `moku-game-index` runs `runCli`. Re-exports only: the code lives in `project/`, and this is the
  * one door to it in `src/`.

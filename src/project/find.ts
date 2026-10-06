@@ -7,7 +7,7 @@
  * its last good parse.
  */
 import type ts from "typescript";
-import { type Catalog, parseCached } from "./catalog";
+import { parseCached } from "./catalog";
 import { collectJsx, type JsxHit } from "./extract/jsx";
 import type { Definer, ModuleFacts } from "./extract/module";
 import { ANY, HOLE, hasHole, holeOf } from "./extract/pattern";
@@ -212,21 +212,21 @@ async function viewOf(session: Session, file: string): Promise<View | undefined>
 }
 
 /**
- * The definers a file can call, recognised by binding on the module facts of the catalog, as
- * extraction does.
+ * The definers a file can call, recognised by binding on the module facts of the catalog and the
+ * tsconfig aliases of the session, as extraction does.
  *
- * @param catalog - The catalog of the project.
+ * @param session - The open project.
  * @param file - The root-relative path.
  * @returns The callee text to the definer.
  */
-function definersAt(catalog: Catalog, file: string): ReadonlyMap<string, Definer> {
+function definersAt(session: Session, file: string): ReadonlyMap<string, Definer> {
   const modules = new Map<string, ModuleFacts>();
 
-  for (const [path, record] of catalog.records) {
+  for (const [path, record] of session.catalog.records) {
     if (record.good !== undefined) modules.set(path, record.good.module);
   }
 
-  return definersOf(modules, file);
+  return definersOf({ modules, aliases: session.aliases }, file);
 }
 
 /**
@@ -285,7 +285,7 @@ export async function findKey(session: Session, key: string): Promise<Found[]> {
     const places = locate(session.catalog.typescript, view.source, anchor, {
       keyKind,
       jsxHits: view.jsx,
-      definers: () => definersAt(session.catalog, anchor.path)
+      definers: () => definersAt(session, anchor.path)
     });
     const answers = places.map(
       (place): Found => ({

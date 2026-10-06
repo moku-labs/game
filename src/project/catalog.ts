@@ -5,10 +5,11 @@
  * every good file, re-extracts only the files whose bytes or reachable definers changed, and
  * assembles the result.
  */
+import type { AliasMap } from "./aliases";
 import { type Assembly, assembleIndex } from "./assemble";
 import { type Extracted, extractFile } from "./extract/definitions";
 import { type ModuleFacts, readModule } from "./extract/module";
-import { definersOf } from "./extract/resolve";
+import { definersOf, type Resolution } from "./extract/resolve";
 import { sha1 } from "./hash";
 import type { ProjectIndex } from "./types";
 import { type Parsed, parseFile, type TypeScript } from "./typescript";
@@ -131,18 +132,19 @@ export function dropFile(catalog: Catalog, path: string): boolean {
 
 /**
  * Brings the keys of every good file up to date: a file is read again when its good version or
- * the definers it reaches changed since it was last read.
+ * the definers it reaches changed since it was last read. An alias change that moves the
+ * definers of a file moves its stamp, so a tsconfig edit re-reads exactly the files it affects.
  *
  * @param catalog - The catalog.
- * @param modules - The module facts of every good file.
+ * @param resolution - The module facts of every good file, and the aliases.
  */
-function refreshExtractions(catalog: Catalog, modules: ReadonlyMap<string, ModuleFacts>): void {
+function refreshExtractions(catalog: Catalog, resolution: Resolution): void {
   for (const [path, record] of catalog.records) {
     const good = record.good;
 
     if (good === undefined) continue;
 
-    const definers = definersOf(modules, path);
+    const definers = definersOf(resolution, path);
     const signature = [...definers].map(([callee, definer]) => `${callee}=${definer}`).join(";");
     const stamp = `${good.hash}|${signature}`;
 
@@ -162,9 +164,10 @@ function refreshExtractions(catalog: Catalog, modules: ReadonlyMap<string, Modul
  *
  * @param catalog - The catalog.
  * @param manifest - The root-relative manifest path when the file exists.
+ * @param aliases - The tsconfig aliases when the game declares some.
  * @returns The index, frozen.
  */
-export function buildIndex(catalog: Catalog, manifest?: string): ProjectIndex {
+export function buildIndex(catalog: Catalog, manifest?: string, aliases?: AliasMap): ProjectIndex {
   const files = [...catalog.records].toSorted(([first], [second]) => (first < second ? -1 : 1));
   const modules = new Map<string, ModuleFacts>();
 
@@ -172,9 +175,9 @@ export function buildIndex(catalog: Catalog, manifest?: string): ProjectIndex {
     if (record.good !== undefined) modules.set(path, record.good.module);
   }
 
-  refreshExtractions(catalog, modules);
+  refreshExtractions(catalog, { modules, aliases });
 
-  const assembly: Assembly = { files, modules };
+  const assembly: Assembly = { files, modules, aliases };
 
   return assembleIndex(assembly, manifest);
 }
