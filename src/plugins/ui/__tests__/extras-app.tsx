@@ -2,9 +2,9 @@
  * @file ui plugin — the app of the `components` prop tests (Delta 8a): a test component and a
  * test tag that stand in for any game component, a screen that adds, changes and drops them, a
  * button that names components the element owns, an element that leaves with an exit motion,
- * every tag once, a popup the flow shows again with a new level, and a bound counter next to the
- * same number as content. Real flow runner, plain Bun, inert renderer, real Yoga. Nothing here
- * imports `effects`.
+ * every tag once, a popup the flow shows again with a new level, a bound counter next to the
+ * same number as content, and a plaque padded around a text of fractional width. Real flow
+ * runner, plain Bun, inert renderer, real Yoga. Nothing here imports `effects`.
  */
 import { bind, createApp, defineGame, hint, projection, type } from "../../../index";
 import { animPlugin } from "../../anim";
@@ -308,6 +308,35 @@ export const boundScreen = projection({
   view: () => <Bound key="boundCounter" />
 });
 
+/** The padding of the plaque: wide on the sides, as a title plaque pads its title. */
+export const plaquePadding = { top: 20, right: 80, bottom: 20, left: 80 } as const;
+
+/**
+ * A plaque sized by its title, centred on the screen. With no font loaded "10" in `digits`
+ * measures 38.4 wide, a fraction of a unit.
+ */
+export const Plaque = defineComponent("Plaque", {
+  view: () => (
+    <column
+      key="plaqueRoot"
+      style={{ width: 800, height: 400, align: "center", justify: "center" }}
+    >
+      <row key="plaque" style={{ padding: plaquePadding }}>
+        <text key="plaqueTitle" style="digits" content="10" />
+      </row>
+    </column>
+  )
+});
+
+/** A screen with the plaque. */
+export const plaqueScreen = projection({
+  name: "plaqueScreen",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "plaqueScreen" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => <Plaque key="plaqueBox" />
+});
+
 /** The tags of `UiIntrinsicElements` the every-tag screen writes, each once. */
 export const TAGS = [
   "screen",
@@ -487,9 +516,10 @@ export const extrasFeature = defineFeature("extras", {
     rolledScreen,
     hintScreen,
     hintViews,
-    boundScreen
+    boundScreen,
+    plaqueScreen
   ],
-  ui: [Marked, Clash, Leaving, MarkedPopup, Rolled, Bound],
+  ui: [Marked, Clash, Leaving, MarkedPopup, Rolled, Bound, Plaque],
   strings: { en: english }
 });
 

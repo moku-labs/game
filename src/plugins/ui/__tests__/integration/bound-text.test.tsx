@@ -8,8 +8,8 @@ import { type ExtrasApp, startExtrasApp, Tally } from "../extras-app";
 // ---------------------------------------------------------------------------
 // Integration: a text with `bind` is sized by the string text shows for it
 // (14-ui Delta 10 Part A, design §1). Real world, text and Yoga; plain Bun,
-// inert renderer, no font loaded: a digit of `digits` measures 19.2, which
-// Yoga rounds to whole units, so "9" is 20 wide and "10" is 40.
+// inert renderer, no font loaded: a digit of `digits` measures 19.2, and ui
+// rounds a measured text up to whole units, so "9" is 20 wide and "10" is 39.
 // ---------------------------------------------------------------------------
 
 /**
@@ -130,7 +130,7 @@ describe("a bound text sized by the string it shows", () => {
 
     expect(shown(app)).toBe("10");
     expect(counters.solves).toBe(solves + 1);
-    expect(ten.w).toBe(40);
+    expect(ten.w).toBe(39);
     expect(ten.x + ten.w / 2).toBe(nine.x + nine.w / 2);
 
     // 11 shows "11": a new string of the same width, so still one solve.

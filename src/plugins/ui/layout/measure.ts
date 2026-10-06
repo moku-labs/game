@@ -127,20 +127,30 @@ export function shownOf(element: Element, source: TextSource): string | undefine
   return value === undefined ? "" : formatBound(value, format, ms => source.duration(ms));
 }
 
+/** Below this a measured length counts as whole: the tolerance Yoga's own rounding uses. */
+const WHOLE_EPSILON = 0.0001;
+
 /**
  * The size a text or an icon takes before Yoga clamps it: an icon is square on one line of its
- * text style, a bound text measures the string it shows, any other text its content.
+ * text style, a bound text measures the string it shows, any other text its content. The size is
+ * rounded up to whole units. Yoga rounds a node with a measure function outward but sizes its
+ * parent from the unrounded length, so a fractional size would run into the parent's padding.
  *
  * @param element - The text or icon element.
  * @param source - What it is measured through.
- * @returns The width and the height.
+ * @returns The width and the height, in whole units.
  */
 function naturalSize(element: Element, source: TextSource): Size {
   const { content, style } = contentOf(element);
+  const size =
+    element.type === "icon"
+      ? squareOf(source.measure(LINE_SAMPLE, style))
+      : source.measure(shownOf(element, source) ?? content, style);
 
-  if (element.type === "icon") return squareOf(source.measure(LINE_SAMPLE, style));
-
-  return source.measure(shownOf(element, source) ?? content, style);
+  return {
+    width: Math.ceil(size.width - WHOLE_EPSILON),
+    height: Math.ceil(size.height - WHOLE_EPSILON)
+  };
 }
 
 /**
