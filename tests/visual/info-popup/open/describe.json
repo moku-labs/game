@@ -1,0 +1,736 @@
+{
+  "ui": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [],
+            "key": "infoBackdrop",
+            "local": {},
+            "rect": {
+              "h": 1440,
+              "w": 1080,
+              "x": 0,
+              "y": 0
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "alpha": 0.6,
+              "fill": 1054237,
+              "height": "100%",
+              "left": 0,
+              "position": "absolute",
+              "reason": "the backdrop dims the whole screen behind the panel",
+              "top": 0,
+              "width": "100%"
+            },
+            "type": "button"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "key": "infoPanelSpark",
+                "local": {},
+                "rect": {
+                  "h": 120,
+                  "w": 120,
+                  "x": 480,
+                  "y": 493
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {
+                  "height": 120,
+                  "width": 120
+                },
+                "type": "image"
+              },
+              {
+                "children": [],
+                "key": "infoCount",
+                "local": {},
+                "rect": {
+                  "h": 150,
+                  "w": 70,
+                  "x": 505,
+                  "y": 645
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {},
+                "type": "text"
+              },
+              {
+                "children": [],
+                "key": "infoOk",
+                "local": {},
+                "rect": {
+                  "h": 120,
+                  "w": 320,
+                  "x": 380,
+                  "y": 827
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {
+                  "fill": 15905853,
+                  "height": 120,
+                  "radius": 24,
+                  "width": 320
+                },
+                "type": "button"
+              }
+            ],
+            "key": "infoPanel",
+            "local": {},
+            "rect": {
+              "h": 550,
+              "w": 640,
+              "x": 220,
+              "y": 445
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "align": "center",
+              "direction": "column",
+              "fill": 3103291,
+              "gap": 32,
+              "padding": 48,
+              "radius": 32,
+              "width": 640
+            },
+            "type": "column"
+          }
+        ],
+        "key": "infoScreen",
+        "local": {},
+        "rect": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "state": {
+          "active": false,
+          "covered": false,
+          "disabled": false,
+          "focus": false,
+          "hover": false,
+          "pressed": false,
+          "selected": false
+        },
+        "style": {
+          "align": "center",
+          "direction": "column",
+          "height": "100%",
+          "justify": "center",
+          "width": "100%"
+        },
+        "type": "screen"
+      },
+      {
+        "children": [
+          {
+            "children": [],
+            "key": "counter",
+            "rect": {
+              "h": 150,
+              "w": 70,
+              "x": 505,
+              "y": 432
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {},
+            "type": "text"
+          },
+          {
+            "children": [],
+            "key": "note",
+            "rect": {
+              "h": 130,
+              "w": 464,
+              "x": 308,
+              "y": 630
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {},
+            "type": "text"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "key": "infoIcon",
+                "rect": {
+                  "h": 120,
+                  "w": 120,
+                  "x": 480,
+                  "y": 848
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {
+                  "height": 120,
+                  "width": 120
+                },
+                "type": "image"
+              }
+            ],
+            "key": "info",
+            "rect": {
+              "h": 200,
+              "w": 200,
+              "x": 440,
+              "y": 808
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "align": "center",
+              "fill": 15905853,
+              "height": 200,
+              "justify": "center",
+              "radius": 100,
+              "width": 200
+            },
+            "type": "button"
+          }
+        ],
+        "key": "homeScreen",
+        "rect": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "state": {
+          "active": false,
+          "covered": false,
+          "disabled": false,
+          "focus": false,
+          "hover": false,
+          "pressed": false,
+          "selected": false
+        },
+        "style": {
+          "align": "center",
+          "direction": "column",
+          "gap": 48,
+          "height": "100%",
+          "justify": "center",
+          "width": "100%"
+        },
+        "type": "screen"
+      }
+    ],
+    "rect": {
+      "h": 0,
+      "w": 0,
+      "x": 0,
+      "y": 0
+    },
+    "state": {
+      "active": false,
+      "covered": false,
+      "disabled": false,
+      "focus": false,
+      "hover": false,
+      "pressed": false,
+      "selected": false
+    },
+    "style": {},
+    "type": "screen"
+  },
+  "views": [
+    {
+      "components": {
+        "Box": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "Escapable": true,
+        "Parent": {
+          "key": "infoScreen",
+          "projection": "InfoPopup"
+        },
+        "Shape": {
+          "alpha": 0.6,
+          "clip": false,
+          "dash": 0,
+          "fill": 1054237,
+          "fillAlpha": 1,
+          "h": 1440,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 1080
+        },
+        "Tappable": {
+          "intent": "close",
+          "payload": {}
+        },
+        "Transform": {
+          "pivot": {
+            "x": 540,
+            "y": 720
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 720
+        }
+      },
+      "key": "infoBackdrop",
+      "projection": "InfoPopup"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 150,
+          "w": 70,
+          "x": 505,
+          "y": 645
+        },
+        "Parent": {
+          "key": "infoPanel",
+          "projection": "InfoPopup"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 35,
+            "y": 75
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 320,
+          "y": 275
+        }
+      },
+      "key": "infoCount",
+      "projection": "InfoPopup"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 120,
+          "w": 320,
+          "x": 380,
+          "y": 827
+        },
+        "Parent": {
+          "key": "infoPanel",
+          "projection": "InfoPopup"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 15905853,
+          "fillAlpha": 1,
+          "h": 120,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 320
+        },
+        "Tappable": {
+          "intent": "ok",
+          "payload": {}
+        },
+        "Transform": {
+          "pivot": {
+            "x": 160,
+            "y": 60
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 320,
+          "y": 442
+        }
+      },
+      "key": "infoOk",
+      "projection": "InfoPopup"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 550,
+          "w": 640,
+          "x": 220,
+          "y": 445
+        },
+        "Parent": {
+          "key": "infoScreen",
+          "projection": "InfoPopup"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 3103291,
+          "fillAlpha": 1,
+          "h": 550,
+          "kind": "rect",
+          "radius": 32,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 640
+        },
+        "Transform": {
+          "pivot": {
+            "x": 320,
+            "y": 275
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 720
+        }
+      },
+      "key": "infoPanel",
+      "projection": "InfoPopup"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 120,
+          "w": 120,
+          "x": 480,
+          "y": 493
+        },
+        "Parent": {
+          "key": "infoPanel",
+          "projection": "InfoPopup"
+        },
+        "Sprite": {
+          "alpha": 1,
+          "anchor": {
+            "x": 0,
+            "y": 0
+          },
+          "fit": "contain",
+          "height": 120,
+          "texture": "ui.fx-spark",
+          "tint": 16777215,
+          "width": 120
+        },
+        "Transform": {
+          "pivot": {
+            "x": 60,
+            "y": 60
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 320,
+          "y": 108
+        }
+      },
+      "key": "infoPanelSpark",
+      "projection": "InfoPopup"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "Layer": {
+          "name": "ui"
+        },
+        "Order": {
+          "value": 1
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16777215,
+          "fillAlpha": 0,
+          "h": 1440,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 1080
+        },
+        "Transform": {
+          "pivot": {
+            "x": 540,
+            "y": 720
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 720
+        }
+      },
+      "key": "infoScreen",
+      "projection": "InfoPopup"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 150,
+          "w": 70,
+          "x": 505,
+          "y": 432
+        },
+        "Parent": {
+          "key": "homeScreen",
+          "projection": "home.screen"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 35,
+            "y": 75
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 507
+        }
+      },
+      "key": "counter",
+      "projection": "home.screen"
+    },
+    {
+      "components": {
+        "Layer": {
+          "name": "ui"
+        }
+      },
+      "key": "home.screen",
+      "projection": "home.screen"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "Layer": {
+          "name": "ui"
+        },
+        "Order": {
+          "value": 0
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16777215,
+          "fillAlpha": 0,
+          "h": 1440,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 1080
+        },
+        "Transform": {
+          "pivot": {
+            "x": 540,
+            "y": 720
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 720
+        }
+      },
+      "key": "homeScreen",
+      "projection": "home.screen"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 200,
+          "w": 200,
+          "x": 440,
+          "y": 808
+        },
+        "Parent": {
+          "key": "homeScreen",
+          "projection": "home.screen"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 15905853,
+          "fillAlpha": 1,
+          "h": 200,
+          "kind": "rect",
+          "radius": 100,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 200
+        },
+        "Tappable": {
+          "intent": "info",
+          "payload": {}
+        },
+        "Transform": {
+          "pivot": {
+            "x": 100,
+            "y": 100
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 908
+        },
+        "effects.glow": {
+          "alpha": 1,
+          "color": 15905853,
+          "distance": 18,
+          "enabled": true,
+          "order": 0,
+          "strength": 1.8
+        }
+      },
+      "key": "info",
+      "projection": "home.screen"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 120,
+          "w": 120,
+          "x": 480,
+          "y": 848
+        },
+        "Parent": {
+          "key": "info",
+          "projection": "home.screen"
+        },
+        "Sprite": {
+          "alpha": 1,
+          "anchor": {
+            "x": 0,
+            "y": 0
+          },
+          "fit": "contain",
+          "height": 120,
+          "texture": "ui.fx-spark",
+          "tint": 16777215,
+          "width": 120
+        },
+        "Transform": {
+          "pivot": {
+            "x": 60,
+            "y": 60
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 100,
+          "y": 100
+        }
+      },
+      "key": "infoIcon",
+      "projection": "home.screen"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 130,
+          "w": 464,
+          "x": 308,
+          "y": 630
+        },
+        "Parent": {
+          "key": "homeScreen",
+          "projection": "home.screen"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 232,
+            "y": 65
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 695
+        }
+      },
+      "key": "note",
+      "projection": "home.screen"
+    }
+  ]
+}

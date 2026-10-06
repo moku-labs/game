@@ -514,8 +514,8 @@ Two subpaths, neither on the root (V4). An editor, MCP tools and e2e scripts rea
 ```ts
 import { openProject } from "@moku-labs/game/project";
 
-const project = await openProject({ root: "tests/integration/merge-game" });
-(await project.find("node:board/merge"))[0]?.line; // 17, in "nodes/merge.ts"
+const project = await openProject({ root: "tests/fixtures/mini-game" });
+(await project.find("node:infoPopup/count"))[0]?.line; // 7, in "nodes/count.ts"
 const stop = project.watch((index, change) => refresh(index.revision, change.moved));
 stop();
 project.close();
@@ -603,4 +603,4 @@ src/
 tests/            headless scenarios with createHeadless and walk
 ```
 
-This is the layout of the worked example in the engine repository: `tests/integration/merge-game/` with `kit.ts`, `state.ts`, `tables.ts`, `rules/`, `nodes/`, `flows/`, `game.ts`. It is an internal test fixture written on the public API only. It is not in the npm package. Its scenario is `tests/integration/template-merge.test.ts`. A game with a screen adds `features/<name>/view.tsx` (projections and components), `features/<name>/animations.ts`, `features/<name>/strings/<locale>.json` and the `generated/` folder `bun run assets:keys` writes. Each plugin has a README: `src/plugins/<name>/README.md` for `time`, `lifecycle`, `model`, `clock`, `flow`, `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`, `audio`, `effects`, `platform`. Moku Core specification: https://github.com/moku-labs/core/tree/main/specification
+This is the layout of the worked example, the merge game in moku-labs/demos (https://github.com/moku-labs/demos): `kit.ts`, `state.ts`, `tables.ts`, `rules/`, `nodes/`, `flows/`, `game.ts`, written on the public API only, with its e2e and visual tests. The engine repository keeps a smaller fixture, `tests/fixtures/mini-game/`, which is not in the npm package. A game with a screen adds `features/<name>/view.tsx` (projections and components), `features/<name>/animations.ts`, `features/<name>/strings/<locale>.json` and the `generated/` folder `bun run assets:keys` writes. Each plugin has a README: `src/plugins/<name>/README.md` for `time`, `lifecycle`, `model`, `clock`, `flow`, `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`, `audio`, `effects`, `platform`. Moku Core specification: https://github.com/moku-labs/core/tree/main/specification

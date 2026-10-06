@@ -7,7 +7,7 @@
       "bin/**",
       "*.config.ts",
       "!tests/visual/**/*.json",
-      "!tests/integration/merge-game/dist"
+      "!tests/fixtures/mini-game/dist"
     ]
   },
   "formatter": {

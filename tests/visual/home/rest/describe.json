@@ -3,12 +3,12 @@
     "children": [
       {
         "children": [],
-        "key": "homeBackground",
+        "key": "counter",
         "rect": {
-          "h": 1440,
-          "w": 1080,
-          "x": 0,
-          "y": 0
+          "h": 150,
+          "w": 70,
+          "x": 505,
+          "y": 432
         },
         "state": {
           "active": false,
@@ -19,24 +19,17 @@
           "pressed": false,
           "selected": false
         },
-        "style": {
-          "height": "100%",
-          "left": 0,
-          "position": "absolute",
-          "reason": "the background covers the whole screen, the safe area included (design §5.1)",
-          "top": 0,
-          "width": "100%"
-        },
-        "type": "image"
+        "style": {},
+        "type": "text"
       },
       {
         "children": [],
-        "key": "homeBarRoom",
+        "key": "note",
         "rect": {
-          "h": 144,
-          "w": 0,
-          "x": 540,
-          "y": 50
+          "h": 130,
+          "w": 464,
+          "x": 308,
+          "y": 630
         },
         "state": {
           "active": false,
@@ -47,409 +40,19 @@
           "pressed": false,
           "selected": false
         },
-        "style": {
-          "height": 144,
-          "margin": {
-            "top": 50
-          }
-        },
-        "type": "spacer"
+        "style": {},
+        "type": "text"
       },
       {
         "children": [
           {
-            "children": [
-              {
-                "children": [
-                  {
-                    "children": [],
-                    "key": "homeLogoRopeLeft",
-                    "rect": {
-                      "h": 916,
-                      "w": 18,
-                      "x": 303,
-                      "y": -927
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 916,
-                      "left": 213,
-                      "position": "absolute",
-                      "reason": "the ropes hang the sign from above the top of the screen (design §6 A1)",
-                      "top": -900,
-                      "width": 18
-                    },
-                    "type": "image"
-                  },
-                  {
-                    "children": [],
-                    "key": "homeLogoRopeRight",
-                    "rect": {
-                      "h": 916,
-                      "w": 18,
-                      "x": 759,
-                      "y": -927
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 916,
-                      "position": "absolute",
-                      "reason": "the ropes hang the sign from above the top of the screen (design §6 A1)",
-                      "right": 213,
-                      "top": -900,
-                      "width": 18
-                    },
-                    "type": "image"
-                  },
-                  {
-                    "children": [],
-                    "key": "homeLogoName",
-                    "rect": {
-                      "h": 308,
-                      "w": 564,
-                      "x": 258,
-                      "y": 33
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {},
-                    "type": "text"
-                  },
-                  {
-                    "children": [],
-                    "key": "homeLogoSprigTop",
-                    "rect": {
-                      "h": 195,
-                      "w": 180,
-                      "x": 866,
-                      "y": -75
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 195,
-                      "position": "absolute",
-                      "reason": "the sprig is pinned over the corner of the sign",
-                      "right": -56,
-                      "top": -48,
-                      "width": 180
-                    },
-                    "type": "image"
-                  },
-                  {
-                    "children": [],
-                    "key": "homeLogoSprigBottom",
-                    "rect": {
-                      "h": 195,
-                      "w": 180,
-                      "x": -6,
-                      "y": 322
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "bottom": -104,
-                      "height": 195,
-                      "left": -96,
-                      "position": "absolute",
-                      "reason": "the sprig is pinned over the corner of the sign",
-                      "width": 180
-                    },
-                    "type": "image"
-                  }
-                ],
-                "key": "homeLogo",
-                "rect": {
-                  "h": 440,
-                  "w": 900,
-                  "x": 90,
-                  "y": -27
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "align": "center",
-                  "height": 440,
-                  "justify": "center",
-                  "nineSlice": "ui.panel-signboard",
-                  "padding": {
-                    "bottom": 72,
-                    "left": 72,
-                    "right": 72,
-                    "top": 60
-                  },
-                  "tint": 8151118,
-                  "width": 900
-                },
-                "type": "column"
-              },
-              {
-                "children": [],
-                "key": "homeYard",
-                "rect": {
-                  "h": 924,
-                  "w": 960,
-                  "x": 60,
-                  "y": 443
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "height": 924,
-                  "width": 960
-                },
-                "type": "image"
-              },
-              {
-                "children": [
-                  {
-                    "children": [],
-                    "key": "playPostLeft",
-                    "rect": {
-                      "h": 330,
-                      "w": 48,
-                      "x": 240,
-                      "y": 1437
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 330,
-                      "left": 140,
-                      "position": "absolute",
-                      "reason": "the posts stand behind the Play sign and reach below it (design §6 A2)",
-                      "top": 40,
-                      "width": 48
-                    },
-                    "type": "image"
-                  },
-                  {
-                    "children": [],
-                    "key": "playPostRight",
-                    "rect": {
-                      "h": 330,
-                      "w": 48,
-                      "x": 792,
-                      "y": 1437
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 330,
-                      "position": "absolute",
-                      "reason": "the posts stand behind the Play sign and reach below it (design §6 A2)",
-                      "right": 140,
-                      "top": 40,
-                      "width": 48
-                    },
-                    "type": "image"
-                  },
-                  {
-                    "children": [
-                      {
-                        "children": [],
-                        "key": "playLabel",
-                        "rect": {
-                          "h": 132,
-                          "w": 404,
-                          "x": 338,
-                          "y": 1441
-                        },
-                        "state": {
-                          "active": false,
-                          "covered": false,
-                          "disabled": false,
-                          "focus": false,
-                          "hover": false,
-                          "pressed": false,
-                          "selected": false
-                        },
-                        "style": {},
-                        "type": "text"
-                      }
-                    ],
-                    "key": "play",
-                    "rect": {
-                      "h": 220,
-                      "w": 880,
-                      "x": 100,
-                      "y": 1397
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "align": "center",
-                      "direction": "row",
-                      "height": 220,
-                      "justify": "center",
-                      "left": 0,
-                      "nineSlice": "ui.button-green",
-                      "position": "absolute",
-                      "reason": "the plank lies over its two posts",
-                      "top": 0,
-                      "width": 880
-                    },
-                    "type": "button"
-                  },
-                  {
-                    "children": [],
-                    "key": "playSprigLeft",
-                    "rect": {
-                      "h": 184,
-                      "w": 170,
-                      "x": 38,
-                      "y": 1357
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 184,
-                      "left": -62,
-                      "position": "absolute",
-                      "reason": "the sprig is pinned over the end of the sign",
-                      "top": -40,
-                      "width": 170
-                    },
-                    "type": "image"
-                  },
-                  {
-                    "children": [],
-                    "key": "playSprigRight",
-                    "rect": {
-                      "h": 184,
-                      "w": 170,
-                      "x": 876,
-                      "y": 1503
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "bottom": -70,
-                      "height": 184,
-                      "position": "absolute",
-                      "reason": "the sprig is pinned over the end of the sign",
-                      "right": -66,
-                      "width": 170
-                    },
-                    "type": "image"
-                  }
-                ],
-                "key": "playSign",
-                "rect": {
-                  "h": 220,
-                  "w": 880,
-                  "x": 100,
-                  "y": 1397
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "height": 220,
-                  "width": 880
-                },
-                "type": "stack"
-              }
-            ],
-            "fitScale": 0.7311435523114356,
-            "key": "homeCentre",
+            "children": [],
+            "key": "infoIcon",
             "rect": {
-              "h": 1644,
-              "w": 1000,
-              "x": 40,
-              "y": -27
+              "h": 120,
+              "w": 120,
+              "x": 480,
+              "y": 848
             },
             "state": {
               "active": false,
@@ -461,22 +64,18 @@
               "selected": false
             },
             "style": {
-              "align": "center",
-              "direction": "column",
-              "fit": "contain",
-              "gap": 30,
-              "height": 1644,
-              "width": 1000
+              "height": 120,
+              "width": 120
             },
-            "type": "column"
+            "type": "image"
           }
         ],
-        "key": "homeMiddle",
+        "key": "info",
         "rect": {
-          "h": 1202,
-          "w": 1080,
-          "x": 0,
-          "y": 194
+          "h": 200,
+          "w": 200,
+          "x": 440,
+          "y": 808
         },
         "state": {
           "active": false,
@@ -489,391 +88,13 @@
         },
         "style": {
           "align": "center",
-          "alignSelf": "stretch",
-          "grow": 1,
+          "fill": 15905853,
+          "height": 200,
           "justify": "center",
-          "margin": {
-            "bottom": 44
-          }
+          "radius": 100,
+          "width": 200
         },
-        "type": "column"
-      },
-      {
-        "children": [
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "children": [],
-                    "key": "homeCoinsIcon",
-                    "rect": {
-                      "h": 110,
-                      "w": 110,
-                      "x": 48,
-                      "y": 67
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 110,
-                      "left": -36,
-                      "position": "absolute",
-                      "reason": "the icon of a HUD pill is bigger than the bar and hangs over its left end (design §6 B1)",
-                      "top": -17,
-                      "width": 110
-                    },
-                    "type": "icon"
-                  },
-                  {
-                    "children": [],
-                    "key": "homeCoinsText",
-                    "rect": {
-                      "h": 72,
-                      "w": 112,
-                      "x": 203,
-                      "y": 86
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {},
-                    "type": "text"
-                  }
-                ],
-                "key": "homeCoins",
-                "rect": {
-                  "h": 76,
-                  "w": 290,
-                  "x": 84,
-                  "y": 84
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "align": "center",
-                  "direction": "row",
-                  "height": 76,
-                  "justify": "center",
-                  "margin": {
-                    "left": 36
-                  },
-                  "nineSlice": "ui.hud-pill",
-                  "padding": {
-                    "left": 84,
-                    "right": 24
-                  },
-                  "width": 290
-                },
-                "type": "row"
-              },
-              {
-                "children": [
-                  {
-                    "children": [],
-                    "key": "homeSettingsIcon",
-                    "rect": {
-                      "h": 79,
-                      "w": 79,
-                      "x": 937,
-                      "y": 83
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "height": 79,
-                      "width": 79
-                    },
-                    "type": "icon"
-                  }
-                ],
-                "key": "homeSettings",
-                "rect": {
-                  "h": 120,
-                  "w": 120,
-                  "x": 916,
-                  "y": 62
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "align": "center",
-                  "fill": 14196834,
-                  "height": 120,
-                  "justify": "center",
-                  "radius": 60,
-                  "stroke": 3809810,
-                  "strokeWidth": 6,
-                  "width": 120
-                },
-                "type": "button"
-              }
-            ],
-            "key": "homeBar",
-            "rect": {
-              "h": 144,
-              "w": 1080,
-              "x": 0,
-              "y": 50
-            },
-            "state": {
-              "active": false,
-              "covered": false,
-              "disabled": false,
-              "focus": false,
-              "hover": false,
-              "pressed": false,
-              "selected": false
-            },
-            "style": {
-              "align": "center",
-              "alignSelf": "stretch",
-              "direction": "row",
-              "height": 144,
-              "justify": "between",
-              "margin": {
-                "top": 50
-              },
-              "padding": {
-                "left": 48,
-                "right": 44
-              }
-            },
-            "type": "row"
-          },
-          {
-            "children": [
-              {
-                "children": [
-                  {
-                    "children": [
-                      {
-                        "children": [],
-                        "key": "giftIcon",
-                        "rect": {
-                          "h": 86,
-                          "w": 86,
-                          "x": 933,
-                          "y": 240
-                        },
-                        "state": {
-                          "active": false,
-                          "covered": false,
-                          "disabled": false,
-                          "focus": false,
-                          "hover": false,
-                          "pressed": false,
-                          "selected": false
-                        },
-                        "style": {
-                          "height": 86,
-                          "width": 86
-                        },
-                        "type": "icon"
-                      },
-                      {
-                        "children": [
-                          {
-                            "children": [],
-                            "key": "giftBadgeCount",
-                            "rect": {
-                              "h": 42,
-                              "w": 18,
-                              "x": 1012,
-                              "y": 217
-                            },
-                            "state": {
-                              "active": false,
-                              "covered": false,
-                              "disabled": false,
-                              "focus": false,
-                              "hover": false,
-                              "pressed": false,
-                              "selected": false
-                            },
-                            "style": {},
-                            "type": "text"
-                          }
-                        ],
-                        "key": "giftBadge",
-                        "rect": {
-                          "h": 52,
-                          "w": 52,
-                          "x": 995,
-                          "y": 212
-                        },
-                        "state": {
-                          "active": false,
-                          "covered": false,
-                          "disabled": false,
-                          "focus": false,
-                          "hover": false,
-                          "pressed": false,
-                          "selected": false
-                        },
-                        "style": {
-                          "align": "center",
-                          "fill": 13187917,
-                          "height": 52,
-                          "justify": "center",
-                          "position": "absolute",
-                          "radius": 26,
-                          "reason": "the count sits on the rim of the button, over its corner",
-                          "right": -6,
-                          "stroke": 3809810,
-                          "strokeWidth": 4,
-                          "top": -6,
-                          "width": 52
-                        },
-                        "type": "stack"
-                      }
-                    ],
-                    "key": "gift",
-                    "rect": {
-                      "h": 130,
-                      "w": 130,
-                      "x": 911,
-                      "y": 218
-                    },
-                    "state": {
-                      "active": false,
-                      "covered": false,
-                      "disabled": false,
-                      "focus": false,
-                      "hover": false,
-                      "pressed": false,
-                      "selected": false
-                    },
-                    "style": {
-                      "align": "center",
-                      "fill": 14196834,
-                      "height": 130,
-                      "justify": "center",
-                      "radius": 65,
-                      "stroke": 3809810,
-                      "strokeWidth": 6,
-                      "width": 130
-                    },
-                    "type": "button"
-                  }
-                ],
-                "key": "giftWobble",
-                "rect": {
-                  "h": 130,
-                  "w": 130,
-                  "x": 911,
-                  "y": 218
-                },
-                "state": {
-                  "active": false,
-                  "covered": false,
-                  "disabled": false,
-                  "focus": false,
-                  "hover": false,
-                  "pressed": false,
-                  "selected": false
-                },
-                "style": {
-                  "height": 130,
-                  "width": 130
-                },
-                "type": "stack"
-              }
-            ],
-            "key": "giftCorner",
-            "rect": {
-              "h": 130,
-              "w": 130,
-              "x": 911,
-              "y": 218
-            },
-            "state": {
-              "active": false,
-              "covered": false,
-              "disabled": false,
-              "focus": false,
-              "hover": false,
-              "pressed": false,
-              "selected": false
-            },
-            "style": {
-              "align": "center",
-              "alignSelf": "end",
-              "direction": "column",
-              "margin": {
-                "right": 39,
-                "top": 24
-              }
-            },
-            "type": "column"
-          }
-        ],
-        "key": "homeTop",
-        "rect": {
-          "h": 1440,
-          "w": 1080,
-          "x": 0,
-          "y": 0
-        },
-        "state": {
-          "active": false,
-          "covered": false,
-          "disabled": false,
-          "focus": false,
-          "hover": false,
-          "pressed": false,
-          "selected": false
-        },
-        "style": {
-          "direction": "column",
-          "height": "100%",
-          "left": 0,
-          "padding": {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0
-          },
-          "position": "absolute",
-          "reason": "the bar is drawn over the ropes of the logo sign, which hang from the screen top",
-          "top": 0,
-          "width": "100%"
-        },
-        "type": "column"
+        "type": "button"
       }
     ],
     "key": "homeScreen",
@@ -895,13 +116,9 @@
     "style": {
       "align": "center",
       "direction": "column",
+      "gap": 48,
       "height": "100%",
-      "padding": {
-        "bottom": 0,
-        "left": 0,
-        "right": 0,
-        "top": 0
-      },
+      "justify": "center",
       "width": "100%"
     },
     "type": "screen"
@@ -910,225 +127,27 @@
     {
       "components": {
         "Box": {
-          "h": 130,
-          "w": 130,
-          "x": 911,
-          "y": 218
+          "h": 150,
+          "w": 70,
+          "x": 505,
+          "y": 432
         },
         "Parent": {
-          "key": "giftWobble",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 14196834,
-          "fillAlpha": 1,
-          "h": 130,
-          "kind": "rect",
-          "radius": 65,
-          "stroke": 3809810,
-          "strokeWidth": 6,
-          "w": 130
-        },
-        "Tappable": {
-          "intent": "gift",
-          "payload": {}
-        },
-        "Transform": {
-          "pivot": {
-            "x": 65,
-            "y": 65
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 65,
-          "y": 65
-        }
-      },
-      "key": "gift",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 52,
-          "w": 52,
-          "x": 995,
-          "y": 212
-        },
-        "Parent": {
-          "key": "gift",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 13187917,
-          "fillAlpha": 1,
-          "h": 52,
-          "kind": "rect",
-          "radius": 26,
-          "stroke": 3809810,
-          "strokeWidth": 4,
-          "w": 52
-        },
-        "Transform": {
-          "pivot": {
-            "x": 26,
-            "y": 26
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 110,
-          "y": 20
-        }
-      },
-      "key": "giftBadge",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 42,
-          "w": 18,
-          "x": 1012,
-          "y": 217
-        },
-        "Parent": {
-          "key": "giftBadge",
+          "key": "homeScreen",
           "projection": "home.screen"
         },
         "Transform": {
           "pivot": {
-            "x": 9,
-            "y": 21
+            "x": 35,
+            "y": 75
           },
           "rotation": 0,
           "scale": 1,
-          "x": 26,
-          "y": 26
+          "x": 540,
+          "y": 507
         }
       },
-      "key": "giftBadgeCount",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 130,
-          "w": 130,
-          "x": 911,
-          "y": 218
-        },
-        "Parent": {
-          "key": "homeTop",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 130,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 130
-        },
-        "Transform": {
-          "pivot": {
-            "x": 65,
-            "y": 65
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 976,
-          "y": 283
-        }
-      },
-      "key": "giftCorner",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 86,
-          "w": 86,
-          "x": 933,
-          "y": 240
-        },
-        "Parent": {
-          "key": "gift",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 86,
-          "texture": "ui.icon-gift",
-          "tint": 16777215,
-          "width": 86
-        },
-        "Transform": {
-          "pivot": {
-            "x": 43,
-            "y": 43
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 65,
-          "y": 65
-        }
-      },
-      "key": "giftIcon",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 130,
-          "w": 130,
-          "x": 911,
-          "y": 218
-        },
-        "Parent": {
-          "key": "giftCorner",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 130,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 130
-        },
-        "Transform": {
-          "pivot": {
-            "x": 65,
-            "y": 65
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 65,
-          "y": 65
-        }
-      },
-      "key": "giftWobble",
+      "key": "counter",
       "projection": "home.screen"
     },
     {
@@ -1138,530 +157,6 @@
         }
       },
       "key": "home.screen",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 1440,
-          "w": 1080,
-          "x": 0,
-          "y": 0
-        },
-        "Parent": {
-          "key": "homeScreen",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "cover",
-          "height": 1440,
-          "texture": "board.bg-forest-meadow",
-          "tint": 16777215,
-          "width": 1080
-        },
-        "Transform": {
-          "pivot": {
-            "x": 540,
-            "y": 720
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 540,
-          "y": 720
-        }
-      },
-      "key": "homeBackground",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 144,
-          "w": 1080,
-          "x": 0,
-          "y": 50
-        },
-        "Parent": {
-          "key": "homeTop",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 144,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 1080
-        },
-        "Transform": {
-          "pivot": {
-            "x": 540,
-            "y": 72
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 540,
-          "y": 122
-        }
-      },
-      "key": "homeBar",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 144,
-          "w": 0,
-          "x": 540,
-          "y": 50
-        },
-        "Parent": {
-          "key": "homeScreen",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 144,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 0
-        },
-        "Transform": {
-          "pivot": {
-            "x": 0,
-            "y": 72
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 540,
-          "y": 122
-        }
-      },
-      "key": "homeBarRoom",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 1644,
-          "w": 1000,
-          "x": 40,
-          "y": -27
-        },
-        "Parent": {
-          "key": "homeMiddle",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 1644,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 1000
-        },
-        "Transform": {
-          "pivot": {
-            "x": 500,
-            "y": 822
-          },
-          "rotation": 0,
-          "scale": 0.7311435523114356,
-          "x": 540,
-          "y": 601
-        }
-      },
-      "key": "homeCentre",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 76,
-          "w": 290,
-          "x": 84,
-          "y": 84
-        },
-        "NineSlice": {
-          "alpha": 1,
-          "clip": false,
-          "debug": false,
-          "height": 76,
-          "texture": "ui.hud-pill",
-          "tint": 16777215,
-          "width": 290
-        },
-        "Parent": {
-          "key": "homeBar",
-          "projection": "home.screen"
-        },
-        "Transform": {
-          "pivot": {
-            "x": 145,
-            "y": 38
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 229,
-          "y": 72
-        }
-      },
-      "key": "homeCoins",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 110,
-          "w": 110,
-          "x": 48,
-          "y": 67
-        },
-        "Parent": {
-          "key": "homeCoins",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 110,
-          "texture": "ui.icon-coin",
-          "tint": 16777215,
-          "width": 110
-        },
-        "Transform": {
-          "pivot": {
-            "x": 55,
-            "y": 55
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 19,
-          "y": 38
-        }
-      },
-      "key": "homeCoinsIcon",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 72,
-          "w": 112,
-          "x": 203,
-          "y": 86
-        },
-        "Counter": {
-          "value": 125
-        },
-        "Parent": {
-          "key": "homeCoins",
-          "projection": "home.screen"
-        },
-        "Text": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "bind": {
-            "component": "Counter",
-            "field": "value",
-            "format": "int"
-          },
-          "content": "",
-          "resolved": "125",
-          "style": "ui.number"
-        },
-        "Transform": {
-          "pivot": {
-            "x": 56,
-            "y": 36
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 175,
-          "y": 38
-        }
-      },
-      "key": "homeCoinsText",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 440,
-          "w": 900,
-          "x": 90,
-          "y": -27
-        },
-        "NineSlice": {
-          "alpha": 1,
-          "clip": false,
-          "debug": false,
-          "height": 440,
-          "texture": "ui.panel-signboard",
-          "tint": 8151118,
-          "width": 900
-        },
-        "Parent": {
-          "key": "homeCentre",
-          "projection": "home.screen"
-        },
-        "Transform": {
-          "pivot": {
-            "x": 450,
-            "y": 220
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 500,
-          "y": 220
-        }
-      },
-      "key": "homeLogo",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 308,
-          "w": 564,
-          "x": 258,
-          "y": 33
-        },
-        "Parent": {
-          "key": "homeLogo",
-          "projection": "home.screen"
-        },
-        "Transform": {
-          "pivot": {
-            "x": 282,
-            "y": 154
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 450,
-          "y": 214
-        }
-      },
-      "key": "homeLogoName",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 916,
-          "w": 18,
-          "x": 303,
-          "y": -927
-        },
-        "Parent": {
-          "key": "homeLogo",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "fill",
-          "height": 916,
-          "texture": "ui.rope-vertical",
-          "tint": 16777215,
-          "width": 18
-        },
-        "Transform": {
-          "pivot": {
-            "x": 9,
-            "y": 458
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 222,
-          "y": -442
-        }
-      },
-      "key": "homeLogoRopeLeft",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 916,
-          "w": 18,
-          "x": 759,
-          "y": -927
-        },
-        "Parent": {
-          "key": "homeLogo",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "fill",
-          "height": 916,
-          "texture": "ui.rope-vertical",
-          "tint": 16777215,
-          "width": 18
-        },
-        "Transform": {
-          "pivot": {
-            "x": 9,
-            "y": 458
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 678,
-          "y": -442
-        }
-      },
-      "key": "homeLogoRopeRight",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 195,
-          "w": 180,
-          "x": -6,
-          "y": 322
-        },
-        "Parent": {
-          "key": "homeLogo",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 195,
-          "texture": "ui.decor-sprig",
-          "tint": 16777215,
-          "width": 180
-        },
-        "Transform": {
-          "pivot": {
-            "x": 90,
-            "y": 97.5
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": -6,
-          "y": 446.5
-        }
-      },
-      "key": "homeLogoSprigBottom",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 195,
-          "w": 180,
-          "x": 866,
-          "y": -75
-        },
-        "Parent": {
-          "key": "homeLogo",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 195,
-          "texture": "ui.decor-sprig",
-          "tint": 16777215,
-          "width": 180
-        },
-        "Transform": {
-          "pivot": {
-            "x": 90,
-            "y": 97.5
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 866,
-          "y": 49.5
-        }
-      },
-      "key": "homeLogoSprigTop",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 1202,
-          "w": 1080,
-          "x": 0,
-          "y": 194
-        },
-        "Parent": {
-          "key": "homeScreen",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 1202,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 1080
-        },
-        "Transform": {
-          "pivot": {
-            "x": 540,
-            "y": 601
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 540,
-          "y": 795
-        }
-      },
-      "key": "homeMiddle",
       "projection": "home.screen"
     },
     {
@@ -1708,91 +203,10 @@
     {
       "components": {
         "Box": {
-          "h": 120,
-          "w": 120,
-          "x": 916,
-          "y": 62
-        },
-        "Parent": {
-          "key": "homeBar",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 14196834,
-          "fillAlpha": 1,
-          "h": 120,
-          "kind": "rect",
-          "radius": 60,
-          "stroke": 3809810,
-          "strokeWidth": 6,
-          "w": 120
-        },
-        "Tappable": {
-          "intent": "openSettings",
-          "payload": {}
-        },
-        "Transform": {
-          "pivot": {
-            "x": 60,
-            "y": 60
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 976,
-          "y": 72
-        }
-      },
-      "key": "homeSettings",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 79,
-          "w": 79,
-          "x": 937,
-          "y": 83
-        },
-        "Parent": {
-          "key": "homeSettings",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 79,
-          "texture": "ui.icon-gear",
-          "tint": 16777215,
-          "width": 79
-        },
-        "Transform": {
-          "pivot": {
-            "x": 39.5,
-            "y": 39.5
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 60.5,
-          "y": 60.5
-        }
-      },
-      "key": "homeSettingsIcon",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 1440,
-          "w": 1080,
-          "x": 0,
-          "y": 0
+          "h": 200,
+          "w": 200,
+          "x": 440,
+          "y": 808
         },
         "Parent": {
           "key": "homeScreen",
@@ -1802,101 +216,28 @@
           "alpha": 1,
           "clip": false,
           "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 1440,
+          "fill": 15905853,
+          "fillAlpha": 1,
+          "h": 200,
           "kind": "rect",
-          "radius": 0,
+          "radius": 100,
           "stroke": 0,
           "strokeWidth": 0,
-          "w": 1080
-        },
-        "Transform": {
-          "pivot": {
-            "x": 540,
-            "y": 720
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 540,
-          "y": 720
-        }
-      },
-      "key": "homeTop",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 924,
-          "w": 960,
-          "x": 60,
-          "y": 443
-        },
-        "Parent": {
-          "key": "homeCentre",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 924,
-          "texture": "home.home-yard",
-          "tint": 16777215,
-          "width": 960
-        },
-        "Transform": {
-          "pivot": {
-            "x": 480,
-            "y": 462
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 500,
-          "y": 932
-        }
-      },
-      "key": "homeYard",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 220,
-          "w": 880,
-          "x": 100,
-          "y": 1397
-        },
-        "NineSlice": {
-          "alpha": 1,
-          "clip": false,
-          "debug": false,
-          "height": 220,
-          "texture": "ui.button-green",
-          "tint": 16777215,
-          "width": 880
-        },
-        "Parent": {
-          "key": "playSign",
-          "projection": "home.screen"
+          "w": 200
         },
         "Tappable": {
-          "intent": "play",
+          "intent": "info",
           "payload": {}
         },
         "Transform": {
           "pivot": {
-            "x": 440,
-            "y": 110
+            "x": 100,
+            "y": 100
           },
           "rotation": 0,
           "scale": 1,
-          "x": 440,
-          "y": 110
+          "x": 540,
+          "y": 908
         },
         "effects.glow": {
           "alpha": 1,
@@ -1907,45 +248,19 @@
           "strength": 1.8
         }
       },
-      "key": "play",
+      "key": "info",
       "projection": "home.screen"
     },
     {
       "components": {
         "Box": {
-          "h": 132,
-          "w": 404,
-          "x": 338,
-          "y": 1441
+          "h": 120,
+          "w": 120,
+          "x": 480,
+          "y": 848
         },
         "Parent": {
-          "key": "play",
-          "projection": "home.screen"
-        },
-        "Transform": {
-          "pivot": {
-            "x": 202,
-            "y": 66
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 440,
-          "y": 110
-        }
-      },
-      "key": "playLabel",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 330,
-          "w": 48,
-          "x": 240,
-          "y": 1437
-        },
-        "Parent": {
-          "key": "playSign",
+          "key": "info",
           "projection": "home.screen"
         },
         "Sprite": {
@@ -1954,177 +269,50 @@
             "x": 0,
             "y": 0
           },
-          "fit": "cover",
-          "height": 330,
-          "texture": "home.sign-post",
+          "fit": "contain",
+          "height": 120,
+          "texture": "ui.fx-spark",
           "tint": 16777215,
-          "width": 48
+          "width": 120
         },
         "Transform": {
           "pivot": {
-            "x": 24,
-            "y": 165
+            "x": 60,
+            "y": 60
           },
           "rotation": 0,
           "scale": 1,
-          "x": 164,
-          "y": 205
-        }
-      },
-      "key": "playPostLeft",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 330,
-          "w": 48,
-          "x": 792,
-          "y": 1437
-        },
-        "Parent": {
-          "key": "playSign",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "cover",
-          "height": 330,
-          "texture": "home.sign-post",
-          "tint": 16777215,
-          "width": 48
-        },
-        "Transform": {
-          "pivot": {
-            "x": 24,
-            "y": 165
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 716,
-          "y": 205
-        }
-      },
-      "key": "playPostRight",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 220,
-          "w": 880,
           "x": 100,
-          "y": 1397
-        },
-        "Parent": {
-          "key": "homeCentre",
-          "projection": "home.screen"
-        },
-        "Shape": {
-          "alpha": 1,
-          "clip": false,
-          "dash": 0,
-          "fill": 16777215,
-          "fillAlpha": 0,
-          "h": 220,
-          "kind": "rect",
-          "radius": 0,
-          "stroke": 0,
-          "strokeWidth": 0,
-          "w": 880
-        },
-        "Transform": {
-          "pivot": {
-            "x": 440,
-            "y": 110
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 500,
-          "y": 1534
+          "y": 100
         }
       },
-      "key": "playSign",
+      "key": "infoIcon",
       "projection": "home.screen"
     },
     {
       "components": {
         "Box": {
-          "h": 184,
-          "w": 170,
-          "x": 38,
-          "y": 1357
+          "h": 130,
+          "w": 464,
+          "x": 308,
+          "y": 630
         },
         "Parent": {
-          "key": "playSign",
+          "key": "homeScreen",
           "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 184,
-          "texture": "ui.decor-sprig",
-          "tint": 16777215,
-          "width": 170
         },
         "Transform": {
           "pivot": {
-            "x": 85,
-            "y": 92
+            "x": 232,
+            "y": 65
           },
           "rotation": 0,
           "scale": 1,
-          "x": 23,
-          "y": 52
+          "x": 540,
+          "y": 695
         }
       },
-      "key": "playSprigLeft",
-      "projection": "home.screen"
-    },
-    {
-      "components": {
-        "Box": {
-          "h": 184,
-          "w": 170,
-          "x": 876,
-          "y": 1503
-        },
-        "Parent": {
-          "key": "playSign",
-          "projection": "home.screen"
-        },
-        "Sprite": {
-          "alpha": 1,
-          "anchor": {
-            "x": 0,
-            "y": 0
-          },
-          "fit": "contain",
-          "height": 184,
-          "texture": "ui.decor-sprig",
-          "tint": 16777215,
-          "width": 170
-        },
-        "Transform": {
-          "pivot": {
-            "x": 85,
-            "y": 92
-          },
-          "rotation": 0,
-          "scale": 1,
-          "x": 861,
-          "y": 198
-        }
-      },
-      "key": "playSprigRight",
+      "key": "note",
       "projection": "home.screen"
     }
   ]

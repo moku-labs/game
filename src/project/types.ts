@@ -13,8 +13,8 @@
  *
  * @example
  * ```ts
- * // The editor opens the fixture game with the default manifest and a slower debounce.
- * const options: ProjectOptions = { root: "tests/integration/merge-game", debounceMs: 120 };
+ * // The editor opens the mini game with the default manifest and a slower debounce.
+ * const options: ProjectOptions = { root: "tests/fixtures/mini-game", debounceMs: 120 };
  * ```
  */
 export type ProjectOptions = {
@@ -33,7 +33,7 @@ export type ProjectOptions = {
  *
  * @example
  * ```ts
- * const kind: JsxKind = "idProp"; // id="settingsBoard" on <Signboard>
+ * const kind: JsxKind = "idProp"; // id="infoPanel" on <Panel>
  * ```
  */
 export type JsxKind = "literal" | "template" | "idProp" | "ident";
@@ -44,8 +44,8 @@ export type JsxKind = "literal" | "template" | "idProp" | "ident";
  *
  * @example
  * ```ts
- * // node:board/merge, defined by the const `merge` of nodes/merge.ts.
- * const anchor: Anchor = { path: "nodes/merge.ts", binding: "merge" };
+ * // node:infoPopup/count, defined by the const `count` of nodes/count.ts.
+ * const anchor: Anchor = { path: "nodes/count.ts", binding: "count" };
  * ```
  */
 export type Anchor = {
@@ -77,8 +77,8 @@ export type Anchor = {
  *
  * @example
  * ```ts
- * index.symbols["flow:board"]; // { def: [{ path: "flows/board.ts", binding: "boardFlow" }] }
- * index.files["nodes/merge.ts"]?.state; // "ok"
+ * index.symbols["flow:infoPopup"]; // { def: [{ path: "flows/info.ts", binding: "infoFlow" }] }
+ * index.files["nodes/count.ts"]?.state; // "ok"
  * ```
  */
 export type ProjectIndex = {
@@ -105,9 +105,9 @@ export type ProjectIndex = {
  *
  * @example
  * ```ts
- * // An agent moved nodes/toast.ts to nodes/board/toast.ts and fixed the import of the board flow.
- * change.files; // ["flows/board.ts", "nodes/board/toast.ts", "nodes/toast.ts"]
- * change.moved; // [{ key: "node:board/toast", from: "nodes/toast.ts", to: "nodes/board/toast.ts" }]
+ * // An agent moved nodes/count.ts to nodes/info/count.ts and fixed the import of the info flow.
+ * change.files; // ["flows/info.ts", "nodes/count.ts", "nodes/info/count.ts"]
+ * change.moved; // [{ key: "node:infoPopup/count", from: "nodes/count.ts", to: "nodes/info/count.ts" }]
  * change.removed; // []
  * ```
  */
@@ -130,9 +130,9 @@ export type ProjectChange = {
  *
  * @example
  * ```ts
- * // The editor opens the Home scene of the fixture game.
+ * // The editor opens the Home scene of the mini game.
  * const [found] = await project.find("scene:home");
- * [found?.path, found?.line, found?.range]; // ["features/home/scene.ts", 8, [8, 1, 13, 4]]
+ * [found?.path, found?.line, found?.range]; // ["features/home/scene.ts", 8, [8, 1, 12, 4]]
  * ```
  */
 export type Found = Anchor & {
@@ -157,7 +157,7 @@ export type ProjectApi = {
    * @example
    * ```ts
    * // The editor checks a node file before it opens it.
-   * project.index.files["nodes/merge.ts"]?.state; // "ok"
+   * project.index.files["nodes/count.ts"]?.state; // "ok"
    * ```
    */
   readonly index: ProjectIndex;
@@ -170,14 +170,14 @@ export type ProjectApi = {
    * with a literal prop of the same name on their component (both the pattern and the prop come
    * back), then `*` patterns. An unknown key answers `[]`.
    *
-   * @param key - An engine id: `node:board/merge`, `flow:board`, `textStyle:ui.title`, `jsx:card2Picture`.
+   * @param key - An engine id: `node:infoPopup/count`, `flow:main`, `textStyle:ui.counter`, `jsx:infoPanelSpark`.
    * @returns One entry per place, in the order above; `broken` when the file does not parse now.
    * @example
    * ```ts
-   * // The editor jumps to the node the flow view clicked, and to the X of the settings board.
-   * (await project.find("node:board/merge"))[0]?.line; // 17, in "nodes/merge.ts"
-   * (await project.find("jsx:settingsBoardClose")).map(found => `${found.path}:${found.line}`);
-   * // ["features/ui/kit.tsx:844", "features/settings/settings.tsx:290"]
+   * // The editor jumps to the node the flow view clicked, and to the spark of the info panel.
+   * (await project.find("node:infoPopup/count"))[0]?.line; // 7, in "nodes/count.ts"
+   * (await project.find("jsx:infoPanelSpark")).map(found => `${found.path}:${found.line}`);
+   * // ["features/info/popup.tsx:65", "features/info/popup.tsx:79"]
    * ```
    */
   find(key: string): Promise<Found[]>;
@@ -213,9 +213,9 @@ export type ProjectApi = {
    * @throws {Error} When the path leaves the root, by `..` or by a symlink.
    * @example
    * ```ts
-   * // The editor saved nodes/merge.ts through its own file layer.
-   * const index = await project.changed("nodes/merge.ts");
-   * index.files["nodes/merge.ts"]?.state; // "ok"
+   * // The editor saved nodes/count.ts through its own file layer.
+   * const index = await project.changed("nodes/count.ts");
+   * index.files["nodes/count.ts"]?.state; // "ok"
    * ```
    */
   changed(path: string): Promise<ProjectIndex>;

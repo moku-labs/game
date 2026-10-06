@@ -1,23 +1,11 @@
 /**
- * @file Every visual test of the fixture game, in the order a run plays them. The headless leg
- * runs them in `bun run test` (`tests/integration/visual-headless.test.ts`); both legs run with
- * `bun run fixture:visual` (`run.ts`). The baselines live next to them: `<test>/<checkpoint>/`.
+ * @file Every visual test of the mini game, in the order a run plays them. The headless leg runs
+ * them in `bun run test` (`tests/integration/visual-headless.test.ts`); both legs run with
+ * `bun run mini:visual` (`run.ts`). The baselines live next to them: `<test>/<checkpoint>/`, the
+ * headless files only.
  */
 import type { VisualTest } from "@moku-labs/game/visual";
-import { boardMerge } from "./board-merge.visual";
-import { giftPopup } from "./gift-popup.visual";
 import { home } from "./home.visual";
-import { leavePopup } from "./leave-popup.visual";
-import { renamePopup } from "./rename-popup.visual";
-import { rewardPopup } from "./reward-popup.visual";
-import { settings } from "./settings.visual";
+import { infoPopup } from "./info-popup.visual";
 
-export const fixtureVisualTests: readonly VisualTest[] = [
-  home,
-  boardMerge,
-  rewardPopup,
-  renamePopup,
-  giftPopup,
-  settings,
-  leavePopup
-];
+export const miniVisualTests: readonly VisualTest[] = [home, infoPopup];

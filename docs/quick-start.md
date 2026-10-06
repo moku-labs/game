@@ -131,7 +131,7 @@ In a live game the same answer comes from the screen: `app.flow.gate.answer({ in
 > Types reach a game through one namespace per plugin: `import type { Flow, Model, Clock, Lifecycle, Time } from "@moku-labs/game"`, then `Flow.RouteStep`, `Model.PlayerStateProvider`, `Time.Phase`. The screen and interface plugins follow the same rule: `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`, `Effects`, `Platform`. `Text` is the component, so its type namespace is `TextTypes`.
 
 > [!TIP]
-> A larger worked example lives in [`tests/integration/merge-game/`](../tests/integration/merge-game). It is a small game written on the public API only, with sub-flows, a slot, a feature and timers. It is an internal test fixture and is not published. Its scenario is [`tests/integration/template-merge.test.ts`](../tests/integration/template-merge.test.ts).
+> A larger worked example is the merge game in [moku-labs/demos](https://github.com/moku-labs/demos). It is written on the public API only, with sub-flows, a slot, features, timers and its own e2e and visual tests. The engine keeps a small fixture of its own, [`tests/fixtures/mini-game/`](../tests/fixtures/mini-game): one rest node, one popup flow and two features. It is not published.
 
 ## A screen: the body font and the asset keys
 

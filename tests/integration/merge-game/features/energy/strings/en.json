@@ -1,9 +1,0 @@
-{
-  "energy.title": "Out of energy",
-  "energy.refill": "Refills in {time, duration, short}",
-  "energy.watch": {
-    "text": "Watch & refill",
-    "note": "Plank button, two lines, max 9 chars per line"
-  },
-  "energy.later": "Later"
-}

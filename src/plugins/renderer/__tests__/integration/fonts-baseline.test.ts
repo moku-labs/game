@@ -4,11 +4,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import type { PixiModule, PixiTexture } from "../../types";
 import { createMockRenderer } from "../mock-renderer";
 
-// The fixture's display font, read as it ships: BMFont XML, MSDF, size 48, lineHeight 57, base 45.
-const FONT_KEY = "ui.font-display";
+// The mini game's body font, read as it ships: BMFont XML, MSDF, size 44, lineHeight 55, base 41.
+const FONT_KEY = "ui.font-body";
 const fnt = readFileSync(
   new URL(
-    "../../../../../tests/integration/merge-game/features/ui/assets/font-display.fnt",
+    "../../../../../tests/fixtures/mini-game/features/ui/assets/font-body.fnt",
     import.meta.url
   ),
   "utf8"
@@ -18,7 +18,7 @@ const fnt = readFileSync(
 function header(pattern: RegExp): number[] {
   const match = pattern.exec(fnt);
 
-  if (match === null) throw new Error(`font-display.fnt has no ${String(pattern)}`);
+  if (match === null) throw new Error(`font-body.fnt has no ${String(pattern)}`);
 
   return match.slice(1).map(Number);
 }
@@ -26,6 +26,14 @@ function header(pattern: RegExp): number[] {
 const [fontSize = 0] = header(/<info[^>]*\ssize="(\d+)"/);
 const [lineHeight = 0] = header(/<common[^>]*\slineHeight="(\d+)"/);
 const [padTop = 0, , padBottom = 0] = header(/<info[^>]*\spadding="(\d+),(\d+),(\d+),(\d+)"/);
+// The capital И as the font draws it: its quad from `yoffset` below the line top, `height` tall.
+const [capitalHeight = 0, capitalTop = 0] = header(
+  /<char id="1048"[^>]*\sheight="(\d+)"[^>]*\syoffset="(-?\d+)"/
+);
+// Where the ink of И sits in the line box: its centre less the centre of the box, in font units.
+// Pangolin leaves more room under its capitals than over them, so the band sits 2 units high.
+const capitalOffset =
+  (capitalTop + padTop + (capitalTop + capitalHeight - padBottom)) / 2 - lineHeight / 2;
 
 const ENTITIES: Readonly<Record<string, string>> = {
   "&amp;": "&",
@@ -132,9 +140,11 @@ afterEach(() => {
 
 describe("renderer fonts: the baseline of a real BMFont", () => {
   it.each([
-    { style: "ui.button", size: 54 },
-    { style: "ui.title", size: 64 }
-  ])("centres the capital band of $style in its text box within 1 u", async ({ size }) => {
+    { style: "ui.note", size: 52 },
+    { style: "ui.counter", size: 120 }
+  ])("draws the capital band of $style where the .fnt puts it in its text box, within 1 u", async ({
+    size
+  }) => {
     const mock = createMockRenderer({
       config: { loadPixi: () => Promise.resolve(withRealFonts(mock.pixi.module)) }
     });
@@ -158,7 +168,10 @@ describe("renderer fonts: the baseline of a real BMFont", () => {
     const bandTop = capital.top + padTop * scale;
     const bandBottom = capital.bottom - padBottom * scale;
 
-    expect(Math.abs((bandTop + bandBottom) / 2 - box / 2)).toBeLessThanOrEqual(1);
+    // Drawn from the line top: a glyph drawn lineHeight - base low would miss by 14 units at 44.
+    expect(
+      Math.abs((bandTop + bandBottom) / 2 - box / 2 - capitalOffset * scale)
+    ).toBeLessThanOrEqual(1);
 
     mock.stop();
     label.destroy();

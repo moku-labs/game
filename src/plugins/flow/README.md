@@ -65,7 +65,7 @@ trailing `?` is optional. The command reads its input already typed:
 
 ```ts
 export const jumpToLevel = defineCommand({
-  id: "timber.jumpToLevel",
+  id: "mini.jumpToLevel",
   title: "Go to level",
   input: { level: "number" },
   effect: "route",

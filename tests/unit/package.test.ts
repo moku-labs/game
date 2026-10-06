@@ -6,7 +6,7 @@ import { sources } from "../../src/plugins/flow/doors/sources";
 // ---------------------------------------------------------------------------
 // Unit test: what npm ships beside `dist`. The agent guide, the body font
 // with its licence and the asset scanner bin are in the package, and the
-// shipped font cannot drift from the fixture game's copy.
+// shipped font cannot drift from the mini game's copy.
 // ---------------------------------------------------------------------------
 
 /** The fields of `package.json` this test reads. */
@@ -26,8 +26,8 @@ interface PackageJson {
 /** The repository root, the folder of `package.json`. */
 const ROOT = new URL("../../", import.meta.url);
 
-/** The fixture game's body font is the source; `fonts/` ships a byte copy, and this file keeps the two equal. */
-const FIXTURE_FONTS = new URL("tests/integration/merge-game/features/ui/assets/", ROOT);
+/** The mini game's body font and `fonts/` are byte copies; this file keeps the two equal. */
+const FIXTURE_FONTS = new URL("tests/fixtures/mini-game/features/ui/assets/", ROOT);
 
 /**
  * Read a file of the repository as bytes.

@@ -23,7 +23,7 @@ export type {
 // eslint-disable-next-line unicorn/prefer-export-from -- the script block below needs the local binding
 export { runCli };
 
-// Run as a script: `bun src/project.ts --root tests/integration/merge-game where node:board/merge`
+// Run as a script: `bun src/project.ts --root tests/fixtures/mini-game where node:infoPopup/count`
 // or the built `dist/project.mjs`.
 if (import.meta.main) {
   process.exitCode = await runCli(process.argv.slice(2));

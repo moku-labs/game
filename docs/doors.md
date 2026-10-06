@@ -167,7 +167,7 @@ await Bun.build({
 });
 ```
 
-**Or set the global** in a module the dev entry imports before the engine. The fixture page does this in [`tests/integration/merge-game/web/dev.ts`](../tests/integration/merge-game/web/dev.ts):
+**Or set the global** in a module the dev entry imports before the engine. The fixture page does this in [`tests/fixtures/mini-game/web/dev.ts`](../tests/fixtures/mini-game/web/dev.ts):
 
 ```ts
 // web/dev.ts, the first import of web/main.ts
