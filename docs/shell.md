@@ -322,7 +322,7 @@ Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>
 |---|---|---|---|
 | `--root <dir>` | every | `.` | The game folder, against the cwd |
 | `--preload <path>` | every | none | A file Bun preloads. Repeats |
-| `--serve-plugin <path>` | `dev`, `build`, `native` | none | A Bun plugin the page bundles with, after the hot plugin. Repeats |
+| `--serve-plugin <path>` | `dev`, `build`, `native`, `visual` | none | A Bun plugin the page bundles with, after the hot plugin. Repeats |
 | `--port <n>` | `dev` | `3000` | An integer 0-65535. `0` takes a free port |
 | `--packed` | `dev` | off | Serves `<game>/dist/assets` instead of the raw files |
 | `--out <dir>` | `build` | `<game>/dist/web` | The output folder, replaced by the run |
@@ -379,7 +379,8 @@ export default { app: { app: fixtureApp }, tests: [rewardPopup] };
 
 - The flags of the runner are read by `parseVisualArgv`: `--update`, `--only`, `--no-pixels`, `--pixels`, `--webgl`, `--dir`.
 - The baselines live in `tests/visual/baselines/<test>/<checkpoint>/`.
-- The pixel leg runs on a Mac only, unless `--pixels` or `--no-pixels` says otherwise. When it runs without `--url`, the command writes its own page into `.moku/visual/`: `index.html`, `dev.ts`, `main.ts` and `bunfig.toml`, which reach the game from two folders up. The page of `dev` and of the editor in `.moku/` stays as it is, so `visual` runs while either serves the game. The command serves its page in its own process with the server of `dev`, on a free port of `127.0.0.1`, and stops the server at the end. The page is bundled with the `bunfig.toml` of the working directory, so the hot plugin and `--serve-plugin` do not apply.
+- The pixel leg runs on a Mac only, unless `--pixels` or `--no-pixels` says otherwise. When it runs without `--url`, the command writes its own page into `.moku/visual/`: `index.html`, `dev.ts`, `main.ts` and `bunfig.toml`, which reach the game from two folders up. The page of `dev` and of the editor in `.moku/` stays as it is, so `visual` runs while either serves the game. Then, as `dev` does, the command runs Bun again under `.moku/visual/bunfig.toml`, in the same working directory, with the same arguments. So the page is bundled like the dev page: the hot plugin first, every `--serve-plugin`, every `--preload`, `__MOKU_GAME_DEV__` defined `true`. The hot plugin changes nothing in a run: no file changes while it plays. The child plays the tests and serves the page with the server of `dev`, on a free port of `127.0.0.1`. It stops the server at the end, or when the parent is gone. Ctrl+C and the stop signals go to the child, and the exit code is the child's. A run that serves no page plays in the bin's own process, or in a child with the preloads when `--preload` is given.
+- Without `manifest.json` a run that serves the page stops: `[game] visual: no manifest.json in "<game>".` with `Run "moku-game keys" first.`
 - The exit code is `0` when every checkpoint is the same or written, `1` when one differs or a test fails.
 - A missing module or another default export, a bare app factory too: `[game] visual: tests/visual/index.ts must export default { app, tests }.` with `app is a VisualSetup { app, page? }: export default { app: { app: () => game.screen().app }, tests }.`
 

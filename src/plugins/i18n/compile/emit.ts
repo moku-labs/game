@@ -36,11 +36,6 @@ export type TypeEntry = { key: string; params: Record<string, ParameterType> };
  *
  * @param entries - The keys of the locale.
  * @returns The import line, or `undefined`.
- * @example
- * ```ts
- * helperImport([{ key: "chest.opens", compiled: compileMessage("Opens in {left, duration}") }]);
- * // 'import { messageDuration as duration } from "@moku-labs/game";'
- * ```
  */
 function helperImport(entries: readonly LocaleEntry[]): string | undefined {
   const helpers = [

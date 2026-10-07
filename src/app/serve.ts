@@ -52,6 +52,14 @@ export type ServeRun = {
   servePlugins: readonly string[];
 };
 
+/** How the bin runs itself again as a marked child. */
+export type ChildRun = {
+  /** The working directory of the child. */
+  cwd: string;
+  /** Opens what lives exactly as long as the child, such as the scenario watcher. */
+  whileRunning?: () => Watcher | undefined;
+};
+
 /** The server of the dev page, the part `dev` and `visual` use. Bun's `Server` fits it. */
 export type PageServer = {
   /** The bound address, with the port the system picked. */
@@ -481,23 +489,39 @@ export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number>
     deps.ui.warn('[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.');
   }
 
-  // The child serves the page from the game folder in its own process group: Ctrl+C reaches the
-  // parent, which hands it on.
-  const child = deps.spawn(devChildCommand(run, page, deps), {
+  // The child serves the page from the game folder; the scenario watcher lives as long as it.
+  return runChild(devChildCommand(run, page, deps), deps, {
     cwd: run.root,
+    whileRunning: () => watchScenarios(run.root, settings, deps)
+  });
+}
+
+/**
+ * Runs the bin again as a marked child, `MOKU_GAME_CHILD=1`, in its own process group: Ctrl+C
+ * reaches the parent, which hands it and the other stop signals on. `dev` and `visual` run their
+ * page server this way, under the page's bunfig.
+ *
+ * @param command - The words of the command: the Bun, its flags, the bin and its arguments.
+ * @param deps - The spawn, the signals and the environment.
+ * @param child - The working directory, and what lives as long as the child.
+ * @returns The exit code of the child.
+ * @throws {Error} When the child does not start.
+ */
+export async function runChild(command: string[], deps: CliDeps, child: ChildRun): Promise<number> {
+  const started = deps.spawn(command, {
+    cwd: child.cwd,
     env: { ...deps.env, MOKU_GAME_CHILD: "1" },
     stdio: ["inherit", "inherit", "inherit"],
     detached: true
   });
-  const removers = FORWARDED.map(signal => deps.onSignal(signal, () => child.kill(signal)));
+  const removers = FORWARDED.map(signal => deps.onSignal(signal, () => started.kill(signal)));
   let watcher: Watcher | undefined;
 
-  // The scenario watcher lives exactly as long as the child: it opens once the child runs and
-  // closes when it exits.
+  // What lives as long as the child opens once it runs and closes when it exits.
   try {
-    watcher = watchScenarios(run.root, settings, deps);
+    watcher = child.whileRunning?.();
 
-    return await child.exited;
+    return await started.exited;
   } finally {
     watcher?.close();
     for (const remove of removers) remove();
@@ -594,6 +618,25 @@ export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageSer
 }
 
 /**
+ * Watches the parent of a child run: a parent that died hands the child to another process, so
+ * its parent id changes. The dev child and the visual child stop their server then.
+ *
+ * @param onGone - Called once when the parent is gone.
+ * @returns Stops watching.
+ */
+export function watchParent(onGone: () => void): () => void {
+  const parent = process.ppid;
+  const timer = setInterval(() => {
+    if (process.ppid === parent) return;
+
+    clearInterval(timer);
+    onGone();
+  }, PARENT_CHECK_MS);
+
+  return () => clearInterval(timer);
+}
+
+/**
  * Waits until the dev child should stop: Ctrl+C, a stop signal, or a parent that died (its
  * parent id changed). Then stops the server.
  *
@@ -602,20 +645,15 @@ export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageSer
  * @returns Resolves to the exit code `0` once the server stopped.
  */
 function untilStopped(server: PageServer, deps: CliDeps): Promise<number> {
-  const parent = process.ppid;
-
   return new Promise(resolve => {
     const removers: (() => void)[] = [];
-    // A parent that died hands the child to another process: the parent id changes.
-    const timer = setInterval(() => {
-      if (process.ppid !== parent) stop();
-    }, PARENT_CHECK_MS);
     // Every cause stops the same way: no more checks, no more listeners, then the server.
     const stop = (): void => {
-      clearInterval(timer);
+      unwatch();
       for (const remove of removers.splice(0)) remove();
       resolve(server.stop(true).then(() => 0));
     };
+    const unwatch = watchParent(stop);
 
     // Ctrl+C and SIGTERM stop the child; SIGHUP is the parent's to hand on.
     for (const signal of STOPPING) removers.push(deps.onSignal(signal, stop));

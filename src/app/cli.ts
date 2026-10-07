@@ -467,6 +467,7 @@ function runVisualCommand(argv: readonly string[], parsed: Parsed, deps: CliDeps
 
   return runVisual(
     {
+      argv,
       root: parsed.root,
       tests: path.resolve(deps.cwd, tests),
       ...(url === undefined ? {} : { url }),
@@ -510,8 +511,12 @@ async function runParsed(argv: readonly string[], parsed: Parsed, deps: CliDeps)
   checkFiles("--preload", parsed.preload);
   if (usesPlugins) checkFiles("--serve-plugin", parsed.servePlugins);
 
+  // `dev` and `visual` run the bin again themselves, under the bunfig of their page.
   const hops =
-    parsed.command !== "dev" && parsed.preload.length > 0 && deps.env.MOKU_GAME_CHILD !== "1";
+    parsed.command !== "dev" &&
+    parsed.command !== "visual" &&
+    parsed.preload.length > 0 &&
+    deps.env.MOKU_GAME_CHILD !== "1";
 
   if (hops) return hop(argv, parsed, deps);
 

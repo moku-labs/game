@@ -3,13 +3,30 @@
  * game, headless (`--no-pixels`). The tests module is the engine's `tests/visual/index.ts` and the
  * baselines are the committed headless ones, so a run answers `same` at every checkpoint. The
  * page of the pixel leg is served from `.moku/visual/` of a copy in a Bun child and really
- * bundles: its script carries the game's strings.
+ * bundles: its script carries the game's strings. Under `--config=.moku/visual/bunfig.toml`, the
+ * way the command runs its child, a serve plugin changes the page.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { writeVisualPage } from "../../src/app/visual";
 import { copyMiniGame, REPO, removeCopies, runBin } from "./app-helpers";
+
+/** What the serve plugin of the test writes into the page. */
+const MARK = "marked by the serve plugin";
+
+/** A serve plugin that replaces the `dev.ts` of the visual page, so the page carries `MARK`. */
+const MARK_PLUGIN = String.raw`export default {
+  name: "mark",
+  setup(build) {
+    build.onLoad({ filter: /[\/]\.moku[\/]visual[\/]dev\.ts$/ }, () => ({
+      contents: 'globalThis.__MOKU_GAME_DEV__ = true;\nglobalThis.__MOKU_MARK__ = "marked by the serve plugin";\n',
+      loader: "ts"
+    }));
+  }
+};
+`;
 
 /** The copies of this file, removed after it. */
 const copies: string[] = [];
@@ -19,20 +36,22 @@ afterAll(() => {
 });
 
 /** What the child saw of the served visual page. */
-type Served = { status: number; game: boolean; title: boolean };
+type Served = { status: number; game: boolean; title: boolean; marked: boolean };
 
 /**
  * Serves the visual page of a game in a Bun child the way `moku-game visual` does, fetches the page
  * and its script, and stops the server.
  *
  * @param root - The game folder.
- * @returns The status of the script and whether the page and the script carry the game.
+ * @param bun - The flags of the Bun child, such as `--config=<bunfig>`.
+ * @param servePlugins - The serve plugins the page is written with.
+ * @returns The status of the script and whether the page and the script carry the game and the mark.
  */
-function serveInChild(root: string): Served {
+function serveInChild(root: string, bun: string[] = [], servePlugins: string[] = []): Served {
   const script = `
     const { serveVisualPage } = await import(${JSON.stringify(path.join(REPO, "src", "app", "visual.ts"))});
     const server = await serveVisualPage(
-      { root: process.cwd(), tests: "", flags: [], preload: [], servePlugins: [] },
+      { root: process.cwd(), preload: [], servePlugins: ${JSON.stringify(servePlugins)} },
       { resolve: (specifier, from) => Bun.resolveSync(specifier, from), loadPage: file => import(file) }
     );
     const html = await (await fetch(server.url)).text();
@@ -43,11 +62,17 @@ function serveInChild(root: string): Served {
     process.stdout.write(JSON.stringify({
       status: response.status,
       game: code.includes("Tap the"),
-      title: html.includes("<title>mini-game</title>")
+      title: html.includes("<title>mini-game</title>"),
+      marked: code.includes(${JSON.stringify(MARK)})
     }));
   `;
   // eslint-disable-next-line sonarjs/no-os-command-from-path -- the Bun on PATH is the one the project scripts run.
-  const ran = spawnSync("bun", ["--eval", script], { cwd: root, encoding: "utf8" });
+  const ran = spawnSync("bun", [...bun, "--eval", script], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, MOKU_GAME_CHILD: "1" },
+    timeout: 50_000
+  });
 
   if (ran.status !== 0) throw new Error(`The Bun child failed.\n  ${ran.stderr}.`);
 
@@ -88,11 +113,34 @@ describe("moku-game visual on the mini game", () => {
 
     copies.push(root);
 
-    expect(serveInChild(root)).toEqual({ status: 200, game: true, title: true });
+    expect(serveInChild(root)).toEqual({ status: 200, game: true, title: true, marked: false });
     expect(readFileSync(path.join(root, ".moku", "visual", "main.ts"), "utf8")).toContain(
       'import game from "../../index.ts";'
     );
     expect(existsSync(path.join(root, ".moku", "main.ts"))).toBe(false);
+  }, 60_000);
+
+  it("applies a serve plugin under the page's bunfig, the way the command runs its child", async () => {
+    const root = copyMiniGame("visual-plugin");
+    const plugin = path.join(root, "tree", "mark.ts");
+
+    copies.push(root);
+    mkdirSync(path.dirname(plugin), { recursive: true });
+    writeFileSync(plugin, MARK_PLUGIN);
+
+    const page = await writeVisualPage(
+      { root, preload: [], servePlugins: [plugin] },
+      (specifier, from) => Bun.resolveSync(specifier, from)
+    );
+
+    expect(serveInChild(root, [`--config=${page.bunfig}`], [plugin])).toEqual({
+      status: 200,
+      game: true,
+      title: true,
+      marked: true
+    });
+    // Bundled without the bunfig, as the bin process itself would, the page misses the change.
+    expect(serveInChild(root, [], [plugin]).marked).toBe(false);
   }, 60_000);
 
   it("exits 1 when the tests module is missing", async () => {

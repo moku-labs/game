@@ -9,8 +9,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CliDeps } from "../../src/app/cli";
+import type { CliDeps, Signal, SpawnOptions } from "../../src/app/cli";
 import { runCommand } from "../../src/app/cli";
+import { watchParent } from "../../src/app/serve";
 import { runCli } from "../../src/cli";
 import type { VisualOptions, VisualReport, VisualSetup, VisualTest } from "../../src/visual";
 import { parseVisualArgv } from "../../src/visual";
@@ -19,7 +20,24 @@ import { parseVisualArgv } from "../../src/visual";
 type Call = { setup: VisualSetup; tests: readonly VisualTest[]; options: VisualOptions };
 
 /** What the stub seams saw. */
-type Seen = { calls: Call[]; errors: string[]; pages: string[] };
+type Seen = {
+  calls: Call[];
+  errors: string[];
+  pages: string[];
+  spawns: { command: string[]; options: SpawnOptions }[];
+  kills: Signal[];
+  handlers: Map<Signal, () => void>;
+  removed: Signal[];
+};
+
+/** The Bun the stubs run the bin with. */
+const BUN = "/bin/bun";
+
+/** The bin the stubs run again. */
+const SELF = "/game/node_modules/@moku-labs/game/bin/moku-game.mjs";
+
+/** The environment of the marked child run of the bin. */
+const CHILD = { MOKU_GAME_CHILD: "1" } as const;
 
 /** How the stub runner answers a call. */
 type Runner = (call: Call) => Promise<VisualReport>;
@@ -67,6 +85,7 @@ function makeGame(files: Record<string, string> = {}, leftOut: string[] = []): s
   const all: Record<string, string> = {
     "config.ts": 'export default { page: { title: "t" } };\n',
     "index.ts": "export default {};\n",
+    "manifest.json": '{ "version": 1, "bundles": {} }\n',
     ".gitignore": ".moku/\n",
     "tests/visual/index.ts": SUITE,
     ...files
@@ -95,14 +114,28 @@ const passed: Runner = async () => ({ ok: true, tests: [] });
 
 /**
  * Makes the stub seams of `moku-game visual`: a real `parseVisualArgv`, a stub runner, a stub
- * page loader. Every other seam is unused by the command and throws.
+ * page loader, a spawn whose child exits with 3, and the signals. Every other seam is unused by
+ * the command and throws.
  *
  * @param cwd - The working directory.
  * @param runner - How the stub runner answers.
+ * @param env - The environment the bin started with: `CHILD` for the marked child run.
  * @returns The seams and what they saw.
  */
-function fakeDeps(cwd: string, runner: Runner = passed): { deps: CliDeps; seen: Seen } {
-  const seen: Seen = { calls: [], errors: [], pages: [] };
+function fakeDeps(
+  cwd: string,
+  runner: Runner = passed,
+  env: Readonly<Record<string, string>> = {}
+): { deps: CliDeps; seen: Seen } {
+  const seen: Seen = {
+    calls: [],
+    errors: [],
+    pages: [],
+    spawns: [],
+    kills: [],
+    handlers: new Map(),
+    removed: []
+  };
   const deps: CliDeps = {
     ui: {
       info: unused,
@@ -110,12 +143,20 @@ function fakeDeps(cwd: string, runner: Runner = passed): { deps: CliDeps; seen: 
       warn: unused,
       error: message => seen.errors.push(message)
     },
-    env: {},
+    env,
     cwd,
-    execPath: "/bin/bun",
-    self: ["/game/node_modules/@moku-labs/game/bin/moku-game.mjs"],
-    spawn: unused,
-    onSignal: unused,
+    execPath: BUN,
+    self: [SELF],
+    spawn: (command, options) => {
+      seen.spawns.push({ command, options });
+
+      return { exited: Promise.resolve(3), kill: signal => seen.kills.push(signal ?? "SIGTERM") };
+    },
+    onSignal: (signal, handler) => {
+      seen.handlers.set(signal, handler);
+
+      return () => seen.removed.push(signal);
+    },
     watch: unused,
     assets: unused,
     native: unused,
@@ -146,14 +187,16 @@ function fakeDeps(cwd: string, runner: Runner = passed): { deps: CliDeps; seen: 
  * @param argv - The arguments after the bin.
  * @param cwd - The working directory.
  * @param runner - How the stub runner answers.
+ * @param env - The environment the bin started with.
  * @returns The exit code and what the seams saw.
  */
 async function run(
   argv: string[],
   cwd: string,
-  runner?: Runner
+  runner?: Runner,
+  env?: Readonly<Record<string, string>>
 ): Promise<{ code: number; seen: Seen }> {
-  const { deps, seen } = fakeDeps(cwd, runner);
+  const { deps, seen } = fakeDeps(cwd, runner, env);
   const code = await runCommand(argv, deps);
 
   return { code, seen };
@@ -365,11 +408,16 @@ describe("moku-game visual, the page of the pixel leg", () => {
     const devMain = "// the page of moku-game dev or of the editor\n";
     const root = makeGame({ ".moku/main.ts": devMain });
     const bodies: string[] = [];
-    const { code, seen } = await run(["visual", "--pixels"], root, async ({ setup }) => {
-      bodies.push(await bodyAt(setup.page?.url ?? ""));
+    const { code, seen } = await run(
+      ["visual", "--pixels"],
+      root,
+      async ({ setup }) => {
+        bodies.push(await bodyAt(setup.page?.url ?? ""));
 
-      return { ok: true, tests: [] };
-    });
+        return { ok: true, tests: [] };
+      },
+      CHILD
+    );
     const url = seen.calls[0]?.setup.page?.url ?? "";
 
     expect(code).toBe(0);
@@ -390,11 +438,16 @@ describe("moku-game visual, the page of the pixel leg", () => {
   it("stops the server when the runner throws, and exits 1 with its message", async () => {
     const root = makeGame();
     const urls: string[] = [];
-    const { code, seen } = await run(["visual", "--pixels"], root, async ({ setup }) => {
-      urls.push(setup.page?.url ?? "");
+    const { code, seen } = await run(
+      ["visual", "--pixels"],
+      root,
+      async ({ setup }) => {
+        urls.push(setup.page?.url ?? "");
 
-      throw new Error("[game] The pixel leg needs playwright-core.");
-    });
+        throw new Error("[game] The pixel leg needs playwright-core.");
+      },
+      CHILD
+    );
 
     expect(code).toBe(1);
     expect(seen.errors).toEqual(["[game] The pixel leg needs playwright-core."]);
@@ -449,6 +502,130 @@ describe("moku-game visual, its own page", () => {
     expect(readFileSync(path.join(folder, "bunfig.toml"), "utf8")).toContain(
       'plugins = ["/engine/dist/hot.mjs"]'
     );
+  });
+});
+
+describe("moku-game visual, the run of the bin again", () => {
+  it("runs again under .moku/visual/bunfig.toml with --serve-plugin, and answers its code", async () => {
+    const root = makeGame({ "tree/mark.ts": "export default {};\n" });
+    const argv = ["visual", "--pixels", "--serve-plugin", "tree/mark.ts"];
+    const { code, seen } = await run(argv, root);
+    const bunfig = path.join(root, ".moku", "visual", "bunfig.toml");
+
+    expect(code).toBe(3);
+    expect(seen.spawns).toEqual([
+      {
+        command: [BUN, `--config=${bunfig}`, SELF, ...argv],
+        options: {
+          cwd: root,
+          env: { MOKU_GAME_CHILD: "1" },
+          stdio: ["inherit", "inherit", "inherit"],
+          detached: true
+        }
+      }
+    ]);
+    expect(readFileSync(bunfig, "utf8")).toContain(
+      `plugins = ["/engine/dist/hot.mjs", ${JSON.stringify(path.join(root, "tree", "mark.ts"))}]`
+    );
+    expect(seen.calls).toEqual([]);
+    expect(seen.pages).toEqual([]);
+  });
+
+  it("hands Ctrl+C and the stop signals to the child, and stops listening after", async () => {
+    const root = makeGame();
+    const { seen } = await run(["visual", "--pixels"], root);
+
+    expect([...seen.handlers.keys()]).toEqual(["SIGINT", "SIGTERM", "SIGHUP"]);
+    seen.handlers.get("SIGINT")?.();
+    expect(seen.kills).toEqual(["SIGINT"]);
+    expect(seen.removed).toEqual(["SIGINT", "SIGTERM", "SIGHUP"]);
+  });
+
+  it("runs every served page under its bunfig, a serve plugin or not, its preloads in it", async () => {
+    const root = makeGame({ "tree/preload.ts": "" });
+    const { seen } = await run(["visual", "--pixels", "--preload", "tree/preload.ts"], root);
+    const bunfig = path.join(root, ".moku", "visual", "bunfig.toml");
+
+    expect(seen.spawns[0]?.command.slice(0, 3)).toEqual([BUN, `--config=${bunfig}`, SELF]);
+    expect(readFileSync(bunfig, "utf8")).toContain(
+      `preload = [${JSON.stringify(path.join(root, "tree", "preload.ts"))}]`
+    );
+  });
+
+  it("runs again with --preload= when no page is served", async () => {
+    const root = makeGame({ "tree/preload.ts": "" });
+    const argv = ["visual", "--no-pixels", "--preload", "tree/preload.ts"];
+    const { seen } = await run(argv, root);
+
+    expect(seen.spawns.map(spawn => spawn.command)).toEqual([
+      [BUN, `--preload=${path.join(root, "tree", "preload.ts")}`, SELF, ...argv]
+    ]);
+    expect(existsSync(path.join(root, ".moku"))).toBe(false);
+  });
+
+  it("plays in this process when nothing needs the bin again, and in the marked child", async () => {
+    const root = makeGame({ "tree/preload.ts": "" });
+    const plain = await run(["visual", "--no-pixels"], root);
+    const child = await run(
+      ["visual", "--no-pixels", "--preload", "tree/preload.ts"],
+      root,
+      undefined,
+      CHILD
+    );
+
+    expect(plain.seen.spawns).toEqual([]);
+    expect(plain.seen.calls).toHaveLength(1);
+    expect(child.seen.spawns).toEqual([]);
+    expect(child.seen.calls).toHaveLength(1);
+  });
+
+  it("refuses a game without manifest.json, in the parent and in the child", async () => {
+    const root = makeGame({}, ["manifest.json"]);
+    const message = `[game] visual: no manifest.json in "${root}".\n  Run "moku-game keys" first.`;
+    const parent = await run(["visual", "--pixels"], root);
+    const child = await run(["visual", "--pixels"], root, undefined, CHILD);
+
+    expect(parent.code).toBe(1);
+    expect(parent.seen.errors).toEqual([message]);
+    expect(parent.seen.spawns).toEqual([]);
+    expect(child.code).toBe(1);
+    expect(child.seen.errors).toEqual([message]);
+    expect(child.seen.calls).toEqual([]);
+  });
+});
+
+describe("watchParent", () => {
+  it("calls back once when the parent id changes, and not after it is stopped", () => {
+    const ppid = Object.getOwnPropertyDescriptor(process, "ppid");
+    const gone = vi.fn();
+
+    vi.useFakeTimers();
+
+    try {
+      const stop = watchParent(gone);
+
+      vi.advanceTimersByTime(3000);
+      expect(gone).not.toHaveBeenCalled();
+
+      Object.defineProperty(process, "ppid", { value: -1, configurable: true });
+      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(3000);
+      expect(gone).toHaveBeenCalledTimes(1);
+
+      stop();
+
+      const quiet = vi.fn();
+      const stopQuiet = watchParent(quiet);
+
+      stopQuiet();
+      Object.defineProperty(process, "ppid", { value: -2, configurable: true });
+      vi.advanceTimersByTime(3000);
+      expect(quiet).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      if (ppid === undefined) Reflect.deleteProperty(process, "ppid");
+      else Object.defineProperty(process, "ppid", ppid);
+    }
   });
 });
 

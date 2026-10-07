@@ -115,7 +115,7 @@ const report = await runVisualTests({ app: () => game.screen({ manifest, io }).a
 process.exitCode = report.ok ? 0 : 1;
 ```
 
-A game runs its visual tests with the bin, no script of its own: `moku-game visual`. It reads `tests/visual/index.ts`, whose default export is the two arguments of `runVisualTests`, `{ app: VisualSetup, tests }`, and keeps the baselines in `tests/visual/baselines/`. When the pixel leg runs and no `--url` is given, it writes its own page into `.moku/visual/`, serves it in its own process on a free port and stops it after; the page of `dev` and of the editor stays as it is. The exit code is 1 when a checkpoint differs. See [the shell](./shell.md#visual).
+A game runs its visual tests with the bin, no script of its own: `moku-game visual`. It reads `tests/visual/index.ts`, whose default export is the two arguments of `runVisualTests`, `{ app: VisualSetup, tests }`, and keeps the baselines in `tests/visual/baselines/`. When the pixel leg runs and no `--url` is given, it writes its own page into `.moku/visual/`, runs Bun again under that page's bunfig as `dev` does, so `--serve-plugin` and `--preload` apply, and the child serves the page on a free port and stops it after; the page of `dev` and of the editor stays as it is. The exit code is 1 when a checkpoint differs. See [the shell](./shell.md#visual).
 
 ```ts
 // tests/visual/index.ts of a game, run with `moku-game visual`, `moku-game visual --update --only reward-popup`
