@@ -4,7 +4,7 @@
  * page of the pixel leg served in this process on a free port and stopped after, `--url` instead
  * of the server, the exit code from the report, and `runCli` with the real runner.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -27,13 +27,14 @@ type Runner = (call: Call) => Promise<VisualReport>;
 /** The tests module of a game whose app is never built: the runner is a stub. */
 const SUITE = [
   'export const app = () => { throw new Error("not built"); };',
-  'export default { app, tests: [{ name: "home" }] };',
+  'export default { app: { app }, tests: [{ name: "home" }] };',
   ""
 ].join("\n");
 
 /** The message of a missing or wrong tests module. */
 const refused = (file: string): string =>
-  `[game] visual: ${file} must export default { app, tests }.`;
+  `[game] visual: ${file} must export default { app, tests }.\n` +
+  "  app is a VisualSetup { app, page? }: export default { app: { app: () => game.screen().app }, tests }.";
 
 /** The temp folders of a test, removed after it. */
 const made: string[] = [];
@@ -194,6 +195,7 @@ describe("moku-game visual, the tests module and the baselines", () => {
     expect(seen.errors).toEqual([]);
     expect(seen.calls).toHaveLength(1);
     expect(seen.calls[0]?.setup).toEqual({ app: suite.app });
+    expect(seen.calls[0]?.setup.app).toBe(suite.app);
     expect(seen.calls[0]?.tests).toEqual([{ name: "home" }]);
     expect(seen.calls[0]?.options).toEqual({
       pixels: false,
@@ -224,7 +226,7 @@ describe("moku-game visual, the tests module and the baselines", () => {
     expect(seen.calls[0]?.options.dir).toBe(path.join(root, "shots"));
   });
 
-  it("takes a whole VisualSetup as app, its page kept", async () => {
+  it("keeps the page of the VisualSetup, its url replaced", async () => {
     const root = makeGame({
       "tests/visual/index.ts":
         "export default { app: { app: () => 0, page: { url: 'unused', width: 430 } }, tests: [] };\n"
@@ -256,10 +258,12 @@ describe("moku-game visual, the tests module and the baselines", () => {
     ["no default export", "export const app = () => 0;\n"],
     ["a default that is no object", "export default 5;\n"],
     ["no app", "export default { tests: [] };\n"],
-    ["no tests", "export default { app: () => 0 };\n"],
-    ["an app that is no function", "export default { app: 1, tests: [] };\n"],
+    ["no tests", "export default { app: { app: () => 0 } };\n"],
+    ["a bare app factory", "export default { app: () => 0, tests: [] };\n"],
+    ["an app that is no setup", "export default { app: 1, tests: [] };\n"],
     ["a setup without its app", "export default { app: { page: { url: 'x' } }, tests: [] };\n"],
-    ["tests that are no list", "export default { app: () => 0, tests: {} };\n"]
+    ["a setup whose app is no function", "export default { app: { app: 1 }, tests: [] };\n"],
+    ["tests that are no list", "export default { app: { app: () => 0 }, tests: {} };\n"]
   ])("refuses a module with %s", async (_shape, text) => {
     const root = makeGame({ "tests/visual/index.ts": text });
     const { code, seen } = await run(["visual", "--no-pixels"], root);
@@ -357,8 +361,9 @@ describe("moku-game visual, the flags", () => {
 });
 
 describe("moku-game visual, the page of the pixel leg", () => {
-  it("serves the dev page in this process on a free port and stops it after", async () => {
-    const root = makeGame();
+  it("serves its own page from .moku/visual/ in this process on a free port and stops it after", async () => {
+    const devMain = "// the page of moku-game dev or of the editor\n";
+    const root = makeGame({ ".moku/main.ts": devMain });
     const bodies: string[] = [];
     const { code, seen } = await run(["visual", "--pixels"], root, async ({ setup }) => {
       bodies.push(await bodyAt(setup.page?.url ?? ""));
@@ -370,8 +375,14 @@ describe("moku-game visual, the page of the pixel leg", () => {
     expect(code).toBe(0);
     expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
     expect(bodies).toEqual(["<html>the page</html>"]);
-    expect(seen.pages).toEqual([path.join(root, ".moku", "index.html")]);
-    expect(existsSync(path.join(root, ".moku", "main.ts"))).toBe(true);
+    expect(seen.pages).toEqual([path.join(root, ".moku", "visual", "index.html")]);
+    expect(
+      ["index.html", "dev.ts", "main.ts", "bunfig.toml"].filter(
+        file => !existsSync(path.join(root, ".moku", "visual", file))
+      )
+    ).toEqual([]);
+    expect(readFileSync(path.join(root, ".moku", "main.ts"), "utf8")).toBe(devMain);
+    expect(existsSync(path.join(root, ".moku", "index.html"))).toBe(false);
     expect(seen.calls[0]?.options.pixels).toBe(true);
     expect(await bodyAt(url)).toBe("stopped");
   });
@@ -420,6 +431,27 @@ describe("moku-game visual, the page of the pixel leg", () => {
   });
 });
 
+describe("moku-game visual, its own page", () => {
+  it("imports the game from two folders up, the hot plugin first in its bunfig", async () => {
+    const root = makeGame({ "tests/scenarios/ready.ts": "export default () => ({});\n" });
+
+    await run(["visual", "--pixels"], root);
+
+    const folder = path.join(root, ".moku", "visual");
+    const main = readFileSync(path.join(folder, "main.ts"), "utf8");
+
+    expect(main).toContain('import game from "../../index.ts";');
+    expect(main).toContain('import config from "../../config.ts";');
+    expect(main).toContain('import scenario0 from "../../tests/scenarios/ready.ts";');
+    expect(readFileSync(path.join(folder, "index.html"), "utf8")).toContain(
+      '<script type="module" src="./main.ts"></script>'
+    );
+    expect(readFileSync(path.join(folder, "bunfig.toml"), "utf8")).toContain(
+      'plugins = ["/engine/dist/hot.mjs"]'
+    );
+  });
+});
+
 describe("moku-game visual, the exit code", () => {
   it("exits 1 when the report is not ok", async () => {
     const root = makeGame();
@@ -436,7 +468,7 @@ describe("moku-game visual, the exit code", () => {
 describe.skipIf(typeof Bun === "undefined")("runCli visual", () => {
   it("runs the real runner in this process: no test, a passing report", async () => {
     const root = makeGame({
-      "tests/visual/index.ts": "export default { app: () => 0, tests: [] };\n"
+      "tests/visual/index.ts": "export default { app: { app: () => 0 }, tests: [] };\n"
     });
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 

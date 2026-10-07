@@ -1826,6 +1826,8 @@ function isHelper(folders: readonly string[]): boolean {
 
 /**
  * What test-suffix says about a file: a file in a test kind folder ends with that folder's suffix.
+ * The `index` of a kind folder passes: it is the folder's door, such as the module of
+ * `moku-game visual`, `tests/visual/index.ts`.
  *
  * @param file - The file, relative to the game root.
  * @param table - Kind folder to suffix.
@@ -1849,7 +1851,7 @@ function suffixMessage(file: string, table: Readonly<Record<string, string>>): s
   const isTsxOfTsKind = extension === TSX_EXTENSION && kind.suffix.endsWith(TS_EXTENSION);
   const suffix = isTsxOfTsKind ? `${kind.suffix}x` : kind.suffix;
 
-  if (name.endsWith(suffix)) return undefined;
+  if (name.endsWith(suffix) || INDEX_FILE.test(name)) return undefined;
 
   // The report names the new name and where a helper goes instead.
   const renamed = `${name.slice(0, -extension.length).replace(TEST_WORD, "")}${suffix}`;

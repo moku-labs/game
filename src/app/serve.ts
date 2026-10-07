@@ -289,25 +289,33 @@ function writeIfChanged(file: string, text: string): void {
  * @param root - The game folder.
  * @param settings - The resolved config.
  * @param agents - The agent modules, when the page has any.
+ * @param toRoot - The path from `main.ts` to the game folder.
  * @returns The text.
  */
-function mainOf(root: string, settings: ResolvedGameConfig, agents?: readonly string[]): string {
+function mainOf(
+  root: string,
+  settings: ResolvedGameConfig,
+  agents?: readonly string[],
+  toRoot = "../"
+): string {
   const scenarios = scenarioNamesOf(root);
 
   return agents === undefined || agents.length === 0
-    ? devMain(settings, { scenarios, devModules: [] })
-    : devMain(settings, { scenarios, devModules: devModulesOf(root), agents });
+    ? devMain(settings, { scenarios, devModules: [] }, toRoot)
+    : devMain(settings, { scenarios, devModules: devModulesOf(root), agents }, toRoot);
 }
 
 /**
  * Writes the dev page of a checked game into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts`
- * and `bunfig.toml`. Every text is made before the first write, so a refused value writes
- * nothing.
+ * and `bunfig.toml`. `moku-game visual` writes its own page into `.moku/visual/`, so the page of
+ * `dev` or of the editor stays as it is; the links of the page reach the game from its depth.
+ * Every text is made before the first write, so a refused value writes nothing.
  *
  * @param root - The game folder, absolute.
  * @param settings - The resolved config.
  * @param options - The agents, the preloads and the extra plugins, absolute.
  * @param resolve - Bun's resolver, to find the hot plugin.
+ * @param page - The folder of the page under the game, `/` separated: `.moku` by default.
  * @returns The paths of the HTML and the bunfig.
  * @throws {Error} When the hot plugin does not resolve, a preload or plugin is not a file, or a
  *   page value is refused.
@@ -316,7 +324,8 @@ export function writePage(
   root: string,
   settings: ResolvedGameConfig,
   options: PrepareOptions,
-  resolve: CliDeps["resolve"]
+  resolve: CliDeps["resolve"],
+  page = ".moku"
 ): PageFiles {
   const preload = options.preload ?? [];
   const servePlugins = options.servePlugins ?? [];
@@ -324,13 +333,16 @@ export function writePage(
   checkFiles("--preload", preload);
   checkFiles("--serve-plugin", servePlugins);
 
-  const folder = path.join(root, ".moku");
+  const segments = page.split("/");
+  // One step up per folder of the page: "../" for `.moku`, "../../" for `.moku/visual`.
+  const toRoot = "../".repeat(segments.length);
+  const folder = path.join(root, ...segments);
   const html = path.join(folder, "index.html");
   const bunfig = path.join(folder, "bunfig.toml");
   const texts: [string, string][] = [
-    [html, pageHtml(settings.page, { toRoot: "../", script: "./main.ts" })],
+    [html, pageHtml(settings.page, { toRoot, script: "./main.ts" })],
     [path.join(folder, "dev.ts"), devFlag()],
-    [path.join(folder, "main.ts"), mainOf(root, settings, options.agents)],
+    [path.join(folder, "main.ts"), mainOf(root, settings, options.agents, toRoot)],
     [bunfig, bunfigText({ hotPlugin: hotPluginOf(root, resolve), servePlugins, preload })]
   ];
 

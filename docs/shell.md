@@ -25,7 +25,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `generated/` | What `moku-game keys` writes: `assets.ts`, `strings.ts`, `strings.<locale>.ts` |
 | `manifest.json` | The dev manifest `moku-game keys` writes |
 | `tests/` | The tests. `tests/scenarios/<name>.ts` are the prepared saves of `?player=<name>` |
-| `.moku/` | What `moku-game` writes: the dev page, its `bunfig.toml`, the Tauri project. Git ignores it |
+| `.moku/` | What `moku-game` writes: the dev page, its `bunfig.toml`, the page of `visual` in `.moku/visual/`, the Tauri project. Git ignores it |
 | `dist/assets/`, `dist/web/`, `dist-native/` | The pack, the web build, the native apps |
 
 A game has no `web/`, no `native.ts`, no `platform-bridge.ts` and no `bunfig.toml`.
@@ -367,21 +367,21 @@ The page carries no scenario, no agent, no `.dev` module and no `/control`. Ever
 
 ### visual
 
-`moku-game visual` runs the visual tests of a game with `runVisualTests` of `@moku-labs/game/visual`. The tests module, `tests/visual/index.ts`, default-exports the two arguments of the runner: `app`, the app factory of `VisualSetup` or a whole `VisualSetup` with its `page`, and `tests`, the list of `defineVisualTest` results.
+`moku-game visual` runs the visual tests of a game with `runVisualTests` of `@moku-labs/game/visual`. The tests module, `tests/visual/index.ts`, default-exports the two arguments of the runner: `app`, a `VisualSetup` `{ app, page? }`, and `tests`, the list of `defineVisualTest` results. The command fills `page.url`; a `page` given here keeps its `width`, `deviceScaleFactor` and `browser`.
 
 ```ts
 // tests/visual/index.ts
 import { fixtureApp } from "../helpers/visual/fixture";
 import { rewardPopup } from "./reward-popup.visual";
 
-export default { app: fixtureApp, tests: [rewardPopup] };
+export default { app: { app: fixtureApp }, tests: [rewardPopup] };
 ```
 
 - The flags of the runner are read by `parseVisualArgv`: `--update`, `--only`, `--no-pixels`, `--pixels`, `--webgl`, `--dir`.
 - The baselines live in `tests/visual/baselines/<test>/<checkpoint>/`.
-- The pixel leg runs on a Mac only, unless `--pixels` or `--no-pixels` says otherwise. When it runs without `--url`, the command writes the dev page into `.moku/` and serves it in its own process with the server of `dev`, on a free port of `127.0.0.1`. It stops the server at the end. The page is bundled with the `bunfig.toml` of the working directory, so the hot plugin and `--serve-plugin` do not apply.
+- The pixel leg runs on a Mac only, unless `--pixels` or `--no-pixels` says otherwise. When it runs without `--url`, the command writes its own page into `.moku/visual/`: `index.html`, `dev.ts`, `main.ts` and `bunfig.toml`, which reach the game from two folders up. The page of `dev` and of the editor in `.moku/` stays as it is, so `visual` runs while either serves the game. The command serves its page in its own process with the server of `dev`, on a free port of `127.0.0.1`, and stops the server at the end. The page is bundled with the `bunfig.toml` of the working directory, so the hot plugin and `--serve-plugin` do not apply.
 - The exit code is `0` when every checkpoint is the same or written, `1` when one differs or a test fails.
-- A missing module or another default export: `[game] visual: tests/visual/index.ts must export default { app, tests }.`
+- A missing module or another default export, a bare app factory too: `[game] visual: tests/visual/index.ts must export default { app, tests }.` with `app is a VisualSetup { app, page? }: export default { app: { app: () => game.screen().app }, tests }.`
 
 ### keys and pack
 

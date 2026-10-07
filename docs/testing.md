@@ -115,11 +115,11 @@ const report = await runVisualTests({ app: () => game.screen({ manifest, io }).a
 process.exitCode = report.ok ? 0 : 1;
 ```
 
-A game runs its visual tests with the bin, no script of its own: `moku-game visual`. It reads `tests/visual/index.ts`, whose default export is the two arguments of `runVisualTests`, and keeps the baselines in `tests/visual/baselines/`. When the pixel leg runs and no `--url` is given, it serves the dev page in its own process on a free port and stops it after. The exit code is 1 when a checkpoint differs. See [the shell](./shell.md#visual).
+A game runs its visual tests with the bin, no script of its own: `moku-game visual`. It reads `tests/visual/index.ts`, whose default export is the two arguments of `runVisualTests`, `{ app: VisualSetup, tests }`, and keeps the baselines in `tests/visual/baselines/`. When the pixel leg runs and no `--url` is given, it writes its own page into `.moku/visual/`, serves it in its own process on a free port and stops it after; the page of `dev` and of the editor stays as it is. The exit code is 1 when a checkpoint differs. See [the shell](./shell.md#visual).
 
 ```ts
 // tests/visual/index.ts of a game, run with `moku-game visual`, `moku-game visual --update --only reward-popup`
-export default { app: () => game.screen({ manifest, io }).app, tests: [rewardPopup] };
+export default { app: { app: () => game.screen({ manifest, io }).app }, tests: [rewardPopup] };
 ```
 
 A checkpoint settles the motions and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.webp`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, or with WebGL under `--webgl`, on a Mac only, and compares `screen.webp` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
