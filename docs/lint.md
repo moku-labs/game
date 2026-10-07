@@ -32,7 +32,7 @@ oxlint 1.86.0 or later. The rules use the ESLint rule API, so ESLint 9 loads the
 | Rule | Code | Reports | Passes |
 |---|---|---|---|
 | `moku-game/lazy-imports` | L2 | `import { Application } from "pixi.js"`, `export … from "yoga-layout"`, subpaths too | `import type …`, `await import("pixi.js")` |
-| `moku-game/native-imports` | L13 | any import or `import()` of `@moku-labs/system`, `@moku-labs/native`, `@tauri-apps/*` | the same import in `platform-bridge.ts`, `native.ts`, `web/` |
+| `moku-game/native-imports` | L13 | any import or `import()` of `@moku-labs/system`, `@moku-labs/native`, `@tauri-apps/*`, also in the root `index.ts` and `config.ts`: name the capability in `config.ts` `system`, the engine page wires it | the same import in `platform-bridge.ts`, `native.ts`, `web/` until the demos leave them |
 | `moku-game/dev-imports` | dev only | any import or `import()` of `@moku-labs/editor` (and subpaths) or `@moku-labs/game/control` | the same import in a dev file or a test |
 | `moku-game/no-module-state` | L5 | a module-scope `let` or `var`, a module-scope `new Map/Set/WeakMap/WeakSet` (exported too) | the same inside a function |
 | `moku-game/determinism` | L3 | `Math.random`, `Date.now`, `performance.now`, `new Date()`, `setTimeout`, `setInterval` (bare or on `globalThis`, `window`, `self`) | `new Date(now)`: it formats a stored moment |
@@ -198,8 +198,8 @@ The defaults follow the layout of a game. They start with `**/`, so a game that 
 | Rule | Default `files` | Default `ignores` |
 |---|---|---|
 | `lazy-imports` | `**` | tests |
-| `native-imports` | logic, `**/kit.ts`, `**/plugins/**` | `**/*.dev.{ts,tsx}`, tests |
-| `dev-imports` | `**` | `web/main.ts`, `web/dev*.ts`, `web/editor*.ts`, `**/*.dev.{ts,tsx}`, tests |
+| `native-imports` | logic, `config.ts`, `**/kit.ts`, `**/plugins/**` | `**/*.dev.{ts,tsx}`, tests |
+| `dev-imports` | `**` | `.moku/**`, `web/main.ts`, `web/dev*.ts`, `web/editor*.ts`, `**/*.dev.{ts,tsx}`, tests |
 | `no-module-state` | `**` | tests |
 | `determinism` | logic | effect side, `**/*.dev.{ts,tsx}`, tests |
 | `rules-siblings` | `**/rules/**` | tests |
@@ -208,7 +208,7 @@ The defaults follow the layout of a game. They start with `**/`, so a game that 
 | `feature-door` | `**/{core,shared,features,plugins}/**` | tests |
 | `test-suffix` | `**/tests/**`, `**/__tests__/**` | none |
 
-- logic: `**/state.ts`, `**/tables.ts`, `**/game.ts`, `**/{core,nodes,flows,rules,features,shared}/**`
+- logic: the root `index.ts`, `**/state.ts`, `**/tables.ts`, `**/game.ts`, `**/{core,nodes,flows,rules,features,shared}/**`
 - effect side: `**/{plugin,plugins}/**`. Plugins answer effects; the `schedule` effect is a timer by design
 - tests: `tests/**`, `**/__tests__/**`, `**/*.{test,spec}.{ts,tsx}`
 

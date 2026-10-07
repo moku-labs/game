@@ -1,18 +1,22 @@
 # @moku-labs/game
 
-> 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state. V1 is the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry; V2 adds the screen plugins `world`, `renderer`, `input`, `assets`, `scenes`, a Pixi v8 renderer loaded lazily, and the `@moku-labs/game/assets` entry that generates typed asset keys. V3 adds the interface plugins `anim`, `i18n`, `text`, `ui` (`screen` lists all nine) and the opt-in `audio`: choreographies as data, strings as data, text from MSDF fonts, screens in JSX laid out by Yoga, sound as an effect a node awaits. V4 adds two doors for the editor: `@moku-labs/game/inspect` reads a running game, `@moku-labs/game/control` drives a dev build. V5 adds the opt-in plugin `effects`: particles and WGSL/GLSL filters as components. V6 adds the opt-in plugin `platform`: the Back button, haptics and keep-awake through a provider the game passes. The package is published on npm as `@moku-labs/game`, and this file ships inside it.
+> 2D puzzle game engine on TypeScript, built as a Layer-2 framework on @moku-labs/core. The game is a deterministic graph of business logic. State commits only on edges. Position is data. Player input and world events are answers a node waits for. The screen is a projection of committed state. V1 is the logic plugins `time`, `lifecycle`, `model`, `clock`, `flow` and a headless testing entry; V2 adds the screen plugins `world`, `renderer`, `input`, `assets`, `scenes`, a Pixi v8 renderer loaded lazily, and the `@moku-labs/game/assets` entry that generates typed asset keys. V3 adds the interface plugins `anim`, `i18n`, `text`, `ui` (`screen` lists all nine) and the opt-in `audio`: choreographies as data, strings as data, text from MSDF fonts, screens in JSX laid out by Yoga, sound as an effect a node awaits. V4 adds two doors for the editor: `@moku-labs/game/inspect` reads a running game, `@moku-labs/game/control` drives a dev build. V5 adds the opt-in plugin `effects`: particles and WGSL/GLSL filters as components. V6 adds the opt-in plugin `platform`: the Back button, haptics and keep-awake through a provider the game passes. The game shell makes a game a folder of data: `@moku-labs/game/app` (`defineGameApp`, `config.ts` as `GameConfig`), the page `@moku-labs/game/app/page`, the system shell `@moku-labs/game/app/system` and the bin `moku-game` that serves, builds, packages and packs the folder. The package is published on npm as `@moku-labs/game`, and this file ships inside it.
 
-Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer dependency, no V1 code imports it. `playwright-core` (visual tests), `sharp` (the asset pack) and `typescript` (the project index) are optional peers. Node >= 24, Bun >= 1.3.14. TypeScript strict with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. The engine ships no genre rules: no merge, no match-3, no physics. A game brings its own pure rule functions.
+Facts: Bun only. ESM only. `"sideEffects": false`. `pixi.js` `^8.0.0` is a peer dependency, no V1 code imports it. `playwright-core` (visual tests), `sharp` (the asset pack), `typescript` (the project index), `@moku-labs/system` (the system shell and the store save) and `@moku-labs/native` (`moku-game native`) are optional peers. Node >= 24, Bun >= 1.3.14. TypeScript strict with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`. The engine ships no genre rules: no merge, no match-3, no physics. A game brings its own pure rule functions.
 
 ## Entry points
 
 - `@moku-labs/game`: everything a game imports.
+- `@moku-labs/game/app`: `defineGameApp`, `startMoment` and the types of a game's `index.ts` and `config.ts`. No `node:` import, no system or native package. See "The game shell".
+- `@moku-labs/game/app/page` (the browser): `startPage`, the page the generated `.moku/main.ts` calls.
+- `@moku-labs/game/app/system` (the browser, the native shell): `systemShell`, `fromSystem`, `storeSave`, `createSystemApp` over the optional peer `@moku-labs/system`. The one entry that reaches it.
+- `@moku-labs/game/cli` (node and bun only): `runCli`, the bin `moku-game`, and `preparePage`, the editor's dev page.
 - `@moku-labs/game/testing`: headless play, repro runs, isolated feature tests (`isolate`, `stub`), fake clock, in-memory save provider. No `node:` import.
 - `@moku-labs/game/visual` (node and bun only): the visual tests `defineVisualTest`, `runVisualTests`, `parseVisualArgv`.
 - `@moku-labs/game/assets` (node and bun only): the asset key scanner, the production packer and the string compiler. The package bin `moku-game-assets` runs it.
 - `@moku-labs/game/inspect`: the read door of the editor, safe in a production build. See "Doors for the editor".
 - `@moku-labs/game/control`: the write door of the editor, dev builds only. See "Doors for the editor".
-- `@moku-labs/game/hot` (the Bun dev server only): the `bunfig.toml` plugin that hot swaps views in a running page. See "Hot swap".
+- `@moku-labs/game/hot` (the Bun dev server only): the Bun plugin that hot swaps views in a running page; `moku-game dev` lists it. See "Hot swap".
 - `@moku-labs/game/lint`: the oxlint JS plugin `moku-game` with the game lint rules. See "Lint for games".
 - `@moku-labs/game/project` (node and bun only): the project index, where every engine id of a game is defined, line read fresh at the call. It follows the tsconfig `paths` of the game. The package bin `moku-game-index` runs it. See "Project index".
 - `@moku-labs/game/fonts/*`: the shipped MSDF body font and its licence. See "Fonts".
@@ -27,7 +31,7 @@ Root exports:
 - Effects helpers from the root (V5): `defineEmitter`, `Emitter`, `defineFilter`, `Glow`, `Outline`, `Blur`, `ColorMatrix`, `Noise`, `Displacement`, `Alpha`.
 - Platform from the root (V6): the types `PlatformProvider`, `BackResult`, `HapticKind` and the frozen list `HAPTIC_KINDS`.
 - `defineGame<Types>()` returns, typed by the game's `player`, `session`, `assets`, `bundles`, `scenes`, `strings` and `textStyles`: `defineNode`, `defineFlow`, `defineFeature`, `projection`, `sprite`, `Sprite`, `NineSlice`, `defineBundles`, `load`, `defineScene`, `defineAnimation`, `frames`, `sfx`, `play`, `tr`, `label`, `defineTextStyles`, `defineComponent`, `defineStyle`, `defineTokens`, `popup`, `music`, `Frames`, `defineEmitter`, `Emitter`, `Displacement`. `Types` is `{ player; session; assets: string; bundles?: string; scenes?: string; strings: Record<string, unknown>; textStyles?: string; emitters?: string }`.
-- `@moku-labs/game/assets`: `scanAssets(options)`, `emitKeys`, `emitManifest`, `compileStrings(root, out, options?)`, `checkStrings`, `packAssets(options)`, `exportStrings`, `importStrings`, `runCli(argv, strings)` with `strings: StringsTools` = `{ compile: compileStrings, exportStrings, importStrings }`. Audio files are `.mp3` or `.m4a`. Asset key = feature (or layer name) + "." + path inside `assets/`. `runCli` (a game's `bun run assets:keys`) scans the assets and compiles `features/*/strings/<locale>.json`, and the `strings/` of every layer, into `generated/strings.ts` (the `Strings` type for `defineGame`) and one `generated/strings.<locale>.ts` per locale; `--check` fails when any output is out of date; `--pack <dir>` writes the production build. `--layer <folder>[=<name>]`, repeatable and good with every mode, scans `<root>/<folder>/` like one more feature under `<name>` (`<folder>` alone maps to itself): its `assets.ts`, `assets/` and `strings/<locale>.json`. A game on the layered layout passes `--layer shared=ui`, so `shared/assets/*` keeps the `ui.*` keys. A missing layer folder is a warning. `scanAssets`, `compileStrings`, `exportStrings` and `importStrings` take the same map as `layers: { shared: "ui" }`. `--pseudo` also writes the pseudo-locale `en-XA`. `--export <dir>` and `--import <dir>` exchange strings with translators; `--source <locale>` names the locale they read from, `"en"` by default. The package bin `moku-game-assets` is this CLI: a game's script is `"assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts"`.
+- `@moku-labs/game/assets`: `scanAssets(options)`, `emitKeys`, `emitManifest`, `compileStrings(root, out, options?)`, `checkStrings`, `packAssets(options)`, `exportStrings`, `importStrings`, `runCli(argv, strings)` with `strings: StringsTools` = `{ compile: compileStrings, exportStrings, importStrings }`. Audio files are `.mp3` or `.m4a`. Asset key = feature (or layer name) + "." + path inside `assets/`. `runCli` (a game's `bun run assets:keys`) scans the assets and compiles `features/*/strings/<locale>.json`, and the `strings/` of every layer, into `generated/strings.ts` (the `Strings` type for `defineGame`) and one `generated/strings.<locale>.ts` per locale; `--check` fails when any output is out of date; `--pack <dir>` writes the production build. `--layer <folder>[=<name>]`, repeatable and good with every mode, scans `<root>/<folder>/` like one more feature under `<name>` (`<folder>` alone maps to itself): its `assets.ts`, `assets/` and `strings/<locale>.json`. A game on the layered layout passes `--layer shared=ui`, so `shared/assets/*` keeps the `ui.*` keys. A missing layer folder is a warning. `scanAssets`, `compileStrings`, `exportStrings` and `importStrings` take the same map as `layers: { shared: "ui" }`. `--pseudo` also writes the pseudo-locale `en-XA`. `--export <dir>` and `--import <dir>` exchange strings with translators; `--source <locale>` names the locale they read from, `"en"` by default. The package bin `moku-game-assets` is this CLI: a script is `"assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts"`. A game with `config.ts` runs `moku-game keys` and `moku-game pack` instead: they pass its paths and its layers.
 - Type namespaces: `Time`, `Lifecycle`, `Model`, `Clock`, `Flow`, `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`, `Effects`, `Platform`. Use `import type { Flow } from "@moku-labs/game"` and then `Flow.RouteStep`, `Flow.NodeContext`, `Model.Json`, `Model.PlayerStateProvider`, `Clock.ClockSource`, `Time.Phase`, `Lifecycle.PauseReason`, `Anim.Target`, `I18n.Message`. `Text` is the component, so the text types are `TextTypes`.
 - `defineNode` and `defineFlow` are NOT root exports. They come from `defineGame<Types>()`.
 
@@ -157,8 +161,8 @@ type NodeContext = {
 ```
 
 - `moku-game/lazy-imports` (L2): no static value import of `pixi.js` or `yoga-layout`. `import type` and `import()` pass. Default files `**`.
-- `moku-game/native-imports` (L13): no `@moku-labs/system`, `@moku-labs/native`, `@tauri-apps/*` in the logic, `kit.ts` and `plugins/`. Wire the platform in `platform-bridge.ts`, `native.ts` or `web/`.
-- `moku-game/dev-imports`: `@moku-labs/editor` and `@moku-labs/game/control` only in `web/main.ts`, `web/dev*.ts`, `web/editor*.ts`, `*.dev.ts(x)` and tests.
+- `moku-game/native-imports` (L13): no `@moku-labs/system`, `@moku-labs/native`, `@tauri-apps/*` in the logic, the root `index.ts` and `config.ts`, `kit.ts` and `plugins/`. A game imports no native package: it names the capability in `config.ts` `system`, and the engine page wires it.
+- `moku-game/dev-imports`: `@moku-labs/editor` and `@moku-labs/game/control` only in `*.dev.ts(x)`, tests and the generated `.moku/` page (and `web/main.ts`, `web/dev*.ts`, `web/editor*.ts` of a game that still has `web/`).
 - `moku-game/no-module-state` (L5): no module-scope `let` or `var`, no module-scope `new Map/Set/WeakMap/WeakSet`. Default files `**`.
 - `moku-game/determinism` (L3): no `Math.random`, `Date.now`, `performance.now`, `new Date()`, `setTimeout`, `setInterval` in the logic. `new Date(now)` passes. Plugin folders, `**/{plugin,plugins}/**`, are the effect side and are skipped: a plugin answers `schedule` with a timer.
 - `moku-game/rules-siblings` (L4): a file under `rules/` imports only `./` siblings, `@core/types` and `@shared/rules`, by alias or by relative path. `@core/kit`, `../tables` and `import type … from "@moku-labs/game"` are reported.
@@ -168,7 +172,7 @@ type NodeContext = {
 - `moku-game/test-suffix`: a file in a test kind folder ends with its suffix. `tests/e2e/` `.e2e.ts`, `tests/visual/` `.visual.ts`, `tests/editor/` `.editor.ts`, `__tests__/`, `__tests__/unit/` and `__tests__/integration/` `.test.ts`, `__tests__/isolated/` `.isolated.ts`, `__tests__/visual/` `.visual.ts`; a `.tsx` file adds an `x`. Helpers go to `tests/helpers/` or `__tests__/fixtures/`.
 - Layers under the game root: `core/**`, `shared/**`, `features/<f>/**`, `plugins/<p>/**`, `generated/**`, `game.ts`, `tests/**`. A file outside them (`kit.ts`, `nodes/`, `web/`) keeps the layout rules quiet, so a game on the template layout lints as before.
 - Aliases: `layer-imports`, `feature-door` and `rules-siblings` read the `compilerOptions.paths` of `tsconfig.json` (comments, trailing commas and relative `extends` included), the way the project index does. Without `paths` they read the v15 table: `@core/*` → `core/*`, `@shared` → `shared/index.ts`, `@shared/rules` → `shared/rules/index.ts`, `@features` → `features/index.ts`, `@features/*` → `features/*/index.ts`, `@plugins` → `plugins/index.ts`, `@generated/*` → `generated/*`, `@tests/*` → `tests/*`. `aliasTargetsOf(tsconfig, root, specifier)` from `@moku-labs/game/lint` answers what they read: for a game without a tsconfig, `aliasTargetsOf("/game/tsconfig.json", "/game", "@features/orders")` is `["/game/features/orders/index.ts"]`.
-- Logic = `**/state.ts`, `**/tables.ts`, `**/game.ts`, `**/{core,nodes,flows,rules,features,shared}/**`. Tests (`tests/**`, `**/__tests__/**`, `*.test.ts`) are skipped by every rule but `test-suffix`.
+- Logic = the root `index.ts`, `**/state.ts`, `**/tables.ts`, `**/game.ts`, `**/{core,nodes,flows,rules,features,shared}/**`. Tests (`tests/**`, `**/__tests__/**`, `*.test.ts`) are skipped by every rule but `test-suffix`.
 - Every rule takes `["error", { "files": [...], "ignores": [...] }]`. Globs are relative to the directory oxlint runs in; a key given replaces the default. `layer-imports`, `feature-door` and `rules-siblings` also take `root` (the folder of `core/`, `shared/`, `features/`, `plugins/` and `game.ts`, default `.`) and `tsconfig` (default `tsconfig.json`); `test-suffix` takes `root` and `suffixes` (kind folder to suffix, replaces the table whole).
 
 ## Minimal game
@@ -228,25 +232,96 @@ export const mainFlow = defineFlow("main", {
 ```
 
 ```ts
-// game.ts
-import { createApp } from "@moku-labs/game";
+// index.ts: the game as one data object
+import { defineGameApp } from "@moku-labs/game/app";
 import { mainFlow } from "./flow";
 
-export const createGame = (seed: "from-save" | number = "from-save") =>
-  createApp({
-    pluginConfigs: {
-      model: { initialPlayer: { coins: 0, lastRoll: 0 }, initialSession: { rolls: 0 }, seed },
-      flow: { mainFlow, safeNode: "home" }
-    },
-    onStart: ctx => {
-      ctx.flow.run().catch((error: unknown) => {
-        ctx.log.error("game: the graph failed", { error });
-      });
-    }
-  });
+export default defineGameApp({
+  flow: mainFlow,
+  safeNode: "home",
+  player: { coins: 0, lastRoll: 0 },
+  session: { rolls: 0 }
+});
 ```
 
-The game calls `flow.run()` itself, once, from `onStart`. Do not await it there: it resolves only when the app stops. The screen sends answers with `app.flow.gate.answer({ intent: "roll" })`.
+```ts
+// config.ts: the page, as plain data
+import type { GameConfig } from "@moku-labs/game/app";
+
+export default { page: { title: "Dice" } } satisfies GameConfig;
+```
+
+The game never calls `flow.run()`. The page runs the graph after `app.start()`; a test hands the app to `createHeadless`, which runs it. The screen sends answers with `app.flow.gate.answer({ intent: "roll" })`.
+
+## The game shell
+
+A game is a folder: `index.ts` (`export default defineGameApp({ ... })`), `config.ts` (plain data, `satisfies GameConfig`), `core/`, `shared/`, `features/`, `plugins/`, `generated/`, `tests/` with `tests/scenarios/<name>.ts`. No `web/`, no `native.ts`, no `platform-bridge.ts`, no `bunfig.toml`, no `createApp` call. `.moku/` holds what `moku-game` writes; the game's `.gitignore` lists it. Scripts of the game's `package.json`: `"dev": "moku-game dev"`, `"build": "moku-game build"`, `"native:ios-sim": "moku-game native build ios --simulator"`.
+
+- `defineGameApp(definition)` returns the game, `{ headless(seams?), screen(seams?) }`, and creates no app. Every type comes from the object; no generic at the call site. Keys: `flow` (required), `safeNode` (default: the start of the main flow), `player` and `session` (required), `referenceLong` (1920), `seed` (42), `shared` (composed first among the features), `features`, `plugins` (their APIs land on `screen().app`), `headless: { features?, plugins? }`, `pluginConfigs`.
+- `pluginConfigs` takes every plugin of the screen app but the keys the shell writes. A seam-owned key is a compile error: `model.playerProvider`, `initialPlayer`, `initialSession`, `seed` (the game keeps `schemaVersion`, `migrations`); all of `clock` and `platform`; `flow.mainFlow`, `safeNode`; `renderer.mount`; `assets.manifest`, `io`; `audio.context`.
+- `game.headless(seams?)` composes the core plugins, `logicOnly` of `headless.features`, then `headless.plugins`. `game.screen(seams?)` composes the screen set, `audio`, `effects`, `platform`, then `shared`, the features and the game's plugins. Both return `{ app, clock, provider }`, the app not started; each call is fresh. Defaults: `fakeClock(startMoment)` (`startMoment` is `1_000_000`), a fresh `memory()` save, the seed of the definition or 42.
+- Seams of both: `seed`, `clock`, `provider`, `player`, `session`. Screen only: `manifest` (a URL or the parsed file), `io`, `platform`, `keepAwake` (false), `audio: { context?, journal? }`, `renderer: { mount?, loadPixi?, preference? }`. Without a mount the renderer is inert, so `game.screen()` runs in plain Bun.
+- `defineGameApp` throws `[game] defineGameApp needs flow.` and `[game] defineGameApp: features[2] is not a feature.` for what TypeScript cannot stop.
+- A game's exit plugin calls `ctx.require(platformPlugin).exit()` itself.
+
+```ts
+// a test of the dice game
+import { startMoment } from "@moku-labs/game/app";
+import { createHeadless } from "@moku-labs/game/testing";
+import game from "./index";
+
+const { app, clock, provider } = game.headless();
+const run = await createHeadless(app);
+
+run.state().path; // "home"
+clock.now() === startMoment; // true
+provider.calls.map(call => call.method); // ["load", "commit"]: a new player
+await run.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]);
+app.model.store.snapshot().session; // { rolls: 2 }
+await run.stop();
+```
+
+`config.ts` keys and defaults: `page.title` (required, never empty), `page.lang` (`"en"`), `page.background` (`"#000000"`: the page behind the canvas, the `theme-color` meta and the native window; the canvas clear colour stays `pluginConfigs.renderer.background`), `page.orientation` (`"portrait"`, or `"landscape"`, `"any"`: the native build locks it), `page.icons: { favicon?, appleTouch? }` (files relative to the game, `<link>` tags), `page.head` (raw tags, verbatim), `native: { name, identifier, icon?, targets? }` (absent: no native build), `system` (`[]`; names `lifecycle`, `back`, `haptics`, `keepAwake`, `store`), `save` (`"memory"`, or `"local"`, `"store"`), `assets.layers` (`{}`; `{ shared: "ui" }` becomes `--layer shared=ui`). A refused value throws, for example `[game] config.save is "disk".` or `[game] config.system names "tray", which the game shell does not wire.`
+
+```ts
+// config.ts of a game in a native shell
+import type { GameConfig } from "@moku-labs/game/app";
+
+export default {
+  page: { title: "Лесной городок", lang: "ru", background: "#10161d", orientation: "portrait", icons: { favicon: "assets/icon.png" } },
+  native: { name: "Лесной городок", identifier: "com.mokulabs.timber", icon: "assets/icon.png" },
+  system: ["lifecycle", "back", "haptics", "keepAwake"],
+  save: "memory",
+  assets: { layers: { shared: "ui" } }
+} satisfies GameConfig;
+```
+
+The page. `moku-game dev` and `build` write a `main.ts` that calls `startPage(game, config, { scenarios?, system?, agents?, devModules? })`. In order it resolves the config; picks the start; builds the system shell when the page has one and picks the save; makes `game.screen()` with the canvas on `#game`, `manifest.json` next to the page, the device clock and the shell's platform; sets `globalThis.game` (the app), `globalThis.system` (the system app or `undefined`) and `globalThis.doors` (`read`, `watch`, `sources`; `run`, `commands` in dev); follows reduced motion; starts the shell, the app, and runs the graph (a stop is logged `[game] The graph stopped.`); in dev starts the agents with `{ app, name, modules }`.
+- `?player=<name>` starts from the scenario `tests/scenarios/<name>.ts` on a fresh memory save, never on the stored one. An unknown name logs `[game] No scenario "<name>".` and starts from the starting player. A scenario is `Scenario<Player>`: `(now) => ({ player, session? })`, its default export.
+- `?renderer=webgl` asks Pixi for WebGL.
+- Save kinds: `"memory"` lives for the page only; `"local"` is `localStorage` under `<native.identifier>:save` or `moku-game:save`, and falls back to memory with a warning where storage is refused; `"store"` is the system store (idb on the web, the Tauri store native), needs the shell, rejects a load it cannot read instead of starting a new player.
+- System: the generated `main.ts` imports `systemShell` of `@moku-labs/game/app/system` only when `system` is not empty or `save` is `"store"`, so a web-only page bundles no system code. The shell loads each named `@moku-labs/system` plugin with its own `import()`. Not installed: `[game] config.system needs @moku-labs/system.` with `bun add @moku-labs/system@^0.3.1`.
+
+```ts
+// .moku/main.ts of the engine's mini game, written by moku-game dev
+// Written by moku-game dev. Do not edit.
+import "./dev.ts";
+import { startPage } from "@moku-labs/game/app/page";
+import game from "../index.ts";
+import config from "../config.ts";
+import scenario0 from "../tests/scenarios/ready.ts";
+
+await startPage(game, config, {
+  scenarios: { "ready": scenario0 }
+});
+```
+
+Commands of the bin `moku-game` (bun). Every command takes `--root <dir>` (default `.`), `--preload <path>` and `--serve-plugin <path>` (both repeat), before or after the command word. Exit 0 on success, else 1 with a `[game] …` line.
+- `moku-game dev [--port 3000] [--packed]`: writes `.moku/index.html`, `dev.ts`, `main.ts`, `bunfig.toml` (the hot plugin first, `__MOKU_GAME_DEV__` defined `true`), runs Bun again under that bunfig in the game folder and serves `/`. It prints `› <folder>: dev server, raw assets. Ctrl+C stops it.` and then the bound URL alone on its own line, `http://localhost:3000/`. `--port 0` takes a free port. `--packed` serves `dist/assets`. A new or removed file in `tests/scenarios/` rewrites `main.ts`. A taken port: `[game] dev: port 3000 is in use.` with `Pass --port 0 for a free port.`
+- `moku-game build [--out dist/web]`: packs the assets, bundles the page minified with `__MOKU_GAME_DEV__` defined `false` (no scenario, no agent, no `.dev` module, no `/control`), every link `./`, and copies the pack beside it with `manifest.json` next to `index.html`. Runs from any http sub-path and from Tauri, not from `file://`.
+- `moku-game native build <target> [--simulator]`, `native dev <target>`, `native doctor [<target>]`, `native clean [<target>]`: one verb of `@moku-labs/native` (a dev dependency, `^0.3.2`) over `config.ts`. App name, identifier and icon from `native`, orientation and background colour from `page`; the web build is `moku-game build`, the dev server `moku-game dev --port 5173`; system rows for `back`, `haptics`, `store`; the Tauri project in `.moku/tauri`, the apps in `dist-native`. `[game] config.ts has no native section.` without `native`.
+- `moku-game keys [--check]`: `generated/assets.ts`, the compiled strings and `manifest.json`. `moku-game pack [--no-cache]`: `dist/assets`. Both pass the layers of `config.ts`.
+- `preparePage(root, { agents?, preload?, servePlugins? })` of `@moku-labs/game/cli` writes the dev page of `moku-game dev` and resolves `{ html, bunfig }`, both absolute, for a server the caller starts: `bun --config=<bunfig>`. With agents the page also imports the game's `**/*.dev.ts` and hands them to the agents. The editor calls it: `await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] })`.
 
 ## More patterns
 
@@ -493,7 +568,7 @@ Cosmetic rendering extras as data, drawn by `effectsPlugin`: `plugins: [...scree
 
 ### platform (V6, Standard, opt-in)
 
-The phone as a provider, last in the array: `plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin]` with `pluginConfigs: { platform: { provider, keepAwake: true } }`. The engine never imports a native package: the game builds the provider in its own layer, usually from `@moku-labs/system`. The full reference is `src/plugins/platform/README.md`.
+The phone as a provider, last in the array: `plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin]` with `pluginConfigs: { platform: { provider, keepAwake: true } }`. `game.screen()` composes it and takes the provider as its `platform` seam. A game imports no native package: the engine page builds the provider from the `system` list of `config.ts` through `@moku-labs/game/app/system`, and turns keep-awake on when the list names `keepAwake`. The full reference is `src/plugins/platform/README.md`.
 - `PlatformProvider` has six members: `onPause(fn)`, `onResume(fn)`, `onBack(fn)` (each returns its remover), `haptic(kind)`, `keepAwake(on)`, `exit()`. Pause and resume push and pop the `"background"` reason of `lifecycle`. A provider method that throws is logged, never thrown into the frame.
 - Back chain, `app.platform.back(): BackResult`. First an Escape press: a popup with an `escape` button closes, `"popup"`. Then `flow.gate.answer({ intent: "back" })` when the resting node lists `back`, `"intent"`. Then `provider.exit()`, `"exit"`. Without a provider `"none"`.
 - Haptics: `await fx(haptic("success"))` in a node, or `haptic("light")` as a timeline step. The kinds are `HAPTIC_KINDS`: `light`, `medium`, `heavy`, `selection`, `success`, `warning`, `error`. A fast walk is silent.
@@ -512,9 +587,9 @@ Two subpaths, neither on the root (V4). An editor, MCP tools and e2e scripts rea
 
 - `@moku-labs/game/inspect`: `read(app, source, input?)` reads once; `watch(app, source, input, fn)` reads on the `signals` phase when the source changes and returns the stop function; `defineSource`; the frozen catalogue `sources`; the types `Source`, `InputSchema`, `InputOf`. Every source only reads, so the door is safe in a production build. Keys of `sources`: `graph`, `position`, `history`, `tainted`, `cheats`, `model`, `entities`, `projections`, `ui`, `locate`, `render`, `sounds`, `audioMuted`, `effects`, `assets`, `log`, `explain`, `diff`, `schema`, `at`; their ids are `game.<key>`. `locate` takes `{ key }` (a ui element) or `{ target }` (a view by projection key) and answers its box in CSS px, the numbers Playwright clicks. `at` takes `{ x, y }` in CSS px and lists the views under that point, topmost first. `explain` takes `{ entity }` and answers that entity in full, `undefined` for a stale id. `diff` takes `{ from, to }` frames and answers what changed per entity; it throws in a production build and for a frame outside the last 120. `schema` lists every component and tag type the world met, with the JSON kind of each field. `audioMuted` answers whether the master bus is muted. `sounds` throws `[game] The source game.sounds needs audioPlugin.`, `audioMuted` throws `[game] The source game.audioMuted needs audioPlugin.` and `effects` throws `[game] The source game.effects needs effectsPlugin.` when that plugin is not installed; the editor lists such a source as not installed.
 - `@moku-labs/game/control`: `run(app, command, input?)` resolves `{ value, state }`, `state` being `{ path, frame, tainted }`; `defineCommand`; `controlRefused`; the frozen catalogue `commands`; the types `Command`, `Ran`. Keys of `commands`: `answer`, `tap`, `drag`, `key`, `fill`, `walk`, `bookmark`, `restore`, `step`, `pause`, `resume`, `capture`, `debug`, `reducedMotion`, `timeScale`, `mute`, `trace`. `capture` resolves `{ png }`, and `{ png, legend }` with `legend: true`; `undefined` while the renderer is inert. `timeScale` takes `{ scale }`; 0 freezes game time while the frames keep running. `mute` takes `{ muted }`, mutes the master bus and answers the flag. Without `audioPlugin` it throws `[game] The command game.mute needs audioPlugin.` `trace` takes `{ path }`, a list of views by projection key, and answers whether the gate took the answer.
-- Commands run in dev builds only. Only `__MOKU_GAME_DEV__ === true` turns the dev build on: a bundler `define` (`true` in dev, `false` in production), `globalThis.__MOKU_GAME_DEV__ = true` in the dev entry, or `vi.stubGlobal("__MOKU_GAME_DEV__", true)` in a test. Otherwise `run` throws `[game] Control commands run in dev builds only.`
+- Commands run in dev builds only. Only `__MOKU_GAME_DEV__ === true` turns the dev build on: `moku-game dev` defines it `true` and sets the global in `.moku/dev.ts`, `moku-game build` defines it `false`; a game without the shell uses a bundler `define`; a test uses `vi.stubGlobal("__MOKU_GAME_DEV__", true)`. Otherwise `run` throws `[game] Control commands run in dev builds only.`
 - A command's effect is `read`, `route`, `cosmetic`, `cheat` or `raw`. A `cheat` or `raw` command taints the session and is journaled; read it with `sources.tainted` and `sources.cheats`. Of the base commands only `restore` is `raw`. `bookmark` answers `flow.bookmark()` plus `scene`, the mounted scene; `restore` calls `scenes.expect(scene)` before `flow.restore`, so a bookmark at a popup restores the scene under it.
-- A game's own: `defineSource({ id, title, input, changes, read })` with `changes` `"frame"`, `"commit"` or `"edge"`, and `defineCommand({ id, title, input, effect, run })`. The id is camelCase words joined by dots, at least two: `dice.rolls`. An input schema maps field names to `"string"`, `"number"`, `"boolean"` or `"json"`; a trailing `?` makes one optional. A command body starts with `if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();`. Keep them in `.dev` modules that only the dev entry and the tests import.
+- A game's own: `defineSource({ id, title, input, changes, read })` with `changes` `"frame"`, `"commit"` or `"edge"`, and `defineCommand({ id, title, input, effect, run })`. The id is camelCase words joined by dots, at least two: `dice.rolls`. An input schema maps field names to `"string"`, `"number"`, `"boolean"` or `"json"`; a trailing `?` makes one optional. A command body starts with `if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();`. Keep them in `.dev` modules that only the dev page and the tests import: the editor's dev page (`preparePage` with agents) imports every `**/*.dev.ts`, `moku-game build` none.
 
 ## Project index
 
@@ -539,7 +614,7 @@ project.close();
 
 ## Hot swap
 
-Dev only. A save of a view file swaps the module in the running page: same state, same node, no reload. The game's `bunfig.toml` lists the plugin; the dev server runs in the game root, and a production `Bun.build` never loads it:
+Dev only. A save of a view file swaps the module in the running page: same state, same node, no reload. `moku-game dev` lists the plugin first in its `.moku/bunfig.toml` and runs the server in the game root, so a game sets nothing; `moku-game build` never loads it. A game with a server of its own lists it in its own `bunfig.toml`:
 
 ```toml
 [serve.static]
@@ -549,7 +624,7 @@ plugins = ["@moku-labs/game/hot"]
 - View files swap: `.tsx`, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`, `generated/strings.<locale>.ts`. On the layered layout also any `.ts` directly in a kind folder: `styles/`, `motion/`, `effects/`, `views/`, `world/projections/`, `world/layout/`, in a feature or in `shared/`. Styles, components, function components, projections of a registered name, animations, text styles, emitters and strings. After a strings JSON edit run `bun run assets:keys`; its output is what swaps.
 - Logic files reload the page: `rules/`, `nodes/`, `flows/`, `state.ts`, `tables.ts`, `kit.ts`, a feature `index.ts`, `world/components/`, `world/systems/`. A view file that exports a scene, system, ECS component, filter, flow, node, feature, plugin, a new projection or a new animation is refused: `ui` logs `ui:hot-refused` and throws, and Bun reloads the page.
 - A swap logs `ui:hot-swap` and emits the global event `ui:hot-swap` `{ file, module }`.
-- Another layout: `export default hot({ include, exclude })` from the game's own `hot.ts`, listed as `plugins = ["./hot.ts"]`.
+- Another layout, on a server of the game's own: `export default hot({ include, exclude })` from the game's `hot.ts`, listed as `plugins = ["./hot.ts"]`.
 - Keep a view helper in the module of the projection that uses it. A function another module stored into an object at load time keeps the old version.
 
 ## Fonts
@@ -581,20 +656,20 @@ Exports of `@moku-labs/game/testing`: `createHeadless`, `runRepro`, `stepFrames`
 import type { Flow } from "@moku-labs/game";
 import { createHeadless } from "@moku-labs/game/testing";
 import { expect, it } from "vitest";
-import { createGame } from "./game";
+import game from "./index";
 
 const rollOnce: Flow.RouteStep = { at: "home", intent: "roll" };
 
 it("plays two rolls without a screen", async () => {
-  const app = createGame(42);
-  const game = await createHeadless(app);
+  const { app } = game.headless({ seed: 42 });
+  const run = await createHeadless(app);
 
-  const state = await game.walk([rollOnce, rollOnce]);
+  const state = await run.walk([rollOnce, rollOnce]);
 
   expect(state.path).toBe("home");
   expect(app.model.store.snapshot().session).toEqual({ rolls: 2 });
 
-  await game.stop();
+  await run.stop();
 });
 ```
 
@@ -623,21 +698,22 @@ game.state().path; // "main/home"
 await game.stop();
 ```
 
-For timers, pass `clock: { source: fakeClock(1_000_000) }` in `pluginConfigs`, call `clock.advance(ms)`, then yield the microtask queue before reading the state. For a fixed game, pass `model: { seed: 42 }`. In tests, compose features as `plugins: [feature.logicOnly]`.
+For timers, take the clock of `game.headless()`, a `fakeClock(startMoment)`: call `clock.advance(ms)`, then yield the microtask queue before reading the state. The seed is the definition's, else 42; `game.headless({ seed: 7 })` pins another. The headless app composes `logicOnly` of `headless.features`. An app made with `createApp` by hand passes `clock: { source: fakeClock(1_000_000) }`, `model: { seed: 42 }` and `plugins: [feature.logicOnly]` itself.
 
 ## File layout of a game
 
 ```
-src/
-  state.ts        Player and Session types, starting state, the defineGame call
-  tables.ts       balance data as plain objects
-  rules/          pure functions, no engine import, no clock, no random
-  nodes/          one file per node: boot.ts, home.ts, await-intent.ts
-  flows/          main.ts, one file per sub-flow, one file per feature
-  game.ts         the single createApp call
-tests/            headless scenarios with createHeadless and walk
+index.ts          export default defineGameApp({ ... }): the game as one data object
+config.ts         export default { page, native?, system?, save?, assets? } satisfies GameConfig
+core/             the kit (the defineGame call) and its types
+shared/           the shared layer
+features/<f>/     one feature: flow/, rules/, views/, styles/, motion/, world/, assets/, strings/
+plugins/          the game's own plugins
+generated/        what moku-game keys writes
+tests/            the tests; tests/scenarios/<name>.ts are the saves of ?player=<name>
+.moku/            what moku-game writes, ignored by git
 ```
 
-The layered layout puts the game under `core/` (the kit and its types), `shared/` (the shared layer), `features/<f>/` with kind folders (`flow/`, `rules/`, `views/`, `styles/`, `motion/`, `world/`), `plugins/`, `generated/` and `game.ts`, with tsconfig aliases `@core/*`, `@shared`, `@features/*`. The lint rules `layer-imports`, `feature-door` and `test-suffix`, the hot kind folders, `--layer shared=ui` and the project index follow it.
+Rules are pure functions in `rules/`: no engine import, no clock, no random. The tsconfig aliases are `@core/*`, `@shared`, `@features/*`. The lint rules `layer-imports`, `feature-door` and `test-suffix`, the hot kind folders, the `assets.layers` of `config.ts` and the project index follow the layers `core/`, `shared/`, `features/` and `plugins/`.
 
-This is the layout of the worked example, the merge game in moku-labs/demos (https://github.com/moku-labs/demos): `kit.ts`, `state.ts`, `tables.ts`, `rules/`, `nodes/`, `flows/`, `game.ts`, written on the public API only, with its e2e and visual tests. The engine repository keeps a smaller fixture, `tests/fixtures/mini-game/`, which is not in the npm package. A game with a screen adds `features/<name>/view.tsx` (projections and components), `features/<name>/animations.ts`, `features/<name>/strings/<locale>.json` and the `generated/` folder `bun run assets:keys` writes. Each plugin has a README: `src/plugins/<name>/README.md` for `time`, `lifecycle`, `model`, `clock`, `flow`, `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`, `audio`, `effects`, `platform`. Moku Core specification: https://github.com/moku-labs/core/tree/main/specification
+The worked example is the merge game in moku-labs/demos (https://github.com/moku-labs/demos), written on the public API only, with its e2e and visual tests. The engine repository keeps a smaller fixture, `tests/fixtures/mini-game/` (`index.ts`, `config.ts`, `tests/scenarios/ready.ts`, one rest node, one popup flow, two features), which is not in the npm package. A feature with a screen adds `view.tsx` (projections and components), `animations.ts` and `strings/<locale>.json`. Each plugin has a README: `src/plugins/<name>/README.md` for `time`, `lifecycle`, `model`, `clock`, `flow`, `world`, `renderer`, `input`, `assets`, `scenes`, `anim`, `i18n`, `text`, `ui`, `audio`, `effects`, `platform`. Moku Core specification: https://github.com/moku-labs/core/tree/main/specification

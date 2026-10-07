@@ -1,6 +1,6 @@
 # Configuration
 
-Global config and the config of every plugin, with defaults.
+Global config and the config of every plugin, with defaults. A game sets them in `index.ts`: `referenceLong` and `pluginConfigs` of `defineGameApp`. The page, the native app, the system plugins and the save live in `config.ts`, see [config.ts of a game](#configts-of-a-game).
 
 ## Global
 
@@ -16,7 +16,7 @@ createApp({ config: { orientation: "landscape", referenceSide: 1080, referenceLo
 
 ## Per plugin
 
-Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
+Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createApp({ pluginConfigs })` for an app made by hand. `defineGameApp` does not take the keys the shell writes from the seams: `model.playerProvider`, `initialPlayer`, `initialSession`, `seed`, all of `clock` and `platform`, `flow.mainFlow`, `safeNode`, `renderer.mount`, `assets.manifest`, `io` and `audio.context`. See [The game shell](./shell.md#indexts-the-game).
 
 | Plugin | Key | Type | Default | Meaning |
 |---|---|---|---|---|
@@ -68,5 +68,29 @@ Set with `createApp({ pluginConfigs: { <plugin>: { ... } } })`.
 | `effects` | `maxPasses` | `number` | `24` | Render passes per frame above which `effects:pass-budget` warns once per crossing |
 | `effects` | `phone` | `boolean \| "auto"` | `"auto"` | Whether the device is a phone. `"auto"`: a coarse pointer and a short side of at most 820 CSS px, read once at start |
 | `effects` | `blur` | `{ quality, phoneResolution }` | `{ quality: 2, phoneResolution: 0.5 }` | What a `Blur` with `quality: 0` and `resolution: 0` resolves to |
-| `platform` | `provider` | `PlatformProvider \| undefined` | `undefined` | The provider the game builds, usually from `@moku-labs/system`. Absent: the plugin is inert and `back()` answers `"none"` |
+| `platform` | `provider` | `PlatformProvider \| undefined` | `undefined` | The engine page passes the system shell's provider when `config.ts` names `system` plugins. Absent: the plugin is inert and `back()` answers `"none"` |
 | `platform` | `keepAwake` | `boolean` | `false` | Keep the screen on while the game runs; released while it is paused and on stop |
+
+## config.ts of a game
+
+Plain data that `satisfies GameConfig` of `@moku-labs/game/app`. `moku-game` and the page read it; the game logic never does.
+
+```ts
+// config.ts
+import type { GameConfig } from "@moku-labs/game/app";
+
+export default { page: { title: "mini-game" } } satisfies GameConfig;
+```
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `page.title` | `string` | required | The page title. Never empty |
+| `page.lang` | `string` | `"en"` | The `lang` of the page |
+| `page.background` | `string` | `"#000000"` | The page behind the canvas, the `theme-color` meta and the native window. The canvas clear colour is `renderer.background` |
+| `page.orientation` | `"portrait" \| "landscape" \| "any"` | `"portrait"` | The orientation the native build locks |
+| `page.icons` | `{ favicon?, appleTouch? }` | `{}` | Icon files relative to the game, as `<link>` tags |
+| `page.head` | `readonly string[]` | `[]` | Raw tags for `<head>`, verbatim |
+| `native` | `{ name, identifier, icon?, targets? }` | `undefined` | The native app. Absent: no native build |
+| `system` | `readonly SystemName[]` | `[]` | `lifecycle`, `back`, `haptics`, `keepAwake`, `store`: the system plugins the shell wires |
+| `save` | `"memory" \| "local" \| "store"` | `"memory"` | Where the player's save lives |
+| `assets.layers` | `Record<string, string>` | `{}` | Asset layers by folder: `{ shared: "ui" }` |

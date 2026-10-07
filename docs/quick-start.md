@@ -73,59 +73,82 @@ export const mainFlow = defineFlow("main", {
 });
 ```
 
-**4. Create the app.** The graph is started by the game, never by the plugin.
+**4. Define the game.** `index.ts` is the whole game as one data object. `defineGameApp` creates no app: the page and the tests do, with `game.screen()` and `game.headless()`. The graph is run by the page or the test, never by the game.
 
 ```ts
-// game.ts
-import { createApp } from "@moku-labs/game";
+// index.ts
+import { defineGameApp } from "@moku-labs/game/app";
 import { mainFlow } from "./flow";
 
-export const createGame = (seed: "from-save" | number = "from-save") =>
-  createApp({
-    pluginConfigs: {
-      model: { initialPlayer: { coins: 0, lastRoll: 0 }, initialSession: { rolls: 0 }, seed },
-      flow: { mainFlow, safeNode: "home" }
-    },
-    onStart: ctx => {
-      ctx.flow.run().catch((error: unknown) => {
-        ctx.log.error("game: the graph failed", { error });
-      });
-    }
-  });
+export default defineGameApp({
+  flow: mainFlow,
+  safeNode: "home",
+  player: { coins: 0, lastRoll: 0 },
+  session: { rolls: 0 }
+});
 ```
 
-A hook that throws never stops the game. The engine writes it to the log as the error entry `"game: a hook failed"`; read it with `app.log.trace()`. A game can add its own `onError: (error, ctx) => …` to `createApp`; the kernel calls both.
+A hook that throws never stops the game. The engine writes it to the log as the error entry `"game: a hook failed"`; read it with `app.log.trace()`.
 
-**5. Play it headless.** `createHeadless` returns a game object once the graph rests at its first
-rest node. Its `walk` method plays a route.
+**5. Name the page.** `config.ts` is plain data: the page, and later the native app, the system plugins and the save. Every field but the title has a default.
+
+```ts
+// config.ts
+import type { GameConfig } from "@moku-labs/game/app";
+
+export default {
+  page: { title: "Dice", background: "#10161d" }
+} satisfies GameConfig;
+```
+
+**6. Play it headless.** `game.headless()` makes the logic app, not started, on a fake clock and an in-memory save. `createHeadless` starts it and resolves once the graph rests at its first rest node. Its `walk` method plays a route.
 
 ```ts
 // game.test.ts
 import type { Flow } from "@moku-labs/game";
 import { createHeadless } from "@moku-labs/game/testing";
 import { expect, it } from "vitest";
-import { createGame } from "./game";
+import game from "./index";
 
 const rollOnce: Flow.RouteStep = { at: "home", intent: "roll" };
 
 it("plays two rolls and a reset without a screen", async () => {
-  const app = createGame(42);
-  const game = await createHeadless(app);
+  const { app } = game.headless();
+  const run = await createHeadless(app);
 
-  const state = await game.walk([rollOnce, rollOnce]);
+  const state = await run.walk([rollOnce, rollOnce]);
 
   expect(state.path).toBe("home");
   expect(app.model.store.snapshot().session).toEqual({ rolls: 2 });
 
-  await game.walk([{ at: "home", intent: "reset" }]);
+  await run.walk([{ at: "home", intent: "reset" }]);
 
   expect(app.model.store.snapshot().player).toMatchObject({ coins: 0 });
 
-  await game.stop();
+  await run.stop();
 });
 ```
 
 In a live game the same answer comes from the screen: `app.flow.gate.answer({ intent: "roll" })`.
+
+**7. Serve it.** The engine bin `moku-game` serves the folder with hot reload. Add the scripts and ignore what it writes:
+
+```json
+{
+  "scripts": {
+    "dev": "moku-game dev",
+    "build": "moku-game build"
+  }
+}
+```
+
+```sh
+echo ".moku/" >> .gitignore
+bun run dev     # http://localhost:3000/
+bun run build   # the production page in dist/web
+```
+
+The page, the save kinds, `?player=` scenarios, the system plugins and the native build are in [The game shell](./shell.md).
 
 > [!TIP]
 > Types reach a game through one namespace per plugin: `import type { Flow, Model, Clock, Lifecycle, Time } from "@moku-labs/game"`, then `Flow.RouteStep`, `Model.PlayerStateProvider`, `Time.Phase`. The screen and interface plugins follow the same rule: `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`, `Effects`, `Platform`. `Text` is the component, so its type namespace is `TextTypes`.
@@ -135,30 +158,22 @@ In a live game the same answer comes from the screen: `app.flow.gate.answer({ in
 
 ## A screen: the body font and the asset keys
 
-A game with a screen keeps its files in `src/features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. The package ships it as the bin `moku-game-assets`. It runs under bun; with node only, run `bun node_modules/@moku-labs/game/dist/assets.mjs`. Add the script to the game's `package.json`:
+A game with a screen keeps its files in `features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. `moku-game keys` runs it on the game folder: it writes `generated/assets.ts`, the compiled strings and `manifest.json`. `moku-game keys --check` fails when an output is out of date, and `moku-game pack` writes the production build into `dist/assets`.
 
-```json
-{
-  "scripts": {
-    "assets:keys": "moku-game-assets --root src --manifest public/assets/manifest.json --keys src/generated/assets.ts"
-  }
-}
-```
+A game on the layered layout names its layers in `config.ts`, `assets: { layers: { shared: "ui" } }`, so `shared/assets/*` keeps the `ui.*` keys.
 
-The same bin takes `--check`, which fails when an output is out of date, and `--pack <dir>` for the production build.
-
-A game on the layered layout adds `--layer shared=ui`, so `shared/assets/*` keeps the `ui.*` keys.
-
-The package also ships one MSDF body font, Pangolin Regular under the SIL Open Font License 1.1. Copy it into the game, do not reference it: the scanner reads keys only from `features/<feature>/assets/` and from the layers of `--layer`. The licence goes next to `assets/`, not inside it.
+The package also ships one MSDF body font, Pangolin Regular under the SIL Open Font License 1.1. Copy it into the game, do not reference it: the scanner reads keys only from `features/<feature>/assets/` and from the layers. The licence goes next to `assets/`, not inside it.
 
 ```bash
-mkdir -p src/features/ui/assets
-cp node_modules/@moku-labs/game/fonts/font-body.* src/features/ui/assets/
-cp node_modules/@moku-labs/game/fonts/LICENSE.txt src/features/ui/LICENSE-fonts.txt
-bun run assets:keys
+mkdir -p features/ui/assets
+cp node_modules/@moku-labs/game/fonts/font-body.* features/ui/assets/
+cp node_modules/@moku-labs/game/fonts/LICENSE.txt features/ui/LICENSE-fonts.txt
+bunx moku-game keys
 ```
 
 The font gets the key `ui.font-body`. That is the default of `text` config `fonts.body`, so the built-in style `body` works with no config.
+
+The bin `moku-game-assets` is the scanner on its own, for a game without `config.ts`. It takes the same flags: `--root`, `--keys`, `--manifest`, `--layer`, `--check`, `--pack <dir>`.
 
 ## The contract
 

@@ -110,6 +110,15 @@ describe("package.json", () => {
     expect(pkg.peerDependenciesMeta.typescript).toEqual({ optional: true });
   });
 
+  it("the package has the moku-game bin and the ./cli export", () => {
+    const bin = pkg.bin["moku-game"];
+
+    expect(bin).toBe("./bin/moku-game.mjs");
+    expect(readText(bin ?? "").startsWith("#!/usr/bin/env bun\n")).toBe(true);
+    expect(readText(bin ?? "")).toContain('from "../dist/cli.mjs"');
+    expect(pkg.exports["./cli"]).toEqual({ types: "./dist/cli.d.mts", default: "./dist/cli.mjs" });
+  });
+
   it("exports the fonts folder by subpath", () => {
     expect(pkg.exports["./fonts/*"]).toBe("./fonts/*");
   });

@@ -5,7 +5,10 @@
  */
 import { readFile } from "node:fs/promises";
 import type { Assets } from "@moku-labs/game";
-import type { MiniGame } from "../fixtures/mini-game/game";
+import type miniGame from "../fixtures/mini-game/index";
+
+/** The mini game as `miniGame.screen()` builds it: the screen app, not started. */
+export type MiniGame = ReturnType<typeof miniGame.screen>["app"];
 
 /** The folder of the mini game: the dev manifest and every asset path are relative to it. */
 export const miniFolder = new URL("../fixtures/mini-game/", import.meta.url);

@@ -7,7 +7,7 @@ import { read, sources } from "@moku-labs/game/inspect";
 import { openProject, type ProjectApi } from "@moku-labs/game/project";
 import { createHeadless } from "@moku-labs/game/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createMiniGame } from "../fixtures/mini-game/game";
+import miniGame from "../fixtures/mini-game/index";
 import { miniFolder, readManifest } from "./mini-helpers";
 
 // ---------------------------------------------------------------------------
@@ -106,12 +106,12 @@ describe("the project index of the mini game", () => {
     );
 
     expect(openMs).toBeLessThan(OPEN_BOUND_MS);
-    expect(Object.keys(project.index.files)).toHaveLength(21);
+    expect(Object.keys(project.index.files)).toHaveLength(18);
     expect(project.index.manifest).toBe("manifest.json");
   });
 
   it("joins game.graph exactly: one node: key per <flow>/<node>, one flow: key per flow", async () => {
-    const app = createMiniGame({ manifest: await readManifest() });
+    const { app } = miniGame.screen({ manifest: await readManifest() });
     const game = await createHeadless(app);
     const graph = read(app, sources.graph);
     const pairs = Object.entries(graph.flows).flatMap(([flow, described]) =>
@@ -303,6 +303,6 @@ describe("the moku-game-index bin", () => {
     expect(where.status).toBe(0);
     expect(where.stdout).toBe("nodes/count.ts:7\n");
     expect(check.status).toBe(0);
-    expect(check.stdout).toContain("21 files, 35 keys: 0 broken, 0 in conflict, 0 unresolved.");
+    expect(check.stdout).toContain("18 files, 35 keys: 0 broken, 0 in conflict, 0 unresolved.");
   });
 });

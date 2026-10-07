@@ -41,6 +41,22 @@ export default defineConfig({
         find: "@moku-labs/game/visual",
         replacement: new URL("src/visual.ts", import.meta.url).pathname
       },
+      {
+        find: "@moku-labs/game/app/page",
+        replacement: new URL("src/app/page.ts", import.meta.url).pathname
+      },
+      {
+        find: "@moku-labs/game/app/system",
+        replacement: new URL("src/app/system.ts", import.meta.url).pathname
+      },
+      {
+        find: "@moku-labs/game/app",
+        replacement: new URL("src/app.ts", import.meta.url).pathname
+      },
+      {
+        find: "@moku-labs/game/cli",
+        replacement: new URL("src/cli.ts", import.meta.url).pathname
+      },
       { find: "@moku-labs/game", replacement: new URL("src/index.ts", import.meta.url).pathname }
     ]
   },

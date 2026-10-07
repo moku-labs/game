@@ -15,7 +15,7 @@ You write small nodes and edge tables. The engine runs them, saves on the edges 
 
 <br/>
 
-[Why](#why) · [Status](#status) · [Install](#install) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Plugins](#plugins) · [Docs](#docs)
+[Why](#why) · [Status](#status) · [Install](#install) · [Quick start](#quick-start) · [Game shell](#game-shell) · [How it works](#how-it-works) · [Plugins](#plugins) · [Docs](#docs)
 
 ---
 
@@ -55,9 +55,11 @@ bun add @moku-labs/game pixi.js
 > [!IMPORTANT]
 > Bun only. ESM only. There is no CJS build. `pixi.js` `^8.0.0` is a peer dependency. Screens are `.tsx`, so a game sets `"jsx": "react-jsx"` and `"jsxImportSource": "@moku-labs/game"`.
 
+A game in a native shell adds the optional peers: `bun add @moku-labs/system` for the system plugins and the store save, `bun add -d @moku-labs/native` for the native build. A web-only game installs neither.
+
 ## Quick start
 
-A dice game in three files: one rest node, one working node, one flow.
+A dice game in a folder: one rest node, one working node, one flow, then the game and its page as data.
 
 ```ts
 // state.ts: bind the helpers to the types of the game
@@ -94,30 +96,81 @@ export const mainFlow = defineFlow("main", {
 });
 ```
 
+A game in two files: `index.ts` is the game as one data object, `config.ts` the page as plain data.
+
 ```ts
-// game.test.ts: play it with no screen
-import { createApp } from "@moku-labs/game";
-import { createHeadless } from "@moku-labs/game/testing";
+// index.ts: the game as one data object
+import { defineGameApp } from "@moku-labs/game/app";
 import { mainFlow } from "./flow";
 
-const app = createApp({
-  pluginConfigs: {
-    model: { initialPlayer: { coins: 0 }, initialSession: { rolls: 0 }, seed: 42 },
-    flow: { mainFlow, safeNode: "home" }
-  },
-  onStart: ctx => {
-    ctx.flow.run().catch((error: unknown) => ctx.log.error("game: the graph failed", { error }));
-  }
+export default defineGameApp({
+  flow: mainFlow,
+  safeNode: "home",
+  player: { coins: 0 },
+  session: { rolls: 0 }
 });
+```
 
-const game = await createHeadless(app);
-await game.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]);
+```ts
+// config.ts: the page, as plain data
+import type { GameConfig } from "@moku-labs/game/app";
+
+export default { page: { title: "Dice" } } satisfies GameConfig;
+```
+
+Tests make the app with `game.headless()` or `game.screen()`, not started, on a fake clock and an in-memory save:
+
+```ts
+// game.test.ts: play it with no screen
+import { createHeadless } from "@moku-labs/game/testing";
+import game from "./index";
+
+const { app } = game.headless();
+const run = await createHeadless(app);
+
+await run.walk([{ at: "home", intent: "roll" }, { at: "home", intent: "roll" }]);
 app.model.store.snapshot().session; // { rolls: 2 }
 ```
 
-The full version, with a reset node and a vitest file, is in [docs/quick-start.md](./docs/quick-start.md). A bigger game, the merge game, lives in [moku-labs/demos](https://github.com/moku-labs/demos) with its tests.
+`bunx moku-game dev` serves it with hot reload on `http://localhost:3000/`. The full version, with a reset node and a vitest file, is in [docs/quick-start.md](./docs/quick-start.md). A bigger game, the merge game, lives in [moku-labs/demos](https://github.com/moku-labs/demos) with its tests.
 
-A game with a screen gets two more things from the package. The body font `fonts/font-body.*` (Pangolin, SIL OFL 1.1) is the default of the built-in text style `body` once copied into `src/features/ui/assets/`. The bin `moku-game-assets` writes the typed asset keys, the manifest and the strings. It runs under bun; with node only, run `bun node_modules/@moku-labs/game/dist/assets.mjs`. Both are in [docs/quick-start.md](./docs/quick-start.md#a-screen-the-body-font-and-the-asset-keys).
+A game with a screen gets two more things from the package. The body font `fonts/font-body.*` (Pangolin, SIL OFL 1.1) is the default of the built-in text style `body` once copied into `features/ui/assets/`. `moku-game keys` writes the typed asset keys, the manifest and the strings. Both are in [docs/quick-start.md](./docs/quick-start.md#a-screen-the-body-font-and-the-asset-keys).
+
+## Game shell
+
+The engine bin `moku-game` serves, builds and packs a game folder. A game writes no page, no server, no bridge and no `bunfig.toml`.
+
+| Path | Holds |
+|---|---|
+| `index.ts` | `export default defineGameApp({ ... })` |
+| `config.ts` | `page`, `native`, `system`, `save`, `assets`: plain data that `satisfies GameConfig` |
+| `core/`, `shared/`, `features/`, `plugins/` | The kit, the shared layer, the features, the game's plugins |
+| `tests/` | The tests. `tests/scenarios/<name>.ts` are the saves of `?player=<name>` on the dev page |
+| `.moku/` | What `moku-game` writes. Add `.moku/` to `.gitignore` |
+
+```json
+{
+  "scripts": {
+    "dev": "moku-game dev",
+    "build": "moku-game build",
+    "native:ios-sim": "moku-game native build ios --simulator"
+  }
+}
+```
+
+| Command | Does |
+|---|---|
+| `moku-game dev [--port 3000] [--packed]` | Serves the game with hot reload. Prints the bound URL, also for `--port 0` |
+| `moku-game build [--out dist/web]` | Packs the assets and builds the production page |
+| `moku-game native build <target> [--simulator]` | Builds the native app: `ios`, `macos`, `android` |
+| `moku-game native dev <target>` | Runs the native shell on the dev server |
+| `moku-game native doctor`, `native clean` | Checks or removes the native project |
+| `moku-game keys [--check]` | Writes `generated/assets.ts`, the strings and `manifest.json` |
+| `moku-game pack [--no-cache]` | Packs the assets into `dist/assets` |
+
+Every command takes `--root <dir>`, `--preload <path>` and `--serve-plugin <path>`.
+
+`config.ts` names the system plugins the page wires, `system: ["lifecycle", "back", "haptics", "keepAwake"]`, and the save, `save: "memory" | "local" | "store"`. A `system` list and the `"store"` save need the optional peer `@moku-labs/system`; `moku-game native` needs `@moku-labs/native`. The game imports neither. The whole shell is in [docs/shell.md](./docs/shell.md).
 
 ## How it works
 
@@ -188,12 +241,16 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | Import | Runs in | For |
 |---|---|---|
 | `@moku-labs/game` | anywhere | The engine: plugins, helpers, components |
+| `@moku-labs/game/app` | anywhere | `defineGameApp`, `startMoment` and the types of `index.ts` and `config.ts`. See [The game shell](./docs/shell.md) |
+| `@moku-labs/game/app/page` | the browser | `startPage`, the page the generated `.moku/main.ts` calls |
+| `@moku-labs/game/app/system` | the browser, the native shell | The system shell over the optional peer `@moku-labs/system` |
+| `@moku-labs/game/cli` | Node and Bun | `runCli`, the bin `moku-game`; `preparePage`, the dev page for the editor |
 | `@moku-labs/game/testing` | anywhere | Headless and isolated games, the fake clock, the in-memory save |
 | `@moku-labs/game/visual` | Node and Bun | Visual tests: baselines of state, describe and pixels |
 | `@moku-labs/game/assets` | Node and Bun | Asset keys, the manifest, strings, the pack |
 | `@moku-labs/game/inspect` | anywhere | Read a running game |
 | `@moku-labs/game/control` | dev builds | Drive a running game |
-| `@moku-labs/game/hot` | the Bun dev server | The `bunfig.toml` plugin that hot swaps views. See [Hot swap](./docs/hot-swap.md) |
+| `@moku-labs/game/hot` | the Bun dev server | The Bun plugin that hot swaps views. `moku-game dev` lists it. See [Hot swap](./docs/hot-swap.md) |
 | `@moku-labs/game/lint` | oxlint | The game lint rules, as an oxlint JS plugin |
 | `@moku-labs/game/project` | Node and Bun | Where every engine id of a game is defined, line fresh at the call. The bin `moku-game-index`. See [Project index](./docs/project-index.md) |
 | `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | anywhere | The JSX runtime. A game never imports it by hand. |
@@ -228,6 +285,7 @@ Each rule takes `{ "files": [...], "ignores": [...] }`. `layer-imports`, `featur
 | Page | What is inside |
 |---|---|
 | [Quick start](./docs/quick-start.md) | The full dice game, step by step |
+| [The game shell](./docs/shell.md) | `defineGameApp`, `config.ts`, the page, the save, system and native, the `moku-game` commands |
 | [Plugins](./docs/plugins.md) | The dependency graph, the plugin table, every root export |
 | [Interface in JSX](./docs/jsx.md) | Tags, components, styles, popups |
 | [Doors for the editor](./docs/doors.md) | `/inspect` and `/control`, base sources and commands |
@@ -236,7 +294,7 @@ Each rule takes `{ "files": [...], "ignores": [...] }`. `layer-imports`, `featur
 | [Configuration](./docs/configuration.md) | Every config field and its default |
 | [Lint for games](./docs/lint.md) | The `moku-game` oxlint rules, their options and defaults |
 | [Project index](./docs/project-index.md) | `openProject`, the key scheme, `find` and `watch`, the `moku-game-index` bin |
-| [Testing](./docs/testing.md) | Headless, isolated and visual tests, all scripts, test layout, lint rules |
+| [Testing](./docs/testing.md) | `game.headless()` and `game.screen()`, headless, isolated and visual tests, all scripts, test layout, lint rules |
 | [`llms.txt`](./llms.txt) | The engine in one page, for an AI that writes a game |
 
 Each plugin has its own README, linked in the table above. The kernel is specified in the [Moku Core specification](https://github.com/moku-labs/core/tree/main/specification).
@@ -250,7 +308,8 @@ bun run lint             # biome check . && eslint .
 bun run test             # vitest, unit and integration
 bun run test:coverage    # with the 90% threshold
 bun run validate         # publint and attw
-bun run mini:pack        # pack the mini game of tests/fixtures
+bun run mini:dev         # moku-game dev of the mini game of tests/fixtures
+bun run mini:pack        # moku-game pack of the mini game
 bun run mini:visual      # visual tests of the mini game
 bun run release          # moku-release
 ```
@@ -259,7 +318,7 @@ Every script is in [docs/testing.md](./docs/testing.md#scripts).
 
 ### Hot swap
 
-A save of a view file swaps it in the running page, with the same state. One line in the game's `bunfig.toml`:
+A save of a view file swaps it in the running page, with the same state. `moku-game dev` lists the plugin in the bunfig it writes, so a game sets nothing. A game with a server of its own lists it in its `bunfig.toml`:
 
 ```toml
 [serve.static]
@@ -272,7 +331,7 @@ A save of a logic file reloads the page. What swaps and what reloads: [docs/hot-
 
 - **Node `>= 24`** and **Bun `>= 1.3.14`**. Use `bun` only.
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
-- **`pixi.js` `^8.0.0`** as a peer dependency. `playwright-core` for visual tests, `sharp` for the asset pack and `typescript` for the project index are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
+- **`pixi.js` `^8.0.0`** as a peer dependency. `playwright-core` for visual tests, `sharp` for the asset pack, `typescript` for the project index, `@moku-labs/system` for the system shell and `@moku-labs/native` for the native build are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
 - **[`@moku-labs/core`](https://github.com/moku-labs/core)** is the kernel. **[`@moku-labs/common`](https://github.com/moku-labs/common)** brings `log` and `env`.
 
 ## License

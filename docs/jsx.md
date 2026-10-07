@@ -111,15 +111,19 @@ export const deliver = defineNode({
 Headless the same node runs to the end: `popup` resolves through the gate, `play` finishes at once in fast mode, and `sfx` without `audio` resolves `undefined`. The strings behind `tr` come from `features/*/strings/<locale>.json`; `bun run assets:keys` compiles them next to the asset keys, and `strings: Strings` in `defineGame` makes a wrong key or a missing parameter a compile error.
 
 ```ts
-// game.ts — sound is opt-in, the buses follow the committed player
-createApp({
-  plugins: [...screen, audioPlugin, hudFeature],
+// index.ts: game.screen() composes audio, the buses follow the committed player
+export default defineGameApp({
+  flow: mainFlow,
+  player: startingPlayer,
+  session: startingSession,
+  features: [hudFeature],
   pluginConfigs: {
-    renderer: { mount: "#game" },
     audio: { volumes: player => (player as Player).settings.audio }
   }
 });
 ```
+
+An app made with `createApp` alone adds `audioPlugin` to its plugins itself: sound is opt-in there.
 
 `volumes` receives the committed player as `Json`, so the game names its own type once. `player.settings.audio` is `{ master?, music?, sfx? }`, committed by a settings node like any other state and applied on every `model:committed`.
 

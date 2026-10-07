@@ -15,6 +15,22 @@
       "types": "./dist/testing.d.mts",
       "default": "./dist/testing.mjs"
     },
+    "./app": {
+      "types": "./dist/app.d.mts",
+      "default": "./dist/app.mjs"
+    },
+    "./app/page": {
+      "types": "./dist/app/page.d.mts",
+      "default": "./dist/app/page.mjs"
+    },
+    "./app/system": {
+      "types": "./dist/app/system.d.mts",
+      "default": "./dist/app/system.mjs"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.mts",
+      "default": "./dist/cli.mjs"
+    },
     "./visual": {
       "types": "./dist/visual.d.mts",
       "default": "./dist/visual.mjs"
@@ -54,6 +70,7 @@
     "./fonts/*": "./fonts/*"
   },
   "bin": {
+    "moku-game": "./bin/moku-game.mjs",
     "moku-game-assets": "./bin/moku-game-assets.mjs",
     "moku-game-index": "./bin/moku-game-index.mjs"
   },
@@ -88,7 +105,8 @@
     "test:integration": "bun --bun vitest run --project integration",
     "test:coverage": "bun --bun vitest run --project unit --project integration --coverage",
     "build": "tsdown",
-    "mini:pack": "bun src/assets.ts --root tests/fixtures/mini-game --keys tests/fixtures/mini-game/generated/assets.ts --pack tests/fixtures/mini-game/dist/assets",
+    "mini:pack": "bun tests/fixtures/moku-game.ts pack --root tests/fixtures/mini-game",
+    "mini:dev": "bun tests/fixtures/moku-game.ts dev --root tests/fixtures/mini-game",
     "mini:visual": "bun tests/visual/run.ts",
     "validate": "publint && attw --pack . --profile esm-only",
     "release:setup": "moku-release setup",
@@ -103,6 +121,8 @@
   "peerDependencies": {
     "@moku-labs/common": "^0.3.4",
     "@moku-labs/core": "^1.7.1",
+    "@moku-labs/native": "^0.3.2",
+    "@moku-labs/system": "^0.3.1",
     "pixi.js": "^8.0.0",
     "playwright-core": ">=1.50.0",
     "sharp": "^0.34.0",
@@ -112,6 +132,12 @@
     "access": "public"
   },
   "peerDependenciesMeta": {
+    "@moku-labs/native": {
+      "optional": true
+    },
+    "@moku-labs/system": {
+      "optional": true
+    },
     "playwright-core": {
       "optional": true
     },
@@ -130,6 +156,8 @@
     "@moku-labs/ci": "1.2.6",
     "@moku-labs/common": "0.3.4",
     "@moku-labs/core": "1.7.1",
+    "@moku-labs/native": "0.3.2",
+    "@moku-labs/system": "0.3.1",
     "@types/bun": "1.3.14",
     "@vitest/coverage-istanbul": "4.0.18",
     "eslint": "9.39.3",

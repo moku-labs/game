@@ -5,6 +5,13 @@ export default defineConfig({
     index: "src/index.ts",
     // Subpath: the headless test helpers.
     testing: "src/testing.ts",
+    // Subpath: defineGameApp, the game definition and its config.
+    app: "src/app.ts",
+    // Subpaths: the page a game runs in, and its system shell (the optional @moku-labs/system).
+    "app/page": "src/app/page.ts",
+    "app/system": "src/app/system.ts",
+    // Subpath: the moku-game bin and the editor's preparePage; node and bun only.
+    cli: "src/cli.ts",
     // Subpath: the visual tests, node and bun only.
     visual: "src/visual.ts",
     // Subpath: the build-time asset key scanner, node and bun only.
