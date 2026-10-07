@@ -131,48 +131,26 @@ export async function runBin(
   return { code, stdout: started.stdout(), stderr: started.stderr() };
 }
 
-/** A port held by this process on every address `localhost` resolves to. */
+/** A port held by this process on the address the dev server binds. */
 export type HeldPort = {
   /** The port, as `--port` takes it. */
   port: string;
-  /** Stops the servers that hold it. */
+  /** Stops the server that holds it. */
   release: () => Promise<void>;
 };
 
 /**
- * Starts a server on one free address of `localhost` that answers "taken".
- *
- * @param port - The port, `0` for any.
- * @returns The server.
- */
-function serveTaken(port: number): ReturnType<typeof Bun.serve> {
-  return Bun.serve({ hostname: "localhost", port, fetch: () => new Response("taken") });
-}
-
-/**
- * Holds a free port on every address `localhost` resolves to. The dev server binds `localhost`,
- * and Bun binds the first of its addresses that is free, so a port is taken for it only when
- * every one of them is.
+ * Holds a free port on `127.0.0.1`, the address the dev server binds.
  *
  * @returns The port and its release.
  */
-export function holdLocalhostPort(): HeldPort {
-  const first = serveTaken(0);
-  const held = [first];
-
-  // Each bind takes the next free address of localhost; the one after the last one fails.
-  for (let tries = 0; tries < 8; tries += 1) {
-    try {
-      held.push(serveTaken(first.port ?? 0));
-    } catch {
-      break;
-    }
-  }
+export function holdPort(): HeldPort {
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("taken") });
 
   return {
-    port: String(first.port),
+    port: String(server.port),
     release: async () => {
-      await Promise.all(held.map(server => server.stop(true)));
+      await server.stop(true);
     }
   };
 }

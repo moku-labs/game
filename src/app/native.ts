@@ -106,7 +106,7 @@ export function nativeConfigOf(
       cwd: where.cwd,
       build: `${where.command} build`,
       devCommand: `${where.command} dev --port ${DEV_PORT}`,
-      devUrl: `http://localhost:${DEV_PORT}`,
+      devUrl: `http://127.0.0.1:${DEV_PORT}`,
       dist: path.join(where.cwd, "dist/web")
     },
     system: systemRowsOf(settings),

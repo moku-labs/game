@@ -127,7 +127,7 @@ describe("nativeConfigOf", () => {
       cwd: "/g",
       build: '"bun" "/g/bin/moku-game.mjs" "--root" "/g" build',
       devCommand: '"bun" "/g/bin/moku-game.mjs" "--root" "/g" dev --port 5173',
-      devUrl: "http://localhost:5173",
+      devUrl: "http://127.0.0.1:5173",
       dist: "/g/dist/web"
     });
   });

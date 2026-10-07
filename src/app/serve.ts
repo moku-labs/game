@@ -547,7 +547,7 @@ function fileResponse(file: string | undefined): Response {
 }
 
 /**
- * Starts the dev server on `localhost` only, never on every interface: the page on `/`, the
+ * Starts the dev server on `127.0.0.1` only, never on every interface: the page on `/`, the
  * manifest of the served folder on `/manifest.json`, and its files as static files.
  *
  * @param run - The flags of the run.
@@ -560,7 +560,7 @@ function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
 
   try {
     return Bun.serve({
-      hostname: "localhost",
+      hostname: "127.0.0.1",
       port: run.port,
       development: true,
       routes: {

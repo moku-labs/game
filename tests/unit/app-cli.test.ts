@@ -22,7 +22,7 @@ import type { NativeVerb, NativeVerbOptions, NativeWhere } from "../../src/app/n
 import { staticPath } from "../../src/app/serve";
 import type { ResolvedGameConfig } from "../../src/app/types";
 import { runCli } from "../../src/cli";
-import { copyMiniGame, holdLocalhostPort, removeCopies } from "../integration/app-helpers";
+import { copyMiniGame, holdPort, removeCopies } from "../integration/app-helpers";
 
 /** What the stub seams saw. */
 type Seen = {
@@ -560,7 +560,7 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
     const { running, seen, url } = await startChild(root);
 
     expect(seen.out[0]).toBe(`${path.basename(root)}: dev server, raw assets. Ctrl+C stops it.`);
-    expect(url).toMatch(/^http:\/\/localhost:\d+\/$/);
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
     expect(await textOf(url)).toBe("<html>the page</html>");
     expect(JSON.parse(await textOf(`${url}manifest.json`))).toEqual({ version: 1, bundles: {} });
     expect(await textOf(`${url}features/ui/assets/%7Bbutton%7D.png`)).toBe("png");
@@ -582,15 +582,15 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
     await expect(fetch(url)).rejects.toThrow();
   });
 
-  it("binds the server to localhost, never to every interface", async () => {
+  it("binds the server to 127.0.0.1, never to every interface", async () => {
     const root = makeGame();
     const serve = vi.spyOn(Bun, "serve");
 
     try {
       const { running, seen, url } = await startChild(root);
 
-      expect(serve.mock.calls[0]?.[0]).toMatchObject({ hostname: "localhost" });
-      expect(new URL(url).hostname).toBe("localhost");
+      expect(serve.mock.calls[0]?.[0]).toMatchObject({ hostname: "127.0.0.1" });
+      expect(new URL(url).hostname).toBe("127.0.0.1");
 
       interrupt(seen);
       expect(await running).toBe(0);
@@ -617,7 +617,7 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
 
   it("a taken port exits 1 with the --port 0 advice", async () => {
     const root = makeGame();
-    const { port, release } = holdLocalhostPort();
+    const { port, release } = holdPort();
     const { deps, seen } = fakeDeps(root, { env: { MOKU_GAME_CHILD: "1" } });
 
     try {

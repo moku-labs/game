@@ -274,7 +274,7 @@ const { app } = game.screen({ platform: fromSystem(system) }); // Back, pause, h
 | `app.name`, `app.identifier`, `app.icon` | `native.name`, `native.identifier`, `native.icon` |
 | `app.orientation`, `app.backgroundColor` | `page.orientation`, `page.background` |
 | `web.build` | `moku-game build`, with the runner flags |
-| `web.devCommand`, `web.devUrl` | `moku-game dev --port 5173`, `http://localhost:5173` |
+| `web.devCommand`, `web.devUrl` | `moku-game dev --port 5173`, `http://127.0.0.1:5173` |
 | `web.dist` | `<game>/dist/web` |
 | `system` | One row per name that needs a Tauri capability: `back`, `haptics`, `store`. A `"store"` save adds `store` |
 | `targets` | `native.targets`, else the target of the command |
@@ -317,10 +317,10 @@ The global flags go before or after the command word. The exit code is `0` on su
 
 ```
 › mini-game: dev server, raw assets. Ctrl+C stops it.
-http://localhost:3000/
+http://127.0.0.1:3000/
 ```
 
-- The server listens on `localhost` only, never on the network.
+- The server listens on `127.0.0.1` only, never on the network.
 - `/` is the page, `/manifest.json` the manifest of the game, or of `dist/assets` with `--packed`. Any other path is a file of the game, or of `dist/assets` with `--packed`. A segment that starts with a dot, such as `.moku` or `..`, and `node_modules` answer 404.
 - The bunfig lists the engine's hot plugin first and defines `__MOKU_GAME_DEV__` as `true`. `dev.ts` sets the global too. See [Hot swap](./hot-swap.md).
 - `main.ts` lists `tests/scenarios/*.ts`, sorted, by file stem. Test files, `.d.ts` and `index.ts` are skipped. A new or removed scenario file rewrites `main.ts`, and the page reloads. A `tests/scenarios/` folder created after the start needs a restart.

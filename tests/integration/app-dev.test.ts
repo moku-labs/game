@@ -9,7 +9,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   copyMiniGame,
-  holdLocalhostPort,
+  holdPort,
   MINI_GAME,
   REPO,
   removeCopies,
@@ -115,7 +115,7 @@ describe("moku-game dev on the mini game", () => {
     const stdout = server.started?.stdout() ?? "";
 
     expect(stdout.match(URL_LINE)).toEqual([server.url]);
-    expect(server.url).toMatch(/^http:\/\/localhost:\d+\/$/);
+    expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
     expect(stdout).toContain("mini-game: dev server, raw assets. Ctrl+C stops it.");
   });
 
@@ -248,7 +248,7 @@ describe("moku-game dev on copies of the mini game", () => {
 
   it("a taken port exits 1 with the --port 0 advice", async () => {
     const root = game("dev-taken");
-    const { port, release } = holdLocalhostPort();
+    const { port, release } = holdPort();
 
     try {
       const ran = await runBin(["dev", "--root", root, "--port", port]);
