@@ -30,6 +30,10 @@ export default defineConfig({
     "jsx-dev-runtime": "src/jsx-dev-runtime.ts"
   },
   format: ["esm"],
+  // The two ICU parsers of the i18n plugin are the only packages the build may bundle.
+  deps: {
+    onlyBundle: ["@formatjs/icu-messageformat-parser", "@formatjs/icu-skeleton-parser"]
+  },
   dts: true,
   clean: true,
   sourcemap: false,
