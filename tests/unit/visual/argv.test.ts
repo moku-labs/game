@@ -43,6 +43,12 @@ describe("parseVisualArgv", () => {
     });
   });
 
+  it("reads --pixels as the pixel leg forced on; the last of --pixels and --no-pixels wins", () => {
+    expect(parseVisualArgv(["--pixels"])).toEqual({ pixels: true });
+    expect(parseVisualArgv(["--pixels", "--no-pixels"])).toEqual({ pixels: false });
+    expect(parseVisualArgv(["--no-pixels", "--pixels"])).toEqual({ pixels: true });
+  });
+
   it("leaves arguments it does not know to the script that got them", () => {
     expect(parseVisualArgv(["run", "--project", "unit", "--update"])).toEqual({ update: true });
   });

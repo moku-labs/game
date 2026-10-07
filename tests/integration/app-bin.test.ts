@@ -61,7 +61,7 @@ describe("the moku-game bin", () => {
 
     expect(ran.status).toBe(1);
     expect(ran.stderr).toContain(
-      '[game] moku-game: no command "serve". Name one of dev, build, native, keys, pack, help.'
+      '[game] moku-game: no command "serve". Name one of dev, build, native, keys, pack, visual, help.'
     );
     expect(ran.stdout).toBe("");
   });

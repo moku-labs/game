@@ -54,9 +54,11 @@ function valueAfter(argv: readonly string[], index: number, placeholder: string)
 }
 
 /**
- * Reads the flags of the visual tests from a command line: `--update`, `--no-pixels`, `--webgl`,
- * `--only <name>` (repeatable) and `--dir <path>`. An argument it does not know is left to the
- * script that got it, so a test runner's own arguments pass through.
+ * Reads the flags of the visual tests from a command line: `--update`, `--no-pixels`, `--pixels`,
+ * `--webgl`, `--only <name>` (repeatable) and `--dir <path>`. `--pixels` forces the pixel leg on
+ * off a Mac; the last of `--pixels` and `--no-pixels` wins. An argument it does not know is left
+ * to the script that got it, so a test runner's own arguments pass through. `moku-game visual`
+ * reads its flags with it.
  *
  * @param argv - The arguments after the script name.
  * @returns The flags that were given, and nothing else.
@@ -67,6 +69,7 @@ function valueAfter(argv: readonly string[], index: number, placeholder: string)
  * parseVisualArgv(["--update", "--only", "reward-popup"]); // { update: true, only: ["reward-popup"] }
  * parseVisualArgv(["--no-pixels", "--dir", "shots"]); // { pixels: false, dir: "shots" }
  * parseVisualArgv(["--webgl"]); // { renderer: "webgl" }
+ * parseVisualArgv(["--pixels"]); // { pixels: true }
  * ```
  */
 export function parseVisualArgv(argv: readonly string[]): VisualFlags {
@@ -76,6 +79,7 @@ export function parseVisualArgv(argv: readonly string[]): VisualFlags {
   for (const [index, argument] of argv.entries()) {
     if (argument === "--update") flags.update = true;
     if (argument === "--no-pixels") flags.pixels = false;
+    if (argument === "--pixels") flags.pixels = true;
     if (argument === "--webgl") flags.renderer = "webgl";
     if (argument === "--only") only.push(valueAfter(argv, index, "<name>"));
     if (argument === "--dir") flags.dir = valueAfter(argv, index, "<path>");

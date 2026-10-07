@@ -97,7 +97,8 @@ async function build(
     },
     native: unused,
     resolve: unused,
-    loadPage: unused
+    loadPage: unused,
+    visual: unused
   };
   const exit = await runCommand(["build", "--root", root, ...argv], deps);
 

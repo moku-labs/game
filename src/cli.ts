@@ -1,7 +1,7 @@
 /**
  * @file The `@moku-labs/game/cli` door, node and bun only: the `moku-game` bin and the editor's
- * seam. `runCli` runs one command line of `moku-game` (dev, build, native, keys, pack, help) in
- * this process; `preparePage` writes a game's dev page into `<game>/.moku/` for a server the
+ * seam. `runCli` runs one command line of `moku-game` (dev, build, native, keys, pack, visual,
+ * help) in this process; `preparePage` writes a game's dev page into `<game>/.moku/` for a server the
  * caller starts itself, as the editor does. It imports no Pixi, and the root entry never imports
  * it. The code lives in `app/`; this file wires the real process into it.
  */
@@ -55,7 +55,7 @@ export type PreparedPage = {
 /**
  * The real process behind the command line: the branded console, the environment the bin
  * started with, Bun's spawn and resolver, the signals, `fs.watch`, the asset scanner with the
- * string tools, and native.
+ * string tools, native, and the visual test runner, loaded only by `moku-game visual`.
  *
  * @returns The seams of this process.
  */
@@ -93,14 +93,15 @@ function processDeps(): CliDeps {
     assets: argv => runAssets(argv, { compile: compileStrings, exportStrings, importStrings }, ui),
     native: runNative,
     resolve: (specifier, from) => Bun.resolveSync(specifier, from),
-    loadPage: file => import(file)
+    loadPage: file => import(file),
+    visual: () => import("./visual")
   };
 }
 
 /**
  * Runs one `moku-game` command line in this process: `dev`, `build`, `native <verb>`, `keys`,
- * `pack` or `help`, with `--root`, `--preload` and `--serve-plugin` before or after the command
- * word. Every line goes through the branded console; nothing exits the process.
+ * `pack`, `visual` or `help`, with `--root`, `--preload` and `--serve-plugin` before or after the
+ * command word. Every line goes through the branded console; nothing exits the process.
  *
  * @param argv - The arguments after the bin.
  * @returns The exit code.
@@ -108,6 +109,7 @@ function processDeps(): CliDeps {
  * ```ts
  * // bin/moku-game.mjs in a game folder:
  * await runCli(["dev", "--port", "0"]); // 0 after Ctrl+C; stdout had "http://localhost:<port>/"
+ * await runCli(["visual", "--no-pixels"]); // 0 when every checkpoint of tests/visual/index.ts is the same
  * await runCli(["help"]); // 0
  * ```
  */

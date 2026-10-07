@@ -52,8 +52,8 @@ export type ServeRun = {
   servePlugins: readonly string[];
 };
 
-/** The server of the dev child, the part this file uses. Bun's `Server` fits it. */
-type PageServer = {
+/** The server of the dev page, the part `dev` and `visual` use. Bun's `Server` fits it. */
+export type PageServer = {
   /** The bound address, with the port the system picked. */
   readonly url: URL;
   /**
@@ -548,14 +548,15 @@ function fileResponse(file: string | undefined): Response {
 
 /**
  * Starts the dev server on `127.0.0.1` only, never on every interface: the page on `/`, the
- * manifest of the served folder on `/manifest.json`, and its files as static files.
+ * manifest of the served folder on `/manifest.json`, and its files as static files. The dev child
+ * and `moku-game visual` serve the page with it.
  *
  * @param run - The flags of the run.
- * @param page - The page bundle the child imported.
+ * @param page - The page bundle the process imported.
  * @returns The server.
  * @throws {Error} When the port is in use.
  */
-function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
+export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
   const base = run.packed ? path.join(run.root, "dist", "assets") : run.root;
 
   try {

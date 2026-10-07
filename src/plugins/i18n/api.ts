@@ -4,7 +4,7 @@
  * countdown reads, and the swap of one module the dev hot swap calls. This is the only place in the
  * engine where a locale is read.
  */
-import { createIntlKit, durationInput } from "./intl";
+import { createIntlKit, messageDuration } from "./intl";
 import { isReady, loadLocale, notLoaded, notRegistered } from "./lifecycle";
 import { mergeLocales, mergeParts, missingParts, resolve } from "./messages";
 import type {
@@ -205,7 +205,7 @@ export function createI18nApi(ctx: I18nCtx): I18nApi {
     duration: (ms: number, style: DurationStyle = "short"): string =>
       kitOf(ctx.state, ctx.state.locale)
         .duration({ style, secondsDisplay: "always" })
-        .format(durationInput(ms)),
+        .format(messageDuration(ms)),
     locales: () => [...ctx.state.registered.keys()].toSorted(),
     replace: (locale, messages) => replaceModule(ctx, locale, messages)
   };

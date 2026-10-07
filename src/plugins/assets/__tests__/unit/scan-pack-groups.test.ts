@@ -13,6 +13,24 @@ describe("groupOf", () => {
     expect(groupOf(texture("ui.effects.fx-star"))).toBe("fx");
   });
 
+  it("sends a key with an fx folder to fx, whatever its size", () => {
+    expect(groupOf(texture("ui.fx.leaf"))).toBe("fx");
+    expect(groupOf(texture("ui.fx.glow", 900, 900))).toBe("fx");
+    expect(groupOf(texture("ui.effects.fx.star"))).toBe("fx");
+  });
+
+  it("sends the frames of an animation in an fx folder to fx", () => {
+    expect(groupOf(texture("ui.fx.coin-spin.0"))).toBe("fx");
+    expect(groupOf(texture("ui.fx.coin-spin.11"))).toBe("fx");
+  });
+
+  it("reads fx as a folder only between the bundle name and the stem", () => {
+    expect(groupOf(texture("ui.fx"))).toBe("main");
+    expect(groupOf(texture("fx.leaf"))).toBe("main");
+    expect(groupOf(texture("ui.fxs.leaf"))).toBe("main");
+    expect(groupOf(texture("ui.my-fx.leaf"))).toBe("main");
+  });
+
   it("does not read fx- anywhere but in the last segment", () => {
     expect(groupOf(texture("fx-ui.star"))).toBe("main");
     expect(groupOf(texture("ui.star-fx-1"))).toBe("main");
@@ -46,6 +64,23 @@ describe("planGroups", () => {
 
     expect(plan.groups.size).toBe(0);
     expect(plan.loose.map(member => member.key)).toEqual(["orders.bg", "orders.card"]);
+  });
+
+  it("packs an fx folder and fx- stems into one fx group", () => {
+    const plan = planGroups([
+      texture("ui.fx.leaf"),
+      texture("ui.icon-a"),
+      texture("ui.fx-spark"),
+      texture("ui.fx.coin-spin.0"),
+      texture("ui.icon-b")
+    ]);
+
+    expect(plan.groups.get("fx")?.map(member => member.key)).toEqual([
+      "ui.fx-spark",
+      "ui.fx.coin-spin.0",
+      "ui.fx.leaf"
+    ]);
+    expect(plan.groups.get("main")?.map(member => member.key)).toEqual(["ui.icon-a", "ui.icon-b"]);
   });
 
   it("sends an fx group of one loose too", () => {

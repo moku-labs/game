@@ -1,18 +1,21 @@
 /**
  * @file The command line of `moku-game`: the arguments read per command with `node:util`
- * `parseArgs`, then one of `dev`, `build`, `native <verb>`, `keys`, `pack` or `help`. Every seam
- * of the process (the console, the environment, spawning, signals, the watcher, the asset
- * scanner, native, Bun's resolver) comes in as `deps`, so a test runs a command with stubs. It
- * returns the exit code and never exits itself. A plain function, on no API.
+ * `parseArgs`, then one of `dev`, `build`, `native <verb>`, `keys`, `pack`, `visual` or `help`.
+ * Every seam of the process (the console, the environment, spawning, signals, the watcher, the
+ * asset scanner, native, Bun's resolver, the visual test runner) comes in as `deps`, so a test
+ * runs a command with stubs. It returns the exit code and never exits itself. A plain function,
+ * on no API.
  */
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { BrandConsole } from "@moku-labs/common/cli";
 import type { HTMLBundle } from "bun";
+import type { parseVisualArgv, runVisualTests } from "../visual";
 import { keysArguments, packArguments, runBuild } from "./build";
 import type { NativeVerb, NativeVerbOptions, NativeWhere } from "./native";
 import { checkFiles, loadSettings, type ServeRun, serveChild, serveParent } from "./serve";
 import type { ResolvedGameConfig } from "./types";
+import { runVisual } from "./visual";
 
 /** The part of the branded console the command line writes through. */
 export type CliUi = Pick<BrandConsole, "info" | "warn" | "error" | "line">;
@@ -42,6 +45,14 @@ export type Child = {
    * @param signal - The signal.
    */
   kill(signal?: Signal): void;
+};
+
+/** The visual test runner of `@moku-labs/game/visual`, the part `moku-game visual` calls. */
+export type VisualRunner = {
+  /** Reads the flags of the runner. */
+  parseVisualArgv: typeof parseVisualArgv;
+  /** Plays the tests and compares every checkpoint with its baselines. */
+  runVisualTests: typeof runVisualTests;
 };
 
 /** A folder watcher. `fs.watch` gives one. */
@@ -81,10 +92,12 @@ export type CliDeps = {
   resolve: (specifier: string, from: string) => string;
   /** Imports the written page; its default export is the bundle a Bun server serves. */
   loadPage: (file: string) => Promise<{ default: Response | HTMLBundle }>;
+  /** Loads the visual test runner; only `moku-game visual` needs it. */
+  visual: () => Promise<VisualRunner>;
 };
 
 /** The commands of the line that run something; `help` only prints. */
-type Command = "dev" | "build" | "native" | "keys" | "pack";
+type Command = "dev" | "build" | "native" | "keys" | "pack" | "visual";
 
 /** The flags every command takes. */
 const GLOBAL_OPTIONS = ["root", "preload", "serve-plugin", "help"] as const;
@@ -100,8 +113,19 @@ const ALL_OPTIONS = {
   out: { type: "string" },
   simulator: { type: "boolean" },
   check: { type: "boolean" },
-  "no-cache": { type: "boolean" }
+  "no-cache": { type: "boolean" },
+  tests: { type: "string" },
+  url: { type: "string" },
+  update: { type: "boolean" },
+  only: { type: "string", multiple: true },
+  "no-pixels": { type: "boolean" },
+  pixels: { type: "boolean" },
+  dir: { type: "string" },
+  webgl: { type: "boolean" }
 } as const;
+
+/** The flags of `visual` that `parseVisualArgv` reads, in the runner's words. */
+const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl)$/;
 
 /** The flags of one command besides the global ones. */
 const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIONS)[]>> = {
@@ -109,11 +133,18 @@ const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIO
   build: ["out"],
   native: ["simulator"],
   keys: ["check"],
-  pack: ["no-cache"]
+  pack: ["no-cache"],
+  visual: ["tests", "url", "update", "only", "no-pixels", "pixels", "dir", "webgl"]
 };
 
 /** The native verbs, in the order the messages name them. */
 const NATIVE_VERBS: readonly NativeVerb[] = ["build", "dev", "doctor", "clean"];
+
+/** The command words, in the order the messages name them. */
+const COMMAND_NAMES = "dev, build, native, keys, pack, visual, help";
+
+/** The tests module of a game, under the game folder. */
+const VISUAL_TESTS = path.join("tests", "visual", "index.ts");
 
 /** The port of `moku-game dev` without `--port`. */
 const DEFAULT_PORT = "3000";
@@ -132,6 +163,9 @@ const USAGE = [
   "  native doctor | native clean          check or remove the native project",
   "  keys [--check]                        write generated/assets.ts and manifest.json",
   "  pack [--no-cache]                     pack the assets into dist/assets",
+  "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
+  "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",
+  "    [--tests tests/visual/index.ts] [--url <url>]",
   "  help                                  print this text",
   "",
   "Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>."
@@ -157,7 +191,7 @@ type Parsed = {
  * Tells whether a word is a command of the line that runs something.
  *
  * @param word - The first positional argument.
- * @returns True for `dev`, `build`, `native`, `keys` and `pack`.
+ * @returns True for `dev`, `build`, `native`, `keys`, `pack` and `visual`.
  */
 function isCommand(word: string): word is Command {
   return Object.hasOwn(COMMAND_OPTIONS, word);
@@ -254,9 +288,7 @@ function parseCommand(argv: readonly string[], cwd: string): Parsed | "help" | u
   if (word === undefined) return undefined;
 
   if (!isCommand(word)) {
-    throw new Error(
-      `[game] moku-game: no command "${word}". Name one of dev, build, native, keys, pack, help.`
-    );
+    throw new Error(`[game] moku-game: no command "${word}". Name one of ${COMMAND_NAMES}.`);
   }
 
   checkTokens(word, loose.tokens);
@@ -405,6 +437,48 @@ async function runScan(parsed: Parsed, deps: CliDeps): Promise<number> {
 }
 
 /**
+ * The flags of `visual` that `parseVisualArgv` reads, in the order given, each value after its
+ * flag: `--dir=shots` becomes `--dir shots`.
+ *
+ * @param argv - The arguments after the bin, their flags checked.
+ * @returns The flags of the runner.
+ */
+function visualFlags(argv: readonly string[]): string[] {
+  return parseLoose(argv).tokens.flatMap(token => {
+    if (token.kind !== "option" || !VISUAL_FLAGS.test(token.name)) return [];
+
+    return token.value === undefined ? [`--${token.name}`] : [`--${token.name}`, token.value];
+  });
+}
+
+/**
+ * Runs `moku-game visual` with the tests module and the baselines of the game.
+ *
+ * @param argv - The arguments after the bin.
+ * @param parsed - The command line.
+ * @param deps - The process seams.
+ * @returns `0` when every checkpoint passed, else `1`.
+ */
+function runVisualCommand(argv: readonly string[], parsed: Parsed, deps: CliDeps): Promise<number> {
+  refuseExtra(parsed, 0);
+
+  const tests = parsed.values.tests ?? path.join(parsed.root, VISUAL_TESTS);
+  const url = parsed.values.url;
+
+  return runVisual(
+    {
+      root: parsed.root,
+      tests: path.resolve(deps.cwd, tests),
+      ...(url === undefined ? {} : { url }),
+      flags: visualFlags(argv),
+      preload: parsed.preload,
+      servePlugins: parsed.servePlugins
+    },
+    deps
+  );
+}
+
+/**
  * Runs the bin once more with every `--preload` as a Bun preload, so the preload runs before the
  * engine loads. The re-run is marked, so it does not hop again.
  *
@@ -462,6 +536,9 @@ async function runParsed(argv: readonly string[], parsed: Parsed, deps: CliDeps)
     case "pack": {
       return runScan(parsed, deps);
     }
+    case "visual": {
+      return runVisualCommand(argv, parsed, deps);
+    }
   }
 }
 
@@ -476,8 +553,8 @@ function printUsage(ui: CliUi): void {
 
 /**
  * Runs one `moku-game` command line: reads the command and its flags, then runs `dev`, `build`,
- * `native <verb>`, `keys`, `pack` or `help`. Every failure is printed through the console as a
- * `[game] …` message; nothing exits the process.
+ * `native <verb>`, `keys`, `pack`, `visual` or `help`. Every failure is printed through the
+ * console as a `[game] …` message; nothing exits the process.
  *
  * @param argv - The arguments after the bin.
  * @param deps - The process seams.
@@ -495,7 +572,7 @@ export async function runCommand(argv: readonly string[], deps: CliDeps): Promis
 
     if (parsed === undefined) {
       printUsage(deps.ui);
-      deps.ui.error("[game] moku-game: name a command: dev, build, native, keys, pack, help.");
+      deps.ui.error(`[game] moku-game: name a command: ${COMMAND_NAMES}.`);
 
       return 1;
     }

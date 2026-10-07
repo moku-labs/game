@@ -162,6 +162,7 @@ function fakeDeps(
     },
     resolve: () => HOT,
     loadPage: async () => ({ default: new Response("<html>the page</html>") }),
+    visual: () => Promise.reject(new Error("the visual runner is not loaded here")),
     ...change
   };
 
@@ -691,7 +692,7 @@ describe("the command line", () => {
     expect(code).toBe(1);
     expect(seen.out[0]).toBe("moku-game <command> [options]");
     expect(seen.errors).toEqual([
-      "[game] moku-game: name a command: dev, build, native, keys, pack, help."
+      "[game] moku-game: name a command: dev, build, native, keys, pack, visual, help."
     ]);
   });
 
@@ -701,7 +702,7 @@ describe("the command line", () => {
 
     expect(code).toBe(1);
     expect(seen.errors).toEqual([
-      '[game] moku-game: no command "serve". Name one of dev, build, native, keys, pack, help.'
+      '[game] moku-game: no command "serve". Name one of dev, build, native, keys, pack, visual, help.'
     ]);
   });
 
@@ -717,6 +718,9 @@ describe("the command line", () => {
       "  native doctor | native clean          check or remove the native project",
       "  keys [--check]                        write generated/assets.ts and manifest.json",
       "  pack [--no-cache]                     pack the assets into dist/assets",
+      "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
+      "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",
+      "    [--tests tests/visual/index.ts] [--url <url>]",
       "  help                                  print this text",
       "",
       "Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>."

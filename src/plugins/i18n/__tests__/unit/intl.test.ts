@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIntlKit, durationInput } from "../../intl";
+import { createIntlKit, messageArgument, messageDuration } from "../../intl";
+import type { ElementNode } from "../../types";
 
 describe("createIntlKit", () => {
   it("carries the locale it was built for", () => {
@@ -70,7 +71,7 @@ describe("createIntlKit duration", () => {
   });
 });
 
-describe("durationInput", () => {
+describe("messageDuration", () => {
   it.each([
     [95_000, { minutes: 1, seconds: 35 }],
     [3_605_000, { hours: 1, seconds: 5 }],
@@ -80,7 +81,7 @@ describe("durationInput", () => {
     [500, { seconds: 1 }],
     [59_001, { minutes: 1, seconds: 0 }]
   ])("splits %d ms into whole seconds, rounded up", (ms, expected) => {
-    expect(durationInput(ms)).toEqual(expected);
+    expect(messageDuration(ms)).toEqual(expected);
   });
 
   it.each([
@@ -90,6 +91,46 @@ describe("durationInput", () => {
     Number.POSITIVE_INFINITY,
     Number.NEGATIVE_INFINITY
   ])("reads %d ms as zero seconds", ms => {
-    expect(durationInput(ms)).toEqual({ seconds: 0 });
+    expect(messageDuration(ms)).toEqual({ seconds: 0 });
+  });
+});
+
+describe("messageArgument", () => {
+  it("keeps an element node in its place, the same object", () => {
+    const coin: ElementNode = { type: "icon", props: { name: "hud.coin" }, children: [] };
+
+    expect(messageArgument(coin, createIntlKit("en"))).toEqual({ kind: "element", node: coin });
+    expect((messageArgument(coin, createIntlKit("en")) as { node: ElementNode }).node).toBe(coin);
+  });
+
+  it("formats a list through Intl.ListFormat of the locale", () => {
+    expect(messageArgument(["Ann", "Bob", "Cy"], createIntlKit("en"))).toEqual({
+      kind: "text",
+      text: "Ann, Bob, and Cy"
+    });
+    expect(messageArgument(["Аня", "Боря"], createIntlKit("ru"))).toEqual({
+      kind: "text",
+      text: "Аня и Боря"
+    });
+  });
+
+  it("formats a number through Intl.NumberFormat of the locale", () => {
+    expect(messageArgument(1234, createIntlKit("en"))).toEqual({ kind: "text", text: "1,234" });
+    expect(messageArgument(1234, createIntlKit("ru"))).toEqual({
+      kind: "text",
+      text: new Intl.NumberFormat("ru").format(1234)
+    });
+  });
+
+  it("reads anything else as text", () => {
+    const intl = createIntlKit("en");
+
+    expect(messageArgument("Ann", intl)).toEqual({ kind: "text", text: "Ann" });
+    expect(messageArgument(true, intl)).toEqual({ kind: "text", text: "true" });
+    expect(messageArgument(undefined, intl)).toEqual({ kind: "text", text: "undefined" });
+    expect(messageArgument({ type: "icon" }, intl)).toEqual({
+      kind: "text",
+      text: "[object Object]"
+    });
   });
 });

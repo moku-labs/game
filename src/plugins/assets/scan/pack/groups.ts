@@ -5,7 +5,8 @@
 
 /**
  * The atlas group of a texture inside its bundle. `fx` holds the particle textures, which one
- * emitter binds as one page; `main` holds every other texture small enough to pack.
+ * emitter binds as one page: a stem that starts with `fx-`, or anything in an `fx` folder. `main`
+ * holds every other texture small enough to pack.
  *
  * @example
  * ```ts
@@ -31,24 +32,34 @@ const LOOSE_SIDE = 512;
 /** The last segment of a key that names a particle texture starts with this. */
 const FX_PREFIX = "fx-";
 
+/** A folder of particle textures: every texture below it is one. */
+const FX_FOLDER = "fx";
+
 /** The groups in the order a bundle packs them. */
 const GROUP_ORDER: readonly Group[] = ["fx", "main"];
 
 /**
- * Picks the atlas group of one texture. A key whose last segment starts with `fx-` goes to `fx`
- * whatever its size; any other texture goes to `main` when no side is above 512 px.
+ * Picks the atlas group of one texture. A key whose last segment starts with `fx-`, or with a
+ * folder segment `fx` between the bundle name and the stem, goes to `fx` whatever its size: the
+ * frames of an animation in `fx/` too. Any other texture goes to `main` when no side is above
+ * 512 px.
  *
  * @param texture - The key and the size of the texture.
  * @returns The group, or `undefined` when the texture stays loose by its size.
  * @example
  * ```ts
  * groupOf({ key: "ui.fx-rays", width: 504, height: 512 }); // "fx"
+ * groupOf({ key: "ui.fx.leaf", width: 64, height: 64 }); // "fx", from assets/fx/leaf.webp of ui
+ * groupOf({ key: "ui.fx", width: 64, height: 64 }); // "main": a stem, no folder
  * ```
  */
 export function groupOf(texture: Sized): Group | undefined {
-  const name = texture.key.slice(texture.key.lastIndexOf(".") + 1);
+  const segments = texture.key.split(".");
+  const name = segments.at(-1) ?? "";
+  // The folders sit between the bundle name and the stem.
+  const folders = segments.slice(1, -1);
 
-  if (name.startsWith(FX_PREFIX)) return "fx";
+  if (name.startsWith(FX_PREFIX) || folders.includes(FX_FOLDER)) return "fx";
 
   return texture.width <= LOOSE_SIDE && texture.height <= LOOSE_SIDE ? "main" : undefined;
 }
