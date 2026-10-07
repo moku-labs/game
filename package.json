@@ -108,7 +108,7 @@
     "mini:pack": "bun tests/fixtures/moku-game.ts pack --root tests/fixtures/mini-game",
     "mini:dev": "bun tests/fixtures/moku-game.ts dev --root tests/fixtures/mini-game",
     "mini:visual": "bun tests/visual/run.ts",
-    "validate": "publint && attw --pack . --profile esm-only",
+    "validate": "publint && (attw --pack . --profile esm-only --quiet || attw --pack . --profile esm-only)",
     "release:setup": "moku-release setup",
     "release:doctor": "moku-release doctor",
     "release": "moku-release"

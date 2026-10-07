@@ -61,6 +61,9 @@ export default defineConfig({
     ]
   },
   test: {
+    // The engine logs every warning of a test app through ctx.log. A passed test keeps them to
+    // itself; a failed one prints them beside its error.
+    silent: "passed-only",
     projects: [
       {
         // An inline project inherits the root config only with `extends: true`.
