@@ -17,7 +17,8 @@ const SCENARIO_MARKER = "scenario-marker-7f3a2c";
 
 /**
  * A Bun plugin that fails every import of `@tauri-apps/plugin-store`, as in a game that does not
- * install it.
+ * install it. The other `@tauri-apps` packages stay external: the engine does not install them,
+ * and the test reads their import in the bundle.
  */
 const NO_PLUGIN_STORE = String.raw`export default {
   name: "no-plugin-store",
@@ -25,6 +26,7 @@ const NO_PLUGIN_STORE = String.raw`export default {
     build.onResolve({ filter: /^@tauri-apps\/plugin-store$/ }, () => {
       throw new Error("@tauri-apps/plugin-store is not installed");
     });
+    build.onResolve({ filter: /^@tauri-apps\// }, args => ({ path: args.path, external: true }));
   }
 };
 `;

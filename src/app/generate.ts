@@ -357,8 +357,8 @@ export function devMain(settings: ResolvedGameConfig, sources: MainSources): str
 
 /**
  * The `main.ts` of the production page: the page entry, the game and its config, and the shell
- * with the loaders of the named plugins when the game needs it. No dev flag, no scenario, no agent, no `.dev` module, no door: none of
- * them ships.
+ * with the loaders of the named plugins when the game needs it. No dev flag, no scenario, no
+ * agent, no `.dev` module, no door: none of them ships.
  *
  * @param settings - The resolved `config.ts`.
  * @returns The text of the in-memory `.moku/build/main.ts`.
