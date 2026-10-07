@@ -553,12 +553,14 @@ export type PageAgent<App = ScreenAppOfGame<AnyGameApp>> = (page: {
 }) => void | Promise<void>;
 
 /**
- * Builds the system shell from the resolved config: the type of `systemShell` of
- * `@moku-labs/game/app/system`. The page reaches the shell only through this.
+ * Builds the system shell from the resolved config: what `systemShellOf` of
+ * `@moku-labs/game/app/system` returns over the loaders of the page. The page reaches the shell
+ * only through this.
  *
  * @example
  * ```ts
- * await startPage(game, config, { system: systemShell }); // systemShell is a SystemShellFactory
+ * const factory: SystemShellFactory = systemShellOf({ system: () => import("@moku-labs/system"), back: () => import("@moku-labs/system/back") });
+ * await startPage(game, config, { system: factory }); // the page builds the shell of config.system: ["back"]
  * ```
  */
 export type SystemShellFactory = (
@@ -571,7 +573,8 @@ export type SystemShellFactory = (
  *
  * @example
  * ```ts
- * const options: PageOptions = { scenarios: { ready }, system: systemShell, agents: [agent0], devModules: [devModule0] };
+ * const system = systemShellOf({ system: () => import("@moku-labs/system"), haptics: () => import("@moku-labs/system/haptics") });
+ * const options: PageOptions = { scenarios: { ready }, system, agents: [agent0], devModules: [devModule0] };
  * ```
  */
 export type PageOptions = {
@@ -605,12 +608,46 @@ export type StartedPage<Game extends AnyGameApp> = {
 // ─── /app/system: the native shell ────────────────────────────
 
 /**
- * The system shell: the `@moku-labs/system` app the config names, and what the engine takes from
- * it. `systemShell` builds it; the page starts it before the game and stops it after.
+ * The modules of `@moku-labs/system` the page loads, one loader per name of `config.ts`: the
+ * package itself always, and the entry of each plugin the game names, the store for a store save.
+ * The generated `main.ts` writes only the loaders of the names, so the page bundles only those
+ * plugins and never meets the native package of another. Typed `unknown`: a system type here would
+ * land in the `.d.mts` of every game and break the typecheck of a web-only one.
  *
  * @example
  * ```ts
- * const shell = await systemShell(resolveConfig(config), problem => problems.push(problem));
+ * // A page of its own for a game whose config.ts names haptics, with a memory save.
+ * const modules: SystemModules = {
+ *   system: () => import("@moku-labs/system"),
+ *   haptics: () => import("@moku-labs/system/haptics")
+ * };
+ * await startPage(game, config, { system: systemShellOf(modules) }); // the bundle holds no store plugin
+ * ```
+ */
+export type SystemModules = {
+  /** `@moku-labs/system` itself, for its `createApp`. Always there. */
+  system: () => Promise<{ createApp: unknown }>;
+  /** `@moku-labs/system/lifecycle`, when the game names `lifecycle`. */
+  lifecycle?: () => Promise<{ lifecyclePlugin: unknown }>;
+  /** `@moku-labs/system/back`, when the game names `back`. */
+  back?: () => Promise<{ backPlugin: unknown }>;
+  /** `@moku-labs/system/haptics`, when the game names `haptics`. */
+  haptics?: () => Promise<{ hapticsPlugin: unknown }>;
+  /** `@moku-labs/system/keep-awake`, when the game names `keepAwake`. */
+  keepAwake?: () => Promise<{ keepAwakePlugin: unknown }>;
+  /** `@moku-labs/system/store`, when the game names `store` or its save is `"store"`. */
+  store?: () => Promise<{ storePlugin: unknown }>;
+};
+
+/**
+ * The system shell: the `@moku-labs/system` app the config names, and what the engine takes from
+ * it. The factory of `systemShellOf` builds it; the page starts it before the game and stops it
+ * after.
+ *
+ * @example
+ * ```ts
+ * const build = systemShellOf({ system: () => import("@moku-labs/system"), store: () => import("@moku-labs/system/store") });
+ * const shell = await build(resolveConfig({ page: { title: "T" }, save: "store" }), problem => problems.push(problem));
  * game.screen({ platform: shell.platform, provider: shell.save });
  * ```
  */

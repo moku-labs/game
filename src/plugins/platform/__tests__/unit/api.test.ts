@@ -87,3 +87,38 @@ describe("back", () => {
     );
   });
 });
+
+describe("exit", () => {
+  it("asks the provider to leave once and presses nothing", () => {
+    const mock = createMockPlatform();
+
+    expect(mock.api.exit()).toBeUndefined();
+    expect(mock.fake.provider.exit).toHaveBeenCalledTimes(1);
+    expect(mock.input.pressed).toEqual([]);
+    expect(mock.gate.answers).toEqual([]);
+  });
+
+  it("does nothing and throws nothing without a provider", () => {
+    const mock = createMockPlatform({ provider: false });
+
+    expect(() => mock.api.exit()).not.toThrow();
+    expect(mock.fake.provider.exit).not.toHaveBeenCalled();
+    expect(mock.log.error).not.toHaveBeenCalled();
+  });
+
+  it("logs a provider exit that throws, as the exit of back() does", () => {
+    const mock = createMockPlatform();
+    const failure = new Error("no permission");
+
+    mock.fake.provider.exit.mockImplementation(() => {
+      throw failure;
+    });
+
+    expect(() => mock.api.exit()).not.toThrow();
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith(
+      "platform: the provider failed",
+      { method: "exit" },
+      failure
+    );
+  });
+});

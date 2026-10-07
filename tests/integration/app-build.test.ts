@@ -3,7 +3,8 @@
  * marked scenario: the assets packed, the page bundled with every link `./`, the packed manifest
  * beside it, and no dev code in the output. Plus the refusal of an output folder at the game root,
  * a build run from another folder with the tree plugin, and the Bun log of a page that does not
- * bundle.
+ * bundle. Plus a game that names only `haptics` with a memory save: it builds where
+ * `@tauri-apps/plugin-store` cannot resolve, and its bundle holds no store.
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +14,22 @@ import { copyMiniGame, REPO, removeCopies, runBin } from "./app-helpers";
 
 /** A string only the marked scenario holds: a build that ships scenarios carries it. */
 const SCENARIO_MARKER = "scenario-marker-7f3a2c";
+
+/**
+ * A Bun plugin that fails every import of `@tauri-apps/plugin-store`, as in a game that does not
+ * install it. The other `@tauri-apps` packages stay external: the engine does not install them,
+ * and the test reads their import in the bundle.
+ */
+const NO_PLUGIN_STORE = String.raw`export default {
+  name: "no-plugin-store",
+  setup(build) {
+    build.onResolve({ filter: /^@tauri-apps\/plugin-store$/ }, () => {
+      throw new Error("@tauri-apps/plugin-store is not installed");
+    });
+    build.onResolve({ filter: /^@tauri-apps\// }, args => ({ path: args.path, external: true }));
+  }
+};
+`;
 
 /** The copies and output folders of this file, removed after it. */
 const made: string[] = [];
@@ -149,6 +166,33 @@ describe("moku-game build", () => {
     expect(ran.code).toBe(0);
     expect(existsSync(path.join(out, "index.html"))).toBe(true);
     expect(existsSync(path.join(out, "manifest.json"))).toBe(true);
+  }, 180_000);
+
+  it("a game naming only haptics with a memory save builds without @tauri-apps/plugin-store", async () => {
+    const root = copyMiniGame("build-haptics");
+    const away = mkdtempSync(path.join(tmpdir(), "moku-game-no-store-"));
+    const plugin = path.join(away, "no-plugin-store.ts");
+    const out = path.join(away, "web");
+
+    made.push(root, away);
+    writeFileSync(
+      path.join(root, "config.ts"),
+      'export default { page: { title: "mini-game" }, system: ["haptics"], save: "memory" };\n'
+    );
+    writeFileSync(plugin, NO_PLUGIN_STORE);
+
+    const ran = await runBin(["build", "--root", root, "--serve-plugin", plugin, "--out", out]);
+
+    expect(ran.stderr).toBe("");
+    expect(ran.code).toBe(0);
+
+    const code = filesUnder(out)
+      .filter(file => file.endsWith(".js"))
+      .map(file => readFileSync(path.join(out, file), "utf8"))
+      .join("\n");
+
+    expect(code).toContain("@tauri-apps/plugin-haptics");
+    expect(code).not.toContain("plugin-store");
   }, 180_000);
 
   it("a failed bundle exits 1 with the Bun log", async () => {

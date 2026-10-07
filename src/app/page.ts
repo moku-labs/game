@@ -239,7 +239,7 @@ async function startAgents(
  * // Written by moku-game dev. Do not edit.
  * import "./dev.ts";
  * import { startPage } from "@moku-labs/game/app/page";
- * import { systemShell } from "@moku-labs/game/app/system";
+ * import { systemShellOf } from "@moku-labs/game/app/system";
  * import game from "../index.ts";
  * import config from "../config.ts";
  * import scenario0 from "../tests/scenarios/empty.ts";
@@ -249,7 +249,10 @@ async function startAgents(
  *
  * await startPage(game, config, {
  *   scenarios: { "empty": scenario0, "full": scenario1 },
- *   system: systemShell,
+ *   system: systemShellOf({
+ *     system: () => import("@moku-labs/system"),
+ *     lifecycle: () => import("@moku-labs/system/lifecycle")
+ *   }),
  *   agents: [agent0],
  *   devModules: [devModule0]
  * });

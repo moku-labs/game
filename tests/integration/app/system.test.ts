@@ -1,7 +1,7 @@
 /**
  * @file The system shell end to end. First the mini game runs on Home over `fromSystem` of a fake
  * system, as the native shell runs a game: the shell's pause, resume and Back reach the game, and
- * a haptic effect of the game reaches the shell. Then `systemShell` over the real
+ * a haptic effect of the game reaches the shell. Then `systemShellOf` over the loaders of the real
  * `@moku-labs/system` outside Tauri: the web providers answer, and a store that cannot be read
  * rejects the load instead of starting a new player.
  */
@@ -9,9 +9,20 @@ import type { SystemResult } from "@moku-labs/system";
 import { describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../../../src/app/config";
 import type { SystemSlice } from "../../../src/app/system";
-import { fromSystem, systemShell } from "../../../src/app/system";
+import { fromSystem, systemShellOf } from "../../../src/app/system";
+import type { SystemModules } from "../../../src/app/types";
 import game from "../../fixtures/mini-game/index";
 import { folderIo, frames, readManifest, startOnHome } from "../mini-helpers";
+
+/** The loaders of the real `@moku-labs/system`, as a generated `main.ts` naming them all writes them. */
+const modules: SystemModules = {
+  system: () => import("@moku-labs/system"),
+  lifecycle: () => import("@moku-labs/system/lifecycle"),
+  back: () => import("@moku-labs/system/back"),
+  haptics: () => import("@moku-labs/system/haptics"),
+  keepAwake: () => import("@moku-labs/system/keep-awake"),
+  store: () => import("@moku-labs/system/store")
+};
 
 /** What every fake capability answers: done, by the web provider. */
 const done: SystemResult<void> = { ok: true, value: undefined, provider: "web" };
@@ -152,13 +163,13 @@ describe("fromSystem — the mini game on Home over the bridge", () => {
   });
 });
 
-describe("systemShell — over the real @moku-labs/system, outside Tauri", () => {
+describe("systemShellOf — over the real @moku-labs/system, outside Tauri", () => {
   it("composes the named capabilities, starts and stops, and the web answers unsupported", async () => {
     const config = resolveConfig({
       page: { title: "T" },
       system: ["lifecycle", "back", "haptics", "keepAwake"]
     });
-    const shell = await systemShell(config, vi.fn());
+    const shell = await systemShellOf(modules)(config, vi.fn());
     const handle = shell.handle as SystemSlice;
 
     expect(Object.keys(handle)).toEqual(
@@ -180,7 +191,7 @@ describe("systemShell — over the real @moku-labs/system, outside Tauri", () =>
 
   it("rejects the load of a store save the page cannot read", async () => {
     const config = resolveConfig({ page: { title: "T" }, save: "store" });
-    const shell = await systemShell(config, vi.fn());
+    const shell = await systemShellOf(modules)(config, vi.fn());
 
     await shell.start();
 

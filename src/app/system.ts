@@ -1,9 +1,10 @@
 /**
  * @file `@moku-labs/game/app/system`: the system shell a game runs in. It builds the
- * `@moku-labs/system` app from the names `config.ts` lists, one lazy `import()` per name, and
- * hands the engine two things over it: the platform provider and, for a store save, the save
- * provider. The only file of the engine that reaches `@moku-labs/system`: a web-only game never
- * imports this entry, so neither its bundle nor its typecheck meets the package.
+ * `@moku-labs/system` app from the names `config.ts` lists, with the loaders the page hands it,
+ * and hands the engine two things over it: the platform provider and, for a store save, the save
+ * provider. The file names the package only in types: the generated `main.ts` writes one
+ * `import()` per named plugin, so a page bundles only the plugins its game names. A web-only game
+ * never imports this entry, so neither its bundle nor its typecheck meets the package.
  */
 import type { AnyPluginInstance } from "@moku-labs/core";
 import type {
@@ -20,7 +21,9 @@ import type { storePlugin } from "@moku-labs/system/store";
 import { applyTo } from "../plugins/model/store/drafts";
 import type { JsonDocument, Patch, PlayerStateProvider } from "../plugins/model/store/types";
 import type { HapticKind, PlatformProvider } from "../plugins/platform/types";
-import type { ResolvedGameConfig, SystemName, SystemShell } from "./types";
+import type { SystemModules, SystemName, SystemShellFactory } from "./types";
+
+export type { SystemModules } from "./types";
 
 /**
  * What the bridge reads of the system app: the four capabilities, each one there only when the
@@ -29,7 +32,8 @@ import type { ResolvedGameConfig, SystemName, SystemShell } from "./types";
  *
  * @example
  * ```ts
- * const slice: SystemSlice = await createSystemApp(["haptics"], "moku-game"); // slice.haptics only
+ * const modules = { system: () => import("@moku-labs/system"), haptics: () => import("@moku-labs/system/haptics") };
+ * const slice: SystemSlice = await createSystemApp(["haptics"], "moku-game", modules); // slice.haptics only
  * ```
  */
 export type SystemSlice = {
@@ -60,7 +64,11 @@ export type StoreSlice = Pick<Store.StoreApi, "get" | "set">;
  *
  * @example
  * ```ts
- * const system: SystemApp = await createSystemApp(["lifecycle", "store"], "com.mokulabs.timber");
+ * const system: SystemApp = await createSystemApp(["lifecycle", "store"], "com.mokulabs.timber", {
+ *   system: () => import("@moku-labs/system"),
+ *   lifecycle: () => import("@moku-labs/system/lifecycle"),
+ *   store: () => import("@moku-labs/system/store")
+ * });
  * await system.start(); // system.lifecycle and system.store answer from here on
  * ```
  */
@@ -91,7 +99,8 @@ type CapabilityName = Exclude<SystemName, "store">;
 /**
  * What the shell takes of `@moku-labs/system`: its `createApp`, the capability plugins of the
  * names, and the store plugin when the names hold it. The store keeps its own type: its config
- * names the store.
+ * names the store. The loaders of the page answer `unknown`, so a web-only game never meets the
+ * system types; this is where they become them.
  */
 type Loaded = {
   createApp: typeof createSystem;
@@ -101,23 +110,6 @@ type Loaded = {
 
 /** The system plugins in the order the shell composes them, whatever the order of `config.ts`. */
 const systemOrder: readonly SystemName[] = ["lifecycle", "back", "haptics", "keepAwake", "store"];
-
-/** One lazy import per capability plugin: the page loads only the plugins the game names. */
-const capabilityLoaders: Readonly<Record<CapabilityName, () => Promise<AnyPluginInstance>>> = {
-  lifecycle: () => import("@moku-labs/system/lifecycle").then(module => module.lifecyclePlugin),
-  back: () => import("@moku-labs/system/back").then(module => module.backPlugin),
-  haptics: () => import("@moku-labs/system/haptics").then(module => module.hapticsPlugin),
-  keepAwake: () => import("@moku-labs/system/keep-awake").then(module => module.keepAwakePlugin)
-};
-
-/**
- * Loads the store plugin, by its own lazy import.
- *
- * @returns The store plugin.
- */
-function loadStore(): Promise<typeof storePlugin> {
-  return import("@moku-labs/system/store").then(module => module.storePlugin);
-}
 
 /** The store namespace of a game with no native identifier. */
 const defaultNamespace = "moku-game";
@@ -216,24 +208,61 @@ export function fromSystem(system: SystemSlice): PlatformProvider {
 }
 
 /**
- * Loads `@moku-labs/system` and the plugins of the names, all at once.
+ * Refuses a named plugin the page has no loader for, before anything loads. The generated
+ * `main.ts` writes a loader per name; a page of its own may miss one.
+ *
+ * @param names - The system plugins of the shell.
+ * @param modules - The loaders of the page.
+ * @throws {Error} When a name has no loader.
+ */
+function checkLoaders(names: readonly SystemName[], modules: SystemModules): void {
+  const missing = names.find(name => modules[name] === undefined);
+
+  if (missing !== undefined) {
+    throw new Error(`[game] config.system names "${missing}", but main.ts has no loader for it.`);
+  }
+}
+
+/**
+ * One plugin per capability, through the loader of the page. The loaders are checked first, so
+ * each one called is there.
+ */
+const capabilityPlugins: Readonly<
+  Record<CapabilityName, (modules: SystemModules) => Promise<unknown> | undefined>
+> = {
+  lifecycle: modules => modules.lifecycle?.().then(module => module.lifecyclePlugin),
+  back: modules => modules.back?.().then(module => module.backPlugin),
+  haptics: modules => modules.haptics?.().then(module => module.hapticsPlugin),
+  keepAwake: modules => modules.keepAwake?.().then(module => module.keepAwakePlugin)
+};
+
+/**
+ * Loads `@moku-labs/system` and the plugins of the names, all at once, with the loaders of the
+ * page.
  *
  * @param names - The system plugins, in the fixed order.
+ * @param modules - The loaders of the page.
  * @returns The `createApp` of the package, the capability plugins in the order of the names, and
  *   the store plugin when the names hold it.
- * @throws {Error} When the package is not installed.
+ * @throws {Error} When a name has no loader, or a loader rejects: the package is not installed.
  */
-async function loadSystem(names: readonly SystemName[]): Promise<Loaded> {
+async function loadSystem(names: readonly SystemName[], modules: SystemModules): Promise<Loaded> {
+  checkLoaders(names, modules);
+
   const capabilities = names.filter((name): name is CapabilityName => name !== "store");
 
   try {
     const [system, store, ...plugins] = await Promise.all([
-      import("@moku-labs/system"),
-      names.includes("store") ? loadStore() : undefined,
-      ...capabilities.map(name => capabilityLoaders[name]())
+      modules.system(),
+      names.includes("store") ? modules.store?.().then(module => module.storePlugin) : undefined,
+      ...capabilities.map(name => capabilityPlugins[name](modules))
     ]);
 
-    return { createApp: system.createApp, capabilities: plugins, store };
+    return {
+      createApp: system.createApp as typeof createSystem,
+      capabilities: plugins as AnyPluginInstance[],
+      store: store as typeof storePlugin | undefined
+    };
   } catch (error) {
     throw new Error(
       "[game] config.system needs @moku-labs/system.\n  Install it: bun add @moku-labs/system@^0.3.1.",
@@ -245,27 +274,34 @@ async function loadSystem(names: readonly SystemName[]): Promise<Loaded> {
 /**
  * Creates the `@moku-labs/system` app of the named plugins, in the fixed order `lifecycle`,
  * `back`, `haptics`, `keepAwake`, `store`, each name once. The store is named after `namespace`.
- * Each plugin is loaded by its own `import()`, so a page loads only the plugins its game names.
- * The app is not started.
+ * Each plugin is loaded by its loader in `modules`, and only the named ones are called, so a page
+ * loads only the plugins its game names. The app is not started.
  *
  * @param names - The system plugins the game names, in any order.
  * @param namespace - The store name: the native identifier, or `"moku-game"`.
+ * @param modules - The loaders of the page: the package, and one per named plugin.
  * @returns The system app, not started.
- * @throws {Error} When `@moku-labs/system` is not installed.
+ * @throws {Error} When a named plugin has no loader in `modules`, or a loader rejects because
+ *   `@moku-labs/system` is not installed.
  * @example
  * ```ts
  * // A shell of its own: the store named after the app, and the haptics.
- * const system = await createSystemApp(["store", "haptics"], "com.mokulabs.timber");
+ * const system = await createSystemApp(["store", "haptics"], "com.mokulabs.timber", {
+ *   system: () => import("@moku-labs/system"),
+ *   haptics: () => import("@moku-labs/system/haptics"),
+ *   store: () => import("@moku-labs/system/store")
+ * });
  * await system.start();
  * await system.haptics?.selection(); // { ok: false, provider: "web", reason: "unsupported" } in iOS Safari
  * ```
  */
 export async function createSystemApp(
   names: readonly SystemName[],
-  namespace: string
+  namespace: string,
+  modules: SystemModules
 ): Promise<SystemApp> {
   const ordered = systemOrder.filter(name => names.includes(name));
-  const { createApp, capabilities, store } = await loadSystem(ordered);
+  const { createApp, capabilities, store } = await loadSystem(ordered, modules);
 
   // The store is last in the fixed order, so it goes after the capabilities.
   if (store === undefined) return createApp({ plugins: capabilities });
@@ -427,41 +463,45 @@ export function storeSave(
 }
 
 /**
- * Builds the system shell from the resolved `config.ts`: the `@moku-labs/system` app of the names
- * `config.system` lists, plus the store when `config.save` is `"store"`, in the fixed order. It
- * hands the engine the platform provider over that app and, for a store save, the save provider.
- * The page starts the shell before the game; this function does not start it. The generated
- * `main.ts` passes the function itself to `startPage`, only when `config.ts` names a system
- * plugin or the store save.
+ * Makes the system shell factory of a page over its loaders. The factory builds the shell from the
+ * resolved `config.ts`: the `@moku-labs/system` app of the names `config.system` lists, plus the
+ * store when `config.save` is `"store"`, in the fixed order. It hands the engine the platform
+ * provider over that app and, for a store save, the save provider. Nothing loads until the page
+ * calls the factory, and the page starts the shell before the game. The generated `main.ts`
+ * passes it to `startPage` with one loader per name, only when `config.ts` names a system plugin
+ * or the store save.
  *
- * @param config - The resolved `config.ts` of the game.
- * @param report - Takes a problem the page reports later, such as a write the store refused.
- * @returns The shell, not started.
- * @throws {Error} When `@moku-labs/system` is not installed.
+ * @param modules - The loaders of the page: the package, and one per named plugin.
+ * @returns The factory the page calls; it throws the messages of `createSystemApp`.
  * @example
  * ```ts
- * // The in-memory .moku/build/main.ts of moku-game build, for a game whose config.ts names system plugins.
+ * // The in-memory .moku/build/main.ts of moku-game build, for a game whose config.ts names back.
  * import { startPage } from "@moku-labs/game/app/page";
- * import { systemShell } from "@moku-labs/game/app/system";
+ * import { systemShellOf } from "@moku-labs/game/app/system";
  * import game from "../../index.ts";
  * import config from "../../config.ts";
  *
- * await startPage(game, config, { system: systemShell });
+ * await startPage(game, config, {
+ *   system: systemShellOf({
+ *     system: () => import("@moku-labs/system"),
+ *     back: () => import("@moku-labs/system/back")
+ *   })
+ * });
  * ```
  */
-export async function systemShell(
-  config: ResolvedGameConfig,
-  report: (problem: string) => void
-): Promise<SystemShell> {
-  const names: readonly SystemName[] =
-    config.save === "store" ? [...config.system, "store"] : config.system;
-  const app = await createSystemApp(names, config.native?.identifier ?? defaultNamespace);
+export function systemShellOf(modules: SystemModules): SystemShellFactory {
+  return async (config, report) => {
+    const names: readonly SystemName[] =
+      config.save === "store" ? [...config.system, "store"] : config.system;
+    const namespace = config.native?.identifier ?? defaultNamespace;
+    const app = await createSystemApp(names, namespace, modules);
 
-  return {
-    handle: app,
-    platform: fromSystem(app),
-    save: app.store === undefined ? undefined : storeSave(app.store, saveKey, report),
-    start: () => app.start(),
-    stop: () => app.stop()
+    return {
+      handle: app,
+      platform: fromSystem(app),
+      save: app.store === undefined ? undefined : storeSave(app.store, saveKey, report),
+      start: () => app.start(),
+      stop: () => app.stop()
+    };
   };
 }

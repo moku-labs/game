@@ -121,6 +121,19 @@ export type PlatformApi = {
    * ```
    */
   back(): BackResult;
+  /**
+   * Leaves the app through the provider, as the last step of `back()` does: no Escape, no intent
+   * `back`. A provider `exit` that throws is logged, never thrown. Without a provider it does
+   * nothing.
+   *
+   * @example
+   * ```ts
+   * // merge-game's exit plugin answers the fx "exit" of the Leave button.
+   * ctx.require(flowPlugin).fx.handle("exit", () => ctx.require(platformPlugin).exit());
+   * // a press of Leave: the provider leaves the app; on the web page without a provider, nothing
+   * ```
+   */
+  exit(): void;
 };
 
 /**

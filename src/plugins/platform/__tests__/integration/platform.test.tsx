@@ -180,6 +180,21 @@ describe("the Back chain", () => {
   });
 });
 
+describe("exit", () => {
+  it("leaves the app from the fx handler of a Leave button", async () => {
+    const fake = createFakeProvider();
+    const app = await startGame(fake);
+
+    app.flow.fx.handle("exit", () => app.platform.exit());
+    app.flow.fx.dispatch({ kind: "exit" });
+
+    expect(fake.provider.exit).toHaveBeenCalledTimes(1);
+    expect(nodeOf(app)).toBe("home");
+
+    await app.stop();
+  });
+});
+
 describe("haptics", () => {
   it("reaches the provider from a node's fx", async () => {
     const fake = createFakeProvider();
