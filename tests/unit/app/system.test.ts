@@ -1,16 +1,18 @@
 /**
  * @file The system shell over fakes of `@moku-labs/system`. `fromSystem` maps the engine's
  * platform provider onto the four capabilities, today's bridge of merge-game ported as is, and is
- * inert where the slice has no capability. `createSystemApp` loads one module per name and
- * composes the plugins in a fixed order. `systemShell` adds the store for a store save. A missing
- * package throws the install message.
+ * inert where the slice has no capability. `createSystemApp` calls the loader of each named plugin
+ * the page hands it, and only those, and composes the plugins in a fixed order. `systemShellOf`
+ * adds the store for a store save. A named plugin without its loader, and a loader that rejects,
+ * throw the two `[game]` messages.
  */
+import { readFileSync } from "node:fs";
 import type { SystemResult } from "@moku-labs/system";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { resolveConfig } from "../../../src/app/config";
 import type { SystemSlice } from "../../../src/app/system";
-import { createSystemApp, fromSystem, systemShell } from "../../../src/app/system";
-import type { SystemShellFactory } from "../../../src/app/types";
+import { createSystemApp, fromSystem, systemShellOf } from "../../../src/app/system";
+import type { SystemModules, SystemShellFactory } from "../../../src/app/types";
 import type { HapticKind } from "../../../src/index";
 import { HAPTIC_KINDS } from "../../../src/index";
 
@@ -18,7 +20,7 @@ import { HAPTIC_KINDS } from "../../../src/index";
  * The fake `@moku-labs/system`: a `createApp` that records its options and gives an app whose
  * capabilities are spies, one set per plugin it was handed.
  */
-const systemModule = vi.hoisted(() => {
+const systemModule = (() => {
   const done = { ok: true, value: undefined, provider: "web" } as const;
   const absent = { ok: true, value: undefined, provider: "web" } as const;
   const capabilities = {
@@ -46,14 +48,31 @@ const systemModule = vi.hoisted(() => {
   );
 
   return { createApp };
-});
+})();
 
-vi.mock("@moku-labs/system", () => ({ createApp: systemModule.createApp }));
-vi.mock("@moku-labs/system/lifecycle", () => ({ lifecyclePlugin: { name: "lifecycle" } }));
-vi.mock("@moku-labs/system/back", () => ({ backPlugin: { name: "back" } }));
-vi.mock("@moku-labs/system/haptics", () => ({ hapticsPlugin: { name: "haptics" } }));
-vi.mock("@moku-labs/system/keep-awake", () => ({ keepAwakePlugin: { name: "keepAwake" } }));
-vi.mock("@moku-labs/system/store", () => ({ storePlugin: { name: "store" } }));
+/** The loaders of a page that names every system plugin, each a spy over a fake module. */
+type FakeModules = { [Name in keyof SystemModules]-?: NonNullable<SystemModules[Name]> };
+
+/**
+ * Creates the loaders of every system plugin, as the generated `main.ts` of a game that names them
+ * all writes them, over the fake system.
+ *
+ * @returns The loaders, each a spy.
+ */
+function fakeModules(): FakeModules {
+  return {
+    system: vi.fn(async () => ({ createApp: systemModule.createApp })),
+    lifecycle: vi.fn(async () => ({ lifecyclePlugin: { name: "lifecycle" } })),
+    back: vi.fn(async () => ({ backPlugin: { name: "back" } })),
+    haptics: vi.fn(async () => ({ hapticsPlugin: { name: "haptics" } })),
+    keepAwake: vi.fn(async () => ({ keepAwakePlugin: { name: "keepAwake" } })),
+    store: vi.fn(async () => ({ storePlugin: { name: "store" } }))
+  };
+}
+
+/** The install message of a loader that rejects. */
+const INSTALL =
+  "[game] config.system needs @moku-labs/system.\n  Install it: bun add @moku-labs/system@^0.3.1.";
 
 /** What the last `createApp` call of the fake system was given. */
 type SystemOptions = { plugins: readonly { name: string }[]; pluginConfigs?: object };
@@ -276,26 +295,51 @@ describe("fromSystem — a capability the game did not list", () => {
 
 describe("createSystemApp — the system app of the named plugins", () => {
   it("createSystemApp composes the named plugins in the fixed order", async () => {
-    await createSystemApp(["store", "haptics", "lifecycle", "keepAwake", "back", "haptics"], "g");
+    await createSystemApp(
+      ["store", "haptics", "lifecycle", "keepAwake", "back", "haptics"],
+      "g",
+      fakeModules()
+    );
 
     expect(composed()).toEqual(["lifecycle", "back", "haptics", "keepAwake", "store"]);
   });
 
+  it("createSystemApp calls the loaders of the named plugins and no other", async () => {
+    const modules = fakeModules();
+
+    await createSystemApp(["haptics"], "moku-game", modules);
+
+    expect(modules.system).toHaveBeenCalledOnce();
+    expect(modules.haptics).toHaveBeenCalledOnce();
+    expect(modules.lifecycle).not.toHaveBeenCalled();
+    expect(modules.back).not.toHaveBeenCalled();
+    expect(modules.keepAwake).not.toHaveBeenCalled();
+    expect(modules.store).not.toHaveBeenCalled();
+  });
+
+  it("createSystemApp works with only the loaders of the named plugins", async () => {
+    const { system, haptics } = fakeModules();
+    const app = await createSystemApp(["haptics"], "moku-game", { system, haptics });
+
+    expect(composed()).toEqual(["haptics"]);
+    expect(app.haptics).toBeDefined();
+  });
+
   it("createSystemApp names the store after the identifier", async () => {
-    await createSystemApp(["store"], "com.mokulabs.timber");
+    await createSystemApp(["store"], "com.mokulabs.timber", fakeModules());
 
     expect(lastOptions().pluginConfigs).toEqual({ store: { name: "com.mokulabs.timber" } });
   });
 
   it("gives no plugin config to a system app without the store", async () => {
-    await createSystemApp(["lifecycle", "back"], "com.mokulabs.timber");
+    await createSystemApp(["lifecycle", "back"], "com.mokulabs.timber", fakeModules());
 
     expect(composed()).toEqual(["lifecycle", "back"]);
     expect(lastOptions().pluginConfigs).toBeUndefined();
   });
 
   it("returns the app with a capability per named plugin", async () => {
-    const app = await createSystemApp(["haptics"], "moku-game");
+    const app = await createSystemApp(["haptics"], "moku-game", fakeModules());
 
     expect(app.haptics).toBeDefined();
     expect(app.lifecycle).toBeUndefined();
@@ -303,18 +347,70 @@ describe("createSystemApp — the system app of the named plugins", () => {
   });
 });
 
-describe("systemShell — the shell the page starts", () => {
-  it("is the SystemShellFactory the page takes in its options", () => {
-    expectTypeOf(systemShell).toEqualTypeOf<SystemShellFactory>();
+describe("createSystemApp — the two errors", () => {
+  it("a named plugin without its loader throws and loads nothing", async () => {
+    const { system, lifecycle } = fakeModules();
+
+    await expect(
+      createSystemApp(["lifecycle", "haptics"], "moku-game", { system, lifecycle })
+    ).rejects.toThrow(
+      new Error('[game] config.system names "haptics", but main.ts has no loader for it.')
+    );
+    expect(system).not.toHaveBeenCalled();
+    expect(lifecycle).not.toHaveBeenCalled();
   });
 
-  it('systemShell adds store when save is "store"', async () => {
+  it("a loader of @moku-labs/system that rejects throws the install message", async () => {
+    const missing = new Error("Cannot find package '@moku-labs/system'");
+    const modules = { ...fakeModules(), system: vi.fn(() => Promise.reject(missing)) };
+
+    await expect(createSystemApp(["haptics"], "moku-game", modules)).rejects.toMatchObject({
+      message: INSTALL,
+      cause: missing
+    });
+  });
+
+  it("a loader of a named plugin that rejects throws the install message", async () => {
+    const missing = new Error("Cannot find module '@moku-labs/system/haptics'");
+    const modules = { ...fakeModules(), haptics: vi.fn(() => Promise.reject(missing)) };
+
+    await expect(createSystemApp(["haptics"], "moku-game", modules)).rejects.toMatchObject({
+      message: INSTALL,
+      cause: missing
+    });
+  });
+});
+
+describe("systemShellOf — the shell the page starts", () => {
+  it("is the SystemShellFactory the page takes in its options", () => {
+    expectTypeOf(systemShellOf(fakeModules())).toEqualTypeOf<SystemShellFactory>();
+    expectTypeOf(systemShellOf).parameter(0).toEqualTypeOf<SystemModules>();
+  });
+
+  it("loads nothing until the page builds the shell", () => {
+    const modules = fakeModules();
+
+    systemShellOf(modules);
+
+    expect(modules.system).not.toHaveBeenCalled();
+  });
+
+  it('systemShellOf adds store when save is "store"', async () => {
     const config = resolveConfig({ page: { title: "T" }, system: ["haptics"], save: "store" });
-    const shell = await systemShell(config, vi.fn());
+    const shell = await systemShellOf(fakeModules())(config, vi.fn());
 
     expect(composed()).toEqual(["haptics", "store"]);
     expect(lastOptions().pluginConfigs).toEqual({ store: { name: "moku-game" } });
     expect(shell.save).toBeDefined();
+  });
+
+  it('a store save without the store loader throws the loader message for "store"', async () => {
+    const { system, haptics } = fakeModules();
+    const config = resolveConfig({ page: { title: "T" }, system: ["haptics"], save: "store" });
+
+    await expect(systemShellOf({ system, haptics })(config, vi.fn())).rejects.toThrow(
+      '[game] config.system names "store", but main.ts has no loader for it.'
+    );
   });
 
   it("names the store after the native identifier", async () => {
@@ -324,7 +420,7 @@ describe("systemShell — the shell the page starts", () => {
       save: "store"
     });
 
-    await systemShell(config, vi.fn());
+    await systemShellOf(fakeModules())(config, vi.fn());
 
     expect(composed()).toEqual(["store"]);
     expect(lastOptions().pluginConfigs).toEqual({ store: { name: "com.mokulabs.timber" } });
@@ -336,7 +432,7 @@ describe("systemShell — the shell the page starts", () => {
       system: ["keepAwake", "back", "lifecycle"],
       save: "local"
     });
-    const shell = await systemShell(config, vi.fn());
+    const shell = await systemShellOf(fakeModules())(config, vi.fn());
 
     expect(composed()).toEqual(["lifecycle", "back", "keepAwake"]);
     expect(shell.save).toBeUndefined();
@@ -345,14 +441,14 @@ describe("systemShell — the shell the page starts", () => {
   it("composes the store once when config.system names it and save is store", async () => {
     const config = resolveConfig({ page: { title: "T" }, system: ["store"], save: "store" });
 
-    await systemShell(config, vi.fn());
+    await systemShellOf(fakeModules())(config, vi.fn());
 
     expect(composed()).toEqual(["store"]);
   });
 
   it("hands the platform over the system app and starts and stops it", async () => {
     const config = resolveConfig({ page: { title: "T" }, system: ["haptics", "keepAwake"] });
-    const shell = await systemShell(config, vi.fn());
+    const shell = await systemShellOf(fakeModules())(config, vi.fn());
     const app = vi.mocked(systemModule.createApp).mock.results.at(-1)?.value as {
       haptics: { notify: () => Promise<SystemResult<void>> };
       start: () => Promise<void>;
@@ -375,7 +471,7 @@ describe("systemShell — the shell the page starts", () => {
 
   it("reads the save of a store save from the store under the key save", async () => {
     const config = resolveConfig({ page: { title: "T" }, save: "store" });
-    const shell = await systemShell(config, vi.fn());
+    const shell = await systemShellOf(fakeModules())(config, vi.fn());
     const app = vi.mocked(systemModule.createApp).mock.results.at(-1)?.value as {
       store: { get: (key: string) => Promise<SystemResult<unknown>> };
     };
@@ -385,21 +481,15 @@ describe("systemShell — the shell the page starts", () => {
   });
 });
 
-describe("a missing @moku-labs/system", () => {
-  it("a missing @moku-labs/system throws the install message", async () => {
-    vi.resetModules();
-    vi.doMock("@moku-labs/system", () => {
-      throw new Error("Cannot find package '@moku-labs/system'");
-    });
+describe("app/system — the engine file", () => {
+  it.skipIf(typeof Bun === "undefined")(
+    "system.ts loads no module of @moku-labs/system: the page hands it the loaders",
+    () => {
+      const source = readFileSync(new URL("../../../src/app/system.ts", import.meta.url), "utf8");
+      const loaded = new Bun.Transpiler({ loader: "ts" }).scanImports(source);
 
-    const { createSystemApp: create } = await import("../../../src/app/system");
-
-    await expect(create(["haptics"], "moku-game")).rejects.toMatchObject({
-      message:
-        "[game] config.system needs @moku-labs/system.\n  Install it: bun add @moku-labs/system@^0.3.1."
-    });
-
-    vi.doUnmock("@moku-labs/system");
-    vi.resetModules();
-  });
+      expect(loaded.filter(found => found.path.startsWith("@moku-labs/system"))).toEqual([]);
+      expect(loaded.filter(found => found.kind === "dynamic-import")).toEqual([]);
+    }
+  );
 });

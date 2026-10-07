@@ -15,6 +15,8 @@ const app = createApp({ plugins: [...screen, platformPlugin] });
 expectTypeOf(app.platform.back()).toEqualTypeOf<BackResult>();
 expectTypeOf<BackResult>().toEqualTypeOf<"popup" | "intent" | "exit" | "none">();
 expectTypeOf<PlatformApi["back"]>().toEqualTypeOf<() => BackResult>();
+expectTypeOf<PlatformApi["exit"]>().toEqualTypeOf<() => void>();
+expectTypeOf(app.platform.exit()).toEqualTypeOf<void>();
 expectTypeOf<Config["provider"]>().toEqualTypeOf<PlatformProvider | undefined>();
 expectTypeOf<Config["keepAwake"]>().toEqualTypeOf<boolean>();
 expectTypeOf<PlatformProvider["haptic"]>().parameter(0).toEqualTypeOf<HapticKind>();

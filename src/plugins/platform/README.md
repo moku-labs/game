@@ -4,7 +4,7 @@
 
 ```ts
 // config.ts of a game: name the capabilities; the engine page builds the provider from them
-// (systemShell of @moku-labs/game/app/system over @moku-labs/system) and passes it to the plugin.
+// (systemShellOf of @moku-labs/game/app/system over @moku-labs/system) and passes it to the plugin.
 export default {
   page: { title: "Timber Town" },
   system: ["lifecycle", "back", "haptics", "keepAwake"]
@@ -49,6 +49,15 @@ Without a provider `back()` presses nothing and returns `"none"`. Every popup wi
 const home = defineNode({ rest: true, outcomes: { play: type(), back: type() } }); // Back asks first
 
 app.platform.back(); // "intent": Home rests and lists "back"
+```
+
+## Exit
+
+`exit()` is the last step of the Back chain alone: the provider leaves the app. A provider `exit` that throws is logged like the one of `back()`; without a provider it does nothing.
+
+```ts
+// merge-game's exit plugin answers the fx "exit" of the Leave button.
+ctx.require(flowPlugin).fx.handle("exit", () => ctx.require(platformPlugin).exit());
 ```
 
 ## Haptics

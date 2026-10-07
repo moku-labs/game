@@ -86,7 +86,7 @@
  * |---|---|
  * | `@moku-labs/game/app` | `defineGameApp`, the game as one data object with `headless()` and `screen()`; `startMoment`; the types of `index.ts` and `config.ts` (`GameConfig`) |
  * | `@moku-labs/game/app/page` | `startPage`, the page the generated `.moku/main.ts` calls: `?player=` scenarios, the system shell, the dev agents |
- * | `@moku-labs/game/app/system` | the system shell over the optional peer `@moku-labs/system`: `systemShell`, `fromSystem`, `storeSave`, `createSystemApp` |
+ * | `@moku-labs/game/app/system` | the system shell over the optional peer `@moku-labs/system`: `systemShellOf`, `fromSystem`, `storeSave`, `createSystemApp` |
  * | `@moku-labs/game/cli` | `runCli` of the bin `moku-game` and `preparePage` for the editor, node and bun only |
  * | `@moku-labs/game/testing` | headless play, repro runs, isolated feature tests (`isolate`, `stub`), the in-memory save, the fake clock |
  * | `@moku-labs/game/visual` | the visual tests, node and bun only |

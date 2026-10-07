@@ -5,7 +5,7 @@
  * import they write carries its `.ts` extension: an import between two in-memory files of
  * `Bun.build` resolves only with it.
  */
-import type { ResolvedGameConfig } from "./types";
+import type { ResolvedGameConfig, SystemName } from "./types";
 
 /** The first line of a generated file a person may open. */
 const WRITTEN = "// Written by moku-game dev. Do not edit.";
@@ -15,6 +15,18 @@ const SAFE_VALUE = /^[#\w(),.%\s-]+$/;
 
 /** The files of `tests/scenarios/` that are not scenarios. */
 const NOT_SCENARIO = /\.(?:test|spec|d)\.ts$|^index\.ts$/;
+
+/**
+ * The entry of `@moku-labs/system` each system plugin loads from, in the order the shell composes
+ * them.
+ */
+const SYSTEM_ENTRIES: readonly (readonly [SystemName, string])[] = [
+  ["lifecycle", "lifecycle"],
+  ["back", "back"],
+  ["haptics", "haptics"],
+  ["keepAwake", "keep-awake"],
+  ["store", "store"]
+];
 
 /** The page of a resolved `config.ts`. */
 type Page = ResolvedGameConfig["page"];
@@ -205,7 +217,7 @@ export function scenarioFiles(files: readonly string[]): string[] {
  * Whether the page needs the system shell: a system plugin is named, or the save is the store.
  *
  * @param settings - The resolved `config.ts`.
- * @returns True when `main.ts` imports `systemShell`.
+ * @returns True when `main.ts` imports `systemShellOf`.
  * @example
  * ```ts
  * needsShell(resolveConfig({ page: { title: "T" }, save: "store" })); // true
@@ -213,6 +225,31 @@ export function scenarioFiles(files: readonly string[]): string[] {
  */
 function needsShell(settings: ResolvedGameConfig): boolean {
   return settings.system.length > 0 || settings.save === "store";
+}
+
+/**
+ * The `system` option of `startPage`: `systemShellOf` over the loader of the package and one
+ * loader per plugin the shell composes, in the fixed order. The store is one when `config.system`
+ * names it or the save is the store. Only these `import()`s are written, so the page bundles no
+ * other plugin and never needs its native package.
+ *
+ * @param settings - The resolved `config.ts`.
+ * @returns The option, indented two spaces, with no comma after it.
+ * @example
+ * ```ts
+ * shellOption(resolveConfig({ page: { title: "T" }, system: ["haptics"] })).split("\n")[2]; // '    haptics: () => import("@moku-labs/system/haptics")'
+ * ```
+ */
+function shellOption(settings: ResolvedGameConfig): string {
+  const named = SYSTEM_ENTRIES.filter(
+    ([name]) => settings.system.includes(name) || (name === "store" && settings.save === "store")
+  );
+  const loaders = [
+    '    system: () => import("@moku-labs/system")',
+    ...named.map(([name, entry]) => `    ${name}: () => import("@moku-labs/system/${entry}")`)
+  ];
+
+  return ["  system: systemShellOf({", loaders.join(",\n"), "  })"].join("\n");
 }
 
 /**
@@ -230,7 +267,9 @@ function needsShell(settings: ResolvedGameConfig): boolean {
 function pageImports(settings: ResolvedGameConfig, toRoot: string): string[] {
   return [
     'import { startPage } from "@moku-labs/game/app/page";',
-    ...(needsShell(settings) ? ['import { systemShell } from "@moku-labs/game/app/system";'] : []),
+    ...(needsShell(settings)
+      ? ['import { systemShellOf } from "@moku-labs/game/app/system";']
+      : []),
     `import game from "${toRoot}index.ts";`,
     `import config from "${toRoot}config.ts";`
   ];
@@ -270,8 +309,8 @@ function importLine(binding: string, specifier: string): string {
 /**
  * The `main.ts` of the dev page: the dev flag first, then the page entry, the game, its config,
  * one import per scenario, and, with agents, one per `.dev` module and one per agent. It calls
- * `startPage` with the scenarios by file stem, the shell when the game needs it, the agents and
- * the `.dev` modules.
+ * `startPage` with the scenarios by file stem, the shell with the loaders of the named plugins
+ * when the game needs it, the agents and the `.dev` modules.
  *
  * @param settings - The resolved `config.ts`.
  * @param sources - The scenario files, the `.dev` modules and the agents.
@@ -293,7 +332,7 @@ export function devMain(settings: ResolvedGameConfig, sources: MainSources): str
   const scenarioMap = keys.length === 0 ? "{}" : `{ ${keys.join(", ")} }`;
   const options = [
     `  scenarios: ${scenarioMap}`,
-    ...(needsShell(settings) ? ["  system: systemShell"] : []),
+    ...(needsShell(settings) ? [shellOption(settings)] : []),
     ...(agents.length === 0 ? [] : [`  agents: [${numbered("agent", agents.length)}]`]),
     ...(devModules.length === 0
       ? []
@@ -318,7 +357,7 @@ export function devMain(settings: ResolvedGameConfig, sources: MainSources): str
 
 /**
  * The `main.ts` of the production page: the page entry, the game and its config, and the shell
- * when the game needs it. No dev flag, no scenario, no agent, no `.dev` module, no door: none of
+ * with the loaders of the named plugins when the game needs it. No dev flag, no scenario, no agent, no `.dev` module, no door: none of
  * them ships.
  *
  * @param settings - The resolved `config.ts`.
@@ -330,10 +369,10 @@ export function devMain(settings: ResolvedGameConfig, sources: MainSources): str
  */
 export function buildMain(settings: ResolvedGameConfig): string {
   const call = needsShell(settings)
-    ? "await startPage(game, config, { system: systemShell });"
-    : "await startPage(game, config);";
+    ? ["await startPage(game, config, {", shellOption(settings), "});"]
+    : ["await startPage(game, config);"];
 
-  return [...pageImports(settings, "../../"), "", call, ""].join("\n");
+  return [...pageImports(settings, "../../"), "", ...call, ""].join("\n");
 }
 
 /**

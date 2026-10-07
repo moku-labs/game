@@ -216,17 +216,70 @@ describe("devMain", () => {
     );
   });
 
-  it("devMain imports systemShell only for a system list or a store save", () => {
-    const shell = 'import { systemShell } from "@moku-labs/game/app/system";';
+  it("devMain imports systemShellOf only for a system list or a store save", () => {
+    const shell = 'import { systemShellOf } from "@moku-labs/game/app/system";';
     const sources = { scenarios: [], devModules: [] };
 
     expect(devMain(plain, sources)).not.toContain(shell);
-    expect(devMain(settingsWith({ save: "local" }), sources)).not.toContain("systemShell");
+    expect(devMain(settingsWith({ save: "local" }), sources)).not.toContain("systemShellOf");
     expect(devMain(settingsWith({ system: ["haptics"] }), sources)).toContain(shell);
-    expect(devMain(settingsWith({ system: ["haptics"] }), sources)).toContain(
-      "  system: systemShell"
-    );
     expect(devMain(settingsWith({ save: "store" }), sources)).toContain(shell);
+  });
+
+  it("devMain writes the loaders of the named plugins only", () => {
+    const text = devMain(settingsWith({ system: ["haptics"] }), { scenarios: [], devModules: [] });
+
+    expect(text).toContain(
+      [
+        "await startPage(game, config, {",
+        "  scenarios: {},",
+        "  system: systemShellOf({",
+        '    system: () => import("@moku-labs/system"),',
+        '    haptics: () => import("@moku-labs/system/haptics")',
+        "  })",
+        "});"
+      ].join("\n")
+    );
+    expect(text).not.toMatch(/@moku-labs\/system\/(?:lifecycle|back|keep-awake|store)/);
+  });
+
+  it("devMain writes the loaders in the fixed order, keepAwake from keep-awake, the store for a store save", () => {
+    const text = devMain(
+      settingsWith({ system: ["keepAwake", "back", "lifecycle"], save: "store" }),
+      {
+        scenarios: [],
+        devModules: []
+      }
+    );
+
+    expect(text).toContain(
+      [
+        "  system: systemShellOf({",
+        '    system: () => import("@moku-labs/system"),',
+        '    lifecycle: () => import("@moku-labs/system/lifecycle"),',
+        '    back: () => import("@moku-labs/system/back"),',
+        '    keepAwake: () => import("@moku-labs/system/keep-awake"),',
+        '    store: () => import("@moku-labs/system/store")',
+        "  })"
+      ].join("\n")
+    );
+    expect(text).not.toContain("haptics");
+  });
+
+  it("devMain writes the store loader once when config.system names it for a store save", () => {
+    const text = devMain(settingsWith({ system: ["store"], save: "store" }), {
+      scenarios: [],
+      devModules: []
+    });
+
+    expect(text.match(/@moku-labs\/system\/store/g)).toHaveLength(1);
+  });
+
+  it("devMain of a web-only game writes no loader", () => {
+    const text = devMain(plain, { scenarios: [], devModules: [] });
+
+    expect(text).not.toContain("@moku-labs/system");
+    expect(text).not.toContain("import(");
   });
 
   it("devMain imports agents and .dev modules only when agents are passed", () => {
@@ -291,11 +344,16 @@ describe("buildMain", () => {
     expect(text).toBe(
       [
         'import { startPage } from "@moku-labs/game/app/page";',
-        'import { systemShell } from "@moku-labs/game/app/system";',
+        'import { systemShellOf } from "@moku-labs/game/app/system";',
         'import game from "../../index.ts";',
         'import config from "../../config.ts";',
         "",
-        "await startPage(game, config, { system: systemShell });",
+        "await startPage(game, config, {",
+        "  system: systemShellOf({",
+        '    system: () => import("@moku-labs/system"),',
+        '    back: () => import("@moku-labs/system/back")',
+        "  })",
+        "});",
         ""
       ].join("\n")
     );
@@ -305,10 +363,33 @@ describe("buildMain", () => {
     expect(text).not.toMatch(/\/control|\/inspect/);
   });
 
+  it("buildMain writes the main.ts of the systemShellOf example line for line", () => {
+    const system = readFileSync(new URL("../../src/app/system.ts", import.meta.url), "utf8");
+    const block = /\* ```ts\n((?: \*.*\n)+?) \* ```\n \*\/\nexport function systemShellOf/.exec(
+      system
+    );
+    const example = (block?.[1] ?? "")
+      .split("\n")
+      .map(line => line.replace(/^ \* ?/, ""))
+      .slice(1)
+      .join("\n");
+
+    expect(example).not.toBe("");
+    expect(buildMain(settingsWith({ system: ["back"] }))).toBe(example);
+  });
+
+  it("buildMain of a haptics game with a memory save writes no store loader", () => {
+    const text = buildMain(settingsWith({ system: ["haptics"], save: "memory" }));
+
+    expect(text).toContain('    haptics: () => import("@moku-labs/system/haptics")');
+    expect(text).not.toContain("@moku-labs/system/store");
+  });
+
   it("buildMain of a web-only game passes no shell", () => {
     const text = buildMain(plain);
 
-    expect(text).not.toContain("systemShell");
+    expect(text).not.toContain("systemShellOf");
+    expect(text).not.toContain("@moku-labs/system");
     expect(text).toContain("await startPage(game, config);\n");
   });
 });

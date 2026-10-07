@@ -6,7 +6,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 |---|---|---|
 | `@moku-labs/game/app` | anywhere | `defineGameApp`, `startMoment`, the types `GameConfig`, `GameDefinition`, `GameApp`, `GameHandle`, `GamePluginConfigs`, `HeadlessSeams`, `ScreenSeams`, `MemoryProvider`, `Scenario`, `PageAgent`, `SaveKind`, `SystemName` |
 | `@moku-labs/game/app/page` | the browser | `startPage`, the page the generated `.moku/main.ts` calls |
-| `@moku-labs/game/app/system` | the browser, the native shell | `systemShell`, `fromSystem`, `storeSave`, `createSystemApp`, the types `SystemApp`, `SystemSlice`, `StoreSlice`. The one entry that reaches `@moku-labs/system` |
+| `@moku-labs/game/app/system` | the browser, the native shell | `systemShellOf`, `fromSystem`, `storeSave`, `createSystemApp`, the types `SystemApp`, `SystemSlice`, `StoreSlice`, `SystemModules`. The one entry that names `@moku-labs/system`, in types only |
 | `@moku-labs/game/cli` | Node and Bun | `runCli`, `preparePage`, the types `PreparePageOptions`, `PreparedPage` |
 | bin `moku-game` | Bun | `dev`, `build`, `native`, `keys`, `pack`, `help` |
 
@@ -245,7 +245,19 @@ A store save that cannot be read rejects the load: `[game] The save could not be
 | `@moku-labs/system` | `config.ts` names a `system` plugin, or `save` is `"store"` | `bun add @moku-labs/system@^0.3.1` |
 | `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.2` |
 
-The page imports the shell only when the game needs it. The generated `main.ts` then imports `systemShell` from `@moku-labs/game/app/system` and passes it to `startPage`. It loads each named system plugin with its own `import()`. Without the package: `[game] config.system needs @moku-labs/system.`
+The page imports the shell only when the game needs it. The generated `main.ts` then imports `systemShellOf` from `@moku-labs/game/app/system` and passes `systemShellOf({ ... })` to `startPage`. It writes one `import()` for the package and one per named plugin, in the order `lifecycle`, `back`, `haptics`, `keepAwake`, `store`; the store when `system` names it or `save` is `"store"`. The engine holds no `import()` of the package, so the page bundles only the named plugins. A game with `system: ["haptics"]` and a memory save builds without `@tauri-apps/plugin-store`.
+
+```ts
+// .moku/build/main.ts of a game whose config.ts names haptics, with a memory save
+await startPage(game, config, {
+  system: systemShellOf({
+    system: () => import("@moku-labs/system"),
+    haptics: () => import("@moku-labs/system/haptics")
+  })
+});
+```
+
+Without the package, a loader rejects: `[game] config.system needs @moku-labs/system.` A page of its own that names a plugin without its loader: `[game] config.system names "<name>", but main.ts has no loader for it.`
 
 | `system` name | The engine gets |
 |---|---|
@@ -260,7 +272,12 @@ A game that builds its own shell takes the parts from `@moku-labs/game/app/syste
 ```ts
 import { createSystemApp, fromSystem } from "@moku-labs/game/app/system";
 
-const system = await createSystemApp(["lifecycle", "back", "haptics"], "com.mokulabs.timber");
+const system = await createSystemApp(["lifecycle", "back", "haptics"], "com.mokulabs.timber", {
+  system: () => import("@moku-labs/system"),
+  lifecycle: () => import("@moku-labs/system/lifecycle"),
+  back: () => import("@moku-labs/system/back"),
+  haptics: () => import("@moku-labs/system/haptics")
+});
 await system.start();
 const { app } = game.screen({ platform: fromSystem(system) }); // Back, pause, haptics reach the system app
 ```
