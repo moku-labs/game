@@ -14,13 +14,14 @@ export type MiniGame = ReturnType<typeof miniGame.screen>["app"];
 export const miniFolder = new URL("../fixtures/mini-game/", import.meta.url);
 
 /**
- * Reads the committed dev manifest, the file the dev server hands the browser.
+ * Reads the committed dev manifest `generated/manifest.json`, the file the dev server hands the
+ * browser on `/manifest.json`.
  *
  * @returns The parsed manifest.
  */
 export async function readManifest(): Promise<Assets.Manifest> {
   return JSON.parse(
-    await readFile(new URL("manifest.json", miniFolder), "utf8")
+    await readFile(new URL("generated/manifest.json", miniFolder), "utf8")
   ) as Assets.Manifest;
 }
 

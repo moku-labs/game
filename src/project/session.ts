@@ -51,8 +51,8 @@ export type Session = {
   queue: Promise<unknown>;
 };
 
-/** The manifest the asset scanner writes by default. */
-const MANIFEST_FILE = "manifest.json";
+/** The dev manifest `moku-game keys` writes. */
+const MANIFEST_FILE = "generated/manifest.json";
 
 /** The tsconfig whose `paths` are read by default. */
 const TSCONFIG_FILE = "tsconfig.json";

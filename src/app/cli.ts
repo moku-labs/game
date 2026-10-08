@@ -161,7 +161,7 @@ const USAGE = [
   "  native build <target> [--simulator]   build the native app (ios, macos, android)",
   "  native dev <target>                   run the native shell on the dev server",
   "  native doctor | native clean          check or remove the native project",
-  "  keys [--check]                        write generated/assets.ts and manifest.json",
+  "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
   "  pack [--no-cache]                     pack the assets into dist/assets",
   "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
   "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",

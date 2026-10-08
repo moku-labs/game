@@ -165,7 +165,7 @@ The engine bin `moku-game` serves, builds and packs a game folder. A game writes
 | `moku-game native build <target> [--simulator]` | Builds the native app: `ios`, `macos`, `android` |
 | `moku-game native dev <target>` | Runs the native shell on the dev server |
 | `moku-game native doctor`, `native clean` | Checks or removes the native project |
-| `moku-game keys [--check]` | Writes `generated/assets.ts`, the strings and `manifest.json` |
+| `moku-game keys [--check]` | Writes `generated/assets.ts`, the strings and `generated/manifest.json` |
 | `moku-game pack [--no-cache]` | Packs the assets into `dist/assets` |
 | `moku-game visual [--update] [--only <name>] [--no-pixels]` | Runs the visual tests of `tests/visual/index.ts` against `tests/visual/baselines/`. The pixel leg runs on a Mac, on a page served for the run. Exit 1 when a checkpoint differs |
 

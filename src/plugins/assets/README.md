@@ -92,7 +92,7 @@ extension, so a `.ktx2` served as `application/octet-stream` loads as before.
 
 ## The manifest
 
-The dev manifest of `bun run assets:keys` is version 1: loose files, straight from the features.
+The dev manifest of `bun run assets:keys` is version 1: loose files, straight from the features. A game with `config.ts` gets it from `moku-game keys` in `generated/manifest.json`, and `moku-game dev` serves it on `/manifest.json`. Its paths stay relative to the game folder.
 
 ```json
 {

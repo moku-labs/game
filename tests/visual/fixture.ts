@@ -15,7 +15,7 @@ import { folderIo, miniFolder } from "../integration/mini-helpers";
 
 /** The dev manifest, the file the dev server hands the page. */
 const manifest = JSON.parse(
-  readFileSync(new URL("manifest.json", miniFolder), "utf8")
+  readFileSync(new URL("generated/manifest.json", miniFolder), "utf8")
 ) as Assets.Manifest;
 
 /**

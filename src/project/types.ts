@@ -23,7 +23,7 @@
 export type ProjectOptions = {
   /** The folder of the game. A path that is not a directory rejects `openProject`. */
   root: string;
-  /** The asset manifest, root-relative. Default `manifest.json`, the scanner's default. */
+  /** The asset manifest, root-relative. Default `generated/manifest.json`, where `moku-game keys` writes it. */
   manifest?: string;
   /**
    * The tsconfig whose `paths` the index follows, root-relative. Default `tsconfig.json`. A path

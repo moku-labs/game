@@ -30,7 +30,7 @@ const running: { stop(): Promise<void> }[] = [];
 
 /** The dev manifest of the mini game, the file the page fetches next to itself. */
 const manifestText = readFileSync(
-  new URL("../../fixtures/mini-game/manifest.json", import.meta.url),
+  new URL("../../fixtures/mini-game/generated/manifest.json", import.meta.url),
   "utf8"
 );
 

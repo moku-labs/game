@@ -79,7 +79,7 @@ function makeGame(files: Record<string, string> = {}, leftOut: string[] = []): s
   const all: Record<string, string> = {
     "config.ts": 'export default { page: { title: "t" } };\n',
     "index.ts": "export default {};\n",
-    "manifest.json": '{ "version": 1, "bundles": {} }\n',
+    "generated/manifest.json": '{ "version": 1, "bundles": {} }\n',
     ".gitignore": ".moku/\n",
     ...files
   };
@@ -403,13 +403,16 @@ describe("moku-game dev, the parent", () => {
     expect(seen.removed.toSorted()).toEqual(["SIGHUP", "SIGINT", "SIGTERM"]);
   });
 
-  it("dev warns when manifest.json is missing and when .moku is not ignored", async () => {
-    const root = makeGame({ ".gitignore": "node_modules\n" }, ["manifest.json"]);
+  it("dev warns when generated/manifest.json is missing and when .moku is not ignored", async () => {
+    const root = makeGame(
+      { ".gitignore": "node_modules\n", "manifest.json": '{ "version": 1, "bundles": {} }\n' },
+      ["generated/manifest.json"]
+    );
     const { code, seen } = await run(["dev"], root);
 
     expect(code).toBe(0);
     expect(seen.warnings).toEqual([
-      `[game] dev: no manifest.json in "${root}".\n  Run "moku-game keys" first.`,
+      `[game] dev: no generated/manifest.json in "${root}".\n  Run "moku-game keys" first.`,
       '[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.'
     ]);
   });
@@ -423,7 +426,7 @@ describe("moku-game dev, the parent", () => {
     for (const [file, text] of Object.entries({
       "config.ts": 'export default { page: { title: "t" } };\n',
       "index.ts": "export default {};\n",
-      "manifest.json": "{}\n"
+      "generated/manifest.json": "{}\n"
     })) {
       put(path.join(root, file), text);
       put(path.join(below, file), text);
@@ -556,7 +559,8 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
       "features/ui/assets/{button}.png": "png",
       "features/ui/assets/empty.png": "",
       ".moku/main.ts": "secret",
-      "node_modules/x/index.js": "installed"
+      "node_modules/x/index.js": "installed",
+      "manifest.json": '{ "stale": true }\n'
     });
     const { running, seen, url } = await startChild(root);
 
@@ -716,7 +720,7 @@ describe("the command line", () => {
       "  native build <target> [--simulator]   build the native app (ios, macos, android)",
       "  native dev <target>                   run the native shell on the dev server",
       "  native doctor | native clean          check or remove the native project",
-      "  keys [--check]                        write generated/assets.ts and manifest.json",
+      "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
       "  pack [--no-cache]                     pack the assets into dist/assets",
       "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
       "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",
@@ -769,7 +773,7 @@ describe("keys and pack", () => {
         "--layer",
         "shared=ui",
         "--manifest",
-        path.join(root, "manifest.json"),
+        path.join(root, "generated", "manifest.json"),
         "--pseudo"
       ]
     ]);
@@ -792,7 +796,7 @@ describe("keys and pack", () => {
       "--keys",
       path.join(bare, "generated", "assets.ts"),
       "--manifest",
-      path.join(bare, "manifest.json")
+      path.join(bare, "generated", "manifest.json")
     ]);
   });
 

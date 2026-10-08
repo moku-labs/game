@@ -79,7 +79,7 @@ afterEach(() => {
 
 describe("moku-game-index --json", () => {
   it("prints the index as pretty JSON", async () => {
-    const root = writeGame({ "kit.ts": KIT, "home.ts": HOME, "manifest.json": "{}" });
+    const root = writeGame({ "kit.ts": KIT, "home.ts": HOME, "generated/manifest.json": "{}" });
     const { ui, lines } = recorder();
 
     expect(await runCli(["--root", root, "--json"], ui)).toBe(0);
@@ -93,7 +93,7 @@ describe("moku-game-index --json", () => {
     };
 
     expect(index.schemaVersion).toBe(1);
-    expect(index.manifest).toBe("manifest.json");
+    expect(index.manifest).toBe("generated/manifest.json");
     expect(index.symbols).toHaveProperty("scene:home");
     expect(printed).toContain('\n  "schemaVersion": 1,');
   });

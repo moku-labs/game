@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url";
 import type { VisualSetup, VisualTest } from "../visual";
 import type { CliDeps, VisualRunner } from "./cli";
 import {
+  DEV_MANIFEST,
   loadGame,
   type PageFiles,
   type PageServer,
@@ -122,19 +123,19 @@ async function loadSuite(file: string, cwd: string): Promise<Suite> {
  * @param resolve - Bun's resolver, to find the hot plugin.
  * @returns The paths of the HTML and the bunfig.
  * @throws {Error} The errors of `moku-game dev` before its server starts, and a game without
- *   `manifest.json`.
+ *   `generated/manifest.json`.
  */
 export async function writeVisualPage(
   page: VisualPageRun,
   resolve: CliDeps["resolve"]
 ): Promise<PageFiles> {
   const settings = await loadGame(page.root);
-  const manifest = path.join(page.root, "manifest.json");
+  const manifest = path.join(page.root, DEV_MANIFEST);
 
   // The page loads its assets through the dev manifest: without it the pictures are empty.
   if (statSync(manifest, { throwIfNoEntry: false })?.isFile() !== true) {
     throw new Error(
-      `[game] visual: no manifest.json in "${page.root}".\n  Run "moku-game keys" first.`
+      `[game] visual: no ${DEV_MANIFEST} in "${page.root}".\n  Run "moku-game keys" first.`
     );
   }
 

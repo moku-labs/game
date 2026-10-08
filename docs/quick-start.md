@@ -158,7 +158,7 @@ The page, the save kinds, `?player=` scenarios, the system plugins and the nativ
 
 ## A screen: the body font and the asset keys
 
-A game with a screen keeps its files in `features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. `moku-game keys` runs it on the game folder: it writes `generated/assets.ts`, the compiled strings and `manifest.json`. `moku-game keys --check` fails when an output is out of date, and `moku-game pack` writes the production build into `dist/assets`.
+A game with a screen keeps its files in `features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. `moku-game keys` runs it on the game folder: it writes `generated/assets.ts`, the compiled strings and the dev manifest `generated/manifest.json`. `moku-game keys --check` fails when an output is out of date, and `moku-game pack` writes the production build into `dist/assets`.
 
 A game on the layered layout names its layers in `config.ts`, `assets: { layers: { shared: "ui" } }`, so `shared/assets/*` keeps the `ui.*` keys.
 

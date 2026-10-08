@@ -107,7 +107,7 @@ describe("the project index of the mini game", () => {
 
     expect(openMs).toBeLessThan(OPEN_BOUND_MS);
     expect(Object.keys(project.index.files)).toHaveLength(18);
-    expect(project.index.manifest).toBe("manifest.json");
+    expect(project.index.manifest).toBe("generated/manifest.json");
   });
 
   it("joins game.graph exactly: one node: key per <flow>/<node>, one flow: key per flow", async () => {

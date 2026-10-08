@@ -22,8 +22,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `shared/` | The shared layer |
 | `features/<f>/` | One feature: `flow/`, `rules/`, `views/`, `styles/`, `motion/`, `world/`, `assets/`, `strings/` |
 | `plugins/` | The game's own plugins |
-| `generated/` | What `moku-game keys` writes: `assets.ts`, `strings.ts`, `strings.<locale>.ts` |
-| `manifest.json` | The dev manifest `moku-game keys` writes |
+| `generated/` | What `moku-game keys` writes: `assets.ts`, `strings.ts`, `strings.<locale>.ts` and `manifest.json`, the dev manifest |
 | `tests/` | The tests. `tests/scenarios/<name>.ts` are the prepared saves of `?player=<name>` |
 | `.moku/` | What `moku-game` writes: the dev page, its `bunfig.toml`, the page of `visual` in `.moku/visual/`, the Tauri project. Git ignores it |
 | `dist/assets/`, `dist/web/`, `dist-native/` | The pack, the web build, the native apps |
@@ -308,7 +307,7 @@ moku-game <command> [options]
   native build <target> [--simulator]   build the native app (ios, macos, android)
   native dev <target>                   run the native shell on the dev server
   native doctor | native clean          check or remove the native project
-  keys [--check]                        write generated/assets.ts and manifest.json
+  keys [--check]                        write generated/assets.ts and generated/manifest.json
   pack [--no-cache]                     pack the assets into dist/assets
   visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac
     [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]
@@ -349,11 +348,11 @@ http://127.0.0.1:3000/
 ```
 
 - The server listens on `127.0.0.1` only, never on the network.
-- `/` is the page, `/manifest.json` the manifest of the game, or of `dist/assets` with `--packed`. Any other path is a file of the game, or of `dist/assets` with `--packed`. A segment that starts with a dot, such as `.moku` or `..`, and `node_modules` answer 404.
+- `/` is the page, `/manifest.json` the dev manifest `generated/manifest.json` of the game, or `manifest.json` of `dist/assets` with `--packed`. Its paths are relative to the game folder, `features/...`. Any other path is a file of the game, or of `dist/assets` with `--packed`. A segment that starts with a dot, such as `.moku` or `..`, and `node_modules` answer 404.
 - The bunfig lists the engine's hot plugin first and defines `__MOKU_GAME_DEV__` as `true`. `dev.ts` sets the global too. See [Hot swap](./hot-swap.md).
 - `main.ts` lists `tests/scenarios/*.ts`, sorted, by file stem. Test files, `.d.ts` and `index.ts` are skipped. A new or removed scenario file rewrites `main.ts`, and the page reloads. A `tests/scenarios/` folder created after the start needs a restart.
 - Ctrl+C stops the server with exit code 0. A taken port: `[game] dev: port 3000 is in use.` with `Pass --port 0 for a free port.`
-- Without `manifest.json` it warns `Run "moku-game keys" first.` and serves on.
+- Without `generated/manifest.json` it warns `[game] dev: no generated/manifest.json in "<game>".` with `Run "moku-game keys" first.` and serves on.
 
 ### build
 
@@ -380,13 +379,13 @@ export default { app: { app: fixtureApp }, tests: [rewardPopup] };
 - The flags of the runner are read by `parseVisualArgv`: `--update`, `--only`, `--no-pixels`, `--pixels`, `--webgl`, `--dir`.
 - The baselines live in `tests/visual/baselines/<test>/<checkpoint>/`.
 - The pixel leg runs on a Mac only, unless `--pixels` or `--no-pixels` says otherwise. When it runs without `--url`, the command writes its own page into `.moku/visual/`: `index.html`, `dev.ts`, `main.ts` and `bunfig.toml`, which reach the game from two folders up. The page of `dev` and of the editor in `.moku/` stays as it is, so `visual` runs while either serves the game. Then, as `dev` does, the command runs Bun again under `.moku/visual/bunfig.toml`, in the same working directory, with the same arguments. So the page is bundled like the dev page: the hot plugin first, every `--serve-plugin`, every `--preload`, `__MOKU_GAME_DEV__` defined `true`. The hot plugin changes nothing in a run: no file changes while it plays. The child plays the tests and serves the page with the server of `dev`, on a free port of `127.0.0.1`. It stops the server at the end, or when the parent is gone. Ctrl+C and the stop signals go to the child, and the exit code is the child's. A run that serves no page plays in the bin's own process, or in a child with the preloads when `--preload` is given.
-- Without `manifest.json` a run that serves the page stops: `[game] visual: no manifest.json in "<game>".` with `Run "moku-game keys" first.`
+- Without `generated/manifest.json` a run that serves the page stops: `[game] visual: no generated/manifest.json in "<game>".` with `Run "moku-game keys" first.`
 - The exit code is `0` when every checkpoint is the same or written, `1` when one differs or a test fails.
 - A missing module or another default export, a bare app factory too: `[game] visual: tests/visual/index.ts must export default { app, tests }.` with `app is a VisualSetup { app, page? }: export default { app: { app: () => game.screen().app }, tests }.`
 
 ### keys and pack
 
-`keys` and `pack` run the asset scanner of `@moku-labs/game/assets` with the game's paths and one `--layer` per `assets.layers` entry. `keys` writes `generated/assets.ts`, the compiled strings and `manifest.json`. `pack` writes `dist/assets`. See [the asset keys](./quick-start.md#a-screen-the-body-font-and-the-asset-keys).
+`keys` and `pack` run the asset scanner of `@moku-labs/game/assets` with the game's paths and one `--layer` per `assets.layers` entry. `keys` writes `generated/assets.ts`, the compiled strings and the dev manifest `generated/manifest.json`. `pack` writes `dist/assets`. See [the asset keys](./quick-start.md#a-screen-the-body-font-and-the-asset-keys).
 
 ## The editor: preparePage
 
