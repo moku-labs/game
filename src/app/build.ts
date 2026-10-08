@@ -20,7 +20,7 @@ import { pathToFileURL } from "node:url";
 import type { BunPlugin } from "bun";
 import type { CliDeps } from "./cli";
 import { buildMain, pageHtml } from "./generate";
-import { loadGame } from "./serve";
+import { DEV_MANIFEST, loadGame } from "./serve";
 import type { ResolvedGameConfig } from "./types";
 
 /** One `moku-game build` run, its flags read and its paths absolute. */
@@ -95,7 +95,7 @@ function hasEnglishStrings(root: string, settings: ResolvedGameConfig): boolean 
 }
 
 /**
- * The flags of the asset scan for `moku-game keys`: the dev manifest beside the game, the
+ * The flags of the asset scan for `moku-game keys`: the dev manifest in `generated/`, the
  * pseudo-locale when the game has an English string file, and `--check` for a check run.
  *
  * @param root - The game folder.
@@ -104,7 +104,7 @@ function hasEnglishStrings(root: string, settings: ResolvedGameConfig): boolean 
  * @returns The flags for the scanner's command line.
  * @example
  * ```ts
- * keysArguments("/g", resolveConfig({ page: { title: "T" } }), true).slice(4); // ["--manifest", "/g/manifest.json", "--check"]: no strings
+ * keysArguments("/g", resolveConfig({ page: { title: "T" } }), true).slice(4); // ["--manifest", "/g/generated/manifest.json", "--check"]: no strings
  * keysArguments("/g", resolveConfig({ page: { title: "T" } }), false).at(-1); // "--pseudo" once /g/features/home/strings/en.json exists
  * ```
  */
@@ -116,7 +116,7 @@ export function keysArguments(
   return [
     ...scanArguments(root, settings),
     "--manifest",
-    path.join(root, "manifest.json"),
+    path.join(root, DEV_MANIFEST),
     ...(hasEnglishStrings(root, settings) ? ["--pseudo"] : []),
     ...(check ? ["--check"] : [])
   ];

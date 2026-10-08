@@ -126,11 +126,11 @@ describe("moku-game dev on the mini game", () => {
     expect(html).toContain("<title>mini-game</title>");
   });
 
-  it("serves /manifest.json from the root", async () => {
+  it("serves /manifest.json from generated/manifest.json", async () => {
     const served = await textOf(`${server.url}manifest.json`);
 
     expect(JSON.parse(served)).toEqual(
-      JSON.parse(readFileSync(path.join(MINI_GAME, "manifest.json"), "utf8"))
+      JSON.parse(readFileSync(path.join(MINI_GAME, "generated", "manifest.json"), "utf8"))
     );
   });
 

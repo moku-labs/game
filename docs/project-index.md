@@ -54,7 +54,7 @@ project.close();
 | `changed(path)` | Re-indexes one root-relative path now and resolves with the new index. The tsconfig, or a file it extends, reads the aliases again. Does not call the watch callers |
 | `close()` | Stops the watcher and drops every caller. `find` and `changed` keep working; `watch` throws |
 
-The root is always explicit: `root` or `--root`. Nothing is inferred from the working directory. The manifest defaults to `manifest.json` at the root, the asset scanner's default; `index.manifest` is set only when that file exists. The tsconfig defaults to `tsconfig.json` at the root; `index.tsconfig` is set only when that file exists and holds `paths`.
+The root is always explicit: `root` or `--root`. Nothing is inferred from the working directory. The manifest defaults to `generated/manifest.json`, where `moku-game keys` writes it; `index.manifest` is set only when that file exists. The tsconfig defaults to `tsconfig.json` at the root; `index.tsconfig` is set only when that file exists and holds `paths`.
 
 ## The index
 

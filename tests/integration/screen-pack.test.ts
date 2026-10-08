@@ -65,7 +65,7 @@ describe("screen-pack — the generated asset keys", () => {
         "--root",
         gameRoot,
         "--manifest",
-        `${gameRoot}/manifest.json`,
+        `${gameRoot}/generated/manifest.json`,
         "--keys",
         `${gameRoot}/generated/assets.ts`,
         "--check",

@@ -85,7 +85,7 @@ function makeGame(files: Record<string, string> = {}, leftOut: string[] = []): s
   const all: Record<string, string> = {
     "config.ts": 'export default { page: { title: "t" } };\n',
     "index.ts": "export default {};\n",
-    "manifest.json": '{ "version": 1, "bundles": {} }\n',
+    "generated/manifest.json": '{ "version": 1, "bundles": {} }\n',
     ".gitignore": ".moku/\n",
     "tests/visual/index.ts": SUITE,
     ...files
@@ -579,9 +579,9 @@ describe("moku-game visual, the run of the bin again", () => {
     expect(child.seen.calls).toHaveLength(1);
   });
 
-  it("refuses a game without manifest.json, in the parent and in the child", async () => {
-    const root = makeGame({}, ["manifest.json"]);
-    const message = `[game] visual: no manifest.json in "${root}".\n  Run "moku-game keys" first.`;
+  it("refuses a game without generated/manifest.json, in the parent and in the child", async () => {
+    const root = makeGame({ "manifest.json": "{}\n" }, ["generated/manifest.json"]);
+    const message = `[game] visual: no generated/manifest.json in "${root}".\n  Run "moku-game keys" first.`;
     const parent = await run(["visual", "--pixels"], root);
     const child = await run(["visual", "--pixels"], root, undefined, CHILD);
 

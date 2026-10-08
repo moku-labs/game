@@ -82,6 +82,12 @@ const STOPPING: readonly Signal[] = ["SIGINT", "SIGTERM"];
 /** How often the dev child checks that its parent still runs. */
 const PARENT_CHECK_MS = 1000;
 
+/**
+ * The dev manifest `moku-game keys` writes, relative to the game folder, next to
+ * `generated/assets.ts`. The dev server answers `/manifest.json` with it.
+ */
+export const DEV_MANIFEST = "generated/manifest.json";
+
 /** The folders a `.dev.ts` module is never looked for in. */
 const NO_DEV_MODULES = /^(?:node_modules|dist|generated|tests|__tests__)$/;
 
@@ -469,7 +475,7 @@ function devChildCommand(run: ServeRun, page: PageFiles, deps: CliDeps): string[
 export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number> {
   const settings = await loadGame(run.root);
   const hasPack = isFile(path.join(run.root, "dist", "assets", "manifest.json"));
-  const hasManifest = isFile(path.join(run.root, "manifest.json"));
+  const hasManifest = isFile(path.join(run.root, DEV_MANIFEST));
 
   // A packed run serves the pack, so it needs one; a raw run only warns without the dev manifest.
   if (run.packed && !hasPack) {
@@ -479,7 +485,7 @@ export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number>
   }
 
   if (!run.packed && !hasManifest) {
-    deps.ui.warn(`[game] dev: no manifest.json in "${run.root}".\n  Run "moku-game keys" first.`);
+    deps.ui.warn(`[game] dev: no ${DEV_MANIFEST} in "${run.root}".\n  Run "moku-game keys" first.`);
   }
 
   // The page is written before the child imports it, into a folder git should not see.
@@ -584,8 +590,10 @@ function fileResponse(file: string | undefined): Response {
 
 /**
  * Starts the dev server on `127.0.0.1` only, never on every interface: the page on `/`, the
- * manifest of the served folder on `/manifest.json`, and its files as static files. The dev child
- * and `moku-game visual` serve the page with it.
+ * manifest on `/manifest.json`, and the files of the served folder as static files. The manifest
+ * is the dev manifest `generated/manifest.json` of the game, or `manifest.json` of `dist/assets`
+ * with `--packed`; its paths are relative to the served folder. The dev child and
+ * `moku-game visual` serve the page with it.
  *
  * @param run - The flags of the run.
  * @param page - The page bundle the process imported.
@@ -594,6 +602,7 @@ function fileResponse(file: string | undefined): Response {
  */
 export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
   const base = run.packed ? path.join(run.root, "dist", "assets") : run.root;
+  const manifest = path.join(base, run.packed ? "manifest.json" : DEV_MANIFEST);
 
   try {
     return Bun.serve({
@@ -602,7 +611,7 @@ export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageSer
       development: true,
       routes: {
         "/": page,
-        "/manifest.json": () => fileResponse(path.join(base, "manifest.json"))
+        "/manifest.json": () => fileResponse(manifest)
       },
       fetch: request => fileResponse(staticPath(base, new URL(request.url).pathname))
     });
