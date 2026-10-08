@@ -20,7 +20,7 @@ export const hudFeature = defineFeature("hud", {
 
 ## The two halves
 
-**Build time** (`compile/`, node only, reached through `@moku-labs/game/assets`): `compileStrings(root, out, { pseudo?, layers? })` walks `features/*/strings/<locale>.json` and the `strings/` of every layer (`layers`, `--layer`), parses every message once and writes `generated/strings.ts` (the `Strings` type a game hands `defineGame`) and one `generated/strings.<locale>.ts` per locale, plus `strings.en-XA.ts` with `pseudo`. `bun run assets:keys` runs it next to the asset scanner; `--check` covers both. `exportStrings` and `importStrings` exchange the strings with translators.
+**Build time** (`compile/`, node only, reached through `@moku-labs/game/assets`): `compileStrings(root, out, { pseudo?, layers? })` walks `features/*/strings/<locale>.json` and the `strings/` of every layer (`layers`, `--layer`), parses every message once and writes `generated/strings.ts` (the `Strings` type a game hands `defineGame`) and one `generated/strings.<locale>.ts` per locale, plus `strings.en-XA.ts` with `pseudo`. A locale module carries no helper code: when a message has a plain argument or a duration, it imports `messageArgument as argument` and `messageDuration as duration` from `@moku-labs/game`, the same functions the plugin runs. `bun run assets:keys` runs it next to the asset scanner; `--check` covers both. `exportStrings` and `importStrings` exchange the strings with translators.
 
 **Run time**: `format(message)` calls the function the build wrote and returns `Part[]`, never a joined string. `Intl.PluralRules`, `Intl.NumberFormat`, `Intl.ListFormat`, `Intl.DateTimeFormat` and `Intl.DurationFormat` come from a kit memoised per locale.
 

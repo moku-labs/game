@@ -36,7 +36,7 @@ type IconName = keyof Page["icons"];
 
 /** Where the page reaches the game folder and its script from. */
 export type PageLinks = {
-  /** The path from the page to the game folder: `"../"` for `.moku/`, `"../../"` for `.moku/build/`. */
+  /** The path from the page to the game folder: `"../"` for `.moku/`, `"../../"` for `.moku/build/` and `.moku/visual/`. */
   toRoot: string;
   /** The script of the page, relative to it. */
   script: string;
@@ -314,13 +314,19 @@ function importLine(binding: string, specifier: string): string {
  *
  * @param settings - The resolved `config.ts`.
  * @param sources - The scenario files, the `.dev` modules and the agents.
+ * @param toRoot - The path from `main.ts` to the game folder: `"../"` for `.moku/`, `"../../"`
+ *   for the page of `moku-game visual` in `.moku/visual/`.
  * @returns The text of `.moku/main.ts`.
  * @example
  * ```ts
  * devMain(resolveConfig({ page: { title: "T" } }), { scenarios: ["ready.ts"], devModules: [] }).includes('scenarios: { "ready": scenario0 }'); // true
  * ```
  */
-export function devMain(settings: ResolvedGameConfig, sources: MainSources): string {
+export function devMain(
+  settings: ResolvedGameConfig,
+  sources: MainSources,
+  toRoot = "../"
+): string {
   const scenarios = scenarioFiles(sources.scenarios);
   const agents = sources.agents ?? [];
   const devModules = agents.length === 0 ? [] : sources.devModules.toSorted();
@@ -343,9 +349,11 @@ export function devMain(settings: ResolvedGameConfig, sources: MainSources): str
   return [
     WRITTEN,
     'import "./dev.ts";',
-    ...pageImports(settings, "../"),
-    ...scenarios.map((file, index) => importLine(`scenario${index}`, `../tests/scenarios/${file}`)),
-    ...devModules.map((file, index) => importLine(`* as devModule${index}`, `../${file}`)),
+    ...pageImports(settings, toRoot),
+    ...scenarios.map((file, index) =>
+      importLine(`scenario${index}`, `${toRoot}tests/scenarios/${file}`)
+    ),
+    ...devModules.map((file, index) => importLine(`* as devModule${index}`, `${toRoot}${file}`)),
     ...agents.map((agent, index) => importLine(`agent${index}`, agent)),
     "",
     "await startPage(game, config, {",

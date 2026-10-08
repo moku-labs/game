@@ -89,7 +89,7 @@ The factory takes the seams of one app: `player`, `session`, `seed` and `clock`,
 |---|---|---|
 | `defineVisualTest` | `(name: string, test: { start: VisualStart; steps: readonly VisualStep[]; webgl?: boolean }) => VisualTest` | A visual test as frozen data: where it starts, its steps, and whether it also runs in the WebGL leg |
 | `runVisualTests` | `(setup: VisualSetup, tests: readonly VisualTest[], options?: VisualOptions) => Promise<VisualReport>` | Plays the tests and compares every checkpoint with its baseline files |
-| `parseVisualArgv` | `(argv: readonly string[]) => { update?; pixels?; only?; dir?; renderer? }` | Reads `--update`, `--no-pixels`, `--webgl`, `--only <name>` and `--dir <path>` from a command line. `--webgl` runs only the tests with `webgl: true`, on the page with `?renderer=webgl`: such a test writes its picture to `screen.webgl.webp` and shares `state.json` and `describe.json` with the WebGPU leg |
+| `parseVisualArgv` | `(argv: readonly string[]) => { update?; pixels?; only?; dir?; renderer? }` | Reads `--update`, `--no-pixels`, `--pixels`, `--webgl`, `--only <name>` and `--dir <path>` from a command line. `--pixels` runs the pixel leg off a Mac too; the last of `--pixels` and `--no-pixels` wins. `--webgl` runs only the tests with `webgl: true`, on the page with `?renderer=webgl`: such a test writes its picture to `screen.webgl.webp` and shares `state.json` and `describe.json` with the WebGPU leg |
 
 The types `VisualTest`, `VisualStart`, `VisualStep`, `VisualSetup`, `VisualApp`, `VisualPage`, `VisualOptions`, `VisualRenderer`, `VisualTolerance`, `VisualReport`, `VisualTestResult` and `CheckpointResult` come from the same entry.
 
@@ -115,6 +115,13 @@ const report = await runVisualTests({ app: () => game.screen({ manifest, io }).a
 process.exitCode = report.ok ? 0 : 1;
 ```
 
+A game runs its visual tests with the bin, no script of its own: `moku-game visual`. It reads `tests/visual/index.ts`, whose default export is the two arguments of `runVisualTests`, `{ app: VisualSetup, tests }`, and keeps the baselines in `tests/visual/baselines/`. When the pixel leg runs and no `--url` is given, it writes its own page into `.moku/visual/`, runs Bun again under that page's bunfig as `dev` does, so `--serve-plugin` and `--preload` apply, and the child serves the page on a free port and stops it after; the page of `dev` and of the editor stays as it is. The exit code is 1 when a checkpoint differs. See [the shell](./shell.md#visual).
+
+```ts
+// tests/visual/index.ts of a game, run with `moku-game visual`, `moku-game visual --update --only reward-popup`
+export default { app: { app: () => game.screen({ manifest, io }).app }, tests: [rewardPopup] };
+```
+
 A checkpoint settles the motions and saves three baseline files next to the test: `<dir>/<test>/<checkpoint>/state.json`, `describe.json` and `screen.webp`. A missing file is written; `--update` rewrites them; any other file is compared. The headless leg plays every test in plain Bun and compares `state.json` and `describe.json` exactly, so it runs in `bun run test`. The pixel leg plays the same steps on the dev page in Chrome with WebGPU, or with WebGL under `--webgl`, on a Mac only, and compares `screen.webp` with a tolerance; a pixel difference with the same state and describe is reported as a rendering regression. The page is the contract: a dev build that sets `globalThis.game` to the app and `globalThis.doors` to `{ read, watch, sources, run, commands }`. No CI job runs pixels.
 
 #### Pixels
@@ -138,7 +145,7 @@ bun run mini:visual --only info-popup --no-pixels    # one test, headless only
 bun run mini:visual --url http://localhost:3000/     # a page already served by bun run mini:dev
 ```
 
-The exit code is 1 when a checkpoint differs.
+The exit code is 1 when a checkpoint differs. The same tests run through the bin with `tests/visual/index.ts`: `bun tests/fixtures/moku-game.ts visual --root tests/fixtures/mini-game --tests tests/visual/index.ts --dir tests/visual --no-pixels`; `tests/integration/app-visual.test.ts` runs it headless.
 
 The test of the browser leg itself opens a real Chrome only on request: `MOKU_VISUAL_BROWSER=1 bunx vitest run tests/unit/visual/browser.test.ts`. It also proves the WebP is lossless: random opaque pixels come back byte for byte. Without the variable it skips with its reason, so `bun run test` opens no browser.
 

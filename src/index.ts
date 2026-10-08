@@ -98,7 +98,7 @@
  * | `@moku-labs/game/project` | the project index of a game's sources, node and bun only |
  * | `@moku-labs/game/jsx-runtime`, `/jsx-dev-runtime` | the JSX runtimes `jsxImportSource: "@moku-labs/game"` names |
  * | `@moku-labs/game/fonts/*` | the MSDF body font `font-body.fnt` + `.png` and its OFL licence; a game copies them into `features/ui/assets/` |
- * | bin `moku-game` | `dev`, `build`, `native <verb>`, `keys`, `pack`: serves, builds, packages and packs a game folder, bun only |
+ * | bin `moku-game` | `dev`, `build`, `native <verb>`, `keys`, `pack`, `visual`: serves, builds, packages, packs and visually tests a game folder, bun only |
  * | bin `moku-game-assets` | the asset scanner CLI, bun only |
  * | bin `moku-game-index` | the project index CLI, bun only |
  *
@@ -312,7 +312,8 @@ export {
   wait
 } from "./plugins/anim/timeline/steps";
 export type { HapticKind } from "./plugins/anim/timeline/types";
-// i18n: messages as data
+// i18n: messages as data, and the two helpers a generated strings module imports
+export { messageArgument, messageDuration } from "./plugins/i18n/intl";
 export { tr } from "./plugins/i18n/tr";
 export type { DescriptionNode } from "./plugins/world/projection/types";
 // text: the Text component, board labels, text styles, bound numbers and countdowns

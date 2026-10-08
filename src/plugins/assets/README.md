@@ -352,7 +352,7 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 | Padding | 2 px between frames and a 2 px border, transparent, no extrude. |
 | Trim, rotation | Never: a rotated or trimmed nine-slice would lose its borders. |
 | Loose by size | A texture with a side above 512 px stays a file of its own. |
-| Groups | Per bundle: `fx` holds the textures whose key's last segment starts with `fx-`, whatever their size (a particle emitter binds one page); `main` holds the other textures. |
+| Groups | Per bundle: `fx` holds the textures whose key's last segment starts with `fx-` (`ui.fx-spark`) or that lie in an `fx` folder (`ui.fx.leaf` from `assets/fx/leaf.webp`), whatever their size (a particle emitter binds one page); `main` holds the other textures. The frames of an animation in `fx/` (`ui.fx.coin-spin.0`) go to `fx` too. A stem named `fx` with no folder (`ui.fx`) is not an fx folder. |
 | Group of one | Stays loose: an atlas of one file is one request either way. |
 | `fx` pages | Exactly one; more is a problem naming the bundle and the count. |
 | Oversized | A texture that fits no page is a problem naming the key, never a silent drop. |

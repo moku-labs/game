@@ -184,6 +184,26 @@ describe("devMain", () => {
     ]);
   });
 
+  it("devMain at depth 2 reaches the game, its scenarios and its .dev modules from ../../", () => {
+    const text = devMain(
+      plain,
+      {
+        scenarios: ["ready.ts"],
+        devModules: ["features/board/board.dev.ts"],
+        agents: ["@moku-labs/editor/agent/page"]
+      },
+      "../../"
+    );
+
+    expect(relativeImports(text)).toEqual([
+      "./dev.ts",
+      "../../index.ts",
+      "../../config.ts",
+      "../../tests/scenarios/ready.ts",
+      "../../features/board/board.dev.ts"
+    ]);
+  });
+
   it("devMain maps scenario files to keys by stem, sorted, and skips test files", () => {
     const text = devMain(plain, {
       scenarios: ["ready.ts", "full.test.ts", "index.ts", "a.spec.ts", "types.d.ts", "empty.ts"],

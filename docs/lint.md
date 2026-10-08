@@ -40,7 +40,7 @@ oxlint 1.86.0 or later. The rules use the ESLint rule API, so ESLint 9 loads the
 | `moku-game/static-keys` | keys | a JSX `key` the project index cannot follow: `tabKeys[props.tab]`, `a ?? b`, `a \|\| b`, `a && b`, `a ? b : c`, `props.tab`, `item.name`, a `let`, a function, a class or a catch parameter, a `const` of one of these | `key="row"`, `key={3}`, `` key={`${props.id}Label`} ``, `props.id`, `props.amountKey`, `cardKey(card.slot)`, a parameter, an import, a `const` of one of these |
 | `moku-game/layer-imports` | layers | an import, export-from or `import()` that reaches a layer above its own, `import type` too: `@features/home` from `shared/` | `@core/kit` and `@shared` from a feature |
 | `moku-game/feature-door` | doors | `@features` below `game.ts`, a feature that imports its own `index.ts`, a deep import of another feature, a relative import that leaves the feature | `@features/orders`, `./flow/merge` inside the feature |
-| `moku-game/test-suffix` | tests | a file in a test kind folder that misses the folder's suffix: `tests/e2e/board.test.ts` | `tests/e2e/board.e2e.ts`, a helper in `tests/helpers/` |
+| `moku-game/test-suffix` | tests | a file in a test kind folder that misses the folder's suffix: `tests/e2e/board.test.ts` | `tests/e2e/board.e2e.ts`, a helper in `tests/helpers/`, the folder's `index.ts` |
 
 `import { type A } from "pixi.js"` is reported. Under `verbatimModuleSyntax` it keeps a side-effect import, which loads Pixi. Write `import type { A } from "pixi.js"`.
 
@@ -116,7 +116,7 @@ Inside one feature any relative import passes, at any depth. The barrels `featur
 
 ### Test suffixes
 
-`test-suffix` reports a `.ts` or `.tsx` file in a test kind folder that does not end with the folder's suffix. A `.tsx` file takes the suffix with an `x`: `.e2e.tsx`.
+`test-suffix` reports a `.ts` or `.tsx` file in a test kind folder that does not end with the folder's suffix. A `.tsx` file takes the suffix with an `x`: `.e2e.tsx`. The `index.ts` of a kind folder passes: it is the folder's door, such as `tests/visual/index.ts`, the module `moku-game visual` reads.
 
 | Folder | Suffix |
 |---|---|

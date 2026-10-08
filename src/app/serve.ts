@@ -52,8 +52,16 @@ export type ServeRun = {
   servePlugins: readonly string[];
 };
 
-/** The server of the dev child, the part this file uses. Bun's `Server` fits it. */
-type PageServer = {
+/** How the bin runs itself again as a marked child. */
+export type ChildRun = {
+  /** The working directory of the child. */
+  cwd: string;
+  /** Opens what lives exactly as long as the child, such as the scenario watcher. */
+  whileRunning?: () => Watcher | undefined;
+};
+
+/** The server of the dev page, the part `dev` and `visual` use. Bun's `Server` fits it. */
+export type PageServer = {
   /** The bound address, with the port the system picked. */
   readonly url: URL;
   /**
@@ -289,25 +297,33 @@ function writeIfChanged(file: string, text: string): void {
  * @param root - The game folder.
  * @param settings - The resolved config.
  * @param agents - The agent modules, when the page has any.
+ * @param toRoot - The path from `main.ts` to the game folder.
  * @returns The text.
  */
-function mainOf(root: string, settings: ResolvedGameConfig, agents?: readonly string[]): string {
+function mainOf(
+  root: string,
+  settings: ResolvedGameConfig,
+  agents?: readonly string[],
+  toRoot = "../"
+): string {
   const scenarios = scenarioNamesOf(root);
 
   return agents === undefined || agents.length === 0
-    ? devMain(settings, { scenarios, devModules: [] })
-    : devMain(settings, { scenarios, devModules: devModulesOf(root), agents });
+    ? devMain(settings, { scenarios, devModules: [] }, toRoot)
+    : devMain(settings, { scenarios, devModules: devModulesOf(root), agents }, toRoot);
 }
 
 /**
  * Writes the dev page of a checked game into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts`
- * and `bunfig.toml`. Every text is made before the first write, so a refused value writes
- * nothing.
+ * and `bunfig.toml`. `moku-game visual` writes its own page into `.moku/visual/`, so the page of
+ * `dev` or of the editor stays as it is; the links of the page reach the game from its depth.
+ * Every text is made before the first write, so a refused value writes nothing.
  *
  * @param root - The game folder, absolute.
  * @param settings - The resolved config.
  * @param options - The agents, the preloads and the extra plugins, absolute.
  * @param resolve - Bun's resolver, to find the hot plugin.
+ * @param page - The folder of the page under the game, `/` separated: `.moku` by default.
  * @returns The paths of the HTML and the bunfig.
  * @throws {Error} When the hot plugin does not resolve, a preload or plugin is not a file, or a
  *   page value is refused.
@@ -316,7 +332,8 @@ export function writePage(
   root: string,
   settings: ResolvedGameConfig,
   options: PrepareOptions,
-  resolve: CliDeps["resolve"]
+  resolve: CliDeps["resolve"],
+  page = ".moku"
 ): PageFiles {
   const preload = options.preload ?? [];
   const servePlugins = options.servePlugins ?? [];
@@ -324,13 +341,16 @@ export function writePage(
   checkFiles("--preload", preload);
   checkFiles("--serve-plugin", servePlugins);
 
-  const folder = path.join(root, ".moku");
+  const segments = page.split("/");
+  // One step up per folder of the page: "../" for `.moku`, "../../" for `.moku/visual`.
+  const toRoot = "../".repeat(segments.length);
+  const folder = path.join(root, ...segments);
   const html = path.join(folder, "index.html");
   const bunfig = path.join(folder, "bunfig.toml");
   const texts: [string, string][] = [
-    [html, pageHtml(settings.page, { toRoot: "../", script: "./main.ts" })],
+    [html, pageHtml(settings.page, { toRoot, script: "./main.ts" })],
     [path.join(folder, "dev.ts"), devFlag()],
-    [path.join(folder, "main.ts"), mainOf(root, settings, options.agents)],
+    [path.join(folder, "main.ts"), mainOf(root, settings, options.agents, toRoot)],
     [bunfig, bunfigText({ hotPlugin: hotPluginOf(root, resolve), servePlugins, preload })]
   ];
 
@@ -469,23 +489,39 @@ export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number>
     deps.ui.warn('[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.');
   }
 
-  // The child serves the page from the game folder in its own process group: Ctrl+C reaches the
-  // parent, which hands it on.
-  const child = deps.spawn(devChildCommand(run, page, deps), {
+  // The child serves the page from the game folder; the scenario watcher lives as long as it.
+  return runChild(devChildCommand(run, page, deps), deps, {
     cwd: run.root,
+    whileRunning: () => watchScenarios(run.root, settings, deps)
+  });
+}
+
+/**
+ * Runs the bin again as a marked child, `MOKU_GAME_CHILD=1`, in its own process group: Ctrl+C
+ * reaches the parent, which hands it and the other stop signals on. `dev` and `visual` run their
+ * page server this way, under the page's bunfig.
+ *
+ * @param command - The words of the command: the Bun, its flags, the bin and its arguments.
+ * @param deps - The spawn, the signals and the environment.
+ * @param child - The working directory, and what lives as long as the child.
+ * @returns The exit code of the child.
+ * @throws {Error} When the child does not start.
+ */
+export async function runChild(command: string[], deps: CliDeps, child: ChildRun): Promise<number> {
+  const started = deps.spawn(command, {
+    cwd: child.cwd,
     env: { ...deps.env, MOKU_GAME_CHILD: "1" },
     stdio: ["inherit", "inherit", "inherit"],
     detached: true
   });
-  const removers = FORWARDED.map(signal => deps.onSignal(signal, () => child.kill(signal)));
+  const removers = FORWARDED.map(signal => deps.onSignal(signal, () => started.kill(signal)));
   let watcher: Watcher | undefined;
 
-  // The scenario watcher lives exactly as long as the child: it opens once the child runs and
-  // closes when it exits.
+  // What lives as long as the child opens once it runs and closes when it exits.
   try {
-    watcher = watchScenarios(run.root, settings, deps);
+    watcher = child.whileRunning?.();
 
-    return await child.exited;
+    return await started.exited;
   } finally {
     watcher?.close();
     for (const remove of removers) remove();
@@ -548,14 +584,15 @@ function fileResponse(file: string | undefined): Response {
 
 /**
  * Starts the dev server on `127.0.0.1` only, never on every interface: the page on `/`, the
- * manifest of the served folder on `/manifest.json`, and its files as static files.
+ * manifest of the served folder on `/manifest.json`, and its files as static files. The dev child
+ * and `moku-game visual` serve the page with it.
  *
  * @param run - The flags of the run.
- * @param page - The page bundle the child imported.
+ * @param page - The page bundle the process imported.
  * @returns The server.
  * @throws {Error} When the port is in use.
  */
-function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
+export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
   const base = run.packed ? path.join(run.root, "dist", "assets") : run.root;
 
   try {
@@ -581,6 +618,25 @@ function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
 }
 
 /**
+ * Watches the parent of a child run: a parent that died hands the child to another process, so
+ * its parent id changes. The dev child and the visual child stop their server then.
+ *
+ * @param onGone - Called once when the parent is gone.
+ * @returns Stops watching.
+ */
+export function watchParent(onGone: () => void): () => void {
+  const parent = process.ppid;
+  const timer = setInterval(() => {
+    if (process.ppid === parent) return;
+
+    clearInterval(timer);
+    onGone();
+  }, PARENT_CHECK_MS);
+
+  return () => clearInterval(timer);
+}
+
+/**
  * Waits until the dev child should stop: Ctrl+C, a stop signal, or a parent that died (its
  * parent id changed). Then stops the server.
  *
@@ -589,20 +645,15 @@ function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageServer {
  * @returns Resolves to the exit code `0` once the server stopped.
  */
 function untilStopped(server: PageServer, deps: CliDeps): Promise<number> {
-  const parent = process.ppid;
-
   return new Promise(resolve => {
     const removers: (() => void)[] = [];
-    // A parent that died hands the child to another process: the parent id changes.
-    const timer = setInterval(() => {
-      if (process.ppid !== parent) stop();
-    }, PARENT_CHECK_MS);
     // Every cause stops the same way: no more checks, no more listeners, then the server.
     const stop = (): void => {
-      clearInterval(timer);
+      unwatch();
       for (const remove of removers.splice(0)) remove();
       resolve(server.stop(true).then(() => 0));
     };
+    const unwatch = watchParent(stop);
 
     // Ctrl+C and SIGTERM stop the child; SIGHUP is the parent's to hand on.
     for (const signal of STOPPING) removers.push(deps.onSignal(signal, stop));

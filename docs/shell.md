@@ -8,7 +8,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `@moku-labs/game/app/page` | the browser | `startPage`, the page the generated `.moku/main.ts` calls |
 | `@moku-labs/game/app/system` | the browser, the native shell | `systemShellOf`, `fromSystem`, `storeSave`, `createSystemApp`, the types `SystemApp`, `SystemSlice`, `StoreSlice`, `SystemModules`. The one entry that names `@moku-labs/system`, in types only |
 | `@moku-labs/game/cli` | Node and Bun | `runCli`, `preparePage`, the types `PreparePageOptions`, `PreparedPage` |
-| bin `moku-game` | Bun | `dev`, `build`, `native`, `keys`, `pack`, `help` |
+| bin `moku-game` | Bun | `dev`, `build`, `native`, `keys`, `pack`, `visual`, `help` |
 
 `/app` imports no `node:` module, no `@moku-labs/system` and no `@moku-labs/native`. A web-only game never meets either package.
 
@@ -25,7 +25,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `generated/` | What `moku-game keys` writes: `assets.ts`, `strings.ts`, `strings.<locale>.ts` |
 | `manifest.json` | The dev manifest `moku-game keys` writes |
 | `tests/` | The tests. `tests/scenarios/<name>.ts` are the prepared saves of `?player=<name>` |
-| `.moku/` | What `moku-game` writes: the dev page, its `bunfig.toml`, the Tauri project. Git ignores it |
+| `.moku/` | What `moku-game` writes: the dev page, its `bunfig.toml`, the page of `visual` in `.moku/visual/`, the Tauri project. Git ignores it |
 | `dist/assets/`, `dist/web/`, `dist-native/` | The pack, the web build, the native apps |
 
 A game has no `web/`, no `native.ts`, no `platform-bridge.ts` and no `bunfig.toml`.
@@ -39,6 +39,7 @@ The scripts of the game's `package.json`:
     "build": "moku-game build",
     "keys": "moku-game keys",
     "pack": "moku-game pack",
+    "test:visual": "moku-game visual",
     "native:ios-sim": "moku-game native build ios --simulator"
   }
 }
@@ -309,6 +310,9 @@ moku-game <command> [options]
   native doctor | native clean          check or remove the native project
   keys [--check]                        write generated/assets.ts and manifest.json
   pack [--no-cache]                     pack the assets into dist/assets
+  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac
+    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]
+    [--tests tests/visual/index.ts] [--url <url>]
   help                                  print this text
 
 Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>.
@@ -318,13 +322,20 @@ Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>
 |---|---|---|---|
 | `--root <dir>` | every | `.` | The game folder, against the cwd |
 | `--preload <path>` | every | none | A file Bun preloads. Repeats |
-| `--serve-plugin <path>` | `dev`, `build`, `native` | none | A Bun plugin the page bundles with, after the hot plugin. Repeats |
+| `--serve-plugin <path>` | `dev`, `build`, `native`, `visual` | none | A Bun plugin the page bundles with, after the hot plugin. Repeats |
 | `--port <n>` | `dev` | `3000` | An integer 0-65535. `0` takes a free port |
 | `--packed` | `dev` | off | Serves `<game>/dist/assets` instead of the raw files |
 | `--out <dir>` | `build` | `<game>/dist/web` | The output folder, replaced by the run |
 | `--simulator` | `native build` | off | iOS: the simulator build |
 | `--check` | `keys` | off | Fails when an output is out of date |
 | `--no-cache` | `pack` | off | A cold pack |
+| `--tests <file>` | `visual` | `<game>/tests/visual/index.ts` | The tests module, against the cwd |
+| `--dir <path>` | `visual` | `<game>/tests/visual/baselines` | The baselines folder, against the cwd |
+| `--update` | `visual` | off | Rewrites the baselines of every test it runs |
+| `--only <name>` | `visual` | every test | Runs one test. Repeats |
+| `--no-pixels`, `--pixels` | `visual` | pixels on a Mac only | The headless leg alone, or the pixel leg off a Mac too. The last one wins |
+| `--webgl` | `visual` | off | The tests with `webgl: true`, on the page with `?renderer=webgl` |
+| `--url <url>` | `visual` | the page served for the run | A page that is served already, such as `moku-game dev` |
 
 The global flags go before or after the command word. The exit code is `0` on success, else `1` and a `[game] …` line, or the code of the scanner or the dev server.
 
@@ -353,6 +364,25 @@ The page carries no scenario, no agent, no `.dev` module and no `/control`. Ever
 ### native
 
 `moku-game native <verb> [<target>]` runs one verb of `@moku-labs/native` over the native config above. `build` and `dev` need a target, such as `ios`. `doctor` and `clean` take one or none. Native prints its own progress and failures.
+
+### visual
+
+`moku-game visual` runs the visual tests of a game with `runVisualTests` of `@moku-labs/game/visual`. The tests module, `tests/visual/index.ts`, default-exports the two arguments of the runner: `app`, a `VisualSetup` `{ app, page? }`, and `tests`, the list of `defineVisualTest` results. The command fills `page.url`; a `page` given here keeps its `width`, `deviceScaleFactor` and `browser`.
+
+```ts
+// tests/visual/index.ts
+import { fixtureApp } from "../helpers/visual/fixture";
+import { rewardPopup } from "./reward-popup.visual";
+
+export default { app: { app: fixtureApp }, tests: [rewardPopup] };
+```
+
+- The flags of the runner are read by `parseVisualArgv`: `--update`, `--only`, `--no-pixels`, `--pixels`, `--webgl`, `--dir`.
+- The baselines live in `tests/visual/baselines/<test>/<checkpoint>/`.
+- The pixel leg runs on a Mac only, unless `--pixels` or `--no-pixels` says otherwise. When it runs without `--url`, the command writes its own page into `.moku/visual/`: `index.html`, `dev.ts`, `main.ts` and `bunfig.toml`, which reach the game from two folders up. The page of `dev` and of the editor in `.moku/` stays as it is, so `visual` runs while either serves the game. Then, as `dev` does, the command runs Bun again under `.moku/visual/bunfig.toml`, in the same working directory, with the same arguments. So the page is bundled like the dev page: the hot plugin first, every `--serve-plugin`, every `--preload`, `__MOKU_GAME_DEV__` defined `true`. The hot plugin changes nothing in a run: no file changes while it plays. The child plays the tests and serves the page with the server of `dev`, on a free port of `127.0.0.1`. It stops the server at the end, or when the parent is gone. Ctrl+C and the stop signals go to the child, and the exit code is the child's. A run that serves no page plays in the bin's own process, or in a child with the preloads when `--preload` is given.
+- Without `manifest.json` a run that serves the page stops: `[game] visual: no manifest.json in "<game>".` with `Run "moku-game keys" first.`
+- The exit code is `0` when every checkpoint is the same or written, `1` when one differs or a test fails.
+- A missing module or another default export, a bare app factory too: `[game] visual: tests/visual/index.ts must export default { app, tests }.` with `app is a VisualSetup { app, page? }: export default { app: { app: () => game.screen().app }, tests }.`
 
 ### keys and pack
 

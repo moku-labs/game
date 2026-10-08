@@ -1,25 +1,53 @@
 /**
  * @file i18n plugin — the golden-test harness. Not a test file: the unit project only collects
  * `*.test.ts`. It compiles a message, emits the module the build would write, transpiles it with
- * Bun, and evaluates it. So the goldens assert the real generated code, casts and `argument`
- * helper included, not a second implementation of it.
+ * Bun, and evaluates it. So the goldens assert the real generated code, casts and its import of
+ * the engine's `messageArgument` and `messageDuration` included, not a second implementation.
  */
 import { emitLocale } from "../../compile/emit";
 import { type CompiledSource, compileMessage } from "../../compile/message";
-import { createIntlKit } from "../../intl";
+import { createIntlKit, messageArgument, messageDuration } from "../../intl";
 import type { CompiledMessage, CompiledMessages, IntlKit, Part } from "../../types";
 
+/** The value exports of `@moku-labs/game` a generated locale module may import. */
+const ENGINE: Readonly<Record<string, unknown>> = { messageArgument, messageDuration };
+
+/** The one value import a generated locale module may have: the helpers, from the engine root. */
+const ENGINE_IMPORT = /^import \{ ([^}]+) \} from "@moku-labs\/game";$/m;
+
 /**
- * Evaluates a generated locale module.
+ * Reads the value import of a transpiled module: each local name and the engine export it binds.
+ *
+ * @param javascript - The transpiled module.
+ * @returns The local names and their values, none for a module without the import.
+ * @throws {Error} When the module imports a name the engine does not export.
+ */
+function importsOf(javascript: string): { names: string[]; values: unknown[] } {
+  const specifiers = ENGINE_IMPORT.exec(javascript)?.[1]?.split(",") ?? [];
+  const pairs = specifiers.map(specifier => {
+    const [imported = "", local = imported] = specifier.trim().split(" as ");
+
+    if (!(imported in ENGINE)) throw new Error(`@moku-labs/game exports no "${imported}"`);
+
+    return [local, ENGINE[imported]] as const;
+  });
+
+  return { names: pairs.map(([local]) => local), values: pairs.map(([, value]) => value) };
+}
+
+/**
+ * Evaluates a generated locale module. Its import of the engine is bound to the real functions,
+ * so a helper the module calls without importing it fails here as it would in a game.
  *
  * @param source - The module text `emitLocale` wrote.
  * @returns The compiled messages of the module.
  */
 export function evaluateModule(source: string): CompiledMessages {
   const javascript = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
-  const body = javascript.replace("export default", "return");
+  const { names, values } = importsOf(javascript);
+  const body = javascript.replace(ENGINE_IMPORT, "").replace("export default", "return");
 
-  return new Function(body)() as CompiledMessages;
+  return new Function(...names, body)(...values) as CompiledMessages;
 }
 
 /**

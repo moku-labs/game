@@ -1083,6 +1083,11 @@ describe("@moku-labs/game/lint rules in process", () => {
       ["tests/e2e/flows/board.ts", misnamed("tests/e2e/", ".e2e.ts", "board.ts", "board.e2e.ts")],
       ["tests/visual/home.visual.ts", ""],
       ["tests/visual/run.ts", misnamed("tests/visual/", ".visual.ts", "run.ts", "run.visual.ts")],
+      ["tests/visual/foo.ts", misnamed("tests/visual/", ".visual.ts", "foo.ts", "foo.visual.ts")],
+      // The index of a kind folder is its door, such as the module `moku-game visual` reads.
+      ["tests/visual/index.ts", ""],
+      ["tests/e2e/index.tsx", ""],
+      ["tests/visual/flows/index.ts", ""],
       ["tests/editor/flow.editor.ts", ""],
       [
         "tests/editor/e2e/game.spec.ts",
