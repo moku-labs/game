@@ -48,8 +48,11 @@ A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effect
 | Logic: `rules/`, `nodes/`, `flows/`, `state.ts`, `tables.ts`, `kit.ts`, a feature `index.ts`, `world/components/`, `world/systems/` | Reload and restore. These files never get the footer. A `world/layout/` module gets it: plain functions swap and repaint, but one that exports an object with its own `name` or `id` is refused and reloads |
 | Scenes, systems, ECS components, filters, features, flows, nodes, plugins | Reload and restore. They are registered by value at start |
 | A new projection or a new animation | Reload and restore. A scene mounts a projection, a feature registers an animation |
+| A string value in `strings/<locale>.json` | Swap. The keys watch writes `generated/strings.<locale>.ts`, and `i18n.replace` takes it |
+| A new string key | Swap, the same way: the message is new in `generated/strings.<locale>.ts`. `generated/strings.ts` gets the key as a type only, and a type reloads nothing |
+| An asset file: new, removed, or saved with new bytes | Reload and restore. The keys watch writes `.moku/assets-stamp.ts`, which `main.ts` imports. The page fetches the manifest again, and the dev server answers files with `no-store`, so the new bytes show |
 
-Strings come from `features/*/strings/<locale>.json` and the `strings/` of every layer of `--layer`. After a JSON edit, run `bun run assets:keys`. It writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin has no watch mode.
+Strings come from `features/*/strings/<locale>.json` and the `strings/` of every layer. The last three rows need the keys watch: `moku-game dev` on the raw files runs it, and the editor starts it with `watchKeys`. See [dev keeps generated/ fresh](./shell.md#dev-keeps-generated-fresh). A game with a server of its own runs `bun run assets:keys` after a JSON edit: it writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin `moku-game-assets` has no watch mode.
 
 ## A refusal
 

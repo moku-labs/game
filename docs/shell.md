@@ -7,7 +7,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `@moku-labs/game/app` | anywhere | `defineGameApp`, `startMoment`, the types `GameConfig`, `GameDefinition`, `GameApp`, `GameHandle`, `GamePluginConfigs`, `HeadlessSeams`, `ScreenSeams`, `MemoryProvider`, `Scenario`, `PageAgent`, `SaveKind`, `SystemName` |
 | `@moku-labs/game/app/page` | the browser | `startPage`, the page the generated `.moku/main.ts` calls |
 | `@moku-labs/game/app/system` | the browser, the native shell | `systemShellOf`, `fromSystem`, `storeSave`, `createSystemApp`, the types `SystemApp`, `SystemSlice`, `StoreSlice`, `SystemModules`. The one entry that names `@moku-labs/system`, in types only |
-| `@moku-labs/game/cli` | Node and Bun | `runCli`, `preparePage`, the types `PreparePageOptions`, `PreparedPage` |
+| `@moku-labs/game/cli` | Node and Bun | `runCli`, `preparePage`, `watchKeys`, the types `PreparePageOptions`, `PreparedPage`, `WatchKeysOptions`, `KeysWatcher` |
 | bin `moku-game` | Bun | `dev`, `build`, `native`, `keys`, `pack`, `visual`, `help` |
 
 `/app` imports no `node:` module, no `@moku-labs/system` and no `@moku-labs/native`. A web-only game never meets either package.
@@ -22,7 +22,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `shared/` | The shared layer |
 | `features/<f>/` | One feature: `flow/`, `rules/`, `views/`, `styles/`, `motion/`, `world/`, `assets/`, `strings/` |
 | `plugins/` | The game's own plugins |
-| `generated/` | What `moku-game keys` writes: `assets.ts`, `strings.ts`, `strings.<locale>.ts` and `manifest.json`, the dev manifest |
+| `generated/` | What `moku-game keys` writes, and `moku-game dev` writes again on save: `assets.ts`, `strings.ts`, `strings.<locale>.ts` and `manifest.json`, the dev manifest |
 | `tests/` | The tests. `tests/scenarios/<name>.ts` are the prepared saves of `?player=<name>` |
 | `.moku/` | What `moku-game` writes: the dev page, its `bunfig.toml`, the page of `visual` in `.moku/visual/`, the Tauri project. Git ignores it |
 | `dist/assets/`, `dist/web/`, `dist-native/` | The pack, the web build, the native apps |
@@ -189,6 +189,7 @@ A value TypeScript would refuse, in a file that skips `satisfies`, stops `moku-g
 ```ts
 // Written by moku-game dev. Do not edit.
 import "./dev.ts";
+import "./assets-stamp.ts";
 import { startPage } from "@moku-labs/game/app/page";
 import game from "../index.ts";
 import config from "../config.ts";
@@ -323,7 +324,7 @@ Every command: --root <dir> (default .), --preload <path>, --serve-plugin <path>
 | `--preload <path>` | every | none | A file Bun preloads. Repeats |
 | `--serve-plugin <path>` | `dev`, `build`, `native`, `visual` | none | A Bun plugin the page bundles with, after the hot plugin. Repeats |
 | `--port <n>` | `dev` | `3000` | An integer 0-65535. `0` takes a free port |
-| `--packed` | `dev` | off | Serves `<game>/dist/assets` instead of the raw files |
+| `--packed` | `dev` | off | Serves `<game>/dist/assets` instead of the raw files, and does not watch the keys |
 | `--out <dir>` | `build` | `<game>/dist/web` | The output folder, replaced by the run |
 | `--simulator` | `native build` | off | iOS: the simulator build |
 | `--check` | `keys` | off | Fails when an output is out of date |
@@ -340,7 +341,7 @@ The global flags go before or after the command word. The exit code is `0` on su
 
 ### dev
 
-`moku-game dev` writes the dev page into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts` and `bunfig.toml`. A file is written only when its text changed. It then runs Bun again under that bunfig, in the game folder, and serves the page. It prints two lines; the second is the bound URL, plain, on its own line:
+`moku-game dev` writes the dev page into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts`, `bunfig.toml` and `assets-stamp.ts`. A file is written only when its text changed. It then runs Bun again under that bunfig, in the game folder, and serves the page. On the raw files it first [scans the keys](#dev-keeps-generated-fresh) and prints the lines of that scan. Then it prints two lines; the second is the bound URL, plain, on its own line:
 
 ```
 › mini-game: dev server, raw assets. Ctrl+C stops it.
@@ -348,11 +349,21 @@ http://127.0.0.1:3000/
 ```
 
 - The server listens on `127.0.0.1` only, never on the network.
-- `/` is the page, `/manifest.json` the dev manifest `generated/manifest.json` of the game, or `manifest.json` of `dist/assets` with `--packed`. Its paths are relative to the game folder, `features/...`. Any other path is a file of the game, or of `dist/assets` with `--packed`. A segment that starts with a dot, such as `.moku` or `..`, and `node_modules` answer 404.
+- `/` is the page, `/manifest.json` the dev manifest `generated/manifest.json` of the game, or `manifest.json` of `dist/assets` with `--packed`. Its paths are relative to the game folder, `features/...`. Any other path is a file of the game, or of `dist/assets` with `--packed`. A segment that starts with a dot, such as `.moku` or `..`, and `node_modules` answer 404. Every file answers with `Cache-Control: no-store`.
 - The bunfig lists the engine's hot plugin first and defines `__MOKU_GAME_DEV__` as `true`. `dev.ts` sets the global too. See [Hot swap](./hot-swap.md).
 - `main.ts` lists `tests/scenarios/*.ts`, sorted, by file stem. Test files, `.d.ts` and `index.ts` are skipped. A new or removed scenario file rewrites `main.ts`, and the page reloads. A `tests/scenarios/` folder created after the start needs a restart.
 - Ctrl+C stops the server with exit code 0. A taken port: `[game] dev: port 3000 is in use.` with `Pass --port 0 for a free port.`
-- Without `generated/manifest.json` it warns `[game] dev: no generated/manifest.json in "<game>".` with `Run "moku-game keys" first.` and serves on.
+
+#### dev keeps `generated/` fresh
+
+`dev` on the raw files watches the game folder. A game needs no `moku-game keys` by hand.
+
+- **At start** it runs the scan of `keys` before the page is written: same flags, same outputs, same layers. So `generated/manifest.json` is there for the first request.
+- **On save** of an asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`) or of a `strings/<locale>.json` it scans again, 100 ms after the last file event. It prints one line: `› keys: features/home/strings/en.json`, or `› keys: features/ui/assets/dot.png and 2 more`. A save of any other file costs a walk of the folder, not a scan. An output that did not change is not rewritten.
+- **The page** follows the output, see [Hot swap](./hot-swap.md#what-swaps-and-what-reloads). A changed or new string swaps: `generated/strings.<locale>.ts` is a view module. An asset file that is new, gone or saved with new bytes reloads the page: the watch rewrites `.moku/assets-stamp.ts`, which `main.ts` imports.
+- **A failed scan** is one warning, `[game] keys: <the scanner's message>`, the first scan too. The server runs on, and the next save scans again.
+- **A changed layer in `config.ts` needs a restart.** The config is read once, at start.
+- `--packed` serves the pack and watches nothing. `visual` does not watch either: it still stops without `generated/manifest.json`.
 
 ### build
 
@@ -387,9 +398,11 @@ export default { app: { app: fixtureApp }, tests: [rewardPopup] };
 
 `keys` and `pack` run the asset scanner of `@moku-labs/game/assets` with the game's paths and one `--layer` per `assets.layers` entry. `keys` writes `generated/assets.ts`, the compiled strings and the dev manifest `generated/manifest.json`. `pack` writes `dist/assets`. See [the asset keys](./quick-start.md#a-screen-the-body-font-and-the-asset-keys).
 
+`dev` runs the scan of `keys` itself, at start and on save. `keys` is for a run without the dev server, and `keys --check` for CI.
+
 ## The editor: preparePage
 
-The editor takes the same page from the engine. `preparePage(root, options?)` of `@moku-labs/game/cli` writes the dev page of `moku-game dev` and answers its paths. It starts no server and no watcher, and throws the same `[game]` errors.
+The editor takes the same page from the engine. `preparePage(root, options?)` of `@moku-labs/game/cli` writes the dev page of `moku-game dev` and answers its paths. It also writes the first `assets-stamp.ts`, the empty one, when the game has none. It starts no server and no watcher, and throws the same `[game]` errors.
 
 ```ts
 // The editor bin, started with --root games/timber:
@@ -403,6 +416,26 @@ await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] });
 | `agents` | Agent modules the page starts after the app, in order. Each default-exports a `PageAgent`. With agents, `main.ts` also imports the game's `**/*.dev.ts` modules and hands them to the agents |
 | `preload` | Files Bun preloads in the serving process |
 | `servePlugins` | Bun plugins the page bundles with, after the hot plugin |
+
+### watchKeys
+
+The editor never runs `moku-game dev`, so it starts the keys watch itself. `watchKeys(root, options?)` is the watch of [dev](#dev-keeps-generated-fresh): one scan before it resolves, then one per save of an asset or a strings file. A folder that is not a game rejects it with the `[game]` error `preparePage` throws for it.
+
+```ts
+// The editor bin, next to preparePage, started with --root games/timber:
+const { preparePage, watchKeys } = await import(Bun.resolveSync("@moku-labs/game/cli", root));
+await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] });
+const keys = await watchKeys("games/timber", { onError: message => log.warn(message) });
+// generated/ is fresh; a save of features/home/strings/en.json rewrites generated/strings.en.ts
+keys.close(); // when the editor closes the game
+```
+
+| Part | What |
+|---|---|
+| `options.onError` | Called with the scanner's message when a scan fails, the first one too. The watch goes on. Default: a warning on the console, `[game] keys: <message>` |
+| `keys.close()` | Stops the watch. A running scan finishes; no later one starts. A second call does nothing |
+
+The layers of `config.ts` are read once. A changed layer needs a new `watchKeys`.
 
 ## A game against the engine working tree
 

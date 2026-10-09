@@ -158,6 +158,7 @@ function fakeDeps(
       return () => seen.removed.push(signal);
     },
     watch: unused,
+    watchKeys: unused,
     assets: unused,
     native: unused,
     resolve: () => "/engine/dist/hot.mjs",
