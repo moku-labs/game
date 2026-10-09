@@ -7,8 +7,46 @@
 import type { PixiModule } from "../types";
 import { createFakeElement, type FakeElement } from "./fake-dom";
 
-/** The source behind a fake texture. `resolution` is 1 when left out, as Pixi's default. */
-export type FakeSource = { width: number; height: number; destroyed: boolean; resolution?: number };
+/**
+ * The source behind a fake texture. `resolution` is 1 when left out, as Pixi's default. A test
+ * writes the first three; the texture adds the rest, so the renderer can let go of the bind
+ * groups Pixi keeps: `released` lists the events whose listeners were removed, the ones of the
+ * style as `"style:<event>"`.
+ */
+export type FakeSource = {
+  width: number;
+  height: number;
+  destroyed: boolean;
+  resolution?: number;
+  released?: string[];
+  style?: { removeAllListeners(event: string): void };
+  removeAllListeners?(event: string): void;
+};
+
+/**
+ * Gives a source the two `removeAllListeners` of a Pixi source and of its style, once: a slice
+ * shares the source of its page.
+ *
+ * @param source - The source a test wrote, or one another texture already took.
+ * @returns The same source.
+ */
+function listening(source: FakeSource): FakeSource {
+  if (source.released !== undefined) return source;
+
+  const released: string[] = [];
+
+  source.released = released;
+  source.style = {
+    removeAllListeners: (event: string): void => {
+      released.push(`style:${event}`);
+    }
+  };
+  source.removeAllListeners = (event: string): void => {
+    released.push(event);
+  };
+
+  return source;
+}
 
 /** A fake Pixi rectangle: what a texture frame is made of. */
 export class FakeRectangle {
@@ -43,6 +81,8 @@ export class FakeTexture {
   public destroyCalls = 0;
   /** What the last `destroy` was asked to do with the source. */
   public destroyedSource: boolean | undefined;
+  /** What the source had let go of when `destroy` ran. */
+  public releasedBeforeDestroy: string[] | undefined;
   private readonly framed: boolean;
 
   public constructor(options: {
@@ -50,7 +90,7 @@ export class FakeTexture {
     frame?: FakeRectangle;
     defaultBorders?: { left: number; top: number; right: number; bottom: number };
   }) {
-    this.source = options.source ?? { width: 64, height: 64, destroyed: false };
+    this.source = listening(options.source ?? { width: 64, height: 64, destroyed: false });
     this.defaultBorders = options.defaultBorders;
     this.framed = options.frame !== undefined;
     this.frame = options.frame ?? new FakeRectangle(0, 0, this.source.width, this.source.height);
@@ -90,6 +130,7 @@ export class FakeTexture {
     this.destroyCalls += 1;
     this.destroyed = true;
     this.destroyedSource = destroySource === true;
+    this.releasedBeforeDestroy = [...(this.source.released ?? [])];
     if (destroySource === true) this.source.destroyed = true;
   }
 }

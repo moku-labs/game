@@ -3,8 +3,9 @@
  * every asset file of the game into `.moku/assets-stamp.ts`; when that module changes, `ui`
  * forwards its new exports on the global `ui:hot-swap`. This file replaces the changed files of
  * the loaded bundles: a new texture, font or sound per key, the old textures destroyed after the
- * new ones are stored, then `assets:replaced`. A changed set of files and a file that fails reload
- * the page instead: a hook cannot refuse by throwing, the core bus catches what a hook throws.
+ * new ones are stored, then `assets:replaced`. A file that fails is logged and its bundle keeps
+ * what it had. A changed set of files reloads the page instead: a hook cannot refuse by throwing,
+ * the core bus catches what a hook throws.
  */
 import { enforceBudget } from "./budget";
 import { kindOf, nineOf, resolveBaseUrl, sumMb, textureMb } from "./manifest";
@@ -35,7 +36,7 @@ const ASSETS = "assets";
 /** That folder inside a path. */
 const ASSETS_FOLDER = `/${ASSETS}/`;
 
-/** What a refused or a failed swap calls: the page reload, or the spy of a test. */
+/** What a refused or a broken swap calls: the page reload, or the spy of a test. */
 type Reload = () => void;
 
 /**
@@ -72,8 +73,9 @@ type Failure = { path: string; reason: string };
 type Swap = { ctx: AssetsCtx; io: AssetsIo; reload: Reload };
 
 /**
- * Reloads the page. This is how a swap refuses and how it fails: the page boots again with the
- * new manifest and the new files. Headless and in a test there is no page, so nothing happens.
+ * Reloads the page. This is how a swap refuses, and what it does when a replace breaks after its
+ * files arrived: the page boots again with the new manifest and the new files. Headless and in a
+ * test there is no page, so nothing happens.
  */
 function reloadPage(): void {
   globalThis.location?.reload();
@@ -341,7 +343,7 @@ function loadingOf(swap: Swap, bundle: string, sizes: Sizes): Loading {
     io: measuringIo(swap.io, sizes),
     bundle,
     base: resolveBaseUrl(config.baseUrl, config.manifest),
-    // Nothing cancels a swap: a file that fails reloads the page.
+    // Nothing cancels a swap: its files all settle, and a failed one is only logged.
     signal: new AbortController().signal,
     assets: emptyAssets()
   };
@@ -525,56 +527,61 @@ function publish(ctx: AssetsCtx, batch: Batch, record: BundleRecord): void {
 
 /**
  * Replaces the changed files of one bundle. Every file is loaded first and nothing is stored
- * before all of them are there: a failure, or a bundle that was unloaded on the way, only gives
- * the new textures back, and the old ones were never touched.
+ * before all of them are there. A file that fails is logged and the bundle keeps its old
+ * textures, fonts and bytes: the new textures are given back, nothing is emitted and the page
+ * stays. The stamp of the broken file is applied all the same, so it is read again only when it
+ * is saved again. A bundle that was unloaded on the way gives its new textures back too.
  *
  * @param swap - The running swap.
  * @param batch - The bundle and its changed files.
- * @returns The files that failed; none when the bundle was replaced or had nothing to replace.
+ * @throws {Error} What the io, the renderer or the budget throws after the files arrived.
  */
-async function replaceBundle(swap: Swap, batch: Batch): Promise<Failure[]> {
+async function replaceBundle(swap: Swap, batch: Batch): Promise<void> {
   const { ctx, io } = swap;
   const record = await settledRecord(ctx.state, batch.bundle);
 
-  if (record === undefined) return [];
+  if (record === undefined) return;
 
   const sizes: Sizes = new Map();
   const { fresh, failures } = await loadAll(loadingOf(swap, batch.bundle, sizes), batch.owners);
 
   if (failures.length > 0 || record.status !== "loaded") {
+    for (const failure of failures) ctx.log.error("assets:replace-failed", failure);
+
     for (const texture of sizes.keys()) io.destroyTexture(texture);
 
-    return failures;
+    return;
   }
 
   for (const loaded of fresh) store(io, record, loaded, sizes);
 
   publish(ctx, batch, record);
-
-  return [];
 }
 
 /**
- * Runs one swap, bundle after bundle. The first bundle with a failure logs it and reloads the
- * page, and the swap stops there. It never rejects, so the chain of swaps in the state cannot
- * break: what a replace throws outside its loads fails every file of its bundle.
+ * Runs one swap, bundle after bundle: a bundle with a file that failed does not stop the next
+ * one. It never rejects, so the chain of swaps in the state cannot break. A throw after the files
+ * arrived (from a destroy, the views or the budget) leaves a bundle whose stored state is not
+ * known: every file of it is logged as failed, the page reloads and the swap stops there.
  *
  * @param swap - The running swap.
  * @param batches - The changed files, by bundle.
  */
 async function replaceAll(swap: Swap, batches: readonly Batch[]): Promise<void> {
   for (const batch of batches) {
-    const failures = await replaceBundle(swap, batch).catch((error: unknown) =>
-      batch.owners.map(owner => ({ path: owner.path, reason: reasonOf(error) }))
-    );
+    try {
+      await replaceBundle(swap, batch);
+    } catch (error) {
+      const reason = reasonOf(error);
 
-    if (failures.length === 0) continue;
+      for (const { path } of batch.owners) {
+        swap.ctx.log.error("assets:replace-failed", { path, reason });
+      }
 
-    for (const failure of failures) swap.ctx.log.error("assets:replace-failed", failure);
+      swap.reload();
 
-    swap.reload();
-
-    return;
+      return;
+    }
   }
 }
 
@@ -585,7 +592,7 @@ async function replaceAll(swap: Swap, batches: readonly Batch[]): Promise<void> 
  * row never overlap.
  *
  * @param ctx - Domain context of the plugin.
- * @param reload - What a refused or a failed swap calls. The page reload by default; a test
+ * @param reload - What a refused or a broken swap calls. The page reload by default; a test
  *   passes a spy.
  * @returns The handler of `ui:hot-swap`.
  */

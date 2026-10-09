@@ -365,7 +365,9 @@ export function clearFrames(state: SyncState): void {
 
 /**
  * Frees a texture, its source and the crops cut from it. A slice keeps the source: it belongs to
- * the page, which frees it. A texture destroyed twice is a no-op.
+ * the page, which frees it. A source that goes lets go of its `change` listeners first, the ones
+ * of its style too, so no bind group Pixi still keeps is told. A texture destroyed twice is a
+ * no-op.
  *
  * @param state - The sync branch of the plugin state.
  * @param texture - The texture to free.
@@ -375,5 +377,14 @@ export function destroyTexture(state: SyncState, texture: PixiTexture): void {
 
   if (texture.destroyed) return;
 
-  texture.destroy(!state.slices.has(texture));
+  if (state.slices.has(texture)) {
+    texture.destroy(false);
+
+    return;
+  }
+
+  // Pixi 8.21 caches batch bind groups forever, and each one warns when a source it holds goes.
+  texture.source.style.removeAllListeners("change");
+  texture.source.removeAllListeners("change");
+  texture.destroy(true);
 }

@@ -242,7 +242,7 @@ the guard is not written that way. The keys watch of `moku-game dev` writes `.mo
 an `AssetStamps`: `files` maps every asset file of the game to its `size:mtimeMs`, `changed` lists
 the paths the last batch changed. `ui` forwards the module on the global `ui:hot-swap`, and
 `assets` hooks it with no `depends` on `ui`, as `effects` does. New bytes are swapped in place;
-a changed set of files reloads the page.
+a changed set of files reloads the page; a file that cannot be read keeps the old asset.
 
 ```ts
 // .moku/assets-stamp.ts after a save of fx-spark.webp
@@ -268,7 +268,8 @@ export default {
 | The manifest | `width`, `height` and `mb` of a texture and of a font page come from the decoded image, the font `mb` from its pages, the bundle `mb` from its files and atlas pages. Then `enforceBudget` runs. |
 | After | `renderer.sync.textures.invalidate(keys)`, `time.wake()`, then `assets:replaced`: one event per bundle per swap. |
 | Unloaded on the way | A bundle that left while its files were fetched gets nothing: the new textures are destroyed and no event goes out. |
-| A failure | Every changed file of a bundle is loaded before one is stored. When a fetch or a decode fails, `ctx.log.error("assets:replace-failed", { path, reason })` is written, the new textures are given back and the page reloads. No old texture was touched. |
+| A failure | Every changed file of a bundle is loaded before one is stored. When a fetch, a decode or a parse fails, `ctx.log.error("assets:replace-failed", { path, reason })` is written and the bundle keeps its old textures, fonts and bytes: the new textures of that bundle are destroyed, nothing is stored, no `assets:replaced` goes out for it, and the page does not reload. `state.stamps` records the new stamp all the same, so the broken file is not read again until it is saved again; its next good save swaps. The other bundles of the same swap are still replaced. |
+| A replace that breaks | A throw after the files arrived (from a destroy, the views or the budget) leaves a state nobody knows: every file of that bundle is logged as `assets:replace-failed`, the page reloads and the swap stops. |
 | Order | One swap at a time (`state.swapping`): the swap of a second save starts when the first one settled. |
 
 The reload is one private function over `globalThis.location?.reload()`. `createHandlers(ctx,

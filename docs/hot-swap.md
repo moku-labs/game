@@ -61,7 +61,7 @@ A save with new bytes travels in three steps. The keys watch writes `.moku/asset
 
 - **Dev on the raw files only.** `--packed` watches nothing, and a built game has no hot plugin.
 - **A bundle that is not loaded gets nothing.** Its next load reads the new bytes.
-- **A failed replace reloads the page.** `assets` logs `assets:replace-failed` and keeps the old textures. A broken `.fnt` reloads too: `text` logs `text:font-replace-failed`.
+- **A failed replace keeps the old asset.** A file that cannot be fetched or decoded is logged as `assets:replace-failed`. Its bundle keeps the old textures, fonts and bytes, and the page does not reload. The next good save of the file swaps. A `.fnt` that `text` cannot read still reloads: `text` logs `text:font-replace-failed`.
 - **A `.fnt` that starts naming another page file** is seen only when that page file is new, which reloads.
 - **A sound that is playing plays on** with the old bytes. The next play takes the new ones.
 - **A running particle effect of a replaced texture starts again**, so a burst plays again.

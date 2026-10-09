@@ -202,6 +202,18 @@ describe("sync textures", () => {
     expect(texture.destroyCalls).toBe(1);
     expect(texture.source.destroyed).toBe(true);
   });
+
+  it("lets go of the change listeners of a source it frees, the style first", async () => {
+    const mock = await started();
+    const texture = new FakeTexture({});
+
+    mock.api.sync.textures.destroy(texture as never);
+    mock.api.sync.textures.destroy(texture as never);
+
+    // Pixi keeps bind groups that listen there for good: gone before the source, and only once.
+    expect(texture.source.released).toEqual(["style:change", "change"]);
+    expect(texture.releasedBeforeDestroy).toEqual(["style:change", "change"]);
+  });
 });
 
 /**
@@ -362,6 +374,8 @@ describe("sync textures: a slice out of an atlas page", () => {
 
     expect(slice.destroyCalls).toBe(1);
     expect(slice.source.destroyed).toBe(false);
+    // The source stays with the page, so its listeners stay too.
+    expect(slice.source.released).toEqual([]);
   });
 
   it("frees the source with the page, and a slice after it never asks for the source again", async () => {

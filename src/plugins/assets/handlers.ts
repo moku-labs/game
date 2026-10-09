@@ -19,7 +19,7 @@ import type { AssetsCtx, FlowRest, HotSwap, KernelSlice } from "./types";
  * kernel registers hooks before it builds the plugin APIs, so nothing is resolvable yet.
  *
  * @param ctx - Kernel context of the assets plugin.
- * @param reload - What a refused or a failed hot swap calls. The kernel passes nothing, which
+ * @param reload - What a refused or a broken hot swap calls. The kernel passes nothing, which
  *   means the page reload; a test passes a spy.
  * @returns The two hooks of the plugin.
  */

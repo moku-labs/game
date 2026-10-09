@@ -589,6 +589,157 @@ describe("the dev hot swap: which paths", () => {
   });
 });
 
+describe("the dev hot swap: a file that fails keeps the old asset", () => {
+  it("logs a failed fetch, does not reload and still answers the old texture", async () => {
+    const { mock, reload, swap } = await startDev(["board"]);
+    const old = mock.api.texture("board.cell");
+    const stamps = saved(CELL);
+
+    mock.io.status.set(url(CELL), 404);
+    await swap(stamps);
+
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("assets:replace-failed", {
+      path: CELL,
+      reason: `[game] assets: bundle "board" failed at "${CELL}" (404).`
+    });
+    expect(reload).not.toHaveBeenCalled();
+    // The old texture is alive and it is still what the key answers.
+    expect(mock.api.texture("board.cell")).toBe(old);
+    expect(mock.io.destroyed).toEqual([]);
+    expect(mock.api.isLoaded("board")).toBe(true);
+    expect(mock.emitted).toEqual([]);
+    expect(mock.renderer.invalidated).toEqual([]);
+    // The new stamp is kept, so the broken file is not read again until it is saved again.
+    expect(mock.ctx.state.stamps).toBe(stamps.files);
+  });
+
+  it("logs a failed decode, does not reload and still answers the old texture", async () => {
+    const { mock, reload, swap } = await startDev(["board"]);
+    const old = mock.api.texture("board.cell");
+
+    vi.spyOn(mock.io, "decode").mockRejectedValueOnce("the image could not be decoded");
+    await swap(saved(CELL));
+
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("assets:replace-failed", {
+      path: CELL,
+      reason: "the image could not be decoded"
+    });
+    expect(reload).not.toHaveBeenCalled();
+    expect(mock.api.texture("board.cell")).toBe(old);
+    expect(mock.io.destroyed).toEqual([]);
+    expect(mock.emitted).toEqual([]);
+  });
+
+  it("keeps the old font and its pages when one page fails", async () => {
+    const { mock, reload, swap } = await startDev(["ui"]);
+    const old = mock.ctx.state.records.get("ui")?.fonts.get("ui.body");
+
+    mock.io.status.set(url(PAGE_1), 404);
+    await swap(saved(PAGE_1));
+
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("assets:replace-failed", {
+      path: FNT,
+      reason: `[game] assets: bundle "ui" failed at "${PAGE_1}" (404).`
+    });
+    expect(reload).not.toHaveBeenCalled();
+    expect(mock.ctx.state.records.get("ui")?.fonts.get("ui.body")).toBe(old);
+    expect(mock.api.font("ui.body")?.texture).toBe(old?.texture);
+    // The first page arrived before the second failed: it is given back, the old ones stay.
+    expect(mock.io.created).toHaveLength(1);
+    expect(mock.io.destroyed).toEqual(mock.io.created);
+    expect(mock.emitted).toEqual([]);
+  });
+
+  it("keeps the old bytes of a sound that fails", async () => {
+    const { mock, reload, swap } = await startDev(["ui"]);
+    const old = mock.api.audio("ui.click");
+
+    mock.io.status.set(url(CLICK), 404);
+    await swap(saved(CLICK));
+
+    expect(mock.log.error).toHaveBeenCalledOnce();
+    expect(reload).not.toHaveBeenCalled();
+    expect(mock.api.audio("ui.click")).toBe(old);
+    expect(mock.emitted).toEqual([]);
+  });
+
+  it("frees what the bundle already made and stores none of it, the good files too", async () => {
+    const { mock, reload, swap } = await startDev(["ui"]);
+    const before = structuredClone(mock.ctx.state.manifest);
+    const icon = mock.api.texture("ui.icon");
+
+    mock.io.status.set(url(PANEL), 404);
+    mock.io.sizes.set(url(ICON), { width: 256, height: 256 });
+    await swap(saved(ICON, PANEL));
+
+    // The icon was fetched and uploaded although the panel failed: it is given back.
+    expect(mock.io.created).toHaveLength(1);
+    expect(mock.io.destroyed).toEqual(mock.io.created);
+    expect(mock.api.texture("ui.icon")).toBe(icon);
+    expect(mock.ctx.state.manifest).toEqual(before);
+    expect(mock.api.usage().textureMb).toBe(0.459);
+    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("assets:replace-failed", {
+      path: PANEL,
+      reason: `[game] assets: bundle "ui" failed at "${PANEL}" (404).`
+    });
+    expect(reload).not.toHaveBeenCalled();
+    expect(mock.emitted).toEqual([]);
+    expect(mock.renderer.invalidated).toEqual([]);
+  });
+
+  it("replaces the other bundle of the same swap", async () => {
+    const { mock, reload, swap } = await startDev();
+    const cell = mock.api.texture("board.cell");
+    const icon = mock.api.texture("ui.icon");
+
+    mock.io.status.set(url(CELL), 404);
+    await swap(saved(CELL, ICON));
+
+    expect(mock.io.fetched).toEqual([url(CELL), url(ICON)]);
+    expect(mock.api.texture("board.cell")).toBe(cell);
+    expect(mock.api.texture("ui.icon")).not.toBe(icon);
+    expect(replaced(mock)).toEqual([{ bundle: "ui", keys: ["ui.icon"] }]);
+    expect(mock.log.error).toHaveBeenCalledOnce();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("does not read the broken file again until it is saved again", async () => {
+    const { mock, reload, swap } = await startDev();
+
+    mock.io.status.set(url(CELL), 404);
+    await swap(saved(CELL));
+    mock.io.status.delete(url(CELL));
+    forget(mock);
+
+    // Another file is saved: the stamp of the broken one did not move, so it is left alone.
+    await swap({ files: filesOf({ [CELL]: "200:2", [ICON]: "300:3" }), changed: [ICON] });
+
+    expect(mock.io.fetched).toEqual([url(ICON)]);
+    expect(replaced(mock)).toEqual([{ bundle: "ui", keys: ["ui.icon"] }]);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("swaps the file on its next good save", async () => {
+    const { mock, reload, swap } = await startDev(["board"]);
+    const old = mock.api.texture("board.cell");
+
+    mock.io.status.set(url(CELL), 404);
+    await swap(saved(CELL));
+    mock.io.status.delete(url(CELL));
+    await swap({ files: filesOf({ [CELL]: "300:3" }), changed: [CELL] });
+
+    const fresh = mock.api.texture("board.cell");
+
+    expect(fresh).not.toBe(old);
+    expect(mock.io.created).toHaveLength(1);
+    expect(mock.io.created[0]).toBe(fresh);
+    expect(mock.io.destroyed).toEqual([old]);
+    expect(replaced(mock)).toEqual([{ bundle: "board", keys: ["board.cell"] }]);
+    expect(mock.log.error).toHaveBeenCalledOnce();
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
+
 describe("the dev hot swap: what reloads the page instead", () => {
   it("refuses when a file of the manifest left the game", async () => {
     const { mock, reload, swap } = await startDev();
@@ -637,62 +788,6 @@ describe("the dev hot swap: what reloads the page instead", () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it("logs a failed fetch, reloads and leaves the old texture alive", async () => {
-    const { mock, reload, swap } = await startDev(["board"]);
-    const old = mock.api.texture("board.cell");
-
-    mock.io.status.set(url(CELL), 404);
-    await swap(saved(CELL));
-
-    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("assets:replace-failed", {
-      path: CELL,
-      reason: `[game] assets: bundle "board" failed at "${CELL}" (404).`
-    });
-    expect(reload).toHaveBeenCalledOnce();
-    expect(mock.api.texture("board.cell")).toBe(old);
-    expect(mock.io.destroyed).toEqual([]);
-    expect(mock.emitted).toEqual([]);
-    expect(mock.renderer.invalidated).toEqual([]);
-  });
-
-  it("logs a failed decode, reloads and leaves the old texture alive", async () => {
-    const { mock, reload, swap } = await startDev(["board"]);
-    const old = mock.api.texture("board.cell");
-
-    vi.spyOn(mock.io, "decode").mockRejectedValueOnce("the image could not be decoded");
-    await swap(saved(CELL));
-
-    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("assets:replace-failed", {
-      path: CELL,
-      reason: "the image could not be decoded"
-    });
-    expect(reload).toHaveBeenCalledOnce();
-    expect(mock.api.texture("board.cell")).toBe(old);
-    expect(mock.io.destroyed).toEqual([]);
-  });
-
-  it("frees what a failed swap of a bundle already made, and stores none of it", async () => {
-    const { mock, reload, swap } = await startDev(["ui"]);
-    const before = structuredClone(mock.ctx.state.manifest);
-    const icon = mock.api.texture("ui.icon");
-
-    mock.io.status.set(url(PANEL), 404);
-    mock.io.sizes.set(url(ICON), { width: 256, height: 256 });
-    await swap(saved(ICON, PANEL));
-
-    // The icon was fetched and uploaded although the panel failed: it is given back.
-    expect(mock.io.created).toHaveLength(1);
-    expect(mock.io.destroyed).toEqual(mock.io.created);
-    expect(mock.api.texture("ui.icon")).toBe(icon);
-    expect(mock.ctx.state.manifest).toEqual(before);
-    expect(mock.log.error).toHaveBeenCalledExactlyOnceWith("assets:replace-failed", {
-      path: PANEL,
-      reason: `[game] assets: bundle "ui" failed at "${PANEL}" (404).`
-    });
-    expect(reload).toHaveBeenCalledOnce();
-    expect(mock.emitted).toEqual([]);
-  });
-
   it("reloads when a replace breaks after its files arrived, and names every file of the bundle", async () => {
     const { mock, reload, swap } = await startDev(["ui"]);
 
@@ -714,10 +809,12 @@ describe("the dev hot swap: what reloads the page instead", () => {
     expect(mock.emitted).toEqual([]);
   });
 
-  it("stops at the first bundle that failed", async () => {
+  it("stops at the bundle whose replace broke: the page reloads anyway", async () => {
     const { mock, reload, swap } = await startDev();
 
-    mock.io.status.set(url(CELL), 404);
+    vi.spyOn(mock.io, "destroyTexture").mockImplementation(() => {
+      throw new Error("the device is lost");
+    });
     await swap(saved(CELL, ICON));
 
     expect(mock.io.fetched).toEqual([url(CELL)]);
@@ -918,16 +1015,28 @@ describe("the dev hot swap: one at a time", () => {
     ]);
   });
 
-  it("keeps swapping after a swap that failed", async () => {
+  it("keeps the chain of swaps alive after a replace that broke", async () => {
     const { mock, reload, swap } = await startDev();
 
-    mock.io.status.set(url(CELL), 404);
+    vi.spyOn(mock.io, "destroyTexture").mockImplementationOnce(() => {
+      throw new Error("the device is lost");
+    });
     await swap(saved(CELL));
-    mock.io.status.delete(url(CELL));
     await swap({ files: filesOf({ [CELL]: "300:3" }), changed: [CELL] });
 
     expect(reload).toHaveBeenCalledOnce();
     expect(replaced(mock)).toEqual([{ bundle: "board", keys: ["board.cell"] }]);
+  });
+
+  it("keeps the chain of swaps alive after a file that failed", async () => {
+    const { mock, reload, swap } = await startDev();
+
+    mock.io.status.set(url(CELL), 404);
+    await swap(saved(CELL));
+    await swap({ files: filesOf({ [CELL]: "200:2", [ICON]: "300:3" }), changed: [ICON] });
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(replaced(mock)).toEqual([{ bundle: "ui", keys: ["ui.icon"] }]);
   });
 });
 
