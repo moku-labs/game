@@ -362,3 +362,86 @@ describe("the switch after the restore door expected a scene", () => {
     expect(mock.log.warn).not.toHaveBeenCalled();
   });
 });
+
+describe("the switch at a transit node after the restore door expected a scene", () => {
+  it("mounts the expected scene at a transit node in live mode that names none", async () => {
+    const mock = startedMock();
+
+    mock.api.expect("home");
+    await mock.enter({ path: "info/show" });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.world.calls).toEqual(["setLayers", "mount"]);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("mounts the transit node's own scene in live mode and keeps the expected one", async () => {
+    const mock = startedMock();
+
+    mock.api.expect("home");
+    await mock.enter({ path: "main/play", scene: "board" });
+
+    expect(mock.state.current).toBe("board");
+    expect(mock.state.pending).toBe("home");
+    expect(mock.world.mounted).toHaveLength(1);
+  });
+
+  it("mounts the expected scene under an over transit node when nothing is mounted", async () => {
+    const mock = startedMock();
+
+    mock.api.expect("home");
+    await mock.enter({ path: "info/show", over: true });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.emitted).toEqual([
+      { name: "scenes:changed", payload: { from: undefined, to: "home", music: "home.theme" } }
+    ]);
+  });
+
+  it("keeps the mounted scene under an over transit node, whatever is expected", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+    mock.world.calls.length = 0;
+    mock.api.expect("board");
+    await mock.enter({ path: "info/show", over: true });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.world.calls).toEqual([]);
+  });
+
+  it("does nothing at a transit node in live mode with nothing expected", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ path: "info/show" });
+
+    expect(mock.state.current).toBeUndefined();
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+
+  it("leaves the expected scene for the rest point at a transit node in fast mode", async () => {
+    const mock = startedMock();
+
+    mock.api.expect("home");
+    await mock.enter({ path: "info/show" }, { mode: "fast" });
+
+    expect(mock.state.current).toBeUndefined();
+    expect(mock.state.pending).toBe("home");
+    expect(mock.world.calls).toEqual([]);
+  });
+
+  it("leaves the expected scene alone at an over transit node in fast mode", async () => {
+    const mock = startedMock();
+
+    mock.api.expect("home");
+    await mock.enter({ path: "info/show", over: true }, { mode: "fast" });
+
+    expect(mock.state.current).toBeUndefined();
+    expect(mock.state.pending).toBe("home");
+    expect(mock.world.calls).toEqual([]);
+  });
+});

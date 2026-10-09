@@ -95,8 +95,8 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `key` | `game.key` | `{ key: "string", shift: "boolean?" }` | route | `input.pressKey(key, { shift })`. Value: whether a listener handled the key |
 | `fill` | `game.fill` | `{ key: "string", value: "string" }` | route | `ui.fill(key, value)`: types into the `input` with that `key`, cut to its `maxLength`. Value: whether the field took the text |
 | `walk` | `game.walk` | `{ route: "json" }` | route | `flow.walk(route)`. Value: the flow state after the walk |
-| `bookmark` | `game.bookmark` | none | read | `flow.bookmark()`, plus `scene`, the mounted scene, when the app has `scenes` and a scene is mounted. Value: the bookmark, plain JSON |
-| `restore` | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `scenes.expect(bookmark.scene)` when the bookmark has a `scene`, then `flow.restore(bookmark)`. Or a `/testing` repro: its state at its checkpoint, then `flow.walk(repro.route)`. Value: the flow state |
+| `bookmark` | `game.bookmark` | none | read | `flow.bookmark()`, plus `scene`, the mounted scene, when the app has `scenes` and a scene is mounted. While an effect that takes answers waits, the bookmark names the waiting transit node and carries `rest`. Value: the bookmark, plain JSON |
+| `restore` | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `scenes.expect(bookmark.scene)` when the bookmark has a `scene`, then `flow.restore(bookmark)`. A bookmark of a waiting transit node runs that node again, and the command answers once its gate is open. Or a `/testing` repro: its state at its checkpoint, then `flow.walk(repro.route)`. Value: the flow state |
 | `step` | `game.step` | `{ frames: "number", deltaMs: "number?" }` | cosmetic | `time.step(deltaMs)` `frames` times, also while paused. `deltaMs` is 1000/60 by default. Value: `time.snapshot()` |
 | `pause` | `game.pause` | none | cosmetic | `lifecycle.push("devtools")`. Value: `lifecycle.isPaused()` |
 | `resume` | `game.resume` | none | cosmetic | `lifecycle.pop("devtools")`. Value: `lifecycle.isPaused()`, still true while another reason holds |
@@ -107,7 +107,28 @@ From `@moku-labs/game/control`. Every command runs in dev builds only and leaves
 | `mute` | `game.mute` | `{ muted: "boolean" }` | cosmetic | `audio.mute("master", muted)`: music and sfx go silent, the stored volumes stay. Value: `audio.muted("master")`. Only in a game that composes `audioPlugin` |
 | `trace` | `game.trace` | `{ path: "json" }` | route | `input.trace(path)`, a list of `{ projection, key }`. Value: whether the gate took the answer. See the [input README](../src/plugins/input/README.md) |
 
-A bookmark at a popup comes back with its scene. The Settings popup over Home is a rest node with no `scene` of its own. In a fresh page nothing is mounted, so `game.restore` names the bookmark's `scene` first and the restored node mounts it under the popup. A `scene` that is not a string makes `game.restore` throw. `flow.restore` itself ignores `scene`.
+A bookmark at a popup comes back with its scene. A popup node has no `scene` of its own. It is a rest node, as the Settings popup over Home, or a transit node that waits for an effect that takes answers, as `info/show` of the mini game. In a fresh page nothing is mounted, so `game.restore` names the bookmark's `scene` first and the restored node mounts it under the popup. A `scene` that is not a string makes `game.restore` throw, and so does a `rest` that is not `{ path, input }`. `flow.restore` itself ignores `scene`.
+
+A bookmark taken while an effect that takes answers waits names the waiting transit node. Such an effect is a `popup`, or a hand-written descriptor with `answers`. The bookmark carries `rest: { path, input }`, the rest point before that node. `rest` is left out when no rest node came before it: the graph started at that node, or a restore entered it. The state of the bookmark is the one committed when the node was entered: what the node wrote before its gate is not in it.
+
+`game.restore` of such a bookmark runs the node again from its start, so its effects before the gate play again and it writes again what it wrote. The command answers once the gate is open, so `value.pending.gate` already lists the answers. The open gate is not the draw: the popup shows on the next frame. When the graph changed since the bookmark, the restore enters `rest` instead if that is a checkpoint, and logs `flow:restore-fell-back`. Otherwise it throws. A repro starts at a rest node only. Full rules: the [flow README](../src/plugins/flow/README.md#bookmark-and-restore).
+
+```ts
+// The mini game with its info popup open over Home.
+const { value: atPopup } = await run(app, commands.bookmark);
+atPopup.path; // "info/show": the node that waits for the popup's answer
+atPopup.scene; // "home"
+atPopup.rest; // { path: "home", input: null }
+
+// A fresh page.
+const { value } = await run(app, commands.restore, { bookmark: atPopup });
+value.path; // "info/show"
+value.pending.gate; // ["ok", "close"]
+app.scenes.current(); // "home"
+read(app, sources.locate, { key: "infoOk" }); // undefined: the gate is open, the popup is not drawn yet
+// One frame later.
+read(app, sources.locate, { key: "infoOk" }); // { x: 380, y: 827, w: 320, h: 120 } in a headless test
+```
 
 ### Capture options
 

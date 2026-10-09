@@ -656,19 +656,21 @@ export type RouteStep =
   | { at: string; result: { outcome: string; payload?: Json } };
 
 /**
- * A rest node plus a state that really existed there. Serialisable. `graph` is the hash of
- * `describe()`.
+ * A node plus a state that really existed there. Serialisable. `path` names a rest node, or a
+ * transit node that waited at the gate for the answer of an effect (a popup); for the second the
+ * state is the one committed when the node was entered. `graph` is the hash of `describe()`.
  *
  * @example
  * ```ts
+ * // Taken while the info popup of the mini game waits for its answer, opened from "home".
  * const bookmark: Bookmark = {
- *   path: "board/awaitIntent", input: null,
- *   player: { coins: 7 }, session: { taps: 0 },
- *   rng: { seed: 42, streams: {} }, graph: "fe4d257a"
+ *   path: "info/show", input: null, player: { count: 0 }, session: { opened: 0 },
+ *   rng: { seed: 42, streams: {} }, graph: "0e0d2aa8", rest: { path: "home", input: null }
  * };
  * ```
  */
 export type Bookmark = {
+  /** Path of a rest node, or of a transit node that waited at the gate. */
   path: string;
   input: Json;
   player: Json;
@@ -680,6 +682,12 @@ export type Bookmark = {
    * `game.restore`; `flow.restore` ignores it.
    */
   scene?: string;
+  /**
+   * The rest point before a transit `path`: the last rest node and its input. `restore` enters
+   * it instead when the graph changed since the bookmark. Absent for a bookmark of a rest node,
+   * and when no rest node came before the transit node.
+   */
+  rest?: { path: string; input: Json };
 };
 
 /**
@@ -815,9 +823,15 @@ export type EnterCallback = (
 export type LoopSeam = {
   /** Sub-flow results a walk substitutes, by path. The loop takes each one once. */
   substitutions: Map<string, Result>;
-  /** Called with the path every time the loop enters a rest node. */
+  /**
+   * Called with the path every time the loop enters a rest node, and once when it enters the
+   * node of a bookmark, which may be a transit node. `restore` resolves on the second.
+   */
   rest: ((path: string) => void)[];
-  /** Called every time the loop opens the gate of a rest node. The walk waits on it. */
+  /**
+   * Called every time the loop opens a gate: the wait of a rest node, or an effect with answers
+   * inside any node. The walk waits on it, and so does `restore` after it entered a transit node.
+   */
   gateOpen: (() => void)[];
   /** The bookmark the loop enters at the next turn. */
   restoring: Bookmark | undefined;
@@ -834,7 +848,11 @@ export type RunnerState = {
   enterCallbacks: Record<Stage, EnterCallback[]>;
   /** The position: one frame per nesting level. */
   stack: Frame[];
-  /** The stack of the last rest node: the rollback target. */
+  /**
+   * The frames a failed node is retried from, paired with the state a rollback returns to: the
+   * last rest node, or the node the graph started at or a restore entered. The last two may be
+   * transit nodes, so `bookmark()` writes its `rest` only when these frames name a rest node.
+   */
   restFrame: Frame[] | undefined;
   /** Inside a slot: the contribution the loop just finished. The slot continues after it. */
   slotAfter: string | undefined;
@@ -930,7 +948,10 @@ export type RunnerApi = {
   /**
    * Walks a route in fast mode through the running loop: it answers the gate at each step's `at`
    * and substitutes the result of every sub-flow node the route skips. A `from` bookmark is
-   * entered through the same check as `restore`. The mode of the caller is put back afterwards.
+   * entered through the same check as `restore`, with the same fallback. A rest node is entered
+   * before the switch to fast mode: its stages see the mode of the caller. A transit node is
+   * entered after the switch and without the wait `restore` adds for it: its popup is not shown,
+   * the route answers it. The mode of the caller is put back afterwards.
    *
    * @param route - The player's answers and substituted sub-flow results, in order.
    * @param options - Walk options.
@@ -951,33 +972,58 @@ export type RunnerApi = {
   walk(route: readonly RouteStep[], options?: { from?: Bookmark }): Promise<FlowState>;
 
   /**
-   * Makes a bookmark of the current rest point: the rest node plus the committed state.
+   * Makes a bookmark of where the graph stands: the last rest node plus the committed state.
+   * While a transit node waits at the gate for the answer of an effect (a `popup`, or any
+   * descriptor with `answers`), the bookmark names that node instead. Its state is the one
+   * committed when the node was entered: what the node wrote before the wait is not in it, the
+   * node writes it again when it is restored. `rest` then names the rest point before the node.
+   * While a transit node awaits anything else (an animation, a request) the bookmark still names
+   * the last rest node.
    *
    * @returns The bookmark, ready for JSON.
    * @throws {Error} When the graph has no position yet.
    * @example
    * ```ts
-   * // A devtools button keeps the position while the board rests.
-   * const bookmark = app.flow.bookmark();
-   * bookmark.path; // "board/awaitIntent"
-   * JSON.stringify(bookmark); // plain data: path, input, player, session, rng and the graph hash
+   * // A devtools button keeps the position. The board rests: the bookmark names its rest node.
+   * const atBoard = app.flow.bookmark(); // plain data, ready for JSON.stringify
+   * atBoard.path; // "board/awaitIntent"
+   * // The mini game with its info popup open: the bookmark names the node that waits.
+   * const atPopup = app.flow.bookmark();
+   * atPopup.path; // "info/show"
+   * atPopup.rest; // { path: "home", input: null }: the rest point before it
    * ```
    */
   bookmark(): Bookmark;
 
   /**
-   * Replaces the state with the bookmark's and enters its node. A checkpoint is always
-   * accepted; any other rest node only while the graph is unchanged.
+   * Replaces the state with the bookmark's and enters its node. A rest checkpoint is always
+   * accepted; any other node only while the graph is unchanged. A transit node is never taken
+   * for a checkpoint: when the graph changed, such a bookmark is entered at its `rest` point
+   * instead, if that is a checkpoint, and the log gets `flow:restore-fell-back`. A renamed or
+   * removed node is a changed graph too: a bookmark with `rest` whose path names no node takes
+   * the same fallback.
+   *
+   * A rest node: the promise resolves when the node is entered, before its scene stage ran. A
+   * transit node runs again from its first line, live, with the bookmark's input, so its effects
+   * before the gate play again; the promise resolves when its gate is open, or at the rest node
+   * or the end of the loop it reaches without one. A node that does none of these keeps the
+   * promise pending. An open gate is not a drawn popup: the popup shows on the next frame. And
+   * `setMode` still throws there, since the graph waits inside a transit node.
    *
    * @param bookmark - The bookmark to enter.
-   * @returns A promise that resolves once the graph rests at the bookmark's node.
-   * @throws {Error} When the bookmark names no rest node of this graph, when the graph changed
-   *   since a bookmark of a plain rest node, and before `run()`.
+   * @returns A promise that resolves once a rest node is entered, or a transit node waits at
+   *   its gate.
+   * @throws {Error} When the bookmark names no node of this graph and has no `rest`, when the
+   *   graph changed since the bookmark and neither it nor its `rest` point is a rest checkpoint,
+   *   and before `run()`.
    * @example
    * ```ts
    * // The next session opens where the last one stopped: state and position come back together.
-   * await app.flow.restore(bookmark);
+   * await app.flow.restore(atBoard);
    * app.flow.state().path; // "board/awaitIntent"
+   * // A bookmark the mini game took at its info popup: the popup waits again when this resolves.
+   * await app.flow.restore(atPopup);
+   * app.flow.state().pending.gate; // ["ok", "close"], and state().path is "info/show"
    * ```
    */
   restore(bookmark: Bookmark): Promise<void>;
@@ -1029,7 +1075,9 @@ export type RunnerApi = {
   history(): readonly JournalEntry[];
 
   /**
-   * Switches between live and fast mode. Legal before `run()` and while the graph rests.
+   * Switches between live and fast mode. Legal before `run()` and while the graph rests. A
+   * transit node that waits at the gate for a popup does not rest: it throws there too, also
+   * right after a `restore` into such a node.
    *
    * @param mode - `"live"` or `"fast"`.
    * @throws {Error} When a transit node is running.

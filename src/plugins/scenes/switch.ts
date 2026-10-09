@@ -50,8 +50,36 @@ async function untilAborted(ctx: ScenesCtx, bundle: string, signal: AbortSignal)
 }
 
 /**
+ * Takes the expected scene and clears the record, so one `expect` mounts one scene.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns The scene id that was recorded or expected, or `undefined` when there was none.
+ */
+function takePending(ctx: ScenesCtx): string | undefined {
+  const target = ctx.state.pending;
+
+  ctx.state.pending = undefined;
+
+  return target;
+}
+
+/**
+ * Tells whether the node is a transit node of a fast walk: the walk passes through it and builds
+ * no scene there.
+ *
+ * @param node - The node being entered.
+ * @param run - The runner's mode and signal.
+ * @returns True for a node without `rest` entered in fast mode.
+ */
+function isFastTransit(node: NodeInfo, run: RunContext): boolean {
+  return run.mode === "fast" && !node.rest;
+}
+
+/**
  * Reads the scene the node asks for. In fast mode a transit node only records it: the walk passes
- * through many of them and the picture is built once, at the rest point.
+ * through many of them and the picture is built once, at the rest point. In live mode a transit
+ * node without a scene of its own takes the expected one, so a restore at a popup that waits for
+ * its answer builds the scene under it; one with its own scene leaves the record alone.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
@@ -61,13 +89,13 @@ async function untilAborted(ctx: ScenesCtx, bundle: string, signal: AbortSignal)
 function targetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | undefined {
   const state = ctx.state;
 
-  if (run.mode === "fast" && !node.rest) {
-    if (node.scene !== undefined) state.pending = node.scene;
+  if (isFastTransit(node, run)) {
+    state.pending = node.scene ?? state.pending;
 
     return undefined;
   }
 
-  if (!node.rest) return node.scene;
+  if (!node.rest) return node.scene ?? takePending(ctx);
 
   const target = node.scene ?? state.pending;
 
@@ -81,28 +109,27 @@ function targetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | und
 }
 
 /**
- * Reads the scene an `over` node asks for. An over node never switches a mounted scene; a rest
- * one takes the expected scene while nothing is mounted, so a restore at a popup builds the scene
- * under it. A scene the over node names itself is only warned about.
+ * Reads the scene an `over` node asks for. An over node never switches a mounted scene; it takes
+ * the expected scene while nothing is mounted, so a restore at a popup builds the scene under it,
+ * whether the popup rests or waits for its answer. In fast mode an over transit node takes
+ * nothing and leaves the record alone: a walk builds no scene on the way. A scene the over node
+ * names itself is only warned about.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The over node being entered.
+ * @param run - The runner's mode and signal.
  * @returns The expected scene id, or `undefined` when nothing has to happen.
  */
-function overTargetOf(ctx: ScenesCtx, node: NodeInfo): string | undefined {
-  const state = ctx.state;
-
+function overTargetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | undefined {
   if (node.scene !== undefined) {
     ctx.log.warn("scenes: an over node cannot name a scene", { path: node.path });
   }
 
-  if (!node.rest || state.current !== undefined) return undefined;
+  if (isFastTransit(node, run)) return undefined;
 
-  const target = state.pending;
+  if (ctx.state.current !== undefined) return undefined;
 
-  state.pending = undefined;
-
-  return target;
+  return takePending(ctx);
 }
 
 /**
@@ -151,7 +178,7 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
  * ```
  */
 export async function enterScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): Promise<void> {
-  const target = node.over ? overTargetOf(ctx, node) : targetOf(ctx, node, run);
+  const target = node.over ? overTargetOf(ctx, node, run) : targetOf(ctx, node, run);
 
   if (target === undefined || target === ctx.state.current) return;
 

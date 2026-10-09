@@ -7,6 +7,7 @@ import type { FxApi, FxInternal } from "../../fx/types";
 import type { Answer, GateApi, GateInternal, GateSpec } from "../../gate/types";
 import type { InboxApi, InboxInternal } from "../../inbox/types";
 import { createRunnerApi, stopRunner } from "../../runner/api";
+import { graphHash } from "../../runner/registry";
 import type {
   AnyFlow,
   AnyNode,
@@ -128,6 +129,8 @@ const transaction: Transaction = {
 const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
   const opened: GateSpec[] = [];
   const modeChanges: string[] = [];
+  // The restore of the store and every switch of the mode, in the order they were called.
+  const calls: string[] = [];
   const gate: GateApi & GateInternal = {
     answer: (): boolean => false,
     pointer: vi.fn(),
@@ -152,6 +155,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
     endGuides: vi.fn(),
     setMode: (mode: "live" | "fast"): void => {
       modeChanges.push(mode);
+      calls.push(`setMode ${mode}`);
     }
   };
   const inbox: InboxApi & InboxInternal = {
@@ -185,7 +189,9 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
         markRest: vi.fn(),
         markBarrier: () => Promise.resolve(),
         rollback: vi.fn(),
-        restore: vi.fn(),
+        restore: vi.fn(() => {
+          calls.push("restore");
+        }),
         flush: () => Promise.resolve()
       },
       rng: { peek: vi.fn() }
@@ -217,7 +223,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
   };
   const modules: Modules = { features, fx, gate, inbox };
 
-  return { api: createRunnerApi(ctx, modules), ctx, modules, opened, modeChanges };
+  return { api: createRunnerApi(ctx, modules), ctx, modules, opened, modeChanges, calls };
 };
 
 /** The smallest running graph: one rest node that waits for one intent. */
@@ -225,6 +231,67 @@ const restingGraph = (): AnyFlow =>
   flow("main", { home: node({ rest: true, outcomes: ["play"] }) }, "home", {
     home: { play: "home" }
   });
+
+/** A transit node in front of a rest node: the smallest graph with a node that is not a rest node. */
+const bootGraph = (options: NodeOptions = {}): AnyFlow =>
+  flow("main", { boot: node(options), home: node({ rest: true, outcomes: ["play"] }) }, "boot", {
+    boot: { done: "home" },
+    home: { play: "boot" }
+  });
+
+/**
+ * The mini game in small: the rest node `home`, and the sub-flow `infoPopup` whose transit node
+ * `show` waits for the answer of a popup.
+ */
+const popupGraph = (options: { checkpoint?: boolean } = {}) => {
+  const info = flow("infoPopup", { show: node({ outcomes: ["ok"] }) }, "show", {
+    show: { ok: "show" }
+  });
+  const main = flow(
+    "main",
+    {
+      home: node({ rest: true, checkpoint: options.checkpoint ?? false, outcomes: ["info"] }),
+      info
+    },
+    "home",
+    { home: { info: "info" }, info: {} }
+  );
+
+  return { info, main };
+};
+
+const homeFrame = { flow: "main", node: "home", input: { level: 3 } };
+
+const showFrames = [
+  { flow: "main", node: "info", input: noPayload },
+  { flow: "infoPopup", node: "show", input: { tip: 2 } }
+];
+
+/** A harness whose graph stands inside `show`, with `home` as the last rest point. */
+const setupAtPopup = (options: { checkpoint?: boolean } = {}) => {
+  const { info, main } = popupGraph(options);
+  const harness = setup(main);
+  const runner = harness.ctx.state.runner;
+
+  runner.flows.set("main", main);
+  runner.flows.set("infoPopup", info);
+  runner.restFrame = [homeFrame];
+  runner.stack = [...showFrames];
+
+  return harness;
+};
+
+/** A bookmark of `info/show` with the rest point before it, made for another graph. */
+const stalePopupBookmark = (): Bookmark => ({
+  path: "info/show",
+  input: { tip: 2 },
+  player: { coins: 1 },
+  session: {},
+  rng: { seed: 1, streams: {} },
+  graph: "00000000",
+  scene: "home",
+  rest: { path: "home", input: { level: 3 } }
+});
 
 describe("createRunnerApi", () => {
   it("runs the loop once and throws on a second run()", async () => {
@@ -383,14 +450,8 @@ describe("createRunnerApi", () => {
     await expect(harness.api.restore(stale)).rejects.toThrow("was made for another graph");
   });
 
-  it("refuses to restore a node that is not a rest node", async () => {
-    const main = flow(
-      "main",
-      { boot: node(), home: node({ rest: true, outcomes: ["play"] }) },
-      "boot",
-      { boot: { done: "home" }, home: { play: "boot" } }
-    );
-    const harness = setup(main);
+  it("refuses to restore a transit node whose graph hash no longer matches", async () => {
+    const harness = setup(bootGraph());
 
     await expect(
       harness.api.restore({
@@ -401,7 +462,63 @@ describe("createRunnerApi", () => {
         rng: { seed: 1, streams: {} },
         graph: "00000000"
       })
-    ).rejects.toThrow("is not a rest node");
+    ).rejects.toThrow('[game] The bookmark "boot" was made for another graph.');
+  });
+
+  it("hands a transit bookmark to the running loop while the graph hash matches", () => {
+    const harness = setup(bootGraph());
+    const bookmark: Bookmark = {
+      path: "boot",
+      input: noPayload,
+      player: {},
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: graphHash(harness.api.describe())
+    };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+  });
+
+  it.each([
+    ["names nothing", "nowhere"],
+    ["names a sub-flow", "info"],
+    ["goes on behind a plain node", "home/deeper"]
+  ])("refuses to restore a path that %s: it is not a node", async (_name, path) => {
+    const harness = setup(popupGraph({ checkpoint: true }).main);
+
+    await expect(
+      harness.api.restore({
+        path,
+        input: noPayload,
+        player: {},
+        session: {},
+        rng: { seed: 1, streams: {} },
+        graph: graphHash(harness.api.describe())
+      })
+    ).rejects.toThrow(
+      `[game] The bookmark "${path}" is not a node of the graph.\n  Restore a rest node, for example the checkpoint "home".`
+    );
+  });
+
+  it("never takes a transit node for a checkpoint, also when it carries the flag", async () => {
+    const harness = setup(bootGraph({ checkpoint: true }));
+
+    await expect(
+      harness.api.restore({
+        path: "boot",
+        input: noPayload,
+        player: {},
+        session: {},
+        rng: { seed: 1, streams: {} },
+        graph: "00000000"
+      })
+    ).rejects.toThrow('[game] The bookmark "boot" was made for another graph.');
   });
 
   it("hands a checkpoint bookmark to the running loop whatever the graph hash says", async () => {
@@ -456,7 +573,31 @@ describe("createRunnerApi", () => {
 
     await expect(
       harness.api.restore({
-        path: "boot",
+        path: "shop",
+        input: noPayload,
+        player: {},
+        session: {},
+        rng: { seed: 1, streams: {} },
+        graph: "00000000"
+      })
+    ).rejects.toThrow('for example the checkpoint "home"');
+  });
+
+  it("names a rest checkpoint when it refuses a bookmark, never a transit node that carries the flag", async () => {
+    const main = flow(
+      "main",
+      {
+        boot: node({ checkpoint: true }),
+        home: node({ rest: true, checkpoint: true, outcomes: ["play"] })
+      },
+      "boot",
+      { boot: { done: "home" }, home: { play: "boot" } }
+    );
+    const harness = setup(main);
+
+    await expect(
+      harness.api.restore({
+        path: "shop",
         input: noPayload,
         player: {},
         session: {},
@@ -481,7 +622,7 @@ describe("createRunnerApi", () => {
 
     await expect(
       harness.api.restore({
-        path: "boot",
+        path: "board",
         input: noPayload,
         player: {},
         session: {},
@@ -524,7 +665,9 @@ describe("createRunnerApi", () => {
 
     harness.ctx.state.runner.running = new Promise<void>(() => undefined);
 
-    await expect(harness.api.walk([], { from: transit })).rejects.toThrow("is not a rest node");
+    await expect(harness.api.walk([], { from: transit })).rejects.toThrow(
+      '[game] The bookmark "boot" was made for another graph.'
+    );
   });
 
   it("refuses to restore before run()", async () => {
@@ -544,6 +687,432 @@ describe("createRunnerApi", () => {
         graph: "00000000"
       })
     ).rejects.toThrow("needs a running graph");
+  });
+});
+
+describe("bookmark() at a transit node", () => {
+  it("names the transit node that waits at the open gate, with the rest point before it", () => {
+    const harness = setupAtPopup();
+
+    harness.ctx.state.gate.open = { allowed: ["ok"] };
+
+    const bookmark = harness.api.bookmark();
+
+    expect(bookmark).toEqual({
+      path: "info/show",
+      input: { tip: 2 },
+      player: { coins: 7 },
+      session: { visits: 1 },
+      rng: { seed: 42, streams: { chest: 3 } },
+      graph: graphHash(harness.api.describe()),
+      rest: { path: "home", input: { level: 3 } }
+    });
+  });
+
+  it("names the last rest node while the transit node runs with the gate shut", () => {
+    const harness = setupAtPopup();
+    const bookmark = harness.api.bookmark();
+
+    expect(bookmark).toMatchObject({ path: "home", input: { level: 3 }, player: { coins: 7 } });
+    expect("rest" in bookmark).toBe(false);
+  });
+
+  it("names a rest node as before while its own gate is open", () => {
+    const harness = setupAtPopup();
+
+    harness.ctx.state.runner.stack = [homeFrame];
+    harness.ctx.state.gate.open = { allowed: ["info"] };
+
+    const bookmark = harness.api.bookmark();
+
+    expect(bookmark).toMatchObject({ path: "home", input: { level: 3 } });
+    expect("rest" in bookmark).toBe(false);
+  });
+
+  it.each([
+    ["the start node, a transit node", [{ flow: "main", node: "info", input: noPayload }]],
+    ["the transit node a restore entered", showFrames],
+    ["nothing", undefined]
+  ])("leaves rest out when the rest frame names %s", (_name, restFrame) => {
+    const harness = setupAtPopup();
+
+    harness.ctx.state.runner.restFrame = restFrame;
+    harness.ctx.state.gate.open = { allowed: ["ok"] };
+
+    const bookmark = harness.api.bookmark();
+
+    expect(bookmark).toMatchObject({ path: "info/show", input: { tip: 2 } });
+    expect("rest" in bookmark).toBe(false);
+  });
+});
+
+describe("restore() of a transit bookmark made for another graph", () => {
+  it("enters the checkpoint its rest names instead, and logs the fallback", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark = stalePopupBookmark();
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toEqual({
+      ...bookmark,
+      path: "home",
+      input: { level: 3 }
+    });
+    expect(harness.ctx.log.info).toHaveBeenCalledExactlyOnceWith("flow:restore-fell-back", {
+      from: "info/show",
+      to: "home"
+    });
+  });
+
+  it("is refused when its rest names a plain rest node: that one needs the same graph too", async () => {
+    const harness = setupAtPopup({ checkpoint: false });
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.restore(stalePopupBookmark())).rejects.toThrow(
+      '[game] The bookmark "home" was made for another graph.'
+    );
+    expect(harness.ctx.state.runner.seam?.restoring).toBeUndefined();
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("is refused without a rest, as before", async () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark = stalePopupBookmark();
+
+    delete bookmark.rest;
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.restore(bookmark)).rejects.toThrow(
+      '[game] The bookmark "info/show" was made for another graph.'
+    );
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("is refused when its rest names a transit node", async () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = {
+      ...stalePopupBookmark(),
+      rest: { path: "info/show", input: noPayload }
+    };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.restore(bookmark)).rejects.toThrow("was made for another graph");
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("is entered itself, without a fallback, while the graph hash matches", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = {
+      ...stalePopupBookmark(),
+      graph: graphHash(harness.api.describe())
+    };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("leaves a rest bookmark alone: a rest it carries is never a fallback", async () => {
+    const harness = setupAtPopup({ checkpoint: false });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "home" };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.restore(bookmark)).rejects.toThrow(
+      '[game] The bookmark "home" was made for another graph.'
+    );
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("takes the same fallback, with the same log line, under walk({ from })", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark = stalePopupBookmark();
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const walked = harness.api.walk([], { from: bookmark });
+
+    walked.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toMatchObject({ path: "home" });
+    expect(harness.ctx.log.info).toHaveBeenCalledExactlyOnceWith("flow:restore-fell-back", {
+      from: "info/show",
+      to: "home"
+    });
+  });
+});
+
+/**
+ * Counts the descriptions of the graph. `describe()` reads the owners once, so one call of
+ * `features.all()` is one description, and the hash is taken from a description.
+ *
+ * @param harness - The harness whose features are watched from now on.
+ * @returns The spy on `features.all`.
+ */
+const watchDescriptions = (harness: ReturnType<typeof setupAtPopup>) =>
+  vi.spyOn(harness.modules.features, "all");
+
+describe("the graph hash of one acceptance", () => {
+  it("describes the graph once when the fallback and the check both need the hash", async () => {
+    const harness = setupAtPopup({ checkpoint: false });
+    const described = watchDescriptions(harness);
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    // Another graph, and the rest point is a plain rest node: the fallback asks, then the check.
+    await expect(harness.api.restore(stalePopupBookmark())).rejects.toThrow(
+      '[game] The bookmark "home" was made for another graph.'
+    );
+    expect(described).toHaveBeenCalledTimes(1);
+  });
+
+  it("describes the graph once for a transit bookmark of the graph that runs", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = {
+      ...stalePopupBookmark(),
+      graph: graphHash(harness.api.describe())
+    };
+    const described = watchDescriptions(harness);
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+    expect(described).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not describe the graph for a rest checkpoint: the hash is not needed", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "home" };
+    const described = watchDescriptions(harness);
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+    expect(described).not.toHaveBeenCalled();
+  });
+});
+
+describe("restore() of a bookmark whose path names no node any more", () => {
+  it.each([
+    ["was renamed or removed", "info/tip"],
+    ["became a sub-flow", "info"]
+  ])("enters the checkpoint its rest names when the node %s, and logs the fallback", (_name, path) => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toEqual({
+      ...bookmark,
+      path: "home",
+      input: { level: 3 }
+    });
+    expect(harness.ctx.log.info).toHaveBeenCalledExactlyOnceWith("flow:restore-fell-back", {
+      from: path,
+      to: "home"
+    });
+  });
+
+  it("is refused when its rest names a plain rest node: that one needs the same graph too", async () => {
+    const harness = setupAtPopup({ checkpoint: false });
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(
+      harness.api.restore({ ...stalePopupBookmark(), path: "info/tip" })
+    ).rejects.toThrow('[game] The bookmark "home" was made for another graph.');
+    expect(harness.ctx.state.runner.seam?.restoring).toBeUndefined();
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("is refused when its rest names no node either", async () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = {
+      ...stalePopupBookmark(),
+      path: "info/tip",
+      rest: { path: "lobby", input: noPayload }
+    };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.restore(bookmark)).rejects.toThrow(
+      '[game] The bookmark "lobby" is not a node of the graph.'
+    );
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("is refused without a rest, as before: it is not a node of the graph", async () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "info/tip" };
+
+    delete bookmark.rest;
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.restore(bookmark)).rejects.toThrow(
+      '[game] The bookmark "info/tip" is not a node of the graph.\n  Restore a rest node, for example the checkpoint "home".'
+    );
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+
+  it("takes the same fallback, with the same log line, under walk({ from })", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "info/tip" };
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const walked = harness.api.walk([], { from: bookmark });
+
+    walked.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toEqual({
+      ...bookmark,
+      path: "home",
+      input: { level: 3 }
+    });
+    expect(harness.ctx.log.info).toHaveBeenCalledExactlyOnceWith("flow:restore-fell-back", {
+      from: "info/tip",
+      to: "home"
+    });
+  });
+
+  it("refuses the same bookmark without a rest under walk({ from })", async () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "info/tip" };
+
+    delete bookmark.rest;
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    await expect(harness.api.walk([], { from: bookmark })).rejects.toThrow(
+      '[game] The bookmark "info/tip" is not a node of the graph.'
+    );
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Waits until an assertion passes. The loop of these tests moves in microtasks, so a millisecond
+ * between two looks is plenty.
+ *
+ * @param assert - Throws while the loop is not there yet.
+ * @returns A promise that resolves once the assertion passed.
+ */
+const eventually = (assert: () => void): Promise<void> => vi.waitFor(assert, { interval: 1 });
+
+/**
+ * Runs the loop of the boot graph until it waits in `boot`, so a walk has a loop that takes its
+ * bookmark. The popup graph cannot run: its `show` is a cycle without a rest node.
+ *
+ * @returns The harness of the running loop, and the way to bookmark one of its nodes.
+ */
+const runBootGraph = async () => {
+  const harness = setup(bootGraph());
+
+  harness.api.run().catch(() => undefined);
+  await eventually(() => expect(harness.opened).toEqual([{ allowed: ["done"] }]));
+
+  return {
+    ...harness,
+
+    /**
+     * Makes a bookmark of a node of the graph that runs, so the hash lets it in.
+     *
+     * @param path - `"home"`, the rest node, or `"boot"`, the transit node.
+     * @returns The bookmark.
+     */
+    bookmarkAt: (path: string): Bookmark => ({
+      path,
+      input: noPayload,
+      player: { coins: 1 },
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: graphHash(harness.api.describe())
+    })
+  };
+};
+
+/**
+ * Lets a walk with an empty route end: once the loop entered the bookmark and the mode was
+ * switched, the loop is stopped, and a walk has nothing to wait for after the end of the loop.
+ *
+ * @param harness - The harness of the running loop.
+ * @param walking - The promise of the walk.
+ */
+const endWalk = async (
+  harness: ReturnType<typeof setup>,
+  walking: Promise<unknown>
+): Promise<void> => {
+  await eventually(() =>
+    expect(harness.calls).toEqual(expect.arrayContaining(["restore", "setMode fast"]))
+  );
+  await stopRunner(harness.ctx);
+  await walking;
+};
+
+describe("walk({ from }) and the order of the enter and the fast mode", () => {
+  it("enters a rest bookmark first and switches to fast mode after it, as before", async () => {
+    const harness = await runBootGraph();
+    const bookmark = harness.bookmarkAt("home");
+    const walking = harness.api.walk([], { from: bookmark });
+
+    // The loop was sent to the bookmark, and the walk has not touched the mode yet.
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+    expect(harness.modeChanges).toEqual([]);
+
+    await endWalk(harness, walking);
+
+    // One log for both calls: a switch that came one turn late, or early, shows as another order.
+    expect(harness.calls).toEqual(["restore", "setMode fast", "setMode live"]);
+  });
+
+  it("switches to fast mode before it enters a transit bookmark", async () => {
+    const harness = await runBootGraph();
+    const bookmark = harness.bookmarkAt("boot");
+    const walking = harness.api.walk([], { from: bookmark });
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+    expect(harness.modeChanges).toEqual(["fast"]);
+
+    await endWalk(harness, walking);
+
+    expect(harness.calls).toEqual(["setMode fast", "restore", "setMode live"]);
+  });
+
+  it("refuses with the message of walk before run(), also with a bookmark nothing would accept", async () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "info/tip" };
+
+    delete bookmark.rest;
+
+    await expect(harness.api.walk([], { from: bookmark })).rejects.toThrow(
+      "[game] flow.walk() needs a running graph."
+    );
+    expect(harness.modeChanges).toEqual([]);
   });
 });
 

@@ -165,6 +165,25 @@ export function findNode(
 }
 
 /**
+ * Tells whether an entry of a flow is a rest checkpoint: a rest node that carries the checkpoint
+ * flag, a place a save may stand on. A sub-flow and a slot are no nodes. A transit node is never
+ * one, whatever its flag says: it is a place inside a transition.
+ *
+ * @param entry - A node, a sub-flow or a slot of a flow.
+ * @returns True for a node with both `rest` and `checkpoint`.
+ * @example
+ * ```ts
+ * // `home` rests and is a checkpoint. `boot` is a transit node that carries the flag too.
+ * isRestCheckpoint(home); // true
+ * isRestCheckpoint(boot); // false
+ * isRestCheckpoint(boardFlow); // false: a sub-flow is no node
+ * ```
+ */
+export function isRestCheckpoint(entry: FlowEntry): boolean {
+  return entry.kind === "node" && entry.rest && entry.checkpoint;
+}
+
+/**
  * Renders an edge target as a string: a node name, `"exit:win"` or `"map:node"`.
  *
  * @param target - The target as the edge table holds it.
@@ -335,6 +354,83 @@ export function describeGraph(
   }
 
   return { main: [...flows.keys()][0] ?? "", flows: described, slots };
+}
+
+/** One flow of a described graph. */
+type DescribedFlow = FlowGraph["flows"][string];
+
+/**
+ * Reads one node of a described flow by name. Own keys only: `nodes.constructor` is defined on
+ * every object.
+ *
+ * @param flow - The described flow, or `undefined` when the graph does not hold it.
+ * @param name - Name of the node.
+ * @returns The described node, or `undefined` when the flow has none of that name.
+ * @example
+ * ```ts
+ * ownNode({ nodes: {}, start: "home", edges: {} }, "constructor"); // undefined
+ * ```
+ */
+function ownNode(flow: DescribedFlow | undefined, name: string): GraphNode | undefined {
+  return flow !== undefined && Object.hasOwn(flow.nodes, name) ? flow.nodes[name] : undefined;
+}
+
+/**
+ * Picks the described flow a path continues in after one node: the sub-flow it enters, or, behind
+ * a slot, the first contribution in order that has the next segment as a node. The same choice
+ * `findNode` makes on the flows themselves.
+ *
+ * @param graph - Result of `describeGraph`.
+ * @param node - The described node the path just passed.
+ * @param next - The next segment of the path.
+ * @returns The flow to go on in, or `undefined` when the path ends here.
+ * @example
+ * ```ts
+ * // In a graph whose main flow uses the sub-flow "board" as its node "board":
+ * describedFlowBehind(graph, graph.flows.main.nodes.board, "awaitIntent")?.start; // "awaitIntent"
+ * ```
+ */
+function describedFlowBehind(
+  graph: FlowGraph,
+  node: GraphNode,
+  next: string
+): DescribedFlow | undefined {
+  if (node.subFlow !== undefined) return graph.flows[node.subFlow];
+  if (node.slot === undefined) return undefined;
+
+  return (graph.slots[node.slot] ?? [])
+    .map(contribution => graph.flows[contribution.flow])
+    .find(flow => ownNode(flow, next) !== undefined);
+}
+
+/**
+ * Finds the node a path names in a described graph, the way `findNode` finds it in the flows: one
+ * sub-flow per segment, and through a slot into the contribution that has the next segment. For a
+ * caller that holds only `flow.describe()`, such as a headless helper.
+ *
+ * @param graph - Result of `describeGraph`.
+ * @param path - A path as `framePath` renders it.
+ * @returns The described node, sub-flow or slot, or `undefined` when the path names nothing.
+ * @example
+ * ```ts
+ * describedNode(app.flow.describe(), "board/awaitIntent")?.rest; // true: a rest node
+ * describedNode(app.flow.describe(), "board")?.subFlow; // "board": a sub-flow, no rest node
+ * ```
+ */
+export function describedNode(graph: FlowGraph, path: string): GraphNode | undefined {
+  const names = path.split("/").filter(Boolean);
+  let flow = graph.flows[graph.main];
+
+  for (const [step, name] of names.entries()) {
+    const node = ownNode(flow, name);
+    const next = names[step + 1];
+
+    if (node === undefined || next === undefined) return node;
+
+    flow = describedFlowBehind(graph, node, next);
+  }
+
+  return undefined;
 }
 
 /**

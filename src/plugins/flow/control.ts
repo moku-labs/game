@@ -17,7 +17,8 @@ type SceneApp = { readonly scenes?: ScenesApi };
 
 /**
  * Enters a bookmark, or a repro's bookmark followed by its route. A bookmark's `scene` is handed
- * to `scenes.expect` first, so a rest node without a scene of its own mounts it.
+ * to `scenes.expect` first, so a node without a scene of its own mounts it: a rest node, or the
+ * transit node of a bookmark taken while an effect that takes answers waited.
  *
  * @param app - The app; with `scenes`, the bookmark's scene is expected before the restore.
  * @param input - Exactly one of a bookmark and a repro, as JSON.
@@ -31,8 +32,11 @@ async function restoreFrom(
   input: { bookmark?: Json | undefined; repro?: Json | undefined }
 ): Promise<FlowState> {
   const { bookmark, repro } = input;
+  const bookmarkOnly = bookmark !== undefined && repro === undefined;
+  const reproOnly = repro !== undefined && bookmark === undefined;
 
-  if (bookmark !== undefined && repro === undefined) {
+  // A bookmark: its scene is expected first, so the node the restore enters mounts it.
+  if (bookmarkOnly) {
     const read = readBookmark(bookmark);
 
     if (read.scene !== undefined) app.scenes?.expect(read.scene);
@@ -42,7 +46,8 @@ async function restoreFrom(
     return app.flow.state();
   }
 
-  if (repro !== undefined && bookmark === undefined) {
+  // A repro: its state at its checkpoint, then its route from there.
+  if (reproOnly) {
     const parsed = readRepro(repro);
 
     await app.flow.restore(reproBookmark(app, parsed));
@@ -50,6 +55,7 @@ async function restoreFrom(
     return app.flow.walk(parsed.route);
   }
 
+  // Both or neither: the door cannot tell which position was meant.
   throw new Error(
     "[game] game.restore takes a bookmark or a repro.\n  Pass exactly one of { bookmark } and { repro }."
   );
@@ -106,15 +112,19 @@ export const walkCommand = defineCommand({
 });
 
 /**
- * Takes a bookmark of the rest point: the node plus the committed state, plain JSON. An app with
- * the screen plugins adds the mounted `scene`, so a restore in a fresh page builds it again.
+ * Takes a bookmark of where the graph stands: the node plus the committed state, plain JSON. The
+ * node is the last rest node, or, while a transit node waits for an effect that takes answers (a
+ * `popup`, or a hand-written descriptor with `answers`), that node; `rest` then names the rest
+ * point before it. An app with the screen plugins adds the mounted `scene`, so a restore in a
+ * fresh page builds it again.
  *
  * @example
  * ```ts
- * // The editor keeps the position while the Settings popup stands over Home.
+ * // The editor keeps the position while the info popup of the mini game is open over Home.
  * const { value } = await run(app, commands.bookmark);
- * value.path; // "settings/open"
+ * value.path; // "info/show": the node that waits for the popup's answer
  * value.scene; // "home"
+ * value.rest; // { path: "home", input: null }
  * ```
  */
 export const bookmarkCommand = defineCommand({
@@ -138,6 +148,10 @@ export const bookmarkCommand = defineCommand({
  * Restores a bookmark, or a repro: its state at its checkpoint, then its route. Replaces the
  * state outside the graph, so the session is tainted and the command journaled. A bookmark's
  * `scene` goes to `scenes.expect` first: a bookmark at a popup comes back with the scene under it.
+ * A bookmark taken while a transit node waited for an effect that takes answers (a `popup`, or a
+ * hand-written descriptor with `answers`) runs that node again, and the command answers once its
+ * gate is open: the state it returns already lists the answers. The popup is drawn on the next
+ * frame. A repro starts at a rest node only.
  *
  * @example
  * ```ts
@@ -146,11 +160,11 @@ export const bookmarkCommand = defineCommand({
  * const ran = await run(app, commands.restore, { repro });
  * ran.state; // { path: "board/awaitIntent", frame: 12, tainted: true }
  *
- * // A fresh page restores the bookmark game.bookmark took at the Settings popup over Home.
- * bookmark.scene; // "home"
- * await run(app, commands.restore, { bookmark });
- * await app.flow.walk([]); // the scene stage runs after the restore resolved
- * app.scenes.current(); // "home"
+ * // A fresh page restores the bookmark game.bookmark took at the info popup of the mini game.
+ * const { value } = await run(app, commands.restore, { bookmark });
+ * value.path; // "info/show"
+ * value.pending.gate; // ["ok", "close"]: the popup waits for its answer again
+ * app.scenes.current(); // "home": the scene the bookmark named, under the popup
  * ```
  */
 export const restoreCommand = defineCommand({

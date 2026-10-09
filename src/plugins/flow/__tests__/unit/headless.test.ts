@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
-import { createHeadless, type HeadlessApp, runRepro, stepFrames } from "../../headless";
-import type { Bookmark, FlowGraph, FlowState, RouteStep } from "../../types";
+import {
+  createHeadless,
+  type HeadlessApp,
+  reproBookmark,
+  runRepro,
+  stepFrames
+} from "../../headless";
+import type { Bookmark, FlowGraph, FlowState, GraphNode, RouteStep } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Unit test: the headless helpers over a hand-written app
@@ -18,7 +24,45 @@ const graph: FlowGraph = {
   slots: {}
 };
 
-type AppOptions = { running?: boolean; fatal?: Error };
+const flags = { rest: false, over: false, checkpoint: false, barrier: false };
+
+const described = (flow: string, name: string, changes: Partial<GraphNode> = {}): GraphNode => ({
+  flow,
+  node: name,
+  ...flags,
+  outcomes: ["done"],
+  ...changes
+});
+
+/**
+ * The graph of a game with nodes: the transit node `boot`, the rest checkpoint `home`, and the
+ * sub-flow `info` whose transit node `show` waits for a popup and whose `confirm` rests.
+ */
+const popupGraph: FlowGraph = {
+  main: "main",
+  flows: {
+    main: {
+      nodes: {
+        boot: described("main", "boot"),
+        home: described("main", "home", { rest: true, checkpoint: true }),
+        info: described("main", "info", { subFlow: "infoPopup" })
+      },
+      start: "boot",
+      edges: {}
+    },
+    infoPopup: {
+      nodes: {
+        show: described("infoPopup", "show", { checkpoint: true }),
+        confirm: described("infoPopup", "confirm", { rest: true })
+      },
+      start: "show",
+      edges: {}
+    }
+  },
+  slots: {}
+};
+
+type AppOptions = { running?: boolean; fatal?: Error; graph?: FlowGraph };
 
 const createFakeApp = (options: AppOptions = {}) => {
   const calls: string[] = [];
@@ -88,7 +132,7 @@ const createFakeApp = (options: AppOptions = {}) => {
         calls.push("restore");
         restored.push(bookmark);
       },
-      describe: (): FlowGraph => graph,
+      describe: (): FlowGraph => options.graph ?? graph,
       state,
       history: () => [],
       setMode: (mode: "live" | "fast"): void => {
@@ -221,6 +265,113 @@ describe("runRepro", () => {
 
     expect(fake.restored[0]?.path).toBe("boot");
     expect(fake.restored[0]?.rng).toEqual({ seed: 1, streams: {} });
+  });
+
+  it("refuses a checkpoint that names a transit node, before anything is restored", async () => {
+    const fake = createFakeApp({ graph: popupGraph });
+
+    await expect(
+      runRepro(fake.app, { player: { coins: 7 }, checkpoint: "info/show", route: [] })
+    ).rejects.toThrow(
+      '[game] The bookmark "info/show" is not a rest node of the graph.\n  Restore a rest node, for example the checkpoint "home".'
+    );
+    expect(fake.restored).toEqual([]);
+  });
+});
+
+describe("reproBookmark", () => {
+  it.each([
+    ["a transit node of the main flow", "boot"],
+    ["a transit node that carries the checkpoint flag", "info/show"],
+    ["a sub-flow", "info"]
+  ])("refuses a checkpoint that names %s", (_name, checkpoint) => {
+    const fake = createFakeApp({ graph: popupGraph });
+
+    expect(() => reproBookmark(fake.app, { player: {}, checkpoint, route: [] })).toThrow(
+      `[game] The bookmark "${checkpoint}" is not a rest node of the graph.`
+    );
+  });
+
+  it("refuses a repro without a checkpoint when the start node is a transit node, as before", () => {
+    const fake = createFakeApp({ graph: popupGraph });
+
+    expect(() => reproBookmark(fake.app, { player: {}, route: [] })).toThrow(
+      '[game] The bookmark "boot" is not a rest node of the graph.'
+    );
+  });
+
+  it.each([
+    ["a rest checkpoint", "home"],
+    ["a plain rest node inside a sub-flow", "info/confirm"]
+  ])("builds the bookmark of %s with the hash of the running graph", (_name, checkpoint) => {
+    const fake = createFakeApp({ graph: popupGraph });
+    const bookmark = reproBookmark(fake.app, { player: { coins: 7 }, checkpoint, route: [] });
+
+    expect(bookmark).toMatchObject({ path: checkpoint, player: { coins: 7 }, session: {} });
+    expect(bookmark.graph).toMatch(/^[\da-f]{8}$/);
+    expect("rest" in bookmark).toBe(false);
+  });
+
+  it("leaves a path the graph does not have to restore, which names it as no node", () => {
+    const fake = createFakeApp({ graph: popupGraph });
+
+    expect(reproBookmark(fake.app, { player: {}, checkpoint: "nowhere", route: [] }).path).toBe(
+      "nowhere"
+    );
+  });
+
+  it("refuses a repro without a checkpoint when the graph has no main flow to start from", () => {
+    const fake = createFakeApp({ graph: { main: "main", flows: {}, slots: {} } });
+
+    expect(() => reproBookmark(fake.app, { player: {}, route: [] })).toThrow(
+      '[game] runRepro() found no flow "main" to start from.\n  Name the checkpoint the repro was taken at.'
+    );
+  });
+
+  it("names the start of the main flow when the graph has no checkpoint to suggest", () => {
+    const nodes = { boot: described("main", "boot") };
+    const fake = createFakeApp({
+      graph: { main: "main", flows: { main: { nodes, start: "boot", edges: {} } }, slots: {} }
+    });
+
+    expect(() => reproBookmark(fake.app, { player: {}, checkpoint: "boot", route: [] })).toThrow(
+      'Restore a rest node, for example the checkpoint "boot".'
+    );
+  });
+
+  it("never suggests a transit node as the checkpoint, also when it carries the flag", () => {
+    const nodes = {
+      boot: described("main", "boot", { checkpoint: true }),
+      home: described("main", "home", { rest: true, checkpoint: true })
+    };
+    const fake = createFakeApp({
+      graph: { main: "main", flows: { main: { nodes, start: "boot", edges: {} } }, slots: {} }
+    });
+
+    expect(() => reproBookmark(fake.app, { player: {}, checkpoint: "boot", route: [] })).toThrow(
+      'for example the checkpoint "home"'
+    );
+  });
+
+  it("names a checkpoint inside a sub-flow with its flow", () => {
+    const fake = createFakeApp({
+      graph: {
+        main: "main",
+        flows: {
+          main: { nodes: { boot: described("main", "boot") }, start: "boot", edges: {} },
+          board: {
+            nodes: { play: described("board", "play", { rest: true, checkpoint: true }) },
+            start: "play",
+            edges: {}
+          }
+        },
+        slots: {}
+      }
+    });
+
+    expect(() => reproBookmark(fake.app, { player: {}, checkpoint: "boot", route: [] })).toThrow(
+      'for example the checkpoint "board/play"'
+    );
   });
 });
 

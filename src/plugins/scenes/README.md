@@ -56,15 +56,14 @@ defineScene("board", { bundle: "board", layers: { cells: {}, items: { sort: "y" 
 | Method | Behaviour |
 |---|---|
 | `current()` | Id of the mounted scene. `undefined` before the first switch and after stop |
-| `expect(id)` | The scene the next rest node without its own `scene` mounts. The restore door calls it with the scene of a bookmark. An id no feature declared throws `[game] Scene "<id>" is not registered.` |
+| `expect(id)` | The scene the next node without its own `scene` mounts: a rest node, or a transit node in live mode. The restore door calls it with the scene of a bookmark. An id no feature declared throws `[game] Scene "<id>" is not registered.` |
 
 Nothing else is public. A scene is switched by the graph, never by a call: the plugin answers one question and takes one order, for the restore door.
 
 ```ts
 // A fresh page restores a bookmark taken at the Settings popup over Home.
 app.scenes.expect("home");
-await app.flow.restore(bookmark);
-await app.flow.walk([]); // the scene stage runs after restore resolves
+await app.flow.restore(bookmark); // resolves when the popup's gate is open
 app.scenes.current(); // "home"
 ```
 
@@ -74,21 +73,23 @@ app.scenes.current(); // "home"
 
 | Step | What happens |
 |---|---|
-| 1 | `node.over`: return, unless it is a rest node, nothing is mounted and a scene is pending; then the target is the pending scene and the record is cleared. An over node that names a scene is a `ctx.log.warn` |
+| 1 | `node.over`: return, unless nothing is mounted and a scene is pending; then the target is the pending scene and the record is cleared. An over transit node in fast mode always returns and leaves the record alone. An over node that names a scene is a `ctx.log.warn` |
 | 2 | Fast mode on a transit node: record the scene as pending and return |
-| 3 | On a rest node: the target is `node.scene` or what was recorded or expected; the record is cleared |
-| 4 | No target: return. A rest node with no scene and nothing mounted is a warning |
-| 5 | The target is already mounted: return |
-| 6 | No such scene: throw `[game] Scene "bord" is not registered.` The static check of `flow` normally catches it first |
-| 7 | `await assets.load(scene.bundle)`, raced against the node's abort signal |
-| 8 | Aborted: return. Nothing was touched, the old scene is still there |
-| 9 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` → `time.wake()` → `scenes:changed` |
+| 3 | Live mode on a transit node: the target is `node.scene`, and the record is left alone. Without a scene of its own the target is what was recorded or expected, and the record is cleared |
+| 4 | On a rest node: the target is `node.scene` or what was recorded or expected; the record is cleared |
+| 5 | No target: return. A rest node with no scene and nothing mounted is a warning |
+| 6 | The target is already mounted: return |
+| 7 | No such scene: throw `[game] Scene "bord" is not registered.` The static check of `flow` normally catches it first |
+| 8 | `await assets.load(scene.bundle)`, raced against the node's abort signal |
+| 9 | Aborted: return. Nothing was touched, the old scene is still there |
+| 10 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` → `time.wake()` → `scenes:changed` |
 
 | Case | Behaviour |
 |---|---|
 | Node without `scene` | The current scene lives on. A popup stands on the scene under it |
 | `over` node | Never switches a mounted scene. After it closes, the node under it is active again on the same scene |
-| `over` rest node, nothing mounted | Mounts the pending scene: a restore at a popup after `expect` builds the scene under it. Nothing pending: nothing happens |
+| `over` node, nothing mounted | Mounts the pending scene: a restore at a popup after `expect` builds the scene under it, whether the popup is a rest node or a transit node that waits for its answer. Nothing pending: nothing happens. An over transit node of a fast walk mounts nothing and keeps the record for the rest point |
+| Transit node in live mode, no `scene` | Mounts the pending scene and clears the record: a restore at a transit node on a fresh page builds the expected scene. Nothing pending: nothing happens, and no warning |
 | Abort during the load | The callback returns. A rejection would be a node failure; `flow` handles the abort itself |
 | Bundle load fails | The callback rejects. `flow` rolls back, emits `flow:error` and re-enters the rest node, whose scene is still mounted |
 | `mount` throws | Same path as a failed load |
@@ -102,7 +103,7 @@ A load that fails after the abort is logged with `ctx.log.warn` and never thrown
 
 ## Static validation of scene ids
 
-`flow` owns it and this plugin contributes nothing. `validateGraph` reads the scene ids from the `scenes` key of the registered feature descriptions, so a node whose `scene` is not among them, and an `over` node that names a scene, join the single `run()` error. It runs only when at least one feature brought a `scenes` key, so a `logicOnly` headless app is not checked. The throw of step 6 and the warning of step 1 are the second line of defence.
+`flow` owns it and this plugin contributes nothing. `validateGraph` reads the scene ids from the `scenes` key of the registered feature descriptions, so a node whose `scene` is not among them, and an `over` node that names a scene, join the single `run()` error. It runs only when at least one feature brought a `scenes` key, so a `logicOnly` headless app is not checked. The throw of step 7 and the warning of step 1 are the second line of defence.
 
 ## Configuration
 

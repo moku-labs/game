@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Contribution, FeaturesApi } from "../../features/types";
-import { collectFlows, describeGraph, findNode, framePath, graphHash } from "../../runner/registry";
+import {
+  collectFlows,
+  describedNode,
+  describeGraph,
+  findNode,
+  framePath,
+  graphHash
+} from "../../runner/registry";
 import type {
   AnyFlow,
   AnyNode,
@@ -293,6 +300,70 @@ describe("describeGraph", () => {
 
   it("builds the description without running the game", () => {
     expect(describeGraph(collectFlows(mainFlow, []), noFeatures).slots).toEqual({ afterWin: [] });
+  });
+});
+
+describe("describedNode", () => {
+  const graph = describeGraph(collectFlows(mainFlow, [rewardFlow]), features);
+
+  it("finds a node of the main flow with its flags", () => {
+    expect(describedNode(graph, "home")).toMatchObject({
+      flow: "main",
+      node: "home",
+      rest: true,
+      checkpoint: true
+    });
+  });
+
+  it("finds a node inside a sub-flow", () => {
+    expect(describedNode(graph, "board/awaitIntent")).toMatchObject({
+      flow: "board",
+      node: "awaitIntent",
+      rest: true
+    });
+    expect(describedNode(graph, "board/merge")?.rest).toBe(false);
+  });
+
+  it("finds the sub-flow itself, which is no rest node", () => {
+    expect(describedNode(graph, "board")).toMatchObject({ subFlow: "board", rest: false });
+  });
+
+  it("descends through a slot into the contribution that has the next node", () => {
+    expect(describedNode(graph, "afterWin/give")).toMatchObject({ flow: "reward", node: "give" });
+  });
+
+  it("takes the first contribution in order when two have the same node name", () => {
+    const second = flow("bonus", { give: node({ rest: true }) }, "give", {
+      give: { done: "give" }
+    });
+    const both: FeaturesApi = {
+      ...features,
+      contributions: () => [contribution, { feature: "bonus", flow: second, order: 20 }]
+    };
+    const described = describeGraph(collectFlows(mainFlow, [rewardFlow, second]), both);
+
+    expect(describedNode(described, "afterWin/give")?.flow).toBe("reward");
+  });
+
+  it.each([
+    ["an unknown node", "nowhere"],
+    ["a path behind a plain node", "home/deeper"],
+    ["a node no contribution of the slot has", "afterWin/missing"],
+    ["an inherited key such as constructor", "constructor"],
+    ["an inherited key behind a slot", "afterWin/constructor"],
+    ["an empty path", ""]
+  ])("finds nothing for %s", (_name, path) => {
+    expect(describedNode(graph, path)).toBeUndefined();
+  });
+
+  it("finds nothing behind a slot whose contribution is a flow the graph does not hold", () => {
+    const withoutReward = describeGraph(collectFlows(mainFlow, []), features);
+
+    expect(describedNode(withoutReward, "afterWin/give")).toBeUndefined();
+  });
+
+  it("finds nothing in a graph without its main flow", () => {
+    expect(describedNode({ main: "main", flows: {}, slots: {} }, "home")).toBeUndefined();
   });
 });
 

@@ -247,7 +247,9 @@ export type StoreState = {
 /**
  * store module API, `app.model.store`. Logic changes the trees only inside a transaction, and only
  * a rest point hands patches to the provider, so a kill between two rest nodes loses a whole
- * transition and never half of one.
+ * transition and never half of one. One restore differs: `flow.restore` of a bookmark taken at a
+ * transit node marks a rest point there, so the provider receives a document from between two rest
+ * nodes, and a kill right after it loads that state at the start node.
  *
  * @example
  * ```ts

@@ -5,8 +5,16 @@
  */
 import type { Json, RngState } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
-import { graphHash } from "./runner/registry";
-import type { Answer, Bookmark, Api as FlowApi, FlowState, JournalEntry, RouteStep } from "./types";
+import { describedNode, graphHash } from "./runner/registry";
+import type {
+  Answer,
+  Bookmark,
+  Api as FlowApi,
+  FlowGraph,
+  FlowState,
+  JournalEntry,
+  RouteStep
+} from "./types";
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
 const noPayload: Json = null;
@@ -250,37 +258,69 @@ export async function createHeadless(app: HeadlessApp): Promise<HeadlessGame> {
 }
 
 /**
- * Reads the rest node a repro starts at: its checkpoint, or the start of the main flow.
+ * Names a checkpoint of a described graph, for the message of a refused repro: the first rest
+ * node that is one, or the start of the main flow when the graph has none.
+ *
+ * @param graph - The described graph.
+ * @returns The path of a checkpoint to suggest.
+ * @example
+ * ```ts
+ * someCheckpoint({ main: "main", flows: {}, slots: {} }); // "": an empty graph suggests nothing
+ * ```
+ */
+function someCheckpoint(graph: FlowGraph): string {
+  for (const [id, flow] of Object.entries(graph.flows)) {
+    for (const [name, node] of Object.entries(flow.nodes)) {
+      if (node.rest && node.checkpoint) return id === graph.main ? name : `${id}/${name}`;
+    }
+  }
+
+  return graph.flows[graph.main]?.start ?? "";
+}
+
+/**
+ * Reads the rest node a repro starts at: its checkpoint, or the start of the main flow. A repro
+ * starts at a rest node only. `flow.restore` also enters a transit node while the graph is
+ * unchanged, and a repro carries the hash of the graph that runs now, so the path is checked here.
  *
  * @param app - The started app.
  * @param repro - Starting state, optional checkpoint and the route.
  * @returns The path of the node the repro enters.
- * @throws {Error} When the graph has no main flow to start from.
+ * @throws {Error} When the graph has no main flow to start from, and when the path names a node
+ *   that is not a rest node.
  */
 function reproPath(app: HeadlessApp, repro: Repro): string {
-  if (repro.checkpoint !== undefined) return repro.checkpoint;
-
   const graph = app.flow.describe();
-  const start = graph.flows[graph.main]?.start;
+  const path = repro.checkpoint ?? graph.flows[graph.main]?.start;
 
-  if (start === undefined) {
+  if (path === undefined) {
     throw new Error(
       `[game] runRepro() found no flow "${graph.main}" to start from.\n  Name the checkpoint the repro was taken at.`
     );
   }
 
-  return start;
+  const node = describedNode(graph, path);
+
+  if (node !== undefined && !node.rest) {
+    throw new Error(
+      `[game] The bookmark "${path}" is not a rest node of the graph.\n  Restore a rest node, for example the checkpoint "${someCheckpoint(graph)}".`
+    );
+  }
+
+  return path;
 }
 
 /**
  * Builds the bookmark a repro is entered with: its state, its checkpoint and the hash of the
  * graph that runs now, so a checkpoint is accepted and any other rest node is checked. The route
- * is not part of it: the caller walks it after the restore.
+ * is not part of it: the caller walks it after the restore. A repro starts at a rest node: a
+ * checkpoint that names a transit node is refused here, although `flow.restore` enters one.
  *
  * @param app - The started app.
  * @param repro - Starting state, optional checkpoint and the route.
  * @returns The bookmark to restore.
- * @throws {Error} When the repro names no checkpoint and the graph has no main flow.
+ * @throws {Error} When the repro names no checkpoint and the graph has no main flow, and when
+ *   the node it starts at is not a rest node.
  * @example
  * ```ts
  * // The game.restore command loads a bug report taken at the "home" checkpoint.

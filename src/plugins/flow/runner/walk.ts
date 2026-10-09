@@ -15,10 +15,19 @@ import { readState } from "./view";
 const noPayload: Json = null;
 
 /**
- * Where a walk starts from: the bookmark and the checked restore that enters it. They come
- * together, so a walk can never enter a bookmark the plugin's `restore` would refuse.
+ * Where a walk starts from: the bookmark, the restore that enters it and the kind of node that is
+ * entered. The runner API fills it in after its check of the bookmark, so a walk can never enter
+ * a bookmark the plugin's `restore` would refuse.
  */
-type WalkStart = { restore: (bookmark: Bookmark) => Promise<void>; from: Bookmark };
+type WalkStart = {
+  restore: (bookmark: Bookmark) => Promise<void>;
+  from: Bookmark;
+  /**
+   * True when `restore` enters a transit node: the walk then switches to fast mode before the
+   * enter. Absent for a rest node, which is entered first.
+   */
+  transit?: boolean;
+};
 
 /** A step of the route that answers a rest node through the gate. */
 type IntentStep = Extract<RouteStep, { intent: string }>;
@@ -28,6 +37,9 @@ type ResultStep = Extract<RouteStep, { result: unknown }>;
 
 /** What the walk watches while the loop moves between rest points. */
 type RestWatch = { next(): Promise<void>; off(): void };
+
+/** The wait for the next gate the loop opens, and the way to give it up. */
+type GateWatch = { promise: Promise<void>; off(): void };
 
 /** Whether the one loop is still running, and the promise of its end. */
 type EndWatch = { done: boolean; settled: Promise<void> };
@@ -144,27 +156,37 @@ function watchEnd(running: Promise<void>): EndWatch {
 }
 
 /**
- * Waits for the next gate the loop opens. The listener takes itself off when it fires, so a walk
- * that ended meanwhile leaves nothing behind.
+ * Watches for the next gate the loop opens. The listener leaves the seam when a gate wakes it. A
+ * wait that something else ended calls `off()`: the gate that would take the listener off may
+ * never come.
  *
  * @param seam - The seam of the running loop.
- * @returns A promise that resolves when the loop opens a gate.
+ * @returns The promise of the next open gate, and the way to stop watching.
  */
-function nextGateOpen(seam: LoopSeam): Promise<void> {
-  return new Promise<void>(resolve => {
-    /**
-     * Wakes the walk once the loop opened the gate.
-     */
-    const listener = (): void => {
-      const index = seam.gateOpen.indexOf(listener);
+function nextGateOpen(seam: LoopSeam): GateWatch {
+  const watch: { wake: (() => void) | undefined } = { wake: undefined };
+  /**
+   * Takes the listener off the seam. It may be gone already.
+   */
+  const off = (): void => {
+    const index = seam.gateOpen.indexOf(listener);
 
-      if (index !== -1) seam.gateOpen.splice(index, 1);
-
-      resolve();
-    };
-
-    seam.gateOpen.push(listener);
+    if (index !== -1) seam.gateOpen.splice(index, 1);
+  };
+  /**
+   * Wakes the waiting side once the loop opened a gate, and leaves.
+   */
+  function listener(): void {
+    off();
+    watch.wake?.();
+  }
+  const promise = new Promise<void>(resolve => {
+    watch.wake = resolve;
   });
+
+  seam.gateOpen.push(listener);
+
+  return { promise, off };
 }
 
 /**
@@ -180,7 +202,43 @@ async function reachGate(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise
   if (ctx.state.gate.open !== undefined) return;
   if (ended.done) return;
 
-  await Promise.race([nextGateOpen(seam), ended.settled]);
+  const opened = nextGateOpen(seam);
+
+  try {
+    await Promise.race([opened.promise, ended.settled]);
+  } finally {
+    // When the loop ended first, no gate comes to take the listener off.
+    opened.off();
+  }
+}
+
+/**
+ * Waits until a transit node the loop was sent into shows what it waits for: the gate it opens,
+ * or, when it opens none, the next rest point or the end of the loop. `restore` waits here after
+ * it entered a transit bookmark, so its caller reads a state with the open gate in it. There is no
+ * timeout: a node that opens no gate, never rests and never ends keeps the wait pending, as its
+ * body would. Call it only after the loop entered the node: a gate opened before that belongs to
+ * the node the restore aborted.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @returns A promise that resolves at the open gate, at a rest point or at the end of the loop.
+ */
+export async function reachGateOrRest(ctx: FlowCtx): Promise<void> {
+  const running = ctx.state.runner.running;
+
+  if (running === undefined || ctx.state.gate.open !== undefined) return;
+
+  const seam = loopSeam(ctx.state.runner);
+  const opened = nextGateOpen(seam);
+  const rested = watchRest(seam);
+
+  try {
+    await Promise.race([opened.promise, rested.next(), watchEnd(running).settled]);
+  } finally {
+    // One of the three won. The other two must leave nothing on the seam.
+    opened.off();
+    rested.off();
+  }
 }
 
 /**
@@ -334,14 +392,17 @@ async function playRoute(
 /**
  * Walks a route through the running loop: restores `from` when given, switches to fast mode,
  * waits until the loop rests at each step's `at` and answers through the gate, and substitutes
- * the result of every sub-flow node the route skips. The mode of the caller is put back
- * afterwards, also when a step rejects, and a substitution the route never reached is disarmed:
- * it must not skip a sub-flow in the live play that follows.
+ * the result of every sub-flow node the route skips. A rest node `from` names is entered before
+ * the switch: the stages of that node see the mode of the caller. A transit node is entered
+ * after the switch, so it never starts live and never shows its popup. The mode of the caller
+ * is put back afterwards, also when the bookmark is refused or a step rejects, and a
+ * substitution the route never reached is disarmed: it must not skip a sub-flow in the live play
+ * that follows.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
  * @param route - The player's answers and substituted results, in order.
- * @param start - Bookmark to enter first and the checked restore that enters it.
+ * @param start - Bookmark to enter first, the restore that enters it and the kind of its node.
  * @returns The state the walk ended in.
  * @throws {Error} Before `run()` was called, when the bookmark is refused, and when a step's `at`
  *   is never reached.
@@ -360,15 +421,23 @@ export async function walkRoute(
     );
   }
 
-  if (start !== undefined) await start.restore(start.from);
+  // The bookmark is entered on one side of the switch: a rest node before it, a transit node after.
+  const entersBeforeSwitch = start !== undefined && !start.transit;
+  const entersAfterSwitch = start !== undefined && !entersBeforeSwitch;
 
+  if (entersBeforeSwitch) await start.restore(start.from);
+
+  // From here on the graph runs fast, until the route is played or a step rejects.
   const previous = ctx.state.fx.mode;
 
   modules.fx.setMode("fast");
 
   try {
+    if (entersAfterSwitch) await start.restore(start.from);
+
     await playRoute(ctx, modules, route, running);
   } finally {
+    // The live play that follows gets the caller's mode back and no substitution left armed.
     loopSeam(ctx.state.runner).substitutions.clear();
     modules.fx.setMode(previous);
   }

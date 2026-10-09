@@ -7,7 +7,9 @@ persisted through the provider. The `session` tree lives for one run of the game
 
 Logic changes the trees only inside a transaction. `flow` opens one transaction per node run and
 commits it on the edge. Only a rest point hands patches to the provider, so a kill between two rest
-nodes loses a whole transition and never half of one.
+nodes loses a whole transition and never half of one. One exception: `flow.restore` of a bookmark
+taken at a transit node marks a rest point there, so the provider receives a document from between
+two rest nodes, and a kill right after it loads that state at the start node.
 
 Two modules do the work and the plugin root groups them:
 
