@@ -18,8 +18,9 @@ const historyMarker = "world:history-on";
 /**
  * Bundles one door, or the root of the engine, the way a game does, minified, with the dev flag
  * defined: from an entry outside the package that re-exports the whole file. An entry inside the package would not do:
- * under `"sideEffects": false` Bun 1.3.14 drops the modules a re-export-only entry of the package
- * itself names. Vitest runs on Node, so the build runs in a Bun child process.
+ * `sideEffects` lists `./dist/index.mjs` and no `src` file, so Bun 1.3.14 still drops the modules a
+ * re-export-only entry of the package itself names. Vitest runs on Node, so the build runs in a Bun
+ * child process.
  *
  * @param door - The door file under `src/`, or `index.ts` for the root.
  * @param dev - The value `__MOKU_GAME_DEV__` is defined as.

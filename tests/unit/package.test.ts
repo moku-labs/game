@@ -137,6 +137,7 @@ describe("package.json", () => {
 
     expect(pkg.sideEffects).toEqual(["./dist/index.mjs"]);
     expect(listed).toEqual([{ subpath: ".", file: "./dist/index.mjs" }]);
+    expect(pkg.exports["."]).toMatchObject({ default: pkg.sideEffects[0] });
   });
 });
 

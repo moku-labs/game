@@ -167,7 +167,7 @@ describe("the draw-call counter of the renderer in a game build", () => {
 /**
  * Builds one entry of the package the way `tsdown` builds `dist/`: ESM for node, every package
  * left as an import, so a package the entry reaches shows up by its name. The entry lives outside
- * the package and re-exports the source file, for the `"sideEffects": false` reason of
+ * the package and re-exports the source file, for the `sideEffects` reason of
  * `doors-build.test.ts`. Vitest runs on Node, so the build runs in a Bun child process.
  *
  * @param source - The entry file under `src/`, or a module of one.
