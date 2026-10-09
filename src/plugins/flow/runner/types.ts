@@ -985,11 +985,12 @@ export type RunnerApi = {
    * @example
    * ```ts
    * // A devtools button keeps the position. The board rests: the bookmark names its rest node.
-   * app.flow.bookmark().path; // "board/awaitIntent"
+   * const atBoard = app.flow.bookmark(); // plain data, ready for JSON.stringify
+   * atBoard.path; // "board/awaitIntent"
    * // The mini game with its info popup open: the bookmark names the node that waits.
-   * const bookmark = app.flow.bookmark(); // plain data, ready for JSON.stringify
-   * bookmark.path; // "info/show"
-   * bookmark.rest; // { path: "home", input: null }: the rest point before it
+   * const atPopup = app.flow.bookmark();
+   * atPopup.path; // "info/show"
+   * atPopup.rest; // { path: "home", input: null }: the rest point before it
    * ```
    */
   bookmark(): Bookmark;
@@ -1018,7 +1019,7 @@ export type RunnerApi = {
    * @example
    * ```ts
    * // The next session opens where the last one stopped: state and position come back together.
-   * await app.flow.restore(bookmark);
+   * await app.flow.restore(atBoard);
    * app.flow.state().path; // "board/awaitIntent"
    * // A bookmark the mini game took at its info popup: the popup waits again when this resolves.
    * await app.flow.restore(atPopup);

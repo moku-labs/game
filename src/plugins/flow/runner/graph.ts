@@ -3,8 +3,8 @@
  */
 import type { FeaturesApi } from "../features/types";
 import type { FlowCtx } from "../types";
-import { collectFlows, slotNames } from "./registry";
-import type { AnyFlow } from "./types";
+import { collectFlows, describeGraph, slotNames } from "./registry";
+import type { AnyFlow, FlowGraph } from "./types";
 import { validateGraph } from "./validate";
 
 /**
@@ -51,6 +51,17 @@ export function collectGraph(ctx: FlowCtx, features: FeaturesApi): Map<string, A
   }
 
   return graph.flows;
+}
+
+/**
+ * Renders the whole graph as JSON. It reads the flows as data, so it works before `run()`.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @param features - Features API: owners and slot contributions.
+ * @returns The graph.
+ */
+export function graphOf(ctx: FlowCtx, features: FeaturesApi): FlowGraph {
+  return describeGraph(collectGraph(ctx, features), features);
 }
 
 /**

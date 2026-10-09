@@ -129,6 +129,8 @@ const transaction: Transaction = {
 const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
   const opened: GateSpec[] = [];
   const modeChanges: string[] = [];
+  // The restore of the store and every switch of the mode, in the order they were called.
+  const calls: string[] = [];
   const gate: GateApi & GateInternal = {
     answer: (): boolean => false,
     pointer: vi.fn(),
@@ -153,6 +155,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
     endGuides: vi.fn(),
     setMode: (mode: "live" | "fast"): void => {
       modeChanges.push(mode);
+      calls.push(`setMode ${mode}`);
     }
   };
   const inbox: InboxApi & InboxInternal = {
@@ -186,7 +189,9 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
         markRest: vi.fn(),
         markBarrier: () => Promise.resolve(),
         rollback: vi.fn(),
-        restore: vi.fn(),
+        restore: vi.fn(() => {
+          calls.push("restore");
+        }),
         flush: () => Promise.resolve()
       },
       rng: { peek: vi.fn() }
@@ -218,7 +223,7 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
   };
   const modules: Modules = { features, fx, gate, inbox };
 
-  return { api: createRunnerApi(ctx, modules), ctx, modules, opened, modeChanges };
+  return { api: createRunnerApi(ctx, modules), ctx, modules, opened, modeChanges, calls };
 };
 
 /** The smallest running graph: one rest node that waits for one intent. */
@@ -849,6 +854,64 @@ describe("restore() of a transit bookmark made for another graph", () => {
   });
 });
 
+/**
+ * Counts the descriptions of the graph. `describe()` reads the owners once, so one call of
+ * `features.all()` is one description, and the hash is taken from a description.
+ *
+ * @param harness - The harness whose features are watched from now on.
+ * @returns The spy on `features.all`.
+ */
+const watchDescriptions = (harness: ReturnType<typeof setupAtPopup>) =>
+  vi.spyOn(harness.modules.features, "all");
+
+describe("the graph hash of one acceptance", () => {
+  it("describes the graph once when the fallback and the check both need the hash", async () => {
+    const harness = setupAtPopup({ checkpoint: false });
+    const described = watchDescriptions(harness);
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    // Another graph, and the rest point is a plain rest node: the fallback asks, then the check.
+    await expect(harness.api.restore(stalePopupBookmark())).rejects.toThrow(
+      '[game] The bookmark "home" was made for another graph.'
+    );
+    expect(described).toHaveBeenCalledTimes(1);
+  });
+
+  it("describes the graph once for a transit bookmark of the graph that runs", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = {
+      ...stalePopupBookmark(),
+      graph: graphHash(harness.api.describe())
+    };
+    const described = watchDescriptions(harness);
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+    expect(described).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not describe the graph for a rest checkpoint: the hash is not needed", () => {
+    const harness = setupAtPopup({ checkpoint: true });
+    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "home" };
+    const described = watchDescriptions(harness);
+
+    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
+
+    const restored = harness.api.restore(bookmark);
+
+    restored.catch(() => undefined);
+
+    expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
+    expect(described).not.toHaveBeenCalled();
+  });
+});
+
 describe("restore() of a bookmark whose path names no node any more", () => {
   it.each([
     ["was renamed or removed", "info/tip"],
@@ -952,37 +1015,92 @@ describe("restore() of a bookmark whose path names no node any more", () => {
   });
 });
 
+/**
+ * Waits until an assertion passes. The loop of these tests moves in microtasks, so a millisecond
+ * between two looks is plenty.
+ *
+ * @param assert - Throws while the loop is not there yet.
+ * @returns A promise that resolves once the assertion passed.
+ */
+const eventually = (assert: () => void): Promise<void> => vi.waitFor(assert, { interval: 1 });
+
+/**
+ * Runs the loop of the boot graph until it waits in `boot`, so a walk has a loop that takes its
+ * bookmark. The popup graph cannot run: its `show` is a cycle without a rest node.
+ *
+ * @returns The harness of the running loop, and the way to bookmark one of its nodes.
+ */
+const runBootGraph = async () => {
+  const harness = setup(bootGraph());
+
+  harness.api.run().catch(() => undefined);
+  await eventually(() => expect(harness.opened).toEqual([{ allowed: ["done"] }]));
+
+  return {
+    ...harness,
+
+    /**
+     * Makes a bookmark of a node of the graph that runs, so the hash lets it in.
+     *
+     * @param path - `"home"`, the rest node, or `"boot"`, the transit node.
+     * @returns The bookmark.
+     */
+    bookmarkAt: (path: string): Bookmark => ({
+      path,
+      input: noPayload,
+      player: { coins: 1 },
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: graphHash(harness.api.describe())
+    })
+  };
+};
+
+/**
+ * Lets a walk with an empty route end: once the loop entered the bookmark and the mode was
+ * switched, the loop is stopped, and a walk has nothing to wait for after the end of the loop.
+ *
+ * @param harness - The harness of the running loop.
+ * @param walking - The promise of the walk.
+ */
+const endWalk = async (
+  harness: ReturnType<typeof setup>,
+  walking: Promise<unknown>
+): Promise<void> => {
+  await eventually(() =>
+    expect(harness.calls).toEqual(expect.arrayContaining(["restore", "setMode fast"]))
+  );
+  await stopRunner(harness.ctx);
+  await walking;
+};
+
 describe("walk({ from }) and the order of the enter and the fast mode", () => {
-  it("enters a rest bookmark first and switches to fast mode after it, as before", () => {
-    const harness = setupAtPopup({ checkpoint: true });
-    const bookmark: Bookmark = { ...stalePopupBookmark(), path: "home" };
-
-    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
-
-    const walked = harness.api.walk([], { from: bookmark });
-
-    walked.catch(() => undefined);
+  it("enters a rest bookmark first and switches to fast mode after it, as before", async () => {
+    const harness = await runBootGraph();
+    const bookmark = harness.bookmarkAt("home");
+    const walking = harness.api.walk([], { from: bookmark });
 
     // The loop was sent to the bookmark, and the walk has not touched the mode yet.
     expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
     expect(harness.modeChanges).toEqual([]);
+
+    await endWalk(harness, walking);
+
+    // One log for both calls: a switch that came one turn late, or early, shows as another order.
+    expect(harness.calls).toEqual(["restore", "setMode fast", "setMode live"]);
   });
 
-  it("switches to fast mode before it enters a transit bookmark", () => {
-    const harness = setupAtPopup({ checkpoint: true });
-    const bookmark: Bookmark = {
-      ...stalePopupBookmark(),
-      graph: graphHash(harness.api.describe())
-    };
-
-    harness.ctx.state.runner.running = new Promise<void>(() => undefined);
-
-    const walked = harness.api.walk([], { from: bookmark });
-
-    walked.catch(() => undefined);
+  it("switches to fast mode before it enters a transit bookmark", async () => {
+    const harness = await runBootGraph();
+    const bookmark = harness.bookmarkAt("boot");
+    const walking = harness.api.walk([], { from: bookmark });
 
     expect(harness.ctx.state.runner.seam?.restoring).toBe(bookmark);
     expect(harness.modeChanges).toEqual(["fast"]);
+
+    await endWalk(harness, walking);
+
+    expect(harness.calls).toEqual(["setMode fast", "restore", "setMode live"]);
   });
 
   it("refuses with the message of walk before run(), also with a bookmark nothing would accept", async () => {

@@ -30,8 +30,34 @@ import type { Config, Deps, FlowCtx } from "../../types";
 // over the real loop, gate, fx and inbox, with a fake model store.
 // ---------------------------------------------------------------------------
 
-const tick = async (times = 60): Promise<void> => {
-  for (let index = 0; index < times; index += 1) await Promise.resolve();
+/**
+ * Lets the loop run until it waits for something from outside: a gate, a held stage, a body that
+ * awaits. A task comes only after every queued microtask and the ones those queue, so the number
+ * of `await` hops the loop needs between two waits does not matter.
+ */
+const idle = (): Promise<void> =>
+  new Promise<void>(resolve => {
+    setTimeout(resolve, 0);
+  });
+
+/** How often `waitUntil` looks. The loop needs one idle turn; the rest is slack. */
+const looks = 20;
+
+/**
+ * Waits until a condition holds. It looks only while the loop is idle, so what a test reads next
+ * is where the loop stopped, not a state it passed through.
+ *
+ * @param holds - The condition.
+ * @throws {Error} When the loop went idle again and again and the condition never held.
+ */
+const waitUntil = async (holds: () => boolean): Promise<void> => {
+  for (let look = 0; look < looks; look += 1) {
+    await idle();
+
+    if (holds()) return;
+  }
+
+  throw new Error(`The loop never got there: ${holds.toString()}`);
 };
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
@@ -338,8 +364,27 @@ const setup = (options: GraphOptions = {}) => {
     },
 
     /**
-     * Starts the loop and gives it the time to reach its first wait. A graph the loop refuses
-     * fails the test here, not later with an empty path.
+     * Tells whether the loop stands at a node, its gate open or shut.
+     *
+     * @param path - Path of the node.
+     * @returns True while the position is that node.
+     */
+    standsAt: (path: string): boolean => api.state().path === path,
+
+    /**
+     * Tells whether the loop waits for an answer at a node: a rest node, or a transit node whose
+     * popup asks.
+     *
+     * @param path - Path of the node.
+     * @returns True while the position is that node and the gate is open.
+     */
+    waitsAt: (path: string): boolean =>
+      api.state().path === path && ctx.state.gate.open !== undefined,
+
+    /**
+     * Starts the loop and lets it reach its first wait, which differs by graph: a gate, a held
+     * stage, a body that awaits. A graph the loop refuses fails the test here, not later with an
+     * empty path.
      */
     start: async (): Promise<void> => {
       const fatal: unknown[] = [];
@@ -347,7 +392,7 @@ const setup = (options: GraphOptions = {}) => {
       api.run().catch((error: unknown) => {
         fatal.push(error);
       });
-      await tick();
+      await idle();
 
       if (fatal.length > 0) throw fatal[0];
     }
@@ -383,7 +428,7 @@ describe("restore() into a transit node", () => {
     const restoring = harness.api.restore(harness.bookmarkAt("ask"));
     const restored = watch(restoring);
 
-    await tick();
+    await waitUntil(() => harness.standsAt("ask"));
 
     // The loop stands in the node already: the rest seam fired, but nothing waits for an answer yet.
     expect(harness.api.state()).toMatchObject({ path: "ask", pending: {} });
@@ -411,7 +456,7 @@ describe("restore() into a transit node", () => {
     expect(harness.shown[0]?.aborted).toBe(false);
 
     harness.modules.gate.answer({ intent: "ok" });
-    await tick();
+    await waitUntil(() => harness.waitsAt("home"));
 
     expect(harness.api.state()).toMatchObject({ path: "home", pending: { gate: homeIntents } });
     await stopRunner(harness.ctx);
@@ -422,7 +467,7 @@ describe("restore() into a transit node", () => {
 
     await harness.start();
     harness.modules.gate.answer({ intent: "open" });
-    await tick();
+    await waitUntil(() => harness.waitsAt("ask"));
 
     expect(harness.api.state()).toMatchObject({ path: "ask", pending: { gate: ["ok", "close"] } });
 
@@ -449,9 +494,9 @@ describe("restore() into a transit node", () => {
     // The old node is aborted but still in its `load` stage. Its body runs after the stage, with
     // no abort check between the two, so it can open the gate once: this is that notification.
     notifyGateOpen(harness.ctx.state.runner);
-    await tick();
+    await idle();
     releaseOld();
-    await tick();
+    await waitUntil(() => harness.standsAt("ask"));
 
     expect(harness.api.state().path).toBe("ask");
     expect(restored.settled).toBe(false);
@@ -470,10 +515,45 @@ describe("restore() into a transit node", () => {
     await harness.api.restore(harness.bookmarkAt("skip"));
 
     expect(harness.api.state().path).toBe("home");
-    await tick();
-    // The wait took its rest listener off; the gate listener left with the gate of `home`.
+    await waitUntil(() => harness.waitsAt("home"));
+    // The wait took both its listeners off, and the gate of `home` found nobody to wake.
     expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
     await stopRunner(harness.ctx);
+  });
+
+  it("leaves no gate listener behind when the wait ended at a rest node", async () => {
+    const harness = setup();
+
+    await harness.start();
+
+    // `home` is held in its stage: no gate opens after the rest point that ended the wait.
+    const release = harness.hold("home");
+
+    await harness.api.restore(harness.bookmarkAt("skip"));
+
+    expect(harness.api.state()).toMatchObject({ path: "home", pending: {} });
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+
+    release();
+    await stopRunner(harness.ctx);
+  });
+
+  it("leaves no gate listener behind when the wait ended with the loop", async () => {
+    const harness = setup();
+
+    await harness.start();
+
+    const restoring = harness.api.restore(harness.bookmarkAt("stuck"));
+
+    await waitUntil(() => harness.standsAt("stuck"));
+
+    // The wait listens for a gate, and `stuck` opens none.
+    expect(loopSeam(harness.ctx.state.runner).gateOpen).toHaveLength(1);
+
+    await stopRunner(harness.ctx);
+    await restoring;
+
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
   });
 
   it("resolves when the loop ends before the node opened a gate", async () => {
@@ -484,7 +564,7 @@ describe("restore() into a transit node", () => {
     const restoring = harness.api.restore(harness.bookmarkAt("stuck"));
     const restored = watch(restoring);
 
-    await tick();
+    await waitUntil(() => harness.standsAt("stuck"));
 
     expect(harness.api.state().path).toBe("stuck");
     expect(restored.settled).toBe(false);
@@ -520,7 +600,7 @@ describe("restore() into a rest node", () => {
     expect(harness.api.state()).toMatchObject({ path: "home", pending: {} });
 
     release();
-    await tick();
+    await waitUntil(() => harness.waitsAt("home"));
 
     expect(harness.api.state().pending).toEqual({ gate: homeIntents });
     await stopRunner(harness.ctx);
@@ -585,7 +665,7 @@ describe("restore() called while the edge before it still arrives", () => {
 
     // `skip` is a barrier node: its edge to `home` is committed and waits for the provider.
     harness.modules.gate.answer({ intent: "skip" });
-    await tick();
+    await waitUntil(() => harness.standsAt("skip"));
 
     expect(harness.api.state().path).toBe("skip");
 
@@ -607,13 +687,13 @@ describe("restore() called while the edge before it still arrives", () => {
     const releaseNode = harness.hold("ask");
 
     harness.modules.gate.answer({ intent: "skip" });
-    await tick();
+    await waitUntil(() => harness.standsAt("skip"));
 
     const restoring = harness.api.restore(harness.bookmarkAt("ask"));
     const restored = watch(restoring);
 
     releaseWrite();
-    await tick();
+    await waitUntil(() => harness.standsAt("ask"));
 
     // The edge arrived at `home`, then the loop took the bookmark: it stands in `ask`, gate shut.
     expect(harness.api.state()).toMatchObject({ path: "ask", pending: {} });
@@ -633,7 +713,7 @@ describe("bookmark() on the running loop", () => {
 
     await harness.start();
     harness.modules.gate.answer({ intent: "open" });
-    await tick();
+    await waitUntil(() => harness.waitsAt("ask"));
 
     expect(harness.api.bookmark()).toMatchObject({
       path: "ask",
@@ -680,7 +760,7 @@ describe("walk({ from }) with a transit bookmark", () => {
       from: harness.bookmarkAt("pass")
     });
 
-    await tick();
+    await waitUntil(() => loopSeam(harness.ctx.state.runner).substitutions.has("level"));
 
     // The restored node has reached no gate and no rest node, and the walk already armed its step.
     expect(harness.api.state().path).toBe("pass");
@@ -857,14 +937,14 @@ describe("a body that was aborted", () => {
     // The restore aborts `stuck` while it awaits. The loop stands in the stage of `home`.
     await harness.api.restore(harness.bookmarkAt("home"));
     body.resolve();
-    await tick();
+    await waitUntil(() => caught.length > 0);
 
     expect(caught).toEqual(["restore"]);
     expect(harness.ctx.state.gate.open).toBeUndefined();
     expect(harness.shown).toEqual([]);
 
     release();
-    await tick();
+    await waitUntil(() => harness.waitsAt("home"));
 
     // The gate `home` opens is its own: nothing was open under it.
     expect(harness.api.state()).toMatchObject({ path: "home", pending: { gate: homeIntents } });
@@ -890,9 +970,9 @@ describe("a body that was aborted", () => {
 
     await harness.start();
     await harness.api.restore(harness.bookmarkAt("home"));
-    await tick();
+    await waitUntil(() => harness.waitsAt("home"));
     body.resolve();
-    await tick();
+    await waitUntil(() => caught.length > 0);
 
     expect(caught).toEqual(["restore"]);
     expect(harness.modules.gate.state()).toEqual({
@@ -904,7 +984,10 @@ describe("a body that was aborted", () => {
   });
 
   it("leaves no unhandled rejection when it starts an effect it does not await", async () => {
-    const unhandled = vi.fn();
+    const reasons: unknown[] = [];
+    const record = (reason: unknown): void => {
+      reasons.push(reason);
+    };
     const body = Promise.withResolvers<void>();
     const harness = setup({
       start: "stuck",
@@ -916,22 +999,23 @@ describe("a body that was aborted", () => {
       }
     });
 
-    process.on("unhandledRejection", unhandled);
+    process.on("unhandledRejection", record);
 
     try {
       await harness.start();
       await harness.api.restore(harness.bookmarkAt("home"));
       body.resolve();
-      await tick();
+      // The body goes on, starts its effect and ends.
+      await idle();
       // The runtime reports a rejection nobody handled after the microtasks, in a task of its own.
-      await new Promise<void>(resolve => {
-        setTimeout(resolve, 0);
-      });
+      await idle();
     } finally {
-      process.off("unhandledRejection", unhandled);
+      process.off("unhandledRejection", record);
     }
 
-    expect(unhandled).not.toHaveBeenCalled();
+    // The listener hears the whole worker. This test owns one kind of rejection only: the effect
+    // its aborted body started, refused with the abort reason. Any other one is not its failure.
+    expect(reasons.filter(reason => reason === "restore")).toEqual([]);
     expect(harness.shown).toEqual([]);
     await stopRunner(harness.ctx);
   });
@@ -957,7 +1041,7 @@ describe("a body that was aborted", () => {
     await harness.start();
     await harness.api.restore(harness.bookmarkAt("home"));
     body.resolve();
-    await tick();
+    await waitUntil(() => caught.length > 0);
 
     expect(caught).toEqual(["restore"]);
     await stopRunner(harness.ctx);

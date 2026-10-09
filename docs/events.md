@@ -9,7 +9,7 @@ One event is global: `ui:hot-swap`, so `effects` and `assets` can hook it with n
 | `lifecycle:changed` | `lifecycle` | `{ reason: PauseReason; action: "push" \| "pop"; reasons: readonly PauseReason[]; paused: boolean; resumed: boolean }` | The pause stack really changed. `resumed` is true only on the change that emptied the stack |
 | `model:committed` | `model` | `{ roots: readonly Root[]; cause: "edge" \| "rollback" \| "restore" \| "load" }` | Committed state changed. `Root` is `"player" \| "session" \| "rng"` |
 | `flow:edge` | `flow` | `{ flow: string; node: string; outcome: string; payload: Json; next: string; patches: { doc: Patch[]; session: Patch[] }; index: number; now: number }` | After the commit of an edge |
-| `flow:rest` | `flow` | `{ path: string; checkpoint: boolean }` | The graph entered a rest node |
+| `flow:rest` | `flow` | `{ path: string; checkpoint: boolean }` | The graph entered a rest node. Also once when `flow.restore` enters the node of a bookmark, for a transit node too: `path` is then no rest node and `checkpoint` is false |
 | `flow:error` | `flow` | `{ path: string; error: unknown; rolledBackTo: string; retry: boolean }` | A node failed and the graph rolled back |
 | `world:reconciled` | `world` | counts per reconcile | Dev only, behind `reconciledEvent` |
 | `renderer:device-lost` | `renderer` | `{ kind, reason }` | The GPU device or context was lost; `lifecycle` is pushed |

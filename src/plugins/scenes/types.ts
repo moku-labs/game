@@ -268,7 +268,8 @@ export type ScenesApi = {
    * Names the scene the next node without its own `scene` mounts. A rest node reads it, and so
    * does a transit node in live mode; a transit node of a fast walk leaves it for the rest point.
    * The restore door calls it with the scene of a bookmark, so a bookmark at a popup comes back
-   * with the scene under it, also when the popup is a transit node that waits for its answer.
+   * with the scene under it, also when the popup is a transit node that waits for its answer:
+   * the scene of such a popup is mounted before `flow.restore` resolves.
    * An over node takes the expected scene only while nothing is mounted; it never switches a
    * mounted one.
    *
@@ -276,10 +277,10 @@ export type ScenesApi = {
    * @throws {Error} For an id no feature declared, also before `onStart` filled the registry.
    * @example
    * ```ts
-   * // A fresh page restores a bookmark taken at the Settings popup over Home.
+   * // A fresh page restores a bookmark taken at the Settings popup over Home, a transit node
+   * // that waits for its answer.
    * app.scenes.expect("home");
-   * await app.flow.restore(bookmark);
-   * await app.flow.walk([]); // the scene stage runs after restore resolves
+   * await app.flow.restore(bookmark); // resolves when the popup's gate is open
    * app.scenes.current(); // "home"
    * ```
    */

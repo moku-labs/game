@@ -32,8 +32,11 @@ async function restoreFrom(
   input: { bookmark?: Json | undefined; repro?: Json | undefined }
 ): Promise<FlowState> {
   const { bookmark, repro } = input;
+  const bookmarkOnly = bookmark !== undefined && repro === undefined;
+  const reproOnly = repro !== undefined && bookmark === undefined;
 
-  if (bookmark !== undefined && repro === undefined) {
+  // A bookmark: its scene is expected first, so the node the restore enters mounts it.
+  if (bookmarkOnly) {
     const read = readBookmark(bookmark);
 
     if (read.scene !== undefined) app.scenes?.expect(read.scene);
@@ -43,7 +46,8 @@ async function restoreFrom(
     return app.flow.state();
   }
 
-  if (repro !== undefined && bookmark === undefined) {
+  // A repro: its state at its checkpoint, then its route from there.
+  if (reproOnly) {
     const parsed = readRepro(repro);
 
     await app.flow.restore(reproBookmark(app, parsed));
@@ -51,6 +55,7 @@ async function restoreFrom(
     return app.flow.walk(parsed.route);
   }
 
+  // Both or neither: the door cannot tell which position was meant.
   throw new Error(
     "[game] game.restore takes a bookmark or a repro.\n  Pass exactly one of { bookmark } and { repro }."
   );

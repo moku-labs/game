@@ -4,11 +4,11 @@
  */
 import type { Json } from "../../model/types";
 import type { FlowCtx } from "../types";
-import { collectGraph, restorePosition, runLoop } from "./loop";
-import { describeGraph, findNode, framePath, graphHash } from "./registry";
+import { acceptBookmark } from "./bookmark";
+import { graphOf } from "./graph";
+import { restorePosition, runLoop } from "./loop";
+import { framePath, graphHash } from "./registry";
 import type {
-  AnyFlow,
-  AnyNode,
   Bookmark,
   EnterCallback,
   FlowGraph,
@@ -25,178 +25,6 @@ import { reachGateOrRest, walkRoute } from "./walk";
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
 const noPayload: Json = null;
-
-/** A bookmark that passed the check, and whether the node it names is a rest node. */
-type Accepted = { bookmark: Bookmark; rest: boolean };
-
-/**
- * Reads the main flow of the config.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param method - Name of the API method that needs it, for the message.
- * @returns The top-level flow.
- * @throws {Error} When no main flow was configured.
- */
-function mainFlow(ctx: FlowCtx, method: string): AnyFlow {
-  const main = ctx.config.mainFlow;
-
-  if (main === undefined) {
-    throw new Error(
-      `[game] flow.${method}() needs a main flow.\n  Pass it as pluginConfigs.flow.mainFlow.`
-    );
-  }
-
-  return main;
-}
-
-/**
- * Renders the whole graph as JSON. It reads the flows as data, so it works before `run()`.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @returns The graph.
- */
-function graphOf(ctx: FlowCtx, modules: Modules): FlowGraph {
-  return describeGraph(collectGraph(ctx, modules.features), modules.features);
-}
-
-/**
- * Names a checkpoint of the graph, for the message of a refused bookmark. Only a rest node is
- * one: a transit node that carries the flag is no place a restore may be sent to.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @returns The path of the first rest checkpoint, or the start of the main flow.
- */
-function someCheckpoint(ctx: FlowCtx, modules: Modules): string {
-  const main = mainFlow(ctx, "restore");
-
-  for (const flow of collectGraph(ctx, modules.features).values()) {
-    for (const [name, entry] of Object.entries(flow.nodes)) {
-      if (entry.kind === "node" && entry.rest && entry.checkpoint) {
-        return flow.id === main.id ? name : `${flow.id}/${name}`;
-      }
-    }
-  }
-
-  return main.start;
-}
-
-/**
- * Looks up the node at a path. A sub-flow and a slot are no nodes: nothing runs at them.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @param path - Path of a bookmark, or of its rest point.
- * @returns The node there, a rest node or a transit node, or `undefined` when the path names none.
- */
-function nodeAt(ctx: FlowCtx, modules: Modules, path: string): AnyNode | undefined {
-  const entry = findNode(mainFlow(ctx, "restore"), path, modules.features.contributions)?.entry;
-
-  return entry?.kind === "node" ? entry : undefined;
-}
-
-/**
- * Finds the node a bookmark names.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @param bookmark - The bookmark to enter.
- * @returns The node at the bookmark's path, a rest node or a transit node.
- * @throws {Error} When the path names no node of the graph.
- */
-function bookmarkNode(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): AnyNode {
-  const node = nodeAt(ctx, modules, bookmark.path);
-
-  if (node === undefined) {
-    throw new Error(
-      `[game] The bookmark "${bookmark.path}" is not a node of the graph.\n  Restore a rest node, for example the checkpoint "${someCheckpoint(ctx, modules)}".`
-    );
-  }
-
-  return node;
-}
-
-/**
- * Tells whether the graph is the one a bookmark was made for.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @param bookmark - The bookmark to compare with.
- * @returns True while the hash of `describe()` is the bookmark's.
- */
-function sameGraph(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): boolean {
-  return graphHash(graphOf(ctx, modules)) === bookmark.graph;
-}
-
-/**
- * Checks that a bookmark may be entered: a rest checkpoint always, any other node only while the
- * graph is the one the bookmark was made for. A transit node is never taken for a checkpoint,
- * whatever its flag says: it is a place inside a transition, not a place a save may stand on.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @param bookmark - The bookmark to enter.
- * @returns The node the bookmark names.
- * @throws {Error} When the path is no node, or the graph changed since the bookmark.
- */
-function checkBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): AnyNode {
-  const node = bookmarkNode(ctx, modules, bookmark);
-
-  if (node.rest && node.checkpoint) return node;
-  if (sameGraph(ctx, modules, bookmark)) return node;
-
-  throw new Error(
-    `[game] The bookmark "${bookmark.path}" was made for another graph.\n  Restore the checkpoint "${someCheckpoint(ctx, modules)}" instead.`
-  );
-}
-
-/**
- * Builds the bookmark of the rest point before a transit node, for a bookmark that carries `rest`
- * and was made for another graph. That is one whose path names a transit node while the hash
- * differs, and one whose path names no node any more: a renamed or removed node is a changed
- * graph too. Only the position changes: the state stays the bookmark's.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @param bookmark - The bookmark to enter.
- * @returns The bookmark to enter instead, or `undefined` when the bookmark stands for itself.
- */
-function restFallback(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): Bookmark | undefined {
-  const rest = bookmark.rest;
-
-  if (rest === undefined) return undefined;
-
-  const node = nodeAt(ctx, modules, bookmark.path);
-
-  // The node is still there, and it is a rest node or the graph is the bookmark's own.
-  if (node !== undefined && (node.rest || sameGraph(ctx, modules, bookmark))) return undefined;
-
-  return { ...bookmark, path: rest.path, input: rest.input };
-}
-
-/**
- * Decides what the loop enters for a bookmark: the bookmark itself, or the rest point before it
- * when the graph changed under a bookmark that has one. Either one passes the same check, so the
- * fallback is entered only when it is a checkpoint, and the log says that it was taken.
- *
- * @param ctx - Domain context of the flow plugin.
- * @param modules - Injected sibling APIs.
- * @param bookmark - The bookmark to enter.
- * @returns The bookmark the loop enters, and whether its node is a rest node.
- * @throws {Error} When neither the bookmark nor its rest point may be entered.
- */
-function acceptBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): Accepted {
-  const fallback = restFallback(ctx, modules, bookmark);
-  const entered = fallback ?? bookmark;
-  const node = checkBookmark(ctx, modules, entered);
-
-  if (fallback !== undefined) {
-    ctx.log.info("flow:restore-fell-back", { from: bookmark.path, to: fallback.path });
-  }
-
-  return { bookmark: entered, rest: node.rest };
-}
 
 /**
  * Tells whether a frame points at a rest node.
@@ -221,6 +49,17 @@ function resting(ctx: FlowCtx): boolean {
   const frame = ctx.state.runner.stack.at(-1);
 
   return frame === undefined || restsAt(ctx, frame);
+}
+
+/**
+ * Tells whether a transit node waits at the gate: an effect that takes answers is open inside
+ * it. A rest node with its own gate open rests, so it does not count.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @returns True while the gate is open and the position is no rest node.
+ */
+function waitsInTransit(ctx: FlowCtx): boolean {
+  return ctx.state.gate.open !== undefined && !resting(ctx);
 }
 
 /**
@@ -253,7 +92,9 @@ function restBefore(ctx: FlowCtx): Bookmark["rest"] {
  */
 function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
   const state = ctx.state.runner;
-  const waiting = ctx.state.gate.open !== undefined && !resting(ctx);
+
+  // The node to name: the transit node that waits at the gate, else the last rest point.
+  const waiting = waitsInTransit(ctx);
   const frames = waiting ? state.stack : (state.restFrame ?? state.stack);
 
   if (frames.length === 0) {
@@ -262,16 +103,18 @@ function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
     );
   }
 
+  // The state that existed there. A waiting node also gets the rest point before it.
   const snapshot = ctx.deps.model.store.snapshot();
   const rest = waiting ? restBefore(ctx) : undefined;
 
+  // The bookmark: plain data, ready for JSON.
   return {
     path: framePath(frames),
     input: frames.at(-1)?.input ?? noPayload,
     player: snapshot.player,
     session: snapshot.session,
     rng: { seed: snapshot.rng.seed, streams: { ...snapshot.rng.streams } },
-    graph: graphHash(graphOf(ctx, modules)),
+    graph: graphHash(graphOf(ctx, modules.features)),
     // `exactOptionalPropertyTypes`: a bookmark without a rest point has no key.
     ...(rest === undefined ? {} : { rest })
   };
@@ -289,6 +132,7 @@ function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
  * @returns A promise that resolves once the loop entered the node.
  */
 async function enterAccepted(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): Promise<void> {
+  // Not a plain `return`: this await is the turn in which the loop starts a rest node's stages.
   await restorePosition(ctx, modules, bookmark);
 }
 
@@ -398,7 +242,7 @@ export function createRunnerApi(ctx: FlowCtx, modules: Modules): RunnerApi {
 
     restore: (bookmark: Bookmark): Promise<void> => restoreBookmark(ctx, modules, bookmark),
 
-    describe: (): FlowGraph => graphOf(ctx, modules),
+    describe: (): FlowGraph => graphOf(ctx, modules.features),
 
     state: (): FlowState => readState(ctx),
 

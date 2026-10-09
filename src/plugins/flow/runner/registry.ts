@@ -165,6 +165,25 @@ export function findNode(
 }
 
 /**
+ * Tells whether an entry of a flow is a rest checkpoint: a rest node that carries the checkpoint
+ * flag, a place a save may stand on. A sub-flow and a slot are no nodes. A transit node is never
+ * one, whatever its flag says: it is a place inside a transition.
+ *
+ * @param entry - A node, a sub-flow or a slot of a flow.
+ * @returns True for a node with both `rest` and `checkpoint`.
+ * @example
+ * ```ts
+ * // `home` rests and is a checkpoint. `boot` is a transit node that carries the flag too.
+ * isRestCheckpoint(home); // true
+ * isRestCheckpoint(boot); // false
+ * isRestCheckpoint(boardFlow); // false: a sub-flow is no node
+ * ```
+ */
+export function isRestCheckpoint(entry: FlowEntry): boolean {
+  return entry.kind === "node" && entry.rest && entry.checkpoint;
+}
+
+/**
  * Renders an edge target as a string: a node name, `"exit:win"` or `"map:node"`.
  *
  * @param target - The target as the edge table holds it.

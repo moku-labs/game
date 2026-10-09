@@ -409,6 +409,33 @@ describe("walkRoute", () => {
     await stopping;
   });
 
+  it("leaves no gate listener behind when the loop ends before the step is reached", async () => {
+    const main = flow(
+      "main",
+      {
+        boot: node({ outcomes: ["done"], run: () => new Promise<Result>(() => undefined) }),
+        home: waiting("play")
+      },
+      "boot",
+      { boot: { done: "home" }, home: { play: "home" } }
+    );
+    const harness = setup(main);
+
+    harness.start();
+
+    const walking = walkRoute(harness.ctx, harness.modules, [{ at: "home", intent: "play" }]);
+
+    // The step listens for the gate of `home` from its first turn on, and `boot` never gets there.
+    expect(loopSeam(harness.ctx.state.runner).gateOpen).toHaveLength(1);
+
+    const stopping = stopRunner(harness.ctx);
+
+    await expect(walking).rejects.toThrow('[game] flow.walk() never reached "home".');
+    await stopping;
+
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+  });
+
   it("restores the bookmark of options.from before the first step", async () => {
     const main = flow("main", { home: waiting("play"), shop: waiting("buy") }, "home", {
       home: { play: "shop" },
@@ -652,6 +679,7 @@ describe("reachGateOrRest", () => {
     await done;
 
     expect(watch.seam.rest).toEqual([]);
+    expect(watch.seam.gateOpen).toEqual([]);
   });
 
   it.each([
@@ -669,5 +697,6 @@ describe("reachGateOrRest", () => {
 
     await expect(done).resolves.toBeUndefined();
     expect(watch.seam.rest).toEqual([]);
+    expect(watch.seam.gateOpen).toEqual([]);
   });
 });

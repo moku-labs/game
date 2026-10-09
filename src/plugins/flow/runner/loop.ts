@@ -9,7 +9,7 @@ import { noPayload } from "./loop-types";
 import { nodeInfo, nodeOutcome, runEnterCallbacks, stopped, waitForPointer } from "./node";
 import { describePlan, pickContribution } from "./plan";
 import { eventResult, framesOf, locateFrames } from "./position";
-import { findNode, framePath } from "./registry";
+import { findNode, framePath, isRestCheckpoint } from "./registry";
 import { loopSeam, notifyGateOpen, notifyRest, takeSubstitution } from "./seam";
 import type { AnyFlow, AnyNode, Bookmark, Modules, SlotNode } from "./types";
 
@@ -209,6 +209,7 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
   const state = ctx.state.runner;
   const location = findNode(requireMainFlow(ctx), bookmark.path, modules.features.contributions);
 
+  // Cleared before the guard: this turn takes the bookmark, also one the guard refuses.
   loopSeam(state).restoring = undefined;
 
   if (location === undefined) {
@@ -217,6 +218,7 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
     );
   }
 
+  // Replace the state, and mark the rest point: the provider gets the whole restored document.
   ctx.deps.model.store.restore({
     player: bookmark.player,
     session: bookmark.session,
@@ -224,16 +226,16 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
   });
   ctx.deps.model.store.markRest();
 
+  // Move the position to the node. Its frames are also what a failure retries from.
   state.stack = framesOf(location.trail, bookmark.input);
   state.slotAfter = undefined;
   state.restFrame = [...state.stack];
   state.failures = 0;
 
-  const entry = location.entry;
-
+  // Announce the node once. Only a rest node is announced as a checkpoint.
   ctx.emit("flow:rest", {
     path: bookmark.path,
-    checkpoint: entry.kind === "node" && entry.rest && entry.checkpoint
+    checkpoint: isRestCheckpoint(location.entry)
   });
   notifyRest(state, bookmark.path);
 }
@@ -370,6 +372,5 @@ export function restorePosition(
   return entered;
 }
 
-export { collectGraph } from "./graph";
 export { loopSeam } from "./seam";
 export { stopRunner } from "./stop";

@@ -63,8 +63,7 @@ Nothing else is public. A scene is switched by the graph, never by a call: the p
 ```ts
 // A fresh page restores a bookmark taken at the Settings popup over Home.
 app.scenes.expect("home");
-await app.flow.restore(bookmark);
-await app.flow.walk([]); // the scene stage runs after restore resolves
+await app.flow.restore(bookmark); // resolves when the popup's gate is open
 app.scenes.current(); // "home"
 ```
 

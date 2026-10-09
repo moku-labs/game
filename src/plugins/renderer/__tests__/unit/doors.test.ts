@@ -419,32 +419,37 @@ describe("game.capture", () => {
   it("answers the error of a refused restore at the next frame, and goes back", async () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const { app, flow, capture } = diffApp();
-    const unhandled = watchUnhandled();
+    const refused = new Error("[game] The bookmark was refused.");
+    const unhandled = watchUnhandled(refused);
 
-    // The bookmark of "shop" is refused after the gate was shut; home rests at once.
-    flow.restore = async (bookmark: Bookmark) => {
-      flow.restoredPaths.push(bookmark.path);
+    try {
+      // The bookmark of "shop" is refused after the gate was shut; home rests at once.
+      flow.restore = async (bookmark: Bookmark) => {
+        flow.restoredPaths.push(bookmark.path);
 
-      if (bookmark.path === "shop") {
-        flow.state = { ...flow.state, pending: {} };
+        if (bookmark.path === "shop") {
+          flow.state = { ...flow.state, pending: {} };
 
-        throw new Error("[game] The bookmark was refused.");
-      }
+          throw refused;
+        }
 
-      flow.state = { ...flow.state, path: bookmark.path, pending: { gate: ["play"] } };
-    };
+        flow.state = { ...flow.state, path: bookmark.path, pending: { gate: ["play"] } };
+      };
 
-    const outcome = run(app, captureCommand, { diff: bookmarkAt("shop") }).then(
-      () => "resolved",
-      (error: Error) => error.message
-    );
+      const outcome = run(app, captureCommand, { diff: bookmarkAt("shop") }).then(
+        () => "resolved",
+        (error: Error) => error.message
+      );
 
-    // The restore rejects while the command waits on a frame: nobody may leave it unhandled.
-    await task();
-    await drive(app, outcome);
+      // The restore rejects while the command waits on a frame: nobody may leave it unhandled.
+      await task();
+      await drive(app, outcome);
 
-    await expect(outcome).resolves.toBe("[game] The bookmark was refused.");
-    expect(unhandled.stop()).toEqual([]);
+      await expect(outcome).resolves.toBe("[game] The bookmark was refused.");
+      expect(unhandled.stop()).toEqual([]);
+    } finally {
+      unhandled.stop();
+    }
     expect(flow.restoredPaths).toEqual(["shop", "home"]);
     expect(capture).not.toHaveBeenCalled();
     expect(app.time.snapshot().frame).toBeLessThan(10);
@@ -482,34 +487,39 @@ describe("game.capture", () => {
   it("leaves no restore unhandled when a frame it waits on fails first", async () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const { app, flow } = diffApp();
-    const unhandled = watchUnhandled();
-    const broken = {
-      ...app,
-      time: {
-        ...app.time,
-        step: () => {
-          throw new Error("the frame failed");
+    const refused = new Error("[game] The bookmark was refused.");
+    const unhandled = watchUnhandled(refused);
+    try {
+      const broken = {
+        ...app,
+        time: {
+          ...app.time,
+          step: () => {
+            throw new Error("the frame failed");
+          }
         }
-      }
-    };
+      };
 
-    // The frame fails at once; the restore is refused one task later.
-    app.time.pause();
-    flow.restore = async (bookmark: Bookmark) => {
-      flow.restoredPaths.push(bookmark.path);
-      flow.state = { ...flow.state, pending: {} };
+      // The frame fails at once; the restore is refused one task later.
+      app.time.pause();
+      flow.restore = async (bookmark: Bookmark) => {
+        flow.restoredPaths.push(bookmark.path);
+        flow.state = { ...flow.state, pending: {} };
+        await task();
+
+        throw refused;
+      };
+
+      await expect(run(broken, captureCommand, { diff: bookmarkAt("shop") })).rejects.toThrow(
+        "the frame failed"
+      );
+      await task();
       await task();
 
-      throw new Error("[game] The bookmark was refused.");
-    };
-
-    await expect(run(broken, captureCommand, { diff: bookmarkAt("shop") })).rejects.toThrow(
-      "the frame failed"
-    );
-    await task();
-    await task();
-
-    expect(unhandled.stop()).toEqual([]);
+      expect(unhandled.stop()).toEqual([]);
+    } finally {
+      unhandled.stop();
+    }
     expect(flow.restoredPaths).toEqual(["shop", "home"]);
   });
 
@@ -727,19 +737,21 @@ async function task(): Promise<void> {
 }
 
 /**
- * Collects the promise rejections nobody handled, from now until `stop`.
+ * Collects the rejections with one error that nobody handled, from now until `stop`. The listener
+ * is process-wide, so a rejection another test of the worker left behind is not counted.
  *
- * @returns The stop function, which answers what was collected.
+ * @param own - The error the test rejects with.
+ * @returns The stop function, which answers the unhandled rejections with `own`.
  */
-function watchUnhandled(): { stop(): unknown[] } {
+function watchUnhandled(own: Error): { stop(): unknown[] } {
   const reasons: unknown[] = [];
   /**
-   * Keeps one unhandled rejection.
+   * Keeps one unhandled rejection of the test's own error.
    *
    * @param reason - What the promise rejected with.
    */
   const keep = (reason: unknown): void => {
-    reasons.push(reason);
+    if (reason === own) reasons.push(reason);
   };
 
   process.on("unhandledRejection", keep);

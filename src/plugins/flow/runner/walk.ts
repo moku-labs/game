@@ -38,6 +38,9 @@ type ResultStep = Extract<RouteStep, { result: unknown }>;
 /** What the walk watches while the loop moves between rest points. */
 type RestWatch = { next(): Promise<void>; off(): void };
 
+/** The wait for the next gate the loop opens, and the way to give it up. */
+type GateWatch = { promise: Promise<void>; off(): void };
+
 /** Whether the one loop is still running, and the promise of its end. */
 type EndWatch = { done: boolean; settled: Promise<void> };
 
@@ -153,27 +156,37 @@ function watchEnd(running: Promise<void>): EndWatch {
 }
 
 /**
- * Waits for the next gate the loop opens. The listener takes itself off when it fires, so a walk
- * that ended meanwhile leaves nothing behind.
+ * Watches for the next gate the loop opens. The listener leaves the seam when a gate wakes it. A
+ * wait that something else ended calls `off()`: the gate that would take the listener off may
+ * never come.
  *
  * @param seam - The seam of the running loop.
- * @returns A promise that resolves when the loop opens a gate.
+ * @returns The promise of the next open gate, and the way to stop watching.
  */
-function nextGateOpen(seam: LoopSeam): Promise<void> {
-  return new Promise<void>(resolve => {
-    /**
-     * Wakes the walk once the loop opened the gate.
-     */
-    const listener = (): void => {
-      const index = seam.gateOpen.indexOf(listener);
+function nextGateOpen(seam: LoopSeam): GateWatch {
+  const watch: { wake: (() => void) | undefined } = { wake: undefined };
+  /**
+   * Takes the listener off the seam. It may be gone already.
+   */
+  const off = (): void => {
+    const index = seam.gateOpen.indexOf(listener);
 
-      if (index !== -1) seam.gateOpen.splice(index, 1);
-
-      resolve();
-    };
-
-    seam.gateOpen.push(listener);
+    if (index !== -1) seam.gateOpen.splice(index, 1);
+  };
+  /**
+   * Wakes the waiting side once the loop opened a gate, and leaves.
+   */
+  function listener(): void {
+    off();
+    watch.wake?.();
+  }
+  const promise = new Promise<void>(resolve => {
+    watch.wake = resolve;
   });
+
+  seam.gateOpen.push(listener);
+
+  return { promise, off };
 }
 
 /**
@@ -189,7 +202,14 @@ async function reachGate(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise
   if (ctx.state.gate.open !== undefined) return;
   if (ended.done) return;
 
-  await Promise.race([nextGateOpen(seam), ended.settled]);
+  const opened = nextGateOpen(seam);
+
+  try {
+    await Promise.race([opened.promise, ended.settled]);
+  } finally {
+    // When the loop ended first, no gate comes to take the listener off.
+    opened.off();
+  }
 }
 
 /**
@@ -209,11 +229,14 @@ export async function reachGateOrRest(ctx: FlowCtx): Promise<void> {
   if (running === undefined || ctx.state.gate.open !== undefined) return;
 
   const seam = loopSeam(ctx.state.runner);
+  const opened = nextGateOpen(seam);
   const rested = watchRest(seam);
 
   try {
-    await Promise.race([nextGateOpen(seam), rested.next(), watchEnd(running).settled]);
+    await Promise.race([opened.promise, rested.next(), watchEnd(running).settled]);
   } finally {
+    // One of the three won. The other two must leave nothing on the seam.
+    opened.off();
     rested.off();
   }
 }
@@ -398,19 +421,23 @@ export async function walkRoute(
     );
   }
 
-  const transit = start?.transit ?? false;
+  // The bookmark is entered on one side of the switch: a rest node before it, a transit node after.
+  const entersBeforeSwitch = start !== undefined && !start.transit;
+  const entersAfterSwitch = start !== undefined && !entersBeforeSwitch;
 
-  if (start !== undefined && !transit) await start.restore(start.from);
+  if (entersBeforeSwitch) await start.restore(start.from);
 
+  // From here on the graph runs fast, until the route is played or a step rejects.
   const previous = ctx.state.fx.mode;
 
   modules.fx.setMode("fast");
 
   try {
-    if (start !== undefined && transit) await start.restore(start.from);
+    if (entersAfterSwitch) await start.restore(start.from);
 
     await playRoute(ctx, modules, route, running);
   } finally {
+    // The live play that follows gets the caller's mode back and no substitution left armed.
     loopSeam(ctx.state.runner).substitutions.clear();
     modules.fx.setMode(previous);
   }

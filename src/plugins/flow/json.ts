@@ -140,6 +140,21 @@ function invalidBookmark(): Error {
 }
 
 /**
+ * Tells whether a JSON value has the shape of a rest point: an object with a path and an input.
+ *
+ * @param value - The `rest` field of a bookmark.
+ * @returns True when `path` is a string and `input` is there.
+ * @example
+ * ```ts
+ * isRestPoint({ path: "home", input: null }); // true
+ * isRestPoint({ path: "home" }); // false: a rest point has an input, `null` when it is empty
+ * ```
+ */
+function isRestPoint(value: Json): value is { path: string; input: Json } {
+  return isRecord(value) && typeof value.path === "string" && value.input !== undefined;
+}
+
+/**
  * Reads the rest point of a bookmark taken at a transit node.
  *
  * @param value - The `rest` field of a bookmark.
@@ -151,9 +166,7 @@ function invalidBookmark(): Error {
  * ```
  */
 function readRest(value: Json): Bookmark["rest"] {
-  if (!isRecord(value) || typeof value.path !== "string" || value.input === undefined) {
-    return undefined;
-  }
+  if (!isRestPoint(value)) return undefined;
 
   return { path: value.path, input: value.input };
 }
@@ -169,13 +182,13 @@ function readRest(value: Json): Bookmark["rest"] {
  */
 function readBookmarkOptions(value: JsonRecord, bookmark: Bookmark): Bookmark {
   const { scene, rest } = value;
+  const sceneIsMalformed = scene !== undefined && typeof scene !== "string";
 
-  if (scene !== undefined) {
-    if (typeof scene !== "string") throw invalidBookmark();
+  // The scene the `game.bookmark` door added: a string when it is there.
+  if (sceneIsMalformed) throw invalidBookmark();
+  if (scene !== undefined) bookmark.scene = scene;
 
-    bookmark.scene = scene;
-  }
-
+  // The rest point before a transit node: a path and an input when it is there.
   if (rest !== undefined) {
     const point = readRest(rest);
 
