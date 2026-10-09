@@ -2,16 +2,26 @@
  * @file The `@moku-labs/game/cli` door, node and bun only: the `moku-game` bin and the editor's
  * seam. `runCli` runs one command line of `moku-game` (dev, build, native, keys, pack, visual,
  * help) in this process; `preparePage` writes a game's dev page into `<game>/.moku/` for a server the
- * caller starts itself, as the editor does. It imports no Pixi, and the root entry never imports
- * it. The code lives in `app/`; this file wires the real process into it.
+ * caller starts itself, as the editor does, and `watchKeys` keeps the game's `generated/` fresh
+ * while that page is open. It imports no Pixi, and the root entry never imports it. The code
+ * lives in `app/`; this file wires the real process into it.
  */
 import { watch } from "node:fs";
 import path from "node:path";
 import { createBrandConsole } from "@moku-labs/common/cli";
 import { type CliDeps, runCommand } from "./app/cli";
+import {
+  type KeysSeams,
+  type KeysUi,
+  type KeysWatcher,
+  type WatchKeysOptions,
+  watchKeysAt
+} from "./app/keys";
 import { runNative } from "./app/native";
-import { preparePageAt } from "./app/serve";
+import { loadGame, preparePageAt } from "./app/serve";
 import { compileStrings, exportStrings, importStrings, runCli as runAssets } from "./assets";
+
+export type { KeysWatcher, WatchKeysOptions } from "./app/keys";
 
 /**
  * What the dev page of `preparePage` is written with besides the game.
@@ -53,9 +63,26 @@ export type PreparedPage = {
 };
 
 /**
+ * The real seams of the keys watch: the asset scanner with the string tools, as `moku-game keys`
+ * runs it, `fs.watch`, and the console.
+ *
+ * @param ui - The console of the process.
+ * @returns The seams.
+ */
+function keysSeams(ui: KeysUi): KeysSeams {
+  return {
+    scan: (argv, scanUi) =>
+      runAssets(argv, { compile: compileStrings, exportStrings, importStrings }, scanUi),
+    watch,
+    ui
+  };
+}
+
+/**
  * The real process behind the command line: the branded console, the environment the bin
- * started with, Bun's spawn and resolver, the signals, `fs.watch`, the asset scanner with the
- * string tools, native, and the visual test runner, loaded only by `moku-game visual`.
+ * started with, Bun's spawn and resolver, the signals, `fs.watch`, the keys watch, the asset
+ * scanner with the string tools, native, and the visual test runner, loaded only by
+ * `moku-game visual`.
  *
  * @returns The seams of this process.
  */
@@ -90,6 +117,7 @@ function processDeps(): CliDeps {
 
       return watcher;
     },
+    watchKeys: (root, settings) => watchKeysAt(root, settings, keysSeams(ui)),
     assets: argv => runAssets(argv, { compile: compileStrings, exportStrings, importStrings }, ui),
     native: runNative,
     resolve: (specifier, from) => Bun.resolveSync(specifier, from),
@@ -120,8 +148,10 @@ export async function runCli(argv: readonly string[]): Promise<number> {
 /**
  * Writes a game's dev page into `<root>/.moku/` for a server the caller starts: `index.html`,
  * `dev.ts`, `main.ts` with the scenarios of `tests/scenarios/` (and, with agents, the agents and
- * the game's `.dev` modules), and `bunfig.toml` with the engine's hot plugin. It starts no server
- * and no watcher, and throws the `[game]` errors of `moku-game dev`.
+ * the game's `.dev` modules), and `bunfig.toml` with the engine's hot plugin. It also writes the
+ * first `assets-stamp.ts`, the empty one, when the game has none: `main.ts` imports it, and
+ * `watchKeys` rewrites it when an asset file changes. It starts no server and no watcher, and
+ * throws the `[game]` errors of `moku-game dev`.
  *
  * @param root - The game folder, relative to the cwd or absolute.
  * @param options - The agents, the preloads and the extra bundler plugins.
@@ -152,4 +182,39 @@ export async function preparePage(
     },
     (specifier, from) => Bun.resolveSync(specifier, from)
   );
+}
+
+/**
+ * Keeps `generated/` of a game fresh while its dev page is open, for a server the caller runs:
+ * the editor calls it next to `preparePage`, and raw `moku-game dev` runs the same watch itself.
+ * It watches the game folder, runs the scan of `moku-game keys` once and resolves after it. Then
+ * a save of an asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`) or of a
+ * `strings/<locale>.json` scans again, with the same flags, outputs and layers; an output that
+ * did not change is not rewritten. On the page a rewritten `generated/strings.<locale>.ts` hot
+ * swaps. An asset file that is new, gone or saved again rewrites `.moku/assets-stamp.ts`, which
+ * the page imports, so the page reloads and shows the new image or the new bytes of an old one. A
+ * failed scan goes to `onError` and the watch goes on, the first scan too. The layers of
+ * `config.ts` are read once: a changed layer needs a new `watchKeys`.
+ *
+ * @param root - The game folder, relative to the cwd or absolute.
+ * @param options - Where the message of a failed scan goes.
+ * @returns The running watch; `close()` stops it.
+ * @throws {Error} When the game has no `config.ts` or `index.ts`, or a config value is refused.
+ * @example
+ * ```ts
+ * // The editor bin, next to preparePage, started with --root games/timber:
+ * const { preparePage, watchKeys } = await import(Bun.resolveSync("@moku-labs/game/cli", root));
+ * await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] });
+ * const keys = await watchKeys("games/timber", { onError: message => log.warn(message) });
+ * // generated/ is fresh; a save of features/home/strings/en.json rewrites generated/strings.en.ts
+ * keys.close(); // when the editor closes the game
+ * ```
+ */
+export async function watchKeys(
+  root: string,
+  options: WatchKeysOptions = {}
+): Promise<KeysWatcher> {
+  const game = path.resolve(root);
+
+  return watchKeysAt(game, await loadGame(game), keysSeams(createBrandConsole()), options);
 }

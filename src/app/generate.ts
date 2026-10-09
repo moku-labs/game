@@ -1,14 +1,20 @@
 /**
  * @file The text of the files `moku-game` generates for a game: the page HTML, the dev and build
- * `main.ts`, the dev flag module and the dev bunfig. Pure text builders: no IO, no Bun. The dev
- * writes them into `<game>/.moku/`, the build hands them to `Bun.build` in memory. Every relative
- * import they write carries its `.ts` extension: an import between two in-memory files of
- * `Bun.build` resolves only with it.
+ * `main.ts`, the dev flag module, the assets stamp module and the dev bunfig. Pure text builders:
+ * no IO, no Bun. The dev writes them into `<game>/.moku/`, the build hands them to `Bun.build` in
+ * memory. Every relative import they write carries its `.ts` extension: an import between two
+ * in-memory files of `Bun.build` resolves only with it.
  */
 import type { ResolvedGameConfig, SystemName } from "./types";
 
 /** The first line of a generated file a person may open. */
 const WRITTEN = "// Written by moku-game dev. Do not edit.";
+
+/**
+ * The stamp module of a game, a file of `<game>/.moku/`. One per game: the dev page and the page
+ * of `moku-game visual` import the same one.
+ */
+export const ASSETS_STAMP = "assets-stamp.ts";
 
 /** A colour or a language tag: it lands in a `<style>` and in attributes, so nothing else passes. */
 const SAFE_VALUE = /^[#\w(),.%\s-]+$/;
@@ -307,10 +313,25 @@ function importLine(binding: string, specifier: string): string {
 }
 
 /**
- * The `main.ts` of the dev page: the dev flag first, then the page entry, the game, its config,
- * one import per scenario, and, with agents, one per `.dev` module and one per agent. It calls
- * `startPage` with the scenarios by file stem, the shell with the loaders of the named plugins
- * when the game needs it, the agents and the `.dev` modules.
+ * The path from a page under `.moku/` to `.moku/` itself, where the one stamp of a game lives.
+ *
+ * @param toRoot - The path from the page to the game folder.
+ * @returns `"./"` for the dev page in `.moku/`, `"../"` for the page in `.moku/visual/`.
+ * @example
+ * ```ts
+ * toStampFolder("../../"); // "../"
+ * ```
+ */
+function toStampFolder(toRoot: string): string {
+  return toRoot.slice("../".length) || "./";
+}
+
+/**
+ * The `main.ts` of the dev page: the dev flag first, then the assets stamp, the page entry, the
+ * game, its config, one import per scenario, and, with agents, one per `.dev` module and one per
+ * agent. It calls `startPage` with the scenarios by file stem, the shell with the loaders of the
+ * named plugins when the game needs it, the agents and the `.dev` modules. The stamp import makes
+ * the page reload when the keys watch writes a new stamp: an asset file changed.
  *
  * @param settings - The resolved `config.ts`.
  * @param sources - The scenario files, the `.dev` modules and the agents.
@@ -349,6 +370,7 @@ export function devMain(
   return [
     WRITTEN,
     'import "./dev.ts";',
+    `import "${toStampFolder(toRoot)}${ASSETS_STAMP}";`,
     ...pageImports(settings, toRoot),
     ...scenarios.map((file, index) =>
       importLine(`scenario${index}`, `${toRoot}tests/scenarios/${file}`)
@@ -395,6 +417,23 @@ export function buildMain(settings: ResolvedGameConfig): string {
  */
 export function devFlag(): string {
   return `${WRITTEN}\nglobalThis.__MOKU_GAME_DEV__ = true;\n`;
+}
+
+/**
+ * The `assets-stamp.ts` module the dev `main.ts` imports: one string that changes when an asset
+ * file of the game changes. The hot plugin takes it for a logic module, so a new stamp reloads the
+ * page, and the page shows the new bytes of an image whose key stayed the same. The page starts
+ * with the empty stamp; the keys watch writes the hash of the asset files.
+ *
+ * @param hash - The hash of the asset files, `""` before the first watch.
+ * @returns The text of `.moku/assets-stamp.ts`.
+ * @example
+ * ```ts
+ * assetsStamp(""); // '// Written by moku-game dev. Do not edit.\nexport default "";\n'
+ * ```
+ */
+export function assetsStamp(hash: string): string {
+  return `${WRITTEN}\nexport default ${JSON.stringify(hash)};\n`;
 }
 
 /**

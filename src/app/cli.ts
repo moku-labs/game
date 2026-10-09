@@ -2,9 +2,9 @@
  * @file The command line of `moku-game`: the arguments read per command with `node:util`
  * `parseArgs`, then one of `dev`, `build`, `native <verb>`, `keys`, `pack`, `visual` or `help`.
  * Every seam of the process (the console, the environment, spawning, signals, the watcher, the
- * asset scanner, native, Bun's resolver, the visual test runner) comes in as `deps`, so a test
- * runs a command with stubs. It returns the exit code and never exits itself. A plain function,
- * on no API.
+ * keys watch, the asset scanner, native, Bun's resolver, the visual test runner) comes in as
+ * `deps`, so a test runs a command with stubs. It returns the exit code and never exits itself. A
+ * plain function, on no API.
  */
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -12,6 +12,7 @@ import type { BrandConsole } from "@moku-labs/common/cli";
 import type { HTMLBundle } from "bun";
 import type { parseVisualArgv, runVisualTests } from "../visual";
 import { keysArguments, packArguments, runBuild } from "./build";
+import type { KeysWatcher } from "./keys";
 import type { NativeVerb, NativeVerbOptions, NativeWhere } from "./native";
 import { checkFiles, loadSettings, type ServeRun, serveChild, serveParent } from "./serve";
 import type { ResolvedGameConfig } from "./types";
@@ -79,6 +80,11 @@ export type CliDeps = {
   onSignal: (signal: Signal, handler: () => void) => () => void;
   /** Watches a folder; the listener gets the event name, `"rename"` for an added or removed file. */
   watch: (folder: string, listener: (event: string) => void) => Watcher;
+  /**
+   * Starts the keys watch of a checked game for raw `dev`: one scan before it resolves, then one
+   * per save of an asset or a strings file. `close()` stops it.
+   */
+  watchKeys: (root: string, settings: ResolvedGameConfig) => Promise<KeysWatcher>;
   /** Runs the asset scanner's command line with the string tools; answers its exit code. */
   assets: (argv: string[]) => Promise<number>;
   /** Runs one native verb through `@moku-labs/native`; answers whether it succeeded. */

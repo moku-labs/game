@@ -238,6 +238,7 @@ async function startAgents(
  * ```ts
  * // Written by moku-game dev. Do not edit.
  * import "./dev.ts";
+ * import "./assets-stamp.ts";
  * import { startPage } from "@moku-labs/game/app/page";
  * import { systemShellOf } from "@moku-labs/game/app/system";
  * import game from "../index.ts";

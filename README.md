@@ -134,7 +134,7 @@ app.model.store.snapshot().session; // { rolls: 2 }
 
 `bunx moku-game dev` serves it with hot reload on `http://localhost:3000/`. The full version, with a reset node and a vitest file, is in [docs/quick-start.md](./docs/quick-start.md). A bigger game, the merge game, lives in [moku-labs/demos](https://github.com/moku-labs/demos) with its tests.
 
-A game with a screen gets two more things from the package. The body font `fonts/font-body.*` (Pangolin, SIL OFL 1.1) is the default of the built-in text style `body` once copied into `features/ui/assets/`. `moku-game keys` writes the typed asset keys, the manifest and the strings. Both are in [docs/quick-start.md](./docs/quick-start.md#a-screen-the-body-font-and-the-asset-keys).
+A game with a screen gets two more things from the package. The body font `fonts/font-body.*` (Pangolin, SIL OFL 1.1) is the default of the built-in text style `body` once copied into `features/ui/assets/`. `moku-game keys` writes the typed asset keys, the manifest and the strings, and `moku-game dev` writes them again when an asset or a strings file is saved. Both are in [docs/quick-start.md](./docs/quick-start.md#a-screen-the-body-font-and-the-asset-keys).
 
 ## Game shell
 
@@ -160,7 +160,7 @@ The engine bin `moku-game` serves, builds and packs a game folder. A game writes
 
 | Command | Does |
 |---|---|
-| `moku-game dev [--port 3000] [--packed]` | Serves the game with hot reload. Prints the bound URL, also for `--port 0` |
+| `moku-game dev [--port 3000] [--packed]` | Serves the game with hot reload. Prints the bound URL, also for `--port 0`. On the raw files it runs the scan of `keys` at start and on a save of an asset or a strings file |
 | `moku-game build [--out dist/web]` | Packs the assets and builds the production page |
 | `moku-game native build <target> [--simulator]` | Builds the native app: `ios`, `macos`, `android` |
 | `moku-game native dev <target>` | Runs the native shell on the dev server |
@@ -245,7 +245,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | `@moku-labs/game/app` | anywhere | `defineGameApp`, `startMoment` and the types of `index.ts` and `config.ts`. See [The game shell](./docs/shell.md) |
 | `@moku-labs/game/app/page` | the browser | `startPage`, the page the generated `.moku/main.ts` calls |
 | `@moku-labs/game/app/system` | the browser, the native shell | The system shell over the optional peer `@moku-labs/system` |
-| `@moku-labs/game/cli` | Node and Bun | `runCli`, the bin `moku-game`; `preparePage`, the dev page for the editor |
+| `@moku-labs/game/cli` | Node and Bun | `runCli`, the bin `moku-game`; `preparePage`, the dev page for the editor; `watchKeys`, which keeps `generated/` fresh next to it |
 | `@moku-labs/game/testing` | anywhere | Headless and isolated games, the fake clock, the in-memory save |
 | `@moku-labs/game/visual` | Node and Bun | Visual tests: baselines of state, describe and pixels |
 | `@moku-labs/game/assets` | Node and Bun | Asset keys, the manifest, strings, the pack |

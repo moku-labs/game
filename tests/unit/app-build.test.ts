@@ -87,6 +87,7 @@ async function build(
     spawn: unused,
     onSignal: unused,
     watch: unused,
+    watchKeys: unused,
     assets: async scan => {
       seen.scans.push(scan);
       for (const [file, text] of Object.entries(pack)) {

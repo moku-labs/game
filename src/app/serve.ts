@@ -1,23 +1,17 @@
 /**
  * @file `moku-game dev`: the game folder read and checked, the dev page written into
- * `<game>/.moku/`, the parent that re-runs the bin under the generated bunfig, and the child that
- * serves the page with `Bun.serve`. The hot plugin comes from the engine the game resolves, so
- * the game writes no bunfig, no HTML and no dev file. Node and Bun only: the bin bundles it.
+ * `<game>/.moku/`, the parent that starts the keys watch and re-runs the bin under the generated
+ * bunfig, and the child that serves the page with `Bun.serve`. The hot plugin comes from the
+ * engine the game resolves, so the game writes no bunfig, no HTML and no dev file. Node and Bun
+ * only: the bin bundles it.
  */
-import {
-  type Dirent,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync
-} from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CliDeps, Signal, Watcher } from "./cli";
 import { resolveConfig } from "./config";
-import { bunfigText, devFlag, devMain, pageHtml } from "./generate";
+import { writeIfChanged } from "./files";
+import { ASSETS_STAMP, assetsStamp, bunfigText, devFlag, devMain, pageHtml } from "./generate";
 import type { GameConfig, ResolvedGameConfig } from "./types";
 
 /** What the dev page is written with besides the game. Every path is absolute. */
@@ -83,8 +77,8 @@ const STOPPING: readonly Signal[] = ["SIGINT", "SIGTERM"];
 const PARENT_CHECK_MS = 1000;
 
 /**
- * The dev manifest `moku-game keys` writes, relative to the game folder, next to
- * `generated/assets.ts`. The dev server answers `/manifest.json` with it.
+ * The dev manifest `moku-game keys` and the keys watch of `moku-game dev` write, relative to the
+ * game folder, next to `generated/assets.ts`. The dev server answers `/manifest.json` with it.
  */
 export const DEV_MANIFEST = "generated/manifest.json";
 
@@ -285,19 +279,6 @@ function devModulesOf(root: string, relative = ""): string[] {
 }
 
 /**
- * Writes a file only when its text changed, so a second run wakes no watcher.
- *
- * @param file - The absolute path.
- * @param text - The text.
- */
-function writeIfChanged(file: string, text: string): void {
-  if (existsSync(file) && readFileSync(file, "utf8") === text) return;
-
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, text);
-}
-
-/**
  * The text of the dev `main.ts` for the game as it is on disk now.
  *
  * @param root - The game folder.
@@ -323,7 +304,9 @@ function mainOf(
  * Writes the dev page of a checked game into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts`
  * and `bunfig.toml`. `moku-game visual` writes its own page into `.moku/visual/`, so the page of
  * `dev` or of the editor stays as it is; the links of the page reach the game from its depth.
- * Every text is made before the first write, so a refused value writes nothing.
+ * Every text is made before the first write, so a refused value writes nothing. A game without
+ * `.moku/assets-stamp.ts` gets the empty one, so the import of `main.ts` resolves with or without
+ * a keys watch; a stamp that is there is the watch's and stays.
  *
  * @param root - The game folder, absolute.
  * @param settings - The resolved config.
@@ -360,14 +343,18 @@ export function writePage(
     [bunfig, bunfigText({ hotPlugin: hotPluginOf(root, resolve), servePlugins, preload })]
   ];
 
+  const stamp = path.join(root, ".moku", ASSETS_STAMP);
+
   for (const [file, text] of texts) writeIfChanged(file, text);
+  if (!existsSync(stamp)) writeIfChanged(stamp, assetsStamp(""));
 
   return { html, bunfig };
 }
 
 /**
- * Reads and checks a game, then writes its dev page into `<game>/.moku/`. The editor's step and
- * the dev parent's step 3; it starts no server and no watcher.
+ * Reads and checks a game, then writes its dev page into `<game>/.moku/`, the first
+ * `assets-stamp.ts` with it. The editor's step and the dev parent's step 3; it starts no server
+ * and no watcher.
  *
  * @param root - The game folder, absolute.
  * @param options - The agents, the preloads and the extra plugins, absolute.
@@ -463,9 +450,12 @@ function devChildCommand(run: ServeRun, page: PageFiles, deps: CliDeps): string[
 }
 
 /**
- * The dev parent: checks the game, writes the page, re-runs the bin under the generated bunfig
- * with the game as its working directory, and watches the scenarios while the child runs. It
- * hands Ctrl+C and the other stop signals to the child and answers the child's exit code.
+ * The dev parent: checks the game, starts the keys watch on the raw files, writes the page,
+ * re-runs the bin under the generated bunfig with the game as its working directory, and watches
+ * the scenarios while the child runs. The first scan of the keys watch writes
+ * `generated/manifest.json` before the page is served, and a save of an asset or a strings file
+ * scans again; `--packed` serves the pack and watches no keys. It hands Ctrl+C and the other stop
+ * signals to the child and answers the child's exit code.
  *
  * @param run - The flags of the run.
  * @param deps - The process seams.
@@ -475,31 +465,34 @@ function devChildCommand(run: ServeRun, page: PageFiles, deps: CliDeps): string[
 export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number> {
   const settings = await loadGame(run.root);
   const hasPack = isFile(path.join(run.root, "dist", "assets", "manifest.json"));
-  const hasManifest = isFile(path.join(run.root, DEV_MANIFEST));
 
-  // A packed run serves the pack, so it needs one; a raw run only warns without the dev manifest.
+  // A packed run serves the pack, so it needs one.
   if (run.packed && !hasPack) {
     throw new Error(
       `[game] dev: no packed build in "${path.join(run.root, "dist", "assets")}".\n  Run "moku-game pack" first.`
     );
   }
 
-  if (!run.packed && !hasManifest) {
-    deps.ui.warn(`[game] dev: no ${DEV_MANIFEST} in "${run.root}".\n  Run "moku-game keys" first.`);
+  // Raw files only: generated/ is fresh before the page is written, and stays fresh on save.
+  const keys = run.packed ? undefined : await deps.watchKeys(run.root, settings);
+
+  try {
+    // The page is written before the child imports it, into a folder git should not see.
+    const page = writePage(run.root, settings, run, deps.resolve);
+
+    if (!ignoresMoku(run.root)) {
+      deps.ui.warn('[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.');
+    }
+
+    // The child serves the page from the game folder; the scenario watcher lives as long as it.
+    return await runChild(devChildCommand(run, page, deps), deps, {
+      cwd: run.root,
+      whileRunning: () => watchScenarios(run.root, settings, deps)
+    });
+  } finally {
+    // The keys watch closes with the child, and also when the page is refused or no child starts.
+    keys?.close();
   }
-
-  // The page is written before the child imports it, into a folder git should not see.
-  const page = writePage(run.root, settings, run, deps.resolve);
-
-  if (!ignoresMoku(run.root)) {
-    deps.ui.warn('[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.');
-  }
-
-  // The child serves the page from the game folder; the scenario watcher lives as long as it.
-  return runChild(devChildCommand(run, page, deps), deps, {
-    cwd: run.root,
-    whileRunning: () => watchScenarios(run.root, settings, deps)
-  });
 }
 
 /**
@@ -576,7 +569,8 @@ function safeDecode(pathname: string): string | undefined {
 }
 
 /**
- * Answers a request with a file, or a 404 for a missing or empty one.
+ * Answers a request with a file, or a 404 for a missing or empty one. A file is never cached:
+ * after a reload the page shows the new bytes of an edited image.
  *
  * @param file - The absolute path, or `undefined` for a refused path.
  * @returns The response.
@@ -585,15 +579,17 @@ function fileResponse(file: string | undefined): Response {
   const found = file === undefined ? undefined : statSync(file, { throwIfNoEntry: false });
   const isServable = file !== undefined && found?.isFile() === true && found.size > 0;
 
-  return isServable ? new Response(Bun.file(file)) : new Response("Not found", { status: 404 });
+  return isServable
+    ? new Response(Bun.file(file), { headers: { "Cache-Control": "no-store" } })
+    : new Response("Not found", { status: 404 });
 }
 
 /**
  * Starts the dev server on `127.0.0.1` only, never on every interface: the page on `/`, the
- * manifest on `/manifest.json`, and the files of the served folder as static files. The manifest
- * is the dev manifest `generated/manifest.json` of the game, or `manifest.json` of `dist/assets`
- * with `--packed`; its paths are relative to the served folder. The dev child and
- * `moku-game visual` serve the page with it.
+ * manifest on `/manifest.json`, and the files of the served folder as static files, each with
+ * `Cache-Control: no-store`. The manifest is the dev manifest `generated/manifest.json` of the
+ * game, or `manifest.json` of `dist/assets` with `--packed`; its paths are relative to the served
+ * folder. The dev child and `moku-game visual` serve the page with it.
  *
  * @param run - The flags of the run.
  * @param page - The page bundle the process imported.

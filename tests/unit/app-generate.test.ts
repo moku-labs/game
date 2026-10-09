@@ -1,11 +1,12 @@
 /**
  * @file The text builders of `moku-game dev` and `build`: the page HTML, the dev and build
- * `main.ts`, the dev flag module and the bunfig. Pure text in, text out.
+ * `main.ts`, the dev flag module, the assets stamp module and the bunfig. Pure text in, text out.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../../src/app/config";
 import {
+  assetsStamp,
   buildMain,
   bunfigText,
   devFlag,
@@ -166,6 +167,15 @@ describe("devMain", () => {
     expect(first).toBe('import "./dev.ts";');
   });
 
+  it("devMain imports the assets stamp right after the dev flag, from .moku/ at both depths", () => {
+    const sources = { scenarios: ["ready.ts"], devModules: [] };
+    const dev = devMain(plain, sources).split("\n");
+    const visual = devMain(plain, sources, "../../").split("\n");
+
+    expect(dev.slice(1, 3)).toEqual(['import "./dev.ts";', 'import "./assets-stamp.ts";']);
+    expect(visual.slice(1, 3)).toEqual(['import "./dev.ts";', 'import "../assets-stamp.ts";']);
+  });
+
   it("devMain writes .ts on every relative import", () => {
     const text = devMain(settingsWith({ system: ["back"] }), {
       scenarios: ["empty.ts", "full.ts"],
@@ -176,6 +186,7 @@ describe("devMain", () => {
 
     expect(relative).toEqual([
       "./dev.ts",
+      "./assets-stamp.ts",
       "../index.ts",
       "../config.ts",
       "../tests/scenarios/empty.ts",
@@ -197,6 +208,7 @@ describe("devMain", () => {
 
     expect(relativeImports(text)).toEqual([
       "./dev.ts",
+      "../assets-stamp.ts",
       "../../index.ts",
       "../../config.ts",
       "../../tests/scenarios/ready.ts",
@@ -224,6 +236,7 @@ describe("devMain", () => {
       [
         "// Written by moku-game dev. Do not edit.",
         'import "./dev.ts";',
+        'import "./assets-stamp.ts";',
         'import { startPage } from "@moku-labs/game/app/page";',
         'import game from "../index.ts";',
         'import config from "../config.ts";',
@@ -358,7 +371,7 @@ describe("devMain", () => {
 });
 
 describe("buildMain", () => {
-  it("buildMain has no dev flag, no scenarios, no agents and no /control or /inspect import", () => {
+  it("buildMain has no dev flag, no stamp, no scenarios, no agents and no /control or /inspect import", () => {
     const text = buildMain(settingsWith({ system: ["back"] }));
 
     expect(text).toBe(
@@ -378,6 +391,8 @@ describe("buildMain", () => {
       ].join("\n")
     );
     expect(text).not.toContain("dev.ts");
+    expect(text).not.toContain("assets-stamp");
+    expect(buildMain(plain)).not.toContain("assets-stamp");
     expect(text).not.toContain("scenario");
     expect(text).not.toContain("agent");
     expect(text).not.toMatch(/\/control|\/inspect/);
@@ -418,6 +433,15 @@ describe("devFlag", () => {
   it("devFlag sets the global and imports nothing", () => {
     expect(devFlag()).toBe(
       "// Written by moku-game dev. Do not edit.\nglobalThis.__MOKU_GAME_DEV__ = true;\n"
+    );
+  });
+});
+
+describe("assetsStamp", () => {
+  it("assetsStamp default-exports the hash and imports nothing", () => {
+    expect(assetsStamp("")).toBe('// Written by moku-game dev. Do not edit.\nexport default "";\n');
+    expect(assetsStamp("da39a3ee5e6b4b0d3255bfef95601890afd80709")).toBe(
+      '// Written by moku-game dev. Do not edit.\nexport default "da39a3ee5e6b4b0d3255bfef95601890afd80709";\n'
     );
   });
 });

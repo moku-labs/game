@@ -1,10 +1,12 @@
 /**
  * @file The command line of `moku-game` over stub seams: the flags of every command, the dev
- * parent (the written page, the re-run under the bunfig, the signals, the scenario watcher, the
- * advice), the dev child's server, `keys` and `pack` through the asset scanner, `native` through
- * `runNative`, the `--preload` re-run, and `runCli` with the real seams of this process.
+ * parent (the keys watch, the written page with its stamp, the re-run under the bunfig, the
+ * signals, the scenario watcher, the advice), the dev child's server, `keys` and `pack` through
+ * the asset scanner, `native` through `runNative`, the `--preload` re-run, and `runCli` with the
+ * real seams of this process.
  */
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,8 +20,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliDeps, Signal, SpawnOptions } from "../../src/app/cli";
 import { runCommand } from "../../src/app/cli";
+import { resolveConfig } from "../../src/app/config";
 import type { NativeVerb, NativeVerbOptions, NativeWhere } from "../../src/app/native";
-import { staticPath } from "../../src/app/serve";
+import { serveParent, staticPath, writePage } from "../../src/app/serve";
 import type { ResolvedGameConfig } from "../../src/app/types";
 import { runCli } from "../../src/cli";
 import { copyMiniGame, holdPort, removeCopies } from "../integration/app-helpers";
@@ -34,6 +37,7 @@ type Seen = {
   handlers: Map<Signal, (() => void)[]>;
   removed: Signal[];
   watches: { folder: string; listener: (event: string) => void; closed: boolean }[];
+  keys: { root: string; settings: ResolvedGameConfig; closed: boolean }[];
   scans: string[][];
   natives: {
     verb: NativeVerb;
@@ -115,6 +119,7 @@ function fakeDeps(
     handlers: new Map(),
     removed: [],
     watches: [],
+    keys: [],
     scans: [],
     natives: []
   };
@@ -147,6 +152,17 @@ function fakeDeps(
       return {
         close: () => {
           watched.closed = true;
+        }
+      };
+    },
+    watchKeys: async (root, settings) => {
+      const watching = { root, settings, closed: false };
+
+      seen.keys.push(watching);
+
+      return {
+        close: () => {
+          watching.closed = true;
         }
       };
     },
@@ -284,8 +300,134 @@ describe("moku-game dev, the parent", () => {
     });
     expect(read(root, ".moku/index.html")).toContain("<title>t</title>");
     expect(read(root, ".moku/dev.ts")).toContain("globalThis.__MOKU_GAME_DEV__ = true;");
-    expect(read(root, ".moku/main.ts")).toContain('import "./dev.ts";');
+    expect(read(root, ".moku/main.ts")).toContain(
+      'import "./dev.ts";\nimport "./assets-stamp.ts";\n'
+    );
     expect(read(root, ".moku/bunfig.toml")).toContain(`plugins = ["${HOT}"]`);
+  });
+
+  it("dev starts the keys watch after the game is read, before the page is written and the child starts", async () => {
+    const root = makeGame();
+    const { deps, seen } = fakeDeps(root);
+    const order: string[] = [];
+    const code = await runCommand(["dev"], {
+      ...deps,
+      watchKeys: async (given, settings) => {
+        // The watch takes a moment, as its first scan does.
+        await new Promise(resolve => setTimeout(resolve, 5));
+        order.push(
+          `keys: page ${existsSync(path.join(root, ".moku"))}, child ${seen.spawns.length}`
+        );
+
+        return deps.watchKeys(given, settings);
+      },
+      spawn: (command, options) => {
+        order.push(`child: keys closed ${seen.keys[0]?.closed}`);
+
+        return deps.spawn(command, options);
+      }
+    });
+
+    expect(code).toBe(0);
+    expect(order).toEqual(["keys: page false, child 0", "child: keys closed false"]);
+    expect(seen.keys.map(keys => [keys.root, keys.settings.page.title, keys.closed])).toEqual([
+      [root, "t", true]
+    ]);
+  });
+
+  it("dev keeps the keys watch open while the child runs and closes it when the child exits", async () => {
+    const root = makeGame();
+    const ended: { exit: (code: number) => void } = { exit: () => undefined };
+    const exited = new Promise<number>(resolve => {
+      ended.exit = resolve;
+    });
+    const { deps, seen } = fakeDeps(root, {}, exited);
+    const running = runCommand(["dev"], deps);
+
+    await waitFor(() => seen.spawns.length === 1);
+
+    expect(seen.keys.map(keys => keys.closed)).toEqual([false]);
+
+    ended.exit(0);
+
+    expect(await running).toBe(0);
+    expect(seen.keys.map(keys => keys.closed)).toEqual([true]);
+  });
+
+  it("dev closes the keys watch when the page is refused or the child does not start", async () => {
+    const refused = makeGame();
+    const unstarted = makeGame();
+    const page = await run(["dev"], refused, {
+      resolve: () => {
+        throw new Error('Cannot find package "@moku-labs/game"');
+      }
+    });
+    const child = await run(["dev"], unstarted, {
+      spawn: () => {
+        throw new Error("[game] spawn failed.");
+      }
+    });
+
+    expect([page.code, child.code]).toEqual([1, 1]);
+    expect(page.seen.keys.map(keys => keys.closed)).toEqual([true]);
+    expect(child.seen.keys.map(keys => keys.closed)).toEqual([true]);
+    expect(existsSync(path.join(refused, ".moku"))).toBe(false);
+  });
+
+  it("a --preload or --serve-plugin that is gone when the page is written closes the keys watch", async () => {
+    const root = makeGame();
+    const gone = path.join(root, "gone.ts");
+    const base = { root, port: 0, packed: false, preload: [], servePlugins: [] };
+    const preload = fakeDeps(root);
+    const plugin = fakeDeps(root);
+
+    await expect(serveParent({ ...base, preload: [gone] }, preload.deps)).rejects.toThrow(
+      `[game] moku-game: --preload "${gone}" is not a file.`
+    );
+    await expect(serveParent({ ...base, servePlugins: [gone] }, plugin.deps)).rejects.toThrow(
+      `[game] moku-game: --serve-plugin "${gone}" is not a file.`
+    );
+    expect(preload.seen.keys.map(keys => keys.closed)).toEqual([true]);
+    expect(plugin.seen.keys.map(keys => keys.closed)).toEqual([true]);
+    expect([...preload.seen.spawns, ...plugin.seen.spawns]).toEqual([]);
+  });
+
+  it("dev does not write the page or start the child when the keys watch is refused", async () => {
+    const root = makeGame();
+    const { code, seen } = await run(["dev"], root, {
+      watchKeys: () => Promise.reject(new Error("[game] keys: the game folder is gone."))
+    });
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual(["[game] keys: the game folder is gone."]);
+    expect(seen.spawns).toEqual([]);
+    expect(existsSync(path.join(root, ".moku"))).toBe(false);
+  });
+
+  it("dev writes the empty first stamp and keeps a stamp that is there", async () => {
+    const root = makeGame();
+    const stamp = path.join(root, ".moku", "assets-stamp.ts");
+
+    await run(["dev"], root);
+
+    expect(readFileSync(stamp, "utf8")).toBe(
+      '// Written by moku-game dev. Do not edit.\nexport default "";\n'
+    );
+
+    put(stamp, 'export default "the stamp of a keys watch";\n');
+    await run(["dev"], root);
+
+    expect(readFileSync(stamp, "utf8")).toBe('export default "the stamp of a keys watch";\n');
+  });
+
+  it("the page of visual in .moku/visual imports the same stamp from one folder up", () => {
+    const root = makeGame();
+
+    writePage(root, resolveConfig({ page: { title: "t" } }), {}, () => HOT, ".moku/visual");
+
+    expect(read(root, ".moku/visual/main.ts")).toContain('import "../assets-stamp.ts";');
+    expect(read(root, ".moku/assets-stamp.ts")).toContain('export default "";');
+    expect(existsSync(path.join(root, ".moku", "visual", "assets-stamp.ts"))).toBe(false);
   });
 
   it("dev takes --port 0", async () => {
@@ -403,16 +545,13 @@ describe("moku-game dev, the parent", () => {
     expect(seen.removed.toSorted()).toEqual(["SIGHUP", "SIGINT", "SIGTERM"]);
   });
 
-  it("dev warns when generated/manifest.json is missing and when .moku is not ignored", async () => {
-    const root = makeGame(
-      { ".gitignore": "node_modules\n", "manifest.json": '{ "version": 1, "bundles": {} }\n' },
-      ["generated/manifest.json"]
-    );
+  it("dev warns when .moku is not ignored, and no more without generated/manifest.json", async () => {
+    const root = makeGame({ ".gitignore": "node_modules\n" }, ["generated/manifest.json"]);
     const { code, seen } = await run(["dev"], root);
 
     expect(code).toBe(0);
+    expect(seen.keys).toHaveLength(1);
     expect(seen.warnings).toEqual([
-      `[game] dev: no generated/manifest.json in "${root}".\n  Run "moku-game keys" first.`,
       '[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.'
     ]);
   });
@@ -441,7 +580,7 @@ describe("moku-game dev, the parent", () => {
     ]);
   });
 
-  it("dev --packed refuses without a pack and passes --packed to the child with one", async () => {
+  it("dev --packed refuses without a pack, passes --packed to the child with one, and never watches the keys", async () => {
     const root = makeGame();
     const refused = await run(["dev", "--packed"], root);
 
@@ -456,6 +595,7 @@ describe("moku-game dev, the parent", () => {
 
     expect(packed.code).toBe(0);
     expect(packed.seen.spawns[0]?.command.slice(-3)).toEqual(["--port", "0", "--packed"]);
+    expect([...refused.seen.keys, ...packed.seen.keys]).toEqual([]);
   });
 
   it("a new scenario file rewrites main.ts with its key, and the watcher closes with the child", async () => {
@@ -500,7 +640,7 @@ describe("moku-game dev, the parent", () => {
 
   it("a second dev with the same game rewrites nothing", async () => {
     const root = makeGame();
-    const files = ["index.html", "dev.ts", "main.ts", "bunfig.toml"].map(file =>
+    const files = ["index.html", "dev.ts", "main.ts", "bunfig.toml", "assets-stamp.ts"].map(file =>
       path.join(root, ".moku", file)
     );
     const old = new Date("2020-01-01T00:00:00Z");
@@ -585,6 +725,28 @@ describe.skipIf(typeof Bun === "undefined")("moku-game dev, the child", () => {
     expect(await running).toBe(0);
     expect(seen.removed.toSorted()).toEqual(["SIGINT", "SIGTERM"]);
     await expect(fetch(url)).rejects.toThrow();
+  });
+
+  it("answers a file and the manifest with no-store, so a reload shows the new bytes of an image", async () => {
+    const root = makeGame({ "features/ui/assets/dot.png": "png" });
+    const { running, seen, url } = await startChild(root);
+    const first = await fetch(`${url}features/ui/assets/dot.png`);
+
+    expect(await first.text()).toBe("png");
+    expect(first.headers.get("cache-control")).toBe("no-store");
+    expect(first.headers.get("content-type")).toBe("image/png");
+
+    put(path.join(root, "features/ui/assets/dot.png"), "other bytes");
+
+    const second = await fetch(`${url}features/ui/assets/dot.png`);
+    const manifest = await fetch(`${url}manifest.json`);
+
+    expect(await second.text()).toBe("other bytes");
+    expect(manifest.headers.get("cache-control")).toBe("no-store");
+    expect(await statusOf(`${url}features/ui/assets/missing.png`)).toBe(404);
+
+    interrupt(seen);
+    expect(await running).toBe(0);
   });
 
   it("binds the server to 127.0.0.1, never to every interface", async () => {
