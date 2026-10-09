@@ -48,6 +48,8 @@ export function createAssetsState(): State {
     current: undefined,
     useCounter: 0,
     warned: emptySet(),
-    removers: []
+    removers: [],
+    stamps: undefined,
+    swapping: undefined
   };
 }

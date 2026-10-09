@@ -411,7 +411,7 @@ describe("moku-game dev, the parent", () => {
     await run(["dev"], root);
 
     expect(readFileSync(stamp, "utf8")).toBe(
-      '// Written by moku-game dev. Do not edit.\nexport default "";\n'
+      "// Written by moku-game dev. Do not edit.\nexport default {\n  files: {},\n  changed: []\n};\n"
     );
 
     put(stamp, 'export default "the stamp of a keys watch";\n');
@@ -426,7 +426,9 @@ describe("moku-game dev, the parent", () => {
     writePage(root, resolveConfig({ page: { title: "t" } }), {}, () => HOT, ".moku/visual");
 
     expect(read(root, ".moku/visual/main.ts")).toContain('import "../assets-stamp.ts";');
-    expect(read(root, ".moku/assets-stamp.ts")).toContain('export default "";');
+    expect(read(root, ".moku/assets-stamp.ts")).toContain(
+      "export default {\n  files: {},\n  changed: []\n};"
+    );
     expect(existsSync(path.join(root, ".moku", "visual", "assets-stamp.ts"))).toBe(false);
   });
 

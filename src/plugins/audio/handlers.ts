@@ -1,13 +1,14 @@
 /**
- * @file audio plugin — the four hooks. They are the whole of what drives this plugin: the player
- * sets the volumes, the graph sets the music, the OS sets the pause and the budget sets what is
- * still decoded.
+ * @file audio plugin — the five hooks. They are the whole of what drives this plugin: the player
+ * sets the volumes, the graph sets the music, the OS sets the pause, and the budget and a dev hot
+ * swap set what is still decoded.
  */
 import { setBusVolume } from "./api";
 import { applyAllGains, isBus } from "./graph";
 import { withDeps } from "./lifecycle";
 import { pauseMusic, playMusic, resumeMusic, trackMusic } from "./playback";
 import type {
+  AssetsReplaced,
   AudioCtx,
   BundleUnloaded,
   Bus,
@@ -15,6 +16,7 @@ import type {
   LifecycleChanged,
   ModelCommitted,
   SceneChanged,
+  State,
   Volumes
 } from "./types";
 import { installUnlock } from "./unlock";
@@ -79,18 +81,33 @@ function resumeAfterPause(ctx: AudioCtx): void {
 }
 
 /**
- * Creates the four hook handlers. Each one builds the domain context when it first fires, not
+ * Forgets the decoded buffer and the one warning of every key named. A key that is no sound is in
+ * neither, so it costs nothing. A source that is playing holds its own buffer and plays on.
+ *
+ * @param state - The plugin state.
+ * @param keys - Asset keys whose bytes left or changed.
+ */
+function evict(state: State, keys: readonly string[]): void {
+  for (const key of keys) {
+    state.decoded.delete(key);
+    state.warned.delete(key);
+  }
+}
+
+/**
+ * Creates the five hook handlers. Each one builds the domain context when it first fires, not
  * while this factory runs: the kernel registers hooks before it builds the plugin APIs, so
  * nothing is resolvable yet.
  *
  * @param ctx - Kernel context of the audio plugin.
- * @returns The four hooks of the plugin.
+ * @returns The five hooks of the plugin.
  */
 export function createHandlers(ctx: KernelSlice): {
   "model:committed": (payload: ModelCommitted) => void;
   "scenes:changed": (payload: SceneChanged) => void;
   "lifecycle:changed": (payload: LifecycleChanged) => void;
   "assets:bundle-unloaded": (payload: BundleUnloaded) => void;
+  "assets:replaced": (payload: AssetsReplaced) => void;
 } {
   let audio: AudioCtx | undefined;
 
@@ -158,12 +175,18 @@ export function createHandlers(ctx: KernelSlice): {
      * @param payload - The bundle that left and the keys it carried.
      */
     "assets:bundle-unloaded": (payload: BundleUnloaded): void => {
-      const state = domain().state;
+      evict(domain().state, payload.keys);
+    },
 
-      for (const key of payload.keys) {
-        state.decoded.delete(key);
-        state.warned.delete(key);
-      }
+    /**
+     * Drops the decoded sounds a dev hot swap replaced: `assets.audio(key)` already answers the
+     * new bytes, so the next play of a key decodes them. Nothing that is playing is stopped: a
+     * source keeps the buffer it started with and a streamed track keeps its Blob.
+     *
+     * @param payload - The bundle whose files were replaced and the keys with new bytes.
+     */
+    "assets:replaced": (payload: AssetsReplaced): void => {
+      evict(domain().state, payload.keys);
     }
   };
 }

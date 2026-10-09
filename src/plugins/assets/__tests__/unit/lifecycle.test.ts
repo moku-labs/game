@@ -302,3 +302,17 @@ describe("releaseAll when nothing was loaded", () => {
     expect(mock.ctx.state.bundleOfKey.size).toBe(0);
   });
 });
+
+describe("releaseAll after a dev hot swap", () => {
+  it("forgets the stamp it applied and the swap it ran", async () => {
+    const mock = createMockAssets({ manifest });
+
+    await mock.start();
+    mock.ctx.state.stamps = { "features/board/assets/cell.png": "100:1" };
+    mock.ctx.state.swapping = Promise.resolve();
+    releaseAll(mock.ctx.state);
+
+    expect(mock.ctx.state.stamps).toBeUndefined();
+    expect(mock.ctx.state.swapping).toBeUndefined();
+  });
+});

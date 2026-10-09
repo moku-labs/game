@@ -63,5 +63,10 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   `text-shadow`. Drawing order per run: shadow, outline copies, synthetic bold copies (a `<b>` run
   of a style with no `bold` font: 8 copies at `size / 20`, in the run colour), the glyphs. No
   stroke is handed to Pixi `BitmapText`: it draws nothing on an MSDF font. Headless nothing is built and no font is installed.
+- **Hot swap:** `assets:replaced` (dev builds only) installs a replaced font again and marks the
+  labels drawn with a replaced font or inline icon. The next frame builds each of them again from
+  the new textures, even when its string did not change. No other font is read and no other label
+  is written; a replaced font drops the layout cache once. A `.fnt` that cannot be read logs
+  `text:font-replace-failed` and reloads the page.
 - **Depends:** `time`, `flow`, `world`, `renderer`, `assets`, `i18n`, `clock`. Emits nothing; listens to
-  `assets:bundle-loaded`, `assets:bundle-unloaded` and `i18n:locale-changed`.
+  `assets:bundle-loaded`, `assets:bundle-unloaded`, `assets:replaced` and `i18n:locale-changed`.

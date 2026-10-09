@@ -63,10 +63,10 @@ function tick(): Promise<void> {
 }
 
 describe("createHandlers", () => {
-  it("declares the one hook the plugin listens to", () => {
+  it("declares the two hooks the plugin listens to", () => {
     const mock = createMockAssets({ manifest });
 
-    expect(Object.keys(createHandlers(mock.ctx))).toEqual(["flow:rest"]);
+    expect(Object.keys(createHandlers(mock.ctx))).toEqual(["flow:rest", "ui:hot-swap"]);
   });
 
   it("rebuilds the preload queue at a rest node", async () => {

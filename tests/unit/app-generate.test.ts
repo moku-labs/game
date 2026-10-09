@@ -2,7 +2,10 @@
  * @file The text builders of `moku-game dev` and `build`: the page HTML, the dev and build
  * `main.ts`, the dev flag module, the assets stamp module and the bunfig. Pure text in, text out.
  */
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../../src/app/config";
 import {
@@ -438,11 +441,70 @@ describe("devFlag", () => {
 });
 
 describe("assetsStamp", () => {
-  it("assetsStamp default-exports the hash and imports nothing", () => {
-    expect(assetsStamp("")).toBe('// Written by moku-game dev. Do not edit.\nexport default "";\n');
-    expect(assetsStamp("da39a3ee5e6b4b0d3255bfef95601890afd80709")).toBe(
-      '// Written by moku-game dev. Do not edit.\nexport default "da39a3ee5e6b4b0d3255bfef95601890afd80709";\n'
+  it("assetsStamp of no file is the empty stamp, and imports nothing", () => {
+    expect(assetsStamp([], [])).toBe(
+      "// Written by moku-game dev. Do not edit.\nexport default {\n  files: {},\n  changed: []\n};\n"
     );
+  });
+
+  it("assetsStamp writes one file with its stamp, and the changed paths", () => {
+    expect(assetsStamp([["features/ui/assets/fx-spark.webp", "2554:1791536552578"]], [])).toBe(
+      [
+        "// Written by moku-game dev. Do not edit.",
+        "export default {",
+        "  files: {",
+        '    "features/ui/assets/fx-spark.webp": "2554:1791536552578"',
+        "  },",
+        "  changed: []",
+        "};",
+        ""
+      ].join("\n")
+    );
+    expect(
+      assetsStamp(
+        [["features/ui/assets/fx-spark.webp", "2556:1791536552900"]],
+        ["features/ui/assets/fx-spark.webp"]
+      )
+    ).toContain('  changed: ["features/ui/assets/fx-spark.webp"]\n');
+  });
+
+  it("assetsStamp sorts the files and the changed paths", () => {
+    const text = assetsStamp(
+      [
+        ["features/ui/assets/fx-spark.webp", "2554:3"],
+        ["features/home/assets/popup.mp3", "900:2"],
+        ["features/ui/assets/font-body.fnt", "1810:1"]
+      ],
+      ["features/ui/assets/fx-spark.webp", "features/home/assets/popup.mp3"]
+    );
+
+    expect(text.split("\n").slice(2, 8)).toEqual([
+      "  files: {",
+      '    "features/home/assets/popup.mp3": "900:2",',
+      '    "features/ui/assets/font-body.fnt": "1810:1",',
+      '    "features/ui/assets/fx-spark.webp": "2554:3"',
+      "  },",
+      '  changed: ["features/home/assets/popup.mp3", "features/ui/assets/fx-spark.webp"]'
+    ]);
+  });
+
+  it("assetsStamp writes a path that needs escaping as a string the module reads back", async () => {
+    const odd = 'features/ui/assets/say "hi" \\ {button}\n.png';
+    const text = assetsStamp([[odd, "3:1"]], [odd]);
+    const folder = mkdtempSync(path.join(tmpdir(), "moku-game-stamp-"));
+    const file = path.join(folder, "assets-stamp.ts");
+
+    try {
+      writeFileSync(file, text);
+
+      const loaded = (await import(pathToFileURL(file).href)) as { default: unknown };
+
+      expect(text).toContain(`    ${JSON.stringify(odd)}: "3:1"\n`);
+      expect(text).toContain(`  changed: [${JSON.stringify(odd)}]\n`);
+      expect(loaded.default).toEqual({ files: { [odd]: "3:1" }, changed: [odd] });
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 });
 

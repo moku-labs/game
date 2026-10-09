@@ -360,7 +360,7 @@ http://127.0.0.1:3000/
 
 - **At start** it runs the scan of `keys` before the page is written: same flags, same outputs, same layers. So `generated/manifest.json` is there for the first request.
 - **On save** of an asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`) or of a `strings/<locale>.json` it scans again, 100 ms after the last file event. It prints one line: `› keys: features/home/strings/en.json`, or `› keys: features/ui/assets/dot.png and 2 more`. A save of any other file costs a walk of the folder, not a scan. An output that did not change is not rewritten.
-- **The page** follows the output, see [Hot swap](./hot-swap.md#what-swaps-and-what-reloads). A changed or new string swaps: `generated/strings.<locale>.ts` is a view module. An asset file that is new, gone or saved with new bytes reloads the page: the watch rewrites `.moku/assets-stamp.ts`, which `main.ts` imports.
+- **The page** follows the output, see [Hot swap](./hot-swap.md#what-swaps-and-what-reloads). A changed or new string swaps: `generated/strings.<locale>.ts` is a view module. An asset file saved with new bytes swaps, and a new or removed one reloads the page: the watch rewrites `.moku/assets-stamp.ts`, which `main.ts` imports. Its shape is under [watchKeys](#watchkeys).
 - **A failed scan** is one warning, `[game] keys: <the scanner's message>`, the first scan too. The server runs on, and the next save scans again.
 - **A changed layer in `config.ts` needs a restart.** The config is read once, at start.
 - `--packed` serves the pack and watches nothing. `visual` does not watch either: it still stops without `generated/manifest.json`.
@@ -436,6 +436,31 @@ keys.close(); // when the editor closes the game
 | `keys.close()` | Stops the watch. A running scan finishes; no later one starts. A second call does nothing |
 
 The layers of `config.ts` are read once. A changed layer needs a new `watchKeys`.
+
+#### The stamp module
+
+After a scan the watch writes `<game>/.moku/assets-stamp.ts` when an asset file changed. The page imports it, and the hot plugin hands its new default export to the running game. What the game does with it: [An asset file](./hot-swap.md#an-asset-file).
+
+```ts
+// <game>/.moku/assets-stamp.ts
+// Written by moku-game dev. Do not edit.
+export default {
+  files: {
+    "features/ui/assets/font-body.fnt": "1810:1791536000000",
+    "features/ui/assets/fx-spark.webp": "2554:1791536552578"
+  },
+  changed: ["features/ui/assets/fx-spark.webp"]
+};
+```
+
+| Field | What |
+|---|---|
+| `files` | Every watched asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`; no strings file), relative to the game with `/`, sorted. The value is `<size>:<mtimeMs>` |
+| `changed` | The paths whose value differs from the batch before, sorted. A new file is listed. A removed file is not: it is missing from `files`. Empty in the first stamp of a run |
+
+- The first scan of a run writes every file and an empty `changed`.
+- A save of a strings file alone leaves the stamp as it is.
+- `preparePage` writes the empty stamp, `{ files: {}, changed: [] }`, when the game has none.
 
 ## A game against the engine working tree
 

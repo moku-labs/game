@@ -191,8 +191,35 @@ describe("hot()", () => {
   it("anchors the view names and the kind folders in one default filter", () => {
     expect(register(hot()).filter.source).toBe(
       String.raw`(\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.[\w-]+\.ts|` +
-        String.raw`\/(?:styles|motion|effects|views)\/[^/]+\.ts|\/world\/(?:projections|layout)\/[^/]+\.ts)$`
+        String.raw`\/(?:styles|motion|effects|views)\/[^/]+\.ts|\/world\/(?:projections|layout)\/[^/]+\.ts|` +
+        String.raw`\/\.moku\/assets-stamp\.ts)$`
     );
+  });
+
+  it("matches the stamp module of the keys watch, and no other file of .moku/", () => {
+    const { filter } = register(hot());
+
+    expect(filter.test("/g/.moku/assets-stamp.ts")).toBe(true);
+
+    for (const file of [
+      "/g/.moku/main.ts",
+      "/g/.moku/dev.ts",
+      "/g/.moku/visual/main.ts",
+      "/g/.moku/visual/assets-stamp.ts",
+      "/g/features/home/assets-stamp.ts"
+    ]) {
+      expect(filter.test(file), file).toBe(false);
+    }
+  });
+
+  it("appends the footer to .moku/assets-stamp.ts: the default exclude does not take it", async () => {
+    const file = await writeTemp(".moku/assets-stamp.ts");
+    const loaded = await register(hot()).load({ path: file });
+
+    expect(loaded.loader).toBe("ts");
+    expect(loaded.contents.startsWith(SOURCE)).toBe(true);
+    expect(loaded.contents).toContain("  import.meta.hot.accept(next => {");
+    expect(loaded.contents).toContain(`swap(next, ${JSON.stringify(file)});`);
   });
 
   it("appends the footer to animations.ts, effects.ts and a generated strings file", async () => {

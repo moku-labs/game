@@ -50,9 +50,22 @@ A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effect
 | A new projection or a new animation | Reload and restore. A scene mounts a projection, a feature registers an animation |
 | A string value in `strings/<locale>.json` | Swap. The keys watch writes `generated/strings.<locale>.ts`, and `i18n.replace` takes it |
 | A new string key | Swap, the same way: the message is new in `generated/strings.<locale>.ts`. `generated/strings.ts` gets the key as a type only, and a type reloads nothing |
-| An asset file: new, removed, or saved with new bytes | Reload and restore. The keys watch writes `.moku/assets-stamp.ts`, which `main.ts` imports. The page fetches the manifest again, and the dev server answers files with `no-store`, so the new bytes show |
+| An asset file saved with new bytes: a texture, a bitmap font `.fnt` or its page, a sound | Swap. The keys watch writes `.moku/assets-stamp.ts`, and `assets` reads the changed files again. See [An asset file](#an-asset-file) |
+| An asset file that is new, removed or renamed, also a changed nine-slice tag in the file name | Reload and restore. The manifest the page booted with is not true any more. The page fetches it again, and the dev server answers files with `no-store` |
 
-Strings come from `features/*/strings/<locale>.json` and the `strings/` of every layer. The last three rows need the keys watch: `moku-game dev` on the raw files runs it, and the editor starts it with `watchKeys`. See [dev keeps generated/ fresh](./shell.md#dev-keeps-generated-fresh). A game with a server of its own runs `bun run assets:keys` after a JSON edit: it writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin `moku-game-assets` has no watch mode.
+Strings come from `features/*/strings/<locale>.json` and the `strings/` of every layer. The last four rows need the keys watch: `moku-game dev` on the raw files runs it, and the editor starts it with `watchKeys`. See [dev keeps generated/ fresh](./shell.md#dev-keeps-generated-fresh). A game with a server of its own runs `bun run assets:keys` after a JSON edit: it writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin `moku-game-assets` has no watch mode.
+
+### An asset file
+
+A save with new bytes travels in three steps. The keys watch writes `.moku/assets-stamp.ts`: `files` names every asset file with its size and time, `changed` the ones this save changed. `main.ts` imports that module and the hot plugin gives it the footer, so the page accepts it with no reload. `assets` hooks `ui:hot-swap`, reads the changed files of the loaded bundles again, stores each under its old key and emits `assets:replaced` `{ bundle, keys }`, once per bundle. `text`, `effects` and `audio` hook that event. The stamp itself is under [The stamp module](./shell.md#the-stamp-module).
+
+- **Dev on the raw files only.** `--packed` watches nothing, and a built game has no hot plugin.
+- **A bundle that is not loaded gets nothing.** Its next load reads the new bytes.
+- **A failed replace keeps the old asset.** A file that cannot be fetched or decoded is logged as `assets:replace-failed`. Its bundle keeps the old textures, fonts and bytes, and the page does not reload. The next good save of the file swaps. A `.fnt` that `text` cannot read still reloads: `text` logs `text:font-replace-failed`.
+- **A `.fnt` that starts naming another page file** is seen only when that page file is new, which reloads.
+- **A sound that is playing plays on** with the old bytes. The next play takes the new ones.
+- **A running particle effect of a replaced texture starts again**, so a burst plays again.
+- **An image outside every `assets/` folder**, such as a favicon or `features/home/outside.webp`, is ignored. A new file in the `assets/` of a feature or of a layer reloads the page, also the first file of a folder that had none.
 
 ## A refusal
 

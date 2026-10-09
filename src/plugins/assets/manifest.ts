@@ -18,6 +18,15 @@ import type {
 
 const TIERS: readonly string[] = ["boot", "core", "scene", "feature", "lazy"];
 
+/** The bytes of one megabyte. */
+const BYTES_PER_MB = 1_048_576;
+
+/** The bytes one pixel takes in GPU memory: RGBA, no mipmaps. */
+const BYTES_PER_PIXEL = 4;
+
+/** Megabytes are kept to three decimals: a value is rounded to a whole number of these parts. */
+const PARTS_PER_MB = 1000;
+
 /**
  * Creates an empty map. It lives in its own non-exported function because lint rule L5 refuses a
  * collection built inside an exported declaration.
@@ -374,6 +383,44 @@ export function resolveBaseUrl(
  */
 export function fileUrl(base: string, path: string): string {
   return `${base}${path.startsWith("/") ? path.slice(1) : path}`;
+}
+
+/**
+ * Works out what an image costs in texture memory: `width × height × 4` bytes as megabytes,
+ * rounded to 3 decimals. It is the number the scanner writes for a texture and for a font page;
+ * the dev hot swap writes it again for a file that came back with another size.
+ *
+ * @param width - Width of the image in pixels.
+ * @param height - Height of the image in pixels.
+ * @returns The megabytes.
+ * @example
+ * ```ts
+ * textureMb(256, 128); // 0.125
+ * ```
+ */
+export function textureMb(width: number, height: number): number {
+  return (
+    Math.round(((width * height * BYTES_PER_PIXEL) / BYTES_PER_MB) * PARTS_PER_MB) / PARTS_PER_MB
+  );
+}
+
+/**
+ * Adds up megabytes, rounded to 3 decimals: the pages of a font give the font, the files and the
+ * atlas pages of a bundle give the bundle.
+ *
+ * @param parts - The records to add up.
+ * @returns The sum.
+ * @example
+ * ```ts
+ * sumMb([{ mb: 0.125 }, { mb: 0.063 }, { mb: 0.021 }]); // 0.209
+ * ```
+ */
+export function sumMb(parts: readonly { mb: number }[]): number {
+  let total = 0;
+
+  for (const part of parts) total += part.mb;
+
+  return Math.round(total * PARTS_PER_MB) / PARTS_PER_MB;
 }
 
 /**

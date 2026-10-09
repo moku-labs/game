@@ -267,6 +267,22 @@ async function startGame(start: Start = {}): Promise<Game> {
 }
 
 /**
+ * Starts a watch on a game folder that is there, over fresh stub seams: a second run of the same
+ * game.
+ *
+ * @param root - The game folder.
+ * @returns The started watch and what its seams saw.
+ */
+async function startOn(root: string): Promise<Game> {
+  const stubs = stubSeams(false);
+  const keys = await watchKeysAt(root, SETTINGS, stubs.seams);
+
+  opened.push(keys);
+
+  return { root, keys, ...stubs };
+}
+
+/**
  * Fires one event of the root watcher.
  *
  * @param game - The started watch.
@@ -352,6 +368,42 @@ async function atRest(): Promise<void> {
  */
 function stampOf(root: string): string {
   return readFileSync(path.join(root, ".moku", "assets-stamp.ts"), "utf8");
+}
+
+/**
+ * Reads the default export of the stamp module of a game. The module text is an object literal
+ * with two plain keys; with them quoted it is JSON.
+ *
+ * @param root - The game folder.
+ * @returns The files and the changed paths the page would get.
+ */
+function stampsOf(root: string): { files: Record<string, string>; changed: string[] } {
+  const [header = "", ...rest] = stampOf(root).split("\n");
+  const body = rest.join("\n");
+
+  expect(header).toBe("// Written by moku-game dev. Do not edit.");
+  expect(body.startsWith("export default {\n  files: ")).toBe(true);
+  expect(body.endsWith("\n};\n")).toBe(true);
+
+  const json = body
+    .slice("export default ".length, -";\n".length)
+    .replace("\n  files: ", '\n  "files": ')
+    .replace("\n  changed: ", '\n  "changed": ');
+
+  return JSON.parse(json) as { files: Record<string, string>; changed: string[] };
+}
+
+/**
+ * The stamp the watch gives a file as it is on disk now.
+ *
+ * @param root - The game folder.
+ * @param file - The root-relative path.
+ * @returns `<size>:<mtimeMs>`.
+ */
+function inputStamp(root: string, file: string): string {
+  const stats = statSync(path.join(root, file));
+
+  return `${stats.size}:${stats.mtimeMs}`;
 }
 
 /**
@@ -504,8 +556,17 @@ describe("watchKeysAt, what starts a scan", () => {
 
     expect(game.seen.scans).toHaveLength(2);
     expect(stampOf(game.root)).not.toBe(before);
-    expect(stampOf(game.root)).toMatch(
-      /^\/\/ Written by moku-game dev\. Do not edit\.\nexport default "[0-9a-f]{40}";\n$/
+    expect(stampOf(game.root)).toBe(
+      [
+        "// Written by moku-game dev. Do not edit.",
+        "export default {",
+        "  files: {",
+        `    "${DOT}": "${inputStamp(game.root, DOT)}"`,
+        "  },",
+        `  changed: ["${DOT}"]`,
+        "};",
+        ""
+      ].join("\n")
     );
   });
 
@@ -623,7 +684,9 @@ describe("watchKeysAt, the stamp", () => {
   });
 
   it("replaces the empty first stamp of the page, and a stamp of other assets", async () => {
-    const root = makeGame({ ".moku/assets-stamp.ts": 'export default "";\n' });
+    const root = makeGame({
+      ".moku/assets-stamp.ts": "export default {\n  files: {},\n  changed: []\n};\n"
+    });
     const first = await watchKeysAt(root, SETTINGS, stubSeams(false).seams);
     const written = stampOf(root);
 
@@ -634,8 +697,139 @@ describe("watchKeysAt, the stamp", () => {
 
     second.close();
 
-    expect(written).toMatch(/export default "[0-9a-f]{40}";\n$/);
+    expect(written).toContain(`    "${DOT}": "3:`);
     expect(stampOf(root)).not.toBe(written);
+    expect(stampsOf(root).files[DOT]).toBe(inputStamp(root, DOT));
+  });
+
+  it("lists every asset file with its size and time stamp, sorted, and no strings file", async () => {
+    const game = await startGame({
+      files: {
+        "features/ui/assets/font-body.fnt": "fnt",
+        "features/home/assets/popup.mp3": "mp3 bytes",
+        "features/home/assets/LOUD.M4A": "m4a",
+        "art/spark.webp": "webp",
+        "features/home/notes.json": "{}\n"
+      }
+    });
+    const assets = [
+      "art/spark.webp",
+      "features/home/assets/LOUD.M4A",
+      "features/home/assets/popup.mp3",
+      DOT,
+      "features/ui/assets/font-body.fnt"
+    ];
+    const stamps = stampsOf(game.root);
+
+    expect(Object.keys(stamps.files)).toEqual(assets);
+    expect(stamps.files).toEqual(
+      Object.fromEntries(assets.map(file => [file, inputStamp(game.root, file)]))
+    );
+    expect(stamps.files["features/home/assets/popup.mp3"]).toMatch(/^9:\d+(?:\.\d+)?$/);
+  });
+
+  it("writes changed empty with the first scan of a run, also over a stamp that names a file", async () => {
+    const root = makeGame();
+    const first = await startOn(root);
+
+    expect(stampsOf(root).changed).toEqual([]);
+
+    put(root, DOT, "other bytes");
+    await batch(first);
+    first.keys.close();
+
+    expect(stampsOf(root).changed).toEqual([DOT]);
+
+    await startOn(root);
+
+    expect(stampsOf(root)).toEqual({ files: { [DOT]: inputStamp(root, DOT) }, changed: [] });
+  });
+
+  it("names a saved file in changed on the next batch, and only the files of that batch", async () => {
+    const other = "features/ui/assets/panel.png";
+    const game = await startGame({ files: { [other]: "panel" } });
+
+    put(game.root, DOT, "other bytes");
+    await batch(game);
+
+    expect(stampsOf(game.root)).toEqual({
+      files: { [DOT]: inputStamp(game.root, DOT), [other]: inputStamp(game.root, other) },
+      changed: [DOT]
+    });
+
+    // The same bytes at a later time are a save too.
+    stampAt(game.root, other, new Date(Date.now() + 5000));
+    await batch(game);
+
+    expect(stampsOf(game.root).changed).toEqual([other]);
+    expect(stampsOf(game.root).files[other]).toBe(inputStamp(game.root, other));
+  });
+
+  it("names a new file in changed, sorted with a saved one", async () => {
+    const added = "features/home/assets/added.webp";
+    const game = await startGame();
+
+    put(game.root, added, "webp");
+    put(game.root, DOT, "other bytes");
+    await batch(game);
+
+    expect(stampsOf(game.root)).toEqual({
+      files: { [added]: inputStamp(game.root, added), [DOT]: inputStamp(game.root, DOT) },
+      changed: [added, DOT]
+    });
+  });
+
+  it("shows a removed file only by its absence from files", async () => {
+    const other = "features/ui/assets/panel.png";
+    const game = await startGame({ files: { [other]: "panel" } });
+
+    rmSync(path.join(game.root, other));
+    await batch(game);
+
+    expect(stampsOf(game.root)).toEqual({
+      files: { [DOT]: inputStamp(game.root, DOT) },
+      changed: []
+    });
+  });
+
+  it("leaves a stamp that names a file when the next batch saved only a strings file", async () => {
+    const game = await startGame();
+    const stamp = path.join(game.root, ".moku", "assets-stamp.ts");
+    const old = new Date("2020-01-01T00:00:00Z");
+
+    put(game.root, DOT, "other bytes");
+    await batch(game);
+
+    const named = stampOf(game.root);
+
+    utimesSync(stamp, old, old);
+    put(game.root, RUSSIAN, '{ "home.note": "Привет" }\n');
+    await batch(game);
+
+    expect(game.seen.scans).toHaveLength(3);
+    expect(named).toContain(`  changed: ["${DOT}"]`);
+    expect(stampOf(game.root)).toBe(named);
+    expect(statSync(stamp).mtimeMs).toBe(old.getTime());
+  });
+
+  it("names an asset file and no strings file when one batch saved both", async () => {
+    const game = await startGame();
+
+    put(game.root, DOT, "other bytes");
+    put(game.root, RUSSIAN, '{ "home.note": "Привет" }\n');
+    await batch(game);
+
+    expect(stampsOf(game.root).changed).toEqual([DOT]);
+    expect(Object.keys(stampsOf(game.root).files)).toEqual([DOT]);
+  });
+
+  it("writes the stamp after a failed scan too", async () => {
+    const game = await startGame({ steps: { 1: fails("x") }, options: { onError: vi.fn() } });
+
+    put(game.root, DOT, "other bytes");
+    await batch(game);
+
+    expect(stampsOf(game.root).changed).toEqual([DOT]);
   });
 });
 

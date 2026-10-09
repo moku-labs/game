@@ -88,7 +88,7 @@ Why it is set at all: WebKit moves a page to the playback category the moment an
 
 ## Memory
 
-`assets.audio(key)` gives the undecoded bytes and their MIME type; this plugin decodes once per key with `decodeAudioData` and caches the promise, so two plays in flight decode a single time. `assets:bundle-unloaded` names its keys, and exactly those are evicted. A missing or undecodable key is one `ctx.log.warn` per key and the effect resolves: a broken sound never stops the graph. Sounds always decode; `music` picks how a music track plays.
+`assets.audio(key)` gives the undecoded bytes and their MIME type; this plugin decodes once per key with `decodeAudioData` and caches the promise, so two plays in flight decode a single time. `assets:bundle-unloaded` names its keys, and exactly those are evicted. `assets:replaced` (dev hot swap) evicts its keys the same way, so the next play of a swapped sound decodes the new bytes; a sound or a track that is playing is not stopped and keeps the old ones. A missing or undecodable key is one `ctx.log.warn` per key and the effect resolves: a broken sound never stops the graph. Sounds always decode; `music` picks how a music track plays.
 
 | | `music: "decode"` (default) | `music: "stream"` |
 |---|---|---|

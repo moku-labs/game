@@ -6,7 +6,9 @@ import {
   kindOf,
   nineOf,
   parseManifest,
-  resolveBaseUrl
+  resolveBaseUrl,
+  sumMb,
+  textureMb
 } from "../../manifest";
 import type { ManifestFile } from "../../types";
 
@@ -407,5 +409,31 @@ describe("parseManifest tolerates broken entries", () => {
 describe("resolveBaseUrl without a folder", () => {
   it("falls back to the root when the manifest URL has no slash", () => {
     expect(resolveBaseUrl(undefined, "manifest.json")).toBe("/");
+  });
+});
+
+describe("textureMb", () => {
+  it("is width × height × 4 bytes as megabytes, rounded to 3 decimals", () => {
+    expect(textureMb(256, 128)).toBe(0.125);
+    expect(textureMb(1024, 1536)).toBe(6);
+    // 65 536 bytes are 0.0625 MB: the scanner rounds that up, and so does the runtime.
+    expect(textureMb(128, 128)).toBe(0.063);
+    expect(textureMb(85, 96)).toBe(0.031);
+  });
+
+  it("is zero for an image with no pixels", () => {
+    expect(textureMb(0, 128)).toBe(0);
+  });
+});
+
+describe("sumMb", () => {
+  it("adds the megabytes of its parts, rounded to 3 decimals", () => {
+    expect(sumMb([{ mb: 0.125 }, { mb: 0.063 }, { mb: 0.021 }])).toBe(0.209);
+    // 0.1 + 0.2 is 0.30000000000000004 in floating point: the sum is rounded, not the parts.
+    expect(sumMb([{ mb: 0.1 }, { mb: 0.2 }])).toBe(0.3);
+  });
+
+  it("is zero for nothing", () => {
+    expect(sumMb([])).toBe(0);
   });
 });

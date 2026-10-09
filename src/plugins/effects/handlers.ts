@@ -1,12 +1,28 @@
 /**
- * @file effects plugin — the two hooks: a bundle that left takes the effects drawn with its
- * textures along, particles and `Displacement` maps alike, whatever their space; a dev hot swap
- * replaces the registered emitters its module exports.
+ * @file effects plugin — the three hooks: a bundle that left takes the effects drawn with its
+ * textures along, particles and `Displacement` maps alike, whatever their space; so do the files
+ * a dev hot swap replaced, whose effects are built again from the new textures; a dev hot swap of
+ * a module replaces the registered emitters it exports.
  */
 import { retireFilterMaps } from "./filters/system";
 import { isEmitterDefinition, withDeps } from "./lifecycle";
 import { retireParticleKeys } from "./particles/system";
-import type { BundleUnloaded, EffectsCtx, HotSwap, KernelSlice } from "./types";
+import type { AssetsReplaced, BundleUnloaded, EffectsCtx, HotSwap, KernelSlice } from "./types";
+
+/**
+ * Retires everything drawn with the textures of `keys`: the particle instances and their bakes,
+ * the `Displacement` filters, and the one-shot warning of each key, so it can warn again. The
+ * next frame builds each effect again from the texture its key answers then.
+ *
+ * @param effects - Domain context of the effects plugin.
+ * @param keys - The asset keys whose textures are gone.
+ */
+function retireKeys(effects: EffectsCtx, keys: readonly string[]): void {
+  retireParticleKeys(effects, keys);
+  retireFilterMaps(effects, keys);
+
+  for (const key of keys) effects.state.warned.delete(`texture:${key}`);
+}
 
 /**
  * Replaces every registered emitter the saved module exports and drops its bake, so the next
@@ -41,6 +57,7 @@ function replaceEmitters(ctx: KernelSlice, module: HotSwap["module"]): void {
  */
 export function createHandlers(ctx: KernelSlice): {
   "assets:bundle-unloaded": (payload: BundleUnloaded) => void;
+  "assets:replaced": (payload: AssetsReplaced) => void;
   "ui:hot-swap": (payload: HotSwap) => void;
 } {
   let effects: EffectsCtx | undefined;
@@ -54,10 +71,19 @@ export function createHandlers(ctx: KernelSlice): {
      */
     "assets:bundle-unloaded": (payload: BundleUnloaded): void => {
       effects ??= withDeps(ctx);
-      retireParticleKeys(effects, payload.keys);
-      retireFilterMaps(effects, payload.keys);
-
-      for (const key of payload.keys) effects.state.warned.delete(`texture:${key}`);
+      retireKeys(effects, payload.keys);
+    },
+    /**
+     * Retires the particle instances and the `Displacement` filters drawn with the textures a dev
+     * hot swap replaced and drops their bakes. The old textures are destroyed and the new ones
+     * stand under the same keys, so the next frame builds each effect again from the new one.
+     * Only dev emits it.
+     *
+     * @param payload - The bundle and the keys with new bytes.
+     */
+    "assets:replaced": (payload: AssetsReplaced): void => {
+      effects ??= withDeps(ctx);
+      retireKeys(effects, payload.keys);
     },
     /**
      * Replaces the registered emitters a dev hot swap brought. Only dev emits it.

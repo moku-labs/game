@@ -233,6 +233,52 @@ loading and not in the queue, with reason `"budget"`. When nothing may go it wri
 naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
 `page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
 
+## Dev hot swap
+
+Dev builds only. The hook body sits inside the inline dev guard, written as a positive branch
+(`typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__`): a production `define` folds it
+and `swap.ts`, `stamp.ts` and `paths.ts` leave the bundle. Bun 1.3.14 keeps code that follows a folded early `return`, so
+the guard is not written that way. The keys watch of `moku-game dev` writes `.moku/assets-stamp.ts`, whose default export is
+an `AssetStamps`: `files` maps every asset file of the game to its `size:mtimeMs`, `changed` lists
+the paths the last batch changed. `ui` forwards the module on the global `ui:hot-swap`, and
+`assets` hooks it with no `depends` on `ui`, as `effects` does. New bytes are swapped in place;
+a changed set of files reloads the page; a file that cannot be read keeps the old asset.
+
+```ts
+// .moku/assets-stamp.ts after a save of fx-spark.webp
+export default {
+  files: {
+    "features/ui/assets/font-body.fnt": "1810:1791536000000",
+    "features/ui/assets/fx-spark.webp": "2554:1791536552578"
+  },
+  changed: ["features/ui/assets/fx-spark.webp"]
+};
+```
+
+| Step | Rule |
+|---|---|
+| Which files | Every path whose stamp differs from the `files` map applied last (`state.stamps`). The first update after boot has no map, so `changed` stands. |
+| Reload instead | A path of the manifest (a file or a font page) that is not in `files`, or a changed path that the manifest does not know and that is a new asset: a new file, a removed file, a rename, a changed nine-slice tag. `ctx.log.info("assets:swap-refused", { reason })`, then `location.reload()`. Nothing is replaced. A hook cannot refuse by throwing: the core bus catches what a hook throws. |
+| A new asset | An unknown changed path is one when it lies under a folder the manifest names (the path cut after its `assets/` segment; a path with none gives its own folder), or where the scanner reads: `<layer>/assets/…` or `<features>/<feature>/assets/…`, so `assets` is its second or third segment. The first file of an `assets/` folder that had none reloads too. The page knows neither the layers nor the features folder, so any folder counts. |
+| Ignored | The watch stamps every image of the game tree. Any other unknown path is ignored, changed or not: a favicon at the root, `features/home/outside.webp`, an image of `web/`. |
+| Not loaded | Nothing happens: the next load fetches the new bytes, the dev server answers `no-store`. A bundle that is loading is swapped after its load settled. |
+| A texture | Fetched, decoded and uploaded through `io`, with the nine-slice of its manifest entry, and stored under the same key. Then the old texture is destroyed. |
+| A font | A changed `.fnt` or a changed page reads the whole font again, once. Then the old pages are destroyed. |
+| A sound | The bytes are fetched again and stored under the same key. |
+| The manifest | `width`, `height` and `mb` of a texture and of a font page come from the decoded image, the font `mb` from its pages, the bundle `mb` from its files and atlas pages. Then `enforceBudget` runs. |
+| After | `renderer.sync.textures.invalidate(keys)`, `time.wake()`, then `assets:replaced`: one event per bundle per swap. |
+| Unloaded on the way | A bundle that left while its files were fetched gets nothing: the new textures are destroyed and no event goes out. |
+| A failure | Every changed file of a bundle is loaded before one is stored. When a fetch, a decode or a parse fails, `ctx.log.error("assets:replace-failed", { path, reason })` is written and the bundle keeps its old textures, fonts and bytes: the new textures of that bundle are destroyed, nothing is stored, no `assets:replaced` goes out for it, and the page does not reload. `state.stamps` records the new stamp all the same, so the broken file is not read again until it is saved again; its next good save swaps. The other bundles of the same swap are still replaced. |
+| A replace that breaks | A throw after the files arrived (from a destroy, the views or the budget) leaves a state nobody knows: every file of that bundle is logged as `assets:replace-failed`, the page reloads and the swap stops. |
+| Order | One swap at a time (`state.swapping`): the swap of a second save starts when the first one settled. |
+
+The reload is one private function over `globalThis.location?.reload()`. `createHandlers(ctx,
+reload)` takes a replacement as its second argument: the kernel passes none, a test passes a spy.
+
+Limits: a `.fnt` that starts naming another page file is seen only when that page file is new,
+which reloads. The `mb` of a sound is not written again. There is no swap in `--packed` mode, in
+a built game and headless.
+
 ## Events
 
 | Event | Payload |
@@ -240,6 +286,7 @@ naming the five heaviest loaded entries, loose files and atlas pages together (a
 | `assets:bundle-progress` | `{ bundle, loaded, total }` |
 | `assets:bundle-loaded` | `{ bundle, tier, mb, reason: "boot" \| "enter" \| "request" \| "preload" }` |
 | `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request", keys }` |
+| `assets:replaced` | `{ bundle, keys }`, dev builds only |
 
 `assets:bundle-progress` is for the game: no engine plugin listens to it. A splash screen fills
 its loading bar from it.
@@ -259,6 +306,20 @@ createPlugin("loadingBar", {
 `keys` names every asset the bundle carried, so `text` drops the fonts it installed and `audio`
 drops the buffers it decoded, per key.
 
+`assets:replaced` comes after a dev hot swap replaced files of one loaded bundle. `keys` names
+the assets with new bytes: `texture(key)`, `font(key)` and `audio(key)` answer the new object, and
+the old textures are destroyed. A plugin that built something from one of those keys drops it and
+builds it again.
+
+```ts
+// The audio plugin drops the buffer it decoded from a sound a dev save replaced.
+hooks: ctx => ({
+  "assets:replaced": ({ keys }) => {
+    for (const key of keys) ctx.state.decoded.delete(key); // the next play decodes the new bytes
+  }
+}); // a save of features/ui/assets/click.mp3 sends { bundle: "ui", keys: ["ui.click"] }
+```
+
 `onStop` emits nothing: a teardown context has no `emit`.
 
 ## Headless
@@ -273,14 +334,17 @@ work.
 | File | What |
 |---|---|
 | `index.ts` | The `createPlugin` call and the default config. |
-| `types.ts` | Config, State, Events, `Api`, `AssetsIo`, the manifest types and the authoring types. |
+| `types.ts` | Config, State, Events, `Api`, `AssetsIo`, `AssetStamps`, the manifest types and the authoring types. |
 | `state.ts` | `createAssetsState`. |
 | `api.ts` | `createAssetsApi`, `lookupTexture` (the function the texture provider stands on) and the silent lookups behind `font` and `audio`. |
-| `handlers.ts` | The `flow:rest` hook. |
+| `handlers.ts` | The `flow:rest` hook and the dev `ui:hot-swap` hook. |
 | `lifecycle.ts` | `connectAssets` (onInit), `startAssets` (onStart), `releaseAll` (onStop), the enter callback and the `load` effect. |
 | `bundles.ts` | `defineBundles` and the `load` descriptor. |
-| `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`. |
-| `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`. |
+| `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, and the megabyte arithmetic `textureMb` and `sumMb`. |
+| `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`, and the loaders of one file: `loadImage`, `loadFont`, `loadSound`. |
+| `stamp.ts` | The stamp of the keys watch: the type guard `isAssetStamps`, `stampsOf` (the stamp out of a `ui:hot-swap`) and `changedPaths`. |
+| `paths.ts` | The paths of the manifest for the hot swap: `indexPaths`, `refusalOf` (why the page reloads instead) and `batchesOf` (the changed files by bundle). |
+| `swap.ts` | The replace itself: `createSwap` (the handler behind `ui:hot-swap`), one bundle after another. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
 | `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`, `releaseAssets` (slices, then pages, then font pages). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |
@@ -442,4 +506,7 @@ again every frame (`changes: "frame"`), because a bundle loads without a model c
 - `flowPlugin` — `onEnter("load")`, `fx.handle("load", …, { runInFast: true })`, `features.all()`,
   `describe()`, `state()`.
 - `rendererPlugin` — `sync.textures.provide / create / slice / destroy / invalidate`, `host.ready()`.
-- `timePlugin` — `wake()` when a load settles, so the idle frame cap lifts as the picture changes.
+- `timePlugin` — `wake()` when a load settles or a dev hot swap replaced files, so the idle frame
+  cap lifts as the picture changes.
+
+The global `ui:hot-swap` is hooked with no `depends` on `ui`.

@@ -50,6 +50,18 @@ const FILE = "/game/features/hud/view.tsx";
 /** The path of the strings module `assets:keys` writes for Russian. */
 const STRINGS_RU = "/game/generated/strings.ru.ts";
 
+/** The path of the stamp module the keys watch of `moku-game dev` writes. */
+const ASSETS_STAMP = "/game/.moku/assets-stamp.ts";
+
+/** The stamp after a save of one image, as the stamp module exports it by default. */
+const stamps = {
+  files: {
+    "features/ui/assets/font-body.fnt": "1810:1791536000000",
+    "features/ui/assets/fx-spark.webp": "2554:1791536552578"
+  },
+  changed: ["features/ui/assets/fx-spark.webp"]
+};
+
 /** The handler the footer calls. */
 type Swap = (next: unknown, file: string) => void;
 
@@ -449,6 +461,88 @@ describe("the swap: what it replaces", () => {
 
     expect(order).toEqual(order.toSorted((left, right) => left - right));
     expect(order).not.toContain(0);
+  });
+});
+
+describe("the swap: the stamp of the keys watch", () => {
+  it("forwards the stamp with its module, logs one line and repaints nothing", () => {
+    const parts = installed();
+
+    parts.swap({ default: stamps }, ASSETS_STAMP);
+
+    // `assets` takes the stamp from the event; the editor listens to the log line.
+    expect(parts.emit).toHaveBeenCalledExactlyOnceWith("ui:hot-swap", {
+      file: ASSETS_STAMP,
+      module: { default: stamps }
+    });
+    expect(parts.info).toHaveBeenCalledExactlyOnceWith("ui:hot-swap", summary(ASSETS_STAMP));
+    // An asset file is no view: no root renders again, no projection runs, no frame is asked for.
+    expect(parts.refreshAll).not.toHaveBeenCalled();
+    expect(parts.rerunAll).not.toHaveBeenCalled();
+    expect(parts.wake).not.toHaveBeenCalled();
+    expect(parts.replaceComponent).not.toHaveBeenCalled();
+    expect(parts.replace).not.toHaveBeenCalled();
+    expect(parts.replaceAnimation).not.toHaveBeenCalled();
+    expect(parts.replaceStrings).not.toHaveBeenCalled();
+    expect(parts.replaceStyles).not.toHaveBeenCalled();
+  });
+
+  it("hands the stamp on as it is: the same object, never sorted into a kind", () => {
+    const { swap, emit, replaceComponent, replaceAnimation } = installed();
+    // Exports that look like a component and an animation: in the stamp module nothing is sorted.
+    const next = { default: stamps, Settings, coinsFly };
+
+    swap(next, ASSETS_STAMP);
+
+    expect(emit.mock.calls[0]?.[1].module.default).toBe(stamps);
+    expect(emit.mock.calls[0]?.[1].module).toEqual(next);
+    expect(replaceComponent).not.toHaveBeenCalled();
+    expect(replaceAnimation).not.toHaveBeenCalled();
+  });
+
+  it("knows the stamp by a Windows path too", () => {
+    const { swap, emit, refreshAll } = installed();
+    const file = String.raw`C:\game\.moku\assets-stamp.ts`;
+
+    swap({ default: stamps }, file);
+
+    expect(emit).toHaveBeenCalledExactlyOnceWith("ui:hot-swap", {
+      file,
+      module: { default: stamps }
+    });
+    expect(refreshAll).not.toHaveBeenCalled();
+  });
+
+  it("forwards a stamp module with no exports: assets finds no stamp in it", () => {
+    const { swap, emit, info, refreshAll } = installed();
+
+    swap({}, ASSETS_STAMP);
+
+    expect(emit).toHaveBeenCalledExactlyOnceWith("ui:hot-swap", { file: ASSETS_STAMP, module: {} });
+    expect(info).toHaveBeenCalledExactlyOnceWith("ui:hot-swap", summary(ASSETS_STAMP));
+    expect(refreshAll).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stamp module that did not evaluate, so the page reloads", () => {
+    const { swap, info, emit } = installed();
+
+    expect(() => swap(undefined, ASSETS_STAMP)).toThrow(
+      refusal("the module did not evaluate", ASSETS_STAMP)
+    );
+    expect(info).toHaveBeenCalledExactlyOnceWith("ui:hot-refused", {
+      file: ASSETS_STAMP,
+      reason: "the module did not evaluate"
+    });
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("treats a module of that name outside .moku as any other module", () => {
+    const { swap, refreshAll, wake } = installed();
+
+    swap({ default: stamps }, "/game/features/hud/assets-stamp.ts");
+
+    expect(refreshAll).toHaveBeenCalledOnce();
+    expect(wake).toHaveBeenCalledOnce();
   });
 });
 

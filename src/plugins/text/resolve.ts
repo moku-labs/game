@@ -28,6 +28,9 @@ const CACHE_SEPARATOR = String.fromCodePoint(0);
 /** How many laid-out blocks are kept. The oldest goes when a new one does not fit. */
 const CACHE_LIMIT = 1024;
 
+/** How every inline icon tag starts. A resolved text without it holds no icon. */
+const ICON_OPEN = "<icon=";
+
 /** The name the system is registered under; it shows up in a world error message. */
 export const TEXT_SYSTEM_NAME = "text.resolve";
 
@@ -441,9 +444,42 @@ function rememberBound(
 }
 
 /**
+ * Writes the string a bound label already shows once more, and measures it again. A mark on a
+ * label whose number stands still means the picture under it moved: its font arrived or was
+ * replaced, or its style was swapped. The display adapter rebuilds only what `changed(Text)`
+ * names, so the same string is written.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param entity - The entity.
+ * @param text - Its component value.
+ */
+function showAgain(ctx: TextCtx, entity: Entity, text: Readonly<TextValue>): void {
+  ctx.deps.world.ecs.set(entity, Text, { resolved: text.resolved });
+  ctx.state.measured.set(entity, sizeOf(layoutFor(ctx, text.resolved, text.style)));
+}
+
+/**
+ * Reports a bound label whose style is not a digits style, once per style. An unknown style name
+ * is not reported here: `styleOf` reports it by its name.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param styleName - The style name of the bound label.
+ */
+function warnWithoutDigits(ctx: TextCtx, styleName: string): void {
+  const style = ctx.state.styles.get(styleName);
+
+  if (style === undefined || style.digits) return;
+
+  warnOnce(ctx, `bind-style:${styleName}`, "text: bind on a style without digits", {
+    style: styleName
+  });
+}
+
+/**
  * One frame of a bound label: the value read every frame, the string built and written only
  * when its unit moved. A label that stands still costs a read and a few compares; no tag is
- * parsed, and the locale is read only for a `"duration"`.
+ * parsed, and the locale is read only for a `"duration"`. A marked label that stands still is
+ * written once with the string it shows.
  *
  * @param ctx - Domain context of the text plugin.
  * @param entity - The entity.
@@ -458,22 +494,24 @@ function stepBound(
   bind: TextBind,
   frame: Frame
 ): void {
-  const style = ctx.state.styles.get(text.style);
+  warnWithoutDigits(ctx, text.style);
 
-  if (style !== undefined && !style.digits) {
-    warnOnce(ctx, `bind-style:${text.style}`, "text: bind on a style without digits", {
-      style: text.style
-    });
-  }
-
+  // The number of this frame, and the unit its string is built from.
   const value = boundValue(ctx, entity, bind, frame);
   const format = value === undefined ? "int" : formatOf(ctx, entity, bind, value);
   const unit = value === undefined ? undefined : unitOf(value, format);
 
-  ctx.state.dirty.delete(entity);
+  // The mark comes off here, whichever way the frame goes.
+  const marked = ctx.state.dirty.delete(entity);
 
-  if (isShown(ctx, entity, text, unit, format)) return;
+  // The unit stands still: no string is built. A label that was marked is written once as it is.
+  if (isShown(ctx, entity, text, unit, format)) {
+    if (marked) showAgain(ctx, entity, text);
 
+    return;
+  }
+
+  // The unit moved: build the string, write it with its size, and remember what it was built from.
   const next =
     value === undefined ? "" : formatBound(value, format, ms => ctx.deps.i18n.duration(ms));
 
@@ -573,18 +611,58 @@ export function createTextSystem(ctx: TextCtx): AnySystem {
 }
 
 /**
- * Marks labels for the next layout phase: every one of them, or only the ones whose content is a
- * message, which is what a locale change touches.
+ * Marks labels for the next layout phase: every one of them, or only the ones `keep` names. A
+ * locale change names the labels whose content is a message; a dev hot swap names the labels
+ * drawn with a replaced font or icon.
  *
  * @param ctx - Domain context of the text plugin.
- * @param onlyMessages - True to leave the plain strings alone.
+ * @param keep - Tells whether a label is marked. Left out, every label is.
+ * @returns How many labels were marked.
  */
-export function markDirty(ctx: TextCtx, onlyMessages = false): void {
+export function markDirty(
+  ctx: TextCtx,
+  keep: (text: Readonly<TextValue>) => boolean = () => true
+): number {
+  let marked = 0;
+
   for (const [entity, text] of ctx.deps.world.ecs.query(Text)) {
-    if (onlyMessages && typeof text.content === "string") continue;
+    if (!keep(text)) continue;
 
     ctx.state.dirty.add(entity);
+    marked += 1;
   }
+
+  return marked;
+}
+
+/**
+ * Tells whether a label is drawn with one of the asset keys: a font its style names, or an inline
+ * icon of its resolved text. The text is read through the tag grammar, the way it is drawn, so an
+ * escaped `\<icon=…>` is text and not an icon. A text that holds no `<icon=` at all is not read:
+ * most labels have no icon, and this runs for every label of a swap.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param text - The component value of the label.
+ * @param keys - The asset keys to look for.
+ * @returns True when a glyph font or an icon of the label is one of `keys`.
+ */
+export function drawsWith(
+  ctx: TextCtx,
+  text: Readonly<TextValue>,
+  keys: readonly string[]
+): boolean {
+  const style = styleOf(ctx, text.style);
+  const fonts = [style.font, style.bold, style.italic];
+
+  if (fonts.some(font => font !== undefined && keys.includes(font))) return true;
+
+  // Every icon tag holds these characters, so the guard hides no icon. An escaped `\<icon=…>`
+  // holds them too and goes on to the grammar, which reads it as text.
+  if (!text.resolved.includes(ICON_OPEN)) return false;
+
+  return parseTags(text.resolved, warnFor(ctx)).some(
+    run => run.kind === "icon" && keys.includes(run.key)
+  );
 }
 
 /**
