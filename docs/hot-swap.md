@@ -31,6 +31,8 @@ plugins = ["@moku-labs/game/hot"]
 
 The plugin appends a short footer to every view module it loads. The footer accepts the module's own update and hands the new exports to `ui`. Game code never writes `import.meta.hot`.
 
+A view module may import the root `@moku-labs/game`. The package marks only its root entry as having side effects: under `"sideEffects": false` Bun's dev server sends the root again with every hot update, and the page reloads. With the engine working tree (`scripts/tree`) a save of a module that imports the root still reloads the page, a known limit.
+
 ## What swaps and what reloads
 
 A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts` or a generated `generated/strings.<locale>.ts`. On the layered layout it is also any `.ts` directly in a kind folder: `styles/`, `motion/`, `effects/`, `views/`, `world/projections/` and `world/layout/`, in a feature or in `shared/`. A file one folder deeper, such as `views/deep/x.ts`, is not. Anything under `node_modules/`, `web/`, `generated/`, `__tests__/` or `tests/`, and `.test` or `.spec` files, never swap. The generated strings files are the one exception in `generated/`.

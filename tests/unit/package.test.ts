@@ -13,6 +13,8 @@ import { sources } from "../../src/plugins/flow/doors/sources";
 interface PackageJson {
   /** The paths npm packs. */
   files: string[];
+  /** The files a bundler may not drop when nothing of them is used. */
+  sideEffects: string[];
   /** The command names a game gets on its PATH, mapped to their scripts. */
   bin: Record<string, string>;
   /** The subpath exports. */
@@ -121,6 +123,20 @@ describe("package.json", () => {
 
   it("exports the fonts folder by subpath", () => {
     expect(pkg.exports["./fonts/*"]).toBe("./fonts/*");
+  });
+
+  // Under `"sideEffects": false` Bun's barrel optimization parses the re-export-only root again in
+  // every incremental bundle, so the root would be re-sent in every hot update and reload the page.
+  it("sideEffects lists the root entry and no other export", () => {
+    const listed = Object.entries(pkg.exports)
+      .map(([subpath, target]) => ({
+        subpath,
+        file: typeof target === "string" ? target : target.default
+      }))
+      .filter(({ file }) => pkg.sideEffects.includes(file));
+
+    expect(pkg.sideEffects).toEqual(["./dist/index.mjs"]);
+    expect(listed).toEqual([{ subpath: ".", file: "./dist/index.mjs" }]);
   });
 });
 
