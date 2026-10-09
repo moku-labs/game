@@ -29,8 +29,11 @@ import type {
 /** The module the keys watch writes, as the hot footer reports its path. */
 const STAMP_FILE = "/.moku/assets-stamp.ts";
 
-/** The folder of a feature or of a layer the scanner reads. */
-const ASSETS_FOLDER = "/assets/";
+/** The name of the folder of a feature or of a layer the scanner reads. */
+const ASSETS = "assets";
+
+/** That folder inside a path. */
+const ASSETS_FOLDER = `/${ASSETS}/`;
 
 /** What a refused or a failed swap calls: the page reload, or the spy of a test. */
 type Reload = () => void;
@@ -166,6 +169,31 @@ function folderOf(path: string): string {
 }
 
 /**
+ * Tells whether the scanner would read a path, by its shape alone. It mirrors `scanOwner` of
+ * `scan/scan.ts`, which runtime code does not import: the scanner reads `<layer>/assets/` and
+ * `<features>/<feature>/assets/` under the game root, so `assets` is the second or the third
+ * segment and a file follows it. The page knows neither the layers nor the name of the features
+ * folder, so any folder counts as one. This is what finds the first file of an `assets/` folder
+ * the booted manifest names nowhere.
+ *
+ * @param path - A path of the game, root-relative with `/`.
+ * @returns True for a path under the `assets/` of a layer or of a feature.
+ * @example
+ * ```ts
+ * isScannerPath("features/shop/assets/coin.png"); // true: a feature
+ * isScannerPath("shared/assets/button/primary.png"); // true: a layer
+ * isScannerPath("features/home/outside.webp"); // false
+ * ```
+ */
+function isScannerPath(path: string): boolean {
+  const segments = path.split("/");
+  const inLayer = segments[1] === ASSETS && segments.length > 2;
+  const inFeature = segments[2] === ASSETS && segments.length > 3;
+
+  return inLayer || inFeature;
+}
+
+/**
  * Builds the path index of a manifest: which file and bundle every path leads to, and the folders
  * the scanner read. A path under one of those folders that leads nowhere is a new asset.
  *
@@ -218,9 +246,10 @@ function changedPaths(state: State, stamps: AssetStamps): readonly string[] {
 /**
  * Tells why a stamp cannot be swapped in place: the set of files is not the one of the manifest
  * the page booted with. A manifest path the watch no longer stamps was removed or renamed, or its
- * nine-slice tag changed; a changed path under a scanned folder that the manifest does not know
- * is a new asset. The watch stamps every image of the game tree, so a path outside those folders
- * (a favicon, an image of `web/`) refuses nothing.
+ * nine-slice tag changed. A changed path the manifest does not know is a new asset when it lies
+ * under a folder the manifest names, or where the scanner reads: the first file of an `assets/`
+ * folder that had none counts too. The watch stamps every image of the game tree, so any other
+ * unknown path (a favicon, an image of a feature outside its `assets/`) refuses nothing.
  *
  * @param index - The path index of the manifest.
  * @param stamps - The stamp that arrived.
@@ -237,7 +266,9 @@ function refusalOf(
   }
 
   for (const path of changed) {
-    const isNew = !index.owners.has(path) && index.folders.some(folder => path.startsWith(folder));
+    if (index.owners.has(path)) continue;
+
+    const isNew = isScannerPath(path) || index.folders.some(folder => path.startsWith(folder));
 
     if (isNew) return `"${path}" is not in the manifest`;
   }

@@ -439,7 +439,7 @@ The layers of `config.ts` are read once. A changed layer needs a new `watchKeys`
 
 #### The stamp module
 
-After a scan the watch writes `<game>/.moku/assets-stamp.ts` when an asset file changed. The page imports it, and the hot plugin hands its new default export to the running game.
+After a scan the watch writes `<game>/.moku/assets-stamp.ts` when an asset file changed. The page imports it, and the hot plugin hands its new default export to the running game. What the game does with it: [An asset file](./hot-swap.md#an-asset-file).
 
 ```ts
 // <game>/.moku/assets-stamp.ts
@@ -458,6 +458,7 @@ export default {
 | `files` | Every watched asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`; no strings file), relative to the game with `/`, sorted. The value is `<size>:<mtimeMs>` |
 | `changed` | The paths whose value differs from the batch before, sorted. A new file is listed. A removed file is not: it is missing from `files`. Empty in the first stamp of a run |
 
+- The first scan of a run writes every file and an empty `changed`.
 - A save of a strings file alone leaves the stamp as it is.
 - `preparePage` writes the empty stamp, `{ files: {}, changed: [] }`, when the game has none.
 

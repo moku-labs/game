@@ -157,8 +157,9 @@ export async function runCli(argv: readonly string[]): Promise<number> {
  * `dev.ts`, `main.ts` with the scenarios of `tests/scenarios/` (and, with agents, the agents and
  * the game's `.dev` modules), and `bunfig.toml` with the engine's hot plugin. It also writes the
  * first `assets-stamp.ts`, the empty one, when the game has none: `main.ts` imports it, and
- * `watchKeys` rewrites it when an asset file changes. It starts no server and no watcher, and
- * throws the `[game]` errors of `moku-game dev`.
+ * `watchKeys` rewrites it when an asset file changes. The page accepts the new stamp: new bytes
+ * of a file swap in place, a new or removed file reloads the page. It starts no server and no
+ * watcher, and throws the `[game]` errors of `moku-game dev`.
  *
  * @param root - The game folder, relative to the cwd or absolute.
  * @param options - The agents, the preloads and the extra bundler plugins.
@@ -199,9 +200,10 @@ export async function preparePage(
  * `strings/<locale>.json` scans again, with the same flags, outputs and layers; an output that
  * did not change is not rewritten. On the page a rewritten `generated/strings.<locale>.ts` hot
  * swaps. An asset file that is new, gone or saved again rewrites `.moku/assets-stamp.ts`, which
- * the page imports, so the page reloads and shows the new image or the new bytes of an old one. A
- * failed scan goes to `onError` and the watch goes on, the first scan too. The layers of
- * `config.ts` are read once: a changed layer needs a new `watchKeys`.
+ * the page imports and accepts as a hot swap: the new bytes of a file swap in place in the loaded
+ * bundles, with no reload, and a new or removed file reloads the page. A failed scan goes to
+ * `onError` and the watch goes on, the first scan too. The layers of `config.ts` are read once:
+ * a changed layer needs a new `watchKeys`.
  *
  * @param root - The game folder, relative to the cwd or absolute.
  * @param options - Where the message of a failed scan goes.

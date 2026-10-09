@@ -42,7 +42,11 @@ export type Config = {
  * ```
  */
 export type Events = {
-  /** A dev hot swap was applied: the saved module's new exports. `ui` emits it, `effects` replaces its emitters on it. */
+  /**
+   * A dev hot swap was applied: the saved module's new exports. `ui` emits it, `effects` replaces
+   * its emitters on it, and `assets` hears it for the stamp module `.moku/assets-stamp.ts`: it
+   * replaces the asset files the stamp names as changed.
+   */
   "ui:hot-swap": { file: string; module: Readonly<Record<string, unknown>> };
 };
 

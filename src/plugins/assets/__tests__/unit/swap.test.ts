@@ -817,6 +817,57 @@ describe("the dev hot swap: the folders the scanner read", () => {
   });
 });
 
+describe("the dev hot swap: a new file where the manifest names no folder yet", () => {
+  // The scanner reads `<features>/<feature>/assets/` and `<layer>/assets/`. The page knows neither
+  // the layers nor the features folder, so the shape of the path decides.
+  it.each([
+    ["the first file of a feature that had no assets", "features/shop/assets/coin.png"],
+    ["the first file of a new feature, in a subfolder", "features/shop/assets/icons/coin.png"],
+    ["the first file of a layer that had no assets", "shared/assets/button/primary.png"],
+    ["a file of a features folder with another name", "game/shop/assets/coin.png"]
+  ])("refuses %s and reloads", async (_what, path) => {
+    const { mock, reload, swap } = await startDev();
+
+    await swap({ files: filesOf({ [path]: "200:2" }), changed: [path] });
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(mock.log.info).toHaveBeenCalledExactlyOnceWith("assets:swap-refused", {
+      reason: `"${path}" is not in the manifest`
+    });
+    expect(mock.io.fetched).toEqual([]);
+    expect(mock.emitted).toEqual([]);
+  });
+
+  it.each([
+    ["a favicon at the root", "favicon.webp"],
+    ["an image of a feature outside its assets folder", "features/home/outside.webp"],
+    ["an assets folder at the root, which is no layer", "assets/logo.png"],
+    ["an assets folder deeper than the scanner looks", "tools/art/src/assets/draft.png"],
+    ["a file that only has the name of the folder", "features/home/assets.webp"],
+    ["a file named assets where the folder would be", "shared/assets"]
+  ])("ignores %s", async (_what, path) => {
+    const { mock, reload, swap } = await startDev();
+
+    await swap({ files: filesOf({ [path]: "200:2" }), changed: [path] });
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(mock.log.info).not.toHaveBeenCalled();
+    expect(mock.io.fetched).toEqual([]);
+  });
+
+  it("still swaps a known file saved together with an ignored one", async () => {
+    const { mock, reload, swap } = await startDev();
+
+    await swap({
+      files: filesOf({ "favicon.webp": "200:2", [CELL]: "200:2" }),
+      changed: [CELL, "favicon.webp"]
+    });
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(replaced(mock)).toEqual([{ bundle: "board", keys: ["board.cell"] }]);
+  });
+});
+
 describe("the dev hot swap: a bundle with atlas pages", () => {
   it("keeps the pages in the megabytes of the bundle", async () => {
     const BG = "ui/ui.bg-5e0a71bd42.webp";
