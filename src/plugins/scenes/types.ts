@@ -213,9 +213,10 @@ export type State = {
   /** Id of the scene that is mounted now. */
   current: string | undefined;
   /**
-   * The scene the next rest node without its own `scene` mounts: the one a transit node named in
-   * fast mode, or the one the restore door expected with `expect`. A rest node clears it; an over
-   * rest node takes it only while nothing is mounted.
+   * The scene the next node without its own `scene` mounts, at a rest node or at a transit node
+   * in live mode: the one a transit node named in fast mode, or the one the restore door expected
+   * with `expect`. A rest node clears it; a transit node clears it only when it took it; an over
+   * node takes it only while nothing is mounted.
    */
   pending: string | undefined;
   owner: SceneOwner;
@@ -264,9 +265,11 @@ export type ScenesApi = {
    */
   current(): string | undefined;
   /**
-   * Names the scene the next rest node without its own `scene` mounts. The restore door calls it
-   * with the scene of a bookmark, so a bookmark at a popup comes back with the scene under it.
-   * An over rest node takes the expected scene only while nothing is mounted; it never switches a
+   * Names the scene the next node without its own `scene` mounts. A rest node reads it, and so
+   * does a transit node in live mode; a transit node of a fast walk leaves it for the rest point.
+   * The restore door calls it with the scene of a bookmark, so a bookmark at a popup comes back
+   * with the scene under it, also when the popup is a transit node that waits for its answer.
+   * An over node takes the expected scene only while nothing is mounted; it never switches a
    * mounted one.
    *
    * @param id - Id of a scene a feature declared.

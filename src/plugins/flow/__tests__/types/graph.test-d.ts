@@ -1,7 +1,9 @@
 import { describe, expectTypeOf, it } from "vitest";
 import { createApp } from "../../../../index";
+import type { Json } from "../../../model/types";
 import { flowFor } from "../../feature";
 import { defineFlow, defineNode, exit, to, type } from "../../runner/define";
+import type { Bookmark } from "../../runner/types";
 
 type Empty = Record<string, never>;
 
@@ -159,5 +161,36 @@ describe("scene ids per game", () => {
     expectTypeOf(looseNode({ scene: "anything", rest: true, outcomes: {} })).toHaveProperty(
       "scene"
     );
+  });
+});
+
+// A bookmark of a transit node carries the rest point before it; a bookmark of a rest node has none.
+describe("the rest point of a bookmark", () => {
+  const atRest: Bookmark = {
+    path: "home",
+    input: {},
+    player: { count: 0 },
+    session: { opened: 0 },
+    rng: { seed: 42, streams: {} },
+    graph: "0e0d2aa8"
+  };
+
+  it("is optional on the bookmark flow.bookmark() returns", () => {
+    const app = createApp();
+
+    expectTypeOf(app.flow.bookmark().rest).toEqualTypeOf<
+      { path: string; input: Json } | undefined
+    >();
+    expectTypeOf(app.flow.restore).parameter(0).toEqualTypeOf<Bookmark>();
+  });
+
+  it("needs a path and an input when present", () => {
+    const atPopup: Bookmark = { ...atRest, path: "info/show", rest: { path: "home", input: {} } };
+
+    expectTypeOf(atPopup.rest).toEqualTypeOf<{ path: string; input: Json } | undefined>();
+    // @ts-expect-error — a rest point without its input is not one
+    const broken: Bookmark = { ...atRest, rest: { path: "home" } };
+
+    expectTypeOf(broken).toEqualTypeOf<Bookmark>();
   });
 });

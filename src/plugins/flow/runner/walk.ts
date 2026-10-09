@@ -184,6 +184,32 @@ async function reachGate(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise
 }
 
 /**
+ * Waits until a transit node the loop was sent into shows what it waits for: the gate it opens,
+ * or, when it opens none, the next rest point or the end of the loop. `restore` waits here after
+ * it entered a transit bookmark, so its caller reads a state with the open gate in it. There is no
+ * timeout: a node that opens no gate, never rests and never ends keeps the wait pending, as its
+ * body would. Call it only after the loop entered the node: a gate opened before that belongs to
+ * the node the restore aborted.
+ *
+ * @param ctx - Domain context of the flow plugin.
+ * @returns A promise that resolves at the open gate, at a rest point or at the end of the loop.
+ */
+export async function reachGateOrRest(ctx: FlowCtx): Promise<void> {
+  const running = ctx.state.runner.running;
+
+  if (running === undefined || ctx.state.gate.open !== undefined) return;
+
+  const seam = loopSeam(ctx.state.runner);
+  const rested = watchRest(seam);
+
+  try {
+    await Promise.race([nextGateOpen(seam), rested.next(), watchEnd(running).settled]);
+  } finally {
+    rested.off();
+  }
+}
+
+/**
  * The error of a step the loop never reached, naming where it stands instead.
  *
  * @param at - Path the step waited for.
@@ -332,11 +358,13 @@ async function playRoute(
 }
 
 /**
- * Walks a route through the running loop: restores `from` when given, switches to fast mode,
+ * Walks a route through the running loop: switches to fast mode, restores `from` when given,
  * waits until the loop rests at each step's `at` and answers through the gate, and substitutes
- * the result of every sub-flow node the route skips. The mode of the caller is put back
- * afterwards, also when a step rejects, and a substitution the route never reached is disarmed:
- * it must not skip a sub-flow in the live play that follows.
+ * the result of every sub-flow node the route skips. The mode is switched before the bookmark is
+ * entered, so a transit node `from` names never starts live and never shows its popup. The mode
+ * of the caller is put back afterwards, also when the bookmark is refused or a step rejects, and
+ * a substitution the route never reached is disarmed: it must not skip a sub-flow in the live
+ * play that follows.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
@@ -360,13 +388,13 @@ export async function walkRoute(
     );
   }
 
-  if (start !== undefined) await start.restore(start.from);
-
   const previous = ctx.state.fx.mode;
 
   modules.fx.setMode("fast");
 
   try {
+    if (start !== undefined) await start.restore(start.from);
+
     await playRoute(ctx, modules, route, running);
   } finally {
     loopSeam(ctx.state.runner).substitutions.clear();

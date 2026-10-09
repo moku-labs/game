@@ -46,7 +46,7 @@ export const flowPlugin = /*#__PURE__*/ createPlugin("flow", {
   events: (register: RegisterFunction) =>
     register.map<Events>({
       "flow:edge": "An edge was taken and its state committed",
-      "flow:rest": "The graph reached a rest node",
+      "flow:rest": "The graph reached a rest node, or entered the node of a bookmark",
       "flow:error": "A node failed and the graph rolled back"
     }),
   createState: createFlowState,

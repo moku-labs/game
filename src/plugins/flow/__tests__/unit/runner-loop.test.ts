@@ -1459,6 +1459,190 @@ describe("restorePosition", () => {
     expect(harness.ctx.state.runner.stack).toEqual([{ flow: "main", node: "play", input: {} }]);
     await stopRunner(harness.ctx);
   });
+
+  it("runs a transit node again from its start, with the bookmark's input and state", async () => {
+    const seen: unknown[] = [];
+    const main = flow(
+      "main",
+      {
+        home: waiting("play"),
+        ask: node({
+          outcomes: ["ok"],
+          run: context => {
+            seen.push(context.input);
+            return new Promise<Result>(() => undefined);
+          }
+        })
+      },
+      "home",
+      { home: { play: "ask" }, ask: { ok: "home" } }
+    );
+    const harness = setup({ main });
+    const bookmark: Bookmark = {
+      path: "ask",
+      input: { level: 4 },
+      player: { coins: 7 },
+      session: { visits: 1 },
+      rng: { seed: 2, streams: {} },
+      graph: "deadbeef"
+    };
+
+    harness.start();
+    await tick();
+    harness.calls.length = 0;
+
+    await restorePosition(harness.ctx, harness.modules, bookmark);
+    await tick();
+
+    const frames = [{ flow: "main", node: "ask", input: { level: 4 } }];
+
+    expect(seen).toEqual([{ level: 4 }]);
+    expect(harness.model.restored).toEqual([
+      { player: { coins: 7 }, session: { visits: 1 }, rng: { seed: 2, streams: {} } }
+    ]);
+    // The state is replaced and marked before the node opens its transaction on it.
+    expect(harness.calls.filter(call => ["restore", "markRest", "begin"].includes(call))).toEqual([
+      "restore",
+      "markRest",
+      "begin"
+    ]);
+    expect(harness.ctx.state.runner.stack).toEqual(frames);
+    expect(harness.ctx.state.runner.restFrame).toEqual(frames);
+    await stopRunner(harness.ctx);
+  });
+
+  it("retries the restored transit node itself when it fails", async () => {
+    const seen: unknown[] = [];
+    const main = flow(
+      "main",
+      {
+        home: waiting("play"),
+        ask: node({
+          outcomes: ["ok"],
+          run: context => {
+            seen.push(context.input);
+
+            if (seen.length === 1) throw new Error("boom");
+
+            return new Promise<Result>(() => undefined);
+          }
+        })
+      },
+      "home",
+      { home: { play: "ask" }, ask: { ok: "home" } }
+    );
+    const harness = setup({ main });
+    const bookmark: Bookmark = {
+      path: "ask",
+      input: { level: 4 },
+      player: {},
+      session: {},
+      rng: { seed: 2, streams: {} },
+      graph: "deadbeef"
+    };
+
+    harness.start();
+    await tick();
+
+    await restorePosition(harness.ctx, harness.modules, bookmark);
+    await tick();
+
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([
+      expect.objectContaining({ path: "ask", rolledBackTo: "ask", retry: true })
+    ]);
+    expect(seen).toEqual([{ level: 4 }, { level: 4 }]);
+    expect(harness.calls).toContain("rollback");
+    await stopRunner(harness.ctx);
+  });
+
+  it("announces a restored transit node as no checkpoint, also when it carries the flag", async () => {
+    const main = flow(
+      "main",
+      {
+        home: waiting("play"),
+        ask: node({
+          outcomes: ["ok"],
+          checkpoint: true,
+          run: () => new Promise<Result>(() => undefined)
+        })
+      },
+      "home",
+      { home: { play: "ask" }, ask: { ok: "home" } }
+    );
+    const harness = setup({ main });
+    const bookmark: Bookmark = {
+      path: "ask",
+      input: {},
+      player: {},
+      session: {},
+      rng: { seed: 2, streams: {} },
+      graph: "deadbeef"
+    };
+
+    harness.start();
+    await tick();
+
+    await restorePosition(harness.ctx, harness.modules, bookmark);
+
+    expect(payloadsOf(harness.emitted, "flow:rest").at(-1)).toEqual({
+      path: "ask",
+      checkpoint: false
+    });
+    await stopRunner(harness.ctx);
+  });
+
+  it("announces a restored rest checkpoint as a checkpoint", async () => {
+    const main = flow(
+      "main",
+      {
+        home: waiting("play"),
+        shop: node({ rest: true, checkpoint: true, outcomes: ["leave"] })
+      },
+      "home",
+      { home: { play: "shop" }, shop: { leave: "home" } }
+    );
+    const harness = setup({ main });
+    const bookmark: Bookmark = {
+      path: "shop",
+      input: {},
+      player: {},
+      session: {},
+      rng: { seed: 2, streams: {} },
+      graph: "deadbeef"
+    };
+
+    harness.start();
+    await tick();
+
+    await restorePosition(harness.ctx, harness.modules, bookmark);
+
+    expect(payloadsOf(harness.emitted, "flow:rest").at(-1)).toEqual({
+      path: "shop",
+      checkpoint: true
+    });
+    await stopRunner(harness.ctx);
+  });
+
+  it("names a node, not a rest node, when the bookmark's path is gone from the graph", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup({ main });
+    const running = harness.start();
+    const bookmark: Bookmark = {
+      path: "gone",
+      input: {},
+      player: {},
+      session: {},
+      rng: { seed: 2, streams: {} },
+      graph: "deadbeef"
+    };
+
+    await tick();
+    restorePosition(harness.ctx, harness.modules, bookmark).catch(() => undefined);
+
+    await expect(running).rejects.toThrow(
+      '[game] The bookmark names no node "gone".\n  Bookmark a node of the running graph.'
+    );
+  });
 });
 
 // ─── stop deadline ────────────────────────────────────────────

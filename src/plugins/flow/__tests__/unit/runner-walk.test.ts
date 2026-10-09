@@ -7,6 +7,7 @@ import { createFxApi } from "../../fx/api";
 import { createGateApi } from "../../gate/api";
 import { createInboxApi } from "../../inbox/api";
 import { loopSeam, restorePosition, runLoop, stopRunner } from "../../runner/loop";
+import { notifyGateOpen, notifyRest } from "../../runner/seam";
 import type {
   AnyFlow,
   AnyNode,
@@ -19,7 +20,7 @@ import type {
   Result,
   Target
 } from "../../runner/types";
-import { walkRoute } from "../../runner/walk";
+import { reachGateOrRest, walkRoute } from "../../runner/walk";
 import { createFlowState } from "../../state";
 import type { Config, Deps, FlowCtx } from "../../types";
 
@@ -435,5 +436,163 @@ describe("walkRoute", () => {
     expect(state.path).toBe("home");
 
     await stopRunner(harness.ctx);
+  });
+
+  it("switches to fast mode before it enters the bookmark of options.from", async () => {
+    const main = flow("main", { home: waiting("play"), shop: waiting("buy") }, "home", {
+      home: { play: "shop" },
+      shop: { buy: "home" }
+    });
+    const harness = setup(main);
+    const modes: string[] = [];
+
+    harness.start();
+
+    const bookmark: Bookmark = {
+      path: "shop",
+      input: noPayload,
+      player: {},
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: "any"
+    };
+
+    await walkRoute(harness.ctx, harness.modules, [], {
+      restore: entered => {
+        modes.push(harness.ctx.state.fx.mode);
+
+        return restorePosition(harness.ctx, harness.modules, entered);
+      },
+      from: bookmark
+    });
+
+    expect(modes).toEqual(["fast"]);
+    expect(harness.ctx.state.fx.mode).toBe("live");
+
+    await stopRunner(harness.ctx);
+  });
+
+  it("puts the mode back when the bookmark of options.from is refused", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup(main);
+
+    harness.start();
+
+    const bookmark: Bookmark = {
+      path: "home",
+      input: noPayload,
+      player: {},
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: "any"
+    };
+
+    await expect(
+      walkRoute(harness.ctx, harness.modules, [], {
+        restore: () => Promise.reject(new Error("refused")),
+        from: bookmark
+      })
+    ).rejects.toThrow("refused");
+    expect(harness.ctx.state.fx.mode).toBe("live");
+
+    await stopRunner(harness.ctx);
+  });
+});
+
+/** A context whose loop is a promise the test settles by hand. */
+const withLoop = () => {
+  const harness = setup(
+    flow("main", { home: waiting("play") }, "home", { home: { play: "home" } })
+  );
+  const loop = Promise.withResolvers<void>();
+  const reached = { value: false };
+
+  loop.promise.catch(() => undefined);
+  harness.ctx.state.runner.running = loop.promise;
+
+  return {
+    ctx: harness.ctx,
+    loop,
+    reached,
+    seam: loopSeam(harness.ctx.state.runner),
+
+    /**
+     * Starts the wait and records when it ends.
+     *
+     * @returns The promise of the wait.
+     */
+    wait: (): Promise<void> =>
+      reachGateOrRest(harness.ctx).then(() => {
+        reached.value = true;
+      })
+  };
+};
+
+const tick = async (): Promise<void> => {
+  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+};
+
+describe("reachGateOrRest", () => {
+  it("returns at once when the loop is not running", async () => {
+    const watch = withLoop();
+
+    watch.ctx.state.runner.running = undefined;
+
+    await expect(reachGateOrRest(watch.ctx)).resolves.toBeUndefined();
+    expect(watch.seam).toMatchObject({ rest: [], gateOpen: [] });
+  });
+
+  it("returns at once while a gate is open", async () => {
+    const watch = withLoop();
+
+    watch.ctx.state.gate.open = { allowed: ["play"] };
+
+    await expect(reachGateOrRest(watch.ctx)).resolves.toBeUndefined();
+    expect(watch.seam).toMatchObject({ rest: [], gateOpen: [] });
+  });
+
+  it("waits for the gate the loop opens", async () => {
+    const watch = withLoop();
+    const done = watch.wait();
+
+    await tick();
+
+    expect(watch.reached.value).toBe(false);
+
+    notifyGateOpen(watch.ctx.state.runner);
+    await done;
+
+    expect(watch.seam).toMatchObject({ rest: [], gateOpen: [] });
+  });
+
+  it("ends at the next rest point when no gate opened, and stops listening for one", async () => {
+    const watch = withLoop();
+    const done = watch.wait();
+
+    await tick();
+
+    expect(watch.reached.value).toBe(false);
+
+    notifyRest(watch.ctx.state.runner, "home");
+    await done;
+
+    expect(watch.seam.rest).toEqual([]);
+  });
+
+  it.each([
+    ["ends", (loop: PromiseWithResolvers<void>) => loop.resolve()],
+    ["fails", (loop: PromiseWithResolvers<void>) => loop.reject(new Error("fatal"))]
+  ])("ends when the loop %s", async (_name, end) => {
+    const watch = withLoop();
+    const done = watch.wait();
+
+    await tick();
+
+    expect(watch.reached.value).toBe(false);
+
+    end(watch.loop);
+
+    await expect(done).resolves.toBeUndefined();
+    expect(watch.seam.rest).toEqual([]);
   });
 });

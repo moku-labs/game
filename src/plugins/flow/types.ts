@@ -39,7 +39,11 @@ export type Events = {
     index: number;
     now: number;
   };
-  /** The graph reached a rest node. */
+  /**
+   * The graph reached a rest node, or entered the node of a bookmark. The second also happens
+   * for a transit node that waited at the gate: `path` is then no rest node and `checkpoint` is
+   * false.
+   */
   "flow:rest": { path: string; checkpoint: boolean };
   /** A node failed and the graph rolled back. */
   "flow:error": { path: string; error: unknown; rolledBackTo: string; retry: boolean };

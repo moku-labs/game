@@ -140,8 +140,57 @@ function invalidBookmark(): Error {
 }
 
 /**
+ * Reads the rest point of a bookmark taken at a transit node.
+ *
+ * @param value - The `rest` field of a bookmark.
+ * @returns The rest point, or `undefined` when the value is not one.
+ * @example
+ * ```ts
+ * readRest({ path: "home", input: null }); // { path: "home", input: null }
+ * readRest("home"); // undefined
+ * ```
+ */
+function readRest(value: Json): Bookmark["rest"] {
+  if (!isRecord(value) || typeof value.path !== "string" || value.input === undefined) {
+    return undefined;
+  }
+
+  return { path: value.path, input: value.input };
+}
+
+/**
+ * Reads the optional fields of a bookmark onto it: the `scene` the `game.bookmark` door added and
+ * the `rest` point of a bookmark taken at a transit node. An absent field leaves no key.
+ *
+ * @param value - The JSON object of the bookmark.
+ * @param bookmark - The bookmark with its required fields.
+ * @returns The bookmark with its scene and its rest point.
+ * @throws {Error} When the scene or the rest point has the wrong shape.
+ */
+function readBookmarkOptions(value: JsonRecord, bookmark: Bookmark): Bookmark {
+  const { scene, rest } = value;
+
+  if (scene !== undefined) {
+    if (typeof scene !== "string") throw invalidBookmark();
+
+    bookmark.scene = scene;
+  }
+
+  if (rest !== undefined) {
+    const point = readRest(rest);
+
+    if (point === undefined) throw invalidBookmark();
+
+    bookmark.rest = point;
+  }
+
+  return bookmark;
+}
+
+/**
  * Reads a bookmark out of JSON, the value `flow.bookmark()` made and the editor kept. The
- * `scene` the `game.bookmark` door added is kept when present.
+ * `scene` the `game.bookmark` door added and the `rest` point of a bookmark taken at a transit
+ * node are kept when present.
  *
  * @param value - The JSON the editor sent.
  * @returns The bookmark.
@@ -163,12 +212,7 @@ export function readBookmark(value: Json): Bookmark {
     throw invalidBookmark();
   }
 
-  const { scene } = value;
-
-  if (scene === undefined) return { path, input, player, session, rng, graph };
-  if (typeof scene !== "string") throw invalidBookmark();
-
-  return { path, input, player, session, rng, graph, scene };
+  return readBookmarkOptions(value, { path, input, player, session, rng, graph });
 }
 
 /**

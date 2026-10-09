@@ -53,7 +53,9 @@ function guideAllow(payload: Json | undefined): Allow | undefined {
 
 /**
  * Builds the `fx` of a node context: awaited effects by call, cosmetic hints by `emit`. A `guide`
- * narrows the gate while it runs; the runner lifts the narrow when the node is left.
+ * narrows the gate while it runs; the runner lifts the narrow when the node is left. A body that
+ * was aborted keeps running, since the loop only stops waiting for it, so its `fx` starts nothing
+ * any more: the gate and the narrow belong to the node the loop entered after it.
  *
  * @param modules - Injected sibling APIs.
  * @param step - The node run in progress.
@@ -61,12 +63,14 @@ function guideAllow(payload: Json | undefined): Allow | undefined {
  */
 function nodeFx(modules: Modules, step: Step): NodeFx {
   /**
-   * Awaits one effect.
+   * Awaits one effect. After the abort of the node it rejects with the abort reason instead.
    *
    * @param descriptor - The descriptor the node awaits.
    * @returns The answer, the handler's value, or `undefined`.
    */
   const run = (descriptor: Descriptor): Promise<unknown> => {
+    if (step.signal.aborted) return Promise.reject(abortReason(step.signal));
+
     if (descriptor.kind === "guide") {
       const allow = guideAllow(descriptor.payload);
 

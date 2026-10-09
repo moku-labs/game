@@ -193,8 +193,12 @@ function enterSlot(
 }
 
 /**
- * Enters the node of a bookmark: the state is replaced, the rest point is marked and the position
- * becomes the bookmark's path.
+ * Enters the node of a bookmark, a rest node or a transit node: the state is replaced, the rest
+ * point is marked and the position becomes the bookmark's path. The mark is made for a transit
+ * node too. A restore leaves the whole document waiting for the provider, and a rollback of the
+ * node would drop it unsent; and the frames of the transit node are what a failure of it must
+ * retry, since the restored state belongs to them. `flow:rest` and the rest seam fire once for
+ * every node entered here; only a rest node is announced as a checkpoint.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs; the features API resolves a path through a slot.
@@ -209,7 +213,7 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
 
   if (location === undefined) {
     throw new Error(
-      `[game] The bookmark names no node "${bookmark.path}".\n  Bookmark a rest node of the running graph.`
+      `[game] The bookmark names no node "${bookmark.path}".\n  Bookmark a node of the running graph.`
     );
   }
 
@@ -229,7 +233,7 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
 
   ctx.emit("flow:rest", {
     path: bookmark.path,
-    checkpoint: entry.kind === "node" && entry.checkpoint
+    checkpoint: entry.kind === "node" && entry.rest && entry.checkpoint
   });
   notifyRest(state, bookmark.path);
 }
@@ -321,7 +325,8 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
  * @param ctx - Domain context of the flow plugin.
  * @param _modules - Injected sibling APIs.
  * @param bookmark - The bookmark to enter.
- * @returns A promise that resolves once the loop rests at the bookmark's node.
+ * @returns A promise that resolves once the loop entered the bookmark's node, before that node
+ *   ran: the rest seam fired.
  * @throws {Error} When the loop is not running.
  */
 export function restorePosition(
