@@ -216,7 +216,8 @@ export type State = {
    * The scene the next node without its own `scene` mounts, at a rest node or at a transit node
    * in live mode: the one a transit node named in fast mode, or the one the restore door expected
    * with `expect`. A rest node clears it; a transit node clears it only when it took it; an over
-   * node takes it only while nothing is mounted.
+   * node takes it and clears it, whatever is mounted, except an over transit node of a fast walk,
+   * which leaves it alone.
    */
   pending: string | undefined;
   owner: SceneOwner;
@@ -270,8 +271,10 @@ export type ScenesApi = {
    * The restore door calls it with the scene of a bookmark, so a bookmark at a popup comes back
    * with the scene under it, also when the popup is a transit node that waits for its answer:
    * the scene of such a popup is mounted before `flow.restore` resolves.
-   * An over node takes the expected scene only while nothing is mounted; it never switches a
-   * mounted one.
+   * An over node takes the expected scene too, whatever is mounted, so a popup bookmark restored
+   * on a page that shows another scene switches to the scene of the bookmark. With nothing
+   * expected an over node never switches. An over transit node of a fast walk mounts nothing and
+   * keeps the record.
    *
    * @param id - Id of a scene a feature declared.
    * @throws {Error} For an id no feature declared, also before `onStart` filled the registry.

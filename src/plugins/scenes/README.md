@@ -73,7 +73,7 @@ app.scenes.current(); // "home"
 
 | Step | What happens |
 |---|---|
-| 1 | `node.over`: return, unless nothing is mounted and a scene is pending; then the target is the pending scene and the record is cleared. An over transit node in fast mode always returns and leaves the record alone. An over node that names a scene is a `ctx.log.warn` |
+| 1 | `node.over`: the target is the pending scene, whatever is mounted, and the record is cleared. Nothing pending: return. An over transit node in fast mode always returns and leaves the record alone. An over node that names a scene is a `ctx.log.warn` |
 | 2 | Fast mode on a transit node: record the scene as pending and return |
 | 3 | Live mode on a transit node: the target is `node.scene`, and the record is left alone. Without a scene of its own the target is what was recorded or expected, and the record is cleared |
 | 4 | On a rest node: the target is `node.scene` or what was recorded or expected; the record is cleared |
@@ -87,8 +87,7 @@ app.scenes.current(); // "home"
 | Case | Behaviour |
 |---|---|
 | Node without `scene` | The current scene lives on. A popup stands on the scene under it |
-| `over` node | Never switches a mounted scene. After it closes, the node under it is active again on the same scene |
-| `over` node, nothing mounted | Mounts the pending scene: a restore at a popup after `expect` builds the scene under it, whether the popup is a rest node or a transit node that waits for its answer. Nothing pending: nothing happens. An over transit node of a fast walk mounts nothing and keeps the record for the rest point |
+| `over` node | Takes the pending scene, whatever is mounted, and clears the record: a restore at a popup after `expect` builds the scene under it, whether the popup is a rest node or a transit node that waits for its answer. The pending scene is already mounted: nothing is built. Nothing pending: it never switches, and after it closes the node under it is active again on the same scene. An over transit node of a fast walk mounts nothing and keeps the record. A scene recorded by a fast walk at a transit node is taken by an over rest node too |
 | Transit node in live mode, no `scene` | Mounts the pending scene and clears the record: a restore at a transit node on a fresh page builds the expected scene. Nothing pending: nothing happens, and no warning |
 | Abort during the load | The callback returns. A rejection would be a node failure; `flow` handles the abort itself |
 | Bundle load fails | The callback rejects. `flow` rolls back, emits `flow:error` and re-enters the rest node, whose scene is still mounted |

@@ -218,7 +218,8 @@ async function reachGate(ctx: FlowCtx, seam: LoopSeam, ended: EndWatch): Promise
  * it entered a transit bookmark, so its caller reads a state with the open gate in it. There is no
  * timeout: a node that opens no gate, never rests and never ends keeps the wait pending, as its
  * body would. Call it only after the loop entered the node: a gate opened before that belongs to
- * the node the restore aborted.
+ * the node the restore aborted. After a loop that ended before the enter it returns at once: the
+ * end of the loop is already there.
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns A promise that resolves at the open gate, at a rest point or at the end of the loop.

@@ -92,6 +92,21 @@ describe("the switch in fast mode", () => {
     ]);
   });
 
+  it("mounts the scene a transit node recorded at an over rest node, over another mounted scene", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+    mock.emitted.length = 0;
+    await mock.enter({ scene: "board" }, { mode: "fast" });
+    await mock.enter({ path: "main/popup", rest: true, over: true }, { mode: "fast" });
+
+    expect(mock.state.current).toBe("board");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.emitted).toEqual([
+      { name: "scenes:changed", payload: { from: "home", to: "board", music: undefined } }
+    ]);
+  });
+
   it("lets the rest node's own scene win over the recorded one", async () => {
     const mock = startedMock();
 
@@ -340,16 +355,51 @@ describe("the switch after the restore door expected a scene", () => {
     ]);
   });
 
-  it("keeps the mounted scene under an over rest node, whatever is expected", async () => {
+  it("switches to the expected scene under an over rest node while another scene is mounted", async () => {
     const mock = startedMock();
 
     await mock.enter({ scene: "home" });
     mock.world.calls.length = 0;
+    mock.emitted.length = 0;
     mock.api.expect("board");
     await mock.enter({ path: "settings/open", rest: true, over: true });
 
+    expect(mock.state.current).toBe("board");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.world.calls).toEqual(["setLayers", "unmount", "mount"]);
+    expect(mock.emitted).toEqual([
+      { name: "scenes:changed", payload: { from: "home", to: "board", music: undefined } }
+    ]);
+  });
+
+  it("clears the record and touches nothing at an over node when the mounted scene is expected", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+    mock.world.calls.length = 0;
+    mock.emitted.length = 0;
+    mock.api.expect("home");
+    await mock.enter({ path: "settings/open", rest: true, over: true });
+
     expect(mock.state.current).toBe("home");
+    expect(mock.state.pending).toBeUndefined();
     expect(mock.world.calls).toEqual([]);
+    expect(mock.emitted).toEqual([]);
+  });
+
+  it("does nothing at an over node with a scene mounted and nothing expected", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+    mock.world.calls.length = 0;
+    mock.emitted.length = 0;
+    await mock.enter({ path: "settings/open", rest: true, over: true });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.emitted).toEqual([]);
+    expect(mock.log.warn).not.toHaveBeenCalled();
   });
 
   it("does nothing for an over rest node with nothing mounted and nothing expected", async () => {
@@ -400,16 +450,21 @@ describe("the switch at a transit node after the restore door expected a scene",
     ]);
   });
 
-  it("keeps the mounted scene under an over transit node, whatever is expected", async () => {
+  it("switches to the expected scene under an over transit node while another scene is mounted", async () => {
     const mock = startedMock();
 
     await mock.enter({ scene: "home" });
     mock.world.calls.length = 0;
+    mock.emitted.length = 0;
     mock.api.expect("board");
     await mock.enter({ path: "info/show", over: true });
 
-    expect(mock.state.current).toBe("home");
-    expect(mock.world.calls).toEqual([]);
+    expect(mock.state.current).toBe("board");
+    expect(mock.state.pending).toBeUndefined();
+    expect(mock.world.calls).toEqual(["setLayers", "unmount", "mount"]);
+    expect(mock.emitted).toEqual([
+      { name: "scenes:changed", payload: { from: "home", to: "board", music: undefined } }
+    ]);
   });
 
   it("does nothing at a transit node in live mode with nothing expected", async () => {
@@ -443,5 +498,20 @@ describe("the switch at a transit node after the restore door expected a scene",
     expect(mock.state.current).toBeUndefined();
     expect(mock.state.pending).toBe("home");
     expect(mock.world.calls).toEqual([]);
+  });
+
+  it("leaves the expected scene alone at an over transit node in fast mode while another scene is mounted", async () => {
+    const mock = startedMock();
+
+    await mock.enter({ scene: "home" });
+    mock.world.calls.length = 0;
+    mock.emitted.length = 0;
+    mock.api.expect("board");
+    await mock.enter({ path: "info/show", over: true }, { mode: "fast" });
+
+    expect(mock.state.current).toBe("home");
+    expect(mock.state.pending).toBe("board");
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.emitted).toEqual([]);
   });
 });

@@ -124,12 +124,13 @@ function makeBookmark(ctx: FlowCtx, modules: Modules): Bookmark {
  * Sends the running loop to a bookmark that passed the check, the short way a walk needs: the
  * promise resolves as soon as the loop stands at the node, before the node ran. It stays an
  * `async` function of its own: the microtask turn it adds lets the loop start the stages of a
- * rest node before the walk goes on and switches to fast mode.
+ * rest node before the walk goes on and switches to fast mode. A loop that ends first resolves it
+ * too, with nothing entered: the walk then finds its route not reached.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
  * @param bookmark - The accepted bookmark.
- * @returns A promise that resolves once the loop entered the node.
+ * @returns A promise that resolves once the loop entered the node, or ended first.
  */
 async function enterAccepted(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): Promise<void> {
   // Not a plain `return`: this await is the turn in which the loop starts a rest node's stages.
@@ -175,12 +176,14 @@ async function walkFrom(
  * enters it. A transit node shows nothing until it ran up to its gate, so for one the promise
  * waits on: for the gate the node opens, or the rest point or the end of the loop it reaches
  * without one. The wait starts only after the loop entered the node, so a gate the aborted old
- * node still opened is not taken for the new one.
+ * node still opened is not taken for the new one. A loop that ends before it entered the node
+ * ends both waits: nothing is entered, and the wait for the gate returns at once.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
  * @param bookmark - The bookmark to enter.
- * @returns A promise that resolves once a rest node is entered, or a transit node waits.
+ * @returns A promise that resolves once a rest node is entered, or a transit node waits, or the
+ *   loop ended first.
  * @throws {Error} When the bookmark may not be entered, and before `run()`.
  */
 async function restoreBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): Promise<void> {

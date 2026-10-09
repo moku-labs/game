@@ -20,6 +20,7 @@ import type {
   Modules,
   OutcomeTags,
   Result,
+  RunnerApi,
   Target
 } from "../../runner/types";
 import { createFlowState } from "../../state";
@@ -234,13 +235,13 @@ const createStoreFake = () => {
   };
 };
 
-const setup = (options: GraphOptions = {}) => {
+const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000) => {
   const model = createStoreFake();
   const config: Config = {
     mainFlow: undefined,
     safeNode: undefined,
     retries: 1,
-    settleTimeoutMs: 2000,
+    settleTimeoutMs,
     journalLimit: 500
   };
   const deps: Deps = {
@@ -416,6 +417,42 @@ const watch = (promise: Promise<unknown>): { settled: boolean } => {
   );
 
   return seen;
+};
+
+/**
+ * Reads every `flow:rest` the graph emitted, in order.
+ *
+ * @param ctx - The context of the harness. Its `emit` is a mock.
+ * @returns The payload of each one.
+ */
+const restsOf = (ctx: FlowCtx): unknown[] => {
+  // `emit` has one overload per event, and the mock types its calls by the last one only.
+  const calls: readonly (readonly unknown[])[] = vi.mocked(ctx.emit).mock.calls;
+
+  return calls.filter(call => call[0] === "flow:rest").map(call => call[1]);
+};
+
+/** What the loop rejects with when a node fails inside the safe node. */
+const fatal = '[game] The node "stuck" failed while the graph was recovering in the safe node.';
+
+/**
+ * Makes the `load` stage of the start node fail, so the loop ends by rejecting. The first failure
+ * is a retry. The second sends the loop to the safe node, which is the start node here. The third
+ * entry is inside the safe node, where a failure is fatal: the test decides when it comes.
+ *
+ * @param api - The runner API of the harness.
+ * @param third - The `load` stage of the third entry.
+ */
+const failLoad = (api: Pick<RunnerApi, "onEnter">, third: () => Promise<void>): void => {
+  const entries = { count: 0 };
+
+  api.onEnter("load", () => {
+    entries.count += 1;
+
+    if (entries.count < 3) throw new Error("The load stage failed.");
+
+    return third();
+  });
 };
 
 describe("restore() into a transit node", () => {
@@ -704,6 +741,247 @@ describe("restore() called while the edge before it still arrives", () => {
 
     expect(harness.api.state().pending).toEqual({ gate: ["ok", "close"] });
     await stopRunner(harness.ctx);
+  });
+});
+
+describe("restore() on a loop that stops before it took the bookmark", () => {
+  it("resolves a rest bookmark and enters nothing", async () => {
+    const harness = setup({ barrier: true });
+
+    await harness.start();
+
+    const release = harness.holdBarrier();
+
+    // `skip` is a barrier node: its edge to `home` is committed and waits for the provider.
+    harness.modules.gate.answer({ intent: "skip" });
+    await waitUntil(() => harness.standsAt("skip"));
+
+    const restoring = harness.api.restore(harness.bookmarkAt("end"));
+    const stopping = stopRunner(harness.ctx);
+
+    // The edge arrives at `home`. The next turn sees the stop before the bookmark.
+    release();
+    await stopping;
+    await restoring;
+
+    expect(harness.api.state().path).toBe("home");
+    expect(harness.model.restored).toEqual([]);
+    // The one rest point is the edge's. The bookmark was never announced.
+    expect(restsOf(harness.ctx)).toEqual([{ path: "home", checkpoint: true }]);
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
+  });
+
+  it("resolves a transit bookmark the same way: no gate or rest listener stays on the seam", async () => {
+    const harness = setup({ barrier: true });
+
+    await harness.start();
+
+    const release = harness.holdBarrier();
+
+    harness.modules.gate.answer({ intent: "skip" });
+    await waitUntil(() => harness.standsAt("skip"));
+
+    const restoring = harness.api.restore(harness.bookmarkAt("ask"));
+    const stopping = stopRunner(harness.ctx);
+
+    release();
+    await stopping;
+    await restoring;
+
+    // `ask` never ran, so no gate of it came. The wait for one ended with the loop.
+    expect(harness.trace.asked).toEqual([]);
+    expect(harness.model.restored).toEqual([]);
+    expect(restsOf(harness.ctx)).toEqual([{ path: "home", checkpoint: true }]);
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
+  });
+
+  it("resolves two restores that both still wait, each by its own watch", async () => {
+    const harness = setup({ barrier: true });
+
+    await harness.start();
+
+    const release = harness.holdBarrier();
+
+    harness.modules.gate.answer({ intent: "skip" });
+    await waitUntil(() => harness.standsAt("skip"));
+
+    // The second restore puts its bookmark in the seam. The first one must not drop it.
+    const first = harness.api.restore(harness.bookmarkAt("end"));
+    const second = harness.api.restore(harness.bookmarkAt("ask"));
+    const stopping = stopRunner(harness.ctx);
+
+    release();
+    await stopping;
+    await Promise.all([first, second]);
+
+    expect(harness.model.restored).toEqual([]);
+    expect(harness.trace.asked).toEqual([]);
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
+  });
+
+  it("resolves when the loop really ends, not when a stop gave up at its deadline", async () => {
+    // One millisecond for the loop to settle after the stop.
+    const harness = setup({ barrier: true }, 1);
+
+    await harness.start();
+
+    const release = harness.holdBarrier();
+
+    harness.modules.gate.answer({ intent: "skip" });
+    await waitUntil(() => harness.standsAt("skip"));
+
+    const restoring = harness.api.restore(harness.bookmarkAt("end"));
+    const restored = watch(restoring);
+
+    // The write is still held, so the loop pends on and the stop ends by its deadline.
+    await stopRunner(harness.ctx);
+
+    expect(harness.api.state().running).toBe(false);
+    expect(restored.settled).toBe(false);
+
+    release();
+    await restoring;
+
+    expect(harness.model.restored).toEqual([]);
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
+  });
+});
+
+describe("restore() on a loop that ends by rejecting", () => {
+  it("resolves a pending restore, enters nothing and leaves no unhandled rejection", async () => {
+    const reasons: unknown[] = [];
+    const record = (reason: unknown): void => {
+      reasons.push(reason);
+    };
+    const stage = Promise.withResolvers<void>();
+    const harness = setup({ start: "stuck" });
+
+    failLoad(harness.api, () => stage.promise);
+    process.on("unhandledRejection", record);
+
+    try {
+      // The loop failed twice and stands in the `load` stage of the safe node.
+      await harness.start();
+
+      const running = harness.ctx.state.runner.running;
+      const restoring = harness.api.restore(harness.bookmarkAt("home"));
+
+      stage.reject(new Error("The load stage failed."));
+
+      await expect(running).rejects.toThrow(fatal);
+      await restoring;
+      // The runtime reports a rejection nobody handled after the microtasks, in a task of its own.
+      await idle();
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+
+    // The listener hears the whole worker. This test owns one kind of rejection only: the error
+    // of the loop, which the watch of the restore must not pass on.
+    expect(
+      reasons.filter(reason => reason instanceof Error && reason.message.startsWith(fatal))
+    ).toEqual([]);
+    expect(harness.model.restored).toEqual([]);
+    expect(restsOf(harness.ctx)).toEqual([]);
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
+  });
+
+  it.each([
+    "home",
+    "ask"
+  ])("resolves at once and enters nothing when run() rejected before: a bookmark at %s", async path => {
+    const harness = setup({ start: "stuck" });
+
+    failLoad(harness.api, () => Promise.reject(new Error("The load stage failed.")));
+
+    await expect(harness.api.run()).rejects.toThrow(fatal);
+
+    // `running` stays set after a fatal error, so the restore is not refused.
+    const restoring = harness.api.restore(harness.bookmarkAt(path));
+    const late = idle().then(() => "late");
+
+    // At once: before the next task.
+    await expect(Promise.race([restoring, late])).resolves.toBeUndefined();
+
+    expect(harness.model.restored).toEqual([]);
+    expect(restsOf(harness.ctx)).toEqual([]);
+    expect(harness.trace.asked).toEqual([]);
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
+  });
+});
+
+describe("restore() the loop entered, on a loop that ends later", () => {
+  it("enters a restored bookmark once, and the end of the loop later ends only the restore that still waits", async () => {
+    const harness = setup({ barrier: true });
+
+    await harness.start();
+    await harness.api.restore(harness.bookmarkAt("end", { player: { coins: 1 } }));
+    await waitUntil(() => harness.waitsAt("end"));
+
+    // The first restore took its listener off when the loop entered `end`.
+    expect(loopSeam(harness.ctx.state.runner).rest).toEqual([]);
+
+    // Back to `home`, and into the barrier edge of `skip`, which is held open.
+    harness.modules.gate.answer({ intent: "again" });
+    await waitUntil(() => harness.waitsAt("home"));
+
+    const release = harness.holdBarrier();
+
+    harness.modules.gate.answer({ intent: "skip" });
+    await waitUntil(() => harness.standsAt("skip"));
+
+    const restoring = harness.api.restore(harness.bookmarkAt("end", { player: { coins: 2 } }));
+    const stopping = stopRunner(harness.ctx);
+
+    release();
+    await stopping;
+    await restoring;
+
+    // The first bookmark was entered once. The second one never was.
+    expect(harness.model.restored).toEqual([{ coins: 1 }]);
+    expect(restsOf(harness.ctx)).toEqual([
+      { path: "end", checkpoint: false },
+      { path: "home", checkpoint: true },
+      { path: "home", checkpoint: true }
+    ]);
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
+  });
+});
+
+describe("walk({ from }) on a loop that stops before it took the bookmark", () => {
+  it("rejects with its not-reached error for a route, and puts the mode back", async () => {
+    const harness = setup({ barrier: true });
+
+    await harness.start();
+
+    const release = harness.holdBarrier();
+
+    harness.modules.gate.answer({ intent: "skip" });
+    await waitUntil(() => harness.standsAt("skip"));
+
+    const walking = harness.api.walk([{ at: "end", intent: "again" }], {
+      from: harness.bookmarkAt("end")
+    });
+    const stopping = stopRunner(harness.ctx);
+
+    release();
+
+    await expect(walking).rejects.toThrow(
+      '[game] flow.walk() never reached "end".\n  The graph rests at "home"'
+    );
+    await stopping;
+
+    expect(harness.model.restored).toEqual([]);
+    expect(harness.api.state().mode).toBe("live");
+    expect(loopSeam(harness.ctx.state.runner)).toMatchObject({ rest: [], gateOpen: [] });
+    expect(loopSeam(harness.ctx.state.runner).restoring).toBeUndefined();
   });
 });
 

@@ -61,9 +61,10 @@ const bookmarkWith = (changes: Record<string, Json>, without = ""): Json =>
  *
  * @param fake - The fake app.
  * @param mounted - The scene `current()` reports.
+ * @param refusal - What `flow.restore` rejects with; left out, the fake enters the bookmark.
  * @returns The app with scenes, and the calls in order.
  */
-const withScenes = (fake: DoorsFake, mounted: string | undefined) => {
+const withScenes = (fake: DoorsFake, mounted: string | undefined, refusal?: Error) => {
   const calls: string[] = [];
   const scenes: ScenesApi = {
     current: () => mounted,
@@ -75,6 +76,9 @@ const withScenes = (fake: DoorsFake, mounted: string | undefined) => {
     ...fake.app.flow,
     restore: async (entered: Parameters<DoorsFake["app"]["flow"]["restore"]>[0]) => {
       calls.push(`restore ${entered.path}`);
+
+      if (refusal !== undefined) throw refusal;
+
       await fake.app.flow.restore(entered);
     }
   };
@@ -319,6 +323,28 @@ describe("flow commands", () => {
     await run(app, restoreCommand, { bookmark });
 
     expect(calls).toEqual(["restore board/awaitIntent"]);
+  });
+
+  it("game.restore expects the mounted scene again when the bookmark is refused, and rejects with the refusal itself", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const refusal = new Error("[game] The bookmark was made for another graph.");
+    const { app, calls } = withScenes(createDoorsFake(), "home", refusal);
+
+    const restoring = run(app, restoreCommand, { bookmark: { ...bookmark, scene: "board" } });
+
+    await expect(restoring).rejects.toBe(refusal);
+    expect(calls).toEqual(["expect board", "restore board/awaitIntent", "expect home"]);
+  });
+
+  it("game.restore expects nothing after a refusal while no scene is mounted", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const refusal = new Error("[game] The bookmark was made for another graph.");
+    const { app, calls } = withScenes(createDoorsFake(), undefined, refusal);
+
+    const restoring = run(app, restoreCommand, { bookmark: { ...bookmark, scene: "board" } });
+
+    await expect(restoring).rejects.toBe(refusal);
+    expect(calls).toEqual(["expect board", "restore board/awaitIntent"]);
   });
 
   it("game.restore enters a bookmark with a scene on an app without scenes", async () => {
