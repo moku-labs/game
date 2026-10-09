@@ -29,7 +29,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `onEnter(stage, fn): () => void` | Registry for the plugins above: `assets` preloads at `"load"`, `scenes` switches at `"scene"`. The callback gets `NodeInfo`, which carries `scene` when the node was defined with `defineNode({ scene: "board", ... })`; a game that passes `scenes: "home" | "board"` to `defineGame` gets the id checked by the compiler. A node without `scene` keeps the current scene; an `over` node must not name one. |
 | `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. `options.from` enters a bookmark first. A rest node is entered before the switch to fast mode. A transit node is entered after the switch, without waiting for its gate. |
 | `bookmark(): Bookmark` | Where the graph stands as serialisable data: the last rest node, or the transit node that waits at the gate for an answer. See [Bookmark and restore](#bookmark-and-restore). Flow does not know scenes: the optional `scene` field is written by the `game.bookmark` door only. |
-| `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. Ignores `scene`. For a rest node it resolves before the scene stage of the restored node runs; `walk([])` waits for the gate it opens after that stage. For a transit node it resolves once that node opened its gate. See [Bookmark and restore](#bookmark-and-restore). |
+| `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. Ignores `scene`. For a rest node it resolves before the scene stage of the restored node runs; `walk([])` waits for the gate it opens after that stage. For a transit node it resolves once that node opened its gate. It also resolves when the loop ends first, by a stop or a fatal error: nothing is entered then, and `state()` shows where the graph stands. See [Bookmark and restore](#bookmark-and-restore). |
 | `describe(): FlowGraph` | The whole graph as JSON, built without running the game. |
 | `state(): FlowState` | `{ running, path, stack, pending, mode }`, frozen. The same object comes back while the graph did not move: no edge, no gate opened or closed, no mode switch. |
 | `history(): readonly JournalEntry[]` | Edges since the last checkpoint. |
@@ -77,7 +77,7 @@ app.flow.state().pending.gate; // ["ok", "close"]
 | Accepted | A checkpoint always. A plain rest node while the graph hash matches. | Only while the graph hash matches. It is never a checkpoint, also with `checkpoint: true`. |
 | The graph changed | A plain rest node is refused. | `restore` enters `rest` instead when that is a checkpoint, and logs the info entry `flow:restore-fell-back` with `{ from, to }`. Without `rest` it is refused. A renamed or removed node is a changed graph too: a bookmark with `rest` whose path names no node takes the same fallback, and without `rest` it is refused as no node of the graph. |
 | What runs | The node is entered again, with the bookmark's input. | The node runs again from its first line, live, with the bookmark's input. Its effects before the gate play again. A failure retries this node. |
-| `restore` resolves | When the node is entered, before its scene stage. | When the node opened its gate, or at the rest node or the end of the loop it reaches without one. |
+| `restore` resolves | When the node is entered, before its scene stage. Or when the loop ends first: the node is not entered. | When the node opened its gate, or at the rest node or the end of the loop it reaches without one. Or when the loop ends before the node is entered: it never runs. |
 | `flow:rest` | Emitted once. `checkpoint` is the node's flag. | Emitted once, with `checkpoint: false`. |
 | `walk(route, { from })` | Enters before the switch to fast mode, then walks. The stages of the node see the mode of the caller. | Enters after the switch to fast mode, without waiting for the gate. The node runs in fast mode, so its popup is not shown. The route answers it. |
 
@@ -96,8 +96,6 @@ Known limits:
 - A transit restore hands the provider a document from between two rest points: the rest point
   is marked on restore, so that a later rollback does not drop the restored document. A page
   kill right after it loads that state at the start node.
-- An `over` node never replaces a scene that is already mounted. A popup bookmarked over Board
-  and restored on a page that already shows Home comes back over Home.
 - A body that was aborted (by `restore`, by a world event, by `onStop`) can start no effect any
   more. Its `fx(...)` call rejects with the abort reason: `"restore"`, `"inbox"` or `"stop"`.
 
@@ -170,9 +168,10 @@ The `scene` of a bookmark is what makes a restore at a popup work in a fresh pag
 a scene of its own keeps the mounted scene: a rest node (`settings/open`, the Settings popup over
 Home), or a transit node that waits for an effect that takes answers (`info/show`, the info popup
 of the mini game). In a fresh page nothing is mounted, so the restore door names the scene first
-and the node mounts it. A `scene` that is not a string makes `game.restore` refuse the bookmark,
-and so does a `rest` that is not `{ path, input }`. Flow imports the `ScenesApi` type only, never
-the scenes plugin.
+and the node mounts it. On a page that shows another scene an `over` node replaces it with the
+bookmark's scene. A `scene` that is not a string makes `game.restore` refuse the bookmark, and so
+does a `rest` that is not `{ path, input }`. Flow imports the `ScenesApi` type only, never the
+scenes plugin.
 
 `game.bookmark` at a waiting transit node answers with that node's `path` and with `rest`.
 `game.restore` of such a bookmark answers once the node's gate is open, so the state it returns

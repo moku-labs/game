@@ -324,13 +324,16 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
  * Restores a bookmark through the running loop: the active node is aborted with reason
  * `"restore"`, its transaction is discarded, the state is replaced and the node is entered. An
  * edge that was already committed still arrives first, and the rest point it reaches is not the
- * bookmark's: the promise waits for the turn in which the loop takes the bookmark.
+ * bookmark's: the promise waits for the turn in which the loop takes the bookmark. A loop that
+ * ends before that turn ends the wait too, after a stop or a fatal error. Nothing is entered
+ * then, and the bookmark is dropped: the seam outlives the loop, and the next `run()` would enter
+ * a bookmark nobody waits for.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param _modules - Injected sibling APIs.
  * @param bookmark - The bookmark to enter.
  * @returns A promise that resolves once the loop entered the bookmark's node, before that node
- *   ran: the rest seam fired.
+ *   ran: the rest seam fired. It also resolves when the loop ended first, with nothing entered.
  * @throws {Error} When the loop is not running.
  */
 export function restorePosition(
@@ -339,8 +342,9 @@ export function restorePosition(
   bookmark: Bookmark
 ): Promise<void> {
   const state = ctx.state.runner;
+  const running = state.running;
 
-  if (state.running === undefined) {
+  if (running === undefined) {
     throw new Error(
       "[game] flow.restore() needs a running graph.\n  Call flow.run() from the createApp onStart callback first."
     );
@@ -361,8 +365,25 @@ export function restorePosition(
 
       resolve();
     };
+    /**
+     * Ends the wait when the loop ended, resolved or rejected, before it took the bookmark.
+     */
+    const finish = (): void => {
+      const index = seam.rest.indexOf(listener);
+
+      // The listener left at the rest seam: the bookmark was entered and the wait is over.
+      if (index === -1) return;
+
+      seam.rest.splice(index, 1);
+
+      // Only this bookmark is dropped. A later restore may have put its own in the seam.
+      if (seam.restoring === bookmark) seam.restoring = undefined;
+
+      resolve();
+    };
 
     seam.rest.push(listener);
+    running.then(finish, finish);
   });
 
   seam.restoring = bookmark;

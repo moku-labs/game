@@ -109,11 +109,11 @@ function targetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string | und
 }
 
 /**
- * Reads the scene an `over` node asks for. An over node never switches a mounted scene; it takes
- * the expected scene while nothing is mounted, so a restore at a popup builds the scene under it,
- * whether the popup rests or waits for its answer. In fast mode an over transit node takes
- * nothing and leaves the record alone: a walk builds no scene on the way. A scene the over node
- * names itself is only warned about.
+ * Reads the scene an `over` node asks for. An over node takes the expected scene and clears the
+ * record, whatever is mounted, so a restore at a popup builds the scene under it, whether the
+ * popup rests or waits for its answer. With nothing expected it switches nothing. In fast mode an
+ * over transit node takes nothing and leaves the record alone: a walk builds no scene on the way.
+ * A scene the over node names itself is only warned about.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The over node being entered.
@@ -126,8 +126,6 @@ function overTargetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string |
   }
 
   if (isFastTransit(node, run)) return undefined;
-
-  if (ctx.state.current !== undefined) return undefined;
 
   return takePending(ctx);
 }
@@ -159,9 +157,9 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
 }
 
 /**
- * The `scene` stage of entering a node: the whole switch. An `over` node never switches a mounted
- * scene, a node without a scene keeps the current one, and an aborted node returns without
- * touching anything.
+ * The `scene` stage of entering a node: the whole switch. An `over` node switches only to an
+ * expected scene, a node without a scene and with nothing expected keeps the current one, and an
+ * aborted node returns without touching anything.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.

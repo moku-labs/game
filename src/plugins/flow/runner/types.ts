@@ -833,7 +833,10 @@ export type LoopSeam = {
    * inside any node. The walk waits on it, and so does `restore` after it entered a transit node.
    */
   gateOpen: (() => void)[];
-  /** The bookmark the loop enters at the next turn. */
+  /**
+   * The bookmark the loop enters at the next turn. The loop clears it when it takes it. A loop
+   * that ends first never takes it, so the restore that waits drops its own.
+   */
   restoring: Bookmark | undefined;
 };
 
@@ -1010,9 +1013,14 @@ export type RunnerApi = {
    * promise pending. An open gate is not a drawn popup: the popup shows on the next frame. And
    * `setMode` still throws there, since the graph waits inside a transit node.
    *
+   * The promise also resolves when the graph stops before the bookmark was entered: `onStop`
+   * ended the loop, or `run()` rejected. Nothing is entered then and the state is not replaced.
+   * `state()` shows whether it was: its `path` is the node the graph stands at.
+   *
    * @param bookmark - The bookmark to enter.
    * @returns A promise that resolves once a rest node is entered, or a transit node waits at
-   *   its gate.
+   *   its gate. It also resolves when the graph stops first, with nothing entered: read
+   *   `state()` to tell.
    * @throws {Error} When the bookmark names no node of this graph and has no `rest`, when the
    *   graph changed since the bookmark and neither it nor its `rest` point is a rest checkpoint,
    *   and before `run()`.

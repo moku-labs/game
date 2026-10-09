@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { commands, run } from "../../../../control";
 import { createApp, createPlugin, defineGame, projection, screen, type } from "../../../../index";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
@@ -281,6 +282,47 @@ describe("scenes plugin integration — a fast walk", () => {
 
     expect(app.scenes.current()).toBe("home");
     expect(app.world.projection.entityOf("menu.buttons", "play")).toBeDefined();
+
+    await app.stop();
+  });
+});
+
+describe("scenes plugin integration — the restore door at an over node", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("switches to the scene of a popup bookmark when another scene is mounted", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const first = await startApp();
+
+    expect(first.flow.gate.answer({ intent: "play" })).toBe(true);
+    await tick();
+    expect(first.flow.gate.answer({ intent: "info" })).toBe(true);
+    await tick();
+
+    const taken = await run(first, commands.bookmark);
+    const bookmark = structuredClone(taken.value);
+
+    await first.stop();
+
+    expect(bookmark).toMatchObject({ path: "info", scene: "board" });
+
+    const app = await startApp();
+
+    expect(app.scenes.current()).toBe("home");
+
+    await run(app, commands.restore, { bookmark });
+    await tick();
+
+    expect(app.flow.state().path).toBe("info");
+    expect(app.scenes.current()).toBe("board");
+    expect(app.world.projection.entityOf("board.cells", "c1")).toBeDefined();
+    expect(app.world.projection.entityOf("menu.buttons", "play")).toBeUndefined();
+    expect(heard).toEqual([
+      { from: undefined, to: "home", music: "home.theme" },
+      { from: "home", to: "board", music: undefined }
+    ]);
 
     await app.stop();
   });
