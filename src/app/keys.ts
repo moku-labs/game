@@ -132,6 +132,20 @@ function entriesOf(folder: string): Dirent[] {
 }
 
 /**
+ * Tells whether a file is an input of the scan: an asset file, or a strings file.
+ *
+ * @param file - The path relative to the game, with `/`.
+ * @returns True for a file the watch stamps.
+ * @example
+ * ```ts
+ * isInput("features/home/strings/en.json"); // true
+ * ```
+ */
+function isInput(file: string): boolean {
+  return ASSET_FILE.test(file) || STRINGS_FILE.test(file);
+}
+
+/**
  * Reads one folder of the walk and the folders below it, outside the skipped ones: every asset
  * file and every strings file joins the inputs with its stamp. Symlinks are not followed.
  *
@@ -146,7 +160,7 @@ function readFolder(root: string, folder: string, walk: Walk): void {
     const inGame = folder === "" ? entry.name : `${folder}/${entry.name}`;
 
     if (entry.isDirectory() && !isSkippedFolder(entry.name)) readFolder(root, inGame, walk);
-    if (!entry.isFile() || !(ASSET_FILE.test(inGame) || STRINGS_FILE.test(inGame))) continue;
+    if (!entry.isFile() || !isInput(inGame)) continue;
 
     const stats = statSync(path.join(root, inGame), { throwIfNoEntry: false });
 
@@ -251,6 +265,22 @@ function scanUi(ui: KeysUi, errors: string[], first: boolean): KeysUi {
 }
 
 /**
+ * The message of a scan that answered an exit code other than 0: the error lines it printed, one
+ * per line, or the code itself when it printed none.
+ *
+ * @param code - The exit code of the scan, not 0.
+ * @param errors - The error lines the scan printed.
+ * @returns The message for `onError`.
+ * @example
+ * ```ts
+ * failureText(1, []); // "the scan exited with code 1."
+ * ```
+ */
+function failureText(code: number, errors: readonly string[]): string {
+  return errors.length > 0 ? errors.join("\n") : `the scan exited with code ${code}.`;
+}
+
+/**
  * Runs the scan of `moku-game keys` for the game as it is on disk now. The flags are read again
  * for every scan: `--pseudo` depends on a `strings/en.json` being there.
  *
@@ -265,7 +295,7 @@ async function failureOf(watch: Watch, first: boolean): Promise<string | undefin
     const argv = keysArguments(watch.root, watch.settings, false);
     const code = await watch.seams.scan(argv, scanUi(watch.seams.ui, errors, first));
 
-    return code === 0 ? undefined : errors.join("\n");
+    return code === 0 ? undefined : failureText(code, errors);
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
@@ -357,9 +387,13 @@ export async function watchKeysAt(
   seams: KeysSeams,
   options: WatchKeysOptions = {}
 ): Promise<KeysWatcher> {
-  // The real path: the platform reports events under it, and a temp folder is often a symlink.
+  // The real path and the error sink. The platform reports events under the real path, and a
+  // temp folder is often a symlink. Without an `onError` a failed scan is a console warning.
   const real = realpathSync(root);
   const onError = options.onError ?? (message => seams.ui.warn(`[game] keys: ${message}`));
+
+  // The batcher, the tree watcher and the state of the watch. The batcher names `watch` before
+  // it is made, and reads it only at call time: when a batch runs, long after this stanza.
   const batcher = createBatcher(QUIET_MS, () => serialized(watch));
   const tree = watchTree(real, () => batcher.poke(), seams.watch);
   const watch: Watch = {
@@ -373,6 +407,8 @@ export async function watchKeysAt(
     scanning: Promise.resolve(),
     closed: false
   };
+
+  // Close: no later batch starts and the watcher lets go. A second call does nothing.
   const close = (): void => {
     if (watch.closed) return;
 

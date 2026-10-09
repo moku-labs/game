@@ -63,6 +63,18 @@ export type PreparedPage = {
 };
 
 /**
+ * Runs the asset scanner's command line with the string tools of i18n: the scan behind
+ * `moku-game keys`, `pack`, and the keys watch.
+ *
+ * @param argv - The flags of the scanner.
+ * @param ui - Where its lines go.
+ * @returns The exit code of the scanner.
+ */
+function runScanner(argv: string[], ui: KeysUi): Promise<number> {
+  return runAssets(argv, { compile: compileStrings, exportStrings, importStrings }, ui);
+}
+
+/**
  * The real seams of the keys watch: the asset scanner with the string tools, as `moku-game keys`
  * runs it, `fs.watch`, and the console.
  *
@@ -70,12 +82,7 @@ export type PreparedPage = {
  * @returns The seams.
  */
 function keysSeams(ui: KeysUi): KeysSeams {
-  return {
-    scan: (argv, scanUi) =>
-      runAssets(argv, { compile: compileStrings, exportStrings, importStrings }, scanUi),
-    watch,
-    ui
-  };
+  return { scan: runScanner, watch, ui };
 }
 
 /**
@@ -118,7 +125,7 @@ function processDeps(): CliDeps {
       return watcher;
     },
     watchKeys: (root, settings) => watchKeysAt(root, settings, keysSeams(ui)),
-    assets: argv => runAssets(argv, { compile: compileStrings, exportStrings, importStrings }, ui),
+    assets: argv => runScanner(argv, ui),
     native: runNative,
     resolve: (specifier, from) => Bun.resolveSync(specifier, from),
     loadPage: file => import(file),

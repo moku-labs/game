@@ -345,6 +345,7 @@ export function writePage(
 
   const stamp = path.join(root, ".moku", ASSETS_STAMP);
 
+  // The page is written; the empty stamp only when the keys watch has not written one.
   for (const [file, text] of texts) writeIfChanged(file, text);
   if (!existsSync(stamp)) writeIfChanged(stamp, assetsStamp(""));
 

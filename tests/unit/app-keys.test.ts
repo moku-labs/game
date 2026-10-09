@@ -327,7 +327,21 @@ function pause(ms: number): Promise<void> {
  */
 async function trailingBatch(): Promise<void> {
   await vi.advanceTimersByTimeAsync(QUIET_MS);
-  await pause(10);
+  await atRest();
+}
+
+/**
+ * Waits until no timer of the batcher waits, on a machine of any speed. `vi.waitFor` alone would
+ * also pass in the instant between a timer that fired and the batch it started asking for one
+ * more walk, so the pending microtasks run and the count is read once more.
+ *
+ * @returns Resolves when the batcher is at rest.
+ */
+async function atRest(): Promise<void> {
+  await vi.waitFor(() => expect(vi.getTimerCount()).toBe(0), WAIT);
+  await vi.advanceTimersByTimeAsync(0);
+
+  expect(vi.getTimerCount()).toBe(0);
 }
 
 /**
@@ -570,21 +584,25 @@ describe("watchKeysAt, what starts a scan", () => {
     await vi.waitFor(() => expect(game.seen.scans).toHaveLength(2), WAIT);
   });
 
-  it("skips a folder it cannot read instead of failing", async () => {
-    const root = makeGame({ "art/locked/secret.png": "png" });
-    const locked = path.join(root, "art", "locked");
-    const stubs = stubSeams(false);
+  // Root reads a folder of mode 000, so the test would prove nothing there.
+  it.skipIf(process.getuid?.() === 0)(
+    "skips a folder it cannot read instead of failing",
+    async () => {
+      const root = makeGame({ "art/locked/secret.png": "png" });
+      const locked = path.join(root, "art", "locked");
+      const stubs = stubSeams(false);
 
-    chmodSync(locked, 0o000);
+      chmodSync(locked, 0o000);
 
-    try {
-      opened.push(await watchKeysAt(root, SETTINGS, stubs.seams));
-    } finally {
-      chmodSync(locked, 0o755);
+      try {
+        opened.push(await watchKeysAt(root, SETTINGS, stubs.seams));
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+
+      expect(stubs.seen.scans).toHaveLength(1);
     }
-
-    expect(stubs.seen.scans).toHaveLength(1);
-  });
+  );
 });
 
 describe("watchKeysAt, the stamp", () => {
@@ -667,6 +685,17 @@ describe("watchKeysAt, a failed scan", () => {
     await batch(game);
 
     expect(onError.mock.calls).toEqual([["boom"], ["not an error"]]);
+    expect(game.seen.printed).toEqual(SCANNER_LINES);
+  });
+
+  it("names the exit code when a scan answers one and printed no error", async () => {
+    const onError = vi.fn();
+    const game = await startGame({ steps: { 1: () => 3 }, options: { onError } });
+
+    put(game.root, DOT, "other bytes");
+    await batch(game);
+
+    expect(onError.mock.calls).toEqual([["the scan exited with code 3."]]);
     expect(game.seen.printed).toEqual(SCANNER_LINES);
   });
 
@@ -824,7 +853,7 @@ describe("watchKeysAt, the trailing batch", () => {
 
     put(game.root, "features/home/view.ts", "export {};\n");
     await batch(game);
-    await pause(10);
+    await atRest();
 
     expect(game.seen.scans).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
@@ -922,7 +951,7 @@ describe("watchKeysAt, close", () => {
     fire(game);
     second.release();
     await vi.waitFor(() => expect(game.seen.printed).toContain(`info keys: ${DOT}`), WAIT);
-    await pause(10);
+    await atRest();
 
     expect(stampOf(game.root)).not.toBe(before);
     expect(watched(game)).toEqual([]);
