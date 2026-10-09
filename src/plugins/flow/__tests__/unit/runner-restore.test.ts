@@ -50,6 +50,7 @@ type NodeOptions = {
   outcomes?: readonly string[];
   rest?: boolean;
   checkpoint?: boolean;
+  barrier?: boolean;
   run?: (context: AnyNodeContext) => Result | Promise<Result>;
 };
 
@@ -60,7 +61,7 @@ const node = (options: NodeOptions = {}): AnyNode => ({
   rest: options.rest ?? false,
   over: false,
   checkpoint: options.checkpoint ?? false,
-  barrier: false,
+  barrier: options.barrier ?? false,
   inbox: [],
   ...(options.run ? { run: options.run } : {})
 });
@@ -93,6 +94,8 @@ type GraphOptions = {
   start?: string;
   /** Body of `stuck`. By default it never ends. */
   stuck?: (context: AnyNodeContext) => Promise<Result>;
+  /** Makes `skip` a barrier node: its edge to `home` waits for the write of the provider. */
+  barrier?: boolean;
 };
 
 /**
@@ -136,7 +139,7 @@ const createGraph = (
           return result("ok");
         }
       }),
-      skip: node({ run: () => result("done") }),
+      skip: node({ barrier: options.barrier ?? false, run: () => result("done") }),
       stuck: node({ run: options.stuck ?? (() => new Promise<Result>(() => undefined)) }),
       pass: node({ run: () => result("done") }),
       level,
@@ -172,6 +175,8 @@ const createMockLog = (): Log.LogApi => ({
 const createStoreFake = () => {
   const trees = { player: { coins: 0 }, session: { visits: 0 } };
   const restored: Json[] = [];
+  // The write of a barrier edge, while the test holds it open.
+  const barrier: { write: Promise<void> | undefined } = { write: undefined };
   const transaction: Transaction = {
     player: trees.player,
     session: trees.session,
@@ -186,13 +191,14 @@ const createStoreFake = () => {
   };
 
   return {
+    barrier,
     restored,
     store: {
       load: async (): Promise<void> => undefined,
       snapshot: (): Snapshot => snapshot,
       begin: (): Transaction => transaction,
       markRest: vi.fn(),
-      markBarrier: async (): Promise<void> => undefined,
+      markBarrier: (): Promise<void> => barrier.write ?? Promise.resolve(),
       rollback: vi.fn(),
       restore: (input: { player: Json }): void => {
         restored.push(input.player);
@@ -311,6 +317,23 @@ const setup = (options: GraphOptions = {}) => {
       return () => {
         held.delete(path);
         gateway.resolve();
+      };
+    },
+
+    /**
+     * Holds the write of the next barrier edge open until the returned function is called. The
+     * edge is committed by then, but the loop has not arrived at the node it leads to.
+     *
+     * @returns The function that lets the write through.
+     */
+    holdBarrier: (): (() => void) => {
+      const write = Promise.withResolvers<void>();
+
+      model.barrier.write = write.promise;
+
+      return () => {
+        model.barrier.write = undefined;
+        write.resolve();
       };
     },
 
@@ -526,6 +549,82 @@ describe("restore() into a rest node", () => {
     release();
     await stopRunner(harness.ctx);
   });
+
+  it("resolves the same way for the rest point of a bookmark whose node is gone from the graph", async () => {
+    const harness = setup();
+
+    await harness.start();
+
+    const release = harness.hold("home");
+    const gone = harness.bookmarkAt("renamed", {
+      graph: "00000000",
+      rest: { path: "home", input: noPayload }
+    });
+
+    await harness.api.restore(gone);
+
+    expect(harness.api.state()).toMatchObject({ path: "home", pending: {} });
+    expect(harness.model.restored).toEqual([{ coins: 9 }]);
+    expect(harness.ctx.log.info).toHaveBeenCalledExactlyOnceWith("flow:restore-fell-back", {
+      from: "renamed",
+      to: "home"
+    });
+
+    release();
+    await stopRunner(harness.ctx);
+  });
+});
+
+describe("restore() called while the edge before it still arrives", () => {
+  it("resolves at its own rest node, not at the rest node the edge arrives at", async () => {
+    const harness = setup({ barrier: true });
+
+    await harness.start();
+
+    const release = harness.holdBarrier();
+
+    // `skip` is a barrier node: its edge to `home` is committed and waits for the provider.
+    harness.modules.gate.answer({ intent: "skip" });
+    await tick();
+
+    expect(harness.api.state().path).toBe("skip");
+
+    const restoring = harness.api.restore(harness.bookmarkAt("end"));
+
+    release();
+    await restoring;
+
+    expect(harness.api.state().path).toBe("end");
+    await stopRunner(harness.ctx);
+  });
+
+  it("resolves a transit bookmark at its gate, not at the rest node the edge arrives at", async () => {
+    const harness = setup({ barrier: true });
+
+    await harness.start();
+
+    const releaseWrite = harness.holdBarrier();
+    const releaseNode = harness.hold("ask");
+
+    harness.modules.gate.answer({ intent: "skip" });
+    await tick();
+
+    const restoring = harness.api.restore(harness.bookmarkAt("ask"));
+    const restored = watch(restoring);
+
+    releaseWrite();
+    await tick();
+
+    // The edge arrived at `home`, then the loop took the bookmark: it stands in `ask`, gate shut.
+    expect(harness.api.state()).toMatchObject({ path: "ask", pending: {} });
+    expect(restored.settled).toBe(false);
+
+    releaseNode();
+    await restoring;
+
+    expect(harness.api.state().pending).toEqual({ gate: ["ok", "close"] });
+    await stopRunner(harness.ctx);
+  });
 });
 
 describe("bookmark() on the running loop", () => {
@@ -647,6 +746,93 @@ describe("walk({ from }) with a transit bookmark", () => {
   });
 });
 
+describe("walk({ from }) with a bookmark whose node is gone from the graph", () => {
+  it("falls back to the rest point, and logs it", async () => {
+    const harness = setup();
+
+    await harness.start();
+
+    const state = await harness.api.walk([], {
+      from: harness.bookmarkAt("renamed", {
+        graph: "00000000",
+        rest: { path: "home", input: noPayload }
+      })
+    });
+
+    expect(state.path).toBe("home");
+    expect(harness.model.restored).toEqual([{ coins: 9 }]);
+    expect(harness.ctx.log.info).toHaveBeenCalledExactlyOnceWith("flow:restore-fell-back", {
+      from: "renamed",
+      to: "home"
+    });
+    await stopRunner(harness.ctx);
+  });
+
+  it("is refused without a rest point, as before: its path is no node of the graph", async () => {
+    const harness = setup();
+
+    await harness.start();
+
+    await expect(
+      harness.api.walk([], { from: harness.bookmarkAt("renamed", { graph: "00000000" }) })
+    ).rejects.toThrow('[game] The bookmark "renamed" is not a node of the graph.');
+    expect(harness.ctx.log.info).not.toHaveBeenCalled();
+    expect(harness.api.state()).toMatchObject({ path: "home", mode: "live" });
+    await stopRunner(harness.ctx);
+  });
+});
+
+describe("walk({ from }) with a rest bookmark", () => {
+  it("enters the node before it switches to fast mode, as before: its stages see the caller's mode", async () => {
+    const harness = setup();
+
+    await harness.start();
+    harness.stageModes.length = 0;
+
+    const state = await harness.api.walk([], { from: harness.bookmarkAt("end") });
+
+    expect(harness.stageModes[0]).toEqual({ path: "end", mode: "live" });
+    expect(state).toMatchObject({ path: "end", mode: "live" });
+    await stopRunner(harness.ctx);
+  });
+
+  it("walks its route in fast mode once the node is entered", async () => {
+    const harness = setup();
+
+    await harness.start();
+    harness.stageModes.length = 0;
+
+    const state = await harness.api.walk([{ at: "home", intent: "open" }], {
+      from: harness.bookmarkAt("home")
+    });
+
+    expect(harness.stageModes).toEqual([
+      { path: "home", mode: "live" },
+      { path: "ask", mode: "fast" }
+    ]);
+    expect(harness.shown).toEqual([]);
+    expect(state).toMatchObject({ path: "ask", mode: "live" });
+    await stopRunner(harness.ctx);
+  });
+
+  it("enters the rest point of a fallback the same way: the node entered is a rest node", async () => {
+    const harness = setup();
+
+    await harness.start();
+    harness.stageModes.length = 0;
+
+    await harness.api.walk([], {
+      from: harness.bookmarkAt("ask", {
+        graph: "00000000",
+        rest: { path: "home", input: noPayload }
+      })
+    });
+
+    expect(harness.stageModes[0]).toEqual({ path: "home", mode: "live" });
+    await stopRunner(harness.ctx);
+  });
+});
+
 describe("a body that was aborted", () => {
   it("opens no gate: its effect with answers rejects with the abort reason", async () => {
     const caught: unknown[] = [];
@@ -714,6 +900,66 @@ describe("a body that was aborted", () => {
       allowed: homeIntents,
       narrowed: false
     });
+    await stopRunner(harness.ctx);
+  });
+
+  it("leaves no unhandled rejection when it starts an effect it does not await", async () => {
+    const unhandled = vi.fn();
+    const body = Promise.withResolvers<void>();
+    const harness = setup({
+      start: "stuck",
+      stuck: async ({ fx }) => {
+        await body.promise;
+        void fx(popup);
+
+        return result("done");
+      }
+    });
+
+    process.on("unhandledRejection", unhandled);
+
+    try {
+      await harness.start();
+      await harness.api.restore(harness.bookmarkAt("home"));
+      body.resolve();
+      await tick();
+      // The runtime reports a rejection nobody handled after the microtasks, in a task of its own.
+      await new Promise<void>(resolve => {
+        setTimeout(resolve, 0);
+      });
+    } finally {
+      process.off("unhandledRejection", unhandled);
+    }
+
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(harness.shown).toEqual([]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("still rejects for the body that awaits the effect: the reason reaches its catch", async () => {
+    const caught: unknown[] = [];
+    const body = Promise.withResolvers<void>();
+    const harness = setup({
+      start: "stuck",
+      stuck: async context => {
+        await body.promise;
+
+        try {
+          await context.fx(popup);
+        } catch (error) {
+          caught.push(error);
+        }
+
+        return result("done");
+      }
+    });
+
+    await harness.start();
+    await harness.api.restore(harness.bookmarkAt("home"));
+    body.resolve();
+    await tick();
+
+    expect(caught).toEqual(["restore"]);
     await stopRunner(harness.ctx);
   });
 });

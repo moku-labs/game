@@ -15,10 +15,19 @@ import { readState } from "./view";
 const noPayload: Json = null;
 
 /**
- * Where a walk starts from: the bookmark and the checked restore that enters it. They come
- * together, so a walk can never enter a bookmark the plugin's `restore` would refuse.
+ * Where a walk starts from: the bookmark, the restore that enters it and the kind of node that is
+ * entered. The runner API fills it in after its check of the bookmark, so a walk can never enter
+ * a bookmark the plugin's `restore` would refuse.
  */
-type WalkStart = { restore: (bookmark: Bookmark) => Promise<void>; from: Bookmark };
+type WalkStart = {
+  restore: (bookmark: Bookmark) => Promise<void>;
+  from: Bookmark;
+  /**
+   * True when `restore` enters a transit node: the walk then switches to fast mode before the
+   * enter. Absent for a rest node, which is entered first.
+   */
+  transit?: boolean;
+};
 
 /** A step of the route that answers a rest node through the gate. */
 type IntentStep = Extract<RouteStep, { intent: string }>;
@@ -358,18 +367,19 @@ async function playRoute(
 }
 
 /**
- * Walks a route through the running loop: switches to fast mode, restores `from` when given,
+ * Walks a route through the running loop: restores `from` when given, switches to fast mode,
  * waits until the loop rests at each step's `at` and answers through the gate, and substitutes
- * the result of every sub-flow node the route skips. The mode is switched before the bookmark is
- * entered, so a transit node `from` names never starts live and never shows its popup. The mode
- * of the caller is put back afterwards, also when the bookmark is refused or a step rejects, and
- * a substitution the route never reached is disarmed: it must not skip a sub-flow in the live
- * play that follows.
+ * the result of every sub-flow node the route skips. A rest node `from` names is entered before
+ * the switch: the stages of that node see the mode of the caller. A transit node is entered
+ * after the switch, so it never starts live and never shows its popup. The mode of the caller
+ * is put back afterwards, also when the bookmark is refused or a step rejects, and a
+ * substitution the route never reached is disarmed: it must not skip a sub-flow in the live play
+ * that follows.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs: features, fx, gate, inbox.
  * @param route - The player's answers and substituted results, in order.
- * @param start - Bookmark to enter first and the checked restore that enters it.
+ * @param start - Bookmark to enter first, the restore that enters it and the kind of its node.
  * @returns The state the walk ended in.
  * @throws {Error} Before `run()` was called, when the bookmark is refused, and when a step's `at`
  *   is never reached.
@@ -388,12 +398,16 @@ export async function walkRoute(
     );
   }
 
+  const transit = start?.transit ?? false;
+
+  if (start !== undefined && !transit) await start.restore(start.from);
+
   const previous = ctx.state.fx.mode;
 
   modules.fx.setMode("fast");
 
   try {
-    if (start !== undefined) await start.restore(start.from);
+    if (start !== undefined && transit) await start.restore(start.from);
 
     await playRoute(ctx, modules, route, running);
   } finally {

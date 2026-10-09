@@ -52,6 +52,26 @@ function guideAllow(payload: Json | undefined): Allow | undefined {
 }
 
 /**
+ * Refuses an effect a body starts after its node was aborted. The rejection counts as handled
+ * from the start: a body that does not await the effect leaves no unhandled rejection behind,
+ * and a body that awaits it still gets the reason.
+ *
+ * @param signal - The aborted signal of the node.
+ * @returns A promise rejected with the abort reason.
+ * @example
+ * ```ts
+ * refuseEffect(AbortSignal.abort("restore")); // a promise rejected with "restore"
+ * ```
+ */
+function refuseEffect(signal: AbortSignal): Promise<never> {
+  const refused = Promise.reject(abortReason(signal));
+
+  refused.catch(noop);
+
+  return refused;
+}
+
+/**
  * Builds the `fx` of a node context: awaited effects by call, cosmetic hints by `emit`. A `guide`
  * narrows the gate while it runs; the runner lifts the narrow when the node is left. A body that
  * was aborted keeps running, since the loop only stops waiting for it, so its `fx` starts nothing
@@ -69,7 +89,7 @@ function nodeFx(modules: Modules, step: Step): NodeFx {
    * @returns The answer, the handler's value, or `undefined`.
    */
   const run = (descriptor: Descriptor): Promise<unknown> => {
-    if (step.signal.aborted) return Promise.reject(abortReason(step.signal));
+    if (step.signal.aborted) return refuseEffect(step.signal);
 
     if (descriptor.kind === "guide") {
       const allow = guideAllow(descriptor.payload);

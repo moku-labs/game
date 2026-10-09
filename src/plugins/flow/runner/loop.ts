@@ -320,7 +320,9 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
 
 /**
  * Restores a bookmark through the running loop: the active node is aborted with reason
- * `"restore"`, its transaction is discarded, the state is replaced and the node is entered.
+ * `"restore"`, its transaction is discarded, the state is replaced and the node is entered. An
+ * edge that was already committed still arrives first, and the rest point it reaches is not the
+ * bookmark's: the promise waits for the turn in which the loop takes the bookmark.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param _modules - Injected sibling APIs.
@@ -348,6 +350,9 @@ export function restorePosition(
      * Resolves once, when the loop rests at the restored node.
      */
     const listener = (): void => {
+      // A rest point reached before the loop took the bookmark is not the one.
+      if (seam.restoring !== undefined) return;
+
       const index = seam.rest.indexOf(listener);
 
       if (index !== -1) seam.rest.splice(index, 1);

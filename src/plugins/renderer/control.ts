@@ -184,33 +184,85 @@ function nextFrame(app: HeadlessApp): Promise<void> {
 }
 
 /**
- * Waits on drawn frames until the graph rests at a gate: at most 600.
+ * A restore in flight: the promise of `flow.restore`, and how far it got. `entered` once it
+ * resolved, `failed` once it rejected.
+ */
+type Entry = { readonly restore: Promise<void>; state: "pending" | "entered" | "failed" };
+
+/**
+ * Starts the restore of a bookmark and does not wait for it. Both ways it can end are marked on
+ * the entry, so a restore that rejects while a frame is waited on is never left unhandled.
  *
  * @param app - The app.
- * @returns True once it rests, false when it still does not after 600 drawn frames.
+ * @param bookmark - The bookmark to enter.
+ * @returns The restore in flight.
  */
-async function waitForRest(app: HeadlessApp): Promise<boolean> {
-  for (let frame = 0; frame < REST_FRAMES; frame += 1) {
-    if (atRest(app.flow.state())) return true;
+function startRestore(app: HeadlessApp, bookmark: Bookmark): Entry {
+  const entry: Entry = { restore: app.flow.restore(bookmark), state: "pending" };
 
+  entry.restore.then(
+    () => {
+      entry.state = "entered";
+    },
+    () => {
+      entry.state = "failed";
+    }
+  );
+
+  return entry;
+}
+
+/**
+ * Tells whether a restore still has frames to wait for: it has not settled, or it resolved and
+ * the graph does not rest at a gate yet. A gate counts only after the restore resolved: until
+ * then it can be the gate of the node the restore leaves. A failed restore waits for nothing.
+ *
+ * @param app - The app.
+ * @param entry - The restore in flight.
+ * @returns True while another frame is needed.
+ */
+function waiting(app: HeadlessApp, entry: Entry): boolean {
+  if (entry.state === "pending") return true;
+
+  return entry.state === "entered" && !atRest(app.flow.state());
+}
+
+/**
+ * Waits on drawn frames until a restore resolved and the graph rests at a gate, or the restore
+ * failed: at most 600.
+ *
+ * @param app - The app.
+ * @param entry - The restore in flight.
+ * @returns False when frames are still needed after 600 drawn ones.
+ */
+async function waitForRest(app: HeadlessApp, entry: Entry): Promise<boolean> {
+  for (let frame = 0; frame < REST_FRAMES && waiting(app, entry); frame += 1) {
     await nextFrame(app);
   }
 
-  return atRest(app.flow.state());
+  return !waiting(app, entry);
 }
 
 /**
  * Restores a bookmark and waits until the graph rests at a gate, then two drawn frames more, so
- * the screen of the gate is built and drawn.
+ * the screen of the gate is built and drawn. The frames run while the restore is in flight: a
+ * bookmark of a transit node resolves only at its gate, and on a paused clock no frame but the
+ * ones stepped here brings its node there.
  *
  * @param app - The app.
  * @param bookmark - The bookmark to enter.
- * @throws {Error} When the graph does not rest within 600 drawn frames.
+ * @throws {Error} When the graph does not rest within 600 drawn frames, and whatever the restore
+ *   rejects with.
  */
 async function restoreAtRest(app: HeadlessApp, bookmark: Bookmark): Promise<void> {
-  await app.flow.restore(bookmark);
+  const entry = startRestore(app, bookmark);
+  const rested = await waitForRest(app, entry);
 
-  if (!(await waitForRest(app))) {
+  // A restore that failed throws its own error here. One still pending after 600 frames is not
+  // awaited: its node may never open a gate, and the command must answer.
+  if (entry.state !== "pending") await entry.restore;
+
+  if (!rested) {
     throw new Error(
       "[game] game.capture diff: the bookmark did not come to rest in 600 frames.\n  Capture a bookmark taken at a gate."
     );

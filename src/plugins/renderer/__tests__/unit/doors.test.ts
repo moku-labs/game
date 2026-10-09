@@ -361,6 +361,158 @@ describe("game.capture", () => {
     expect(capture).not.toHaveBeenCalled();
   });
 
+  it("steps the frames a restore needs before it resolves, while the clock is paused", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, flow, capture } = diffApp();
+    const pictures: { frame: number; path: string }[] = [];
+
+    // A bookmark of a transit node: the restore resolves at its gate, three drawn frames away,
+    // and on a paused clock only the command steps a frame.
+    app.time.pause();
+    resolveAtGate(app, flow);
+    capture.mockImplementation(async () => {
+      pictures.push({ frame: app.time.snapshot().frame, path: app.flow.state().path });
+
+      return { png: "data:image/png;base64,theirs" };
+    });
+
+    const ran = await run(app, captureCommand, { diff: bookmarkAt("shop") });
+
+    expect(ran.value).toEqual({ png: "data:image/png;base64,theirs" });
+    expect(pictures.map(picture => picture.path)).toEqual(["shop", "home"]);
+    // Three frames to the gate and two more, at the least.
+    expect(pictures[0]?.frame).toBeGreaterThanOrEqual(5);
+    expect(flow.restoredPaths).toEqual(["shop", "home"]);
+    expect(app.flow.state()).toMatchObject({ path: "home", pending: { gate: ["play"] } });
+    expect(app.time.isPaused()).toBe(true);
+  }, 2000);
+
+  it("does not take the gate of the node it leaves for the rest of the bookmark", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, flow, capture } = diffApp();
+    const pictures: { path: string; pending: FlowState["pending"] }[] = [];
+
+    // The gate the game waits at stays open until the loop left its node: a popup's does. The
+    // bookmark's own gate opens three drawn frames after the restore resolved.
+    flow.restore = async (bookmark: Bookmark) => {
+      flow.restoredPaths.push(bookmark.path);
+      await settle();
+      flow.state = { ...flow.state, path: bookmark.path, pending: {} };
+      flow.restFrames = 3;
+    };
+    capture.mockImplementation(async () => {
+      const { path, pending } = app.flow.state();
+
+      pictures.push({ path, pending });
+
+      return { png: "data:image/png;base64,theirs" };
+    });
+
+    await drive(app, run(app, captureCommand, { diff: bookmarkAt("shop") }));
+
+    expect(pictures).toEqual([
+      { path: "shop", pending: { gate: ["play"] } },
+      { path: "home", pending: { gate: ["play"] } }
+    ]);
+  });
+
+  it("answers the error of a refused restore at the next frame, and goes back", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, flow, capture } = diffApp();
+    const unhandled = watchUnhandled();
+
+    // The bookmark of "shop" is refused after the gate was shut; home rests at once.
+    flow.restore = async (bookmark: Bookmark) => {
+      flow.restoredPaths.push(bookmark.path);
+
+      if (bookmark.path === "shop") {
+        flow.state = { ...flow.state, pending: {} };
+
+        throw new Error("[game] The bookmark was refused.");
+      }
+
+      flow.state = { ...flow.state, path: bookmark.path, pending: { gate: ["play"] } };
+    };
+
+    const outcome = run(app, captureCommand, { diff: bookmarkAt("shop") }).then(
+      () => "resolved",
+      (error: Error) => error.message
+    );
+
+    // The restore rejects while the command waits on a frame: nobody may leave it unhandled.
+    await task();
+    await drive(app, outcome);
+
+    await expect(outcome).resolves.toBe("[game] The bookmark was refused.");
+    expect(unhandled.stop()).toEqual([]);
+    expect(flow.restoredPaths).toEqual(["shop", "home"]);
+    expect(capture).not.toHaveBeenCalled();
+    expect(app.time.snapshot().frame).toBeLessThan(10);
+  });
+
+  it("gives up on a restore that never resolves, after 600 frames, and goes back", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, flow, capture } = diffApp();
+
+    // The node of "shop" opens no gate, never rests and never ends; home rests at once.
+    app.time.pause();
+    flow.restore = (bookmark: Bookmark) => {
+      flow.restoredPaths.push(bookmark.path);
+
+      if (bookmark.path === "shop") {
+        flow.state = { ...flow.state, path: bookmark.path, pending: {} };
+
+        return new Promise<void>(() => undefined);
+      }
+
+      flow.state = { ...flow.state, path: bookmark.path, pending: { gate: ["play"] } };
+
+      return Promise.resolve();
+    };
+
+    await expect(run(app, captureCommand, { diff: bookmarkAt("shop") })).rejects.toThrow(
+      "[game] game.capture diff: the bookmark did not come to rest in 600 frames.\n  Capture a bookmark taken at a gate."
+    );
+    expect(flow.restoredPaths).toEqual(["shop", "home"]);
+    expect(app.flow.state()).toMatchObject({ path: "home", pending: { gate: ["play"] } });
+    expect(capture).not.toHaveBeenCalled();
+    expect(app.time.snapshot().frame).toBeGreaterThanOrEqual(600);
+  }, 2000);
+
+  it("leaves no restore unhandled when a frame it waits on fails first", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const { app, flow } = diffApp();
+    const unhandled = watchUnhandled();
+    const broken = {
+      ...app,
+      time: {
+        ...app.time,
+        step: () => {
+          throw new Error("the frame failed");
+        }
+      }
+    };
+
+    // The frame fails at once; the restore is refused one task later.
+    app.time.pause();
+    flow.restore = async (bookmark: Bookmark) => {
+      flow.restoredPaths.push(bookmark.path);
+      flow.state = { ...flow.state, pending: {} };
+      await task();
+
+      throw new Error("[game] The bookmark was refused.");
+    };
+
+    await expect(run(broken, captureCommand, { diff: bookmarkAt("shop") })).rejects.toThrow(
+      "the frame failed"
+    );
+    await task();
+    await task();
+
+    expect(unhandled.stop()).toEqual([]);
+    expect(flow.restoredPaths).toEqual(["shop", "home"]);
+  });
+
   it("answers undefined, back where it started, when the earlier picture cannot be read", async () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const { app, capture, restored } = diffApp();
@@ -532,6 +684,73 @@ function diffApp(options: { ready?: boolean } = {}) {
   const app = { ...base, flow: flowApi, renderer, world: mock.world };
 
   return { app, flow, capture, restored };
+}
+
+/**
+ * Makes the hand-made flow restore the way a bookmark of a transit node does: the gate is shut at
+ * once, opens three drawn frames later, and only then does the restore resolve.
+ *
+ * @param app - The app whose frames open the gate.
+ * @param app.time - Its time, for the frame hook.
+ * @param app.time.onFrame - Registers the frame hook.
+ * @param flow - The hand-made flow.
+ */
+function resolveAtGate(
+  app: { readonly time: { onFrame(phase: "render", callback: () => void): unknown } },
+  flow: FakeFlow
+): void {
+  const waiting: (() => void)[] = [];
+
+  app.time.onFrame("render", () => {
+    if (flow.state.pending.gate === undefined) return;
+
+    for (const resolve of waiting.splice(0)) resolve();
+  });
+  flow.restore = (bookmark: Bookmark) => {
+    flow.restoredPaths.push(bookmark.path);
+    flow.state = { ...flow.state, path: bookmark.path, pending: {} };
+    flow.restFrames = 3;
+
+    return new Promise<void>(resolve => {
+      waiting.push(resolve);
+    });
+  };
+}
+
+/**
+ * Waits one task: a rejection nobody handles is reported only after the microtasks ran dry.
+ */
+async function task(): Promise<void> {
+  await new Promise(resolve => {
+    setTimeout(resolve, 0);
+  });
+}
+
+/**
+ * Collects the promise rejections nobody handled, from now until `stop`.
+ *
+ * @returns The stop function, which answers what was collected.
+ */
+function watchUnhandled(): { stop(): unknown[] } {
+  const reasons: unknown[] = [];
+  /**
+   * Keeps one unhandled rejection.
+   *
+   * @param reason - What the promise rejected with.
+   */
+  const keep = (reason: unknown): void => {
+    reasons.push(reason);
+  };
+
+  process.on("unhandledRejection", keep);
+
+  return {
+    stop: () => {
+      process.off("unhandledRejection", keep);
+
+      return reasons;
+    }
+  };
 }
 
 /**

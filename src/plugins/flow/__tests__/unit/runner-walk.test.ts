@@ -438,7 +438,7 @@ describe("walkRoute", () => {
     await stopRunner(harness.ctx);
   });
 
-  it("switches to fast mode before it enters the bookmark of options.from", async () => {
+  it("enters a rest bookmark of options.from before it switches to fast mode", async () => {
     const main = flow("main", { home: waiting("play"), shop: waiting("buy") }, "home", {
       home: { play: "shop" },
       shop: { buy: "home" }
@@ -466,7 +466,82 @@ describe("walkRoute", () => {
       from: bookmark
     });
 
+    expect(modes).toEqual(["live"]);
+    expect(harness.ctx.state.fx.mode).toBe("live");
+
+    await stopRunner(harness.ctx);
+  });
+
+  it("switches to fast mode before it enters a transit bookmark of options.from", async () => {
+    const seen: string[] = [];
+    const main = flow(
+      "main",
+      {
+        home: waiting("play"),
+        work: node({
+          outcomes: ["done"],
+          run: () => {
+            seen.push(harness.ctx.state.fx.mode);
+            return { outcome: "done", payload: noPayload };
+          }
+        }),
+        end: waiting("again")
+      },
+      "home",
+      { home: { play: "work" }, work: { done: "end" }, end: { again: "home" } }
+    );
+    const harness = setup(main);
+    const modes: string[] = [];
+
+    harness.start();
+
+    const bookmark: Bookmark = {
+      path: "work",
+      input: noPayload,
+      player: {},
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: "any"
+    };
+    const state = await walkRoute(harness.ctx, harness.modules, [], {
+      restore: entered => {
+        modes.push(harness.ctx.state.fx.mode);
+
+        return restorePosition(harness.ctx, harness.modules, entered);
+      },
+      from: bookmark,
+      transit: true
+    });
+
     expect(modes).toEqual(["fast"]);
+    expect(seen).toEqual(["fast"]);
+    expect(state).toMatchObject({ path: "end", mode: "live" });
+
+    await stopRunner(harness.ctx);
+  });
+
+  it("puts the mode back when a transit bookmark of options.from is refused", async () => {
+    const main = flow("main", { home: waiting("play") }, "home", { home: { play: "home" } });
+    const harness = setup(main);
+
+    harness.start();
+
+    const bookmark: Bookmark = {
+      path: "home",
+      input: noPayload,
+      player: {},
+      session: {},
+      rng: { seed: 1, streams: {} },
+      graph: "any"
+    };
+
+    await expect(
+      walkRoute(harness.ctx, harness.modules, [], {
+        restore: () => Promise.reject(new Error("refused")),
+        from: bookmark,
+        transit: true
+      })
+    ).rejects.toThrow("refused");
     expect(harness.ctx.state.fx.mode).toBe("live");
 
     await stopRunner(harness.ctx);

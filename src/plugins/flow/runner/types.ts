@@ -948,8 +948,9 @@ export type RunnerApi = {
   /**
    * Walks a route in fast mode through the running loop: it answers the gate at each step's `at`
    * and substitutes the result of every sub-flow node the route skips. A `from` bookmark is
-   * entered through the same check as `restore`, with the same fallback, but in fast mode and
-   * without the wait `restore` adds for a transit node: the popup of such a node is not shown,
+   * entered through the same check as `restore`, with the same fallback. A rest node is entered
+   * before the switch to fast mode: its stages see the mode of the caller. A transit node is
+   * entered after the switch and without the wait `restore` adds for it: its popup is not shown,
    * the route answers it. The mode of the caller is put back afterwards.
    *
    * @param route - The player's answers and substituted sub-flow results, in order.
@@ -997,7 +998,9 @@ export type RunnerApi = {
    * Replaces the state with the bookmark's and enters its node. A rest checkpoint is always
    * accepted; any other node only while the graph is unchanged. A transit node is never taken
    * for a checkpoint: when the graph changed, such a bookmark is entered at its `rest` point
-   * instead, if that is a checkpoint, and the log gets `flow:restore-fell-back`.
+   * instead, if that is a checkpoint, and the log gets `flow:restore-fell-back`. A renamed or
+   * removed node is a changed graph too: a bookmark with `rest` whose path names no node takes
+   * the same fallback.
    *
    * A rest node: the promise resolves when the node is entered, before its scene stage ran. A
    * transit node runs again from its first line, live, with the bookmark's input, so its effects
@@ -1009,8 +1012,9 @@ export type RunnerApi = {
    * @param bookmark - The bookmark to enter.
    * @returns A promise that resolves once a rest node is entered, or a transit node waits at
    *   its gate.
-   * @throws {Error} When the bookmark names no node of this graph, when the graph changed since
-   *   the bookmark and neither it nor its `rest` point is a rest checkpoint, and before `run()`.
+   * @throws {Error} When the bookmark names no node of this graph and has no `rest`, when the
+   *   graph changed since the bookmark and neither it nor its `rest` point is a rest checkpoint,
+   *   and before `run()`.
    * @example
    * ```ts
    * // The next session opens where the last one stopped: state and position come back together.

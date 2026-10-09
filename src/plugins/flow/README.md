@@ -27,7 +27,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 |---|---|
 | `run(): Promise<void>` | Validates the graph, seals `features`, loads the save and enters `mainFlow.start`. Called once, by the consumer's `onStart`. Rejects on a fatal error; resolves when `onStop` aborts the loop. |
 | `onEnter(stage, fn): () => void` | Registry for the plugins above: `assets` preloads at `"load"`, `scenes` switches at `"scene"`. The callback gets `NodeInfo`, which carries `scene` when the node was defined with `defineNode({ scene: "board", ... })`; a game that passes `scenes: "home" | "board"` to `defineGame` gets the id checked by the compiler. A node without `scene` keeps the current scene; an `over` node must not name one. |
-| `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. `options.from` enters a bookmark first, already in fast mode and without waiting for its gate. |
+| `walk(route, options?): Promise<FlowState>` | Fast walk: every node's logic runs for real, effects answer instantly, `route` supplies the player's answers. `options.from` enters a bookmark first. A rest node is entered before the switch to fast mode. A transit node is entered after the switch, without waiting for its gate. |
 | `bookmark(): Bookmark` | Where the graph stands as serialisable data: the last rest node, or the transit node that waits at the gate for an answer. See [Bookmark and restore](#bookmark-and-restore). Flow does not know scenes: the optional `scene` field is written by the `game.bookmark` door only. |
 | `restore(bookmark): Promise<void>` | Replaces state and enters the bookmark's node. Ignores `scene`. For a rest node it resolves before the scene stage of the restored node runs; `walk([])` waits for the gate it opens after that stage. For a transit node it resolves once that node opened its gate. See [Bookmark and restore](#bookmark-and-restore). |
 | `describe(): FlowGraph` | The whole graph as JSON, built without running the game. |
@@ -75,11 +75,11 @@ app.flow.state().pending.gate; // ["ok", "close"]
 | | A rest node | A transit node |
 |---|---|---|
 | Accepted | A checkpoint always. A plain rest node while the graph hash matches. | Only while the graph hash matches. It is never a checkpoint, also with `checkpoint: true`. |
-| The graph changed | A plain rest node is refused. | `restore` enters `rest` instead when that is a checkpoint, and logs the info entry `flow:restore-fell-back` with `{ from, to }`. Without `rest` it is refused. |
+| The graph changed | A plain rest node is refused. | `restore` enters `rest` instead when that is a checkpoint, and logs the info entry `flow:restore-fell-back` with `{ from, to }`. Without `rest` it is refused. A renamed or removed node is a changed graph too: a bookmark with `rest` whose path names no node takes the same fallback, and without `rest` it is refused as no node of the graph. |
 | What runs | The node is entered again, with the bookmark's input. | The node runs again from its first line, live, with the bookmark's input. Its effects before the gate play again. A failure retries this node. |
 | `restore` resolves | When the node is entered, before its scene stage. | When the node opened its gate, or at the rest node or the end of the loop it reaches without one. |
 | `flow:rest` | Emitted once. `checkpoint` is the node's flag. | Emitted once, with `checkpoint: false`. |
-| `walk(route, { from })` | Enters and walks. | Enters without waiting for the gate. The node runs in fast mode, so its popup is not shown. The route answers it. |
+| `walk(route, { from })` | Enters before the switch to fast mode, then walks. The stages of the node see the mode of the caller. | Enters after the switch to fast mode, without waiting for the gate. The node runs in fast mode, so its popup is not shown. The route answers it. |
 
 A repro (`runRepro`, `reproBookmark`, `game.restore` with `repro`) starts at a rest node only. A
 `checkpoint` that names a transit node is refused.
