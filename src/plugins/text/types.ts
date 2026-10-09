@@ -300,11 +300,13 @@ export type Line = { runs: Run[]; width: number };
 export type TextLayout = { lines: Line[]; width: number; height: number };
 
 /**
- * What one label container was last filled from: the style object and the laid-out block. An
- * update with the same style object, the same anchor and the same lines and runs writes the new
- * text and positions into the objects already there.
+ * What one label container was last filled from: the style object, the laid-out block and the
+ * generation of the state at that moment. An update with the same style object, the same
+ * generation, the same anchor and the same lines and runs writes the new text and positions into
+ * the objects already there. An older generation means a dev hot swap replaced a font or an icon
+ * since: the objects hold textures that are destroyed, so they are built again.
  */
-export type DrawnLabel = { style: TextStyle; layout: TextLayout };
+export type DrawnLabel = { style: TextStyle; layout: TextLayout; generation: number };
 
 /**
  * A dev warning that is written once per key. Pure modules take it as an argument, so nothing
@@ -386,6 +388,11 @@ export type State = {
   drawn: WeakMap<object, DrawnLabel>;
   /** Entities to re-resolve in the next layout phase. */
   dirty: Set<Entity>;
+  /**
+   * Counts the dev hot swaps that replaced a font or an inline icon of a live label. A label
+   * container drawn under an older count is built again on its next update.
+   */
+  generation: number;
   /** Warning keys already written, so a style, a tag, a glyph or a font warns once. */
   warned: Set<string>;
   /** The system, the two world hooks and the display adapter. */
@@ -515,6 +522,12 @@ export type BundleLoaded = AssetsEvents["assets:bundle-loaded"];
  * Payload of the `assets:bundle-unloaded` hook: `keys` names the assets that left.
  */
 export type BundleUnloaded = AssetsEvents["assets:bundle-unloaded"];
+
+/**
+ * Payload of the `assets:replaced` hook: a dev hot swap put new bytes behind `keys`. Each of them
+ * answers a new font or texture already, and the old pages and textures are destroyed.
+ */
+export type AssetsReplaced = AssetsEvents["assets:replaced"];
 
 /**
  * Payload of the `i18n:locale-changed` hook: every message has to be resolved again.

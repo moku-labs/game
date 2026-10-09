@@ -154,6 +154,11 @@ export type EffectsCtx = KernelSlice & { readonly deps: Deps };
 export type BundleUnloaded = AssetsEvents["assets:bundle-unloaded"];
 
 /**
+ * Payload of the `assets:replaced` hook: `keys` names every asset a dev hot swap gave new bytes.
+ */
+export type AssetsReplaced = AssetsEvents["assets:replaced"];
+
+/**
  * Payload of the global `ui:hot-swap` hook: the saved file and its new exports.
  */
 export type HotSwap = GlobalEvents["ui:hot-swap"];

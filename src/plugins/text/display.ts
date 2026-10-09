@@ -6,7 +6,7 @@
 import type { DisplayAdapter } from "../renderer/sync/types";
 import type { PixiContainer, PixiModule, PixiSprite, PixiTexture } from "../renderer/types";
 import { fontOfRun, lineHeightOf, measureRun, parseAdvances } from "./measure";
-import { layoutFor, markDirty, styleOf, warnFor } from "./resolve";
+import { drawsWith, layoutFor, markDirty, styleOf, warnFor } from "./resolve";
 import type {
   DrawnLabel,
   IconRun,
@@ -44,6 +44,9 @@ type Ring = { width: number; color: number };
 
 /** A Pixi bitmap text: a glyph run, one copy of its rings or its shadow. */
 type PixiBitmapText = InstanceType<PixiModule["BitmapText"]>;
+
+/** What a font replace that failed calls: the page reload, or the spy of a test. */
+type Reload = () => void;
 
 /**
  * Reads the fonts of `fontKeys` that `assets` can answer for: the advance table first, then the
@@ -110,6 +113,83 @@ export function releaseFonts(ctx: TextCtx, keys: readonly string[]): void {
 function refresh(ctx: TextCtx): void {
   ctx.state.cache.clear();
   markDirty(ctx);
+}
+
+/**
+ * Reloads the page. This is how a font replace that failed ends, so the game is not left drawing
+ * with a font whose table was released. Headless and in a test there is no page, so nothing
+ * happens.
+ */
+function reloadPage(): void {
+  globalThis.location?.reload();
+}
+
+/**
+ * Says why a font could not be installed again.
+ *
+ * @param error - What the install threw.
+ * @returns The message of an error, or the value as a string.
+ * @example
+ * ```ts
+ * reasonOf(new Error("The page is gone.")); // "The page is gone."
+ * ```
+ */
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Installs every font among the replaced keys again: its table and its mark go, then the new
+ * file and the new page are read. The stamp of the keys watch is written after a failed scan
+ * too, so a `.fnt` the scanner refused still gets here, and reading it throws after its table was
+ * released. That font is logged and the page reloads.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param keys - The asset keys a dev hot swap replaced.
+ * @param reload - What a font that cannot be installed calls.
+ * @returns False when a font failed, so the page is on its way out.
+ */
+function reinstallFonts(ctx: TextCtx, keys: readonly string[], reload: Reload): boolean {
+  for (const key of keys) {
+    if (!ctx.state.fontKeys.has(key)) continue;
+
+    try {
+      releaseFonts(ctx, [key]);
+      installFonts(ctx);
+    } catch (error) {
+      ctx.log.error("text:font-replace-failed", { key, reason: reasonOf(error) });
+      reload();
+
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Applies what a dev hot swap replaced. `assets` answers the new font and the new texture of
+ * every key already, and the old pages and textures are destroyed. A font among the keys is
+ * installed again here, so the font registry of the renderer holds the new page at once. The
+ * labels drawn with a replaced font or inline icon are marked and the generation moves: the next
+ * frame writes each of them, and the adapter builds it again from the new textures even when its
+ * string stands still.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param keys - The asset keys with new bytes.
+ * @param reload - What a font that cannot be installed calls. The page reload by default; a test
+ *   passes a spy.
+ */
+export function applyReplaced(
+  ctx: TextCtx,
+  keys: readonly string[],
+  reload: Reload = reloadPage
+): void {
+  if (!reinstallFonts(ctx, keys, reload)) return;
+
+  if (markDirty(ctx, text => drawsWith(ctx, text, keys)) === 0) return;
+
+  ctx.state.generation += 1;
 }
 
 /**
@@ -385,14 +465,18 @@ function buildRun(
 }
 
 /**
- * The style and the laid-out block of one component value.
+ * The style and the laid-out block of one component value, under the generation of this moment.
  *
  * @param ctx - Domain context of the text plugin.
  * @param value - The component value.
  * @returns What the container is filled from.
  */
 function labelOf(ctx: TextCtx, value: Readonly<TextValue>): DrawnLabel {
-  return { style: styleOf(ctx, value.style), layout: layoutFor(ctx, value.resolved, value.style) };
+  return {
+    style: styleOf(ctx, value.style),
+    layout: layoutFor(ctx, value.resolved, value.style),
+    generation: ctx.state.generation
+  };
 }
 
 /**
@@ -546,10 +630,40 @@ function samePoint(first: Point, second: Point): boolean {
 }
 
 /**
+ * Tells whether a container already shows a value: the string, the style name and the anchor it
+ * was last updated with, drawn with the style object that is current and under the generation
+ * that is current. A replaced style is a new object under the same name. A font or an icon a dev
+ * hot swap replaced moves the generation, because the objects hold textures that are destroyed.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param container - The container of this label.
+ * @param previous - The value the container was drawn from.
+ * @param next - The value to draw now.
+ * @returns True when nothing has to be drawn.
+ */
+function isCurrent(
+  ctx: TextCtx,
+  container: PixiContainer,
+  previous: Readonly<TextValue>,
+  next: Readonly<TextValue>
+): boolean {
+  const drawn = ctx.state.drawn.get(container);
+
+  return (
+    previous.resolved === next.resolved &&
+    previous.style === next.style &&
+    samePoint(previous.anchor, next.anchor) &&
+    drawn?.style === styleOf(ctx, next.style) &&
+    drawn.generation === ctx.state.generation
+  );
+}
+
+/**
  * Draws a changed value into a container that holds a label already. A ticking counter keeps its
- * objects: with the same style object, the same anchor and the same lines and runs, the new text
- * and spots are written into them. Anything else frees the children and fills the container
- * again.
+ * objects: with the same style object, the same generation, the same anchor and the same lines
+ * and runs, the new text and spots are written into them. Anything else frees the children and
+ * fills the container again. A label of an older generation is always filled again: writing the
+ * string it shows already into a `BitmapText` rebuilds no glyph.
  *
  * @param ctx - Domain context of the text plugin.
  * @param pixi - The Pixi module the renderer loaded.
@@ -569,6 +683,7 @@ function redraw(
 
   if (
     drawn?.style === label.style &&
+    drawn.generation === label.generation &&
     samePoint(previous.anchor, next.anchor) &&
     sameShape(drawn.layout, label.layout)
   ) {
@@ -618,15 +733,7 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
       // The alpha fades the container, so a tween on it never touches the runs.
       container.alpha = next.alpha;
 
-      // A replaced style is a new object under the same name, so the label redraws with it.
-      if (
-        previous.resolved === next.resolved &&
-        previous.style === next.style &&
-        samePoint(previous.anchor, next.anchor) &&
-        ctx.state.drawn.get(container)?.style === styleOf(ctx, next.style)
-      ) {
-        return;
-      }
+      if (isCurrent(ctx, container, previous, next)) return;
 
       redraw(ctx, pixi, container, previous, next);
     },

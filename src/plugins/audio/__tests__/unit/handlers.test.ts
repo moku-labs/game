@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import { playMusic } from "../../playback";
 import type { Bus, Config, LifecycleChanged, Volumes } from "../../types";
-import { createFakeContext, type FakeContext } from "../fake-audio-context";
+import { createFakeContext, type FakeContext, keyOf } from "../fake-audio-context";
 import { type FakeAudio, type FakeUrls, installFakeAudio, installFakeUrl } from "../fake-media";
 import { createMockAudio, type MockAudio } from "./mock-audio";
 
@@ -225,6 +225,97 @@ describe("assets:bundle-unloaded", () => {
   });
 });
 
+describe("assets:replaced", () => {
+  it("decodes a replaced key again, from the new bytes, on its next play", async () => {
+    const { mock, context } = started();
+
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "board.hit" }, cosmetic: true });
+    mock.assets.replaced.set("board.hit", "board.hit v2");
+    mock.hooks["assets:replaced"]({ bundle: "board", keys: ["board.hit"] });
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "board.hit" }, cosmetic: true });
+
+    expect(context.decodes).toEqual(["board.hit", "board.hit v2"]);
+    expect(keyOf(context.sources[1]?.buffer)).toBe("board.hit v2");
+  });
+
+  it("decodes nothing by itself and keeps the keys the swap did not name", async () => {
+    const { mock, context } = started();
+
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "board.hit" }, cosmetic: true });
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "ui.click" }, cosmetic: true });
+    mock.assets.replaced.set("ui.click", "ui.click v2");
+    mock.hooks["assets:replaced"]({ bundle: "board", keys: ["board.hit"] });
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "ui.click" }, cosmetic: true });
+
+    expect([...mock.state.decoded.keys()]).toEqual(["ui.click"]);
+    expect(context.decodes).toEqual(["board.hit", "ui.click"]);
+  });
+
+  it("leaves a sound and a track that are playing untouched", async () => {
+    const { mock, context } = started();
+
+    mock.hooks["scenes:changed"]({ from: undefined, to: "board", music: "board.theme" });
+    await Promise.resolve();
+    await Promise.resolve();
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "board.hit" }, cosmetic: true });
+    mock.assets.replaced.set("board.theme", "board.theme v2");
+    mock.assets.replaced.set("board.hit", "board.hit v2");
+
+    mock.hooks["assets:replaced"]({ bundle: "board", keys: ["board.theme", "board.hit"] });
+
+    expect(context.sources).toHaveLength(2);
+    expect(context.sources.map(source => source.stoppedAt)).toEqual([undefined, undefined]);
+    expect(context.sources.map(source => keyOf(source.buffer))).toEqual([
+      "board.theme",
+      "board.hit"
+    ]);
+    expect(mock.state.music?.key).toBe("board.theme");
+  });
+
+  it("does nothing for keys that are not sounds", async () => {
+    const { mock, context } = started();
+
+    mock.assets.missing.add("ui.gone");
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "ui.click" }, cosmetic: true });
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "ui.gone" }, cosmetic: true });
+    const asked = [...mock.assets.asked];
+
+    mock.hooks["assets:replaced"]({ bundle: "board", keys: ["board.atlas", "font-body"] });
+
+    expect([...mock.state.decoded.keys()]).toEqual(["ui.click"]);
+    expect([...mock.state.warned]).toEqual(["ui.gone"]);
+    expect(mock.assets.asked).toEqual(asked);
+    expect(context.decodes).toEqual(["ui.click"]);
+  });
+
+  it("warns again about a replaced file that still does not decode", async () => {
+    const { mock } = started();
+
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "bad.hit" }, cosmetic: true });
+    mock.hooks["assets:replaced"]({ bundle: "board", keys: ["bad.hit"] });
+
+    expect([...mock.state.warned]).toEqual([]);
+
+    await mock.fx("sfx", { kind: "sfx", payload: { key: "bad.hit" }, cosmetic: true });
+
+    expect(mock.log.warn).toHaveBeenCalledTimes(2);
+    expect(mock.log.warn).toHaveBeenLastCalledWith("audio: the audio file did not decode", {
+      key: "bad.hit"
+    });
+  });
+
+  it("writes state only when the plugin runs headless", () => {
+    const mock = createMockAudio();
+
+    mock.start();
+    mock.state.warned.add("board.hit");
+    mock.hooks["assets:replaced"]({ bundle: "board", keys: ["board.hit"] });
+
+    expect([...mock.state.warned]).toEqual([]);
+    expect(mock.assets.asked).toEqual([]);
+  });
+});
+
 /** The pause payload `lifecycle` emits for a push of the background reason. */
 const push: LifecycleChanged = {
   reason: "background",
@@ -347,6 +438,18 @@ describe('assets:bundle-unloaded at music: "stream"', () => {
       reason: "budget",
       keys: ["board.theme"]
     });
+
+    expect(audio.elements[0]?.pauses).toBe(0);
+    expect(urls.revoked).toEqual([]);
+    expect(mock.state.music?.stream?.element).toBe(audio.elements[0]);
+  });
+});
+
+describe('assets:replaced at music: "stream"', () => {
+  it("leaves the playing element alone and revokes nothing", async () => {
+    const { mock, audio, urls } = await streaming();
+
+    mock.hooks["assets:replaced"]({ bundle: "board", keys: ["board.theme"] });
 
     expect(audio.elements[0]?.pauses).toBe(0);
     expect(urls.revoked).toEqual([]);

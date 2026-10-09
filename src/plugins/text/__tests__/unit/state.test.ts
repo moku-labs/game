@@ -24,6 +24,10 @@ describe("createTextState", () => {
     expect(state.removers).toEqual([]);
   });
 
+  it("starts at generation 0: no hot swap replaced a font or an icon yet", () => {
+    expect(createTextState().generation).toBe(0);
+  });
+
   it("hands every app its own collections", () => {
     const first = createTextState();
     const second = createTextState();

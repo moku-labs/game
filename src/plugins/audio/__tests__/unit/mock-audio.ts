@@ -25,12 +25,14 @@ export type FakeFlow = { registered: Registered[]; removed: string[]; api: FlowA
 
 /**
  * The fake `assets`: `audio(key)` answers an `.mp3` whose bytes are the text of the key itself, or
- * the MIME type a test wrote in `mimes` for that key (an `.m4a` is `"audio/mp4"`).
+ * the MIME type a test wrote in `mimes` for that key (an `.m4a` is `"audio/mp4"`). A test that
+ * swaps a file writes the text of its new bytes in `replaced`.
  */
 export type FakeAssets = {
   asked: string[];
   missing: Set<string>;
   mimes: Map<string, AudioMime>;
+  replaced: Map<string, string>;
   api: AssetsApi;
 };
 
@@ -111,6 +113,7 @@ function createFakeAssets(): FakeAssets {
     asked: [],
     missing: new Set<string>(),
     mimes: new Map<string, AudioMime>(),
+    replaced: new Map<string, string>(),
     api: undefined as unknown as AssetsApi
   };
 
@@ -120,7 +123,10 @@ function createFakeAssets(): FakeAssets {
 
       if (fake.missing.has(key)) return undefined;
 
-      return { bytes: bytesOf(key), mime: fake.mimes.get(key) ?? "audio/mpeg" };
+      return {
+        bytes: bytesOf(fake.replaced.get(key) ?? key),
+        mime: fake.mimes.get(key) ?? "audio/mpeg"
+      };
     }
   } as unknown as AssetsApi;
 

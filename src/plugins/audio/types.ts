@@ -249,7 +249,7 @@ export type State = {
   resuming: boolean;
   /** Sounds fired while `resuming`, one per key; played when the context runs, dropped when it does not. */
   pendingSfx: Map<string, SfxRequest>;
-  /** Per key, evicted per key on `assets:bundle-unloaded`. */
+  /** Per key, evicted per key on `assets:bundle-unloaded` and `assets:replaced`. */
   decoded: Map<string, Promise<AudioBuffer>>;
   /** Asset keys that already got their one warning. */
   warned: Set<string>;
@@ -422,6 +422,11 @@ export type LifecycleChanged = LifecycleEvents["lifecycle:changed"];
  * Payload of the `assets:bundle-unloaded` hook: `keys` names every decoded sound that is gone.
  */
 export type BundleUnloaded = AssetsEvents["assets:bundle-unloaded"];
+
+/**
+ * Payload of the `assets:replaced` hook: `keys` names every asset a dev hot swap gave new bytes.
+ */
+export type AssetsReplaced = AssetsEvents["assets:replaced"];
 
 /**
  * What one play of a sound asks for: the key and the bus the sound goes to.

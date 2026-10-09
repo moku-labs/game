@@ -73,4 +73,31 @@ describe("createHandlers", () => {
     expect(mock.wake).toHaveBeenCalledTimes(1);
     expect(mock.state.cache.size).toBe(0);
   });
+
+  it("marks only the labels whose content is a message on a locale change", () => {
+    const mock = started();
+
+    mock.world.put(1, Text, Text({ content: { key: "hud.orders" } }).value);
+    mock.world.put(2, Text, Text({ content: "+5" }).value);
+    mock.world.put(3, Text, Text({ content: "<icon=hud.coin>" }).value);
+    mock.step();
+
+    expect(mock.state.dirty.size).toBe(0);
+
+    mock.hooks["i18n:locale-changed"]({ locale: "en" });
+
+    expect([...mock.state.dirty]).toEqual([1]);
+    expect(mock.state.generation).toBe(0);
+  });
+
+  it("answers the four hooks of the plugin", () => {
+    const mock = started();
+
+    expect(Object.keys(mock.hooks)).toEqual([
+      "assets:bundle-loaded",
+      "assets:bundle-unloaded",
+      "assets:replaced",
+      "i18n:locale-changed"
+    ]);
+  });
 });

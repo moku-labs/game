@@ -158,6 +158,8 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 
 `assets:bundle-unloaded` retires every particle instance and every `Displacement` drawn with one of its keys, whatever their space, drops their bakes, and lets the keys warn again. An effect is baked again once its bundle is back.
 
+`assets:replaced` (dev only) does the same for the keys a hot swap gave new bytes: the next frame starts each emitter and builds each `Displacement` again from the new texture, so live particles of a replaced key are gone and a burst plays again.
+
 `ui:hot-swap` (global, so no `depends` on `ui`) takes the exports of a module the dev server swapped. Each `defineEmitter` export whose id a feature registered replaces it, and its bake is dropped. A live instance keeps its own bake; the next instance bakes the new config. An id no feature registered warns `effects:hot-unknown-emitter`. Other exports are ignored.
 
 ### Hot swap (dev)
@@ -179,4 +181,4 @@ None. Nothing above `effects` needs to know a particle died or a filter was assi
 
 ## Dependencies
 
-`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)` and the `assets:bundle-unloaded` hook), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.
+`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)`, the `assets:bundle-unloaded` and `assets:replaced` hooks), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.

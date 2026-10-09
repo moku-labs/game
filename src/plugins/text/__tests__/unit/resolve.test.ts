@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Part } from "../../../i18n/types";
 import { component } from "../../../world/ecs/define";
-import { bind, Countdown, Text } from "../../components";
+import { bind, builtInStyles, Countdown, Text } from "../../components";
+import { drawsWith, markDirty } from "../../resolve";
 import type { TextBind } from "../../types";
 import { miniFontJson } from "../fixtures/mini-font";
 import { createMockText, type MockText } from "./mock-text";
@@ -450,6 +451,75 @@ describe("the layout system — a locale change", () => {
     expect(mock.world.read(1, Text)?.resolved).toBe("3 orders");
     expect(mock.world.writes.filter(write => write.entity === 2)).toHaveLength(1);
     expect(mock.wake).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("markDirty", () => {
+  it("marks every label when it is handed no predicate, and says how many", () => {
+    const mock = started();
+
+    place(mock, 1, { content: { key: "hud.orders" } });
+    place(mock, 2, { content: "+5" });
+
+    expect(markDirty(mock.ctx)).toBe(2);
+    expect([...mock.state.dirty]).toEqual([1, 2]);
+  });
+
+  it("marks only the labels the predicate keeps", () => {
+    const mock = started();
+
+    place(mock, 1, { content: "+5" });
+    place(mock, 2, { content: "+5", style: "digits" });
+    place(mock, 3, { content: "+7" });
+
+    expect(markDirty(mock.ctx, text => text.style === "digits")).toBe(1);
+    expect([...mock.state.dirty]).toEqual([2]);
+  });
+
+  it("marks nothing when the predicate keeps no label", () => {
+    const mock = started();
+
+    place(mock, 1, { content: "+5" });
+
+    expect(markDirty(mock.ctx, () => false)).toBe(0);
+    expect(mock.state.dirty.size).toBe(0);
+  });
+});
+
+describe("drawsWith", () => {
+  it("is true for a font the style of the label names: regular, bold or italic", () => {
+    const mock = started();
+
+    mock.state.styles.set("rich", {
+      ...builtInStyles(mock.ctx.config.fonts).body,
+      bold: "ui.font-bold",
+      italic: "ui.font-italic"
+    });
+
+    const text = Text({ content: "12", style: "rich" }).value;
+
+    expect(drawsWith(mock.ctx, text, ["ui.font-body"])).toBe(true);
+    expect(drawsWith(mock.ctx, text, ["board.cell", "ui.font-bold"])).toBe(true);
+    expect(drawsWith(mock.ctx, text, ["ui.font-italic"])).toBe(true);
+    expect(drawsWith(mock.ctx, text, ["ui.font-digits"])).toBe(false);
+    expect(drawsWith(mock.ctx, text, [])).toBe(false);
+  });
+
+  it("is true for an inline icon of the resolved text, read through the tag grammar", () => {
+    const mock = started();
+    const icon = { ...Text.defaults, resolved: "×<icon=hud.coin>5" };
+    const escaped = { ...Text.defaults, resolved: String.raw`\<icon=hud.coin>` };
+
+    expect(drawsWith(mock.ctx, icon, ["hud.coin"])).toBe(true);
+    expect(drawsWith(mock.ctx, icon, ["hud.gem"])).toBe(false);
+    expect(drawsWith(mock.ctx, escaped, ["hud.coin"])).toBe(false);
+  });
+
+  it("reads an unknown style as body, the style the label is drawn with", () => {
+    const mock = started();
+    const text = { ...Text.defaults, style: "hud.nope", resolved: "12" };
+
+    expect(drawsWith(mock.ctx, text, ["ui.font-body"])).toBe(true);
   });
 });
 

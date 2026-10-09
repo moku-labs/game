@@ -6,7 +6,7 @@
  * code in the integration test.
  */
 import type { Log } from "@moku-labs/common/browser";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Api as AssetsApi, FontAsset } from "../../../assets/types";
 import { fakeClock } from "../../../clock/fake";
@@ -356,6 +356,10 @@ export type FakeRenderer = {
   api: RendererApi;
   ready: boolean;
   installed: string[];
+  /** The page texture every font key was last installed with. */
+  pages: Map<string, PixiTexture>;
+  /** What `fonts.install` throws when a case sets it: a renderer that cannot read the file. */
+  refuses: unknown;
   provided: Array<{ component: string; adapter: DisplayAdapter<TextValue> }>;
   removedDisplays: number;
 };
@@ -372,6 +376,8 @@ function createFakeRenderer(): FakeRenderer {
     api: undefined as unknown as RendererApi,
     ready: false,
     installed: [],
+    pages: new Map(),
+    refuses: undefined,
     provided: [],
     removedDisplays: 0
   };
@@ -395,8 +401,11 @@ function createFakeRenderer(): FakeRenderer {
         }
       },
       fonts: {
-        install: (key: string): void => {
+        install: (key: string, _fnt: string, texture: PixiTexture): void => {
+          if (fake.refuses !== undefined) throw fake.refuses;
+
           fake.installed.push(key);
+          fake.pages.set(key, texture);
         },
         installed: (key: string): boolean => fake.installed.includes(key)
       }
@@ -421,6 +430,8 @@ export type MockText = {
   /** Counts the reads of `clock.now()` the plugin made. */
   clockNow: ReturnType<typeof vi.fn>;
   wake: ReturnType<typeof vi.fn>;
+  /** Stands in for the page reload a failed font replace calls. */
+  reload: Mock<() => void>;
   hooks: ReturnType<typeof createHandlers>;
   start(): void;
   stop(): void;
@@ -472,6 +483,7 @@ export function createMockText(
   const assets = createFakeAssets();
   const renderer = createFakeRenderer();
   const wake = vi.fn();
+  const reload: Mock<() => void> = vi.fn();
   const clock = fakeClock(1_000_000);
   const clockNow = vi.fn((): number => clock.now());
   const clockApi = { now: clockNow } as unknown as ClockApi;
@@ -513,7 +525,8 @@ export function createMockText(
     clock,
     clockNow,
     wake,
-    hooks: createHandlers(kernel as unknown as Parameters<typeof createHandlers>[0]),
+    reload,
+    hooks: createHandlers(kernel as unknown as Parameters<typeof createHandlers>[0], reload),
     start: (): void => startText(kernel as unknown as Parameters<typeof startText>[0]),
     stop: (): void => stopText(state),
     step: (): void => {
