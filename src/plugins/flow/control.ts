@@ -17,8 +17,9 @@ type SceneApp = { readonly scenes?: ScenesApi };
 
 /**
  * Restores a bookmark with its `scene` expected first, so the node the restore enters mounts it.
- * A refused restore puts the record back to the mounted scene: no later node switches to the
- * scene of a bookmark that was never entered.
+ * A refused restore puts the record back to the mounted scene, when one is mounted: no later
+ * node switches to the scene of a bookmark that was never entered. With nothing mounted the
+ * record stays, as the scenes API has no way to clear it.
  *
  * @param app - The app; with `scenes`, the bookmark's scene is expected before the restore.
  * @param bookmark - The bookmark to enter.
