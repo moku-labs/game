@@ -438,8 +438,9 @@ export default [
 
   // 6b4. L12 — the visual test runner `src/visual/` is node-only and reaches the whole `/control`
   // catalogue: only the door `src/visual.ts` imports it. The project index `src/project/` is
-  // node-only too: only the door `src/project.ts` imports it. A later block replaces the whole rule,
-  // so the patterns these files carry now are repeated: L9's outside `ui`, L10's inside it.
+  // node-only too: only the door `src/project.ts` imports it, and the keys watch of
+  // `src/app/keys.ts`, node-only as well, which reuses its tree watcher. A later block replaces the
+  // whole rule, so the patterns these files carry now are repeated: L9's outside `ui`, L10's inside it.
   {
     files: ["src/**/*.ts"],
     ignores: [
@@ -447,6 +448,7 @@ export default [
       "src/visual/**",
       "src/project.ts",
       "src/project/**",
+      "src/app/keys.ts",
       "src/jsx-runtime.ts",
       "src/jsx-dev-runtime.ts",
       "src/plugins/ui/**",

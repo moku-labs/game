@@ -3,9 +3,9 @@
  * engine repo, with the real scanner, the real `fs.watch` and the branded console: `generated/`
  * written before it resolves, a strings save and an image save picked up, a broken strings file
  * handed to `onError` and its fix scanned again. The platform watcher is trusted on macOS only;
- * the batch rules run on every platform in `tests/unit/app-keys.test.ts`. A write waits one quiet
- * period after the scan before it: Bun reports only the first path of a burst of writes, so a
- * save in the same instant as the scan's own writes under `generated/` would not be heard.
+ * the batch rules run on every platform in `tests/unit/app-keys.test.ts`. A test writes right
+ * after a scan, with no wait: Bun reports only the first path of a burst of writes, so such a save
+ * may not be heard, and the trailing batch of the scan is what finds it.
  */
 import {
   appendFileSync,
@@ -26,9 +26,6 @@ const TIMING_SLACK = Number(process.env.PROJECT_TIMING_SLACK ?? 1);
 
 /** How long a test waits for a scan before it fails. */
 const WAIT_MS = 8000 * TIMING_SLACK;
-
-/** How long a test waits after a scan before its next write. */
-const QUIET_MS = 300 * TIMING_SLACK;
 
 /** The English strings of the mini game, under the game folder. */
 const ENGLISH = "features/home/strings/en.json";
@@ -53,25 +50,14 @@ function game(): string {
 }
 
 /**
- * Starts the watch of a game and waits one quiet period, so the first write of the test is not
- * in the same instant as the writes of the first scan.
+ * Starts the watch of a game; the test may write at once.
  *
  * @param root - The game folder.
  * @param onError - Gets the message of a failed scan.
- * @returns Resolves when the game is watched and quiet.
+ * @returns Resolves when the first scan ended.
  */
 async function watched(root: string, onError?: (message: string) => void): Promise<void> {
   opened.push(await watchKeys(root, onError === undefined ? {} : { onError }));
-  await quiet();
-}
-
-/**
- * Waits one quiet period.
- *
- * @returns Resolves after it.
- */
-function quiet(): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, QUIET_MS));
 }
 
 /**
@@ -152,17 +138,18 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
 
         writeFileSync(path.join(root, ENGLISH), '{\n  "home.note": "Tap the button"\n}\n');
 
+        // The line comes after the scan, and the batch writes a stamp right after it, if at all.
         await vi.waitFor(
-          () => expect(read(root, "generated/strings.en.ts")).toContain('text: "Tap the button"'),
+          () =>
+            expect(lines.filter(line => line.includes("keys: "))).toEqual([
+              expect.stringContaining(`keys: ${ENGLISH}`)
+            ]),
           { timeout: WAIT_MS }
         );
-        await quiet();
 
+        expect(read(root, "generated/strings.en.ts")).toContain('text: "Tap the button"');
         expect(writtenAt(root, ".moku/assets-stamp.ts")).toBe(stamp);
         expect(writtenAt(root, "generated/assets.ts")).toBe(keys);
-        expect(lines.filter(line => line.includes("keys: "))).toEqual([
-          expect.stringContaining(`keys: ${ENGLISH}`)
-        ]);
       } finally {
         log.mockRestore();
       }
@@ -179,10 +166,10 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
 
       appendFileSync(path.join(root, "features/ui/assets/fx-spark.webp"), Buffer.from([0, 0]));
 
+      // The stamp is written after the scan, so the scan wrote what it had to write by then.
       await vi.waitFor(() => expect(read(root, ".moku/assets-stamp.ts")).not.toBe(stamp), {
         timeout: WAIT_MS
       });
-      await quiet();
 
       expect(read(root, ".moku/assets-stamp.ts")).toMatch(/export default "[0-9a-f]{40}";\n$/);
       expect(writtenAt(root, "generated/assets.ts")).toBe(keys);
@@ -197,7 +184,6 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       writeFileSync(path.join(root, ENGLISH), '{\n  "home.note": "Tap the button"\n');
 
       await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1), { timeout: WAIT_MS });
-      await quiet();
 
       // The reason after the colon is the JSON parser's own sentence, so only the start is pinned.
       expect(onError).toHaveBeenCalledWith(

@@ -1,7 +1,8 @@
 /**
  * @file `watchKeysAt`, the watch behind `moku-game dev` and the editor's `watchKeys`, over stub
  * seams: a stub scan, a fake `fs.watch` the test fires, and a temp game folder with real files.
- * The quiet period runs on fake timers; the walk reads the real disk. Most tests use the fake
+ * The quiet period runs on fake timers; the walk reads the real disk. A batch that scanned asks
+ * for one trailing batch, so a test that counts timers lets it pass first. Most tests use the fake
  * platform without recursive watching: the end of a batch re-arms the folder watchers, so a folder
  * made before an event tells the test that the batch of that event ended.
  */
@@ -319,6 +320,17 @@ function pause(ms: number): Promise<void> {
 }
 
 /**
+ * Lets the trailing batch of the last scan run to its end. A batch that scanned asks for one
+ * more walk; on a game nobody saved in the meantime that walk finds no difference.
+ *
+ * @returns Resolves when the trailing batch ended.
+ */
+async function trailingBatch(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(QUIET_MS);
+  await pause(10);
+}
+
+/**
  * Reads the stamp module of a game.
  *
  * @param root - The game folder.
@@ -446,7 +458,10 @@ describe("watchKeysAt, what starts a scan", () => {
 
     await vi.advanceTimersByTimeAsync(1);
     await vi.waitFor(() => expect(game.seen.scans).toHaveLength(2), WAIT);
+    // The scan asked for its trailing walk; that walk finds nothing and asks for no more.
+    await trailingBatch();
 
+    expect(game.seen.scans).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -530,6 +545,8 @@ describe("watchKeysAt, what starts a scan", () => {
   it("pokes nothing for an event under generated/, .moku/, node_modules/, dist/ or tests/", async () => {
     const game = await startGame({ recursive: true });
 
+    // The trailing walk of the first scan ends first: after it no timer waits.
+    await trailingBatch();
     put(game.root, DOT, "other bytes");
 
     for (const file of [
@@ -724,7 +741,7 @@ describe("watchKeysAt, one scan at a time", () => {
     expect(stubs.seen.most).toBe(1);
   });
 
-  it("gives exactly one more batch for the events during a running scan", async () => {
+  it("gives exactly one more scan for the events during a running scan, then its trailing walk and no more", async () => {
     const second = held();
     const game = await startGame({ steps: { 1: second.step } });
 
@@ -747,7 +764,9 @@ describe("watchKeysAt, one scan at a time", () => {
 
     second.release();
     await vi.waitFor(() => expect(watched(game)).toContain("after"), WAIT);
-    await pause(10);
+    // The third scan asked for its trailing walk, as every scan does. It is the last batch: it
+    // finds no difference, so it scans nothing and asks for nothing.
+    await trailingBatch();
 
     expect(game.seen.scans).toHaveLength(3);
     expect(game.seen.most).toBe(1);
@@ -755,6 +774,59 @@ describe("watchKeysAt, one scan at a time", () => {
       "info keys: features/ui/assets/a.png",
       "info keys: features/ui/assets/b.png and 2 more"
     ]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("watchKeysAt, the trailing batch", () => {
+  it("scans a save whose event was swallowed during the writes of a scan, and then ends", async () => {
+    const root = makeGame();
+    const hidden = "features/ui/assets/hidden.png";
+    // The second scan saves an image while it runs, and the platform reports no event for it.
+    const stubs = stubSeams(false, {
+      1: ui => {
+        put(root, hidden, "png");
+
+        return passes(ui);
+      }
+    });
+    const game: Game = { root, ...stubs, keys: await watchKeysAt(root, SETTINGS, stubs.seams) };
+
+    opened.push(game.keys);
+    put(root, DOT, "other bytes");
+    await batch(game);
+
+    expect(game.seen.scans).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(2);
+
+    // No event is fired: only the walk the scan asked for can find the save.
+    await vi.advanceTimersByTimeAsync(QUIET_MS);
+    await vi.waitFor(() => expect(game.seen.printed).toContain(`info keys: ${hidden}`), WAIT);
+
+    expect(game.seen.scans).toHaveLength(3);
+
+    // That scan asked for a walk too. It finds no difference: no fourth scan, no timer left.
+    await trailingBatch();
+
+    expect(game.seen.scans).toHaveLength(3);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("follows the first scan too, and a batch with no scan asks for nothing", async () => {
+    const game = await startGame();
+
+    expect(vi.getTimerCount()).toBe(2);
+
+    await trailingBatch();
+
+    expect(game.seen.scans).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    put(game.root, "features/home/view.ts", "export {};\n");
+    await batch(game);
+    await pause(10);
+
+    expect(game.seen.scans).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
   });
 });

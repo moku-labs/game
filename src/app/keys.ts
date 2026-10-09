@@ -5,16 +5,16 @@
  * every asset file and every `strings/<locale>.json`; it runs the scan of `moku-game keys` only
  * when they differ from the batch before. After a scan it writes `.moku/assets-stamp.ts` from the
  * asset files, so the dev page reloads and shows the new bytes of an image. One scan runs at a
- * time, and a failed scan never stops the watch. The scan, `fs.watch` and the console come in as
- * seams, so a test drives it. Node and Bun only: the bin bundles it.
+ * time, and a failed scan never stops the watch. A batch that scanned is followed by one more
+ * walk: the platform reports only the first path of a burst of writes, so a save made in the same
+ * instant as the scan's own writes under `generated/` may never be reported. The scan, `fs.watch`
+ * and the console come in as seams, so a test drives it. Node and Bun only: the bin bundles it.
  */
 import { createHash } from "node:crypto";
 import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import type { BrandConsole } from "@moku-labs/common/cli";
-// eslint-disable-next-line no-restricted-imports -- node-only too: the watch skips the folders the index skips
 import { isSkippedFolder } from "../project/paths";
-// eslint-disable-next-line no-restricted-imports -- node-only too: the watch reuses the tree watcher and the batcher
 import { createBatcher, type TreeWatcher, type WatchFunction, watchTree } from "../project/watch";
 import { keysArguments } from "./build";
 import { writeIfChanged } from "./files";
@@ -98,6 +98,8 @@ type Watch = {
   readonly onError: (message: string) => void;
   /** The watcher of the game folder. */
   readonly tree: TreeWatcher;
+  /** Asks for one more batch after the quiet period. It does nothing after `close`. */
+  readonly again: () => void;
   /** The inputs of the batch before; `undefined` until the first scan. */
   inputs: Inputs | undefined;
   /** The lock: the batch that runs now, or the last one. Every batch awaits it first. */
@@ -290,8 +292,9 @@ async function scanAndReport(
 
 /**
  * One batch: walks the game, and scans when an input differs from the batch before; the first
- * batch always scans. Then it writes the stamp of the asset files, and arms the folder watchers
- * with the folders of the walk.
+ * batch always scans. Then it writes the stamp of the asset files, asks for one trailing batch,
+ * and arms the folder watchers with the folders of the walk. A batch that did not scan asks for
+ * nothing, so the trailing batch of a quiet game ends the chain.
  *
  * @param watch - The watch.
  */
@@ -310,6 +313,8 @@ async function runBatch(watch: Watch): Promise<void> {
       path.join(watch.root, ".moku", ASSETS_STAMP),
       assetsStamp(assetsHash(walk.inputs))
     );
+    // One more walk: a save in the same instant as these writes may not have been reported.
+    watch.again();
   }
 
   if (!watch.closed) watch.tree.rearm(walk.folders);
@@ -363,6 +368,7 @@ export async function watchKeysAt(
     seams,
     onError,
     tree,
+    again: () => batcher.poke(),
     inputs: undefined,
     scanning: Promise.resolve(),
     closed: false
