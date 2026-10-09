@@ -1,9 +1,11 @@
 {
   "name": "@moku-labs/game",
-  "version": "0.0.0",
+  "version": "0.13.2",
   "description": "2D puzzle game engine on TypeScript and PixiJS, built on @moku-labs/core.",
   "type": "module",
-  "sideEffects": ["./dist/index.mjs"],
+  "sideEffects": [
+    "./dist/index.mjs"
+  ],
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
   "exports": {
