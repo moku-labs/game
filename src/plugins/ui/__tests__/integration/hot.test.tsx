@@ -137,6 +137,64 @@ describe("dev hot swap", () => {
     await app.stop();
   });
 
+  it("forwards the assets stamp without rendering a view again", async () => {
+    const app = await startDevApp();
+    const stamp = "/game/.moku/assets-stamp.ts";
+    let renders = 0;
+    const Counted = defineComponent("Settings", {
+      local: { tab: "audio" },
+      view: (props: { volume: number }, local) => {
+        renders += 1;
+
+        return (
+          <column key="settings" style={{ gap: 8, width: 400, height: 260 }}>
+            <button key="audio" local={{ tab: "audio" }} style={{ width: 120, height: 60 }} />
+            <button key="video" local={{ tab: "video" }} style={{ width: 120, height: 60 }} />
+            <text
+              key="which"
+              style={{ width: 300, height: 40 }}
+              content={`${local.tab}:${props.volume}`}
+            />
+          </column>
+        );
+      }
+    });
+
+    hotSwap()({ Settings: Counted }, FILE);
+    app.time.step(16);
+
+    const rendered = renders;
+
+    expect(rendered).toBeGreaterThan(0);
+
+    // The stamp of the keys watch names asset files: `assets` hooks the event, no view runs.
+    hotSwap()(
+      { default: { files: { "features/ui/assets/fx-spark.webp": "2554:1" }, changed: [] } },
+      stamp
+    );
+    app.time.step(16);
+    app.time.step(16);
+
+    expect(renders).toBe(rendered);
+    expect(loggedData(app, "ui:hot-swap")).toEqual({
+      file: stamp,
+      components: [],
+      projections: [],
+      animations: [],
+      emitters: [],
+      strings: [],
+      textStyles: []
+    });
+
+    // Any other module that is not refused repaints, a module of plain values too.
+    hotSwap()({ GAP: 8 }, FILE);
+    app.time.step(16);
+
+    expect(renders).toBeGreaterThan(rendered);
+
+    await app.stop();
+  });
+
   it("re-renders a mounted projection with the new view", async () => {
     const app = await startDevApp();
 

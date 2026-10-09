@@ -37,6 +37,12 @@ import type {
 /** A texture the fake io handed out. `from` is the URL its bytes came from. */
 export type FakeTexture = { id: string; from: string; nine: CreateTextureOptions["nine"] };
 
+/** The pixel size of a decoded image. */
+export type FakeSize = { width: number; height: number };
+
+/** The size the fake decodes an image to when no test scripted one: what `manifestOf` gives a file. */
+const DEFAULT_SIZE: FakeSize = { width: 128, height: 128 };
+
 /** A slice the fake io cut. `page` is the id of the page texture, `frame` what the loader passed. */
 export type FakeSlice = {
   id: string;
@@ -63,6 +69,8 @@ export type FakeIo = AssetsIo & {
   texts: Map<string, string>;
   /** URL to the bytes an `.mp3` fetch answers with. Missing means the URL as UTF-8. */
   bodies: Map<string, ArrayBuffer>;
+  /** URL to the pixel size its decoded image has. Missing means 128×128. */
+  sizes: Map<string, FakeSize>;
   /** While `gated` is true every fetch waits for `release`. */
   control: { gated: boolean };
   held: Held[];
@@ -98,8 +106,11 @@ export function createFakeIo(manifest?: unknown): FakeIo {
   const contentTypes = new Map<string, string>();
   const texts = new Map<string, string>();
   const bodies = new Map<string, ArrayBuffer>();
+  const sizes = new Map<string, FakeSize>();
   const control = { gated: false };
   const held: Held[] = [];
+  // A counter, not the length of `created`: a test that empties the list still gets a new id.
+  const made = { textures: 0 };
 
   const io: FakeIo = {
     created,
@@ -110,6 +121,7 @@ export function createFakeIo(manifest?: unknown): FakeIo {
     contentTypes,
     texts,
     bodies,
+    sizes,
     control,
     held,
     release: (match: (url: string) => boolean): void => {
@@ -155,11 +167,16 @@ export function createFakeIo(manifest?: unknown): FakeIo {
         arrayBuffer: async () => bodies.get(url) ?? new TextEncoder().encode(url).buffer
       };
     },
-    decode: async (blob: Blob): Promise<DecodedImage> =>
-      ({ url: await blob.text() }) as unknown as DecodedImage,
+    decode: async (blob: Blob): Promise<DecodedImage> => {
+      const url = await blob.text();
+
+      return { url, ...(sizes.get(url) ?? DEFAULT_SIZE) } as unknown as DecodedImage;
+    },
     createTexture: (image: DecodedImage, options?: CreateTextureOptions): Texture => {
+      made.textures += 1;
+
       const texture: FakeTexture = {
-        id: `t${created.length + 1}`,
+        id: `t${made.textures}`,
         from: (image as unknown as { url?: string }).url ?? "",
         nine: options?.nine
       };

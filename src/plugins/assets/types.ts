@@ -4,7 +4,7 @@
  */
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
-import type { Require } from "../../config";
+import type { Events as GlobalEvents, Require } from "../../config";
 import type { Descriptor, Api as FlowApi, NodeInfo } from "../flow/types";
 import type { PixiTexture, Api as RendererApi, SliceFrame } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
@@ -450,6 +450,30 @@ export type BundleRecord = LoadedAssets & {
 export type PreloadQueue = { bundles: string[]; controller: AbortController };
 
 /**
+ * What the keys watch of `moku-game dev` knows about the asset files of a game: the default export
+ * of the generated `.moku/assets-stamp.ts`. The dev hot swap compares it with the map it applied
+ * last and replaces the files whose stamp differs.
+ *
+ * @example
+ * ```ts
+ * // The stamp after a save of fx-spark.webp: every watched file, and the one that changed.
+ * const stamps: AssetStamps = {
+ *   files: {
+ *     "features/ui/assets/font-body.fnt": "1810:1791536000000",
+ *     "features/ui/assets/fx-spark.webp": "2554:1791536552578"
+ *   },
+ *   changed: ["features/ui/assets/fx-spark.webp"]
+ * };
+ * ```
+ */
+export type AssetStamps = {
+  /** Every watched asset file, root-relative with `/`, and its `size:mtimeMs`. Sorted by path. */
+  files: Readonly<Record<string, string>>;
+  /** The files whose stamp differs from the batch before. Empty in the first stamp of a run. */
+  changed: readonly string[];
+};
+
+/**
  * assets plugin config.
  *
  * @example
@@ -499,6 +523,10 @@ export type State = {
   warned: Set<string>;
   /** `onEnter`, the `load` handler and the texture provider. */
   removers: Array<() => void>;
+  /** The `files` map of the stamp the dev hot swap applied last. `undefined` until the first swap. */
+  stamps: Readonly<Record<string, string>> | undefined;
+  /** The running dev hot swap. The next one waits for it, so two swaps never overlap. */
+  swapping: Promise<void> | undefined;
 };
 
 /**
@@ -542,6 +570,21 @@ export type Usage = { textureMb: number; budgetMb: number; bundles: readonly Bun
  *     }
  *   })
  * }); // a board bundle of four files sets share to 0.25, 0.5, 0.75 and 1; bundle-loaded follows
+ *
+ * // The text plugin installs a font again after a dev save replaced its page or its .fnt file.
+ * createPlugin("text", {
+ *   depends: [assetsPlugin, rendererPlugin],
+ *   hooks: ctx => ({
+ *     "assets:replaced": ({ keys }) => {
+ *       for (const key of keys) {
+ *         const font = ctx.require(assetsPlugin).font(key); // undefined for a texture or a sound
+ *         const fonts = ctx.require(rendererPlugin).sync.fonts;
+ *
+ *         if (font !== undefined) fonts.install(key, font.fnt, font.texture);
+ *       }
+ *     }
+ *   })
+ * }); // a save of features/ui/assets/body_0.png sends { bundle: "ui", keys: ["ui.body"] }
  * ```
  */
 export type Events = {
@@ -561,6 +604,12 @@ export type Events = {
     reason: "budget" | "request";
     keys: readonly string[];
   };
+  /**
+   * Files of a loaded bundle were replaced by a dev hot swap: one event per bundle per swap. `keys`
+   * names every asset that has new bytes; each of them answers a new texture, font or sound, and
+   * the old textures are destroyed. Dev builds only.
+   */
+  "assets:replaced": { bundle: string; keys: readonly string[] };
 };
 
 /**
@@ -695,7 +744,7 @@ export type Deps = { flow: FlowApi; renderer: RendererApi; time: TimeApi };
  * What the kernel context offers before the deps are attached.
  *
  * `index.ts` writes `events` with an annotated `register` (core spec `14-EVENT-REGISTRATION.md`
- * row 8), so the two own events reach the context the kernel hands the factories and `emit` is the
+ * row 8), so the own events reach the context the kernel hands the factories and `emit` is the
  * kernel's own, assets-typed one. No member of the context is cast.
  */
 export type KernelSlice = PluginCtx<Config, State, Events> & {
@@ -710,6 +759,12 @@ export type KernelSlice = PluginCtx<Config, State, Events> & {
 export type AssetsCtx = KernelSlice & { readonly deps: Deps };
 
 /**
- * Payload of the one event assets listens to.
+ * Payload of the `flow:rest` hook: where the graph rests.
  */
 export type FlowRest = { path: string; checkpoint: boolean };
+
+/**
+ * Payload of the global `ui:hot-swap` hook: the saved file and its new exports. For the stamp of
+ * the keys watch, `module.default` is the `AssetStamps`.
+ */
+export type HotSwap = GlobalEvents["ui:hot-swap"];

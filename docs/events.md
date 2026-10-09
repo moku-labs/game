@@ -2,7 +2,7 @@
 
 Every event a plugin emits, and how a game listens.
 
-One event is global: `ui:hot-swap`, so `effects` can hook it with no `depends` on `ui`. Every other event belongs to a plugin. `time` and `clock` emit nothing.
+One event is global: `ui:hot-swap`, so `effects` and `assets` can hook it with no `depends` on `ui`. Every other event belongs to a plugin. `time` and `clock` emit nothing.
 
 | Event | Emitted by | Payload | When |
 |---|---|---|---|
@@ -14,11 +14,12 @@ One event is global: `ui:hot-swap`, so `effects` can hook it with no `depends` o
 | `world:reconciled` | `world` | counts per reconcile | Dev only, behind `reconciledEvent` |
 | `renderer:device-lost` | `renderer` | `{ kind, reason }` | The GPU device or context was lost; `lifecycle` is pushed |
 | `assets:bundle-loaded`, `assets:bundle-unloaded` | `assets` | `{ bundle, tier, mb, reason }` | A bundle entered or left memory |
+| `assets:replaced` | `assets` | `{ bundle: string; keys: readonly string[] }` | Dev only: a hot swap replaced files of one loaded bundle. One event per bundle per swap. `keys` are the asset keys with new bytes: each answers a new texture, font or sound, and the old textures are destroyed. See [Hot swap](./hot-swap.md) |
 | `scenes:changed` | `scenes` | `{ from, to, music }` | The scene switched on entering a node |
 | `anim:mark` | `anim` | `{ animation, mark }` | A `mark` step was reached, or jumped by `finish()` |
 | `anim:finished` | `anim` | `{ animation }` | A timeline ended or was finished. Never on `cancel()` |
 | `i18n:locale-changed` | `i18n` | `{ locale }` | The module of the new locale is loaded, or `replace` swapped messages of the current locale or the fallback; `text` re-resolves. Never at start |
-| `ui:hot-swap` | `ui`, global | `{ file: string; module: Readonly<Record<string, unknown>> }` | Dev only: a saved view module was swapped, `module` is its new exports. `effects` replaces its emitters. See [Hot swap](./hot-swap.md) |
+| `ui:hot-swap` | `ui`, global | `{ file: string; module: Readonly<Record<string, unknown>> }` | Dev only: a saved view module was swapped, `module` is its new exports. `effects` replaces its emitters. For `.moku/assets-stamp.ts` it is only forwarded, with no repaint: `module.default` is the `AssetStamps`, and `assets` replaces the changed files. See [Hot swap](./hot-swap.md) |
 
 `text`, `audio`, `effects` and `platform` emit nothing, and `ui` only the dev `ui:hot-swap`; the `effects` budgets are log warnings.
 

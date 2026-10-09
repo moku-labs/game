@@ -268,5 +268,7 @@ export function releaseAll(state: State): void {
   state.warned.clear();
   state.current = undefined;
   state.sceneBundle = undefined;
+  state.stamps = undefined;
+  state.swapping = undefined;
   state.io = undefined;
 }

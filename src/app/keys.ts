@@ -4,13 +4,13 @@
  * events stop for a quiet period, a batch walks the game and reads the size and the time stamp of
  * every asset file and every `strings/<locale>.json`; it runs the scan of `moku-game keys` only
  * when they differ from the batch before. After a scan it writes `.moku/assets-stamp.ts` from the
- * asset files, so the dev page reloads and shows the new bytes of an image. One scan runs at a
- * time, and a failed scan never stops the watch. A batch that scanned is followed by one more
- * walk: the platform reports only the first path of a burst of writes, so a save made in the same
- * instant as the scan's own writes under `generated/` may never be reported. The scan, `fs.watch`
- * and the console come in as seams, so a test drives it. Node and Bun only: the bin bundles it.
+ * asset files: every file with its stamp, and the ones this batch found changed, so the dev page
+ * reads only those again. One scan runs at a time, and a failed scan never stops the watch. A
+ * batch that scanned is followed by one more walk: the platform reports only the first path of a
+ * burst of writes, so a save made in the same instant as the scan's own writes under `generated/`
+ * may never be reported. The scan, `fs.watch` and the console come in as seams, so a test drives
+ * it. Node and Bun only: the bin bundles it.
  */
-import { createHash } from "node:crypto";
 import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import type { BrandConsole } from "@moku-labs/common/cli";
@@ -201,24 +201,28 @@ function changedPaths(before: Inputs, after: Inputs): string[] {
 }
 
 /**
- * Hashes the asset files of a walk: their paths, sizes and time stamps. The strings files stay
- * out, so a strings save leaves the hash as it is.
+ * The text of the stamp module after one batch: every asset file of the walk with its stamp, and
+ * the asset files that differ from the batch before. The strings files stay out, so a batch that
+ * saved only strings has no stamp to write. A removed file is not listed as changed: it shows by
+ * its absence from the files. The first batch of a run has no batch before it, so it lists none.
  *
- * @param inputs - The stamps of a walk.
- * @returns The SHA-1 as 40 hex digits.
+ * @param inputs - The stamps of this walk.
+ * @param changed - The inputs that differ from the batch before: added, removed, or saved again.
+ * @param first - True for the first batch of the watch.
+ * @returns The text, or `undefined` when no asset file changed in a later batch.
  * @example
  * ```ts
- * assetsHash(new Map([["features/home/strings/en.json", "9:1"]])); // "da39a3ee5e6b4b0d3255bfef95601890afd80709": no asset file
+ * stampText(new Map([["a.png", "4:2"], ["strings/en.json", "9:1"]]), ["a.png", "strings/en.json"], false); // '// Written by moku-game dev. Do not edit.\nexport default {\n  files: {\n    "a.png": "4:2"\n  },\n  changed: ["a.png"]\n};\n'
  * ```
  */
-function assetsHash(inputs: Inputs): string {
-  const assets = [...inputs]
-    .filter(([file]) => ASSET_FILE.test(file))
-    .map(([file, stamp]) => `${file}:${stamp}`)
-    .toSorted();
+function stampText(inputs: Inputs, changed: readonly string[], first: boolean): string | undefined {
+  const moved = changed.filter(file => ASSET_FILE.test(file));
 
-  // eslint-disable-next-line sonarjs/hashing -- the version of the asset files the page reloads on, not a secret
-  return createHash("sha1").update(assets.join("\n")).digest("hex");
+  if (!first && moved.length === 0) return undefined;
+
+  const files = [...inputs].filter(([file]) => ASSET_FILE.test(file));
+
+  return assetsStamp(files, first ? [] : moved.filter(file => inputs.has(file)));
 }
 
 /**
@@ -322,9 +326,9 @@ async function scanAndReport(
 
 /**
  * One batch: walks the game, and scans when an input differs from the batch before; the first
- * batch always scans. Then it writes the stamp of the asset files, asks for one trailing batch,
- * and arms the folder watchers with the folders of the walk. A batch that did not scan asks for
- * nothing, so the trailing batch of a quiet game ends the chain.
+ * batch always scans. Then it writes the stamp when an asset file changed, asks for one trailing
+ * batch, and arms the folder watchers with the folders of the walk. A batch that did not scan
+ * asks for nothing, so the trailing batch of a quiet game ends the chain.
  *
  * @param watch - The watch.
  */
@@ -338,11 +342,11 @@ async function runBatch(watch: Watch): Promise<void> {
 
   if (first || changed.length > 0) {
     await scanAndReport(watch, changed, first);
-    // The stamp follows the asset files alone, so it is rewritten only when one of them changed.
-    writeIfChanged(
-      path.join(watch.root, ".moku", ASSETS_STAMP),
-      assetsStamp(assetsHash(walk.inputs))
-    );
+
+    // The stamp follows the asset files alone: a batch of strings saves has none to write.
+    const stamp = stampText(walk.inputs, changed, first);
+
+    if (stamp !== undefined) writeIfChanged(path.join(watch.root, ".moku", ASSETS_STAMP), stamp);
     // One more walk: a save in the same instant as these writes may not have been reported.
     watch.again();
   }

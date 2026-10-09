@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, createPlugin, defineGame, screen, type } from "../../../../index";
 import { defineScene } from "../../../scenes/define";
 import { assetsPlugin } from "../../index";
-import type { Events, Manifest, ManifestFile } from "../../types";
+import type { AssetStamps, Events, Manifest, ManifestFile } from "../../types";
 import { createFakeIo } from "../unit/mock-assets";
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,8 @@ const heard: {
   loaded: Events["assets:bundle-loaded"][];
   progress: Events["assets:bundle-progress"][];
   unloaded: Events["assets:bundle-unloaded"][];
-} = { loaded: [], progress: [], unloaded: [] };
+  replaced: Events["assets:replaced"][];
+} = { loaded: [], progress: [], unloaded: [], replaced: [] };
 
 const probePlugin = createPlugin("assetsProbe", {
   depends: [assetsPlugin],
@@ -131,6 +132,9 @@ const probePlugin = createPlugin("assetsProbe", {
     },
     "assets:bundle-unloaded": (payload: Events["assets:bundle-unloaded"]) => {
       heard.unloaded.push(payload);
+    },
+    "assets:replaced": (payload: Events["assets:replaced"]) => {
+      heard.replaced.push(payload);
     }
   })
 });
@@ -191,6 +195,7 @@ async function startApp(io?: ReturnType<typeof createFakeIo>, source: Manifest =
   heard.loaded.length = 0;
   heard.progress.length = 0;
   heard.unloaded.length = 0;
+  heard.replaced.length = 0;
 
   const app = createApp({
     plugins: [...screen, boardFeature, probePlugin],
@@ -444,6 +449,128 @@ describe("assets plugin integration — a packed manifest", () => {
 
     expect(Object.keys(packed.bundles).every(name => app.assets.isLoaded(name))).toBe(true);
     expect(app.assets.texture("board.panel")).toBeUndefined();
+
+    await app.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The dev hot swap of asset files on the real screen set. In a dev build `ui`
+// installs `globalThis.__moku_hot`, the handler the footer of the stamp module
+// calls; here the test calls it the same way. `ui` forwards the stamp on the
+// global `ui:hot-swap`, and `assets` hooks it with no `depends` on `ui`.
+// ---------------------------------------------------------------------------
+
+/** The path the hot footer reports for the stamp module of a game. */
+const STAMP = "/game/.moku/assets-stamp.ts";
+
+/** The file of the scene bundle "ui", which the graph stands on after start. */
+const PANEL = "features/board/assets/panel.png";
+
+/**
+ * Builds the stamp of the keys watch for the dev manifest: every file and font page at its first
+ * stamp, the saved ones at a later one.
+ *
+ * @param changed - The paths that were saved.
+ * @returns The default export of the stamp module.
+ */
+function stampsOf(changed: readonly string[]): AssetStamps {
+  const paths = Object.values(manifest.bundles).flatMap(bundle =>
+    bundle.files.flatMap(entry => [entry.path ?? "", ...(entry.pages ?? []).map(page => page.path)])
+  );
+  const files = Object.fromEntries(
+    paths.map(path => [path, changed.includes(path) ? "200:2" : "100:1"])
+  );
+
+  return { files, changed };
+}
+
+/**
+ * Calls the handler the running dev app installed, as the footer of the stamp module does, and
+ * lets the swap behind it settle.
+ *
+ * @param stamps - The new default export of the stamp module.
+ */
+async function saveStamp(stamps: AssetStamps): Promise<void> {
+  const swap: unknown = Reflect.get(globalThis, "__moku_hot");
+
+  if (typeof swap !== "function") throw new Error("ui installed no hot swap handler");
+
+  swap({ default: stamps }, STAMP);
+
+  for (let turn = 0; turn < 5; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+}
+
+describe("assets plugin integration — the dev hot swap", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("replaces a saved file of a loaded bundle and tells the plugins above", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const io = createFakeIo();
+    const app = await startApp(io);
+    const old = app.assets.texture("board.panel");
+    const usedBefore = app.assets.usage().textureMb;
+
+    await saveStamp(stampsOf([PANEL]));
+
+    const fresh = app.assets.texture("board.panel");
+
+    expect(fresh).not.toBe(old);
+    expect(io.created.at(-1)).toBe(fresh);
+    expect(io.destroyed).toEqual([old]);
+    expect(heard.replaced).toEqual([{ bundle: "ui", keys: ["board.panel"] }]);
+    // The same size came back, so the memory report stands.
+    expect(app.assets.usage().textureMb).toBe(usedBefore);
+    // `ui` forwarded the stamp: one line for the editor, with nothing of its own swapped.
+    expect(app.log.trace().findLast(entry => entry.event === "ui:hot-swap")?.data).toMatchObject({
+      file: STAMP,
+      components: []
+    });
+
+    await app.stop();
+  });
+
+  it("reloads the page instead when a file of the manifest left the game", async () => {
+    const reload = vi.fn();
+
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    vi.stubGlobal("location", { reload });
+
+    const io = createFakeIo();
+    const app = await startApp(io);
+    const fetchedBefore = io.fetched.length;
+    const files = Object.fromEntries(
+      Object.entries(stampsOf([]).files).filter(([path]) => path !== PANEL)
+    );
+
+    await saveStamp({ files, changed: [] });
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(app.log.trace().findLast(entry => entry.event === "assets:swap-refused")?.data).toEqual({
+      reason: `"${PANEL}" left the game`
+    });
+    expect(io.fetched).toHaveLength(fetchedBefore);
+    expect(heard.replaced).toEqual([]);
+
+    await app.stop();
+  });
+
+  it("swaps nothing while headless: there is no file to replace", async () => {
+    const reload = vi.fn();
+
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    vi.stubGlobal("location", { reload });
+
+    const app = await startApp();
+
+    // Even a stamp that names no file of the manifest is not refused: nothing was ever fetched.
+    await saveStamp({ files: {}, changed: [] });
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(heard.replaced).toEqual([]);
 
     await app.stop();
   });

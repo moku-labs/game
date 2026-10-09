@@ -13,6 +13,13 @@ describe("createAssetsState", () => {
     expect(state.useCounter).toBe(0);
   });
 
+  it("starts with no stamp applied and no hot swap running", () => {
+    const state = createAssetsState();
+
+    expect(state.stamps).toBeUndefined();
+    expect(state.swapping).toBeUndefined();
+  });
+
   it("starts with empty registries", () => {
     const state = createAssetsState();
 

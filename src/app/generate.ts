@@ -313,6 +313,23 @@ function importLine(binding: string, specifier: string): string {
 }
 
 /**
+ * Orders two texts by their code units, as `toSorted()` does without a comparer.
+ *
+ * @param first - One text.
+ * @param second - The other text.
+ * @returns A negative number, zero or a positive number.
+ * @example
+ * ```ts
+ * compareText("a/b.png", "a/c.png"); // -1
+ * ```
+ */
+function compareText(first: string, second: string): number {
+  if (first === second) return 0;
+
+  return first < second ? -1 : 1;
+}
+
+/**
  * The path from a page under `.moku/` to `.moku/` itself, where the one stamp of a game lives.
  *
  * @param toRoot - The path from the page to the game folder.
@@ -330,8 +347,9 @@ function toStampFolder(toRoot: string): string {
  * The `main.ts` of the dev page: the dev flag first, then the assets stamp, the page entry, the
  * game, its config, one import per scenario, and, with agents, one per `.dev` module and one per
  * agent. It calls `startPage` with the scenarios by file stem, the shell with the loaders of the
- * named plugins when the game needs it, the agents and the `.dev` modules. The stamp import makes
- * the page reload when the keys watch writes a new stamp: an asset file changed.
+ * named plugins when the game needs it, the agents and the `.dev` modules. The stamp import puts
+ * the stamp module on the page: when the keys watch writes a new stamp, the hot plugin hands it to
+ * the running game.
  *
  * @param settings - The resolved `config.ts`.
  * @param sources - The scenario files, the `.dev` modules and the agents.
@@ -420,20 +438,38 @@ export function devFlag(): string {
 }
 
 /**
- * The `assets-stamp.ts` module the dev `main.ts` imports: one string that changes when an asset
- * file of the game changes. The hot plugin takes it for a logic module, so a new stamp reloads the
- * page, and the page shows the new bytes of an image whose key stayed the same. The page starts
- * with the empty stamp; the keys watch writes the hash of the asset files.
+ * The `assets-stamp.ts` module the dev `main.ts` imports: the asset files of the game with their
+ * stamps, and the ones the last save changed. The hot plugin takes it for a module that swaps, so
+ * a new stamp reaches the running game, which reads the changed files again. The page starts with
+ * the empty stamp; the keys watch writes the files. Both lists are sorted here, and every path
+ * and stamp is written by `JSON.stringify`: a file name may hold a quote or a backslash.
  *
- * @param hash - The hash of the asset files, `""` before the first watch.
+ * @param files - Every watched asset file: its path relative to the game with `/`, and its stamp
+ *   `<size>:<mtimeMs>`. None before the first watch.
+ * @param changed - The paths whose stamp differs from the batch before, the new ones too. None in
+ *   the first stamp of a run.
  * @returns The text of `.moku/assets-stamp.ts`.
  * @example
  * ```ts
- * assetsStamp(""); // '// Written by moku-game dev. Do not edit.\nexport default "";\n'
+ * assetsStamp([], []); // '// Written by moku-game dev. Do not edit.\nexport default {\n  files: {},\n  changed: []\n};\n'
  * ```
  */
-export function assetsStamp(hash: string): string {
-  return `${WRITTEN}\nexport default ${JSON.stringify(hash)};\n`;
+export function assetsStamp(
+  files: readonly (readonly [file: string, stamp: string])[],
+  changed: readonly string[]
+): string {
+  const entries = files
+    .toSorted(([first], [second]) => compareText(first, second))
+    .map(([file, stamp]) => `    ${JSON.stringify(file)}: ${JSON.stringify(stamp)}`);
+  const map = entries.length === 0 ? "{}" : `{\n${entries.join(",\n")}\n  }`;
+  const list = changed
+    .toSorted(compareText)
+    .map(file => JSON.stringify(file))
+    .join(", ");
+
+  return [WRITTEN, "export default {", `  files: ${map},`, `  changed: [${list}]`, "};", ""].join(
+    "\n"
+  );
 }
 
 /**

@@ -1,6 +1,7 @@
 /**
  * @file assets plugin — loading one bundle and the boot sequence. One running load per bundle,
- * every caller a waiter: the last one to leave aborts the fetches.
+ * every caller a waiter: the last one to leave aborts the fetches. The loaders of one image, one
+ * font and one sound are exported: the dev hot swap of `swap.ts` reads a changed file through them.
  */
 import { enforceBudget, releaseAssets } from "./budget";
 import { fileUrl, indexKeys, kindOf, nineOf, parseManifest, resolveBaseUrl } from "./manifest";
@@ -9,6 +10,7 @@ import type {
   AssetsIo,
   AtlasFrame,
   AtlasPage,
+  AudioAsset,
   AudioMime,
   BundleMap,
   BundleRecord,
@@ -45,7 +47,7 @@ type Progress = Events["assets:bundle-progress"];
  * One running load of a bundle, as the file loaders see it: where the files come from, the
  * signal that cancels them and the maps they fill.
  */
-type Loading = {
+export type Loading = {
   io: AssetsIo;
   bundle: string;
   base: string;
@@ -241,12 +243,15 @@ export function touch(state: State, record: BundleRecord): void {
 }
 
 /**
- * Creates the four empty maps a bundle's assets live in. It is its own function because lint
- * rule L5 refuses a collection built inside an exported declaration.
+ * Creates the four empty maps a bundle's assets live in: the home of a running load.
  *
  * @returns Empty maps for textures, fonts, audio and atlas pages.
+ * @example
+ * ```ts
+ * emptyAssets().textures.size; // 0
+ * ```
  */
-function emptyAssets(): LoadedAssets {
+export function emptyAssets(): LoadedAssets {
   return { textures: new Map(), fonts: new Map(), audio: new Map(), pages: new Map() };
 }
 
@@ -275,7 +280,7 @@ async function fetchFile(run: Loading, path: string): Promise<FetchResponse> {
  * @returns The texture of the image.
  * @throws {Error} When the response is not ok.
  */
-async function loadImage(
+export async function loadImage(
   run: Loading,
   path: string,
   options?: CreateTextureOptions
@@ -341,7 +346,7 @@ function mimeOf(soundPath: string): AudioMime {
  * @returns The font file and its page textures.
  * @throws {Error} When a response is not ok, or the manifest lists no page.
  */
-async function loadFont(run: Loading, file: ManifestFile): Promise<LoadedFont> {
+export async function loadFont(run: Loading, file: ManifestFile): Promise<LoadedFont> {
   const path = pathOf(run.bundle, file);
   const entries = file.pages ?? [];
 
@@ -355,6 +360,22 @@ async function loadFont(run: Loading, file: ManifestFile): Promise<LoadedFont> {
   if (first === undefined) throw pagelessFont(run.bundle, path);
 
   return { fnt, texture: first, pages };
+}
+
+/**
+ * Loads one sound: the bytes exactly as they were fetched, never decoded here, and the type of
+ * their container.
+ *
+ * @param run - The running load.
+ * @param file - The audio file of the manifest.
+ * @returns The bytes and their MIME type.
+ * @throws {Error} When the response is not ok.
+ */
+export async function loadSound(run: Loading, file: ManifestFile): Promise<AudioAsset> {
+  const soundPath = pathOf(run.bundle, file);
+  const response = await fetchFile(run, soundPath);
+
+  return { bytes: await response.arrayBuffer(), mime: mimeOf(soundPath) };
 }
 
 /**
@@ -439,10 +460,7 @@ async function loadFile(run: Running, file: ManifestFile): Promise<void> {
   }
 
   if (kind === "audio") {
-    const soundPath = pathOf(run.bundle, file);
-    const response = await fetchFile(run, soundPath);
-
-    assets.audio.set(file.key, { bytes: await response.arrayBuffer(), mime: mimeOf(soundPath) });
+    assets.audio.set(file.key, await loadSound(run, file));
 
     return;
   }

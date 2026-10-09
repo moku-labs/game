@@ -5,7 +5,8 @@
  * registries, so the screen repaints on the next frame and every component keeps its local
  * state; emitters reach `effects` through the global `ui:hot-swap` event. A module that brings
  * something registered at start is refused with a throw, which Bun turns into a full reload that
- * restores the state.
+ * restores the state. The stamp of the keys watch, `.moku/assets-stamp.ts`, is only forwarded on
+ * that event: `assets` replaces the files it names, and no view renders again.
  */
 import type { AnyAnimationDefinition } from "../anim/types";
 import type { CompiledMessages } from "../i18n/types";
@@ -20,6 +21,9 @@ const HOT_GLOBAL = "__moku_hot";
 
 /** A strings module `assets:keys` generates; the group is its locale. */
 const STRINGS_FILE = /\/generated\/strings\.([\w-]+)\.ts$/;
+
+/** The stamp module the keys watch of `moku-game dev` writes: it names asset files, no view. */
+const ASSETS_STAMP = "/.moku/assets-stamp.ts";
 
 /**
  * The `kind` of every value a game registers by value at start: ECS component and tag types
@@ -245,6 +249,43 @@ function localeOf(file: string): string | undefined {
 }
 
 /**
+ * Tells whether the saved module is the stamp of the keys watch, read from its path with `/`
+ * separators.
+ *
+ * @param file - The path of the saved module.
+ * @returns True for `.moku/assets-stamp.ts` of a game.
+ * @example
+ * ```ts
+ * isAssetsStamp("/game/.moku/assets-stamp.ts"); // true
+ * ```
+ */
+function isAssetsStamp(file: string): boolean {
+  return file.replaceAll("\\", "/").endsWith(ASSETS_STAMP);
+}
+
+/**
+ * Starts the swaps of one module: its exports for the event, and nothing swapped yet.
+ *
+ * @param module - The exports of the saved module.
+ * @returns The swaps, every list empty.
+ * @example
+ * ```ts
+ * noSwaps({ GAP: 8 }).components; // []
+ * ```
+ */
+function noSwaps(module: Readonly<Record<string, unknown>>): Swaps {
+  return {
+    module,
+    components: [],
+    projections: [],
+    animations: [],
+    emitters: [],
+    strings: [],
+    textStyles: []
+  };
+}
+
+/**
  * Files one export under the kind it is, in the order component, projection, animation, emitter,
  * strings, text styles. The `default` export of a strings file counts as strings.
  *
@@ -304,15 +345,7 @@ function sortExports(next: unknown, file: string): Swaps | Refusal {
 
   // Every export is classified before anything is written, so a refusal changes nothing.
   const locale = localeOf(file);
-  const swaps: Swaps = {
-    module: Object.fromEntries(exports),
-    components: [],
-    projections: [],
-    animations: [],
-    emitters: [],
-    strings: [],
-    textStyles: []
-  };
+  const swaps = noSwaps(Object.fromEntries(exports));
 
   for (const entry of exports) {
     const reason = fileExport(swaps, entry, locale);
@@ -423,10 +456,27 @@ function summaryOf(file: string, swaps: Swaps): Summary {
 }
 
 /**
+ * Hands the stamp of the keys watch on: the event with the exports of the module, and the log
+ * line the editor listens to, every list empty. Nothing is sorted, replaced or repainted: the
+ * stamp names asset files, and `assets` hooks the event to replace them. A listener cannot refuse
+ * by throwing, the bus catches what a hook throws, so `assets` reloads the page itself.
+ *
+ * @param ctx - Domain context of the ui plugin.
+ * @param file - The path of the stamp module.
+ * @param next - Its new module namespace.
+ */
+function forwardStamp(ctx: UiCtx, file: string, next: object): void {
+  const swaps = noSwaps(Object.fromEntries(Object.entries(next)));
+
+  ctx.emit("ui:hot-swap", { file, module: swaps.module });
+  ctx.log.info("ui:hot-swap", summaryOf(file, swaps));
+}
+
+/**
  * Builds the handler of one app: sort the exports, run the replaces that may throw, write the
  * components and the text styles, and repaint every view. The repaint runs for every module that
  * is not refused, so a module of styles only, whose bindings Bun already patched, shows on the
- * next frame too.
+ * next frame too. The stamp of the keys watch is the one module that is only forwarded.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param jsx - The jsx module, which owns the component registry and the roots.
@@ -434,6 +484,13 @@ function summaryOf(file: string, swaps: Swaps): Summary {
  */
 function createSwap(ctx: UiCtx, jsx: JsxModule): HotSwap {
   return (next: unknown, file: string): void => {
+    // The stamp brings asset files, not views. One that did not evaluate is refused below.
+    if (isAssetsStamp(file) && hasMembers(next)) {
+      forwardStamp(ctx, file, next);
+
+      return;
+    }
+
     // Refuse a module that brings nothing to swap or something registered at start.
     const sorted = sortExports(next, file);
 

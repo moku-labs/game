@@ -30,6 +30,9 @@ const WAIT_MS = 8000 * TIMING_SLACK;
 /** The English strings of the mini game, under the game folder. */
 const ENGLISH = "features/home/strings/en.json";
 
+/** An image of the mini game, under the game folder. */
+const SPARK = "features/ui/assets/fx-spark.webp";
+
 /** The copies of this file, removed after it. */
 const copies: string[] = [];
 
@@ -82,6 +85,19 @@ function writtenAt(root: string, file: string): number {
   return statSync(path.join(root, file)).mtimeMs;
 }
 
+/**
+ * The stamp the watch gives a file as it is on disk now.
+ *
+ * @param root - The game folder.
+ * @param file - The path under it.
+ * @returns `<size>:<mtimeMs>`.
+ */
+function stampOf(root: string, file: string): string {
+  const stats = statSync(path.join(root, file));
+
+  return `${stats.size}:${stats.mtimeMs}`;
+}
+
 afterEach(() => {
   for (const keys of opened.splice(0)) keys.close();
 });
@@ -120,7 +136,13 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       expect(existsSync(path.join(root, "generated", "assets.ts"))).toBe(true);
       expect(existsSync(path.join(root, "generated", "manifest.json"))).toBe(true);
       expect(read(root, "generated/strings.en.ts")).toContain("Tap the");
-      expect(read(root, ".moku/assets-stamp.ts")).toMatch(/export default "[0-9a-f]{40}";\n$/);
+      expect(read(root, ".moku/assets-stamp.ts")).toMatch(
+        /^\/\/ Written by moku-game dev\. Do not edit\.\nexport default \{\n {2}files: \{\n/
+      );
+      expect(read(root, ".moku/assets-stamp.ts")).toContain(
+        `    "${SPARK}": "${stampOf(root, SPARK)}"`
+      );
+      expect(read(root, ".moku/assets-stamp.ts")).toMatch(/\n {2}changed: \[\]\n\};\n$/);
     });
 
     it("rewrites generated/strings.en.ts for a changed string value, and not the stamp", async () => {
@@ -155,7 +177,7 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       }
     });
 
-    it("rewrites the stamp for new bytes in an existing image, and not generated/assets.ts", async () => {
+    it("rewrites the stamp for new bytes in an existing image with that image as changed, and not generated/assets.ts", async () => {
       const root = game();
 
       await watched(root);
@@ -164,14 +186,20 @@ describe.skipIf(typeof Bun === "undefined" || process.platform !== "darwin")(
       const keys = writtenAt(root, "generated/assets.ts");
       const manifest = read(root, "generated/manifest.json");
 
-      appendFileSync(path.join(root, "features/ui/assets/fx-spark.webp"), Buffer.from([0, 0]));
+      appendFileSync(path.join(root, SPARK), Buffer.from([0, 0]));
 
       // The stamp is written after the scan, so the scan wrote what it had to write by then.
       await vi.waitFor(() => expect(read(root, ".moku/assets-stamp.ts")).not.toBe(stamp), {
         timeout: WAIT_MS
       });
 
-      expect(read(root, ".moku/assets-stamp.ts")).toMatch(/export default "[0-9a-f]{40}";\n$/);
+      // The stamp names the image with its new size, and nothing else as changed.
+      expect(read(root, ".moku/assets-stamp.ts")).toContain(
+        `    "${SPARK}": "${stampOf(root, SPARK)}"`
+      );
+      expect(read(root, ".moku/assets-stamp.ts")).toMatch(
+        new RegExp(String.raw`\n {2}changed: \["${SPARK}"\]\n\};\n$`)
+      );
       expect(writtenAt(root, "generated/assets.ts")).toBe(keys);
       expect(read(root, "generated/manifest.json")).toBe(manifest);
     });
