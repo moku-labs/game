@@ -9,7 +9,7 @@ You write small nodes and edge tables. The engine runs them, saves on the edges 
 [![npm](https://img.shields.io/npm/v/@moku-labs/game?logo=npm&color=cb3837&label=npm)](https://www.npmjs.com/package/@moku-labs/game)
 [![types](https://img.shields.io/badge/types-included-3178c6?logo=typescript&logoColor=white)](#requirements)
 [![node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](#requirements)
-[![bun](https://img.shields.io/badge/bun-%3E%3D1.3.14-2da44e?logo=bun&logoColor=white)](#requirements)
+[![bun](https://img.shields.io/badge/bun-%3E%3D1.4.2-2da44e?logo=bun&logoColor=white)](#requirements)
 [![for @moku-labs/core](https://img.shields.io/badge/for-%40moku--labs%2Fcore-0b7285)](https://github.com/moku-labs/core)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
@@ -330,7 +330,7 @@ A save of a logic file reloads the page. What swaps and what reloads: [docs/hot-
 
 ## Requirements
 
-- **Node `>= 24`** and **Bun `>= 1.3.14`**. Use `bun` only.
+- **Node `>= 24`** and **Bun `>= 1.4.2`**. Use `bun` only.
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
 - **`pixi.js` `^8.0.0`** as a peer dependency. `playwright-core` for visual tests, `sharp` for the asset pack, `typescript` for the project index, `@moku-labs/system` for the system shell and `@moku-labs/native` for the native build are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
 - **[`@moku-labs/core`](https://github.com/moku-labs/core)** is the kernel. **[`@moku-labs/common`](https://github.com/moku-labs/common)** brings `log` and `env`.

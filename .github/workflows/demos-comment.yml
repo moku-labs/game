@@ -39,3 +39,4 @@ jobs:
       # issue_comment has no head_ref: name the branch to pair with explicitly.
       paired_ref: ${{ needs.head.outputs.ref }}
       tier: full
+      bun_version: "1.4.2"

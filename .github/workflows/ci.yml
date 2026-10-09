@@ -24,6 +24,10 @@ permissions:
 jobs:
   ci:
     uses: moku-labs/ci/.github/workflows/package-ci.yml@v1
+    with:
+      # This pin is the real guard: Bun does not enforce `engines.bun`, and 1.3.14 freezes
+      # the dev server.
+      bun_version: "1.4.2"
 
   demos:
     needs: ci
@@ -33,3 +37,4 @@ jobs:
       # The preview job of `ci` published this commit; a full sha resolves on pkg.pr.new.
       game: https://pkg.pr.new/@moku-labs/game@${{ github.event.pull_request.head.sha }}
       tier: ${{ contains(github.event.pull_request.labels.*.name, 'demos:full') && 'full' || 'fast' }}
+      bun_version: "1.4.2"
