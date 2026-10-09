@@ -515,6 +515,30 @@ describe("drawsWith", () => {
     expect(drawsWith(mock.ctx, escaped, ["hud.coin"])).toBe(false);
   });
 
+  it("is false for a text that holds no icon tag, whatever else it holds", () => {
+    const mock = started();
+    const tagged = { ...Text.defaults, resolved: "<b>12</b> <color=#ff0000>hud.coin</color>" };
+    const bare = { ...Text.defaults, resolved: "icon=hud.coin" };
+    const empty = { ...Text.defaults, resolved: "" };
+
+    expect(drawsWith(mock.ctx, tagged, ["hud.coin"])).toBe(false);
+    expect(drawsWith(mock.ctx, bare, ["hud.coin"])).toBe(false);
+    expect(drawsWith(mock.ctx, empty, ["hud.coin"])).toBe(false);
+  });
+
+  it("still finds an icon that stands behind an escaped one or inside other tags", () => {
+    const mock = started();
+    const behind = {
+      ...Text.defaults,
+      resolved: String.raw`\<icon=hud.gem> <icon=hud.coin>`
+    };
+    const inside = { ...Text.defaults, resolved: "<b>×<icon=hud.coin></b>5" };
+
+    expect(drawsWith(mock.ctx, behind, ["hud.coin"])).toBe(true);
+    expect(drawsWith(mock.ctx, behind, ["hud.gem"])).toBe(false);
+    expect(drawsWith(mock.ctx, inside, ["hud.coin"])).toBe(true);
+  });
+
   it("reads an unknown style as body, the style the label is drawn with", () => {
     const mock = started();
     const text = { ...Text.defaults, style: "hud.nope", resolved: "12" };

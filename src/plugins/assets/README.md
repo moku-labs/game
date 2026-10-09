@@ -237,7 +237,7 @@ naming the five heaviest loaded entries, loose files and atlas pages together (a
 
 Dev builds only. The hook body sits inside the inline dev guard, written as a positive branch
 (`typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__`): a production `define` folds it
-and `swap.ts` leaves the bundle. Bun 1.3.14 keeps code that follows a folded early `return`, so
+and `swap.ts`, `stamp.ts` and `paths.ts` leave the bundle. Bun 1.3.14 keeps code that follows a folded early `return`, so
 the guard is not written that way. The keys watch of `moku-game dev` writes `.moku/assets-stamp.ts`, whose default export is
 an `AssetStamps`: `files` maps every asset file of the game to its `size:mtimeMs`, `changed` lists
 the paths the last batch changed. `ui` forwards the module on the global `ui:hot-swap`, and
@@ -312,19 +312,12 @@ the old textures are destroyed. A plugin that built something from one of those 
 builds it again.
 
 ```ts
-// The text plugin installs a font again after a save of features/ui/assets/body_0.png.
+// The audio plugin drops the buffer it decoded from a sound a dev save replaced.
 hooks: ctx => ({
   "assets:replaced": ({ keys }) => {
-    // { bundle: "ui", keys: ["ui.body"] }
-    for (const key of keys) {
-      const font = ctx.require(assetsPlugin).font(key); // undefined for a texture or a sound
-
-      if (font !== undefined) {
-        ctx.require(rendererPlugin).sync.fonts.install(key, font.fnt, font.texture);
-      }
-    }
+    for (const key of keys) ctx.state.decoded.delete(key); // the next play decodes the new bytes
   }
-});
+}); // a save of features/ui/assets/click.mp3 sends { bundle: "ui", keys: ["ui.click"] }
 ```
 
 `onStop` emits nothing: a teardown context has no `emit`.
@@ -349,7 +342,9 @@ work.
 | `bundles.ts` | `defineBundles` and the `load` descriptor. |
 | `manifest.ts` | `parseManifest` (versions 1 and 2), `indexKeys`, `kindOf`, `resolveBaseUrl`, `fileUrl`, `nineOf`, and the megabyte arithmetic `textureMb` and `sumMb`. |
 | `tiers.ts` | `loadBundle`, `bootTiers`, `isPermanent`, and the loaders of one file: `loadImage`, `loadFont`, `loadSound`. |
-| `swap.ts` | The dev hot swap of asset files: `createSwap` (the handler behind `ui:hot-swap`) and the type guard `isAssetStamps`. |
+| `stamp.ts` | The stamp of the keys watch: the type guard `isAssetStamps`, `stampsOf` (the stamp out of a `ui:hot-swap`) and `changedPaths`. |
+| `paths.ts` | The paths of the manifest for the hot swap: `indexPaths`, `refusalOf` (why the page reloads instead) and `batchesOf` (the changed files by bundle). |
+| `swap.ts` | The replace itself: `createSwap` (the handler behind `ui:hot-swap`), one bundle after another. |
 | `preload.ts` | `bundlesOfNode`, `neighbourhood`, the background queue. |
 | `budget.ts` | `usedMb`, `pickVictim`, `enforceBudget`, `unloadBundle`, `releaseAssets` (slices, then pages, then font pages). |
 | `inspect.ts` | The `game.assets` source of the `/inspect` door. |

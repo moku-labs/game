@@ -1,17 +1,17 @@
 /**
- * @file assets plugin — the dev hot swap of asset files. The keys watch of `moku-game dev` stamps
- * every asset file of the game into `.moku/assets-stamp.ts`; when that module changes, `ui`
- * forwards its new exports on the global `ui:hot-swap`. This file replaces the changed files of
- * the loaded bundles: a new texture, font or sound per key, the old textures destroyed after the
- * new ones are stored, then `assets:replaced`. A file that fails is logged and its bundle keeps
- * what it had. A changed set of files reloads the page instead: a hook cannot refuse by throwing,
- * the core bus catches what a hook throws.
+ * @file assets plugin — the dev hot swap of asset files. When the stamp of the keys watch changes
+ * (`stamp.ts`), the changed files of the loaded bundles (`paths.ts`) are replaced here: a new
+ * texture, font or sound per key, the old textures destroyed after the new ones are stored, then
+ * `assets:replaced`. A file that fails is logged and its bundle keeps what it had. A changed set
+ * of files reloads the page instead: a hook cannot refuse by throwing, the core bus catches what
+ * a hook throws.
  */
 import { enforceBudget } from "./budget";
 import { kindOf, nineOf, resolveBaseUrl, sumMb, textureMb } from "./manifest";
+import { type Batch, batchesOf, indexPaths, type Owner, type PathIndex, refusalOf } from "./paths";
+import { changedPaths, stampsOf } from "./stamp";
 import { emptyAssets, type Loading, loadFont, loadImage, loadSound } from "./tiers";
 import type {
-  AssetStamps,
   AssetsCtx,
   AssetsIo,
   AudioAsset,
@@ -20,36 +20,13 @@ import type {
   DecodedImage,
   HotSwap,
   LoadedFont,
-  Manifest,
-  ManifestBundle,
-  ManifestFile,
   State,
   Texture
 } from "./types";
 
-/** The module the keys watch writes, as the hot footer reports its path. */
-const STAMP_FILE = "/.moku/assets-stamp.ts";
-
-/** The name of the folder of a feature or of a layer the scanner reads. */
-const ASSETS = "assets";
-
-/** That folder inside a path. */
-const ASSETS_FOLDER = `/${ASSETS}/`;
-
+// Twins of Reload, reloadPage and reasonOf live in text/display.ts: a change edits both.
 /** What a refused or a broken swap calls: the page reload, or the spy of a test. */
 type Reload = () => void;
-
-/**
- * The file a manifest path leads to: its record, its own path and its bundle. The pages of a font
- * lead to the font, so the `.fnt` and every page share one owner.
- */
-type Owner = { bundle: string; entry: ManifestBundle; file: ManifestFile; path: string };
-
-/** The changed files of one bundle: what one `assets:replaced` reports. */
-type Batch = { bundle: string; entry: ManifestBundle; owners: Owner[] };
-
-/** The paths of one manifest: the owner of each, and the folders the scanner read them from. */
-type PathIndex = { manifest: Manifest; owners: Map<string, Owner>; folders: readonly string[] };
 
 /** The pixel size of a decoded image. */
 type Size = { width: number; height: number };
@@ -82,227 +59,17 @@ function reloadPage(): void {
 }
 
 /**
- * Tells whether a value maps paths to stamps.
+ * Says why a file could not be replaced.
  *
- * @param value - The `files` member of a stamp module.
- * @returns True for a plain object whose values are all strings.
+ * @param error - What the load threw.
+ * @returns The message of an error, or the value as a string.
  * @example
  * ```ts
- * isStampMap({ "features/ui/assets/fx-spark.webp": "2554:1791536552578" }); // true
+ * reasonOf(new Error("The source image could not be decoded.")); // "The source image could not be decoded."
  * ```
  */
-function isStampMap(value: unknown): value is AssetStamps["files"] {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every(stamp => typeof stamp === "string")
-  );
-}
-
-/**
- * Tells whether a value is a list of paths.
- *
- * @param value - The `changed` member of a stamp module.
- * @returns True for an array of strings.
- * @example
- * ```ts
- * isPathList(["features/ui/assets/fx-spark.webp"]); // true
- * ```
- */
-function isPathList(value: unknown): value is AssetStamps["changed"] {
-  return Array.isArray(value) && value.every(path => typeof path === "string");
-}
-
-/**
- * Tells the stamp of the keys watch from any other default export.
- *
- * @param value - The default export of the stamp module.
- * @returns True when it carries a `files` map of strings and a `changed` list of strings.
- * @example
- * ```ts
- * isAssetStamps({ files: { "features/ui/assets/popup.mp3": "8120:1791536000000" }, changed: [] }); // true
- * isAssetStamps("3f2a9c"); // false: a hash, as the module carried before it listed the files
- * ```
- */
-export function isAssetStamps(value: unknown): value is AssetStamps {
-  if (typeof value !== "object" || value === null) return false;
-  if (!("files" in value) || !("changed" in value)) return false;
-
-  return isStampMap(value.files) && isPathList(value.changed);
-}
-
-/**
- * Reads the stamp out of a hot swap, when the saved module is the stamp of the keys watch.
- *
- * @param payload - The saved file and its new exports.
- * @returns The stamp, or `undefined` for any other file and for a module that carries none.
- * @example
- * ```ts
- * stampsOf({ file: "/game/features/hud/view.tsx", module: { Hud } }); // undefined
- * ```
- */
-function stampsOf(payload: HotSwap): AssetStamps | undefined {
-  if (!payload.file.replaceAll("\\", "/").endsWith(STAMP_FILE)) return undefined;
-
-  const stamps = payload.module.default;
-
-  return isAssetStamps(stamps) ? stamps : undefined;
-}
-
-/**
- * Reads the folder the scanner found a manifest path in. The scanner reads the `assets/` folder
- * of a feature or of a layer, so the path is cut after it; a path with no such folder, as in a
- * manifest written by hand, gives the folder of the file.
- *
- * @param path - A path of the manifest.
- * @returns The folder, ending in a slash, or `""` for a file at the root.
- * @example
- * ```ts
- * folderOf("features/ui/assets/fx/leaf.webp"); // "features/ui/assets/"
- * ```
- */
-function folderOf(path: string): string {
-  const scanned = path.indexOf(ASSETS_FOLDER);
-
-  if (scanned !== -1) return path.slice(0, scanned + ASSETS_FOLDER.length);
-
-  return path.slice(0, path.lastIndexOf("/") + 1);
-}
-
-/**
- * Tells whether the scanner would read a path, by its shape alone. It mirrors `scanOwner` of
- * `scan/scan.ts`, which runtime code does not import: the scanner reads `<layer>/assets/` and
- * `<features>/<feature>/assets/` under the game root, so `assets` is the second or the third
- * segment and a file follows it. The page knows neither the layers nor the name of the features
- * folder, so any folder counts as one. This is what finds the first file of an `assets/` folder
- * the booted manifest names nowhere.
- *
- * @param path - A path of the game, root-relative with `/`.
- * @returns True for a path under the `assets/` of a layer or of a feature.
- * @example
- * ```ts
- * isScannerPath("features/shop/assets/coin.png"); // true: a feature
- * isScannerPath("shared/assets/button/primary.png"); // true: a layer
- * isScannerPath("features/home/outside.webp"); // false
- * ```
- */
-function isScannerPath(path: string): boolean {
-  const segments = path.split("/");
-  const inLayer = segments[1] === ASSETS && segments.length > 2;
-  const inFeature = segments[2] === ASSETS && segments.length > 3;
-
-  return inLayer || inFeature;
-}
-
-/**
- * Builds the path index of a manifest: which file and bundle every path leads to, and the folders
- * the scanner read. A path under one of those folders that leads nowhere is a new asset.
- *
- * @param manifest - The manifest the page booted with.
- * @returns The index.
- */
-function indexPaths(manifest: Manifest): PathIndex {
-  const owners = new Map<string, Owner>();
-  const folders = new Set<string>();
-
-  for (const [bundle, entry] of Object.entries(manifest.bundles)) {
-    for (const file of entry.files) {
-      // A texture packed in an atlas has no path: it is cut out of a page, and a pack is not watched.
-      if (file.path === undefined) continue;
-
-      const owner: Owner = { bundle, entry, file, path: file.path };
-
-      for (const path of [file.path, ...(file.pages ?? []).map(page => page.path)]) {
-        owners.set(path, owner);
-        folders.add(folderOf(path));
-      }
-    }
-  }
-
-  // A file at the root has no folder, and the empty prefix would claim every image of the game.
-  folders.delete("");
-
-  return { manifest, owners, folders: [...folders] };
-}
-
-/**
- * Works out which files a stamp changed, and keeps its map for the next one. Against the map
- * applied last it is every path whose stamp differs. The first update after boot has no map to
- * compare with, so the list of the keys watch stands.
- *
- * @param state - The plugin state.
- * @param stamps - The stamp that arrived.
- * @returns The changed paths.
- */
-function changedPaths(state: State, stamps: AssetStamps): readonly string[] {
-  const applied = state.stamps;
-
-  state.stamps = stamps.files;
-
-  if (applied === undefined) return stamps.changed;
-
-  return Object.keys(stamps.files).filter(path => stamps.files[path] !== applied[path]);
-}
-
-/**
- * Tells why a stamp cannot be swapped in place: the set of files is not the one of the manifest
- * the page booted with. A manifest path the watch no longer stamps was removed or renamed, or its
- * nine-slice tag changed. A changed path the manifest does not know is a new asset when it lies
- * under a folder the manifest names, or where the scanner reads: the first file of an `assets/`
- * folder that had none counts too. The watch stamps every image of the game tree, so any other
- * unknown path (a favicon, an image of a feature outside its `assets/`) refuses nothing.
- *
- * @param index - The path index of the manifest.
- * @param stamps - The stamp that arrived.
- * @param changed - The paths whose bytes changed.
- * @returns The reason, or `undefined` when only bytes changed.
- */
-function refusalOf(
-  index: PathIndex,
-  stamps: AssetStamps,
-  changed: readonly string[]
-): string | undefined {
-  for (const path of index.owners.keys()) {
-    if (!Object.hasOwn(stamps.files, path)) return `"${path}" left the game`;
-  }
-
-  for (const path of changed) {
-    if (index.owners.has(path)) continue;
-
-    const isNew = isScannerPath(path) || index.folders.some(folder => path.startsWith(folder));
-
-    if (isNew) return `"${path}" is not in the manifest`;
-  }
-
-  return undefined;
-}
-
-/**
- * Groups the changed files by their bundle. A font whose `.fnt` and pages changed in one save is
- * listed once: a font is replaced as a whole. A path the manifest does not know is left out.
- *
- * @param index - The path index of the manifest.
- * @param changed - The paths whose bytes changed.
- * @returns One batch per bundle, in the order the paths name them.
- */
-function batchesOf(index: PathIndex, changed: readonly string[]): Batch[] {
-  const batches = new Map<string, Batch>();
-
-  for (const path of changed) {
-    const owner = index.owners.get(path);
-
-    if (owner === undefined) continue;
-
-    const { bundle, entry } = owner;
-    const batch = batches.get(bundle) ?? { bundle, entry, owners: [] };
-
-    if (!batch.owners.includes(owner)) batch.owners.push(owner);
-
-    batches.set(bundle, batch);
-  }
-
-  return [...batches.values()];
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -365,20 +132,6 @@ async function loadFresh(run: Loading, owner: Owner): Promise<Fresh> {
   if (kind === "audio") return { kind, owner, audio: await loadSound(run, owner.file) };
 
   return { kind, owner, texture: await loadImage(run, owner.path, nineOf(owner.file)) };
-}
-
-/**
- * Says why a file could not be replaced.
- *
- * @param error - What the load threw.
- * @returns The message of an error, or the value as a string.
- * @example
- * ```ts
- * reasonOf(new Error("The source image could not be decoded.")); // "The source image could not be decoded."
- * ```
- */
-function reasonOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -526,6 +279,20 @@ function publish(ctx: AssetsCtx, batch: Batch, record: BundleRecord): void {
 }
 
 /**
+ * Gives the new files of one bundle up: every file that failed is logged, and every texture the
+ * swap uploaded goes back. Nothing was stored, so the bundle keeps what it had.
+ *
+ * @param swap - The running swap.
+ * @param failures - The files that could not be read.
+ * @param sizes - Every new texture of the bundle.
+ */
+function discard(swap: Swap, failures: readonly Failure[], sizes: Sizes): void {
+  for (const failure of failures) swap.ctx.log.error("assets:replace-failed", failure);
+
+  for (const texture of sizes.keys()) swap.io.destroyTexture(texture);
+}
+
+/**
  * Replaces the changed files of one bundle. Every file is loaded first and nothing is stored
  * before all of them are there. A file that fails is logged and the bundle keeps its old
  * textures, fonts and bytes: the new textures are given back, nothing is emitted and the page
@@ -545,10 +312,11 @@ async function replaceBundle(swap: Swap, batch: Batch): Promise<void> {
   const sizes: Sizes = new Map();
   const { fresh, failures } = await loadAll(loadingOf(swap, batch.bundle, sizes), batch.owners);
 
-  if (failures.length > 0 || record.status !== "loaded") {
-    for (const failure of failures) ctx.log.error("assets:replace-failed", failure);
+  // A file that failed, or a bundle that left on the way: nothing is stored.
+  const isDiscarded = failures.length > 0 || record.status !== "loaded";
 
-    for (const texture of sizes.keys()) io.destroyTexture(texture);
+  if (isDiscarded) {
+    discard(swap, failures, sizes);
 
     return;
   }

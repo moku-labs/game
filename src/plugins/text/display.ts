@@ -45,8 +45,52 @@ type Ring = { width: number; color: number };
 /** A Pixi bitmap text: a glyph run, one copy of its rings or its shadow. */
 type PixiBitmapText = InstanceType<PixiModule["BitmapText"]>;
 
+// Twins of Reload, reloadPage and reasonOf live in assets/swap.ts: a change edits both.
 /** What a font replace that failed calls: the page reload, or the spy of a test. */
 type Reload = () => void;
+
+/**
+ * Reads one font when `assets` can answer for it: the advance table first, then the install in the
+ * renderer. A font that has both already is left alone.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param key - The asset key of the font.
+ * @returns True when its advance table arrived, so what was measured without it is stale.
+ * @throws {Error} When the `.fnt` is in neither BMFont format.
+ */
+function installFont(ctx: TextCtx, key: string): boolean {
+  const renderer = ctx.deps.renderer;
+  const needsTable = !ctx.state.tables.has(key);
+  // The plugin's own mark is the gate: `releaseFonts` drops it, so a reloaded bundle installs again.
+  const needsInstall = renderer.host.ready() && !ctx.state.installed.has(key);
+
+  if (!needsTable && !needsInstall) return false;
+
+  const font = ctx.deps.assets.font(key);
+
+  if (font === undefined) return false;
+
+  if (needsTable) ctx.state.tables.set(key, parseAdvances(font.fnt, key));
+
+  if (needsInstall) {
+    renderer.sync.fonts.install(key, font.fnt, font.texture);
+    ctx.state.installed.add(key);
+  }
+
+  return needsTable;
+}
+
+/**
+ * Forgets one font: its advance table and the mark that the renderer holds it, so the next
+ * `installFont` reads both again.
+ *
+ * @param ctx - Domain context of the text plugin.
+ * @param key - The asset key of the font.
+ */
+function dropFont(ctx: TextCtx, key: string): void {
+  ctx.state.tables.delete(key);
+  ctx.state.installed.delete(key);
+}
 
 /**
  * Reads the fonts of `fontKeys` that `assets` can answer for: the advance table first, then the
@@ -56,30 +100,10 @@ type Reload = () => void;
  * @throws {Error} When a `.fnt` is in neither BMFont format.
  */
 export function installFonts(ctx: TextCtx): void {
-  const renderer = ctx.deps.renderer;
-  const ready = renderer.host.ready();
   let arrived = false;
 
   for (const key of ctx.state.fontKeys) {
-    const needsTable = !ctx.state.tables.has(key);
-    // The plugin's own mark is the gate: `releaseFonts` drops it, so a reloaded bundle installs again.
-    const needsInstall = ready && !ctx.state.installed.has(key);
-
-    if (!needsTable && !needsInstall) continue;
-
-    const font = ctx.deps.assets.font(key);
-
-    if (font === undefined) continue;
-
-    if (needsTable) {
-      ctx.state.tables.set(key, parseAdvances(font.fnt, key));
-      arrived = true;
-    }
-
-    if (needsInstall) {
-      renderer.sync.fonts.install(key, font.fnt, font.texture);
-      ctx.state.installed.add(key);
-    }
+    if (installFont(ctx, key)) arrived = true;
   }
 
   if (arrived) refresh(ctx);
@@ -97,8 +121,7 @@ export function releaseFonts(ctx: TextCtx, keys: readonly string[]): void {
   for (const key of keys) {
     if (!ctx.state.fontKeys.has(key)) continue;
 
-    ctx.state.tables.delete(key);
-    ctx.state.installed.delete(key);
+    dropFont(ctx, key);
     left = true;
   }
 
@@ -139,23 +162,22 @@ function reasonOf(error: unknown): string {
 }
 
 /**
- * Installs every font among the replaced keys again: its table and its mark go, then the new
- * file and the new page are read. The stamp of the keys watch is written after a failed scan
- * too, so a `.fnt` the scanner refused still gets here, and reading it throws after its table was
- * released. That font is logged and the page reloads.
+ * Installs every replaced font again, one by one: its table and its mark go, then the new file
+ * and the new page are read. No other font is touched and no label is marked here. The stamp of
+ * the keys watch is written after a failed scan too, so a `.fnt` the scanner refused still gets
+ * here, and reading it throws after its table was released. That font is logged and the page
+ * reloads.
  *
  * @param ctx - Domain context of the text plugin.
- * @param keys - The asset keys a dev hot swap replaced.
+ * @param fonts - The font keys among what a dev hot swap replaced.
  * @param reload - What a font that cannot be installed calls.
  * @returns False when a font failed, so the page is on its way out.
  */
-function reinstallFonts(ctx: TextCtx, keys: readonly string[], reload: Reload): boolean {
-  for (const key of keys) {
-    if (!ctx.state.fontKeys.has(key)) continue;
-
+function reinstallFonts(ctx: TextCtx, fonts: readonly string[], reload: Reload): boolean {
+  for (const key of fonts) {
     try {
-      releaseFonts(ctx, [key]);
-      installFonts(ctx);
+      dropFont(ctx, key);
+      installFont(ctx, key);
     } catch (error) {
       ctx.log.error("text:font-replace-failed", { key, reason: reasonOf(error) });
       reload();
@@ -170,10 +192,10 @@ function reinstallFonts(ctx: TextCtx, keys: readonly string[], reload: Reload): 
 /**
  * Applies what a dev hot swap replaced. `assets` answers the new font and the new texture of
  * every key already, and the old pages and textures are destroyed. A font among the keys is
- * installed again here, so the font registry of the renderer holds the new page at once. The
- * labels drawn with a replaced font or inline icon are marked and the generation moves: the next
- * frame writes each of them, and the adapter builds it again from the new textures even when its
- * string stands still.
+ * installed again here, so the font registry of the renderer holds the new page at once. Only
+ * the labels drawn with a replaced font or inline icon are marked, and the generation moves: the
+ * next frame writes each of them, and the adapter builds it again from the new textures even when
+ * its string stands still. A label of another font is not written and keeps its objects.
  *
  * @param ctx - Domain context of the text plugin.
  * @param keys - The asset keys with new bytes.
@@ -185,7 +207,12 @@ export function applyReplaced(
   keys: readonly string[],
   reload: Reload = reloadPage
 ): void {
-  if (!reinstallFonts(ctx, keys, reload)) return;
+  const fonts = keys.filter(key => ctx.state.fontKeys.has(key));
+
+  // A layout is cached by style and string, not by font, so a replaced font drops all of them, once.
+  if (fonts.length > 0) ctx.state.cache.clear();
+
+  if (!reinstallFonts(ctx, fonts, reload)) return;
 
   if (markDirty(ctx, text => drawsWith(ctx, text, keys)) === 0) return;
 
@@ -681,12 +708,14 @@ function redraw(
   const drawn = ctx.state.drawn.get(container);
   const label = labelOf(ctx, next);
 
-  if (
+  // The objects in the container can take the new block: only the text and the spots differ.
+  const canRetext =
     drawn?.style === label.style &&
     drawn.generation === label.generation &&
     samePoint(previous.anchor, next.anchor) &&
-    sameShape(drawn.layout, label.layout)
-  ) {
+    sameShape(drawn.layout, label.layout);
+
+  if (canRetext) {
     retext(ctx, pixi, container, next, label);
 
     return;

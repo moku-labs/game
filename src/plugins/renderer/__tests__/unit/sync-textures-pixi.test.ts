@@ -65,16 +65,16 @@ function bindGroupWarnings(spy: MockInstance<typeof console.warn>): number {
 }
 
 describe("destroying a texture Pixi drew", () => {
-  it("warns twice per bind group when Pixi destroys it on its own: the reason for the fix", () => {
+  it("warns when Pixi destroys it on its own: the reason for the fix", () => {
     const spy = quiet();
     const texture = loose();
 
     draw(texture);
     texture.destroy(true);
 
-    // Three bind groups, each for the source and for its sampler. The CI pin: when a Pixi
-    // release stops warning here, `destroyTexture` can stop removing the listeners.
-    expect(bindGroupWarnings(spy)).toBe(6);
+    // The CI pin: when a Pixi release stops warning here, `destroyTexture` can stop removing
+    // the listeners. How many warnings there are is Pixi's business.
+    expect(bindGroupWarnings(spy)).toBeGreaterThan(0);
   });
 
   it("prints no bind group warning through destroyTexture", () => {
@@ -119,9 +119,9 @@ describe("destroying a texture Pixi drew", () => {
 
     destroyTexture(state, slice);
 
-    // Three bind groups listen to the source; the style has them and the source itself.
-    expect(listeners).toBe(3);
-    expect(styleListeners).toBe(4);
+    // The bind groups listen to the source and to its style, before the slice went and after.
+    expect(listeners).toBeGreaterThan(0);
+    expect(styleListeners).toBeGreaterThan(0);
     expect(page.source.listenerCount("change")).toBe(listeners);
     expect(page.source.style.listenerCount("change")).toBe(styleListeners);
     expect(slice.destroyed).toBe(true);

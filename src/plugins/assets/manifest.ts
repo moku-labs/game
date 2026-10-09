@@ -24,6 +24,9 @@ const BYTES_PER_MB = 1_048_576;
 /** The bytes one pixel takes in GPU memory: RGBA, no mipmaps. */
 const BYTES_PER_PIXEL = 4;
 
+/** Megabytes are kept to three decimals: a value is rounded to a whole number of these parts. */
+const PARTS_PER_MB = 1000;
+
 /**
  * Creates an empty map. It lives in its own non-exported function because lint rule L5 refuses a
  * collection built inside an exported declaration.
@@ -396,7 +399,9 @@ export function fileUrl(base: string, path: string): string {
  * ```
  */
 export function textureMb(width: number, height: number): number {
-  return Math.round(((width * height * BYTES_PER_PIXEL) / BYTES_PER_MB) * 1000) / 1000;
+  return (
+    Math.round(((width * height * BYTES_PER_PIXEL) / BYTES_PER_MB) * PARTS_PER_MB) / PARTS_PER_MB
+  );
 }
 
 /**
@@ -415,7 +420,7 @@ export function sumMb(parts: readonly { mb: number }[]): number {
 
   for (const part of parts) total += part.mb;
 
-  return Math.round(total * 1000) / 1000;
+  return Math.round(total * PARTS_PER_MB) / PARTS_PER_MB;
 }
 
 /**

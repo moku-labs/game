@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createHandlers } from "../../handlers";
-import { isAssetStamps } from "../../swap";
 import { loadBundle } from "../../tiers";
 import type { AssetStamps, HotSwap, Manifest } from "../../types";
 import { createMockAssets, type FakeTexture, type MockAssets, packedManifest } from "./mock-assets";
@@ -74,6 +73,9 @@ const manifest: Manifest = {
   }
 };
 
+/** One file the io was asked for, and the events that had gone out by then. */
+type Ask = { url: string; emitted: string[] };
+
 /** A started dev page: the mock, the reload spy and the two ways to send a stamp. */
 type DevPage = {
   mock: MockAssets;
@@ -82,6 +84,10 @@ type DevPage = {
   hook: (payload: HotSwap) => void;
   /** Sends the stamp module and waits for the swap it queued. */
   swap: (stamps: AssetStamps) => Promise<void>;
+  /** Every file the io was asked for since the page started, in order. */
+  asks: Ask[];
+  /** Resolves once the io was asked for that many files: a load or a swap reached its fetch. */
+  asked: (count: number) => Promise<void>;
 };
 
 afterEach(() => {
@@ -130,17 +136,6 @@ function saved(...changed: string[]): AssetStamps {
 }
 
 /**
- * Lets the timers run a few times, so everything the fake io could settle has settled.
- *
- * @returns A promise that resolves after the queue drained.
- */
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 5; turn += 1) {
-    await new Promise(resolve => setTimeout(resolve, 0));
-  }
-}
-
-/**
  * Empties the recordings of a mock, so a test reads only what its swap did.
  *
  * @param mock - The mock plugin.
@@ -183,6 +178,22 @@ async function startDev(
   forget(mock);
 
   const hook = createHandlers(mock.ctx, reload)["ui:hot-swap"];
+  const asks: Ask[] = [];
+  const waiting: Array<{ count: number; resolve: () => void }> = [];
+  const fetch = mock.io.fetch;
+
+  // Every fetch is noted with the events that went out before it: a test waits for the fetch
+  // itself, never for time to pass, and pins what came first.
+  mock.io.fetch = (file, init) => {
+    asks.push({ url: file, emitted: mock.emitted.map(entry => entry.name) });
+
+    for (const waiter of waiting.splice(0)) {
+      if (asks.length >= waiter.count) waiter.resolve();
+      else waiting.push(waiter);
+    }
+
+    return fetch(file, init);
+  };
 
   return {
     mock,
@@ -192,7 +203,14 @@ async function startDev(
       hook({ file: STAMP, module: { default: stamps } });
 
       await mock.ctx.state.swapping;
-    }
+    },
+    asks,
+    asked: (count: number): Promise<void> =>
+      asks.length >= count
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            waiting.push({ count, resolve });
+          })
   };
 }
 
@@ -205,30 +223,6 @@ async function startDev(
 function replaced(mock: MockAssets): unknown[] {
   return mock.emitted.filter(entry => entry.name === "assets:replaced").map(entry => entry.payload);
 }
-
-describe("isAssetStamps", () => {
-  it("takes the stamp the keys watch writes", () => {
-    expect(isAssetStamps({ files: {}, changed: [] })).toBe(true);
-    expect(isAssetStamps(saved(CELL))).toBe(true);
-  });
-
-  it.each([
-    ["nothing", undefined],
-    // eslint-disable-next-line unicorn/no-null -- a module may export null; it is no stamp.
-    ["null", null],
-    ["the sha1 the stamp was before", "3f2a9c"],
-    ["an object without changed", { files: {} }],
-    ["an object without files", { changed: [] }],
-    ["files that is a list", { files: [], changed: [] }],
-    // eslint-disable-next-line unicorn/no-null -- JSON may carry null; it is no file map.
-    ["files that is null", { files: null, changed: [] }],
-    ["a stamp that is not a string", { files: { [CELL]: 200 }, changed: [] }],
-    ["changed that is a map", { files: {}, changed: {} }],
-    ["a changed path that is not a string", { files: {}, changed: [7] }]
-  ])("refuses %s", (_name, value) => {
-    expect(isAssetStamps(value)).toBe(false);
-  });
-});
 
 describe("the dev hot swap: a texture", () => {
   it("replaces a changed texture of a loaded bundle with a new one", async () => {
@@ -442,25 +436,25 @@ describe("the dev hot swap: which bundles", () => {
   });
 
   it("swaps a bundle that is loading only after its load settled", async () => {
-    const { mock, hook } = await startDev([]);
+    const { mock, hook, asks, asked } = await startDev([]);
 
     mock.io.control.gated = true;
 
     const loading = mock.api.load("board");
 
-    await settle();
+    // The running load holds its fetch when the stamp arrives.
+    await asked(1);
     hook({ file: STAMP, module: { default: saved(CELL) } });
-    await settle();
-
-    // The running load holds the one fetch: the swap waits for it.
-    expect(mock.io.fetched).toEqual([url(CELL)]);
-    expect(replaced(mock)).toEqual([]);
-
     mock.io.control.gated = false;
     mock.io.releaseAll();
     await loading;
     await mock.ctx.state.swapping;
 
+    // The swap asked for the file only after the load had landed.
+    expect(asks).toEqual([
+      { url: url(CELL), emitted: [] },
+      { url: url(CELL), emitted: ["assets:bundle-progress", "assets:bundle-loaded"] }
+    ]);
     expect(mock.io.fetched).toEqual([url(CELL), url(CELL)]);
     expect(mock.io.created).toHaveLength(2);
     expect(mock.api.texture("board.cell")).toBe(mock.io.created[1]);
@@ -473,7 +467,7 @@ describe("the dev hot swap: which bundles", () => {
   });
 
   it("skips a bundle whose running load was given up", async () => {
-    const { mock, hook } = await startDev([]);
+    const { mock, hook, asked } = await startDev([]);
     const caller = new AbortController();
 
     mock.io.control.gated = true;
@@ -482,9 +476,9 @@ describe("the dev hot swap: which bundles", () => {
       () => undefined
     );
 
-    await settle();
+    // The load holds its fetch when the stamp arrives; then its only waiter leaves.
+    await asked(1);
     hook({ file: STAMP, module: { default: saved(CELL) } });
-    await settle();
     caller.abort();
     await loading;
     await mock.ctx.state.swapping;
@@ -496,11 +490,12 @@ describe("the dev hot swap: which bundles", () => {
   });
 
   it("destroys the new texture and says nothing when the bundle was unloaded on the way", async () => {
-    const { mock, reload, hook } = await startDev(["board"]);
+    const { mock, reload, hook, asked } = await startDev(["board"]);
 
     mock.io.control.gated = true;
     hook({ file: STAMP, module: { default: saved(CELL) } });
-    await settle();
+    // The swap holds its fetch when the bundle leaves.
+    await asked(1);
 
     expect(mock.io.fetched).toEqual([url(CELL)]);
 
@@ -984,31 +979,25 @@ describe("the dev hot swap: a bundle with atlas pages", () => {
 
 describe("the dev hot swap: one at a time", () => {
   it("starts the second swap only after the first one settled", async () => {
-    const { mock, hook } = await startDev();
+    const { mock, hook, asks, asked } = await startDev();
 
     mock.io.control.gated = true;
     hook({ file: STAMP, module: { default: saved(CELL) } });
-    await settle();
+    // The first swap holds its fetch when the second stamp arrives.
+    await asked(1);
     hook({
       file: STAMP,
       module: { default: { files: filesOf({ [CELL]: "200:2", [ICON]: "300:3" }), changed: [ICON] } }
     });
-    await settle();
-
-    // The first swap holds its fetch; the second has not started.
-    expect(mock.io.fetched).toEqual([url(CELL)]);
-    expect(replaced(mock)).toEqual([]);
-
-    mock.io.release(fetched => fetched === url(CELL));
-    await settle();
-
-    // The first one is done, and only now the second one fetches.
-    expect(replaced(mock)).toEqual([{ bundle: "board", keys: ["board.cell"] }]);
-    expect(mock.io.fetched).toEqual([url(CELL), url(ICON)]);
-
+    mock.io.control.gated = false;
     mock.io.releaseAll();
     await mock.ctx.state.swapping;
 
+    // The second swap asked for its file only after the first one had told its bundle.
+    expect(asks).toEqual([
+      { url: url(CELL), emitted: [] },
+      { url: url(ICON), emitted: ["assets:replaced"] }
+    ]);
     expect(replaced(mock)).toEqual([
       { bundle: "board", keys: ["board.cell"] },
       { bundle: "ui", keys: ["ui.icon"] }

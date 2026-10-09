@@ -149,6 +149,32 @@ function frame(mock: MockText, entity: Entity, object: FakeObject, previous: Tex
   adapterOf(mock).update(object, previous, mock.world.read(entity, Text) as TextValue);
 }
 
+/** One label on the screen: its entity, its container and the value the container was built from. */
+type Mounted = { entity: Entity; object: FakeObject; shown: TextValue };
+
+/**
+ * Runs one frame over several labels the way the engine does: one layout phase for all of them,
+ * then phase `sync` hands the adapter every label that phase wrote, and no other.
+ *
+ * @param mock - The mock plugin.
+ * @param labels - The labels on the screen.
+ */
+function frameAll(mock: MockText, labels: readonly Mounted[]): void {
+  const before = labels.map(label => writesOf(mock, label.entity));
+
+  mock.step();
+
+  for (const [index, label] of labels.entries()) {
+    if (writesOf(mock, label.entity) === before[index]) continue;
+
+    adapterOf(mock).update(
+      label.object,
+      label.shown,
+      mock.world.read(label.entity, Text) as TextValue
+    );
+  }
+}
+
 describe("the assets:replaced hook — a font", () => {
   it("installs a replaced font again, from the new file and the new page", () => {
     const mock = drawing();
@@ -191,6 +217,46 @@ describe("the assets:replaced hook — a font", () => {
     expect(mock.state.dirty.has(1)).toBe(true);
     expect(mock.state.dirty.has(2)).toBe(true);
     expect(mock.state.generation).toBe(1);
+  });
+
+  it("marks the labels of the replaced font, and no label of another font", () => {
+    const mock = drawing();
+
+    place(mock, 1, { content: "12" });
+    place(mock, 2, { content: "12", style: "hud.rich" });
+    place(mock, 3, { content: "12", style: "digits" });
+    place(mock, 4, { content: "12", style: "hud.title" });
+
+    mock.assets.fonts.set(BODY, { fnt: widerFontJson, texture: newPage });
+    mock.hooks["assets:replaced"]({ bundle: "ui", keys: [BODY] });
+
+    expect([...mock.state.dirty].toSorted((first, second) => first - second)).toEqual([1, 2]);
+    expect(mock.state.generation).toBe(1);
+  });
+
+  it("draws the label of the replaced font again, and no label of another font", () => {
+    const mock = drawing();
+    const body: Mounted = { entity: 1, ...mounted(mock, 1, { content: "12" }) };
+    const digits: Mounted = { entity: 2, ...mounted(mock, 2, { content: "12", style: "digits" }) };
+    const bodyGlyphs = body.object.children[0];
+    const digitsGlyphs = digits.object.children[0];
+    const digitsWrites = writesOf(mock, 2);
+
+    mock.assets.fonts.set(BODY, { fnt: widerFontJson, texture: newPage });
+    mock.hooks["assets:replaced"]({ bundle: "ui", keys: [BODY] });
+    frameAll(mock, [body, digits]);
+
+    // The label of the replaced font: measured with the new table, built from the new page.
+    expect(mock.state.measured.get(1)).toEqual({ width: 44, height: 48 });
+    expect(bodyGlyphs?.destroyed).toBe(true);
+    expect(body.object.children[0]).not.toBe(bodyGlyphs);
+
+    // The label of the other font: not written, not measured again, its objects kept.
+    expect(writesOf(mock, 2)).toBe(digitsWrites);
+    expect(mock.state.measured.get(2)).toEqual({ width: 36, height: 40 });
+    expect(digits.object.children).toHaveLength(1);
+    expect(digits.object.children[0]).toBe(digitsGlyphs);
+    expect(digitsGlyphs?.destroyed).toBe(false);
   });
 
   it("counts the bold font of a style as a font of its labels", () => {

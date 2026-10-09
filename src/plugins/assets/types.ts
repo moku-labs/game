@@ -571,20 +571,12 @@ export type Usage = { textureMb: number; budgetMb: number; bundles: readonly Bun
  *   })
  * }); // a board bundle of four files sets share to 0.25, 0.5, 0.75 and 1; bundle-loaded follows
  *
- * // The text plugin installs a font again after a dev save replaced its page or its .fnt file.
- * createPlugin("text", {
- *   depends: [assetsPlugin, rendererPlugin],
- *   hooks: ctx => ({
- *     "assets:replaced": ({ keys }) => {
- *       for (const key of keys) {
- *         const font = ctx.require(assetsPlugin).font(key); // undefined for a texture or a sound
- *         const fonts = ctx.require(rendererPlugin).sync.fonts;
- *
- *         if (font !== undefined) fonts.install(key, font.fnt, font.texture);
- *       }
- *     }
- *   })
- * }); // a save of features/ui/assets/body_0.png sends { bundle: "ui", keys: ["ui.body"] }
+ * // The audio plugin drops the buffer it decoded from a sound a dev save replaced.
+ * hooks: ctx => ({
+ *   "assets:replaced": ({ keys }) => {
+ *     for (const key of keys) ctx.state.decoded.delete(key); // the next play decodes the new bytes
+ *   }
+ * }); // a save of features/ui/assets/click.mp3 sends { bundle: "ui", keys: ["ui.click"] }
  * ```
  */
 export type Events = {
