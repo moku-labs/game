@@ -353,28 +353,35 @@ export function restorePosition(
   const seam = loopSeam(state);
   const entered = new Promise<void>(resolve => {
     /**
+     * Takes the listener off the rest seam.
+     *
+     * @returns True when it was still there, false when it had already left.
+     */
+    const dropListener = (): boolean => {
+      const index = seam.rest.indexOf(listener);
+
+      if (index === -1) return false;
+
+      seam.rest.splice(index, 1);
+
+      return true;
+    };
+    /**
      * Resolves once, when the loop rests at the restored node.
      */
     const listener = (): void => {
       // A rest point reached before the loop took the bookmark is not the one.
       if (seam.restoring !== undefined) return;
 
-      const index = seam.rest.indexOf(listener);
-
-      if (index !== -1) seam.rest.splice(index, 1);
-
+      dropListener();
       resolve();
     };
     /**
      * Ends the wait when the loop ended, resolved or rejected, before it took the bookmark.
      */
     const finish = (): void => {
-      const index = seam.rest.indexOf(listener);
-
       // The listener left at the rest seam: the bookmark was entered and the wait is over.
-      if (index === -1) return;
-
-      seam.rest.splice(index, 1);
+      if (!dropListener()) return;
 
       // Only this bookmark is dropped. A later restore may have put its own in the seam.
       if (seam.restoring === bookmark) seam.restoring = undefined;

@@ -169,9 +169,10 @@ a scene of its own keeps the mounted scene: a rest node (`settings/open`, the Se
 Home), or a transit node that waits for an effect that takes answers (`info/show`, the info popup
 of the mini game). In a fresh page nothing is mounted, so the restore door names the scene first
 and the node mounts it. On a page that shows another scene an `over` node replaces it with the
-bookmark's scene. A `scene` that is not a string makes `game.restore` refuse the bookmark, and so
-does a `rest` that is not `{ path, input }`. Flow imports the `ScenesApi` type only, never the
-scenes plugin.
+bookmark's scene. A refused restore leaves the mounted scene as the expected one, so no later node
+switches to the scene of the refused bookmark. A `scene` that is not a string makes `game.restore`
+refuse the bookmark, and so does a `rest` that is not `{ path, input }`. Flow imports the
+`ScenesApi` type only, never the scenes plugin.
 
 `game.bookmark` at a waiting transit node answers with that node's `path` and with `rest`.
 `game.restore` of such a bookmark answers once the node's gate is open, so the state it returns

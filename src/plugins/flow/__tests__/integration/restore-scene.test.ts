@@ -14,8 +14,10 @@ import type { Bookmark } from "../../types";
 // ---------------------------------------------------------------------------
 // Integration: the restore door brings back the scene under a popup. A bookmark
 // taken at "settings/open", a rest node with no scene over Home, is restored in
-// a fresh app whose graph never entered Home. The real flow, model, world,
-// assets and scenes plugins, in plain Bun: `renderer` is inert, `assets` headless.
+// a fresh app whose graph never entered Home. A bookmark of the board that is
+// refused leaves Home expected: the info popup, an over node, opens over Home.
+// The real flow, model, world, assets and scenes plugins, in plain Bun:
+// `renderer` is inert, `assets` headless.
 // ---------------------------------------------------------------------------
 
 type Button = { id: string };
@@ -43,14 +45,24 @@ const homeScene = defineScene("home", {
   projections: [menuButtons]
 });
 
+const boardScene = defineScene("board", {
+  bundle: "board",
+  layers: { cells: {} },
+  projections: []
+});
+
 const home = defineNode({
   rest: true,
   checkpoint: true,
   scene: "home",
-  outcomes: { open: type() }
+  outcomes: { open: type(), play: type(), info: type() }
 });
 
 const open = defineNode({ rest: true, outcomes: { close: type() } });
+
+const board = defineNode({ rest: true, scene: "board", outcomes: { leave: type() } });
+
+const info = defineNode({ rest: true, over: true, outcomes: { close: type() } });
 
 const settings = defineFlow("settings", {
   nodes: { open },
@@ -60,14 +72,19 @@ const settings = defineFlow("settings", {
 });
 
 const main = defineFlow("main", {
-  nodes: { home, settings },
+  nodes: { home, settings, board, info },
   start: "home",
-  edges: { home: { open: "settings" }, settings: { closed: "home" } }
+  edges: {
+    home: { open: "settings", play: "board", info: "info" },
+    settings: { closed: "home" },
+    board: { leave: "home" },
+    info: { close: "home" }
+  }
 });
 
 const homeFeature = defineFeature("home", {
   flows: [main],
-  scenes: [homeScene],
+  scenes: [homeScene, boardScene],
   projections: [menuButtons]
 });
 
@@ -186,6 +203,40 @@ describe("the restore door brings back the scene", () => {
 
     expect(app.scenes.current()).toBeUndefined();
     expect(warnedNoScene(app)).toBe(true);
+
+    await app.stop();
+  });
+
+  it("keeps the mounted scene under the next popup when a bookmark of another scene is refused", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const first = await startApp();
+
+    await first.flow.walk([]);
+    await first.flow.walk([{ at: "home", intent: "play" }]);
+
+    const taken = await run(first, commands.bookmark);
+
+    await first.stop();
+
+    expect(taken.value).toMatchObject({ path: "board", scene: "board" });
+
+    // The graph changed since: "board" is a rest node and no checkpoint, so it is refused.
+    const bookmark: Bookmark = { ...structuredClone(taken.value), graph: "another-graph" };
+    const app = await startApp();
+
+    await app.flow.walk([]);
+
+    await expect(run(app, commands.restore, { bookmark })).rejects.toThrow(
+      '[game] The bookmark "board" was made for another graph.\n  Restore the checkpoint "home" instead.'
+    );
+    expect(app.flow.state().path).toBe("home");
+    expect(app.scenes.current()).toBe("home");
+
+    // Normal play goes on: the info popup, an over node, opens over Home.
+    const state = await app.flow.walk([{ at: "home", intent: "info" }]);
+
+    expect(state.path).toBe("info");
+    expect(app.scenes.current()).toBe("home");
 
     await app.stop();
   });

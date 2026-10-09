@@ -16,6 +16,31 @@ import type { Bookmark, FlowState } from "./types";
 type SceneApp = { readonly scenes?: ScenesApi };
 
 /**
+ * Restores a bookmark with its `scene` expected first, so the node the restore enters mounts it.
+ * A refused restore puts the record back to the mounted scene: no later node switches to the
+ * scene of a bookmark that was never entered.
+ *
+ * @param app - The app; with `scenes`, the bookmark's scene is expected before the restore.
+ * @param bookmark - The bookmark to enter.
+ * @throws {Error} What `flow.restore` refused the bookmark with, unchanged.
+ */
+async function restoreWithScene(app: HeadlessApp & SceneApp, bookmark: Bookmark): Promise<void> {
+  const mounted = app.scenes?.current();
+
+  if (bookmark.scene !== undefined) app.scenes?.expect(bookmark.scene);
+
+  try {
+    await app.flow.restore(bookmark);
+  } catch (error) {
+    // The restore was refused: the record goes back to the mounted scene, which no node
+    // switches to.
+    if (mounted !== undefined) app.scenes?.expect(mounted);
+
+    throw error;
+  }
+}
+
+/**
  * Enters a bookmark, or a repro's bookmark followed by its route. A bookmark's `scene` is handed
  * to `scenes.expect` first, so a node without a scene of its own mounts it: a rest node, or the
  * transit node of a bookmark taken while an effect that takes answers waited.
@@ -37,11 +62,7 @@ async function restoreFrom(
 
   // A bookmark: its scene is expected first, so the node the restore enters mounts it.
   if (bookmarkOnly) {
-    const read = readBookmark(bookmark);
-
-    if (read.scene !== undefined) app.scenes?.expect(read.scene);
-
-    await app.flow.restore(read);
+    await restoreWithScene(app, readBookmark(bookmark));
 
     return app.flow.state();
   }

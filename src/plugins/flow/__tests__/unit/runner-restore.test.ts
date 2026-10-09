@@ -917,7 +917,7 @@ describe("restore() on a loop that ends by rejecting", () => {
 });
 
 describe("restore() the loop entered, on a loop that ends later", () => {
-  it("resolved once at the rest seam: the end of the loop leaves it alone and ends only the restore that still waits", async () => {
+  it("enters a restored bookmark once, and the end of the loop later ends only the restore that still waits", async () => {
     const harness = setup({ barrier: true });
 
     await harness.start();
