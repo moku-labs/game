@@ -79,8 +79,9 @@ export function commitEdge(
  * Discards everything the failed node did, rolls back and decides between a retry and the safe
  * node. Every failure is written to the log as one error entry `flow:error`, right before the
  * event of the same name. When the loop gives up it stands on the safe node, whose `recover` is
- * then still to run. A failure while the loop already recovers in the safe node is fatal: it is
- * no event and no log entry, it rejects `run()`.
+ * then still to run, and an answer the gate still held is dropped; a retry keeps it. A failure
+ * while the loop already recovers in the safe node is fatal: it is no event and no log entry, it
+ * rejects `run()`.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -132,6 +133,8 @@ export function handleFailure(
     safe.inside = true;
     safe.recover = true;
     state.failures = 0;
+    // The position moves to the safe node: a press made in the failed transition stays behind.
+    modules.gate.dropHeld();
   }
 
   return "continue";

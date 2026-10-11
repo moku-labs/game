@@ -152,8 +152,10 @@ export type GateInternal = {
   clearHeld(frame: number, elapsed: number): void;
 
   /**
-   * Drops the held answer, whatever its age. The runner calls it when it enters a bookmark: a
-   * press made before a restore belongs to the position the restore left.
+   * Drops the held answer, whatever its age. The runner calls it where the position jumps: when
+   * it enters a bookmark, and when it gives up on a transition and moves to the safe node. A
+   * press made before the jump belongs to the position that was left. A retry keeps the press,
+   * and a stop clears it for the next `run()`.
    */
   dropHeld(): void;
 };

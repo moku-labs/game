@@ -119,12 +119,14 @@ paused game ages nothing.
 createApp({ pluginConfigs: { flow: { mainFlow, safeNode: "home", holdMs: 1100 } } });
 ```
 
-Three things hold nothing or drop the answer, whatever `holdMs` is:
+These hold nothing or drop the answer, whatever `holdMs` is:
 
 - Fast mode and a game without a frame source hold nothing.
 - A gate that opens in fast mode drops the held answer without offering it. A fast walk answers
   its own gates.
 - Entering a bookmark drops it. The press belongs to the position the restore left.
+- Giving up on a transition drops it, before the graph goes to `safeNode`. A retry keeps it.
+- A stop drops it. The next `run()` starts with nothing held.
 
 ## When a node fails
 

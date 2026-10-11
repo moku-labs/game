@@ -720,6 +720,33 @@ describe("restore() while an answer is held", () => {
   });
 });
 
+describe("run() again after a stop", () => {
+  it("does not hand a press of the stopped game to its first gate", async () => {
+    const harness = setup({}, 2000, Number.POSITIVE_INFINITY);
+
+    await harness.start();
+    harness.modules.gate.answer({ intent: "stuck" });
+    await waitUntil(() => harness.standsAt("stuck"));
+
+    // `stuck` never ends and opens no gate: the press arrives at a closed door and is held.
+    harness.frames.running = true;
+    expect(harness.modules.gate.answer({ intent: "open" })).toBe(false);
+    harness.frames.running = false;
+
+    await stopRunner(harness.ctx);
+
+    expect(harness.ctx.state.gate.held).toBeUndefined();
+
+    await harness.start();
+    await waitUntil(() => harness.ctx.state.gate.open !== undefined);
+
+    // `home` lists "open". With the stale press its gate would have taken it and gone to `ask`.
+    expect(harness.api.state()).toMatchObject({ path: "home", pending: { gate: homeIntents } });
+    expect(harness.trace.asked).toEqual([]);
+    await stopRunner(harness.ctx);
+  });
+});
+
 describe("restore() called while the edge before it still arrives", () => {
   it("resolves at its own rest node, not at the rest node the edge arrives at", async () => {
     const harness = setup({ barrier: true });

@@ -29,8 +29,8 @@ function leave(ctx: KernelSlice): void {
  * Runs the Back chain once. `back()` and the provider's `onBack` both go through here, so a test
  * and a real press end the same way. Escape is what ui answers with the `escape` button of its
  * top root; it also ends the editing of a text field. While the graph moves between nodes the gate
- * is closed: it holds the answer for one frame, so the press counts as taken and never leaves the
- * app in the middle of a step.
+ * is closed: it holds the answer for the next gate (one frame, or `flow.holdMs`), so the press
+ * counts as taken and never leaves the app in the middle of a step.
  *
  * @param ctx - Kernel context of the platform plugin.
  * @returns What took the press, `"none"` without a provider.

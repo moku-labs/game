@@ -1468,6 +1468,24 @@ describe("the flow:error log entry", () => {
   });
 });
 
+describe("the held answer when the loop gives up", () => {
+  it("drops the held answer on the give-up and keeps it on a retry", async () => {
+    const harness = setup({ main: failingBoot(safeHome()), config: safeConfig });
+
+    harness.start();
+    await tick();
+
+    const first = harness.calls.indexOf("rollback");
+    const last = harness.calls.lastIndexOf("rollback");
+
+    // The first failure is a retry: the press stays for the gate the player comes back to.
+    expect(harness.calls.slice(first + 1, last)).not.toContain("dropHeld");
+    // The second one moves the position to the safe node: the press belongs to the old one.
+    expect(harness.calls.slice(last + 1)).toEqual(["dropHeld", "begin", "open:play,shop"]);
+    await stopRunner(harness.ctx);
+  });
+});
+
 describe("recover on the safe node", () => {
   it("runs recover as one committed transaction before the safe node opens its gate", async () => {
     const harness = setup({
@@ -1483,6 +1501,7 @@ describe("recover on the safe node", () => {
     await tick();
 
     expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
       "begin",
       "recover",
       "commit",
@@ -1683,7 +1702,7 @@ describe("recover on the safe node", () => {
     harness.start();
     await tick();
 
-    expect(afterGiveUp(harness.calls)).toEqual(["begin", "open:play,shop"]);
+    expect(afterGiveUp(harness.calls)).toEqual(["dropHeld", "begin", "open:play,shop"]);
     expect(payloadsOf(harness.emitted, "flow:edge")).toEqual([]);
     expect(payloadsOf(harness.emitted, "flow:rest")).toEqual([]);
     await stopRunner(harness.ctx);
@@ -1710,7 +1729,9 @@ describe("recover on the safe node", () => {
 
     // The bookmark names the safe node itself, and still its recover does not touch the restored state.
     expect(recovered.count).toBe(0);
+    // One drop for the give-up, one for the bookmark.
     expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
       "dropHeld",
       "restore",
       "markRest",
@@ -1744,7 +1765,7 @@ describe("recover on the safe node", () => {
     await expect(running).resolves.toBeUndefined();
 
     expect(signals[0]?.reason).toBe("stop");
-    expect(afterGiveUp(harness.calls)).toEqual(["begin", "discard", "drop", "close"]);
+    expect(afterGiveUp(harness.calls)).toEqual(["dropHeld", "begin", "discard", "drop", "close"]);
     expect(harness.gate.opened).toEqual([]);
   });
 
@@ -1776,8 +1797,8 @@ describe("recover on the safe node", () => {
       return afterGiveUp(harness.calls);
     };
 
-    expect(await settle("returns")).toEqual(["begin", "discard", "drop", "close"]);
-    expect(await settle("rejects")).toEqual(["begin", "discard", "drop", "close"]);
+    expect(await settle("returns")).toEqual(["dropHeld", "begin", "discard", "drop", "close"]);
+    expect(await settle("rejects")).toEqual(["dropHeld", "begin", "discard", "drop", "close"]);
   });
 
   it("ends the loop when a stop lands while the recovery commits, before the node is entered", async () => {
@@ -1826,6 +1847,7 @@ describe("recover on the safe node", () => {
 
     expect(signals[0]?.reason).toBe("restore");
     expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
       "begin",
       "discard",
       "drop",
@@ -1873,6 +1895,7 @@ describe("recover on the safe node", () => {
     // One lift per entry of `boot`, then the guide of the recovery and its lift.
     expect(harness.gate.narrows).toEqual([undefined, undefined, { intent: "play" }, undefined]);
     expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
       "begin",
       "fx:guide",
       "endGuides",
