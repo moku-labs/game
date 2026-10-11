@@ -141,7 +141,7 @@ export type SceneSpec<
 > = {
   bundle: Bundle;
   layers: Layers;
-  projections: Projections & CheckedProjections<NoInfer<SceneLayer<Layers>>, NoInfer<Projections>>;
+  projections: Projections & NoInfer<CheckedProjections<SceneLayer<Layers>, Projections>>;
   music?: Asset;
 };
 
