@@ -225,6 +225,33 @@ describe("the measure function of a bound text", () => {
     expect(node.isDirty()).toBe(false);
   });
 
+  it("re-measures a text without a bind when what it is measured in changed", () => {
+    const glyph = { width: 10 };
+    const source: TextSource = {
+      measure: content => ({
+        width: typeof content === "string" ? content.length * glyph.width : 0,
+        height: 20
+      }),
+      resolved: () => "Play",
+      duration: ms => `${ms / 1000}s`
+    };
+    const plain = textElement({ content: "Play" });
+    const { state, row, node } = centredText(plain, source);
+
+    expect(solved(row, node)).toEqual({ x: 130, w: 40 });
+
+    // text resolved the label again and it measures the same: nothing to do.
+    expect(remeasureShown(state, plain, source)).toBe(false);
+
+    // Its font arrived, or the locale changed: the same content takes another size.
+    glyph.width = 15;
+
+    expect(remeasureShown(state, plain, source)).toBe(true);
+    expect(node.isDirty()).toBe(true);
+    expect(solved(row, node)).toEqual({ x: 120, w: 60 });
+    expect(remeasureShown(state, plain, source)).toBe(false);
+  });
+
   it("leaves a content text and a text never measured alone", () => {
     const source = sourceOf(new Map([[LABEL, "Play again"]]));
     const plain = textElement({ content: "Play" });

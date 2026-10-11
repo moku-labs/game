@@ -1,6 +1,7 @@
 /**
- * @file ui/jsx — the bound-text remeasure step: a text whose shown string changed this frame is
- * measured again, and its root solves only when the new string takes another size.
+ * @file ui/jsx — the remeasure step: a text `text` wrote this frame is measured again, and its
+ * root solves only when it takes another size. A bound text is written when the string it shows
+ * changes; any text when `text` resolves it again, after a new locale or when its font arrives.
  */
 import { Text } from "../../text/components";
 import { Exiting } from "../../world/ecs/define";
@@ -9,10 +10,11 @@ import type { UiCtx } from "../types";
 import type { JsxState } from "./types";
 
 /**
- * Asks for a solve of every root with a bound text whose shown string measures to another size
- * now. `text` writes `resolved` earlier in this phase, and only when the shown string changed,
- * so a counter that stands still walks nothing. A leaving text is out of the flow: its roll
- * solves nothing.
+ * Asks for a solve of every root with a text that measures to another size now. `text` writes
+ * `resolved` earlier in this phase: for a bound text when the string it shows changed, so a
+ * counter that stands still walks nothing, and for every label it resolved again, a message after
+ * a new locale or any label whose font arrived. No root is reconciled for it and no view runs. A
+ * leaving text is out of the flow: its roll solves nothing.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param state - The jsx state: the elements and their roots.

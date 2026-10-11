@@ -199,6 +199,13 @@ export type ScrollWindow = {
 };
 
 /**
+ * What the style of an element was resolved on besides its own node: the epoch of the jsx state,
+ * and the row height when the element is a row of a windowed scroll. While both stand, and the
+ * raw `style` and the state flags say what they said, the resolved style is kept.
+ */
+export type StyleBasis = { epoch: number; rowHeight: number | undefined };
+
+/**
  * One live element: the entity, the Yoga node, the resolved style and the place in the tree.
  * `rect` is natural: under a `fit` ancestor it is the rect before that ancestor's scale. `fit`
  * is the element's own fit scale (1 without `fit: "contain"`), and `rest` the rest `Transform`
@@ -210,7 +217,9 @@ export type ScrollWindow = {
  * warnings of its props in `warned`; `scrolledIn` marks an element a range change of a windowed
  * scroll created: it plays no `enter` hook. A text or an icon that sizes itself keeps in
  * `measuredSize` what its measure function last answered, before Yoga's clamp: a bound text whose
- * new string measures the same asks for no solve.
+ * new string measures the same asks for no solve. `basis` is what `style` was resolved on, set
+ * once the style is on the layout node and the components are written; an element without one is
+ * patched in full at its next patch.
  */
 export type Element = {
   entity: Entity;
@@ -243,6 +252,7 @@ export type Element = {
   scrolledIn: boolean;
   window?: ScrollWindow;
   measuredSize?: { width: number; height: number };
+  basis?: StyleBasis;
 };
 
 /**
@@ -394,7 +404,8 @@ export type TextState = {
  * jsx module state. `hosts` holds the elements with a `hosts` prop; `hosted` maps a world view to
  * the element that hosts it; `fields` holds the text fields by entity. `hints` buffers the hints
  * released since the last frame step; `scrolls` holds the scroll containers; `windowRenders`
- * counts the re-renders of a windowed list its range made.
+ * counts the re-renders of a windowed list its range made. `styled` and `written` count the style
+ * passes and the write passes of the reconcile, for `UiCounters`.
  */
 export type JsxState = {
   components: Map<string, AnyComponentDefinition>;
@@ -416,6 +427,15 @@ export type JsxState = {
   windowRenders: number;
   /** True from a restore or a load until the next reconcile built every root again. */
   remount: boolean;
+  /**
+   * Counts what changes every style at once: a new viewport, a dev hot swap. An element last
+   * patched in an earlier epoch is patched in full, however equal its description is. A new
+   * locale and a font that arrives are no epoch: `text` resolves the labels again and the
+   * remeasure step measures them.
+   */
+  epoch: number;
+  styled: number;
+  written: number;
 };
 
 /**
@@ -553,8 +573,9 @@ export type JsxModule = {
    */
   replace(definition: AnyComponentDefinition): void;
   /**
-   * Marks every root for a reconcile and a solve and every measured text for a new measure, so
-   * each view runs again on the next frame at the size of the current text styles.
+   * Marks every root for a reconcile and a solve and every measured text for a new measure, and
+   * starts a new epoch, so each view runs again on the next frame at the size of the current text
+   * styles and every element is styled and written again.
    */
   refreshAll(): void;
   mountRoot(entity: Entity, name: string, layer: string, popup?: PopupLink): void;

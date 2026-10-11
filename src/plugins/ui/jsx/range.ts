@@ -93,6 +93,21 @@ export function createRange(ctx: UiCtx, layout: LayoutModule, reconcile: RangeRe
   }
 
   /**
+   * The height an element is laid out at as a row of a windowed scroll, whatever its style says.
+   * The reconcile keeps it with the resolved style: a row whose scroll names another row height
+   * is laid out again, though its own description says the same.
+   *
+   * @param parent - The parent of the element.
+   * @param node - The node of this render.
+   * @returns The row height, or `undefined` for an element that is no row of a windowed scroll.
+   */
+  function rowHeightOf(parent: Element | undefined, node: DescriptionNode): number | undefined {
+    const scroll = windowedScrollOf(parent);
+
+    return scroll?.window === undefined || isOwnKey(node.key) ? undefined : scroll.window.rowHeight;
+  }
+
+  /**
    * The style an element is laid out with, from the style it resolved to. A row of a windowed
    * scroll is laid out at the row height, whatever its style says; a row style with another
    * height is one warning per scroll.
@@ -323,5 +338,5 @@ export function createRange(ctx: UiCtx, layout: LayoutModule, reconcile: RangeRe
     return windowing !== undefined && parent.parent === windowing;
   }
 
-  return { rowStyle, slotsFor, step, dropRow, isMoving, dropsRowsOf };
+  return { rowStyle, rowHeightOf, slotsFor, step, dropRow, isMoving, dropsRowsOf };
 }

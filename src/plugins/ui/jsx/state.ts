@@ -77,6 +77,9 @@ export function createJsxState(): JsxState {
     hints: [],
     scrolls: emptySet(),
     windowRenders: 0,
-    remount: false
+    remount: false,
+    epoch: 0,
+    styled: 0,
+    written: 0
   };
 }

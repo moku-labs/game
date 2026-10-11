@@ -90,7 +90,9 @@ export const Escapable = /*#__PURE__*/ tag("Escapable");
  *
  * @example
  * ```ts
- * const value: UiCountersValue = { solves: 1, nodes: 12, measured: 1, reconciles: 3, windowRenders: 0 };
+ * const value: UiCountersValue = {
+ *   solves: 1, nodes: 12, measured: 1, reconciles: 3, windowRenders: 0, styled: 12, written: 0
+ * };
  * ```
  */
 export type UiCountersValue = {
@@ -99,19 +101,54 @@ export type UiCountersValue = {
   measured: number;
   reconciles: number;
   windowRenders: number;
+
+  /**
+   * The style passes since the start: one for every element whose style `ui` resolved, at its
+   * mount and again when its `style`, its state flags or the viewport changed, or
+   * whose style it wrote onto its layout node again. An element whose description says what it
+   * said adds none.
+   *
+   * @example
+   * ```ts
+   * // A HUD of 12 elements, every style written inline. A commit raises a field it does not draw.
+   * const counters = app.world.ecs.resource(UiCounters);
+   * const before = counters.styled; // 12: one per element, from the mount
+   * app.time.step(16); // the frame of that commit: the view ran, the description says the same
+   * counters.styled - before; // 0
+   * ```
+   */
+  styled: number;
+
+  /**
+   * The write passes since the start: one each time `ui` wrote the visual, the input and the
+   * extra components of a live element again. The mount is not counted. An element whose
+   * description says what it said adds none, and no component of it is marked changed.
+   *
+   * @example
+   * ```ts
+   * // The same HUD. A commit raises the coins its counter shows: `components` of one text changed.
+   * const counters = app.world.ecs.resource(UiCounters);
+   * const before = counters.written;
+   * app.time.step(16); // the frame of that commit
+   * counters.written - before; // 1: the counter text, and none of the other 11 elements
+   * ```
+   */
+  written: number;
 };
 
 /**
- * The three Yoga counters, the reconcile count of the frame and the range re-renders of the
- * windowed lists. Written by the two systems of `ui`, read by the acceptance tests. Not part of
- * `app.ui`.
+ * The three Yoga counters, the reconcile count of the frame, the range re-renders of the windowed
+ * lists, and the style and write passes of the reconcile. Written by the two systems of `ui`, read
+ * by the acceptance tests. Not part of `app.ui`.
  */
 export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
   solves: 0,
   nodes: 0,
   measured: 0,
   reconciles: 0,
-  windowRenders: 0
+  windowRenders: 0,
+  styled: 0,
+  written: 0
 });
 
 /**

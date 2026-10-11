@@ -123,8 +123,11 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
       state.components.set(definition.name, definition);
     },
 
-    // A swapped text style keeps its name, so every measured text is measured again.
+    // A swapped text style keeps its name, so every measured text is measured again. The new
+    // epoch patches every element in full, as a swap of anything a description only names needs.
     refreshAll: (): void => {
+      state.epoch += 1;
+
       for (const element of state.elements.values()) modules.layout.markMeasured(element);
 
       for (const root of state.roots.values()) {

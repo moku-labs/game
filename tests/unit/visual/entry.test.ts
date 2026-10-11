@@ -67,6 +67,7 @@ describe("the ./testing entry", () => {
     expect(Object.keys(testing).toSorted()).toEqual([
       "createHeadless",
       "fakeClock",
+      "fakeFx",
       "isolate",
       "memory",
       "runRepro",

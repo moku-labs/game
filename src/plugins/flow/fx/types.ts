@@ -6,7 +6,8 @@ import type { Allow } from "../gate/types";
 
 /**
  * An effect a node awaits. With `answers` the runner opens the gate for those intents.
- * `cosmetic: true` swallows a handler error and resolves `undefined`.
+ * `cosmetic: true` keeps a handler error away from the node: the effect resolves `undefined` and
+ * the log gets the warn entry `flow:fx-cosmetic-failed` with `{ kind, message }`.
  *
  * @example
  * ```ts
@@ -263,9 +264,10 @@ export type NodeFx = ((descriptor: Descriptor) => Promise<unknown>) & {
    * Starts an effect now and does not wait for it: the handler is called at once and the body goes
    * on. Fast mode and the node's signal apply as for `await fx(descriptor)`. A handler that fails
    * never fails the node: the log gets the error entry `flow:fx-start-failed` with
-   * `{ path, kind }`, and a `cosmetic` descriptor is silent. After the abort of the node nothing is
-   * started, and a rejection that comes after the abort is not logged: the handler was told to
-   * stop.
+   * `{ path, kind }`. For a `cosmetic` descriptor it gets the warn entry `flow:fx-cosmetic-failed`
+   * with `{ kind, message }` instead, as it does when the effect is awaited. After the abort of the
+   * node nothing is started, and a rejection that comes after the abort is not logged: the handler
+   * was told to stop.
    *
    * @param descriptor - The effect to start. Not one with `answers` and not a `guide`.
    * @throws {Error} When the descriptor has `answers` or is a `guide`: an answer has to be awaited.

@@ -1,8 +1,9 @@
 /**
  * @file ui/layout — the measure function of a text that sizes itself. Yoga calls it once per
  * invalidation; the answer comes from the advance table of `text`, never from a canvas. A text
- * with `bind` is sized by the string `text` shows for it, and its node is marked dirty when a new
- * shown string measures to another size.
+ * with `bind` is sized by the string `text` shows for it. The node of a text is marked dirty when
+ * `text` wrote it and it measures to another size: a new shown string, a new locale, a font that
+ * arrived.
  */
 import type { MeasureFunction, Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Message } from "../../i18n/types";
@@ -248,9 +249,12 @@ export function markMeasured(state: LayoutState, element: Element): void {
 }
 
 /**
- * Marks the node of a bound text dirty when the string `text` shows for it now measures to another
- * size than the node was laid out with. `text` writes `resolved` only when the shown string
- * changes, and a counter that rolls through digits of one width asks for no solve.
+ * Marks the node of a text dirty when what it draws now measures to another size than the node was
+ * laid out with. `text` writes `Text` when the shown string of a bound label changes, and for
+ * every label it resolves again: a message after a new locale, any label when its font arrives or
+ * its style is swapped. So a text without `bind` is measured again too, and a counter that rolls
+ * through digits of one width asks for no solve. A text with a fixed size has no measure function
+ * and is left alone.
  *
  * @param state - The layout state, for the node of the element.
  * @param element - An element whose `Text` changed this frame.
@@ -262,7 +266,7 @@ export function remeasureShown(state: LayoutState, element: Element, source: Tex
   const before = element.measuredSize;
 
   if (node === undefined || before === undefined) return false;
-  if (bindOf(element) === undefined || !needsMeasure(element)) return false;
+  if (!needsMeasure(element)) return false;
 
   const size = naturalSize(element, source);
 
