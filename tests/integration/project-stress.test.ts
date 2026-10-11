@@ -23,20 +23,24 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Integration: the project index under an agent burst, on a temp copy of the
-// mini game (no dist). A scripted burst runs for PROJECT_STRESS_MS (10 s by
-// default, 60 s locally when set): edits, lines inserted above definitions, a
-// renamed binding, a node file moved to another folder, a deleted file, a file
-// left broken then fixed, 17 files touched within 100 ms, and saves with the
-// same bytes. After each step the index must match the disk, every key must
-// answer a line that holds its binding or key, and the change must report the
-// move and the delete; a save with the same bytes calls nobody.
+// mini game (no dist). A scripted burst runs PROJECT_STRESS_CYCLES times (2 by
+// default, so the rename and the move go there and back; 15 locally for a
+// run of about a minute): edits, lines inserted above definitions, a renamed
+// binding, a node file moved to another folder, a deleted file, a file left
+// broken then fixed, 17 files touched within 100 ms, and saves with the same
+// bytes. After each step the index must match the disk, every key must answer
+// a line that holds its binding or key, and the change must report the move
+// and the delete; a save with the same bytes calls nobody.
 // ---------------------------------------------------------------------------
 
 /** The mini game, copied and never written. */
 const FIXTURE = fileURLToPath(new URL("../fixtures/mini-game/", import.meta.url));
 
-/** How long the burst runs. */
-const STRESS_MS = Number(process.env.PROJECT_STRESS_MS ?? 10_000);
+/** How many times the burst runs: an odd cycle renames and moves, an even one puts both back. */
+const STRESS_CYCLES = Number(process.env.PROJECT_STRESS_CYCLES ?? 2);
+
+/** How long one cycle takes on a quiet box, for the timeout of the test. */
+const CYCLE_MS = 4000;
 
 /** How much longer a slow box may take: every wait window and quiet period is multiplied by it. */
 const TIMING_SLACK = Number(process.env.PROJECT_TIMING_SLACK ?? 1);
@@ -245,8 +249,8 @@ afterAll(() => {
 });
 
 describe("the project index under an agent burst", () => {
-  it(`keeps every key on the right line for ${STRESS_MS} ms`, {
-    timeout: STRESS_MS + 30_000 * TIMING_SLACK
+  it(`keeps every key on the right line through ${STRESS_CYCLES} cycles of the burst`, {
+    timeout: STRESS_CYCLES * CYCLE_MS + 30_000 * TIMING_SLACK
   }, async ({ annotate }) => {
     const random = seeded(7);
     // Every file of the game but the one that moves: twenty files.
@@ -257,7 +261,7 @@ describe("the project index under an agent burst", () => {
     let moves = 0;
     let removes = 0;
 
-    while (Date.now() - started < STRESS_MS) {
+    while (cycles < STRESS_CYCLES) {
       cycles += 1;
 
       // An edit at the end of a file.
