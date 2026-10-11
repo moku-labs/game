@@ -21,7 +21,7 @@ import type {
   GameLintScope
 } from "@moku-labs/game/lint";
 import plugin, { aliasTargetsOf, globToRegExp } from "@moku-labs/game/lint";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { aliasTargets, readAliases } from "../../src/project/aliases";
 import { buildIndex, createCatalog, putFile } from "../../src/project/catalog";
 import { loadTypeScript } from "../../src/project/typescript";
@@ -383,11 +383,42 @@ export function TabButton(props: { tab: Tab }) {
 /** The files of the fixture game whose JSX keys the rule reads. */
 const GAME_KEY_FILES = ["features/home/view.tsx", "features/info/popup.tsx"];
 
+/** A key the index cannot follow, in a file the rule reads, a skipped name and a test. */
+const BAD_ROW = "export const Row = (props: { tab: string }) => <row key={props.tab} />;\n";
+
+/** The three places of `BAD_ROW`. */
+const ROWS = { "web/row.tsx": BAD_ROW, "web/row.skip.tsx": BAD_ROW, "tests/row.tsx": BAD_ROW };
+
 describe("moku-game/static-keys under oxlint", () => {
   const rules = { "moku-game/static-keys": "error" };
+  /** The findings of one run on the default options: each case reads its own files. */
+  let shared: Finding[] = [];
+
+  /**
+   * The findings of the shared run in some files.
+   *
+   * @param files - The files of one case.
+   * @returns Their findings, sorted as `runOxlint` sorts them.
+   */
+  const findingsIn = (files: string[]): Finding[] =>
+    shared.filter(item => files.includes(item.file));
+
+  beforeAll(() => {
+    shared = runOxlint(
+      { "features/keys.tsx": KEYS, "features/slots.ts": "", ...OLD_KEYS, ...ROWS },
+      rules,
+      SOURCE,
+      folder => {
+        for (const file of GAME_KEY_FILES) {
+          mkdirSync(path.dirname(path.join(folder, file)), { recursive: true });
+          copyFileSync(path.join(MINI_GAME, file), path.join(folder, file));
+        }
+      }
+    );
+  });
 
   it("reports the keys the index cannot follow and passes the ones it reads", () => {
-    const findings = runOxlint({ "features/keys.tsx": KEYS, "features/slots.ts": "" }, rules);
+    const findings = findingsIn(["features/keys.tsx", "features/slots.ts"]);
 
     expect(findings.map(item => `${item.file}:${item.line}`)).toEqual(
       [27, 28, 29, 30, 31, 32, 33, 34, 36].map(line => `features/keys.tsx:${line}`)
@@ -396,13 +427,8 @@ describe("moku-game/static-keys under oxlint", () => {
   });
 
   it("reports the old key shapes and none of the keys of the fixture game", () => {
-    const old = runOxlint(OLD_KEYS, rules);
-    const now = runOxlint({}, rules, SOURCE, folder => {
-      for (const file of GAME_KEY_FILES) {
-        mkdirSync(path.dirname(path.join(folder, file)), { recursive: true });
-        copyFileSync(path.join(MINI_GAME, file), path.join(folder, file));
-      }
-    });
+    const old = findingsIn(Object.keys(OLD_KEYS));
+    const now = findingsIn(GAME_KEY_FILES);
 
     expect(old.map(item => `${item.file}:${item.line}`)).toEqual([
       "features/settings/settings.tsx:9",
@@ -413,15 +439,12 @@ describe("moku-game/static-keys under oxlint", () => {
   });
 
   it("checks .tsx outside tests by default, and takes files and ignores from the options", () => {
-    const bad = "export const Row = (props: { tab: string }) => <row key={props.tab} />;\n";
-    const files = { "web/row.tsx": bad, "web/row.skip.tsx": bad, "tests/row.tsx": bad };
-
-    expect(runOxlint(files, rules)).toEqual([
+    expect(findingsIn(Object.keys(ROWS))).toEqual([
       { rule: "static-keys", file: "web/row.skip.tsx", line: 1 },
       { rule: "static-keys", file: "web/row.tsx", line: 1 }
     ]);
     expect(
-      runOxlint(files, {
+      runOxlint(ROWS, {
         "moku-game/static-keys": ["error", { files: ["**/*.tsx"], ignores: ["**/*.skip.tsx"] }]
       })
     ).toEqual([
