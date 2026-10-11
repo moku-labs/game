@@ -182,6 +182,7 @@ export function stopUi(state: State): void {
   state.layout.nodes = 0;
   state.layout.yoga = undefined;
   state.layout.scrolling = undefined;
+  state.layout.iconLine = undefined;
   state.jsx.components.clear();
   state.jsx.roots.clear();
   state.jsx.elements.clear();

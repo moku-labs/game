@@ -377,6 +377,94 @@ describe("what a text is measured in changes, with no commit", () => {
   });
 });
 
+describe("a prop that is no plain data", () => {
+  it("writes a `local` patch that holds another Set: tap A, then tap B, picks both", async () => {
+    const app = await startGridApp(createGridApp(), ["picker"]);
+    const picked = find(app, "picked");
+
+    expect(app.world.ecs.get(picked, Text)?.content).toBe("");
+
+    app.input.tap(find(app, "pickA"));
+    app.time.step(16);
+
+    expect(app.world.ecs.get(picked, Text)?.content).toBe("a");
+
+    // The patch of B was `{ picked: Set {"b"} }` and is `{ picked: Set {"a", "b"} }` now.
+    app.input.tap(find(app, "pickB"));
+    app.time.step(16);
+
+    expect(app.world.ecs.get(picked, Text)?.content).toBe("a,b");
+    expect(app.ui.tree().local).toEqual({ picked: new Set(["a", "b"]) });
+
+    await app.stop();
+  });
+});
+
+describe("an icon without a size when the body font arrives late", () => {
+  it("is squared on the new line beside a text that grew, with no commit", async () => {
+    const app = await startGridApp(createGridApp({ lateFont: true }), ["grid", "icons"]);
+    const watched = watch(app);
+    const title = find(app, "title");
+    const icon = find(app, "autoIcon");
+    const rendered = renders.grid;
+
+    // Mounted before the font: one line of the 32 px body style is 1.2 em, rounded up.
+    expect(app.world.ecs.get(title, Box)).toMatchObject({ w: 77, h: 39 });
+    expect(app.world.ecs.get(icon, Box)).toMatchObject({ w: 39, h: 39 });
+
+    const cost = await watched.cost(async () => {
+      await app.assets.load(LATE_BUNDLE);
+      app.time.step(16);
+    });
+
+    // One frame: the title and the icon follow the line of the font. One solve per root.
+    expect(app.world.ecs.get(title, Box)).toMatchObject({
+      w: 4 * LATE_FONT.advance,
+      h: LATE_FONT.lineHeight
+    });
+    expect(app.world.ecs.get(icon, Box)).toMatchObject({
+      w: LATE_FONT.lineHeight,
+      h: LATE_FONT.lineHeight
+    });
+    expect(app.world.ecs.get(icon, Sprite)).toMatchObject({
+      width: LATE_FONT.lineHeight,
+      height: LATE_FONT.lineHeight
+    });
+    expect(cost).toMatchObject({ styled: 0, solves: 2 });
+    expect(renders.grid).toBe(rendered);
+    // The icon with a fixed size is not measured: it keeps its 32.
+    expect(app.world.ecs.get(find(app, "fixedIcon"), Box)).toMatchObject({ w: 32, h: 32 });
+
+    await app.stop();
+  });
+
+  it("is squared on the new line on a screen with icons and no text", async () => {
+    const app = await startGridApp(createGridApp({ lateFont: true }), ["icons"]);
+    const watched = watch(app);
+    const icon = find(app, "autoIcon");
+
+    expect(app.world.ecs.get(icon, Box)).toMatchObject({ w: 39, h: 39 });
+
+    const cost = await watched.cost(async () => {
+      await app.assets.load(LATE_BUNDLE);
+      app.time.step(16);
+    });
+
+    expect(app.world.ecs.get(icon, Box)).toMatchObject({
+      w: LATE_FONT.lineHeight,
+      h: LATE_FONT.lineHeight
+    });
+    expect(cost).toMatchObject({ styled: 0, solves: 1 });
+
+    // The line stands still from here: an idle frame measures and solves nothing.
+    rest(app);
+
+    expect(await watched.cost(() => app.time.step(16))).toMatchObject({ solves: 0, measured: 0 });
+
+    await app.stop();
+  });
+});
+
 describe("a popup root that becomes covered", () => {
   it("resolves its elements again from the same description, and again when it is uncovered", async () => {
     const app = await startStackApp();

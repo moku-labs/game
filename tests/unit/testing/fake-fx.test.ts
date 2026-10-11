@@ -228,6 +228,74 @@ describe("fakeFx: an awaited effect", () => {
   });
 });
 
+describe("fakeFx: a cosmetic effect whose answer fails", () => {
+  it("resolves undefined when answer throws for a cosmetic descriptor, as the game does", async () => {
+    const fx = fakeFx({
+      answer: () => {
+        throw new Error("no audio device");
+      }
+    });
+    const tap = sfx("ui.tap");
+
+    await expect(fx.fx(tap)).resolves.toBeUndefined();
+    // The call is recorded all the same: the node did ask for the effect.
+    expect(fx.awaited).toEqual([tap]);
+  });
+
+  it("resolves undefined when answer rejects for a cosmetic descriptor", async () => {
+    const fx = fakeFx({ answer: () => Promise.reject(new Error("no audio device")) });
+
+    await expect(fx.fx({ kind: "play", cosmetic: true })).resolves.toBeUndefined();
+  });
+
+  it("still rejects for a descriptor that is not cosmetic, with the same failing answer", async () => {
+    const thrown = fakeFx({
+      answer: () => {
+        throw new Error("no network");
+      }
+    });
+    const rejected = fakeFx({ answer: () => Promise.reject(new Error("no network")) });
+
+    await expect(thrown.fx({ kind: "load" })).rejects.toThrow("no network");
+    await expect(thrown.fx({ kind: "load", cosmetic: false })).rejects.toThrow("no network");
+    await expect(rejected.fx({ kind: "load" })).rejects.toThrow("no network");
+    await expect(rejected.fx({ kind: "load", cosmetic: false })).rejects.toThrow("no network");
+  });
+
+  it("keeps the value of a cosmetic effect whose answer does not fail", async () => {
+    const fx = fakeFx({ answer: () => "played" });
+
+    await expect(fx.fx(sfx("ui.tap"))).resolves.toBe("played");
+  });
+
+  it("leaves no unhandled rejection when a body starts a cosmetic effect whose answer fails", async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    const answer = vi.fn(() => Promise.reject(new Error("no audio device")));
+    const fx = fakeFx({ answer });
+
+    process.on("unhandledRejection", record);
+
+    try {
+      fx.fx.start(sfx("ui.tap"));
+      // A body that asks for the sound and does not wait for it: nobody catches this promise.
+      fx.fx(sfx("ui.tap"));
+      await new Promise<void>(resolve => {
+        setTimeout(resolve, 0);
+      });
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+
+    expect(unhandled).toEqual([]);
+    expect(fx.started).toEqual([sfx("ui.tap")]);
+    // Only the awaited call asked for an answer: nothing waits for a started effect.
+    expect(answer).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("fakeFx: a started effect", () => {
   it("records the descriptor and returns nothing", () => {
     const fx = fakeFx();

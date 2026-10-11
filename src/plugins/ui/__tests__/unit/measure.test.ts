@@ -4,7 +4,7 @@ import { bind } from "../../../text/components";
 import { component } from "../../../world/ecs/define";
 import type { Entity } from "../../../world/types";
 import type { Element } from "../../jsx/types";
-import { installMeasure, remeasureShown, shownOf } from "../../layout/measure";
+import { iconLineMoved, installMeasure, remeasureShown, shownOf } from "../../layout/measure";
 import { createLayoutState } from "../../layout/state";
 import type { LayoutState, TextSource } from "../../layout/types";
 import { loadYogaModule } from "../../layout/yoga";
@@ -279,5 +279,76 @@ describe("the measure function of a bound text", () => {
     resolved.set(LABEL, "10");
 
     expect(remeasureShown(state, element, source)).toBe(false);
+  });
+});
+
+// ─── an icon without a size follows one line of the body style ──
+
+/**
+ * A fake `text` whose line height a test moves, as a font that arrives does.
+ *
+ * @param line - The line every measure answers with; the test writes `height`.
+ * @param line.height - The height of one line now.
+ * @returns The source the measure function reads.
+ */
+function lineSource(line: { height: number }): TextSource {
+  return {
+    measure: content => ({
+      width: typeof content === "string" ? content.length * 10 : 0,
+      height: line.height
+    }),
+    resolved: () => undefined,
+    duration: ms => `${ms / 1000}s`
+  };
+}
+
+/**
+ * Builds an icon element with the props the markup wrote: no width and no height.
+ *
+ * @returns The element.
+ */
+function iconElement(): Element {
+  const icon = textElement({ name: "ui.gear", style: { tint: 0xff_ee_dd } });
+
+  icon.type = "icon";
+  icon.node = { ...icon.node, type: "icon" };
+
+  return icon;
+}
+
+describe("the line an icon without a size is squared on", () => {
+  it("is not read before an icon was measured, so a screen without one costs nothing", () => {
+    const line = { height: 20 };
+    const source = lineSource(line);
+    const { state, row, node } = centredText(textElement({ content: "Play" }), source);
+
+    solved(row, node);
+    line.height = 30;
+
+    expect(state.iconLine).toBeUndefined();
+    expect(iconLineMoved(state, source)).toBe(false);
+  });
+
+  it("is kept when an icon is measured, and a move of it is told once", () => {
+    const line = { height: 20 };
+    const source = lineSource(line);
+    const icon = iconElement();
+    const { state, row, node } = centredText(icon, source);
+
+    expect(solved(row, node)).toEqual({ x: 140, w: 20 });
+    expect(state.iconLine).toBe(20);
+    expect(iconLineMoved(state, source)).toBe(false);
+
+    // The body font arrived: its line is higher than the fallback's.
+    line.height = 30;
+
+    expect(iconLineMoved(state, source)).toBe(true);
+    expect(iconLineMoved(state, source)).toBe(false);
+
+    // The icon is measured again and takes the new square.
+    expect(remeasureShown(state, icon, source)).toBe(true);
+    expect(node.isDirty()).toBe(true);
+    expect(solved(row, node)).toEqual({ x: 135, w: 30 });
+    expect(remeasureShown(state, icon, source)).toBe(false);
   });
 });

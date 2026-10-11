@@ -32,6 +32,7 @@ export function createLayoutState(): LayoutState {
     solves: 0,
     scrolling: undefined,
     scrollStart: { pointerY: 0, offset: 0 },
+    iconLine: undefined,
     order: 0,
     cleanups: []
   };

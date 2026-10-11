@@ -56,10 +56,12 @@ component is set, so `changed()` names none of its components.
 | `bind`, `texture`, `name`, `fit`, `intent`, `payload`, `local`, `escape`, `components`, `motion` | its components are written. No style pass, no solve |
 | `hosts`, the props of a windowed `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
 | the viewport (size, orientation, safe area), a dev hot swap | every element is patched in full once: style, layout node, components |
-| the locale, a font that arrives after the mount | no element is patched and no view runs. The texts `text` resolves again are measured in that frame, and their root solves once when a size changed |
+| the locale, a font that arrives after the mount | no element is patched and no view runs. The texts `text` resolves again are measured in that frame; when the line of the `body` style moved, every `icon` without a size is too, on a screen with no text as well. A root solves once when a size in it changed |
 
-- **Plain data compares by value, a function by identity.** Props hold plain data: objects, arrays,
-  strings, numbers, booleans and the values of `components`.
+- **Plain objects and arrays compare by value, anything else by identity.** A literal object, an
+  object without a prototype and an array say the same when their content does, however deep. A
+  function, a `Set`, a `Map`, a `Date` and a class instance are the same only when they are the
+  same object: a prop that holds a new `Set` at every render is written at every render.
 - **Hooks stay built once.** A `motion` from `defineMotion`, or a hook table at module level, is the
   same function at every render. An arrow written inline in a view is a new one each time, so its
   element is written at every render: no style pass and no solve, but one write pass.
@@ -92,7 +94,8 @@ resolve that is the bound field of its `components` value in the format of the b
 a row centres is centred from the first frame. A new shown string asks for a solve only when it
 measures to another size: a counter that rolls through digits of one width solves nothing. A text
 without `bind` is measured again the same way when `text` resolves it again: a message after a new
-locale, any text when its font arrives.
+locale, any text when its font arrives. An `icon` without a `width` and `height` is square on one
+line of the `body` text style, and is measured again when that line moves.
 
 `style.alpha` fades the element and everything inside it: a disabled button at `alpha: 0.6`
 draws its icon and its label at 0.6 too, and a column at `alpha: 0` hides its children. The

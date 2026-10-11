@@ -3,7 +3,8 @@
  * invalidation; the answer comes from the advance table of `text`, never from a canvas. A text
  * with `bind` is sized by the string `text` shows for it. The node of a text is marked dirty when
  * `text` wrote it and it measures to another size: a new shown string, a new locale, a font that
- * arrived.
+ * arrived. An icon without a size is square on one line of the `body` style; the line it was
+ * measured with is kept, so a move of it is seen without a text.
  */
 import type { MeasureFunction, Yoga, Node as YogaNode } from "yoga-layout/load";
 import type { Message } from "../../i18n/types";
@@ -21,6 +22,38 @@ const LINE_SAMPLE = "M";
 
 /** Below this a measured length counts as whole: the tolerance Yoga's own rounding uses. */
 const WHOLE_EPSILON = 0.0001;
+
+/**
+ * One line of the text style an icon without a size is squared on.
+ *
+ * @param source - What the line is measured through.
+ * @returns The height of that line, as `text` measures it now.
+ */
+function lineOf(source: TextSource): number {
+  return source.measure(LINE_SAMPLE, DEFAULT_TEXT_STYLE).height;
+}
+
+/**
+ * Tells whether the line the icons are squared on moved since an icon was last measured: the
+ * body font arrived, left or was replaced, or the style was swapped. Nothing is read before the
+ * first icon without a size was measured, so a screen without one costs nothing; after that a
+ * call is one read of the advance table. A move is told once.
+ *
+ * @param state - The layout state: the line the icons were last measured with.
+ * @param source - What the line is measured through.
+ * @returns True when every icon without a size has to be measured again.
+ */
+export function iconLineMoved(state: LayoutState, source: TextSource): boolean {
+  if (state.iconLine === undefined) return false;
+
+  const line = lineOf(source);
+
+  if (line === state.iconLine) return false;
+
+  state.iconLine = line;
+
+  return true;
+}
 
 /**
  * Makes an icon square on the line height of the text next to it.
@@ -229,6 +262,10 @@ export function installMeasure(
 
     state.measured += 1;
     element.measuredSize = size;
+
+    // An icon carries no `Text`, so nothing names it when its line moves: keep the line the
+    // icons were measured with, for `iconLineMoved`.
+    if (element.type === "icon") state.iconLine = lineOf(source);
 
     return clampToMode(yoga, size, { width, widthMode, height, heightMode });
   };

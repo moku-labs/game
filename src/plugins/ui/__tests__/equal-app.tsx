@@ -20,6 +20,7 @@ import { textPlugin } from "../../text";
 import { worldPlugin } from "../../world";
 import { component } from "../../world/ecs/define";
 import { uiPlugin } from "../index";
+import { defineComponent } from "../jsx/component";
 
 /** A game's own counter: the number the bound text of the header shows. */
 export const Purse = component("Purse", { value: 0 });
@@ -158,6 +159,62 @@ export const gridScreen = projection({
   }
 });
 
+/**
+ * A picker whose local state is a `Set`: each button writes the picked names plus its own, so
+ * its `local` prop holds a new `Set` at every render.
+ */
+export const Picker = defineComponent("Picker", {
+  local: { picked: new Set<string>() },
+  view: (_props: object, local) => (
+    <column key="pickerRoot" style={{ width: 600, height: 400 }}>
+      <button
+        key="pickA"
+        local={{ picked: new Set([...local.picked, "a"]) }}
+        style={{ width: 100, height: 60 }}
+      />
+      <button
+        key="pickB"
+        local={{ picked: new Set([...local.picked, "b"]) }}
+        style={{ width: 100, height: 60 }}
+      />
+      <text
+        key="picked"
+        style={{ width: 200, height: 40 }}
+        content={[...local.picked].toSorted().join(",")}
+      />
+    </column>
+  )
+});
+
+/** One row of a single-root screen. */
+type ScreenItem = { id: string };
+
+/** A screen with the picker. */
+export const pickerScreen = projection({
+  name: "picker",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "picker" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => <Picker key="pickerBox" />
+});
+
+/**
+ * A screen with icons and no text: one icon without a size, its style written inline, so it is
+ * square on one line of the `body` text style, and one with a fixed size.
+ */
+export const iconScreen = projection({
+  name: "icons",
+  layer: "ui",
+  from: (): ScreenItem[] => [{ id: "icons" }],
+  key: (item: ScreenItem) => item.id,
+  view: () => (
+    <column key="iconRoot" style={{ width: 600, height: 400, align: "start" }}>
+      <icon key="autoIcon" name="ui.gear" style={{ tint: 0xff_ee_dd }} />
+      <icon key="fixedIcon" name="ui.gear" style={{ width: 32, height: 32 }} />
+    </column>
+  )
+});
+
 const home = defineNode({
   rest: true,
   outcomes: { tick: type(), earn: type(), rename: type(), dress: type() }
@@ -219,7 +276,8 @@ const main = defineFlow("main", {
 /** The feature of the fixture: the grid screen and its two locales. */
 export const gridFeature = defineFeature("grid", {
   flows: [main],
-  projections: [gridScreen],
+  projections: [gridScreen, pickerScreen, iconScreen],
+  ui: [Picker],
   strings: { en: english, de: german }
 });
 
@@ -340,13 +398,14 @@ export function createGridApp(options: { lateFont?: boolean } = {}) {
 }
 
 /**
- * Starts the app headless on a phone, with the flow resting on `home`, and mounts the grid: the
- * reconcile, the first solve and the first resolve of `text` have run.
+ * Starts the app headless on a phone, with the flow resting on `home`, and mounts its screens:
+ * the reconcile, the first solve and the first resolve of `text` have run.
  *
  * @param app - The app to start; a new one when left out.
- * @returns The started app, the 200 elements live.
+ * @param screens - The projections to mount; the grid of 200 elements when left out.
+ * @returns The started app, the elements of the mounted screens live.
  */
-export async function startGridApp(app = createGridApp()) {
+export async function startGridApp(app = createGridApp(), screens: readonly string[] = ["grid"]) {
   vi.spyOn(app.renderer.viewport, "size").mockReturnValue(PHONE);
 
   await app.start();
@@ -354,7 +413,7 @@ export async function startGridApp(app = createGridApp()) {
   await tick60();
 
   app.world.projection.setLayers([{ name: "ui", sort: "order" }]);
-  app.world.projection.mount(["grid"], { kind: "plugin", name: "test" });
+  app.world.projection.mount(screens, { kind: "plugin", name: "test" });
   app.time.step(16);
   app.time.step(16);
   app.time.step(16);

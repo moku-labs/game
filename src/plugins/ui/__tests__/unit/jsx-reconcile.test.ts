@@ -212,7 +212,9 @@ function harness() {
     /** The entities whose `Text` the fake `text` wrote this frame. */
     textsWritten: [] as Entity[],
     /** What the fake `layout.remeasure` answers: whether the text takes another size. */
-    resized: false
+    resized: false,
+    /** What the fake `layout.iconLineMoved` answers: whether the line of the icons moved. */
+    lineMoved: false
   };
 
   const ecs = {
@@ -321,6 +323,7 @@ function harness() {
     attach: vi.fn(),
     applyStyle,
     remeasure,
+    iconLineMoved: () => world.lineMoved,
     markMeasured: vi.fn(),
     affectsRect: layoutChanged,
     place: vi.fn(),
@@ -892,6 +895,31 @@ describe("what an equal description is resolved against", () => {
     h.world.resized = false;
     h.frame.reconcile();
 
+    expect(h.root().needsSolve).toBe(false);
+  });
+
+  it("measures every icon again when the line they are squared on moved, and no other element", () => {
+    const h = harness();
+
+    h.mount(screen());
+
+    // The body font arrived on a screen where `text` wrote nothing this frame.
+    h.world.lineMoved = true;
+    h.world.resized = true;
+    h.frame.reconcile();
+
+    expect(h.remeasure).toHaveBeenCalledExactlyOnceWith(h.element("gear"));
+    expect(h.root().needsSolve).toBe(true);
+    expect(h.resolveElement).not.toHaveBeenCalled();
+    expect(h.touched()).toEqual([]);
+
+    // The line stands still: no icon is looked at.
+    vi.clearAllMocks();
+    h.frame.solve();
+    h.world.lineMoved = false;
+    h.frame.reconcile();
+
+    expect(h.remeasure).not.toHaveBeenCalled();
     expect(h.root().needsSolve).toBe(false);
   });
 

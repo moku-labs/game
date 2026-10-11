@@ -11,7 +11,7 @@ import type { UiCtx } from "../types";
 import { applyStyleToNode, layoutChanged } from "./apply";
 import { beginExit, canDespawn } from "./exit";
 import { createGuideHandler } from "./guide";
-import { installMeasure, markMeasured, remeasureShown } from "./measure";
+import { iconLineMoved, installMeasure, markMeasured, remeasureShown } from "./measure";
 import { liftRest, play, playExtraChange, repose, startLoop, writeRest } from "./motion";
 import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
@@ -82,6 +82,8 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
     },
 
     remeasure: (element: Element): boolean => remeasureShown(state, element, source),
+
+    iconLineMoved: (): boolean => iconLineMoved(state, source),
 
     markMeasured: (element: Element): void => markMeasured(state, element),
 

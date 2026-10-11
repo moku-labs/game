@@ -19,7 +19,6 @@ import {
 } from "../../renderer/components";
 import { Text } from "../../text/components";
 import { Exiting, Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
-import { deepEquals } from "../../world/projection/diff";
 import type { AnyComponentType, AnyComponentValue, Entity, MotionHandle } from "../../world/types";
 import { Box, Escapable, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
@@ -34,7 +33,8 @@ import { hostViews, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
 import { settlePopups } from "./popups";
 import { createRange } from "./range";
-import { markResizedTexts } from "./remeasure";
+import { markResizedIcons, markResizedTexts } from "./remeasure";
+import { sameValue } from "./same";
 import type {
   DescriptionNode,
   Element,
@@ -137,8 +137,8 @@ type Change = {
 };
 
 /**
- * Tells whether two nodes write the same visual, input and extras: every prop of `WRITTEN` equal
- * by value, a function inside by identity.
+ * Tells whether two nodes write the same visual, input and extras: every prop of `WRITTEN` says
+ * the same, as `sameValue` reads it.
  *
  * @param previous - The node the element was last patched from.
  * @param next - The node of this render.
@@ -152,7 +152,7 @@ type Change = {
  * ```
  */
 function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
-  return WRITTEN.every(name => deepEquals(previous.props[name], next.props[name]));
+  return WRITTEN.every(name => sameValue(previous.props[name], next.props[name]));
 }
 
 /**
@@ -808,8 +808,9 @@ export function createReconciler(
    * resolved style is kept, and `styles.resolveElement` not called, while the raw `style` says the
    * same by value, the state flags are the same, and what a style is resolved on stands: the
    * epoch of the jsx state, which a new viewport ends, and the row height of a windowed row. The element is unchanged when its style is kept and its `content` and every
-   * prop of `WRITTEN` say the same too. Plain data is compared by value, a function by identity,
-   * and the same object always says the same: one changed in place is not seen.
+   * prop of `WRITTEN` say the same too. A plain object and an array are compared by value;
+   * anything else by identity: a function, a `Set`, a `Map`, a `Date`, a class instance. The
+   * same object always says the same: one changed in place is not seen.
    *
    * @param root - The root being reconciled: its covered flag is one of the state flags.
    * @param element - The element that stayed.
@@ -831,10 +832,10 @@ export function createReconciler(
     const stands = element.basis?.epoch === state.epoch && element.basis.rowHeight === rowHeight;
 
     // Keep the resolved style while the raw one and the flags say the same; else resolve again.
-    const sameStyle = deepEquals(previous.props.style, node.props.style);
-    const keepsStyle = stands && sameStyle && deepEquals(element.is, is);
+    const sameStyle = sameValue(previous.props.style, node.props.style);
+    const keepsStyle = stands && sameStyle && sameValue(element.is, is);
     const style = keepsStyle ? element.style : styleFor(parent, node, is);
-    const sameContent = deepEquals(previous.props.content, node.props.content);
+    const sameContent = sameValue(previous.props.content, node.props.content);
 
     return {
       is,
@@ -1430,6 +1431,10 @@ export function createReconciler(
     // A text that `text` wrote this frame and that measures to another size now asks its root
     // for a solve: a bound number, a new locale, a font that arrived.
     markResizedTexts(ctx, state, modules.layout);
+
+    // An icon without a size carries no `Text`: it is measured again when the line it is squared
+    // on moved, which is when the body font arrives.
+    markResizedIcons(ctx, state, modules.layout);
 
     // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());

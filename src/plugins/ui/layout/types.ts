@@ -65,6 +65,8 @@ export type LayoutState = {
   solves: number;
   scrolling: Entity | undefined;
   scrollStart: { pointerY: number; offset: number };
+  /** One line of the `body` style as the icons were last measured with it; none before that. */
+  iconLine: number | undefined;
   order: number;
   cleanups: Array<() => void>;
 };
@@ -78,6 +80,8 @@ export type LayoutModule = {
   attach(element: Element): void;
   applyStyle(element: Element): void;
   remeasure(element: Element): boolean;
+  /** Tells, once, that the line the icons without a size are squared on moved. */
+  iconLineMoved(): boolean;
   markMeasured(element: Element): void;
   affectsRect(first: ResolvedStyle, second: ResolvedStyle): boolean;
   place(parent: Element, children: readonly Element[]): void;
