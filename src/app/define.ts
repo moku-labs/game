@@ -224,7 +224,8 @@ function appOf(
 
 /**
  * Makes the headless app of a definition: the logic of `headless.features`, then
- * `headless.plugins`.
+ * `headless.plugins`. Without a `headless.features` list it takes `features`; an empty list means
+ * none. `shared` is not composed.
  *
  * @param definition - The game's definition.
  * @param seams - The seams of this call.
@@ -233,7 +234,9 @@ function appOf(
 function headlessOf(definition: Definition, seams: Seams) {
   const runtime = runtimeOf(seams);
   const plugins = [
-    ...(definition.headless?.features ?? []).map(feature => feature.logicOnly),
+    ...(definition.headless?.features ?? definition.features ?? []).map(
+      feature => feature.logicOnly
+    ),
     ...(definition.headless?.plugins ?? [])
   ];
   const configs = composedOnly(mergeConfigs(definition, seams, runtime, false), plugins);

@@ -6,6 +6,7 @@ import type { Descriptor, Hint, NodeFx } from "../fx/types";
 import type { Allow } from "../gate/types";
 import type { FlowCtx } from "../types";
 import { createOut } from "./define";
+import { asError } from "./edge";
 import type { Aborted, AbortReason, Delivery, Location, NodeOutcome, Step } from "./loop-types";
 import { noop, stages } from "./loop-types";
 import { answerResult, eventResult } from "./position";
@@ -72,17 +73,22 @@ function refuseEffect(signal: AbortSignal): Promise<never> {
 }
 
 /**
- * Builds the `fx` of a node context: awaited effects by call, cosmetic hints by `emit`. A `guide`
- * narrows the gate while it runs; the runner lifts the narrow when the node is left. A body that
- * was aborted keeps running, since the loop only stops waiting for it, so its `fx` starts nothing
- * any more: the gate and the narrow belong to the node the loop entered after it. The `recover`
- * of a rest node gets the same `fx`, bound to the signal of its recovery.
+ * Builds the `fx` of a node context: awaited effects by call, effects the body does not wait for
+ * by `start`, cosmetic hints by `emit`. A `guide` narrows the gate while it runs; the runner lifts
+ * the narrow when the node is left. A body that was aborted keeps running, since the loop only
+ * stops waiting for it, so its `fx` starts nothing any more: the gate and the narrow belong to the
+ * node the loop entered after it. The `recover` of a rest node gets the same `fx`, bound to the
+ * signal of its recovery.
  *
  * @param modules - Injected sibling APIs.
- * @param step - The run in progress: its abort signal, and how it tells a walk that a gate opened.
+ * @param step - The run in progress: its abort signal, how it tells a walk that a gate opened, and
+ *   the path and the log a failed `start` is reported with.
  * @returns The effects gateway of one node run.
  */
-export function nodeFx(modules: Modules, step: Pick<Step, "signal" | "gateOpened">): NodeFx {
+export function nodeFx(
+  modules: Modules,
+  step: Pick<Step, "signal" | "gateOpened" | "path" | "log">
+): NodeFx {
   /**
    * Awaits one effect. After the abort of the node it rejects with the abort reason instead.
    *
@@ -105,6 +111,34 @@ export function nodeFx(modules: Modules, step: Pick<Step, "signal" | "gateOpened
     return value;
   };
 
+  /**
+   * Starts one effect and does not wait for it. It takes the path of an awaited effect, so the
+   * mode and the node's signal apply; only its end is nobody's wait. A failure is the handler's:
+   * it goes to the log and never to the node. A `cosmetic` descriptor does not get that far: the
+   * gateway swallows its failure. After the abort of the node nothing is started and nothing is
+   * thrown, not even for a descriptor refused otherwise.
+   *
+   * @param descriptor - The descriptor the node starts.
+   * @throws {Error} When the descriptor has `answers` or is a `guide`.
+   */
+  const start = (descriptor: Descriptor): void => {
+    if (step.signal.aborted) return;
+
+    if (descriptor.answers !== undefined || descriptor.kind === "guide") {
+      throw new Error(
+        `[game] fx.start() got the effect "${descriptor.kind}" in the node "${step.path}", and its answer has to be awaited.\n  Write await fx(...) for a descriptor with answers and for a guide.`
+      );
+    }
+
+    modules.fx.run(descriptor, step.signal).catch((error: unknown) => {
+      step.log.error(
+        "flow:fx-start-failed",
+        { path: step.path, kind: descriptor.kind },
+        asError(error)
+      );
+    });
+  };
+
   return Object.assign(run, {
     /**
      * Buffers one cosmetic hint until the transaction of this node commits.
@@ -113,7 +147,8 @@ export function nodeFx(modules: Modules, step: Pick<Step, "signal" | "gateOpened
      */
     emit: (item: Hint): void => {
       modules.fx.buffer(item);
-    }
+    },
+    start
   });
 }
 

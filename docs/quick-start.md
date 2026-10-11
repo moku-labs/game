@@ -193,5 +193,5 @@ Every term of the graph, in full.
 | Edge target | A node name, `exit("outcome")` to leave a sub-flow, or `to("node", payload => input)` to adapt the payload. |
 | Slot | `slot("name")`. An extension point. Features contribute sub-flows to it with an `order`. |
 | Feature | `defineFeature(name, { nodes?, flows?, contribute? })`. An ordinary plugin that registers into `flow.features`. `feature.logicOnly` is the headless twin. |
-| Effect | `await fx(descriptor)` for awaited effects, `fx.emit(hint(kind, payload))` for cosmetic ones. Hints are released after the commit and dropped in fast mode. |
+| Effect | `await fx(descriptor)` for awaited effects, `fx.start(descriptor)` to start one now and not wait for it, `fx.emit(hint(kind, payload))` for cosmetic ones. Hints are released after the commit and dropped in fast mode. |
 | Transition | Rest node to rest node. It is a transaction. An error rolls back to the last rest point, retries, then enters `safeNode`. Every failure is an `error` entry `flow:error` in the log. |

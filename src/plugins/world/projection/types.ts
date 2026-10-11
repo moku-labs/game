@@ -298,7 +298,10 @@ export type ChangeHooks<Item> = { readonly [component: string]: ChangeHook<Item>
  * The motion hooks of a projection. Every one is optional; without a hook the component diff is
  * written directly. `loop` starts what moves a view for its whole life (an additive sway, a spin):
  * it is played wherever `enter` plays, next to it, and its motion is kept apart from the view's
- * other motions, so a change never cancels it; it ends when the view dies.
+ * other motions, so a change never cancels it; it ends when the view dies. A view that entered
+ * directly (a mount, a load, a restore, a paused or fast world) plays no `enter`, and a direct
+ * reconcile ends every track of a view: the loop is then started by the first frame in which the
+ * world is live and a tween driver is installed, once.
  *
  * @example
  * ```ts
@@ -397,7 +400,9 @@ export type AnyProjectionSpec = {
  * Why a reconcile runs. Merged over the frame; the cause table decides play or direct. A
  * `"restore"` and a `"load"` replace the state, so their reconcile also brings every live view to
  * its rest pose, whether its item changed or not, and every element to the rest pose its owner
- * recorded with `setRest`.
+ * recorded with `setRest`. A `"rollback"` commits the state of the last rest point: a live view
+ * whose item did not change and that stands off its rest pose is settled, as `settle(entity)`
+ * does. An element another plugin owns is not.
  *
  * @example
  * ```ts
@@ -409,21 +414,6 @@ export type Cause = "edge" | "rollback" | "restore" | "load" | "mount" | "rerun"
 /**
  * One live or exiting view: the entity of one key of one projection, its rest pose and the
  * motions that still run on it.
- *
- * @example
- * ```ts
- * const view: View = {
- *   entity: 1_048_576,
- *   projection: "board.items",
- *   key: "i7",
- *   item: { id: "i7" },
- *   rest: new Map(),
- *   handles: [],
- *   lifted: false,
- *   dropWhenStill: false,
- *   exiting: false
- * };
- * ```
  */
 export type View = {
   entity: Entity;
@@ -436,6 +426,13 @@ export type View = {
   lifted: boolean;
   /** `lift(false)` is waiting for the last motion to end. */
   dropWhenStill: boolean;
+  /**
+   * The `loop` hook of the view is still to be started. Set when the view enters in a direct
+   * reconcile, which plays no hook, and whenever a flush ends its tracks, the loop among them.
+   * The sweep starts the loop and clears the flag, only while the world is live and a tween
+   * driver is installed. It is the only trigger, so a loop starts once.
+   */
+  loopOwed: boolean;
   exiting: boolean;
 };
 
@@ -463,14 +460,23 @@ export type Mounted = {
 /**
  * One track the projection started on the driver. The world keeps the component name and the
  * handle, so it knows which components are driven without knowing how the driver runs them.
- *
- * @example
- * ```ts
- * const track: Track = { entity: 1_048_576, component: "Transform", handle: flight };
- * track.handle.active(); // true while the flight runs
- * ```
  */
-export type Track = { entity: Entity; component: string; handle: MotionHandle };
+export type Track = {
+  entity: Entity;
+  component: string;
+  handle: MotionHandle;
+  /**
+   * Whether the track adds to its fields instead of owning them, as the loop of a view does. An
+   * additive track drives no component: a settle may bring the component home under it.
+   */
+  additive: boolean;
+  /**
+   * The fields the track names, the ones of its keyframe segments included. While an additive
+   * track runs, its offset sits in the stored value of these fields, so they are not compared
+   * with the rest pose.
+   */
+  fields: readonly string[];
+};
 
 /**
  * The rest pose of one entity, by component name: the last output of `view(item)` for a view, or
@@ -514,11 +520,17 @@ export type ProjectionState = {
   tracks: Track[];
   /** The tween engine `anim` installed, or `undefined`: then every target is written at once. */
   driver: TweenDriver | undefined;
-  /** The rest pose of an entity that is not a view, recorded by its owner through `setRest`. */
+  /**
+   * The rest pose of an entity that is not a view, recorded by its owner through `setRest`. The
+   * entry of an entity that is gone is dropped by the sweep and by the converge step.
+   */
   rests: Map<Entity, RestPose>;
   /** Projection name to key to the entity a plugin above registered under it. */
   keys: Map<string, Map<string, Entity>>;
-  /** The reverse of `keys`, so `keyOf` answers for a registered element too. */
+  /**
+   * The reverse of `keys`, so `keyOf` answers for a registered element too. The entry of an
+   * entity that is gone is dropped with its rest pose, and its side of `keys` with it.
+   */
   keysByEntity: Map<Entity, ProjectionKey>;
   /** Entity to component name to the fields another writer owns. */
   mutes: Map<Entity, Map<string, Set<string>>>;
@@ -587,11 +599,6 @@ export type Counts = {
 
 /**
  * What one reconcile run is asked to do.
- *
- * @example
- * ```ts
- * const options: ReconcileOptions = { direct: true, force: false, converge: false };
- * ```
  */
 export type ReconcileOptions = {
   names?: readonly string[];
@@ -604,6 +611,13 @@ export type ReconcileOptions = {
    * ends every motion first.
    */
   converge: boolean;
+  /**
+   * Whether a live view whose item did not change is settled when it stands off its rest pose.
+   * Set when a rollback is among the causes: the failed node committed nothing, so no entry
+   * brings back a view it moved. A play reconcile cancels the motions of the view and plays its
+   * settle; a direct one writes the rest pose after the flush.
+   */
+  settle: boolean;
 };
 
 /**
@@ -715,8 +729,8 @@ export type ProjectionApi = {
 
   /**
    * A drop with no commit: cancels the view's motions and plays settle for every loose component.
-   * In mode `paused` or `fast` the rest pose is written at once. No-op for an entity that is not
-   * a live view.
+   * A view that loops comes home too, and its loop runs on. In mode `paused` or `fast` the rest
+   * pose is written at once. No-op for an entity that is not a live view.
    *
    * @param entity - The entity of the view that was dropped.
    * @example
@@ -749,7 +763,8 @@ export type ProjectionApi = {
   /**
    * Moves a view into or out of its projection's `lift` layer. `lift(entity, false)` on a view
    * that still moves takes effect when its last motion ends, so a settling view stays above the
-   * board until it is home.
+   * board until it is home. A reconcile or a `settle(entity)` that ends the motions of the view
+   * applies the pending drop itself.
    *
    * @param entity - The entity of the view.
    * @param on - True to lift, false to drop back.
@@ -890,6 +905,7 @@ export type ProjectionApi = {
    * It is also where a restore and a load put the element: after their reconcile every track on
    * the entity is ended and every recorded component it still carries is written, muted fields
    * left out. So the owner records the pose it draws the element with, every time that changes.
+   * The pose of an entity that is gone is dropped in the next live frame.
    *
    * @param entity - The entity of the element.
    * @param component - The component whose rest value is recorded.
@@ -912,6 +928,8 @@ export type ProjectionApi = {
   /**
    * Gives an entity a projection and key of its own, so `entityOf` and `keyOf` answer for it next
    * to the live views. That is how an element becomes a target for `anim`, `input` and `guide`.
+   * A key whose entity is gone is dropped in the next live frame, also when the remover was never
+   * called.
    *
    * @param projection - Name the element is addressed under.
    * @param key - Key the element is addressed under.
@@ -994,7 +1012,10 @@ export type ProjectionInternal = {
 
   /**
    * Sweeps the views whose motions ended: the despawn queue, the convergence check and the
-   * pending drops. The tracks themselves are advanced by the driver.
+   * pending drops. Then it drops the rest pose and the registered key of every element whose
+   * entity is gone, and starts the loop of every live view that owes one. It runs once per
+   * frame and does nothing unless the world is live. The tracks themselves are advanced by the
+   * driver.
    */
   sweep(): void;
 

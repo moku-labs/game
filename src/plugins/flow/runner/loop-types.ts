@@ -1,6 +1,7 @@
 /**
  * @file flow/runner — shared types and constants of the loop.
  */
+import type { Log } from "@moku-labs/common/browser";
 import type { Json, Transaction } from "../../model/types";
 import type { WorldEvent } from "../inbox/types";
 import type { AnyFlow, AnyNode, FlowEntry, Frame, Result, Stage } from "./types";
@@ -71,6 +72,8 @@ export type Step = {
   path: string;
   input: Json;
   gateOpened: () => void;
+  /** The engine log: an effect the body started with `fx.start` that fails is written there. */
+  log: Log.LogApi;
 };
 
 /** One result ready to be committed onto its edge. */

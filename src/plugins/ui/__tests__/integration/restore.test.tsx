@@ -79,6 +79,17 @@ const leaveSplash = defineAnimation("splash.leave", {
     )
 });
 
+/** Where the art of the splash stands once the reveal ended, and how long the reveal takes. */
+const REVEALED = -500;
+const REVEAL_MS = 160;
+
+/** The reveal of the splash: the art rises to its end pose. */
+const revealSplash = defineAnimation("splash.reveal", {
+  slots: {},
+  build: () =>
+    tween(view("splashArt"), Transform, { y: REVEALED }, { ms: REVEAL_MS, ease: "linear" })
+});
+
 /** A sway of one second the second giant plays for as long as it lives. */
 const sway = defineMotion({
   keyframes: {
@@ -195,7 +206,21 @@ const KEYS = [
 const splash = defineNode({
   rest: true,
   checkpoint: true,
-  outcomes: { start: type(), go: type() }
+  outcomes: { start: type(), go: type(), show: type() }
+});
+
+/**
+ * A transit node that animates a ui element as its first line and then waits at a gate: a
+ * bookmark taken while it waits names this node, and a restore runs it again from that line.
+ */
+const reveal = defineNode({
+  outcomes: { done: type() },
+  run: async ({ fx, out }) => {
+    await fx(play(revealSplash, {}));
+    await fx({ kind: "confirm", answers: ["ok"] });
+
+    return out.done();
+  }
 });
 
 const leave = defineNode({
@@ -231,12 +256,13 @@ const dimmer = defineNode({
 const dimmed = defineNode({ rest: true, outcomes: { again: type() } });
 
 const main = defineFlow("main", {
-  nodes: { splash, leave, travel, menu, dimmer, dimmed },
+  nodes: { splash, leave, travel, reveal, menu, dimmer, dimmed },
   start: "splash",
   outcomes: {},
   edges: {
-    splash: { start: "leave", go: "travel" },
+    splash: { start: "leave", go: "travel", show: "reveal" },
     leave: { done: "menu" },
+    reveal: { done: "menu" },
     travel: { done: "splash" },
     menu: { dim: "dimmer" },
     dimmer: { done: "dimmed" },
@@ -248,7 +274,7 @@ const splashFeature = defineFeature("splash", {
   flows: [main],
   components: [Parallax],
   projections: [splashScreen],
-  animations: [leaveSplash],
+  animations: [leaveSplash, revealSplash],
   ui: [Lamp]
 });
 
@@ -393,6 +419,129 @@ function creditsOf(app: SplashApp): { offset: number | undefined; y: number | un
     y: app.world.ecs.get(content, Transform)?.y
   };
 }
+
+/**
+ * Reads the art of the splash: the entity that draws it and where it stands.
+ *
+ * @param app - The running app.
+ * @returns The entity of the element and the `y` of its `Transform`.
+ */
+function artOf(app: SplashApp): { entity: number | undefined; y: number | undefined } {
+  const entity = app.ui.find("splashArt");
+
+  return { entity, y: app.world.ecs.get(entity ?? 0, Transform)?.y };
+}
+
+/**
+ * Plays the reveal up to its gate, moves on to the rest node `menu` and hands back the bookmark
+ * taken while the reveal waited.
+ *
+ * @param app - The running app, resting on `splash`.
+ * @returns The bookmark of the waiting transit node `reveal`.
+ */
+async function bookmarkReveal(app: SplashApp) {
+  // Enter the transit node: its first line plays the reveal, then it waits at its gate.
+  expect(app.flow.gate.answer({ intent: "show" })).toBe(true);
+  await tick();
+
+  for (let frame = 0; frame < 20; frame += 1) {
+    app.time.step(16);
+    await tick(4);
+  }
+
+  expect(app.flow.state()).toMatchObject({ path: "reveal", pending: { gate: ["ok"] } });
+  expect(artOf(app).y).toBe(REVEALED);
+
+  // The bookmark of a transit node that waits at a gate names that node.
+  const bookmark = app.flow.bookmark();
+
+  expect(bookmark).toMatchObject({ path: "reveal", rest: { path: "splash" } });
+
+  // Move on to another rest node of the same screen.
+  expect(app.flow.gate.answer({ intent: "ok" })).toBe(true);
+  await tick();
+  stepFrames(app, 3);
+
+  expect(app.flow.state().path).toBe("menu");
+
+  return bookmark;
+}
+
+/** How many frames a restore of the reveal may take before the test gives up on it. */
+const RESTORE_FRAMES = 60;
+
+/**
+ * Restores a bookmark of a waiting transit node. Its promise resolves when the gate of the node
+ * is open, and the node reaches its gate only when its animation ended, so frames are stepped
+ * one at a time, as a page runs them or as `game.step` steps them, until it resolved.
+ *
+ * @param app - The running app.
+ * @param bookmark - The bookmark to enter.
+ * @returns Whether the restore resolved, and after how many frames.
+ */
+async function restoreStepping(
+  app: SplashApp,
+  bookmark: ReturnType<SplashApp["flow"]["bookmark"]>
+): Promise<{ resolved: boolean; frames: number }> {
+  const outcome = { resolved: false, frames: 0 };
+  const restored = app.flow.restore(bookmark).then(() => {
+    outcome.resolved = true;
+  });
+
+  // The body of the restored node starts in the microtasks before the first frame.
+  await tick();
+
+  while (!outcome.resolved && outcome.frames < RESTORE_FRAMES) {
+    app.time.step(16);
+    outcome.frames += 1;
+    await tick(4);
+  }
+
+  if (outcome.resolved) await restored;
+
+  return outcome;
+}
+
+describe("ui — a restored transit node animates the elements the restore built", () => {
+  // F5, red on purpose: the body runs before any frame, so `play` starts on the old element.
+  // Frame 1 builds the roots again and despawns it; frame 2 ends the track and opens the gate.
+  // The built element never moves: its `y` is the rest 450, not the end pose -500. Both tests.
+  it.fails("plays its first line on the built element, the world live", async () => {
+    const app = await startSplash();
+    const bookmark = await bookmarkReveal(app);
+    const before = artOf(app);
+    const restore = await restoreStepping(app, bookmark);
+
+    stepFrames(app, 3);
+
+    expect(restore.resolved).toBe(true);
+    expect(app.flow.state()).toMatchObject({ path: "reveal", pending: { gate: ["ok"] } });
+    expect(artOf(app).entity).not.toBe(before.entity);
+    expect(artOf(app).y).toBe(REVEALED);
+
+    await app.stop();
+  });
+
+  it.fails("plays its first line on the built element, on a paused page with stepped frames", async () => {
+    const app = await startSplash();
+    const bookmark = await bookmarkReveal(app);
+    const before = artOf(app);
+
+    app.lifecycle.push("devtools");
+
+    const restore = await restoreStepping(app, bookmark);
+
+    stepFrames(app, 3);
+
+    expect(restore.resolved).toBe(true);
+    expect(app.time.isPaused()).toBe(true);
+    expect(app.flow.state()).toMatchObject({ path: "reveal", pending: { gate: ["ok"] } });
+    expect(artOf(app).entity).not.toBe(before.entity);
+    expect(artOf(app).y).toBe(REVEALED);
+
+    await app.stop();
+  });
+});
 
 describe("ui — a restore brings the elements of a screen home", () => {
   it("after the exit animation ended, on a paused page with stepped frames", async () => {

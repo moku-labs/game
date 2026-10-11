@@ -145,11 +145,14 @@ const orderCard = defineMotion({
   way; a tolerance of 1e-9 rad): the next cycle restarts at the start, which looks the same.
 - `defineMotion` builds a separate `loop` hook; `enter` no longer starts it. `world` plays `loop`
   wherever it plays `enter`, outside the view's handles, so enter still resolves and the loop runs on.
-  On a projection view it starts only when enter plays, never on a direct reconcile (mount, load,
-  restore, fast mode); a UI element always plays it, and a changed `motion` prop swaps the loop.
+  A direct reconcile (mount, load, restore, a paused or fast world) plays no `enter`, and its flush
+  ends every track of a view. Such a projection view owes its loop: a view that entered directly,
+  or whose tracks a flush ended, gets its loop from the next live frame, once. A UI element always
+  plays it, and a changed `motion` prop swaps the loop.
 - It is one additive track per component the keys name, with `repeat: "forever"`, so it layers over
   the rest pose, enter, change and settle motions: a new rest pose carries the loop along.
-- It dies with its view, on `flushAll` (fast mode) and on `finishAll()`. `active()` counts it.
+- It dies with its view, on `flushAll` (fast mode) and on `finishAll()`. `active()` counts it. After
+  `flushAll` the loop of a view that is still live starts again in the next live frame.
 - A loop does not keep the clock awake: two seconds after the last `wake()` it steps at `time.idleFps`.
 - `loop.ms` is one cycle; left out, it is `transition.ms`. A `loop.ms` that is not a finite number above 0 throws
   `[game] Motion loop "<name>" has ms <ms>.` A `loop.track` that names no keyframe track throws too.

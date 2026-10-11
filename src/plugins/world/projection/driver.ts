@@ -189,7 +189,13 @@ export function startTrack(
   );
 
   if (handle.active()) {
-    state.tracks.push({ entity, component: component.componentName, handle });
+    state.tracks.push({
+      entity,
+      component: component.componentName,
+      handle,
+      additive: options.additive === true,
+      fields: Object.keys(withSegmentFields(to, options.segments))
+    });
   }
 
   return handle;
@@ -221,7 +227,9 @@ export function forgetEndedTracks(pctx: ProjectionCtx): void {
 }
 
 /**
- * The component names a running track drives on one entity.
+ * The component names a running track drives on one entity. An additive track drives none: the
+ * loop of a view adds an offset to the rest pose and owns no component, so a settle may bring
+ * the component home under it.
  *
  * @param pctx - Domain context of the projection module.
  * @param entity - The entity to ask about.
@@ -233,10 +241,34 @@ export function drivenComponents(pctx: ProjectionCtx, entity: Entity): Set<strin
   const driven = noFields();
 
   for (const track of pctx.ctx.state.projection.tracks) {
-    if (track.entity === entity) driven.add(track.component);
+    if (track.entity === entity && !track.additive) driven.add(track.component);
   }
 
   return driven;
+}
+
+/**
+ * The fields of one component of one entity that a running additive track adds to. The offset of
+ * a loop sits in the stored value of such a field, and the world cannot tell it from the value
+ * under it, so the field is never compared with its rest value: not when a settle asks what is
+ * loose, and not in the convergence check.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param entity - The entity to ask about.
+ * @param name - Component name.
+ * @returns The field names a loop adds to, empty for a component no additive track runs on.
+ */
+export function swayedFields(pctx: ProjectionCtx, entity: Entity, name: string): Set<string> {
+  const swayed = noFields();
+
+  for (const track of pctx.ctx.state.projection.tracks) {
+    if (track.entity !== entity || track.component !== name || !track.additive) continue;
+    if (!track.handle.active()) continue;
+
+    for (const field of track.fields) swayed.add(field);
+  }
+
+  return swayed;
 }
 
 /**

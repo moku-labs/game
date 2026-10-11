@@ -148,6 +148,7 @@ export function createViewRecord(
     handles: [],
     lifted: false,
     dropWhenStill: false,
+    loopOwed: false,
     exiting: false
   };
 }

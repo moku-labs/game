@@ -311,6 +311,41 @@ const pressWhileDealing = async (holdMs: number) => {
   }
 };
 
+// ─── a game whose node starts a sound and goes on ─────────────
+
+const counter = defineNode({ rest: true, checkpoint: true, outcomes: { tap: type() } });
+
+const countTap = defineNode({
+  outcomes: { counted: type() },
+  run: ({ fx, player, out }) => {
+    // Started, not awaited: the sound plays while the edge commits.
+    fx.start({ kind: "jingle", payload: { key: "ui.tap" } });
+    player.coins += 1;
+
+    return out.counted();
+  }
+});
+
+const tapFlow = defineFlow("tap", {
+  nodes: { counter, countTap },
+  start: "counter",
+  edges: { counter: { tap: "countTap" }, countTap: { counted: "counter" } }
+});
+
+const createTapGame = () =>
+  createApp({
+    pluginConfigs: {
+      model: {
+        playerProvider: memory(),
+        seed: 7,
+        initialPlayer: { coins: 0, merges: 0 },
+        initialSession: { popups: 0 }
+      },
+      clock: { source: fakeClock(1000) },
+      flow: { mainFlow: tapFlow }
+    }
+  });
+
 // ─── a game whose board transition fails on every attempt ─────
 
 type Match = { screen: "home" | "board"; marks: number };
@@ -554,6 +589,42 @@ describe("flow plugin", () => {
 
     expect(game.app.flow.state().running).toBe(false);
     expect(game.provider.calls.map(call => call.method)).toContain("load");
+  });
+});
+
+// ─── an effect a node starts and does not await ───────────────
+
+describe("an effect started with fx.start", () => {
+  it("lets the edge commit before its handler resolves", async () => {
+    const app = createTapGame();
+    const played = Promise.withResolvers<void>();
+    const sounds: unknown[] = [];
+
+    await app.start();
+    app.flow.fx.handle("jingle", descriptor => {
+      sounds.push(descriptor.payload);
+
+      return played.promise;
+    });
+    app.flow.run().catch(() => undefined);
+    await tick();
+
+    app.flow.gate.answer({ intent: "tap" });
+    await tick();
+
+    // The sound is still playing: the edge is committed and the next gate is open.
+    expect(sounds).toEqual([{ key: "ui.tap" }]);
+    expect(app.model.store.snapshot().player).toMatchObject({ coins: 1 });
+    expect(app.flow.state()).toMatchObject({ path: "counter", pending: { gate: ["tap"] } });
+
+    played.resolve();
+    await tick();
+
+    // The end of the sound moves nothing and is no log entry.
+    expect(app.flow.state()).toMatchObject({ path: "counter", pending: { gate: ["tap"] } });
+    expect(app.log.trace().filter(entry => entry.level === "error")).toEqual([]);
+
+    await app.stop();
   });
 });
 

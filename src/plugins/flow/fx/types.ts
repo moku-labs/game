@@ -228,7 +228,9 @@ export type FxInternal = {
 };
 
 /**
- * The `fx` of a node context: awaited effects by call, cosmetic hints by `emit`.
+ * The `fx` of a node context, and of the context of `recover`. Three ways to reach what is not
+ * logic: `await fx(descriptor)` runs an effect and waits for it, `fx.start(descriptor)` starts one
+ * now and does not wait, `fx.emit(hint)` keeps a cosmetic hint until the edge has committed.
  *
  * @example
  * ```ts
@@ -238,4 +240,44 @@ export type FxInternal = {
  * fx.emit(hint("sparkle", { cell: "c3" }));
  * ```
  */
-export type NodeFx = ((descriptor: Descriptor) => Promise<unknown>) & { emit(hint: Hint): void };
+export type NodeFx = ((descriptor: Descriptor) => Promise<unknown>) & {
+  /**
+   * Buffers one cosmetic hint. It reaches its handler and the `onHint` listeners only after the
+   * commit of the edge, so a node that fails shows nothing. Fast mode drops it.
+   *
+   * @param hint - The hint, built with `hint(kind, payload)`.
+   * @example
+   * ```ts
+   * // The "merge" node: the sparkle belongs to the merge, so it is shown once the merge is real.
+   * run: ({ fx, session, input, out }) => {
+   *   session.merged.push(input.cell);
+   *   fx.emit(hint("sparkle", { cell: "c3" })); // nothing is shown yet
+   *
+   *   return out.done(); // the edge commits, then the handler of "sparkle" gets the hint
+   * }
+   * ```
+   */
+  emit(hint: Hint): void;
+
+  /**
+   * Starts an effect now and does not wait for it: the handler is called at once and the body goes
+   * on. Fast mode and the node's signal apply as for `await fx(descriptor)`. A handler that fails
+   * never fails the node: the log gets the error entry `flow:fx-start-failed` with
+   * `{ path, kind }`, and a `cosmetic` descriptor is silent. After the abort of the node nothing is
+   * started.
+   *
+   * @param descriptor - The effect to start. Not one with `answers` and not a `guide`.
+   * @throws {Error} When the descriptor has `answers` or is a `guide`: an answer has to be awaited.
+   * @example
+   * ```ts
+   * // The "place" node of a board game: the tap sound starts, the mark is placed at once.
+   * run: ({ fx, session, input, out }) => {
+   *   fx.start(sfx("ui.tap")); // undefined: the handler of "sfx" is already playing "ui.tap"
+   *   session.marks.push(input.cell);
+   *
+   *   return out.placed(); // the edge commits while the sound still plays
+   * }
+   * ```
+   */
+  start(descriptor: Descriptor): void;
+};

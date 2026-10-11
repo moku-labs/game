@@ -143,7 +143,8 @@ export async function recoverNode(
      */
     gateOpened: (): void => {
       notifyGateOpen(state);
-    }
+    },
+    log: ctx.log
   };
   const outcome = await Promise.race([callRecover(modules, recovery), abortOutcome(abort.signal)]);
 

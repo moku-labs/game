@@ -4,11 +4,12 @@
  */
 import type { AnyComponentValue, ComponentType, Entity } from "../ecs/types";
 import { deepEquals } from "./diff";
-import { drivenComponents, inertHandle, mutedFields, startTrack } from "./driver";
+import { drivenComponents, inertHandle, mutedFields, startTrack, swayedFields } from "./driver";
 import type {
   AnyProjectionSpec,
   Motion,
   MotionHandle,
+  Mounted,
   NumericFields,
   ProjectionCtx,
   RestOptions,
@@ -218,7 +219,68 @@ export function runHook(
 }
 
 /**
- * The rest components that are off their rest value and that no running track drives.
+ * The peers of a call outside a reconcile, as `settle` and the loop the sweep starts make it:
+ * both sides are the items of the last reconcile.
+ *
+ * @param mounted - The mounted projection.
+ * @returns The peers, the same item table as new and as old.
+ */
+export function restingPeers(mounted: Mounted): Peers {
+  return { next: mounted.items, previous: mounted.items };
+}
+
+/**
+ * Plays the `loop` hook of a view, when its projection has one. The motion is not kept with the
+ * view's handles: a change cancels those, and the loop runs until the view dies or a flush ends
+ * its tracks.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view that loops.
+ * @param spec - The projection spec.
+ * @param peers - The new and the old items of the projection.
+ */
+export function startLoop(
+  pctx: ProjectionCtx,
+  view: View,
+  spec: AnyProjectionSpec,
+  peers: Peers
+): void {
+  const loop = spec.motion?.loop;
+
+  if (loop === undefined) return;
+
+  runHook(pctx, view, "loop", () => loop(createViewHandle(pctx, view, peers)));
+}
+
+/**
+ * Copies a component value without some of its fields.
+ *
+ * @param value - The component value.
+ * @param skipped - The field names to leave out.
+ * @returns A new record with the other fields.
+ * @example
+ * ```ts
+ * withoutFields({ x: 10, rotation: 0.04 }, new Set(["rotation"])); // { x: 10 }
+ * ```
+ */
+function withoutFields(
+  value: Readonly<Record<string, unknown>>,
+  skipped: ReadonlySet<string>
+): Record<string, unknown> {
+  const kept: Record<string, unknown> = {};
+
+  for (const [field, entry] of Object.entries(value)) {
+    if (!skipped.has(field)) kept[field] = entry;
+  }
+
+  return kept;
+}
+
+/**
+ * The rest components that are off their rest value and that no running track drives. The loop
+ * of a view counts for neither: it drives no component, and the fields it adds to are left out of
+ * the comparison, because its offset is no distance from the rest pose. So a looping view is
+ * loose exactly when a view without a loop would be.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view to check.
@@ -233,7 +295,17 @@ export function looseComponents(pctx: ProjectionCtx, view: View): string[] {
 
     const stored = storedValue(pctx, view.entity, value.type);
 
-    if (stored !== undefined && !deepEquals(stored, value.value)) loose.push(name);
+    if (stored === undefined) continue;
+
+    const swayed = swayedFields(pctx, view.entity, name);
+    // The rest value of a component that is no tag is a plain record of its fields.
+    const rest = value.value as Record<string, unknown>;
+    const home =
+      swayed.size === 0
+        ? deepEquals(stored, rest)
+        : deepEquals(withoutFields(stored, swayed), withoutFields(rest, swayed));
+
+    if (!home) loose.push(name);
   }
 
   return loose;
@@ -352,27 +424,71 @@ function atRest(stored: unknown, rest: unknown): boolean {
 }
 
 /**
+ * The fields of one rest component that are off their rest value: muted fields left out, numbers
+ * within `REST_TOLERANCE`. A field a running loop adds to is left out too: the offset of the loop
+ * sits in its stored value and is no miss. A tag and a component the entity does not carry
+ * answer nothing.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view to check.
+ * @param name - Name of the rest component.
+ * @param value - The rest value of that component.
+ * @returns The fields to write to bring the component home, by field name.
+ */
+function offRestFields(
+  pctx: ProjectionCtx,
+  view: View,
+  name: string,
+  value: AnyComponentValue
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+
+  if (value.value === true) return patch;
+
+  const stored = storedValue(pctx, view.entity, value.type);
+
+  if (stored === undefined) return patch;
+
+  const muted = mutedFields(pctx, view.entity, name);
+  const swayed = swayedFields(pctx, view.entity, name);
+
+  for (const [field, entry] of Object.entries(value.value as Record<string, unknown>)) {
+    if (muted.has(field) || swayed.has(field)) continue;
+    if (!atRest(stored[field], entry)) patch[field] = entry;
+  }
+
+  return patch;
+}
+
+/**
+ * Tells whether a view carries a component off its rest value, by the rule of the convergence
+ * check: a field another writer owns does not count, a field a running loop adds to does not
+ * count, and a number counts as at rest within `REST_TOLERANCE`. A rollback asks it before it
+ * settles a view whose item did not change.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view to check.
+ * @returns True when at least one field of one rest component is off its rest value.
+ */
+export function standsOffRest(pctx: ProjectionCtx, view: View): boolean {
+  for (const [name, value] of view.rest) {
+    if (Object.keys(offRestFields(pctx, view, name, value)).length > 0) return true;
+  }
+
+  return false;
+}
+
+/**
  * The convergence check of the last motion: every rest component is compared with the stored
- * value, muted fields excluded, numbers within `REST_TOLERANCE`. A difference is written and
- * reported.
+ * value, muted fields and the fields a running loop adds to excluded, numbers within
+ * `REST_TOLERANCE`. A difference is written and reported.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view that came to rest.
  */
 export function checkConvergence(pctx: ProjectionCtx, view: View): void {
   for (const [name, value] of view.rest) {
-    if (value.value === true) continue;
-
-    const stored = storedValue(pctx, view.entity, value.type);
-
-    if (stored === undefined) continue;
-
-    const muted = mutedFields(pctx, view.entity, name);
-    const patch: Record<string, unknown> = {};
-
-    for (const [field, entry] of Object.entries(value.value as Record<string, unknown>)) {
-      if (!muted.has(field) && !atRest(stored[field], entry)) patch[field] = entry;
-    }
+    const patch = offRestFields(pctx, view, name, value);
 
     if (Object.keys(patch).length === 0) continue;
 

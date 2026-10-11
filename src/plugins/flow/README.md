@@ -97,7 +97,8 @@ Known limits:
   is marked on restore, so that a later rollback does not drop the restored document. A page
   kill right after it loads that state at the start node.
 - A body that was aborted (by `restore`, by a world event, by `onStop`) can start no effect any
-  more. Its `fx(...)` call rejects with the abort reason: `"restore"`, `"inbox"` or `"stop"`.
+  more. Its `fx(...)` call rejects with the abort reason: `"restore"`, `"inbox"` or `"stop"`. Its
+  `fx.start(...)` call starts nothing and throws nothing.
 
 ## The gate hold
 
@@ -257,6 +258,53 @@ refuse the bookmark, and so does a `rest` that is not `{ path, input }`. Flow im
 `game.restore` of such a bookmark answers once the node's gate is open, so the state it returns
 already has `pending.gate`. No `walk([])` is needed after it, and a fast walk would not show the
 popup.
+
+## Effects in a node
+
+A node reaches everything that is not logic through the `fx` of its context. There are three
+calls. `recover` gets the same `fx`.
+
+| Call | The handler runs | The body | Use it for |
+|---|---|---|---|
+| `await fx(descriptor)` | Now | Waits for the handler. With `answers` it waits for the player's answer. | A popup, a `guide`, `schedule`, an animation the next line depends on |
+| `fx.start(descriptor)` | Now | Goes on at once. The call returns nothing. | A tap sound, a haptic tick, an animation nothing waits for |
+| `fx.emit(hint)` | After the commit of the edge | Goes on at once. | What shows a change that must be real first: a sparkle on the merged cell |
+
+```ts
+const place = defineNode({
+  input: type<{ cell: string }>(),
+  outcomes: { placed: type() },
+  run: async ({ fx, session, input, out }) => {
+    fx.start(sfx("ui.tap"));                                   // started now, not awaited
+    session.marks.push(input.cell);
+    await fx({ kind: "drop", payload: { cell: input.cell } }); // awaited: the edge waits for it
+    fx.emit(hint("placed", { cell: input.cell }));             // released after the commit
+
+    return out.placed();
+  }
+});
+```
+
+`fx.start` takes the path of an awaited effect. Only the end of the effect is nobody's wait.
+
+| | `fx.start(descriptor)` |
+|---|---|
+| Mode | As for an awaited effect. In fast mode only a `runInFast` handler runs. |
+| Signal | The node's. It aborts when the node is aborted. A node that ended never aborts it. |
+| A handler that fails | Never fails the node. The log gets one error entry `flow:fx-start-failed` with `{ path, kind }`. While the frame loop runs it is written in the `signals` phase of the next frame. |
+| A `cosmetic` descriptor (`sfx`, `haptic`) | Silent when its handler fails, as it is when awaited. |
+| `answers`, `guide` | Throws `[game] fx.start() got the effect …`. An answer has to be awaited: write `await fx(...)`. |
+| After the abort of the node | Starts nothing and throws nothing. |
+| The handler's value | Dropped. |
+
+```ts
+app.log.trace().filter(entry => entry.event === "flow:fx-start-failed");
+// [{ level: "error", event: "flow:fx-start-failed", ts: 1790000000000,
+//    data: { path: "board/place", kind: "load", error: { message, stack } } }]
+```
+
+A hint is not a started effect. `fx.emit` waits for the commit and a failed node drops its hints.
+`fx.start` runs at once and a failed node does not take it back.
 
 ## The signal of an effect handler
 

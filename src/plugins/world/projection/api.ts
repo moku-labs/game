@@ -14,11 +14,20 @@ import {
   looseComponents,
   type Peers,
   playSettle,
+  restingPeers,
   stillMoving,
   writeRestNow
 } from "./motions";
-import { clearMounted, flushQueues, sweepQueue } from "./queue";
-import { reconcile, restingPeers } from "./reconcile";
+import {
+  clearMounted,
+  dropIfStill,
+  dropPending,
+  flushQueues,
+  forgetDeadElements,
+  startOwedLoops,
+  sweepQueue
+} from "./queue";
+import { reconcile } from "./reconcile";
 import type {
   AnyProjectionSpec,
   Cause,
@@ -209,8 +218,9 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
   const state = ctx.state.projection;
 
   /**
-   * Reconciles what is dirty. The cause table decides play or direct, and whether every live view
-   * and every element with a recorded rest pose is brought to it: a restore and a load do that.
+   * Reconciles what is dirty. The cause table decides play or direct, whether every live view
+   * and every element with a recorded rest pose is brought to it (a restore and a load do that),
+   * and whether an unchanged view that stands off its rest pose is settled (a rollback does).
    */
   const reconcileIfDirty = (): void => {
     const dirty = state.dirty;
@@ -223,8 +233,9 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         dirty.causes.some(cause => isDirectCause(cause)) ||
         deps.ecs.mode() !== "live";
       const converge = dirty.causes.some(cause => isConvergeCause(cause));
+      const settle = dirty.causes.includes("rollback");
 
-      reconcile(pctx, { direct, force: dirty.force, converge });
+      reconcile(pctx, { direct, force: dirty.force, converge, settle });
     }
 
     state.hints.length = 0;
@@ -256,6 +267,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     handles: [],
     lifted: false,
     dropWhenStill: false,
+    loopOwed: false,
     exiting: false
   });
 
@@ -322,7 +334,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
           names: fresh.map(spec => spec.name),
           direct: true,
           force: true,
-          converge: false
+          converge: false,
+          settle: false
         });
       }
     },
@@ -363,18 +376,15 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
 
       if (deps.ecs.mode() !== "live") {
         writeRestNow(pctx, view, [...view.rest.keys()]);
-
         // Only a pending `lift(false)` drops the view. A view the finger still holds stays lifted.
-        if (view.dropWhenStill) {
-          view.dropWhenStill = false;
-          view.lifted = false;
-          writeLayer(pctx, entity, spec.layer);
-        }
+        dropPending(pctx, view);
 
         return;
       }
 
       playSettle(pctx, view, spec, restingPeers(mounted), looseComponents(pctx, view));
+      // The motions were cancelled: when no new one started, a pending `lift(false)` takes effect.
+      dropIfStill(pctx, view);
     },
 
     mute: (
@@ -461,7 +471,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       if (known === undefined || known.kind !== "plugin") return undefined;
       if (owner.kind !== known.kind || owner.name !== known.name) return undefined;
 
-      // The handle and a later `setRest` share one pose object; a despawn or the key remover drops it.
+      // The handle and a later `setRest` share one pose object. The key remover drops it, and so
+      // does the sweep once the entity is gone.
       state.rests.set(entity, restOf(entity));
 
       return createViewHandle(pctx, elementView(entity), noPeers());
@@ -537,6 +548,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       if (deps.ecs.mode() !== "live") return;
 
       sweepQueue(pctx);
+      forgetDeadElements(pctx);
+      startOwedLoops(pctx);
     },
 
     flushAll: (): void => {
