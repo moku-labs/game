@@ -33,6 +33,7 @@ export function createProjectionState(): ProjectionState {
     keys: emptyMap(),
     keysByEntity: emptyMap(),
     mutes: emptyMap(),
+    converged: [],
     offHints: []
   };
 }
