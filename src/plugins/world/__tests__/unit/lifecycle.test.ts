@@ -93,6 +93,7 @@ describe("clearWorld", () => {
 
     world.start();
     world.api.projection.register(boardItems());
+    world.api.projection.onConverged(() => undefined);
     expect(world.frames).toHaveLength(5);
 
     clearWorld(world.ctx.state);
@@ -100,6 +101,7 @@ describe("clearWorld", () => {
     expect(world.frames).toHaveLength(0);
     expect(world.ctx.state.ecs.offFrame).toEqual([]);
     expect(world.ctx.state.projection.offHints).toEqual([]);
+    expect(world.ctx.state.projection.converged).toEqual([]);
     expect(world.ctx.state.projection.specs.size).toBe(0);
   });
 

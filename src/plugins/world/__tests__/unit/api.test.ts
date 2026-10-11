@@ -43,6 +43,7 @@ const PROJECTION_MEMBERS = [
   "motionsOf",
   "mount",
   "mute",
+  "onConverged",
   "register",
   "registerKey",
   "replace",

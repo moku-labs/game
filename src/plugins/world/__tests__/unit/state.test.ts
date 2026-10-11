@@ -57,6 +57,7 @@ describe("createWorldState", () => {
     expect(state.projection.hints).toEqual([]);
     expect(state.projection.dirty).toBeUndefined();
     expect(state.projection.offHints).toEqual([]);
+    expect(state.projection.converged).toEqual([]);
   });
 
   it("starts with a frozen, empty layer list", () => {

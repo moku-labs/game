@@ -120,6 +120,7 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     setRest: projection.setRest,
     restOf: projection.restOf,
     registerKey: projection.registerKey,
+    onConverged: projection.onConverged,
     rerunAll: projection.rerunAll
   };
 }

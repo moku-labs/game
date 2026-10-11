@@ -202,6 +202,7 @@ export function clearWorld(state: State): void {
 
   for (const off of state.projection.offHints) off();
   state.projection.offHints.length = 0;
+  state.projection.converged.length = 0;
 
   state.projection.specs.clear();
   state.projection.mounted.clear();

@@ -414,6 +414,8 @@ export type JsxState = {
   hints: Hint[];
   scrolls: Set<Entity>;
   windowRenders: number;
+  /** True from a restore or a load until the next reconcile built every root again. */
+  remount: boolean;
 };
 
 /**
@@ -564,6 +566,11 @@ export type JsxModule = {
   applyTap(entity: Entity): void;
   markPointer(entity: Entity, flag: PointerFlag, on: boolean): void;
   playEnter(entity: Entity): void;
+  /**
+   * Asks for every root to be built again by the next reconcile, after the world brought the
+   * elements to their rest pose and ended every track on them: a restore or a load.
+   */
+  converged(): void;
   key(input: KeyInput): boolean;
   blur(): void;
 };

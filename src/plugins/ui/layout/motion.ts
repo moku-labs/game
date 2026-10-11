@@ -94,7 +94,9 @@ function restVisual(
 
 /**
  * Records the rest pose of one element before a hook runs: the transform from `Box` and the
- * style, and the visual the element is actually drawn with.
+ * style, and the visual the element is actually drawn with. The content of a scroll records no
+ * rest `Transform`: the scroll step owns its pose, and the world brings an element back to every
+ * rest it holds after a restore.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element that entered or moved.
@@ -103,11 +105,13 @@ function restVisual(
 export function writeRest(ctx: UiCtx, element: Element, parent: Rect | undefined): void {
   const projection = ctx.deps.world.projection;
 
-  projection.setRest(
-    element.entity,
-    Transform,
-    restTransform(element.rect, parent, element.style, element.fit)
-  );
+  if (element.type !== CONTENT) {
+    projection.setRest(
+      element.entity,
+      Transform,
+      restTransform(element.rect, parent, element.style, element.fit)
+    );
+  }
 
   const visual = restVisual(element);
 
@@ -259,8 +263,8 @@ export function still(element: Element): boolean {
  * element plays its `change.Transform` motion when it has one, else takes the pose through a
  * 0 ms rest track, which lands on the next frame step and lets an additive loop re-base on the
  * new rest; an element that has not spawned yet only records it, and so does one whose
- * `change.Box` motion already played. The content of a scroll keeps its `Transform`: the scroll
- * step owns it.
+ * `change.Box` motion already played. The content of a scroll keeps its `Transform` and records
+ * no rest with the world: the scroll step owns it.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element whose rect, style or fit may have changed.
@@ -282,6 +286,9 @@ export function repose(
   const previous = element.rest;
 
   element.rest = next;
+
+  if (element.type === CONTENT) return;
+
   ctx.deps.world.projection.setRest(element.entity, Transform, next);
 
   if (!element.live || hooked) return;
@@ -294,7 +301,7 @@ export function repose(
     return;
   }
 
-  if (element.type !== CONTENT) handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
+  handleOf(ctx, element)?.toRest(Transform, { ms: 0 });
 }
 
 /**

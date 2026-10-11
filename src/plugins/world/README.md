@@ -79,8 +79,9 @@ app.world.ecs.snapshot().entities[0];
 | `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. |
 | `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
-| `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home. |
+| `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home, and where a restore and a load put it. The owner records the pose it draws the element with, every time that changes. |
 | `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. |
+| `onConverged(listener)` | Calls the listener after a reconcile a restore or a load caused, when every view and every element stands on its rest pose and every track on them is ended. `ui` builds its roots again after it, so each element stands as freshly mounted. The remover is safe to call twice. |
 | `rerunAll()` | Marks every mounted projection dirty and forces `view` for every item. |
 
 The authoring helpers are pure and exported from the package root:
@@ -130,6 +131,36 @@ While a phase runs, `spawn`, `despawn`, `despawnOwnedBy`, `add`, `remove`, `tag`
 queued and applied in call order when the phase ends. `set` is never queued. A queued command on an
 entity that died meanwhile is dropped.
 
+### The cause of a reconcile
+
+The cause of the commit decides how the reconcile runs. The causes of one frame are merged: one
+direct cause makes the reconcile direct. A direct reconcile ends with a flush: every motion of a
+live view is finished, every track on its entity is cancelled and the despawn queue is emptied.
+
+| Cause | Mode | A live view whose item is the same object as before |
+|---|---|---|
+| `edge`, `rollback` | play; direct while the world is `paused` or `fast` | skipped: its pose is not written |
+| `rerun` (`rerunAll`, `replace`) | direct | `view` runs again and the rest pose is written |
+| `restore`, `load` | direct | written to its rest pose; `view` does not run again |
+
+A restore and a load replace the state. After their reconcile every live view of every mounted
+projection stands on the rest pose of the new state and no motion runs on it, whether its item
+changed or not. That covers a projection whose `from` hands out the same object for the same
+state, a frozen table or a constant: an aborted node finishes its animation, which leaves the views
+on the end pose, and no item of the restore is new. The rest pose is written after the flush, so
+nothing writes after it, also not an additive track that puts its base back when it is cancelled.
+Muted fields are left out.
+
+The same reconcile brings home the elements another plugin owns, which no projection meets: every
+entity with a pose recorded by `setRest`. Every track on the entity is ended with
+`driver.cancelAll`, then each recorded component the entity still carries is written, muted fields
+left out. A component the element dropped is not added back. An element tagged `Exiting` has its
+tracks ended and keeps its place, so its owner sweeps it. A recorded pose of an entity that is gone
+is skipped, and so is one recorded for a projection view. Last, every `onConverged` listener runs:
+the owner puts back what only it knows, as `ui` builds its roots again through its mount path. A
+listener that throws is logged with `log.error("world:converged-listener-failed", …)` and the
+others still run.
+
 ## Motions
 
 A motion may carry a `loop` hook (`defineMotion` with `loop` builds it): it is played wherever `enter`
@@ -171,14 +202,15 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
 
 - **hooks** `model:committed` records `cause` and `roots` in `state.projection.dirty`. The reconcile
   runs once, at the start of the next frame, so two commits in one frame give one reconcile. In fast
-  mode it reconciles at once, direct.
+  mode it reconciles at once, direct. What each cause does is in
+  [The cause of a reconcile](#the-cause-of-a-reconcile).
 - **onStart** `connectWorld` reads every feature description and registers its `components`, then
   `systems`, then `projections`, in feature order; registers the five `time.onFrame` callbacks, the
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
-  views, registered keys, recorded rest poses, the despawn queue, entities and resources, and resets
-  the frame history. No `onRemoved` fires: `renderer` stopped earlier.
+  views, registered keys, recorded rest poses, the `onConverged` listeners, the despawn queue,
+  entities and resources, and resets the frame history. No `onRemoved` fires: `renderer` stopped earlier.
 
 ## Doors
 
