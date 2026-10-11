@@ -24,7 +24,7 @@ A screen test passes the parsed manifest and a file seam, `game.screen({ manifes
 
 ## Testing entry
 
-`@moku-labs/game/testing` re-exports the headless helpers and the isolated feature tests. It imports no `node:` module, so a test that runs in a browser can import it. The visual tests live in `@moku-labs/game/visual`, see [Visual tests](#visual-tests).
+`@moku-labs/game/testing` re-exports the headless helpers, the isolated feature tests and `fakeFx`, the `fx` of a node context for a unit test. It imports no `node:` module, so a test that runs in a browser can import it. The visual tests live in `@moku-labs/game/visual`, see [Visual tests](#visual-tests).
 
 | Export | Signature | Purpose |
 |---|---|---|
@@ -35,9 +35,10 @@ A screen test passes the parsed manifest and a file seam, `game.screen({ manifes
 | `memory` | `(fixture?: { state: SaveDoc; version: number }) => PlayerStateProvider & { calls: ProviderCall[] }` | In-memory save provider. It keeps what it was committed and records every call |
 | `saveOf` | `(player: Json, seed?: number) => SaveDoc` | Builds a save document for a fixture |
 | `isolate` | `(feature: FeaturePlugin, options: IsolateOptions<Nodes>) => (seams?: IsolateSeams) => App` | Composes one feature with the shared layer and nothing else of the game. Returns a factory of apps, not started. See [Isolated feature tests](#isolated-feature-tests) |
+| `fakeFx` | `(options?: FakeFxOptions) => FakeFx` | The `fx` of a node context for a test that calls `node.run(context)` itself. Records `awaited`, `started` and `emitted`; `options.answer(descriptor)` answers an awaited effect; `options.path` names the node in a refused `fx.start` |
 | `stub` | `(outcome: string, payload?: Json) => Stub` | Replaces a node or a sub-flow of the isolated flow: it ends at once with this outcome and payload |
 
-A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`. The types `HeadlessApp`, `HeadlessGame`, `Repro`, `ReproResult`, `IsolateOptions`, `IsolateSeams`, `Stub` and `StubsOf` come from the same entry.
+A `HeadlessGame` has `walk(route)`, `answer(answer)`, `state()`, `history()` and `stop()`. The types `HeadlessApp`, `HeadlessGame`, `Repro`, `ReproResult`, `IsolateOptions`, `IsolateSeams`, `Stub`, `StubsOf`, `FakeFx` and `FakeFxOptions` come from the same entry.
 
 ### Isolated feature tests
 

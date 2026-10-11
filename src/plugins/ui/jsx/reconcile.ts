@@ -1,9 +1,11 @@
 /**
  * @file ui/jsx — the reconcile: a description tree diffed by identity into the entities `ui`
- * owns, and the solve that gives every one of them its rect before it is ever drawn. Beside it:
+ * owns, and the solve that gives every one of them its rect before it is ever drawn. An element
+ * that stays is compared prop by prop, by value: one that says what it said is neither styled nor
+ * written. Beside it:
  * the range of a windowed scroll (`range.ts`), the rest and the motion of the extras
- * (`extras.ts`), the hint routed to a keyed element (`hints.ts`) and the bound-text remeasure
- * (`remeasure.ts`).
+ * (`extras.ts`), the hint routed to a keyed element (`hints.ts`) and the remeasure of the texts
+ * `text` resolved again (`remeasure.ts`).
  */
 import { PointerOver, Pressed, Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
@@ -31,7 +33,8 @@ import { hostViews, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
 import { settlePopups } from "./popups";
 import { createRange } from "./range";
-import { markResizedTexts } from "./remeasure";
+import { markResizedIcons, markResizedTexts } from "./remeasure";
+import { sameValue } from "./same";
 import type {
   DescriptionNode,
   Element,
@@ -88,10 +91,69 @@ export const ELEMENT_OWNED: ReadonlySet<string> = namesOf([
 const CONTENT_STYLE: Style = Object.freeze({ origin: "topLeft" });
 
 /**
+ * The props, besides `style`, `state` and `content`, that a live element is written from: `bind`,
+ * `texture`, `name` and `fit` reach its visual, `intent`, `payload`, `local` and `escape` its
+ * input, `components` its extras and `motion` its hooks. Every other prop is read from the node
+ * where it is used, at every patch: `hosts`, the props of a windowed scroll, the props of a text
+ * field, and the children.
+ */
+const WRITTEN: readonly string[] = [
+  "bind",
+  "texture",
+  "name",
+  "fit",
+  "components",
+  "motion",
+  "intent",
+  "payload",
+  "local",
+  "escape"
+];
+
+/**
  * The state flags that do not come from the markup: the pointer's two, the keyboard's one and
  * the root's one.
  */
 type LiveFlags = Pick<IsFlags, "pressed" | "hover" | "focus" | "covered">;
+
+/**
+ * What one patch found by comparing the node of this render with the one before it.
+ */
+type Change = {
+  /** The state flags of this render. */
+  is: IsFlags;
+  /** The style of this render: the object the element holds when it was kept. */
+  style: ResolvedStyle;
+  /** The row height the style of this render is resolved on, for a row of a windowed scroll. */
+  rowHeight: number | undefined;
+  /** The style was resolved again, not kept. */
+  resolved: boolean;
+  /** A field of the style that reaches a rect changed. */
+  moved: boolean;
+  /** The layout node is written and measured again: a rect, a text or what it is measured in. */
+  measures: boolean;
+  /** The element says what it said: nothing is styled and nothing is written. */
+  unchanged: boolean;
+};
+
+/**
+ * Tells whether two nodes write the same visual, input and extras: every prop of `WRITTEN` says
+ * the same, as `sameValue` reads it.
+ *
+ * @param previous - The node the element was last patched from.
+ * @param next - The node of this render.
+ * @returns True when no component of the element has to be written for these props.
+ * @example
+ * ```ts
+ * writesSame(
+ *   { type: "button", props: { intent: "claim", payload: { id: 1 } }, children: [] },
+ *   { type: "button", props: { intent: "claim", payload: { id: 2 } }, children: [] }
+ * ); // false
+ * ```
+ */
+function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
+  return WRITTEN.every(name => sameValue(previous.props[name], next.props[name]));
+}
 
 /**
  * The children one element is diffed against. A scroll container holds exactly one of them: the
@@ -551,6 +613,7 @@ export function createReconciler(
       scrolledIn: range.isMoving()
     };
 
+    state.styled += 1;
     state.elements.set(entity, element);
     state.byIdentity.set(identity, entity);
     trackHost(state, element);
@@ -560,6 +623,8 @@ export function createReconciler(
     if (element.type === "scroll") state.scrolls.add(entity);
 
     modules.layout.attach(element);
+    // The style is on the layout node: from here an equal description keeps it.
+    element.basis = { epoch: state.epoch, rowHeight: range.rowHeightOf(parent, node) };
     diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
     root.needsSolve = true;
 
@@ -696,11 +761,12 @@ export function createReconciler(
    * its offset belongs to the finger, and a new look or a new rect never resets it. The look
    * written is recorded as the rest of the visual, so the rest the world holds is always the one
    * the element is drawn with: a restore brings it back to exactly that. The extras of the
-   * `components` prop are diffed last.
+   * `components` prop are diffed last. Every call is one write pass of `UiCounters`.
    *
    * @param element - The element that changed.
    */
   function writeLive(element: Element): void {
+    state.written += 1;
     writeOrder(element);
 
     // Remove the visuals and inputs the element no longer carries.
@@ -738,7 +804,88 @@ export function createReconciler(
   }
 
   /**
-   * Updates one live element from its new node.
+   * Compares the node of this render with the one a live element was last patched from. The
+   * resolved style is kept, and `styles.resolveElement` not called, while the raw `style` says the
+   * same by value, the state flags are the same, and what a style is resolved on stands: the
+   * epoch of the jsx state, which a new viewport ends, and the row height of a windowed row. The element is unchanged when its style is kept and its `content` and every
+   * prop of `WRITTEN` say the same too. A plain object and an array are compared by value;
+   * anything else by identity: a function, a `Set`, a `Map`, a `Date`, a class instance. The
+   * same object always says the same: one changed in place is not seen.
+   *
+   * @param root - The root being reconciled: its covered flag is one of the state flags.
+   * @param element - The element that stayed.
+   * @param node - The node of this render.
+   * @returns The flags and the style of this render, and what they change.
+   */
+  function compare(root: Root, element: Element, node: DescriptionNode): Change {
+    const previous = element.node;
+    const parent = parentOf(element);
+    const is = isFlagsOf(node, {
+      pressed: element.is.pressed,
+      hover: element.is.hover,
+      focus: element.is.focus,
+      covered: root.covered
+    });
+
+    // What a style is resolved on besides the node itself.
+    const rowHeight = range.rowHeightOf(parent, node);
+    const stands = element.basis?.epoch === state.epoch && element.basis.rowHeight === rowHeight;
+
+    // Keep the resolved style while the raw one and the flags say the same; else resolve again.
+    const sameStyle = sameValue(previous.props.style, node.props.style);
+    const keepsStyle = stands && sameStyle && sameValue(element.is, is);
+    const style = keepsStyle ? element.style : styleFor(parent, node, is);
+    const sameContent = sameValue(previous.props.content, node.props.content);
+
+    return {
+      is,
+      style,
+      rowHeight,
+      resolved: !keepsStyle,
+      moved: !keepsStyle && modules.layout.affectsRect(element.style, style),
+      measures: !stands || !sameStyle || !sameContent,
+      unchanged: keepsStyle && sameContent && writesSame(previous, node)
+    };
+  }
+
+  /**
+   * Writes what a patch changed on one element: its style onto the layout node when a rect or a
+   * measure may move, which asks the root for a solve; then, on a live element, its visual, its
+   * input and its extras, and its rest pose when no rect moved.
+   *
+   * @param root - The root being reconciled.
+   * @param element - The element, its node, flags and style of this render already set.
+   * @param change - What the patch found.
+   */
+  function rewrite(root: Root, element: Element, change: Change): void {
+    const applies = change.moved || change.measures;
+
+    // One style pass: the style was resolved again, or is written onto the layout node again.
+    if (change.resolved || applies) state.styled += 1;
+
+    if (applies) {
+      modules.layout.applyStyle(element);
+      root.needsSolve = true;
+    }
+
+    if (!element.live) return;
+
+    writeLive(element);
+
+    // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
+    if (!change.moved) {
+      modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
+    }
+  }
+
+  /**
+   * Updates one live element from its new node. An element whose description says what it said is
+   * neither styled nor written: no `styles.resolveElement`, no `layout.applyStyle`, no solve asked
+   * for, no component set, no rest recorded, no rest pose moved. What still runs for it reads a
+   * prop the comparison leaves out, or costs nothing: the check of a windowed scroll's props; the
+   * node of this render kept on the element, which the hosts, the rows of a windowed scroll, a
+   * text field and the measure of a text read later; its motion and its instance; the host set;
+   * the props of a text field; the loop of a new motion; and the diff of its children.
    *
    * @param root - The root being reconciled.
    * @param element - The element that stayed.
@@ -753,25 +900,17 @@ export function createReconciler(
   ): void {
     checkWindow(node);
 
-    const previousNode = element.node;
-    const is = isFlagsOf(node, {
-      pressed: element.is.pressed,
-      hover: element.is.hover,
-      focus: element.is.focus,
-      covered: root.covered
-    });
-    const style = styleFor(parentOf(element), node, is);
-    const moved = modules.layout.affectsRect(element.style, style);
-    const contentChanged =
-      previousNode.props.content !== node.props.content ||
-      previousNode.props.style !== node.props.style;
-
+    const change = compare(root, element, node);
     const motion = node.props.motion as ElementMotion | undefined;
     const loopChanged = motion?.loop !== element.motion?.loop;
 
+    // A changed element has no basis until its write went through: a patch that throws on the way
+    // is done in full at the next render, not taken for one that says the same.
+    if (!change.unchanged) delete element.basis;
+
     element.node = node;
-    element.is = is;
-    element.style = style;
+    element.is = change.is;
+    element.style = change.style;
     element.motion = motion;
     element.instance = instance;
     trackHost(state, element);
@@ -782,15 +921,9 @@ export function createReconciler(
     // has not entered yet starts the loop of its motion when it enters.
     if (loopChanged && element.entered) modules.layout.loop(element);
 
-    if (moved || contentChanged) {
-      modules.layout.applyStyle(element);
-      root.needsSolve = true;
-    }
-
-    if (element.live) writeLive(element);
-    // A new look that moves no rect moves the rest pose now; a new rect waits for the solve.
-    if (element.live && !moved) {
-      modules.layout.repose(element, parentRect(element), false, hintOf(state, element));
+    if (!change.unchanged) {
+      rewrite(root, element, change);
+      element.basis = { epoch: state.epoch, rowHeight: change.rowHeight };
     }
 
     diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
@@ -1295,11 +1428,20 @@ export function createReconciler(
     modules.layout.scroll(containers, lookup);
     range.step(containers);
 
-    // A bound text whose new string measures to another size asks its root for a solve.
+    // A text that `text` wrote this frame and that measures to another size now asks its root
+    // for a solve: a bound number, a new locale, a font that arrived.
     markResizedTexts(ctx, state, modules.layout);
+
+    // An icon without a size carries no `Text`: it is measured again when the line it is squared
+    // on moved, which is when the body font arrives.
+    markResizedIcons(ctx, state, modules.layout);
 
     // Reconcile every root whose tree, instance or style changed, and all of them on a new viewport.
     const viewportChanged = modules.styles.useViewport(ctx.deps.renderer.viewport.size());
+
+    // On a new viewport a style resolves to something else: a new epoch patches every element in
+    // full, however equal its description is.
+    if (viewportChanged) state.epoch += 1;
 
     for (const root of dirtyRoots(viewportChanged)) reconcileDirtyRoot(root);
 
@@ -1321,6 +1463,8 @@ export function createReconciler(
     counters.solves = solves;
     counters.reconciles = state.reconciles;
     counters.windowRenders = state.windowRenders;
+    counters.styled = state.styled;
+    counters.written = state.written;
   }
 
   /**
@@ -1433,6 +1577,7 @@ export function createReconciler(
     const moved = modules.layout.affectsRect(element.style, style);
 
     element.style = style;
+    state.styled += 1;
 
     if (moved) {
       modules.layout.applyStyle(element);

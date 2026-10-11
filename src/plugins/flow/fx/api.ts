@@ -118,15 +118,20 @@ function invoke(
 
 /**
  * Runs the handler of an awaited effect. A missing handler resolves `undefined` instantly, so a
- * game without `audio` runs; a `cosmetic` descriptor swallows the failure the same way.
+ * game without `audio` runs. A `cosmetic` descriptor swallows the failure the same way, after one
+ * warn entry `flow:fx-cosmetic-failed`: a broken sound never fails the node, and it is never
+ * silent either. A failure that arrives after the abort of the signal is no failure: the handler
+ * was told to stop, so nothing is written.
  *
  * @param state - fx module state.
+ * @param log - The engine log.
  * @param descriptor - The awaited descriptor.
- * @param signal - The node's abort signal.
+ * @param signal - The signal the handler is called with.
  * @returns What the handler resolved with.
  */
 async function effectValue(
   state: FxState,
+  log: Log.LogApi,
   descriptor: Descriptor,
   signal: AbortSignal
 ): Promise<unknown> {
@@ -137,9 +142,14 @@ async function effectValue(
   try {
     return await entry.run(descriptor, { signal, mode: state.mode });
   } catch (error) {
-    if (descriptor.cosmetic === true) return;
+    if (descriptor.cosmetic !== true) throw error;
+    if (signal.aborted) return;
 
-    throw error;
+    // `log.warn` takes no error, so the text of what was thrown goes in as data.
+    log.warn("flow:fx-cosmetic-failed", {
+      kind: descriptor.kind,
+      message: asError(error).message
+    });
   }
 }
 
@@ -334,7 +344,7 @@ export function createFxApi(ctx: FlowCtx, deps: { gate: GateInternal }): FxApi &
       // A guide outlives its own `await`: it keeps the narrow and its visual until the node ends,
       // so its handler gets a signal of its own instead of the node's.
       const shown = descriptor.kind === "guide" ? beginGuide(state, signal) : signal;
-      const work = effectValue(state, descriptor, shown);
+      const work = effectValue(state, ctx.log, descriptor, shown);
 
       if (state.mode === "fast" || !ctx.deps.time.isRunning()) return work;
 

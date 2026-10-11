@@ -9,6 +9,7 @@ import type { Descriptor, FxApi, FxInternal, Hint } from "../../fx/types";
 import type { Allow, Answer, GateApi, GateInternal, GateSpec } from "../../gate/types";
 import type { InboxApi, InboxInternal, WorldEvent } from "../../inbox/types";
 import { loopSeam, restorePosition, runLoop, stopRunner } from "../../runner/loop";
+import { refuseStart } from "../../runner/node";
 import type {
   AnyFlow,
   AnyNode,
@@ -2038,6 +2039,21 @@ const withGateway = (harness: ReturnType<typeof setup>) => {
 const errorEntriesOf = (harness: ReturnType<typeof setup>) =>
   vi.mocked(harness.ctx.log.error).mock.calls;
 
+/** The warn entries of the log, as `[event, data]`. */
+const warnEntriesOf = (harness: ReturnType<typeof setup>) =>
+  vi.mocked(harness.ctx.log.warn).mock.calls;
+
+/** The message `refuseStart` throws for a descriptor in a node, or `undefined` when it passes. */
+const refusalOf = (descriptor: Descriptor, path: string): string | undefined => {
+  try {
+    refuseStart(descriptor, path);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  return undefined;
+};
+
 describe("fx.start", () => {
   it("runs the handler at once, with the node's signal, and returns undefined", async () => {
     const order: string[] = [];
@@ -2217,7 +2233,7 @@ describe("fx.start", () => {
     await stopRunner(harness.ctx);
   });
 
-  it("writes nothing when the handler of a cosmetic descriptor rejects", async () => {
+  it("writes the flow:fx-cosmetic-failed warn and no flow:fx-start-failed when the handler of a cosmetic descriptor rejects", async () => {
     const started = { count: 0 };
     const harness = setup({
       main: startingFlow(context => {
@@ -2237,9 +2253,73 @@ describe("fx.start", () => {
     await tick();
 
     expect(started.count).toBe(1);
+    expect(warnEntriesOf(harness)).toEqual([
+      ["flow:fx-cosmetic-failed", { kind: "sfx", message: "no audio device" }]
+    ]);
+    // The gateway swallowed the failure, so the started effect did not fail: no error entry.
     expect(errorEntriesOf(harness)).toEqual([]);
     expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
     await stopRunner(harness.ctx);
+  });
+
+  it("writes the same warn for a cosmetic handler that throws", async () => {
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "play", cosmetic: true });
+
+        return result("done");
+      }),
+      running: false
+    });
+
+    withGateway(harness).handle("play", () => {
+      throw new Error("not registered");
+    });
+    harness.start();
+    await tick();
+
+    expect(warnEntriesOf(harness)).toEqual([
+      ["flow:fx-cosmetic-failed", { kind: "play", message: "not registered" }]
+    ]);
+    expect(errorEntriesOf(harness)).toEqual([]);
+    // Never the node's failure: the edge committed.
+    expect(harness.ctx.state.runner.journal).toEqual([
+      expect.objectContaining({ path: "boot", outcome: "done", next: "home" })
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("does not log the abort of the node as a failed cosmetic effect", async () => {
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "play", cosmetic: true });
+
+        return new Promise<Result>(() => undefined);
+      }),
+      running: false
+    });
+
+    // A handler that honours the signal: it rejects when the node is aborted.
+    withGateway(harness).handle(
+      "play",
+      (_descriptor, handlerContext) =>
+        new Promise<void>((_resolve, reject) => {
+          handlerContext.signal.addEventListener(
+            "abort",
+            () => {
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true }
+          );
+        })
+    );
+    harness.start();
+    await tick();
+    await stopRunner(harness.ctx);
+    await tick();
+
+    expect(warnEntriesOf(harness)).toEqual([]);
+    expect(errorEntriesOf(harness)).toEqual([]);
   });
 
   it("refuses a descriptor with answers and a guide: an answer has to be awaited", async () => {
@@ -2277,6 +2357,23 @@ describe("fx.start", () => {
     expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
     expect(harness.gate.narrows).toEqual([undefined]);
     await stopRunner(harness.ctx);
+  });
+
+  it("refuseStart throws that message for answers and for a guide, and nothing for the rest", () => {
+    expect(refusalOf({ kind: "popup", answers: ["ok"] }, "board/place")).toBe(
+      '[game] fx.start() got the effect "popup" in the node "board/place", and its answer has to be awaited.\n  Write await fx(...) for a descriptor with answers and for a guide.'
+    );
+    expect(refusalOf(guide({ allow: { intent: "play" } }), "board/place")).toBe(
+      '[game] fx.start() got the effect "guide" in the node "board/place", and its answer has to be awaited.\n  Write await fx(...) for a descriptor with answers and for a guide.'
+    );
+    // An empty `answers` still asks for an answer: the gate would open for no intent.
+    expect(refusalOf({ kind: "popup", answers: [] }, "board/place")).toContain(
+      'got the effect "popup"'
+    );
+    expect(
+      refusalOf({ kind: "sfx", payload: { key: "ui.tap" }, cosmetic: true }, "board/place")
+    ).toBeUndefined();
+    expect(refusalOf({ kind: "load" }, "board/place")).toBeUndefined();
   });
 
   it("fails the node like any thrown error when the refusal is not caught", async () => {

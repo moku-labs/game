@@ -405,6 +405,168 @@ describe("run in live mode", () => {
   });
 });
 
+// ─── run: a failed cosmetic effect ────────────────────────────
+
+/** The warn entries of the log, as `[event, data]`. */
+const warnEntriesOf = (log: Log.LogApi) => vi.mocked(log.warn).mock.calls;
+
+describe("a failed cosmetic effect", () => {
+  it("writes one flow:fx-cosmetic-failed warn for a handler that throws, and resolves undefined", async () => {
+    const { api, log } = setup();
+
+    api.handle("shake", () => {
+      throw new Error("no screen");
+    });
+
+    await expect(api.run({ kind: "shake", cosmetic: true }, signal())).resolves.toBeUndefined();
+    expect(warnEntriesOf(log)).toEqual([
+      ["flow:fx-cosmetic-failed", { kind: "shake", message: "no screen" }]
+    ]);
+    // The entry is a warn with the text as data: nothing is written as an error.
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("writes the same entry for a handler that rejects", async () => {
+    const { api, log } = setup();
+
+    api.handle("sfx", () => Promise.reject(new Error("no audio device")));
+
+    await expect(
+      api.run({ kind: "sfx", payload: { key: "ui.tap" }, cosmetic: true }, signal())
+    ).resolves.toBeUndefined();
+    expect(warnEntriesOf(log)).toEqual([
+      ["flow:fx-cosmetic-failed", { kind: "sfx", message: "no audio device" }]
+    ]);
+  });
+
+  it("writes the text of a thrown value that is no error", async () => {
+    const { api, log } = setup();
+    const reason: unknown = "no device";
+
+    api.handle("sfx", () => Promise.reject(reason));
+    api.handle("play", () => {
+      throw 404;
+    });
+    await api.run({ kind: "sfx", cosmetic: true }, signal());
+    await api.run({ kind: "play", cosmetic: true }, signal());
+
+    expect(warnEntriesOf(log)).toEqual([
+      ["flow:fx-cosmetic-failed", { kind: "sfx", message: "no device" }],
+      ["flow:fx-cosmetic-failed", { kind: "play", message: "404" }]
+    ]);
+  });
+
+  it("writes one entry per failure: the same kind twice is two entries", async () => {
+    const { api, log } = setup();
+
+    api.handle("sfx", () => Promise.reject(new Error("no audio device")));
+    await api.run({ kind: "sfx", cosmetic: true }, signal());
+    await api.run({ kind: "sfx", cosmetic: true }, signal());
+
+    expect(warnEntriesOf(log)).toHaveLength(2);
+  });
+
+  it("writes nothing when the signal is aborted at the moment the failure arrives", async () => {
+    const { api, log } = setup();
+    const node = new AbortController();
+
+    // A handler that honours the signal: it rejects when the node is aborted.
+    api.handle(
+      "play",
+      (_descriptor, handlerCtx) =>
+        new Promise<void>((_resolve, reject) => {
+          handlerCtx.signal.addEventListener(
+            "abort",
+            () => {
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true }
+          );
+        })
+    );
+    const pending = api.run({ kind: "play", cosmetic: true }, node.signal);
+
+    await tick();
+    node.abort("stop");
+
+    await expect(pending).resolves.toBeUndefined();
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing for a handler that throws under a signal that is already aborted", async () => {
+    const { api, log } = setup();
+    const node = new AbortController();
+
+    node.abort("restore");
+    api.handle("play", () => {
+      throw new Error("no screen");
+    });
+
+    await expect(api.run({ kind: "play", cosmetic: true }, node.signal)).resolves.toBeUndefined();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("still rejects for a descriptor that is not cosmetic, and writes no such entry", async () => {
+    const { api, log } = setup();
+
+    api.handle("load", () => Promise.reject(new Error("broken")));
+
+    await expect(api.run({ kind: "load" }, signal())).rejects.toThrow("broken");
+    await expect(api.run({ kind: "load", cosmetic: false }, signal())).rejects.toThrow("broken");
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing for a cosmetic effect that succeeds or has no handler", async () => {
+    const { api, log } = setup();
+
+    api.handle("sfx", () => "played");
+
+    await expect(api.run({ kind: "sfx", cosmetic: true }, signal())).resolves.toBe("played");
+    await expect(api.run({ kind: "haptic", cosmetic: true }, signal())).resolves.toBeUndefined();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("writes the entry when the failure arrives, the completion still waits for the signals phase", async () => {
+    const { api, log } = setup({ running: true });
+    const done = vi.fn();
+
+    api.handle("sfx", () => Promise.reject(new Error("no audio device")));
+    api.run({ kind: "sfx", cosmetic: true }, signal()).then(done);
+    await tick();
+
+    expect(warnEntriesOf(log)).toEqual([
+      ["flow:fx-cosmetic-failed", { kind: "sfx", message: "no audio device" }]
+    ]);
+    expect(done).not.toHaveBeenCalled();
+
+    api.flushSettled();
+    await tick();
+
+    expect(done).toHaveBeenCalledWith(undefined);
+    expect(warnEntriesOf(log)).toHaveLength(1);
+  });
+
+  it("keeps flow:fx-handler-failed for a delivered descriptor and a released hint", async () => {
+    const { api, log } = setup();
+
+    api.handle("sfx", () => Promise.reject(new Error("no audio device")));
+    api.handle("sparkle", () => {
+      throw new Error("no screen");
+    });
+    api.dispatch({ kind: "sfx", cosmetic: true });
+    api.buffer(hint("sparkle"));
+    api.release();
+    await tick();
+
+    expect(vi.mocked(log.error).mock.calls.map(entry => [entry[0], entry[1]])).toEqual([
+      ["flow:fx-handler-failed", { kind: "sparkle" }],
+      ["flow:fx-handler-failed", { kind: "sfx" }]
+    ]);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
 // ─── run: fast mode ───────────────────────────────────────────
 
 describe("run in fast mode", () => {

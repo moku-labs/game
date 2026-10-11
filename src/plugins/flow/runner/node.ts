@@ -73,6 +73,29 @@ function refuseEffect(signal: AbortSignal): Promise<never> {
 }
 
 /**
+ * Refuses a descriptor that `fx.start` may not start: one with `answers`, and a `guide`. Both end
+ * with an answer, and an answer has to be awaited. Every other descriptor passes. The one place
+ * this rule and its message are written: the `fx` of a node context calls it, and so does
+ * `fakeFx` of the testing entry, so a unit test gets the error the game would get.
+ *
+ * @param descriptor - The descriptor a body hands to `fx.start`.
+ * @param path - Runtime path of the node, named in the message.
+ * @throws {Error} When the descriptor has `answers` or is a `guide`.
+ * @example
+ * ```ts
+ * refuseStart({ kind: "sfx" }, "board/place"); // undefined: a sound may be started
+ * refuseStart({ kind: "popup", answers: ["ok"] }, "board/place"); // throws '[game] fx.start() got the effect "popup" in the node "board/place", …'
+ * ```
+ */
+export function refuseStart(descriptor: Descriptor, path: string): void {
+  if (descriptor.answers === undefined && descriptor.kind !== "guide") return;
+
+  throw new Error(
+    `[game] fx.start() got the effect "${descriptor.kind}" in the node "${path}", and its answer has to be awaited.\n  Write await fx(...) for a descriptor with answers and for a guide.`
+  );
+}
+
+/**
  * Builds the `fx` of a node context: awaited effects by call, effects the body does not wait for
  * by `start`, cosmetic hints by `emit`. A `guide` narrows the gate while it runs; the runner lifts
  * the narrow when the node is left. A body that was aborted keeps running, since the loop only
@@ -115,8 +138,9 @@ export function nodeFx(
    * Starts one effect and does not wait for it. It takes the path of an awaited effect, so the
    * mode and the node's signal apply; only its end is nobody's wait. A failure is the handler's:
    * it goes to the log and never to the node. A `cosmetic` descriptor does not get that far: the
-   * gateway swallows its failure. After the abort of the node nothing is started and nothing is
-   * thrown, not even for a descriptor refused otherwise. An effect that ends with a rejection
+   * gateway swallows its failure and writes the warn entry `flow:fx-cosmetic-failed` itself, so
+   * no `flow:fx-start-failed` follows. After the abort of the node nothing is started and nothing
+   * is thrown, not even for a descriptor refused otherwise. An effect that ends with a rejection
    * after the abort did not fail: its handler was told to stop, so nothing is logged.
    *
    * @param descriptor - The descriptor the node starts.
@@ -125,11 +149,7 @@ export function nodeFx(
   const start = (descriptor: Descriptor): void => {
     if (step.signal.aborted) return;
 
-    if (descriptor.answers !== undefined || descriptor.kind === "guide") {
-      throw new Error(
-        `[game] fx.start() got the effect "${descriptor.kind}" in the node "${step.path}", and its answer has to be awaited.\n  Write await fx(...) for a descriptor with answers and for a guide.`
-      );
-    }
+    refuseStart(descriptor, step.path);
 
     modules.fx.run(descriptor, step.signal).catch((error: unknown) => {
       // The node was aborted while the effect ran: its handler was told to stop, nothing failed.

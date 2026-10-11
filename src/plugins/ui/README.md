@@ -35,6 +35,45 @@ the cursor shows a hand over a local-state button, one `input.onKey` listener fo
 hints to the `change` hooks of elements, and on a page the hidden input of the text fields;
 `onStop` removes all of them. A dev build also installs the [hot swap](#hot-swap-dev) handler.
 
+## What a re-render costs
+
+A `view` returns a new description at every commit that reaches its screen. `ui` compares it with
+the one before: element by element, prop by prop, by value. An element that says what it said costs
+the comparison and nothing else. No style is resolved, no layout node is written, no solve runs, no
+component is set, so `changed()` names none of its components.
+
+```tsx
+// Both cost the same. The inline object is new at every render and says what the last one said.
+<row key="bar" style={{ gap: 8, padding: 16 }} />
+<row key="bar" style={barStyle} />
+```
+
+| What changed on an element | What runs for it |
+|---|---|
+| nothing | the comparison |
+| `style`, `state`, a pointer or focus flag, a covered root | its style is resolved again and its components are written. Its layout node is written and its root solves once when a rect may move, and for a new `style` prop |
+| `content` | its layout node is written and measured again, its root solves once, its components are written |
+| `bind`, `texture`, `name`, `fit`, `intent`, `payload`, `local`, `escape`, `components`, `motion` | its components are written. No style pass, no solve |
+| `hosts`, the props of a windowed `scroll`, the props of an `input`, the children | read at every render where they are used. The element itself is not written |
+| the viewport (size, orientation, safe area), a dev hot swap | every element is patched in full once: style, layout node, components |
+| the locale, a font that arrives after the mount | no element is patched and no view runs. The texts `text` resolves again are measured in that frame; when the line of the `body` style moved, every `icon` without a size is too, on a screen with no text as well. A root solves once when a size in it changed |
+
+- **Plain objects and arrays compare by value, anything else by identity.** A literal object, an
+  object without a prototype and an array say the same when their content does, however deep. A
+  function, a `Set`, a `Map`, a `Date` and a class instance are the same only when they are the
+  same object: a prop that holds a new `Set` at every render is written at every render.
+- **Hooks stay built once.** A `motion` from `defineMotion`, or a hook table at module level, is the
+  same function at every render. An arrow written inline in a view is a new one each time, so its
+  element is written at every render: no style pass and no solve, but one write pass.
+- **A style is a value.** Write it inline or keep one from `defineStyle`. An object changed in place
+  is the same object, so the change is not seen until that element is resolved again.
+- **A patch that throws** is done in full at the next render.
+
+`UiCounters` counts both passes: `styled` is one per element whose style was resolved or written
+onto its layout node, `written` one per live element whose components were written again. On a
+screen of 200 elements with every style inline, a commit that changes a field the screen does not
+draw adds 0 to both, solves nothing and sets no component.
+
 ## What an element is drawn with
 
 | Tag | Visual | Input |
@@ -53,7 +92,10 @@ A `text` without a fixed `width` and `height` is sized by `text.measure` of what
 `content`, or for a bound text the string `text` shows for it, `Text.resolved`. Before the first
 resolve that is the bound field of its `components` value in the format of the bind, so a number
 a row centres is centred from the first frame. A new shown string asks for a solve only when it
-measures to another size: a counter that rolls through digits of one width solves nothing.
+measures to another size: a counter that rolls through digits of one width solves nothing. A text
+without `bind` is measured again the same way when `text` resolves it again: a message after a new
+locale, any text when its font arrives. An `icon` without a `width` and `height` is square on one
+line of the `body` text style, and is measured again when that line moves.
 
 `style.alpha` fades the element and everything inside it: a disabled button at `alpha: 0.6`
 draws its icon and its label at 0.6 too, and a column at `alpha: 0` hides its children. The
@@ -107,8 +149,9 @@ on a `layer`: a `<layer components={[Blur(...)]} />` blurs its own children only
 
 - Mount: the extras are added after the element's visual and input, before `Box`, so a `Box` hook
   sees them.
-- Patch: a new name is added; a name whose fields changed (shallow, `Object.is` per field) is set,
-  without the fields its type gives to a plugin; a name that left is removed. The same fields write
+- Patch: a `components` list that says the same by value is not looked at. In a list that changed,
+  a new name is added; a name whose fields changed (shallow, `Object.is` per field) is set, without
+  the fields its type gives to a plugin; a name that left is removed. The same fields write
   nothing, so a tween on `Glow.strength` from a motion hook survives an unrelated re-render.
 - Exit: nothing is removed. An exiting element keeps its extras until it despawns.
 - A `scroll` gets them on the container, not on its content.
@@ -523,7 +566,8 @@ again: its save is what the hot swap takes.
 
 The replaces that may throw run first: projections, then animations, then strings. Then the
 components and the text styles are written, every ui root reconciles and solves on the next
-frame, `world.projection.rerunAll()` runs every projection again, and `time.wake()` lifts the idle
+frame with every element patched in full (see [What a re-render costs](#what-a-re-render-costs)),
+`world.projection.rerunAll()` runs every projection again, and `time.wake()` lifts the idle
 cap. Last, the global event `ui:hot-swap` carries `{ file, module }` with the exports, and
 `ui:hot-swap` is logged at info with `{ file, components, projections, animations, emitters,
 strings, textStyles }`: names, ids, locales and style names. This runs for a module that swapped

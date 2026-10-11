@@ -292,7 +292,7 @@ const place = defineNode({
 | Mode | As for an awaited effect. In fast mode only a `runInFast` handler runs. |
 | Signal | The node's. It aborts when the node is aborted. A node that ended never aborts it. |
 | A handler that fails | Never fails the node. The log gets one error entry `flow:fx-start-failed` with `{ path, kind }`. While the frame loop runs it is written in the `signals` phase of the next frame. |
-| A `cosmetic` descriptor (`sfx`, `haptic`) | Silent when its handler fails, as it is when awaited. |
+| A `cosmetic` descriptor (`sfx`, `play`, `haptic`) that fails | Never fails the node. The log gets one warn entry `flow:fx-cosmetic-failed` with `{ kind, message }` and no `flow:fx-start-failed`. |
 | `answers`, `guide` | Throws `[game] fx.start() got the effect …`. An answer has to be awaited: write `await fx(...)`. |
 | After the abort of the node | Starts nothing and throws nothing. A rejection that comes after the abort is not logged: the handler was told to stop. |
 | The handler's value | Dropped. |
@@ -305,6 +305,24 @@ app.log.trace().filter(entry => entry.event === "flow:fx-start-failed");
 
 A hint is not a started effect. `fx.emit` waits for the commit and a failed node drops its hints.
 `fx.start` runs at once and a failed node does not take it back.
+
+**A cosmetic effect that fails.** A descriptor with `cosmetic: true` (`sfx`, `play`, `haptic`,
+`music`) never fails its node: `await fx(...)` resolves `undefined` and the body goes on. The
+failure is not silent. The log gets one warn entry, for an awaited effect and for a started one:
+
+```ts
+app.log.trace().filter(entry => entry.event === "flow:fx-cosmetic-failed");
+// [{ level: "warn", event: "flow:fx-cosmetic-failed", ts: 1790000000000,
+//    data: { kind: "play", message: "[game] Animation \"deal\" is not registered.\n  Add it to the animations key of a feature." } }]
+```
+
+| | `flow:fx-cosmetic-failed` |
+|---|---|
+| `message` | The text of what the handler threw or rejected with: `Error.message`, or `String(value)` for a value that is no error. A warn entry carries no error object. |
+| When | At the moment the failure arrives. It does not wait for the `signals` phase. |
+| How often | Once per failure. The same sound that fails twice is two entries. |
+| After the abort of the node | Nothing is written: the handler was told to stop, so its rejection is no failure. |
+| A hint (`fx.emit`) and `fx.dispatch` | Not this entry. A handler that fails there writes the error entry `flow:fx-handler-failed` with `{ kind }`. |
 
 ## The signal of an effect handler
 
