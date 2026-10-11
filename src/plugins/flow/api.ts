@@ -32,8 +32,8 @@ function createModules(ctx: FlowCtx): Modules {
 }
 
 /**
- * Reduces the gate to what a game may call. `open`, `close`, `narrow` and `clearHeld` belong to
- * the runner and to `fx`.
+ * Reduces the gate to what a game may call. `open`, `close`, `narrow`, `clearHeld` and `dropHeld`
+ * belong to the runner, to `fx` and to the plugin root.
  *
  * @param gate - The full gate module.
  * @returns The public gate API.

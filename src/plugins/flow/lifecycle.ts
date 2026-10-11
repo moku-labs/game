@@ -79,10 +79,11 @@ function registerSchedule(ctx: FlowCtx, fx: FxApi): void {
 
 /**
  * Connects flow to its dependencies in `onInit`: posts `elapsed` from `clock.onElapsed` into the
- * inbox, flushes effect completions and the gate hold in `time.onFrame("signals")`, and registers
- * the `schedule` handler. `onInit` has no access to the plugin's own API, so it builds its own
- * module objects — they are pure functions over `ctx.state`, which is the one place the modules
- * keep their data, so these objects and the API's objects are the same gate and the same fx.
+ * inbox, flushes effect completions and ages the gate hold in `time.onFrame("signals")`, with the
+ * frame and the elapsed game time of that frame, and registers the `schedule` handler. `onInit`
+ * has no access to the plugin's own API, so it builds its own module objects — they are pure
+ * functions over `ctx.state`, which is the one place the modules keep their data, so these
+ * objects and the API's objects are the same gate and the same fx.
  *
  * @param ctx - Kernel context of the flow plugin.
  */
@@ -96,9 +97,9 @@ export function connectFlow(ctx: KernelSlice): void {
     inbox.post({ type: "elapsed", payload: input });
   });
 
-  flowCtx.deps.time.onFrame("signals", ({ frame }) => {
+  flowCtx.deps.time.onFrame("signals", ({ frame, elapsed }) => {
     fx.flushSettled();
-    gate.clearHeld(frame);
+    gate.clearHeld(frame, elapsed);
   });
 
   registerSchedule(flowCtx, fx);

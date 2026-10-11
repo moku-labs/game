@@ -11,7 +11,7 @@ import { musicOf, playMusic, playSfx, stopMusic } from "./playback";
 import { applySession, resetSession } from "./session";
 import { disposeStream } from "./stream";
 import type { AudioContextLike, AudioCtx, Config, Deps, KernelSlice, State } from "./types";
-import { installUnlock, removeUnlock } from "./unlock";
+import { removeUnlock, startUnlock } from "./unlock";
 
 /**
  * Resolves the dependency APIs `flow`, `assets`, `model` and `time` with `ctx.require`.
@@ -65,9 +65,10 @@ function createContext(config: Config): AudioContextLike | undefined {
 
 /**
  * Starts the plugin in `onStart`: the audio session first, before any sound exists, then both
- * effect handlers, then the context with its graph and its unlock. The handlers are registered
- * even headless, so a node that awaits a sound resolves in plain Bun exactly as it does in a
- * browser.
+ * effect handlers, then the context with its graph and its unlock. The unlock asks the context to
+ * run at once: a shell that lets audio play is unlocked with no touch, and a browser that wants a
+ * gesture gets the two listeners. The handlers are registered even headless, so a node that
+ * awaits a sound resolves in plain Bun exactly as it does in a browser.
  *
  * @param ctx - Kernel context of the audio plugin.
  */
@@ -96,7 +97,7 @@ export function startAudio(ctx: KernelSlice): void {
   state.context = context;
   state.buses = buildGraph(context, state.buses);
   applyAllGains(state);
-  installUnlock(audio);
+  startUnlock(audio);
 }
 
 /**

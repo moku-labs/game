@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Descriptor } from "../../../flow/types";
-import { removeUnlock } from "../../unlock";
+import { removeUnlock, startUnlock } from "../../unlock";
 import { createFakeContext, installFakeWindow, keyOf } from "../fake-audio-context";
 import { createMockAudio } from "./mock-audio";
 
@@ -42,7 +42,8 @@ describe("installUnlock", () => {
     await tick();
 
     expect(fakeWindow.listeners).toHaveLength(0);
-    expect(context.resumes).toBe(1);
+    // The start attempt, then the gesture.
+    expect(context.resumes).toBe(2);
     expect(mock.api.unlocked()).toBe(true);
   });
 
@@ -55,7 +56,8 @@ describe("installUnlock", () => {
     fakeWindow.dispatch("touchend");
     await tick();
 
-    expect(context.resumes).toBe(1);
+    // The start attempt, then the gesture.
+    expect(context.resumes).toBe(2);
     expect(mock.state.unlocked).toBe(true);
   });
 
@@ -224,6 +226,179 @@ describe("sounds during the unlock", () => {
     await mock.fx("sfx", sfx("ui.click"));
 
     expect(mock.state.pendingSfx.size).toBe(0);
+  });
+});
+
+describe("startUnlock", () => {
+  it("unlocks with no gesture where resume() fulfils, removes the listeners and starts the declared music", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext({ autoplay: true });
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    mock.hooks["scenes:changed"]({ from: undefined, to: "board", music: "board.theme" });
+
+    expect(mock.api.unlocked()).toBe(false);
+    expect(fakeWindow.listeners).toHaveLength(2);
+
+    await tick();
+
+    expect(context.resumes).toBe(1);
+    expect(mock.api.unlocked()).toBe(true);
+    expect(fakeWindow.listeners).toHaveLength(0);
+    expect(mock.state.unlock).toBeUndefined();
+    expect(context.sources.map(source => keyOf(source.buffer))).toEqual(["board.theme"]);
+    expect(mock.state.music?.source).toBeDefined();
+  });
+
+  it("unlocks at once and installs no listener when the context is created running", () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext({ state: "running", autoplay: true });
+    const mock = createMockAudio({ context });
+
+    mock.start();
+
+    expect(mock.api.unlocked()).toBe(true);
+    expect(fakeWindow.listeners).toHaveLength(0);
+    expect(mock.state.unlock).toBeUndefined();
+    expect(context.resumes).toBe(0);
+  });
+
+  it("stays locked with both listeners where the browser wants a gesture, and the gesture unlocks", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    await tick();
+
+    expect(context.resumes).toBe(1);
+    expect(context.state).toBe("suspended");
+    expect(mock.api.unlocked()).toBe(false);
+    expect(fakeWindow.listeners.map(entry => entry.type)).toEqual(["pointerdown", "touchend"]);
+
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+
+    expect(context.resumes).toBe(2);
+    expect(mock.api.unlocked()).toBe(true);
+    expect(fakeWindow.listeners).toHaveLength(0);
+  });
+
+  it("drops a sound fired while the start attempt is pending, and never plays it", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+
+    expect(context.resumes).toBe(1);
+    expect(mock.state.resuming).toBe(false);
+
+    await mock.fx("sfx", sfx("ui.click"));
+
+    expect(mock.state.pendingSfx.size).toBe(0);
+
+    fakeWindow.dispatch("pointerdown");
+    await tick();
+
+    expect(mock.api.unlocked()).toBe(true);
+    expect(context.sources).toHaveLength(0);
+  });
+
+  it("warns nothing and keeps the listeners when the start resume is refused", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext({ autoplay: true });
+    const mock = createMockAudio({ context });
+
+    context.resumeFails = true;
+    mock.start();
+    await tick();
+
+    expect(context.resumes).toBe(1);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+    expect(mock.api.unlocked()).toBe(false);
+    expect(fakeWindow.listeners).toHaveLength(2);
+  });
+
+  it("stays locked with the listeners when the start resume fulfils but the context does not run", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext({ autoplay: true });
+    const mock = createMockAudio({ context });
+
+    context.resumeState = "suspended";
+    mock.start();
+    await tick();
+
+    expect(context.resumes).toBe(1);
+    expect(mock.log.warn).not.toHaveBeenCalled();
+    expect(mock.api.unlocked()).toBe(false);
+    expect(fakeWindow.listeners).toHaveLength(2);
+  });
+
+  it("changes nothing when the start resume settles after the app stopped", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    await mock.stop();
+
+    // The page got its gesture after the stop and resumes the context itself: the promise of
+    // the start attempt fulfils on a context that runs.
+    fakeWindow.dispatch("pointerdown");
+    await context.resume();
+    await tick();
+
+    expect(context.resumes).toBe(2);
+    expect(context.state).toBe("running");
+    expect(mock.state.unlocked).toBe(false);
+    expect(mock.state.unlock).toBeUndefined();
+    expect(fakeWindow.listeners).toHaveLength(0);
+  });
+
+  it("starts the music once when a gesture and the start attempt settle together", async () => {
+    const fakeWindow = installFakeWindow();
+    const context = createFakeContext();
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    mock.hooks["scenes:changed"]({ from: undefined, to: "board", music: "board.theme" });
+    fakeWindow.dispatch("pointerdown");
+    const play = mock.fx("sfx", sfx("ui.click"));
+
+    await play;
+    await tick();
+
+    expect(context.resumes).toBe(2);
+    expect(mock.api.unlocked()).toBe(true);
+    expect(mock.state.resuming).toBe(false);
+    expect(context.sources.map(source => keyOf(source.buffer)).toSorted()).toEqual([
+      "board.theme",
+      "ui.click"
+    ]);
+    expect(fakeWindow.listeners).toHaveLength(0);
+  });
+
+  it("does nothing where there is no context", () => {
+    const fakeWindow = installFakeWindow();
+    const mock = createMockAudio();
+
+    expect(() => startUnlock(mock.audio)).not.toThrow();
+    expect(fakeWindow.listeners).toHaveLength(0);
+    expect(mock.state.unlocked).toBe(false);
+  });
+
+  it("runs the start attempt where there is no window", async () => {
+    const context = createFakeContext({ autoplay: true });
+    const mock = createMockAudio({ context });
+
+    mock.start();
+    await tick();
+
+    expect(context.resumes).toBe(1);
+    expect(mock.state.unlock).toBeUndefined();
+    expect(mock.api.unlocked()).toBe(true);
   });
 });
 

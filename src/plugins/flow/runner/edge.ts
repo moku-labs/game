@@ -13,8 +13,23 @@ import { notifyRest } from "./seam";
 import type { Frame, JournalEntry, Modules, Result } from "./types";
 
 /**
+ * Turns whatever a node failed with into an error the log takes.
+ *
+ * @param value - The thrown value or the rejection reason.
+ * @returns The value itself when it is an error, a new error with its text otherwise.
+ * @example
+ * ```ts
+ * asError("no save").message; // "no save"
+ * ```
+ */
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
+/**
  * Commits the transaction of one node, releases its hints, journals the edge and emits
- * `flow:edge`. This is the only commit of the engine.
+ * `flow:edge`. This is the only commit of the engine: the edge of a node, and the recovery edge
+ * of the safe node, both go through it.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -22,7 +37,12 @@ import type { Frame, JournalEntry, Modules, Result } from "./types";
  * @param next - Path the edge leads to.
  * @returns The journal entry of this edge.
  */
-function commitEdge(ctx: FlowCtx, modules: Modules, step: Commit, next: string): JournalEntry {
+export function commitEdge(
+  ctx: FlowCtx,
+  modules: Modules,
+  step: Commit,
+  next: string
+): JournalEntry {
   const commit = step.transaction.commit();
 
   // An edge is the moment the screen has something new to show: the idle cap is lifted after the commit.
@@ -57,7 +77,11 @@ function commitEdge(ctx: FlowCtx, modules: Modules, step: Commit, next: string):
 
 /**
  * Discards everything the failed node did, rolls back and decides between a retry and the safe
- * node. A failure while the loop already recovers in the safe node is fatal.
+ * node. Every failure is written to the log as one error entry `flow:error`, right before the
+ * event of the same name. When the loop gives up it stands on the safe node, whose `recover` is
+ * then still to run, and an answer the gate still held is dropped; a retry keeps it. A failure
+ * while the loop already recovers in the safe node is fatal: it is no event and no log entry, it
+ * rejects `run()`.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -95,8 +119,11 @@ export function handleFailure(
   const retry = state.failures <= ctx.config.retries;
   const safeTarget = (): Frame[] => safeFrames(ctx, modules.features.contributions);
   const target = retry ? (state.restFrame ?? safeTarget()) : safeTarget();
+  const rolledBackTo = framePath(target);
 
-  ctx.emit("flow:error", { path, error, rolledBackTo: framePath(target), retry });
+  // The log first: a game with no hook on the event still learns that a node failed.
+  ctx.log.error("flow:error", { path, rolledBackTo, retry }, asError(error));
+  ctx.emit("flow:error", { path, error, rolledBackTo, retry });
 
   state.stack = [...target];
   // A rollback leaves any slot the loop was in: nothing of it may steer the next slot entry.
@@ -104,7 +131,10 @@ export function handleFailure(
 
   if (!retry) {
     safe.inside = true;
+    safe.recover = true;
     state.failures = 0;
+    // The position moves to the safe node: a press made in the failed transition stays behind.
+    modules.gate.dropHeld();
   }
 
   return "continue";

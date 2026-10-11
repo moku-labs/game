@@ -208,7 +208,7 @@ export type SoundEntry = {
 export type BusState = { gain: GainNode | undefined; volume: number; muted: boolean };
 
 /**
- * The music that is playing, or the key remembered until the first touch unlocks the context.
+ * The music that is playing, or the key remembered until the context is unlocked.
  * `source` plays a decoded track, `stream` a streamed one; they are never both set. Both
  * `undefined`: the key is only remembered (a locked context, or a refused `play()`).
  *
@@ -245,7 +245,7 @@ export type State = {
   /** A lifecycle push is in force: every bus is held at zero. */
   paused: boolean;
   unlocked: boolean;
-  /** A gesture called `resume()` and it has not settled yet. */
+  /** A gesture called `resume()` and it has not settled yet. The start attempt never sets it. */
   resuming: boolean;
   /** Sounds fired while `resuming`, one per key; played when the context runs, dropped when it does not. */
   pendingSfx: Map<string, SfxRequest>;
@@ -351,14 +351,20 @@ export type AudioApi = {
   muted(bus: Bus): boolean;
 
   /**
-   * Tells whether the browser let the audio context run. It is false until the first pointer
-   * event on the page resumed it, and false for the whole of a headless run.
+   * Tells whether the audio context runs. A shell that lets audio play with no gesture, such as a
+   * native webview with the requirement switched off, makes it true at start: at once when the
+   * context is created running, otherwise when the `resume()` of `onStart` fulfils. A browser
+   * that wants a gesture keeps it false until the first pointer event on the page resumed the
+   * context. It is false for the whole of a headless run.
    *
    * @returns True once the context is running.
    * @example
    * ```ts
-   * // A "tap to start" screen stays up until the browser allowed sound.
-   * app.audio.unlocked(); // false before the first touch, true after it
+   * // A "tap for sound" hint stays on screen only while the shell holds the sound back.
+   * await app.start();
+   * app.audio.unlocked(); // true where the context was created running, false in a browser tab
+   * // The player touches the page of that tab.
+   * app.audio.unlocked(); // true
    * ```
    */
   unlocked(): boolean;

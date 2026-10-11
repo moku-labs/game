@@ -36,8 +36,12 @@ export type GateState = {
   open: GateSpec | undefined;
   /** Resolver of the promise returned by `open`. */
   resolve: ((answer: Answer) => void) | undefined;
-  /** An answer given while the gate was closed, kept for one frame. */
-  held: { answer: Answer; frame: number } | undefined;
+  /**
+   * An answer given while the gate was closed, kept for the next gate: for the frame it was given
+   * in, or for `config.holdMs` of game time. `frame` is the frame of the refusal and `at` is
+   * `time.snapshot().elapsed` at that moment: the age is counted from it.
+   */
+  held: { answer: Answer; frame: number; at: number } | undefined;
   /** The one answer a running `guide` lets through. */
   narrow: Allow | undefined;
   /** True while a pointer is down. Entering an `over` node waits for false. */
@@ -60,15 +64,21 @@ export type GateState = {
 export type GateApi = {
   /**
    * Gives one answer. Accepted only while the gate is open and the intent is allowed. An answer
-   * to a closed gate is held for one frame and re-offered when the gate opens within it.
+   * to a closed gate is refused and held: it is offered once to the next gate that opens, which
+   * takes it when it lists the intent and a running `guide` lets it through. With `holdMs: 0` the
+   * hold lives for the frame the answer was given in and the first answer wins. With `holdMs`
+   * above 0 the last answer wins and it is kept for that much game time. Nothing is held in fast
+   * mode or while no frame source runs.
    *
    * @param answer - Intent and optional payload.
-   * @returns Whether the answer was accepted.
+   * @returns Whether the answer was accepted. `false` for a held answer too: it is not taken yet.
    * @example
    * ```ts
    * // The player dropped the item of cell c2 onto c3 while the board rests.
    * app.flow.gate.answer({ intent: "merge", payload: { from: "c2", to: "c3" } }); // true
    * app.flow.gate.answer({ intent: "quit" }); // false: the resting node does not list "quit"
+   * // With holdMs: 1100, a tap during the merge animation is played when the board rests again.
+   * app.flow.gate.answer({ intent: "tap", payload: { cell: "c4" } }); // false now, taken later
    * ```
    */
   answer(answer: Answer): boolean;
@@ -105,8 +115,10 @@ export type GateApi = {
  */
 export type GateInternal = {
   /**
-   * Opens the gate for the intents of one node and waits for the answer. An answer held from
-   * this frame is offered at once, so the promise can be resolved before it is returned.
+   * Opens the gate for the intents of one node and waits for the answer. A held answer is offered
+   * at once, so the promise can be resolved before it is returned. It is offered once: a gate that
+   * does not take it drops it. A gate that opens in fast mode drops it without an offer: a fast
+   * walk answers its own gates.
    *
    * @param spec - The intents this gate accepts.
    * @returns The answer that closed the gate.
@@ -129,10 +141,21 @@ export type GateInternal = {
   narrow(allow: Allow | undefined): void;
 
   /**
-   * Drops an answer that was held in an earlier frame. Wired to `time.onFrame("signals")` by the
-   * plugin root, so a hold lives for exactly the frame it was given in.
+   * Ages the held answer. Wired to `time.onFrame("signals")` by the plugin root. An answer of the
+   * running frame always stays. An answer of an earlier frame is dropped when `config.holdMs` is
+   * 0 or less, so the hold lives for exactly the frame it was given in; with `holdMs` above 0 it is
+   * dropped once `elapsed` is more than `holdMs` past the refusal. `Infinity` never drops it here.
    *
    * @param frame - The frame that is running now.
+   * @param elapsed - Game time of that frame, `time.snapshot().elapsed`.
    */
-  clearHeld(frame: number): void;
+  clearHeld(frame: number, elapsed: number): void;
+
+  /**
+   * Drops the held answer, whatever its age. The runner calls it where the position jumps: when
+   * it enters a bookmark, and when it gives up on a transition and moves to the safe node. A
+   * press made before the jump belongs to the position that was left. A retry keeps the press,
+   * and a stop clears it for the next `run()`.
+   */
+  dropHeld(): void;
 };

@@ -212,6 +212,31 @@ function nodeProblems(flow: AnyFlow): string[] {
 }
 
 /**
+ * Reports a `recover` on a node that does not rest. The recovery makes its node the rest point
+ * of the loop, so only a rest node can carry one.
+ *
+ * @param flow - The flow being validated.
+ * @returns One sentence per problem.
+ * @example
+ * ```ts
+ * recoverProblems(boardFlow); // []: no transit node of the board has a recover
+ * ```
+ */
+function recoverProblems(flow: AnyFlow): string[] {
+  const problems: string[] = [];
+
+  for (const [name, entry] of Object.entries(flow.nodes)) {
+    if (entry.kind !== "node" || entry.recover === undefined || entry.rest) continue;
+
+    problems.push(
+      `[game] Flow "${flow.id}": node "${name}" has recover but is not a rest node.\n  Add rest: true, or remove recover.`
+    );
+  }
+
+  return problems;
+}
+
+/**
  * Reports a start node that is not in `nodes`, and every node the start cannot reach.
  *
  * @param flow - The flow being validated.
@@ -511,6 +536,49 @@ function safeNodeProblems(config: Readonly<Config>, features: FeaturesApi): stri
 }
 
 /**
+ * Warns about a `recover` on a node that is not the safe node. The runner calls `recover` only in
+ * the safe node, after it gave up on a transition, so the hook never runs anywhere else. The safe
+ * node is the configured one, or the start of the main flow. Nothing is warned about while that
+ * path names no node: a wrong `safeNode` is a problem of its own, and behind a start that is a
+ * sub-flow or a slot the node the loop enters is not known before the game runs.
+ *
+ * @param flows - Every collected flow by id.
+ * @param features - Features API, read for a safe node inside a slot contribution.
+ * @param config - Resolved flow config: `mainFlow`, `safeNode`.
+ * @returns One warning per node whose `recover` never runs.
+ */
+function recoverWarnings(
+  flows: ReadonlyMap<string, AnyFlow>,
+  features: FeaturesApi,
+  config: Readonly<Config>
+): string[] {
+  const { mainFlow } = config;
+
+  if (!mainFlow) return [];
+
+  const safePath = config.safeNode ?? mainFlow.start;
+  const safe = findNode(mainFlow, safePath, features.contributions);
+
+  if (safe?.entry.kind !== "node") return [];
+
+  const warnings: string[] = [];
+
+  for (const flow of flows.values()) {
+    for (const [name, entry] of Object.entries(flow.nodes)) {
+      if (entry.kind !== "node" || entry.recover === undefined) continue;
+      // The same name in another flow is another node: the flow and the name together tell.
+      if (safe.flow.id === flow.id && safe.name === name) continue;
+
+      warnings.push(
+        `[game] Flow "${flow.id}": node "${name}" has recover but is not the safe node.\n  The engine runs recover only in the safe node "${safePath}". Move recover there or remove it.`
+      );
+    }
+  }
+
+  return warnings;
+}
+
+/**
  * Warns when two contributions of one slot have a node with the same name. A bookmark path keeps
  * node names only, so `restore` cannot tell the two apart and enters the first one in order.
  *
@@ -568,9 +636,11 @@ function sizeWarnings(flow: AnyFlow): string[] {
  * unreachable node, outcome without an edge, missing target, barrier edge that does not reach a
  * rest node of the same flow, cycle with no rest node, slot without a name, equal contribution
  * `order`, one flow contributed twice to a slot, `inbox` type that is not an outcome, rest node
- * with neither `run` nor outcomes, a scene id no feature registers, an `over` node that names a
- * scene, `safeNode` that is not a checkpoint, colliding ids. Types are bypassed by JSON data and
- * casts, so this runs even though the edge table is checked at compile time.
+ * with neither `run` nor outcomes, a `recover` on a node that is not a rest node, a scene id no
+ * feature registers, an `over` node that names a scene, `safeNode` that is not a checkpoint,
+ * colliding ids. A `recover` on a node that is not the safe node is a warning: it never runs
+ * there. Types are bypassed by JSON data and casts, so this runs even though the edge table is
+ * checked at compile time.
  *
  * @param flows - Every collected flow by id, the main flow first.
  * @param features - Features API: slot contributions and feature names.
@@ -589,13 +659,14 @@ export function validateGraph(
     problems.push(
       ...edgeProblems(flow),
       ...nodeProblems(flow),
+      ...recoverProblems(flow),
       ...reachProblems(flow),
       ...cycleProblems(flow)
     );
     warnings.push(...sizeWarnings(flow));
   }
 
-  warnings.push(...slotNameWarnings(flows, features));
+  warnings.push(...slotNameWarnings(flows, features), ...recoverWarnings(flows, features, config));
 
   problems.push(
     ...flowIdProblems(flows),

@@ -203,6 +203,18 @@ describe("audio plugin integration — a live walk with a context", () => {
     await app.stop();
   });
 
+  it.each([
+    ["created running", { state: "running", autoplay: true }],
+    ["resumed at start", { autoplay: true }]
+  ] as const)("is unlocked with no pointer event where the shell lets audio play: %s", async (_shape, shell) => {
+    const context = createFakeContext(shell);
+    const app = await startApp(context);
+
+    expect(app.audio.unlocked()).toBe(true);
+
+    await app.stop();
+  });
+
   it("plays the sound a node awaits and the music the scene declared", async () => {
     const fakeWindow = installFakeWindow();
     const context = createFakeContext();

@@ -141,7 +141,8 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
     },
     close: vi.fn(),
     narrow: vi.fn(),
-    clearHeld: vi.fn()
+    clearHeld: vi.fn(),
+    dropHeld: vi.fn()
   };
   const fx: FxApi & FxInternal = {
     handle: vi.fn(() => unregister),
@@ -211,7 +212,8 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
       safeNode: overrides.safeNode,
       retries: overrides.retries ?? 1,
       settleTimeoutMs: overrides.settleTimeoutMs ?? 2000,
-      journalLimit: overrides.journalLimit ?? 500
+      journalLimit: overrides.journalLimit ?? 500,
+      holdMs: overrides.holdMs ?? 0
     },
     state: createMockState(),
     emit: vi.fn(),

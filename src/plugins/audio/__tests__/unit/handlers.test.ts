@@ -144,7 +144,8 @@ describe("lifecycle:changed", () => {
       resumed: true
     });
 
-    expect(context.resumes).toBe(1);
+    // The start attempt, then the resume after the pause.
+    expect(context.resumes).toBe(2);
   });
 
   it("leaves a running context alone", () => {
@@ -159,7 +160,8 @@ describe("lifecycle:changed", () => {
       resumed: true
     });
 
-    expect(context.resumes).toBe(0);
+    // The start attempt only: the pop asked for nothing.
+    expect(context.resumes).toBe(1);
   });
 });
 

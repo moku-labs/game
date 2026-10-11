@@ -28,7 +28,10 @@ import type { AnyFlow, DefineNode, GameState, RunnerApi, RunnerState } from "./r
  * ```
  */
 export type Events = {
-  /** An edge was taken and its state committed. */
+  /**
+   * An edge was taken and its state committed. Also the recovery of the safe node: `node` and
+   * `next` are then the safe node and `outcome` is `"recover"`.
+   */
   "flow:edge": {
     flow: string;
     node: string;
@@ -45,7 +48,10 @@ export type Events = {
    * false.
    */
   "flow:rest": { path: string; checkpoint: boolean };
-  /** A node failed and the graph rolled back. */
+  /**
+   * A node failed and the graph rolled back. The engine writes the same failure to the log first,
+   * as an error entry `flow:error`, so a game without a hook still sees it.
+   */
   "flow:error": { path: string; error: unknown; rolledBackTo: string; retry: boolean };
 };
 
@@ -68,6 +74,21 @@ export type Config = {
   settleTimeoutMs: number;
   /** Journal entries kept between checkpoints. */
   journalLimit: number;
+  /**
+   * How long an answer a closed gate refused is kept for the next gate, in milliseconds of game
+   * time (`time.snapshot().elapsed`, which stands still during a pause). `0`: for the frame it was
+   * given in, and the first answer wins. Above `0`: the last answer wins, and it is dropped once
+   * it is older than `holdMs`. `Infinity`: kept until the next gate opens.
+   *
+   * @example
+   * ```ts
+   * // The move animation of a board game closes the gate for about a second. A tap on the next
+   * // cell during it is played when the board rests again, not lost.
+   * createApp({ pluginConfigs: { flow: { mainFlow, safeNode: "home", holdMs: 1100 } } });
+   * app.flow.gate.answer({ intent: "tap", payload: { cell: 4 } }); // false: kept for the next gate
+   * ```
+   */
+  holdMs: number;
 };
 
 /**
@@ -281,6 +302,7 @@ export type {
   NodeSpec,
   NodeTable,
   OutcomeTags,
+  RecoverContext,
   Result,
   RouteStep,
   RunnerApi,
