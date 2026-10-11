@@ -154,8 +154,9 @@ async function bufferOf(ctx: AudioCtx, key: string): Promise<AudioBuffer | undef
 /**
  * Plays one sound: the handler of the kind `"sfx"`. Every play is its own source, so the same key
  * twice in one frame is heard twice, and the promise resolves when the sound STARTED. The handler
- * ignores its signal: a sound that began plays to its end. While the first gesture's `resume()` is
- * pending the sound waits in `pendingSfx`, one per key; before any gesture it is dropped.
+ * ignores its signal: a sound that began plays to its end. While a gesture's `resume()` is
+ * pending the sound waits in `pendingSfx`, one per key. A locked context no gesture is resuming
+ * drops it: the start attempt of the unlock queues nothing.
  *
  * @param ctx - Domain context of the plugin.
  * @param descriptor - The `sfx` descriptor `anim` built.
@@ -391,7 +392,7 @@ function refused(ctx: AudioCtx, key: string): void {
 /**
  * Switches the music: the handler of the kind `"music"` and what `scenes:changed` calls. The same
  * key does nothing, a new key cross-fades, `null` fades out. While the context is locked the key
- * is only remembered; the first touch starts it. A key that is still on its way counts as the
+ * is only remembered; the unlock starts it. A key that is still on its way counts as the
  * same key, and every other request replaces it: the replaced switch starts nothing when its
  * buffer or its element is ready, so one tap that unlocks the context and enters a scene with the
  * same track starts it once. `config.music` picks the decode or the stream path.

@@ -30,6 +30,7 @@ type NodeOptions = {
   inbox?: readonly string[];
   scene?: string;
   run?: boolean;
+  recover?: boolean;
 };
 
 const node = (options: NodeOptions = {}): AnyNode => ({
@@ -42,7 +43,8 @@ const node = (options: NodeOptions = {}): AnyNode => ({
   barrier: options.barrier ?? false,
   inbox: options.inbox ?? [],
   ...(options.scene === undefined ? {} : { scene: options.scene }),
-  ...(options.run === false ? {} : { run: () => ({ outcome: "done", payload: 0 }) })
+  ...(options.run === false ? {} : { run: () => ({ outcome: "done", payload: 0 }) }),
+  ...(options.recover === true ? { recover: () => undefined } : {})
 });
 
 const slotNode = (name: string): SlotNode => ({
@@ -81,7 +83,8 @@ const config = (overrides: Partial<Config> = {}): Config => ({
   safeNode: overrides.safeNode,
   retries: 1,
   settleTimeoutMs: 2000,
-  journalLimit: 500
+  journalLimit: 500,
+  holdMs: 0
 });
 
 const report = (main: AnyFlow, features: FeaturesApi = featuresWith(), safeNode?: string) =>
@@ -363,6 +366,152 @@ describe("validateGraph", () => {
     );
 
     expect(report(board, featuresWith(), "home").problems).toEqual([]);
+  });
+
+  it("reports a recover on a node that is not a rest node", () => {
+    const board = flow(
+      "board",
+      { catchUp: node({ recover: true }), awaitIntent: node({ rest: true, outcomes: ["merge"] }) },
+      "catchUp",
+      { catchUp: { done: "awaitIntent" }, awaitIntent: { merge: "catchUp" } }
+    );
+
+    expect(report(board).problems).toEqual([
+      '[game] Flow "board": node "catchUp" has recover but is not a rest node.\n  Add rest: true, or remove recover.'
+    ]);
+  });
+
+  it("accepts a recover on the configured safe node", () => {
+    const main = flow(
+      "main",
+      {
+        boot: node(),
+        home: node({ rest: true, checkpoint: true, outcomes: ["go"], recover: true })
+      },
+      "boot",
+      { boot: { done: "home" }, home: { go: "boot" } }
+    );
+
+    expect(report(main, featuresWith(), "home")).toEqual({ problems: [], warnings: [] });
+  });
+
+  it("accepts a recover on the start node when no safe node is configured", () => {
+    const main = flow(
+      "main",
+      { home: node({ rest: true, checkpoint: true, outcomes: ["go"], recover: true }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(main)).toEqual({ problems: [], warnings: [] });
+  });
+
+  it("warns about a recover on a rest node that is not the safe node: it never runs there", () => {
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, checkpoint: true, outcomes: ["go"] }),
+        shop: node({ rest: true, outcomes: ["leave"], recover: true })
+      },
+      "home",
+      { home: { go: "shop" }, shop: { leave: "home" } }
+    );
+
+    expect(report(main, featuresWith(), "home")).toEqual({
+      problems: [],
+      warnings: [
+        '[game] Flow "main": node "shop" has recover but is not the safe node.\n  The engine runs recover only in the safe node "home". Move recover there or remove it.'
+      ]
+    });
+  });
+
+  it("names the start node in the warning when no safe node is configured", () => {
+    const main = flow(
+      "main",
+      {
+        home: node({ rest: true, checkpoint: true, outcomes: ["go"] }),
+        shop: node({ rest: true, outcomes: ["leave"], recover: true })
+      },
+      "home",
+      { home: { go: "shop" }, shop: { leave: "home" } }
+    );
+
+    expect(report(main).warnings).toEqual([
+      '[game] Flow "main": node "shop" has recover but is not the safe node.\n  The engine runs recover only in the safe node "home". Move recover there or remove it.'
+    ]);
+  });
+
+  it("tells the safe node from a node of the same name in another flow", () => {
+    const sub = flow(
+      "sub",
+      { home: node({ rest: true, outcomes: ["quit"], recover: true }) },
+      "home",
+      { home: { quit: { kind: "exit", outcome: "done" } } },
+      ["done"]
+    );
+    const main = flow(
+      "main",
+      { home: node({ rest: true, checkpoint: true, outcomes: ["go"], recover: true }), sub },
+      "home",
+      { home: { go: "sub" }, sub: { done: "home" } }
+    );
+
+    expect(report(main, featuresWith(), "home").warnings).toEqual([
+      '[game] Flow "sub": node "home" has recover but is not the safe node.\n  The engine runs recover only in the safe node "home". Move recover there or remove it.'
+    ]);
+  });
+
+  it("accepts a recover on a safe node inside a slot contribution", () => {
+    const reward = flow(
+      "reward",
+      { give: node({ rest: true, checkpoint: true, outcomes: ["go"], recover: true }) },
+      "give",
+      { give: { go: "give" } }
+    );
+    const board = flow(
+      "board",
+      { afterWin: slotNode("afterWin"), home: node({ rest: true, outcomes: ["go"] }) },
+      "afterWin",
+      { afterWin: { done: "home" }, home: { go: "afterWin" } }
+    );
+    const features = featuresWith([{ feature: "coins", flow: reward, order: 10 }]);
+    const flows = collectFlows(board, [reward]);
+
+    expect(
+      validateGraph(flows, features, config({ mainFlow: board, safeNode: "afterWin/give" }))
+    ).toEqual({ problems: [], warnings: [] });
+  });
+
+  it("leaves the recover warning to the problem when the safe node is not a node of the graph", () => {
+    const main = flow(
+      "main",
+      { home: node({ rest: true, checkpoint: true, outcomes: ["go"], recover: true }) },
+      "home",
+      { home: { go: "home" } }
+    );
+
+    expect(report(main, featuresWith(), "nowhere")).toEqual({
+      problems: [
+        '[game] The safe node "nowhere" is not a node of the graph.\n  Set flow.safeNode to the path of a checkpoint node.'
+      ],
+      warnings: []
+    });
+  });
+
+  it("warns about no recover while the main flow starts with a sub-flow: its node is entered then", () => {
+    const level = flow(
+      "level",
+      { play: node({ rest: true, outcomes: ["quit"], recover: true }) },
+      "play",
+      { play: { quit: { kind: "exit", outcome: "left" } } },
+      ["left"]
+    );
+    const main = flow("main", { level, home: node({ rest: true, outcomes: ["go"] }) }, "level", {
+      level: { left: "home" },
+      home: { go: "level" }
+    });
+
+    expect(report(main)).toEqual({ problems: [], warnings: [] });
   });
 
   it("reports two different flows that use one id", () => {

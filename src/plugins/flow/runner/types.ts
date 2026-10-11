@@ -156,6 +156,37 @@ export type NodeRun<Game extends GameState, Input, Tags extends OutcomeTags> = (
 ) => Result<keyof Tags & string> | Promise<Result<keyof Tags & string>>;
 
 /**
+ * The one object the `recover` of a rest node receives: the node context without `input` and
+ * `out`. The transition that led here failed, so there is no input, and a recovery ends with no
+ * outcome: the node is entered right after it. `player` and `session` are drafts of the
+ * recovery's own transaction, `now` is `clock.now()` read once when the recovery starts.
+ *
+ * @example
+ * ```ts
+ * // The safe node "home" of a board game. The board failed: the session still says "board".
+ * recover: ({ session }: RecoverContext<Game>) => {
+ *   session.screen = "home";
+ *   session.moves = [];
+ * }
+ * ```
+ */
+export type RecoverContext<Game extends GameState = GameState> = {
+  player: Game["player"];
+  session: Game["session"];
+  rng: RngView;
+  fx: NodeFx;
+  signal: AbortSignal;
+  now: number;
+};
+
+/**
+ * The recovery of a rest node: plain `await` code that puts the state right and returns nothing.
+ */
+export type NodeRecover<Game extends GameState> = (
+  context: RecoverContext<Game>
+) => void | Promise<void>;
+
+/**
  * The part of a node, or of a flow used as a node, that an edge table looks at.
  */
 export type Wired<Input, Tags extends OutcomeTags> = {
@@ -197,11 +228,13 @@ export type NodeDefinition<
   /** Id of the scene the node is shown on. Absent: the node keeps the current scene. */
   readonly scene?: string;
   readonly run?: NodeRun<Game, Input, Tags>;
+  /** The recovery of a rest node. Absent: the node is entered as it is after a failure. */
+  readonly recover?: NodeRecover<Game>;
 };
 
 /**
  * What the author passes to `defineNode`. `run` is required unless `rest: true`: a rest node
- * without a body is a pure wait.
+ * without a body is a pure wait. `recover` exists on a rest node only.
  *
  * @example
  * ```ts
@@ -223,8 +256,40 @@ export type NodeSpec<Game extends GameState, Input, Tags extends OutcomeTags> = 
   /** Id of the scene this node is shown on. Without it the node keeps the current scene. */
   scene?: SceneIdOf<Game>;
 } & (
-  | { rest: true; run?: NodeRun<Game, Input, Tags> }
-  | { rest?: false; run: NodeRun<Game, Input, Tags> }
+  | {
+      rest: true;
+      run?: NodeRun<Game, Input, Tags>;
+      /**
+       * Puts the state right before this node is entered as the safe node. When a transition
+       * failed and its retries are used up, the graph rolls back to the rest point that failed
+       * and moves to `flow.safeNode`. Without `recover` that node opens its gate on the state of
+       * the rest point it did not come from. With it the engine runs `recover` first, as one
+       * transaction: what it writes is committed as an edge of the node onto itself, with the
+       * outcome `"recover"`, and becomes the rest point a later rollback returns to. Then the node
+       * is entered as usual. It runs only in the safe node, only after the loop gave up, never on
+       * a retry and never after a `restore`. A `recover` that throws rejects `run()`.
+       *
+       * @example
+       * ```ts
+       * // "home" is flow.safeNode. The board failed twice: the session still describes the board.
+       * const home = defineNode({
+       *   rest: true,
+       *   checkpoint: true,
+       *   outcomes: { play: type() },
+       *   recover: ({ session }) => {
+       *     session.screen = "home"; // the gate of "home" opens on this, not on "board"
+       *   }
+       * });
+       * ```
+       */
+      recover?: NodeRecover<Game>;
+    }
+  | {
+      rest?: false;
+      run: NodeRun<Game, Input, Tags>;
+      /** A transit node has no `recover`: writing one is a compile error. */
+      recover?: never;
+    }
 );
 
 /**
@@ -551,8 +616,14 @@ export type AnyNodeContext = {
 };
 
 /**
- * Any node as the runner holds it. `run` is a method on purpose: method parameters are compared
- * bivariantly, so every typed `NodeDefinition` fits and the runner calls the body without a cast.
+ * The recovery context as the runner builds it. Every typed `RecoverContext` is assignable to it.
+ */
+export type AnyRecoverContext = Omit<AnyNodeContext, "input" | "out">;
+
+/**
+ * Any node as the runner holds it. `run` and `recover` are methods on purpose: method parameters
+ * are compared bivariantly, so every typed `NodeDefinition` fits and the runner calls both
+ * without a cast.
  *
  * @example
  * ```ts
@@ -569,6 +640,7 @@ export type AnyNode = AnyWired & {
   /** Id of the scene the node is shown on. Absent: the node keeps the current scene. */
   readonly scene?: string;
   run?(ctx: AnyNodeContext): Result | Promise<Result>;
+  recover?(context: AnyRecoverContext): void | Promise<void>;
 };
 
 /**

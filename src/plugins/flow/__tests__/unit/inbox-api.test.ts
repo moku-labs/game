@@ -100,7 +100,8 @@ const createMockCtx = (): FlowCtx => {
     safeNode: undefined,
     retries: 1,
     settleTimeoutMs: 2000,
-    journalLimit: 500
+    journalLimit: 500,
+    holdMs: 0
   };
 
   return {

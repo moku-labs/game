@@ -1,6 +1,6 @@
 /**
- * @file flow/gate — API factory. The single entry of player answers: close before deliver, a
- * one-frame hold for an answer that arrived a moment too early, and the `guide` narrow.
+ * @file flow/gate — API factory. The single entry of player answers: close before deliver, a hold
+ * for an answer that arrived while the gate was closed, and the `guide` narrow.
  */
 import type { Json } from "../../model/types";
 import type { FlowCtx } from "../types";
@@ -124,9 +124,10 @@ function deliver(state: GateState, answer: Answer): void {
 }
 
 /**
- * Keeps an answer that arrived at a closed gate for one frame. Nothing is held in fast mode or
- * while time is not running: there is no frame that could re-offer it. The first answer wins, a
- * second one in the same frame is dropped.
+ * Keeps an answer that arrived at a closed gate, with the frame and the game time of the refusal.
+ * Nothing is held in fast mode or while time is not running: there is no frame that could age it.
+ * Without a hold time (`holdMs` 0 or less) the first answer wins and a second one is dropped. With
+ * one, every refused answer replaces the held one: the last press is the one the player means.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param answer - The answer the closed gate refused.
@@ -134,14 +135,17 @@ function deliver(state: GateState, answer: Answer): void {
 function hold(ctx: FlowCtx, answer: Answer): void {
   if (ctx.state.fx.mode === "fast") return;
   if (!ctx.deps.time.isRunning()) return;
-  if (ctx.state.gate.held !== undefined) return;
+  if (ctx.config.holdMs <= 0 && ctx.state.gate.held !== undefined) return;
 
-  ctx.state.gate.held = { answer, frame: ctx.deps.time.snapshot().frame };
+  const { frame, elapsed } = ctx.deps.time.snapshot();
+
+  ctx.state.gate.held = { answer, frame, at: elapsed };
 }
 
 /**
  * Offers the held answer to the gate that has just opened. It is offered once: an answer the new
- * gate does not accept is dropped, not kept for the next one.
+ * gate does not accept is dropped, not kept for the next one. A gate that opens in fast mode gets
+ * no offer: a fast walk answers its own gates, and a press of the live play before it is dropped.
  *
  * @param ctx - Domain context of the flow plugin.
  */
@@ -152,6 +156,7 @@ function offerHeld(ctx: FlowCtx): void {
 
   ctx.state.gate.held = undefined;
 
+  if (ctx.state.fx.mode === "fast") return;
   if (!accepts(ctx.state.gate, held.answer)) return;
 
   deliver(ctx.state.gate, held.answer);
@@ -159,8 +164,9 @@ function offerHeld(ctx: FlowCtx): void {
 
 /**
  * Creates the gate API: the single entry of player answers. The gate closes before the answer is
- * handed on; an answer to a closed gate is held for one frame, first wins; `narrow` lets one
- * answer through; `pointer(true)` delays entering an `over` node.
+ * handed on; an answer to a closed gate is held for the next gate, for one frame or for
+ * `config.holdMs` of game time; `narrow` lets one answer through; `pointer(true)` delays entering
+ * an `over` node.
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns The public gate API plus the methods injected into `runner` and `fx`.
@@ -209,10 +215,18 @@ export function createGateApi(ctx: FlowCtx): GateApi & GateInternal {
       ctx.state.gate.narrow = allow;
     },
 
-    clearHeld: (frame: number): void => {
-      if (ctx.state.gate.held === undefined) return;
-      if (ctx.state.gate.held.frame === frame) return;
+    clearHeld: (frame: number, elapsed: number): void => {
+      const held = ctx.state.gate.held;
 
+      if (held === undefined) return;
+      if (held.frame === frame) return;
+      // With a hold time the age decides, in game time: a paused game ages nothing.
+      if (ctx.config.holdMs > 0 && elapsed - held.at <= ctx.config.holdMs) return;
+
+      ctx.state.gate.held = undefined;
+    },
+
+    dropHeld: (): void => {
       ctx.state.gate.held = undefined;
     }
   };

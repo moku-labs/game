@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createApp,
   createPlugin,
@@ -219,6 +219,209 @@ const startGuidedGame = async (
   await tick();
 };
 
+// ─── a game whose gate stays closed while an effect plays ─────
+
+const table = defineNode({ rest: true, checkpoint: true, outcomes: { deal: type() } });
+
+const dealCards = defineNode({
+  outcomes: { dealt: type() },
+  run: async ({ fx, out }) => {
+    await fx({ kind: "deal" });
+    return out.dealt();
+  }
+});
+
+const hand = defineNode({ rest: true, outcomes: { tap: type() } });
+
+const played = defineNode({ rest: true, outcomes: { again: type() } });
+
+const dealFlow = defineFlow("deal", {
+  nodes: { table, dealCards, hand, played },
+  start: "table",
+  edges: {
+    table: { deal: "dealCards" },
+    dealCards: { dealt: "hand" },
+    hand: { tap: "played" },
+    played: { again: "table" }
+  }
+});
+
+/**
+ * Plays the case measured in the demo game: the player presses at the start of a transition whose
+ * effect keeps the gate closed for 1008 ms of game time. The frame source is the platform seam:
+ * with one, `time` runs and the gate holds.
+ *
+ * @param holdMs - The configured hold time.
+ * @returns Whether the press was accepted at once, and where the graph stands afterwards.
+ */
+const pressWhileDealing = async (holdMs: number) => {
+  vi.stubGlobal("requestAnimationFrame", () => 1);
+  vi.stubGlobal("cancelAnimationFrame", () => undefined);
+
+  try {
+    const app = createApp({
+      pluginConfigs: {
+        model: {
+          playerProvider: memory(),
+          seed: 7,
+          initialPlayer: { coins: 0, merges: 0 },
+          initialSession: { popups: 0 }
+        },
+        clock: { source: fakeClock(1000) },
+        flow: { mainFlow: dealFlow, holdMs }
+      }
+    });
+    const dealt = Promise.withResolvers<void>();
+
+    await app.start();
+    app.flow.fx.handle("deal", () => dealt.promise);
+    app.flow.run().catch(() => undefined);
+    await tick();
+
+    const running = app.time.isRunning();
+
+    app.flow.gate.answer({ intent: "deal" });
+    await tick();
+
+    // `dealCards` awaits its effect: the gate is closed. The player presses now.
+    const waiting = app.flow.state().path;
+    const accepted = app.flow.gate.answer({ intent: "tap" });
+
+    app.time.step(504);
+    await tick();
+    dealt.resolve();
+    await tick();
+    // The completion of an effect waits for the `signals` phase of the next frame.
+    app.time.step(504);
+    await tick();
+
+    const outcome = {
+      running,
+      waiting,
+      accepted,
+      elapsed: app.time.snapshot().elapsed,
+      state: app.flow.state()
+    };
+
+    await app.stop();
+
+    return outcome;
+  } finally {
+    vi.unstubAllGlobals();
+  }
+};
+
+// ─── a game whose board transition fails on every attempt ─────
+
+type Match = { screen: "home" | "board"; marks: number };
+
+const match = defineGame<{
+  player: Player;
+  session: Match;
+  assets: string;
+  strings: Record<string, unknown>;
+}>();
+
+const menu = match.defineNode({
+  rest: true,
+  checkpoint: true,
+  outcomes: { play: type(), mark: type() },
+  recover: ({ session }) => {
+    session.screen = "home";
+    session.marks = 0;
+  }
+});
+
+const enterBoard = match.defineNode({
+  outcomes: { entered: type() },
+  run: ({ session, out }) => {
+    session.screen = "board";
+    session.marks = 1;
+    return out.entered();
+  }
+});
+
+const turn = match.defineNode({ rest: true, outcomes: { mark: type() } });
+
+const placeMark = match.defineNode({
+  outcomes: { placed: type() },
+  run: ({ session }) => {
+    // The change happens before the throw: only a committed edge may keep it.
+    session.marks += 1;
+
+    throw new Error("the board broke");
+  }
+});
+
+const matchFlow = match.defineFlow("match", {
+  nodes: { home: menu, enterBoard, turn, placeMark },
+  start: "home",
+  edges: {
+    home: { play: "enterBoard", mark: "placeMark" },
+    enterBoard: { entered: "turn" },
+    turn: { mark: "placeMark" },
+    placeMark: { placed: "turn" }
+  }
+});
+
+const createMatchGame = () => {
+  const edges: { node: string; outcome: string; next: string }[] = [];
+  const failures: { path: string; rolledBackTo: string; retry: boolean }[] = [];
+  const edgeLog = createPlugin("edgeLog", {
+    depends: [flowPlugin],
+    hooks: () => ({
+      "flow:edge": payload => {
+        edges.push({ node: payload.node, outcome: payload.outcome, next: payload.next });
+      },
+      "flow:error": payload => {
+        failures.push({
+          path: payload.path,
+          rolledBackTo: payload.rolledBackTo,
+          retry: payload.retry
+        });
+      }
+    })
+  });
+  const app = createApp({
+    plugins: [edgeLog],
+    pluginConfigs: {
+      model: {
+        playerProvider: memory(),
+        seed: 7,
+        initialPlayer: { coins: 0, merges: 0 },
+        initialSession: { screen: "home", marks: 0 }
+      },
+      clock: { source: fakeClock(1000) },
+      flow: { mainFlow: matchFlow, safeNode: "home" }
+    }
+  });
+
+  return { app, edges, failures };
+};
+
+/**
+ * Plays the match until the loop gives up: the board rests with its own session, `placeMark`
+ * fails, is retried from the board and fails again. The loop then stands on the safe node `home`.
+ *
+ * @param game - The match game.
+ */
+const playUntilGiveUp = async (game: ReturnType<typeof createMatchGame>): Promise<void> => {
+  await game.app.start();
+  game.app.flow.run().catch(() => undefined);
+  await tick();
+
+  game.app.flow.gate.answer({ intent: "play" });
+  await tick();
+  game.app.flow.gate.answer({ intent: "mark" });
+  await tick();
+  game.app.flow.gate.answer({ intent: "mark" });
+  await tick();
+};
+
+/** Reads the `flow:error` entries of the log, in order. */
+const errorEntries = (game: ReturnType<typeof createMatchGame>) =>
+  game.app.log.trace().filter(entry => entry.event === "flow:error");
+
 const createGame = () => {
   const provider = memory();
   const clock = fakeClock(1000);
@@ -351,6 +554,106 @@ describe("flow plugin", () => {
 
     expect(game.app.flow.state().running).toBe(false);
     expect(game.provider.calls.map(call => call.method)).toContain("load");
+  });
+});
+
+// ─── an answer given while the gate is closed ─────────────────
+
+describe("an answer given while the gate is closed", () => {
+  it("is taken by the rest node that opens 1008 ms later, with holdMs 1100", async () => {
+    const outcome = await pressWhileDealing(1100);
+
+    // The press was refused at the closed gate, kept, and answered `hand` when it opened.
+    expect(outcome).toMatchObject({
+      running: true,
+      waiting: "dealCards",
+      accepted: false,
+      elapsed: 1008,
+      state: { path: "played", pending: { gate: ["again"] } }
+    });
+  });
+
+  it("is lost when the gate opens 1008 ms later, with holdMs 500", async () => {
+    const outcome = await pressWhileDealing(500);
+
+    expect(outcome).toMatchObject({
+      accepted: false,
+      elapsed: 1008,
+      state: { path: "hand", pending: { gate: ["tap"] } }
+    });
+  });
+});
+
+// ─── a transition that fails on every attempt ─────────────────
+
+describe("a transition that fails on every attempt", () => {
+  it("writes one flow:error entry per failure to the log: the retry, then the give-up", async () => {
+    const game = createMatchGame();
+
+    await playUntilGiveUp(game);
+
+    expect(errorEntries(game)).toEqual([
+      expect.objectContaining({
+        level: "error",
+        data: expect.objectContaining({ path: "placeMark", rolledBackTo: "turn", retry: true })
+      }),
+      expect.objectContaining({
+        level: "error",
+        data: expect.objectContaining({ path: "placeMark", rolledBackTo: "home", retry: false })
+      })
+    ]);
+    expect(errorEntries(game)[0]?.data).toMatchObject({ error: { message: "the board broke" } });
+
+    await game.app.stop();
+  });
+
+  it("opens the gate of the safe node on the session its recover committed", async () => {
+    const game = createMatchGame();
+
+    await playUntilGiveUp(game);
+
+    expect(game.app.flow.state()).toMatchObject({
+      path: "home",
+      pending: { gate: ["play", "mark"] }
+    });
+    // The rollback left the session of the board, { screen: "board", marks: 1 }: `recover` put it right.
+    expect(game.app.model.store.snapshot().session).toEqual({ screen: "home", marks: 0 });
+    expect(game.edges.map(edge => edge.outcome)).toEqual([
+      "play",
+      "entered",
+      "mark",
+      "mark",
+      "recover"
+    ]);
+    expect(game.edges.at(-1)).toEqual({ node: "home", outcome: "recover", next: "home" });
+
+    await game.app.stop();
+  });
+
+  it("rolls a later failed transition back to the recovered state, not to the one before it", async () => {
+    const game = createMatchGame();
+
+    await playUntilGiveUp(game);
+
+    // `placeMark` fails straight from `home` this time: a retry, back at `home`.
+    game.app.flow.gate.answer({ intent: "mark" });
+    await tick();
+
+    expect(game.failures).toEqual([
+      { path: "placeMark", rolledBackTo: "turn", retry: true },
+      { path: "placeMark", rolledBackTo: "home", retry: false },
+      { path: "placeMark", rolledBackTo: "home", retry: true }
+    ]);
+    expect(game.app.flow.state()).toMatchObject({
+      path: "home",
+      pending: { gate: ["play", "mark"] }
+    });
+    // The recovery is a committed edge and a rest mark: the rollback returns to it.
+    expect(game.app.model.store.snapshot().session).toEqual({ screen: "home", marks: 0 });
+    // The retry entered `home` again and ran no second recovery.
+    expect(game.edges.filter(edge => edge.outcome === "recover")).toHaveLength(1);
+
+    await game.app.stop();
   });
 });
 

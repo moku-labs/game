@@ -1,9 +1,9 @@
 import { describe, expectTypeOf, it } from "vitest";
-import { createApp } from "../../../../index";
+import { createApp, defineGame } from "../../../../index";
 import type { Json } from "../../../model/types";
 import { flowFor } from "../../feature";
 import { defineFlow, defineNode, exit, to, type } from "../../runner/define";
-import type { Bookmark } from "../../runner/types";
+import type { Bookmark, RecoverContext } from "../../runner/types";
 
 type Empty = Record<string, never>;
 
@@ -192,5 +192,102 @@ describe("the rest point of a bookmark", () => {
     const broken: Bookmark = { ...atRest, rest: { path: "home" } };
 
     expectTypeOf(broken).toEqualTypeOf<Bookmark>();
+  });
+});
+
+// `recover` belongs to a rest node: the safe node puts the state right before its gate opens.
+describe("recover of a rest node", () => {
+  type Match = { screen: "home" | "board"; marks: number };
+  type Player = { wins: number };
+
+  const { defineNode: gameNode } = defineGame<{
+    player: Player;
+    session: Match;
+    assets: string;
+    strings: Record<string, unknown>;
+  }>();
+
+  it("types the context with the game's session and player", () => {
+    const menu = gameNode({
+      rest: true,
+      checkpoint: true,
+      outcomes: { play: type() },
+      recover: context => {
+        expectTypeOf(context).toExtend<RecoverContext<{ player: Player; session: Match }>>();
+        expectTypeOf(context.session).toEqualTypeOf<Match>();
+        expectTypeOf(context.player).toEqualTypeOf<Player>();
+        expectTypeOf(context.now).toBeNumber();
+        expectTypeOf(context.signal).toEqualTypeOf<AbortSignal>();
+        context.session.screen = "home";
+      }
+    });
+
+    expectTypeOf(menu.recover).not.toBeUndefined();
+    expectTypeOf(menu.kind).toEqualTypeOf<"node">();
+  });
+
+  it("gives the context no input and no out: a recovery has neither", () => {
+    gameNode({
+      rest: true,
+      input: type<{ level: number }>(),
+      outcomes: { play: type() },
+      recover: context => {
+        expectTypeOf<keyof typeof context>().toEqualTypeOf<
+          "player" | "session" | "rng" | "fx" | "signal" | "now"
+        >();
+        expectTypeOf(context).not.toHaveProperty("input");
+        expectTypeOf(context).not.toHaveProperty("out");
+        // @ts-expect-error — a recovery has no input
+        expectTypeOf(context.input).toBeNever();
+        // @ts-expect-error — a recovery ends with no outcome
+        expectTypeOf(context.out).toBeNever();
+      }
+    });
+  });
+
+  it("accepts an async recover, next to the body of the rest node", () => {
+    const menu = gameNode({
+      rest: true,
+      outcomes: { play: type() },
+      run: ({ out }) => out.play(),
+      recover: async ({ fx, session }) => {
+        await fx({ kind: "fade" });
+        session.marks = 0;
+      }
+    });
+
+    expectTypeOf(menu.rest).toBeBoolean();
+  });
+
+  it("is refused on a transit node", () => {
+    // The compiler reports it on the whole spec: `rest: true` is missing for a spec with recover.
+    // @ts-expect-error — recover belongs to a rest node
+    gameNode({
+      outcomes: { done: type() },
+      run: ({ out }) => out.done(),
+      recover: ({ session }: RecoverContext<{ player: Player; session: Match }>) => {
+        session.marks = 0;
+      }
+    });
+    // @ts-expect-error — recover belongs to a rest node, also with rest: false written out
+    gameNode({
+      rest: false,
+      outcomes: { done: type() },
+      run: ({ out }) => out.done(),
+      recover: ({ session }: RecoverContext<{ player: Player; session: Match }>) => {
+        session.marks = 0;
+      }
+    });
+    // The helper without a game refuses it the same way.
+    // @ts-expect-error — recover belongs to a rest node
+    defineNode({
+      outcomes: { done: type() },
+      run: ({ out }) => out.done(),
+      recover: () => undefined
+    });
+    // Without recover the same transit node is fine: the refusal above is about recover alone.
+    expectTypeOf(
+      gameNode({ outcomes: { done: type() }, run: ({ out }) => out.done() }).rest
+    ).toBeBoolean();
   });
 });

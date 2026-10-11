@@ -235,15 +235,18 @@ const createStoreFake = () => {
   };
 };
 
-const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000) => {
+const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000, holdMs = 0) => {
   const model = createStoreFake();
   const config: Config = {
     mainFlow: undefined,
     safeNode: undefined,
     retries: 1,
     settleTimeoutMs,
-    journalLimit: 500
+    journalLimit: 500,
+    holdMs
   };
+  // Whether a frame source drives the loop. A test turns it on for the moment a press arrives.
+  const frames = { running: false };
   const deps: Deps = {
     time: {
       onFrame: () => unregister,
@@ -253,7 +256,7 @@ const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000) => {
       resume: vi.fn(),
       wake: vi.fn(),
       isPaused: vi.fn(),
-      isRunning: () => false,
+      isRunning: () => frames.running,
       step: vi.fn()
     },
     model: { store: model.store, rng: { peek: vi.fn() } },
@@ -307,6 +310,7 @@ const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000) => {
   return {
     api,
     ctx,
+    frames,
     model,
     modules,
     shown,
@@ -688,6 +692,30 @@ describe("restore() into a rest node", () => {
     });
 
     release();
+    await stopRunner(harness.ctx);
+  });
+});
+
+describe("restore() while an answer is held", () => {
+  it("drops an answer held with holdMs Infinity: the press belongs to the old position", async () => {
+    const harness = setup({ start: "stuck" }, 2000, Number.POSITIVE_INFINITY);
+
+    await harness.start();
+
+    // `stuck` never ends and opens no gate: the press arrives at a closed door and is held.
+    harness.frames.running = true;
+    expect(harness.modules.gate.answer({ intent: "open" })).toBe(false);
+    harness.frames.running = false;
+
+    expect(harness.ctx.state.gate.held?.answer).toEqual({ intent: "open" });
+
+    await harness.api.restore(harness.bookmarkAt("home"));
+    await waitUntil(() => harness.waitsAt("home"));
+
+    // `home` lists "open". With the press still held its gate would have taken it and gone to `ask`.
+    expect(harness.ctx.state.gate.held).toBeUndefined();
+    expect(harness.api.state()).toMatchObject({ path: "home", pending: { gate: homeIntents } });
+    expect(harness.trace.asked).toEqual([]);
     await stopRunner(harness.ctx);
   });
 });

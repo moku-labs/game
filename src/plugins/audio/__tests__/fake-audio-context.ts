@@ -2,6 +2,11 @@
  * @file audio plugin — the fake WebAudio context and the fake `window` of the tests. Not a test
  * file: the unit project only collects `*.test.ts`. Everything the plugin schedules is recorded
  * here as plain data, so no test needs a sound card, a browser or a timer.
+ *
+ * The autoplay policy follows what Chrome 148 does to a page script. A page that got no gesture
+ * creates the context `"suspended"` and its `resume()` stays pending: it does not reject, and it
+ * settles once a `resume()` called after a gesture went through. A shell that asks for no gesture
+ * creates the context `"running"`, and `resume()` fulfils.
  */
 import { vi } from "vitest";
 import type { AudioContextLike } from "../types";
@@ -72,19 +77,51 @@ export type FakeContext = {
   decodes: string[];
   resumes: number;
   closes: number;
-  /** Set by a test: `resume()` rejects instead of resolving. */
+  /** Set by a test: the shell asks for no gesture, so `resume()` settles without one. */
+  autoplay: boolean;
+  /** Set by a test: a `resume()` the page may call rejects instead of resolving. */
   resumeFails: boolean;
-  /** Set by a test: the state `resume()` leaves the context in. */
+  /** Set by a test: the state a `resume()` the page may call leaves the context in. */
   resumeState: AudioContext["state"] | "interrupted";
+};
+
+/** How a test wants the context to be born. Nothing set: `"suspended"`, and a gesture is needed. */
+export type FakeShell = {
+  /** The state at creation. Chrome without the gesture requirement creates it `"running"`. */
+  state?: FakeContext["state"];
+  /** The start value of `autoplay`: `resume()` settles without a gesture. */
+  autoplay?: boolean;
 };
 
 /** A `window` a test can dispatch on, without a DOM. */
 export type FakeWindow = {
+  /** The page got a gesture. Sticky, like the user activation of a browser. */
+  activated: boolean;
   listeners: Array<{ type: string; handler: (event: unknown) => void; once: boolean }>;
   addEventListener(type: string, handler: (event: unknown) => void, options?: unknown): void;
   removeEventListener(type: string, handler: (event: unknown) => void): void;
   dispatch(type: string): void;
 };
+
+/** The events a browser counts as a user gesture. Dispatching one activates the fake page. */
+const GESTURES: ReadonlySet<string> = new Set([
+  "keydown",
+  "mousedown",
+  "pointerdown",
+  "pointerup",
+  "touchend"
+]);
+
+/**
+ * Tells whether the page of the test got a gesture: the fake `window` is the global one and a
+ * gesture was dispatched on it. A test without a window never activates, so its context stays
+ * locked unless it sets `autoplay`.
+ */
+function pageActivated(): boolean {
+  const page = globalThis.window as Partial<FakeWindow> | undefined;
+
+  return page?.activated === true;
+}
 
 /** The bytes of the `.mp3` an asset key stands for in the tests. */
 export function bytesOf(key: string): ArrayBuffer {
@@ -169,23 +206,29 @@ function createFakeMediaSource(element: unknown): FakeMediaSource {
  * Creates the fake context: three counters, two lists and a `decodeAudioData` that answers with
  * the text of the bytes it got. Bytes whose text is `"bad"` reject, which is how a test plays an
  * undecodable file.
+ *
+ * `resume()` without a gesture on the page and without `autoplay` returns a pending promise and
+ * leaves the state alone. Every later `resume()` the page may call that reaches `"running"`
+ * settles the pending ones first, in the order they were made, the way a browser does.
  */
-export function createFakeContext(): FakeContext {
+export function createFakeContext(shell: FakeShell = {}): FakeContext {
   const gains: FakeGain[] = [];
   const sources: FakeSource[] = [];
   const decodes: string[] = [];
   const mediaSources: FakeMediaSource[] = [];
+  const waiting: Array<() => void> = [];
 
   const context: FakeContext = {
     destination: { id: "destination" } as unknown as AudioDestinationNode,
     currentTime: 0,
-    state: "suspended",
+    state: shell.state ?? "suspended",
     gains,
     sources,
     mediaSources,
     decodes,
     resumes: 0,
     closes: 0,
+    autoplay: shell.autoplay ?? false,
     resumeFails: false,
     resumeState: "running",
     createGain: (): GainNode => {
@@ -221,9 +264,17 @@ export function createFakeContext(): FakeContext {
     resume: (): Promise<void> => {
       context.resumes += 1;
 
+      if (!context.autoplay && !pageActivated()) {
+        return new Promise<void>(resolve => {
+          waiting.push(resolve);
+        });
+      }
+
       if (context.resumeFails) return Promise.reject(new Error("blocked"));
 
       context.state = context.resumeState;
+
+      if (context.state === "running") for (const settle of waiting.splice(0)) settle();
 
       return Promise.resolve();
     },
@@ -248,6 +299,7 @@ export function installFakeWindow(): FakeWindow {
   const listeners: FakeWindow["listeners"] = [];
 
   const fake: FakeWindow = {
+    activated: false,
     listeners,
     addEventListener: (
       type: string,
@@ -267,6 +319,9 @@ export function installFakeWindow(): FakeWindow {
       if (at !== -1) listeners.splice(at, 1);
     },
     dispatch: (type: string): void => {
+      // A browser activates the page before the handlers of the gesture run.
+      if (GESTURES.has(type)) fake.activated = true;
+
       // A copy: a handler that removes a listener must not make the loop skip the next one.
       for (const entry of listeners.filter(candidate => candidate.type === type)) {
         if (entry.once) fake.removeEventListener(entry.type, entry.handler);

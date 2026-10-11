@@ -6,7 +6,7 @@ import type { Descriptor, Hint, NodeFx } from "../fx/types";
 import type { Allow } from "../gate/types";
 import type { FlowCtx } from "../types";
 import { createOut } from "./define";
-import type { AbortReason, Delivery, Location, NodeOutcome, Step } from "./loop-types";
+import type { Aborted, AbortReason, Delivery, Location, NodeOutcome, Step } from "./loop-types";
 import { noop, stages } from "./loop-types";
 import { answerResult, eventResult } from "./position";
 import type { AnyNode, AnyNodeContext, Modules, NodeInfo, RunnerState } from "./types";
@@ -75,13 +75,14 @@ function refuseEffect(signal: AbortSignal): Promise<never> {
  * Builds the `fx` of a node context: awaited effects by call, cosmetic hints by `emit`. A `guide`
  * narrows the gate while it runs; the runner lifts the narrow when the node is left. A body that
  * was aborted keeps running, since the loop only stops waiting for it, so its `fx` starts nothing
- * any more: the gate and the narrow belong to the node the loop entered after it.
+ * any more: the gate and the narrow belong to the node the loop entered after it. The `recover`
+ * of a rest node gets the same `fx`, bound to the signal of its recovery.
  *
  * @param modules - Injected sibling APIs.
- * @param step - The node run in progress.
+ * @param step - The run in progress: its abort signal, and how it tells a walk that a gate opened.
  * @returns The effects gateway of one node run.
  */
-function nodeFx(modules: Modules, step: Step): NodeFx {
+export function nodeFx(modules: Modules, step: Pick<Step, "signal" | "gateOpened">): NodeFx {
   /**
    * Awaits one effect. After the abort of the node it rejects with the abort reason instead.
    *
@@ -224,6 +225,7 @@ export function stopped(state: RunnerState): boolean {
 
 /**
  * Resolves as soon as the node is aborted, so a body that ignores its signal never holds the loop.
+ * A recovery races its `recover` against the same promise.
  *
  * @param signal - The node's abort signal.
  * @returns The abort outcome.
@@ -232,10 +234,10 @@ export function stopped(state: RunnerState): boolean {
  * await abortOutcome(AbortSignal.abort("restore")); // { kind: "aborted", reason: "restore" }
  * ```
  */
-function abortOutcome(signal: AbortSignal): Promise<NodeOutcome> {
+export function abortOutcome(signal: AbortSignal): Promise<Aborted> {
   if (signal.aborted) return Promise.resolve({ kind: "aborted", reason: abortReason(signal) });
 
-  return new Promise<NodeOutcome>(resolve => {
+  return new Promise<Aborted>(resolve => {
     signal.addEventListener(
       "abort",
       () => {

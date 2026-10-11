@@ -56,7 +56,9 @@ export function type<Payload = void>(): TypeTag<NoInfer<Payload>> {
 
 /**
  * Defines a node. `out` of the body has one method per declared outcome; `run` is required
- * unless `rest: true`. `Game` is bound by `defineGame<Types>()`; here it is the engine's `Json`.
+ * unless `rest: true`. A rest node may carry `recover`: the engine runs it before the node is
+ * entered as the safe node. `Game` is bound by `defineGame<Types>()`; here it is the engine's
+ * `Json`.
  *
  * @param spec - Input tag, outcomes, flags, inbox and the body.
  * @returns The node as plain data.
@@ -88,7 +90,8 @@ export function defineNode<
     barrier: spec.barrier === true,
     inbox: spec.inbox ?? [],
     // `exactOptionalPropertyTypes`: the key is absent, never present with `undefined`.
-    ...(spec.scene === undefined ? {} : { scene: spec.scene })
+    ...(spec.scene === undefined ? {} : { scene: spec.scene }),
+    ...(spec.recover === undefined ? {} : { recover: spec.recover })
   };
 
   return spec.run ? { ...node, run: spec.run } : node;

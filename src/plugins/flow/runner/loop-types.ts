@@ -30,6 +30,18 @@ export type NodeOutcome =
   | { kind: "aborted"; reason: AbortReason }
   | { kind: "failed"; error: unknown };
 
+/** A run the runner aborted: the variant a node run and a recovery share. */
+export type Aborted = Extract<NodeOutcome, { kind: "aborted" }>;
+
+/**
+ * What one recovery produced: `recover` returned, the runner aborted it, or it failed. Nothing
+ * here throws: the loop reads the variant.
+ */
+export type RecoveryOutcome =
+  | { kind: "recovered" }
+  | Aborted
+  | Extract<NodeOutcome, { kind: "failed" }>;
+
 /** What one turn of the loop decided: keep running, or end because `onStop` aborted. */
 export type StepOutcome = "continue" | "stop";
 
@@ -71,8 +83,12 @@ export type Commit = {
   path: string;
 };
 
-/** Whether the loop is already recovering inside the safe node. A failure there is fatal. */
-export type Safe = { inside: boolean };
+/**
+ * How the loop stands after it gave up on a transition. `inside`: it is in the safe node, and a
+ * failure there is fatal; it stays true until the safe node's own edge commits. `recover`: the
+ * safe node has not been entered yet, so its `recover` is still to run; a restore clears it.
+ */
+export type Safe = { inside: boolean; recover: boolean };
 
 /**
  * Does nothing. It stands in for an unsubscribe function until the real one arrives.

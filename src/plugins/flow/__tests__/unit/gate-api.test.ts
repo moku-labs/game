@@ -12,7 +12,14 @@ import type { Config, Deps, FlowCtx, State } from "../../types";
 // Unit test: createGateApi (mock context, no kernel)
 // ---------------------------------------------------------------------------
 
-type FakeTime = TimeApi & { setFrame(frame: number): void; setRunning(running: boolean): void };
+type FakeTime = TimeApi & {
+  setFrame(frame: number): void;
+  setRunning(running: boolean): void;
+  /** Starts the next frame: the frame number moves on by one and game time by `ms`. */
+  advance(ms: number): void;
+};
+
+type Gate = ReturnType<typeof createGateApi>;
 
 const noop = (): void => {};
 
@@ -47,6 +54,10 @@ const createFakeTime = (): FakeTime => {
     },
     setRunning: (running: boolean) => {
       flags.running = running;
+    },
+    advance: (ms: number) => {
+      time.frame += 1;
+      time.elapsed += ms;
     }
   };
 };
@@ -108,14 +119,15 @@ const createTestState = (): State => ({
   }
 });
 
-const createMockCtx = (): { ctx: FlowCtx; time: FakeTime } => {
+const createMockCtx = (holdMs = 0): { ctx: FlowCtx; time: FakeTime } => {
   const time = createFakeTime();
   const config: Config = {
     mainFlow: undefined,
     safeNode: undefined,
     retries: 1,
     settleTimeoutMs: 2000,
-    journalLimit: 500
+    journalLimit: 500,
+    holdMs
   };
 
   return {
@@ -130,6 +142,55 @@ const createMockCtx = (): { ctx: FlowCtx; time: FakeTime } => {
       deps: createMockDeps(time)
     }
   };
+};
+
+/**
+ * Plays one frame the way `connectFlow` wires it: game time moves on, then the `signals` phase
+ * lets the gate age its hold.
+ *
+ * @param gate - The gate under test.
+ * @param time - The fake time of the test.
+ * @param ms - Game time this frame adds.
+ */
+const playFrame = (gate: Gate, time: FakeTime, ms: number): void => {
+  time.advance(ms);
+
+  const { frame, elapsed } = time.snapshot();
+
+  gate.clearHeld(frame, elapsed);
+};
+
+/**
+ * Opens the gate for `play` and collects what it is answered with in this turn.
+ *
+ * @param gate - The gate under test.
+ * @returns The answers the opening gate took: the held one, or none.
+ */
+const openForPlay = async (gate: Gate): Promise<Answer[]> => {
+  const answers: Answer[] = [];
+
+  gate.open({ allowed: ["play"] }).then(answer => answers.push(answer));
+  await Promise.resolve();
+
+  return answers;
+};
+
+/**
+ * The case measured in the demo game: the player presses at the start of a transition, and the
+ * gate stays closed for `closedMs` of game time, played in frames of 16 ms.
+ *
+ * @param holdMs - The configured hold time.
+ * @param closedMs - How long the gate stays closed after the press.
+ * @returns What the gate that opens afterwards is answered with.
+ */
+const pressThenWait = (holdMs: number, closedMs: number): Promise<Answer[]> => {
+  const { ctx, time } = createMockCtx(holdMs);
+  const gate = createGateApi(ctx);
+
+  gate.answer({ intent: "play" });
+  for (let waited = 0; waited < closedMs; waited += 16) playFrame(gate, time, 16);
+
+  return openForPlay(gate);
 };
 
 describe("createGateApi", () => {
@@ -269,7 +330,7 @@ describe("createGateApi", () => {
       const gate = createGateApi(ctx);
 
       gate.answer({ intent: "play" });
-      gate.clearHeld(1);
+      gate.clearHeld(1, 0);
 
       await expect(gate.open({ allowed: ["play"] })).resolves.toEqual({ intent: "play" });
     });
@@ -280,7 +341,7 @@ describe("createGateApi", () => {
       const answers: Answer[] = [];
 
       gate.answer({ intent: "play" });
-      gate.clearHeld(2);
+      gate.clearHeld(2, 16);
 
       expect(ctx.state.gate.held).toBeUndefined();
 
@@ -294,7 +355,196 @@ describe("createGateApi", () => {
       const { ctx } = createMockCtx();
       const gate = createGateApi(ctx);
 
-      gate.clearHeld(7);
+      gate.clearHeld(7, 96);
+
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+  });
+
+  describe("hold with holdMs", () => {
+    it("records the frame and the game time of the refusal", () => {
+      const { ctx, time } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      playFrame(gate, time, 250);
+      gate.answer({ intent: "play" });
+
+      expect(ctx.state.gate.held).toEqual({ answer: { intent: "play" }, frame: 2, at: 250 });
+    });
+
+    it("delivers an answer refused at 0 ms to a gate that opens at 300 ms", async () => {
+      const { ctx, time } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      playFrame(gate, time, 100);
+      playFrame(gate, time, 200);
+
+      expect(await openForPlay(gate)).toEqual([{ intent: "play" }]);
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+
+    it("keeps the answer while it is exactly holdMs old", async () => {
+      const { ctx, time } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      playFrame(gate, time, 500);
+
+      expect(await openForPlay(gate)).toEqual([{ intent: "play" }]);
+    });
+
+    it("drops the answer once it is older than holdMs", async () => {
+      const { ctx, time } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      playFrame(gate, time, 600);
+
+      expect(ctx.state.gate.held).toBeUndefined();
+      expect(await openForPlay(gate)).toEqual([]);
+    });
+
+    it("keeps the last of two answers", async () => {
+      const { ctx } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play", payload: 1 });
+      gate.answer({ intent: "play", payload: 2 });
+
+      expect(await openForPlay(gate)).toEqual([{ intent: "play", payload: 2 }]);
+    });
+
+    it("counts the age from the last refusal", async () => {
+      const { ctx, time } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play", payload: 1 });
+      playFrame(gate, time, 400);
+      gate.answer({ intent: "play", payload: 2 });
+      playFrame(gate, time, 300);
+
+      // 700 ms after the first press, 300 ms after the second: the second is still young.
+      expect(await openForPlay(gate)).toEqual([{ intent: "play", payload: 2 }]);
+    });
+
+    it("loses a press made 1008 ms before the gate opens with holdMs 500", async () => {
+      expect(await pressThenWait(500, 1008)).toEqual([]);
+    });
+
+    it("delivers a press made 1008 ms before the gate opens with holdMs 1100", async () => {
+      expect(await pressThenWait(1100, 1008)).toEqual([{ intent: "play" }]);
+    });
+
+    it("delivers a press made 1008 ms before the gate opens with holdMs Infinity", async () => {
+      expect(await pressThenWait(Number.POSITIVE_INFINITY, 1008)).toEqual([{ intent: "play" }]);
+    });
+
+    it("keeps the answer until the next gate opens with holdMs Infinity, however long that takes", async () => {
+      const { ctx, time } = createMockCtx(Number.POSITIVE_INFINITY);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      playFrame(gate, time, 3_600_000);
+
+      expect(await openForPlay(gate)).toEqual([{ intent: "play" }]);
+    });
+
+    it("does not age the answer while game time stands still", async () => {
+      const { ctx, time } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      // A time scale of 0: the frames keep running and `elapsed` does not move.
+      for (let frame = 0; frame < 120; frame += 1) playFrame(gate, time, 0);
+
+      expect(await openForPlay(gate)).toEqual([{ intent: "play" }]);
+    });
+
+    it("offers the answer once: a gate that does not list the intent drops it", async () => {
+      const { ctx } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+      const answers: Answer[] = [];
+
+      gate.answer({ intent: "shop" });
+
+      expect(await openForPlay(gate)).toEqual([]);
+      expect(gate.state().open).toBe(true);
+      expect(ctx.state.gate.held).toBeUndefined();
+
+      gate.close();
+      gate.open({ allowed: ["shop"] }).then(answer => answers.push(answer));
+      await Promise.resolve();
+
+      expect(answers).toEqual([]);
+    });
+
+    it("drops the answer when a running guide does not let it through", async () => {
+      const { ctx } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      gate.narrow({ intent: "merge" });
+
+      expect(await openForPlay(gate)).toEqual([]);
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+
+    it("holds nothing in fast mode", () => {
+      const { ctx } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      ctx.state.fx.mode = "fast";
+      gate.answer({ intent: "play" });
+
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+
+    it("drops the answer without an offer when the gate opens in fast mode", async () => {
+      const { ctx } = createMockCtx(500);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      // A fast walk starts: it answers its own gates.
+      ctx.state.fx.mode = "fast";
+
+      expect(await openForPlay(gate)).toEqual([]);
+      expect(gate.state().open).toBe(true);
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+
+    it("counts a negative holdMs as no hold time: one frame, first answer wins", async () => {
+      const { ctx, time } = createMockCtx(-1);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play", payload: 1 });
+      gate.answer({ intent: "play", payload: 2 });
+
+      expect(ctx.state.gate.held?.answer).toEqual({ intent: "play", payload: 1 });
+
+      playFrame(gate, time, 0);
+
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+  });
+
+  describe("dropHeld", () => {
+    it("drops an answer held with holdMs Infinity, as when a bookmark is entered", async () => {
+      const { ctx } = createMockCtx(Number.POSITIVE_INFINITY);
+      const gate = createGateApi(ctx);
+
+      gate.answer({ intent: "play" });
+      gate.dropHeld();
+
+      expect(ctx.state.gate.held).toBeUndefined();
+      expect(await openForPlay(gate)).toEqual([]);
+    });
+
+    it("does nothing when no answer is held", () => {
+      const { ctx } = createMockCtx();
+      const gate = createGateApi(ctx);
+
+      gate.dropHeld();
 
       expect(ctx.state.gate.held).toBeUndefined();
     });

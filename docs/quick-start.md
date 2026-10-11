@@ -185,6 +185,7 @@ Every term of the graph, in full.
 | Node context | `{ input, player, session, rng, fx, out, signal, now }`. `player` and `session` are drafts. `now` is `clock.now()` read once at node entry. |
 | Rest node | `rest: true`. The graph waits here. Without `run` it is a pure wait for a gate answer or an inbox event. Entering it marks a rest point. |
 | `checkpoint` | A rest node where the journal is compacted. `safeNode` points at one. |
+| `recover` | A function on a rest node, `({ player, session, rng, fx, signal, now }) => void`. It runs when the runner gave up on a transition and enters this node as `safeNode`. It writes the state the node needs, and that commits as one edge with the outcome `recover`. |
 | `barrier` | After the edge of this node the save is written durably with `commitDurable`. Rollback cannot cross it. Every edge of a barrier node leads to a rest node of the same flow. |
 | `over` | The node waits while a pointer is down, so a popup never appears in the middle of a drag. |
 | `inbox` | Outcome names of a rest node that a world event of the same type may produce. |
@@ -193,4 +194,4 @@ Every term of the graph, in full.
 | Slot | `slot("name")`. An extension point. Features contribute sub-flows to it with an `order`. |
 | Feature | `defineFeature(name, { nodes?, flows?, contribute? })`. An ordinary plugin that registers into `flow.features`. `feature.logicOnly` is the headless twin. |
 | Effect | `await fx(descriptor)` for awaited effects, `fx.emit(hint(kind, payload))` for cosmetic ones. Hints are released after the commit and dropped in fast mode. |
-| Transition | Rest node to rest node. It is a transaction. An error rolls back to the last rest point, retries, then enters `safeNode`. |
+| Transition | Rest node to rest node. It is a transaction. An error rolls back to the last rest point, retries, then enters `safeNode`. Every failure is an `error` entry `flow:error` in the log. |

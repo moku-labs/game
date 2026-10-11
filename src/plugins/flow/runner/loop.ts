@@ -9,13 +9,14 @@ import { noPayload } from "./loop-types";
 import { nodeInfo, nodeOutcome, runEnterCallbacks, stopped, waitForPointer } from "./node";
 import { describePlan, pickContribution } from "./plan";
 import { eventResult, framesOf, locateFrames } from "./position";
+import { recoverNode, takeRecovery } from "./recover";
 import { findNode, framePath, isRestCheckpoint } from "./registry";
 import { loopSeam, notifyGateOpen, notifyRest, takeSubstitution } from "./seam";
 import type { AnyFlow, AnyNode, Bookmark, Modules, SlotNode } from "./types";
 
 /**
- * Runs one node: wait for the pointer, `onEnter` stages, open the transaction, produce the
- * outcome, then commit on the edge or recover.
+ * Runs one node: wait for the pointer, the recovery the loop owes the safe node, `onEnter` stages,
+ * open the transaction, produce the outcome, then commit on the edge or recover.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.
@@ -38,6 +39,13 @@ async function runNode(
 
   if (stopped(state)) return "stop";
   if (state.seam?.restoring !== undefined) return "continue";
+
+  // The loop gave up and this is the safe node: its `recover` runs before anything of the entry.
+  if (takeRecovery(safe, node)) {
+    const ended = await recoverNode(ctx, modules, { location, node, path }, safe);
+
+    if (ended !== undefined) return ended;
+  }
 
   const abort = new AbortController();
 
@@ -198,14 +206,17 @@ function enterSlot(
  * node too. A restore leaves the whole document waiting for the provider, and a rollback of the
  * node would drop it unsent; and the frames of the transit node are what a failure of it must
  * retry, since the restored state belongs to them. `flow:rest` and the rest seam fire once for
- * every node entered here; only a rest node is announced as a checkpoint.
+ * every node entered here; only a rest node is announced as a checkpoint. A restore wins over
+ * what belonged to the old position: a recovery the loop still owed the safe node does not run on
+ * the restored state, and an answer the gate still held is dropped.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs; the features API resolves a path through a slot.
  * @param bookmark - The bookmark to enter.
+ * @param safe - How the loop stands after it gave up. Its pending recovery is cleared.
  * @throws {Error} When the graph has no node at the bookmark's path.
  */
-function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void {
+function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark, safe: Safe): void {
   const state = ctx.state.runner;
   const location = findNode(requireMainFlow(ctx), bookmark.path, modules.features.contributions);
 
@@ -217,6 +228,10 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark): void
       `[game] The bookmark names no node "${bookmark.path}".\n  Bookmark a node of the running graph.`
     );
   }
+
+  // The old position is left: its pending recovery and a press made there go with it.
+  safe.recover = false;
+  modules.gate.dropHeld();
 
   // Replace the state, and mark the rest point: the provider gets the whole restored document.
   ctx.deps.model.store.restore({
@@ -257,7 +272,7 @@ async function advance(ctx: FlowCtx, modules: Modules, safe: Safe): Promise<Step
   const restoring = state.seam?.restoring;
 
   if (restoring !== undefined) {
-    enterBookmark(ctx, modules, restoring);
+    enterBookmark(ctx, modules, restoring, safe);
 
     return "continue";
   }
@@ -286,7 +301,8 @@ async function advance(ctx: FlowCtx, modules: Modules, safe: Safe): Promise<Step
 /**
  * Runs the graph until aborted: enter node, `onEnter` stages, begin a transaction, await the
  * body, commit on the edge, release hints, journal, emit `flow:edge`, follow the edge. An error
- * discards, rolls back and retries, then enters `safeNode`; a failure inside `safeNode` rejects.
+ * discards, rolls back, is logged and retries, then enters `safeNode`, whose `recover` runs first
+ * as one committed edge; a failure inside `safeNode` rejects.
  * Abort reasons: `"stop"` ends the loop, `"inbox"` turns the event into the outcome, `"restore"`
  * enters the bookmark's frame.
  *
@@ -310,7 +326,7 @@ export async function runLoop(ctx: FlowCtx, modules: Modules): Promise<void> {
   state.slotAfter = undefined;
   state.failures = 0;
 
-  const safe: Safe = { inside: false };
+  const safe: Safe = { inside: false, recover: false };
   const loop = { running: true };
 
   while (loop.running) {
