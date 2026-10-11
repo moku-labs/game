@@ -170,6 +170,57 @@ describe("anim lifecycle", () => {
     expect(mock.api.active()).toBe(0);
   });
 
+  it("leaves a loop standing through a fast frame, lets it run on, and ends it on finishAll", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const handle = mock.api.play(flight, { it: entity });
+    // A sway of 400 ms, as `defineMotion` builds a loop: additive, repeated forever.
+    const loop = mock.world.projection.viewOf(entity, { kind: "plugin", name: "test" })?.tween(
+      Transform,
+      { rotation: 0 },
+      {
+        ms: 400,
+        ease: "linear",
+        additive: true,
+        repeat: "forever",
+        segments: [
+          { at: 0.5, to: { rotation: 0.1 } },
+          { at: 1, to: { rotation: 0 } }
+        ]
+      }
+    );
+
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(0.05, 6);
+
+    // The entity is no projection view, so the flush of the world leaves its tracks alone: only
+    // the fast frames of `anim` touch them, and they end what has an end.
+    mock.world.ecs.setMode("fast");
+    mock.frame(16);
+    mock.frame(16);
+
+    expect(handle.active()).toBe(false);
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
+    // The loop has no end: it stands where it is.
+    expect(loop?.active()).toBe(true);
+    expect(mock.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(0.05, 6);
+    expect(mock.api.active()).toBe(1);
+
+    mock.world.ecs.setMode("live");
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(0.1, 6);
+
+    mock.api.finishAll();
+
+    expect(loop?.active()).toBe(false);
+    expect(mock.api.active()).toBe(0);
+  });
+
   it("resolves every pending done when the plugin stops", async () => {
     const mock = createMockAnim();
 

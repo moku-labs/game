@@ -73,7 +73,8 @@ async function runNode(
      */
     gateOpened: (): void => {
       notifyGateOpen(state);
-    }
+    },
+    log: ctx.log
   };
   const delivered: Delivery = { event: undefined };
   const outcome = await nodeOutcome(modules, step, delivered);

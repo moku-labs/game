@@ -20,7 +20,9 @@ import type { Target } from "../../../anim/types";
 // Integration: a restore converges the views an aborted animation left behind.
 // The splash pieces come from one frozen table, so `from` hands out the very
 // same item objects for the same state and no item of the restore is new. The
-// real time, lifecycle, model, clock, flow, world, renderer and anim plugins.
+// flush of the restore ends the sway of a piece too: the piece owes its loop,
+// and the sweep of the same frame starts it again. The real time, lifecycle,
+// model, clock, flow, world, renderer and anim plugins.
 // ---------------------------------------------------------------------------
 
 type Piece = { readonly id: string; readonly x: number; readonly y: number };
@@ -125,8 +127,8 @@ const tick = async (times = 40): Promise<void> => {
 /**
  * Starts an app that rests at the splash, with its pieces mounted.
  *
- * @param phase - `"splash"` mounts the pieces directly; `"intro"` lets them enter on an edge, so
- *   their sway plays.
+ * @param phase - `"splash"` mounts the pieces directly, so their sway is owed and the sweep of
+ *   the next frame starts it; `"intro"` lets them enter on an edge, which starts the sway itself.
  * @returns The started app, resting at the node `splash`.
  */
 async function startSplash(phase: "intro" | "splash") {
@@ -162,18 +164,23 @@ describe("world — a restore converges the views of an aborted animation", () =
     const entity = app.world.projection.entityOf("splash.pieces", "p1") ?? 0;
     const bookmark = app.flow.bookmark();
 
+    // The piece was mounted directly, which plays no hook: its sway was owed, and it runs.
+    expect(app.anim.active()).toBe(1);
+
     expect(app.flow.gate.answer({ intent: "start" })).toBe(true);
     await tick();
     app.time.step(16);
     app.time.step(100);
 
-    expect(app.anim.active()).toBe(1);
+    expect(app.anim.active()).toBe(2);
     expect(app.world.ecs.get(entity, Transform)?.y).toBeLessThan(300);
 
     // The restore aborts the node, and `anim` finishes its timeline: the piece is off the screen.
     await app.flow.restore(bookmark);
 
-    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ y: -900, rotation: 3 });
+    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ y: -900 });
+    // The end pose of the timeline, plus what the sway adds on top.
+    expect(app.world.ecs.get(entity, Transform)?.rotation).toBeGreaterThanOrEqual(3);
 
     app.time.step(16);
 
@@ -185,16 +192,19 @@ describe("world — a restore converges the views of an aborted animation", () =
       rotation: 0,
       scale: 1
     });
-    expect(app.anim.active()).toBe(0);
+    // Nothing of the exit animation is left. The flush ended the sway too, and the sweep of the
+    // same frame started it again.
+    expect(app.anim.active()).toBe(1);
 
     app.time.step(100);
 
-    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 300, rotation: 0 });
+    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 300, scale: 1 });
+    expect(app.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(0.05, 6);
 
     await app.stop();
   });
 
-  it("also when a loop of the view still adds to a field the animation ended on", async () => {
+  it("starts the loop of the view again, once, on the rest pose and not on the field the animation ended on", async () => {
     const app = await startSplash("intro");
     const entity = app.world.projection.entityOf("splash.pieces", "p1") ?? 0;
     const bookmark = app.flow.bookmark();
@@ -219,11 +229,21 @@ describe("world — a restore converges the views of an aborted animation", () =
       rotation: 0,
       scale: 1
     });
-    expect(app.anim.active()).toBe(0);
+    // The sway the restore ended runs again: one loop, and nothing of the exit animation.
+    expect(app.anim.active()).toBe(1);
 
     app.time.step(100);
 
-    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 300, rotation: 0 });
+    // It adds to the rest pose: a quarter of the 400 ms walk is half the way to 0.1.
+    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 300, scale: 1 });
+    expect(app.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(0.05, 6);
+
+    app.time.step(100);
+    app.time.step(200);
+
+    // A whole walk later it is home again, and it is still the one loop.
+    expect(app.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(0, 6);
+    expect(app.anim.active()).toBe(1);
 
     await app.stop();
   });

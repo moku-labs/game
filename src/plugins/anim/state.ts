@@ -39,6 +39,7 @@ export function createAnimState(ctx: { readonly config: Readonly<Config> }): Sta
     owner: emptyMap(),
     offsets: emptyMap(),
     bases: emptyMap(),
+    additive: emptyMap(),
     timelines: emptyMap(),
     registry: emptyMap(),
     markListeners: emptySet(),

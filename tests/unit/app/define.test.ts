@@ -121,6 +121,82 @@ describe("headless", () => {
     expect(app.score.start()).toBe(0);
   });
 
+  it("headless composes the logic of features when the definition has no headless key", () => {
+    const game = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      shared: sharedFeature,
+      features: [homeFeature, rewardFeature],
+      plugins: [scorePlugin]
+    });
+    const { app } = game.headless();
+
+    const plugins = lastOptions().plugins ?? [];
+
+    expect(plugins).toHaveLength(2);
+    expect(plugins[0]).toBe(homeFeature.logicOnly);
+    expect(plugins[1]).toBe(rewardFeature.logicOnly);
+    expect(app.has("homeScreen")).toBe(true);
+    expect(app.has("reward")).toBe(true);
+    // The default covers `features` only: `shared` and the game's plugins stay out, as before.
+    expect(app.has("shared")).toBe(false);
+    expect(app.has("score")).toBe(false);
+  });
+
+  it("an explicit headless.features list wins over features", () => {
+    const game = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      features: [homeFeature, rewardFeature],
+      headless: { features: [rewardFeature] }
+    });
+    const { app } = game.headless();
+
+    const plugins = lastOptions().plugins ?? [];
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]).toBe(rewardFeature.logicOnly);
+    expect(app.has("homeScreen")).toBe(false);
+  });
+
+  it("an explicit empty headless.features list composes no feature", () => {
+    const game = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      features: [homeFeature, rewardFeature],
+      headless: { features: [] }
+    });
+    const { app } = game.headless();
+
+    expect(lastOptions().plugins).toEqual([]);
+    expect(app.has("homeScreen")).toBe(false);
+    expect(app.has("reward")).toBe(false);
+  });
+
+  it("headless.plugins without headless.features still gets the logic of features", () => {
+    const game = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      features: [homeFeature, rewardFeature],
+      plugins: [scorePlugin],
+      headless: { plugins: [scorePlugin] }
+    });
+    const { app } = game.headless();
+
+    const plugins = lastOptions().plugins ?? [];
+
+    expect(plugins).toHaveLength(3);
+    expect(plugins[0]).toBe(homeFeature.logicOnly);
+    expect(plugins[1]).toBe(rewardFeature.logicOnly);
+    expect(plugins[2]).toBe(scorePlugin);
+    expect(app.has("homeScreen")).toBe(true);
+    expect(app.score.start()).toBe(0);
+  });
+
   it("headless drops plugin configs of plugins it does not compose", () => {
     const pluginConfigs = {
       time: { maxFps: 30 as const },

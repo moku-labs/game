@@ -13,7 +13,7 @@ import { notifyRest } from "./seam";
 import type { Frame, JournalEntry, Modules, Result } from "./types";
 
 /**
- * Turns whatever a node failed with into an error the log takes.
+ * Turns whatever a node, or an effect it started, failed with into an error the log takes.
  *
  * @param value - The thrown value or the rejection reason.
  * @returns The value itself when it is an error, a new error with its text otherwise.
@@ -22,7 +22,7 @@ import type { Frame, JournalEntry, Modules, Result } from "./types";
  * asError("no save").message; // "no save"
  * ```
  */
-function asError(value: unknown): Error {
+export function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
 

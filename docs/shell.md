@@ -79,7 +79,7 @@ export default defineGameApp({
 | `shared` | none | The shared layer, composed first among the features |
 | `features` | `[]` | The features of the screen app, in order, after `shared` |
 | `plugins` | `[]` | The game's own plugins, after the features. Their APIs land on `screen().app` |
-| `headless` | `{}` | `{ features?, plugins? }`: what the headless app composes, nothing else |
+| `headless` | `{}` | `{ features?, plugins? }`: what the headless app composes, nothing else. `features` left out takes the `features` of the game; `[]` means none. `shared` is not composed |
 | `pluginConfigs` | `{}` | The plugin configs of the game, without the keys the shell owns |
 
 The shell writes some plugin configs from the seams. Those keys are not in the type of `pluginConfigs`: a seam-owned key is a compile error, never a value a shallow merge would drop.
@@ -102,7 +102,7 @@ The graph is run by the page or by the test, never by the game. A game's exit pl
 
 | Method | Composes |
 |---|---|
-| `game.headless(seams?)` | The core plugins, `logicOnly` of `headless.features`, then `headless.plugins`. No screen plugin, no game plugin unless listed |
+| `game.headless(seams?)` | The core plugins, `logicOnly` of `headless.features` (of `features` when left out), then `headless.plugins`. No screen plugin, no game plugin unless listed |
 | `game.screen(seams?)` | The screen set, `audio`, `effects`, `platform`, then `shared`, the features and the game's plugins |
 
 Both return `{ app, clock, provider }`, the app not started. Each call gives a fresh app, a fresh clock and a fresh save. The clock is `fakeClock(startMoment)` and the save a fresh `memory()` unless a seam passes one. `startMoment` is `1_000_000`.

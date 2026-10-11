@@ -5,7 +5,7 @@
 import type { AnyComponent } from "../../world/ecs/types";
 import type { Entity, MotionHandle, TrackOptions, TweenDriver } from "../../world/types";
 import type { AnimCtx } from "../types";
-import { cancelTracksOf, handleOf, startTrack } from "./advance";
+import { addedOffsets, cancelTracksOf, handleOf, startTrack } from "./advance";
 import type { StepMotion } from "./types";
 
 /**
@@ -20,7 +20,9 @@ function noFields(): ReadonlySet<string> {
 
 /**
  * Creates the tween engine `world` runs `ViewHandle.tween`, `toRest` and `all` on. Installed with
- * `world.projection.setDriver` in `onStart`; the remover puts the instant writes back.
+ * `world.projection.setDriver` in `onStart`; the remover puts the instant writes back. It also
+ * reports what its additive tracks add to a component right now, so `world` can compare the
+ * value under a loop with the rest pose.
  *
  * @param actx - Domain context of the anim plugin.
  * @returns The driver.
@@ -35,7 +37,10 @@ export function createDriver(actx: AnimCtx): TweenDriver {
       muted: () => ReadonlySet<string>
     ): MotionHandle => handleOf(actx, startTrack(actx, entity, component, to, options, muted)),
 
-    cancelAll: (entity: Entity): void => cancelTracksOf(actx, entity)
+    cancelAll: (entity: Entity): void => cancelTracksOf(actx, entity),
+
+    offsetsOf: (entity: Entity, component: AnyComponent): Readonly<Record<string, number>> =>
+      addedOffsets(actx, entity, component)
   };
 }
 

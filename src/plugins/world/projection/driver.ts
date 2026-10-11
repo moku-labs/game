@@ -41,6 +41,9 @@ function joinFields(
   return new Set([...(driven ?? []), ...owned]);
 }
 
+/** What a component no loop adds to answers: no offset on any field. */
+const NO_OFFSETS: Readonly<Record<string, number>> = Object.freeze({});
+
 /** A handle for a motion that is already done. */
 const INERT: MotionHandle = {
   finish: (): void => {},
@@ -189,7 +192,12 @@ export function startTrack(
   );
 
   if (handle.active()) {
-    state.tracks.push({ entity, component: component.componentName, handle });
+    state.tracks.push({
+      entity,
+      component: component.componentName,
+      handle,
+      additive: options.additive === true
+    });
   }
 
   return handle;
@@ -221,7 +229,9 @@ export function forgetEndedTracks(pctx: ProjectionCtx): void {
 }
 
 /**
- * The component names a running track drives on one entity.
+ * The component names a running track drives on one entity. An additive track drives none: the
+ * loop of a view adds an offset to the rest pose and owns no component, so a settle may bring
+ * the component home under it.
  *
  * @param pctx - Domain context of the projection module.
  * @param entity - The entity to ask about.
@@ -233,10 +243,28 @@ export function drivenComponents(pctx: ProjectionCtx, entity: Entity): Set<strin
   const driven = noFields();
 
   for (const track of pctx.ctx.state.projection.tracks) {
-    if (track.entity === entity) driven.add(track.component);
+    if (track.entity === entity && !track.additive) driven.add(track.component);
   }
 
   return driven;
+}
+
+/**
+ * What the additive tracks of the installed driver add to one component of one entity right now:
+ * the offset of a loop. A driver that does not report it, and a world without a driver, answer
+ * no offset.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param entity - The entity to ask about.
+ * @param component - The component to ask about.
+ * @returns Field name to what is added to it, empty for a component no loop adds to.
+ */
+export function loopOffsets(
+  pctx: ProjectionCtx,
+  entity: Entity,
+  component: AnyComponent
+): Readonly<Record<string, number>> {
+  return pctx.ctx.state.projection.driver?.offsetsOf?.(entity, component) ?? NO_OFFSETS;
 }
 
 /**

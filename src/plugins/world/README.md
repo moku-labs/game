@@ -71,16 +71,16 @@ app.world.ecs.snapshot().entities[0];
 | `setLayers(list)` / `layers()` | The layer list of the scene; order is draw order. Every call stores a new frozen array, so a reader compares by identity. |
 | `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. Throws for an unknown name and for a `layer` or `lift` the scene does not declare; nothing is mounted then. |
 | `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call. |
-| `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. In `paused` and `fast` it writes the rest pose at once. |
+| `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
-| `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. |
+| `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. |
 | `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
 | `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
-| `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. |
+| `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. A driver may report what its additive tracks add right now with the optional `offsetsOf(entity, component)`: the world then compares the value under a loop with the rest pose. |
 | `viewOf(entity, owner?)` | A view handle for an entity a plugin owns, so `ui` can animate an element. `rest` reads what `setRest` recorded, `peer` answers `undefined`. A projection view and a foreign owner get `undefined`. |
-| `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home, and where a restore and a load put it. The owner records the pose it draws the element with, every time that changes. |
-| `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. |
+| `setRest(entity, Component, value)` | Records the rest pose of such an element, which is where `toRest` brings it home, and where a restore and a load put it. The owner records the pose it draws the element with, every time that changes. The pose of an entity that is gone is dropped in the next live frame. |
+| `registerKey(projection, key, entity)` | Publishes an element under a projection and key. A key a live view holds is a `[game]` error naming both; the remover drops it. A key whose entity is gone is dropped in the next live frame, also when the remover was never called. |
 | `onConverged(listener)` | Calls the listener after a reconcile a restore or a load caused, when every view and every element stands on its rest pose and every track on them is ended. `ui` builds its roots again after it, so each element stands as freshly mounted. The remover is safe to call twice. |
 | `rerunAll()` | Marks every mounted projection dirty and forces `view` for every item. |
 
@@ -118,7 +118,7 @@ const app = createApp({
 | `time` phase | What `world` does, in order |
 |---|---|
 | `input` | reconcile when dirty → drop the hint buffer → systems of `input` → flush commands |
-| `animate` | sweep ended motions (the driver advanced its tracks first) → systems of `animate` → flush |
+| `animate` | sweep ended motions (the driver advanced its tracks first) → forget dead elements → start the owed loops → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
 | `signals` | record the frame history (dev builds only) → clear every change set |
@@ -135,13 +135,48 @@ entity that died meanwhile is dropped.
 
 The cause of the commit decides how the reconcile runs. The causes of one frame are merged: one
 direct cause makes the reconcile direct. A direct reconcile ends with a flush: every motion of a
-live view is finished, every track on its entity is cancelled and the despawn queue is emptied.
+live view is finished, every track on its entity is cancelled, a pending `lift(false)` is applied
+and the despawn queue is emptied. The flush ends the loop of a view too, so the view owes its
+loop from there on: see [Motions](#motions).
 
-| Cause | Mode | A live view whose item is the same object as before |
+| Cause | Mode | A live view whose item did not change |
 |---|---|---|
-| `edge`, `rollback` | play; direct while the world is `paused` or `fast` | skipped: its pose is not written |
+| `edge` | play; direct while the world is `paused` or `fast` | skipped: its pose is not written |
+| `rollback` | play; direct while the world is `paused` or `fast` | settled when it stands off its rest pose, skipped when it stands on it |
 | `rerun` (`rerunAll`, `replace`) | direct | `view` runs again and the rest pose is written |
 | `restore`, `load` | direct | written to its rest pose; `view` does not run again |
+
+**When an item did not change.** An item that is the same object as before is never projected
+again: `view` does not run. An item that is another object goes through `view`, and its
+components are compared with the rest pose of the view. In play mode an empty diff is no change:
+the new item is stored and nothing else happens. No motion of the view is cancelled, no hook runs,
+nothing is written, no loose component is settled, no hint is used and `changed` of
+`world:reconciled` does not count the view. So a `from` that maps or spreads may build a new
+object on every commit and its views keep their motions; a game needs no frozen item table for
+that. A direct reconcile projects a new object as before: its rest pose is written and it counts
+as changed.
+
+**A rollback.** A rollback commits the state of the last rest point. The failed node committed
+nothing, so no item is new and no entry brings back a view the node moved with a motion or a
+timeline. So a rollback settles every live view whose item did not change and that stands off its
+rest pose, exactly as `settle(entity)` does: the motions of the view are cancelled and
+`motion.settle`, or the built-in `toRest` over `settleMs`, is played for the loose components. Off
+its rest pose is measured field by field: a muted field does not count and a number is at rest
+within 1e-6. A view that stands on its rest pose is left alone, so its motions run on. In direct
+mode the rest pose is written at once, after the flush: the flush finishes the motions of the
+view and a cancelled additive track writes its base back, so the rest write comes last.
+
+A view that loops is settled like any other, and its loop runs on over the settle. What its loop
+adds is no distance from the rest pose: a looping view that stands at home is left alone, and one
+the node moved is settled, also when the node moved it in the very field the loop adds to. See
+[Motions](#motions).
+
+Two limits of the rollback settle:
+
+- Only the views of mounted projections are settled. An element another plugin owns, as a `ui`
+  element, stays where the node left it.
+- A timeline the node started and did not await is not aborted by the failure. It may run on
+  over the settle.
 
 A restore and a load replace the state. After their reconcile every live view of every mounted
 projection stands on the rest pose of the new state and no motion runs on it, whether its item
@@ -149,14 +184,17 @@ changed or not. That covers a projection whose `from` hands out the same object 
 state, a frozen table or a constant: an aborted node finishes its animation, which leaves the views
 on the end pose, and no item of the restore is new. The rest pose is written after the flush, so
 nothing writes after it, also not an additive track that puts its base back when it is cancelled.
-Muted fields are left out.
+Muted fields are left out. The `loop` of a view is the one motion that comes back: the flush ends
+it, and the sweep of the same frame starts it again on the rest pose.
 
 The same reconcile brings home the elements another plugin owns, which no projection meets: every
 entity with a pose recorded by `setRest`. Every track on the entity is ended with
 `driver.cancelAll`, then each recorded component the entity still carries is written, muted fields
 left out. A component the element dropped is not added back. An element tagged `Exiting` has its
-tracks ended and keeps its place, so its owner sweeps it. A recorded pose of an entity that is gone
-is skipped, and so is one recorded for a projection view. Last, every `onConverged` listener runs:
+tracks ended and keeps its place, so its owner sweeps it. The recorded pose and the registered key
+of an entity that is gone are dropped before anything is written, as the sweep of every live frame
+drops them: an owner that despawns its element leaves both behind. A pose recorded for a
+projection view is skipped. Last, every `onConverged` listener runs:
 the owner puts back what only it knows, as `ui` builds its roots again through its mount path. A
 listener that throws is logged with `log.error("world:converged-listener-failed", …)` and the
 others still run.
@@ -166,12 +204,63 @@ others still run.
 A motion may carry a `loop` hook (`defineMotion` with `loop` builds it): it is played wherever `enter`
 plays, kept out of the view's handles so a change never cancels it, and ends with the view.
 
+A direct reconcile plays no hook, and its flush ends every track of a view, the loop too. Such a
+view owes its loop: the flag is set when a view enters directly (a mount, a load, a restore, a
+commit while the world is `paused` or `fast`) and whenever a flush ends its tracks. The sweep of
+phase `animate` starts the loop of every live view that owes one and clears the flag, only while
+the world is `live` and a tween driver is installed. The flag is the only trigger, so a loop starts
+once. A world that comes back from `paused` or `fast` makes no reconcile of its own: its first
+frame starts the owed loops. Without a driver nothing starts and the views keep owing, because the
+instant default would write the end pose of the loop once. A view that enters in play mode starts
+its loop at once and owes none. The `enter` hook is never played for a view that entered directly.
+
+So the loop of a live view runs while the world is `live` and `anim` is installed. It ends with
+its view. `anim.finishAll()` ends it too and owes nothing by itself; the next flush of the world
+(a load, a restore, a commit in a paused or fast world) owes it again. A fast frame of the flow
+that flushes no view leaves a loop standing where it is.
+
 A new motion on a view that still animates cancels the running ones and starts from the current
 values (spike P5). Components the new hooks do not drive are brought to the rest pose by
 `motion.settle`, or by the built-in `toRest` over `settleMs`. When the last motion of a view ends,
 every rest component is compared with the stored value, muted fields excluded. A number counts as
 at rest within 1e-6 reference units, so float noise from a root-space round trip is no difference.
 A difference is written and reported with `log.warn("world:view-corrected", …)`.
+
+The loop of a view is an additive track: it adds an offset to the rest pose and owns no
+component. So it drives no component, and a settle brings a looping view home under its loop:
+the settle after `enter`, of a changed item, of a revive, of `settle(entity)` and of a rollback.
+The loop runs on. A track that owns its fields, also one that repeats forever, still drives its
+component. An additive tween a change hook answers with drives none either: the settle brings
+its component to the new rest pose next to that tween.
+
+The offset of a loop sits in the stored value of the fields it adds to. The driver reports it
+with `TweenDriver.offsetsOf`, and the world takes it off before it compares a view with its rest
+pose. So the value under the loop is what counts, and three rules follow:
+
+- A looping view that stands at home is home. No settle starts for it, no `settle` hook is called
+  and no track runs: not on a rollback, on `settle(entity)`, on a commit that changes another
+  component, or on a revive. A view something moved is loose in whatever field, also in the one
+  its loop adds to: a bobbing view a failed node flew up comes home.
+- The convergence check never corrects what the loop adds and reports no `world:view-corrected`
+  for it. A real miss under a loop is corrected to the rest value with the offset on top.
+- The driver keeps its own base for those fields, so a rest value the world writes directly would
+  be gone with the next frame of the loop. Where a loop runs on, the world hands the rest value to
+  the driver with a track of 0 ms that it finishes at once, and writes the value with the offset
+  on top: a changed component without a hook, a settle hook that threw, a correction of the
+  convergence check, and `settle(entity)` in a world that is not live. The base is moved before
+  the write returns, so nothing that cancels the motions of the view next can lose it, and no
+  motion is left that a pending `lift(false)` would wait for. In direct mode the flush cancels the loop, which
+  writes its old base back, so a changed or revived view is written once more after the flush.
+
+A driver that does not report offsets is read as "no offset": the stored value is compared as it
+stands. What an additive track of such a driver adds then counts as a distance from the rest
+pose.
+
+`lift(entity, false)` on a moving view waits for its last motion. The sweep applies it when the
+motion ends. Whatever ends the motions itself applies it too: the flush of a direct reconcile,
+and in play mode a change, a revive, a rollback settle and `settle(entity)` that cancel the
+motions of the view and start no new one. A view the finger still holds carries no pending drop
+and stays lifted.
 
 `ViewHandle.tween`, `toRest` and `all` run on the driver `anim` installs with `setDriver`
 (`projection/driver.ts`). A track reads its start values when its `delayMs` ends, writes the exact

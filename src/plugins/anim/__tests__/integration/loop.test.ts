@@ -135,10 +135,11 @@ function rotationOf(app: CardsApp, key: string): number | undefined {
 }
 
 describe("anim — a defineMotion loop on a projection", () => {
-  it("starts when enter plays and never on the direct mount", async () => {
+  it("starts when enter plays, and in the first live frame after a direct mount", async () => {
     const app = await startCards();
 
-    expect(app.anim.active()).toBe(0);
+    // The direct mount plays no hook: the card owed its loop, and the first frame started it.
+    expect(app.anim.active()).toBe(1);
     expect(rotationOf(app, "a")).toBe(0);
 
     await move(app, [
@@ -147,19 +148,47 @@ describe("anim — a defineMotion loop on a projection", () => {
     ]);
     app.time.step(16);
 
-    expect(app.anim.active()).toBe(1);
+    // The second card entered on an edge: its loop started with enter, next to the first one.
+    expect(app.anim.active()).toBe(2);
 
     for (let frame = 0; frame < 50; frame += 1) app.time.step(16);
 
     // 51 frames of 16 ms = 816 ms: two whole cycles and 16 ms of the third, 0.1 × 16 / 200 in.
     expect(rotationOf(app, "b")).toBeCloseTo(0.008, 6);
-    expect(rotationOf(app, "a")).toBe(0);
-    expect(app.anim.active()).toBe(1);
+    // The mounted card started one frame earlier and is advanced from the frame after: 51 too.
+    expect(rotationOf(app, "a")).toBeCloseTo(0.008, 6);
+    expect(app.anim.active()).toBe(2);
 
     await app.stop();
   });
 
-  it("dies on flushAll (fast mode) and with its view", async () => {
+  it("stands through the fast frames of the flow and runs on when the flow is live again", async () => {
+    const app = await startCards();
+
+    app.time.step(100);
+
+    expect(app.anim.active()).toBe(1);
+    expect(rotationOf(app, "a")).toBeCloseTo(0.05, 6);
+
+    // The flow walks fast and commits nothing: no reconcile, so nothing flushes the view.
+    app.flow.setMode("fast");
+    app.time.step(16);
+    app.time.step(16);
+
+    // A fast frame ends what has an end. The loop has none: it stands where it is.
+    expect(app.anim.active()).toBe(1);
+    expect(rotationOf(app, "a")).toBeCloseTo(0.05, 6);
+
+    app.flow.setMode("live");
+    app.time.step(100);
+
+    expect(app.anim.active()).toBe(1);
+    expect(rotationOf(app, "a")).toBeCloseTo(0.1, 6);
+
+    await app.stop();
+  });
+
+  it("dies on flushAll (fast mode), starts again when the world is live, and dies with its view", async () => {
     const app = await startCards();
     const both = [
       { id: "a", x: 0 },
@@ -182,14 +211,17 @@ describe("anim — a defineMotion loop on a projection", () => {
     await move(app, both);
     app.time.step(16);
 
-    expect(app.anim.active()).toBe(1);
+    // The card that stayed owed its loop after the flush and got it back in a live frame. The
+    // card that entered again started its own.
+    expect(app.anim.active()).toBe(2);
 
     await move(app, [{ id: "a", x: 0 }]);
     app.time.step(16);
     app.time.step(16);
 
+    // Only the loop of the card that left died with its view.
     expect(app.world.projection.entityOf("hud.cards", "b")).toBeUndefined();
-    expect(app.anim.active()).toBe(0);
+    expect(app.anim.active()).toBe(1);
 
     await app.stop();
   });

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { Json, Snapshot, Transaction } from "../../../model/types";
 import type { Contribution, FeaturesApi, FeaturesInternal } from "../../features/types";
+import { createFxApi } from "../../fx/api";
+import { guide } from "../../fx/descriptors";
 import type { Descriptor, FxApi, FxInternal, Hint } from "../../fx/types";
 import type { Allow, Answer, GateApi, GateInternal, GateSpec } from "../../gate/types";
 import type { InboxApi, InboxInternal, WorldEvent } from "../../inbox/types";
@@ -2007,6 +2009,442 @@ describe("recover on the safe node", () => {
 
     expect(refused).toEqual(["stop"]);
     expect(harness.calls).not.toContain("fx:sfx");
+  });
+});
+
+// ─── fx.start: an effect the node does not wait for ───────────
+
+/** A transit node `boot` with the given body, then the rest node `home`. */
+const startingFlow = (run: NonNullable<NodeOptions["run"]>): AnyFlow =>
+  flow("main", { boot: node({ run }), home: waiting("play") }, "boot", {
+    boot: { done: "home" },
+    home: { play: "boot" }
+  });
+
+/**
+ * Puts the real effects gateway behind the runner, so a handler runs as it does in a game: the
+ * mode decides, and a `cosmetic` failure is swallowed. Without a frame loop a completion is not
+ * queued for the `signals` phase.
+ */
+const withGateway = (harness: ReturnType<typeof setup>) => {
+  const gateway = createFxApi(harness.ctx, { gate: harness.gate.gate });
+
+  harness.modules.fx = gateway;
+
+  return gateway;
+};
+
+/** The error entries of the log, as `[event, data, error]`. */
+const errorEntriesOf = (harness: ReturnType<typeof setup>) =>
+  vi.mocked(harness.ctx.log.error).mock.calls;
+
+describe("fx.start", () => {
+  it("runs the handler at once, with the node's signal, and returns undefined", async () => {
+    const order: string[] = [];
+    const returned: unknown[] = [];
+    const signals: { handler: AbortSignal | undefined; node: AbortSignal | undefined } = {
+      handler: undefined,
+      node: undefined
+    };
+    const harness = setup({
+      main: startingFlow(context => {
+        signals.node = context.signal;
+        returned.push(context.fx.start({ kind: "sfx", payload: { key: "ui.tap" } }));
+        order.push("after start");
+
+        return result("done");
+      }),
+      running: false
+    });
+
+    withGateway(harness).handle("sfx", (descriptor, handlerContext) => {
+      order.push(`handler:${JSON.stringify(descriptor.payload)}`);
+      signals.handler = handlerContext.signal;
+    });
+    harness.start();
+    await tick();
+
+    expect(order).toEqual(['handler:{"key":"ui.tap"}', "after start"]);
+    expect(returned).toEqual([undefined]);
+    expect(signals.node).toBeInstanceOf(AbortSignal);
+    expect(signals.handler).toBe(signals.node);
+    await stopRunner(harness.ctx);
+  });
+
+  it("does not hold the node: the edge commits while the handler never resolves", async () => {
+    const started = { count: 0 };
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "jingle" });
+
+        return result("done");
+      }),
+      running: false
+    });
+
+    withGateway(harness).handle("jingle", () => {
+      started.count += 1;
+
+      return new Promise<void>(() => undefined);
+    });
+    harness.start();
+    await tick();
+
+    expect(started.count).toBe(1);
+    expect(harness.ctx.state.runner.journal).toEqual([
+      expect.objectContaining({ path: "boot", outcome: "done", next: "home" })
+    ]);
+    expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("does not hold the node while the frame loop runs either", async () => {
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "jingle" });
+
+        return result("done");
+      })
+    });
+
+    withGateway(harness).handle("jingle", () => new Promise<void>(() => undefined));
+    harness.start();
+    await tick();
+
+    expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("writes one flow:fx-start-failed error entry when the handler rejects, and the node commits", async () => {
+    const boom = new Error("no audio device");
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "jingle" });
+
+        return result("done");
+      }),
+      running: false
+    });
+
+    withGateway(harness).handle("jingle", () => Promise.reject(boom));
+    harness.start();
+    await tick();
+
+    expect(errorEntriesOf(harness)).toEqual([
+      ["flow:fx-start-failed", { path: "boot", kind: "jingle" }, boom]
+    ]);
+    // The failure of a started effect is never the node's: no rollback, no `flow:error`.
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([]);
+    expect(harness.calls).not.toContain("rollback");
+    expect(harness.ctx.state.runner.journal).toEqual([
+      expect.objectContaining({ path: "boot", outcome: "done", next: "home" })
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("writes the same entry for a handler that throws", async () => {
+    const boom = new Error("no audio device");
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "jingle" });
+
+        return result("done");
+      }),
+      running: false
+    });
+
+    withGateway(harness).handle("jingle", () => {
+      throw boom;
+    });
+    harness.start();
+    await tick();
+
+    expect(errorEntriesOf(harness)).toEqual([
+      ["flow:fx-start-failed", { path: "boot", kind: "jingle" }, boom]
+    ]);
+    expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("logs a rejection that is no error as an error with its text", async () => {
+    const reason: unknown = "no device";
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "jingle" });
+
+        return result("done");
+      }),
+      running: false
+    });
+
+    withGateway(harness).handle("jingle", () => Promise.reject(reason));
+    harness.start();
+    await tick();
+
+    const [entry] = errorEntriesOf(harness);
+
+    expect(errorEntriesOf(harness)).toHaveLength(1);
+    expect(entry?.[0]).toBe("flow:fx-start-failed");
+    expect(entry?.[2]).toBeInstanceOf(Error);
+    expect(entry?.[2]?.message).toBe("no device");
+    await stopRunner(harness.ctx);
+  });
+
+  it("writes the entry in the signals phase while the frame loop runs", async () => {
+    const boom = new Error("no audio device");
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "jingle" });
+
+        return result("done");
+      })
+    });
+    const gateway = withGateway(harness);
+
+    gateway.handle("jingle", () => Promise.reject(boom));
+    harness.start();
+    await tick();
+
+    // The completion of an effect waits for the next `signals` phase, a failed one too.
+    expect(errorEntriesOf(harness)).toEqual([]);
+
+    gateway.flushSettled();
+    await tick();
+
+    expect(errorEntriesOf(harness)).toEqual([
+      ["flow:fx-start-failed", { path: "boot", kind: "jingle" }, boom]
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("writes nothing when the handler of a cosmetic descriptor rejects", async () => {
+    const started = { count: 0 };
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "sfx", payload: { key: "ui.tap" }, cosmetic: true });
+
+        return result("done");
+      }),
+      running: false
+    });
+
+    withGateway(harness).handle("sfx", () => {
+      started.count += 1;
+
+      return Promise.reject(new Error("no audio device"));
+    });
+    harness.start();
+    await tick();
+
+    expect(started.count).toBe(1);
+    expect(errorEntriesOf(harness)).toEqual([]);
+    expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("refuses a descriptor with answers and a guide: an answer has to be awaited", async () => {
+    const thrown: unknown[] = [];
+    const harness = setup({
+      main: startingFlow(context => {
+        try {
+          context.fx.start({ kind: "popup", answers: ["ok"] });
+        } catch (error) {
+          thrown.push(error);
+        }
+
+        try {
+          context.fx.start(guide({ allow: { intent: "play" } }));
+        } catch (error) {
+          thrown.push(error);
+        }
+
+        return result("done");
+      })
+    });
+
+    harness.start();
+    await tick();
+
+    const messages = thrown.map(error => (error instanceof Error ? error.message : String(error)));
+
+    expect(messages).toEqual([
+      '[game] fx.start() got the effect "popup" in the node "boot", and its answer has to be awaited.\n  Write await fx(...) for a descriptor with answers and for a guide.',
+      '[game] fx.start() got the effect "guide" in the node "boot", and its answer has to be awaited.\n  Write await fx(...) for a descriptor with answers and for a guide.'
+    ]);
+    // Nothing was started: no effect ran, no gate opened for the popup, no narrow was set.
+    expect(harness.calls).not.toContain("fx:popup");
+    expect(harness.calls).not.toContain("fx:guide");
+    expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
+    expect(harness.gate.narrows).toEqual([undefined]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("fails the node like any thrown error when the refusal is not caught", async () => {
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "popup", answers: ["ok"] });
+
+        return result("done");
+      }),
+      config: { retries: 0 }
+    });
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    expect(errorEntriesOf(harness)[0]?.[0]).toBe("flow:error");
+    expect(errorEntriesOf(harness)[0]?.[2]?.message).toContain("fx.start() got the effect");
+    // `boot` is the safe node of this graph, so its second failure is fatal.
+    expect(fatal.error?.message).toContain("failed while the graph was recovering");
+  });
+
+  it("starts nothing and throws nothing after the abort of the node", async () => {
+    const held: { context: AnyNodeContext | undefined } = { context: undefined };
+    const returned: unknown[] = [];
+    const harness = setup({
+      main: startingFlow(context => {
+        held.context = context;
+
+        return new Promise<Result>(() => undefined);
+      })
+    });
+
+    harness.start();
+    await tick();
+    await stopRunner(harness.ctx);
+
+    expect(held.context?.signal.aborted).toBe(true);
+    returned.push(
+      held.context?.fx.start({ kind: "sfx" }),
+      // Also the descriptors `start` refuses: an aborted body gets no error from it.
+      held.context?.fx.start({ kind: "popup", answers: ["ok"] }),
+      held.context?.fx.start(guide({ allow: { intent: "play" } }))
+    );
+
+    expect(returned).toEqual([undefined, undefined, undefined]);
+    expect(harness.calls.filter(call => call.startsWith("fx:"))).toEqual([]);
+    expect(harness.gate.narrows).toEqual([undefined]);
+  });
+
+  it("does not log the abort of the node as a failed effect", async () => {
+    const stopped: string[] = [];
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "load" });
+
+        return new Promise<Result>(() => undefined);
+      }),
+      running: false
+    });
+
+    // A handler that honours the signal: it rejects when the node is aborted.
+    withGateway(harness).handle(
+      "load",
+      (_descriptor, handlerContext) =>
+        new Promise<void>((_resolve, reject) => {
+          handlerContext.signal.addEventListener(
+            "abort",
+            () => {
+              stopped.push("handler");
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true }
+          );
+        })
+    );
+    harness.start();
+    await tick();
+
+    expect(errorEntriesOf(harness)).toEqual([]);
+
+    await stopRunner(harness.ctx);
+    await tick();
+
+    expect(stopped).toEqual(["handler"]);
+    expect(errorEntriesOf(harness)).toEqual([]);
+  });
+
+  it("skips a handler without runInFast in fast mode and runs one that has it", async () => {
+    const ran: string[] = [];
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "sfx" });
+        context.fx.start({ kind: "load" });
+
+        return result("done");
+      }),
+      running: false
+    });
+    const gateway = withGateway(harness);
+
+    gateway.handle("sfx", (_descriptor, handlerContext) => {
+      ran.push(`sfx:${handlerContext.mode}`);
+    });
+    gateway.handle(
+      "load",
+      (_descriptor, handlerContext) => {
+        ran.push(`load:${handlerContext.mode}`);
+      },
+      { runInFast: true }
+    );
+    gateway.setMode("fast");
+    harness.start();
+    await tick();
+
+    expect(ran).toEqual(["load:fast"]);
+    expect(harness.gate.opened).toEqual([{ allowed: ["play"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("starts an effect from recover, inside the recovery transaction", async () => {
+    const harness = setup({
+      main: failingBoot(
+        safeHome(context => {
+          harness.calls.push(`start:${String(context.fx.start({ kind: "sfx" }))}`);
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.start();
+    await tick();
+
+    expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
+      "begin",
+      "fx:sfx",
+      "start:undefined",
+      "commit",
+      "release",
+      "markRest",
+      "begin",
+      "open:play,shop"
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("names the safe node in the entry of an effect that recover started", async () => {
+    const boom = new Error("no audio device");
+    const harness = setup({
+      main: failingBoot(
+        safeHome(context => {
+          context.fx.start({ kind: "jingle" });
+        })
+      ),
+      config: safeConfig,
+      running: false
+    });
+
+    withGateway(harness).handle("jingle", () => Promise.reject(boom));
+    harness.start();
+    await tick();
+
+    expect(errorEntriesOf(harness).filter(entry => entry[0] === "flow:fx-start-failed")).toEqual([
+      ["flow:fx-start-failed", { path: "home", kind: "jingle" }, boom]
+    ]);
+    // The recovery still committed: the safe node opened its gate.
+    expect(harness.gate.opened).toEqual([{ allowed: ["play", "shop"] }]);
+    await stopRunner(harness.ctx);
   });
 });
 

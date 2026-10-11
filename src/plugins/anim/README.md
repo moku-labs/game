@@ -145,11 +145,28 @@ const orderCard = defineMotion({
   way; a tolerance of 1e-9 rad): the next cycle restarts at the start, which looks the same.
 - `defineMotion` builds a separate `loop` hook; `enter` no longer starts it. `world` plays `loop`
   wherever it plays `enter`, outside the view's handles, so enter still resolves and the loop runs on.
-  On a projection view it starts only when enter plays, never on a direct reconcile (mount, load,
-  restore, fast mode); a UI element always plays it, and a changed `motion` prop swaps the loop.
+  A direct reconcile (mount, load, restore, a paused or fast world) plays no `enter`, and its flush
+  ends every track of a view. Such a projection view owes its loop: a view that entered directly,
+  or whose tracks a flush ended, gets its loop from the next live frame, once. A UI element always
+  plays it, and a changed `motion` prop swaps the loop.
 - It is one additive track per component the keys name, with `repeat: "forever"`, so it layers over
   the rest pose, enter, change and settle motions: a new rest pose carries the loop along.
-- It dies with its view, on `flushAll` (fast mode) and on `finishAll()`. `active()` counts it.
+- The loop of a projection view runs while the world is `live` and `anim` is installed. It dies
+  with its view. `finishAll()` ends it; the next flush of the world owes it again. A flush of the
+  world (`flushAll` in fast mode, a load, a restore, a commit in a paused or fast world) ends it
+  too, and it starts again in the next live frame. A fast frame of the flow that flushes no view
+  leaves it standing where it is, and it runs on when the flow is live again. `active()` counts
+  it.
+- A field another writer owns is not written (`world.projection.mute`, the hand of a drag). When
+  the field is given back and that writer moved it, the loop adds to the value it finds there, so
+  the view does not jump back to where the loop started. A writer that only held the field moved
+  nothing: the loop goes on over the value it had.
+- The driver `anim` installs reports what its additive tracks add to a component right now:
+  `offsetsOf(entity, component)` answers field name to offset, `{ rotation: 0.04 }` for a card in
+  mid-sway, and `{}` for a component no additive track runs on. `world` takes that off the stored
+  value before it compares a view with its rest pose. So a view that only sways is home: no
+  settle starts for it. A view something moved is not, also in the swayed field, and the settle
+  brings the value under the loop home while the loop runs on.
 - A loop does not keep the clock awake: two seconds after the last `wake()` it steps at `time.idleFps`.
 - `loop.ms` is one cycle; left out, it is `transition.ms`. A `loop.ms` that is not a finite number above 0 throws
   `[game] Motion loop "<name>" has ms <ms>.` A `loop.track` that names no keyframe track throws too.

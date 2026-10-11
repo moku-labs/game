@@ -16,10 +16,19 @@ import {
   type Peers,
   playSettle,
   runHook,
+  standsOffRest,
   stillMoving,
-  writeRestNow
+  writeRestNow,
+  writeRestUnderLoops
 } from "./motions";
-import { dequeueRevive, despawnView, enqueueExit, flushMounted } from "./queue";
+import {
+  dequeueRevive,
+  despawnView,
+  dropIfStill,
+  enqueueExit,
+  flushMounted,
+  forgetDeadElements
+} from "./queue";
 import type {
   AnyProjectionSpec,
   ChangeHook,
@@ -114,6 +123,7 @@ function hintFor(
  * A key that is new: spawn the entity with the view components and the projection's layer, then
  * play the `enter` hook and the `loop` hook when the reconcile plays motions. The loop is not
  * kept with the view's handles: a change cancels those, and the loop runs until the view dies.
+ * A direct reconcile plays neither hook. The view then owes its loop, which the sweep starts.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -144,7 +154,13 @@ function enterEntry(
   const hook = spec.motion?.enter;
   const loop = spec.motion?.loop;
 
-  if (entry.direct || (hook === undefined && loop === undefined)) return;
+  if (entry.direct) {
+    view.loopOwed = true;
+
+    return;
+  }
+
+  if (hook === undefined && loop === undefined) return;
 
   const handle = createViewHandle(pctx, view, entry.peers);
 
@@ -161,27 +177,52 @@ function enterEntry(
 }
 
 /**
- * A key whose item changed: structural changes are written, a changed component with a hook is
- * handed to it and one without is written directly, then the retarget settles what is loose.
+ * A key whose item is another object than before: structural changes are written, a changed
+ * component with a hook is handed to it and one without is written directly, then the retarget
+ * settles what is loose. A view no motion moves after that gets its pending `lift(false)`.
+ *
+ * In play mode an item with the same content is no change: when the component diff is empty the
+ * new item is stored and nothing else happens. No motion of the view is cancelled, no hook runs,
+ * nothing is written, no loose component is settled and no hint is used. A `from` that builds a
+ * new object on every commit so keeps the motions of its views. A direct reconcile, and a forced
+ * one, project the item as before.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
  * @param view - The live view.
- * @param entry - The item, the peers, the mode and the used hints.
+ * @param entry - The item, the peers, the mode, the force flag, the used hints and the list a
+ *   direct reconcile fills.
  * @param entry.item - The new model item.
  * @param entry.peers - The new and the old items.
  * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.force - Whether an unchanged item is projected again.
  * @param entry.used - The hints that reached an entry.
+ * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
+ * @returns False when the item has the same content as before and was only stored.
  */
 function changeEntry(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   view: View,
-  entry: { item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
-): void {
+  entry: {
+    item: unknown;
+    peers: Peers;
+    direct: boolean;
+    force: boolean;
+    used: Set<Hint>;
+    rewritten: View[];
+  }
+): boolean {
   const next = collectView(pctx, spec, entry.item);
   const { added, changed, removed } = diffComponents(view.rest, next, treeName(pctx));
   const previous = view.item;
+  const plays = !entry.direct && !entry.force;
+
+  if (plays && added.length + changed.length + removed.length === 0) {
+    view.item = entry.item;
+
+    return false;
+  }
 
   for (const value of valuesOf(next, added)) writeValue(pctx, view.entity, value);
   for (const value of valuesOf(view.rest, removed)) pctx.deps.ecs.remove(view.entity, value.type);
@@ -194,8 +235,9 @@ function changeEntry(
     // frame, so a component a cancelled motion left off its rest pose is written too.
     finishHandles(view);
     writeRestNow(pctx, view, [...next.keys()]);
+    entry.rewritten.push(view);
 
-    return;
+    return true;
   }
 
   cancelHandles(view);
@@ -222,29 +264,36 @@ function changeEntry(
     else if (played.motion !== undefined) view.handles.push(played.motion);
   }
 
-  writeRestNow(pctx, view, written);
+  // The loop of the view runs on: a value written under it keeps the offset and reaches the driver.
+  writeRestUnderLoops(pctx, view, written);
   playSettle(pctx, view, spec, entry.peers, looseComponents(pctx, view));
+  // The motions were cancelled: when no new one started, a pending `lift(false)` takes effect.
+  dropIfStill(pctx, view);
+
+  return true;
 }
 
 /**
  * A key that came back while its exit still played: the SAME view is revived, no `enter` and no
- * `change` hook runs, and one settle over the loose components brings it home.
+ * `change` hook runs, and one settle over the loose components brings it home. A view no motion
+ * moves after that gets its pending `lift(false)`.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
  * @param mounted - The mounted projection.
  * @param view - The queued view.
- * @param entry - The item, the peers and the mode.
+ * @param entry - The item, the peers, the mode and the list a direct reconcile fills.
  * @param entry.item - The new model item.
  * @param entry.peers - The new and the old items.
  * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
  */
 function reviveEntry(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   mounted: Mounted,
   view: View,
-  entry: { item: unknown; peers: Peers; direct: boolean }
+  entry: { item: unknown; peers: Peers; direct: boolean; rewritten: View[] }
 ): void {
   cancelHandles(view);
   dequeueRevive(pctx, mounted, view, spec);
@@ -260,11 +309,14 @@ function reviveEntry(
 
   if (entry.direct) {
     writeRestNow(pctx, view, [...next.keys()]);
+    entry.rewritten.push(view);
 
     return;
   }
 
   playSettle(pctx, view, spec, entry.peers, looseComponents(pctx, view));
+  // The exit motion was cancelled: when no settle started, a pending `lift(false)` takes effect.
+  dropIfStill(pctx, view);
 }
 
 /**
@@ -309,19 +361,60 @@ function exitEntry(
 }
 
 /**
+ * A live key whose item did not change, on a rollback: the same object, or in play mode a new
+ * one with the same content. The failed node committed nothing, so no entry brings back a view
+ * it moved with a motion or a timeline. A view that stands off its rest pose is settled as
+ * `projection.settle(entity)` does: its motions are cancelled and the settle is played for the
+ * loose components. With nothing loose a pending `lift(false)` takes effect. A view that stands
+ * on its rest pose is left alone, so its motions run on. That holds for a view that loops too:
+ * the value under its loop is what is compared. A direct reconcile only remembers the view: its
+ * rest pose is written after the flush, in `writeUnchanged`.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param spec - The projection spec.
+ * @param view - The live view whose item is the same as before.
+ * @param entry - The peers, the mode and the list a direct reconcile fills.
+ * @param entry.peers - The new and the old items.
+ * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.unchanged - The unchanged views of a direct reconcile, written after its flush.
+ */
+function settleUnchanged(
+  pctx: ProjectionCtx,
+  spec: AnyProjectionSpec,
+  view: View,
+  entry: { peers: Peers; direct: boolean; unchanged: View[] }
+): void {
+  if (entry.direct) {
+    entry.unchanged.push(view);
+
+    return;
+  }
+
+  if (!standsOffRest(pctx, view)) return;
+
+  cancelHandles(view);
+  playSettle(pctx, view, spec, entry.peers, looseComponents(pctx, view));
+  // The motions were cancelled: when no new one started, a pending `lift(false)` takes effect.
+  dropIfStill(pctx, view);
+}
+
+/**
  * Routes one key of the new state to the entry it belongs to: a live view changes, a queued view
  * revives, an unknown key enters.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
  * @param mounted - The mounted projection.
- * @param entry - The key, its item, the peers, the mode, the force flag and the used hints.
+ * @param entry - The key, its item, the peers, the mode, the flags and the used hints.
  * @param entry.key - The model key.
  * @param entry.item - The model item.
  * @param entry.peers - The new and the old items.
  * @param entry.direct - Whether the reconcile writes without motions.
  * @param entry.force - Whether an unchanged item is projected again.
+ * @param entry.settle - Whether an unchanged view that stands off its rest pose is settled.
  * @param entry.used - The hints that reached an entry.
+ * @param entry.unchanged - The unchanged views of a direct reconcile that settles.
+ * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
  * @param counts - The counters of this reconcile.
  */
 function applyEntry(
@@ -334,19 +427,23 @@ function applyEntry(
     peers: Peers;
     direct: boolean;
     force: boolean;
+    settle: boolean;
     used: Set<Hint>;
+    unchanged: View[];
+    rewritten: View[];
   },
   counts: Counts
 ): void {
   const live = mounted.live.get(entry.key);
 
   if (live !== undefined) {
-    // The same object: nothing to project. A restore and a load still write its rest pose, once
-    // for every live view, in `convergeMounted`.
-    if (!entry.force && live.item === entry.item) return;
+    // The same object, or in play mode the same content: nothing to project. A restore and a
+    // load still write its rest pose, once for every live view, in `convergeMounted`. A rollback
+    // settles it when it stands off it.
+    const same = !entry.force && live.item === entry.item;
 
-    changeEntry(pctx, spec, live, entry);
-    counts.changed += 1;
+    if (!same && changeEntry(pctx, spec, live, entry)) counts.changed += 1;
+    else if (entry.settle) settleUnchanged(pctx, spec, live, entry);
 
     return;
   }
@@ -466,12 +563,42 @@ function convergeMounted(pctx: ProjectionCtx, mounted: Mounted): void {
 }
 
 /**
+ * The last step of a direct reconcile that does not converge: every view an entry wrote is
+ * written to its rest pose once more. The flush cancels the loop of a view with its other
+ * tracks, and the driver writes the base it kept for the fields the loop added to back: the old
+ * rest value. So the write of the entry, which came before the flush, would be lost in those
+ * fields. Muted fields are left out.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param rewritten - The live views a changed or revived entry wrote in this reconcile.
+ */
+function writeAgain(pctx: ProjectionCtx, rewritten: readonly View[]): void {
+  for (const view of rewritten) writeRestNow(pctx, view, [...view.rest.keys()]);
+}
+
+/**
+ * The last step of a direct reconcile a rollback caused: an unchanged view that stands off its
+ * rest pose is written to it. It runs after the flush, as `convergeMounted` does and for the same
+ * reason: the flush finishes the motions of the view, and a cancelled additive track writes its
+ * base back, so the rest write has to come last. Muted fields are left out.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param unchanged - The live views whose item did not change in this reconcile.
+ */
+function writeUnchanged(pctx: ProjectionCtx, unchanged: readonly View[]): void {
+  for (const view of unchanged) {
+    if (standsOffRest(pctx, view)) writeRestNow(pctx, view, [...view.rest.keys()]);
+  }
+}
+
+/**
  * The same last step for the elements another plugin owns, which no reconcile of a projection
  * meets: each is written to the rest pose its owner recorded with `setRest`. Every track on the
  * entity is ended first, so nothing writes after it. Only a component the entity still carries
  * is written and muted fields are left out. An element that is leaving has its tracks ended and
- * keeps its place, and the recorded pose of an entity that is gone is skipped. So is one recorded
- * for a projection view: its own rest pose wins, as in `restOf`, and it is already home.
+ * keeps its place. The recorded pose and the registered key of an entity that is gone are
+ * dropped before anything is written. A pose recorded for a projection view is skipped: its own
+ * rest pose wins, as in `restOf`, and it is already home.
  *
  * @param pctx - Domain context of the projection module.
  */
@@ -479,8 +606,10 @@ function convergeElements(pctx: ProjectionCtx): void {
   const { ecs, components } = pctx.deps;
   const state = pctx.ctx.state.projection;
 
+  forgetDeadElements(pctx);
+
   for (const [entity, rest] of state.rests) {
-    if (ecs.ownerOf(entity) === undefined || state.byEntity.has(entity)) continue;
+    if (state.byEntity.has(entity)) continue;
 
     cancelTracks(pctx, entity);
 
@@ -521,7 +650,7 @@ function tellConverged(pctx: ProjectionCtx): void {
  * @param spec - The projection spec.
  * @param mounted - The mounted projection.
  * @param snapshot - The model snapshot of this reconcile.
- * @param options - Mode, force flag and converge flag of this reconcile.
+ * @param options - Mode, force flag, converge flag and settle flag of this reconcile.
  * @param counts - The counters of this reconcile.
  * @param used - The hints that reached an entry.
  */
@@ -539,7 +668,16 @@ function reconcileOne(
   if (next === undefined) return;
 
   const peers: Peers = { next, previous: mounted.items };
-  const entry = { peers, direct: options.direct, used };
+  const unchanged: View[] = [];
+  const rewritten: View[] = [];
+  const entry = {
+    peers,
+    direct: options.direct,
+    settle: options.settle,
+    used,
+    unchanged,
+    rewritten
+  };
 
   try {
     for (const [key, item] of next) {
@@ -556,7 +694,14 @@ function reconcileOne(
   mounted.items = next;
 
   if (options.direct) flushMounted(pctx, mounted);
-  if (options.converge) convergeMounted(pctx, mounted);
+
+  // A converge writes every live view, so it covers what the other two steps would write.
+  if (options.converge) {
+    convergeMounted(pctx, mounted);
+  } else {
+    writeAgain(pctx, rewritten);
+    writeUnchanged(pctx, unchanged);
+  }
 
   counts.queued += mounted.queue.length;
 }
@@ -566,8 +711,9 @@ function reconcileOne(
  * one then brings the elements other plugins own home and tells their owners.
  *
  * @param pctx - Domain context of the projection module.
- * @param options - Which projections, play or direct, whether `view` is forced, and whether
- *   every live view and every element is brought to its rest pose at the end.
+ * @param options - Which projections, play or direct, whether `view` is forced, whether every
+ *   live view and every element is brought to its rest pose at the end, and whether an unchanged
+ *   view that stands off its rest pose is settled.
  */
 export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void {
   const state = pctx.ctx.state.projection;
@@ -597,14 +743,4 @@ export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void 
   if (pctx.ctx.config.reconciledEvent) {
     pctx.ctx.emit("world:reconciled", { mode: options.direct ? "direct" : "play", ...counts });
   }
-}
-
-/**
- * Re-projects one view with the same item, used by `lift` and `settle` to reach the peers.
- *
- * @param mounted - The mounted projection.
- * @returns The peers of a call outside a reconcile: the items of the last one.
- */
-export function restingPeers(mounted: Mounted): Peers {
-  return { next: mounted.items, previous: mounted.items };
 }

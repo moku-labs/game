@@ -232,11 +232,18 @@ export type GameDefinition<
   seed?: number;
   /** The shared layer: composed first among the features. */
   shared?: Flow.FeaturePlugin;
-  /** The features of the screen app, in order, after `shared`. */
+  /**
+   * The features of the screen app, in order, after `shared`. The headless app composes their
+   * logic too, unless `headless.features` names its own list.
+   */
   features?: readonly Flow.FeaturePlugin[];
   /** The game's own plugins, after the features. Their APIs land on `screen().app`. */
   plugins?: Plugins;
-  /** What the headless app composes: the logic of these features and these plugins, nothing else. */
+  /**
+   * What the headless app composes: the logic of these features and these plugins, nothing else.
+   * `headless.features` left out is the definition's `features`; `headless: { features: [] }`
+   * composes no feature. `shared` and `plugins` are never taken by default.
+   */
   headless?: { features?: readonly Flow.FeaturePlugin[]; plugins?: HeadlessPlugins };
   /** Plugin configs of the game. Seam-owned keys are not accepted. */
   pluginConfigs?: NoInfer<GamePluginConfigs<Plugins>>;
@@ -450,8 +457,9 @@ export type GameApp<
 > = {
   /**
    * Makes the logic app: the core plugins, the logic of `headless.features` and the
-   * `headless.plugins`. No screen plugin, no game plugin unless listed. Each call gives a fresh
-   * app, clock and provider.
+   * `headless.plugins`. A definition without `headless.features` gives the logic of its
+   * `features`. No screen plugin, no `shared`, no game plugin unless listed. Each call gives a
+   * fresh app, clock and provider.
    *
    * @param seams - What the test pins: seed, clock, provider, player, session.
    * @returns The app, not started, and its clock and provider.

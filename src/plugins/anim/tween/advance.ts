@@ -97,6 +97,65 @@ function sumOffsets(actx: AnimCtx, key: string): number {
 }
 
 /**
+ * What the running additive tracks of one component of one entity add to each of its fields
+ * right now: the offset of a loop. The `TweenDriver` seam hands it to `world`, which takes it off
+ * the stored value before it compares a view with its rest pose. A field no additive track adds
+ * to is left out.
+ *
+ * A field another writer owns keeps the offset of the last write of its track. That is what
+ * stands in the field while the writer only holds it, and what the track adds again when the
+ * field is given back. So a view the hand held still reads as home, and a view the hand put
+ * somewhere reads as moved.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param entity - The entity to ask about.
+ * @param component - The component to ask about.
+ * @returns Field name to the sum of the offsets on it.
+ */
+export function addedOffsets(
+  actx: AnimCtx,
+  entity: Entity,
+  component: AnyComponent
+): Record<string, number> {
+  const sums: Record<string, number> = {};
+
+  // Only the additive tracks of this entity are walked: the world asks for every view it compares.
+  for (const track of actx.state.additive.get(entity) ?? []) {
+    if (track.component.componentName !== component.componentName) continue;
+
+    for (const field of Object.keys(track.to)) sums[field] = sumOffsets(actx, keyOf(track, field));
+  }
+
+  return sums;
+}
+
+/**
+ * Files a new additive track under its entity, so `addedOffsets` finds it without a walk of the
+ * whole track table.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The additive track that starts.
+ */
+function fileAdditive(actx: AnimCtx, track: Track): void {
+  const tracks = actx.state.additive.get(track.entity) ?? new Set<Track>();
+
+  tracks.add(track);
+  actx.state.additive.set(track.entity, tracks);
+}
+
+/**
+ * Takes an ended additive track out of the table of its entity, and the entity with its last one.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The track that ended.
+ */
+function unfileAdditive(actx: AnimCtx, track: Track): void {
+  const tracks = actx.state.additive.get(track.entity);
+
+  if (tracks?.delete(track) === true && tracks.size === 0) actx.state.additive.delete(track.entity);
+}
+
+/**
  * Reads the start values of a track, once, when its delay has ended. The base of a field another
  * track already drives is used, so an additive offset is never folded into a start value.
  *
@@ -201,6 +260,60 @@ function fieldValue(
 }
 
 /**
+ * Tells whether another writer owns a field at this write, so the track leaves it alone. An
+ * additive track remembers that it skipped the field: it has to find the value under it again
+ * once the field is given back.
+ *
+ * @param track - The track that is about to write.
+ * @param owned - The fields another writer owns now.
+ * @param field - The field.
+ * @returns True when the track must not write the field.
+ */
+function skipsOwned(track: Track, owned: ReadonlySet<string>, field: string): boolean {
+  if (!owned.has(field)) return false;
+  if (track.additive) track.masked.add(field);
+
+  return true;
+}
+
+/**
+ * How far a field may sit from the value the table last wrote into it and still count as
+ * untouched by another writer. The same size as the rest tolerance of `world`.
+ */
+const UNTOUCHED = 1e-6;
+
+/**
+ * Books what an additive track adds to one field in this frame. On its first write after another
+ * writer gave the field back it also moves the base of the field, when that writer moved the
+ * field. While the field was owned, the track did not write it and the other writer put it where
+ * it wanted, so the base the table kept is stale: a hand dragged a bobbing view away. The value
+ * that stands in the field becomes what the base and the offsets add up to. So this write leaves
+ * the field where it is, the track runs on from there, and a track that starts now to bring the
+ * field home reads that value as its start. Without it the field would jump back to the old base
+ * in one frame.
+ *
+ * A writer that only held the field left in it what the table last wrote: the base plus the
+ * offsets as they stood. Then nothing moved the value under the track, and the base stays.
+ *
+ * @param actx - Domain context of the anim plugin.
+ * @param track - The additive track.
+ * @param field - The field.
+ * @param delta - What the track adds to the field now.
+ * @param left - The value that stands in the field before this write.
+ */
+function addOffset(actx: AnimCtx, track: Track, field: string, delta: number, left: unknown): void {
+  const key = keyOf(track, field);
+  const written = (actx.state.bases.get(key) ?? 0) + sumOffsets(actx, key);
+
+  offsetsOf(actx, key).set(track.id, delta);
+
+  if (!track.masked.delete(field) || typeof left !== "number") return;
+  if (Math.abs(left - written) <= UNTOUCHED) return;
+
+  actx.state.bases.set(key, left - sumOffsets(actx, key));
+}
+
+/**
  * Writes one frame of a track: the eased value for an absolute track, the contributed delta for
  * an additive one, and in both cases the base plus every offset of the field. A component the
  * entity no longer carries ends the track silently.
@@ -208,6 +321,9 @@ function fieldValue(
  * An additive keyframe walk names offsets: it starts at no offset and each segment gives the
  * delta it adds over the base, so a loop keeps its shape whatever pose it started on. A straight
  * additive track still adds the way from its start value to its target.
+ *
+ * A field another writer owns is left alone. An additive track remembers that it skipped the
+ * field, and adds to the value it finds there once the field is given back.
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track to write.
@@ -230,14 +346,14 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
   const walksOffsets = track.additive && track.segments !== undefined;
 
   for (const [field, target] of Object.entries(track.to)) {
-    if (owned.has(field)) continue;
+    if (skipsOwned(track, owned, field)) continue;
 
     const key = keyOf(track, field);
     const start = from[field] ?? target;
     const origin = walksOffsets ? 0 : start;
     const value = final ? target : fieldValue(track, field, origin, target, fraction);
 
-    if (track.additive) offsetsOf(actx, key).set(track.id, value - origin);
+    if (track.additive) addOffset(actx, track, field, value - origin, stored[field]);
     else actx.state.bases.set(key, value);
 
     patch[field] = (actx.state.bases.get(key) ?? start) + sumOffsets(actx, key);
@@ -289,6 +405,7 @@ function endTrack(actx: AnimCtx, track: Track): void {
 
   track.ended = true;
   actx.state.tracks.delete(track.id);
+  if (track.additive) unfileAdditive(actx, track);
 
   const clean = releaseFields(actx, track);
   const ecs = actx.deps.world.ecs;
@@ -364,6 +481,16 @@ function warnIfCrowded(actx: AnimCtx): void {
  */
 export function beginFrame(actx: AnimCtx): void {
   actx.state.frame += 1;
+}
+
+/**
+ * The empty set of the fields a new track skipped. It lives in its own function because lint
+ * rule L5 refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty set of field names.
+ */
+function noMaskedFields(): Set<string> {
+  return new Set();
 }
 
 /**
@@ -450,13 +577,16 @@ export function startTrack(
     ended: Object.keys(target).length === 0,
     segments: options.segments,
     repeatsLeft: instant ? 0 : repeats,
-    held: false
+    held: false,
+    masked: noMaskedFields()
   };
 
   actx.state.nextId += 1;
   if (track.ended) return track;
 
-  if (!track.additive) claimFields(actx, track);
+  if (track.additive) fileAdditive(actx, track);
+  else claimFields(actx, track);
+
   actx.state.tracks.set(track.id, track);
   countPlaying(actx.deps.world.ecs, entity, 1);
   actx.deps.time.wake();
@@ -622,13 +752,21 @@ export function advanceTracks(actx: AnimCtx, deltaMs: number): void {
 }
 
 /**
- * Finishes every track of the table, in table order.
+ * Finishes every track of the table, in table order. With `keepLoops` a loop is left alone: it
+ * has no end to finish on, so it stays in the table and stands where it is. The frame step of a
+ * fast world asks for that, because nothing would start the loop again: a fast walk of the flow
+ * that commits nothing flushes no view, so no view would owe its loop.
  *
  * @param actx - Domain context of the anim plugin.
+ * @param keepLoops - True to leave every track that repeats forever running.
  */
-export function finishAllTracks(actx: AnimCtx): void {
+export function finishAllTracks(actx: AnimCtx, keepLoops = false): void {
   // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-  for (const track of [...actx.state.tracks.values()]) finishTrack(actx, track);
+  for (const track of [...actx.state.tracks.values()]) {
+    if (keepLoops && track.repeatsLeft === Number.POSITIVE_INFINITY) continue;
+
+    finishTrack(actx, track);
+  }
 }
 
 /**

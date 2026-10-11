@@ -176,6 +176,194 @@ describe("anim/tween driver", () => {
     expect(mock.world.ecs.get(entity, Transform)?.x).toBe(55);
   });
 
+  it("reports what its additive tracks add to a component right now, and nothing for other fields", () => {
+    const { mock, driver, entity } = setup();
+
+    driver.track(entity, Transform, { x: 100 }, { ms: 100, ease: "linear" }, open);
+    driver.track(entity, Transform, { x: 10 }, { ms: 100, ease: "linear", additive: true }, open);
+    driver.track(entity, Transform, { x: 20 }, { ms: 100, ease: "linear", additive: true }, open);
+
+    // Nothing was written yet: the tracks add nothing so far.
+    expect(driver.offsetsOf?.(entity, Transform)).toEqual({ x: 0 });
+
+    step(mock, 50);
+
+    // Half way: 5 and 10 on top of the 50 the absolute track holds. `y` has no additive track.
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(65);
+    expect(driver.offsetsOf?.(entity, Transform)).toEqual({ x: 15 });
+    expect(driver.offsetsOf?.(entity, Animation)).toEqual({});
+
+    step(mock, 50);
+
+    // The additive tracks ended and wrote the field clean: nothing is added any more.
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
+    expect(driver.offsetsOf?.(entity, Transform)).toEqual({});
+  });
+
+  it("guard: files the additive tracks per entity, and keeps none that ended", () => {
+    const { mock, driver, entity } = setup();
+    const other = spawnTestEntity(mock, [Transform()]);
+
+    driver.track(entity, Transform, { x: 10 }, { ms: 100, ease: "linear", additive: true }, open);
+    driver.track(other, Transform, { x: 40 }, { ms: 200, ease: "linear", additive: true }, open);
+    driver.track(other, Transform, { y: 9 }, { ms: 100, ease: "linear" }, open);
+    step(mock, 50);
+
+    // Each entity answers for its own additive tracks only.
+    expect(driver.offsetsOf?.(entity, Transform)).toEqual({ x: 5 });
+    expect(driver.offsetsOf?.(other, Transform)).toEqual({ x: 10 });
+    expect(mock.state.additive.size).toBe(2);
+
+    step(mock, 50);
+
+    // The track of the first entity ended, and so did its entry.
+    expect(driver.offsetsOf?.(entity, Transform)).toEqual({});
+    expect([...mock.state.additive.keys()]).toEqual([other]);
+
+    driver.cancelAll(other);
+
+    expect(mock.state.additive.size).toBe(0);
+  });
+
+  it("lets an additive track add to where another writer left a field it owned: no jump back", () => {
+    const { mock, driver, entity } = setup();
+    const owned = new Set<string>();
+
+    // A bob on `y`, as the loop of a view: 10 up and back in 400 ms, forever.
+    driver.track(
+      entity,
+      Transform,
+      { y: 0 },
+      {
+        ms: 400,
+        ease: "linear",
+        additive: true,
+        repeat: "forever",
+        segments: [
+          { at: 0.5, to: { y: 10 } },
+          { at: 1, to: { y: 0 } }
+        ]
+      },
+      () => owned
+    );
+    step(mock, 100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(5);
+
+    // The hand takes the field, drags the entity away and holds it over a frame.
+    owned.add("y");
+    mock.world.ecs.set(entity, Transform, { y: -250 });
+    step(mock, 100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(-250);
+
+    // The hand lets go. The bob adds to where the entity stands: this frame leaves it there.
+    owned.clear();
+    step(mock, 16);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBeCloseTo(-250, 6);
+
+    // It walks on from there: 216 ms into its cycle the bob added 9.2, at 300 ms it adds 5.
+    step(mock, 84);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBeCloseTo(-254.2, 6);
+    expect(mock.api.active()).toBe(1);
+  });
+
+  it.each([
+    ["did not write it", (): void => undefined],
+    [
+      "wrote the value that stood there",
+      (mock: MockAnim, entity: Entity): void => {
+        mock.world.ecs.set(entity, Transform, { y: 5 });
+      }
+    ]
+  ] as const)("keeps the base of a field another writer owned and %s", (_what, hold) => {
+    const { mock, driver, entity } = setup();
+    const owned = new Set<string>();
+    const bob = driver.track(
+      entity,
+      Transform,
+      { y: 0 },
+      {
+        ms: 400,
+        ease: "linear",
+        additive: true,
+        repeat: "forever",
+        segments: [
+          { at: 0.5, to: { y: 10 } },
+          { at: 1, to: { y: 0 } }
+        ]
+      },
+      () => owned
+    );
+
+    step(mock, 100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(5);
+
+    // The hand takes the field and holds the entity where it stands, over six frames.
+    owned.add("y");
+
+    for (let frame = 0; frame < 6; frame += 1) {
+      hold(mock, entity);
+      step(mock, 16);
+    }
+
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(5);
+
+    owned.clear();
+    step(mock, 16);
+
+    // Nobody moved the field: 212 ms into its cycle the bob adds 9.4, over the base it had.
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBeCloseTo(9.4, 6);
+
+    bob.cancel();
+
+    // The value under the bob is where it always was.
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBe(0);
+  });
+
+  it("starts a track home from where the hand let go, in a field a loop adds to", () => {
+    const { mock, driver, entity } = setup();
+    const owned = new Set<string>();
+
+    driver.track(
+      entity,
+      Transform,
+      { y: 0 },
+      {
+        ms: 400,
+        ease: "linear",
+        additive: true,
+        repeat: "forever",
+        segments: [
+          { at: 0.5, to: { y: 10 } },
+          { at: 1, to: { y: 0 } }
+        ]
+      },
+      () => owned
+    );
+    step(mock, 100);
+    owned.add("y");
+    mock.world.ecs.set(entity, Transform, { x: 400, y: -250 });
+    step(mock, 100);
+    owned.clear();
+    // The settle of the drop: both fields go home over 100 ms.
+    driver.track(entity, Transform, { x: 0, y: 0 }, { ms: 100, ease: "linear" }, () => owned);
+    step(mock, 50);
+
+    // Half the way in both fields: `y` did not jump to the base the bob kept. The value under
+    // the bob was -257.5 at the release, and the bob adds 7.5 at 250 ms.
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(200);
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBeCloseTo(-121.25, 6);
+
+    step(mock, 50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(0);
+    expect(mock.world.ecs.get(entity, Transform)?.y).toBeCloseTo(5, 6);
+  });
+
   it("counts the Animation component up per track and removes it with cancelAll", () => {
     const { mock, driver, entity } = setup();
 

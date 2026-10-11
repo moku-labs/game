@@ -16,7 +16,7 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
  *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 },
  *   keys: { x: "1048576:Transform:x" }, ms: 350, ease: "out", delayMs: 0, elapsed: 0,
  *   from: undefined, muted: () => new Set(), additive: false, driven: false, bornFrame: 4,
- *   ended: false, segments: undefined, repeatsLeft: 0, held: false
+ *   ended: false, segments: undefined, repeatsLeft: 0, held: false, masked: new Set()
  * };
  * ```
  */
@@ -59,6 +59,12 @@ export type Track = {
    * walk clears it, so the next hold writes the first key again.
    */
   held: boolean;
+  /**
+   * The fields an additive track skipped at its last write because another writer owned them.
+   * When such a field is given back, the track adds to the value it finds there and not to the
+   * base it kept. Empty for a track that owns its fields.
+   */
+  masked: Set<string>;
 };
 
 /**

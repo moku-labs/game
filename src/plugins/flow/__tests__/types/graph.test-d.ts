@@ -1,7 +1,8 @@
 import { describe, expectTypeOf, it } from "vitest";
-import { createApp, defineGame } from "../../../../index";
+import { createApp, defineGame, sfx } from "../../../../index";
 import type { Json } from "../../../model/types";
 import { flowFor } from "../../feature";
+import type { Descriptor, NodeFx } from "../../fx/types";
 import { defineFlow, defineNode, exit, to, type } from "../../runner/define";
 import type { Bookmark, RecoverContext } from "../../runner/types";
 
@@ -289,5 +290,47 @@ describe("recover of a rest node", () => {
     expectTypeOf(
       gameNode({ outcomes: { done: type() }, run: ({ out }) => out.done() }).rest
     ).toBeBoolean();
+  });
+});
+
+// `fx.start` starts an effect the body does not wait for: there is nothing to await.
+describe("fx.start", () => {
+  const { defineNode: gameNode } = defineGame<{
+    player: { wins: number };
+    session: { taps: number };
+    assets: string;
+    strings: Record<string, unknown>;
+  }>();
+
+  it("compiles in a node body and returns void", () => {
+    const tap = gameNode({
+      outcomes: { done: type() },
+      run: ({ fx, session, out }) => {
+        expectTypeOf(fx.start(sfx("ui.tap"))).toBeVoid();
+        expectTypeOf(fx.start).toEqualTypeOf<NodeFx["start"]>();
+        expectTypeOf(fx.start).parameter(0).toEqualTypeOf<Descriptor>();
+        expectTypeOf(fx.start).returns.toBeVoid();
+        session.taps += 1;
+
+        return out.done();
+      }
+    });
+
+    expectTypeOf(tap.kind).toEqualTypeOf<"node">();
+  });
+
+  it("compiles in recover and returns void there too", () => {
+    const menu = gameNode({
+      rest: true,
+      checkpoint: true,
+      outcomes: { play: type() },
+      recover: ({ fx, session }) => {
+        expectTypeOf(fx.start(sfx("ui.back"))).toBeVoid();
+        expectTypeOf(fx.start).returns.toBeVoid();
+        session.taps = 0;
+      }
+    });
+
+    expectTypeOf(menu.kind).toEqualTypeOf<"node">();
   });
 });
