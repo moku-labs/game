@@ -112,7 +112,8 @@ function commitRecovery(ctx: FlowCtx, modules: Modules, recovery: Recovery): voi
  * recovery edge. A `recover` that fails is a failure inside the safe node: fatal, `run()` rejects.
  * An aborted one leaves like an aborted node: `"stop"` ends the loop, `"restore"` lets the next
  * turn enter the bookmark. `safe.inside` is not touched: it stays true until the safe node's own
- * edge commits, so a failure of the safe node after its recovery is still fatal, never a loop.
+ * edge commits or a restore leaves the node, so a failure of the safe node after its recovery is
+ * still fatal, never a loop.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs.

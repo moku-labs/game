@@ -1742,6 +1742,61 @@ describe("recover on the safe node", () => {
     await stopRunner(harness.ctx);
   });
 
+  it("retries a restored transit node that fails, also when the restore came after a give-up", async () => {
+    const attempts = { value: 0 };
+    const main = flow(
+      "main",
+      {
+        boot: node({
+          run: () => {
+            throw new Error("boom");
+          }
+        }),
+        home: node({ rest: true, checkpoint: true, outcomes: ["play", "ask"] }),
+        ask: node({
+          outcomes: ["ok"],
+          run: () => {
+            attempts.value += 1;
+
+            if (attempts.value === 1) throw new Error("ask boom");
+
+            return result("ok");
+          }
+        }),
+        shop: waiting("leave")
+      },
+      "boot",
+      {
+        boot: { done: "home" },
+        home: { play: "boot", ask: "ask" },
+        ask: { ok: "shop" },
+        shop: { leave: "home" }
+      }
+    );
+    const harness = setup({ main, config: safeConfig });
+
+    harness.onEmit((name, payload) => {
+      if (name !== "flow:error" || payload.path !== "boot" || payload.retry !== false) return;
+
+      restorePosition(harness.ctx, harness.modules, bookmarkAt("ask")).catch(() => undefined);
+    });
+
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    // The bookmark is a new position: the loop is no longer inside the safe node.
+    expect(fatal.error).toBeUndefined();
+    expect(payloadsOf(harness.emitted, "flow:error").at(-1)).toMatchObject({
+      path: "ask",
+      rolledBackTo: "ask",
+      retry: true
+    });
+    expect(attempts.value).toBe(2);
+    expect(harness.gate.opened).toEqual([{ allowed: ["leave"] }]);
+    await stopRunner(harness.ctx);
+  });
+
   it("ends the loop when the runner is stopped while recover is pending", async () => {
     const signals: AbortSignal[] = [];
     const harness = setup({

@@ -86,7 +86,8 @@ export type Commit = {
 /**
  * How the loop stands after it gave up on a transition. `inside`: it is in the safe node, and a
  * failure there is fatal; it stays true until the safe node's own edge commits. `recover`: the
- * safe node has not been entered yet, so its `recover` is still to run; a restore clears it.
+ * safe node has not been entered yet, so its `recover` is still to run. A restore clears both:
+ * the bookmark is a new position, and a failure of its node is retried.
  */
 export type Safe = { inside: boolean; recover: boolean };
 

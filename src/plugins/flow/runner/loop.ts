@@ -208,12 +208,13 @@ function enterSlot(
  * retry, since the restored state belongs to them. `flow:rest` and the rest seam fire once for
  * every node entered here; only a rest node is announced as a checkpoint. A restore wins over
  * what belonged to the old position: a recovery the loop still owed the safe node does not run on
- * the restored state, and an answer the gate still held is dropped.
+ * the restored state, the loop is no longer inside the safe node, so a failure of the restored
+ * node is retried and not fatal, and an answer the gate still held is dropped.
  *
  * @param ctx - Domain context of the flow plugin.
  * @param modules - Injected sibling APIs; the features API resolves a path through a slot.
  * @param bookmark - The bookmark to enter.
- * @param safe - How the loop stands after it gave up. Its pending recovery is cleared.
+ * @param safe - How the loop stands after it gave up. Both of its flags are cleared.
  * @throws {Error} When the graph has no node at the bookmark's path.
  */
 function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark, safe: Safe): void {
@@ -229,7 +230,9 @@ function enterBookmark(ctx: FlowCtx, modules: Modules, bookmark: Bookmark, safe:
     );
   }
 
-  // The old position is left: its pending recovery and a press made there go with it.
+  // The old position is left: the safe node, its pending recovery and a press made there go
+  // with it.
+  safe.inside = false;
   safe.recover = false;
   modules.gate.dropHeld();
 

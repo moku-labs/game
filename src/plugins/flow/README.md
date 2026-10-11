@@ -140,6 +140,8 @@ state back to the last rest point.
 | One more | To `safeNode` | `false` |
 | Any, inside `safeNode` | Nowhere. `run()` rejects. | no event |
 
+A `restore` leaves the safe node. A failure of the restored node is retried, as any failure is.
+
 Every failure writes one error entry to the log, then emits `flow:error`:
 
 ```ts
