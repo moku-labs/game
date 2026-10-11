@@ -6,6 +6,7 @@ import type { Hint } from "../../flow/types";
 import type { Snapshot } from "../../model/types";
 import type { AnyComponentValue } from "../ecs/types";
 import { diffComponents } from "./diff";
+import { cancelTracks } from "./driver";
 import { routeHint } from "./hints";
 import {
   cancelHandles,
@@ -28,7 +29,7 @@ import type {
   ReconcileOptions,
   View
 } from "./types";
-import { asError, collectView, createViewRecord, writeValue } from "./views";
+import { asError, collectView, createViewRecord, storedValue, writeValue } from "./views";
 
 /**
  * Creates the empty set of used hints. It lives in its own non-exported function because lint
@@ -340,6 +341,8 @@ function applyEntry(
   const live = mounted.live.get(entry.key);
 
   if (live !== undefined) {
+    // The same object: nothing to project. A restore and a load still write its rest pose, once
+    // for every live view, in `convergeMounted`.
     if (!entry.force && live.item === entry.item) return;
 
     changeEntry(pctx, spec, live, entry);
@@ -448,13 +451,77 @@ function keyedItems(
 }
 
 /**
+ * The last step of a reconcile a restore or a load caused: every live view is written to its rest
+ * pose, whether its item changed or not. An aborted node finishes its animation, which leaves a
+ * view on the end pose, and a view whose item is the same object as before is never touched by
+ * the entries. It runs after the flush: every handle is finished and every track of the entity is
+ * cancelled by then, also an additive one, which writes its base back when it ends. So nothing
+ * writes after it. Muted fields are left out, and `view` does not run again.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param mounted - The mounted projection, already flushed.
+ */
+function convergeMounted(pctx: ProjectionCtx, mounted: Mounted): void {
+  for (const view of mounted.live.values()) writeRestNow(pctx, view, [...view.rest.keys()]);
+}
+
+/**
+ * The same last step for the elements another plugin owns, which no reconcile of a projection
+ * meets: each is written to the rest pose its owner recorded with `setRest`. Every track on the
+ * entity is ended first, so nothing writes after it. Only a component the entity still carries
+ * is written and muted fields are left out. An element that is leaving has its tracks ended and
+ * keeps its place, and the recorded pose of an entity that is gone is skipped. So is one recorded
+ * for a projection view: its own rest pose wins, as in `restOf`, and it is already home.
+ *
+ * @param pctx - Domain context of the projection module.
+ */
+function convergeElements(pctx: ProjectionCtx): void {
+  const { ecs, components } = pctx.deps;
+  const state = pctx.ctx.state.projection;
+
+  for (const [entity, rest] of state.rests) {
+    if (ecs.ownerOf(entity) === undefined || state.byEntity.has(entity)) continue;
+
+    cancelTracks(pctx, entity);
+
+    if (ecs.has(entity, components.Exiting)) continue;
+
+    const carried: string[] = [];
+
+    for (const [name, value] of rest) {
+      if (storedValue(pctx, entity, value.type) !== undefined) carried.push(name);
+    }
+
+    writeRestNow(pctx, createViewRecord(entity, "", "", undefined, rest), carried);
+  }
+}
+
+/**
+ * Tells every `onConverged` listener that the picture is home, so an owner puts back what only
+ * it knows: `ui` builds its roots again. A listener that throws is logged and the others still
+ * run.
+ *
+ * @param pctx - Domain context of the projection module.
+ */
+function tellConverged(pctx: ProjectionCtx): void {
+  // eslint-disable-next-line unicorn/no-useless-spread -- a listener may remove itself
+  for (const listener of [...pctx.ctx.state.projection.converged]) {
+    try {
+      listener();
+    } catch (error) {
+      pctx.ctx.log.error("world:converged-listener-failed", {}, asError(error));
+    }
+  }
+}
+
+/**
  * Reconciles one mounted projection against the snapshot.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
  * @param mounted - The mounted projection.
  * @param snapshot - The model snapshot of this reconcile.
- * @param options - Mode and force flag of this reconcile.
+ * @param options - Mode, force flag and converge flag of this reconcile.
  * @param counts - The counters of this reconcile.
  * @param used - The hints that reached an entry.
  */
@@ -489,15 +556,18 @@ function reconcileOne(
   mounted.items = next;
 
   if (options.direct) flushMounted(pctx, mounted);
+  if (options.converge) convergeMounted(pctx, mounted);
 
   counts.queued += mounted.queue.length;
 }
 
 /**
- * Runs one reconcile over every mounted projection, or over the named ones only.
+ * Runs one reconcile over every mounted projection, or over the named ones only. A converging
+ * one then brings the elements other plugins own home and tells their owners.
  *
  * @param pctx - Domain context of the projection module.
- * @param options - Which projections, play or direct, and whether `view` is forced.
+ * @param options - Which projections, play or direct, whether `view` is forced, and whether
+ *   every live view and every element is brought to its rest pose at the end.
  */
 export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void {
   const state = pctx.ctx.state.projection;
@@ -514,6 +584,11 @@ export function reconcile(pctx: ProjectionCtx, options: ReconcileOptions): void 
 
     counts.projections += 1;
     reconcileOne(pctx, spec, mounted, snapshot, options, counts, used);
+  }
+
+  if (options.converge) {
+    convergeElements(pctx);
+    tellConverged(pctx);
   }
 
   counts.hintsRouted = used.size;

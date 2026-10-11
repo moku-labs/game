@@ -51,6 +51,23 @@ function isDirectCause(cause: Cause): boolean {
 }
 
 /**
+ * Tells whether a cause replaces the state, so every live view has to stand on its rest pose
+ * when the reconcile ends, also a view whose item is the same object as before, and every
+ * element on the rest pose its owner recorded.
+ *
+ * @param cause - Why the reconcile runs.
+ * @returns True for a load and a restore.
+ * @example
+ * ```ts
+ * isConvergeCause("restore"); // true
+ * isConvergeCause("rerun"); // false
+ * ```
+ */
+function isConvergeCause(cause: Cause): boolean {
+  return cause === "load" || cause === "restore";
+}
+
+/**
  * Creates the empty view tables of a freshly mounted projection. These live in their own
  * non-exported functions because lint rule L5 refuses a collection built inside an exported
  * declaration.
@@ -192,7 +209,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
   const state = ctx.state.projection;
 
   /**
-   * Reconciles what is dirty. The cause table decides play or direct.
+   * Reconciles what is dirty. The cause table decides play or direct, and whether every live view
+   * and every element with a recorded rest pose is brought to it: a restore and a load do that.
    */
   const reconcileIfDirty = (): void => {
     const dirty = state.dirty;
@@ -204,8 +222,9 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         dirty.force ||
         dirty.causes.some(cause => isDirectCause(cause)) ||
         deps.ecs.mode() !== "live";
+      const converge = dirty.causes.some(cause => isConvergeCause(cause));
 
-      reconcile(pctx, { direct, force: dirty.force });
+      reconcile(pctx, { direct, force: dirty.force, converge });
     }
 
     state.hints.length = 0;
@@ -299,7 +318,12 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       for (const spec of fresh) state.mounted.set(spec.name, emptyMounted(owner));
 
       if (fresh.length > 0) {
-        reconcile(pctx, { names: fresh.map(spec => spec.name), direct: true, force: true });
+        reconcile(pctx, {
+          names: fresh.map(spec => spec.name),
+          direct: true,
+          force: true,
+          converge: false
+        });
       }
     },
 
@@ -474,6 +498,16 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         if (byKey.get(key) === entity) byKey.delete(key);
         if (state.keysByEntity.get(entity)?.key === key) state.keysByEntity.delete(entity);
         state.rests.delete(entity);
+      };
+    },
+
+    onConverged: (listener: () => void): (() => void) => {
+      state.converged.push(listener);
+
+      return (): void => {
+        const at = state.converged.indexOf(listener);
+
+        if (at !== -1) state.converged.splice(at, 1);
       };
     },
 

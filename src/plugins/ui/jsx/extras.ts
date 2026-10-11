@@ -48,9 +48,10 @@ function restValueOf(current: object | undefined, value: object, owned: readonly
 /**
  * Records the rest pose of one extra component with a value, so a `change` hook can bring it
  * home with `view.toRest`; a tag has no rest. The fields the type gives to a plugin are skipped.
+ * The visual of a live element is recorded the same way each time its look is written.
  *
  * @param ctx - Domain context of the ui plugin.
- * @param element - The element that carries the extra.
+ * @param element - The element that carries the component.
  * @param value - The value of this render.
  */
 export function recordRest(ctx: UiCtx, element: Element, value: AnyComponentValue): void {

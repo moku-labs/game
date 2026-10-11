@@ -394,7 +394,10 @@ export type AnyProjectionSpec = {
 };
 
 /**
- * Why a reconcile runs. Merged over the frame; the cause table decides play or direct.
+ * Why a reconcile runs. Merged over the frame; the cause table decides play or direct. A
+ * `"restore"` and a `"load"` replace the state, so their reconcile also brings every live view to
+ * its rest pose, whether its item changed or not, and every element to the rest pose its owner
+ * recorded with `setRest`.
  *
  * @example
  * ```ts
@@ -519,6 +522,8 @@ export type ProjectionState = {
   keysByEntity: Map<Entity, ProjectionKey>;
   /** Entity to component name to the fields another writer owns. */
   mutes: Map<Entity, Map<string, Set<string>>>;
+  /** The `onConverged` listeners: the owners of elements, told after a restore or a load. */
+  converged: Array<() => void>;
   offHints: Array<() => void>;
 };
 
@@ -585,13 +590,20 @@ export type Counts = {
  *
  * @example
  * ```ts
- * const options: ReconcileOptions = { direct: true, force: false };
+ * const options: ReconcileOptions = { direct: true, force: false, converge: false };
  * ```
  */
 export type ReconcileOptions = {
   names?: readonly string[];
   direct: boolean;
   force: boolean;
+  /**
+   * Whether every live view is written to its rest pose when the reconcile ends, also a view
+   * whose item did not change, and with it every element whose owner recorded a rest pose. Set
+   * for a restore and a load, and only together with `direct`: the flush of a direct reconcile
+   * ends every motion first.
+   */
+  converge: boolean;
 };
 
 /**
@@ -875,6 +887,9 @@ export type ProjectionApi = {
 
   /**
    * Records what one component of an element looks like at rest, so `toRest` knows where home is.
+   * It is also where a restore and a load put the element: after their reconcile every track on
+   * the entity is ended and every recorded component it still carries is written, muted fields
+   * left out. So the owner records the pose it draws the element with, every time that changes.
    *
    * @param entity - The entity of the element.
    * @param component - The component whose rest value is recorded.
@@ -914,6 +929,24 @@ export type ProjectionApi = {
    * ```
    */
   registerKey(projection: string, key: string, entity: Entity): () => void;
+
+  /**
+   * Calls a listener after a reconcile a restore or a load caused. By then every live view and
+   * every element with a recorded rest pose stands on that pose, and every track on them is
+   * ended, also a loop the owner of an element started. The owner puts back what only it knows.
+   *
+   * @param listener - Called once after each such reconcile.
+   * @returns The remover; calling it twice is safe.
+   * @example
+   * ```ts
+   * // `ui` builds its roots again after a restore, so each element stands as freshly mounted.
+   * const world = ctx.require(worldPlugin);
+   * const off = world.projection.onConverged(() => jsx.converged());
+   *
+   * off(); // onStop: `ui` is gone
+   * ```
+   */
+  onConverged(listener: () => void): () => void;
 
   /**
    * Marks every mounted projection dirty and forces `view` for every item, so the next frame

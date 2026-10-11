@@ -172,6 +172,8 @@ expectTypeOf(looping).toEqualTypeOf<TweenOptions>();
 expectTypeOf(ecs.diff).toEqualTypeOf<(from: number, to: number) => FrameDiff>();
 expectTypeOf(ecs.schema).toEqualTypeOf<() => readonly ComponentSchema[]>();
 expectTypeOf(projectionApi.motionsOf).toEqualTypeOf<(entity: Entity) => readonly string[]>();
+// The seam the owner of elements listens on after a restore: a listener in, its remover out.
+expectTypeOf(projectionApi.onConverged).toEqualTypeOf<(listener: () => void) => () => void>();
 expectTypeOf<EntityDiff["change"]>().toEqualTypeOf<"spawned" | "despawned" | "changed">();
 
 // @ts-expect-error — diff takes two frame numbers, not frame labels
