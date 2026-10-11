@@ -106,12 +106,24 @@ describe("describeOf", () => {
     expect(describeOf(app).ui).toEqual(tree);
   });
 
-  it("leaves the words of every text out of the ui tree", () => {
-    const title = { ...tree.children[0], key: "title", type: "text", content: "Лесной городок" };
-    const worded = { ...tree, content: "root", children: [title as UiNode] } as UiNode;
+  it("leaves the words of every text and its style key out of the ui tree", () => {
+    const title = {
+      ...tree.children[0],
+      key: "title",
+      type: "text",
+      content: "Лесной городок",
+      textStyle: "ui.title"
+    };
+    const worded = {
+      ...tree,
+      content: "root",
+      textStyle: "ui.root",
+      children: [title as UiNode]
+    } as UiNode;
     const ui = describeOf({ ...app, ui: { tree: () => worded } } as ReaderApp).ui;
 
     expect(JSON.stringify(ui)).not.toContain("content");
+    expect(JSON.stringify(ui)).not.toContain("textStyle");
     expect(ui.children[0]).toMatchObject({ key: "title", type: "text", rect: title.rect });
   });
 
