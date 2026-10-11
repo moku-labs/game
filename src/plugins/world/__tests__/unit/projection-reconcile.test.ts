@@ -1801,155 +1801,184 @@ describe("projection reconcile — F2: a pending lift(false) survives settle(ent
 
 // ---------------------------------------------------------------------------
 // F1b. The loop of a view is an additive track: it adds an offset to the rest pose and
-// owns no component. So a settle brings a looping view home, and the offset is no miss.
+// owns no component. The driver reports what it adds right now, and the world compares
+// the value under it with the rest pose. A looping view at home is home; a moved one is not.
 // ---------------------------------------------------------------------------
 
 /**
- * A loop the way `anim` builds it: an additive track on `Transform.scale`, repeated forever. The
- * fake driver knows no offsets and walks `scale` towards 1.2, so the stored value differs from
- * the rest value while the loop runs, as a real offset makes it differ.
+ * Makes the driver of the mock world report what a loop adds to `Transform` right now, as
+ * `anim` reports the offsets of its additive tracks. The fake driver runs no loop, so a test
+ * writes the stored value itself: the value under the loop plus the offset.
  *
- * @param view - The handle the `loop` hook was given.
- * @returns The motion of the loop.
+ * @param world - The mock world.
+ * @param offsets - Field name to what the loop adds to it.
  */
-function swell(view: ViewHandle<Item>): Motion {
-  return view.tween(
-    Transform,
-    { scale: 1.2 },
-    { ms: 60_000, ease: "linear", additive: true, repeat: "forever" }
+function reportOffsets(world: MockWorld, offsets: Readonly<Record<string, number>>): void {
+  world.offDriver();
+  world.api.projection.setDriver({
+    track: world.driver.track,
+    cancelAll: world.driver.cancelAll,
+    offsetsOf: (_entity, component) => (component.componentName === "Transform" ? offsets : {})
+  });
+}
+
+/**
+ * Builds the settle hook of a test: it brings every named component home and counts its calls.
+ *
+ * @returns The hook, as a spy.
+ */
+function settleSpy() {
+  return vi.fn((view: ViewHandle<Item>, components: readonly string[]) =>
+    view.all(components.map(name => restOfName(view, name)))
   );
 }
 
 /**
- * Mounts an empty board whose views loop, lets one item enter on an edge so its loop runs, and
- * steps one frame.
+ * Runs the reconcile slot of one frame and nothing after it, so the driver does not step.
  *
  * @param world - The mock world.
- * @param motion - More hooks of this test, next to the loop.
- * @returns The entity of the looping view.
  */
-function enterLooping(world: MockWorld, motion: ProjectionMotion<Item> = {}): Entity {
-  mountBoard(world, [], { ...motion, loop: swell });
-  commitItems(world, [{ id: "a", level: 1, x: 10, y: 20 }]);
-  world.frame(16);
-
-  return world.api.projection.entityOf(BOARD, "a") ?? 0;
+function reconcileOnly(world: MockWorld): void {
+  for (const registration of world.frames) {
+    if (registration.phase === "input") registration.callback({ ...world.time });
+  }
 }
 
-describe("projection reconcile — F1b: a looping view is settled too", () => {
-  it("settles a looping view on a rollback, and the loop runs on", () => {
-    const world = createMockWorld();
-    const entity = enterLooping(world);
+/**
+ * Mounts one item whose view stands at home under a loop that adds 5 to `y` right now. The loop
+ * is started through the `loop` hook, so the world records an additive track on `Transform.y`
+ * as it does for a real loop. Its delay is an hour: the fake driver knows no offsets and would
+ * write `y` itself, so the track never comes to write within a test.
+ *
+ * @param world - The mock world.
+ * @param motion - The hooks of this test, next to the loop.
+ * @returns The entity of the view.
+ */
+function mountUnderLoop(world: MockWorld, motion: ProjectionMotion<Item>): Entity {
+  mountBoard(world, [{ id: "a", level: 1, x: 10, y: 20 }], {
+    ...motion,
+    loop: view =>
+      view.tween(
+        Transform,
+        { y: 20 },
+        { ms: 1000, delayMs: 3_600_000, additive: true, repeat: "forever" }
+      )
+  });
+  // The view was mounted directly: this frame starts the loop it owes.
+  world.frame(16);
 
-    timelineTrack(world, entity, { y: -900 }).finish();
+  const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+  reportOffsets(world, { y: 5 });
+  world.api.ecs.set(entity, Transform, { y: 25 });
+
+  return entity;
+}
+
+describe("projection reconcile — F1b: the world compares the value under the loop", () => {
+  it("guard against a settle of no length: a rollback takes a view that stands at home under its loop for home", () => {
+    const world = createMockWorld();
+    const settle = settleSpy();
+    const entity = mountUnderLoop(world, { settle });
+
     world.commit("rollback", ["player"]);
     world.frame(16);
 
+    expect(settle).not.toHaveBeenCalled();
+    // The loop is the one track that ever started.
+    expect(world.driver.started).toHaveLength(1);
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 25, scale: 1 });
+  });
+
+  it("guard against a settle of no length: settle(entity) starts no settle for it", () => {
+    const world = createMockWorld();
+    const settle = settleSpy();
+    const entity = mountUnderLoop(world, { settle });
+
+    world.api.projection.settle(entity);
+
+    expect(settle).not.toHaveBeenCalled();
+    expect(world.driver.started).toHaveLength(1);
+  });
+
+  it("guard against a settle of no length: a commit that changes another component starts no settle for it", () => {
+    const world = createMockWorld();
+    const settle = settleSpy();
+    const entity = mountUnderLoop(world, { settle });
+
+    // `Level` has no hook: it is written directly, and `Transform` is home under its loop.
+    commitItems(world, [{ id: "a", level: 2, x: 10, y: 20 }]);
+    world.frame(16);
+
+    expect(world.api.ecs.get(entity, Level)).toEqual({ level: 2 });
+    expect(settle).not.toHaveBeenCalled();
+    expect(world.driver.started).toHaveLength(1);
+  });
+
+  it("guard against a settle of no length: a revive starts no settle for it", () => {
+    const world = createMockWorld();
+    const settle = settleSpy();
+    const entity = mountUnderLoop(world, {
+      settle,
+      // An exit that moves nothing: the view stands on its rest pose while it leaves.
+      exit: view => view.tween(Transform, { scale: 1 }, { ms: 400, ease: "linear" })
+    });
+
+    commitItems(world, []);
+    world.frame(16);
+
+    expect(viewOf(world, "a")?.exiting).toBe(true);
+
+    commitItems(world, [{ id: "a", level: 1, x: 10, y: 20 }]);
+    world.frame(16);
+
+    expect(world.api.projection.entityOf(BOARD, "a")).toBe(entity);
+    expect(settle).not.toHaveBeenCalled();
+    // The exit was cancelled and no settle started: only the loop runs.
+    expect(world.driver.active()).toBe(1);
+  });
+
+  it("settles a view a node moved under its loop, in the very field the loop adds to", () => {
+    const world = createMockWorld();
+    const settle = settleSpy();
+    const entity = mountUnderLoop(world, { settle });
+
+    // The node flew the view up: the value under the loop is -900, the loop still adds 5.
+    world.api.ecs.set(entity, Transform, { y: -895 });
+    world.commit("rollback", ["player"]);
+    world.frame(16);
+
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle.mock.calls[0]?.[1]).toEqual(["Transform"]);
     expect(world.driver.started.at(-1)).toMatchObject({
       entity,
       component: "Transform",
       to: { x: 10, y: 20, scale: 1 },
       options: { ms: 350 }
     });
-
-    world.frame(400);
-
-    expect(world.api.ecs.get(entity, Transform)).toMatchObject({ x: 10, y: 20 });
-    // The settle ended. The loop is the one track left.
-    expect(world.driver.active()).toBe(1);
-    expect(world.api.projection.motionsOf(entity)).toEqual(["Transform"]);
   });
 
-  it("leaves a looping view that stands at home alone on a rollback: the offset of its loop is no miss", () => {
+  it("takes the float noise of the offset for no difference", () => {
     const world = createMockWorld();
-    const entity = enterLooping(world);
+    const settle = settleSpy();
 
-    world.frame(100);
+    mountBoard(world, [{ id: "a", level: 1, x: 10, y: 0.1 }], { settle });
 
-    const started = world.driver.started.length;
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
 
-    expect(world.api.ecs.get(entity, Transform)?.scale).toBeGreaterThan(1);
-
+    // 0.1 + 0.2 - 0.2 is 0.10000000000000003: a hair off the rest value, and still home.
+    reportOffsets(world, { y: 0.2 });
+    world.api.ecs.set(entity, Transform, { y: 0.1 + 0.2 });
     world.commit("rollback", ["player"]);
     world.frame(16);
 
-    expect(world.driver.started).toHaveLength(started);
-    expect(world.driver.active()).toBe(1);
+    expect(settle).not.toHaveBeenCalled();
+    expect(world.driver.started).toHaveLength(0);
   });
 
-  it("settle(entity) brings a looping view home", () => {
+  it("guard: the convergence check does not report what the loop adds when a motion of the view ends", () => {
     const world = createMockWorld();
-    const entity = enterLooping(world);
-
-    world.api.ecs.set(entity, Transform, { x: 77, y: 33 });
-    world.api.projection.settle(entity);
-
-    expect(world.driver.active()).toBe(2);
-
-    world.frame(400);
-
-    expect(world.api.ecs.get(entity, Transform)).toMatchObject({ x: 10, y: 20 });
-    expect(world.driver.active()).toBe(1);
-  });
-
-  it("the settle of a changed item brings a looping view home", () => {
-    const world = createMockWorld();
-    const entity = enterLooping(world);
-
-    world.api.ecs.set(entity, Transform, { y: -900 });
-    // `Level` has no hook and is written directly. Nothing drives `Transform`: it is loose.
-    commitItems(world, [{ id: "a", level: 2, x: 10, y: 20 }]);
-    world.frame(16);
-
-    expect(world.api.ecs.get(entity, Level)).toEqual({ level: 2 });
-    expect(world.driver.active()).toBe(2);
-
-    world.frame(400);
-
-    expect(world.api.ecs.get(entity, Transform)).toMatchObject({ x: 10, y: 20 });
-    expect(world.driver.active()).toBe(1);
-  });
-
-  it("the settle after enter brings a looping view home from the pose its enter hook set", () => {
-    const world = createMockWorld();
-    const entity = enterLooping(world, {
-      enter: view => {
-        view.set(Transform, { y: -50 });
-      }
-    });
-
-    expect(world.api.ecs.get(entity, Transform)?.y).toBeGreaterThan(-50);
-
-    world.frame(400);
-
-    expect(world.api.ecs.get(entity, Transform)).toMatchObject({ x: 10, y: 20 });
-    expect(world.driver.active()).toBe(1);
-  });
-
-  it("the settle of a revive brings a looping view home", () => {
-    const world = createMockWorld();
-    const entity = enterLooping(world, {
-      exit: view => view.tween(Transform, { x: 900 }, { ms: 1000, ease: "linear" })
-    });
-
-    commitItems(world, []);
-    world.frame(16);
-    world.frame(100);
-
-    expect(world.api.ecs.get(entity, Transform)?.x).toBeGreaterThan(10);
-
-    commitItems(world, [{ id: "a", level: 1, x: 10, y: 20 }]);
-    world.frame(16);
-    world.frame(400);
-
-    expect(world.api.projection.entityOf(BOARD, "a")).toBe(entity);
-    expect(world.api.ecs.get(entity, Transform)).toMatchObject({ x: 10, y: 20 });
-    expect(world.driver.active()).toBe(1);
-  });
-
-  it("does not correct the field a loop adds to when another motion of the view ends", () => {
-    const world = createMockWorld();
-    const entity = enterLooping(world, {
+    const entity = mountUnderLoop(world, {
       change: { Level: view => view.toRest(Level, { ms: 50, ease: "linear" }) }
     });
 
@@ -1960,30 +1989,197 @@ describe("projection reconcile — F1b: a looping view is settled too", () => {
 
     expect(world.api.ecs.get(entity, Level)).toEqual({ level: 2 });
     expect(world.log.warn).not.toHaveBeenCalledWith("world:view-corrected", expect.anything());
-    // The loop still holds its value: nothing wrote the rest value over it.
-    expect(world.api.ecs.get(entity, Transform)?.scale).toBeGreaterThan(1);
+    // The stored value still carries the offset: nothing wrote the rest value over it.
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 25, scale: 1 });
+  });
+
+  it("corrects a real miss under a loop to the rest value plus the offset, and tells the driver", () => {
+    const world = createMockWorld();
+    const entity = mountUnderLoop(world, {
+      // A hook that stops short: under the loop it leaves `y` at 50, the new rest value is 70.
+      change: { Transform: view => view.tween(Transform, { y: 55 }, { ms: 50, ease: "linear" }) }
+    });
+
+    commitItems(world, [{ id: "a", level: 1, x: 10, y: 70 }]);
+    world.frame(16);
+    world.frame(100);
+
+    expect(world.log.warn).toHaveBeenCalledWith(
+      "world:view-corrected",
+      expect.objectContaining({ projection: BOARD, key: "a", component: "Transform" })
+    );
+    // The picture keeps the offset of the loop on top of the rest value.
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 75, scale: 1 });
+    // The driver keeps its own base for the field: a track of 0 ms hands it the rest value.
+    expect(world.driver.started.at(-1)).toEqual({
+      entity,
+      component: "Transform",
+      to: { y: 70 },
+      options: { ms: 0, ease: "linear", delayMs: 0, additive: false }
+    });
+  });
+
+  it("guard: a driver without offsetsOf is read as no offset, the stored value is compared as it stands", () => {
+    const world = createMockWorld();
+    const settle = settleSpy();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 10, y: 20 }], { settle });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    // The fake driver has no `offsetsOf`: nothing is taken off the stored value.
+    world.commit("rollback", ["player"]);
+    world.frame(16);
+
+    expect(settle).not.toHaveBeenCalled();
+
+    world.api.ecs.set(entity, Transform, { y: 25 });
+    world.commit("rollback", ["player"]);
+    world.frame(16);
+
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle.mock.calls[0]?.[1]).toEqual(["Transform"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review fix. The driver keeps its own base for the fields a loop adds to, and writes it
+// back when the loop is cancelled. A rest value the world writes directly has to reach
+// that base in play mode, and has to be written last in direct mode.
+// ---------------------------------------------------------------------------
+
+/**
+ * Installs a driver whose `cancelAll` writes, as a cancelled additive track of `anim` writes
+ * the base it kept back.
+ *
+ * @param world - The mock world.
+ * @param base - The stale base the cancelled loop writes.
+ * @param base.y - Its `Transform.y`.
+ */
+function writeBaseOnCancel(world: MockWorld, base: { y: number }): void {
+  world.offDriver();
+  world.api.projection.setDriver({
+    track: world.driver.track,
+    cancelAll: (target: Entity): void => {
+      world.driver.cancelAll(target);
+      world.api.ecs.set(target, Transform, base);
+    }
+  });
+}
+
+describe("projection reconcile — a rest change under the loop of a view is kept", () => {
+  it("writes a rest value under a loop with the offset on top, and hands it to the driver", () => {
+    const world = createMockWorld();
+    const entity = mountUnderLoop(world, {});
+    const started = world.driver.started.length;
+
+    // `Transform` has no hook: its new value is written directly.
+    commitItems(world, [{ id: "a", level: 1, x: 50, y: 70 }]);
+    reconcileOnly(world);
+
+    // The picture does not lose the offset for a frame.
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 50, y: 75, scale: 1 });
+    // Only the field the loop adds to goes to the driver: a track of 0 ms to its rest value.
+    expect(world.driver.started.slice(started)).toEqual([
+      {
+        entity,
+        component: "Transform",
+        to: { y: 70 },
+        options: { ms: 0, ease: "linear", delayMs: 0, additive: false }
+      }
+    ]);
+    // It was finished at once: the view keeps no handle of it, and only the loop runs.
+    expect(viewOf(world, "a")?.handles).toEqual([]);
     expect(world.driver.active()).toBe(1);
   });
 
-  it("still corrects a real miss of a looping view, in a field its loop does not add to", () => {
+  it("writes a component no loop adds to directly, with no track", () => {
     const world = createMockWorld();
-    const entity = enterLooping(world, {
-      change: { Level: view => view.tween(Level, { level: 5 }, { ms: 50, ease: "linear" }) }
-    });
+    const entity = mountUnderLoop(world, {});
 
     commitItems(world, [{ id: "a", level: 2, x: 10, y: 20 }]);
     world.frame(16);
-    world.frame(100);
-    world.frame(16);
 
     expect(world.api.ecs.get(entity, Level)).toEqual({ level: 2 });
-    expect(world.log.warn).toHaveBeenCalledWith(
-      "world:view-corrected",
-      expect.objectContaining({ projection: BOARD, key: "a", component: "Level" })
-    );
-    expect(world.log.warn).not.toHaveBeenCalledWith(
-      "world:view-corrected",
-      expect.objectContaining({ component: "Transform" })
-    );
+    expect(world.driver.started).toHaveLength(1);
+  });
+
+  it("does the same when a settle hook throws and the rest pose is written instead", () => {
+    const world = createMockWorld();
+    const entity = mountUnderLoop(world, {
+      settle: () => {
+        throw new Error("boom");
+      }
+    });
+
+    world.api.ecs.set(entity, Transform, { y: -895 });
+    world.api.projection.settle(entity);
+
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 25, scale: 1 });
+    expect(world.driver.started.at(-1)).toMatchObject({
+      entity,
+      component: "Transform",
+      to: { y: 20 },
+      options: { ms: 0 }
+    });
+  });
+
+  it("does the same when settle(entity) writes the rest pose in a paused world", () => {
+    const world = createMockWorld();
+    const entity = mountUnderLoop(world, {});
+
+    world.api.ecs.set(entity, Transform, { y: -895 });
+    world.api.ecs.setMode("paused");
+    world.api.projection.settle(entity);
+
+    // The loop stands while the world is paused, and still adds its offset.
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 25, scale: 1 });
+    expect(world.driver.started.at(-1)).toMatchObject({
+      entity,
+      component: "Transform",
+      to: { y: 20 },
+      options: { ms: 0 }
+    });
+    // The base went to the driver at once: nothing is left that a paused world would wait for.
+    expect(viewOf(world, "a")?.handles).toEqual([]);
+    expect(world.driver.active()).toBe(1);
+  });
+
+  it("writes a changed item again after the flush of a direct reconcile", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 10, y: 20 }]);
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    writeBaseOnCancel(world, { y: -900 });
+    world.api.ecs.setMode("paused");
+    commitItems(world, [{ id: "a", level: 1, x: 10, y: 70 }]);
+    world.frame(16);
+
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 70, scale: 1 });
+  });
+
+  it("writes a revived item again after the flush of a direct reconcile", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 10, y: 20 }], {
+      exit: view => view.tween(Transform, { x: 900 }, { ms: 1000, ease: "linear" })
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, []);
+    world.frame(16);
+
+    expect(viewOf(world, "a")?.exiting).toBe(true);
+
+    writeBaseOnCancel(world, { y: -900 });
+    world.api.ecs.setMode("paused");
+    commitItems(world, [{ id: "a", level: 1, x: 10, y: 70 }]);
+    world.frame(16);
+
+    expect(world.api.projection.entityOf(BOARD, "a")).toBe(entity);
+    expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 70, scale: 1 });
   });
 });

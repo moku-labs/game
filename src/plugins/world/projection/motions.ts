@@ -4,7 +4,7 @@
  */
 import type { AnyComponentValue, ComponentType, Entity } from "../ecs/types";
 import { deepEquals } from "./diff";
-import { drivenComponents, inertHandle, mutedFields, startTrack, swayedFields } from "./driver";
+import { drivenComponents, inertHandle, loopOffsets, mutedFields, startTrack } from "./driver";
 import type {
   AnyProjectionSpec,
   Motion,
@@ -253,34 +253,53 @@ export function startLoop(
 }
 
 /**
- * Copies a component value without some of its fields.
+ * The stored value of one rest component as it stands under the loop of the view: what the
+ * additive tracks of the driver add right now is taken off each numeric field. Where the result
+ * is at rest within `REST_TOLERANCE`, the exact rest value stands in, so the float noise of the
+ * subtraction is no difference. Without a loop on the component, and with a driver that reports
+ * no offsets, it is the stored value itself.
  *
- * @param value - The component value.
- * @param skipped - The field names to leave out.
- * @returns A new record with the other fields.
- * @example
- * ```ts
- * withoutFields({ x: 10, rotation: 0.04 }, new Set(["rotation"])); // { x: 10 }
- * ```
+ * It is what every comparison with the rest pose reads: the loose components of a settle, the
+ * question of a rollback and the convergence check. So a view that only sways or bobs is home,
+ * and a view something moved is not, in whatever field.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view to read.
+ * @param value - The rest value of the component, which names its type.
+ * @returns The value under the loop, or `undefined` for a tag and for a missing component.
  */
-function withoutFields(
-  value: Readonly<Record<string, unknown>>,
-  skipped: ReadonlySet<string>
-): Record<string, unknown> {
-  const kept: Record<string, unknown> = {};
+export function valueUnderLoop(
+  pctx: ProjectionCtx,
+  view: View,
+  value: AnyComponentValue
+): Readonly<Record<string, unknown>> | undefined {
+  const stored = storedValue(pctx, view.entity, value.type);
 
-  for (const [field, entry] of Object.entries(value)) {
-    if (!skipped.has(field)) kept[field] = entry;
+  if (stored === undefined || value.value === true) return stored;
+
+  const rest = value.value as Record<string, unknown>;
+  const offsets = loopOffsets(pctx, view.entity, asComponent(value.type));
+  let under: Record<string, unknown> | undefined;
+
+  for (const [field, offset] of Object.entries(offsets)) {
+    const current = stored[field];
+
+    if (typeof current !== "number") continue;
+
+    const below = current - offset;
+
+    under ??= { ...stored };
+    under[field] = atRest(below, rest[field]) ? rest[field] : below;
   }
 
-  return kept;
+  return under ?? stored;
 }
 
 /**
  * The rest components that are off their rest value and that no running track drives. The loop
- * of a view counts for neither: it drives no component, and the fields it adds to are left out of
- * the comparison, because its offset is no distance from the rest pose. So a looping view is
- * loose exactly when a view without a loop would be.
+ * of a view counts for neither. It drives no component: it adds an offset to the rest pose and
+ * owns nothing. And its offset is no distance from the rest pose: the value under the loop is
+ * what is compared. So a looping view is loose exactly when a view without a loop would be.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view to check.
@@ -293,19 +312,9 @@ export function looseComponents(pctx: ProjectionCtx, view: View): string[] {
   for (const [name, value] of view.rest) {
     if (driven.has(name) || value.value === true) continue;
 
-    const stored = storedValue(pctx, view.entity, value.type);
+    const under = valueUnderLoop(pctx, view, value);
 
-    if (stored === undefined) continue;
-
-    const swayed = swayedFields(pctx, view.entity, name);
-    // The rest value of a component that is no tag is a plain record of its fields.
-    const rest = value.value as Record<string, unknown>;
-    const home =
-      swayed.size === 0
-        ? deepEquals(stored, rest)
-        : deepEquals(withoutFields(stored, swayed), withoutFields(rest, swayed));
-
-    if (!home) loose.push(name);
+    if (under !== undefined && !deepEquals(under, value.value)) loose.push(name);
   }
 
   return loose;
@@ -346,7 +355,7 @@ export function playSettle(
   const played = runHook(pctx, view, "settle", () => custom(handle, components));
 
   if (played === undefined) {
-    writeRestNow(pctx, view, components);
+    writeRestUnderLoops(pctx, view, components);
 
     return;
   }
@@ -355,7 +364,84 @@ export function playSettle(
 }
 
 /**
- * Writes the rest values of the named components at once, leaving out muted fields.
+ * Writes fields of one rest component at once while a loop of the view may run. A field a loop
+ * adds to is written with the offset on top, so the picture does not lose the offset for a
+ * frame. Its new value is first handed to the driver: the driver keeps its own base for such a
+ * field and would write the old one back with its next frame. A track of 0 ms to the rest value
+ * does that, and it is finished at once. So the base is moved before this call returns, whatever
+ * cancels the motions of the view next and also in a world that is not live, and no handle is
+ * left with the view. The shown value is written last: a driver that adds no offset on `finish`
+ * must not have the last word. A field no loop adds to is written as it is, and muted fields are
+ * left out.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view to write.
+ * @param value - The rest value of the component, which names its type.
+ * @param patch - The fields to write, with their rest values.
+ */
+function writeUnderLoop(
+  pctx: ProjectionCtx,
+  view: View,
+  value: AnyComponentValue,
+  patch: Readonly<Record<string, unknown>>
+): void {
+  const offsets = loopOffsets(pctx, view.entity, asComponent(value.type));
+  const shown: Record<string, unknown> = {};
+  const based: Record<string, number> = {};
+
+  for (const [field, entry] of Object.entries(patch)) {
+    const offset = offsets[field];
+
+    if (offset === undefined || typeof entry !== "number") {
+      shown[field] = entry;
+
+      continue;
+    }
+
+    shown[field] = entry + offset;
+    based[field] = entry;
+  }
+
+  if (Object.keys(based).length > 0) {
+    startTrack(pctx, view.entity, asComponent(value.type), based, {
+      ms: 0,
+      ease: "linear",
+      delayMs: 0,
+      additive: false
+    }).finish();
+  }
+
+  writeUnmuted(pctx, view.entity, value, shown);
+}
+
+/**
+ * Writes the rest values of the named components at once where a loop of the view may still
+ * run: in play mode, and when `settle(entity)` writes in a world that is not live. A value under
+ * a loop keeps the offset on top and reaches the driver too, as `writeUnderLoop` says. A direct
+ * reconcile needs none of this and uses `writeRestNow`: its flush ends every loop.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param view - The view to correct.
+ * @param components - The component names to write.
+ */
+export function writeRestUnderLoops(
+  pctx: ProjectionCtx,
+  view: View,
+  components: readonly string[]
+): void {
+  for (const name of components) {
+    const value = view.rest.get(name);
+
+    if (value === undefined || value.value === true) continue;
+
+    writeUnderLoop(pctx, view, value, value.value as Record<string, unknown>);
+  }
+}
+
+/**
+ * Writes the rest values of the named components at once, leaving out muted fields. It is the
+ * write of a direct reconcile, whose flush ends every loop of the view: a value written under a
+ * loop that runs on goes through `writeRestUnderLoops`.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view to correct.
@@ -425,15 +511,16 @@ function atRest(stored: unknown, rest: unknown): boolean {
 
 /**
  * The fields of one rest component that are off their rest value: muted fields left out, numbers
- * within `REST_TOLERANCE`. A field a running loop adds to is left out too: the offset of the loop
- * sits in its stored value and is no miss. A tag and a component the entity does not carry
- * answer nothing.
+ * within `REST_TOLERANCE`. The value under the loop of the view is what is compared, so the
+ * offset of a loop is no miss, and a miss in a field a loop adds to is one. A tag and a component
+ * the entity does not carry answer nothing.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view to check.
  * @param name - Name of the rest component.
  * @param value - The rest value of that component.
- * @returns The fields to write to bring the component home, by field name.
+ * @returns The fields to write to bring the component home, by field name, with their rest
+ *   values.
  */
 function offRestFields(
   pctx: ProjectionCtx,
@@ -445,26 +532,23 @@ function offRestFields(
 
   if (value.value === true) return patch;
 
-  const stored = storedValue(pctx, view.entity, value.type);
+  const under = valueUnderLoop(pctx, view, value);
 
-  if (stored === undefined) return patch;
+  if (under === undefined) return patch;
 
   const muted = mutedFields(pctx, view.entity, name);
-  const swayed = swayedFields(pctx, view.entity, name);
 
   for (const [field, entry] of Object.entries(value.value as Record<string, unknown>)) {
-    if (muted.has(field) || swayed.has(field)) continue;
-    if (!atRest(stored[field], entry)) patch[field] = entry;
+    if (!muted.has(field) && !atRest(under[field], entry)) patch[field] = entry;
   }
 
   return patch;
 }
 
 /**
- * Tells whether a view carries a component off its rest value, by the rule of the convergence
- * check: a field another writer owns does not count, a field a running loop adds to does not
- * count, and a number counts as at rest within `REST_TOLERANCE`. A rollback asks it before it
- * settles a view whose item did not change.
+ * Tells whether a view carries a component off its rest value: a field another writer owns does
+ * not count, a number counts as at rest within `REST_TOLERANCE`, and what a loop adds does not
+ * count. A rollback asks it before it settles a view whose item did not change.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view to check.
@@ -479,9 +563,10 @@ export function standsOffRest(pctx: ProjectionCtx, view: View): boolean {
 }
 
 /**
- * The convergence check of the last motion: every rest component is compared with the stored
- * value, muted fields and the fields a running loop adds to excluded, numbers within
- * `REST_TOLERANCE`. A difference is written and reported.
+ * The convergence check of the last motion: every rest component is compared with the value
+ * under the loop of the view, muted fields excluded, numbers within `REST_TOLERANCE`. A
+ * difference is written and reported. A field a loop adds to is handed to the driver and written
+ * with the offset on top, so the correction does not jump and is not undone by the loop.
  *
  * @param pctx - Domain context of the projection module.
  * @param view - The view that came to rest.
@@ -492,7 +577,7 @@ export function checkConvergence(pctx: ProjectionCtx, view: View): void {
 
     if (Object.keys(patch).length === 0) continue;
 
-    pctx.deps.ecs.set(view.entity, asComponent(value.type), patch);
+    writeUnderLoop(pctx, view, value, patch);
     pctx.ctx.log.warn("world:view-corrected", {
       projection: view.projection,
       key: view.key,

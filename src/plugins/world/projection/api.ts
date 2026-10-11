@@ -16,7 +16,7 @@ import {
   playSettle,
   restingPeers,
   stillMoving,
-  writeRestNow
+  writeRestUnderLoops
 } from "./motions";
 import {
   clearMounted,
@@ -375,7 +375,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       forgetEndedTracks(pctx);
 
       if (deps.ecs.mode() !== "live") {
-        writeRestNow(pctx, view, [...view.rest.keys()]);
+        // No flush follows: a loop of the view stands and runs on when the world is live again.
+        writeRestUnderLoops(pctx, view, [...view.rest.keys()]);
         // Only a pending `lift(false)` drops the view. A view the finger still holds stays lifted.
         dropPending(pctx, view);
 

@@ -281,6 +281,11 @@ export type State = {
   offsets: Map<string, Map<number, number>>;
   /** Per field key, the value the offsets are added to. Dropped when no track drives the field. */
   bases: Map<string, number>;
+  /**
+   * Per entity, its running additive tracks. `offsetsOf` of the driver reads it, so the cost of
+   * one answer is the loops of that entity and not every track of the game.
+   */
+  additive: Map<Entity, Set<Track>>;
   /** The running timelines, by id. */
   timelines: Map<number, RunningTimeline>;
   /** The `animations` of every feature, read in `onStart`. */

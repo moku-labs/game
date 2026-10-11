@@ -348,9 +348,9 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
  * transition is resolved and every name is checked here, at definition time, so every track it
  * starts carries a concrete duration and a wrong name fails where it is written. A `loop` builds
  * the `loop` hook: `world` and `ui` play it wherever they play `enter`, so a projection view loops
- * once it entered with motion, never after a direct reconcile, and `ui` swaps it when the motion
- * prop of an element changes. One cycle of the loop is `loop.ms`, or `transition.ms` when it is
- * left out.
+ * from its enter, or from the first live frame after a direct reconcile, and `ui` swaps it when
+ * the motion prop of an element changes. One cycle of the loop is `loop.ms`, or `transition.ms`
+ * when it is left out.
  *
  * @param spec - The named poses, the keyframe tracks, the transition, the loop and the hooks to
  *   build.

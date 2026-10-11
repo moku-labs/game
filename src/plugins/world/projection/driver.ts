@@ -41,6 +41,9 @@ function joinFields(
   return new Set([...(driven ?? []), ...owned]);
 }
 
+/** What a component no loop adds to answers: no offset on any field. */
+const NO_OFFSETS: Readonly<Record<string, number>> = Object.freeze({});
+
 /** A handle for a motion that is already done. */
 const INERT: MotionHandle = {
   finish: (): void => {},
@@ -193,8 +196,7 @@ export function startTrack(
       entity,
       component: component.componentName,
       handle,
-      additive: options.additive === true,
-      fields: Object.keys(withSegmentFields(to, options.segments))
+      additive: options.additive === true
     });
   }
 
@@ -248,27 +250,21 @@ export function drivenComponents(pctx: ProjectionCtx, entity: Entity): Set<strin
 }
 
 /**
- * The fields of one component of one entity that a running additive track adds to. The offset of
- * a loop sits in the stored value of such a field, and the world cannot tell it from the value
- * under it, so the field is never compared with its rest value: not when a settle asks what is
- * loose, and not in the convergence check.
+ * What the additive tracks of the installed driver add to one component of one entity right now:
+ * the offset of a loop. A driver that does not report it, and a world without a driver, answer
+ * no offset.
  *
  * @param pctx - Domain context of the projection module.
  * @param entity - The entity to ask about.
- * @param name - Component name.
- * @returns The field names a loop adds to, empty for a component no additive track runs on.
+ * @param component - The component to ask about.
+ * @returns Field name to what is added to it, empty for a component no loop adds to.
  */
-export function swayedFields(pctx: ProjectionCtx, entity: Entity, name: string): Set<string> {
-  const swayed = noFields();
-
-  for (const track of pctx.ctx.state.projection.tracks) {
-    if (track.entity !== entity || track.component !== name || !track.additive) continue;
-    if (!track.handle.active()) continue;
-
-    for (const field of track.fields) swayed.add(field);
-  }
-
-  return swayed;
+export function loopOffsets(
+  pctx: ProjectionCtx,
+  entity: Entity,
+  component: AnyComponent
+): Readonly<Record<string, number>> {
+  return pctx.ctx.state.projection.driver?.offsetsOf?.(entity, component) ?? NO_OFFSETS;
 }
 
 /**

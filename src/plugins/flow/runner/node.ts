@@ -116,7 +116,8 @@ export function nodeFx(
    * mode and the node's signal apply; only its end is nobody's wait. A failure is the handler's:
    * it goes to the log and never to the node. A `cosmetic` descriptor does not get that far: the
    * gateway swallows its failure. After the abort of the node nothing is started and nothing is
-   * thrown, not even for a descriptor refused otherwise.
+   * thrown, not even for a descriptor refused otherwise. An effect that ends with a rejection
+   * after the abort did not fail: its handler was told to stop, so nothing is logged.
    *
    * @param descriptor - The descriptor the node starts.
    * @throws {Error} When the descriptor has `answers` or is a `guide`.
@@ -131,6 +132,9 @@ export function nodeFx(
     }
 
     modules.fx.run(descriptor, step.signal).catch((error: unknown) => {
+      // The node was aborted while the effect ran: its handler was told to stop, nothing failed.
+      if (step.signal.aborted) return;
+
       step.log.error(
         "flow:fx-start-failed",
         { path: step.path, kind: descriptor.kind },

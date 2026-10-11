@@ -18,7 +18,8 @@ import {
   runHook,
   standsOffRest,
   stillMoving,
-  writeRestNow
+  writeRestNow,
+  writeRestUnderLoops
 } from "./motions";
 import {
   dequeueRevive,
@@ -189,19 +190,28 @@ function enterEntry(
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
  * @param view - The live view.
- * @param entry - The item, the peers, the mode, the force flag and the used hints.
+ * @param entry - The item, the peers, the mode, the force flag, the used hints and the list a
+ *   direct reconcile fills.
  * @param entry.item - The new model item.
  * @param entry.peers - The new and the old items.
  * @param entry.direct - Whether the reconcile writes without motions.
  * @param entry.force - Whether an unchanged item is projected again.
  * @param entry.used - The hints that reached an entry.
+ * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
  * @returns False when the item has the same content as before and was only stored.
  */
 function changeEntry(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   view: View,
-  entry: { item: unknown; peers: Peers; direct: boolean; force: boolean; used: Set<Hint> }
+  entry: {
+    item: unknown;
+    peers: Peers;
+    direct: boolean;
+    force: boolean;
+    used: Set<Hint>;
+    rewritten: View[];
+  }
 ): boolean {
   const next = collectView(pctx, spec, entry.item);
   const { added, changed, removed } = diffComponents(view.rest, next, treeName(pctx));
@@ -225,6 +235,7 @@ function changeEntry(
     // frame, so a component a cancelled motion left off its rest pose is written too.
     finishHandles(view);
     writeRestNow(pctx, view, [...next.keys()]);
+    entry.rewritten.push(view);
 
     return true;
   }
@@ -253,7 +264,8 @@ function changeEntry(
     else if (played.motion !== undefined) view.handles.push(played.motion);
   }
 
-  writeRestNow(pctx, view, written);
+  // The loop of the view runs on: a value written under it keeps the offset and reaches the driver.
+  writeRestUnderLoops(pctx, view, written);
   playSettle(pctx, view, spec, entry.peers, looseComponents(pctx, view));
   // The motions were cancelled: when no new one started, a pending `lift(false)` takes effect.
   dropIfStill(pctx, view);
@@ -270,17 +282,18 @@ function changeEntry(
  * @param spec - The projection spec.
  * @param mounted - The mounted projection.
  * @param view - The queued view.
- * @param entry - The item, the peers and the mode.
+ * @param entry - The item, the peers, the mode and the list a direct reconcile fills.
  * @param entry.item - The new model item.
  * @param entry.peers - The new and the old items.
  * @param entry.direct - Whether the reconcile writes without motions.
+ * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
  */
 function reviveEntry(
   pctx: ProjectionCtx,
   spec: AnyProjectionSpec,
   mounted: Mounted,
   view: View,
-  entry: { item: unknown; peers: Peers; direct: boolean }
+  entry: { item: unknown; peers: Peers; direct: boolean; rewritten: View[] }
 ): void {
   cancelHandles(view);
   dequeueRevive(pctx, mounted, view, spec);
@@ -296,6 +309,7 @@ function reviveEntry(
 
   if (entry.direct) {
     writeRestNow(pctx, view, [...next.keys()]);
+    entry.rewritten.push(view);
 
     return;
   }
@@ -352,8 +366,9 @@ function exitEntry(
  * it moved with a motion or a timeline. A view that stands off its rest pose is settled as
  * `projection.settle(entity)` does: its motions are cancelled and the settle is played for the
  * loose components. With nothing loose a pending `lift(false)` takes effect. A view that stands
- * on its rest pose is left alone, so its motions run on. A direct reconcile only remembers the
- * view: its rest pose is written after the flush, in `writeUnchanged`.
+ * on its rest pose is left alone, so its motions run on. That holds for a view that loops too:
+ * the value under its loop is what is compared. A direct reconcile only remembers the view: its
+ * rest pose is written after the flush, in `writeUnchanged`.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -399,6 +414,7 @@ function settleUnchanged(
  * @param entry.settle - Whether an unchanged view that stands off its rest pose is settled.
  * @param entry.used - The hints that reached an entry.
  * @param entry.unchanged - The unchanged views of a direct reconcile that settles.
+ * @param entry.rewritten - The views a direct reconcile wrote, written again after its flush.
  * @param counts - The counters of this reconcile.
  */
 function applyEntry(
@@ -414,6 +430,7 @@ function applyEntry(
     settle: boolean;
     used: Set<Hint>;
     unchanged: View[];
+    rewritten: View[];
   },
   counts: Counts
 ): void {
@@ -546,6 +563,20 @@ function convergeMounted(pctx: ProjectionCtx, mounted: Mounted): void {
 }
 
 /**
+ * The last step of a direct reconcile that does not converge: every view an entry wrote is
+ * written to its rest pose once more. The flush cancels the loop of a view with its other
+ * tracks, and the driver writes the base it kept for the fields the loop added to back: the old
+ * rest value. So the write of the entry, which came before the flush, would be lost in those
+ * fields. Muted fields are left out.
+ *
+ * @param pctx - Domain context of the projection module.
+ * @param rewritten - The live views a changed or revived entry wrote in this reconcile.
+ */
+function writeAgain(pctx: ProjectionCtx, rewritten: readonly View[]): void {
+  for (const view of rewritten) writeRestNow(pctx, view, [...view.rest.keys()]);
+}
+
+/**
  * The last step of a direct reconcile a rollback caused: an unchanged view that stands off its
  * rest pose is written to it. It runs after the flush, as `convergeMounted` does and for the same
  * reason: the flush finishes the motions of the view, and a cancelled additive track writes its
@@ -638,7 +669,15 @@ function reconcileOne(
 
   const peers: Peers = { next, previous: mounted.items };
   const unchanged: View[] = [];
-  const entry = { peers, direct: options.direct, settle: options.settle, used, unchanged };
+  const rewritten: View[] = [];
+  const entry = {
+    peers,
+    direct: options.direct,
+    settle: options.settle,
+    used,
+    unchanged,
+    rewritten
+  };
 
   try {
     for (const [key, item] of next) {
@@ -655,9 +694,14 @@ function reconcileOne(
   mounted.items = next;
 
   if (options.direct) flushMounted(pctx, mounted);
-  // A converge writes every live view, so it covers the unchanged ones of a rollback too.
-  if (options.converge) convergeMounted(pctx, mounted);
-  else writeUnchanged(pctx, unchanged);
+
+  // A converge writes every live view, so it covers what the other two steps would write.
+  if (options.converge) {
+    convergeMounted(pctx, mounted);
+  } else {
+    writeAgain(pctx, rewritten);
+    writeUnchanged(pctx, unchanged);
+  }
 
   counts.queued += mounted.queue.length;
 }

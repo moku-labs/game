@@ -264,7 +264,8 @@ export type NodeFx = ((descriptor: Descriptor) => Promise<unknown>) & {
    * on. Fast mode and the node's signal apply as for `await fx(descriptor)`. A handler that fails
    * never fails the node: the log gets the error entry `flow:fx-start-failed` with
    * `{ path, kind }`, and a `cosmetic` descriptor is silent. After the abort of the node nothing is
-   * started.
+   * started, and a rejection that comes after the abort is not logged: the handler was told to
+   * stop.
    *
    * @param descriptor - The effect to start. Not one with `answers` and not a `guide`.
    * @throws {Error} When the descriptor has `answers` or is a `guide`: an answer has to be awaited.

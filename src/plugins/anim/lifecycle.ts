@@ -164,7 +164,9 @@ export function createRuntime(actx: AnimCtx): TimelineRuntime {
 
 /**
  * Ends everything that moves: every timeline at its own end, then every track on its exact
- * target. The frame step calls it in fast mode, the API exposes it, the teardown runs it last.
+ * target, a loop too. The API exposes it and the teardown runs it last. It owes no loop by
+ * itself; the next flush of `world` (a load, a restore, a commit in a paused or fast world) owes
+ * the loop of a view again.
  *
  * @param actx - Domain context of the anim plugin.
  * @param rt - The timeline runtime.
@@ -177,8 +179,10 @@ export function finishAllAnim(actx: AnimCtx, rt: TimelineRuntime): void {
 /**
  * The one frame step: the timelines consume the delta first, so a track a step just started is
  * advanced by the remainder at once, then every other track advances, then every `Frames` loop.
- * A paused world moves nothing; a fast world ends everything, and a loop, which has no end,
- * stands where it is.
+ * A paused world moves nothing. A fast world ends every timeline and every track that has an
+ * end; a loop, which has none, stays and stands where it is, so it runs on when the world is live
+ * again. That matters for a fast walk of the flow that commits nothing: no view is flushed then,
+ * so no view would get its loop back.
  *
  * @param actx - Domain context of the anim plugin.
  * @param rt - The timeline runtime.
@@ -190,7 +194,8 @@ export function stepAnim(actx: AnimCtx, rt: TimelineRuntime, time: Readonly<Time
   if (mode === "paused") return;
 
   if (mode === "fast") {
-    finishAllAnim(actx, rt);
+    finishAllTimelines(actx, rt);
+    finishAllTracks(actx, true);
 
     return;
   }
@@ -405,6 +410,7 @@ export function stopAnim(state: State): void {
   state.owner.clear();
   state.offsets.clear();
   state.bases.clear();
+  state.additive.clear();
   state.timelines.clear();
   state.registry.clear();
   state.markListeners.clear();

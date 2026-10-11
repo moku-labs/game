@@ -162,6 +162,32 @@ describe("anim — a defineMotion loop on a projection", () => {
     await app.stop();
   });
 
+  it("stands through the fast frames of the flow and runs on when the flow is live again", async () => {
+    const app = await startCards();
+
+    app.time.step(100);
+
+    expect(app.anim.active()).toBe(1);
+    expect(rotationOf(app, "a")).toBeCloseTo(0.05, 6);
+
+    // The flow walks fast and commits nothing: no reconcile, so nothing flushes the view.
+    app.flow.setMode("fast");
+    app.time.step(16);
+    app.time.step(16);
+
+    // A fast frame ends what has an end. The loop has none: it stands where it is.
+    expect(app.anim.active()).toBe(1);
+    expect(rotationOf(app, "a")).toBeCloseTo(0.05, 6);
+
+    app.flow.setMode("live");
+    app.time.step(100);
+
+    expect(app.anim.active()).toBe(1);
+    expect(rotationOf(app, "a")).toBeCloseTo(0.1, 6);
+
+    await app.stop();
+  });
+
   it("dies on flushAll (fast mode), starts again when the world is live, and dies with its view", async () => {
     const app = await startCards();
     const both = [

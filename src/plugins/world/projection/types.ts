@@ -174,10 +174,19 @@ export type TrackOptions = {
  * and goes through `ecs.set`, so `changed()` sees it. Muted fields are never written, also not on
  * `finish()`.
  *
+ * A driver with additive tracks keeps the value under them: an additive track adds an offset to
+ * it, and an absolute track of 0 ms to a field moves it. Such a driver reports the offsets with
+ * `offsetsOf`, so the world can compare the value under a loop with the rest pose.
+ *
  * @example
  * ```ts
  * // `anim` hands the world its own tween core in `onStart`.
- * const driver: TweenDriver = { track: startTrack, cancelAll: cancelTracksOf };
+ * const driver: TweenDriver = {
+ *   track: startTrack,
+ *   cancelAll: cancelTracksOf,
+ *   // A card sways 0.04 rad to one side right now: { rotation: 0.04 }
+ *   offsetsOf: addedOffsets
+ * };
  * const off = ctx.require(worldPlugin).projection.setDriver(driver);
  *
  * off(); // `anim` stopped: the world writes instantly again
@@ -208,6 +217,19 @@ export type TweenDriver = {
    * @param entity - The entity whose tracks end.
    */
   cancelAll(entity: Entity): void;
+
+  /**
+   * What the running additive tracks add to each field of one component of one entity right now:
+   * the offset of a loop. The world takes it off the stored value before it compares a view with
+   * its rest pose, so a view that only sways is home. Optional: a driver without additive tracks
+   * leaves it out, and the world reads that as no offset.
+   *
+   * @param entity - The entity to ask about.
+   * @param component - The component to ask about.
+   * @returns Field name to the sum of the offsets on it. A field no additive track adds to is
+   *   left out.
+   */
+  offsetsOf?(entity: Entity, component: AnyComponent): Readonly<Record<string, number>>;
 };
 
 /**
@@ -470,12 +492,6 @@ export type Track = {
    * additive track drives no component: a settle may bring the component home under it.
    */
   additive: boolean;
-  /**
-   * The fields the track names, the ones of its keyframe segments included. While an additive
-   * track runs, its offset sits in the stored value of these fields, so they are not compared
-   * with the rest pose.
-   */
-  fields: readonly string[];
 };
 
 /**

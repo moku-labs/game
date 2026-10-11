@@ -294,7 +294,7 @@ const place = defineNode({
 | A handler that fails | Never fails the node. The log gets one error entry `flow:fx-start-failed` with `{ path, kind }`. While the frame loop runs it is written in the `signals` phase of the next frame. |
 | A `cosmetic` descriptor (`sfx`, `haptic`) | Silent when its handler fails, as it is when awaited. |
 | `answers`, `guide` | Throws `[game] fx.start() got the effect …`. An answer has to be awaited: write `await fx(...)`. |
-| After the abort of the node | Starts nothing and throws nothing. |
+| After the abort of the node | Starts nothing and throws nothing. A rejection that comes after the abort is not logged: the handler was told to stop. |
 | The handler's value | Dropped. |
 
 ```ts

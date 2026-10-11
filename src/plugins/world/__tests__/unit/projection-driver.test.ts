@@ -195,14 +195,32 @@ describe("projection driver slot", () => {
     // The commit reconciles at the start of the next frame, which is where the hook runs.
     world.frame(0);
 
-    expect(world.driver.started).toEqual([
-      {
-        entity,
-        component: "Transform",
-        to: { x: 100 },
-        options: { ms: 120, ease: "inBack", delayMs: 40, additive: true }
-      }
-    ]);
+    expect(world.driver.started[0]).toEqual({
+      entity,
+      component: "Transform",
+      to: { x: 100 },
+      options: { ms: 120, ease: "inBack", delayMs: 40, additive: true }
+    });
+  });
+
+  it("settles a component its change hook answered with an additive tween only", () => {
+    const world = createMockWorld();
+
+    tweenOnChange(world, { ms: 120, ease: "inBack", delayMs: 40, additive: true });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    world.frame(0);
+
+    // An additive track adds to the value under it and drives no component. So the settle
+    // brings `Transform` to its new rest pose next to the tween of the hook.
+    expect(world.driver.started).toHaveLength(2);
+    expect(world.driver.started[1]).toEqual({
+      entity,
+      component: "Transform",
+      to: { x: 100, y: 0, scale: 1 },
+      options: { ms: 350, ease: "out", delayMs: 0, additive: false }
+    });
   });
 
   it("passes the keyframe segments of a tween to the driver unchanged", () => {

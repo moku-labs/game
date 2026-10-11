@@ -22,8 +22,10 @@ import { component } from "../../ecs/define";
 // additive track: it adds an offset to the rest pose and owns no component. So
 // the settle of a rollback, of `settle(entity)` and of a changed item moves a
 // swaying view home, the sway runs on over it, and the end of a motion does not
-// take the offset of the sway for a miss. The real time, lifecycle, model,
-// clock, flow, world, renderer and anim plugins.
+// take the offset of the sway for a miss. The driver reports what the sway
+// adds, and the world compares the value under it: a swaying view that stands
+// at home is left alone. The real time, lifecycle, model, clock, flow, world,
+// renderer and anim plugins.
 // ---------------------------------------------------------------------------
 
 type Piece = { id: string; x: number; y: number; level: number };
@@ -293,7 +295,7 @@ describe("world — a view that loops is brought home like any other", () => {
     await app.stop();
   });
 
-  it("a rollback leaves a swaying view that stands at home alone: the offset of its sway is no miss", async () => {
+  it("guard against a settle of no length: a rollback leaves a swaying view that stands at home alone", async () => {
     const board = await startBoard();
     const { app, entity } = board;
 
@@ -304,10 +306,17 @@ describe("world — a view that loops is brought home like any other", () => {
     board.step(16);
 
     expect(app.flow.state().path).toBe("home");
-    // No settle started: the sway is the one track.
+    // The value under the sway is the rest pose: no settle started, the sway is the one track.
     expect(app.anim.active()).toBe(1);
     expect(app.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 300, scale: 1 });
     expect(app.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(board.sway(), 6);
+
+    board.step(175);
+
+    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 300, scale: 1 });
+    expect(app.world.ecs.get(entity, Transform)?.rotation).toBeCloseTo(board.sway(), 6);
+    expect(app.anim.active()).toBe(1);
+    expect(corrected(board)).toBe(0);
 
     await app.stop();
   });

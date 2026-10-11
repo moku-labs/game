@@ -2326,6 +2326,44 @@ describe("fx.start", () => {
     expect(harness.gate.narrows).toEqual([undefined]);
   });
 
+  it("does not log the abort of the node as a failed effect", async () => {
+    const stopped: string[] = [];
+    const harness = setup({
+      main: startingFlow(context => {
+        context.fx.start({ kind: "load" });
+
+        return new Promise<Result>(() => undefined);
+      }),
+      running: false
+    });
+
+    // A handler that honours the signal: it rejects when the node is aborted.
+    withGateway(harness).handle(
+      "load",
+      (_descriptor, handlerContext) =>
+        new Promise<void>((_resolve, reject) => {
+          handlerContext.signal.addEventListener(
+            "abort",
+            () => {
+              stopped.push("handler");
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true }
+          );
+        })
+    );
+    harness.start();
+    await tick();
+
+    expect(errorEntriesOf(harness)).toEqual([]);
+
+    await stopRunner(harness.ctx);
+    await tick();
+
+    expect(stopped).toEqual(["handler"]);
+    expect(errorEntriesOf(harness)).toEqual([]);
+  });
+
   it("skips a handler without runInFast in fast mode and runs one that has it", async () => {
     const ran: string[] = [];
     const harness = setup({
