@@ -693,8 +693,10 @@ export function createReconciler(
    * Writes the visual and input components of a live element again. A visual or an input the
    * element no longer carries is removed, so a variant can trade the rectangle for a nine-slice and
    * back, and a button that became disabled stops answering the gate. `Scroll` is only ever added:
-   * its offset belongs to the finger, and a new look or a new rect never resets it. The extras of
-   * the `components` prop are diffed last.
+   * its offset belongs to the finger, and a new look or a new rect never resets it. The look
+   * written is recorded as the rest of the visual, so the rest the world holds is always the one
+   * the element is drawn with: a restore brings it back to exactly that. The extras of the
+   * `components` prop are diffed last.
    *
    * @param element - The element that changed.
    */
@@ -702,7 +704,8 @@ export function createReconciler(
     writeOrder(element);
 
     // Remove the visuals and inputs the element no longer carries.
-    const values = [...visualOf(element), ...inputOf(element)];
+    const visuals = visualOf(element);
+    const values = [...visuals, ...inputOf(element)];
 
     for (const type of [...VISUALS, ...INPUTS]) {
       const carried = values.some(value => value.type === type);
@@ -727,6 +730,9 @@ export function createReconciler(
 
       ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
     }
+
+    // The look just written is the rest of the visual.
+    for (const value of visuals) recordRest(ctx, element, value);
 
     writeExtras(element);
   }
@@ -1146,6 +1152,45 @@ export function createReconciler(
   }
 
   /**
+   * Asks for every root to be built again. The world calls it after a restore or a load, when it
+   * brought every element to its rest pose and ended every track on it. The next reconcile does
+   * the work, because only then the tree of the restored state is here to build from.
+   */
+  function converged(): void {
+    state.remount = true;
+    ctx.deps.time.wake();
+  }
+
+  /**
+   * Builds every root again from nothing: its element tree is dropped at once, with no exit, and
+   * the reconcile of this pass enters it through the mount path. So after a restore or a load an
+   * element stands exactly as if its root had just been mounted with the restored state: a new
+   * entity with the components of the description, then its `enter` hook, then its loop. What a
+   * mount does not bring is gone with the old tree: the local state of a component, a scroll
+   * offset, the keyboard focus, a text being edited, a hover. A root that is leaving keeps
+   * leaving.
+   */
+  function remountRoots(): void {
+    state.remount = false;
+
+    for (const root of state.roots.values()) {
+      if (state.removing.has(root.entity)) continue;
+
+      const element = root.element === undefined ? undefined : lookup(root.element);
+
+      if (element !== undefined) {
+        forgetSubtree(element);
+        forgetInstances(state, element.identity);
+        despawnTree(element);
+      }
+
+      root.element = undefined;
+      root.dirty = true;
+      root.needsSolve = true;
+    }
+  }
+
+  /**
    * Reconciles one root from the node its `Tree` carries.
    *
    * @param root - The root to reconcile.
@@ -1224,14 +1269,18 @@ export function createReconciler(
   }
 
   /**
-   * The first of the two systems of phase `layout`: the sweep, the popups that may leave, the
-   * pull of the text being typed, the scroll offsets and the windowed ranges, the bound texts that
-   * show a string of another size, the viewport, the dirty roots and the hosted views.
+   * The first of the two systems of phase `layout`: the sweep, the roots a restore asked to build
+   * again, the popups that may leave, the pull of the text being typed, the scroll offsets and the
+   * windowed ranges, the bound texts that show a string of another size, the viewport, the dirty
+   * roots and the hosted views.
    */
   function reconcile(): void {
     // Despawn what finished exiting, and count this pass.
     sweep();
     state.reconciles += 1;
+
+    // After a restore or a load every root is built again, the way a mount builds it.
+    if (state.remount) remountRoots();
 
     // A released popup leaves once the flow rests on a node that shows none of its component.
     settlePopups(ctx, state, unmountRoot);
@@ -1399,5 +1448,5 @@ export function createReconciler(
     if (!moved) modules.layout.repose(element, parentRect(element), false);
   }
 
-  return { reconcile, solve, mountRoot, unmountRoot, markPointer, playEnter, sweep };
+  return { reconcile, solve, mountRoot, unmountRoot, markPointer, playEnter, sweep, converged };
 }

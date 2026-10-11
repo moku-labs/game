@@ -66,7 +66,21 @@ app.audio.journal(); // [{ key: "orders.complete", bus: "sfx", kind: "sfx", at: 
 
 ## The unlock
 
-A browser starts every context suspended. `onStart` puts one `pointerdown` and one `touchend` listener on `window` (`once`, `passive`); the first of them removes both and resumes the context. `unlocked()` turns true only when the context really reached `"running"`, and a refused resume warns once and puts the listeners back, so the next gesture tries again. The listeners sit on `window`, not on the canvas: the gesture may as well be a button of the game's loading page, which `input` never sees. Music a scene declared while the context was locked is remembered and started by that first gesture. When the same tap also enters a scene with the same track, the track starts once: the second request finds the first still decoding and does nothing. A sound effect requested while that resume is still pending — the click of the very button that unlocks the context — is queued, one per key, and played as soon as the context runs; a refused resume drops the queue.
+A browser starts a context suspended and lets it run after a user gesture. Some shells ask for no gesture, such as a native webview with the requirement switched off. `onStart` serves both: it asks the context to run at once, and it waits for a gesture where the answer is no. `unlocked()` turns true only when the context really reached `"running"`.
+
+**The start attempt.** `onStart` reads the state of the new context.
+
+- `"running"`: the context is unlocked at once. No listener is installed. Chrome 148 creates the context this way when it asks for no gesture.
+- Any other state: the two listeners are installed, then `resume()` is called once.
+  - The promise fulfils and the context runs: the listeners are removed and `unlocked()` is true with no touch. Music a scene declared in the meantime starts.
+  - The promise stays pending: nothing happens. Chrome 148 does this where it wants a gesture. The listeners wait.
+  - The promise rejects, or fulfils on a context that does not run: nothing happens and nothing is logged. The listeners wait.
+
+A sound fired while the start attempt is pending is dropped, not queued: that promise may never settle. The attempt needs no `window`, so a context given through `config.context` in a runtime without a DOM unlocks the same way. An attempt that fulfils after `onStop` changes nothing.
+
+**The gesture.** `onStart` puts one `pointerdown` and one `touchend` listener on `window` (`once`, `passive`); the first of them removes both and resumes the context. A refused resume warns once and puts the listeners back, so the next gesture tries again. The listeners sit on `window`, not on the canvas: the gesture may as well be a button of the game's loading page, which `input` never sees. Music a scene declared while the context was locked is remembered and started by that first gesture. When the same tap also enters a scene with the same track, the track starts once: the second request finds the first still decoding and does nothing. A sound effect requested while that resume is still pending — the click of the very button that unlocks the context — is queued, one per key, and played as soon as the context runs; a refused resume drops the queue.
+
+A gesture and the start attempt that settle together start the music once: the second request finds the track on its way and does nothing.
 
 ## Pause and iOS
 

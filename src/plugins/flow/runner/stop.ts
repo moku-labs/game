@@ -63,8 +63,9 @@ async function settle(ctx: StopCtx, running: Promise<void>): Promise<boolean> {
 
 /**
  * Stops the runner: the active node is aborted with reason `"stop"`, the loop is given
- * `settleTimeoutMs` to settle, and a background flush that is still running is awaited. The loop
- * itself discards the open transaction and shuts the gate while it leaves the aborted node.
+ * `settleTimeoutMs` to settle, an answer the gate still held is dropped, and a background flush
+ * that is still running is awaited. The loop itself discards the open transaction and shuts the
+ * gate while it leaves the aborted node.
  *
  * @param ctx - Config and state of the flow plugin.
  * @returns A promise that resolves when the graph stands still.
@@ -91,6 +92,8 @@ export async function stopRunner(ctx: StopCtx): Promise<void> {
 
   // A loop that outlived the deadline must still see the stop when it wakes up.
   state.running = undefined;
+  // A press of the stopped game is not an answer for the first gate of the next `run()`.
+  ctx.state.gate.held = undefined;
   if (settled) state.abort = undefined;
 
   const flushing = state.flushing;

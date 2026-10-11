@@ -37,6 +37,7 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `flow` | `retries` | `number` | `1` | Retries of a failed transition before `safeNode` |
 | `flow` | `settleTimeoutMs` | `number` | `2000` | How long `onStop` waits for the active node to settle after abort |
 | `flow` | `journalLimit` | `number` | `500` | Journal entries kept between checkpoints |
+| `flow` | `holdMs` | `number` | `0` | How long an answer a closed gate refused is kept, in milliseconds of game time. `0` keeps it for the frame it was given in, and the first answer wins. Above `0` the last answer wins. `Infinity` keeps it until the next gate opens |
 | `world` | `settleMs` | `number` | `350` | Length of the default settle motion |
 | `world` | `reconciledEvent` | `boolean` | `false` | Emit `world:reconciled` after every reconcile (dev tools) |
 | `renderer` | `mount` | `string \| undefined` | `undefined` | Selector of the mount element. `undefined` keeps the renderer inert |

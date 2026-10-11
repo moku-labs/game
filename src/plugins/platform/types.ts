@@ -106,7 +106,8 @@ export type PlatformApi = {
    * that takes the press wins: Escape taps the `escape` button of the top ui root (`"popup"`),
    * then the intent `back` is answered to the resting node (`"intent"`), and otherwise the
    * provider leaves the app (`"exit"`). While the graph moves between nodes the gate is closed and
-   * holds the answer for one frame, so the press answers `"intent"` and never leaves the app.
+   * holds the answer for the next gate (one frame, or `flow.holdMs`), so the press answers
+   * `"intent"` and never leaves the app.
    * Escape also ends the editing of a ui text field, so a
    * press while a field is edited ends the edit and answers `"popup"`. Without a provider nothing
    * is pressed and the answer is `"none"`.

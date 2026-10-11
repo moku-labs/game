@@ -12,6 +12,7 @@ import type {
   AnyFlow,
   AnyNode,
   AnyNodeContext,
+  AnyRecoverContext,
   AnyTypeTag,
   Bookmark,
   FlowEntry,
@@ -43,6 +44,7 @@ type NodeOptions = {
   rest?: boolean;
   checkpoint?: boolean;
   run?: (context: AnyNodeContext) => Result | Promise<Result>;
+  recover?: (context: AnyRecoverContext) => void | Promise<void>;
 };
 
 const node = (options: NodeOptions = {}): AnyNode => ({
@@ -54,7 +56,8 @@ const node = (options: NodeOptions = {}): AnyNode => ({
   checkpoint: options.checkpoint ?? false,
   barrier: false,
   inbox: [],
-  ...(options.run ? { run: options.run } : {})
+  ...(options.run ? { run: options.run } : {}),
+  ...(options.recover ? { recover: options.recover } : {})
 });
 
 const flow = (
@@ -124,7 +127,8 @@ const setup = (main: AnyFlow) => {
     safeNode: undefined,
     retries: 1,
     settleTimeoutMs: 2000,
-    journalLimit: 500
+    journalLimit: 500,
+    holdMs: 0
   };
   const deps: Deps = {
     time: {
@@ -331,6 +335,51 @@ describe("walkRoute", () => {
     await driving;
 
     expect(reached).toBe("home");
+
+    await stopRunner(harness.ctx);
+  });
+
+  it("runs the recover of the safe node in a fast walk and rests there", async () => {
+    const recovered: string[] = [];
+    const main = flow(
+      "main",
+      {
+        home: node({
+          rest: true,
+          checkpoint: true,
+          outcomes: ["play"],
+          recover: () => {
+            recovered.push(harness.ctx.state.fx.mode);
+          }
+        }),
+        board: node({
+          run: () => {
+            throw new Error("the board broke");
+          }
+        })
+      },
+      "home",
+      { home: { play: "board" }, board: { done: "home" } }
+    );
+    const harness = setup(main);
+
+    harness.start();
+
+    // Two answers: the first failure is a retry, the second makes the loop give up.
+    const state = await walkRoute(harness.ctx, harness.modules, [
+      { at: "home", intent: "play" },
+      { at: "home", intent: "play" }
+    ]);
+    // `emit` has one overload per event, and the mock types its calls by the last one only.
+    const emitted: readonly (readonly unknown[])[] = vi.mocked(harness.ctx.emit).mock.calls;
+
+    expect(recovered).toEqual(["fast"]);
+    expect(state).toMatchObject({ path: "home", pending: { gate: ["play"] }, mode: "live" });
+    expect(emitted.filter(call => call[0] === "flow:edge").map(call => call[1])).toEqual([
+      expect.objectContaining({ node: "home", outcome: "play" }),
+      expect.objectContaining({ node: "home", outcome: "play" }),
+      expect.objectContaining({ node: "home", outcome: "recover", next: "home" })
+    ]);
 
     await stopRunner(harness.ctx);
   });

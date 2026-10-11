@@ -152,6 +152,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
 
     playEnter: frame.playEnter,
 
+    converged: frame.converged,
+
     key: (input: KeyInput): boolean => focus.key(input),
 
     blur: focus.blur

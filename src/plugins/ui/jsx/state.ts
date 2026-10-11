@@ -76,6 +76,7 @@ export function createJsxState(): JsxState {
     text: createTextState(),
     hints: [],
     scrolls: emptySet(),
-    windowRenders: 0
+    windowRenders: 0,
+    remount: false
   };
 }

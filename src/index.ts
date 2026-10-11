@@ -30,6 +30,7 @@
  * | flow | retries | 1 |
  * | flow | settleTimeoutMs | 2000 |
  * | flow | journalLimit | 500 |
+ * | flow | holdMs | 0, an answer to a closed gate lives one frame |
  * | world | settleMs | 350 |
  * | world | reconciledEvent | false |
  * | renderer | mount | undefined, inert without a mount |

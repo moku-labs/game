@@ -18,9 +18,9 @@ vi.mock("../../runner/loop", () => ({
 const { connectFlow, resolveDeps } = await import("../../lifecycle");
 const { createMockKernel } = await import("./mock-kernel");
 
-const frameAt = (frame: number): Readonly<Time> => ({
+const frameAt = (frame: number, elapsed = 0): Readonly<Time> => ({
   delta: 16,
-  elapsed: 0,
+  elapsed,
   scale: 1,
   frame,
   idle: false
@@ -76,18 +76,38 @@ describe("connectFlow", () => {
       const { ctx, record } = createMockKernel();
 
       connectFlow(ctx);
-      ctx.state.gate.held = { answer: { intent: "play" }, frame: 2 };
+      ctx.state.gate.held = { answer: { intent: "play" }, frame: 2, at: 0 };
       record.frames[0]?.callback(frameAt(2));
 
-      expect(ctx.state.gate.held).toEqual({ answer: { intent: "play" }, frame: 2 });
+      expect(ctx.state.gate.held).toEqual({ answer: { intent: "play" }, frame: 2, at: 0 });
     });
 
     it("drops an answer held in an earlier frame", () => {
       const { ctx, record } = createMockKernel();
 
       connectFlow(ctx);
-      ctx.state.gate.held = { answer: { intent: "play" }, frame: 1 };
+      ctx.state.gate.held = { answer: { intent: "play" }, frame: 1, at: 0 };
       record.frames[0]?.callback(frameAt(2));
+
+      expect(ctx.state.gate.held).toBeUndefined();
+    });
+
+    it("keeps an answer of an earlier frame while it is younger than holdMs", () => {
+      const { ctx, record } = createMockKernel({ holdMs: 500 });
+
+      connectFlow(ctx);
+      ctx.state.gate.held = { answer: { intent: "play" }, frame: 1, at: 100 };
+      record.frames[0]?.callback(frameAt(20, 400));
+
+      expect(ctx.state.gate.held).toEqual({ answer: { intent: "play" }, frame: 1, at: 100 });
+    });
+
+    it("drops the answer in the frame whose elapsed time makes it older than holdMs", () => {
+      const { ctx, record } = createMockKernel({ holdMs: 500 });
+
+      connectFlow(ctx);
+      ctx.state.gate.held = { answer: { intent: "play" }, frame: 1, at: 100 };
+      record.frames[0]?.callback(frameAt(40, 616));
 
       expect(ctx.state.gate.held).toBeUndefined();
     });

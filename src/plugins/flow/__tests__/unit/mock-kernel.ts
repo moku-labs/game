@@ -37,17 +37,20 @@ export type MockKernel = {
 const noop = (): void => {};
 
 /**
- * Builds the default flow config, the same five fields `index.ts` declares.
+ * Builds the default flow config, the same six fields `index.ts` declares.
  *
+ * @param overrides - The fields a test sets differently, for example `{ holdMs: 500 }`.
  * @returns The plugin config used by the root unit tests.
  */
-export function createTestConfig(): Config {
+export function createTestConfig(overrides: Partial<Config> = {}): Config {
   return {
     mainFlow: undefined,
     safeNode: undefined,
     retries: 1,
     settleTimeoutMs: 2000,
-    journalLimit: 500
+    journalLimit: 500,
+    holdMs: 0,
+    ...overrides
   };
 }
 
@@ -186,6 +189,7 @@ function createFakeModel(record: Recorder): ModelApi {
  * Creates the mock kernel context of the flow plugin: the real plugin state, fake `time`, `model`
  * and `clock` behind `ctx.require`, and a recorder of everything they were asked to do.
  *
+ * @param overrides - The config fields a test sets differently, for example `{ holdMs: 500 }`.
  * @returns The context, its fake dependencies and the recorder.
  * @example
  * ```ts
@@ -194,13 +198,13 @@ function createFakeModel(record: Recorder): ModelApi {
  * expect(record.frames[0]?.phase).toBe("signals");
  * ```
  */
-export function createMockKernel(): MockKernel {
+export function createMockKernel(overrides: Partial<Config> = {}): MockKernel {
   const record = createRecorder();
   const time = createFakeTime(record);
   const clock = createFakeClock(record);
   const model = createFakeModel(record);
   const apis: Record<string, unknown> = { time, model, clock };
-  const config = createTestConfig();
+  const config = createTestConfig(overrides);
 
   const ctx: KernelSlice = {
     config,

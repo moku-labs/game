@@ -324,26 +324,38 @@ starts; a motion without a loop, or no motion, stops it. Keep a motion a module 
 <row key="card" motion={order.ready ? swayWide : swayGentle} />
 ```
 
-A keyframed `defineMotion` works on any element as it is: the keys walk around the element's
-pivot, so a popup that swings on its ropes names the rope point as its origin.
+### After a restore
 
-```tsx
-const swing = defineMotion({
-  keyframes: {
-    dropIn: [
-      { at: 0, Transform: { dy: -780, rotation: -0.035, scale: 0.8 } },
-      { at: 0.42, ease: "out", Transform: { dy: 14, rotation: 0.087, scale: 1.04 } }
-    ]
-  },
-  transition: { ms: 1000 },
-  on: { enter: "dropIn" }
-});
+After a restore or a load a ui element stands exactly as if its root had just been mounted with
+the restored state. A restore that switches the scene gives that by itself: the scene is
+unmounted and mounted. A restore inside the same scene gives the same picture, in two steps.
 
-<panel key="board" style={{ width: 600, height: 400, origin: { x: 0.5, y: -0.5 } }} motion={swing} />;
-```
+1. `world` brings every element home in the reconcile of the restore: it ends every track on the
+   entity and writes the rest it holds for it, the `Transform`, the visual and the extras. An
+   animation may have left an element anywhere: a timeline that moved it off the screen or faded
+   it to nothing ends on that pose.
+2. `world.projection.onConverged` calls `ui`, and the next reconcile builds every root again. The
+   element tree is dropped at once, with no exit, and the root is entered through the mount path:
+   a new entity with the components of the description, then the `enter` hook, then the `loop`.
 
-Breaking (delta 4): every ui motion with `scale` or `rotation` now turns around the element's
-centre. `origin: "topLeft"` keeps the old pivot.
+So nothing a mount does is written a second time, and a game needs no extra code:
+
+- An `enter` hook that places an element and returns nothing holds. It runs again, with the
+  restored state, also when the screen is the same item as before and no view of a projection
+  runs again.
+- What a mount does not bring is gone with the old tree, as after a remount of the scene: the
+  local state of a component, a scroll offset, the keyboard focus, a text being edited, a hover.
+- The entity of an element is another one after a restore. Ask `ui.find(key)` again.
+- A view hosted in a slot is without its parent for one frame, as after a mount.
+- A root that is leaving keeps leaving.
+
+`ui` builds in phase `layout`, which a `paused` or `fast` world skips. Until the world runs
+again the elements stand on the rest `world` wrote in step 1. Two things keep that rest right:
+
+- The rest of the visual is recorded every time its look is written, not only at mount. So it is
+  the look the element is drawn with now: a hover variant, a new `alpha`.
+- The content of a scroll records no rest `Transform`. The scroll step owns its pose, so the
+  list stays where the finger left it.
 
 ## Fit
 

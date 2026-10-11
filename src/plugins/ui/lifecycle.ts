@@ -78,7 +78,8 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
 
 /**
  * Opens the two systems of phase `layout`, the seven world hooks of `Tree`, `Box`, `Pressed` and
- * `PointerOver`, the two effect handlers, the hint listener that buffers every released hint for
+ * `PointerOver`, the listener that asks for every root to be built again after a restore or a
+ * load, the two effect handlers, the hint listener that buffers every released hint for
  * the `change` hooks of the next frame step, the three tap listeners (the `LocalWrite` patch, the
  * pointer tap that clears the keyboard focus, and the tap that starts or ends the editing of a
  * text field), the pointer door that opens the keyboard inside the DOM listener, the key listener
@@ -104,6 +105,7 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     }),
     ecs.onRemoved(Tree, entity => jsx.unmountRoot(entity)),
     ecs.onAdded(Box, entity => jsx.playEnter(entity)),
+    projection.onConverged(jsx.converged),
     ecs.onAdded(Pressed, entity => jsx.markPointer(entity, "pressed", true)),
     ecs.onRemoved(Pressed, entity => jsx.markPointer(entity, "pressed", false)),
     ecs.onAdded(PointerOver, entity => jsx.markPointer(entity, "hover", true)),
@@ -191,6 +193,7 @@ export function stopUi(state: State): void {
   state.jsx.hosts.clear();
   state.jsx.hosted.clear();
   state.jsx.scrolls.clear();
+  state.jsx.remount = false;
   state.jsx.hints.length = 0;
   // The ring entities went with the ui owner above.
   state.jsx.focus.entity = undefined;

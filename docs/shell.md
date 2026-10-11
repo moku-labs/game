@@ -88,7 +88,7 @@ The shell writes some plugin configs from the seams. Those keys are not in the t
 |---|---|---|
 | `model` | `playerProvider`, `initialPlayer`, `initialSession`, `seed` | `schemaVersion`, `migrations` |
 | `clock` | `source` | nothing |
-| `flow` | `mainFlow`, `safeNode` | `retries`, `settleTimeoutMs`, `journalLimit` |
+| `flow` | `mainFlow`, `safeNode` | `retries`, `settleTimeoutMs`, `journalLimit`, `holdMs` |
 | `platform` | `provider`, `keepAwake` | nothing |
 | `renderer` | `mount`; a seam's `loadPixi` and `preference` win | the rest |
 | `assets` | `manifest`, `io` | `textureBudgetMb`, `preloadDepth`, `baseUrl` |

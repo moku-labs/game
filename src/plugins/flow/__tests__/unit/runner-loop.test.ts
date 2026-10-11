@@ -6,11 +6,12 @@ import type { Contribution, FeaturesApi, FeaturesInternal } from "../../features
 import type { Descriptor, FxApi, FxInternal, Hint } from "../../fx/types";
 import type { Allow, Answer, GateApi, GateInternal, GateSpec } from "../../gate/types";
 import type { InboxApi, InboxInternal, WorldEvent } from "../../inbox/types";
-import { restorePosition, runLoop, stopRunner } from "../../runner/loop";
+import { loopSeam, restorePosition, runLoop, stopRunner } from "../../runner/loop";
 import type {
   AnyFlow,
   AnyNode,
   AnyNodeContext,
+  AnyRecoverContext,
   AnyTypeTag,
   Bookmark,
   FlowEntry,
@@ -53,6 +54,7 @@ type NodeOptions = {
   inbox?: readonly string[];
   scene?: string;
   run?: (context: AnyNodeContext) => Result | Promise<Result>;
+  recover?: (context: AnyRecoverContext) => void | Promise<void>;
 };
 
 const node = (options: NodeOptions = {}): AnyNode => ({
@@ -65,7 +67,8 @@ const node = (options: NodeOptions = {}): AnyNode => ({
   barrier: options.barrier ?? false,
   inbox: options.inbox ?? [],
   ...(options.scene === undefined ? {} : { scene: options.scene }),
-  ...(options.run ? { run: options.run } : {})
+  ...(options.run ? { run: options.run } : {}),
+  ...(options.recover ? { recover: options.recover } : {})
 });
 
 const slotNode = (name: string): SlotNode => ({
@@ -215,7 +218,10 @@ const createGateFake = (calls: string[]) => {
     narrow: (allow: Allow | undefined): void => {
       narrows.push(allow);
     },
-    clearHeld: vi.fn()
+    clearHeld: vi.fn(),
+    dropHeld: (): void => {
+      calls.push("dropHeld");
+    }
   };
 
   return {
@@ -328,6 +334,8 @@ const setup = (options: SetupOptions) => {
   const calls: string[] = [];
   const wakes: string[] = [];
   const emitted: Array<{ name: string; payload: Record<string, Json | unknown> }> = [];
+  // Called with every emitted event at the moment it is emitted, as the first hook of a plugin is.
+  const emitListeners: Array<(name: string, payload: Record<string, Json | unknown>) => void> = [];
   const frameListeners: Array<() => void> = [];
   const clockNow = { value: 1000 };
   const model = createStoreFake(calls, options.barrier ?? (async () => undefined));
@@ -381,11 +389,16 @@ const setup = (options: SetupOptions) => {
       safeNode: options.config?.safeNode,
       retries: options.config?.retries ?? 1,
       settleTimeoutMs: options.config?.settleTimeoutMs ?? 2000,
-      journalLimit: options.config?.journalLimit ?? 500
+      journalLimit: options.config?.journalLimit ?? 500,
+      holdMs: options.config?.holdMs ?? 0
     },
     state: createMockState(),
     emit: vi.fn((name: string, payload: Record<string, Json | unknown>) => {
       emitted.push({ name, payload });
+
+      const current = [...emitListeners];
+
+      for (const listener of current) listener(name, payload);
     }),
     log: createMockLog(),
     require: (plugin => {
@@ -411,6 +424,9 @@ const setup = (options: SetupOptions) => {
     inbox,
     modules,
     model,
+    onEmit: (listener: (name: string, payload: Record<string, Json | unknown>) => void): void => {
+      emitListeners.push(listener);
+    },
     frame: (): void => {
       const current = [...frameListeners];
 
@@ -1322,6 +1338,678 @@ describe("runLoop", () => {
   });
 });
 
+// ─── failures: the log entry and the recovery ─────────────────
+
+/** The safe node of the failure tests: a rest checkpoint, with or without `recover`. */
+const safeHome = (recover?: NodeOptions["recover"]): AnyNode =>
+  node({
+    rest: true,
+    checkpoint: true,
+    outcomes: ["play", "shop"],
+    ...(recover ? { recover } : {})
+  });
+
+/**
+ * A graph whose start node fails on every attempt. With one retry the loop fails twice and gives
+ * up: it stands on the safe node `home`, and no player answered in between.
+ */
+const failingBoot = (home: AnyNode, thrown: unknown = new Error("boom")): AnyFlow =>
+  flow(
+    "main",
+    {
+      boot: node({
+        run: () => {
+          throw thrown;
+        }
+      }),
+      home,
+      shop: waiting("leave")
+    },
+    "boot",
+    { boot: { done: "home" }, home: { play: "boot", shop: "shop" }, shop: { leave: "home" } }
+  );
+
+const safeConfig = { safeNode: "home", retries: 1 };
+
+/** What the store, the gate and the effects were asked to do after the loop gave up. */
+const afterGiveUp = (calls: readonly string[]): string[] =>
+  calls.slice(calls.lastIndexOf("rollback") + 1);
+
+/** Collects what `run()` rejects with, so a test never awaits a loop that does not end. */
+const rejectionOf = (running: Promise<void>): { error: Error | undefined } => {
+  const seen: { error: Error | undefined } = { error: undefined };
+
+  running.catch((error: unknown) => {
+    seen.error = error instanceof Error ? error : new Error(String(error));
+  });
+
+  return seen;
+};
+
+const bookmarkAt = (path: string): Bookmark => ({
+  path,
+  input: {},
+  player: {},
+  session: {},
+  rng: { seed: 2, streams: {} },
+  graph: "deadbeef"
+});
+
+describe("the flow:error log entry", () => {
+  it("writes one error entry per failure: the retry, then the give-up", async () => {
+    const boom = new Error("boom");
+    const harness = setup({ main: failingBoot(safeHome(), boom), config: safeConfig });
+
+    harness.start();
+    await tick();
+
+    expect(vi.mocked(harness.ctx.log.error).mock.calls).toEqual([
+      ["flow:error", { path: "boot", rolledBackTo: "boot", retry: true }, boom],
+      ["flow:error", { path: "boot", rolledBackTo: "home", retry: false }, boom]
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("writes the entry before it emits the event", async () => {
+    const order: string[] = [];
+    const harness = setup({
+      main: failingBoot(safeHome()),
+      config: { safeNode: "home", retries: 0 }
+    });
+
+    vi.mocked(harness.ctx.log.error).mockImplementation(() => {
+      order.push("log");
+    });
+    harness.onEmit(name => {
+      if (name === "flow:error") order.push("emit");
+    });
+    harness.start();
+    await tick();
+
+    expect(order).toEqual(["log", "emit"]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("logs a thrown value that is no error as an error with its text", async () => {
+    const harness = setup({
+      main: failingBoot(safeHome(), "no save"),
+      config: { safeNode: "home", retries: 0 }
+    });
+
+    harness.start();
+    await tick();
+
+    const logged = vi.mocked(harness.ctx.log.error).mock.calls[0]?.[2];
+
+    expect(logged).toBeInstanceOf(Error);
+    expect(logged?.message).toBe("no save");
+    // The event still carries the value the node threw.
+    expect(payloadsOf(harness.emitted, "flow:error")[0]).toMatchObject({ error: "no save" });
+    await stopRunner(harness.ctx);
+  });
+
+  it("writes no entry for the fatal failure inside the safe node", async () => {
+    const home = node({
+      rest: true,
+      checkpoint: true,
+      outcomes: ["play", "shop"],
+      run: () => {
+        throw new Error("safe boom");
+      }
+    });
+    const harness = setup({ main: failingBoot(home), config: safeConfig });
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    expect(fatal.error?.message).toContain("failed while the graph was recovering");
+    // Two failures of `boot`. The third, inside the safe node, rejects run() instead.
+    expect(harness.ctx.log.error).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the held answer when the loop gives up", () => {
+  it("drops the held answer on the give-up and keeps it on a retry", async () => {
+    const harness = setup({ main: failingBoot(safeHome()), config: safeConfig });
+
+    harness.start();
+    await tick();
+
+    const first = harness.calls.indexOf("rollback");
+    const last = harness.calls.lastIndexOf("rollback");
+
+    // The first failure is a retry: the press stays for the gate the player comes back to.
+    expect(harness.calls.slice(first + 1, last)).not.toContain("dropHeld");
+    // The second one moves the position to the safe node: the press belongs to the old one.
+    expect(harness.calls.slice(last + 1)).toEqual(["dropHeld", "begin", "open:play,shop"]);
+    await stopRunner(harness.ctx);
+  });
+});
+
+describe("recover on the safe node", () => {
+  it("runs recover as one committed transaction before the safe node opens its gate", async () => {
+    const harness = setup({
+      main: failingBoot(
+        safeHome(() => {
+          harness.calls.push("recover");
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.start();
+    await tick();
+
+    expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
+      "begin",
+      "recover",
+      "commit",
+      "release",
+      "markRest",
+      "begin",
+      "open:play,shop"
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("builds the recover context from the transaction and the clock, without input and out", async () => {
+    const seen: AnyRecoverContext[] = [];
+    const harness = setup({
+      main: failingBoot(
+        safeHome(context => {
+          seen.push(context);
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.start();
+    await tick();
+
+    const [context] = seen;
+
+    expect(Object.keys(context ?? {}).toSorted()).toEqual([
+      "fx",
+      "now",
+      "player",
+      "rng",
+      "session",
+      "signal"
+    ]);
+    expect(context?.player).toBe(harness.model.store.snapshot().player);
+    expect(context?.session).toBe(harness.model.store.snapshot().session);
+    // The clock is read once for the recovery: after the two entries of `boot`.
+    expect(context?.now).toBe(1030);
+    expect(context?.signal.aborted).toBe(false);
+    await stopRunner(harness.ctx);
+  });
+
+  it("emits and journals the recovery as an edge of the safe node onto itself, and rests there", async () => {
+    const harness = setup({ main: failingBoot(safeHome(() => undefined)), config: safeConfig });
+
+    harness.start();
+    await tick();
+
+    expect(payloadsOf(harness.emitted, "flow:edge")).toEqual([
+      {
+        flow: "main",
+        node: "home",
+        outcome: "recover",
+        payload: noPayload,
+        next: "home",
+        patches: { doc: [], session: [] },
+        index: 0,
+        now: 1030
+      }
+    ]);
+    expect(payloadsOf(harness.emitted, "flow:rest")).toEqual([{ path: "home", checkpoint: true }]);
+    expect(harness.ctx.state.runner.restFrame).toEqual([
+      { flow: "main", node: "home", input: noPayload }
+    ]);
+    // The safe node is a checkpoint: the journal is compacted there, the index keeps counting.
+    expect(harness.ctx.state.runner.journal).toEqual([]);
+    expect(harness.ctx.state.runner.journalIndex).toBe(1);
+    // An edge is the moment the screen has something new to show.
+    expect(harness.wakes).toEqual(["commit"]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("makes the recovered state the rest point a later failure rolls back to", async () => {
+    const recovered = { count: 0 };
+    const harness = setup({
+      main: failingBoot(
+        safeHome(() => {
+          recovered.count += 1;
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.start();
+    await tick();
+    harness.calls.length = 0;
+
+    // The player goes on from the recovered home, and the transition fails again.
+    harness.gate.reply({ intent: "play" });
+    await tick();
+
+    // No rest mark between the recovery and this rollback: the store returns to the recovered state.
+    expect(harness.calls).toContain("rollback");
+    expect(harness.calls).not.toContain("markRest");
+    expect(payloadsOf(harness.emitted, "flow:error").at(-1)).toMatchObject({
+      path: "boot",
+      rolledBackTo: "home",
+      retry: true
+    });
+    // That failure is a retry: `home` is entered again, and recover does not run a second time.
+    expect(recovered.count).toBe(1);
+    expect(harness.gate.opened).toHaveLength(2);
+    await stopRunner(harness.ctx);
+  });
+
+  it("runs no recover when a failed transition is retried, only when the loop gives up", async () => {
+    const recovered = { count: 0 };
+    const main = flow(
+      "main",
+      {
+        home: safeHome(() => {
+          recovered.count += 1;
+        }),
+        board: node({
+          run: () => {
+            throw new Error("boom");
+          }
+        }),
+        shop: waiting("leave")
+      },
+      "home",
+      { home: { play: "board", shop: "shop" }, board: { done: "home" }, shop: { leave: "home" } }
+    );
+    const harness = setup({ main, config: safeConfig });
+
+    harness.start();
+    await tick();
+    harness.gate.reply({ intent: "play" });
+    await tick();
+
+    // One failure is a retry: the loop is back at the rest node it came from.
+    expect(payloadsOf(harness.emitted, "flow:error")).toEqual([
+      expect.objectContaining({ rolledBackTo: "home", retry: true })
+    ]);
+    expect(recovered.count).toBe(0);
+
+    harness.gate.reply({ intent: "play" });
+    await tick();
+
+    // The second failure uses the retries up: now the loop gives up and the safe node recovers.
+    expect(payloadsOf(harness.emitted, "flow:error").at(-1)).toMatchObject({ retry: false });
+    expect(recovered.count).toBe(1);
+    await stopRunner(harness.ctx);
+  });
+
+  it("rejects run() when recover throws: the safe node could not be made safe", async () => {
+    const broken = new Error("recover boom");
+    const harness = setup({
+      main: failingBoot(
+        safeHome(() => {
+          throw broken;
+        })
+      ),
+      config: safeConfig
+    });
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    expect(fatal.error?.message).toBe(
+      '[game] The node "home" failed while the graph was recovering in the safe node.\n  Fix the node or point flow.safeNode at a checkpoint that cannot fail.'
+    );
+    expect(fatal.error?.cause).toBe(broken);
+    expect(afterGiveUp(harness.calls)).toEqual([]);
+    expect(harness.calls.slice(-5)).toEqual(["begin", "discard", "drop", "close", "rollback"]);
+    expect(harness.gate.opened).toEqual([]);
+    // The fatal failure is no event and no log entry of its own.
+    expect(payloadsOf(harness.emitted, "flow:error")).toHaveLength(2);
+    expect(harness.ctx.log.error).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects run() when the safe node fails after its recovery: never a loop", async () => {
+    const recovered = { count: 0 };
+    const home = node({
+      rest: true,
+      checkpoint: true,
+      outcomes: ["play", "shop"],
+      run: () => {
+        throw new Error("safe boom");
+      },
+      recover: () => {
+        recovered.count += 1;
+      }
+    });
+    const harness = setup({ main: failingBoot(home), config: safeConfig });
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    expect(fatal.error?.message).toContain('The node "home" failed while the graph was recovering');
+    expect(recovered.count).toBe(1);
+  });
+
+  it("enters a safe node without recover as before: no edge, no commit, no rest mark", async () => {
+    const harness = setup({ main: failingBoot(safeHome()), config: safeConfig });
+
+    harness.start();
+    await tick();
+
+    expect(afterGiveUp(harness.calls)).toEqual(["dropHeld", "begin", "open:play,shop"]);
+    expect(payloadsOf(harness.emitted, "flow:edge")).toEqual([]);
+    expect(payloadsOf(harness.emitted, "flow:rest")).toEqual([]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("runs no recover when a flow:error listener restores a bookmark", async () => {
+    const recovered = { count: 0 };
+    const harness = setup({
+      main: failingBoot(
+        safeHome(() => {
+          recovered.count += 1;
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.onEmit((name, payload) => {
+      if (name !== "flow:error" || payload.retry !== false) return;
+
+      restorePosition(harness.ctx, harness.modules, bookmarkAt("home")).catch(() => undefined);
+    });
+    harness.start();
+    await tick();
+
+    // The bookmark names the safe node itself, and still its recover does not touch the restored state.
+    expect(recovered.count).toBe(0);
+    // One drop for the give-up, one for the bookmark.
+    expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
+      "dropHeld",
+      "restore",
+      "markRest",
+      "begin",
+      "open:play,shop"
+    ]);
+    expect(payloadsOf(harness.emitted, "flow:edge")).toEqual([]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("retries a restored transit node that fails, also when the restore came after a give-up", async () => {
+    const attempts = { value: 0 };
+    const main = flow(
+      "main",
+      {
+        boot: node({
+          run: () => {
+            throw new Error("boom");
+          }
+        }),
+        home: node({ rest: true, checkpoint: true, outcomes: ["play", "ask"] }),
+        ask: node({
+          outcomes: ["ok"],
+          run: () => {
+            attempts.value += 1;
+
+            if (attempts.value === 1) throw new Error("ask boom");
+
+            return result("ok");
+          }
+        }),
+        shop: waiting("leave")
+      },
+      "boot",
+      {
+        boot: { done: "home" },
+        home: { play: "boot", ask: "ask" },
+        ask: { ok: "shop" },
+        shop: { leave: "home" }
+      }
+    );
+    const harness = setup({ main, config: safeConfig });
+
+    harness.onEmit((name, payload) => {
+      if (name !== "flow:error" || payload.path !== "boot" || payload.retry !== false) return;
+
+      restorePosition(harness.ctx, harness.modules, bookmarkAt("ask")).catch(() => undefined);
+    });
+
+    const fatal = rejectionOf(harness.start());
+
+    await tick();
+
+    // The bookmark is a new position: the loop is no longer inside the safe node.
+    expect(fatal.error).toBeUndefined();
+    expect(payloadsOf(harness.emitted, "flow:error").at(-1)).toMatchObject({
+      path: "ask",
+      rolledBackTo: "ask",
+      retry: true
+    });
+    expect(attempts.value).toBe(2);
+    expect(harness.gate.opened).toEqual([{ allowed: ["leave"] }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("ends the loop when the runner is stopped while recover is pending", async () => {
+    const signals: AbortSignal[] = [];
+    const harness = setup({
+      main: failingBoot(
+        safeHome(context => {
+          signals.push(context.signal);
+
+          return new Promise<void>(() => undefined);
+        })
+      ),
+      config: safeConfig
+    });
+    const running = harness.start();
+
+    await tick();
+
+    expect(signals).toHaveLength(1);
+    expect(harness.ctx.state.runner.abort?.signal).toBe(signals[0]);
+
+    await stopRunner(harness.ctx);
+    await expect(running).resolves.toBeUndefined();
+
+    expect(signals[0]?.reason).toBe("stop");
+    expect(afterGiveUp(harness.calls)).toEqual(["dropHeld", "begin", "discard", "drop", "close"]);
+    expect(harness.gate.opened).toEqual([]);
+  });
+
+  it("leaves a recover that settles on its abort as aborted: no failure, no edge", async () => {
+    const settle = async (how: "returns" | "rejects"): Promise<string[]> => {
+      const harness = setup({
+        main: failingBoot(
+          safeHome(
+            context =>
+              new Promise<void>((resolve, reject) => {
+                context.signal.addEventListener("abort", () => {
+                  if (how === "returns") resolve();
+                  else reject(new Error("the recover gave up"));
+                });
+              })
+          )
+        ),
+        config: safeConfig
+      });
+      const fatal = rejectionOf(harness.start());
+
+      await tick();
+      await stopRunner(harness.ctx);
+      await tick();
+
+      expect(fatal.error).toBeUndefined();
+      expect(payloadsOf(harness.emitted, "flow:edge")).toEqual([]);
+
+      return afterGiveUp(harness.calls);
+    };
+
+    expect(await settle("returns")).toEqual(["dropHeld", "begin", "discard", "drop", "close"]);
+    expect(await settle("rejects")).toEqual(["dropHeld", "begin", "discard", "drop", "close"]);
+  });
+
+  it("ends the loop when a stop lands while the recovery commits, before the node is entered", async () => {
+    const harness = setup({ main: failingBoot(safeHome(() => undefined)), config: safeConfig });
+    const ended = { value: false };
+
+    harness.onEmit((name, payload) => {
+      if (name !== "flow:edge" || payload.outcome !== "recover") return;
+
+      // What `stopRunner` does to the active controller, at the moment the recovery edge is out.
+      harness.ctx.state.runner.abort?.abort("stop");
+    });
+    harness.start().then(
+      () => {
+        ended.value = true;
+      },
+      () => undefined
+    );
+    await tick();
+
+    expect(ended.value).toBe(true);
+    expect(harness.calls).toContain("commit");
+    expect(harness.gate.opened).toEqual([]);
+  });
+
+  it("gives way to a restore that arrives while recover is pending", async () => {
+    const signals: AbortSignal[] = [];
+    const harness = setup({
+      main: failingBoot(
+        safeHome(context => {
+          signals.push(context.signal);
+
+          return new Promise<void>(() => undefined);
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.start();
+    await tick();
+
+    expect(signals).toHaveLength(1);
+
+    await restorePosition(harness.ctx, harness.modules, bookmarkAt("shop"));
+    await tick();
+
+    expect(signals[0]?.reason).toBe("restore");
+    expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
+      "begin",
+      "discard",
+      "drop",
+      "close",
+      "dropHeld",
+      "restore",
+      "markRest",
+      "begin",
+      "open:leave"
+    ]);
+    expect(payloadsOf(harness.emitted, "flow:edge")).toEqual([]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("enters a bookmark asked for while the recovery commits, not the safe node", async () => {
+    const harness = setup({ main: failingBoot(safeHome(() => undefined)), config: safeConfig });
+
+    harness.onEmit((name, payload) => {
+      if (name !== "flow:edge" || payload.outcome !== "recover") return;
+
+      restorePosition(harness.ctx, harness.modules, bookmarkAt("shop")).catch(() => undefined);
+    });
+    harness.start();
+    await tick();
+
+    // The gate of `home` never opened: the loop took the bookmark in its next turn.
+    expect(harness.gate.opened).toEqual([{ allowed: ["leave"] }]);
+    expect(harness.ctx.state.runner.stack).toEqual([{ flow: "main", node: "shop", input: {} }]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("lifts the narrow and ends the guide of a recover before the node is entered", async () => {
+    const harness = setup({
+      main: failingBoot(
+        safeHome(async context => {
+          await context.fx({ kind: "guide", payload: { allow: { intent: "play" } } });
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.start();
+    await tick();
+
+    // One lift per entry of `boot`, then the guide of the recovery and its lift.
+    expect(harness.gate.narrows).toEqual([undefined, undefined, { intent: "play" }, undefined]);
+    expect(afterGiveUp(harness.calls)).toEqual([
+      "dropHeld",
+      "begin",
+      "fx:guide",
+      "endGuides",
+      "commit",
+      "release",
+      "markRest",
+      "begin",
+      "open:play,shop"
+    ]);
+    await stopRunner(harness.ctx);
+  });
+
+  it("tells a walk when recover opens the gate for an answer", async () => {
+    const opened = { count: 0 };
+    const harness = setup({
+      main: failingBoot(
+        safeHome(async context => {
+          await context.fx({ kind: "popup", answers: ["ok"] });
+        })
+      ),
+      config: safeConfig
+    });
+
+    loopSeam(harness.ctx.state.runner).gateOpen.push(() => {
+      opened.count += 1;
+    });
+    harness.start();
+    await tick();
+
+    // The popup of the recovery, then the gate of `home` itself.
+    expect(opened.count).toBe(2);
+    await stopRunner(harness.ctx);
+  });
+
+  it("refuses an effect a recover starts after it was aborted", async () => {
+    const refused: unknown[] = [];
+    const held: { context: AnyRecoverContext | undefined } = { context: undefined };
+    const harness = setup({
+      main: failingBoot(
+        safeHome(context => {
+          held.context = context;
+
+          return new Promise<void>(() => undefined);
+        })
+      ),
+      config: safeConfig
+    });
+
+    harness.start();
+    await tick();
+    await stopRunner(harness.ctx);
+
+    await held.context?.fx({ kind: "sfx" }).catch((error: unknown) => refused.push(error));
+
+    expect(refused).toEqual(["stop"]);
+    expect(harness.calls).not.toContain("fx:sfx");
+  });
+});
+
 // ─── stopRunner ───────────────────────────────────────────────
 
 describe("stopRunner", () => {
@@ -1388,6 +2076,26 @@ describe("restorePosition", () => {
       { flow: "main", node: "play", input: { level: 4 } }
     ]);
     expect(harness.calls).toContain("markRest");
+    await stopRunner(harness.ctx);
+  });
+
+  it("drops a held answer when the bookmark is entered: the press belongs to the old position", async () => {
+    const main = flow("main", { home: waiting("play"), play: waiting("home") }, "home", {
+      home: { play: "play" },
+      play: { home: "home" }
+    });
+    const harness = setup({ main });
+
+    harness.start();
+    await tick();
+    harness.calls.length = 0;
+
+    await restorePosition(harness.ctx, harness.modules, bookmarkAt("play"));
+    await tick();
+
+    // Before the node of the bookmark opens its gate: that gate is never offered the old press.
+    expect(harness.calls.filter(call => call === "dropHeld")).toHaveLength(1);
+    expect(harness.calls.indexOf("dropHeld")).toBeLessThan(harness.calls.indexOf("open:home"));
     await stopRunner(harness.ctx);
   });
 

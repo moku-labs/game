@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createOut, defineFlow, defineNode, exit, slot, to, type } from "../../runner/define";
-import type { GameState, NodeRun, TypeTag } from "../../runner/types";
+import type { GameState, NodeRecover, NodeRun, TypeTag } from "../../runner/types";
 
 const done: NodeRun<GameState, void, { done: TypeTag<void> }> = ({ out }) => out.done();
+
+const reset: NodeRecover<GameState> = () => undefined;
+
+const wait: NodeRun<GameState, void, { play: TypeTag<void> }> = ({ out }) => out.play();
 
 const why = (failure: { reason: string }) => ({ why: failure.reason });
 
@@ -86,6 +90,25 @@ describe("defineNode", () => {
     const node = defineNode({ rest: true, outcomes: { play: type() } });
 
     expect("run" in node).toBe(false);
+  });
+
+  it("keeps the recover of a rest node", () => {
+    const node = defineNode({ rest: true, outcomes: { play: type() }, recover: reset });
+
+    expect(node.recover).toBe(reset);
+  });
+
+  it("keeps the recover next to the body of a rest node", () => {
+    const node = defineNode({ rest: true, outcomes: { play: type() }, run: wait, recover: reset });
+
+    expect(node.run).toBe(wait);
+    expect(node.recover).toBe(reset);
+  });
+
+  it("leaves the recover key out when the author wrote none", () => {
+    const node = defineNode({ rest: true, outcomes: { play: type() } });
+
+    expect("recover" in node).toBe(false);
   });
 
   it("does not share state between two nodes", () => {
