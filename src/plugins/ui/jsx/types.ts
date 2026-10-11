@@ -421,10 +421,10 @@ export type JsxState = {
 /**
  * One node of the snapshot `tree()` answers with. `rect` is natural: under a `fit` ancestor it
  * is the rect before that ancestor's scale. An element with `fit: "contain"` adds `fitScale`,
- * the scale it is drawn at. A `text` adds `content`: the words it draws. An `input` adds `value`:
- * the text being typed while it is edited, else the local field it writes. A windowed `scroll`
- * adds `window`: the rows that exist, which are the children of its content, and how many the
- * list has.
+ * the scale it is drawn at. A `text` adds `content`: the words it draws. A `text` given a text
+ * style key adds `textStyle`. An `input` adds `value`: the text being typed while it is edited,
+ * else the local field it writes. A windowed `scroll` adds `window`: the rows that exist, which
+ * are the children of its content, and how many the list has.
  *
  * @example
  * ```ts
@@ -457,6 +457,18 @@ export type UiNode = {
    * ```
    */
   content?: string;
+  /**
+   * The text style key a `text` was given: its `style` prop while that is a key. Absent when the
+   * style is a `Style` object, when there is none, and on any other tag.
+   *
+   * @example
+   * ```ts
+   * // Home: `<text key="homePlayLabel" style="ui.button" content="Play" />` under the root row.
+   * const label = app.ui.tree().children.find(node => node.key === "homePlayLabel");
+   * label?.textStyle; // "ui.button"
+   * ```
+   */
+  textStyle?: string;
   value?: string;
   /**
    * The rows of a windowed scroll that exist and how many the list has.

@@ -140,3 +140,48 @@ describe("readTree content", () => {
     expect(Object.hasOwn(tree, "content")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// `readTree` over a hand-built state: the `textStyle` of a text node is its
+// `style` prop while that is a text style key, and is left off anything else.
+// ---------------------------------------------------------------------------
+
+describe("readTree textStyle", () => {
+  it("gives a text given a style key that key", () => {
+    const label = elementOf({
+      entity: 2,
+      key: "homePlayLabel",
+      parent: 1,
+      node: { type: "text", props: { style: "ui.button", content: "Play" }, children: [] }
+    });
+    const row = elementOf({
+      type: "row",
+      key: "home",
+      node: { type: "row", props: {}, children: [] },
+      children: [2]
+    });
+    const state = stateWith(row);
+
+    state.elements.set(label.entity, label);
+
+    const found = readTree(state, ["ui"]).children.find(node => node.key === "homePlayLabel");
+
+    expect(found?.textStyle).toBe("ui.button");
+  });
+
+  it("has no textStyle key for a text with a Style object or none, and on a node that is not a text", () => {
+    const sized = elementOf({
+      node: { type: "text", props: { style: { width: 100, height: 40 } }, children: [] }
+    });
+    const bare = elementOf({});
+    const row = elementOf({
+      type: "row",
+      key: "bar",
+      node: { type: "row", props: { style: "ui.button" }, children: [] }
+    });
+
+    expect(Object.hasOwn(readTree(stateWith(sized), ["ui"]), "textStyle")).toBe(false);
+    expect(Object.hasOwn(readTree(stateWith(bare), ["ui"]), "textStyle")).toBe(false);
+    expect(Object.hasOwn(readTree(stateWith(row), ["ui"]), "textStyle")).toBe(false);
+  });
+});

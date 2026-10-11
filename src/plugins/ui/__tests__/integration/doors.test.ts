@@ -3,6 +3,7 @@ import { read } from "../../../flow/doors/read";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { Box } from "../../components";
 import { locateSource, uiSource } from "../../inspect";
+import type { UiNode } from "../../types";
 import { fitBars, startUiApp } from "../app";
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,25 @@ function boardOf(app: App): { fit: number; x: number; y: number } {
     x: content.x + (content.w - 970) / 2,
     y: content.y + (content.h - 970) / 2
   };
+}
+
+/**
+ * Finds the node with a key anywhere in a tree.
+ *
+ * @param node - The node to search from.
+ * @param key - The key to find.
+ * @returns The node, or `undefined` when no node has the key.
+ */
+function nodeOf(node: UiNode, key: string): UiNode | undefined {
+  if (node.key === key) return node;
+
+  for (const child of node.children) {
+    const found = nodeOf(child, key);
+
+    if (found !== undefined) return found;
+  }
+
+  return undefined;
 }
 
 describe("game.locate on the real ui", () => {
@@ -157,6 +177,24 @@ describe("game.ui on the real ui", () => {
     expect(read(app, uiSource)).toEqual(app.ui.tree());
     expect(app.model.store.snapshot()).toBe(model);
     expect(app.world.ecs.snapshot()).toEqual(world);
+
+    await app.stop();
+  });
+
+  it("gives a text its style key, and none to a text with a Style object", async () => {
+    const app = await startUiApp();
+
+    app.world.projection.mount(["hud", "rich"], { kind: "plugin", name: "test" });
+    app.time.step(16);
+    app.time.step(16);
+
+    const tree = read(app, uiSource);
+    const styled = nodeOf(tree, "styled");
+    const auto = nodeOf(tree, "auto");
+
+    expect(styled?.textStyle).toBe("body");
+    expect(auto?.type).toBe("text");
+    expect(Object.hasOwn(auto ?? {}, "textStyle")).toBe(false);
 
     await app.stop();
   });

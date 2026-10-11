@@ -99,15 +99,16 @@ export function stateOf(app: ReaderApp): VisualState {
 }
 
 /**
- * The ui tree without the words of its texts, at every depth.
+ * The ui tree without the words of its texts and without their style keys, at every depth.
  *
  * @param node - A node of the ui source.
- * @returns The node and its children, none with `content`.
+ * @returns The node and its children, none with `content` or `textStyle`.
  */
-function withoutContent(node: UiNode): UiNode {
-  const copy: UiNode = { ...node, children: node.children.map(child => withoutContent(child)) };
+function withoutText(node: UiNode): UiNode {
+  const copy: UiNode = { ...node, children: node.children.map(child => withoutText(child)) };
 
   delete copy.content;
+  delete copy.textStyle;
 
   return copy;
 }
@@ -132,6 +133,7 @@ export function describeOf(app: ReaderApp): VisualDescribe {
     views.push({ ...address, components: withParentAddress(entity.components, addresses) });
   }
 
-  // describe.json keeps rects and styles, not label text: a changed number is a state difference.
-  return { ui: withoutContent(read(app, sources.ui)), views: views.toSorted(byAddress) };
+  // describe.json keeps rects and styles, not label text or its style key: a changed number is a
+  // state difference.
+  return { ui: withoutText(read(app, sources.ui)), views: views.toSorted(byAddress) };
 }

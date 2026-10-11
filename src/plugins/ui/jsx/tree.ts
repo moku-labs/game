@@ -77,10 +77,25 @@ function contentOf(element: Element, resolvedOf: ResolvedOf | undefined): string
 }
 
 /**
+ * The text style key a text element was given: its `style` prop while that is a key.
+ *
+ * @param element - The element to read.
+ * @returns The key, or `undefined` for any other element and for a text with a `Style` object or
+ * no style.
+ */
+function textStyleOf(element: Element): string | undefined {
+  if (element.type !== "text") return undefined;
+
+  const style = element.node.props.style;
+
+  return typeof style === "string" ? style : undefined;
+}
+
+/**
  * Turns one element and its subtree into snapshot nodes. The rect is natural; a fitted element
- * adds the scale it is drawn at; a text adds the words it draws; a text field adds its value; a
- * windowed scroll adds its window. The spacers of a windowed scroll are left out: its content
- * lists the live rows.
+ * adds the scale it is drawn at; a text adds the words it draws and the style key of a keyed
+ * text; a text field adds its value; a windowed scroll adds its window. The spacers of a windowed
+ * scroll are left out: its content lists the live rows.
  *
  * @param state - The jsx state.
  * @param element - The element to read.
@@ -109,12 +124,14 @@ function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | unde
     children
   };
 
-  // The optional fields, each only when it applies: the words of a text, the fit scale of a
-  // fitted element, the value of a text field, the window of a windowed scroll, the local of a
-  // component root.
+  // The optional fields, each only when it applies: the words of a text, the style key of a keyed
+  // text, the fit scale of a fitted element, the value of a text field, the window of a windowed
+  // scroll, the local of a component root.
   const content = contentOf(element, resolvedOf);
   const worded = content === undefined ? node : { ...node, content };
-  const fitted = element.style.fit === "contain" ? { ...worded, fitScale: element.fit } : worded;
+  const textStyle = textStyleOf(element);
+  const styled = textStyle === undefined ? worded : { ...worded, textStyle };
+  const fitted = element.style.fit === "contain" ? { ...styled, fitScale: element.fit } : styled;
   const field = state.fields.get(element.entity);
   const valued = field === undefined ? fitted : { ...fitted, value: fieldValue(state, field) };
   const window = element.window;
