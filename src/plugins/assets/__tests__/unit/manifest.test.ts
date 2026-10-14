@@ -8,7 +8,8 @@ import {
   parseManifest,
   resolveBaseUrl,
   sumMb,
-  textureMb
+  textureMb,
+  textureOptionsOf
 } from "../../manifest";
 import type { ManifestFile } from "../../types";
 
@@ -435,5 +436,90 @@ describe("sumMb", () => {
 
   it("is zero for nothing", () => {
     expect(sumMb([])).toBe(0);
+  });
+});
+
+describe("parseManifest of a sub-feature's bundle", () => {
+  it("keeps parent, dir, release leave and a file's mips", () => {
+    const cup = {
+      key: "ep01.items.cup",
+      path: "features/episodes/ep01/assets/items/cup.png",
+      width: 336,
+      height: 288,
+      mb: 0.492,
+      mips: true
+    };
+    const manifest = parseManifest({
+      version: 1,
+      bundles: {
+        ep01: {
+          feature: "ep01",
+          parent: "episodes",
+          dir: "features/episodes/ep01",
+          tier: "lazy",
+          release: "leave",
+          mb: 0.492,
+          files: [cup]
+        }
+      }
+    });
+
+    expect(manifest.bundles.ep01).toEqual({
+      feature: "ep01",
+      parent: "episodes",
+      dir: "features/episodes/ep01",
+      tier: "lazy",
+      release: "leave",
+      mb: 0.492,
+      files: [cup]
+    });
+  });
+
+  it("reads another release, an empty or a non-string parent and dir, and a mips that is not true as absent", () => {
+    const file = { key: "a.x", path: "p.png", width: 1, height: 1, mb: 0 };
+    const manifest = parseManifest({
+      version: 1,
+      bundles: {
+        a: { feature: "a", parent: "", dir: 7, tier: "lazy", release: "budget", mb: 0, files: [] },
+        b: {
+          feature: "b",
+          tier: "lazy",
+          release: "other",
+          mb: 0,
+          files: [{ ...file, mips: "yes" }]
+        }
+      }
+    });
+
+    expect(manifest.bundles.a).toEqual({ feature: "a", tier: "lazy", mb: 0, files: [] });
+    expect(manifest.bundles.b).toEqual({ feature: "b", tier: "lazy", mb: 0, files: [file] });
+  });
+});
+
+describe("textureMb of the plugin with mipmaps", () => {
+  it("counts the same chain as the scanner", () => {
+    expect(textureMb(256, 128, true)).toBe(0.167);
+    expect(textureMb(4096, 1, true)).toBe(0.031);
+  });
+});
+
+describe("textureOptionsOf", () => {
+  const plain: ManifestFile = {
+    key: "ep01.cup",
+    path: "p.png",
+    width: 336,
+    height: 288,
+    mb: 0.375
+  };
+  const nine = { left: 4, top: 4, right: 4, bottom: 4 };
+
+  it("gives the borders and the mip chain a loose texture asks for, and nothing for a plain one", () => {
+    expect(textureOptionsOf({ ...plain, nine, mips: true })).toEqual({
+      nine: [4, 4, 4, 4],
+      mips: true
+    });
+    expect(textureOptionsOf({ ...plain, mips: true })).toEqual({ mips: true });
+    expect(textureOptionsOf({ ...plain, nine })).toEqual({ nine: [4, 4, 4, 4] });
+    expect(textureOptionsOf(plain)).toBeUndefined();
   });
 });

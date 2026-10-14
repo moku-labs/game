@@ -16,7 +16,7 @@ export function createViewportState(): ViewportState {
     reference: { width: 0, height: 0 },
     safeArea: { top: 0, right: 0, bottom: 0, left: 0 },
     resizePending: false,
-    probe: undefined,
+    probes: undefined,
     cleanups: []
   };
 }

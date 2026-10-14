@@ -98,6 +98,7 @@ describe("renderer plugin integration", () => {
       frameMs: 0,
       textures: 0,
       textureMb: 0,
+      textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
       renderPasses: 0
@@ -289,5 +290,42 @@ describe("renderer plugin integration", () => {
     expect(dom.mount.children).toHaveLength(0);
     expect(dom.documentListeners()).toBe(0);
     expect(dom.observers[0]?.disconnected).toBe(true);
+  });
+
+  it("a late inset reaches viewport.size() within one frame of the real loop", async () => {
+    // A 1080x2400 phone: the frame is the whole mount and a 47 px notch keeps the scale at 1.
+    const dom = installFakeDom({ width: 1080, height: 2400 });
+    const pixi = createFakePixi();
+    const app = createApp({
+      plugins: [worldPlugin, rendererPlugin, boardFeature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        model: {
+          initialPlayer: { items: [{ id: "a", level: 1, x: 0 }] },
+          initialSession: { moves: 0 },
+          seed: 1
+        },
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+      }
+    });
+
+    await app.start();
+    app.flow.run().catch(() => undefined);
+    await tick();
+
+    expect(app.renderer.viewport.size().safeArea.top).toBe(0);
+
+    // An Android WebView reports its notch after the page started.
+    dom.insets.top = 47;
+    for (const observer of dom.observers) {
+      if (observer.targets.some(target => target.dataset.mokuSafeArea === "start")) {
+        observer.fire();
+      }
+    }
+    app.time.step(16);
+
+    expect(app.renderer.viewport.size().safeArea.top).toBe(47);
+
+    await app.stop();
   });
 });

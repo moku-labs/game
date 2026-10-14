@@ -1,16 +1,21 @@
 /**
- * @file assets plugin — texture memory: what is used, who leaves next and the eviction itself.
- * The LRU compares the use counter, never a clock.
+ * @file assets plugin — texture memory: what is used, who leaves next and the eviction itself,
+ * and the release of a `"leave"` bundle whose feature left. The LRU compares the use counter,
+ * never a clock.
  */
 
+import { unloadCompanions } from "./companions";
 import { isPermanent } from "./tiers";
-import type { AssetsCtx, AssetsIo, LoadedAssets, State } from "./types";
+import type { AssetsCtx, AssetsIo, Events, LoadedAssets, ManifestBundle, State } from "./types";
 
 /** How many of the heaviest entries the over-budget warning names. */
 const HEAVIEST = 5;
 
 /** One row of the over-budget warning: a loose file by its key, or a page as `page "<id>"`. */
 type Heavy = { key: string; mb: number };
+
+/** Why a bundle was unloaded: the budget, a caller, or its feature left. */
+type UnloadReason = Events["assets:bundle-unloaded"]["reason"];
 
 /**
  * Adds up the estimated texture memory of every loaded bundle.
@@ -32,7 +37,8 @@ export function usedMb(state: State): number {
 
 /**
  * Picks the bundle that leaves next: the loaded one with the smallest use counter that is not
- * pinned, not permanent and not in the preload queue.
+ * pinned, not named by the mounted scene, not permanent and not in the preload queue. Its
+ * `release` is not read: a `"leave"` bundle is a candidate like any other.
  *
  * @param state - The plugin state.
  * @returns The bundle name, or `undefined` when nothing may go.
@@ -46,6 +52,7 @@ export function pickVictim(state: State): string | undefined {
 
     if (record.status !== "loaded" || entry === undefined) continue;
     if (state.pinned.has(name) || isPermanent(entry.tier)) continue;
+    if (state.sceneNamed.includes(name)) continue;
     if (state.queue?.bundles.includes(name) === true) continue;
     if (record.lastUsed >= smallest) continue;
 
@@ -92,14 +99,15 @@ export function releaseAssets(io: AssetsIo | undefined, assets: LoadedAssets): v
 }
 
 /**
- * Frees one loaded bundle: the textures are destroyed, `renderer` is told that its keys are gone
- * and the event goes out. A bundle that is not loaded is left alone.
+ * Frees one loaded bundle: the textures are destroyed, every companion drops what travels with
+ * it, `renderer` is told that its keys are gone and the event goes out. A bundle that is not
+ * loaded is left alone.
  *
  * @param ctx - Domain context of the plugin.
  * @param bundle - Name of the bundle.
- * @param reason - Whether the budget or a caller asked for it.
+ * @param reason - Whether the budget, a caller or the release of a left feature asked for it.
  */
-export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: "budget" | "request"): void {
+export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: UnloadReason): void {
   const state = ctx.state;
   const record = state.records.get(bundle);
   const entry = state.manifest.bundles[bundle];
@@ -111,12 +119,25 @@ export function unloadBundle(ctx: AssetsCtx, bundle: string, reason: "budget" | 
   record.status = "idle";
   record.lastUsed = 0;
 
+  unloadCompanions(ctx, state.companions, bundle);
+
   const keys = entry.files.map(file => file.key);
 
   ctx.deps.renderer.sync.textures.invalidate(keys);
 
   // `keys` is what `text` and `audio` release: each of them made something per key.
   ctx.emit("assets:bundle-unloaded", { bundle, tier: entry.tier, mb: entry.mb, reason, keys });
+
+  // Inline and positive, as the load: the performance log of an agent build names the unload.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    ctx.deps.renderer.monitor.event("bundle", {
+      bundle,
+      action: "unload",
+      tier: entry.tier,
+      mb: entry.mb,
+      reason
+    });
+  }
 }
 
 /**
@@ -184,5 +205,87 @@ export function enforceBudget(ctx: AssetsCtx): void {
     }
 
     unloadBundle(ctx, victim, "budget");
+  }
+}
+
+/**
+ * Creates an empty set of names. It lives in its own non-exported function because lint rule L5
+ * refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty set.
+ */
+function emptyNames(): Set<string> {
+  return new Set();
+}
+
+/**
+ * Lists the features with a node on the flow stack: for every frame, the outer frames of a
+ * sub-flow included, the owner `flow.describe()` gives the node the frame addresses. A node with
+ * no owner adds nothing. Read once per release or preload pass.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns The feature names.
+ */
+export function featuresOnStack(ctx: AssetsCtx): ReadonlySet<string> {
+  const graph = ctx.deps.flow.describe();
+  const features = emptyNames();
+
+  for (const frame of ctx.deps.flow.state().stack) {
+    const owner = graph.flows[frame.flow]?.nodes[frame.node]?.owner;
+
+    if (owner !== undefined) features.add(owner);
+  }
+
+  return features;
+}
+
+/**
+ * Tells whether a bundle must stay where the game stands now: it is pinned (a bundle of the node
+ * entered last), the mounted scene names it (the last list `sceneBundles` received), its feature
+ * is in `onStack`, or its tier is permanent.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param name - Name of the bundle.
+ * @param entry - Its manifest entry.
+ * @param onStack - The features on the stack, from `featuresOnStack`.
+ * @returns True when the bundle is held.
+ */
+export function isHeld(
+  ctx: AssetsCtx,
+  name: string,
+  entry: ManifestBundle,
+  onStack: ReadonlySet<string>
+): boolean {
+  const state = ctx.state;
+
+  return (
+    state.pinned.has(name) ||
+    state.sceneNamed.includes(name) ||
+    onStack.has(entry.feature) ||
+    isPermanent(entry.tier)
+  );
+}
+
+/**
+ * Unloads every loaded `"leave"` bundle nobody holds any more, with the reason `"leave"`. A
+ * running load is never aborted by it, and a `"budget"` bundle is never touched. Headless it does
+ * nothing.
+ *
+ * @param ctx - Domain context of the plugin.
+ */
+export function releaseLeftBundles(ctx: AssetsCtx): void {
+  const state = ctx.state;
+
+  if (state.io === undefined) return;
+
+  const onStack = featuresOnStack(ctx);
+
+  for (const [name, record] of state.records) {
+    const entry = state.manifest.bundles[name];
+
+    if (record.status !== "loaded" || entry?.release !== "leave") continue;
+    if (isHeld(ctx, name, entry, onStack)) continue;
+
+    unloadBundle(ctx, name, "leave");
   }
 }

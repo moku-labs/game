@@ -12,8 +12,9 @@ const entry = fileURLToPath(new URL("../../control.ts", import.meta.url));
 const marker = "moku:dev";
 
 /**
- * Bundles the flow commands with Bun, minified, with the dev flag defined. Vitest runs on Node,
- * so the build runs in a Bun child process.
+ * Bundles the flow commands with Bun, minified, with the dev flag defined and the agent and
+ * control flags of spec 10 defined false, as a release or dev build defines them. Vitest runs on
+ * Node, so the build runs in a Bun child process.
  *
  * @param dev - The value `__MOKU_GAME_DEV__` is defined as.
  * @returns The bundled code.
@@ -22,7 +23,7 @@ function bundle(dev: "true" | "false"): string {
   const script = `
     const result = await Bun.build({
       entrypoints: [${JSON.stringify(entry)}],
-      define: { __MOKU_GAME_DEV__: ${JSON.stringify(dev)} },
+      define: { __MOKU_GAME_DEV__: ${JSON.stringify(dev)}, __MOKU_GAME_AGENT__: "false", __MOKU_GAME_CONTROL__: "false" },
       minify: true,
       target: "browser",
       external: ["pixi.js", "yoga-layout", "@moku-labs/*"]
@@ -52,6 +53,7 @@ describe("the dev flag in a Bun build of src/plugins/flow/control.ts", () => {
   it("keeps the command bodies when __MOKU_GAME_DEV__ is defined true", () => {
     const code = bundle("true");
 
-    expect(code.split(marker).length - 1).toBe(4);
+    // answer, walk, bookmark, restore, and saveExport/saveImport of spec 10 C6.
+    expect(code.split(marker).length - 1).toBe(6);
   });
 });

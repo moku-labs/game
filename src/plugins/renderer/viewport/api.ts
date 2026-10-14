@@ -4,8 +4,8 @@
  */
 import type { PixiContainer, RendererCtx, ViewportModule } from "../types";
 import { fitFrame, referenceOf, scaleOf } from "./fit";
-import { measureMount, watchResize } from "./resize";
-import { clipInsets, clipToFrame, createSafeAreaProbe, readInsets } from "./safe-area";
+import { measureMount, watchResize, watchSafeArea } from "./resize";
+import { clipInsets, clipToFrame, createSafeAreaProbes, readInsets } from "./safe-area";
 import type { Point, SafeArea, ViewportCtx, ViewportDeps, ViewportSize } from "./types";
 
 /**
@@ -57,7 +57,7 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
     state.frame = fitFrame(size, ctx.config.aspect, ctx.global.orientation);
 
     const clip = {
-      insets: readInsets(state.probe),
+      insets: readInsets(state.probes),
       frame: state.frame,
       canvas: canvasOrigin(deps.host.canvas()),
       window: windowSize()
@@ -135,8 +135,9 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
     },
 
     start: (): void => {
-      state.probe = createSafeAreaProbe();
+      state.probes = createSafeAreaProbes();
       watchResize(vctx);
+      watchSafeArea(vctx);
       layout();
     },
 

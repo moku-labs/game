@@ -332,6 +332,35 @@ describe("effects plugin integration", () => {
     expect(buffers.every(buffer => buffer.destroyed)).toBe(true);
   });
 
+  it("disable then enable of effects.glow on a screen of glowing views: renderPasses drops by the glow's passes the next frame and comes back after enable, stats().filters stays", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const app = await startApp(["a", "b", "c", "d"].map(id => ({ id, kind: "card" as const })));
+
+    step(app, 2);
+
+    // Four cards, each with one Glow pass and two Tint passes, over the one pass of the stage.
+    expect(app.effects.stats()).toEqual({
+      particles: 0,
+      emitters: 0,
+      filters: 8,
+      renderPasses: 13
+    });
+
+    expect(app.effects.diagnostics.disable("effects.glow")).toBe(true);
+    step(app, 1);
+
+    expect(app.effects.stats().renderPasses).toBe(9);
+    expect(app.effects.stats().filters).toBe(8);
+
+    expect(app.effects.diagnostics.enable("effects.glow")).toBe(true);
+    step(app, 1);
+
+    expect(app.effects.stats().renderPasses).toBe(13);
+
+    await app.stop();
+  });
+
   it("checks the GLSL on the WebGL fallback in a dev build and hangs both programs", async () => {
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
 

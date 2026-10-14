@@ -12,6 +12,7 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api).toSorted()).toEqual([
       "capture",
       "host",
+      "monitor",
       "stats",
       "sync",
       "viewport"
@@ -23,7 +24,8 @@ describe("renderer api", () => {
       "gl",
       "kind",
       "pixi",
-      "ready"
+      "ready",
+      "resolution"
     ]);
     expect(Object.keys(mock.api.sync).toSorted()).toEqual([
       "boundsOf",

@@ -177,6 +177,7 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   frameMs: number;
   textures: number;
   textureMb: number;
+  textureMbSplit: { art: number; targets: number; kept: number };
   views: number;
   pooled: number;
   renderPasses: number;
@@ -196,7 +197,7 @@ renderer.begin;
 
 declare const glow: PixiFilter;
 
-expectTypeOf<FilterSlot>().toEqualTypeOf<{ filter: PixiFilter; passes: number }>();
+expectTypeOf<FilterSlot>().toEqualTypeOf<{ filter: PixiFilter; passes: number; kind?: string }>();
 expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void
 >();

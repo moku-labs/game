@@ -1,6 +1,6 @@
 /**
- * @file renderer/viewport — the resize observer and the teardown of the module. One resize is
- * applied per frame, in the `render` callback, never in the observer itself.
+ * @file renderer/viewport — the resize observers and the teardown of the module. One resize is
+ * applied per frame, in the `render` callback, never in an observer itself.
  */
 import type { ViewportCtx, ViewportState } from "./types";
 
@@ -38,16 +38,53 @@ export function watchResize(vctx: ViewportCtx): void {
   state.cleanups.push(() => observer.disconnect());
 }
 
+/** The window event the native shell sends when it sets the `--moku-safe-*` properties or its insets change. */
+const NATIVE_INSETS = "moku-native:insets";
+
 /**
- * Drops the observer and the probe. Works on the state alone, because `onStop` has no context.
+ * Watches the safe area: one observer on both probes, whose size is the insets, and the window
+ * event of the native shell. Both only raise the flag the mount's observer raises, so an inset
+ * that arrives late, a rotation that swaps left and right, or a shell that sets its own insets is
+ * laid out at the next frame. The event's `detail` is not read: the probes are the one source.
+ *
+ * @param vctx - Domain context of the viewport module.
+ */
+export function watchSafeArea(vctx: ViewportCtx): void {
+  const state = vctx.ctx.state.viewport;
+  const { probes } = state;
+
+  if (probes === undefined) return;
+
+  const raise = (): void => {
+    state.resizePending = true;
+  };
+
+  if (typeof globalThis.ResizeObserver === "function") {
+    const observer = new globalThis.ResizeObserver(raise);
+
+    observer.observe(probes.start);
+    observer.observe(probes.end);
+    state.cleanups.push(() => observer.disconnect());
+  }
+
+  if (typeof globalThis.addEventListener === "function") {
+    globalThis.addEventListener(NATIVE_INSETS, raise);
+    state.cleanups.push(() => globalThis.removeEventListener(NATIVE_INSETS, raise));
+  }
+}
+
+/**
+ * Drops the observers, the listener and the probes. Works on the state alone, because `onStop`
+ * has no context.
  *
  * @param state - The viewport branch of the plugin state.
  */
 export function stopViewport(state: ViewportState): void {
   for (const off of state.cleanups) off();
   state.cleanups.length = 0;
-  state.probe?.remove();
-  state.probe = undefined;
+  state.probes?.start.remove();
+  state.probes?.end.remove();
+  state.probes = undefined;
   state.resizePending = false;
   state.frame = { x: 0, y: 0, width: 0, height: 0 };
   state.reference = { width: 0, height: 0 };

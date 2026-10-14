@@ -966,3 +966,120 @@ describe("the carried stack", () => {
     expect(mock.state.carried).toEqual([]);
   });
 });
+
+describe("the aim of the view in the hand", () => {
+  /** The three drop targets of the aim tests, one above the other. */
+  type Rows = { a: Entity; b: Entity; c: Entity };
+
+  // Drop targets `a`, `b` and `c` in rows of 100: `a` covers y 0..100, `b` 100..200, `c` 200..300.
+  function rows(mock: MockInput): Rows {
+    const [a, b, c] = ["a", "b", "c"].map((intent, row) => {
+      const target = mock.spawn([DropTarget({ intent })]);
+
+      mock.boxes.push({ entity: target, x: 0, y: row * 100, width: 100, height: 100 });
+
+      return target;
+    });
+
+    return { a: a ?? 0, b: b ?? 0, c: c ?? 0 };
+  }
+
+  // An item below the rows, its box at y 400..500, grabbed at (50, 440): the grab offset is (0, 10).
+  function holdItem(mock: MockInput, values: Parameters<MockInput["spawn"]>[0]): Entity {
+    const item = mock.spawn(values, { projection: "board.items", key: "i1" });
+
+    mock.boxes.push({ entity: item, x: 0, y: 400, width: 100, height: 100 });
+    mock.state.entity = item;
+    mock.state.phase = "dragging";
+    grab(mock.input, item, { x: 50, y: 440 });
+
+    return item;
+  }
+
+  const aimedUp = { x: 0, y: -100 };
+
+  it("hovers the target under the aim point, not the one under the finger", () => {
+    const mock = createMockInput();
+    const { a, b } = rows(mock);
+
+    holdItem(mock, [
+      Draggable({ payload: { from: "i1" }, aim: aimedUp }),
+      Transform({ x: 50, y: 450 })
+    ]);
+    // The finger at (50, 170) is on `b`; the view stands at (50, 180), its aim point at (50, 80).
+    moveHeld(mock.input, { x: 50, y: 170 });
+    moveHover(mock.input, { x: 50, y: 170 });
+
+    expect(mock.has(a, Hovered)).toBe(true);
+    expect(mock.has(b, Hovered)).toBe(false);
+  });
+
+  it("drops on the target under the aim point posed at the release point, not where the view stood a frame earlier", () => {
+    const mock = createMockInput();
+
+    rows(mock);
+    holdItem(mock, [
+      Draggable({ payload: { from: "i1" }, aim: aimedUp }),
+      Transform({ x: 50, y: 450 })
+    ]);
+    // No move since the grab: the view still stands at (50, 450), where its aim is at (50, 350).
+    release(mock.input, { x: 50, y: 170 });
+
+    expect(mock.answers).toEqual([{ intent: "a", payload: { from: "i1" } }]);
+  });
+
+  it("poses the aim through the held view's rotation and lifted scale", () => {
+    const mock = createMockInput({ heldScale: 2 });
+    const { b } = rows(mock);
+
+    holdItem(mock, [
+      Draggable({ payload: { from: "i1" }, aim: { x: 0, y: 50 } }),
+      Transform({ x: 50, y: 450, rotation: Math.PI })
+    ]);
+    // The view at (50, 280), turned half round and twice its size: the aim lands at (50, 180).
+    // Without the turn it would be (50, 380), on nothing; without the scale (50, 230), on `c`,
+    // where the finger is.
+    moveHeld(mock.input, { x: 50, y: 270 });
+    moveHover(mock.input, { x: 50, y: 270 });
+
+    expect(mock.state.hovered).toBe(b);
+
+    release(mock.input, { x: 50, y: 270 });
+
+    expect(mock.answers).toEqual([{ intent: "b", payload: { from: "i1" } }]);
+  });
+
+  it("without an aim, hovers and drops under the finger, not under the view's origin", () => {
+    const mock = createMockInput();
+    const { a } = rows(mock);
+
+    holdItem(mock, [Draggable({ payload: { from: "i1" } }), Transform({ x: 50, y: 450 })]);
+    // The finger at (50, 95) is on `a`; the view's origin, at (50, 105), is on `b`.
+    moveHeld(mock.input, { x: 50, y: 95 });
+    moveHover(mock.input, { x: 50, y: 95 });
+
+    expect(mock.state.hovered).toBe(a);
+
+    release(mock.input, { x: 50, y: 95 });
+
+    expect(mock.answers).toEqual([{ intent: "a", payload: { from: "i1" } }]);
+  });
+
+  it("a held view with no Transform drops under the finger, whatever its aim", () => {
+    const mock = createMockInput();
+
+    rows(mock);
+
+    const item = mock.spawn([Draggable({ payload: { from: "i1" }, aim: aimedUp })], {
+      projection: "board.items",
+      key: "i1"
+    });
+
+    mock.state.entity = item;
+    mock.state.grabOffset = { x: 0, y: 10 };
+    // Posed from the identity pose, the aim would stand at (50, 60), on `a`.
+    release(mock.input, { x: 50, y: 150 });
+
+    expect(mock.answers).toEqual([{ intent: "b", payload: { from: "i1" } }]);
+  });
+});

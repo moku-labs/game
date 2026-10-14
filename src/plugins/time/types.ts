@@ -42,6 +42,113 @@ export type Time = {
 export type FrameCallback = (time: Readonly<Time>) => void;
 
 /**
+ * What `time` measured of one frame, handed to the measure listeners after the `render` phase. One object, rewritten
+ * every frame: copy the numbers you keep.
+ *
+ * @example
+ * ```ts
+ * // a 120 Hz frame of the board in a debug build:
+ * const frame: FrameMeasure = { frame: 4812, at: 40123.5, gapMs: 8.3, capMs: 8.33, rateMs: 8.33, skipped: 0, startMs: 0.2, phaseMs: Float32Array.of(0.3, 0.1, 0.1, 0.4, 0.1, 2.2), workMs: 3.4, listenersMs: 0.05, idle: false, stepped: false };
+ * ```
+ */
+export type FrameMeasure = {
+  /** `Time.frame` of the measured frame. */
+  frame: number;
+  /** Start of the frame on the page clock (`performance` timeline), ms: the `requestAnimationFrame` timestamp, or the moment `step()` began. */
+  at: number;
+  /** `at` minus `at` of the previous measured frame; `NaN` for the first frame, the first after `resume()`, and a stepped frame. */
+  gapMs: number;
+  /** `1000 / cap` of this frame: `maxFps`, or `idleFps` while idle. */
+  capMs: number;
+  /** `1000 / fps` of the loop's rate in this frame, the idle cap left out: `1000 / maxFps`; spec 21 makes it `1000 / time.rate().fps`. */
+  rateMs: number;
+  /** `requestAnimationFrame` ticks the cap skipped since the previous measured frame. */
+  skipped: number;
+  /** From `at` to the first phase callback: the browser's delay and the events it dispatched first; 0 for a stepped frame. */
+  startMs: number;
+  /** Duration of each phase, ms, in `PHASES` order: input, animate, layout, sync, signals, render. Length 6. */
+  phaseMs: Float32Array;
+  /** From `at` to the end of the `render` phase. */
+  workMs: number;
+  /** What the measure listeners took on the previous frame, ms; 0 on the first. */
+  listenersMs: number;
+  /** The frame ran under the idle cap. */
+  idle: boolean;
+  /** The frame came from `step()`, not from the frame source. */
+  stepped: boolean;
+};
+
+/**
+ * A listener of `time.measure`: called after the `render` phase of every frame of an agent build.
+ *
+ * @example
+ * ```ts
+ * const listener: MeasureListener = frame => ring.commit(frame);
+ * ```
+ */
+export type MeasureListener = (frame: Readonly<FrameMeasure>) => void;
+
+/**
+ * The measure state of an agent build: the listeners, the one reused record and what the next frame needs of the
+ * last one. Not public: exported for `measure.ts`.
+ */
+export type MeasureState = {
+  /** Copy-on-write, as `callbacks`. */
+  listeners: MeasureListener[];
+  /** The one reused object; `phaseMs` is `new Float32Array(6)`. */
+  record: FrameMeasure;
+  /** NaN until the first measured frame and after `resume()`. */
+  lastAt: number;
+  /** Ticks skipped since the last run frame. */
+  skipped: number;
+  /** Cost of the listeners on the last frame. */
+  listenersMs: number;
+  /** The agent's spans charged to the running frame by `chargeAgent`; 0 at creation. */
+  agentMs: number;
+};
+
+/**
+ * A thermal reading of the native shell, normalized: Android's status and headroom, and the time it was read.
+ *
+ * @example
+ * ```ts
+ * const reading: ThermalReading = { status: 2, headroom: 0.71, at: 1791986083963, android: null };
+ * ```
+ */
+export type ThermalReading = {
+  status: number | string | null;
+  headroom: number | null;
+  at: number | null;
+  android: {
+    status: number | string | null;
+    headroom: number | null;
+    forecastSeconds: number | null;
+  } | null;
+};
+
+/**
+ * Events of `time`.
+ *
+ * @example
+ * ```ts
+ * // A game plugin notes the phone's temperature in its own log.
+ * createPlugin("heat", {
+ *   depends: [timePlugin],
+ *   hooks: ctx => ({
+ *     "time:thermal": reading => ctx.log.info("phone temperature", { status: reading.status })
+ *   })
+ * }); // a reading of the shell logs { status: 2 }
+ * ```
+ */
+export type Events = {
+  /**
+   * The native shell reported a thermal reading (`moku-native:thermal`), while `time` listens: on
+   * the native shell, in an agent build (and, from spec 21, with `adaptive`). Never per frame.
+   */
+  "time:thermal": ThermalReading;
+};
+
+/**
  * time plugin config.
  *
  * @example
@@ -76,9 +183,10 @@ export type Config = {
 export type State = {
   callbacks: Record<Phase, FrameCallback[]>;
   /**
-   * Scratch array of a frame: the six callback lists as they were when the frame started.
+   * Scratch tuple of a frame: the six callback lists as they were when the frame started, in
+   * `PHASES` order.
    */
-  captured: (readonly FrameCallback[])[];
+  captured: CapturedPhases;
   time: Time;
   paused: boolean;
   running: boolean;
@@ -101,6 +209,39 @@ export type State = {
    * True while the loop runs at `idleFps`.
    */
   idle: boolean;
+  /**
+   * What an agent build measures of every frame; `undefined` in a build without the flag.
+   */
+  measure: MeasureState | undefined;
+  /**
+   * What `time` asked of the native shell: the stop request of the frame rate and the remover of
+   * the one thermal listener, and whether a refused rate was warned about.
+   */
+  shell: ShellState;
+};
+
+/**
+ * The six callback lists a frame captured, in `PHASES` order. Not public.
+ */
+export type CapturedPhases = [
+  readonly FrameCallback[],
+  readonly FrameCallback[],
+  readonly FrameCallback[],
+  readonly FrameCallback[],
+  readonly FrameCallback[],
+  readonly FrameCallback[]
+];
+
+/**
+ * What `time` holds of the native shell. Not public.
+ */
+export type ShellState = {
+  /** A refused frame rate was warned about once. */
+  warned: boolean;
+  /** Hands the frame rate back to the shell; set by the start request. */
+  stopRate: (() => void) | undefined;
+  /** Removes the one `moku-native:thermal` listener. */
+  removeThermal: (() => void) | undefined;
 };
 
 /**
@@ -231,6 +372,53 @@ export type Api = {
   wake(): void;
 
   /**
+   * Hands what `time` measured of every frame to `listener`, after the `render` phase: the gap, the skipped ticks, the
+   * six phase durations and the whole work. Agent builds only (`__MOKU_GAME_AGENT__`, true in dev and `--debug`
+   * builds): without the flag nothing is measured, the listener is never called and the returned function does
+   * nothing. The record is one object rewritten every frame.
+   *
+   * @param listener - Called once per frame with the record.
+   * @returns The unsubscribe; a second call does nothing.
+   * @example
+   * ```ts
+   * // The renderer's monitor keeps every frame of a debug build in its ring.
+   * const off = ctx.require(timePlugin).measure(frame => ring.commit(frame));
+   * // a 120 Hz frame of the board: frame.gapMs 8.3, frame.workMs 3.4, frame.phaseMs[5] 2.2 (render)
+   * off(); // the renderer stopped
+   * ```
+   */
+  measure(listener: MeasureListener): () => void;
+
+  /**
+   * The page clock for measurement, in an agent build (`__MOKU_GAME_AGENT__`: dev and `--debug` builds): milliseconds
+   * of `performance.now()`. `undefined` in a build without the flag, so a plugin that times its work keeps one branch
+   * and a release bundle keeps none of it. Never for game logic: the game's time is `snapshot()`.
+   *
+   * @returns The clock, or `undefined`.
+   * @example
+   * ```ts
+   * // world, at start: time each system run of a debug build.
+   * const clock = ctx.require(timePlugin).agentClock();
+   * clock?.(); // 40123.52 on a debug page; clock is undefined on the store build
+   * ```
+   */
+  agentClock(): (() => number) | undefined;
+
+  /**
+   * Charges `ms` of the editor's own work (its overlay, its page agent) to the frame running now, so the adaptive
+   * frame rate leaves it out of that frame's work. Agent builds only (`__MOKU_GAME_AGENT__`, true in dev and
+   * `--debug` builds): without the flag it does nothing. The renderer's monitor calls it when an agent span closes.
+   *
+   * @param ms - The span the agent just closed, ms.
+   * @example
+   * ```ts
+   * // The renderer's monitor, when the overlay closes a span of 0.07 ms:
+   * ctx.require(timePlugin).chargeAgent(0.07); // the adaptive rate reads this frame's work 0.07 ms smaller
+   * ```
+   */
+  chargeAgent(ms: number): void;
+
+  /**
    * Runs exactly one frame with the given unscaled delta, ignoring the fps cap, the pause
    * flag and `maxDeltaMs`. The time scale still applies. For tests and tools.
    *
@@ -250,7 +438,7 @@ export type Api = {
 /**
  * Domain context of the time plugin.
  */
-export type TimeCtx = PluginCtx<Config, State> & {
+export type TimeCtx = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
 };

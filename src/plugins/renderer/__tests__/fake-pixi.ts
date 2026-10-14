@@ -18,6 +18,8 @@ export type FakeSource = {
   height: number;
   destroyed: boolean;
   resolution?: number;
+  /** Whether Pixi would generate the mip chain on upload; `from` always writes it. */
+  autoGenerateMipmaps?: boolean;
   released?: string[];
   style?: { removeAllListeners(event: string): void };
   removeAllListeners?(event: string): void;
@@ -63,6 +65,9 @@ export class FakeRectangle {
   }
 }
 
+/** A decoded image as the fake reads it: anything with a width and a height. */
+type FakeImage = { width?: number; height?: number };
+
 /** A fake Pixi texture. */
 export class FakeTexture {
   /** Every texture the fake ever made, in creation order. */
@@ -98,16 +103,23 @@ export class FakeTexture {
   }
 
   /**
-   * Makes a texture from a decoded image.
+   * Makes a texture from a decoded image, or from Pixi's options form `{ resource, ...options }`.
    *
-   * @param image - Anything with a width and a height.
-   * @param image.width - Pixel width.
-   * @param image.height - Pixel height.
-   * @returns A new texture over that image.
+   * @param input - The image, anything with a width and a height, or the options around it.
+   * @returns A new texture over that image; its source records `autoGenerateMipmaps`.
    */
-  public static from(image: { width?: number; height?: number }): FakeTexture {
+  public static from(
+    input: FakeImage | { resource: FakeImage; autoGenerateMipmaps?: boolean }
+  ): FakeTexture {
+    const options = "resource" in input ? input : { resource: input };
+
     return new FakeTexture({
-      source: { width: image.width ?? 64, height: image.height ?? 64, destroyed: false }
+      source: {
+        width: options.resource.width ?? 64,
+        height: options.resource.height ?? 64,
+        destroyed: false,
+        autoGenerateMipmaps: options.autoGenerateMipmaps === true
+      }
     });
   }
 
@@ -401,7 +413,7 @@ export class FakeParticleContainer extends FakeContainer {
   public particleChildren: FakeParticle[] = [];
 
   /**
-   * Refuses a child, as Pixi 8.21 does.
+   * Refuses a child, as Pixi 8.22 does.
    *
    * @throws {Error} Always: particles are not children.
    */
@@ -771,12 +783,16 @@ export type FakeDrawTarget = {
  * @returns The target the fake draw classes count on.
  */
 export function createDrawTarget(): FakeDrawTarget {
+  const data = { instructions: { instructionSize: 0 } };
+
   return {
     drawn: 0,
     graphicsContext: {
-      getContextRenderData: context => ({
-        instructions: { instructionSize: context.instructionSize }
-      })
+      getContextRenderData: context => {
+        data.instructions.instructionSize = context.instructionSize;
+
+        return data;
+      }
     }
   };
 }
@@ -821,14 +837,108 @@ export class FakeGpuGraphicsAdaptor {
   }
 }
 
+/** Pixi's `ExtensionType.WebGLSystem`: the WebGL texture system and the filter system register here. */
+export const WEBGL_SYSTEM = "webgl-system";
+
+/** A render target as the pass rules read it: Pixi's public `RenderTarget` fields. */
+export type FakeRenderTarget = {
+  isRoot: boolean;
+  pixelWidth: number;
+  pixelHeight: number;
+  label?: string;
+  colorTexture?: { label?: string };
+};
+
+/** The fake of Pixi's `SystemRunner`: items are called by the runner's name, in order. */
+export class FakeRunner {
+  public readonly items: object[] = [];
+
+  public constructor(private readonly name: string) {}
+
+  /**
+   * Adds an item.
+   *
+   * @param item - An object with a method of the runner's name.
+   * @returns The runner.
+   */
+  public add(item: object): this {
+    this.items.push(item);
+
+    return this;
+  }
+
+  /**
+   * Removes an item.
+   *
+   * @param item - The item.
+   * @returns The runner.
+   */
+  public remove(item: object): this {
+    const at = this.items.indexOf(item);
+
+    if (at !== -1) this.items.splice(at, 1);
+
+    return this;
+  }
+
+  /**
+   * Calls the method of the runner's name on every item.
+   *
+   * @param args - What the runner hands its items.
+   */
+  public emit(...args: unknown[]): void {
+    // eslint-disable-next-line unicorn/no-useless-spread -- an item may remove itself while it is called
+    for (const item of [...this.items]) {
+      const method: unknown = Reflect.get(item, this.name);
+
+      if (typeof method === "function") Reflect.apply(method, item, args);
+    }
+  }
+}
+
+/** The pass encoder the fake encoder answers for every pass. */
+const PASS_ENCODER = Object.freeze({ label: "pass encoder" });
+
+/** A fake GPU render target: its descriptor, as Pixi builds one for every pass. */
+export type FakeGpuRenderTarget = { descriptor: Record<string, unknown> };
+
 /** The fake of Pixi's `GpuEncoderSystem`: one native draw per `draw` and per `drawIndirect`. */
 export class FakeGpuEncoderSystem {
   public static extension = { type: [WEBGPU_SYSTEM], name: "encoder", priority: 1 };
 
   public renderer: FakeDrawTarget;
+  /** Pixi's command encoder of the render call. */
+  public commandEncoder: unknown = { label: "command encoder" };
+  /** What the encoder did, in order: passes begun and finished, submits. */
+  public readonly calls: string[] = [];
 
   public constructor(renderer: FakeDrawTarget) {
     this.renderer = renderer;
+  }
+
+  /** Records the calls of the encoder; off for the allocation probe, which draws 20 000 frames. */
+  public record = true;
+
+  /**
+   * Begins a render pass on a GPU render target.
+   *
+   * @param _gpuRenderTarget - The target with its descriptor.
+   * @returns The pass encoder, one object for every pass.
+   */
+  public beginRenderPass(_gpuRenderTarget: FakeGpuRenderTarget): unknown {
+    if (this.record) this.calls.push("begin");
+
+    return PASS_ENCODER;
+  }
+
+  /** Ends the running pass; repeat-safe. */
+  public finishRenderPass(): void {
+    if (this.record) this.calls.push("finish");
+  }
+
+  /** Submits the command buffer of the render call. */
+  public postrender(): void {
+    if (this.record) this.calls.push("submit");
   }
 
   /**
@@ -847,6 +957,71 @@ export class FakeGpuEncoderSystem {
    */
   public drawIndirect(_options: unknown): void {
     this.renderer.drawn += 1;
+  }
+}
+
+/** The fake of Pixi's `FilterSystem`: every apply of every filter, both backends. */
+export class FakeFilterSystem {
+  public static extension = { type: [WEBGL_SYSTEM, WEBGPU_SYSTEM], name: "filter" };
+  /** Runs inside every apply, where Pixi begins the passes of the filter. */
+  public static onApply: (() => void) | undefined = undefined;
+
+  /** The filters applied, in order. */
+  public readonly applied: unknown[] = [];
+
+  /**
+   * Applies one filter.
+   *
+   * @param filter - The filter.
+   * @param _input - Its input texture.
+   * @param _output - Its output.
+   * @param _clear - Whether the output is cleared.
+   */
+  public applyFilter(filter: unknown, _input: unknown, _output: unknown, _clear: boolean): void {
+    this.applied.push(filter);
+    FakeFilterSystem.onApply?.();
+  }
+}
+
+/** A texture source as the upload counting reads it. */
+export type FakeUploadSource = {
+  uploadMethodId: string;
+  resource: unknown;
+  pixelWidth: number;
+  pixelHeight: number;
+};
+
+/** The fake of Pixi's `GpuTextureSystem`: `onSourceUpdate` uploads a source. */
+export class FakeGpuTextureSystem {
+  public static extension = { type: [WEBGPU_SYSTEM], name: "texture" };
+
+  /** The sources uploaded, in order. */
+  public readonly uploaded: FakeUploadSource[] = [];
+
+  /**
+   * Uploads a source.
+   *
+   * @param source - The source.
+   */
+  protected onSourceUpdate(source: FakeUploadSource): void {
+    this.uploaded.push(source);
+  }
+}
+
+/** The fake of Pixi's `GlTextureSystem`: `onSourceUpdate` uploads a source. */
+export class FakeGlTextureSystem {
+  public static extension = { type: [WEBGL_SYSTEM], name: "texture" };
+
+  /** The sources uploaded, in order. */
+  public readonly uploaded: FakeUploadSource[] = [];
+
+  /**
+   * Uploads a source.
+   *
+   * @param source - The source.
+   */
+  protected onSourceUpdate(source: FakeUploadSource): void {
+    this.uploaded.push(source);
   }
 }
 
@@ -936,7 +1111,7 @@ export const fakeMSDFBit: FakeShaderBit = {
   }
 };
 
-/** The fake of Pixi 8.21's `localUniformMSDFBit`, with the step that hands over `vColor`. */
+/** The fake of Pixi 8.22's `localUniformMSDFBit`, with the step that hands over `vColor`. */
 export const fakeLocalUniformMSDFBit = {
   name: "local-uniform-msdf-bit",
   vertex: {
@@ -990,7 +1165,7 @@ export const fakeMSDFBitGl: FakeShaderBit = {
   }
 };
 
-/** The fake of Pixi 8.21's `localUniformMSDFBitGl`, with the step that hands over `vColor`. */
+/** The fake of Pixi 8.22's `localUniformMSDFBitGl`, with the step that hands over `vColor`. */
 export const fakeLocalUniformMSDFBitGl = {
   name: "local-uniform-msdf-bit",
   vertex: {
@@ -1187,8 +1362,8 @@ export const fakeExtensions: FakeExtensions = {
   },
 
   /**
-   * Empties the registry and registers Pixi's own three draw classes and its bitmap text pipe, as
-   * importing Pixi does.
+   * Empties the registry and registers Pixi's own six counted classes and its bitmap text pipe,
+   * as importing Pixi does.
    */
   reset(): void {
     fakeExtensions.lists.clear();
@@ -1196,6 +1371,9 @@ export const fakeExtensions: FakeExtensions = {
       FakeGpuBatchAdaptor,
       FakeGpuGraphicsAdaptor,
       FakeGpuEncoderSystem,
+      FakeFilterSystem,
+      FakeGpuTextureSystem,
+      FakeGlTextureSystem,
       FakeBitmapTextPipe
     );
   }
@@ -1208,7 +1386,14 @@ fakeExtensions.reset();
  * batch executes, one graphics execute per entry of `graphics` with that many instructions,
  * `draws` encoder draws and `indirect` indirect draws.
  */
-export type FakeScene = { batches: number; graphics: number[]; draws: number; indirect: number };
+export type FakeScene = {
+  batches: number;
+  graphics: number[];
+  draws: number;
+  indirect: number;
+  /** Render passes the encoder begins, on the bound target, then one submit. */
+  passes: number;
+};
 
 /** The three draw classes an application found in the registry at `init`, as Pixi does. */
 export type FakeDrawClasses = {
@@ -1255,6 +1440,27 @@ export type FakeGlContext = {
   getShaderParameter(shader: FakeGlShader, name: number): boolean;
   getShaderInfoLog(shader: FakeGlShader): string;
   deleteShader(shader: FakeGlShader): void;
+  /** No extension unless a test gives one: `getExtension` answers what `extensions` holds. */
+  extensions: Record<string, unknown>;
+  getExtension(name: string): unknown;
+  /** Programs linked, in order. */
+  linked: unknown[];
+  linkProgram(program: unknown): void;
+  readonly QUERY_RESULT: number;
+  readonly QUERY_RESULT_AVAILABLE: number;
+  readonly RENDERER: number;
+  /** What each query answers: available and its nanoseconds. */
+  results: Map<object, { available: boolean; ns: number }>;
+  /** The disjoint flag `getParameter(GPU_DISJOINT_EXT)` answers. */
+  disjoint: boolean;
+  /** Queries begun and ended, in order. */
+  queries: string[];
+  createQuery(): object;
+  beginQuery(target: number, query: object): void;
+  endQuery(target: number): void;
+  deleteQuery(query: object): void;
+  getQueryParameter(query: object, name: number): unknown;
+  getParameter(name: number): unknown;
 };
 
 /**
@@ -1276,7 +1482,35 @@ export function createFakeGlContext(): FakeGlContext {
     },
     getShaderParameter: () => true,
     getShaderInfoLog: () => "",
-    deleteShader: () => undefined
+    deleteShader: () => undefined,
+    extensions: {},
+    getExtension: name => context.extensions[name] ?? null,
+    linked: [],
+    linkProgram: program => {
+      context.linked.push(program);
+    },
+    QUERY_RESULT: 0x88_66,
+    QUERY_RESULT_AVAILABLE: 0x88_67,
+    RENDERER: 0x1f_01,
+    results: new Map(),
+    disjoint: false,
+    queries: [],
+    createQuery: () => ({}),
+    beginQuery: () => {
+      context.queries.push("begin");
+    },
+    endQuery: () => {
+      context.queries.push("end");
+    },
+    deleteQuery: () => undefined,
+    getQueryParameter: (query, name) => {
+      const result = context.results.get(query);
+
+      if (name === context.QUERY_RESULT_AVAILABLE) return result?.available ?? false;
+
+      return result?.ns ?? 0;
+    },
+    getParameter: name => (name === context.RENDERER ? "Mali-G68" : context.disjoint)
   };
 
   return context;
@@ -1298,29 +1532,73 @@ export type FakeRenderer = FakeDrawTarget & {
   texture: { managedTextures: FakeManagedSource[] };
   /** Pixi's extract system: `base64` records its options and answers `FAKE_PNG`. */
   extract: { calls: unknown[]; base64(options: unknown): Promise<string> };
+  /** Pixi's public runners a monitor hangs items on. */
+  runners: { prerender: FakeRunner; renderStart: FakeRunner; postrender: FakeRunner };
+  /** Pixi's render target system: the bound target and its change runner. */
+  renderTarget: { renderTarget: FakeRenderTarget; onRenderTargetChange: FakeRunner };
+  /** Every resize with the resolution it asked for, `undefined` for none. */
+  resolutions: Array<number | undefined>;
   render(stage: FakeContainer): void;
-  resize(width: number, height: number): void;
+  resize(width: number, height: number, resolution?: number): void;
+};
+
+/** The draw instances of one application, made once, as Pixi makes its systems at init. */
+type FakeDrawInstances = {
+  pipe: { renderer: FakeRenderer };
+  batch: FakeGpuBatchAdaptor;
+  graphics: FakeGpuGraphicsAdaptor;
+  encoder: FakeGpuEncoderSystem;
+  descriptor: { colorAttachments: unknown[] };
+  target: FakeGpuRenderTarget;
+  context: FakeGraphicsContext;
+  renderable: { context: FakeGraphicsContext };
 };
 
 /**
- * Draws one fake frame through the instances a WebGPU application made at init.
+ * Makes the draw instances of an application from the classes found at init.
  *
  * @param renderer - The renderer drawn on.
- * @param classes - The draw classes found at init.
+ * @param classes - The draw classes.
+ * @returns The instances.
+ */
+function createDrawInstances(renderer: FakeRenderer, classes: FakeDrawClasses): FakeDrawInstances {
+  const encoder = new classes.encoder(renderer);
+  const descriptor = { colorAttachments: [] };
+  const context = { instructionSize: 0 };
+
+  encoder.record = false;
+
+  return {
+    pipe: { renderer },
+    batch: new classes.batch(),
+    graphics: new classes.graphics(),
+    encoder,
+    descriptor,
+    target: { descriptor },
+    context,
+    renderable: { context }
+  };
+}
+
+/**
+ * Draws one fake frame through the instances a WebGPU application made at init: nothing is made
+ * per frame, so the allocation probe sees only the engine.
+ *
+ * @param draw - The draw instances of the application.
  * @param scene - What the frame draws.
  */
-function drawScene(renderer: FakeRenderer, classes: FakeDrawClasses, scene: FakeScene): void {
-  const pipe = { renderer };
-  const batch = new classes.batch();
-  const graphics = new classes.graphics();
-  const encoder = new classes.encoder(renderer);
+function drawScene(draw: FakeDrawInstances, scene: FakeScene): void {
+  const { pipe, batch, graphics, encoder } = draw;
 
-  for (let index = 0; index < scene.batches; index += 1) batch.execute(pipe, {});
-  for (const instructionSize of scene.graphics) {
-    graphics.execute(pipe, { context: { instructionSize } });
+  for (let index = 0; index < scene.batches; index += 1) batch.execute(pipe, draw);
+  for (let index = 0; index < scene.graphics.length; index += 1) {
+    draw.context.instructionSize = scene.graphics[index] ?? 0;
+    graphics.execute(pipe, draw.renderable);
   }
-  for (let index = 0; index < scene.draws; index += 1) encoder.draw({});
-  for (let index = 0; index < scene.indirect; index += 1) encoder.drawIndirect({});
+  for (let index = 0; index < scene.draws; index += 1) encoder.draw(draw);
+  for (let index = 0; index < scene.indirect; index += 1) encoder.drawIndirect(draw);
+  for (let index = 0; index < scene.passes; index += 1) encoder.beginRenderPass(draw.target);
+  if (scene.passes > 0) encoder.postrender();
 }
 
 /** What `createFakePixi` sets for every application, because a Pixi class takes no options. */
@@ -1332,7 +1610,7 @@ export type FakeSettings = { kind: "webgpu" | "webgl"; failInit: boolean; scene:
  * @returns The empty scene.
  */
 function emptyScene(): FakeScene {
-  return { batches: 0, graphics: [], draws: 0, indirect: 0 };
+  return { batches: 0, graphics: [], draws: 0, indirect: 0, passes: 0 };
 }
 
 /** A fake Pixi application. */
@@ -1350,6 +1628,8 @@ export class FakeApplication {
   public initOptions: Record<string, unknown> | undefined;
   /** The draw classes a WebGPU application took from the registry at init; none on WebGL. */
   public drawClasses: FakeDrawClasses | undefined;
+  /** The draw instances made from them at init. */
+  private drawInstances: FakeDrawInstances | undefined;
   /** The bitmap text pipe the renderer took from the registry at init, for its backend. */
   public textPipe: FakeExtensionClass | undefined;
   public destroyed = false;
@@ -1397,13 +1677,26 @@ export class FakeApplication {
         const before = renderer.drawn;
 
         renderer.renders += 1;
-        if (this.drawClasses !== undefined) {
-          drawScene(renderer, this.drawClasses, FakeApplication.settings.scene);
+        if (this.drawInstances !== undefined) {
+          drawScene(this.drawInstances, FakeApplication.settings.scene);
         }
         renderer.frameDraws = renderer.drawn - before;
       },
-      resize: (width: number, height: number) => {
+      runners: {
+        prerender: new FakeRunner("prerender"),
+        renderStart: new FakeRunner("renderStart"),
+        postrender: new FakeRunner("postrender")
+      },
+      renderTarget: {
+        renderTarget: { isRoot: true, pixelWidth: 1080, pixelHeight: 1920 },
+        onRenderTargetChange: new FakeRunner("onRenderTargetChange")
+      },
+      resolutions: [],
+      resize: (width: number, height: number, resolution?: number) => {
         renderer.resizes.push({ width, height });
+        renderer.resolutions.push(resolution);
+
+        if (resolution !== undefined) renderer.resolution = resolution;
       }
     };
 
@@ -1425,6 +1718,7 @@ export class FakeApplication {
         ) as typeof FakeGpuGraphicsAdaptor,
         encoder: fakeExtensions.named(WEBGPU_SYSTEM, "encoder") as typeof FakeGpuEncoderSystem
       };
+      this.drawInstances = createDrawInstances(renderer, this.drawClasses);
     }
 
     if (FakeApplication.settings.kind === "webgl") renderer.gl = createFakeGlContext();
@@ -1490,6 +1784,7 @@ export function createFakePixi(
   options: { kind?: "webgpu" | "webgl"; failInit?: boolean; scene?: Partial<FakeScene> } = {}
 ): FakePixi {
   FakeApplication.instances = [];
+  FakeFilterSystem.onApply = undefined;
   FakeApplication.settings = {
     kind: options.kind ?? "webgpu",
     failInit: options.failInit ?? false,
@@ -1530,6 +1825,9 @@ export function createFakePixi(
     GpuBatchAdaptor: FakeGpuBatchAdaptor,
     GpuGraphicsAdaptor: FakeGpuGraphicsAdaptor,
     GpuEncoderSystem: FakeGpuEncoderSystem,
+    FilterSystem: FakeFilterSystem,
+    GpuTextureSystem: FakeGpuTextureSystem,
+    GlTextureSystem: FakeGlTextureSystem,
     BitmapTextPipe: FakeBitmapTextPipe,
     Shader: FakeShader,
     Matrix: FakeMatrix,

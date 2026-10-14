@@ -88,7 +88,8 @@ export type FeatureTextStyles = {
  * ```ts
  * const description: FeatureDescription = {
  *   flows: [rewardFlow],
- *   contribute: { afterWin: { flow: rewardFlow, order: 10 } }
+ *   contribute: { afterWin: { flow: rewardFlow, order: 10 } },
+ *   features: [kitFeature, ep01Feature]
  * };
  * ```
  */
@@ -102,6 +103,12 @@ export type FeatureDescription = {
     string,
     { flow: AnyFlow; order: number; when?: (snapshot: Snapshot) => boolean }
   >;
+  /**
+   * Sub-features this feature declares, each in a folder of its own inside this feature's folder,
+   * in the order they are composed. `defineGameApp` composes them right after this feature; this
+   * feature's `onInit` throws when one of them is not composed.
+   */
+  features?: readonly FeaturePlugin[];
   /** Animations the feature owns, read by `anim`. */
   animations?: readonly FeatureAnimation[];
   /** Interface components the feature owns, read by `ui`. `components` stays the ECS key. */
@@ -115,6 +122,23 @@ export type FeatureDescription = {
   /** Filters the feature puts on its interface components, read by `effects`. */
   filters?: readonly FeatureFilter[];
   [later: string]: unknown;
+};
+
+/**
+ * A feature is an ordinary plugin with no API of its own; `AnyPluginInstance` is the kernel's
+ * widened type for plugin lists. It carries the sub-features it declares and its `logicOnly` twin,
+ * so `flattenFeatures` composes the whole tree, full or logic only.
+ *
+ * @example
+ * ```ts
+ * createApp({ plugins: flattenFeatures([episodesFeature.logicOnly]) }); // episodes, kit, ep01, ep02
+ * ```
+ */
+export type FeaturePlugin = AnyPluginInstance & {
+  /** The same plugin reduced to the logic keys; its `features` are the children's `logicOnly`. */
+  readonly logicOnly: FeatureTree;
+  /** The declared sub-features, in declaration order; empty for a leaf. */
+  readonly features: readonly FeaturePlugin[];
 };
 
 /**
@@ -137,6 +161,8 @@ export type Contribution = {
  */
 export type FeaturesState = {
   byName: Map<string, FeatureDescription>;
+  /** Sub-feature name to the name of the feature that declares it, whatever the registration order. */
+  parentOf: Map<string, string>;
   /** True after `run()`: `register` throws. */
   sealed: boolean;
 };
@@ -155,9 +181,13 @@ export type FeaturesApi = {
    * Records what a feature brings. Called from the feature plugin's `onInit`, so every feature
    * is known before the graph is validated.
    *
+   * A description with `features` records this feature as the parent of each of them.
+   *
    * @param name - Feature name. Shares the namespace with plugin names.
    * @param description - Nodes, flows and slot contributions of the feature.
-   * @throws {Error} After `run()` sealed the registry, and for a duplicate name.
+   * @throws {Error} After `run()` sealed the registry, for a duplicate name, and when one of
+   *   `description.features` is already declared by another feature. A refused registration
+   *   writes nothing.
    * @example
    * ```ts
    * // A hand-written feature plugin registers itself in onInit. `defineFeature` does the same.
@@ -170,17 +200,18 @@ export type FeaturesApi = {
   register(name: string, description: FeatureDescription): void;
 
   /**
-   * Lists every registered feature in registration order. Plugins above read it in their
-   * `onStart` to pick up what they own.
+   * Lists every registered feature in registration order, a sub-feature with the name of the
+   * feature that declares it. Plugins above read it in their `onStart` to pick up what they own.
    *
-   * @returns A fresh list of name and description.
+   * @returns A fresh list of name, description and, for a sub-feature, `parent`.
    * @example
    * ```ts
-   * // A plugin above collects the flows of every feature.
-   * app.flow.features.all(); // [{ name: "reward", description: { flows: [rewardFlow] } }]
+   * // The game composed homeFeature and episodesFeature, whose sub-features are kit and ep01.
+   * app.flow.features.all().map(({ name, parent }) => (parent === undefined ? name : `${parent}/${name}`));
+   * // ["home", "episodes", "episodes/kit", "episodes/ep01"]
    * ```
    */
-  all(): readonly { name: string; description: FeatureDescription }[];
+  all(): readonly RegisteredFeature[];
 
   /**
    * Lists the sub-flows contributed to one slot, lowest `order` first. Two equal orders in one

@@ -1,6 +1,6 @@
 # scenes
 
-> Standard plugin — a scene is a declaration, not a manager. A bundle, named layers, a list of projections, optional music. A node names its scene; the switch runs inside `flow.onEnter("scene")`.
+> Standard plugin — a scene is a declaration, not a manager. A bundle, the bundles of state it names, named layers, a list of projections, optional music. A node names its scene; the switch runs inside `flow.onEnter("scene")`.
 
 There is no scene life cycle to learn. The four mechanisms already exist: bundles in `assets`, layers and projections in `world`, the switch moment in `flow`. This plugin is the sentence that joins them.
 
@@ -29,6 +29,7 @@ export const boardFeature = defineFeature("board", {
 | Key | Type | Meaning |
 |---|---|---|
 | `bundle` | `BundleKey` | The bundle the scene needs. Awaited before anything is mounted |
+| `bundles` | `(state: SceneState<Player, Session>) => BundleKey[]` | Optional. The bundles that depend on the committed state, such as the episode the session plays. Awaited with `bundle`, every time a node enters the scene |
 | `layers` | `Record<string, { sort? }>` | Layer name to its sort rule. The order of the lines is draw order, bottom first. A layer `ui` is appended |
 | `projections` | `ProjectionSpec[]` | The projections the scene mounts. Their `layer` and `lift` are checked against the keys of `layers` and `ui` |
 | `music` | `AudioKey` | Optional. The audio keys of the game (`G["assets"]`). Carried in `scenes:changed`, so `audio` needs no lookup |
@@ -49,7 +50,30 @@ defineScene("board", { bundle: "board", layers: { cells: {}, items: { sort: "y" 
 // [{ name: "cells", sort: "none" }, { name: "items", sort: "y" }, { name: "ui", sort: "none" }]
 ```
 
-`sort` left out means `"none"`. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is plain frozen data, so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey>`.
+`sort` left out means `"none"`. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is plain frozen data, so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey, Player, Session>`.
+
+## Bundles of state: `bundles`
+
+A scene may name bundles that depend on the committed state. `bundles` receives `SceneState`: the frozen `player` and `session` of `model.store.snapshot()`, in a frozen wrapper, never the draft of the node being entered. Through `defineGame` it is typed with the game's `Player` and `Session` and must return the game's bundle keys, so `() => ["ep03"]` and `session.level` do not compile. The loose `defineScene` reads the state as `Json`; annotate the parameter (`({ session }: SceneState<Json, { episode: string }>) => …`) and the session type is inferred from it.
+
+```ts
+// features/location/view/ward.ts: the room is the art of the episode the session plays.
+export const wardScene = defineScene("ward", {
+  bundle: "location",
+  bundles: ({ session }) => [session.episode], // "ep01" | "ep02"
+  layers: { room: {}, glow: {} },
+  projections: [wardRoom, wardGlows]
+});
+```
+
+`bundles` is pure and cheap: it runs at every node of the scene. A throw rejects the node, so `flow` rolls it back with the world untouched. A result that is not a list of names throws:
+
+```
+[game] Scene "ward": bundles() must return a list of bundle names.
+  Return the bundle keys the scene needs, such as ["ep01"].
+```
+
+The list the scene names is its `bundle` first, then what `bundles` returns, in order, each name once (`namedBundles` in `bundles.ts`, which `assets` reads the same way). A scene without `bundles` names its `bundle` alone and has no `bundles` key: a flat game's scene objects are the same as before.
 
 ## API
 
@@ -69,7 +93,7 @@ app.scenes.current(); // "home"
 
 ## The switch
 
-`Stage` in `flow` is `"load"` then `"scene"`, each awaited before the node body, so the node preload of `assets` is done when the switch starts. The scene still awaits its own bundle, because `bundle` may not be in that preload.
+`Stage` in `flow` is `"load"` then `"scene"`, each awaited before the node body, so the node preload of `assets` is done when the switch starts. The scene still awaits its own bundles, because they may not be in that preload. There are two paths: the **switch** to another scene, and the **re-read** at a node that keeps the mounted scene.
 
 | Step | What happens |
 |---|---|
@@ -80,9 +104,12 @@ app.scenes.current(); // "home"
 | 5 | No target: return. A rest node with no scene and nothing mounted is a warning |
 | 6 | The target is already mounted: return |
 | 7 | No such scene: throw `[game] Scene "bord" is not registered.` The static check of `flow` normally catches it first |
-| 8 | `await assets.load(scene.bundle)`, raced against the node's abort signal |
-| 9 | Aborted: return. Nothing was touched, the old scene is still there |
-| 10 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` → `time.wake()` → `scenes:changed` |
+| 8 | `named` = the scene's `bundle` and its `bundles` of the committed state. A throw rejects before any load |
+| 9 | `assets.load` for every name at once, all awaited, raced against the node's abort signal. The first failure rejects |
+| 10 | Aborted: return. Nothing was touched, the old scene is still there |
+| 11 | One synchronous block: `setLayers` → `unmount` old → `mount` new → `current` and `named` → `assets.sceneBundles(named)` → `time.wake()` → `scenes:changed` |
+
+**The re-read.** At any other node (no target, or the mounted scene: a rest node, a live transit node, an over node) a mounted scene with `bundles` is read again from the committed state. The same list, in the same order: nothing happens. Another list: every name is awaited, then `named` is replaced and `assets.sceneBundles(named)` is told. No mount, no `scenes:changed`, no `time.wake()`. An abort keeps the old list. A scene without `bundles` is never re-read, and a transit node of a fast walk neither switches nor re-reads.
 
 | Case | Behaviour |
 |---|---|
@@ -95,10 +122,14 @@ app.scenes.current(); // "home"
 | Shared projection in both scenes | Unmounted and mounted again. A diff by name is a later optimisation |
 | Fast walk | Transit nodes only record. The switch happens once per rest point, and a headless run really mounts |
 | `restore`, rollback, deep link | Same path: the node is entered and the scene is built from the declaration. A restore target that names no scene keeps the current scene, so checkpoints name theirs |
+| Restore at a scene with `bundles` | The store holds the bookmark's state before the node's stages run, so the switch reads `bundles` from the restored session: the ward of `ep02` is mounted once `location` and `ep02` are in, before the gate opens, and `ep01` is never fetched. `flow.restore` of a rest node resolves before the stages; `await app.flow.walk([])` returns with the scene standing |
+| Safe-node recovery | The recovery edge is committed before the stages. A safe node that keeps the scene re-reads `bundles` from the recovered state and awaits what its `recover` named before the gate opens, without mounting again; one that mounts a scene reads it on the switch path. A `bundles` that throws at the safe node is fatal |
 | Headless, plain Bun | Everything runs. Layers are stored, projections mount, entities exist per layer. No pixels, because `renderer` is inert |
 | Leaving a scene | `unmount` flushes motions and the despawn queue at once |
 
 A load that fails after the abort is logged with `ctx.log.warn` and never thrown: nobody waits for it any more.
+
+**Known limit.** When a scene stays mounted and the committed state changes what `bundles` names (a restore of another episode while the ward is up), the projections reconcile on `model:committed` before the scene stage awaits the new bundle, so the new art may be missing for the frames of that load (the texture lookup of `assets` warns and loads it). A switch never shows a scene before its bundles are in.
 
 ## Static validation of scene ids
 
@@ -118,18 +149,19 @@ None. A scene is data in a feature. A transition effect is V3 work of `anim`, so
 
 ## Dependencies
 
-`flow`, `world`, `assets`, `time`. No edge to `renderer`: the layers go through `world.projection`, which `renderer.sync` reads.
+`flow`, `world`, `assets`, `time`, `model`. No edge to `renderer`: the layers go through `world.projection`, which `renderer.sync` reads.
 
 | Plugin | Used for |
 |---|---|
 | `flow` | `onEnter("scene", fn)`, `features.all()` |
 | `world` | `projection.setLayers`, `projection.mount`, `projection.unmount` |
-| `assets` | `load(bundle)` |
+| `assets` | `load(bundle)`; `sceneBundles(named)` after a switch and after a re-read that changed the list, so a bundle the mounted scene names is never a budget victim nor released on `"leave"` |
 | `time` | `wake()` on a switch, so a scene built while the loop idles is drawn at the full frame rate |
+| `model` | `store.snapshot()`, the committed state `bundles` reads |
 
 ## Lifecycle
 
-`onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover and forgets the scenes. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity.
+`onStart` reads the `scenes` key of every registered feature — a duplicate id throws and names both features — and registers the `onEnter("scene")` callback, keeping its remover. `onStop` runs that remover and forgets the scenes, the pending scene and the named list. Nothing is unmounted at stop: a teardown context may not call another plugin's API, and `world.onStop` clears every entity.
 
 ## Not in V2
 

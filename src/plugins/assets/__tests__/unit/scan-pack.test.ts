@@ -4,6 +4,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runCli, type ScanUi } from "../../scan/cli";
+import { textureMb } from "../../scan/image-size";
 import { type PackResult, packAssets } from "../../scan/pack/pack";
 import { scanAssets } from "../../scan/scan";
 import type { Manifest, ManifestBundle, ManifestFile } from "../../types";
@@ -626,5 +627,38 @@ describe("runCli --pack", () => {
       )
     ).toBe(1);
     expect(ui.lines.at(-1)).toContain("[game] assets: the pack found 1 problem.\n");
+  });
+});
+
+describe("packAssets of a sub-feature", () => {
+  it("keeps parent, dir and release, and a mipmapped texture loose with its chain megabytes", async () => {
+    const root = await makeTree({
+      "features/episodes/index.ts": "export {};\n",
+      "features/episodes/ep01/index.ts": "export {};\n",
+      "features/episodes/ep01/assets.ts":
+        'export const a = { kind: "bundles", map: { ep01: { tier: "lazy", release: "leave", mipmaps: ["items/**"] } } };\n',
+      "features/episodes/ep01/assets/a.png": await png(20, 20, BLUE),
+      "features/episodes/ep01/assets/b.png": await png(24, 10, YELLOW),
+      "features/episodes/ep01/assets/items/cup.png": await png(32, 32, RED)
+    });
+
+    folders.push(root);
+
+    const { manifest } = await pack(root, await temp(), false);
+    const ep01 = bundleOf(manifest, "ep01");
+    const cup = fileOf(ep01, "ep01.items.cup");
+
+    expect(ep01).toMatchObject({
+      feature: "ep01",
+      parent: "episodes",
+      dir: "features/episodes/ep01",
+      tier: "lazy",
+      release: "leave"
+    });
+    // The two plain textures share a page; the mipmapped one stays a file of its own.
+    expect(fileOf(ep01, "ep01.a").atlas?.page).toBe("ep01/main-0");
+    expect(cup.atlas).toBeUndefined();
+    expect(cup).toMatchObject({ mips: true, mb: textureMb(32, 32, true) });
+    expect(ep01.mb).toBeCloseTo((ep01.pages?.[0]?.mb ?? 0) + cup.mb, 3);
   });
 });

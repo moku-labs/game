@@ -2,6 +2,7 @@
  * @file scenes plugin — the authoring helper. Pure: it turns a declaration into frozen data and
  * does the layer check twice, once in the type and once for a caller that has no types.
  */
+import type { Json } from "../model/types";
 import type { LayerSpec } from "../world/types";
 import type {
   AnySceneProjection,
@@ -107,9 +108,12 @@ function namesOf(
  * music. A layer `ui` is appended for the HUD and the popups unless the scene declares one. The
  * layer names come from the keys of `layers` and that `ui`, so a projection whose `layer` or
  * `lift` is not among them does not compile — and throws here for a caller without types.
+ * `bundles` names bundles that depend on the committed state: the scene is mounted once those
+ * are in too.
  *
  * @param id - Id of the scene. A node names it with `defineNode({ scene: id })`.
- * @param scene - The bundle, the layers, the projections and the optional music key.
+ * @param scene - The bundle, the optional bundles of state, the layers, the projections and the
+ *   optional music key.
  * @returns The scene as frozen data, ready for the `scenes` key of a feature.
  * @throws {Error} For an integer-like layer name, and for a `layer` or `lift` that is not declared.
  * @example
@@ -123,12 +127,26 @@ function namesOf(
  *
  * boardScene.layers[2]; // { name: "items", sort: "y" }
  * boardScene.layers[4]; // { name: "ui", sort: "none" }, appended for the HUD
+ *
+ * // features/location/view/ward.ts: the room is the art of the episode the session plays.
+ * export const wardScene = defineScene("ward", {
+ *   bundle: "location",
+ *   bundles: ({ session }) => [session.episode], // "ep01" | "ep02": bundle keys of the game
+ *   layers: { room: {}, glow: {} },
+ *   projections: [wardRoom, wardGlows]
+ * });
+ * wardScene.bundles?.({ player: {}, session: { episode: "ep02" } }); // ["ep02"]
  * ```
  */
 export function defineScene<
   Layers extends LayerMap,
-  const Projections extends readonly AnySceneProjection[]
->(id: string, scene: SceneSpec<Layers, Projections, string, string>): SceneDefinition {
+  const Projections extends readonly AnySceneProjection[],
+  Player extends Json = Json,
+  Session extends Json = Json
+>(
+  id: string,
+  scene: SceneSpec<Layers, Projections, string, string, Player, Session>
+): SceneDefinition {
   const layers = layersOf(id, scene.layers);
   const projections: readonly AnySceneProjection[] = scene.projections;
 
@@ -137,22 +155,34 @@ export function defineScene<
     bundle: scene.bundle,
     music: scene.music,
     layers: Object.freeze(layers),
-    projections: Object.freeze(namesOf(id, layers, projections))
+    projections: Object.freeze(namesOf(id, layers, projections)),
+    ...(scene.bundles === undefined ? {} : { bundles: scene.bundles })
   });
 }
 
 /**
- * Binds `defineScene` to one game's asset and bundle keys. Type-only: the same function.
+ * Binds `defineScene` to one game's asset and bundle keys and to its `Player` and `Session`.
+ * Type-only: the same function.
  *
- * @returns `{ defineScene }` whose `bundle` and textures are checked by the compiler.
+ * @returns `{ defineScene }` whose `bundle`, `bundles` and textures are checked by the compiler.
  * @example
  * ```ts
- * const { defineScene } = scenesFor<"board.cell", "board">();
- * defineScene("board", { bundle: "board", layers: { items: {} }, projections: [] }).id; // "board"
+ * const { defineScene } = scenesFor<"board.cell", "board" | "ep01", Player, { episode: "ep01" }>();
+ * defineScene("ward", {
+ *   bundle: "board",
+ *   bundles: ({ session }) => [session.episode],
+ *   layers: { items: {} },
+ *   projections: []
+ * }).id; // "ward"
  * ```
  */
-export function scenesFor<Asset extends string, Bundle extends string>(): {
-  defineScene: DefineScene<Asset, Bundle>;
+export function scenesFor<
+  Asset extends string,
+  Bundle extends string,
+  Player extends Json = Json,
+  Session extends Json = Json
+>(): {
+  defineScene: DefineScene<Asset, Bundle, Player, Session>;
 } {
   return { defineScene };
 }

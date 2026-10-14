@@ -151,17 +151,19 @@ export type ComponentDefinition<
 /**
  * A component that names outcomes, which is what `popup` takes. `Local` stays a parameter
  * because the `local` argument of `view` is contravariant: pinned to `object` it would refuse
- * every component that keeps local state.
+ * every component that keeps local state. `Outcomes` are its outcomes, so the popup's answer names
+ * one of them.
  *
  * @example
  * ```ts
- * const settings: PopupComponent<{ volume: number }, { tab: string }> = Settings;
+ * const settings: PopupComponent<{ volume: number }, { tab: string }, { close: { saved: boolean } }> = Settings;
  * ```
  */
 export type PopupComponent<
   Properties extends object,
-  Local extends object = object
-> = ComponentDefinition<Properties, Local, Record<string, unknown>>;
+  Local extends object = object,
+  Outcomes extends Record<string, unknown> = Record<string, unknown>
+> = ComponentDefinition<Properties, Local, Outcomes>;
 
 /**
  * A component definition with its type arguments erased, as the registry stores it.
@@ -436,6 +438,10 @@ export type JsxState = {
   epoch: number;
   styled: number;
   written: number;
+  /** The wall times of the last taps on a `DebugTrigger` view, five at the most. */
+  debugTaps: number[];
+  /** Whether `ui:debug-trigger-no-agent` was logged: once per app. */
+  debugWarned: boolean;
 };
 
 /**

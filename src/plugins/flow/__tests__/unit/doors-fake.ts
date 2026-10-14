@@ -142,6 +142,9 @@ export function createDoorsFake(): DoorsFake {
       pause: vi.fn(),
       resume: vi.fn(),
       wake: vi.fn(),
+      measure: vi.fn(),
+      agentClock: () => undefined,
+      chargeAgent: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => true,
       step: vi.fn()

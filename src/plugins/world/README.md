@@ -40,6 +40,25 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. The caller is `game.diff`. |
 | `schema(): ComponentSchema[]` | Every component and tag type the world met so far, sorted by name, with the JSON kind of each field. A new list on every call. The caller is `game.schema`, the editor's component palette. |
 
+A game writes its systems with the kit's `system`, from `defineGame`: the same function as the root
+`system`, with `ctx.snapshot` typed by the game's player and session. The result goes into a
+feature's `systems` list or `ecs.system` like any other.
+
+```ts
+// features/board/world/systems/looks.ts of a game: `system` comes from the kit.
+export const looks = system({
+  name: "board.looks",
+  phase: "animate",
+  query: [mut(Transform)],
+  run: (rows, { snapshot }) => {
+    const { cells } = snapshot.player.board; // Player["board"]["cells"], no cast
+    for (const [, transform] of rows) transform.alpha = cells.length > 0 ? 1 : 0.5;
+  }
+});
+```
+
+The types are `World.SystemFor`, `World.SystemContextOf` and `World.GameSystemDefinition`.
+
 `snapshot()` is typed. Both types reach a game as `World.WorldSnapshot` and `World.EntitySnapshot`;
 `diff()` and `schema()` answer `World.FrameDiff` (with `World.EntityDiff` entries) and
 `World.ComponentSchema`.
@@ -97,6 +116,25 @@ system keeps its own state in a resource. `snapshot()` leaves a value that is no
 ```ts
 // Per-system state of the hover look: one Map per world, dropped when the world stops.
 const Looks = resource("boardLooks", () => ({ shown: new Map<Entity, { look: string }>() }));
+```
+
+### `systemTimes()` — the time per system of a debug build
+
+`app.world.systemTimes()` answers the timing table of an agent build (`__MOKU_GAME_AGENT__`: dev
+pages and `--debug` builds), `World.SystemTiming`: `names` by registration index and `ms` in the
+same order, the time each system took in the current frame. The world takes the page clock from
+`time.agentClock()` at start, reads it twice around every system run (the run's own error isolation
+unchanged), and zeroes `ms` in place at the start of the next frame, so after a frame it holds that
+frame's time. A system that comes back under the same name keeps its row; the table grows only when
+a system registers past its end, never per frame. The renderer's monitor reads it after each frame
+for the five slowest systems of the frame and of the second. `undefined` without the flag: a release
+build times nothing.
+
+```ts
+// The renderer's monitor, at the end of a frame of a debug build:
+const systems = ctx.require(worldPlugin).systemTimes();
+systems?.names[3]; // "ward.pan"
+systems?.ms[3]; // 0.42
 ```
 
 ## Configuration

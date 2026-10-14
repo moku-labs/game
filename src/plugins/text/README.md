@@ -40,7 +40,7 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   1 by default and is the alpha of the label's container, so a change is written in place,
   rebuilds no run, and a tween on `Text.alpha` costs one assignment a frame. It draws at its value
   on a distance-field font too: the renderer's own SDF shader applies every alpha once, where Pixi
-  8.21's applies it twice (renderer README, "Distance-field text"). `ui` draws a field's
+  8.22's applies it twice (renderer README, "Distance-field text"). `ui` draws a field's
   placeholder at `alpha: 0.5`.
 - **Numbers:** `bind(Component, field, { format })` shows a numeric component field of the same
   entity, read every frame, written only when the shown string changes. Formats: `int` (the

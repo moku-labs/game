@@ -20,6 +20,10 @@ app.model.store.snapshot().player; // { count: 3 }
 await run.stop();
 ```
 
+`app.model.store.snapshot()` of `game.headless()` and `game.screen()` is typed by the game's player
+and session (`WithGameState` of `@moku-labs/game/app`): `snapshot().player.count` is a `number`, and a
+field the player does not have is a compile error. A game's own `playerOf`/`sessionOf` casts can go.
+
 A screen test passes the parsed manifest and a file seam, `game.screen({ manifest, io }).app`. Without a mount the renderer is inert, so it runs in plain Bun.
 
 ## Testing entry

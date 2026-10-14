@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import { defineCommand, defineSource } from "../../doors/define";
-import { controlRefused, isDev, notInstalled } from "../../doors/dev";
+import {
+  controlReadOnly,
+  controlRefused,
+  isAgent,
+  isControl,
+  isDev,
+  notInstalled
+} from "../../doors/dev";
 import { read, watch } from "../../doors/read";
 import { run } from "../../doors/run";
 import { cheatsOf, isTainted } from "../../doors/session";
@@ -71,6 +78,20 @@ describe("isDev", () => {
     expect(isDev()).toBe(true);
   });
 
+  it("reads the agent and the control flag as on only when each is exactly true", () => {
+    expect([isAgent(), isControl()]).toEqual([false, false]);
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", "true");
+    vi.stubGlobal("__MOKU_GAME_CONTROL__", 1);
+    expect([isAgent(), isControl()]).toEqual([false, false]);
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    expect([isAgent(), isControl(), isDev()]).toEqual([true, false, false]);
+
+    vi.stubGlobal("__MOKU_GAME_CONTROL__", true);
+    expect([isAgent(), isControl(), isDev()]).toEqual([true, true, false]);
+  });
+
   it("builds the refusal in the house error format", () => {
     expect(controlRefused().message).toBe(
       "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
@@ -133,6 +154,122 @@ describe("defineSource and defineCommand", () => {
       key?: string | undefined;
     }>();
     expectTypeOf<InputOf<{ payload: "json" }>>().toEqualTypeOf<{ payload: Json }>();
+  });
+});
+
+/** The body of a command the type tests below never run. */
+const runNothing = (_app: ControlApp): boolean => true;
+
+/** Six command shapes the overlay cannot use: each must fail to compile, so none is ever built. */
+const refusedShapes = () => [
+  // @ts-expect-error — a toggle the overlay cannot draw: no value.
+  defineCommand({
+    id: "t.a",
+    title: "A",
+    input: { on: "boolean" },
+    effect: "cosmetic",
+    overlay: "toggle",
+    run: runNothing
+  }),
+  defineCommand({
+    id: "t.b",
+    title: "B",
+    // @ts-expect-error — a toggle runs with { on } only.
+    input: { level: "number" },
+    effect: "cosmetic",
+    overlay: "toggle",
+    value: () => true,
+    run: runNothing
+  }),
+  defineCommand({
+    id: "t.c",
+    title: "C",
+    // @ts-expect-error — a toggle takes exactly { on: "boolean" }, nothing beside it.
+    input: { on: "boolean", level: "number" },
+    effect: "cosmetic",
+    overlay: "toggle",
+    value: () => true,
+    run: runNothing
+  }),
+  defineCommand({
+    id: "t.d",
+    title: "D",
+    // @ts-expect-error — the overlay runs a button with {}.
+    input: { key: "string" },
+    effect: "cosmetic",
+    overlay: "button",
+    run: runNothing
+  }),
+  // @ts-expect-error — a button has no value.
+  defineCommand({
+    id: "t.e",
+    title: "E",
+    input: {},
+    effect: "cosmetic",
+    overlay: "button",
+    value: () => true,
+    run: runNothing
+  }),
+  // @ts-expect-error — a value without the toggle marker draws nothing.
+  defineCommand({
+    id: "t.f",
+    title: "F",
+    input: {},
+    effect: "cosmetic",
+    value: () => true,
+    run: runNothing
+  })
+];
+
+describe("defineCommand with an overlay marker", () => {
+  /** What the overlay toggle of the test reads and writes. */
+  const glow = { on: true };
+
+  const glowSwitch = defineCommand({
+    id: "test.glow",
+    title: "Glow",
+    input: { on: "boolean" },
+    effect: "cosmetic",
+    overlay: "toggle",
+    value: () => glow.on,
+    run: (_app: ControlApp, { on }) => {
+      glow.on = on;
+
+      return on;
+    }
+  });
+
+  const recenter = defineCommand({
+    id: "test.recenter",
+    title: "Recenter",
+    input: { zoom: "number?" },
+    effect: "cosmetic",
+    overlay: "button",
+    run: (_app: ControlApp, { zoom }) => zoom ?? 1
+  });
+
+  it("accepts a toggle with input { on: boolean } and a value, and a button with no required input", async () => {
+    const fake = createDoorsFake();
+    // What the overlay does: a toggle's switch is drawn from its value, told apart by the marker.
+    const switchOf = (command: typeof glowSwitch | typeof recenter): boolean | undefined =>
+      command.overlay === "toggle" ? command.value(fake.app) : undefined;
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    expect([switchOf(glowSwitch), switchOf(recenter), recenter.overlay]).toEqual([
+      true,
+      undefined,
+      "button"
+    ]);
+    // The overlay runs a toggle with { on: !value(app) } and a button with {}.
+    const toggled = await run(fake.app, glowSwitch, { on: !switchOf(glowSwitch) });
+    const pressed = await run(fake.app, recenter, {});
+
+    expect([toggled.value, switchOf(glowSwitch), pressed.value]).toEqual([false, false, 1]);
+  });
+
+  it("refuses at compile time a toggle without value, a toggle with another input, a button with a required input or a value, and a value without a toggle", () => {
+    expectTypeOf(refusedShapes).toBeFunction();
   });
 });
 
@@ -284,6 +421,58 @@ describe("run", () => {
     await expect(run(fake.app, tapCommand, { intent: "play" })).rejects.toThrow(
       "Control commands run in dev builds only"
     );
+  });
+
+  it("with only AGENT true runs a read and a cosmetic command, and refuses route, cheat and raw as read-only", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const fake = createDoorsFake();
+    const ranWith = (effect: "read" | "cosmetic" | "route" | "cheat" | "raw") =>
+      run(
+        fake.app,
+        defineCommand({
+          id: `test.${effect}`,
+          title: "Effect",
+          input: {},
+          effect,
+          run: () => effect
+        })
+      );
+
+    await expect(ranWith("read")).resolves.toMatchObject({ value: "read" });
+    await expect(ranWith("cosmetic")).resolves.toMatchObject({ value: "cosmetic" });
+
+    for (const effect of ["route", "cheat", "raw"] as const) {
+      const refused = await ranWith(effect).then(
+        () => undefined,
+        (error: unknown) => error
+      );
+
+      expect(refused).toBeInstanceOf(Error);
+      expect(Reflect.get(Object(refused), "reason")).toBe("read-only");
+      expect((refused as Error).message).toBe(
+        `[game] The command test.${effect} changes the game: this debug build runs read and cosmetic commands only.\n  Build with moku-game build --debug=full to run it.`
+      );
+    }
+
+    await expect(run(fake.app, tapCommand, { intent: "play" })).rejects.toThrow(
+      controlReadOnly("test.tap").message
+    );
+    expect(fake.answers).toEqual([]);
+    expect(cheatsOf(fake.app)).toEqual([]);
+  });
+
+  it("with AGENT and CONTROL true runs a route and a raw command", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    vi.stubGlobal("__MOKU_GAME_CONTROL__", true);
+    const fake = createDoorsFake();
+
+    await expect(run(fake.app, tapCommand, { intent: "play" })).resolves.toMatchObject({
+      value: true
+    });
+    await expect(run(fake.app, cheatCommand, { coins: 3 })).resolves.toMatchObject({
+      state: { tainted: true }
+    });
+    expect(fake.answers).toEqual([{ intent: "play" }]);
   });
 
   it("runs the command and wraps its value in the envelope read after it", async () => {

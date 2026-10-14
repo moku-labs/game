@@ -1,6 +1,7 @@
 /**
  * @file The page in a game's bundle: Bun builds a `main.ts` the way `moku-game build` does,
- * minified, for the browser, with `__MOKU_GAME_DEV__` defined. A production bundle carries no
+ * minified, for the browser, with `__MOKU_GAME_DEV__` defined and the agent and control flags of
+ * spec 10 defined false, as a release or dev build defines them. A production bundle carries no
  * control door and no agent call; a dev bundle carries both, so the check is not empty. The page
  * never reaches `@moku-labs/system`: a web-only game bundles no system code.
  */
@@ -48,7 +49,7 @@ function bundlePage(dev: "true" | "false"): string {
     await Bun.write(entry, ${JSON.stringify(main)});
     const result = await Bun.build({
       entrypoints: [entry],
-      define: { __MOKU_GAME_DEV__: ${JSON.stringify(dev)} },
+      define: { __MOKU_GAME_DEV__: ${JSON.stringify(dev)}, __MOKU_GAME_AGENT__: "false", __MOKU_GAME_CONTROL__: "false" },
       minify: true,
       target: "browser",
       external: ["pixi.js", "yoga-layout", "@moku-labs/*"]

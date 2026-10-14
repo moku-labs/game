@@ -39,6 +39,8 @@ export function createEcsState(): EcsState {
     mode: "live",
     offFrame: [],
     frameSnapshot: undefined,
-    history: undefined
+    history: undefined,
+    timing: undefined,
+    timingSlots: emptyMap()
   };
 }

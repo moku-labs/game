@@ -17,5 +17,6 @@ export type {
   SaveKind,
   Scenario,
   ScreenSeams,
-  SystemName
+  SystemName,
+  WithGameState
 } from "./app/types";

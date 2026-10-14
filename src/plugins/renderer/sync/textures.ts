@@ -151,7 +151,7 @@ function defaultBordersOf(nine: NineBorders): {
  *
  * @param sctx - Domain context of the sync module.
  * @param image - The decoded image.
- * @param options - Nine-slice borders, in pixels.
+ * @param options - Nine-slice borders in pixels, and whether Pixi generates the mip chain.
  * @returns The new texture.
  * @throws {Error} When the renderer does not draw.
  */
@@ -161,7 +161,10 @@ export function createTexture(
   options?: CreateTextureOptions
 ): PixiTexture {
   const pixi = drawingPixi(sctx, "create");
-  const base = pixi.Texture.from(image);
+  const base =
+    options?.mips === true
+      ? pixi.Texture.from({ resource: image, autoGenerateMipmaps: true })
+      : pixi.Texture.from(image);
   const nine = options?.nine;
 
   if (nine === undefined) return base;
@@ -383,7 +386,7 @@ export function destroyTexture(state: SyncState, texture: PixiTexture): void {
     return;
   }
 
-  // Pixi 8.21 caches batch bind groups forever, and each one warns when a source it holds goes.
+  // Pixi 8.22 caches batch bind groups forever, and each one warns when a source it holds goes.
   texture.source.style.removeAllListeners("change");
   texture.source.removeAllListeners("change");
   texture.destroy(true);

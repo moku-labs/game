@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clipToFrame, createSafeAreaProbe, readInsets } from "../../viewport/safe-area";
+import { watchSafeArea } from "../../viewport/resize";
+import { clipToFrame, createSafeAreaProbes, readInsets } from "../../viewport/safe-area";
+import { createViewportState } from "../../viewport/state";
+import type { SafeAreaProbes, ViewportCtx } from "../../viewport/types";
 import { installFakeDom } from "../fake-dom";
 
 afterEach(() => {
@@ -8,40 +11,61 @@ afterEach(() => {
 
 const noInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
+/**
+ * Creates the two probes on the fake document.
+ *
+ * @returns The probes; the test fails without a document.
+ */
+function probes(): SafeAreaProbes {
+  const created = createSafeAreaProbes();
+
+  if (created === undefined) throw new Error("the fake document made no probes");
+
+  return created;
+}
+
 describe("viewport safe area", () => {
-  it("reads the four paddings of the probe", () => {
+  it("reads top and left from the start probe and right and bottom from the end probe", () => {
     const dom = installFakeDom();
 
-    dom.insets.top = 47;
-    dom.insets.bottom = 34;
+    Object.assign(dom.insets, { top: 47, right: 12, bottom: 34, left: 5 });
 
-    const probe = dom.document.createElement("div");
-
-    expect(readInsets(probe as unknown as HTMLElement)).toEqual({
-      top: 47,
-      right: 0,
-      bottom: 34,
-      left: 0
-    });
+    expect(readInsets(probes())).toEqual({ top: 47, right: 12, bottom: 34, left: 5 });
   });
 
-  it("makes no probe where there is no document", () => {
-    expect(createSafeAreaProbe()).toBeUndefined();
+  it("declares each inset as its custom property with the env() fallback", () => {
+    installFakeDom();
+
+    const { start, end } = probes();
+
+    expect(start.style.width).toBe("var(--moku-safe-left, env(safe-area-inset-left, 0px))");
+    expect(start.style.height).toBe("var(--moku-safe-top, env(safe-area-inset-top, 0px))");
+    expect(end.style.width).toBe("var(--moku-safe-right, env(safe-area-inset-right, 0px))");
+    expect(end.style.height).toBe("var(--moku-safe-bottom, env(safe-area-inset-bottom, 0px))");
   });
 
-  it("reads zero when the browser answers nothing", () => {
-    const dom = installFakeDom();
-    const probe = dom.document.createElement("div");
+  it("makes no probe and watches nothing where there is no document", () => {
+    const state = createViewportState();
+    const vctx = { ctx: { state: { viewport: state } } } as unknown as ViewportCtx;
+
+    state.probes = createSafeAreaProbes();
+    watchSafeArea(vctx);
+
+    expect(state.probes).toBeUndefined();
+    expect(state.cleanups).toHaveLength(0);
+    expect(readInsets(state.probes)).toEqual(noInsets);
+  });
+
+  it("reads zero when the browser answers nothing or has no getComputedStyle", () => {
+    installFakeDom();
+
+    const both = probes();
 
     vi.stubGlobal("getComputedStyle", () => ({}));
-    expect(readInsets(probe as unknown as HTMLElement)).toEqual(noInsets);
+    expect(readInsets(both)).toEqual(noInsets);
 
     vi.stubGlobal("getComputedStyle", undefined);
-    expect(readInsets(probe as unknown as HTMLElement)).toEqual(noInsets);
-  });
-
-  it("reads zero when there is no probe", () => {
-    expect(readInsets(undefined)).toEqual(noInsets);
+    expect(readInsets(both)).toEqual(noInsets);
   });
 
   it("divides the overlapping part by the scale", () => {

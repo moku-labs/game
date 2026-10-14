@@ -34,6 +34,7 @@ export function createScenesState(): State {
     scenes: emptyRegistry(),
     current: undefined,
     pending: undefined,
+    named: [],
     owner: sceneOwner(),
     teardown: undefined
   };

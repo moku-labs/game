@@ -7,7 +7,8 @@
  * Engine-internal, not a root export. `input`, `anim` and `ui` import `rootPoseOf` and
  * `localPoseOf` from this module path (`../renderer/sync/pose`) and never walk the `Parent` chain
  * themselves; `input` places a carried view under the last pose of a despawned held view with
- * `poseUnder`; `sync` places a box with `rootPointOf`.
+ * `poseUnder`; `sync` places a box with `rootPointOf`. `input` places the drop lookup of an aimed
+ * view with `applyPose`.
  */
 import type { Entity } from "../../world/types";
 import { Parent, Transform, type TransformValue } from "../components";
@@ -62,7 +63,7 @@ function copyPose(pose: Readonly<TransformValue>): TransformValue {
  * // { x: 10, y: 2 }
  * ```
  */
-function applyPose(pose: Readonly<TransformValue>, point: Point): Point {
+export function applyPose(pose: Readonly<TransformValue>, point: Point): Point {
   const cos = Math.cos(pose.rotation);
   const sin = Math.sin(pose.rotation);
   const dx = point.x - pose.pivot.x;

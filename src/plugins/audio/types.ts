@@ -60,7 +60,7 @@ export type MusicOptions = { fadeMs?: number };
 
 /**
  * `music` bound to the audio asset keys of one game. `defineGame` returns it through `audioFor`;
- * the loose export accepts any string.
+ * the loose export accepts any string. The descriptor resolves nothing.
  *
  * @example
  * ```ts
@@ -70,7 +70,7 @@ export type MusicOptions = { fadeMs?: number };
 export type MusicDescriptor<Asset extends string> = (
   key: Asset | null,
   options?: MusicOptions
-) => Descriptor;
+) => Descriptor<void>;
 
 /**
  * Reads the player's volume choice out of the committed player state. Every bus it names is
@@ -82,6 +82,20 @@ export type MusicDescriptor<Asset extends string> = (
  * ```
  */
 export type Volumes = (player: Json) => Partial<Record<Bus, number>>;
+
+/**
+ * `Volumes`, written against the player type of one game: `defineGame` hands it as `volumes`, so
+ * the callback reads the game's player with no cast. The same function at run time.
+ *
+ * @example
+ * ```ts
+ * // index.ts of a game: `volumes` comes from the kit, so `player` is the game's Player.
+ * pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.music })) } }
+ * ```
+ */
+export type VolumesFor<Player> = (
+  read: (player: Player) => Partial<Record<Bus, number>>
+) => Volumes;
 
 /**
  * How a music track is played. `"decode"`: one AudioBuffer per track, gapless, about 58 MB per

@@ -170,7 +170,9 @@ export function createMockEffects(
     },
     snapshot: () => ({ ...time }),
     wake: vi.fn(),
-    step: vi.fn()
+    step: vi.fn(),
+    // The world asks for the page clock in an agent build; this fake hands none out.
+    agentClock: () => undefined
   } as unknown as TimeApi;
 
   const snapshot = (): Snapshot => ({
@@ -220,6 +222,7 @@ export function createMockEffects(
     viewport: {
       size: () => ({ ...renderer.viewport, scale: 1, orientation: "portrait" })
     },
+    monitor: { event: vi.fn() },
     stats: (): never => {
       throw new Error("effects reads renderer.sync.renderPasses(), never renderer.stats()");
     }

@@ -2,8 +2,9 @@
  * @file ui plugin — the two ui commands of the `/control` door: a tap on a keyed element or on a
  * view, and the text typed into a field. The tap goes through `app.input`, so the gate decides;
  * the text goes through `app.ui.fill`, which writes a component's local and answers nothing. The
- * session stays clean. Dev builds only: each body starts with the inline dev guard, so a bundler
- * `define` of `false` drops it, and logs the `moku:dev` marker.
+ * session stays clean. Dev builds and `--debug=full` builds: each body starts with the inline
+ * control guard of a route command, so a bundler `define` of `false` drops it, and logs the
+ * `moku:dev` marker.
  */
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
@@ -58,7 +59,12 @@ export const tapCommand = defineCommand({
   input: { key: "string?", target: "json?" },
   effect: "route",
   run: (app: TapApp, { key, target }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.tap", key });
 
@@ -89,7 +95,12 @@ export const fillCommand = defineCommand({
   input: { key: "string", value: "string" },
   effect: "route",
   run: (app: FillApp, { key, value }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.fill", key });
 

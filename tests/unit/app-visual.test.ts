@@ -167,6 +167,7 @@ function fakeDeps(
 
       return { default: new Response("<html>the page</html>") };
     },
+    now: () => 0,
     visual: async () => ({
       parseVisualArgv,
       runVisualTests: (setup, tests, options = {}) => {

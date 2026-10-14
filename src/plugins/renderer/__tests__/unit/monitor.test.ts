@@ -73,6 +73,7 @@ describe("renderer stats", () => {
       frameMs: 0,
       textures: 0,
       textureMb: 0,
+      textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
       renderPasses: 0
@@ -107,7 +108,7 @@ describe("renderer stats", () => {
   });
 
   it("restarts the window after a long gap instead of counting it as one slow frame", () => {
-    const state = createMonitorState();
+    const state = createMonitorState({ budgetMs: "rate", frames: 1024 });
 
     beginFrame(state, 0);
     endFrame(state, 2);
@@ -120,7 +121,7 @@ describe("renderer stats", () => {
   });
 
   it("ignores the end of a frame whose start it never saw", () => {
-    const state = createMonitorState();
+    const state = createMonitorState({ budgetMs: "rate", frames: 1024 });
 
     endFrame(state, 10);
 
@@ -142,6 +143,35 @@ describe("renderer stats", () => {
     expect(mock.api.stats()).toMatchObject({ textures: 2, textureMb: 5 });
   });
 
+  it("splits the texture memory into art, render targets and the pictures the engine keeps", async () => {
+    const mock = await started();
+    const kept = { pixelWidth: 512, pixelHeight: 512, mipLevelCount: 1, uploadMethodId: "unknown" };
+
+    mock.pixi.last().renderer.texture.managedTextures.push(
+      { pixelWidth: 1024, pixelHeight: 1024, mipLevelCount: 1 },
+      {
+        pixelWidth: 1024,
+        pixelHeight: 512,
+        mipLevelCount: 1,
+        uploadMethodId: "unknown",
+        // eslint-disable-next-line unicorn/no-null -- a render target's resource is null in Pixi.
+        resource: null
+      } as never,
+      kept as never
+    );
+    mock.modules.host.keep(kept, true);
+
+    expect(mock.api.stats()).toMatchObject({
+      textures: 3,
+      textureMb: 7,
+      textureMbSplit: { art: 4, targets: 2, kept: 1 }
+    });
+
+    mock.modules.host.keep(kept, false);
+
+    expect(mock.api.stats().textureMbSplit).toEqual({ art: 4, targets: 3, kept: 0 });
+  });
+
   it("answers no texture for Pixi's canvas renderer, which keeps none on a GPU", async () => {
     const mock = await started();
 
@@ -161,7 +191,7 @@ describe("renderer stats", () => {
   });
 
   it("skips the empty slots Pixi keeps for unloaded texture sources", () => {
-    // Pixi 8.21 GpuTextureSystem and GlTextureSystem answer `Object.values` of a GCManagedHash,
+    // Pixi 8.22 GpuTextureSystem and GlTextureSystem answer `Object.values` of a GCManagedHash,
     // which keeps `null` where a source was unloaded.
     // eslint-disable-next-line unicorn/no-null -- Pixi's empty slot is `null`, the bug is about it
     const emptySlot = null;
@@ -180,7 +210,13 @@ describe("renderer stats", () => {
     } as unknown as PixiApplication;
 
     // (16 + 4) pixels * 4 bytes.
-    expect(textureUsage(app)).toEqual({ count: 2, bytes: 80 });
+    expect(textureUsage(app, new WeakSet())).toEqual({
+      count: 2,
+      bytes: 80,
+      art: 80,
+      targets: 0,
+      kept: 0
+    });
   });
 
   it("estimates the bytes of one texture source", () => {
@@ -258,6 +294,17 @@ describe("renderer capture", () => {
     mock.setPaused(true);
 
     await expect(mock.api.capture()).resolves.toEqual({ png: FAKE_PNG });
+  });
+
+  it("draws on a debug page with only AGENT true, and serves a waiting capture when the game pauses", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const mock = await started();
+    const waiting = mock.api.capture();
+
+    pause(mock);
+
+    await expect(waiting).resolves.toEqual({ png: FAKE_PNG });
+    expect(mock.ctx.state.monitor.captures).toHaveLength(0);
   });
 
   it("takes a waiting capture at once when the game pauses before its frame came", async () => {

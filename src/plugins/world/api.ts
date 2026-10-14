@@ -135,5 +135,9 @@ export function createWorldApi(ctx: KernelSlice): Api {
   const worldCtx: WorldCtx = { ...ctx, deps: resolveDeps(ctx) };
   const { ecs, projection } = createModules(worldCtx);
 
-  return { ecs: exposeEcs(ecs, projection), projection: exposeProjection(projection) };
+  return {
+    ecs: exposeEcs(ecs, projection),
+    projection: exposeProjection(projection),
+    systemTimes: () => ctx.state.ecs.timing
+  };
 }

@@ -43,6 +43,7 @@
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
  * | renderer | debug | { nineSlice: false } |
+ * | renderer | monitor | { budgetMs: "rate", frames: 1024 }, the performance log of an agent build |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
  * | input | dragStartPx | 8 |
@@ -114,6 +115,7 @@ import {
   animPlugin,
   assetsPlugin,
   clockPlugin,
+  debugPlugin,
   flowPlugin,
   i18nPlugin,
   inputPlugin,
@@ -143,11 +145,12 @@ import { componentsFor } from "./plugins/renderer/components";
 import { scenesFor } from "./plugins/scenes/define";
 import { textFor } from "./plugins/text/components";
 import { uiFor } from "./plugins/ui/components";
+import { systemsFor } from "./plugins/world/ecs/define";
 import { projectionFor } from "./plugins/world/projection/define";
 
 const framework = createCore(coreConfig, {
   // Dependency order (spec/11 §1.3, §1.5). The screen set is a list the game spreads in (later cycles).
-  plugins: [timePlugin, lifecyclePlugin, modelPlugin, clockPlugin, flowPlugin],
+  plugins: [timePlugin, lifecyclePlugin, modelPlugin, clockPlugin, debugPlugin, flowPlugin],
   // A hook threw. Core 1.7 hands the framework `onError` the core plugin APIs, which exist before the
   // event bus and are safe whenever a hook can fail (core spec/02 §3), so the error goes to the log.
   onError: (error, { log }) => log.error("game: a hook failed", undefined, error)
@@ -184,16 +187,18 @@ export const createPlugin = framework.createPlugin;
 
 /**
  * Binds the authoring helpers to the types of one game: "createApp for a game". Each plugin binds
- * its own helpers (`flowFor`, `projectionFor`, `componentsFor`, `bundlesFor`, `scenesFor`); this
- * only spreads them, so the kit's type is inferred and never written by hand. At run time these
- * are the same functions and component objects the plugins export.
+ * its own helpers (`flowFor`, `projectionFor`, `systemsFor`, `componentsFor`, `bundlesFor`,
+ * `scenesFor`, `i18nFor`, `audioFor`); this only spreads them, so the kit's type is inferred and
+ * never written by hand. At run time these are the same functions and component objects the
+ * plugins export. The kit's `system` and `volumes` read the game's player and session; `key` types
+ * a string key written in code (a key that comes from data is checked with `app.i18n.isKey`).
  *
  * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`
  *   and `emitters`.
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
- * export const { defineNode, defineFlow, defineFeature, projection, sprite, Sprite, defineBundles, load, defineScene } =
+ * export const { defineNode, defineFlow, defineFeature, projection, system, sprite, Sprite, defineBundles, load, defineScene, tr, key, volumes } =
  *   defineGame<{ player: Player; session: Session; assets: AssetKey; bundles: BundleKey; strings: StringTable }>();
  * ```
  */
@@ -201,14 +206,15 @@ export function defineGame<Types extends GameTypes>() {
   return {
     ...flowFor<{ player: Types["player"]; session: Types["session"]; scenes: SceneIdOf<Types> }>(),
     ...projectionFor<Types["player"], Types["session"]>(),
+    ...systemsFor<Types["player"], Types["session"]>(),
     ...componentsFor<Types["assets"]>(),
     ...bundlesFor<BundlesOf<Types>>(),
-    ...scenesFor<Types["assets"], BundlesOf<Types>>(),
+    ...scenesFor<Types["assets"], BundlesOf<Types>, Types["player"], Types["session"]>(),
     ...animFor<Types["assets"]>(),
     ...i18nFor<Types["strings"]>(),
     ...textFor<TextStylesOf<Types>, Types["assets"]>(),
     ...uiFor<Types["assets"], TextStylesOf<Types>, Extract<keyof Types["strings"], string>>(),
-    ...audioFor<Types["assets"]>(),
+    ...audioFor<Types["assets"], Types["player"]>(),
     ...effectsFor<Types["assets"], EmitterIdOf<Types>>()
   };
 }
@@ -243,8 +249,9 @@ export { audioPlugin, effectsPlugin, platformPlugin } from "./plugins";
 
 // ─── Helpers (explicit, never export *) ───────────────────────
 // flow: nodes, flows, features, effect descriptors
-export { defineFeature } from "./plugins/flow/feature";
+export { defineFeature, flattenFeatures } from "./plugins/flow/feature";
 export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
+export { defineEffect } from "./plugins/flow/fx/effect";
 export { exit, slot, to, type } from "./plugins/flow/runner/define";
 // model
 export { SaveUnreadableError } from "./plugins/model/store/types";
@@ -271,6 +278,36 @@ export {
   sprite,
   Transform
 } from "./plugins/renderer/components";
+// renderer: the performance log of an agent build, its frame ring and the record of one frame
+export { PERF_GAP_BUCKETS, PERF_LOG_VERSION } from "./plugins/renderer/monitor/log-types";
+export { frameAt } from "./plugins/renderer/monitor/ring";
+export type {
+  FrameColumns,
+  FrameReadout,
+  FrameReadResult,
+  FrameRecord,
+  FrameRing,
+  LongFrameEntry,
+  MonitorConfig,
+  PassKind,
+  PassRecord,
+  PerfCause,
+  PerfChange,
+  PerfChangeEntry,
+  PerfCollectorLine,
+  PerfDisplay,
+  PerfEventLine,
+  PerfEventName,
+  PerfHeaderLine,
+  PerfLogLine,
+  PerfLongFrameLine,
+  PerfMarkLine,
+  PerfMeasured,
+  PerfSampleLine,
+  PerfSpikeLine,
+  PerfStartupLine,
+  PerfThermalLine
+} from "./plugins/renderer/types";
 // input: gestures as data
 export {
   Draggable,
@@ -321,7 +358,7 @@ export type { DescriptionNode } from "./plugins/world/projection/types";
 export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
 export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
-export { Box, LocalWrite, popup } from "./plugins/ui/components";
+export { Box, DebugTrigger, LocalWrite, popup } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";
 export { defineStyle } from "./plugins/ui/styles/define";
 export { resolve } from "./plugins/ui/styles/resolve";

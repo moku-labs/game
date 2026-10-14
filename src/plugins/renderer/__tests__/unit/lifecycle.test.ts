@@ -40,9 +40,10 @@ describe("renderer lifecycle", () => {
 
     expect(mock.ctx.state.host.app).toBeDefined();
     expect(mock.ctx.state.sync.root).toBeDefined();
-    expect(mock.ctx.state.viewport.probe).toBeDefined();
+    expect(mock.ctx.state.viewport.probes).toBeDefined();
     expect(mock.frames.some(frame => frame.phase === "render")).toBe(true);
-    expect(mock.dom?.observers).toHaveLength(1);
+    // The mount's observer and the safe-area probes' observer (spec 18 V2).
+    expect(mock.dom?.observers).toHaveLength(2);
   });
 
   it("gives every remover back on stop", async () => {
@@ -72,7 +73,7 @@ describe("renderer lifecycle", () => {
     expect(mock.ctx.state.sync.views.size).toBe(0);
     expect(mock.ctx.state.sync.layers.size).toBe(0);
     expect(mock.ctx.state.sync.pools.size).toBe(0);
-    expect(mock.ctx.state.viewport.probe).toBeUndefined();
+    expect(mock.ctx.state.viewport.probes).toBeUndefined();
   });
 
   it("destroys what the pools hold", async () => {
@@ -165,9 +166,10 @@ describe("renderer lifecycle", () => {
     vi.stubGlobal("ResizeObserver", undefined);
     await mock.start();
 
-    expect(mock.ctx.state.viewport.cleanups).toHaveLength(0);
+    // Only the moku-native:insets listener, which needs no ResizeObserver (spec 18 V2).
+    expect(mock.ctx.state.viewport.cleanups).toHaveLength(1);
     expect(mock.dom?.observers).toHaveLength(0);
-    expect(mock.ctx.state.viewport.probe).toBeDefined();
+    expect(mock.ctx.state.viewport.probes).toBeDefined();
     expect(mock.ctx.state.host.ready).toBe(true);
   });
 

@@ -162,6 +162,17 @@ export const plainCard = Draggable({ payload: { from: "c7" } });
 // @ts-expect-error — carry lists projection keys, not a word for "the children"
 Draggable({ carry: "children" });
 
+// A board item whose picture is lifted above the finger is dropped where the picture is.
+export const lifted = Draggable({ payload: { from: "c7" }, carry: [], aim: { x: 25, y: 12 } });
+// eslint-disable-next-line unicorn/no-null -- the rule under test is that null takes an aim away.
+export const unaimed = Draggable({ aim: null });
+
+// @ts-expect-error — an aim is a point: both coordinates
+Draggable({ aim: { x: 25 } });
+
+// @ts-expect-error — null takes an aim away; undefined is no value under exactOptionalPropertyTypes
+Draggable({ aim: undefined });
+
 expectTypeOf(Traced).toEqualTypeOf<TagType>();
 export const letter = Traceable({ intent: "word", payload: { cell: "b3" } });
 

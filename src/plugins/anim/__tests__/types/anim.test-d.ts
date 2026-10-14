@@ -2,11 +2,22 @@ import { expectTypeOf } from "vitest";
 import type { Anim, HAPTIC_KINDS, HapticKind } from "../../../../index";
 import { defineGame } from "../../../../index";
 import { type } from "../../../flow/runner/define";
+import type { NodeFx } from "../../../flow/types";
 import { Sprite, Transform } from "../../../renderer/components";
 import type { ResourceType } from "../../../world/ecs/types";
 import { AnimPlayer, Frames } from "../../components";
 import { defineMotion } from "../../motion";
-import { defineAnimation, haptic, mark, play, sequence, set, tween } from "../../timeline/steps";
+import {
+  defineAnimation,
+  haptic,
+  mark,
+  play,
+  sequence,
+  set,
+  sfx,
+  tween
+} from "../../timeline/steps";
+import type { FxStep } from "../../timeline/types";
 import type {
   AnimApi,
   AnyAnimationDefinition,
@@ -225,3 +236,12 @@ const player: Anim.AnimPlayerValue = { play: () => ({}) as PlayHandle };
 player.play(lift, { thing: 1 });
 // @ts-expect-error — the slot `thing` is required
 player.play(lift, {});
+
+// The descriptors anim owns resolve nothing when a node awaits them, and stay timeline steps.
+declare const fx: NodeFx;
+
+expectTypeOf(fx(sfx("board.merge"))).toEqualTypeOf<Promise<void>>();
+expectTypeOf(fx(haptic("light"))).toEqualTypeOf<Promise<void>>();
+expectTypeOf(fx(play(deliverOrder, { items: [card], card }))).toEqualTypeOf<Promise<void>>();
+expectTypeOf(sfx("board.merge")).toExtend<FxStep>();
+sequence(sfx("board.merge"), haptic("light"));

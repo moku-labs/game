@@ -162,14 +162,16 @@ export type TextureProvider = (key: string) => PixiTexture | undefined;
 export type NineBorders = readonly [number, number, number, number];
 
 /**
- * Options of `textures.create`.
+ * Options of `textures.create`. `nine` gives the default nine-slice borders in pixels; `mips`
+ * uploads the texture with its full mip chain, which Pixi builds on the GPU (`slice` ignores it:
+ * a slice shares the source of its page).
  *
  * @example
  * ```ts
- * const options: CreateTextureOptions = { nine: [12, 12, 12, 12] };
+ * const options: CreateTextureOptions = { nine: [12, 12, 12, 12], mips: true };
  * ```
  */
-export type CreateTextureOptions = { nine?: NineBorders };
+export type CreateTextureOptions = { nine?: NineBorders; mips?: true };
 
 /**
  * Where `textures.slice` cuts a texture out of an atlas page, in page pixels. The manifest `atlas`
@@ -217,7 +219,7 @@ export type TexturesApi = {
    *
    * @param image - The decoded image.
    * @param options - `nine` is left, top, right and bottom in pixels; it becomes the texture's
-   *   default nine-slice borders.
+   *   default nine-slice borders. `mips: true` uploads the full mip chain, generated on the GPU.
    * @returns The new texture.
    * @throws {Error} When the renderer does not draw.
    * @example
@@ -372,16 +374,21 @@ export type FontsApi = {
 };
 
 /**
- * One filter on an entity's view: a Pixi filter instance `effects` built, and how many render
- * passes one apply of it costs.
+ * One filter on an entity's view: a Pixi filter instance `effects` built, how many render passes
+ * one apply of it costs, and the filter kind id the performance log names it by.
  *
  * @example
  * ```ts
  * // A full-screen blur of quality 4 applies 8 times.
- * const slot: FilterSlot = { filter: blur, passes: 8 };
+ * const slot: FilterSlot = { filter: blur, passes: 8, kind: "blur" };
  * ```
  */
-export type FilterSlot = { filter: PixiFilter; passes: number };
+export type FilterSlot = {
+  filter: PixiFilter;
+  passes: number;
+  /** The filter kind id, for the performance log; optional: a slot without it counts as "other". */
+  kind?: string;
+};
 
 /**
  * The filters drawn on entities' views, `app.renderer.sync.filters`. `effects` builds, writes and
@@ -751,6 +758,11 @@ export type SyncState = {
   outlinesStale: boolean;
   /** The filters `effects` set per entity, kept while the entity lives, view or not. */
   filters: Map<Entity, readonly FilterSlot[]>;
+  /**
+   * The kind of each Pixi filter a slot named, for the performance log of an agent build; a
+   * blur's two passes are filters of their own and are in it too. Empty in a production build.
+   */
+  filterKinds: WeakMap<object, string>;
   cleanups: Array<() => void>;
 };
 

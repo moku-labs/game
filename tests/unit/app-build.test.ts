@@ -8,12 +8,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { buildIdOf, definesOf } from "../../src/app/build";
 import type { CliDeps } from "../../src/app/cli";
 import { runCommand } from "../../src/app/cli";
 import { copyMiniGame, removeCopies } from "../integration/app-helpers";
 
 /** What the stub seams saw. */
-type Seen = { info: string[]; errors: string[]; scans: string[][] };
+type Seen = { info: string[]; warnings: string[]; errors: string[]; scans: string[][] };
 
 /** The copies of this file, removed after it. */
 const copies: string[] = [];
@@ -64,15 +65,17 @@ function unused(): never {
  * @param root - The game folder, also the working directory.
  * @param pack - The files the pack writes, by path under the pack folder.
  * @param code - What the pack answers.
+ * @param change - Seams to replace; a debug build needs the resolver, the clock and the warnings.
  * @returns The exit code and what the seams saw.
  */
 async function build(
   argv: string[],
   root: string,
   pack: Readonly<Record<string, string>> = MANIFEST_ONLY,
-  code = 0
+  code = 0,
+  change: (seen: Seen) => Partial<CliDeps> = () => ({})
 ): Promise<{ code: number; seen: Seen }> {
-  const seen: Seen = { info: [], errors: [], scans: [] };
+  const seen: Seen = { info: [], warnings: [], errors: [], scans: [] };
   const deps: CliDeps = {
     ui: {
       info: message => seen.info.push(message),
@@ -99,7 +102,9 @@ async function build(
     native: unused,
     resolve: unused,
     loadPage: unused,
-    visual: unused
+    visual: unused,
+    now: unused,
+    ...change(seen)
   };
   const exit = await runCommand(["build", "--root", root, ...argv], deps);
 
@@ -108,6 +113,38 @@ async function build(
 
 afterAll(() => {
   removeCopies(copies);
+});
+
+describe("the defines and the build id of a page", () => {
+  it("a release page defines the three flags false, a debug page AGENT true and CONTROL by its profile", () => {
+    const page = {
+      build: "debug-20261014T153012Z",
+      engine: "0.14.12+9c41e0",
+      editor: "127.0.0.1:47600"
+    };
+
+    expect(definesOf(undefined)).toEqual({
+      __MOKU_GAME_DEV__: "false",
+      __MOKU_GAME_AGENT__: "false",
+      __MOKU_GAME_CONTROL__: "false"
+    });
+    expect(definesOf({ ...page, level: "read" })).toEqual({
+      __MOKU_GAME_DEV__: "false",
+      __MOKU_GAME_AGENT__: "true",
+      __MOKU_GAME_CONTROL__: "false",
+      __MOKU_GAME_BUILD__: '"debug-20261014T153012Z"',
+      __MOKU_GAME_ENGINE__: '"0.14.12+9c41e0"',
+      __MOKU_GAME_EDITOR__: '"127.0.0.1:47600"'
+    });
+    expect(definesOf({ ...page, level: "full" }).__MOKU_GAME_CONTROL__).toBe("true");
+  });
+
+  it("names a debug build by its profile and the UTC time of the run", () => {
+    const now = Date.UTC(2026, 9, 14, 15, 30, 12);
+
+    expect(buildIdOf("read", now)).toBe("debug-20261014T153012Z");
+    expect(buildIdOf("full", now)).toBe("debug-full-20261014T153012Z");
+  });
 });
 
 describe("moku-game build, the checks", () => {
@@ -227,5 +264,95 @@ describe.skipIf(typeof Bun === "undefined")("moku-game build, the bundle", () =>
     expect(seen.errors).toEqual([
       `[game] build: --serve-plugin "${plugin}" default-exports no Bun plugin.\n  End it with: export default { name, setup(build) { … } }.`
     ]);
+  });
+});
+
+/** The version of the engine repo: a debug page of a copy names the engine `<version>+src`. */
+const VERSION = (
+  JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+    version: string;
+  }
+).version;
+
+/** A string only the fake editor agent holds: a page that bundles it carries it. */
+const AGENT_MARKER = "fake-editor-agent-3c9e1f";
+
+/**
+ * Writes a fake `@moku-labs/editor` into a game: `./agent/page` default-exports an agent that
+ * logs a marker.
+ *
+ * @param root - The game folder.
+ */
+function fakeEditor(root: string): void {
+  const folder = path.join(root, "node_modules", "@moku-labs", "editor");
+
+  put(
+    path.join(folder, "package.json"),
+    JSON.stringify({
+      name: "@moku-labs/editor",
+      type: "module",
+      exports: { "./agent/page": "./page.js" }
+    })
+  );
+  put(
+    path.join(folder, "page.js"),
+    `export default function agent({ app }) { app.log.info("${AGENT_MARKER}"); }\n`
+  );
+}
+
+/**
+ * The seams of a debug build: Bun's resolver, the clock at 2026-10-14 15:30:12 UTC, and the
+ * warnings recorded.
+ *
+ * @param seen - What the seams saw.
+ * @returns The seams to replace.
+ */
+function debugSeams(seen: Seen): Partial<CliDeps> {
+  return {
+    resolve: (specifier, from) => Bun.resolveSync(specifier, from),
+    now: () => Date.UTC(2026, 9, 14, 15, 30, 12),
+    ui: {
+      info: message => seen.info.push(message),
+      line: unused,
+      warn: message => seen.warnings.push(message),
+      error: message => seen.errors.push(message)
+    }
+  };
+}
+
+describe.skipIf(typeof Bun === "undefined")("moku-game build --debug, the bundle", () => {
+  it("a debug build without @moku-labs/editor fails with the install line and writes nothing", async () => {
+    const root = game();
+    const { code, seen } = await build(["--debug"], root, MANIFEST_ONLY, 0, debugSeams);
+
+    expect(code).toBe(1);
+    expect(seen.errors).toEqual([
+      "[game] build --debug needs @moku-labs/editor in the game.\n  Install it: bun add -d @moku-labs/editor."
+    ]);
+    expect(seen.scans).toEqual([]);
+    expect(existsSync(path.join(root, "dist"))).toBe(false);
+  });
+
+  it("--debug=full builds a page with every command, the full build id, the marked title and one warning", async () => {
+    const root = game();
+
+    fakeEditor(root);
+
+    const { code, seen } = await build(["--debug=full"], root, MANIFEST_ONLY, 0, debugSeams);
+    const out = path.join(root, "dist", "web");
+    const html = readFileSync(path.join(out, "index.html"), "utf8");
+    const script = /<script type="module" crossorigin src="([^"]+)"/.exec(html)?.[1] ?? "";
+    const bundled = readFileSync(path.join(out, script), "utf8");
+
+    expect(seen.errors).toEqual([]);
+    expect(code).toBe(0);
+    expect(seen.warnings).toEqual([
+      `build: a DEBUG page with the editor agent, control: every command, the state-changing ones too. Build debug-full-20261014T153012Z, engine ${VERSION}+src, editor 127.0.0.1:47600. Never ship it to a store.`
+    ]);
+    expect(seen.info).toEqual([expect.stringMatching(/^built ".+": \d+ files, \d+ KB\.$/)]);
+    expect(html).toContain("<title>mini-game Debug</title>");
+    expect(bundled).toContain(AGENT_MARKER);
+    expect(bundled).toContain('"debug-full-20261014T153012Z"');
+    expect(bundled).toMatch(/__MOKU_GAME_CONTROL__\s*=\s*(?:true|!0)/);
   });
 });

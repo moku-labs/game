@@ -39,14 +39,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The fragment step Pixi 8.21 ships, which hands the premultiplied colour over. */
+/** The fragment step Pixi 8.22 ships, which hands the premultiplied colour over. */
 const pixiStep = "calculateMSDFAlpha(outColor, vColor, localUniforms.uDistance)";
 
 /** The fragment step of the renderer: the colour un-premultiplied, at alpha 1. */
 const singleAlphaStep =
   "calculateMSDFAlpha(outColor, vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0), localUniforms.uDistance)";
 
-/** The GLSL fragment step Pixi 8.21 ships, the same double alpha on WebGL. */
+/** The GLSL fragment step Pixi 8.22 ships, the same double alpha on WebGL. */
 const pixiStepGl = "calculateMSDFAlpha(outColor, vColor, uDistance)";
 
 /** The GLSL fragment step of the renderer: the colour un-premultiplied, at alpha 1. */

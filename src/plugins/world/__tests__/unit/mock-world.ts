@@ -106,7 +106,9 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
     resume: vi.fn(),
     isPaused: () => false,
     isRunning: () => false,
-    step: vi.fn()
+    step: vi.fn(),
+    // An agent build asks for the page clock; a test that times systems hands one in.
+    agentClock: () => undefined
   } as unknown as TimeApi;
 
   const snapshot = (): Snapshot => ({

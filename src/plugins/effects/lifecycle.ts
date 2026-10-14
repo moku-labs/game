@@ -15,6 +15,7 @@ import type { FilterDefinition, FilterFields, FilterKind, KindEntry } from "./fi
 import { Emitter } from "./particles/component";
 import { createParticleSystem, forgetEmitter, retireAllParticles } from "./particles/system";
 import type { EmitterDefinition } from "./particles/types";
+import { NO_KINDS } from "./state";
 import type { EffectsCtx, KernelSlice, State } from "./types";
 
 /** The short side, in CSS pixels, at or under which a coarse pointer is a phone. */
@@ -242,6 +243,7 @@ export function startEffects(ctx: KernelSlice): void {
   });
   state.phone = resolvePhone(ctx.config.phone);
   registerKinds(ectx);
+  state.diagnostics.kinds = Object.freeze([...state.kinds.keys()]);
   registerEmitters(ectx);
   openWorld(ectx, [...state.kinds.values()]);
 }
@@ -267,4 +269,8 @@ export function stopEffects(state: State): void {
   state.warned.clear();
   state.particles = 0;
   state.over = { particles: false, passes: false, fullScreen: false };
+  // A switch does not survive a stop: the next start begins with every kind on.
+  state.diagnostics.off.clear();
+  state.diagnostics.kinds = NO_KINDS;
+  state.diagnostics.offList = NO_KINDS;
 }

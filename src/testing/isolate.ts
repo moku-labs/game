@@ -6,7 +6,7 @@
  */
 import type { AnyPluginInstance } from "@moku-labs/core";
 import type { Clock, Flow, Model } from "../index";
-import { createApp, exit, type } from "../index";
+import { createApp, exit, flattenFeatures, type } from "../index";
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
 const noPayload: Model.Json = null;
@@ -278,7 +278,8 @@ export function harnessOf(flow: Flow.AnyFlow, name: string = flow.id): Flow.AnyF
 
 /**
  * Composes one feature without the rest of the game: the shared layer and the feature as
- * `logicOnly`, the feature's flow inside a harness main flow `isolated`, and every stubbed node
+ * `logicOnly` (a parent feature is composed with its sub-features), the feature's flow inside a
+ * harness main flow `isolated`, and every stubbed node
  * replaced by a sub-flow that ends with the stub's outcome. Every exit of the flow lands on the
  * rest node `exited`, whose intent `again` enters the flow once more. Paths read as in the game:
  * the harness holds the flow under `options.as`, its id by default. A node that is not stubbed
@@ -305,7 +306,7 @@ export function isolate<Nodes extends Flow.NodeTable>(
 ): (seams?: IsolateSeams) => IsolatedApp {
   const mainFlow = harnessOf(withStubs(options.flow, options.stubs ?? {}), options.as);
   const shared = options.shared === undefined ? [] : [options.shared.logicOnly];
-  const plugins = [...shared, feature.logicOnly, ...(options.plugins ?? [])];
+  const plugins = [...shared, ...flattenFeatures([feature.logicOnly]), ...(options.plugins ?? [])];
 
   return (seams: IsolateSeams = {}): IsolatedApp =>
     createApp({

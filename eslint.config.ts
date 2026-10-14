@@ -439,7 +439,8 @@ export default [
   // 6b4. L12 — the visual test runner `src/visual/` is node-only and reaches the whole `/control`
   // catalogue: only the door `src/visual.ts` imports it. The project index `src/project/` is
   // node-only too: only the door `src/project.ts` imports it, and the keys watch of
-  // `src/app/keys.ts`, node-only as well, which reuses its tree watcher. A later block replaces the
+  // `src/app/keys.ts` and the engine watch of `src/app/engine-watch.ts`, node-only as well, which
+  // reuse its tree watcher and batcher. A later block replaces the
   // whole rule, so the patterns these files carry now are repeated: L9's outside `ui`, L10's inside it.
   {
     files: ["src/**/*.ts"],
@@ -449,6 +450,7 @@ export default [
       "src/project.ts",
       "src/project/**",
       "src/app/keys.ts",
+      "src/app/engine-watch.ts",
       "src/jsx-runtime.ts",
       "src/jsx-dev-runtime.ts",
       "src/plugins/ui/**",
@@ -471,6 +473,42 @@ export default [
             {
               group: ["**/project/**"],
               message: "The project index is node-only. Only src/project.ts imports it."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  // 6b4b. `src/project/features.ts` reads the disk and is shared by the build-time code that finds
+  // feature folders: the shell build, the lint plugin, the asset scanner and the string compiler.
+  // They may import it; every other file is still refused by 6b4. The patterns 6b4 gives these
+  // files are repeated, with that one module let through.
+  {
+    files: [
+      "src/app/build.ts",
+      "src/lint.ts",
+      "src/plugins/assets/scan/**/*.ts",
+      "src/plugins/i18n/compile/**/*.ts"
+    ],
+    ignores: ["src/**/__tests__/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/ui/jsx/runtime", "./runtime", "../jsx/runtime"],
+              message:
+                "The JSX runtime is reached through src/jsx-runtime.ts and src/jsx-dev-runtime.ts only."
+            },
+            {
+              group: ["**/visual/**"],
+              message: "The visual test runner is node-only. Only src/visual.ts imports it."
+            },
+            {
+              group: ["**/project/**", "!**/project/features", "!**/project/features.ts"],
+              message:
+                "The project index is node-only. Only src/project.ts imports it; build-time code may import src/project/features.ts."
             }
           ]
         }
@@ -585,7 +623,12 @@ export default [
       "src/plugins/effects/**/*.ts",
       "src/plugins/clock/**/*.ts"
     ],
-    ignores: ["src/plugins/clock/system.ts", "src/**/__tests__/**"],
+    ignores: [
+      "src/plugins/clock/system.ts",
+      // Measurement of agent builds, not logic: never reached by a game's state (spec 11 R8.9).
+      "src/plugins/renderer/monitor/clock.ts",
+      "src/**/__tests__/**"
+    ],
     rules: {
       "no-restricted-properties": [
         "error",

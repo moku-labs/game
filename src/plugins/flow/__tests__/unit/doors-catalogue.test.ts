@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../doors/commands";
+import { controlRefused } from "../../doors/dev";
 import { sources } from "../../doors/sources";
+import type { Effect } from "../../doors/types";
 
 // ---------------------------------------------------------------------------
 // Unit test: the base catalogue of the doors — every descriptor is listed
@@ -31,6 +33,7 @@ describe("the base catalogue", () => {
       "sounds",
       "audioMuted",
       "effects",
+      "filters",
       "assets",
       "log",
       "explain",
@@ -46,6 +49,8 @@ describe("the base catalogue", () => {
       "walk",
       "bookmark",
       "restore",
+      "saveExport",
+      "saveImport",
       "step",
       "pause",
       "resume",
@@ -55,7 +60,8 @@ describe("the base catalogue", () => {
       "fill",
       "timeScale",
       "mute",
-      "trace"
+      "trace",
+      "filter"
     ]);
   });
 
@@ -88,5 +94,39 @@ describe("the base catalogue", () => {
     expect(Object.isFrozen(sources)).toBe(true);
     expect(Object.isFrozen(commands)).toBe(true);
     expect(all.every(descriptor => Object.isFrozen(descriptor))).toBe(true);
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/**
+ * Runs a command body directly, on an app that has nothing, and tells whether its first
+ * statement, the inline guard, refused it. A body past its guard fails on the empty app instead.
+ *
+ * @param command - The command.
+ * @returns True when the body threw the refusal of a production build.
+ */
+async function refusedByGuard(command: (typeof commands)[keyof typeof commands]): Promise<boolean> {
+  try {
+    await command.run(Object.freeze({}) as never, {} as never);
+  } catch (error) {
+    return error instanceof Error && error.message === controlRefused().message;
+  }
+
+  return false;
+}
+
+/** The effects a `--debug` page runs. */
+const READ_PROFILE: ReadonlySet<Effect> = new Set(["read", "cosmetic"]);
+
+describe("the guard of every command body", () => {
+  it("with only AGENT true, a read or cosmetic body passes its guard and every other body refuses", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    for (const command of Object.values(commands)) {
+      expect(await refusedByGuard(command), command.id).toBe(!READ_PROFILE.has(command.effect));
+    }
   });
 });

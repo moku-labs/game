@@ -6,6 +6,7 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Events as GlobalEvents, Require } from "../../config";
 import type { AnimApi } from "../anim/types";
+import type { Api as DebugApi } from "../debug/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { I18nApi } from "../i18n/types";
 import type { InputApi } from "../input/types";
@@ -130,6 +131,7 @@ export type State = { jsx: JsxState; styles: StylesState; layout: LayoutState };
  */
 export type Deps = {
   anim: AnimApi;
+  debug: DebugApi;
   time: TimeApi;
   flow: FlowApi;
   world: WorldApi;

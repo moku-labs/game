@@ -84,6 +84,22 @@ function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstanc
 }
 
 /**
+ * Tells whether a debug switch turned a kind off (`effects.diagnostics.disable`). The guard is
+ * inline and positive, so a release build folds the answer to false.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param id - The kind id.
+ * @returns True while the kind is off on a dev or agent page.
+ */
+function isSwitchedOff(ectx: EffectsCtx, id: string): boolean {
+  return (
+    ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)) &&
+    ectx.state.diagnostics.off.has(id)
+  );
+}
+
+/**
  * Brings one kind of one view up to date: the first frame it is seen it gets its instance, once
  * its shader check answered ok; after that it is written.
  *
@@ -126,6 +142,20 @@ function syncKind(
 }
 
 /**
+ * The id of the kind an instance belongs to: the key its view keeps it under. Read only when the
+ * slots change, never per frame.
+ *
+ * @param view - The view's record.
+ * @param instance - One of its instances.
+ * @returns The kind id, `"other"` for an instance the view does not keep.
+ */
+function kindIdOf(view: FilteredView, instance: FilterInstance): string {
+  for (const [id, kept] of view.instances) if (kept === instance) return id;
+
+  return "other";
+}
+
+/**
  * Brings one view up to date, hands the renderer a new frozen slot list when it differs, then
  * destroys what left. A view with nothing left is forgotten; a despawned one gets no call, since
  * the renderer cleared its view when it released it.
@@ -148,7 +178,8 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
     const instance =
       kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed);
 
-    if (instance !== undefined) placed.push(instance);
+    // A kind a debug switch turned off stays written above and leaves the slots.
+    if (instance !== undefined && !isSwitchedOff(ectx, id)) placed.push(instance);
   }
 
   // A kind that left this frame leaves no mark behind for a later frame.
@@ -160,7 +191,8 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
   if (differs(view.assigned, placed)) {
     const slots = placed.map(instance => ({
       filter: instance.filter,
-      passes: instance.passes
+      passes: instance.passes,
+      kind: kindIdOf(view, instance)
     }));
 
     // A despawned entity gets no call: the renderer forgot its slots when it let the view go.
@@ -232,14 +264,17 @@ function coversScreen(ectx: EffectsCtx, entity: Entity, size: ViewportSize): boo
 }
 
 /**
- * Tells whether a view has at least one enabled filter instance.
+ * Tells whether a view has at least one enabled filter instance that is drawn: a kind a debug
+ * switch turned off is not.
  *
+ * @param ectx - Domain context of the effects plugin.
  * @param view - The view.
- * @returns True when one of its instances is enabled.
+ * @returns True when one of its drawn instances is enabled.
  */
-function hasEnabledFilter(view: FilteredView): boolean {
-  for (const instance of view.instances.values()) {
-    if (instance.filter.enabled) return true;
+function hasEnabledFilter(ectx: EffectsCtx, view: FilteredView): boolean {
+  // Walk the kind ids, a Set, rather than the instances' entries, which build a pair per item.
+  for (const id of view.kinds) {
+    if (view.instances.get(id)?.filter.enabled === true && !isSwitchedOff(ectx, id)) return true;
   }
 
   return false;
@@ -289,7 +324,7 @@ function checkBudgets(ectx: EffectsCtx): void {
   let count = 0;
 
   for (const [entity, view] of state.views) {
-    if (hasEnabledFilter(view) && coversScreen(ectx, entity, size)) count += 1;
+    if (hasEnabledFilter(ectx, view) && coversScreen(ectx, entity, size)) count += 1;
   }
 
   // Warn once when more than one such view is on screen.

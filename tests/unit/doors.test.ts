@@ -19,6 +19,7 @@ describe("the editor doors", () => {
   it("./control exports the write side", () => {
     expect(Object.keys(control).toSorted()).toEqual([
       "commands",
+      "controlReadOnly",
       "controlRefused",
       "defineCommand",
       "run"

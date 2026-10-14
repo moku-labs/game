@@ -154,6 +154,25 @@ export type Snapshot = {
 };
 
 /**
+ * A committed snapshot typed by the game's player and session: what the kit's `system` and the
+ * app of `game.headless()` read. Only the type: the store hands the same frozen `Snapshot`.
+ *
+ * @example
+ * ```ts
+ * const snapshot: SnapshotOf<{ coins: number }, { rolls: number }> = {
+ *   player: { coins: 4 },
+ *   session: { rolls: 1 },
+ *   rng: { seed: 42, streams: {} }
+ * };
+ * ```
+ */
+export type SnapshotOf<Player, Session> = {
+  readonly player: Player;
+  readonly session: Session;
+  readonly rng: Readonly<RngState>;
+};
+
+/**
  * Result of a commit: the patches split by tree, and the touched roots in the order `player`,
  * `session`, `rng`.
  *

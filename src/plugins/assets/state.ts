@@ -39,11 +39,11 @@ export function createAssetsState(): State {
     io: undefined,
     manifest: emptyManifest(),
     bundleOfKey: emptyMap(),
-    bundleOfScene: emptyMap(),
+    scenes: emptyMap(),
     featureOfFlow: emptyMap(),
     records: emptyMap(),
     pinned: emptySet(),
-    sceneBundle: undefined,
+    sceneId: undefined,
     queue: undefined,
     current: undefined,
     useCounter: 0,
@@ -51,6 +51,8 @@ export function createAssetsState(): State {
     removers: [],
     stamps: undefined,
     swapping: undefined,
-    sceneNamed: []
+    sceneNamed: [],
+    companions: [],
+    restPending: false
   };
 }

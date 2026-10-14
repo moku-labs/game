@@ -152,6 +152,29 @@ describe("the project index is node-only", () => {
     expect(door).toEqual([]);
     expect(inside).toEqual([]);
   });
+
+  it.each([
+    ["src/app/build.ts", "../project/features"],
+    ["src/lint.ts", "./project/features.ts"],
+    ["src/plugins/assets/scan/probe.ts", "../../../project/features"],
+    ["src/plugins/i18n/compile/probe.ts", "../../../project/features"]
+  ])("allows project/features from the build-time file %s", async (path, from) => {
+    const messages = await lintBoundary(
+      `import { ownerOf } from "${from}";\n\nexport const owner = ownerOf;\n`,
+      path
+    );
+
+    expect(messages.filter(text => text.includes("project index"))).toEqual([]);
+  });
+
+  it("still refuses project/features from a runtime plugin file", async () => {
+    const messages = await lintBoundary(
+      'import { ownerOf } from "../../project/features";\n\nexport const owner = ownerOf;\n',
+      "src/plugins/flow/probe.ts"
+    );
+
+    expect(messages.some(text => text.includes(message))).toBe(true);
+  });
 });
 
 /**

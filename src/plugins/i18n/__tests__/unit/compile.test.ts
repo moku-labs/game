@@ -436,7 +436,7 @@ describe("compileStrings with the pseudo-locale", () => {
       compileStrings(root, path.join(root, "generated"), { pseudo: true })
     ).rejects.toThrow(
       '[game] i18n: "--pseudo" needs an "en" string file in at least one feature.\n' +
-        '  Add features/<feature>/strings/en.json or drop "--pseudo".'
+        `  Add features/<feature>/strings/en.json (a sub-feature's own strings/en.json counts too) or drop "--pseudo".`
     );
     await expect(readFile(path.join(root, "generated", "strings.ts"), "utf8")).rejects.toThrow();
   });

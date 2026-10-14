@@ -1,10 +1,17 @@
 /**
- * @file renderer/viewport — the safe area: one hidden probe whose padding is `env(safe-area-inset-*)`,
- * read with `getComputedStyle` and cut down to the part that really covers the frame.
+ * @file renderer/viewport — the safe area: two hidden probes whose size is the insets, each a
+ * `--moku-safe-*` custom property that falls back to `env(safe-area-inset-*)`, read with
+ * `getComputedStyle` and cut down to the part that really covers the frame.
  */
-import type { Rect, SafeArea } from "./types";
+import type { Rect, SafeArea, SafeAreaProbes } from "./types";
 
 const NONE: SafeArea = { top: 0, right: 0, bottom: 0, left: 0 };
+
+/** The sizes of the probes: the public contract a page, a game or the native shell sets. */
+const TOP = "var(--moku-safe-top, env(safe-area-inset-top, 0px))";
+const RIGHT = "var(--moku-safe-right, env(safe-area-inset-right, 0px))";
+const BOTTOM = "var(--moku-safe-bottom, env(safe-area-inset-bottom, 0px))";
+const LEFT = "var(--moku-safe-left, env(safe-area-inset-left, 0px))";
 
 /**
  * What `clipToFrame` needs to decide how much of an inset lands on the drawn frame.
@@ -36,48 +43,80 @@ function pixels(value: string | undefined): number {
 }
 
 /**
- * Creates the hidden probe whose padding carries the four insets, and appends it to the body.
+ * Creates one hidden probe whose content box is the given width by height, and appends it to the
+ * body.
  *
- * @returns The probe, or `undefined` without a document.
+ * @param document - The document of the page.
+ * @param side - `"start"` or `"end"`, the `data-moku-safe-area` attribute.
+ * @param size - The CSS width and height.
+ * @param size.width - The CSS width: an inset of the left or of the right.
+ * @param size.height - The CSS height: an inset of the top or of the bottom.
+ * @returns The probe.
  */
-export function createSafeAreaProbe(): HTMLElement | undefined {
-  if (typeof globalThis.document === "undefined") return undefined;
-
-  const probe = globalThis.document.createElement("div");
+function createProbe(
+  document: Document,
+  side: "start" | "end",
+  size: { width: string; height: string }
+): HTMLElement {
+  const probe = document.createElement("div");
 
   probe.setAttribute("aria-hidden", "true");
+  probe.dataset.mokuSafeArea = side;
   probe.style.position = "fixed";
   probe.style.top = "0";
   probe.style.left = "0";
-  probe.style.width = "0";
-  probe.style.height = "0";
+  probe.style.margin = "0";
+  probe.style.padding = "0";
+  probe.style.border = "0";
+  probe.style.boxSizing = "content-box";
   probe.style.visibility = "hidden";
   probe.style.pointerEvents = "none";
-  probe.style.paddingTop = "env(safe-area-inset-top)";
-  probe.style.paddingRight = "env(safe-area-inset-right)";
-  probe.style.paddingBottom = "env(safe-area-inset-bottom)";
-  probe.style.paddingLeft = "env(safe-area-inset-left)";
-  globalThis.document.body.append(probe);
+  probe.style.width = size.width;
+  probe.style.height = size.height;
+  document.body.append(probe);
 
   return probe;
 }
 
 /**
- * Reads the four insets the browser resolved on the probe.
+ * Creates the two hidden probes whose size is the safe area, and appends them to the body. Two,
+ * because one element padded by all four insets measures `left + right` by `top + bottom`: a
+ * rotation that swaps the left and the right inset would change nothing a `ResizeObserver` sees.
+ * With one inset per axis as the content size of each probe, every inset change is a size change.
  *
- * @param probe - The probe element, or `undefined` while there is none.
- * @returns The insets in CSS pixels.
+ * @returns `start` (left by top) and `end` (right by bottom), or `undefined` without a document.
  */
-export function readInsets(probe: HTMLElement | undefined): SafeArea {
-  if (probe === undefined || typeof globalThis.getComputedStyle !== "function") return { ...NONE };
+export function createSafeAreaProbes(): SafeAreaProbes | undefined {
+  if (typeof globalThis.document === "undefined") return undefined;
 
-  const style = globalThis.getComputedStyle(probe);
+  const { document } = globalThis;
 
   return {
-    top: pixels(style.paddingTop),
-    right: pixels(style.paddingRight),
-    bottom: pixels(style.paddingBottom),
-    left: pixels(style.paddingLeft)
+    start: createProbe(document, "start", { width: LEFT, height: TOP }),
+    end: createProbe(document, "end", { width: RIGHT, height: BOTTOM })
+  };
+}
+
+/**
+ * Reads the four insets the browser resolved on the probes: top and left from `start`, right and
+ * bottom from `end`.
+ *
+ * @param probes - The two probes, or `undefined` while there are none.
+ * @returns The insets in CSS pixels.
+ */
+export function readInsets(probes: SafeAreaProbes | undefined): SafeArea {
+  if (probes === undefined || typeof globalThis.getComputedStyle !== "function") {
+    return { ...NONE };
+  }
+
+  const start = globalThis.getComputedStyle(probes.start);
+  const end = globalThis.getComputedStyle(probes.end);
+
+  return {
+    top: pixels(start.height),
+    right: pixels(end.width),
+    bottom: pixels(end.height),
+    left: pixels(start.width)
   };
 }
 

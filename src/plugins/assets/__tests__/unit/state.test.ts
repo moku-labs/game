@@ -8,7 +8,7 @@ describe("createAssetsState", () => {
     expect(state.io).toBeUndefined();
     expect(state.manifest).toEqual({ version: 1, bundles: {} });
     expect(state.current).toBeUndefined();
-    expect(state.sceneBundle).toBeUndefined();
+    expect(state.sceneId).toBeUndefined();
     expect(state.queue).toBeUndefined();
     expect(state.useCounter).toBe(0);
   });
@@ -24,7 +24,7 @@ describe("createAssetsState", () => {
     const state = createAssetsState();
 
     expect(state.bundleOfKey.size).toBe(0);
-    expect(state.bundleOfScene.size).toBe(0);
+    expect(state.scenes.size).toBe(0);
     expect(state.featureOfFlow.size).toBe(0);
     expect(state.records.size).toBe(0);
     expect(state.pinned.size).toBe(0);

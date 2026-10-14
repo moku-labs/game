@@ -83,7 +83,7 @@ function capture(ctx: InputCtx, on: boolean): void {
 
 /**
  * Ends the gesture: the press tag goes, the capture is released and the machine forgets the
- * pointer, the entity and its key.
+ * pointer, whether it moved, the entity and its key.
  *
  * @param ctx - Domain context of the input plugin.
  */
@@ -94,15 +94,18 @@ function toIdle(ctx: InputCtx): void {
   capture(ctx, false);
   ctx.state.phase = "idle";
   ctx.state.pointerId = undefined;
+  ctx.state.moved = false;
   ctx.state.entity = undefined;
   ctx.state.key = undefined;
   ctx.state.pressedMs = 0;
 }
 
 /**
- * Takes the pointer and looks for the view under it. The pointer is taken even where no view is,
- * so a second finger stays ignored for the whole gesture. A view that carries `Traceable` starts
- * a trace instead of a press: it is not tagged `Pressed`.
+ * Takes the pointer and looks for the view under it. The pointer is taken even where no view is.
+ * While the finger rests (`rests`) the next finger that goes down takes the pointer over and this
+ * press is cancelled; once it starts a gesture — a drag, a move past the tap slop, a long press, a
+ * trace — a second finger stays ignored. A view that carries `Traceable` starts a trace instead of
+ * a press: it is not tagged `Pressed`.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -113,6 +116,7 @@ function onDown(ctx: InputCtx, pointer: PointerValue, point: Point, sample: RawS
   const { ecs, projection } = ctx.deps.world;
 
   ctx.state.pointerId = sample.pointerId;
+  ctx.state.moved = false;
   ctx.state.start = { x: point.x, y: point.y };
   ctx.state.pressedMs = 0;
   ctx.state.phase = "pressed";
@@ -252,10 +256,25 @@ function letGestureGo(ctx: InputCtx): void {
 }
 
 /**
+ * Tells whether the followed pointer has not started a gesture: pressed, still inside the tap
+ * slop, no long press, no trace. Only such a pointer gives way to another finger, wherever it
+ * rests; a drag, a pan past the slop, a long press and a trace keep the pointer.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @returns True while the followed pointer rests.
+ */
+function rests(ctx: InputCtx): boolean {
+  return ctx.state.phase === "pressed" && !ctx.state.moved;
+}
+
+/**
  * Feeds one raw sample to the machine. A leave does nothing here. A sample of another pointer is
- * dropped while a pointer is active: the second finger is ignored. A move of an idle mouse or pen
- * hit-tests nothing: its point is returned, so the drain moves the hover once per frame. A lost
- * capture ends the gesture like a cancel.
+ * dropped while a pointer is followed: the second finger is ignored. One exception: a press while
+ * the followed pointer rests takes the pointer over and cancels the resting press, so a resting
+ * thumb or palm never blocks the finger that plays. A move of an idle mouse or pen hit-tests
+ * nothing: its point is returned, so the drain moves the hover once per frame. A move of a press
+ * past the tap slop marks the press as moved for good. A lost capture ends the gesture like a
+ * cancel.
  *
  * @param ctx - Domain context of the input plugin.
  * @param pointer - The `Pointer` resource of this frame.
@@ -266,7 +285,12 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
   const { pointerId } = ctx.state;
 
   if (sample.kind === "leave") return undefined;
-  if (pointerId !== undefined && pointerId !== sample.pointerId) return undefined;
+  if (pointerId !== undefined && pointerId !== sample.pointerId) {
+    if (sample.kind !== "down" || !rests(ctx)) return undefined;
+    // The resting pointer gives way: its press is cancelled (no answer), its capture released,
+    // the machine forgets it.
+    toIdle(ctx);
+  }
 
   const point = ctx.deps.renderer.viewport.toReference(sample.clientX, sample.clientY);
 
@@ -280,6 +304,13 @@ function handleSample(ctx: InputCtx, pointer: PointerValue, sample: RawSample): 
     }
     case "move": {
       if (isHover(ctx, pointer, sample)) return point;
+      if (
+        ctx.state.phase === "pressed" &&
+        !ctx.state.moved &&
+        distance(ctx.state.start, point) > ctx.config.tapSlopPx
+      ) {
+        ctx.state.moved = true;
+      }
       if (ctx.state.phase === "tracing") extendTrace(ctx, point);
       else onMove(ctx, point);
       break;
@@ -429,6 +460,7 @@ function pauseGestures(ctx: InputCtx): void {
   pointer.down = false;
   pointer.justPressed = false;
   pointer.justReleased = false;
+  pointer.id = -1;
   toIdle(ctx);
 }
 
@@ -436,7 +468,8 @@ function pauseGestures(ctx: InputCtx): void {
  * The one frame step of the plugin, registered with `time.onFrame("input")` in `onInit`, so it
  * runs before the `world` callback of the same phase: `Pointer`, `Held`, `Hovered` and `Pressed`
  * are fresh when game systems of phase `input` read them.
- * The canvas cursor is set right after the hover.
+ * The canvas cursor is set right after the hover. `Pointer.id` is written last, once per step: the
+ * followed `pointerId`, `-1` when no pointer is followed.
  *
  * @param ctx - Domain context of the input plugin.
  * @param time - The frame's `Time`.
@@ -476,4 +509,5 @@ export function stepGestures(ctx: InputCtx, time: Readonly<Time>): void {
   advanceTime(ctx, pointer, time.delta);
   if (ctx.state.phase === "dragging") followDrag(ctx, pointer);
   if (ctx.state.phase === "tracing") followTrace(ctx);
+  pointer.id = ctx.state.pointerId ?? -1;
 }

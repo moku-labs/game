@@ -1,8 +1,8 @@
 /**
  * @file lifecycle plugin — the lifecycle commands of the `/control` door: pause and resume the
  * game for the editor, through the `devtools` pause reason, so another reason keeps its hold.
- * Dev builds only: every body starts with the inline dev guard, so a bundler `define` of `false`
- * drops it, and logs the `moku:dev` marker.
+ * Dev and debug builds: every body starts with the inline agent guard of a cosmetic command, so
+ * a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
  */
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
@@ -28,7 +28,12 @@ export const pauseCommand = defineCommand({
   input: {},
   effect: "cosmetic",
   run: (app: LifecycleApp) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.pause" });
     app.lifecycle.push("devtools");
@@ -53,7 +58,12 @@ export const resumeCommand = defineCommand({
   input: {},
   effect: "cosmetic",
   run: (app: LifecycleApp) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.resume" });
     app.lifecycle.pop("devtools");

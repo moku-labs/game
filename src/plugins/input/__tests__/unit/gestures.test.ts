@@ -22,7 +22,7 @@ import {
 import { direction, distance } from "../../gestures";
 import { record } from "../../pointer";
 import type { Direction, RawSample } from "../../types";
-import { createMockInput, type MockInput } from "./mock-input";
+import { createMockInput, createStubCanvas, type MockInput } from "./mock-input";
 
 const down = (clientX: number, clientY: number, pointerId = 1): RawSample => ({
   kind: "down",
@@ -240,7 +240,7 @@ describe("the frame step", () => {
     expect(mock.state.entity).toBeUndefined();
   });
 
-  it("ignores the second finger while a pointer is active", () => {
+  it("a resting finger on a button gives way: the second press is heard and the first button taps nothing", () => {
     const mock = createMockInput();
     const first = mock.spawn([Tappable({ intent: "first" })]);
     const second = mock.spawn([Tappable({ intent: "second" })]);
@@ -257,13 +257,13 @@ describe("the frame step", () => {
     record(mock.state, up(350, 50, 2));
     mock.frame();
 
-    expect(mock.answers).toEqual([]);
-    expect(mock.state.entity).toBe(first);
+    expect(mock.answers).toEqual([{ intent: "second", payload: {} }]);
+    expect(mock.has(first, Pressed)).toBe(false);
 
     record(mock.state, up(50, 50, 1));
     mock.frame();
 
-    expect(mock.answers).toEqual([{ intent: "first", payload: {} }]);
+    expect(mock.answers).toEqual([{ intent: "second", payload: {} }]);
   });
 
   it("untags Pressed on a cancel and answers nothing", () => {
@@ -1024,5 +1024,282 @@ describe("Traceable over the other gestures", () => {
 
     expect(tapped).not.toHaveBeenCalled();
     expect(mock.answers).toEqual([{ intent: "word", payload: { path: [{ cell: "b3" }] } }]);
+  });
+});
+
+describe("a finger that has not started a gesture", () => {
+  /** A press view at the top left and a `Tappable` button `play` at x 300..400. */
+  type Board = { mock: MockInput; surface: number; button: number };
+
+  // A view of the given components covering x 0..200, y 0..200, and the `play` button beside it.
+  function board(values: Parameters<MockInput["spawn"]>[0]): Board {
+    const mock = createMockInput();
+    const surface = mock.spawn(values);
+    const button = mock.spawn([Tappable({ intent: "play" })]);
+
+    mock.boxes.push(
+      { entity: surface, x: 0, y: 0, width: 200, height: 200 },
+      { entity: button, x: 300, y: 0, width: 100, height: 100 }
+    );
+    mock.start();
+
+    return { mock, surface, button };
+  }
+
+  // A tap of another finger on the `play` button, in one frame.
+  function tapPlay(mock: MockInput, pointerId: number): void {
+    record(mock.state, down(350, 50, pointerId));
+    record(mock.state, up(350, 50, pointerId));
+    mock.frame();
+  }
+
+  const play = { intent: "play", payload: {} };
+
+  it("gives way to the next finger: a press of pointer 2 on a Tappable answers its tap while pointer 7 rests on the background", () => {
+    const mock = createMockInput();
+
+    view(mock, [Tappable({ intent: "play" })]);
+    record(mock.state, down(500, 500, 7));
+    mock.frame();
+    record(mock.state, down(50, 50, 2));
+    record(mock.state, up(50, 50, 2));
+    mock.frame();
+
+    expect(mock.answers).toEqual([play]);
+  });
+
+  it("a finger that is tracing keeps its gesture: a second finger's press is not heard", () => {
+    const mock = createMockInput();
+    const cell = mock.spawn(
+      [Transform({ x: 50, y: 50 }), Traceable({ intent: "word", payload: { cell: "a1" } })],
+      { projection: "board.cells", key: "a1" }
+    );
+    const button = mock.spawn([Tappable({ intent: "play" })]);
+
+    mock.boxes.push(
+      { entity: cell, x: 0, y: 0, width: 100, height: 100 },
+      { entity: button, x: 300, y: 0, width: 100, height: 100 }
+    );
+    mock.setHitBox(cell, { x: -50, y: -50, width: 100, height: 100 });
+    mock.start();
+    record(mock.state, down(50, 50, 1));
+    mock.frame();
+
+    expect(mock.state.phase).toBe("tracing");
+
+    tapPlay(mock, 2);
+
+    expect(mock.answers).toEqual([]);
+    expect(mock.state.phase).toBe("tracing");
+
+    record(mock.state, up(50, 50, 1));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "word", payload: { path: [{ cell: "a1" }] } }]);
+  });
+
+  it("moves the capture: the pointer that gave way is released before the new one is captured", () => {
+    const mock = createMockInput();
+    const canvas = createStubCanvas();
+
+    mock.canvas.current = canvas.element;
+    mock.start();
+    record(mock.state, down(500, 500, 7));
+    mock.frame();
+
+    expect(canvas.order).toEqual(["capture:7"]);
+
+    record(mock.state, down(500, 600, 2));
+    mock.frame();
+
+    expect(canvas.order).toEqual(["capture:7", "release:7", "capture:2"]);
+
+    record(mock.state, up(500, 600, 2));
+    mock.frame();
+
+    expect(canvas.order).toEqual(["capture:7", "release:7", "capture:2", "release:2"]);
+  });
+
+  it("the pointer that gave way is not heard while the new finger's gesture runs: its move, its lost capture and its lift end nothing", () => {
+    const mock = createMockInput();
+    const item = mock.spawn([Draggable({ payload: { from: "i1" } }), Transform({ x: 50, y: 50 })], {
+      projection: "board.items",
+      key: "i1"
+    });
+    const cell = mock.spawn([DropTarget({ intent: "merge", payload: { to: "c3" } })]);
+
+    mock.boxes.push(
+      { entity: cell, x: 300, y: 0, width: 100, height: 100 },
+      { entity: item, x: 0, y: 0, width: 100, height: 100 }
+    );
+    mock.start();
+    record(mock.state, down(500, 500, 7));
+    mock.frame();
+    record(mock.state, down(50, 50, 2));
+    mock.frame();
+    record(mock.state, moved(70, 50, 2));
+    mock.frame();
+
+    expect(mock.has(item, Held)).toBe(true);
+
+    record(mock.state, moved(510, 500, 7));
+    record(mock.state, sample("lost", "touch", 510, 500, 7));
+    record(mock.state, up(510, 500, 7));
+    mock.frame();
+
+    expect(mock.has(item, Held)).toBe(true);
+    expect(mock.state.phase).toBe("dragging");
+
+    record(mock.state, moved(350, 50, 2));
+    record(mock.state, up(350, 50, 2));
+    mock.frame();
+
+    expect(mock.answers).toEqual([{ intent: "merge", payload: { from: "i1", to: "c3" } }]);
+  });
+
+  it("forgets the pointer that gave way: a mouse whose up never arrived is heard on its next press", () => {
+    const mock = createMockInput();
+
+    view(mock, [Tappable({ intent: "play" })]);
+    record(mock.state, sample("down", "mouse", 500, 500, 1));
+    mock.frame();
+    record(mock.state, down(600, 600, 2));
+    record(mock.state, up(600, 600, 2));
+    mock.frame();
+
+    expect(mock.state.pointerId).toBeUndefined();
+
+    record(mock.state, sample("down", "mouse", 50, 50, 1));
+    record(mock.state, sample("up", "mouse", 50, 50, 1));
+    mock.frame();
+
+    expect(mock.answers).toEqual([play]);
+  });
+
+  it("Pointer.id follows the pressed pointer and is -1 at rest", () => {
+    const mock = createMockInput();
+
+    view(mock, [Tappable({ intent: "play" })]);
+    record(mock.state, down(50, 50, 3));
+    mock.frame();
+
+    expect(pointerOf(mock).id).toBe(3);
+
+    record(mock.state, up(50, 50, 3));
+    mock.frame();
+
+    expect(pointerOf(mock).id).toBe(-1);
+
+    record(mock.state, down(50, 50, 4));
+    record(mock.state, up(50, 50, 4));
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ id: -1, justPressed: true, justReleased: true });
+  });
+
+  it("on a takeover, id, x and y switch to the new finger in the same frame, justPressed is true again and justReleased stays false", () => {
+    const mock = createMockInput();
+
+    mock.start();
+    record(mock.state, down(500, 500, 7));
+    mock.frame();
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ id: 7, justPressed: false });
+
+    record(mock.state, down(50, 50, 2));
+    mock.frame();
+
+    expect(pointerOf(mock)).toEqual({
+      id: 2,
+      x: 50,
+      y: 50,
+      down: true,
+      justPressed: true,
+      justReleased: false
+    });
+  });
+
+  it("a paused world reports no followed pointer", () => {
+    const mock = createMockInput();
+
+    mock.start();
+    record(mock.state, down(50, 50, 3));
+    mock.frame();
+
+    expect(pointerOf(mock).id).toBe(3);
+
+    mock.world.mode = "paused";
+    mock.frame();
+
+    expect(pointerOf(mock)).toMatchObject({ id: -1, down: false });
+  });
+
+  it("a finger that panned past the tap slop keeps the gesture against a second finger", () => {
+    const { mock, surface } = board([Touchable()]);
+
+    record(mock.state, down(50, 50, 1));
+    mock.frame();
+    record(mock.state, moved(50, 70, 1));
+    mock.frame();
+
+    expect(mock.state.moved).toBe(true);
+
+    tapPlay(mock, 2);
+
+    expect(mock.answers).toEqual([]);
+    expect(mock.has(surface, Pressed)).toBe(true);
+    expect(pointerOf(mock).id).toBe(1);
+
+    // Back near its start, the finger has still started a gesture.
+    record(mock.state, moved(50, 52, 1));
+    mock.frame();
+    tapPlay(mock, 2);
+
+    expect(mock.answers).toEqual([]);
+    expect(pointerOf(mock).id).toBe(1);
+  });
+
+  it("starts the next press at rest: a finger that panned before does not make the next one keep the pointer", () => {
+    const { mock } = board([Touchable()]);
+
+    record(mock.state, down(50, 50, 1));
+    mock.frame();
+    record(mock.state, moved(50, 70, 1));
+    mock.frame();
+    record(mock.state, up(50, 70, 1));
+    mock.frame();
+    record(mock.state, down(50, 50, 3));
+    mock.frame();
+    tapPlay(mock, 2);
+
+    expect(mock.answers).toEqual([play]);
+  });
+
+  it("a long press keeps the gesture", () => {
+    const { mock } = board([Pressable({ intent: "inspect" })]);
+
+    record(mock.state, down(50, 50, 1));
+    mock.frame();
+    mock.frame(450);
+
+    expect(mock.state.phase).toBe("longPressed");
+    expect(mock.answers).toEqual([{ intent: "inspect", payload: {} }]);
+
+    tapPlay(mock, 2);
+
+    expect(mock.answers).toEqual([{ intent: "inspect", payload: {} }]);
+  });
+
+  it("a move inside the tap slop is still a rest", () => {
+    const { mock } = board([Touchable()]);
+
+    record(mock.state, down(50, 50, 1));
+    mock.frame();
+    record(mock.state, moved(50, 58, 1));
+    mock.frame();
+    tapPlay(mock, 2);
+
+    expect(mock.answers).toEqual([play]);
   });
 });

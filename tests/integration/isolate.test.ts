@@ -378,3 +378,27 @@ describe("isolate on a board feature", () => {
     await second.stop();
   });
 });
+
+// ─── A parent feature ─────────────────────────────────────────
+
+describe("isolate on a parent feature", () => {
+  it("isolate composes a parent feature with its sub-features", async () => {
+    // The settings popup is a sub-feature of the board: the board's onInit checks it is composed.
+    const settingsScreen = defineFeature("settingsScreen", { flows: [settingsFlow] });
+    const boardParent = defineFeature("boardParent", {
+      flows: [boardFlow],
+      features: [settingsScreen]
+    });
+    const app = isolate(boardParent, { flow: boardFlow, player: fresh })();
+    const game = await createHeadless(app);
+
+    expect(app.flow.features.all().map(({ name, parent }) => ({ name, parent }))).toEqual([
+      { name: "boardParent", parent: undefined },
+      { name: "settingsScreen", parent: "boardParent" }
+    ]);
+    expect(app.flow.describe().flows.settingsPopup?.nodes.open?.owner).toBe("settingsScreen");
+    await game.walk([{ at: "board/awaitIntent", intent: "openSettings" }]);
+    expect(game.state().path).toBe("board/settings/open");
+    await game.stop();
+  });
+});

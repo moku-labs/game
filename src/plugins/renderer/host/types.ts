@@ -2,6 +2,32 @@
  * @file renderer/host — type definitions: the one Pixi application, its backend and its listeners.
  */
 import type { PixiApplication, PixiContainer, PixiModule, RendererKind } from "../types";
+import type { ResolutionReason } from "./resolution";
+
+/**
+ * Where the drawing resolution comes from (contract C-d): the device pixels, the cap, the switch
+ * that overrides both, and the change the next frame applies. Not public.
+ */
+export type ResolutionState = {
+  /** The last `devicePixelRatio` seen; 1 without a window. */
+  dpr: number;
+  /** `maxResolution` of the config. */
+  cap: number;
+  /** Set by `monitor.setResolution`; `undefined` hands the choice back to `dpr` and `cap`. */
+  override: number | undefined;
+  /** A change asked for and not applied yet: the next frame resizes with it. */
+  pending: { value: number; reason: ResolutionReason } | undefined;
+};
+
+/**
+ * A listener of a resolution change: what Pixi drew at, what it draws at now, and why.
+ */
+export type ResolutionListener = (from: number, to: number, reason: ResolutionReason) => void;
+
+/**
+ * The engine's own WebGPU adapter and device of an agent build, handed to Pixi as `webgpu.gpu`.
+ */
+export type OwnGpu = { adapter: GPUAdapter; device: GPUDevice };
 
 /**
  * host module state.
@@ -26,8 +52,8 @@ export type HostState = {
   cleanups: Array<() => void>;
   unsupported: HTMLElement | undefined;
   /**
-   * Swaps Pixi's own draw classes back in. Set once per host state by the dev draw-call counter,
-   * so a restore reuses the installed classes; `undefined` in a production build.
+   * Swaps Pixi's own classes back in. Set once per host state by the counting of a dev or debug
+   * build, so a restore reuses the installed classes; `undefined` in a production build.
    */
   uninstallCounting: (() => void) | undefined;
   /**
@@ -36,6 +62,14 @@ export type HostState = {
    * `undefined` while inert and when the module lacked the pieces.
    */
   uninstallSdfText: (() => void) | undefined;
+  /** The drawing resolution: device pixels, cap, override and the pending change. */
+  resolution: ResolutionState;
+  /** Run after a frame applied a new resolution; emptied by `stopHost`. */
+  onResolutionChange: ResolutionListener[];
+  /** The engine's own adapter and device of an agent build on WebGPU; `undefined` otherwise. */
+  ownGpu: OwnGpu | undefined;
+  /** Texture sources the engine keeps as pictures (F12, C14): `textures()` counts them apart. */
+  kept: WeakSet<object>;
 };
 
 /**
@@ -138,30 +172,53 @@ export type HostApi = {
    * ```
    */
   gl(): WebGL2RenderingContext | undefined;
+
+  /**
+   * The resolution the application draws at now: device pixels per CSS pixel, capped by
+   * `maxResolution` (or set by the debug switch). A change is applied in the frame after it was asked.
+   *
+   * @returns The resolution; 1 while inert.
+   * @example
+   * ```ts
+   * // The settings sheet shows what the quality choice gives on this phone (devicePixelRatio 2.81).
+   * app.renderer.host.resolution(); // 2 with maxResolution 2; 1.5 after the player picked "saver"
+   * ```
+   */
+  resolution(): number;
 };
 
 /**
- * The textures the GPU holds: how many sources, and their estimated bytes.
+ * The textures the GPU holds: how many sources, their estimated bytes, and the bytes split into
+ * art, render targets and kept pictures.
  *
  * @example
  * ```ts
- * const usage: TextureUsage = { count: 2, bytes: 5_242_880 };
+ * const usage: TextureUsage = { count: 2, bytes: 5_242_880, art: 4_194_304, targets: 1_048_576, kept: 0 };
  * ```
  */
-export type TextureUsage = { count: number; bytes: number };
+export type TextureUsage = {
+  count: number;
+  bytes: number;
+  /** Bytes of the sources a game loaded: images, atlases. */
+  art: number;
+  /** Bytes of the render targets: filter textures, pictures Pixi renders into. */
+  targets: number;
+  /** Bytes of the sources the engine keeps as pictures. */
+  kept: number;
+};
 
 /**
- * Swaps Pixi's three WebGPU draw classes for counting ones and returns the undo. The plugin root
- * injects `installDrawCounting` of `monitor/draw-calls.ts` here in a dev build, already bound to
- * the draw counter of `monitor`, because the counter must be in Pixi's registry before
+ * Swaps Pixi's six counting bases for counting subclasses and returns the undo. The plugin root
+ * injects `installCounting` of `monitor/draw-calls.ts` here in a dev or debug build, already bound
+ * to the sinks of `monitor`, because the classes must be in Pixi's registry before
  * `new Application()`, earlier than `monitor` exists.
  */
-export type InstallDrawCounting = (pixi: PixiModule) => () => void;
+export type InstallCounting = (pixi: PixiModule) => () => void;
 
 /**
- * What `host` gets injected: the draw-call counter of a dev build, `undefined` in production.
+ * What `host` gets injected: the counting of a dev or debug build, `undefined` in production.
  */
-export type HostDeps = { installDrawCounting: InstallDrawCounting | undefined };
+export type HostDeps = { installCounting: InstallCounting | undefined };
 
 /**
  * host methods injected into `viewport`, `sync` and `monitor`, and driven by the plugin root. Not
@@ -207,7 +264,8 @@ export type HostInternal = {
   mount(): HTMLElement | undefined;
 
   /**
-   * Resizes the renderer to a CSS-pixel size. A no-op while nothing draws.
+   * Resizes the renderer to a CSS-pixel size, at the pending resolution when one was asked for;
+   * the `onResolution` listeners hear the change. A no-op while nothing draws.
    *
    * @param width - New CSS width of the canvas.
    * @param height - New CSS height of the canvas.
@@ -216,8 +274,58 @@ export type HostInternal = {
 
   /**
    * Draws one frame. A no-op while nothing draws, so a lost device costs nothing.
+   *
+   * @returns True when it called Pixi.
    */
-  render(): void;
+  render(): boolean;
+
+  /**
+   * Asks for a drawing resolution; the next frame applies it on the resize path. A burst of asks
+   * costs one resize.
+   *
+   * @param value - Device pixels per CSS pixel.
+   * @param reason - Why it changes.
+   * @returns True when a change is now pending; false while nothing draws and when Pixi draws at
+   *   it already.
+   */
+  setResolution(value: number, reason: ResolutionReason): boolean;
+
+  /**
+   * Sets or clears the switch that overrides device pixels and cap, and asks for the target.
+   *
+   * @param value - The resolution, or `undefined` to hand the choice back to them.
+   * @returns The resolution the next frame draws at.
+   */
+  overrideResolution(value: number | undefined): number;
+
+  /**
+   * Tells whether a resolution change waits for the next frame.
+   *
+   * @returns True while one is pending.
+   */
+  resolutionPending(): boolean;
+
+  /**
+   * Subscribes to the resolution changes a frame applies.
+   *
+   * @param fn - Called with the old resolution, the new one and the reason.
+   */
+  onResolution(fn: ResolutionListener): void;
+
+  /**
+   * The engine's own WebGPU adapter of an agent build, while ready.
+   *
+   * @returns The adapter, or `undefined` without one.
+   */
+  adapter(): GPUAdapter | undefined;
+
+  /**
+   * Counts a texture source as a kept picture in `textures()`, or no longer.
+   *
+   * @param source - The source.
+   * @param on - True to count it as kept.
+   */
+  keep(source: object, on: boolean): void;
 
   /**
    * Draws the stage into a PNG over the whole canvas. Every container in `hidden` is set
@@ -230,15 +338,8 @@ export type HostInternal = {
   extract(hidden: readonly PixiContainer[]): Promise<string | undefined>;
 
   /**
-   * The resolution the application draws at: device pixels per CSS pixel, capped by
-   * `maxResolution`. A picture of the canvas is its CSS size times this.
-   *
-   * @returns The resolution; 1 while inert.
-   */
-  resolution(): number;
-
-  /**
-   * The texture sources the GPU holds and their estimated memory, read at call time.
+   * The texture sources the GPU holds and their estimated memory, read at call time, split into
+   * art, render targets and kept pictures.
    *
    * @returns The usage; zero while nothing draws.
    */

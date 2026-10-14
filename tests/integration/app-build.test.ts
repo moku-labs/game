@@ -1,12 +1,22 @@
 /**
  * @file `moku-game build` end to end, the test bin on a copy of the mini game with an icon and a
  * marked scenario: the assets packed, the page bundled with every link `./`, the packed manifest
- * beside it, and no dev code in the output. Plus the refusal of an output folder at the game root,
- * a build run from another folder with the tree plugin, and the Bun log of a page that does not
- * bundle. Plus a game that names only `haptics` with a memory save: it builds where
- * `@tauri-apps/plugin-store` cannot resolve, and its bundle holds no store.
+ * beside it, the two startup marks, and no dev code in the output. Plus the refusal of an output
+ * folder at the game root, a build run from another folder with the tree plugin, and the Bun log
+ * of a page that does not bundle. Plus a game that names only `haptics` with a memory save: it
+ * builds where `@tauri-apps/plugin-store` cannot resolve, and its bundle holds no store. Plus
+ * `build --debug` with a fake `@moku-labs/editor` in the copy, and the refusal of a release page
+ * that imports it.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -33,6 +43,59 @@ const NO_PLUGIN_STORE = String.raw`export default {
 
 /** The copies and output folders of this file, removed after it. */
 const made: string[] = [];
+
+/** A string only the fake editor agent holds: a page that bundles the agent carries it. */
+const AGENT_MARKER = "fake-editor-agent-81d4b0";
+
+/** A string only the `.dev` module of the debug copy holds. */
+const DEV_MODULE_MARKER = "dev-module-marker-6e2a19";
+
+/** The version of the engine repo: a copy resolves the engine's sources, `<version>+src`. */
+const VERSION = (
+  JSON.parse(readFileSync(path.join(REPO, "package.json"), "utf8")) as { version: string }
+).version;
+
+/**
+ * Writes a fake `@moku-labs/editor` into a game: `./agent/page` default-exports an agent that
+ * logs a marker, and the module logs an editor line when it loads, as the real agent bundle
+ * carries the `[moku-editor]` prefix.
+ *
+ * @param root - The game folder.
+ */
+function fakeEditor(root: string): void {
+  const folder = path.join(root, "node_modules", "@moku-labs", "editor");
+
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(
+    path.join(folder, "package.json"),
+    JSON.stringify({
+      name: "@moku-labs/editor",
+      type: "module",
+      exports: { "./agent/page": "./page.js" }
+    })
+  );
+  writeFileSync(
+    path.join(folder, "page.js"),
+    [
+      'console.info("[moku-editor] the fake agent loaded.");',
+      `export default function agent({ app }) { app.log.info("${AGENT_MARKER}"); }`,
+      ""
+    ].join("\n")
+  );
+}
+
+/**
+ * Reads the code of a built page: every `.js` and `.html` file of the output.
+ *
+ * @param out - The output folder.
+ * @returns The texts, joined.
+ */
+function pageCode(out: string): string {
+  return filesUnder(out)
+    .filter(file => file.endsWith(".js") || file.endsWith(".html"))
+    .map(file => readFileSync(path.join(out, file), "utf8"))
+    .join("\n");
+}
 
 /**
  * Lists every file under a folder, `/` separated.
@@ -114,8 +177,16 @@ describe("moku-game build", () => {
     expect(code).not.toContain("__moku_hot");
     expect(code).not.toContain("import.meta.hot");
     expect(code).not.toContain("Control commands run in dev builds only");
-    expect(code).not.toContain("renderer.drawCalls");
+    expect(code).not.toContain('"renderer.monitor"');
     expect(code).not.toContain(SCENARIO_MARKER);
+  });
+
+  it("carries the two startup marks and no engine id", () => {
+    const code = pageCode(built.out);
+
+    expect(code).toContain('"moku:script"');
+    expect(code).toContain('"moku:main"');
+    expect(code).not.toContain(`${VERSION}+src`);
   });
 
   it("the icon link starts with ./", () => {
@@ -210,5 +281,84 @@ describe("moku-game build", () => {
     expect(ran.stderr).toContain("[game] build: the page did not bundle.");
     expect(ran.stderr).toContain("missing-module");
     rmSync(out, { recursive: true, force: true });
+  }, 180_000);
+});
+
+/** The debug build of this file, made once. */
+const debug = { root: "", out: "", code: -1 as number | null, stderr: "" };
+
+describe("moku-game build --debug", () => {
+  beforeAll(async () => {
+    debug.root = iconGame("build-debug");
+    debug.out = path.join(mkdtempSync(path.join(tmpdir(), "moku-game-debug-")), "web");
+    made.push(path.dirname(debug.out));
+    fakeEditor(debug.root);
+    writeFileSync(
+      path.join(debug.root, "features", "home", "home.dev.ts"),
+      `export const marker = "${DEV_MODULE_MARKER}";\n`
+    );
+
+    const ran = await runBin(["build", "--root", debug.root, "--debug", "--out", debug.out]);
+
+    debug.code = ran.code;
+    debug.stderr = ran.stderr;
+  }, 180_000);
+
+  it("starts the editor's page agent with the .dev modules, names the build, the engine and the editor, and marks the page", () => {
+    expect(debug.code).toBe(0);
+
+    const code = pageCode(debug.out);
+
+    expect(code).toContain(AGENT_MARKER);
+    expect(code).toContain(DEV_MODULE_MARKER);
+    expect(code).toMatch(/"debug-\d{8}T\d{6}Z"/);
+    expect(code).toContain(`"${VERSION}+src"`);
+    expect(code).toContain('"127.0.0.1:47600"');
+    expect(code).toContain('"moku:script"');
+    expect(code).toContain('"moku:main"');
+    expect(code).toContain("<title>mini-game Debug</title>");
+  });
+
+  it("carries no hot swap, no scenario, no frame recorder and no audio journal", () => {
+    const code = pageCode(debug.out);
+
+    expect(code).not.toContain("__moku_hot");
+    expect(code).not.toContain("import.meta.hot");
+    expect(code).not.toContain(SCENARIO_MARKER);
+    expect(code).not.toContain("world:history-on");
+    expect(code).not.toMatch(/journal:\s*200/);
+  });
+
+  it("warns once naming the profile, the build, the engine and the editor, and writes nothing under .moku", () => {
+    const version = VERSION.replaceAll(".", String.raw`\.`);
+
+    expect(debug.stderr).toMatch(
+      new RegExp(
+        String.raw`build: a DEBUG page with the editor agent, control: read and cosmetic commands\. Build debug-\d{8}T\d{6}Z, engine ${version}\+src, editor 127\.0\.0\.1:47600\. Never ship it to a store\.`
+      )
+    );
+    expect(debug.stderr.match(/a DEBUG page/g)).toHaveLength(1);
+    expect(existsSync(path.join(debug.root, ".moku"))).toBe(false);
+  });
+
+  it("a release page that imports the editor outside any guard is refused, and its output folder is gone", async () => {
+    const root = iconGame("build-agent");
+    const out = path.join(mkdtempSync(path.join(tmpdir(), "moku-game-agent-")), "web");
+    const index = path.join(root, "index.ts");
+
+    made.push(path.dirname(out));
+    fakeEditor(root);
+    writeFileSync(index, `import "@moku-labs/editor/agent/page";\n${readFileSync(index, "utf8")}`);
+
+    const ran = await runBin(["build", "--root", root, "--out", out]);
+
+    expect(ran.code).toBe(1);
+    expect(ran.stderr).toMatch(
+      /\[game] build: the release page carries the editor agent \("\[moku-editor]" in page\/[^)]+\.js\)\./
+    );
+    expect(ran.stderr).toContain(
+      "Import @moku-labs/editor only behind __MOKU_GAME_DEV__, or build a debug page with --debug."
+    );
+    expect(existsSync(out)).toBe(false);
   }, 180_000);
 });

@@ -1,12 +1,14 @@
 /**
  * @file i18n plugin — the public API factory: the current locale, the switch that loads a module
- * and sends the one event, the two `format` forms every label goes through, and the duration a
- * countdown reads, and the swap of one module the dev hot swap calls. This is the only place in the
+ * and sends the one event, the two `format` forms every label goes through, the key check a
+ * restored save goes through, the duration a countdown reads, and the swap of one module the dev
+ * hot swap calls. This is the only place in the
  * engine where a locale is read.
  */
+import { bundleOfKey, ignore, runAfter } from "./bundles";
 import { createIntlKit, messageDuration } from "./intl";
 import { isReady, loadLocale, notLoaded, notRegistered } from "./lifecycle";
-import { mergeLocales, mergeParts, missingParts, resolve } from "./messages";
+import { mergeOf, mergeParts, missingParts, resolve } from "./messages";
 import type {
   CompiledMessages,
   DurationStyle,
@@ -15,7 +17,6 @@ import type {
   IntlKit,
   Message,
   Part,
-  RegisteredModule,
   State
 } from "./types";
 
@@ -55,7 +56,7 @@ function readable(ctx: I18nCtx, locale: string): string {
 
 /**
  * Reports a key no locale of the chain has, once over the app's life, and answers the parts that
- * show it on the screen.
+ * show it on the screen. A key of a coupled bundle that is not loaded names the bundle instead.
  *
  * @param ctx - Kernel context of the i18n plugin.
  * @param key - The message key.
@@ -64,8 +65,12 @@ function readable(ctx: I18nCtx, locale: string): string {
  */
 function missing(ctx: I18nCtx, key: string, locale: string): readonly Part[] {
   if (!ctx.state.warned.has(key)) {
+    const bundle = bundleOfKey(ctx.state, key);
+
     ctx.state.warned.add(key);
-    ctx.log.warn("i18n: missing key", { key, locale });
+
+    if (bundle === undefined) ctx.log.warn("i18n: missing key", { key, locale });
+    else ctx.log.warn("i18n: the bundle of a key is not loaded", { key, bundle, locale });
   }
 
   return missingParts(key);
@@ -90,25 +95,8 @@ function formatIn(ctx: I18nCtx, message: Message, locale?: string): readonly Par
 }
 
 /**
- * Runs one locale switch after the one already in flight, so the last call wins.
- *
- * @param previous - The switch in flight, if there is one.
- * @param task - The switch to run next.
- * @returns The promise of the new switch.
- */
-function runAfter(previous: Promise<void> | undefined, task: () => Promise<void>): Promise<void> {
-  return previous === undefined ? task() : previous.then(task);
-}
-
-/**
- * Swallows the outcome of a switch, so the promise a later caller waits on never rejects.
- */
-function ignore(): void {
-  // Nothing to do: the outcome is read by the caller that started the switch.
-}
-
-/**
- * Switches the current locale: load what is lazy, set the locale, send the event.
+ * Switches the current locale on the queue: load what is lazy (the modules of the held bundles
+ * included), set the locale, send the event.
  *
  * @param ctx - Kernel context of the i18n plugin.
  * @param locale - The locale to switch to.
@@ -144,24 +132,40 @@ function noSingleModule(locale: string): Error {
 }
 
 /**
- * Tells whether a registered module is resolved and carries at least one key of `messages`.
+ * Tells whether a module in memory carries at least one key of `messages`.
  *
- * @param entry - The registered module.
+ * @param table - The module in memory, if there is one.
  * @param messages - The new module.
- * @returns True when the entry is the one `messages` replaces, or one of several.
+ * @returns True when the module is the one `messages` replaces, or one of several.
  */
-function overlaps(entry: RegisteredModule, messages: CompiledMessages): boolean {
-  return isReady(entry) && Object.keys(entry.messages).some(key => Object.hasOwn(messages, key));
+function sharesKey(table: CompiledMessages | undefined, messages: CompiledMessages): boolean {
+  return table !== undefined && Object.keys(table).some(key => Object.hasOwn(messages, key));
 }
 
 /**
- * Swaps the one registered module of a loaded locale whose keys overlap the new module, merges
- * the locale again and tells `text` when a label may read it.
+ * Tells whether every key of a new module belongs to one sub-feature whose bundle is not
+ * loaded: its loader imports the new module when the bundle loads.
+ *
+ * @param state - The plugin state.
+ * @param messages - The new module.
+ * @returns True when the swap is left to the bundle's next load.
+ */
+function waitsForBundle(state: State, messages: CompiledMessages): boolean {
+  const keys = Object.keys(messages);
+  const bundle = bundleOfKey(state, keys[0] ?? "");
+
+  return bundle !== undefined && keys.every(key => key.startsWith(`${bundle}.`));
+}
+
+/**
+ * Swaps the one module in memory of a loaded locale whose keys overlap the new module (a
+ * resolved registry entry, or the module of a held bundle), merges the locale again and tells
+ * `text` when a label may read it.
  *
  * @param ctx - Kernel context of the i18n plugin.
  * @param locale - The locale of the new module.
  * @param messages - The new module.
- * @throws {Error} When no registered module, or more than one, shares a key with the new one.
+ * @throws {Error} When no module in memory, or more than one, shares a key with the new one.
  */
 function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages): void {
   const { state } = ctx;
@@ -169,16 +173,21 @@ function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages)
   if (!state.loaded.has(locale)) return;
 
   const entries = state.registered.get(locale) ?? [];
-  const owners = entries.filter(entry => overlaps(entry, messages));
+  const owners = entries.filter(entry => isReady(entry) && sharesKey(entry.messages, messages));
+  const held = [...state.bundled.values()].filter(modules =>
+    sharesKey(modules.get(locale), messages)
+  );
+  const found = owners.length + held.length;
+
+  if (found === 0 && waitsForBundle(state, messages)) return;
+  if (found !== 1) throw noSingleModule(locale);
+
   const [owner] = owners;
+  const next = entries.map(entry => (entry === owner ? { from: entry.from, messages } : entry));
 
-  if (owner === undefined || owners.length > 1) throw noSingleModule(locale);
-
-  const next = entries.map(entry => (entry === owner ? { from: owner.from, messages } : entry));
-  const merged = mergeLocales(next.filter(entry => isReady(entry)));
-
+  held[0]?.set(locale, messages);
+  state.loaded.set(locale, mergeOf(state, locale, next));
   state.registered.set(locale, next);
-  state.loaded.set(locale, merged);
   state.warned.clear();
 
   if (locale === state.locale || locale === ctx.config.fallback) {
@@ -187,10 +196,30 @@ function replaceModule(ctx: I18nCtx, locale: string, messages: CompiledMessages)
 }
 
 /**
+ * Tells whether a value read from a save is a key the game has: a key of the merged table of the
+ * current locale or of the fallback, by own property (a name of `Object.prototype` is no key), or
+ * a key of a sub-feature whose strings live with a bundle that is not loaded yet, by its prefix.
+ *
+ * @param state - The plugin state.
+ * @param fallback - The locale read after the current one.
+ * @param value - What the save holds.
+ * @returns True when `tr(value)` names a key of the game.
+ */
+function isKnownKey(state: State, fallback: string, value: unknown): value is string {
+  if (typeof value !== "string") return false;
+
+  const tables = [state.loaded.get(state.locale), state.loaded.get(fallback)];
+
+  if (tables.some(table => table !== undefined && Object.hasOwn(table, value))) return true;
+
+  return bundleOfKey(state, value) !== undefined;
+}
+
+/**
  * Builds the API of the plugin.
  *
  * @param ctx - Kernel context of the i18n plugin.
- * @returns The eight members of `app.i18n`.
+ * @returns The nine members of `app.i18n`.
  */
 export function createI18nApi(ctx: I18nCtx): I18nApi {
   return {
@@ -202,6 +231,7 @@ export function createI18nApi(ctx: I18nCtx): I18nApi {
         .map(part => (part.kind === "text" ? part.text : ""))
         .join(""),
     has: key => resolve(ctx.state, key, ctx.state.locale, ctx.config.fallback) !== undefined,
+    isKey: value => isKnownKey(ctx.state, ctx.config.fallback, value),
     duration: (ms: number, style: DurationStyle = "short"): string =>
       kitOf(ctx.state, ctx.state.locale)
         .duration({ style, secondsDisplay: "always" })

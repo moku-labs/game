@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NodeInfo } from "../../../flow/types";
 import { createHandlers } from "../../handlers";
 import { loadBundle } from "../../tiers";
-import { createMockAssets, manifestOf } from "./mock-assets";
+import { createMockAssets, leaving, manifestOf, sceneOf } from "./mock-assets";
 
 const manifest = manifestOf({
   alpha: { feature: "alpha", tier: "scene", keys: ["alpha.one"] },
@@ -74,9 +74,9 @@ describe("createHandlers", () => {
 
     await mock.start();
     mock.flow.graph = graph as never;
-    mock.ctx.state.bundleOfScene = new Map([
-      ["alpha", "alpha"],
-      ["beta", "beta"]
+    mock.ctx.state.scenes = new Map([
+      ["alpha", sceneOf("alpha", "alpha")],
+      ["beta", sceneOf("beta", "beta")]
     ]);
     mock.ctx.state.current = alphaNode;
 
@@ -126,5 +126,37 @@ describe("createHandlers", () => {
     createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
 
     expect(mock.ctx.state.queue).toBeUndefined();
+  });
+});
+
+describe("the release mark of a rest", () => {
+  it("marks a live rest and releases nothing by itself", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "alpha"), preloadDepth: 0 });
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "alpha", undefined, "request");
+    mock.ctx.state.current = alphaNode;
+
+    createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
+
+    expect(mock.ctx.state.restPending).toBe(true);
+    expect(mock.api.isLoaded("alpha")).toBe(true);
+  });
+
+  it("marks no fast rest and still enforces the budget there", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "alpha"), preloadDepth: 0 });
+
+    await mock.start();
+    await loadBundle(mock.assetsCtx, "alpha", undefined, "request");
+    await loadBundle(mock.assetsCtx, "beta", undefined, "request");
+    mock.config.textureBudgetMb = 0.07;
+    mock.flow.mode = "fast";
+    mock.ctx.state.current = alphaNode;
+
+    createHandlers(mock.ctx)["flow:rest"]({ path: "main/alpha", checkpoint: false });
+
+    expect(mock.ctx.state.restPending).toBe(false);
+    expect(mock.api.isLoaded("alpha")).toBe(false);
+    expect(mock.api.isLoaded("beta")).toBe(true);
   });
 });

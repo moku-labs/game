@@ -7,6 +7,7 @@
     "moduleResolution": "bundler",
     "verbatimModuleSyntax": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,
@@ -34,5 +35,9 @@
     }
   },
   "include": ["src", "tests", "declarations.d.ts", "*.config.ts"],
-  "exclude": ["tests/fixtures/layout-game"]
+  "exclude": [
+    "tests/fixtures/layout-game",
+    "tests/fixtures/episodes-game",
+    "tests/integration/*episodes*"
+  ]
 }

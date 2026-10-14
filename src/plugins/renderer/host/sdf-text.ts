@@ -1,5 +1,5 @@
 /**
- * @file renderer/host — the shader of distance-field (MSDF, SDF) bitmap text. Pixi 8.21 applies
+ * @file renderer/host — the shader of distance-field (MSDF, SDF) bitmap text. Pixi 8.22 applies
  * the alpha of such text twice: its fragment step hands `calculateMSDFAlpha` the premultiplied
  * vertex colour, the function raises that alpha into the glyph coverage, and the shader template
  * multiplies the coverage by the colour again, so a label at alpha 0.5 draws at about 0.25. The

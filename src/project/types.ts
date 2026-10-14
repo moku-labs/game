@@ -89,6 +89,8 @@ export type Anchor = {
  * index.files["nodes/count.ts"]?.state; // "ok"
  * // A game whose tsconfig.json holds paths, such as tests/fixtures/layout-game.
  * index.tsconfig; // "tsconfig.json"
+ * // A game with sub-features, such as tests/fixtures/episodes-game.
+ * index.features?.["ep01"]; // { dir: "features/episodes/ep01", parent: "episodes" }
  * ```
  */
 export type ProjectIndex = {
@@ -109,6 +111,14 @@ export type ProjectIndex = {
   files: Record<string, { hash: string; state: "ok" | "broken"; error?: string }>;
   /** What a definer or a JSX key holds that cannot be read without running the game. */
   unresolved: { path: string; reason: string }[];
+  /**
+   * Every feature of the game by name: its root-relative folder and, for a sub-feature, the feature it lives in.
+   * Found by `findFeatureUnits` (`src/project/features.ts`): each folder of `features/`, a folder inside a feature
+   * with a door `index.ts` and `assets/`, `assets.ts` or `strings/` of its own, and a code-only folder the feature's
+   * door imports from `./<folder>` and lists in `features: [...]`. Present in every index `openProject` builds; `{}`
+   * for a game without a features folder.
+   */
+  features?: Record<string, { dir: string; parent?: string }>;
 };
 
 /**
@@ -132,6 +142,8 @@ export type ProjectChange = {
   moved: { key: string; from: string; to: string }[];
   /** Keys gone from every file. */
   removed: string[];
+  /** The feature names whose entry in `features` appeared, vanished, or changed folder or parent; sorted. Absent when none. */
+  features?: string[];
 };
 
 /**

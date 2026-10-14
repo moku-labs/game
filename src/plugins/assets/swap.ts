@@ -7,7 +7,7 @@
  * a hook throws.
  */
 import { enforceBudget } from "./budget";
-import { kindOf, nineOf, resolveBaseUrl, sumMb, textureMb } from "./manifest";
+import { kindOf, resolveBaseUrl, sumMb, textureMb, textureOptionsOf } from "./manifest";
 import { type Batch, batchesOf, indexPaths, type Owner, type PathIndex, refusalOf } from "./paths";
 import { changedPaths, stampsOf } from "./stamp";
 import { emptyAssets, type Loading, loadFont, loadImage, loadSound } from "./tiers";
@@ -131,7 +131,7 @@ async function loadFresh(run: Loading, owner: Owner): Promise<Fresh> {
   if (kind === "font") return { kind, owner, font: await loadFont(run, owner.file) };
   if (kind === "audio") return { kind, owner, audio: await loadSound(run, owner.file) };
 
-  return { kind, owner, texture: await loadImage(run, owner.path, nineOf(owner.file)) };
+  return { kind, owner, texture: await loadImage(run, owner.path, textureOptionsOf(owner.file)) };
 }
 
 /**
@@ -179,17 +179,19 @@ async function settledRecord(state: State, bundle: string): Promise<BundleRecord
 }
 
 /**
- * Writes the pixel size of a new image, and what it costs, into its manifest record.
+ * Writes the pixel size of a new image, and what it costs, into its manifest record. A mipmapped
+ * texture costs every level of its chain.
  *
  * @param target - The record of a texture file or of a font page.
  * @param size - The size of the decoded image.
+ * @param mips - True for a texture uploaded with its full mip chain.
  */
-function resize(target: Sized | undefined, size: Size | undefined): void {
+function resize(target: Sized | undefined, size: Size | undefined, mips: boolean): void {
   if (target === undefined || size === undefined) return;
 
   target.width = size.width;
   target.height = size.height;
-  target.mb = textureMb(size.width, size.height);
+  target.mb = textureMb(size.width, size.height, mips);
 }
 
 /**
@@ -217,7 +219,7 @@ function storeFont(
 
   for (const page of old?.pages ?? []) io.destroyTexture(page);
 
-  for (const [at, texture] of font.pages.entries()) resize(pages[at], sizes.get(texture));
+  for (const [at, texture] of font.pages.entries()) resize(pages[at], sizes.get(texture), false);
 
   file.mb = sumMb(pages);
 }
@@ -252,7 +254,7 @@ function store(io: AssetsIo, record: BundleRecord, fresh: Fresh, sizes: Sizes): 
 
   if (old !== undefined) io.destroyTexture(old);
 
-  resize(file, sizes.get(fresh.texture));
+  resize(file, sizes.get(fresh.texture), file.mips === true);
 }
 
 /**

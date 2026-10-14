@@ -4,11 +4,13 @@
  */
 import { flowPlugin } from "../flow";
 import type { Descriptor, Hint, NodeInfo } from "../flow/types";
+import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
+import { isSceneDefinition } from "../scenes/bundles";
 import { timePlugin } from "../time";
 import { lookupTexture } from "./api";
 import { createBrowserIo } from "./browser";
-import { releaseAssets } from "./budget";
+import { releaseAssets, releaseLeftBundles } from "./budget";
 import { bundlesOfNode } from "./preload";
 import { bootTiers, loadBundle } from "./tiers";
 import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "./types";
@@ -17,16 +19,17 @@ import type { AssetsCtx, AssetsIo, Deps, KernelSlice, LoadResult, State } from "
 type RunContext = { mode: "live" | "fast"; signal: AbortSignal };
 
 /**
- * Resolves the dependency APIs `flow` and `renderer` with `ctx.require`.
+ * Resolves the dependency APIs `flow`, `renderer`, `time` and `model` with `ctx.require`.
  *
  * @param ctx - Kernel context of the assets plugin.
- * @returns The two dependency APIs.
+ * @returns The four dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     flow: ctx.require(flowPlugin),
     renderer: ctx.require(rendererPlugin),
-    time: ctx.require(timePlugin)
+    time: ctx.require(timePlugin),
+    model: ctx.require(modelPlugin)
   };
 }
 
@@ -92,26 +95,46 @@ async function runLoadEffect(
 }
 
 /**
- * The `load` stage of entering a node: the bundles of the node become the pinned set, and in live
- * mode the node waits for them. A bundle the preload did not reach is a dev warning.
+ * Runs the release a live rest marked, once: the arriving node's bundles are pinned by now, so a
+ * bundle its scene names is held. A fast entry clears the mark and releases nothing.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal.
+ */
+function releaseMarkedRest(ctx: AssetsCtx, run: RunContext): void {
+  if (!ctx.state.restPending) return;
+
+  ctx.state.restPending = false;
+
+  if (run.mode === "live") releaseLeftBundles(ctx);
+}
+
+/**
+ * The `load` stage of entering a node: the bundles of the node become the pinned set, the release
+ * a rest marked runs, and in live mode the node waits for its bundles. A bundle the preload did not
+ * reach is a dev warning, except a `"leave"` bundle, which the preload skips on purpose.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
  * @param run - The runner's mode and signal.
+ * @throws {Error} When the `bundles` of the node's scene throws: flow rolls the node back.
  */
 async function enterNode(ctx: AssetsCtx, node: NodeInfo, run: RunContext): Promise<void> {
   const state = ctx.state;
   const bundles = bundlesOfNode(ctx, node);
-  const scene = node.scene === undefined ? undefined : state.bundleOfScene.get(node.scene);
 
   state.current = node;
   state.pinned = new Set(bundles);
-  if (scene !== undefined) state.sceneBundle = scene;
+  if (node.scene !== undefined && state.scenes.has(node.scene)) state.sceneId = node.scene;
+
+  releaseMarkedRest(ctx, run);
 
   if (state.io === undefined || run.mode === "fast") return;
 
   for (const name of bundles) {
-    if (state.records.get(name)?.status !== "loaded") {
+    const isLeaving = state.manifest.bundles[name]?.release === "leave";
+
+    if (state.records.get(name)?.status !== "loaded" && !isLeaving) {
       ctx.log.warn("assets: the node waited for a bundle", { bundle: name, path: node.path });
     }
 
@@ -189,18 +212,16 @@ function stringField(entry: unknown, key: string): string | undefined {
 }
 
 /**
- * Records what the features brought: which bundle a scene shows, and which feature owns a flow.
- * Both are read by the preload; the bundle maps themselves are checked by the boot sequence.
+ * Records what the features brought: every scene by its id, and which feature owns a flow. Both
+ * are read by the preload; the bundle maps themselves are checked by the boot sequence. An entry
+ * of `scenes` that is not a scene declaration is skipped.
  *
  * @param ctx - Domain context of the plugin.
  */
 function readFeatures(ctx: AssetsCtx): void {
   for (const feature of ctx.deps.flow.features.all()) {
     for (const scene of listOf(feature.description.scenes)) {
-      const id = stringField(scene, "id");
-      const bundle = stringField(scene, "bundle");
-
-      if (id !== undefined && bundle !== undefined) ctx.state.bundleOfScene.set(id, bundle);
+      if (isSceneDefinition(scene)) ctx.state.scenes.set(scene.id, scene);
     }
 
     for (const flow of listOf(feature.description.flows)) {
@@ -235,8 +256,9 @@ export async function startAssets(ctx: KernelSlice): Promise<void> {
 
 /**
  * Frees everything in `onStop`: the preload and every running load are aborted, every texture is
- * destroyed, the three registrations are removed and the registries are emptied. A teardown
- * context carries the state and nothing else, so no other plugin is called here.
+ * destroyed, the three registrations are removed and the registries are emptied, the companions
+ * too. A teardown context carries the state and nothing else, so no other plugin is called here:
+ * no companion's `unload` either, its plugin stopped before this one.
  *
  * @param state - The plugin state.
  * @example
@@ -262,12 +284,15 @@ export function releaseAll(state: State): void {
 
   state.records.clear();
   state.bundleOfKey.clear();
-  state.bundleOfScene.clear();
+  state.scenes.clear();
   state.featureOfFlow.clear();
   state.pinned.clear();
   state.warned.clear();
+  state.companions.length = 0;
   state.current = undefined;
-  state.sceneBundle = undefined;
+  state.sceneId = undefined;
+  state.sceneNamed = [];
+  state.restPending = false;
   state.stamps = undefined;
   state.swapping = undefined;
   state.io = undefined;

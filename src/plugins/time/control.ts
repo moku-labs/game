@@ -1,7 +1,7 @@
 /**
  * @file time plugin — the time commands of the `/control` door: step frames by hand and set the
- * time scale. Dev builds only: every body starts with the inline dev guard, so a bundler `define`
- * of `false` drops it, and logs the `moku:dev` marker.
+ * time scale. Dev and debug builds: every body starts with the inline agent guard of a cosmetic
+ * command, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
  */
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
@@ -56,7 +56,12 @@ export const stepCommand = defineCommand({
   input: { frames: "number", deltaMs: "number?" },
   effect: "cosmetic",
   run: (app: ControlApp, { frames, deltaMs = FRAME_MS }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.step", frames });
     checkFrames(frames);
@@ -83,7 +88,12 @@ export const timeScaleCommand = defineCommand({
   input: { scale: "number" },
   effect: "cosmetic",
   run: (app: ControlApp, { scale }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.timeScale", scale });
     checkScale(scale);

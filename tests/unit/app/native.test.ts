@@ -166,6 +166,38 @@ describe("nativeConfigOf", () => {
     expect(config.outDir).toBe("/g/dist-native");
   });
 
+  it("with debug builds the web page with the profile and --editor, and keeps the game's name and identifier", () => {
+    const store = nativeConfigOf(settingsOf(), where, "android");
+    const full = nativeConfigOf(settingsOf(), where, "android", {
+      level: "full",
+      editor: "192.168.1.20:47600"
+    });
+    const read = nativeConfigOf(settingsOf(), where, "android", { level: "read" });
+
+    expect(full.web.build).toBe(
+      '"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug=full --editor 192.168.1.20:47600'
+    );
+    expect(read.web.build).toBe('"bun" "/g/bin/moku-game.mjs" "--root" "/g" build --debug');
+    expect(store.web.build).toBe('"bun" "/g/bin/moku-game.mjs" "--root" "/g" build');
+    expect({ ...full, web: store.web }).toEqual(store);
+    expect(full.app).toMatchObject({ name: "Лесной городок", identifier: "com.mokulabs.timber" });
+  });
+
+  it("an android config composes the native shell once, first; an ios config does not", () => {
+    const shell = settingsOf({ system: ["back", "haptics"] });
+
+    expect(nativeConfigOf(shell, where, "android").system).toEqual([
+      { name: "shell" },
+      { name: "back" },
+      { name: "haptics" }
+    ]);
+    expect(nativeConfigOf(settingsOf(), where, "android").system).toEqual([{ name: "shell" }]);
+    expect(nativeConfigOf(shell, where, "ios").system).toEqual([
+      { name: "back" },
+      { name: "haptics" }
+    ]);
+  });
+
   it("a config without native throws the native-section message", () => {
     expect(() => nativeConfigOf(resolveConfig({ page: { title: "T" } }), where, "ios")).toThrow(
       new Error(
@@ -189,6 +221,24 @@ describe("runNative", () => {
       ["stop"]
     ]);
     expect(recorder.configs).toEqual([nativeConfigOf(settingsOf(), where, "ios")]);
+  });
+
+  it("a debug build passes debug: true to native's build, and the web build carries the profile", async () => {
+    const done = await runNative("build", settingsOf(), where, {
+      target: "android",
+      debug: "full",
+      editor: "192.168.1.20:47600"
+    });
+
+    expect(done).toBe(true);
+    expect(recorder.calls).toEqual([
+      ["start"],
+      ["build", { target: "android", simulator: undefined, debug: true }],
+      ["stop"]
+    ]);
+    expect(recorder.configs[0]?.web.build).toContain(
+      "build --debug=full --editor 192.168.1.20:47600"
+    );
   });
 
   it("dev runs the native shell on the target", async () => {

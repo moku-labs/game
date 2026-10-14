@@ -7,6 +7,9 @@ import type { FilteredView, FilterKind } from "./filters/types";
 import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particles/types";
 import type { State } from "./types";
 
+/** The empty kind list of the switches: one frozen array, shared, so an unchanged list is the same array. */
+export const NO_KINDS: readonly string[] = Object.freeze([]);
+
 /**
  * Creates the particle tables. Its own function because lint rule L5 refuses a collection built
  * inside an exported declaration.
@@ -50,6 +53,7 @@ export function createEffectsState(): State {
     seedCounter: 0,
     particles: 0,
     over: { particles: false, passes: false, fullScreen: false },
-    removers: []
+    removers: [],
+    diagnostics: { kinds: NO_KINDS, off: new Set<string>(), offList: NO_KINDS }
   };
 }

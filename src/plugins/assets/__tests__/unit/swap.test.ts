@@ -1102,3 +1102,35 @@ describe("the dev hot swap: when it does not run", () => {
     expect(mock.io.fetched).toEqual([url(CELL)]);
   });
 });
+
+describe("the dev hot swap: a mipmapped texture", () => {
+  const CUP = "features/episodes/ep01/assets/items/cup.png";
+
+  /** The bundle of the sub-feature ep01: one texture with its mip chain. */
+  const source: Manifest = {
+    version: 1,
+    bundles: {
+      ep01: {
+        feature: "ep01",
+        parent: "episodes",
+        dir: "features/episodes/ep01",
+        tier: "lazy",
+        mb: 0.492,
+        files: [
+          { key: "ep01.items.cup", path: CUP, width: 336, height: 288, mb: 0.492, mips: true }
+        ]
+      }
+    }
+  };
+
+  it("uploads it with its mip chain again and writes the chain megabytes of its new size", async () => {
+    const { mock, swap } = await startDev(["ep01"], source);
+
+    mock.io.sizes.set(url(CUP), { width: 256, height: 128 });
+    await swap({ files: { [CUP]: "200:2" }, changed: [CUP] });
+
+    expect(mock.io.created.map(texture => texture.mips)).toEqual([true]);
+    expect(mock.ctx.state.manifest.bundles.ep01?.files[0]?.mb).toBe(0.167);
+    expect(mock.ctx.state.manifest.bundles.ep01?.mb).toBe(0.167);
+  });
+});

@@ -92,6 +92,26 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `pixi(): PixiModule \| undefined` | The lazily loaded Pixi module once `ready()`, so a plugin above draws with the same Pixi and imports none of it. `undefined` while inert, lost or unsupported. |
 | `device(): GPUDevice \| undefined` | The GPU device of the live WebGPU application, read at call time: a restore makes a new one. `effects` checks a custom filter's WGSL with it in a dev build. `undefined` while inert, before `ready()`, while lost, on the unsupported screen and on WebGL. |
 | `gl(): WebGL2RenderingContext \| undefined` | The WebGL2 context of the live WebGL application, read at call time like `device()`: Pixi restores a lost context itself. `effects` compiles a custom filter's GLSL with it in a dev build. `undefined` while inert, before `ready()`, while the context is lost, on the unsupported screen and on WebGPU. |
+| `resolution(): number` | The resolution the application draws at now: device pixels per CSS pixel, capped by `maxResolution`, or set by `monitor.setResolution`. 1 while inert. |
+
+### Resolution
+
+The drawing resolution has three sources and one rule: `override ?? min(devicePixelRatio, maxResolution)`.
+
+- `devicePixelRatio` is followed in every build: a `matchMedia("(resolution: <dpr>dppx)")` query,
+  armed again for the new ratio after every change, so a window moved to a screen of another ratio,
+  or a browser zoom, draws sharp from the next frame. No window or no `matchMedia`: nothing is armed.
+- `maxResolution` is a number of the config (memory grows with its square).
+- `app.renderer.monitor.setResolution(n)` overrides both, in every build: a player's graphics
+  setting is applied by it from an effect, and the A/B runs of a debug build switch with it.
+  `undefined` hands the choice back. Outside 0.5 to 4 it throws a `RangeError`.
+
+Every change goes through one mechanism: it is remembered, and the next frame applies it on the
+resize path (`viewport` lays out, `host.resize(w, h)` calls Pixi's `renderer.resize(w, h, r)`), so
+a burst of changes costs one resize, the CSS size, the frame and the scale stay, only the backing
+store changes. A restore after a lost device comes back at the current target, override
+included. `host.onResolution(fn)` (internal) hears every applied change with `(from, to, reason)`;
+the monitor writes it into the log, and B1, F12, C14 and PX1 subscribe in later blocks.
 
 ### `viewport` — `app.renderer.viewport`
 
@@ -100,6 +120,42 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `toReference(clientX, clientY)` | `(client − canvas rect − frame offset) / scale`. The rectangle is read at call time. Inert: the input unchanged. |
 | `toScreen({ x, y })` | The inverse: reference units to client CSS pixels, `canvas rect + frame offset + point × scale`. The `game.locate` source places an element or a view on the page with it. Inert: the same numbers, a fresh object. |
 | `size()` | Reference units, a fresh object. `scale = min(short / referenceSide, (long − safe insets) / referenceLong)`: the short side is at least `referenceSide` and grows on a wide screen, the long side inside the safe area is at least `referenceLong`. Inert: the `aspect.min` frame, `scale: 1`, zero safe area. |
+
+### Safe area
+
+`viewport` measures the safe area with two hidden probes on the body: `start` is the left inset wide
+and the top inset tall, `end` the right inset wide and the bottom inset tall. One element padded by
+all four would measure `left + right` by `top + bottom`, so a rotation that swaps the left and the
+right inset would change nothing a `ResizeObserver` sees; with one inset per axis every change of an
+inset is a change of size. Each size is a CSS custom property that falls back to the page's
+`env()` value:
+
+| Inset | Declared as |
+|---|---|
+| top | `var(--moku-safe-top, env(safe-area-inset-top, 0px))` |
+| right | `var(--moku-safe-right, env(safe-area-inset-right, 0px))` |
+| bottom | `var(--moku-safe-bottom, env(safe-area-inset-bottom, 0px))` |
+| left | `var(--moku-safe-left, env(safe-area-inset-left, 0px))` |
+
+A page, a game or the native shell sets the properties on `:root`; any CSS length works, `env()`,
+`max()` and `calc()` included, in CSS pixels of the page. A negative value counts as 0. With no
+property set the insets are `env(safe-area-inset-*)`.
+
+```css
+/* The game's page or @moku-labs/native: keep 24 px clear at the top on a phone that reports no notch. */
+:root {
+  --moku-safe-top: max(env(safe-area-inset-top, 0px), 24px);
+  --moku-safe-bottom: max(env(safe-area-inset-bottom, 0px), 48px);
+}
+```
+
+One observer watches both probes, and the window event `moku-native:insets` (the native shell sends
+it when it sets the properties or its insets change) does the same; its `detail` is not read. Both
+only raise the resize flag, so an inset that arrives late (an Android WebView), a rotation that keeps
+the container's size, or a shell that sets its own insets is laid out at the next frame, once per
+frame at most. There is no `setInsets`: a number a game stores is stale after the next rotation,
+while a CSS value is worked out by the browser at the moment the engine reads it. The probes are
+internal markup: select them by nothing, set the properties instead.
 
 ### `sync` — `app.renderer.sync`
 
@@ -110,9 +166,9 @@ registered with `displays.provide`. Two on one entity: the first in that order w
 | `boundsOf(entity)` | The axis-aligned bounds, in reference units, of the four corners of the view's hit box brought through its `Transform` and `Parent` chain, rotation included. `undefined` without a view, for a view in no tree, hidden or at an effective alpha of 0.01 or less, and for bounds without area (a scale of 0 too), so a located element is one the player sees. A fresh object. Inert: `undefined`. The `game.locate` source of `ui` and the legend of `capture()` read it. |
 | `hitBoxOf(entity)` | The very box `hitTest` tests for the view, in the entity's own units, before the `Transform` and the `Parent` chain: `{ x: -32, y: -32, width: 64, height: 64 }` for a 64 x 64 `Sprite` with the default anchor, `{ x: 0, y: 0, width: w, height: h }` for a `Shape`. A fresh object; `undefined` without a view. `input` fits the circle of a trace in it. |
 | `textures.provide(fn)` | Adds a provider to the chain; the newest is asked first. Returns the remover. Works while inert. |
-| `textures.create(image, { nine? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. Throws while the renderer does not draw. |
+| `textures.create(image, { nine?, mips? })` | Makes a Pixi texture, so `assets` never imports Pixi. `nine` is left, top, right, bottom in pixels. `mips: true` uploads it with its full mip chain (`Texture.from({ resource, autoGenerateMipmaps: true })`), for a texture its bundle's `mipmaps` selects; it costs about a third more. Throws while the renderer does not draw. |
 | `textures.slice(page, { x, y, width, height }, { nine? })` | Cuts a texture out of an atlas page for `assets`: a wrapper over the page's source, its frame in page pixels offset by the page's own frame, `nine` as in `create`. Throws while the renderer does not draw, and when the frame does not fit in the page. See "Slices of an atlas page". |
-| `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. Before a source goes, the `change` listeners of the source and of its style are removed: Pixi 8.21 keeps batch bind groups forever, and each would warn `[BindGroup] ... destroyed while still bound to a shader`. |
+| `textures.destroy(texture)` | `texture.destroy(true)`; a slice `destroy(false)`, the wrapper only. The crops cut from it go too. Twice is a no-op. Before a source goes, the `change` listeners of the source and of its style are removed: Pixi 8.22 keeps batch bind groups forever, and each would warn `[BindGroup] ... destroyed while still bound to a shader`. |
 | `textures.invalidate(keys)` | Every view with one of these keys resolves again in the next pass; the pooled objects of these keys are destroyed at once. No-op while inert. |
 | `displays.provide(Component, adapter)` | A plugin above says how its own component becomes a display object: `create` on the first pass after it appeared, `update` on every change, `destroy` when it leaves. Stored while inert, never called there. Returns the remover. |
 | `fonts.install(key, fnt, texture)` | Installs a BMFont file (text, XML or JSON) and its page texture under an asset key. Throws while the renderer does not draw. |
@@ -148,11 +204,20 @@ no view and whose `ecs.ownerOf` is `undefined`, so an entity that despawned afte
 already left is forgotten too. A live entity keeps its filters for its next visual, in
 the same frame (a `ui` element that trades its shape for a nine-slice keeps its glow) or later. A `rebuildAll` after a restore applies them again. The renderer never destroys a filter.
 
-### `monitor` — `app.renderer.stats()`, `app.renderer.capture()`
+### `monitor` — `app.renderer.stats()`, `app.renderer.capture()`, `app.renderer.monitor`
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, frameMs, textures, textureMb, views, pooled, renderPasses }`, plus `drawCalls` in a dev build, a fresh object. Inert: all 0. |
+| `stats()` | `{ fps, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses }`, plus `drawCalls` in a dev or debug build, a fresh object. Inert: all 0. |
+| `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
+| `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
+| `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
+| `monitor.beginAgent()`, `monitor.endAgent()` | For engine plugins and the editor's page agent. Agent builds: bracket the agent's own work, measured as the `agent` phase, left out of the spike rule and handed to `time.chargeAgent`. A nested begin and a lone end are ignored. |
+| `monitor.setResolution(n \| undefined)` | Every build: draws at `n` from the next frame; `undefined` goes back to the policy (see "Resolution"). Answers the resolution of the next frame. |
+
+`frameAt(ring, age)` (root export) turns one slot into a plain record: NaN as `null`, bits as
+names, the path id as the flow path. `textureMbSplit` splits `textureMb` into the art a game loaded,
+the render targets Pixi draws into, and the pictures the engine keeps (`host.keep`, from F12/C14).
 | `capture(options?)` | Dev builds only. `{ png }`: a PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `{ png, legend }` with `legend: true`. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). Options: `legend`, `layers`, `sheet`, `against`; see "Capture". |
 
 - `fps` counts frame starts over one second of `clock` time; 0 before the first full second and
@@ -163,9 +228,9 @@ the same frame (a `ui` element that trades its shape for a nine-slice keeps its 
   clock out of the renderer. `clock.now()` is whole milliseconds, so one frame reads 3 or 4 ms and
   the mean over a second is exact enough.
 - `textures` counts the live sources in Pixi's `renderer.texture.managedTextures`, on WebGPU and
-  WebGL alike. Pixi 8.21 builds that list with `Object.values` of a `GCManagedHash`, which keeps a
+  WebGL alike. Pixi 8.22 builds that list with `Object.values` of a `GCManagedHash`, which keeps a
   `null` slot for every unloaded source, so the `null` slots are skipped for the count and the bytes.
-- `managedTextures` is deprecated since Pixi 8.15. Pixi 8.21 has no public replacement: the
+- `managedTextures` is deprecated since Pixi 8.15. Pixi 8.22 has no public replacement: the
   `GCSystem` keeps its resource hashes private.
   `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
   level, in MiB.
@@ -187,37 +252,114 @@ and the fresh object of `stats()`.
 
 #### Draw calls
 
-`drawCalls` is counted in dev builds only, on WebGPU. Under WebGPU three Pixi 8.21 classes issue
-every draw: `GpuBatchAdaptor.execute` (one `drawIndexed` per batch), `GpuGraphicsAdaptor.execute`
-(one per instruction of the graphics context) and `GpuEncoderSystem.draw` / `drawIndirect` (meshes,
-tiling sprites, particles, filters). `monitor/draw-calls.ts` builds counting subclasses of them from
-the module object, each with the base's `static extension` object, and `host/init.ts` swaps them in
+`drawCalls` is counted in dev and debug builds only, on WebGPU. Under WebGPU three Pixi 8.22 classes issue
+every draw of the scene: `GpuBatchAdaptor.execute` (one `drawIndexed` per batch),
+`GpuGraphicsAdaptor.execute` (one per instruction of the graphics context) and
+`GpuEncoderSystem.draw` / `drawIndirect` (meshes, tiling sprites, particles, filters).
+`monitor/draw-calls.ts` builds counting subclasses of them from the module object, each with the base's `static extension` object, and `host/init.ts` swaps them in
 through `pixi.extensions.remove` and `add` after `loadPixi()` and before `new Application()`,
 because Pixi builds its systems and adaptors inside `init`. No native prototype and no Pixi
 instance is patched. The swap happens once per host state: a restore after a lost device reuses the
 classes. `onStop` swaps Pixi's own classes back, so a second `createApp` on the page (HMR) starts
 from them. A Pixi module without the three classes draws on uncounted, with `ctx.log.warn`.
 
-The install sits behind the inline dev guard and logs `"moku:dev"` with
-`{ command: "renderer.drawCalls" }`, so a production `define` folds it and the counter leaves the
-bundle; `stats()` then has no `drawCalls` field. The guard is the one of `capture()` written as a
-positive branch (`typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__`): Bun 1.3.14 drops
+The install sits behind the inline dev or agent guard (a dev page and a debug page count draws)
+and logs `"moku:dev"` with `{ command: "renderer.monitor" }`, so a production `define` folds it
+and the counter leaves the bundle; `stats()` then has no `drawCalls` field. The guard is the one of
+`capture()` written as a positive branch (`(typeof __MOKU_GAME_DEV__ !== "undefined" &&
+__MOKU_GAME_DEV__) || (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)`): Bun 1.3.14 drops
 code used only inside a folded `if`, but keeps code used after a folded early `return`. `api.ts`
 hands `host` the counter under the same guard, so a production build drops the counter module. `begin()` starts the count of a frame at 0 and
 `end()` closes it, so a draw between frames, as a capture's extract, is not counted. The WebGL
-fallback reads 0: the three classes are WebGPU ones. Known miss: Pixi 8.22 adds one native
-`pass.draw(3)` for the MSAA restore (`GpuMsaaRestore`), which no subclass sees; it costs one call
-per frame only with `antialias: true`, whose default is false. The project pins 8.21.0, and a unit
-test against the real module pins the three names, their `extension` metadata and their methods.
+fallback reads 0: the three classes are WebGPU ones. Known misses: Pixi 8.22 issues two kinds of
+native draws outside the three classes, and no subclass sees them. The MSAA restore
+(`GpuMsaaRestore`) draws the kept colour of a multisampled target back in, one `pass.draw(3)` per
+colour attachment, each time a pass reopens that target, as the screen after a filter. It runs
+only with `antialias: true`, whose default is false, and then only on a tile-based GPU (Apple, ARM,
+Qualcomm, Imagination) or on a target marked `transient`. The mipmap generator
+(`GpuMipmapGenerator`) draws every level below the first with one `draw(3)`, each time a source
+with `autoGenerateMipmaps` is uploaded or updated. The project pins 8.22.0, and a unit test against
+the real module pins the three names, their `extension` metadata and their methods.
+
+#### Measuring frames (agent builds)
+
+In an agent build (`__MOKU_GAME_AGENT__`: dev pages and `--debug` builds) the monitor attaches at
+the first ready and after every restore. `time.measure` hands it every frame (the gap, the ticks the
+cap skipped, the six phases, the start delay, the work, one frame of the loop's rate); the commit
+writes one slot of the ring from it and from what the counting classes saw: render passes where
+Pixi begins them (stencil passes on WebGPU), draws, filter applies with their pixels and the four
+filter kinds with the most, uploads with their bytes, pipeline compiles, the five slowest world
+systems (`world.systemTimes()`), the flow path, the changes of the frame (resize, resolution,
+scene, bundle, restore). The counting is six subclasses swapped in through `extensions`
+(`GpuBatchAdaptor`, `GpuGraphicsAdaptor`, `GpuEncoderSystem`, `FilterSystem`, `GpuTextureSystem`,
+`GlTextureSystem`); on WebGL a pass is a bound target, seen on Pixi's public runners. Compiles are
+counted on GPU objects of this application only: own properties on the engine's own device and
+`linkProgram` on this app's WebGL context. Long Animation Frames come from a `PerformanceObserver`
+(long tasks where the browser has no LoAF, none on WebKit), the heap from Chromium's
+`performance.memory`. The per-frame path allocates nothing: indexed stores into typed arrays
+allocated once; a dev-only probe (`monitor-alloc.test.ts`, under Node's heap sampler) checks it.
+`monitor/clock.ts` is the one renderer file that reads the page clock (lint L3 ignores it).
+
+**The spike rule.** The budget of a frame is one frame of its own rate (`monitor.budgetMs: "rate"`,
+the default): 8.33 ms at the 120 fps target, 16.7 ms at the 60 fps fallback; a number is a fixed
+line. A frame is a spike when its gap, the agent's work left out, is over `1.5 × max(budget,
+cap)` (`gap`), when its work, the agent's left out, is over the budget (`js`), or when its GPU time
+lands over the budget (`gpu`). With `budgetMs: 16.7`: a gap of 25.0 ms is no spike, 25.1 ms is; at
+the idle cap of 30 fps the line is 50 ms. A spike is annotated with `compile`, `upload` (1 MB or
+more), `longFrame` (an overlapping Long Animation Frame) and the hint `gc?` (a gap with little work
+after the heap dropped by 0.5 MB or more: Chromium only, a hint, never a certainty). A stepped
+frame is never a spike.
+
+#### The log
+
+`monitor.stream(listener)` hands a listener one JSON object per line, every one with `v: 1`
+(`PERF_LOG_VERSION`), `kind`, `t` (page epoch ms, `performance.timeOrigin + performance.now()`) and
+`build` (spec 10's build id, `null` on a page without one). Every line is a fresh object, frozen all
+the way down: a listener may keep it. A reader skips a kind or a field it does not know; "not
+measured on this build or backend" is `null`, never 0.
+
+| Kind | When |
+|---|---|
+| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent), the GPU and its timer, the display, the shell's thermal reading, the config, what is measured. On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
+| `startup` | Once, at the first flush after the first drawn frame, and to every later subscriber after its header: HTML, the bundle's download, parse, evaluate, the Pixi chunk, `app.init`, the first frame, the boot long frames. |
+| `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost. |
+| `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label, the long frames around it. |
+| `longFrame` | When the observer delivers one. |
+| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display`, `compile`/`upload` (at a flush), and every `monitor.event` call. |
+| `mark` | `monitor.mark(label)`, and an auto mark when the flow rests on a new path. |
+| `thermal` | Every `time:thermal` reading of the native shell. |
+
+The engine sends nothing anywhere: the listener decides (the editor's page agent posts the lines to
+its collector). Without a listener no line is built; the ring records anyway.
+
+#### GPU time
+
+On WebGPU with the engine's own device (agent builds request it with Pixi's features plus
+`"timestamp-query"`, handed to Pixi as `webgpu.gpu`), the first 32 passes of a frame carry
+timestamp writes, resolved into Pixi's own command buffer and read back per batch of up to eight
+drawn frames. A late time is written into the slot of its frame and clears `gpuPartial`; a 33rd
+pass or a busy batch keeps the flag. On WebGL the disjoint timer query times each render call
+where the browser has it (no time per pass). Chrome rounds stamps to 0.1 ms unless its flag is set.
+Compare frame pacing and late frames across rates, never raw GPU ms: the A26's GPU clocks down at
+60 fps and its ms rise.
+
+#### What is not counted
+
+Passes Pixi opens on command encoders of its own (a stand-alone clear between frames, the mipmap
+generator, the MSAA restore) and an upload between two frames (zeroed by the next frame's start;
+Pixi uploads lazily at the first draw, inside a frame). A WebGL pass has no stencil count and no GPU
+time of its own. A WebKit page reports no long frames.
 
 #### Capture
 
-- `capture()` guards with `typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__` inline,
-  not with `isDev()`: Bun does not inline a function across modules, and the inline guard folds under
-  a production `define`, so the capture code leaves the bundle. The dev branch logs `"moku:dev"`
+- `capture()` guards with the dev or agent refusal `(typeof __MOKU_GAME_DEV__ === "undefined" ||
+  !__MOKU_GAME_DEV__) && (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)`
+  inline, not with `isDev()`: Bun does not inline a function across modules, and the inline guard
+  folds under a production `define`, so the capture code leaves the bundle; a debug page keeps it.
+  `game.capture` with `diff` writes the state, so on a `--debug` page it throws `controlReadOnly`. The dev branch logs `"moku:dev"`
   with `{ command: "renderer.capture" }` at debug level, plus `options: [...]` with the names of the
   options given (`legend` counts when true). `renderer.extract.base64` exists on the
-  shared systems of both backends (8.21); it draws the stage into a texture over `app.screen`,
+  shared systems of both backends (8.22); it draws the stage into a texture over `app.screen`,
   cleared with `config.background`. The captures due on one frame with the same layers and legend
   share one extract. `onStop` answers a capture still waiting with `undefined`.
 - **Timing.** A picture is taken right after the next drawn frame (`monitor.end()`), at once while
@@ -225,7 +367,7 @@ test against the real module pins the three names, their `extension` metadata an
   `lifecycle:changed` hook (`paused: true`) one microtask later, so a pause inside a frame lets
   that frame end first: a plain capture is taken at once, a running sheet steps what is left of its
   spacing, or nothing when an earlier sheet served on the same pause stepped past it. The hook
-  carries the same positive dev guard as the draw-call counter, so a production build drops it with
+  carries the same positive dev or agent guard as the draw-call counter, so a production build drops it with
   the capture code. A clock that runs again by then leaves it to the next frame. The legend is measured on that same frame, in the same call as the extract's
   synchronous render; only the PNG encode comes later. Every option draws on the picture after the
   extract, on an `OffscreenCanvas` 2D context (`monitor/picture.ts`): the player never sees a toggle
@@ -296,13 +438,14 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `mount` | `string \| HTMLElement \| undefined` | `undefined` | Where the canvas goes. `undefined` keeps the plugin inert. |
 | `background` | `number` | `0x000000` | Clear colour, and the colour of the bars around the frame. |
 | `antialias` | `boolean` | `false` | Antialias the whole canvas. |
-| `maxResolution` | `number` | `2` | Cap of `devicePixelRatio`. Memory grows with its square. |
+| `maxResolution` | `number` | `2` | Cap of `devicePixelRatio`. Memory grows with its square. A player's graphics setting is applied by `monitor.setResolution`. |
 | `preference` | `"webgpu" \| "webgl"` | `"webgpu"` | Passed to Pixi. Pixi falls back to WebGL by itself. |
 | `aspect` | `{ min, max }` | `{ 4 / 3, 21 / 9 }` | Allowed long side / short side. A window outside it gets bars. |
 | `poolLimit` | `number` | `256` | Display objects kept in all pools together. |
 | `unsupportedMessage` | `string` | `"This device cannot run the game."` | Text of the unsupported-device screen. |
 | `loadPixi` | `() => Promise<PixiModule>` | `() => import("pixi.js")` | Loader seam. Tests pass a fake module. |
 | `debug` | `{ nineSlice }` | `{ nineSlice: false }` | Debug drawing at start; `sync.debug.nineSlice(on)` switches it at run time. |
+| `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
 
 ```ts
 const app = createApp({
@@ -430,7 +573,7 @@ measures (the fixture's display font was 12.9 u low at 54 u without it; both lin
 
 ### Distance-field text
 
-Pixi 8.21 applies the alpha of distance-field (MSDF, SDF) bitmap text twice. Its SDF shader hands
+Pixi 8.22 applies the alpha of distance-field (MSDF, SDF) bitmap text twice. Its SDF shader hands
 `calculateMSDFAlpha` the vertex colour, which is premultiplied: the function raises
 `vColor.a × coverage` to a gamma that leans on the luma of the premultiplied colour, and the shader
 template multiplies the result by `vColor` again. A label at alpha 0.5 so drew at about 0.25, a
@@ -485,15 +628,16 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
 ## Lifecycle
 
 - **onStart** `startRenderer` resolves the mount, loads Pixi, in a dev build swaps in the
-  draw-counting classes, creates the application and appends the canvas; then, in the `onReady` callback, `viewport` creates the safe-area probe and the
-  resize observer, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
-  `render` frame callback is registered. Inert without a document or without a mount: nothing is
-  created and nothing is registered.
+  draw-counting classes, creates the application and appends the canvas; then, in the `onReady` callback, `viewport` creates the two safe-area probes, the
+  two resize observers and the `moku-native:insets` listener, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
+  `render` frame callback is registered; in an agent build the monitor then attaches (and again
+  after every restore). Inert without a document or without a mount: nothing is created and nothing
+  is registered.
 - **onStop** `({ config, state }) => stopRenderer({ config, state })` answers a waiting capture
   with `undefined` and forgets the frame counters, then runs the cleanups of `sync`,
   `viewport` and `host` in that order, destroys the pooled objects and the application
   (`{ removeView: true }`, `{ children: true, texture: false }`), swaps Pixi's own draw classes
-  back, removes the probe and the unsupported element and clears every map, the filter slots too. It runs before `world` stops, so the world hooks are
+  back, removes the two safe-area probes and the unsupported element and clears every map, the filter slots too. It runs before `world` stops, so the world hooks are
   removed while `world` is alive. Textures are left to `assets`; a `Display` object is detached,
   never destroyed.
 
@@ -539,8 +683,10 @@ in direct mode, so motions in flight when the command started are finished after
 clock), and `snapshot()` and `step()` (the frames of a sheet), `lifecycle` for `push`/`pop` of
 `"background"` and `"device-lost"` and for the `lifecycle:changed` hook that serves the captures a
 pause left waiting, `clock` for `now()`, the time source of the frame counters,
-`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot` and
-`projection.layers`/`keyOf`. The doors read `world.ecs.ownerOf` and, for `game.capture` with
+`world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot`,
+`projection.layers`/`keyOf` and, in an agent build, `systemTimes()`, `flow` for the flow path of
+the frames in the performance log (`state()`, and the `flow:edge`/`flow:rest` hooks), `time` also
+for `measure` and `chargeAgent` in an agent build. The doors read `world.ecs.ownerOf` and, for `game.capture` with
 `diff`, the app's `flow`. Core APIs: `ctx.log`. `pixi.js` is a peer dependency, reached only
 through `config.loadPixi`.
 

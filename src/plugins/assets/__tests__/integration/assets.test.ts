@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp, createPlugin, defineGame, screen, type } from "../../../../index";
+import {
+  createApp,
+  createPlugin,
+  defineGame,
+  exit,
+  flattenFeatures,
+  screen,
+  type
+} from "../../../../index";
 import { defineScene } from "../../../scenes/define";
+import { load } from "../../bundles";
 import { assetsPlugin } from "../../index";
 import type { AssetStamps, Events, Manifest, ManifestFile } from "../../types";
 import { createFakeIo } from "../unit/mock-assets";
@@ -571,6 +580,180 @@ describe("assets plugin integration — the dev hot swap", () => {
 
     expect(reload).not.toHaveBeenCalled();
     expect(heard.replaced).toEqual([]);
+
+    await app.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: the episode game. `home` rests on `idle`; its flow opens the
+// pick flow of `episodes`, a transit node that enters the flow of the
+// sub-feature `ep01`, whose entry node loads the bundle "ep01" and rests on the
+// ward. A probe companion travels with every bundle.
+// ---------------------------------------------------------------------------
+
+const enterEpisode = defineNode({
+  outcomes: { ready: type() },
+  run: async ({ fx, out }) => {
+    await fx(load("ep01"));
+
+    return out.ready();
+  }
+});
+const episodeWard = defineNode({ rest: true, outcomes: { again: type(), leave: type() } });
+const ep01Flow = defineFlow("ep01.play", {
+  nodes: { enter: enterEpisode, ward: episodeWard },
+  start: "enter",
+  outcomes: { again: type(), leave: type() },
+  edges: { enter: { ready: "ward" }, ward: { again: exit("again"), leave: exit("leave") } }
+});
+const pick = defineNode({ outcomes: { play: type() }, run: ({ out }) => out.play() });
+const pickFlow = defineFlow("episodes.pick", {
+  nodes: { pick, ep01: ep01Flow },
+  start: "pick",
+  outcomes: { back: type() },
+  edges: { pick: { play: "ep01" }, ep01: { again: "pick", leave: exit("back") } }
+});
+const idle = defineNode({ rest: true, outcomes: { open: type() } });
+const homeFlow = defineFlow("home.main", {
+  nodes: { idle, episodes: pickFlow },
+  start: "idle",
+  edges: { idle: { open: "episodes" }, episodes: { back: "idle" } }
+});
+const homeFeature = defineFeature("home", { flows: [homeFlow] });
+const ep01Feature = defineFeature("ep01", { flows: [ep01Flow] });
+const episodesFeature = defineFeature("episodes", { features: [ep01Feature], flows: [pickFlow] });
+
+/** What the companion of the probe was asked, in order, and the switch of the held ep01 load. */
+const travelled: { calls: string[]; arrive: (() => void) | undefined } = {
+  calls: [],
+  arrive: undefined
+};
+
+const companionProbe = createPlugin("companionProbe", {
+  depends: [assetsPlugin],
+  onInit: ctx => {
+    ctx.require(assetsPlugin).companions.add({
+      load: bundle => {
+        travelled.calls.push(`load ${bundle}`);
+
+        return new Promise<void>(resolve => {
+          travelled.arrive = resolve;
+        });
+      },
+      unload: bundle => {
+        travelled.calls.push(`unload ${bundle}`);
+      }
+    });
+  }
+});
+
+/**
+ * Starts the episode game over a fake io and lets the graph settle on `idle`.
+ *
+ * @param release - The release of the bundle "ep01"; absent means "budget".
+ * @returns The started app.
+ */
+async function startEpisodes(release?: "leave") {
+  heard.unloaded.length = 0;
+  travelled.calls.length = 0;
+  travelled.arrive = undefined;
+
+  const episodes: Manifest = {
+    version: 1,
+    bundles: {
+      ep01: {
+        feature: "ep01",
+        parent: "episodes",
+        dir: "features/episodes/ep01",
+        tier: "lazy",
+        ...(release === undefined ? {} : { release }),
+        mb: 0.063,
+        files: [
+          {
+            key: "ep01.room",
+            path: "features/episodes/ep01/assets/room.png",
+            width: 128,
+            height: 128,
+            mb: 0.063
+          }
+        ]
+      }
+    }
+  };
+  const app = createApp({
+    plugins: [
+      ...screen,
+      ...flattenFeatures([homeFeature, episodesFeature]),
+      probePlugin,
+      companionProbe
+    ],
+    pluginConfigs: {
+      flow: { mainFlow: homeFlow },
+      model: { initialPlayer: { coins: 0 }, initialSession: { visits: 0 }, seed: 1 },
+      assets: { manifest: episodes, preloadDepth: 2, io: createFakeIo() }
+    }
+  });
+
+  await app.start();
+  app.flow.run().catch(() => undefined);
+  await tick();
+
+  return app;
+}
+
+describe("assets plugin integration — a bundle that leaves with its feature", () => {
+  it("waits for the companion on the way into the episode, and lets the bundle go at the rest outside it", async () => {
+    const app = await startEpisodes("leave");
+
+    expect(app.flow.gate.answer({ intent: "open" })).toBe(true);
+    await tick();
+
+    // The files are there, the companion is not: the entry node still waits.
+    expect(app.flow.state().path).toBe("episodes/ep01/enter");
+    expect(app.assets.isLoaded("ep01")).toBe(false);
+
+    travelled.arrive?.();
+    await tick();
+
+    expect(app.flow.state().path).toBe("episodes/ep01/ward");
+    expect(app.assets.isLoaded("ep01")).toBe(true);
+
+    // Out through the transit pick node and back in: no rest outside the episode, nothing leaves.
+    expect(app.flow.gate.answer({ intent: "again" })).toBe(true);
+    await tick();
+
+    expect(app.flow.state().path).toBe("episodes/ep01/ward");
+    expect(app.assets.isLoaded("ep01")).toBe(true);
+    expect(heard.unloaded).toEqual([]);
+
+    // Home: the first rest with no node of ep01 on the stack.
+    expect(app.flow.gate.answer({ intent: "leave" })).toBe(true);
+    await tick();
+
+    expect(app.flow.state().path).toBe("idle");
+    expect(app.assets.isLoaded("ep01")).toBe(false);
+    expect(heard.unloaded).toEqual([
+      { bundle: "ep01", tier: "lazy", mb: 0.063, reason: "leave", keys: ["ep01.room"] }
+    ]);
+    expect(travelled.calls).toEqual(["load ep01", "unload ep01"]);
+
+    await app.stop();
+  });
+
+  it('keeps a "budget" bundle loaded on the same walk', async () => {
+    const app = await startEpisodes();
+
+    app.flow.gate.answer({ intent: "open" });
+    await tick();
+    travelled.arrive?.();
+    await tick();
+    app.flow.gate.answer({ intent: "leave" });
+    await tick();
+
+    expect(app.flow.state().path).toBe("idle");
+    expect(app.assets.isLoaded("ep01")).toBe(true);
+    expect(heard.unloaded).toEqual([]);
 
     await app.stop();
   });

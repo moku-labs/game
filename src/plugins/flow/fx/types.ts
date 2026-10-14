@@ -7,18 +7,24 @@ import type { Allow } from "../gate/types";
 /**
  * An effect a node awaits. With `answers` the runner opens the gate for those intents.
  * `cosmetic: true` keeps a handler error away from the node: the effect resolves `undefined` and
- * the log gets the warn entry `flow:fx-cosmetic-failed` with `{ kind, message }`.
+ * the log gets the warn entry `flow:fx-cosmetic-failed` with `{ kind, message }`. `Result` is what
+ * `await fx(descriptor)` resolves with: the built-in helpers and `defineEffect` declare it, a
+ * descriptor written by hand is `Descriptor<unknown>`. It is carried by a member that is never set,
+ * so a descriptor stays plain JSON.
  *
  * @example
  * ```ts
  * const descriptor: Descriptor = { kind: "popup", payload: { name: "Retry" }, answers: ["again"] };
+ * const loading: Descriptor<LoadResult | undefined> = { kind: "load", payload: { bundles: ["board"] } };
  * ```
  */
-export type Descriptor = {
+export type Descriptor<Result = unknown> = {
   kind: string;
   payload?: Json;
   answers?: readonly string[];
   cosmetic?: boolean;
+  /** Never set: the type of what `await fx(descriptor)` resolves with. */
+  readonly $result?: () => Result;
 };
 
 /**
@@ -231,17 +237,18 @@ export type FxInternal = {
 /**
  * The `fx` of a node context, and of the context of `recover`. Three ways to reach what is not
  * logic: `await fx(descriptor)` runs an effect and waits for it, `fx.start(descriptor)` starts one
- * now and does not wait, `fx.emit(hint)` keeps a cosmetic hint until the edge has committed.
+ * now and does not wait, `fx.emit(hint)` keeps a cosmetic hint until the edge has committed. The
+ * awaited value is typed by the descriptor: what its helper or its `defineEffect` declared,
+ * `unknown` for a descriptor written by hand.
  *
  * @example
  * ```ts
  * // Inside a node body: wait for the player's pick, then sparkle once the edge has committed.
- * const pick = await fx({ kind: "popup", payload: { name: "Retry" }, answers: ["again", "home"] });
- * // pick: { intent: "again" }
+ * const pick = await fx(popup(Retry, {})); // Answer<"again" | "home">: { intent: "again" }
  * fx.emit(hint("sparkle", { cell: "c3" }));
  * ```
  */
-export type NodeFx = ((descriptor: Descriptor) => Promise<unknown>) & {
+export type NodeFx = (<Result>(descriptor: Descriptor<Result>) => Promise<Result>) & {
   /**
    * Buffers one cosmetic hint. It reaches its handler and the `onHint` listeners only after the
    * commit of the edge, so a node that fails shows nothing. Fast mode drops it.
@@ -283,4 +290,94 @@ export type NodeFx = ((descriptor: Descriptor) => Promise<unknown>) & {
    * ```
    */
   start(descriptor: Descriptor): void;
+};
+
+/**
+ * How an effect a game declares behaves; see `defineEffect`. `fast: "run"` runs its handler in a
+ * fast walk too, `"skip"` (the default) skips it there; `cosmetic: true` keeps a handler error
+ * away from the node.
+ *
+ * @example
+ * ```ts
+ * const options: EffectOptions = { fast: "run" }; // the page read answers in a fast walk too
+ * ```
+ */
+export type EffectOptions = { fast?: "run" | "skip"; cosmetic?: boolean };
+
+/**
+ * The handler of one declared effect: the typed payload in, the result out. The context is the
+ * gateway's: the node's abort signal and the mode of the walk.
+ *
+ * @example
+ * ```ts
+ * const answerEnvRead: EffectHandler<{ notice: boolean }, { reducedMotion: boolean }> = payload => ({
+ *   reducedMotion: payload.notice
+ * });
+ * ```
+ */
+export type EffectHandler<Payload, Result> = (
+  payload: Payload,
+  context: { signal: AbortSignal; mode: "live" | "fast" }
+) => Result | Promise<Result>;
+
+/**
+ * True for an effect declared without a payload: its constructor then takes no argument.
+ */
+type IsVoidPayload<Payload> =
+  // biome-ignore lint/suspicious/noConfusingVoidType: `void` is the payload of an effect without one, compared on purpose
+  [Payload] extends [void] ? true : false;
+
+/**
+ * An effect a game declares with `defineEffect`: called, it builds the descriptor; `kind` names
+ * it; `handle` registers its one handler. `Resolves` is what `await fx(...)` gives: `Result`, or
+ * `Result | undefined` (see `defineEffect`).
+ *
+ * @example
+ * ```ts
+ * type EnvRead = { reducedMotion: boolean; saveFallback: boolean };
+ * const envRead: Effect<{ notice: boolean }, EnvRead, EnvRead> = defineEffect<{ notice: boolean }, EnvRead>(
+ *   "view-env.read",
+ *   { fast: "run" }
+ * );
+ * ```
+ */
+export type Effect<Payload, Result, Resolves> = {
+  /**
+   * Builds the descriptor a node awaits or starts. An effect without a payload takes no argument.
+   *
+   * @param payload - The payload the effect was declared with.
+   * @returns The descriptor, frozen; `await fx(descriptor)` resolves `Resolves`.
+   * @example
+   * ```ts
+   * envRead({ notice: true }); // { kind: "view-env.read", payload: { notice: true } }
+   * ```
+   */
+  (...payload: IsVoidPayload<Payload> extends true ? [] : [payload: Payload]): Descriptor<Resolves>;
+
+  /**
+   * The effect kind, as `fx.handle` and the journal name it.
+   *
+   * @example
+   * ```ts
+   * envRead.kind; // "view-env.read"
+   * ```
+   */
+  readonly kind: string;
+
+  /**
+   * Registers the one handler of this effect on the flow's gateway, with the fast-walk flag the
+   * declaration chose. The handler gets the payload, not the descriptor.
+   *
+   * @param fx - The flow's effects gateway, `ctx.require(flowPlugin).fx`.
+   * @param handler - Called with the payload and `{ signal, mode }`; returns the result.
+   * @returns The remover: it unregisters this handler.
+   * @throws {Error} When the kind already has a handler.
+   * @example
+   * ```ts
+   * // plugins/view-env/index.ts of a game, in onStart:
+   * ctx.state.off = envRead.handle(ctx.require(flowPlugin).fx, payload => answerEnvRead(ctx, payload));
+   * ctx.state.off(); // in onStop: "view-env.read" has no handler again
+   * ```
+   */
+  handle(fx: FxApi, handler: EffectHandler<Payload, Result>): () => void;
 };

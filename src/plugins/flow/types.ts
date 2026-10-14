@@ -2,13 +2,18 @@
  * @file flow plugin — shared types of the plugin and its modules.
  */
 import type { Log } from "@moku-labs/common/browser";
-import type { AnyPluginInstance, PluginCtx } from "@moku-labs/core";
+import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as ClockApi } from "../clock/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Patch } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
-import type { FeatureDescription, FeaturesApi, FeaturesState } from "./features/types";
+import type {
+  FeatureDescription,
+  FeaturePlugin,
+  FeaturesApi,
+  FeaturesState
+} from "./features/types";
 import type { FxApi, FxState } from "./fx/types";
 import type { GateApi, GateState } from "./gate/types";
 import type { InboxApi, InboxState } from "./inbox/types";
@@ -221,17 +226,6 @@ export type BundlesOf<Types extends GameTypes> = Types extends {
   : string;
 
 /**
- * A feature is an ordinary plugin with no API of its own; `AnyPluginInstance` is the kernel's
- * widened type for plugin lists. `logicOnly` is the same plugin reduced to the V1 keys.
- *
- * @example
- * ```ts
- * createApp({ plugins: [boardFeature.logicOnly] });
- * ```
- */
-export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginInstance };
-
-/**
  * What `flowFor` binds to a game: the node helper with the game's `player` and `session`, and
  * the flow and feature helpers, which take no game types.
  *
@@ -271,9 +265,22 @@ export type {
   FeatureDescription,
   FeatureEmitter,
   FeatureFilter,
-  FeaturesApi
+  FeaturePlugin,
+  FeaturesApi,
+  FeatureTree,
+  RegisteredFeature
 } from "./features/types";
-export type { Descriptor, FxApi, FxHandler, GuideOptions, Hint, NodeFx } from "./fx/types";
+export type {
+  Descriptor,
+  Effect,
+  EffectHandler,
+  EffectOptions,
+  FxApi,
+  FxHandler,
+  GuideOptions,
+  Hint,
+  NodeFx
+} from "./fx/types";
 export type { Allow, Answer, GateApi } from "./gate/types";
 export type { InboxApi, WorldEvent } from "./inbox/types";
 export type {

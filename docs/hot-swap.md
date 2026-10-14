@@ -13,7 +13,7 @@ None. `moku-game dev` writes `.moku/bunfig.toml` with the hot plugin first, reso
 
 [serve.static]
 plugins = ["/abs/game/node_modules/@moku-labs/game/dist/hot.mjs"]
-define = { "__MOKU_GAME_DEV__" = "true" }
+define = { "__MOKU_GAME_DEV__" = "true", "__MOKU_GAME_AGENT__" = "true", "__MOKU_GAME_CONTROL__" = "true" }
 ```
 
 The game keeps no `bunfig.toml`. `--serve-plugin <path>` adds a Bun plugin after the hot one, `--preload <path>` a `preload` line.
@@ -35,7 +35,7 @@ A view module may import the root `@moku-labs/game`. The package marks only its 
 
 ## What swaps and what reloads
 
-A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts` or a generated `generated/strings.<locale>.ts`. On the layered layout it is also any `.ts` directly in a kind folder: `styles/`, `motion/`, `effects/`, `views/`, `world/projections/` and `world/layout/`, in a feature or in `shared/`. A file one folder deeper, such as `views/deep/x.ts`, is not. Anything under `node_modules/`, `web/`, `generated/`, `__tests__/` or `tests/`, and `.test` or `.spec` files, never swap. The generated strings files are the one exception in `generated/`.
+A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts` or a generated `generated/strings.<locale>.ts` or `generated/strings.<feature>.<locale>.ts` (the strings of a sub-feature). On the layered layout it is also any `.ts` directly in a kind folder: `styles/`, `motion/`, `effects/`, `views/`, `world/projections/` and `world/layout/`, in a feature or in `shared/`. A file one folder deeper, such as `views/deep/x.ts`, is not. Anything under `node_modules/`, `web/`, `generated/`, `__tests__/` or `tests/`, and `.test` or `.spec` files, never swap. The generated strings files are the one exception in `generated/`.
 
 | Saved | What happens |
 |---|---|
@@ -46,16 +46,16 @@ A view module is a `.tsx` file, `styles.ts`, `view.ts`, `animations.ts`, `effect
 | Animations | Swap through `anim.replace`. The next `play` builds the new tree; a running timeline keeps its own |
 | Text styles (`defineTextStyles`) | Swap through `text.replaceStyles`. Every label is redrawn with the new style |
 | Emitters (`defineEmitter`) | Swap. `effects` takes them from the `ui:hot-swap` event; live particles keep their old config |
-| Generated strings | Swap through `i18n.replace`. Every label resolves its message again |
+| Generated strings | Swap through `i18n.replace`. Every label resolves its message again. A sub-feature's module whose bundle is not loaded is left alone: the next load of the bundle imports it |
 | Logic: `rules/`, `nodes/`, `flows/`, `state.ts`, `tables.ts`, `kit.ts`, a feature `index.ts`, `world/components/`, `world/systems/` | Reload and restore. These files never get the footer. A `world/layout/` module gets it: plain functions swap and repaint, but one that exports an object with its own `name` or `id` is refused and reloads |
 | Scenes, systems, ECS components, filters, features, flows, nodes, plugins | Reload and restore. They are registered by value at start |
 | A new projection or a new animation | Reload and restore. A scene mounts a projection, a feature registers an animation |
-| A string value in `strings/<locale>.json` | Swap. The keys watch writes `generated/strings.<locale>.ts`, and `i18n.replace` takes it |
-| A new string key | Swap, the same way: the message is new in `generated/strings.<locale>.ts`. `generated/strings.ts` gets the key as a type only, and a type reloads nothing |
+| A string value in `strings/<locale>.json` | Swap. The keys watch writes `generated/strings.<locale>.ts`, for a sub-feature `generated/strings.<feature>.<locale>.ts`, and `i18n.replace` takes it |
+| A new string key | Swap, the same way: the message is new in `generated/strings.<locale>.ts` (or the sub-feature's module). `generated/strings.ts` gets the key as a type only, and a type reloads nothing |
 | An asset file saved with new bytes: a texture, a bitmap font `.fnt` or its page, a sound | Swap. The keys watch writes `.moku/assets-stamp.ts`, and `assets` reads the changed files again. See [An asset file](#an-asset-file) |
 | An asset file that is new, removed or renamed, also a changed nine-slice tag in the file name | Reload and restore. The manifest the page booted with is not true any more. The page fetches it again, and the dev server answers files with `no-store` |
 
-Strings come from `features/*/strings/<locale>.json` and the `strings/` of every layer. The last four rows need the keys watch: `moku-game dev` on the raw files runs it, and the editor starts it with `watchKeys`. See [dev keeps generated/ fresh](./shell.md#dev-keeps-generated-fresh). A game with a server of its own runs `bun run assets:keys` after a JSON edit: it writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin `moku-game-assets` has no watch mode.
+Strings come from the `strings/<locale>.json` of every feature and sub-feature, `features/home/strings/` and `features/episodes/ep01/strings/`, and the `strings/` of every layer. An asset file of a sub-feature swaps like any other. The last four rows need the keys watch: `moku-game dev` on the raw files runs it, and the editor starts it with `watchKeys`. See [dev keeps generated/ fresh](./shell.md#dev-keeps-generated-fresh). A game with a server of its own runs `bun run assets:keys` after a JSON edit: it writes `generated/strings.<locale>.ts`, and that save is what swaps. The bin `moku-game-assets` has no watch mode.
 
 ### An asset file
 
@@ -67,7 +67,7 @@ A save with new bytes travels in three steps. The keys watch writes `.moku/asset
 - **A `.fnt` that starts naming another page file** is seen only when that page file is new, which reloads.
 - **A sound that is playing plays on** with the old bytes. The next play takes the new ones.
 - **A running particle effect of a replaced texture starts again**, so a burst plays again.
-- **An image outside every `assets/` folder**, such as a favicon or `features/home/outside.webp`, is ignored. A new file in the `assets/` of a feature or of a layer reloads the page, also the first file of a folder that had none.
+- **An image outside every `assets/` folder**, such as a favicon or `features/home/outside.webp`, is ignored. A new file in the `assets/` of a feature, of a sub-feature or of a layer reloads the page, also the first file of a folder that had none, so the first file of a new sub-feature does too. A new file in the `assets/` of a kind folder right inside a feature, such as `features/home/views/assets/`, reloads the page as well although the scanner never reads it: an accepted false positive.
 
 ## A refusal
 
@@ -100,7 +100,7 @@ plugins = ["./hot.ts"]
 
 | Option | Default | Tested on |
 |---|---|---|
-| `include` | `.tsx`, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`, `generated/strings.<locale>.ts`, and any `.ts` directly in `styles/`, `motion/`, `effects/`, `views/`, `world/projections/` or `world/layout/` | The absolute path. Do not anchor it at the start |
+| `include` | `.tsx`, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`, `generated/strings.<locale>.ts` and `generated/strings.<feature>.<locale>.ts`, and any `.ts` directly in `styles/`, `motion/`, `effects/`, `views/`, `world/projections/` or `world/layout/` | The absolute path. Do not anchor it at the start |
 | `exclude` | `node_modules/`, `web/`, `generated/`, `__tests__/`, `tests/`, `.test` and `.spec` files | The path relative to the game root, with a leading `/`: `/features/home/view.tsx` |
 
 ## Keep view helpers next to their projection

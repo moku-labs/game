@@ -2,13 +2,14 @@
  * @file The `@moku-labs/game/app/page` entry: `startPage`, the page of a game. The generated
  * `.moku/main.ts` calls it with the game, its config and what the CLI found: scenarios, the system
  * shell, the dev agents and the `.dev` modules. It reaches the shell only through
- * `options.system`, never by an import, so a web-only page bundles no system code. Its dev parts
- * (the write door `/control`, the agents, the audio journal) sit behind the inline dev guard, so a
- * production build drops them.
+ * `options.system`, never by an import, so a web-only page bundles no system code. The write door
+ * `/control` and the agents sit behind the inline dev or agent guard, the audio journal behind
+ * the dev guard, so a production build drops them; a debug build keeps the door and the agents.
  */
 import { read, sources, watch } from "../inspect";
 import { systemSource } from "../plugins/clock/system";
 import type { ClockSource } from "../plugins/clock/types";
+import { isControl } from "../plugins/flow/doors/dev";
 import { memory } from "../plugins/model/store/providers/memory";
 import type { PlayerStateProvider } from "../plugins/model/store/types";
 import { resolveConfig } from "./config";
@@ -16,6 +17,7 @@ import { pageSave } from "./save";
 import type {
   AnyGameApp,
   GameConfig,
+  OverlayStart,
   PageOptions,
   ResolvedGameConfig,
   Scenario,
@@ -161,7 +163,7 @@ function screenOf(game: AnyGameApp, runtime: PageRuntime): PageApp {
 
 /**
  * Sets the three handles of the page on `globalThis`: `game` for e2e, `system` for the shell,
- * `doors` for the editor. The write door `/control` is loaded in dev only.
+ * `doors` for the editor. `/control` is loaded on the dev page and on a debug page.
  *
  * @param app - The screen app.
  * @param shell - The system shell, or `undefined`.
@@ -171,8 +173,10 @@ async function setHandles(app: PageApp, shell: SystemShell | undefined): Promise
   Reflect.set(globalThis, "game", app);
   Reflect.set(globalThis, "system", shell?.handle);
 
+  // The dev or agent guard stays inline: a build defines both flags and folds it.
   const control =
-    typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__
+    (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+    (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
       ? await import("../control")
       : undefined;
 
@@ -198,8 +202,34 @@ function followReducedMotion(app: PageApp): void {
 }
 
 /**
- * Starts the dev agents, in order, after the app: each gets the app, the page title and the
- * game's `.dev` modules. A throwing agent is logged and the page keeps running.
+ * Follows the page out. On `pagehide` the save is flushed at once: the browser waits for no
+ * promise there, so the write starts now, and the failure, if any, is already in the log. A page
+ * going into the back/forward cache (`persisted`) may come back with its app running, so only a
+ * page that is really left stops its app, once.
+ *
+ * @param app - The started screen app.
+ */
+function followPageHide(app: PageApp): void {
+  const listener = (event: PageTransitionEvent): void => {
+    app.model.store.flush().catch(() => {
+      // The store logged a failing provider before it rethrew (src/plugins/model/store/api.ts).
+    });
+
+    if (event.persisted) return;
+
+    // Core's stop does not guard a second call: the listener goes before the app stops.
+    removeEventListener("pagehide", listener);
+    app.stop().catch((error: unknown) => {
+      app.log.error("[game] The page did not stop cleanly.", undefined, toError(error));
+    });
+  };
+
+  addEventListener("pagehide", listener);
+}
+
+/**
+ * Starts the agents, in order, after the app, in dev and in a debug build: each gets the app, the
+ * page title and the game's `.dev` modules. A throwing agent is logged and the page keeps running.
  *
  * @param app - The running app.
  * @param settings - The resolved config.
@@ -221,12 +251,28 @@ async function startAgents(
 }
 
 /**
+ * Shows the editor's overlay the way `config.ts` `debug.overlay` asks, once the agents started: the agent's channel
+ * exists only then.
+ *
+ * @param app - The running app.
+ * @param overlay - `"closed"` makes no call, `"pill"` opens the pill, `"open"` the card.
+ */
+function openStartOverlay(app: PageApp, overlay: OverlayStart): void {
+  if (overlay === "closed") return;
+
+  app.debug.overlay.open({ mode: overlay === "pill" ? "pill" : "card" });
+}
+
+/**
  * Runs a game on its page: resolves `config.ts`, picks the start (a `?player=` scenario runs on a
  * fresh memory save, never on the stored one), builds the system shell when the page has one,
  * picks the save, makes the screen app on `#game` over the device clock and the manifest next to
  * the page, sets `globalThis.game`, `system` and `doors`, follows reduced motion, starts the shell,
- * then the app, and runs the graph. A graph that stops is logged, never thrown. In dev it then
- * starts the agents. Every problem goes to the app's log.
+ * then the app, and runs the graph. A graph that stops is logged, never thrown. In dev and in a
+ * debug build it then logs `page:build` (the build id, the engine id, the control profile),
+ * starts the agents and shows the overlay as `config.ts` `debug.overlay` asks. Every problem goes
+ * to the app's log. On `pagehide` it flushes the save, and stops the app when the page is really
+ * left (`persisted` false); a page kept in the back/forward cache keeps its app running.
  *
  * @param game - The default export of the game's `index.ts`.
  * @param config - The default export of the game's `config.ts`.
@@ -237,6 +283,7 @@ async function startAgents(
  * @example
  * ```ts
  * // Written by moku-game dev. Do not edit.
+ * import "./script.ts";
  * import "./dev.ts";
  * import "./assets-stamp.ts";
  * import { startPage } from "@moku-labs/game/app/page";
@@ -248,6 +295,7 @@ async function startAgents(
  * import * as devModule0 from "../features/board/board.dev.ts";
  * import agent0 from "@moku-labs/editor/agent/page";
  *
+ * performance.mark("moku:main");
  * await startPage(game, config, {
  *   scenarios: { "empty": scenario0, "full": scenario1 },
  *   system: systemShellOf({
@@ -289,10 +337,23 @@ export async function startPage<Game extends AnyGameApp>(
     app.log.error("[game] The graph stopped.", undefined, toError(error));
   });
 
-  // The agents come last, on the running game. The guard stays inline: the build folds it.
-  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+  // The agents come on the running game. The dev or agent guard stays inline: the build folds it.
+  if (
+    (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+    (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+  ) {
+    app.log.info("page:build", {
+      build: globalThis.__MOKU_GAME_BUILD__ ?? "dev",
+      // eslint-disable-next-line unicorn/no-null -- the log line is JSON: `null` names no engine.
+      engine: globalThis.__MOKU_GAME_ENGINE__ ?? null,
+      control: isControl() ? "full" : "read"
+    });
     await startAgents(app, settings, options);
+    openStartOverlay(app, settings.debug.overlay);
   }
+
+  // Last: an agent's own pagehide listener, added while it started, sees the running game first.
+  followPageHide(app);
 
   return { app: app as ScreenAppOfGame<Game>, system: shell?.handle };
 }

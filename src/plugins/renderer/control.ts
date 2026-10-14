@@ -1,10 +1,12 @@
 /**
  * @file renderer plugin — the renderer commands of the `/control` door: take a picture of the
- * canvas, with its options, and switch the debug drawing. Dev builds only: every body starts with
- * the inline dev guard, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
+ * canvas, with its options, and switch the debug drawing. Dev and debug builds: every body starts with
+ * the inline agent guard of a read or cosmetic command, so a bundler `define` of `false` drops it,
+ * and logs the `moku:dev` marker. A capture with `diff` writes the state, so it also takes the
+ * control guard: a `--debug` page refuses it.
  */
 import { defineCommand } from "../flow/doors/define";
-import { controlRefused } from "../flow/doors/dev";
+import { controlReadOnly, controlRefused } from "../flow/doors/dev";
 import { recordCheat } from "../flow/doors/session";
 import type { ControlApp } from "../flow/doors/types";
 import type { HeadlessApp } from "../flow/headless";
@@ -340,7 +342,8 @@ async function captureDiff(
  * itself as a raw write (`tainted` turns true), restores the bookmark and waits for its gate, takes
  * that picture, restores where the game stood and waits again, and answers the pixel diff of now
  * against then. While the game is paused it steps each frame it waits on, 1000/60 ms of game time.
- * `undefined` while the renderer is inert, as in a headless test.
+ * `undefined` while the renderer is inert, as in a headless test. A `--debug` page takes the
+ * picture and refuses `diff` with the read-only error of `controlReadOnly`.
  *
  * @example
  * ```ts
@@ -357,7 +360,12 @@ export const captureCommand = defineCommand({
   input: { legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" },
   effect: "read",
   run: (app: CaptureApp, input) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     const given = givenFields(input);
 
@@ -369,6 +377,14 @@ export const captureCommand = defineCommand({
     const options = readOptions(input);
 
     if (input.diff === undefined) return app.renderer.capture(options);
+
+    // A diff restores a bookmark and journals itself as a raw write: a --debug page refuses it.
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlReadOnly("game.capture diff");
+    }
 
     const diff = readDiff(input.diff);
 
@@ -394,7 +410,12 @@ export const debugCommand = defineCommand({
   input: { nineSlice: "boolean" },
   effect: "cosmetic",
   run: (app: RendererApp, { nineSlice }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.debug", nineSlice });
     app.renderer.sync.debug.nineSlice(nineSlice);

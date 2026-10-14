@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { FakeDom } from "../fake-dom";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -16,6 +17,31 @@ async function started(
   await mock.start();
 
   return mock;
+}
+
+/**
+ * The fake DOM of a started mock, and the observer that watches both safe-area probes.
+ *
+ * @param mock - A started mock renderer.
+ * @returns The fake DOM and the probes' observer; the test fails when either is missing.
+ */
+function probeWatch(mock: MockRenderer): {
+  dom: FakeDom;
+  observer: FakeDom["observers"][number];
+} {
+  const { dom } = mock;
+  const probes = mock.ctx.state.viewport.probes;
+
+  if (dom === undefined || probes === undefined) throw new Error("the mock made no probes");
+
+  const observer = dom.observers.find(
+    each =>
+      each.targets.includes(probes.start as never) && each.targets.includes(probes.end as never)
+  );
+
+  if (observer === undefined) throw new Error("nothing observes both probes");
+
+  return { dom, observer };
 }
 
 describe("viewport size: both sides fit", () => {
@@ -101,5 +127,79 @@ describe("viewport toScreen: reference units to client CSS pixels", () => {
 
     expect(screen).toEqual({ x: 120, y: 340 });
     expect(screen).not.toBe(point);
+  });
+});
+
+describe("viewport safe area: the probes are watched", () => {
+  // A 1080x2400 phone: the frame is the whole mount and the scale stays 1 with a 47 px notch.
+  const phone = { width: 1080, height: 2400 };
+
+  it("an inset that arrives after start is laid out at the next frame", async () => {
+    const mock = await started(phone);
+    const { dom, observer } = probeWatch(mock);
+
+    dom.insets.top = 47;
+    observer.fire();
+
+    expect(mock.modules.viewport.applyPending()).toBe(true);
+    expect(mock.api.viewport.size().scale).toBe(1);
+    expect(mock.api.viewport.size().safeArea.top).toBe(47);
+  });
+
+  it("a left and right swap with the same container size is laid out", async () => {
+    const mock = await started({ ...phone, insets: { left: 47 } });
+    const { dom, observer } = probeWatch(mock);
+
+    expect(mock.api.viewport.size().safeArea).toMatchObject({ left: 47, right: 0 });
+
+    Object.assign(dom.insets, { left: 0, right: 47 });
+    observer.fire();
+    mock.modules.viewport.applyPending();
+
+    expect(mock.api.viewport.size().safeArea).toMatchObject({ left: 0, right: 47 });
+  });
+
+  it("the probes' observer only raises the flag: nothing is laid out before applyPending", async () => {
+    const mock = await started(phone);
+    const { dom, observer } = probeWatch(mock);
+    const resizes = mock.pixi.last().renderer.resizes.length;
+
+    dom.insets.top = 47;
+    observer.fire();
+
+    expect(mock.api.viewport.size().safeArea.top).toBe(0);
+    expect(mock.pixi.last().renderer.resizes).toHaveLength(resizes);
+  });
+
+  it("a moku-native:insets event raises the flag and the next applyPending reads the probes; after stop it does nothing", async () => {
+    const mock = await started(phone);
+    const { dom } = probeWatch(mock);
+
+    dom.insets.bottom = 34;
+    dom.window.dispatch("moku-native:insets", { detail: { top: 999 } });
+
+    expect(mock.modules.viewport.applyPending()).toBe(true);
+    expect(mock.api.viewport.size().safeArea).toMatchObject({ top: 0, bottom: 34 });
+
+    mock.stop();
+    dom.window.dispatch("moku-native:insets", { detail: {} });
+
+    expect(mock.modules.viewport.applyPending()).toBe(false);
+  });
+
+  it("stop removes both probes from the body and disconnects their observer", async () => {
+    const mock = await started(phone);
+    const { dom, observer } = probeWatch(mock);
+    const probes = mock.ctx.state.viewport.probes;
+    const body = dom.document.body.children as unknown[];
+
+    expect(body).toEqual(expect.arrayContaining([probes?.start, probes?.end]));
+
+    mock.stop();
+
+    expect(body).not.toContain(probes?.start);
+    expect(body).not.toContain(probes?.end);
+    expect(observer.disconnected).toBe(true);
+    expect(mock.ctx.state.viewport.probes).toBeUndefined();
   });
 });

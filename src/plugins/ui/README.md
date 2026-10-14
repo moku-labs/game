@@ -6,7 +6,7 @@ rect from one Yoga solve per change.
 
 | Module | Owns |
 |---|---|
-| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()` |
+| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()`, the tap counter of `DebugTrigger` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
 | `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, scroll and the range of a windowed scroll, the `popup` and `guide` handlers |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
@@ -15,7 +15,7 @@ rect from one Yoga solve per change.
 |---|---|
 | `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key, `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
-| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
+| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 
 Config:
@@ -487,6 +487,38 @@ one with `ui`, `renderer` and `world`.
 
 `game.locate` answers where something is drawn, by either address the doors use. It replaces
 `game.rect`, which answered the key form only; `{ key }` answers the same numbers.
+
+## Debug trigger
+
+`DebugTrigger()` is an extra (see [Extra components](#extra-components)) for the view a player
+taps five times to open the editor's overlay on a debug build, with no computer attached: the
+version line of the settings, usually.
+
+```tsx
+// The version line of the settings sheet. Five taps open the overlay of `moku-game build --debug` on the phone.
+<button key="versionLine" style={versionLineStyle} components={[DebugTrigger()]}>
+  <text key="version" style="settings.version" content={tr("settings.version", { version: "1.4.0" })} />
+</button>
+```
+
+- Five taps within 3000 ms (inclusive, first to fifth) open it. The window slides over the last
+  five taps, and after an open five new taps are needed. Taps on other views neither count nor
+  reset the count.
+- The window is wall time (`performance.now()`), not game time: under a time scale of 0 (the
+  editor's pause) or a slowed game it stays three real seconds. Taps still arrive from frames that
+  run.
+- Underneath is `app.debug.overlay.open()` (the `debug` plugin): a game that wants another gesture
+  calls it from its own listener.
+- The tag adds no component: the view must take a press itself. A `button` naming nothing is the
+  plain choice; a `button` with an intent still answers it. A trigger on a view that takes no press
+  (no `Tappable`, `Pressable`, `Draggable`, `Swipeable`, `Traceable` or `Touchable`) warns
+  `ui:debug-trigger-untouchable` `{ key }` once: five taps can never reach it.
+- `lint()` checks a trigger view against `tapTargetPt` in every build, as a tap target.
+- An open logs `ui:debug-trigger` `{ key }`. When no overlay took it (no agent on the page), one
+  `ui:debug-trigger-no-agent` `{ key }` per app.
+- The counter and its hook are registered on a page with the agent flag only (`moku-game dev`,
+  `moku-game build --debug`): a release build carries the tag's descriptor and no counting code,
+  and five taps do nothing.
 
 1. Exactly one of `key` and `target`, else it throws `[game] game.locate takes a key or a target.`
    `target` is read the way `game.tap` reads it.

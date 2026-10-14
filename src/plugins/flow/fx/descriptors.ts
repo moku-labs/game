@@ -56,7 +56,7 @@ export function hint(kind: string, payload?: Json): Hint {
  * await fx(schedule(undefined)); // payload: {}, the pending timer is cancelled
  * ```
  */
-export function schedule(moment: number | undefined): Descriptor {
+export function schedule(moment: number | undefined): Descriptor<void> {
   if (moment === undefined) return { kind: "schedule", payload: {} };
 
   return { kind: "schedule", payload: { moment } };
@@ -78,7 +78,7 @@ export function schedule(moment: number | undefined): Descriptor {
  * // app.flow.gate.answer({ intent: "cancel" }) is false until the node exits
  * ```
  */
-export function guide(options: GuideOptions): Descriptor {
+export function guide(options: GuideOptions): Descriptor<void> {
   const payload: { [key: string]: Json } = { allow: allowJson(options.allow) };
 
   if (options.target !== undefined) {

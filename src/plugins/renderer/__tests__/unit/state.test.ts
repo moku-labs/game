@@ -12,7 +12,8 @@ const config: Config = {
   poolLimit: 256,
   unsupportedMessage: "This device cannot run the game.",
   loadPixi: () => Promise.reject(new Error("not loaded in this test")),
-  debug: { nineSlice: false }
+  debug: { nineSlice: false },
+  monitor: { budgetMs: "rate", frames: 1024 }
 };
 
 describe("renderer state", () => {
@@ -32,7 +33,11 @@ describe("renderer state", () => {
       onLoss: [],
       cleanups: [],
       unsupported: undefined,
-      uninstallCounting: undefined
+      uninstallCounting: undefined,
+      resolution: { dpr: 1, cap: 2, override: undefined, pending: undefined },
+      onResolutionChange: [],
+      ownGpu: undefined,
+      kept: new WeakSet()
     });
     expect(state.viewport.scale).toBe(1);
     expect(state.viewport.frame).toEqual({ x: 0, y: 0, width: 0, height: 0 });

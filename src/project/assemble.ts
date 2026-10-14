@@ -10,6 +10,7 @@ import type { FileRecord } from "./catalog";
 import { COMPONENT } from "./extract/components";
 import type { NodeTable, Unresolved } from "./extract/definitions";
 import { type Modules, missedAlias, type Resolution, resolveBinding } from "./extract/resolve";
+import type { FeatureOwner } from "./features";
 import { revisionOf } from "./hash";
 import { JSX } from "./shapes";
 import type { Anchor, ProjectIndex } from "./types";
@@ -18,13 +19,21 @@ import type { Anchor, ProjectIndex } from "./types";
 const NODE = "node:";
 
 /**
- * What the pass reads: every record sorted by path, the module facts of the good files, and the
- * tsconfig aliases when the game declares some.
+ * One read of the feature units of a game (`findFeatureUnits`): the owners and the code-only
+ * sub-features, and the message of a name clash when the read threw. After a clash the units are
+ * the ones of the last good read.
+ */
+export type OwnersRead = { readonly owners: readonly FeatureOwner[]; readonly error?: string };
+
+/**
+ * What the pass reads: every record sorted by path, the module facts of the good files, the
+ * tsconfig aliases when the game declares some, and the feature units when the catalog has a root.
  */
 export type Assembly = {
   readonly files: readonly (readonly [path: string, record: FileRecord])[];
   readonly modules: Modules;
   readonly aliases?: AliasMap | undefined;
+  readonly owners?: OwnersRead | undefined;
 };
 
 /** One key while it is collected. */
@@ -235,7 +244,29 @@ function deepFreeze<T>(value: T): T {
 }
 
 /**
+ * The `features` table of the index: one entry per unit, in unit order, the parent only when there
+ * is one.
+ *
+ * @param owners - The feature units.
+ * @returns The table.
+ * @example
+ * ```ts
+ * featuresOf([{ name: "home", dir: "features/home", depth: 0, resources: { assets: true, strings: false } }]); // { home: { dir: "features/home" } }
+ * ```
+ */
+function featuresOf(owners: readonly FeatureOwner[]): NonNullable<ProjectIndex["features"]> {
+  return Object.fromEntries(
+    owners.map(owner => [
+      owner.name,
+      owner.parent === undefined ? { dir: owner.dir } : { dir: owner.dir, parent: owner.parent }
+    ])
+  );
+}
+
+/**
  * Assembles the index of a catalog. The index names the tsconfig when the assembly has aliases.
+ * With the feature units it carries `features`, a clash adds one unresolved item, and the units
+ * join the revision; without them the index has no `features` key.
  *
  * @param assembly - The records sorted by path, the module facts of the good files, the aliases.
  * @param manifest - The root-relative manifest path when the file exists.
@@ -270,13 +301,18 @@ export function assembleIndex(assembly: Assembly, manifest: string | undefined):
   addStyleUses(assembly, symbols);
   addComponentUses(assembly, symbols);
 
+  const owners = assembly.owners;
+
+  if (owners?.error !== undefined) unresolved.push({ path: "features", reason: owners.error });
+
   return deepFreeze({
     schemaVersion: 1,
-    revision: revisionOf(files),
+    revision: revisionOf(files, owners?.owners),
     ...(manifest === undefined ? {} : { manifest }),
     ...(assembly.aliases === undefined ? {} : { tsconfig: assembly.aliases.file }),
     symbols: finishSymbols(symbols),
     files,
-    unresolved
+    unresolved,
+    ...(owners === undefined ? {} : { features: featuresOf(owners.owners) })
   });
 }

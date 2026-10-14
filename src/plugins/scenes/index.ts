@@ -1,6 +1,7 @@
 /**
- * Standard tier — a scene is a declaration a node names: a bundle, layers, projections, music.
- * The switch runs inside `flow.onEnter("scene")`. Emits `scenes:changed`.
+ * Standard tier — a scene is a declaration a node names: a bundle, the bundles of state it
+ * names with `bundles`, layers, projections, music. The switch runs inside
+ * `flow.onEnter("scene")` and mounts a scene once all its bundles are in. Emits `scenes:changed`.
  *
  * @see README.md
  */
@@ -8,6 +9,8 @@ import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
+import { modelPlugin } from "../model";
+import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createScenesApi } from "./api";
@@ -28,10 +31,18 @@ import type { Events } from "./types";
  * });
  *
  * export const awaitIntent = defineNode({ scene: "board", rest: true, outcomes: { merge: type() } });
+ *
+ * // A scene whose art depends on the session: mounted once "location" and the episode are in.
+ * export const wardScene = defineScene("ward", {
+ *   bundle: "location",
+ *   bundles: ({ session }) => [session.episode],
+ *   layers: { room: {} },
+ *   projections: [wardRoom]
+ * });
  * ```
  */
 export const scenesPlugin = /*#__PURE__*/ createPlugin("scenes", {
-  depends: [flowPlugin, worldPlugin, assetsPlugin, timePlugin],
+  depends: [flowPlugin, worldPlugin, assetsPlugin, timePlugin, modelPlugin, rendererPlugin],
   events: (register: RegisterFunction) =>
     register.map<Events>({ "scenes:changed": "The mounted scene changed" }),
   createState: createScenesState,

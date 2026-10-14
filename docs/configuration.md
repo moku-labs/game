@@ -1,6 +1,6 @@
 # Configuration
 
-Global config and the config of every plugin, with defaults. A game sets them in `index.ts`: `referenceLong` and `pluginConfigs` of `defineGameApp`. The page, the native app, the system plugins and the save live in `config.ts`, see [config.ts of a game](#configts-of-a-game).
+Global config and the config of every plugin, with defaults. A game sets them in `index.ts`: `orientation`, `referenceSide`, `referenceLong` and `pluginConfigs` of `defineGameApp`. The page, the native app, the system plugins and the save live in `config.ts`, see [config.ts of a game](#configts-of-a-game).
 
 ## Global
 
@@ -31,6 +31,7 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `model` | `seed` | `"from-save" \| number` | `"from-save"` | `"from-save"`: a new player gets a random seed once. A number fixes it for tests |
 | `model` | `schemaVersion` | `number` | `1` | Version of the save schema this build writes |
 | `model` | `migrations` | `readonly Migration[]` | `[]` | Ordered chain. `up` of `from: n` produces version `n + 1` |
+| `debug` | none | | | The plugin has no config. `app.debug.overlay.open({ mode? })`, `close()`, `toggle()`, `isOpen()` drive the editor's overlay on a page with the agent and answer `false` elsewhere; the ui extra `DebugTrigger()` calls `open()` after five taps within three seconds of wall time. The start mode is `config.ts` `debug.overlay` |
 | `clock` | `source` | `ClockSource \| undefined` | `undefined` | Time source. `undefined` means the system source. Tests pass `fakeClock()` |
 | `flow` | `mainFlow` | `AnyFlow \| undefined` | `undefined` | The top-level flow. Required before `run()` |
 | `flow` | `safeNode` | `string \| undefined` | `undefined` | Path of the checkpoint entered after a failed retry. `undefined` means the main flow's `start` |
@@ -42,8 +43,10 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `world` | `reconciledEvent` | `boolean` | `false` | Emit `world:reconciled` after every reconcile (dev tools) |
 | `renderer` | `mount` | `string \| undefined` | `undefined` | Selector of the mount element. `undefined` keeps the renderer inert |
 | `renderer` | `preference` | `"webgpu" \| "webgl"` | `"webgpu"` | Preferred backend; Pixi falls back to WebGL |
-| `renderer` | `background`, `antialias`, `maxResolution`, `aspect`, `poolLimit`, `unsupportedMessage`, `loadPixi` | | see the plugin README | Host, viewport and pool settings; `loadPixi` is the lazy loader, a test passes a fake |
+| `renderer` | `background`, `antialias`, `aspect`, `poolLimit`, `unsupportedMessage`, `loadPixi` | | see the plugin README | Host, viewport and pool settings; `loadPixi` is the lazy loader, a test passes a fake |
 | `renderer` | `debug` | `{ nineSlice: boolean }` | `{ nineSlice: false }` | Outline every nine-slice from the start; `sync.debug.nineSlice(on)` switches it live |
+| `renderer` | `maxResolution` | `number` | `2` | Cap of `devicePixelRatio`; a change of the ratio is followed from the next frame. A player's graphics setting is applied by `renderer.monitor.setResolution` from an effect |
+| `renderer` | `monitor` | `{ budgetMs: number \| "rate"; frames: number }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over the budget is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384) |
 | `input` | `tapSlopPx`, `longPressMs`, `dragStartPx`, `swipeMinPx`, `swipeMaxMs` | `number` | `12`, `450`, `8`, `48`, `300` | Gesture thresholds in reference px and ms |
 | `input` | `cursor` | `{ control: string; idle: string }` | `{ control: "pointer", idle: "" }` | CSS cursor over a control and elsewhere |
 | `input` | `traceStepPx` | `number` | `32` | Reference px between two hit tests along the finger's path inside one frame of a trace. Keep it below the shortest cell span |
@@ -51,11 +54,11 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `assets` | `manifest` | `string \| Manifest \| undefined` | `undefined` | Manifest URL, or the parsed file in a test |
 | `assets` | `textureBudgetMb` | `number` | `192` | Texture memory budget for the LRU unload |
 | `assets` | `preloadDepth` | `number` | `2` | Graph edges walked for the preload at a rest node |
-| `assets` | `baseUrl`, `io` | | `undefined` | The CDN seam and the fetch/decode/texture seam a test replaces |
+| `assets` | `baseUrl`, `io` | | `undefined` | The CDN seam and the fetch/decode/texture seam a test replaces. A bundle's own options are not config: its feature's `assets.ts` sets them, `defineBundles({ ep01: { tier: "feature", release: "leave", mipmaps: ["items/**"] } })` |
 | `anim` | `maxTracks` | `number` | `2000` | Dev guard: one warning each time the running track count rises past it. Durations live in the steps, never here |
 | `i18n` | `locale` | `string` | `"en"` | The locale at start |
 | `i18n` | `fallback` | `string` | `"en"` | The locale a missing key is read from before it is reported missing |
-| `i18n` | `locales` | `Record<string, module \| loader>` | `{}` | Compiled modules outside features, per locale |
+| `i18n` | `locales` | `Record<string, module \| loader>` | `{}` | Compiled modules outside features, per locale. A sub-feature's modules are not here: the sub-feature registers them, and they travel with its bundle |
 | `text` | `fonts` | `{ body, digits }` | `{ body: "ui.font-body", digits: "ui.font-digits" }` | The two boot fonts behind the built-in styles `body` and `digits` |
 | `ui` | `tapTargetPt` | `number` | `44` | The smallest tap target `lint()` accepts |
 | `ui` | `breakpoints` | `{ tall, wide }` | `{ tall: 2, wide: 1.5 }` | Aspect thresholds of the `when` style variants |
@@ -95,3 +98,4 @@ export default { page: { title: "mini-game" } } satisfies GameConfig;
 | `system` | `readonly SystemName[]` | `[]` | `lifecycle`, `back`, `haptics`, `keepAwake`, `store`: the system plugins the shell wires |
 | `save` | `"memory" \| "local" \| "store"` | `"memory"` | Where the player's save lives |
 | `assets.layers` | `Record<string, string>` | `{}` | Asset layers by folder: `{ shared: "ui" }` |
+| `debug.overlay` | `"closed" \| "pill" \| "open"` | `"closed"` | How the editor's overlay shows when a debug page starts: `"pill"` and `"open"` (the card) call `app.debug.overlay.open` right after the agents started. Only a page with the agent reads it |

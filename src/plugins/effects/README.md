@@ -145,6 +145,24 @@ More than one full-screen view with an enabled filter warns `effects:full-screen
 | Member | Behaviour |
 |---|---|
 | `stats()` | `{ particles, emitters, filters, renderPasses }`, a fresh object: live particles, instances plus orphans, filter instances over every view, and `renderer.sync.renderPasses()` read at call time. Headless every number is 0 |
+| `diagnostics.kinds()` | the filter kind ids in registration order: the seven built-ins, then the `filters` of every feature. The same frozen array on every call; empty before start. Every build |
+| `diagnostics.disable(kind)` | turns a kind off: from the next frame no view draws it (no apply, no render pass). `true` when the kind is known and now off |
+| `diagnostics.enable(kind)` | turns it on again: from the next frame its views draw it with their current values. `true` when the kind is known and now on |
+| `diagnostics.disabled()` | the off kinds in registration order; the same frozen array until the next change |
+
+### Diagnostics — the switches of a debug build
+
+`disable` and `enable` act on a dev or agent page only (`__MOKU_GAME_DEV__` or `__MOKU_GAME_AGENT__`, written inline and positive, so a release build drops their bodies and their log events); elsewhere they answer `false`, change nothing, and `disabled()` stays `[]`. An unknown kind answers `false` and warns `effects:diagnostics-unknown` once per id; a kind already in the asked state answers `true` and logs nothing. A switch logs `effects:diagnostics` `{ kind, on }` and writes the event `switch` `{ kind, on }` into the renderer's performance log (`renderer.monitor.event`).
+
+The filter sync still brings an off kind up to date on every view (its instance is made, its values written, its change marks consumed) and only leaves it out of the slot list it hands `renderer.sync.filters.set`: the list is set once at the frame of the switch, and once more after `enable`. No instance is made or destroyed by a switch, so no shader compiles and nothing leaks. While a kind is off, `stats().filters` still counts its instances and `renderPasses` drops by its passes; the full-screen budget does not count a view whose only drawn filters are off. A switch does not survive `stop`/`start` nor a page reload.
+
+```ts
+// On the phone's debug build, from the MCP or chrome://inspect: four cards with Glow and a two-pass Tint.
+app.effects.stats().renderPasses; // 13
+app.effects.diagnostics.disable("effects.glow"); // true
+app.time.step(16);
+app.effects.stats().renderPasses; // 9; stats().filters stays 8
+```
 
 ## Typed ids
 
@@ -174,6 +192,9 @@ Save `features/board/effects.ts` while the dev server runs: a changed `starsBurs
 
 `inspect.ts` holds `game.effects` (key `effects` in `sources`) of the editor's read door, safe in a production build: it reads `stats()` every frame.
 Without `effectsPlugin` in the app it throws `[game] The source game.effects needs effectsPlugin.`
+It also holds `game.filters` (key `filters`): `{ kinds, off }` of `diagnostics`, read every frame; `off` is always `[]` in a production build. Without `effectsPlugin`: `[game] The source game.filters needs effectsPlugin.`
+
+`control.ts` holds `game.filter` (key `filter` in `commands`), a cosmetic command, so it runs on a `--debug` page: `{ kind, on }` switches the kind through `diagnostics` and answers `disabled()`. An unknown kind throws `[game] No filter kind "fx.nope".` with `Known:` and every id of `kinds()`; without `effectsPlugin` it throws `[game] The command game.filter needs effectsPlugin.` It carries no `overlay` marker: a game that wants a switch in the editor's overlay wraps the call in its own overlay command (`docs/doors.md`, "Overlay commands").
 
 ## Events
 

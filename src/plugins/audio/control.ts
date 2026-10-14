@@ -1,7 +1,7 @@
 /**
- * @file audio plugin — the audio command of the `/control` door: mute the whole game. Dev builds
- * only: the body starts with the inline dev guard, so a bundler `define` of `false` drops it, and
- * logs the `moku:dev` marker.
+ * @file audio plugin — the audio command of the `/control` door: mute the whole game. Dev and
+ * debug builds: the body starts with the inline agent guard of a cosmetic command, so a bundler
+ * `define` of `false` drops it, and logs the `moku:dev` marker.
  */
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused, notInstalled } from "../flow/doors/dev";
@@ -25,7 +25,12 @@ export const muteCommand = defineCommand({
   input: { muted: "boolean" },
   effect: "cosmetic",
   run: (app: ControlApp & { readonly audio?: AudioApi }, { muted }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
     if (app.audio === undefined) throw notInstalled("game.mute", "audioPlugin", "command");
 
     app.log.debug("moku:dev", { command: "game.mute", muted });

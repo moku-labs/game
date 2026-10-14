@@ -1,9 +1,11 @@
 /**
  * @file world/ecs — type definitions: entities, component types, queries, systems and the module API.
  */
-import type { Json, Snapshot } from "../../model/types";
+
+import type { Json, Snapshot, SnapshotOf } from "../../model/types";
 import type { Time } from "../../time/types";
 import type { ProjectionKey } from "../projection/types";
+import type { SystemTiming } from "./systems";
 
 /**
  * Entity id: `generation * 2 ** 20 + index`, a safe integer. A freed index comes back with a
@@ -345,6 +347,54 @@ export type SystemDefinition<Terms extends readonly QueryTerm[]> = {
 };
 
 /**
+ * The `SystemContext` of one game: the same context, with the snapshot typed by the game's player
+ * and session.
+ *
+ * @example
+ * ```ts
+ * const looks = (rows: Iterable<[Entity]>, ctx: SystemContextOf<{ board: { cells: number[] } }, {}>): number =>
+ *   ctx.snapshot.player.board.cells.length; // 64 on the board of 8 by 8
+ * ```
+ */
+export type SystemContextOf<Player, Session> = Omit<SystemContext, "snapshot"> & {
+  readonly snapshot: SnapshotOf<Player, Session>;
+};
+
+/**
+ * A system definition of one game: `run` reads the snapshot typed by its player and session.
+ *
+ * @example
+ * ```ts
+ * const looks: GameSystemDefinition<[typeof Transform], { board: { cells: number[] } }, {}> = {
+ *   name: "board.looks",
+ *   phase: "animate",
+ *   query: [Transform],
+ *   run: (rows, { snapshot }) => void snapshot.player.board.cells
+ * };
+ * ```
+ */
+export type GameSystemDefinition<Terms extends readonly QueryTerm[], Player, Session> = Omit<
+  SystemDefinition<Terms>,
+  "run"
+> & {
+  run(entities: Iterable<QueryTuple<Terms>>, ctx: SystemContextOf<Player, Session>): void;
+};
+
+/**
+ * `system` bound to one game's player and session, as the kit of `defineGame` hands it: the same
+ * function, and the result goes where the world takes a system.
+ *
+ * @example
+ * ```ts
+ * const { system } = defineGame<{ player: { board: { cells: number[] } }; session: {}; assets: string; strings: {} }>();
+ * system({ name: "board.looks", phase: "animate", query: [Transform], run: (rows, { snapshot }) => void snapshot.player.board.cells });
+ * ```
+ */
+export type SystemFor<Player, Session> = <const Terms extends readonly QueryTerm[]>(
+  definition: GameSystemDefinition<Terms, Player, Session>
+) => SystemDefinition<Terms>;
+
+/**
  * A system with its query tuple erased, as the world stores it.
  *
  * @example
@@ -574,6 +624,10 @@ export type EcsState = {
   frameSnapshot: FrameSnapshot | undefined;
   /** The frame history: dev builds only, from the first frame on; `undefined` before it. */
   history: History | undefined;
+  /** Time per system of an agent build (H2b); `undefined` without the flag and before start. */
+  timing: SystemTiming | undefined;
+  /** The row of each timed system in `timing`, by name: a system that comes back keeps its row. */
+  timingSlots: Map<string, number>;
 };
 
 /**

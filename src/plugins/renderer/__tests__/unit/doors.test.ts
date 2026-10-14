@@ -60,6 +60,7 @@ describe("game.render", () => {
       frameMs: 0,
       textures: 0,
       textureMb: 0,
+      textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
       renderPasses: 0
@@ -227,6 +228,26 @@ describe("game.capture", () => {
     );
     expect(capture).not.toHaveBeenCalled();
     expect(restored).toEqual([]);
+  });
+
+  it("on a read profile takes the picture, and refuses diff with controlReadOnly before anything restores", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { app, capture, restored } = diffApp();
+
+    await expect(run(app, captureCommand, { legend: true })).resolves.toMatchObject({
+      value: { png: "data:image/png;base64,theirs" }
+    });
+
+    const refused = await run(app, captureCommand, { diff: bookmarkAt("shop") }).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    expect(Reflect.get(Object(refused), "reason")).toBe("read-only");
+    expect((refused as Error).message).toContain("The command game.capture diff changes the game");
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(restored).toEqual([]);
+    expect(cheatsOf(app)).toEqual([]);
   });
 
   it("refuses diff with sheet before anything runs", async () => {

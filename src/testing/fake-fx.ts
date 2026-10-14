@@ -131,7 +131,9 @@ export function fakeFx(options: FakeFxOptions = {}): FakeFx {
     }
   };
 
-  const fx: NodeFx = Object.assign(run, {
+  // The gateway is not generic: the result type is the descriptor's promise, kept by
+  // `defineEffect` and the built-in helpers.
+  const fx = Object.assign(run, {
     /**
      * Records one hint. Nothing releases it: the test has no edge to commit.
      *
@@ -151,7 +153,7 @@ export function fakeFx(options: FakeFxOptions = {}): FakeFx {
       refuseStart(descriptor, path);
       started.push(descriptor);
     }
-  });
+  }) as NodeFx;
 
   return Object.freeze({ fx, awaited, started, emitted });
 }

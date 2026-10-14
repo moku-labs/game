@@ -107,7 +107,7 @@ const createMockLog = (): Log.LogApi => ({
 });
 
 const createMockState = (): State => ({
-  features: { byName: new Map(), sealed: false },
+  features: { byName: new Map(), parentOf: new Map(), sealed: false },
   fx: {
     handlers: new Map(),
     buffered: [],
@@ -368,6 +368,9 @@ const setup = (options: SetupOptions) => {
       isPaused: vi.fn(),
       isRunning: () => options.running ?? true,
       step: vi.fn(),
+      measure: vi.fn(),
+      agentClock: () => undefined,
+      chargeAgent: vi.fn(),
       // Recorded apart from `calls`, with the call it followed: the order is the assertion.
       wake: (): void => {
         wakes.push(calls.at(-1) ?? "start");

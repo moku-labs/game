@@ -6,7 +6,15 @@ import type { HostModule, PixiContainer, PixiModule, RendererCtx, RendererKind }
 import { liveDevice, liveGl, watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
 import { extractStage, textureUsage } from "./readback";
-import type { HostDeps, TextureUsage } from "./types";
+import {
+  askResolution,
+  type ResolutionReason,
+  refreshResolution,
+  resizeAt,
+  targetResolution,
+  watchPixelRatio
+} from "./resolution";
+import type { HostDeps, ResolutionListener, TextureUsage } from "./types";
 import { showUnsupported } from "./unsupported";
 import { watchVisibility } from "./visibility";
 
@@ -14,7 +22,7 @@ import { watchVisibility } from "./visibility";
  * Creates the host module: the one Pixi application and everything that can take it away.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param deps - The draw-call counter the plugin root injects in a dev build.
+ * @param deps - The counting the plugin root injects in a dev or debug build.
  * @returns The host API and its internal half.
  */
 export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
@@ -36,7 +44,7 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
     destroyApplication(state);
 
     try {
-      await createApplication(ctx, mount, deps.installDrawCounting);
+      await createApplication(ctx, mount, deps.installCounting);
     } catch (error) {
       showUnsupported(ctx, mount, error);
 
@@ -70,16 +78,39 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       state.onLoss.push(fn);
     },
 
-    resize: (width: number, height: number): void => {
-      if (state.ready) state.app?.renderer.resize(width, height);
-    },
+    resize: (width: number, height: number): void => resizeAt(state, width, height),
 
-    render: (): void => {
+    render: (): boolean => {
       const app = state.app;
 
-      if (!state.ready || app === undefined) return;
+      if (!state.ready || app === undefined) return false;
 
       app.renderer.render(app.stage);
+
+      return true;
+    },
+
+    setResolution: (value: number, reason: ResolutionReason): boolean =>
+      askResolution(state, value, reason),
+
+    overrideResolution: (value: number | undefined): number => {
+      state.resolution.override = value;
+      refreshResolution(ctx, "debug");
+
+      return targetResolution(state.resolution);
+    },
+
+    resolutionPending: (): boolean => state.resolution.pending !== undefined,
+
+    onResolution: (fn: ResolutionListener): void => {
+      state.onResolutionChange.push(fn);
+    },
+
+    adapter: (): GPUAdapter | undefined => (state.ready ? state.ownGpu?.adapter : undefined),
+
+    keep: (source: object, on: boolean): void => {
+      if (on) state.kept.add(source);
+      else state.kept.delete(source);
     },
 
     extract: async (hidden: readonly PixiContainer[]): Promise<string | undefined> => {
@@ -95,9 +126,11 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
     textures: (): TextureUsage => {
       const app = state.app;
 
-      if (!state.ready || app === undefined) return { count: 0, bytes: 0 };
+      if (!state.ready || app === undefined) {
+        return { count: 0, bytes: 0, art: 0, targets: 0, kept: 0 };
+      }
 
-      return textureUsage(app);
+      return textureUsage(app, state.kept);
     },
 
     init: async (): Promise<void> => {
@@ -108,7 +141,7 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       state.mount = mount;
 
       try {
-        await createApplication(ctx, mount, deps.installDrawCounting);
+        await createApplication(ctx, mount, deps.installCounting);
       } catch (error) {
         showUnsupported(ctx, mount, error);
 
@@ -117,6 +150,7 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
 
       watchDevice(ctx, restart);
       watchVisibility(ctx);
+      watchPixelRatio(ctx);
       state.ready = true;
 
       for (const fn of state.onReady) fn();

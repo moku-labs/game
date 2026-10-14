@@ -72,7 +72,7 @@ describe("createWorldApi", () => {
   it("groups the API by module", () => {
     const world = createMockWorld();
 
-    expect(Object.keys(world.api).toSorted()).toEqual(["ecs", "projection"]);
+    expect(Object.keys(world.api).toSorted()).toEqual(["ecs", "projection", "systemTimes"]);
   });
 
   it("exposes exactly the public members of ecs", () => {

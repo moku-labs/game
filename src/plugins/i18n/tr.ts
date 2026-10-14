@@ -25,16 +25,22 @@ export function tr(key: string, params?: Record<string, Argument>): Message {
 }
 
 /**
- * Binds `tr` to the generated string table of one game. At run time this is the same function;
- * only the type changes, so a wrong key or a missing parameter stops compiling.
+ * Binds `tr` to the generated string table of one game, with `key` for keys that come from data.
+ * At run time `tr` is the same function and `key` returns its argument; only the type changes, so
+ * a wrong key or a missing parameter stops compiling. A key read back from a save is checked by
+ * `app.i18n.isKey(value)`, which the game's app types by the same table.
  *
- * @returns The helper `defineGame` spreads.
+ * @returns The helpers `defineGame` spreads.
  * @example
  * ```ts
- * const { tr } = i18nFor<{ "hud.orders": { n: number } }>();
+ * const { tr, key } = i18nFor<{ "hud.orders": { n: number }; "home.play": Record<string, never> }>();
  * tr("hud.orders", { n: 3 }).key; // "hud.orders"
+ * key("home.play"); // "home.play"
  * ```
  */
 export function i18nFor<Table extends StringTable>(): I18nKit<Table> {
-  return { tr: tr as TypedTr<Table> };
+  return {
+    tr: tr as TypedTr<Table>,
+    key: value => value
+  };
 }

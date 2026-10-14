@@ -5,11 +5,12 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Config as GameConfig, Require } from "../../config";
 import type { Api as ClockApi } from "../clock/types";
+import type { Api as FlowApi } from "../flow/types";
 import type { Api as LifecycleApi } from "../lifecycle/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Entity, Owner, ProjectionKey, Api as WorldApi } from "../world/types";
 import type { HostApi, HostInternal, HostState } from "./host/types";
-import type { MonitorApi, MonitorInternal, MonitorState } from "./monitor/types";
+import type { MonitorApi, MonitorInternal, MonitorState, PerfMonitorApi } from "./monitor/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
 
@@ -18,9 +19,10 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * crop of a `"cover"` sprite), the bitmap-font pieces `fonts.install` needs, the `BitmapText` a
  * plugin above builds through `host.pixi()`, the filter and particle classes `effects` builds
  * through it (a custom filter carries a `GpuProgram` and a `GlProgram` over `defaultFilterVert`),
- * and the extension registry with the three WebGPU draw classes the dev draw-call
- * counter swaps and the bitmap text pipe `host` swaps for one whose SDF shader applies the alpha
- * once (with the WGSL and GLSL shader pieces it compiles that shader from). The module object
+ * and the extension registry with the six classes the counting of a dev or debug build swaps
+ * (the three WebGPU draw classes, the filter system and both texture systems) and the bitmap text
+ * pipe `host` swaps for one whose SDF shader applies the alpha once (with the WGSL and GLSL shader
+ * pieces it compiles that shader from). The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
  * Pixi in its bundle.
  *
@@ -29,6 +31,7 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * const pixi: PixiModule = await import("pixi.js");
  * pixi.Texture.WHITE.width; // 1
  * pixi.GpuBatchAdaptor.extension.name; // "batch"
+ * pixi.FilterSystem.extension.name; // "filter"
  * pixi.BitmapTextPipe.extension.name; // "bitmapText"
  * pixi.defaultFilterVert.startsWith("in vec2 aPosition;"); // true
  * ```
@@ -46,11 +49,14 @@ export type PixiModule = Pick<
   | "Container"
   | "DisplacementFilter"
   | "Filter"
+  | "FilterSystem"
   | "GlProgram"
+  | "GlTextureSystem"
   | "GpuBatchAdaptor"
   | "GpuEncoderSystem"
   | "GpuGraphicsAdaptor"
   | "GpuProgram"
+  | "GpuTextureSystem"
   | "Graphics"
   | "Matrix"
   | "NineSliceSprite"
@@ -184,7 +190,11 @@ export type Config = {
   background: number;
   /** Antialias the whole canvas. Off by default: pixel art and sprites do not need it. */
   antialias: boolean;
-  /** Cap of `devicePixelRatio`. Memory grows with its square. */
+  /**
+   * Cap of `devicePixelRatio`. Memory grows with its square. The drawing follows a change of
+   * `devicePixelRatio` (a window moved to another screen, a zoom) from the next frame. A player's
+   * graphics setting is applied by `renderer.monitor.setResolution` from an effect.
+   */
   maxResolution: number;
   /** Passed to Pixi. Pixi falls back to WebGL by itself. */
   preference: "webgpu" | "webgl";
@@ -198,6 +208,27 @@ export type Config = {
   loadPixi: () => Promise<PixiModule>;
   /** Debug drawing at start. `app.renderer.sync.debug` switches it while the game runs. */
   debug: DebugSwitches;
+  /** The performance monitor of an agent build: the spike budget and the frames the ring keeps. */
+  monitor: MonitorConfig;
+};
+
+/**
+ * The performance monitor of an agent build (`__MOKU_GAME_AGENT__`: dev and `--debug` builds).
+ *
+ * @example
+ * ```ts
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", monitor: { budgetMs: 8.3, frames: 2048 } } } });
+ * ```
+ */
+export type MonitorConfig = {
+  /**
+   * A frame over this is a spike. `"rate"` (the default): one frame of the frame's own rate —
+   * 8.33 ms at the 120 fps target, 16.7 ms at the 60 fps fallback — so a switch of the rate needs
+   * no config change; a number is a fixed budget in ms.
+   */
+  budgetMs: number | "rate";
+  /** Frames the ring keeps in an agent build, 64 to 16384; render passes keep 4x as many. */
+  frames: number;
 };
 
 /**
@@ -223,7 +254,12 @@ export type State = {
  * app.renderer.stats().renderPasses; // 1: no filter on screen
  * ```
  */
-export type Api = { host: HostApi; viewport: ViewportApi; sync: SyncApi } & MonitorApi;
+export type Api = {
+  host: HostApi;
+  viewport: ViewportApi;
+  sync: SyncApi;
+  monitor: PerfMonitorApi;
+} & MonitorApi;
 
 /**
  * One entity under a point of the page, what the `game.at` door answers: the entity, its owner,
@@ -249,7 +285,14 @@ export type Under = {
 /**
  * Resolved dependency APIs. `clock` is the time source of the frame counters.
  */
-export type Deps = { time: TimeApi; lifecycle: LifecycleApi; world: WorldApi; clock: ClockApi };
+export type Deps = {
+  time: TimeApi;
+  lifecycle: LifecycleApi;
+  world: WorldApi;
+  clock: ClockApi;
+  /** The flow path of a frame in the performance ring of an agent build. */
+  flow: FlowApi;
+};
 
 /**
  * What the kernel context offers before the deps are attached.
@@ -285,9 +328,10 @@ export type ViewportModule = ViewportApi & ViewportInternal;
 export type SyncModule = SyncApi & SyncInternal;
 
 /**
- * Both halves of the `monitor` module: what a tool calls and what the frame drives.
+ * Both halves of the `monitor` module: what a tool calls, the performance monitor of an agent
+ * build, and what the frame and the hooks drive.
  */
-export type MonitorModule = MonitorApi & MonitorInternal;
+export type MonitorModule = MonitorApi & PerfMonitorApi & MonitorInternal;
 
 /**
  * The four modules in injection order.
@@ -306,6 +350,32 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
 export type {
+  FrameColumns,
+  FrameReadout,
+  FrameReadResult,
+  FrameRecord,
+  FrameRing,
+  LongFrameEntry,
+  PassKind,
+  PassRecord,
+  PerfCause,
+  PerfChange,
+  PerfChangeEntry,
+  PerfCollectorLine,
+  PerfDisplay,
+  PerfEventLine,
+  PerfEventName,
+  PerfHeaderLine,
+  PerfLogLine,
+  PerfLongFrameLine,
+  PerfMarkLine,
+  PerfMeasured,
+  PerfSampleLine,
+  PerfSpikeLine,
+  PerfStartupLine,
+  PerfThermalLine
+} from "./monitor/log-types";
+export type {
   Captured,
   CaptureOptions,
   CountingClasses,
@@ -315,6 +385,7 @@ export type {
   MonitorDeps,
   MonitorInternal,
   MonitorState,
+  PerfMonitorApi,
   PictureRect,
   RenderStats
 } from "./monitor/types";

@@ -74,6 +74,38 @@ export function filtersOf(state: SyncState, entity: Entity): readonly FilterSlot
 }
 
 /**
+ * Notes the kind of a slot's filter for the performance log: the filter itself and, for a blur,
+ * the two pass filters Pixi applies in its place. A slot without a kind is left out: it counts
+ * as "other".
+ *
+ * @param state - The sync branch of the plugin state.
+ * @param slot - The slot.
+ */
+function nameKind(state: SyncState, slot: FilterSlot): void {
+  const { filter, kind } = slot;
+
+  if (kind === undefined) return;
+
+  state.filterKinds.set(filter, kind);
+
+  if (
+    "blurXFilter" in filter &&
+    typeof filter.blurXFilter === "object" &&
+    filter.blurXFilter !== null
+  ) {
+    state.filterKinds.set(filter.blurXFilter, kind);
+  }
+
+  if (
+    "blurYFilter" in filter &&
+    typeof filter.blurYFilter === "object" &&
+    filter.blurYFilter !== null
+  ) {
+    state.filterKinds.set(filter.blurYFilter, kind);
+  }
+}
+
+/**
  * Keeps the filters of an entity and writes them onto its view when it has one. An empty list
  * forgets the entity.
  *
@@ -84,6 +116,11 @@ export function filtersOf(state: SyncState, entity: Entity): readonly FilterSlot
 export function setFilters(state: SyncState, entity: Entity, slots: readonly FilterSlot[]): void {
   if (slots.length === 0) state.filters.delete(entity);
   else state.filters.set(entity, [...slots]);
+
+  // Inline and positive: Bun folds the agent guard under a production `define`.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    for (const slot of slots) nameKind(state, slot);
+  }
 
   const view = state.views.get(entity);
 

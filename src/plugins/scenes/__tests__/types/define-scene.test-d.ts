@@ -1,9 +1,10 @@
 import { expectTypeOf } from "vitest";
 import { createPlugin } from "../../../../config";
 import { projection } from "../../../../index";
+import type { Json } from "../../../model/types";
 import { defineScene } from "../../define";
 import { scenesPlugin } from "../../index";
-import type { DefineScene, Events, KernelSlice, SceneDefinition } from "../../types";
+import type { DefineScene, Events, KernelSlice, SceneDefinition, SceneState } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -121,6 +122,59 @@ defineGameScene("board", {
 
 // @ts-expect-error — "items" is neither declared nor the appended ui layer.
 defineGameScene("board", { bundle: "board", layers: { cells: {} }, projections: [boardItems] });
+
+// ─── bundles of state, typed with the game's session and bundle keys ───
+
+/** The bundle keys of a game whose location feature has two episodes. */
+type EpisodeBundle = "location" | "ep01" | "ep02";
+
+/** The session of that game. */
+type EpisodeSession = { episode: "ep01" | "ep02" };
+
+const defineEpisodeScene: DefineScene<AssetKey, EpisodeBundle, Json, EpisodeSession> = defineScene;
+
+// T1: the kit types the session `bundles` reads and the keys it returns.
+const ward = defineEpisodeScene("ward", {
+  bundle: "location",
+  bundles: ({ session }) => [session.episode],
+  layers: { room: {} },
+  projections: []
+});
+
+expectTypeOf(ward).toEqualTypeOf<SceneDefinition>();
+
+defineEpisodeScene("ward", {
+  bundle: "location",
+  // @ts-expect-error — T2: "ep03" is not a bundle key of this game.
+  bundles: () => ["ep03"],
+  layers: { room: {} },
+  projections: []
+});
+
+defineEpisodeScene("ward", {
+  bundle: "location",
+  // @ts-expect-error — T3: the session of this game has no field "level".
+  bundles: ({ session }) => [session.level],
+  layers: { room: {} },
+  projections: []
+});
+
+// T4: the loose export infers the session from an annotated parameter…
+defineScene("ward", {
+  bundle: "location",
+  bundles: ({ session }: SceneState<Json, { episode: string }>) => [session.episode],
+  layers: {},
+  projections: []
+});
+
+// …and reads an unannotated one as `Json`, which has no field.
+defineScene("ward", {
+  bundle: "location",
+  // @ts-expect-error — `Json` has no field "episode".
+  bundles: ({ session }) => [session.episode],
+  layers: {},
+  projections: []
+});
 
 // ─── the event a plugin above hooks ───────────────────────────
 

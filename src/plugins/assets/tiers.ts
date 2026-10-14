@@ -1,10 +1,20 @@
 /**
  * @file assets plugin — loading one bundle and the boot sequence. One running load per bundle,
- * every caller a waiter: the last one to leave aborts the fetches. The loaders of one image, one
- * font and one sound are exported: the dev hot swap of `swap.ts` reads a changed file through them.
+ * every caller a waiter: the last one to leave aborts the fetches. The companions load next to the
+ * files, and the bundle counts as loaded only after them. The loaders of one image, one font and
+ * one sound are exported: the dev hot swap of `swap.ts` reads a changed file through them.
  */
 import { enforceBudget, releaseAssets } from "./budget";
-import { fileUrl, indexKeys, kindOf, nineOf, parseManifest, resolveBaseUrl } from "./manifest";
+import { loadCompanions, unloadCompanions } from "./companions";
+import {
+  fileUrl,
+  indexKeys,
+  kindOf,
+  nineOf,
+  parseManifest,
+  resolveBaseUrl,
+  textureOptionsOf
+} from "./manifest";
 import type {
   AssetsCtx,
   AssetsIo,
@@ -12,6 +22,7 @@ import type {
   AtlasPage,
   AudioAsset,
   AudioMime,
+  BundleCompanion,
   BundleMap,
   BundleRecord,
   CreateTextureOptions,
@@ -57,6 +68,14 @@ export type Loading = {
 
 /** A running load once its atlas pages are on the way: the promise of each page by its id. */
 type Running = Loading & { pages: ReadonlyMap<string, Promise<Texture>> };
+
+/** One load attempt as its rollback sees it: the io, the bundle, its record and its companions. */
+type Attempt = {
+  io: AssetsIo;
+  bundle: string;
+  inflight: Inflight;
+  companions: readonly BundleCompanion[];
+};
 
 /**
  * Tells whether a tier stays for the whole session. A permanent bundle is never evicted and
@@ -276,7 +295,7 @@ async function fetchFile(run: Loading, path: string): Promise<FetchResponse> {
  *
  * @param run - The running load.
  * @param path - Path of the image.
- * @param options - The nine-slice borders of a loose texture; none for a page.
+ * @param options - The nine-slice borders and the mip chain of a loose texture; none for a page.
  * @returns The texture of the image.
  * @throws {Error} When the response is not ok.
  */
@@ -467,7 +486,7 @@ async function loadFile(run: Running, file: ManifestFile): Promise<void> {
 
   const texture =
     file.atlas === undefined
-      ? await loadImage(run, pathOf(run.bundle, file), nineOf(file))
+      ? await loadImage(run, pathOf(run.bundle, file), textureOptionsOf(file))
       : await sliceFile(run, file, file.atlas);
 
   assets.textures.set(file.key, texture);
@@ -530,33 +549,44 @@ function finish(
   ctx.deps.renderer.sync.textures.invalidate(entry.files.map(file => file.key));
 
   ctx.emit("assets:bundle-loaded", { bundle, tier: entry.tier, mb: entry.mb, reason });
+
+  // Inline and positive: the performance log of an agent build names the load; a production
+  // `define` folds the guard and the call goes.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    ctx.deps.renderer.monitor.event("bundle", {
+      bundle,
+      action: "load",
+      tier: entry.tier,
+      mb: entry.mb,
+      reason
+    });
+  }
+
   // The picture changes now: the sprites that waited for these keys resolve on the next frame.
   ctx.deps.time.wake();
   enforceBudget(ctx);
 }
 
 /**
- * Rolls one failed load back: what was uploaded is destroyed, the record goes idle and the error
- * waits on the inflight record for every waiter.
+ * Rolls one failed or aborted load back: what was uploaded is destroyed, every companion of the
+ * load drops what it brought, the record goes idle and the error waits on the inflight record for
+ * every waiter.
  *
  * @param ctx - Domain context of the plugin.
- * @param io - The I/O seam.
- * @param bundle - Name of the bundle.
- * @param inflight - The running load.
+ * @param load - The running load: its io, bundle, inflight record and companions.
+ * @param load.io - The I/O seam.
+ * @param load.bundle - Name of the bundle.
+ * @param load.inflight - The running load.
+ * @param load.companions - The companions the load started.
  * @param assets - What was loaded before the failure.
  * @param error - What broke.
  */
-function fail(
-  ctx: AssetsCtx,
-  io: AssetsIo,
-  bundle: string,
-  inflight: Inflight,
-  assets: LoadedAssets,
-  error: unknown
-): void {
+function fail(ctx: AssetsCtx, load: Attempt, assets: LoadedAssets, error: unknown): void {
+  const { io, bundle, inflight } = load;
   const record = recordOf(ctx.state, bundle);
 
   releaseAssets(io, assets);
+  unloadCompanions(ctx, load.companions, bundle);
 
   record.status = "idle";
   record.inflight = undefined;
@@ -583,7 +613,8 @@ function fail(
 /**
  * Runs one load to its end. It never rejects: the error is stored on the inflight record, so a
  * load nobody waits for any more cannot become an unhandled rejection. Every settled file sends
- * `assets:bundle-progress`; the last one comes before `assets:bundle-loaded`.
+ * `assets:bundle-progress`; the last one comes before `assets:bundle-loaded`. The companions
+ * registered when it starts load next to the files, and the bundle is published only after them.
  *
  * @param ctx - Domain context of the plugin.
  * @param io - The I/O seam.
@@ -601,8 +632,12 @@ async function runLoad(
   reason: LoadReason
 ): Promise<void> {
   const assets = emptyAssets();
+  // A companion added while this load runs waits for the next load of the bundle.
+  const companions = [...ctx.state.companions];
 
   try {
+    // The companions start first: what travels with the bundle comes in parallel with its files.
+    const travelling = loadCompanions(companions, bundle);
     // Every page goes up once; the files on a page wait for it and are cut out of it.
     const base = resolveBaseUrl(ctx.config.baseUrl, ctx.config.manifest);
     const loading = { io, bundle, base, signal: inflight.controller.signal, assets };
@@ -616,11 +651,13 @@ async function runLoad(
     );
     // A page no file waited for still lands before the load is published or rolled back.
     const pages = await Promise.allSettled(run.pages.values());
+    const companionsDone = await travelling;
 
     throwFirstFailure(files);
     throwFirstFailure(pages);
+    throwFirstFailure(companionsDone);
   } catch (error) {
-    fail(ctx, io, bundle, inflight, assets, error);
+    fail(ctx, { io, bundle, inflight, companions }, assets, error);
 
     return;
   }
@@ -775,7 +812,7 @@ function bundleMapsOf(value: unknown): BundleMap[] {
 
 /**
  * Warns when one bundle a feature declares disagrees with the manifest: the manifest has no such
- * bundle, or it carries the bundle under another tier.
+ * bundle, carries it under another tier, or with another release (absent means `"budget"`).
  *
  * @param ctx - Domain context of the plugin.
  * @param feature - Name of the feature that declared the bundle.
@@ -795,21 +832,56 @@ function checkDeclaredBundle(ctx: AssetsCtx, feature: string, name: string, spec
     return;
   }
 
-  const declared = (spec as { tier?: string } | undefined)?.tier;
+  const declared = spec as { tier?: string; release?: string } | undefined;
 
-  if (declared === undefined || declared === entry.tier) return;
+  if (declared?.tier !== undefined && declared.tier !== entry.tier) {
+    ctx.log.warn("assets: bundle tier disagrees with the manifest", {
+      feature,
+      bundle: name,
+      declared: declared.tier,
+      manifest: entry.tier
+    });
+  }
 
-  ctx.log.warn("assets: bundle tier disagrees with the manifest", {
+  const release = declared?.release ?? "budget";
+  const written = entry.release ?? "budget";
+
+  if (release === written) return;
+
+  ctx.log.warn("assets: bundle release disagrees with the manifest", {
     feature,
     bundle: name,
-    declared,
-    manifest: entry.tier
+    declared: release,
+    manifest: written
   });
 }
 
 /**
+ * Warns once per manifest bundle of a sub-feature (a bundle with a `parent`) whose feature the app
+ * did not register: its parent's door does not list it, or a raw `createApp` left it out. A
+ * bundle without a parent (a flat feature, a layer) is not checked: a layer's name is no feature.
+ *
+ * @param ctx - Domain context of the plugin.
+ */
+function checkRegisteredOwners(ctx: AssetsCtx): void {
+  const registered = new Set(ctx.deps.flow.features.all().map(feature => feature.name));
+
+  for (const [bundle, entry] of Object.entries(ctx.state.manifest.bundles)) {
+    if (entry.parent === undefined || registered.has(entry.feature)) continue;
+
+    ctx.log.warn("assets: the manifest has a bundle of a feature nobody registered", {
+      bundle,
+      feature: entry.feature,
+      parent: entry.parent,
+      fix: `List it in features: [...] of "${entry.parent}".`
+    });
+  }
+}
+
+/**
  * Compares what the composed features declare with what the manifest carries. A disagreement is
- * one warning per bundle, never a failure: the game still runs on the manifest.
+ * one warning per bundle, never a failure: the game still runs on the manifest. A dev build also
+ * names the sub-feature bundles nobody registered.
  *
  * @param ctx - Domain context of the plugin.
  */
@@ -821,6 +893,9 @@ function checkDeclaredBundles(ctx: AssetsCtx): void {
 
     for (const [name, spec] of declared) checkDeclaredBundle(ctx, feature.name, name, spec);
   }
+
+  // Inline, not `isDev()`, and a positive branch: Bun folds this guard under a production `define`.
+  if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) checkRegisteredOwners(ctx);
 }
 
 /**

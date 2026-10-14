@@ -129,6 +129,9 @@ function createFakeTime(record: Recorder): TimeApi {
     pause: vi.fn(),
     resume: vi.fn(),
     wake: vi.fn(),
+    measure: vi.fn(),
+    agentClock: () => undefined,
+    chargeAgent: vi.fn(),
     isPaused: () => false,
     isRunning: () => true,
     step: vi.fn()

@@ -7,7 +7,7 @@
  * the keys watch names. A view module is a `.tsx` file, a `styles.ts`, a `view.ts`, an
  * `animations.ts`, an `effects.ts`, any `.ts` directly in a `styles/`, `motion/`, `effects/` or
  * `views/` folder, any `.ts` directly in `world/projections/` or `world/layout/`, or a generated
- * `generated/strings.<locale>.ts`. The stamp module `.moku/assets-stamp.ts` gets the footer too:
+ * `generated/strings.<locale>.ts` or `generated/strings.<feature>.<locale>.ts`. The stamp module `.moku/assets-stamp.ts` gets the footer too:
  * its new exports say which asset files changed. A logic module never gets the footer
  * (`world/components/` and `world/systems/` included: they are registered at start, and
  * `.moku/main.ts` too), so its save reaches the root and the page reloads and restores its state. `moku-game dev` lists the
@@ -34,7 +34,8 @@ export type HotOptions = {
    * The files that get the footer. Default: `.tsx` files, `styles.ts`, `view.ts`,
    * `animations.ts`, `effects.ts`, any `.ts` directly in a `styles/`, `motion/`, `effects/` or
    * `views/` folder, and in `world/projections/` or `world/layout/`,
-   * `generated/strings.<locale>.ts`, and the stamp module `.moku/assets-stamp.ts`. Bun runs it as
+   * `generated/strings.<locale>.ts` and `generated/strings.<feature>.<locale>.ts`, and the stamp
+   * module `.moku/assets-stamp.ts`. Bun runs it as
    * the load filter on the absolute path, so it should not anchor at the start.
    */
   include?: RegExp;
@@ -43,7 +44,8 @@ export type HotOptions = {
    * `node_modules/`, `web/`, `generated/`, `__tests__/` or `tests/`, and `.test`/`.spec` files.
    * Tested on the path relative to the game root with a leading `/` and `/` separators, also on
    * Windows: `/features/home/view.tsx`. A folder above the game root never excludes a file. A
-   * `generated/strings.<locale>.ts` file is never excluded: the generated strings swap.
+   * `generated/strings.<locale>.ts` and a `generated/strings.<feature>.<locale>.ts` file are never
+   * excluded: the generated strings swap.
    */
   exclude?: RegExp;
 };
@@ -82,10 +84,10 @@ export type HotPlugin = {
 
 /**
  * The view files by name: `.tsx` files, `styles.ts`, `view.ts`, `animations.ts`, `effects.ts`
- * and the generated strings of a locale.
+ * and the generated strings of a locale, whole-game or of one sub-feature.
  */
 const VIEW_FILES =
-  /\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.[\w-]+\.ts/;
+  /\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.(?:[\w-]+\.)?[\w-]+\.ts/;
 
 /**
  * The view files by folder, the kind folders of the layered layout: a `.ts` directly in
@@ -110,8 +112,11 @@ const DEFAULT_INCLUDE = new RegExp(
   `(${VIEW_FILES.source}|${KIND_FOLDERS.source}|${ASSETS_STAMP.source})$`
 );
 
-/** The generated strings of one locale, the one file under `generated/` that swaps. */
-const STRINGS = /\/generated\/strings\.[\w-]+\.ts$/;
+/**
+ * The generated strings of one locale, whole-game or of one sub-feature: the files under
+ * `generated/` that swap.
+ */
+const STRINGS = /\/generated\/strings\.(?:[\w-]+\.)?[\w-]+\.ts$/;
 
 /** The default folders and test files that never hot swap. The outer group only scopes the `$`. */
 const DEFAULT_EXCLUDE = /(\/(node_modules|web|generated|__tests__|tests)\/|\.(test|spec)\.tsx?$)/;

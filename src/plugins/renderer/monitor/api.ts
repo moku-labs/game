@@ -1,43 +1,70 @@
 /**
  * @file renderer/monitor — API factory. The module keeps its data in `ctx.state.monitor` and reads
  * its counters through the injected `host` and `sync`; a capture places its legend through
- * `viewport` too. The clock is the `clock` plugin's, since the renderer never reads the device
- * clock itself (lint L3).
+ * `viewport` too. The clock of the counters is the `clock` plugin's (lint L3); the performance
+ * monitor of an agent build reads the page clock through `monitor/clock.ts` alone. Every agent
+ * branch is inline and positive, so a production `define` folds it and the performance code
+ * leaves the bundle; the members of `monitor` then exist and do nothing.
  */
+import type { Json } from "../../model/types";
+import type { ThermalReading } from "../../time/types";
 import type { MonitorModule, RendererCtx } from "../types";
 import { cancelCaptures, captureFrame, serveCaptures } from "./capture";
-import type {
-  Captured,
-  CaptureOptions,
-  MonitorCtx,
-  MonitorDeps,
-  MonitorState,
-  RenderStats
+import { pageNow } from "./clock";
+import { openFrame } from "./commit";
+import type { FrameRing, PerfChange, PerfEventName, PerfLogLine } from "./log-types";
+import {
+  attachPerf,
+  beginAgent,
+  endAgent,
+  noteChange,
+  notePath,
+  notePauses,
+  stopPerf,
+  writeMark,
+  writeThermal
+} from "./perf";
+import { EMPTY_RING } from "./ring";
+import { flushPerf, subscribe, writeEvent } from "./stream";
+import {
+  type Captured,
+  type CaptureOptions,
+  COUNT,
+  type MonitorCtx,
+  type MonitorDeps,
+  type MonitorState,
+  type PerfCtx,
+  type RenderStats
 } from "./types";
+import { BYTES_PER_MB, cell, roundTo } from "./units";
 import { beginFrame, endFrame, resetWindow, STALE_MS } from "./window";
 
-/** Bytes of one MiB. */
-const BYTES_PER_MB = 1024 * 1024;
+/**
+ * The unsubscribe `stream` answers in a build without the agent flag: it does nothing.
+ */
+const noStream = (): void => {};
 
 /**
- * Rounds a number to a fixed count of decimals, so a counter reads well in a panel.
- *
- * @param value - The number.
- * @param decimals - Decimals to keep.
- * @returns The rounded number.
- * @example
- * ```ts
- * roundTo(3.456_78, 2); // 3.46
- * ```
+ * The detail of an event written without one.
  */
-function roundTo(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
+const NO_DETAIL: Readonly<Record<string, Json>> = Object.freeze({});
 
-  return Math.round(value * factor) / factor;
+/**
+ * Message of a resolution `setResolution` refuses.
+ *
+ * @param value - What the caller passed.
+ * @returns The message.
+ */
+function resolutionMessage(value: unknown): string {
+  return (
+    `[game] renderer.monitor.setResolution(${String(value)}) needs a number from 0.5 to 4.\n` +
+    "  Pass undefined to go back to maxResolution."
+  );
 }
 
 /**
- * Creates the monitor module: the counters of the renderer and the capture of a frame.
+ * Creates the monitor module: the counters of the renderer, the capture of a frame, and the
+ * performance monitor of an agent build.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param deps - The injected `host`, `viewport` and `sync` modules.
@@ -47,6 +74,12 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
   const state = ctx.state.monitor;
   const clock = ctx.deps.clock;
   const mctx: MonitorCtx = { ctx, deps };
+  // Inline and positive: a production `define` folds it to `undefined`, and every branch below
+  // that reads it goes with it.
+  const pc: PerfCtx | undefined =
+    typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && state.perf !== undefined
+      ? { ctx, deps, perf: state.perf, sinks: state.sinks }
+      : undefined;
 
   return {
     stats: (): RenderStats => {
@@ -58,36 +91,158 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
         frameMs: roundTo(state.frameMs, 2),
         textures: usage.count,
         textureMb: roundTo(usage.bytes / BYTES_PER_MB, 2),
+        textureMbSplit: {
+          art: roundTo(usage.art / BYTES_PER_MB, 2),
+          targets: roundTo(usage.targets / BYTES_PER_MB, 2),
+          kept: roundTo(usage.kept / BYTES_PER_MB, 2)
+        },
         views: counts.views,
         pooled: counts.pooled,
         renderPasses: deps.sync.renderPasses()
       };
 
-      // Inline, as in `capture()`: the field is absent from a production build, not undefined.
-      if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return stats;
+      // The dev or agent guard, inline as in `capture()`: the field is absent from a production
+      // build, not undefined.
+      if (
+        (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+        (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+      ) {
+        return stats;
+      }
 
       return { ...stats, drawCalls: state.draws.last };
     },
 
     capture: async (options: CaptureOptions = {}): Promise<Captured | undefined> => {
-      // Inline, not `isDev()`: Bun folds this guard under `define: { __MOKU_GAME_DEV__: "false" }`
-      // and drops the capture from a production bundle (`flow/doors/dev.ts` declares the global).
-      if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return undefined;
+      // The dev or agent guard, inline, not `isDev()`: Bun folds it under a production `define` of
+      // both flags `false` and drops the capture from the bundle (`flow/doors/dev.ts` declares
+      // the globals).
+      if (
+        (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+        (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+      ) {
+        return undefined;
+      }
 
       return captureFrame(mctx, options);
+    },
+
+    stream: (listener: (line: PerfLogLine) => void): (() => void) => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        return subscribe(pc, listener);
+      }
+
+      return noStream;
+    },
+
+    frames: (): FrameRing => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        return pc.perf.ring;
+      }
+
+      return EMPTY_RING;
+    },
+
+    mark: (label: string): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        writeMark(pc, label, false);
+      }
+    },
+
+    event: (name: PerfEventName, detail: Readonly<Record<string, Json>> = NO_DETAIL): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        writeEvent(pc, name, detail);
+      }
+    },
+
+    beginAgent: (): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        beginAgent(pc.perf);
+      }
+    },
+
+    endAgent: (): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        endAgent(pc);
+      }
+    },
+
+    setResolution: (resolution: number | undefined): number => {
+      // Every build (LEAD-FIXES-4 item 1): a player's graphics setting is applied through here.
+      if (
+        resolution !== undefined &&
+        !(typeof resolution === "number" && resolution >= 0.5 && resolution <= 4)
+      ) {
+        throw new RangeError(resolutionMessage(resolution));
+      }
+
+      return deps.host.overrideResolution(resolution);
     },
 
     begin: (): void => {
       beginFrame(state, clock.now());
       // A draw between two frames, as the extract of a capture, is not a draw of this frame.
       state.draws.frame = 0;
+
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        openFrame(pc.sinks);
+      }
     },
 
-    end: (): void => {
+    end: (drawn: boolean): void => {
       endFrame(state, clock.now());
       state.draws.last = state.draws.frame;
       state.draws.frame = 0;
+
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        pc.perf.drawn = drawn;
+      }
+
       serveCaptures(mctx);
+    },
+
+    changed: (change: PerfChange): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        noteChange(pc.perf, change);
+      }
+    },
+
+    attach: (): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        attachPerf(pc);
+      }
+    },
+
+    flush: (): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        pc.perf.staged[1] = pageNow();
+        flushPerf(pc);
+      }
+    },
+
+    count: (_counter: "rebuilds", amount: number): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        pc.perf.produced |= 1;
+        pc.sinks.counts[COUNT.rebuilds] = cell(pc.sinks.counts, COUNT.rebuilds) + amount;
+      }
+    },
+
+    path: (path: string, rest: boolean): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        notePath(pc, path, rest);
+      }
+    },
+
+    thermal: (reading: ThermalReading): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        writeThermal(pc, reading);
+      }
+    },
+
+    pauses: (reasons: readonly string[], paused: boolean, resumed: boolean): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
+        notePauses(pc, reasons, paused, resumed);
+      }
     }
   };
 }
@@ -95,7 +250,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
 /**
  * Stops the monitor: a capture still waiting gets `undefined`, and every frame seen is forgotten.
  * Works on the state alone, because `onStop` has no context. The draw counter keeps its identity:
- * only its numbers go back to 0.
+ * only its numbers go back to 0. An agent build also stops its performance monitor.
  *
  * @param state - The monitor branch of the plugin state.
  */
@@ -104,4 +259,12 @@ export function stopMonitor(state: MonitorState): void {
   resetWindow(state);
   state.draws.frame = 0;
   state.draws.last = 0;
+
+  if (
+    typeof __MOKU_GAME_AGENT__ !== "undefined" &&
+    __MOKU_GAME_AGENT__ &&
+    state.perf !== undefined
+  ) {
+    stopPerf(state.perf, state.sinks);
+  }
 }

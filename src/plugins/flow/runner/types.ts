@@ -126,9 +126,11 @@ export type Out<Tags extends OutcomeTags> = {
  * @example
  * ```ts
  * // The "roll" node of a dice game: the drafts are written in place, the edge commits them.
- * run: ({ player, session, rng, out }) => {
+ * run: async ({ player, session, rng, fx, out }) => {
+ *   const loaded = await fx(load("board")); // LoadResult | undefined
  *   player.coins += rng.stream("dice").range(1, 6);
  *   session.rolls += 1;
+ *   session.loadedMb = loaded?.mb ?? 0;
  *   return out.done();
  * }
  * ```
@@ -871,7 +873,8 @@ export type FlowState = {
 export type Stage = "load" | "scene";
 
 /**
- * Callback of `onEnter`. Called before `node.run`, awaited.
+ * Callback of `onEnter`. Called before `node.run`, awaited. Read the state with
+ * `model.store.snapshot()`: no node of the graph writes while the stages run.
  *
  * @example
  * ```ts
@@ -1007,6 +1010,13 @@ export type RunnerApi = {
    * switches at `scene`. Every `load` callback runs before the first `scene` callback, in
    * registration order, each awaited.
    *
+   * The stages run before the node opens its transaction, and `model.store.snapshot()` is the
+   * committed state, so a stage reads the state the node is entered with: on an ordinary entry
+   * the state the edge into the node committed; after a restore the bookmark's state, since the
+   * store is replaced before the node's stages run; at the safe node after a give-up the state
+   * its `recover` committed, or, without `recover`, the state of the rest point the rollback
+   * returned to.
+   *
    * @param stage - `"load"` or `"scene"`.
    * @param callback - Called with the node and `{ mode, signal }`, awaited.
    * @returns The unregister function.
@@ -1088,6 +1098,10 @@ export type RunnerApi = {
    * The promise also resolves when the graph stops before the bookmark was entered: `onStop`
    * ended the loop, or `run()` rejected. Nothing is entered then and the state is not replaced.
    * `state()` shows whether it was: its `path` is the node the graph stands at.
+   *
+   * The restored node's `load` and `scene` stages run after this resolves for a rest node: the
+   * scene is mounted when its bundles are in, before the node's gate opens;
+   * `await app.flow.walk([])` waits for that gate.
    *
    * @param bookmark - The bookmark to enter.
    * @returns A promise that resolves once a rest node is entered, or a transit node waits at

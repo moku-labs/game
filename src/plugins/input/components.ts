@@ -20,23 +20,36 @@ export type IntentValue = { intent: string; payload: Json };
 /**
  * A view that can be carried. It names no intent: the drop target does. `carry` lists the
  * projection keys of views of the same projection that ride along on top of it, such as the cards
- * that lie on a solitaire card.
+ * that lie on a solitaire card. `aim` is a point of the view in its own units, the units of its
+ * hit box: with it the hover and the drop look the target up under that point of the view in the
+ * hand, not under the finger. `null`, the default, looks under the finger; a projection takes an
+ * aim away by not giving it.
  *
  * @example
  * ```ts
- * const value: CarryValue = { payload: { from: "c7" }, carry: ["c8", "c9"] };
+ * const value: CarryValue = { payload: { from: "c7" }, carry: ["c8", "c9"], aim: null };
+ * // A board item whose picture is lifted above the finger: the drop goes to the cell under the picture.
+ * const lifted: CarryValue = { payload: { from: "c7" }, carry: [], aim: { x: 25, y: 12 } };
  * ```
  */
-export type CarryValue = { payload: Json; carry: readonly string[] };
+export type CarryValue = {
+  payload: Json;
+  carry: readonly string[];
+  /** A point of the view in the hand, in its own units, that aims the drop; `null` (the default) aims with the finger. */
+  aim: { x: number; y: number } | null;
+};
 
 /**
  * Where the one pointer is, in reference units. `justPressed` and `justReleased` are true for
- * exactly one frame.
+ * exactly one frame. `id` is the `pointerId` of the pointer the gesture machine follows, `-1` when
+ * it follows none. It changes while `down` stays true when a resting finger (pressed, not moved
+ * past the tap slop, no long press, no trace) gives way to another finger: a system that measures
+ * the finger's travel from frame to frame starts over then.
  *
  * @example
  * ```ts
  * const value: PointerValue = {
- *   x: 540, y: 960, down: true, justPressed: false, justReleased: false
+ *   x: 540, y: 960, down: true, justPressed: false, justReleased: false, id: 3
  * };
  * ```
  */
@@ -46,6 +59,8 @@ export type PointerValue = {
   down: boolean;
   justPressed: boolean;
   justReleased: boolean;
+  /** The `pointerId` the resource follows; `-1` at rest. */
+  id: number;
 };
 
 /**
@@ -68,11 +83,12 @@ function intentDefaults(): IntentValue {
  * @returns An empty payload and nothing carried along.
  * @example
  * ```ts
- * carryDefaults(); // { payload: {}, carry: [] }
+ * carryDefaults(); // { payload: {}, carry: [], aim: null }
  * ```
  */
 function carryDefaults(): CarryValue {
-  return { payload: {}, carry: [] };
+  // eslint-disable-next-line unicorn/no-null -- `aim: null` is the default, so a projection's whole-value write takes an earlier aim away.
+  return { payload: {}, carry: [], aim: null };
 }
 
 const pointerDefaults: PointerValue = {
@@ -80,7 +96,8 @@ const pointerDefaults: PointerValue = {
   y: 0,
   down: false,
   justPressed: false,
-  justReleased: false
+  justReleased: false,
+  id: -1
 };
 
 /**
@@ -95,7 +112,8 @@ export const Pressable = /*#__PURE__*/ component("Pressable", intentDefaults());
 
 /**
  * This view can be carried by the finger. It names no intent; the drop target does. The views
- * whose keys `carry` lists hang under it from the grab to the release and fly home with it.
+ * whose keys `carry` lists hang under it from the grab to the release and fly home with it. With
+ * an `aim`, the hover and the drop are looked up under that point of the view in the hand.
  */
 export const Draggable = /*#__PURE__*/ component("Draggable", carryDefaults());
 
@@ -154,6 +172,7 @@ export const Pressed = /*#__PURE__*/ tag("Pressed");
 export const PointerOver = /*#__PURE__*/ tag("PointerOver");
 
 /**
- * Where the one pointer is, in reference units. Written once per frame by the frame step.
+ * Where the one pointer is, in reference units. Written once per frame by the frame step. `id`
+ * names the pointer it follows, `-1` at rest.
  */
 export const Pointer = /*#__PURE__*/ resource("Pointer", pointerDefaults);

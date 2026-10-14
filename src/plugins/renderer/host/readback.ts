@@ -42,27 +42,63 @@ export function sourceBytes(source: {
 }
 
 /**
- * Counts the texture sources the GPU holds and sums their estimated bytes. Pixi's
- * `managedTextures` exists on the WebGPU and the WebGL texture system alike (checked in 8.21);
- * Pixi's canvas renderer keeps no GPU texture and answers zero. Both systems answer
+ * Tells a render target from art: Pixi gives a target no upload method and no resource.
+ *
+ * @param source - The upload fields of a Pixi `TextureSource`.
+ * @param source.uploadMethodId - How Pixi uploads it; `"unknown"` for a render target.
+ * @param source.resource - What it uploads; none for a render target.
+ * @returns True for a render target.
+ * @example
+ * ```ts
+ * isTarget({ uploadMethodId: "unknown", resource: null }); // true
+ * ```
+ */
+function isTarget(source: { uploadMethodId: string; resource: unknown }): boolean {
+  return (
+    source.uploadMethodId === "unknown" &&
+    (source.resource === null || source.resource === undefined)
+  );
+}
+
+/**
+ * Counts the texture sources the GPU holds and sums their estimated bytes, split three ways: a
+ * source with no upload method and no resource is a render target (a filter texture, a picture
+ * Pixi renders into), one the engine keeps as a picture is kept, every other source is art.
+ * Pixi's `managedTextures` exists on the WebGPU and the WebGL texture system alike (checked in
+ * 8.22); Pixi's canvas renderer keeps no GPU texture and answers zero. Both systems answer
  * `Object.values` of a `GCManagedHash`, which keeps a `null` slot for every unloaded source, so
- * only the live sources are counted.
+ * only the live sources are counted. An indexed walk: no array is made.
  *
  * @param app - The application that draws.
- * @returns The count and the bytes.
+ * @param kept - The sources the engine keeps as pictures.
+ * @returns The count, the bytes and their split.
  */
-export function textureUsage(app: PixiApplication): TextureUsage {
+export function textureUsage(app: PixiApplication, kept: WeakSet<object>): TextureUsage {
   const system = app.renderer.texture;
+  const usage: TextureUsage = { count: 0, bytes: 0, art: 0, targets: 0, kept: 0 };
 
-  if (!("managedTextures" in system)) return { count: 0, bytes: 0 };
+  if (!("managedTextures" in system)) return usage;
 
-  // Pixi's type says `TextureSource[]`, but an unloaded source leaves `null` in the list.
-  const sources = system.managedTextures.filter(Boolean);
-  let bytes = 0;
+  const sources = system.managedTextures;
+  const total = sources.length;
 
-  for (const source of sources) bytes += sourceBytes(source);
+  for (let index = 0; index < total; index += 1) {
+    // Pixi's type says `TextureSource[]`, but an unloaded source leaves `null` in the list.
+    const source = sources[index];
 
-  return { count: sources.length, bytes };
+    if (!source) continue;
+
+    const bytes = sourceBytes(source);
+
+    usage.count += 1;
+    usage.bytes += bytes;
+
+    if (kept.has(source)) usage.kept += bytes;
+    else if (isTarget(source)) usage.targets += bytes;
+    else usage.art += bytes;
+  }
+
+  return usage;
 }
 
 /**

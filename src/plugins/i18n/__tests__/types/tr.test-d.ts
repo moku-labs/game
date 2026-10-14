@@ -1,8 +1,17 @@
 import { expectTypeOf } from "vitest";
+import type { Strings as MiniStrings } from "../../../../../tests/fixtures/mini-game/generated/strings";
 import { createPlugin } from "../../../../config";
 import { i18nPlugin } from "../../index";
 import { i18nFor, tr as looseTr } from "../../tr";
-import type { DurationStyle, ElementNode, Events, I18nApi, I18nCtx, Message } from "../../types";
+import type {
+  DurationStyle,
+  ElementNode,
+  Events,
+  I18nApi,
+  I18nCtx,
+  Message,
+  TextKey
+} from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -108,3 +117,56 @@ i18n.duration(95_000, "digital");
 
 // @ts-expect-error — "tiny" is not a duration style.
 i18n.duration(95_000, "tiny");
+
+// ─── keys that come from data ─────────────────────────────────
+
+const { key } = i18nFor<Strings>();
+
+// The keys without parameters, derived from the table: a data table or a save holds one of these.
+expectTypeOf<TextKey<Strings>>().toEqualTypeOf<"orders.complete">();
+
+// A real generated table writes `Record<string, never>` for a message without parameters: its only
+// key is a TextKey, so no list has to be generated next to `Strings`.
+expectTypeOf<TextKey<MiniStrings>>().toEqualTypeOf<"home.note">();
+
+expectTypeOf(key("orders.complete")).toEqualTypeOf<"orders.complete">();
+expectTypeOf(tr(key("orders.complete"))).toEqualTypeOf<
+  Message<"orders.complete", Record<string, never>>
+>();
+
+// @ts-expect-error — "hud.orders" takes { n }, so a table of keys alone cannot hold it.
+key("hud.orders");
+
+// @ts-expect-error — "nope" is not a key of this game.
+key("nope");
+
+declare const saved: string;
+declare const fromSave: unknown;
+
+// @ts-expect-error — a plain string read from a save is no key: tr stays strict.
+tr(saved);
+
+// One isKey, one signature: the app of a game types app.i18n as I18nApi<TextKey<Strings>>
+// (WithGameState), so the value read from the save narrows to a key tr takes alone.
+declare const gameI18n: I18nApi<TextKey<Strings>>;
+
+if (gameI18n.isKey(fromSave)) {
+  expectTypeOf(fromSave).toEqualTypeOf<"orders.complete">();
+  tr(fromSave);
+}
+
+// An engine plugin's ctx.require(i18nPlugin) has no table: the same guard narrows to string only.
+declare const engineI18n: I18nApi;
+declare const fromData: unknown;
+
+if (engineI18n.isKey(fromData)) {
+  expectTypeOf(fromData).toEqualTypeOf<string>();
+  // @ts-expect-error — a string is not a key of this game: only the game's I18nApi narrows to one.
+  tr(fromData);
+}
+
+// The table types the guard only: a game's I18nApi passes where the engine's is expected.
+expectTypeOf<I18nApi<TextKey<Strings>>>().toExtend<I18nApi>();
+
+// The kit has no isKey of its own: the app's i18n is the one form.
+expectTypeOf(i18nFor<Strings>()).not.toHaveProperty("isKey");

@@ -80,6 +80,8 @@ export function createJsxState(): JsxState {
     remount: false,
     epoch: 0,
     styled: 0,
-    written: 0
+    written: 0,
+    debugTaps: [],
+    debugWarned: false
   };
 }

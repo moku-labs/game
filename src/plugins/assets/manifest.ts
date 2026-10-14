@@ -21,7 +21,7 @@ const TIERS: readonly string[] = ["boot", "core", "scene", "feature", "lazy"];
 /** The bytes of one megabyte. */
 const BYTES_PER_MB = 1_048_576;
 
-/** The bytes one pixel takes in GPU memory: RGBA, no mipmaps. */
+/** The bytes one pixel of one mip level takes in GPU memory: RGBA. */
 const BYTES_PER_PIXEL = 4;
 
 /** Megabytes are kept to three decimals: a value is rounded to a whole number of these parts. */
@@ -182,7 +182,7 @@ function parseAtlasPages(value: unknown): readonly AtlasPage[] | undefined {
 
 /**
  * Reads one file entry. Unknown fields are dropped; a `path` that is not a string is absent, as
- * on a texture packed in an atlas.
+ * on a texture packed in an atlas, and `mips` is kept only when it is `true`.
  *
  * @param raw - One element of the `files` array.
  * @returns The file, or `undefined` when the element is not an object.
@@ -202,6 +202,7 @@ function parseFile(raw: unknown): ManifestFile | undefined {
     width: numberAt(raw, "width"),
     height: numberAt(raw, "height"),
     mb: numberAt(raw, "mb"),
+    ...(raw.mips === true ? { mips: true } : {}),
     ...(kind === undefined ? {} : { kind }),
     ...(pages === undefined ? {} : { pages }),
     ...(nine === undefined ? {} : { nine }),
@@ -242,7 +243,26 @@ function parseTier(name: string, value: unknown): Tier {
 }
 
 /**
- * Reads one bundle entry, with its pages sorted by id and its files sorted by key.
+ * Reads one optional string field of a JSON object: an empty string counts as absent.
+ *
+ * @param source - The object to read.
+ * @param key - Name of the field.
+ * @returns The string, or `undefined`.
+ * @example
+ * ```ts
+ * textAt({ dir: "features/episodes/ep01" }, "dir"); // "features/episodes/ep01"
+ * ```
+ */
+function textAt(source: Record<string, unknown>, key: string): string | undefined {
+  const value = source[key];
+
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/**
+ * Reads one bundle entry, with its pages sorted by id and its files sorted by key. `parent` and
+ * `dir` are kept when they are non-empty strings, `release` only when it is `"leave"`: any other
+ * value reads as absent, the default `"budget"`.
  *
  * @param name - Bundle name.
  * @param raw - What the manifest carried under that name.
@@ -263,10 +283,15 @@ function parseBundle(name: string, raw: unknown): ManifestBundle {
     .toSorted((left, right) => left.key.localeCompare(right.key));
 
   const pages = parseAtlasPages(raw.pages);
+  const parent = textAt(raw, "parent");
+  const dir = textAt(raw, "dir");
 
   return {
     feature: stringAt(raw, "feature"),
+    ...(parent === undefined ? {} : { parent }),
+    ...(dir === undefined ? {} : { dir }),
     tier: parseTier(name, raw.tier),
+    ...(raw.release === "leave" ? { release: "leave" } : {}),
     mb: numberAt(raw, "mb"),
     ...(pages === undefined ? {} : { pages }),
     files
@@ -386,22 +411,58 @@ export function fileUrl(base: string, path: string): string {
 }
 
 /**
- * Works out what an image costs in texture memory: `width × height × 4` bytes as megabytes,
- * rounded to 3 decimals. It is the number the scanner writes for a texture and for a font page;
- * the dev hot swap writes it again for a file that came back with another size.
+ * Counts the pixels of an image on the GPU: one level, or with `mips` every level of the full
+ * chain Pixi builds once `autoGenerateMipmaps` is set (`floor(log2(max(width, height))) + 1`
+ * levels, each side halved and floored, never below 1 px), the sum `renderer/host/readback.ts`
+ * counts too.
  *
  * @param width - Width of the image in pixels.
  * @param height - Height of the image in pixels.
+ * @param mips - True for the full mip chain.
+ * @returns The pixels of every level.
+ * @example
+ * ```ts
+ * chainPixels(4, 4, true); // 21: 16 + 4 + 1
+ * ```
+ */
+function chainPixels(width: number, height: number, mips: boolean): number {
+  if (!mips) return width * height;
+
+  const levels = Math.floor(Math.log2(Math.max(width, height))) + 1;
+  let pixels = 0;
+  let levelWidth = width;
+  let levelHeight = height;
+
+  for (let level = 0; level < levels; level += 1) {
+    pixels += levelWidth * levelHeight;
+    levelWidth = Math.max(1, Math.floor(levelWidth / 2));
+    levelHeight = Math.max(1, Math.floor(levelHeight / 2));
+  }
+
+  return pixels;
+}
+
+/**
+ * Works out what an image costs in texture memory: `width × height × 4` bytes as megabytes,
+ * every level of its mip chain with `mips`, rounded to 3 decimals. It is the number the scanner
+ * writes for a texture and for a font page; the dev hot swap writes it again for a file that came
+ * back with another size. Its twin is `textureMb` of `scan/image-size.ts`, which the build side
+ * reads: a change edits both.
+ *
+ * @param width - Width of the image in pixels.
+ * @param height - Height of the image in pixels.
+ * @param mips - True for a texture uploaded with its full mip chain.
  * @returns The megabytes.
  * @example
  * ```ts
  * textureMb(256, 128); // 0.125
+ * textureMb(256, 128, true); // 0.167
  * ```
  */
-export function textureMb(width: number, height: number): number {
-  return (
-    Math.round(((width * height * BYTES_PER_PIXEL) / BYTES_PER_MB) * PARTS_PER_MB) / PARTS_PER_MB
-  );
+export function textureMb(width: number, height: number, mips = false): number {
+  const bytes = chainPixels(width, height, mips) * BYTES_PER_PIXEL;
+
+  return Math.round((bytes / BYTES_PER_MB) * PARTS_PER_MB) / PARTS_PER_MB;
 }
 
 /**
@@ -440,4 +501,23 @@ export function nineOf(file: ManifestFile): CreateTextureOptions | undefined {
   if (nine === undefined) return undefined;
 
   return { nine: [nine.left, nine.top, nine.right, nine.bottom] };
+}
+
+/**
+ * Turns the metadata of a loose texture into the options `io.createTexture` takes: its
+ * nine-slice borders and whether it carries mipmaps.
+ *
+ * @param file - One file of a bundle.
+ * @returns The options, or `undefined` for a file with neither.
+ * @example
+ * ```ts
+ * textureOptionsOf({ key: "ep01.items.cup", path: "p.png", width: 336, height: 288, mb: 0.492, mips: true }); // { mips: true }
+ * ```
+ */
+export function textureOptionsOf(file: ManifestFile): CreateTextureOptions | undefined {
+  const nine = nineOf(file);
+
+  if (file.mips !== true) return nine;
+
+  return { ...nine, mips: true };
 }

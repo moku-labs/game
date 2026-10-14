@@ -72,6 +72,11 @@ export type State = {
   over: { particles: boolean; passes: boolean; fullScreen: boolean };
   /** The teardown closure, the two systems and the world hooks. */
   removers: Array<() => void>;
+  /**
+   * The switches of a debug build: the kind ids in registration order (frozen, filled in `onStart`), the kinds
+   * turned off, and those as a frozen list in the order of `kinds`.
+   */
+  diagnostics: { kinds: readonly string[]; off: Set<string>; offList: readonly string[] };
 };
 
 /**
@@ -120,6 +125,94 @@ export type EffectsApi = {
    * ```
    */
   stats(): EffectsStats;
+
+  /**
+   * Switches of a debug build: filter kinds turned off by hand, to measure what a kind costs on the device. Acts on
+   * a page with the agent flag (a debug build, the dev page); elsewhere `disable` and `enable` change nothing. An off
+   * kind keeps its instances: `stats().filters` still counts them, `renderPasses` drops.
+   *
+   * @example
+   * ```ts
+   * // A game's overlay toggle "Glow": the frame without any glow, then with it again.
+   * app.effects.diagnostics.disable("effects.glow"); // true
+   * app.effects.diagnostics.enable("effects.glow"); // true
+   * ```
+   */
+  diagnostics: EffectsDiagnostics;
+};
+
+/**
+ * Switches of a debug build: filter kinds turned off by hand, to measure what a kind costs on the device. Acts on
+ * a page with the agent flag (a debug build, the dev page); elsewhere `disable` and `enable` change nothing.
+ *
+ * @example
+ * ```ts
+ * // A game's overlay toggle "Glow" (H4.4): the frame without any glow, then with it again.
+ * app.effects.diagnostics.disable("effects.glow"); // true
+ * app.effects.diagnostics.enable("effects.glow"); // true
+ * ```
+ */
+export type EffectsDiagnostics = {
+  /**
+   * The filter kinds this app knows, in registration order: the seven built-ins, then the `filters` of every
+   * feature. The same frozen array on every call; empty before start. Every build.
+   *
+   * @returns The kind ids.
+   * @example
+   * ```ts
+   * // A game with the frost filter of its casefile feature, after start.
+   * app.effects.diagnostics.kinds();
+   * // ["effects.glow", "effects.outline", "effects.blur", "effects.colorMatrix", "effects.noise",
+   * //  "effects.displacement", "effects.alpha", "casefile.frost"]
+   * ```
+   */
+  kinds(): readonly string[];
+
+  /**
+   * Turns a filter kind off: from the next frame no view draws it (no apply, no render pass), while its instances
+   * stay and are still written, so `enable` shows the current look at once. Agent pages only.
+   *
+   * @param kind - A kind id of `kinds()`.
+   * @returns True when the kind is known and now off; false for an unknown kind, and on a page without the agent
+   *   flag, where nothing changes.
+   * @example
+   * ```ts
+   * // The owner measures the board without the glow of its four cards (one glow pass each).
+   * app.effects.diagnostics.disable("effects.glow"); // true
+   * app.time.step(16);
+   * app.effects.stats().renderPasses; // 9, down from 13
+   * app.effects.diagnostics.disable("fx.nope"); // false, and one warning effects:diagnostics-unknown
+   * ```
+   */
+  disable(kind: string): boolean;
+
+  /**
+   * Turns a filter kind on again: from the next frame its views draw it with their current values.
+   *
+   * @param kind - A kind id of `kinds()`.
+   * @returns True when the kind is known and now on; false for an unknown kind and without the agent flag.
+   * @example
+   * ```ts
+   * app.effects.diagnostics.enable("effects.glow"); // true
+   * app.time.step(16);
+   * app.effects.stats().renderPasses; // 13
+   * ```
+   */
+  enable(kind: string): boolean;
+
+  /**
+   * The kinds turned off now, in registration order. The same frozen array until the next change; empty without
+   * the agent flag.
+   *
+   * @returns The kind ids.
+   * @example
+   * ```ts
+   * app.effects.diagnostics.disable("casefile.frost");
+   * app.effects.diagnostics.disable("effects.glow");
+   * app.effects.diagnostics.disabled(); // ["effects.glow", "casefile.frost"]
+   * ```
+   */
+  disabled(): readonly string[];
 };
 
 /**

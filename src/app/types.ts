@@ -13,6 +13,7 @@ import type {
   createApp,
   effectsPlugin,
   Flow,
+  I18n,
   Model,
   Platform,
   platformPlugin,
@@ -98,7 +99,26 @@ export type GameConfig = {
     /** Asset layers by name: `{ shared: "ui" }` packs the shared layer from `features/ui`. */
     layers?: Readonly<Record<string, string>>;
   };
+  /** The debug page. Read only on a page with the agent. Default: `{ overlay: "closed" }`. */
+  debug?: {
+    /**
+     * How the editor's overlay shows when a debug page starts: `"closed"` (default), the `"pill"`, or `"open"` (the
+     * card). Only a page with the agent reads it.
+     */
+    overlay?: OverlayStart;
+  };
 };
+
+/**
+ * How the editor's overlay shows when a debug page starts, `config.ts` `debug.overlay`.
+ *
+ * @example
+ * ```ts
+ * // QA builds of the game start with the small pill shown.
+ * const start: OverlayStart = "pill";
+ * ```
+ */
+export type OverlayStart = "closed" | "pill" | "open";
 
 /**
  * `GameConfig` with every default filled, as `resolveConfig` returns it. The page, the CLI and the
@@ -108,7 +128,7 @@ export type GameConfig = {
  * ```ts
  * const settings: ResolvedGameConfig = {
  *   page: { title: "mini-game", lang: "en", background: "#000000", orientation: "portrait", icons: {}, head: [] },
- *   native: undefined, system: [], save: "memory", assets: { layers: {} }
+ *   native: undefined, system: [], save: "memory", assets: { layers: {} }, debug: { overlay: "closed" }
  * };
  * ```
  */
@@ -123,6 +143,8 @@ export type ResolvedGameConfig = {
   save: SaveKind;
   /** The asset build. */
   assets: { layers: Readonly<Record<string, string>> };
+  /** The debug page: how the overlay shows at its start. */
+  debug: { overlay: OverlayStart };
 };
 
 // ─── index.ts: the game as one data object ────────────────────
@@ -216,16 +238,27 @@ export type GameDefinition<
   Plugins extends readonly AnyPluginInstance[] = readonly [],
   HeadlessPlugins extends readonly AnyPluginInstance[] = readonly [],
   Player extends Model.Json = Model.Json,
-  Session extends Model.Json = Model.Json
+  Session extends Model.Json = Model.Json,
+  Strings extends I18n.StringTable = I18n.StringTable
 > = {
   /** The main flow. */
   flow: Flow.AnyFlow;
+  /**
+   * The generated `Strings` type of the game, as a type tag: `strings: type<Strings>()`. Only the
+   * compiler reads it: `app.i18n.isKey(value)` of the game's app then narrows to a key of the table.
+   * Left out, `isKey` narrows to `string`.
+   */
+  strings?: Flow.TypeTag<Strings>;
   /** The checkpoint entered after a failed retry. Default: the start of the main flow. */
   safeNode?: string;
   /** The player a new save starts from. */
   player: Player;
   /** The session at every start. */
   session: Session;
+  /** The orientation the layout is designed for. Default `"portrait"`. Not `page.orientation` of `config.ts`, which locks the native build. */
+  orientation?: Renderer.Orientation;
+  /** The short side of the design frame, in reference units. Default 1080. */
+  referenceSide?: number;
   /** The long side the layout needs, in reference units. Default 1920. */
   referenceLong?: number;
   /** The rng seed of a new save. Default 42. */
@@ -234,7 +267,9 @@ export type GameDefinition<
   shared?: Flow.FeaturePlugin;
   /**
    * The features of the screen app, in order, after `shared`. The headless app composes their
-   * logic too, unless `headless.features` names its own list.
+   * logic too, unless `headless.features` names its own list. A feature that declares sub-features
+   * (`defineFeature(name, { features })`) brings them: list the parent only; the shell composes the
+   * tree depth first, a parent before its children.
    */
   features?: readonly Flow.FeaturePlugin[];
   /** The game's own plugins, after the features. Their APIs land on `screen().app`. */
@@ -242,7 +277,8 @@ export type GameDefinition<
   /**
    * What the headless app composes: the logic of these features and these plugins, nothing else.
    * `headless.features` left out is the definition's `features`; `headless: { features: [] }`
-   * composes no feature. `shared` and `plugins` are never taken by default.
+   * composes no feature. `shared` and `plugins` are never taken by default. A parent brings the
+   * logic of its sub-features, depth first; `headless.features` may name a sub-feature alone.
    */
   headless?: { features?: readonly Flow.FeaturePlugin[]; plugins?: HeadlessPlugins };
   /** Plugin configs of the game. Seam-owned keys are not accepted. */
@@ -260,6 +296,46 @@ export type GameDefinition<
  * ```
  */
 export type MemoryProvider = ReturnType<typeof memory>;
+
+/** The app with `model.store.snapshot()` typed by the game's player and session. */
+type WithGameSnapshot<App, Player, Session> = App extends {
+  model: { store: { snapshot(): unknown } };
+}
+  ? Omit<App, "model"> & {
+      model: Omit<App["model"], "store"> & {
+        store: Omit<App["model"]["store"], "snapshot"> & {
+          snapshot(): Model.SnapshotOf<Player, Session>;
+        };
+      };
+    }
+  : App;
+
+/** The app with `i18n` typed by the game's strings table; an app without i18n, or the wide table, is left as it is. */
+type WithGameStrings<App, Strings extends I18n.StringTable> = App extends { i18n: I18n.I18nApi }
+  ? I18n.StringTable extends Strings
+    ? App
+    : Omit<App, "i18n"> & { i18n: I18n.I18nApi<I18n.TextKey<Strings>> }
+  : App;
+
+/**
+ * The app of one game with `model.store.snapshot()` typed by the game's player and session, and
+ * `i18n.isKey` by the game's strings table. Only the type: the store and the i18n API are the
+ * engine's, and every other member is the app's own.
+ *
+ * @example
+ * ```ts
+ * const { app } = game.headless();
+ * app.model.store.snapshot().player.count; // 0, typed number
+ * // A game whose index.ts passes strings: type<Strings>(): the screen app narrows a saved key.
+ * game.screen().app.i18n.isKey("ui.toast.saved"); // true once started, typed I18n.TextKey<Strings>
+ * ```
+ */
+export type WithGameState<
+  App,
+  Player,
+  Session,
+  Strings extends I18n.StringTable = I18n.StringTable
+> = WithGameStrings<WithGameSnapshot<App, Player, Session>, Strings>;
 
 /**
  * What one call of `headless()` or `screen()` gives: the app, not started, and the clock and save
@@ -453,7 +529,8 @@ export type GameApp<
   Plugins extends readonly AnyPluginInstance[] = readonly [],
   HeadlessPlugins extends readonly AnyPluginInstance[] = readonly [],
   Player extends Model.Json = Model.Json,
-  Session extends Model.Json = Model.Json
+  Session extends Model.Json = Model.Json,
+  Strings extends I18n.StringTable = I18n.StringTable
 > = {
   /**
    * Makes the logic app: the core plugins, the logic of `headless.features` and the
@@ -476,7 +553,11 @@ export type GameApp<
     Provider extends Model.PlayerStateProvider = MemoryProvider
   >(
     seams?: HeadlessSeams<Player, Session, Source, Provider>
-  ): GameHandle<HeadlessAppOf<HeadlessPlugins>, Source, Provider>;
+  ): GameHandle<
+    WithGameState<HeadlessAppOf<HeadlessPlugins>, Player, Session, Strings>,
+    Source,
+    Provider
+  >;
 
   /**
    * Makes the screen app: the screen set, `audio`, `effects`, `platform`, then `shared`, the
@@ -498,7 +579,7 @@ export type GameApp<
     Provider extends Model.PlayerStateProvider = MemoryProvider
   >(
     seams?: ScreenSeams<Player, Session, Source, Provider>
-  ): GameHandle<ScreenAppOf<Plugins>, Source, Provider>;
+  ): GameHandle<WithGameState<ScreenAppOf<Plugins>, Player, Session, Strings>, Source, Provider>;
 };
 
 // ─── /app/page: the page that runs a game ─────────────────────
@@ -586,13 +667,13 @@ export type SystemShellFactory = (
  * ```
  */
 export type PageOptions = {
-  /** Prepared saves by name, for `?player=`. Dev only; the build passes none. */
+  /** Prepared saves by name, for `?player=`. Dev only; the builds pass none. */
   scenarios?: Readonly<Record<string, Scenario>>;
   /** The system shell factory, when `config.ts` names a system plugin or the store save. */
   system?: SystemShellFactory;
-  /** Agents started after the app. Dev only. */
+  /** Agents started after the app: on the dev page and on a debug page. */
   agents?: readonly PageAgent[];
-  /** The game's `.dev` modules, handed to the agents. Dev only. */
+  /** The game's `.dev` modules, handed to the agents: dev and debug pages. */
   devModules?: readonly object[];
 };
 

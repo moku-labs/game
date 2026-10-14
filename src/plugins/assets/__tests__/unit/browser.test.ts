@@ -136,3 +136,14 @@ describe("createBrowserIo", () => {
     expect(renderer.destroyed).toEqual([texture]);
   });
 });
+
+describe("createBrowserIo with mipmaps", () => {
+  it("hands the mip chain option to the renderer's texture registry", () => {
+    const renderer = createRecordingRenderer();
+    const image = { width: 336, height: 288 } as unknown as DecodedImage;
+
+    createBrowserIo(renderer.api).createTexture(image, { mips: true });
+
+    expect(renderer.created).toEqual([{ image, options: { mips: true } }]);
+  });
+});

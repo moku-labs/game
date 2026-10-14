@@ -32,6 +32,15 @@ function emptyWeakSet<Value extends WeakKey>(): WeakSet<Value> {
 }
 
 /**
+ * Creates an empty weak map. Same reason as `emptyMap`.
+ *
+ * @returns An empty weak map.
+ */
+function emptyWeakMap<Key extends WeakKey, Value>(): WeakMap<Key, Value> {
+  return new WeakMap();
+}
+
+/**
  * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter and
  * no slice.
  *
@@ -62,6 +71,7 @@ export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
     debug: { nineSlice: debug.nineSlice },
     outlinesStale: false,
     filters: emptyMap(),
+    filterKinds: emptyWeakMap(),
     cleanups: []
   };
 }

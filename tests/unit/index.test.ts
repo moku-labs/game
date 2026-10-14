@@ -76,6 +76,7 @@ describe("root index", () => {
       "defineTokens",
       "frames",
       "intrinsics",
+      "key",
       "label",
       "load",
       "music",
@@ -84,7 +85,9 @@ describe("root index", () => {
       "projection",
       "sfx",
       "sprite",
-      "tr"
+      "system",
+      "tr",
+      "volumes"
     ]);
   });
 
@@ -107,7 +110,7 @@ describe("root index", () => {
     const plugins = [...barrel.matchAll(/export \{ (\w+Plugin) \} from/g)].map(([, name]) => name);
     const named = namedFromPlugins(readFileSync(new URL("index.ts", SRC), "utf8"));
 
-    expect(plugins).toHaveLength(17);
+    expect(plugins).toHaveLength(18);
     expect(plugins.filter(name => name !== undefined && !named.includes(name))).toEqual([]);
   });
 });

@@ -255,6 +255,9 @@ const setup = (options: GraphOptions = {}, settleTimeoutMs = 2000, holdMs = 0) =
       pause: vi.fn(),
       resume: vi.fn(),
       wake: vi.fn(),
+      measure: vi.fn(),
+      agentClock: () => undefined,
+      chargeAgent: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => frames.running,
       step: vi.fn()

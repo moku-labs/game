@@ -46,6 +46,9 @@ const createFakeTime = (): FakeTime => {
     pause: vi.fn(),
     resume: vi.fn(),
     wake: vi.fn(),
+    measure: vi.fn(),
+    agentClock: () => undefined,
+    chargeAgent: vi.fn(),
     isPaused: () => false,
     isRunning: () => flags.running,
     step: vi.fn(),
@@ -93,7 +96,7 @@ const notRequired: Require = () => {
 };
 
 const createTestState = (): State => ({
-  features: { byName: new Map(), sealed: false },
+  features: { byName: new Map(), parentOf: new Map(), sealed: false },
   fx: {
     handlers: new Map(),
     buffered: [],

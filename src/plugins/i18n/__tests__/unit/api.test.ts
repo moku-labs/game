@@ -162,6 +162,67 @@ describe("has", () => {
 
     expect(mock.api.has("hud.hint")).toBe(false);
   });
+
+  it("answers false for a name of Object.prototype, and format shows it as a missing key", async () => {
+    const mock = await startedMock();
+
+    expect(mock.api.has("toString")).toBe(false);
+    expect(mock.api.format({ key: "toString" })).toEqual([{ kind: "text", text: "⟦toString⟧" }]);
+  });
+});
+
+/**
+ * The game of the prefix rule: `hud` brought Russian eagerly, `casefile` is a sub-feature of
+ * `cases` whose lazy strings live with the bundle `casefile`, not loaded at start.
+ *
+ * @returns The started mock.
+ */
+async function casefileGame(): Promise<MockI18n> {
+  const mock = createMockI18n({ locale: "ru", fallback: "ru" }, { bundles: ["casefile"] });
+
+  mock.flow.features.push(
+    { name: "hud", description: { strings: { ru: russian } } },
+    { name: "cases", description: {} },
+    {
+      name: "casefile",
+      parent: "cases",
+      description: { strings: { ru: async () => moduleOf({ "casefile.title": "Дело" }) } }
+    }
+  );
+  await mock.start();
+
+  return mock;
+}
+
+describe("isKey", () => {
+  it("answers true for a key of the loaded locale and false for a renamed key, a number, null and a name of Object.prototype", async () => {
+    const mock = await startedMock();
+
+    expect(mock.api.isKey("hud.orders")).toBe(true);
+    expect(mock.api.isKey("hud.coins")).toBe(true);
+    expect(mock.api.isKey("hud.ordersOld")).toBe(false);
+    expect(mock.api.isKey(3)).toBe(false);
+    // eslint-disable-next-line unicorn/no-null -- a save holds null where a key was cleared
+    expect(mock.api.isKey(null)).toBe(false);
+    expect(mock.api.isKey("toString")).toBe(false);
+  });
+
+  it("answers true for a key of a sub-feature whose strings are not loaded, and false for a prefix of no such sub-feature", async () => {
+    const mock = await casefileGame();
+
+    expect(mock.api.isKey("casefile.title")).toBe(true);
+    expect(mock.api.isKey("casefile.gone")).toBe(true);
+    expect(mock.api.isKey("nofeature.title")).toBe(false);
+  });
+
+  it("checks the exact key once the sub-feature's strings are loaded", async () => {
+    const mock = await casefileGame();
+
+    await mock.companion().load("casefile");
+
+    expect(mock.api.isKey("casefile.title")).toBe(true);
+    expect(mock.api.isKey("casefile.gone")).toBe(false);
+  });
 });
 
 describe("locales", () => {

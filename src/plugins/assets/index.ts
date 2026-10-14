@@ -8,6 +8,7 @@
 import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { flowPlugin } from "../flow";
+import { modelPlugin } from "../model";
 import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { createAssetsApi } from "./api";
@@ -40,7 +41,7 @@ const config: Config = {
  * ```
  */
 export const assetsPlugin = /*#__PURE__*/ createPlugin("assets", {
-  depends: [flowPlugin, rendererPlugin, timePlugin],
+  depends: [flowPlugin, rendererPlugin, timePlugin, modelPlugin],
   config,
   events: (register: RegisterFunction) =>
     register.map<Events>({

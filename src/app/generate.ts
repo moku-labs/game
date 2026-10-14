@@ -1,14 +1,21 @@
 /**
- * @file The text of the files `moku-game` generates for a game: the page HTML, the dev and build
- * `main.ts`, the dev flag module, the assets stamp module and the dev bunfig. Pure text builders:
- * no IO, no Bun. The dev writes them into `<game>/.moku/`, the build hands them to `Bun.build` in
- * memory. Every relative import they write carries its `.ts` extension: an import between two
- * in-memory files of `Bun.build` resolves only with it.
+ * @file The text of the files `moku-game` generates for a game: the page HTML, the dev, debug and
+ * build `main.ts`, the dev flag module, the agent flag module of a debug page, the startup mark
+ * module, the assets stamp module and the dev bunfig. Pure text builders: no IO, no Bun. The dev
+ * writes them into `<game>/.moku/`, the build hands them to `Bun.build` in memory. Every relative
+ * import they write carries its `.ts` extension: an import between two in-memory files of
+ * `Bun.build` resolves only with it.
  */
 import type { ResolvedGameConfig, SystemName } from "./types";
 
 /** The first line of a generated file a person may open. */
 const WRITTEN = "// Written by moku-game dev. Do not edit.";
+
+/** The startup mark every generated main writes first after its imports: they all evaluated. */
+const MAIN_MARK = 'performance.mark("moku:main");';
+
+/** The one agent a debug page carries: the editor's page agent, resolved from the game. */
+export const DEBUG_AGENT = "@moku-labs/editor/agent/page";
 
 /**
  * The stamp module of a game, a file of `<game>/.moku/`. One per game: the dev page and the page
@@ -56,6 +63,18 @@ export type MainSources = {
   devModules: readonly string[];
   /** The agent module specifiers, in order. Left out: no agent and no `.dev` module. */
   agents?: readonly string[];
+};
+
+/** What the in-memory `agent.ts` of a debug page sets. */
+type AgentFlags = {
+  /** The build id: `debug-<stamp>` or `debug-full-<stamp>`. */
+  build: string;
+  /** True for `--debug=full`: every command runs. */
+  control: boolean;
+  /** The id of the engine fingerprint. */
+  engine: string;
+  /** The `host:port` the page agent dials. */
+  editor: string;
 };
 
 /** The absolute paths the dev bunfig names. */
@@ -344,12 +363,13 @@ function toStampFolder(toRoot: string): string {
 }
 
 /**
- * The `main.ts` of the dev page: the dev flag first, then the assets stamp, the page entry, the
- * game, its config, one import per scenario, and, with agents, one per `.dev` module and one per
- * agent. It calls `startPage` with the scenarios by file stem, the shell with the loaders of the
- * named plugins when the game needs it, the agents and the `.dev` modules. The stamp import puts
- * the stamp module on the page: when the keys watch writes a new stamp, the hot plugin hands it to
- * the running game.
+ * The `main.ts` of the dev page: the startup mark module first, the dev flag second, then the
+ * assets stamp, the page entry, the game, its config, one import per scenario, and, with agents,
+ * one per `.dev` module and one per agent. Its first statement marks `moku:main`, then it calls
+ * `startPage` with the scenarios by file stem, the shell with the loaders of the named plugins
+ * when the game needs it, the agents and the `.dev` modules. The stamp import puts the stamp
+ * module on the page: when the keys watch writes a new stamp, the hot plugin hands it to the
+ * running game.
  *
  * @param settings - The resolved `config.ts`.
  * @param sources - The scenario files, the `.dev` modules and the agents.
@@ -384,9 +404,11 @@ export function devMain(
       : [`  devModules: [${numbered("devModule", devModules.length)}]`])
   ];
 
-  // The dev flag is imported first, so the global is set before the game's modules run.
+  // The mark first, so it runs before every module; the dev flag next, so the globals are set
+  // before the game's modules run.
   return [
     WRITTEN,
+    'import "./script.ts";',
     'import "./dev.ts";',
     `import "${toStampFolder(toRoot)}${ASSETS_STAMP}";`,
     ...pageImports(settings, toRoot),
@@ -396,6 +418,7 @@ export function devMain(
     ...devModules.map((file, index) => importLine(`* as devModule${index}`, `${toRoot}${file}`)),
     ...agents.map((agent, index) => importLine(`agent${index}`, agent)),
     "",
+    MAIN_MARK,
     "await startPage(game, config, {",
     options.join(",\n"),
     "});",
@@ -404,9 +427,10 @@ export function devMain(
 }
 
 /**
- * The `main.ts` of the production page: the page entry, the game and its config, and the shell
- * with the loaders of the named plugins when the game needs it. No dev flag, no scenario, no
- * agent, no `.dev` module, no door: none of them ships.
+ * The `main.ts` of the production page: the startup mark module, the page entry, the game and its
+ * config, and the shell with the loaders of the named plugins when the game needs it; its first
+ * statement marks `moku:main`. No dev flag, no scenario, no agent, no `.dev` module, no door: none
+ * of them ships. The release page: `moku-game build --debug` uses `debugMain`.
  *
  * @param settings - The resolved `config.ts`.
  * @returns The text of the in-memory `.moku/build/main.ts`.
@@ -420,21 +444,119 @@ export function buildMain(settings: ResolvedGameConfig): string {
     ? ["await startPage(game, config, {", shellOption(settings), "});"]
     : ["await startPage(game, config);"];
 
-  return [...pageImports(settings, "../../"), "", ...call, ""].join("\n");
+  return [
+    'import "./script.ts";',
+    ...pageImports(settings, "../../"),
+    "",
+    MAIN_MARK,
+    ...call,
+    ""
+  ].join("\n");
 }
 
 /**
- * The `dev.ts` module the dev `main.ts` imports first: it sets the dev flag on `globalThis` for
- * code that reads the global. The bunfig `define` already makes the bare flag true in the bundle.
+ * The `main.ts` of a debug page, `moku-game build --debug`: the startup mark module first, the
+ * agent flag module second, then the page entry, the game, its config, one import per `.dev`
+ * module, sorted, and the editor's page agent. Its first statement marks `moku:main`, then it
+ * calls `startPage` with the shell when the game needs it, the agent and the `.dev` modules. No
+ * scenario (`?player=` stays a dev feature), no assets stamp, no dev flag.
  *
+ * @param settings - The resolved `config.ts`.
+ * @param devModules - The `.dev.ts` modules of the game, relative to the game folder, `/` separated.
+ * @returns The text of the in-memory `.moku/build/main.ts`.
+ * @example
+ * ```ts
+ * debugMain(resolveConfig({ page: { title: "T" } }), []).includes("agents: [agent0]"); // true
+ * ```
+ */
+export function debugMain(settings: ResolvedGameConfig, devModules: readonly string[]): string {
+  const sorted = devModules.toSorted();
+  const options = [
+    ...(needsShell(settings) ? [shellOption(settings)] : []),
+    "  agents: [agent0]",
+    ...(sorted.length === 0 ? [] : [`  devModules: [${numbered("devModule", sorted.length)}]`])
+  ];
+
+  // The mark first, so it runs before every module; the flags next, so module-level code of the
+  // engine and the game reads them set.
+  return [
+    'import "./script.ts";',
+    'import "./agent.ts";',
+    ...pageImports(settings, "../../"),
+    ...sorted.map((file, index) => importLine(`* as devModule${index}`, `../../${file}`)),
+    importLine("agent0", DEBUG_AGENT),
+    "",
+    MAIN_MARK,
+    "await startPage(game, config, {",
+    options.join(",\n"),
+    "});",
+    ""
+  ].join("\n");
+}
+
+/**
+ * The `script.ts` module every generated main imports first: it marks `moku:script` with the URL
+ * of the chunk it lands in, the first statement the bundle runs. Two marks cost nothing, so no
+ * flag guards them.
+ *
+ * @returns The text of `.moku/script.ts` and of the in-memory `script.ts` of a build.
+ * @example
+ * ```ts
+ * scriptMark().startsWith('performance.mark("moku:script"'); // true
+ * ```
+ */
+export function scriptMark(): string {
+  return 'performance.mark("moku:script", { detail: import.meta.url });\n';
+}
+
+/**
+ * The `dev.ts` module the dev `main.ts` imports after the startup mark: it sets on `globalThis`,
+ * for code that reads the globals, the build id `"dev"`, the engine id, the control flag, the
+ * agent flag and, last, the dev flag. The bunfig `define` already makes the three bare flags true
+ * in the bundle.
+ *
+ * @param engine - The id of the engine fingerprint the page was written for.
  * @returns The text of `.moku/dev.ts`.
  * @example
  * ```ts
- * devFlag().endsWith("globalThis.__MOKU_GAME_DEV__ = true;\n"); // true
+ * devFlag("0.0.0+src").endsWith("globalThis.__MOKU_GAME_DEV__ = true;\n"); // true
  * ```
  */
-export function devFlag(): string {
-  return `${WRITTEN}\nglobalThis.__MOKU_GAME_DEV__ = true;\n`;
+export function devFlag(engine: string): string {
+  return [
+    WRITTEN,
+    'globalThis.__MOKU_GAME_BUILD__ = "dev";',
+    `globalThis.__MOKU_GAME_ENGINE__ = ${JSON.stringify(engine)};`,
+    "globalThis.__MOKU_GAME_CONTROL__ = true;",
+    "globalThis.__MOKU_GAME_AGENT__ = true;",
+    "globalThis.__MOKU_GAME_DEV__ = true;",
+    ""
+  ].join("\n");
+}
+
+/**
+ * The in-memory `agent.ts` module of a debug page, imported after the startup mark: six lines
+ * that set the build id, the engine id and the editor address, each through `JSON.stringify`, the
+ * control flag of the profile, the agent flag, and the dev flag `false`. No header: nobody opens
+ * it.
+ *
+ * @param page - What the page is built with.
+ * @returns The text.
+ * @example
+ * ```ts
+ * agentFlag({ build: "debug-20261014T153012Z", control: false, engine: "0.14.12+9c41e0", editor: "127.0.0.1:47600" }).split("\n")[0]; // 'globalThis.__MOKU_GAME_BUILD__ = "debug-20261014T153012Z";'
+ * ```
+ */
+export function agentFlag(page: AgentFlags): string {
+  return [
+    `globalThis.__MOKU_GAME_BUILD__ = ${JSON.stringify(page.build)};`,
+    `globalThis.__MOKU_GAME_ENGINE__ = ${JSON.stringify(page.engine)};`,
+    `globalThis.__MOKU_GAME_EDITOR__ = ${JSON.stringify(page.editor)};`,
+    `globalThis.__MOKU_GAME_CONTROL__ = ${String(page.control)};`,
+    "globalThis.__MOKU_GAME_AGENT__ = true;",
+    "globalThis.__MOKU_GAME_DEV__ = false;",
+    ""
+  ].join("\n");
 }
 
 /**
@@ -489,7 +611,7 @@ function tomlList(paths: readonly string[]): string {
 
 /**
  * The bunfig of the dev server: the preloads when given, the hot plugin first among the bundler
- * plugins of the page, and the dev flag defined true.
+ * plugins of the page, and the dev, agent and control flags defined true.
  *
  * @param paths - The absolute paths of the hot plugin, the extra plugins and the preloads.
  * @returns The text of `.moku/bunfig.toml`.
@@ -505,7 +627,7 @@ export function bunfigText(paths: BunfigPaths): string {
     "",
     "[serve.static]",
     `plugins = ${tomlList([paths.hotPlugin, ...paths.servePlugins])}`,
-    'define = { "__MOKU_GAME_DEV__" = "true" }',
+    'define = { "__MOKU_GAME_DEV__" = "true", "__MOKU_GAME_AGENT__" = "true", "__MOKU_GAME_CONTROL__" = "true" }',
     ""
   ].join("\n");
 }

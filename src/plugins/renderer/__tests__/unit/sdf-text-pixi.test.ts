@@ -14,14 +14,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The step of Pixi 8.21's `localUniformMSDFBit` that hands the premultiplied colour over. */
+/** The step of Pixi 8.22's `localUniformMSDFBit` that hands the premultiplied colour over. */
 const pixiStep = "calculateMSDFAlpha(outColor, vColor, localUniforms.uDistance)";
 
 /** The step of the renderer: the colour un-premultiplied, at alpha 1. */
 const singleAlphaStep =
   "calculateMSDFAlpha(outColor, vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0), localUniforms.uDistance)";
 
-/** The GLSL step of Pixi 8.21's `localUniformMSDFBitGl`: the same double alpha on WebGL. */
+/** The GLSL step of Pixi 8.22's `localUniformMSDFBitGl`: the same double alpha on WebGL. */
 const pixiStepGl = "calculateMSDFAlpha(outColor, vColor, uDistance)";
 
 /** The GLSL step of the renderer: the colour un-premultiplied, at alpha 1. */

@@ -195,8 +195,14 @@ export type State = {
   /** Written by the DOM handlers, drained by the frame step. */
   samples: RawSample[];
   phase: GesturePhase;
-  /** The one active pointer. A sample of any other pointer is dropped while this is set. */
+  /**
+   * The one followed pointer. A sample of any other pointer is dropped while this is set, except
+   * a press while this pointer rests (phase `pressed`, not `moved`): that press takes the pointer
+   * over and cancels the resting press.
+   */
   pointerId: number | undefined;
+  /** The followed pointer left the tap slop since its press: it started a gesture and keeps the pointer. */
+  moved: boolean;
   /** The pressed or held entity. */
   entity: Entity | undefined;
   /** The projection key of `entity`, read once at press time. */

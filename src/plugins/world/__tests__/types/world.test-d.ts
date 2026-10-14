@@ -1,7 +1,9 @@
 import { expectTypeOf } from "vitest";
 import type { World } from "../../../../index";
+import { defineFeature, defineGame } from "../../../../index";
 import { component, mut, resource, system, tag } from "../../ecs/define";
 import type {
+  AnySystem,
   ComponentSchema,
   EcsApi,
   Entity,
@@ -192,3 +194,42 @@ expectTypeOf(resource("Pointer", { x: 0, down: false })).toEqualTypeOf<
 expectTypeOf(resource("boardLooks", () => ({ shown: new Map<Entity, string>() }))).toEqualTypeOf<
   ResourceType<{ shown: Map<Entity, string> }>
 >();
+
+// ─── the kit's system reads the snapshot typed by the game ────
+
+type BoardPlayer = { board: { cells: number[] } };
+
+const { system: gameSystem } = defineGame<{
+  player: BoardPlayer;
+  session: { turn: number };
+  assets: string;
+  strings: Record<string, never>;
+}>();
+
+const looks = gameSystem({
+  name: "board.looks",
+  phase: "animate",
+  query: [mut(Position), Held],
+  run: (rows, { snapshot, time }) => {
+    expectTypeOf(snapshot.player.board.cells).toEqualTypeOf<number[]>();
+    expectTypeOf(snapshot.session.turn).toEqualTypeOf<number>();
+    expectTypeOf(time.delta).toEqualTypeOf<number>();
+
+    for (const [, position] of rows) position.x = snapshot.player.board.cells.length;
+  }
+});
+
+gameSystem({
+  name: "board.coins",
+  phase: "animate",
+  query: [],
+  run: (_rows, { snapshot }) => {
+    // @ts-expect-error — the player of this game has no `coins`.
+    expectTypeOf(snapshot.player.coins).toBeNumber();
+  }
+});
+
+// The result goes where the world takes a system: a feature's systems list, or `ecs.system`.
+expectTypeOf(looks).toExtend<AnySystem>();
+ecs.system(looks);
+defineFeature("board", { systems: [looks] });

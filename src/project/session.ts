@@ -3,13 +3,16 @@
  * walk, the tsconfig aliases with the stamps of the config files they came from, the current index
  * and a queue that runs one update at a time. `syncWithDisk` is the batch walk of a watch batch:
  * it walks the root, hashes the files whose stamp moved and every new one, drops the vanished
- * ones, reads the aliases again when a config file moved, and rebuilds the index when bytes or
- * aliases changed. `reindexPath` reads one path now for `changed`.
+ * ones, reads the aliases again when a config file moved, reads the feature units again, and
+ * rebuilds the index when bytes, aliases or units changed. `reindexPath` reads one path now for
+ * `changed`.
  */
 import path from "node:path";
 import { type AliasMap, readAliases, sameAliases } from "./aliases";
+import type { OwnersRead } from "./assemble";
 import { buildIndex, type Catalog, createCatalog, dropFile, putFile } from "./catalog";
 import { diffIndexes } from "./change";
+import { findFeatureUnits } from "./features";
 import { isIndexedFile, openRoot, readInside, resolveInside, toPosix } from "./paths";
 import type { JsxShapes } from "./shapes";
 import type { ProjectChange, ProjectIndex, ProjectOptions } from "./types";
@@ -37,6 +40,11 @@ export type Session = {
    * moved stamp means read them again.
    */
   configStamps: Map<string, Stamp | undefined>;
+  /**
+   * The feature units of the last read, and the message of a name clash when that read threw; the
+   * units of the last good read stay then.
+   */
+  owners: OwnersRead;
   /** One record per indexed file with its last good parse, and the cache of parses. */
   readonly catalog: Catalog;
   /** The size and time stamp of every file of the last walk; a moved stamp means hash again. */
@@ -183,6 +191,63 @@ async function rereadAliases(session: Session): Promise<boolean> {
 }
 
 /**
+ * Reads the feature units of a game: the owners and the code-only sub-features. A name clash keeps
+ * the units of the read before, as a tsconfig that stops parsing keeps its aliases.
+ *
+ * @param root - The real root.
+ * @param before - The read before, if any.
+ * @returns The read.
+ */
+function readOwners(root: string, before?: OwnersRead): OwnersRead {
+  try {
+    return { owners: findFeatureUnits(root) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return { owners: before?.owners ?? [], error: message };
+  }
+}
+
+/**
+ * Whether two reads of the feature units agree: the same names, folders and parents in the same
+ * order, and the same clash message.
+ *
+ * @param before - The read before.
+ * @param after - The read now.
+ * @returns True when the index would not change by them.
+ * @example
+ * ```ts
+ * sameOwners({ owners: [] }, { owners: [], error: "clash" }); // false
+ * ```
+ */
+function sameOwners(before: OwnersRead, after: OwnersRead): boolean {
+  return (
+    before.error === after.error &&
+    before.owners.length === after.owners.length &&
+    before.owners.every((owner, at) => {
+      const other = after.owners[at];
+
+      return owner.name === other?.name && owner.dir === other.dir && owner.parent === other.parent;
+    })
+  );
+}
+
+/**
+ * Reads the feature units again and keeps the new read.
+ *
+ * @param session - The project.
+ * @returns True when they differ from the read before.
+ */
+function rereadOwners(session: Session): boolean {
+  const read = readOwners(session.root, session.owners);
+  const isMoved = !sameOwners(session.owners, read);
+
+  session.owners = read;
+
+  return isMoved;
+}
+
+/**
  * Reads one file into the catalog, or drops it when it is gone or cannot be read.
  *
  * @param session - The project.
@@ -211,7 +276,7 @@ async function rebuild(session: Session, files: readonly string[]): Promise<Proj
   const before = session.index;
   const manifest = await presentManifest(session.root, session.manifest);
 
-  session.index = buildIndex(session.catalog, manifest, session.aliases);
+  session.index = buildIndex(session.catalog, manifest, session.aliases, session.owners);
 
   return diffIndexes(before, session.index, files);
 }
@@ -242,23 +307,25 @@ export async function openSession(options: ProjectOptions): Promise<Session> {
   // One walk lists the files; each is read through the guard and parsed once.
   const walk = await walkRoot(root);
   const catalog = createCatalog(typescript);
+  const owners = readOwners(root);
   const session: Session = {
     root,
     manifest,
     tsconfig,
     aliases,
     configStamps: await stampConfigs(root, configsOf(tsconfig, read)),
+    owners,
     catalog,
     stamps: walk.files,
     folders: walk.folders,
-    index: buildIndex(catalog, undefined, aliases),
+    index: buildIndex(catalog, undefined, aliases, owners),
     shapes: new WeakMap(),
     queue: Promise.resolve()
   };
 
   for (const file of [...walk.files.keys()].toSorted()) await readIntoCatalog(session, file);
 
-  session.index = buildIndex(catalog, await presentManifest(root, manifest), aliases);
+  session.index = buildIndex(catalog, await presentManifest(root, manifest), aliases, owners);
 
   return session;
 }
@@ -282,10 +349,10 @@ export function serialize<T>(session: Session, task: () => Promise<T>): Promise<
 
 /**
  * The batch walk: walks the root, hashes each file whose stamp moved and each new one, drops the
- * vanished ones, reads the aliases again when a config file moved, appeared or vanished, and
- * rebuilds the index when bytes or aliases changed. A save with the same bytes, or a tsconfig
- * edit that leaves the aliases as they were, changes nothing. New aliases list the tsconfig
- * among the changed files.
+ * vanished ones, reads the aliases again when a config file moved, appeared or vanished, reads
+ * the feature units again, and rebuilds the index when bytes, aliases or units changed. A save
+ * with the same bytes, or a tsconfig edit that leaves the aliases as they were, changes nothing.
+ * New aliases list the tsconfig among the changed files; moved units list no file.
  *
  * @param session - The project.
  * @returns The change, or `undefined` when the index stayed the same.
@@ -322,17 +389,53 @@ export async function syncWithDisk(session: Session): Promise<ProjectChange | un
 
   if (aliasesChanged) files.push(session.tsconfig);
 
+  // The feature units: a folder that becomes a sub-feature changes no indexed file.
+  const ownersMoved = rereadOwners(session);
   const manifest = await presentManifest(session.root, session.manifest);
 
-  if (files.length === 0 && manifest === session.index.manifest) return undefined;
+  if (files.length === 0 && manifest === session.index.manifest && !ownersMoved) return undefined;
 
   return rebuild(session, files);
 }
 
 /**
+ * Reads one root-relative path into the project: a config file of the aliases reads them again,
+ * an indexed file is parsed or dropped, anything else is skipped.
+ *
+ * @param session - The project.
+ * @param relative - The root-relative POSIX path.
+ * @param real - Its real path, `undefined` when nothing is there.
+ * @returns The paths to report as changed: the tsconfig for new aliases, the file for new bytes.
+ */
+async function readPath(
+  session: Session,
+  relative: string,
+  real: string | undefined
+): Promise<string[]> {
+  // A config file of the aliases: changed when they resolve differently now.
+  if (session.configStamps.has(relative)) {
+    return (await rereadAliases(session)) ? [session.tsconfig] : [];
+  }
+
+  // A symlink inside the root and a file outside the index change nothing: the walk never lists
+  // them either.
+  const isLinked = real !== undefined && real !== path.join(session.root, relative);
+
+  if (isLinked || !isIndexedFile(relative)) return [];
+
+  // The stamp follows the read, so the next walk does not hash the file again.
+  const stamp = real === undefined ? undefined : await stampOf(real);
+
+  if (stamp !== undefined) session.stamps.set(relative, stamp);
+
+  return (await readIntoCatalog(session, relative)) ? [relative] : [];
+}
+
+/**
  * Reads one root-relative path now: a changed or new source file is parsed, a deleted one is
  * dropped, the tsconfig or a file it extends reads the aliases again, and anything else changes
- * nothing.
+ * no file. The feature units are read again for every path, so a new door or a new `strings/`
+ * folder shows a sub-feature at once.
  *
  * @param session - The project.
  * @param file - The root-relative path.
@@ -345,29 +448,10 @@ export async function reindexPath(session: Session, file: string): Promise<Proje
 
   if (path.isAbsolute(relative)) return session.index;
 
-  // A config file of the aliases: the index is rebuilt when they resolve differently now.
-  if (session.configStamps.has(relative)) {
-    if (await rereadAliases(session)) await rebuild(session, [session.tsconfig]);
+  const files = await readPath(session, relative, real);
+  const ownersMoved = rereadOwners(session);
 
-    return session.index;
-  }
-
-  // A symlink inside the root and a file outside the index change nothing: the walk never lists
-  // them either.
-  const isLinked = real !== undefined && real !== path.join(session.root, relative);
-
-  if (isLinked || !isIndexedFile(relative)) return session.index;
-
-  // The stamp follows the read, so the next walk does not hash the file again.
-  const stamp = real === undefined ? undefined : await stampOf(real);
-
-  if (stamp !== undefined) session.stamps.set(relative, stamp);
-
-  const isChanged = await readIntoCatalog(session, relative);
-
-  if (!isChanged) return session.index;
-
-  await rebuild(session, [relative]);
+  if (files.length > 0 || ownersMoved) await rebuild(session, files);
 
   return session.index;
 }

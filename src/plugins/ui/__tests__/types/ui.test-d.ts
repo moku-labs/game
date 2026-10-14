@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from "vitest";
 import { defineMotion } from "../../../anim/motion";
-import type { Descriptor } from "../../../flow/fx/types";
+import type { Descriptor, NodeFx } from "../../../flow/fx/types";
+import type { Answer } from "../../../flow/gate/types";
 import { Transform, type TransformValue } from "../../../renderer/components";
 import { bind } from "../../../text/components";
 import type { TextBind as TextPluginBind } from "../../../text/types";
@@ -47,6 +48,13 @@ const Stateless = defineComponent("Stateless", {
   outcomes: { ok: {} },
   view: () => ({ type: "panel", props: {}, children: [] })
 });
+
+const Shop = defineComponent("Shop", {
+  outcomes: { buy: {}, close: {} },
+  view: (props: { gold: number }) => ({ type: "panel", props: { gold: props.gold }, children: [] })
+});
+
+declare const fx: NodeFx;
 
 describe("the ui API", () => {
   it("answers a snapshot, an entity and a list of findings", () => {
@@ -102,16 +110,26 @@ describe("the text field", () => {
 
 describe("popup", () => {
   it("takes a component with outcomes and answers a descriptor", () => {
-    expectTypeOf(popup(Reward, { gold: 5 })).toEqualTypeOf<Descriptor>();
+    expectTypeOf(popup(Reward, { gold: 5 })).toEqualTypeOf<Descriptor<Answer<"claim">>>();
+  });
+
+  it("resolves the answer of one of the component's outcomes", async () => {
+    expectTypeOf(fx(popup(Shop, { gold: 3 }))).toEqualTypeOf<Promise<Answer<"buy" | "close">>>();
+
+    const pick = await fx(popup(Shop, { gold: 3 }));
+
+    // @ts-expect-error — Shop has no outcome "sell": this comparison can never be true.
+    expectTypeOf(pick.intent === "sell").toEqualTypeOf<boolean>();
+    expectTypeOf(pick.intent).toEqualTypeOf<"buy" | "close">();
   });
 
   it("takes a component that keeps local state next to its outcomes", () => {
-    expectTypeOf(popup(Settings, { volume: 3 })).toEqualTypeOf<Descriptor>();
+    expectTypeOf(popup(Settings, { volume: 3 })).toEqualTypeOf<Descriptor<Answer<"close">>>();
     expectTypeOf(Settings.local).toEqualTypeOf<{ tab: string }>();
   });
 
   it("takes a component with outcomes and no local state", () => {
-    expectTypeOf(popup(Stateless, {})).toEqualTypeOf<Descriptor>();
+    expectTypeOf(popup(Stateless, {})).toEqualTypeOf<Descriptor<Answer<"ok">>>();
   });
 
   it("refuses props a stateful component's view does not take", () => {

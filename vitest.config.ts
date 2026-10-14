@@ -1,4 +1,31 @@
+import type { Alias } from "vite";
 import { defineConfig } from "vitest/config";
+
+/** The episodes fixture game, absolute, ending in `/`: the only importer of the aliases below. */
+const EPISODES_GAME = new URL("tests/fixtures/episodes-game/", import.meta.url).pathname;
+
+/**
+ * An alias of the episodes fixture game: it applies only when the importer lies under
+ * `tests/fixtures/episodes-game/`. For any other importer the resolver answers nothing, and the
+ * import resolves as if the entry did not exist, so no game prefix reaches the engine's sources.
+ *
+ * @param find - The alias pattern.
+ * @param replacement - The target inside the fixture, with `$1` for the captured rest.
+ * @returns The alias entry.
+ */
+function episodesAlias(find: RegExp, replacement: string): Alias {
+  return {
+    find,
+    replacement: `${EPISODES_GAME}${replacement}`,
+    customResolver: {
+      resolveId(id, importer) {
+        if (importer?.startsWith(EPISODES_GAME) !== true) return;
+
+        return this.resolve(id, importer, { skipSelf: true });
+      }
+    }
+  };
+}
 
 export default defineConfig({
   // The mini game in tests/fixtures imports the engine by its package name, as a real game does.
@@ -57,7 +84,13 @@ export default defineConfig({
         find: "@moku-labs/game/cli",
         replacement: new URL("src/cli.ts", import.meta.url).pathname
       },
-      { find: "@moku-labs/game", replacement: new URL("src/index.ts", import.meta.url).pathname }
+      { find: "@moku-labs/game", replacement: new URL("src/index.ts", import.meta.url).pathname },
+      // The aliases of the episodes fixture game, as its own tsconfig.json declares them. It is
+      // their only importer: a file outside tests/fixtures/episodes-game/ never gets them.
+      episodesAlias(/^@core\/(.*)$/, "core/$1"),
+      episodesAlias(/^@features$/, "features/index.ts"),
+      episodesAlias(/^@features\/(.*)$/, "features/$1/index.ts"),
+      episodesAlias(/^@generated\/(.*)$/, "generated/$1")
     ]
   },
   test: {

@@ -37,6 +37,8 @@ export type SfxDescriptor = {
   readonly kind: "sfx";
   readonly payload: { readonly key: string; readonly bus: string };
   readonly cosmetic: true;
+  /** Never set: `await fx(sfx(...))` resolves nothing. */
+  readonly $result?: () => void;
 };
 
 /**
@@ -65,6 +67,8 @@ export type HapticDescriptor = {
   readonly kind: "haptic";
   readonly payload: { readonly kind: HapticKind };
   readonly cosmetic: true;
+  /** Never set: `await fx(haptic(...))` resolves nothing. */
+  readonly $result?: () => void;
 };
 
 /**
@@ -95,6 +99,8 @@ export type PlayDescriptor = {
   readonly kind: "play";
   readonly payload: { readonly animation: string; readonly slots: Json };
   readonly cosmetic: true;
+  /** Never set: `await fx(play(...))` resolves nothing. */
+  readonly $result?: () => void;
 };
 
 /**

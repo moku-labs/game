@@ -1,7 +1,7 @@
 import type { AnyPluginInstance } from "@moku-labs/core";
 import { describe, expect, it } from "vitest";
 import { defineFeature } from "../../feature";
-import type { FeatureDescription } from "../../features/types";
+import type { FeatureDescription, FeaturePlugin } from "../../features/types";
 import { flowPlugin } from "../../index";
 import type { AnyFlow } from "../../runner/types";
 
@@ -60,8 +60,13 @@ const kernelNames = [
 // src/plugins/lifecycle/__tests__/unit/api.test.ts.
 type InitContext = Parameters<NonNullable<AnyPluginInstance["spec"]["onInit"]>>[0];
 
-const runInit = (plugin: AnyPluginInstance) => {
-  const calls: Array<{ name: string; description: FeatureDescription }> = [];
+type Registration = { name: string; description: FeatureDescription };
+
+const runInit = (
+  plugin: AnyPluginInstance,
+  has: (name: string) => boolean = () => true,
+  calls: Registration[] = []
+) => {
   const features = {
     register: (name: string, description: FeatureDescription): void => {
       calls.push({ name, description });
@@ -73,7 +78,7 @@ const runInit = (plugin: AnyPluginInstance) => {
     state: {},
     emit: () => {},
     require: () => ({ features }),
-    has: () => true
+    has
   };
 
   plugin.spec.onInit?.(ctx as unknown as InitContext);
@@ -279,5 +284,106 @@ describe("reserved names", () => {
 
   it("refuses an empty name", () => {
     expect(() => defineFeature("", description)).toThrow(/^\[game] /);
+  });
+});
+
+// ─── sub-features ─────────────────────────────────────────────
+
+const notComposed =
+  '[game] Feature "episodes" declares the sub-feature "ep01", but the app does not compose it.\n' +
+  "  Compose the whole tree: defineGameApp does it, a raw createApp takes flattenFeatures([...]).";
+
+const tree = () => {
+  const kit = defineFeature("kit", {});
+  const ep01 = defineFeature("ep01", { flows: [flowOf("ep01.play")] });
+  const episodes = defineFeature("episodes", { features: [kit, ep01] });
+
+  return { kit, ep01, episodes };
+};
+
+describe("sub-features", () => {
+  it("a parent carries its sub-features in declaration order, and a leaf carries none", () => {
+    const { kit, ep01, episodes } = tree();
+
+    expect(episodes.features).toHaveLength(2);
+    expect(episodes.features[0]).toBe(kit);
+    expect(episodes.features[1]).toBe(ep01);
+    expect(kit.features).toEqual([]);
+    expect(kit.logicOnly.features).toEqual([]);
+  });
+
+  it("the logicOnly of a parent carries the logicOnly of each sub-feature", () => {
+    const { kit, ep01, episodes } = tree();
+
+    expect(episodes.logicOnly.features).toHaveLength(2);
+    expect(episodes.logicOnly.features[0]).toBe(kit.logicOnly);
+    expect(episodes.logicOnly.features[1]).toBe(ep01.logicOnly);
+  });
+
+  it("logicOnly keeps the features key of the description", () => {
+    const { kit, ep01 } = tree();
+    const children = [kit, ep01];
+    const episodes = defineFeature("episodes", { features: children, ui: [{ name: "Picker" }] });
+
+    const calls = runInit(episodes.logicOnly);
+
+    expect(calls[0]?.description.features).toBe(children);
+    expect(Object.keys(calls[0]?.description ?? {})).toEqual(["features"]);
+  });
+
+  it("a parent's onInit throws, naming itself and the missing sub-feature, when the app does not compose it", () => {
+    const { episodes } = tree();
+    const calls: Registration[] = [];
+
+    expect(() => runInit(episodes, name => name !== "ep01", calls)).toThrow(notComposed);
+    expect(calls).toEqual([]);
+  });
+
+  it("the logicOnly of a parent checks its sub-features the same way", () => {
+    const { episodes } = tree();
+    const calls: Registration[] = [];
+
+    expect(() => runInit(episodes.logicOnly, name => name !== "ep01", calls)).toThrow(notComposed);
+    expect(calls).toEqual([]);
+  });
+
+  it("a parent registers once every sub-feature is composed", () => {
+    const { episodes } = tree();
+    const asked: string[] = [];
+
+    const calls = runInit(episodes, name => {
+      asked.push(name);
+
+      return true;
+    });
+
+    expect(asked).toEqual(["kit", "ep01"]);
+    expect(calls.map(call => call.name)).toEqual(["episodes"]);
+  });
+
+  it("defineFeature throws for an entry of features that is not a feature, naming its index", () => {
+    const { kit, ep01 } = tree();
+    // A game in JavaScript, or one that casts: a logic plugin and a bare object are no features.
+    const logicPlugin = ep01.logicOnly as unknown as FeaturePlugin;
+    const bare = { name: "ep02", logicOnly: kit.logicOnly } as unknown as FeaturePlugin;
+
+    expect(() => defineFeature("episodes", { features: [kit, logicPlugin] })).toThrow(
+      '[game] Feature "episodes": features[1] is not a feature.\n' +
+        "  Make it with defineFeature(name, description)."
+    );
+    expect(() => defineFeature("episodes", { features: [bare] })).toThrow(
+      '[game] Feature "episodes": features[0] is not a feature.'
+    );
+  });
+
+  it("a push to the game's array after defineFeature does not change the tree", () => {
+    const { kit, ep01 } = tree();
+    const children = [kit];
+    const episodes = defineFeature("episodes", { features: children });
+
+    children.push(ep01);
+
+    expect(episodes.features.map(child => child.name)).toEqual(["kit"]);
+    expect(episodes.logicOnly.features.map(child => child.name)).toEqual(["kit"]);
   });
 });

@@ -41,8 +41,36 @@ function emptyWarned(): Set<string> {
 }
 
 /**
- * Creates the initial i18n state: nothing registered, nothing loaded, no load in flight. The
- * registry is filled in `onStart` from the feature descriptions and the config.
+ * Creates the table of bundles assets reported loaded, each with the token of its load.
+ *
+ * @returns An empty table.
+ */
+function emptyHeld(): Map<string, symbol> {
+  return new Map();
+}
+
+/**
+ * Creates the table of the coupled modules of loaded bundles, per bundle and locale.
+ *
+ * @returns An empty table.
+ */
+function emptyBundled(): Map<string, Map<string, CompiledMessages>> {
+  return new Map();
+}
+
+/**
+ * Creates the set of sub-features whose lazy strings live with their bundle.
+ *
+ * @returns An empty set.
+ */
+function emptyCoupled(): Set<string> {
+  return new Set();
+}
+
+/**
+ * Creates the initial i18n state: nothing registered, nothing loaded, no load in flight, no
+ * bundle held and not started. The registry is filled in `onStart` from the feature descriptions
+ * and the config.
  *
  * @returns A fresh state, owned by one app.
  */
@@ -53,6 +81,10 @@ export function createI18nState(): State {
     loaded: emptyLoaded(),
     intl: emptyKits(),
     warned: emptyWarned(),
-    loading: undefined
+    loading: undefined,
+    held: emptyHeld(),
+    bundled: emptyBundled(),
+    coupled: emptyCoupled(),
+    started: false
   };
 }

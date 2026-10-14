@@ -168,6 +168,8 @@ describe("the filter sync — instances and assignment", () => {
 
     mock.frame();
     expect(mock.renderer.sets[0]?.slots[0]?.passes).toBe(2);
+    // The performance log of the renderer names the filter by its kind.
+    expect(mock.renderer.sets[0]?.slots[0]?.kind).toBe("effects.blur");
 
     mock.world.ecs.set(entity, Blur, { quality: 3 });
     mock.frame();
@@ -426,6 +428,96 @@ describe("the filter sync — budgets", () => {
     expect(mock.log.warn).not.toHaveBeenCalled();
 
     mock.spawn([Shape({ w: 1200, h: 2000 }), Transform(), Glow()]);
+    mock.frame();
+
+    expect(mock.log.warn).toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
+  });
+});
+
+describe("the filter sync — kinds a debug switch turned off", () => {
+  it("an off kind is left out of the slots handed to the renderer, once; the other kinds of the view stay", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const mock = started();
+    const entity = view(mock, [Glow(), Tint()]);
+
+    mock.frame();
+    mock.api.diagnostics.disable("effects.glow");
+    mock.frame();
+    mock.frame();
+
+    expect(mock.renderer.sets).toHaveLength(2);
+    expect(lastFilters(mock)).toEqual([filterOf(mock, entity, "fx.tint")]);
+    expect(mock.api.stats().filters).toBe(2);
+
+    mock.api.diagnostics.enable("effects.glow");
+    mock.frame();
+    mock.frame();
+
+    expect(mock.renderer.sets).toHaveLength(3);
+    expect(lastFilters(mock)).toEqual([
+      filterOf(mock, entity, "effects.glow"),
+      filterOf(mock, entity, "fx.tint")
+    ]);
+  });
+
+  it("an off kind's instance is kept and still written; on enable it returns with the value written while it was off", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const mock = started();
+    const entity = view(mock, [Glow(), Tint()]);
+
+    mock.frame();
+
+    const glow = filterOf(mock, entity, "effects.glow");
+    const tint = filterOf(mock, entity, "fx.tint");
+
+    mock.api.diagnostics.disable("effects.glow");
+    mock.api.diagnostics.disable("fx.tint");
+    mock.frame();
+    mock.world.ecs.set(entity, Glow, { enabled: false });
+    mock.world.ecs.set(entity, Tint, { amount: 0.4 });
+    mock.frame();
+
+    expect(filterOf(mock, entity, "effects.glow")).toBe(glow);
+    expect(glow?.enabled).toBe(false);
+    expect((tint?.resources.fu as FakeUniformGroup).uniforms.amount).toBe(0.4);
+
+    mock.api.diagnostics.enable("effects.glow");
+    mock.frame();
+
+    expect(lastFilters(mock)).toEqual([glow]);
+    expect(glow?.enabled).toBe(false);
+  });
+
+  it("a view that gains an off kind gets an instance and no slot", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const mock = started();
+
+    mock.api.diagnostics.disable("effects.glow");
+
+    const entity = view(mock, [Glow(), Tint()]);
+
+    mock.frame();
+
+    expect(filterOf(mock, entity, "effects.glow")).toBeDefined();
+    expect(lastFilters(mock)).toEqual([filterOf(mock, entity, "fx.tint")]);
+  });
+
+  it("the full-screen budget does not count a full-screen view whose only filter is off", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const mock = started();
+
+    mock.api.diagnostics.disable("effects.blur");
+    mock.spawn(cover());
+    mock.spawn(cover());
+    mock.frame();
+
+    expect(mock.log.warn).not.toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
+
+    mock.api.diagnostics.enable("effects.blur");
     mock.frame();
 
     expect(mock.log.warn).toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });

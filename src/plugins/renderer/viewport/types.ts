@@ -46,6 +46,12 @@ export type Rect = { x: number; y: number; width: number; height: number };
 export type SafeArea = { top: number; right: number; bottom: number; left: number };
 
 /**
+ * The two hidden elements whose size is the safe area: `start` is left by top, `end` is right by
+ * bottom, in CSS px.
+ */
+export type SafeAreaProbes = { readonly start: HTMLElement; readonly end: HTMLElement };
+
+/**
  * What a game lays its board out in: the drawn frame in reference units.
  *
  * @example
@@ -80,8 +86,8 @@ export type ViewportState = {
   safeArea: SafeArea;
   /** The observer saw a new size; the `render` callback applies it before drawing. */
   resizePending: boolean;
-  /** The hidden element whose padding carries `env(safe-area-inset-*)`. */
-  probe: HTMLElement | undefined;
+  /** The two hidden elements whose size is the safe area. */
+  probes: SafeAreaProbes | undefined;
   cleanups: Array<() => void>;
 };
 
@@ -160,7 +166,7 @@ export type ViewportInternal = {
   apply(root: PixiContainer): void;
 
   /**
-   * Creates the safe-area probe and the resize observer, and measures once.
+   * Creates the two safe-area probes and the two resize observers, and measures once.
    */
   start(): void;
 

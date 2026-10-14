@@ -9,6 +9,7 @@ import { timePlugin } from "../time";
 import { createModules } from "./api";
 import { recordFrame, resetHistory } from "./ecs/history";
 import { registerType } from "./ecs/storage";
+import { startTiming } from "./ecs/systems";
 import type { AnyComponentType, AnySystem } from "./ecs/types";
 import type { AnyProjectionSpec } from "./projection/types";
 import type { Deps, EcsModule, KernelSlice, ProjectionModule, State, WorldCtx } from "./types";
@@ -146,7 +147,9 @@ function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionM
 /**
  * Connects the world in `onStart`: it reads every feature description, registers the five frame
  * callbacks of the phases and listens to the released hints. In a dev build the `signals`
- * callback records the frame history before it clears the change sets. `onStart` has no access to the
+ * callback records the frame history before it clears the change sets; in an agent build the
+ * timing table starts with the page clock of `time` and the `input` callback zeroes it each
+ * frame. `onStart` has no access to the
  * plugin's own API, so it builds its own module objects — they are views on `ctx.state`, which is
  * the one place the modules keep their data.
  *
@@ -159,11 +162,21 @@ export function connectWorld(ctx: KernelSlice): void {
   const { ecs, projection } = createModules(worldCtx);
   const time = worldCtx.deps.time;
 
+  // Inline and positive, as the frame history below: Bun folds the guard under a production
+  // `define`, so a release bundle times no system.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    const clock = time.agentClock();
+
+    if (clock !== undefined) startTiming(worldCtx.state.ecs, clock);
+  }
+
   registerFeatures(worldCtx, ecs, projection);
 
   worldCtx.state.ecs.offFrame.push(
     ecs.onOwnerLeft(owner => projection.ownerLeft(owner)),
     time.onFrame("input", frame => {
+      // The time per system of the frame starts from 0, in place: no allocation.
+      worldCtx.state.ecs.timing?.ms.fill(0);
       projection.reconcileIfDirty();
       ecs.runPhase("input", frame);
     }),
@@ -236,5 +249,7 @@ export function clearWorld(state: State): void {
   state.ecs.running = undefined;
   state.ecs.frameSnapshot = undefined;
   state.ecs.mode = "live";
+  state.ecs.timing = undefined;
+  state.ecs.timingSlots.clear();
   resetHistory(state.ecs);
 }

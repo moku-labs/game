@@ -51,6 +51,8 @@ export type StubCanvas = {
   ): StubPointerEvent;
   captured: number[];
   released: number[];
+  /** Every capture and release in the order they happened: `"capture:7"`, `"release:7"`. */
+  order: string[];
   /** False makes `setPointerCapture` throw, the way a browser does for a pointer that is gone. */
   flags: { capturable: boolean };
 };
@@ -131,6 +133,7 @@ export function createStubCanvas(): StubCanvas {
   const style = { touchAction: "auto", cursor: "" };
   const captured: number[] = [];
   const released: number[] = [];
+  const order: string[] = [];
   const flags = { capturable: true };
   const stub = {
     style,
@@ -151,9 +154,11 @@ export function createStubCanvas(): StubCanvas {
     setPointerCapture: (pointerId: number): void => {
       if (!flags.capturable) throw new Error("no such pointer");
       captured.push(pointerId);
+      order.push(`capture:${String(pointerId)}`);
     },
     releasePointerCapture: (pointerId: number): void => {
       released.push(pointerId);
+      order.push(`release:${String(pointerId)}`);
     }
   };
 
@@ -162,6 +167,7 @@ export function createStubCanvas(): StubCanvas {
     style,
     captured,
     released,
+    order,
     flags,
     names: () => [...listeners.keys()].toSorted(),
     dispatch: (name, event) => {

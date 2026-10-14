@@ -88,3 +88,13 @@ describe("textureMb", () => {
     expect(textureMb(0, 0)).toBe(0);
   });
 });
+
+describe("textureMb with mipmaps", () => {
+  it("adds every level of the chain, each side halved and never below 1 px", () => {
+    expect(textureMb(256, 128)).toBe(0.125);
+    expect(textureMb(256, 128, true)).toBe(0.167);
+    expect(textureMb(336, 288, true)).toBe(0.492);
+    // Thirteen levels of 4096…1 px by 1 px: the height stays 1, and the long side sets the count.
+    expect(textureMb(4096, 1, true)).toBe(0.031);
+  });
+});

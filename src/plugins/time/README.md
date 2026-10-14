@@ -1,6 +1,6 @@
 # time
 
-> Standard plugin — the one clock of the screen: a single `requestAnimationFrame` loop, six fixed frame phases and the `Time` resource.
+> Standard plugin — the one clock of the screen: a single `requestAnimationFrame` loop, six fixed frame phases, the `Time` resource, the measurement of an agent build and the native shell's frame rate. Emits `time:thermal`.
 
 Nothing else in the engine calls `requestAnimationFrame`, `ticker.add`, `setTimeout` or `setInterval` for frame work. Every frame consumer registers a callback here. The frame never goes through the event bus: callbacks are direct function calls.
 
@@ -29,6 +29,9 @@ Callbacks of one phase run in registration order. A callback registered during a
 | `isRunning()` | True while a real frame source drives the loop. False in plain Bun. |
 | `wake()` | Resets the idle timer: the next frame runs at `maxFps` again. Cheap, idempotent, safe inside a frame. Called by `input` (a pointer sample), `anim` (a track starts), `flow` (an edge), `assets` (a load settles), `scenes` (a switch), `text` (a locale change), `ui` (a reconcile). |
 | `step(deltaMs)` | Runs exactly one frame with the given unscaled delta, ignoring the fps cap, the pause flag and `maxDeltaMs`; the scale still applies. Throws when called from inside a frame callback. For tests and tools. |
+| `measure(listener)` | Agent builds: hands `listener` what `time` measured of every frame, after `render` (see "Measuring a frame"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
+| `agentClock()` | Agent builds: the page clock for measurement (`performance.now()`); `undefined` otherwise. `world` times its systems with it. Never for game logic. |
+| `chargeAgent(ms)` | For engine plugins. Agent builds: charges the editor's own work (its overlay, its page agent) to the frame running now, so the adaptive frame rate leaves it out. The renderer's monitor calls it when an agent span closes. Nothing otherwise. |
 
 ```ts
 const time = ctx.require(timePlugin);
@@ -42,6 +45,39 @@ expect(app.time.snapshot().frame).toBe(1);
 ## Frame algorithm
 
 The cap of a frame is `idleFps` while the screen is idle and `maxFps` otherwise. The first frame, and the first frame after a `resume`, counts as one capped frame (`1000 / cap`) instead of the gap to a stale timestamp. Otherwise the raw delta is `timestamp - lastTimestamp`. A frame that arrives earlier than `1000 / cap - 1` ms is skipped. The delta is clamped at `maxDeltaMs`, multiplied by `scale`, added to `elapsed`, and `frame` is increased before the phases run.
+
+## Measuring a frame (agent builds)
+
+In an agent build (`__MOKU_GAME_AGENT__`: dev pages and `--debug` builds) a frame with a measure
+listener runs measured: the same callbacks in the same order with the same error report, plus eight
+reads of the page clock (one before the first phase, one after each phase, one after the
+listeners). The record is one object rewritten every frame, `FrameMeasure`:
+
+| Field | Meaning |
+|---|---|
+| `frame`, `at` | `Time.frame`, and the start of the frame on the page clock: the `requestAnimationFrame` timestamp, or the moment `step()` began. |
+| `gapMs` | `at` minus `at` of the previous measured frame; NaN for the first, the first after a `resume()`, and a stepped frame. |
+| `capMs`, `rateMs` | `1000 / cap` of this frame (the idle cap included), and one frame of the loop's rate without the idle cap: `1000 / maxFps` (spec 21 makes it the adaptive rate). |
+| `skipped` | Ticks the cap skipped since the previous measured frame. |
+| `startMs`, `phaseMs`, `workMs` | The delay before the first phase (0 when stepped), the six phase durations, and `at` to the end of `render`. |
+| `listenersMs` | What the measure listeners took in the frame before. |
+| `idle`, `stepped` | The frame ran under the idle cap; it came from `step()`. |
+
+`step()` frames are measured too, `stepped: true`. No allocation per frame. Without the flag the
+listener list does not exist, the clock is never read and every frame runs as before; with the flag
+and no listener the clock is not read either. `chargeAgent` spans are zeroed at the end of every
+frame of the frame source, after the phases and the listeners; a stepped frame keeps them.
+
+## On the native shell
+
+On a page with `__MOKU_NATIVE__` of version 1 (the native shell of `@moku-labs/native`), `time`
+asks the panel for `maxFps` at start (`display.setFrameRate(maxFps)`), so a 60 fps game does not
+keep the panel at 120 Hz, and hands the request back at stop (`setFrameRate(null)`). Every build: it
+is product behaviour, not measurement. A refused request is warned about once and the app runs on.
+`src/plugins/time/native.ts` is the one reader of the global in the engine. In an agent build it
+also holds the engine's one listener of the window event `moku-native:thermal` and emits
+`time:thermal` with the normalized reading; the renderer's performance log writes it as a
+`thermal` line. A browser page, and a build without the flag, add no listener.
 
 ## The idle cap
 
@@ -62,11 +98,15 @@ createApp({ pluginConfigs: { time: { maxFps: 30, idleFps: 0 } } });
 
 ## Events
 
-None. Frame work is never an event.
+| Event | Payload | When |
+|---|---|---|
+| `time:thermal` | `ThermalReading` (`{ status, headroom, at, android }`, a missing field `null`) | The native shell reported a thermal reading, in an agent build. Never per frame. |
+
+Frame work is never an event.
 
 ## Lifecycle
 
-`onStart` starts the loop when `globalThis.requestAnimationFrame` is a function. In plain Bun there is no frame source: nothing starts, `isRunning()` stays false and tests drive frames with `step`. `onStop` is `({ state }) => stopLoop(state)`: it cancels the pending frame.
+`onStart` starts the loop when `globalThis.requestAnimationFrame` is a function, then asks the native shell for the frame rate and, on the shell in an agent build, adds the thermal listener. In plain Bun there is no frame source: nothing starts, `isRunning()` stays false and tests drive frames with `step`. `onStop` is `({ state }) => stopTime(state)`: it cancels the pending frame, hands the frame rate back to the shell and removes the thermal listener.
 
 ## Doors
 

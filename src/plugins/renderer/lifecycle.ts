@@ -3,6 +3,7 @@
  * host → viewport → sync, and the teardown that undoes exactly what it created.
  */
 import { clockPlugin } from "../clock";
+import { flowPlugin } from "../flow";
 import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
@@ -14,17 +15,19 @@ import type { Deps, KernelSlice, Modules, RendererCtx, TeardownScope } from "./t
 import { stopViewport } from "./viewport/resize";
 
 /**
- * Resolves the dependency APIs `time`, `lifecycle`, `world` and `clock` with `ctx.require`.
+ * Resolves the dependency APIs `time`, `lifecycle`, `world`, `clock` and `flow` with
+ * `ctx.require`.
  *
  * @param ctx - Kernel context of the renderer plugin.
- * @returns The four dependency APIs.
+ * @returns The five dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     time: ctx.require(timePlugin),
     lifecycle: ctx.require(lifecyclePlugin),
     world: ctx.require(worldPlugin),
-    clock: ctx.require(clockPlugin)
+    clock: ctx.require(clockPlugin),
+    flow: ctx.require(flowPlugin)
   };
 }
 
@@ -39,26 +42,33 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
 }
 
 /**
- * The draw callback of the renderer: a pending resize is applied first, then the frame is drawn,
- * then `monitor` closes the frame and hands it to a waiting capture. The display objects are
- * written by the `sync` system.
+ * The draw callback of the renderer: a pending resize is applied first (a pending resolution
+ * takes the same path: the backing store changes, the frame and the scale do not), then the
+ * frame is drawn, then `monitor` closes the frame and hands it to a waiting capture. The display
+ * objects are written by the `sync` system.
  *
+ * @param ctx - Domain context of the renderer plugin.
  * @param modules - The four modules.
  */
-function renderFrame(modules: Modules): void {
+function renderFrame(ctx: RendererCtx, modules: Modules): void {
+  if (modules.host.resolutionPending()) ctx.state.viewport.resizePending = true;
+
   if (modules.viewport.applyPending()) {
     const root = modules.sync.root();
+
+    modules.monitor.changed("resize");
 
     if (root !== undefined) modules.viewport.apply(root);
   }
 
-  modules.host.render();
-  modules.monitor.end();
+  modules.monitor.end(modules.host.render());
 }
 
 /**
- * Starts the renderer: host init, then `viewport` and `sync` in the `onReady` callback, so
- * nothing is created on a device that cannot draw. A restore rebuilds the tree instead.
+ * Starts the renderer: host init, then `viewport`, `sync` and the frame callbacks in the
+ * `onReady` callback, so nothing is created on a device that cannot draw, and last the monitor
+ * of an agent build attaches to the application. A restore rebuilds the tree and attaches the
+ * monitor to the new application instead.
  *
  * Inert without a document or without a mount: nothing is created and nothing is registered.
  *
@@ -74,8 +84,9 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     modules.sync.start();
     rendererCtx.state.host.cleanups.push(
       rendererCtx.deps.time.onFrame("input", () => modules.monitor.begin()),
-      rendererCtx.deps.time.onFrame("render", () => renderFrame(modules))
+      rendererCtx.deps.time.onFrame("render", () => renderFrame(rendererCtx, modules))
     );
+    modules.monitor.attach();
   });
 
   modules.host.onLoss(() => modules.sync.forget());
@@ -84,13 +95,15 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     // The new canvas starts at Pixi's own size: measure the mount again before the next frame.
     rendererCtx.state.viewport.resizePending = true;
     modules.sync.rebuildAll();
+    modules.monitor.attach();
   });
 
   await modules.host.init();
 }
 
 /**
- * Stops the renderer in the reverse order of the start: `monitor` answers the waiting captures,
+ * Stops the renderer in the reverse order of the start: `monitor` answers the waiting captures
+ * and stops its performance monitor,
  * `sync` lets its views go while `world` is still alive, `viewport` drops its observer and its
  * probe, and `host` destroys the application. Textures are left to `assets`; a `Display` object
  * is left to the game.

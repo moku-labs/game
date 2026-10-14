@@ -981,6 +981,42 @@ describe("conflicts, broken files and the revision", () => {
     expect(index.schemaVersion).toBe(1);
     expect(Object.isFrozen(index.symbols)).toBe(true);
   });
+
+  it("an owner line changes the revision; an index built without owners keeps the file-only revision and no features key", () => {
+    const catalog = createCatalog(ts);
+    const text = "export const a = 1;\n";
+    const resources = { assets: false, strings: true };
+    const episodes = { name: "episodes", dir: "features/episodes", depth: 0, resources };
+    const ep01 = {
+      name: "ep01",
+      dir: "features/episodes/ep01",
+      parent: "episodes",
+      depth: 1,
+      resources
+    };
+
+    putFile(catalog, "features/episodes/index.ts", Buffer.from(text));
+
+    const plain = buildIndex(catalog, undefined);
+    const owned = buildIndex(catalog, undefined, undefined, { owners: [episodes, ep01] });
+    const moved = buildIndex(catalog, undefined, undefined, {
+      owners: [episodes, { ...ep01, parent: "season" }]
+    });
+    const lines = [
+      `features/episodes/index.ts\0${sha1(text)}\n`,
+      "features/episodes/\0\n",
+      "features/episodes/ep01/\0episodes\n"
+    ];
+
+    expect(plain.revision).toBe(sha1(lines[0] ?? ""));
+    expect("features" in plain).toBe(false);
+    expect(owned.revision).toBe(sha1(lines.toSorted().join("")));
+    expect(moved.revision).not.toBe(owned.revision);
+    expect(owned.features).toStrictEqual({
+      episodes: { dir: "features/episodes" },
+      ep01: { dir: "features/episodes/ep01", parent: "episodes" }
+    });
+  });
 });
 
 /**

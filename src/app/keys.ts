@@ -3,7 +3,8 @@
  * keeps `generated/` fresh while a dev page is open. A file event is only a trigger. When the
  * events stop for a quiet period, a batch walks the game and reads the size and the time stamp of
  * every asset file and every `strings/<locale>.json`; it runs the scan of `moku-game keys` only
- * when they differ from the batch before. After a scan it writes `.moku/assets-stamp.ts` from the
+ * when they differ from the batch before. A folder that becomes or stops being a sub-feature scans
+ * too: the keys and bundles of its files move between owners. After a scan it writes `.moku/assets-stamp.ts` from the
  * asset files: every file with its stamp, and the ones this batch found changed, so the dev page
  * reads only those again. One scan runs at a time, and a failed scan never stops the watch. A
  * batch that scanned is followed by one more walk: the platform reports only the first path of a
@@ -14,6 +15,7 @@
 import { type Dirent, readdirSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import type { BrandConsole } from "@moku-labs/common/cli";
+import { findFeatureOwners } from "../project/features";
 import { isSkippedFolder } from "../project/paths";
 import { createBatcher, type TreeWatcher, type WatchFunction, watchTree } from "../project/watch";
 import { keysArguments } from "./build";
@@ -37,7 +39,10 @@ export type KeysWatcher = {
   close(): void;
 };
 
-/** What `watchKeys` is started with. */
+/**
+ * What `watchKeys` is started with. The watch scans when an asset file or a strings file changes;
+ * a folder that becomes or stops being a sub-feature scans too.
+ */
 export type WatchKeysOptions = {
   /**
    * Called with the scanner's message when a scan fails: bad JSON in a strings file, a key two
@@ -80,7 +85,10 @@ type Inputs = ReadonlyMap<string, string>;
 
 /** One walk of a game folder. */
 type Walk = {
-  /** The stamp `<size>:<mtimeMs>` of every asset file and every strings file. */
+  /**
+   * The stamp `<size>:<mtimeMs>` of every asset file and every strings file, and one entry per
+   * sub-feature folder (`features/episodes/ep01/`) or feature name clash (`features/`).
+   */
   inputs: Map<string, string>;
   /** Every folder walked, relative to the game with `/`; `""` is the game folder. */
   folders: string[];
@@ -170,6 +178,28 @@ function readFolder(root: string, folder: string, walk: Walk): void {
 }
 
 /**
+ * Adds the feature owners below the top level to the inputs: a folder that becomes or stops being
+ * a sub-feature moves keys and bundles between owners without any asset or strings file changing.
+ * The trailing `/` keeps the entry apart from every file. A name two folders share adds one entry
+ * with the message instead of throwing: the scan reports the clash, and a rename moves the entry.
+ *
+ * @param root - The real game folder.
+ * @param walk - The inputs so far.
+ */
+function readOwners(root: string, walk: Walk): void {
+  try {
+    for (const owner of findFeatureOwners(root)) {
+      if (owner.depth >= 1) walk.inputs.set(`${owner.dir}/`, `sub-feature of ${owner.parent}`);
+    }
+  } catch (error) {
+    walk.inputs.set(
+      "features/",
+      `clash: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+/**
  * Walks a game folder for the inputs of the scan.
  *
  * @param root - The real game folder.
@@ -179,6 +209,7 @@ function walkInputs(root: string): Walk {
   const walk: Walk = { inputs: new Map(), folders: [] };
 
   readFolder(root, "", walk);
+  readOwners(root, walk);
 
   return walk;
 }

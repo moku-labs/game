@@ -1,8 +1,9 @@
 /**
  * @file input plugin — the input commands of the `/control` door: a drag from one view onto
  * another, a trace through many views and a key press. Each goes through `app.input`, so the gate
- * decides and the session stays clean. Dev builds only: every body starts with the inline dev
- * guard, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker. The targets
+ * decides and the session stays clean. Dev builds and `--debug=full` builds: every body starts
+ * with the inline control guard of a route command, so a bundler `define` of `false` drops it,
+ * and logs the `moku:dev` marker. The targets
  * are read with `target.ts`; `readTarget` is re-exported here for the `game.tap` command of ui,
  * which taps a view by the same projection key.
  */
@@ -52,7 +53,12 @@ export const dragCommand = defineCommand({
   input: { from: "json", to: "json" },
   effect: "route",
   run: (app: InputApp, { from, to }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.drag" });
 
@@ -77,7 +83,12 @@ export const traceCommand = defineCommand({
   input: { path: "json" },
   effect: "route",
   run: (app: InputApp, { path }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.trace" });
 
@@ -102,7 +113,12 @@ export const keyCommand = defineCommand({
   input: { key: "string", shift: "boolean?" },
   effect: "route",
   run: (app: InputApp, { key, shift = false }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.key", key });
 

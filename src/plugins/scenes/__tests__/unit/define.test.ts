@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { Json } from "../../../model/types";
 import { projection } from "../../../world/projection/define";
 import { defineScene } from "../../define";
+import type { SceneState } from "../../types";
 
 type Item = { id: string };
 
@@ -247,5 +249,38 @@ describe("defineScene and the ui layer", () => {
         projections: [boardItems]
       })
     ).toThrow('[game] Scene "board": projection "board.items" names layer "items".');
+  });
+});
+
+/**
+ * The ward's bundles of state: the episode the session plays.
+ *
+ * @param state - The committed state.
+ * @param state.session - The session, whose episode names the bundle.
+ * @returns The episode bundle.
+ */
+const wardBundles = ({ session }: SceneState<Json, { episode: string }>): string[] => [
+  session.episode
+];
+
+describe("defineScene and the bundles of state", () => {
+  // Bug: the freeze drops the function, so the switch never awaits the episode.
+  it("keeps the bundles function the scene declared", () => {
+    const scene = defineScene("ward", {
+      bundle: "location",
+      bundles: wardBundles,
+      layers: { room: {} },
+      projections: []
+    });
+
+    expect(scene.bundles).toBe(wardBundles);
+    expect(scene.bundles?.({ player: {}, session: { episode: "ep02" } })).toEqual(["ep02"]);
+  });
+
+  // Bug: a flat game's scene objects change shape.
+  it("has no bundles key for a scene that declares none", () => {
+    const scene = defineScene("home", { bundle: "home", layers: { ui: {} }, projections: [] });
+
+    expect(Object.keys(scene)).toEqual(["id", "bundle", "music", "layers", "projections"]);
   });
 });

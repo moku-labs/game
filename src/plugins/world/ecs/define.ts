@@ -11,6 +11,7 @@ import type {
   QueryTerm,
   ResourceType,
   SystemDefinition,
+  SystemFor,
   TagType,
   TagValue
 } from "./types";
@@ -141,6 +142,22 @@ export function system<const Terms extends readonly QueryTerm[]>(
   definition: SystemDefinition<Terms>
 ): SystemDefinition<Terms> {
   return definition;
+}
+
+/**
+ * Binds `system` to one game's player and session, so `run` reads a typed snapshot. Type-only:
+ * the same function.
+ *
+ * @returns `{ system }` whose `run` reads the game's state types.
+ * @example
+ * ```ts
+ * const { system: gameSystem } = systemsFor<{ board: { cells: number[] } }, {}>();
+ * gameSystem({ name: "looks", phase: "animate", query: [Transform], run: (rows, { snapshot }) => void snapshot.player.board.cells });
+ * ```
+ */
+export function systemsFor<Player, Session>(): { system: SystemFor<Player, Session> } {
+  // The world hands the committed snapshot, which the game's types describe.
+  return { system: system as SystemFor<Player, Session> };
 }
 
 /**

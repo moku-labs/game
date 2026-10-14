@@ -1,13 +1,15 @@
 /**
- * Standard tier — single rAF loop, six frame phases, the Time resource. Emits no events.
+ * Standard tier — single rAF loop, six frame phases, the Time resource, the measurement of an
+ * agent build and the native shell's frame rate. Emits `time:thermal`.
  *
  * @see README.md
  */
+import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { createTimeApi } from "./api";
-import { startLoop, stopLoop } from "./lifecycle";
+import { startTime, stopTime } from "./lifecycle";
 import { createTimeState } from "./state";
-import type { Config } from "./types";
+import type { Config, Events } from "./types";
 
 const config: Config = { maxFps: 60, maxDeltaMs: 50, idleFps: 30, idleAfterMs: 2000 };
 
@@ -25,9 +27,14 @@ const config: Config = { maxFps: 60, maxDeltaMs: 50, idleFps: 30, idleAfterMs: 2
  */
 export const timePlugin = /*#__PURE__*/ createPlugin("time", {
   config,
+  events: (register: RegisterFunction) =>
+    register.map<Events>({
+      "time:thermal": "The native shell reported a thermal reading"
+    }),
   createState: createTimeState,
   api: createTimeApi,
-  onStart: startLoop,
-  // @no-resource-check — onStop cancels the requestAnimationFrame handle.
-  onStop: ({ state }) => stopLoop(state)
+  onStart: startTime,
+  // @no-resource-check — onStop cancels the requestAnimationFrame handle, hands the frame rate
+  // back to the native shell and removes the thermal listener.
+  onStop: ({ state }) => stopTime(state)
 });

@@ -1,14 +1,16 @@
 /**
- * @file assets plugin — API factory. `app.assets`: five members over the state, all of them
+ * @file assets plugin — API factory. `app.assets`: the members over the state, all of them
  * answering at once while headless.
  */
 import { unloadBundle, usedMb } from "./budget";
+import { addCompanion } from "./companions";
 import { withDeps } from "./lifecycle";
 import { ignoreFailure, isPermanent, loadBundle, touch } from "./tiers";
 import type {
   Api,
   AssetsCtx,
   AudioAsset,
+  BundleCompanion,
   BundleRecord,
   BundleUsage,
   FontAsset,
@@ -183,6 +185,10 @@ export function createAssetsApi(ctx: KernelSlice): Api {
     usage: (): Usage => usage(assets),
     sceneBundles: (named: readonly string[]): void => {
       ctx.state.sceneNamed = [...named];
+    },
+    has: (bundle: string): boolean => Object.hasOwn(ctx.state.manifest.bundles, bundle),
+    companions: {
+      add: (companion: BundleCompanion): (() => void) => addCompanion(ctx.state, companion)
     }
   };
 }

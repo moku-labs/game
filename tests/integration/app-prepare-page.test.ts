@@ -1,8 +1,9 @@
 /**
  * @file `preparePage`, the editor's seam of `@moku-labs/game/cli`, on copies of the mini game in
- * the engine repo: the four files under `.moku/`, the absolute paths it returns, no rewrite on a
- * second call, the hot plugin of the working tree, the agents and `.dev` modules on the page, and
- * the refusals of a folder that is not a game. It runs Bun's resolver, so it needs Bun.
+ * the engine repo: the files under `.moku/`, the absolute paths and the engine it returns, no
+ * rewrite on a second call, the hot plugin of the working tree, the agents and `.dev` modules on
+ * the page, and the refusals of a folder that is not a game. It runs Bun's resolver, so it needs
+ * Bun.
  */
 import { existsSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -12,6 +13,11 @@ import { copyMiniGame, REPO, removeCopies } from "./app-helpers";
 
 /** The copies of this file, removed after it. */
 const copies: string[] = [];
+
+/** The version of the engine repo: a copy resolves the engine's sources, `<version>+src`. */
+const VERSION = (
+  JSON.parse(readFileSync(path.join(REPO, "package.json"), "utf8")) as { version: string }
+).version;
 
 /**
  * Copies the mini game for one test.
@@ -51,7 +57,12 @@ describe.skipIf(typeof Bun === "undefined")("preparePage", () => {
     expect(page(root, "index.html")).toContain("<title>mini-game</title>");
     expect(page(root, "main.ts")).toContain('import scenario0 from "../tests/scenarios/ready.ts";');
     expect(page(root, "dev.ts")).toContain("globalThis.__MOKU_GAME_DEV__ = true;");
-    expect(page(root, "bunfig.toml")).toContain('define = { "__MOKU_GAME_DEV__" = "true" }');
+    expect(page(root, "script.ts")).toBe(
+      'performance.mark("moku:script", { detail: import.meta.url });\n'
+    );
+    expect(page(root, "bunfig.toml")).toContain(
+      'define = { "__MOKU_GAME_DEV__" = "true", "__MOKU_GAME_AGENT__" = "true", "__MOKU_GAME_CONTROL__" = "true" }'
+    );
   });
 
   it("preparePage returns absolute html and bunfig paths", async () => {
@@ -60,8 +71,19 @@ describe.skipIf(typeof Bun === "undefined")("preparePage", () => {
 
     expect(prepared).toEqual({
       html: path.join(root, ".moku", "index.html"),
-      bunfig: path.join(root, ".moku", "bunfig.toml")
+      bunfig: path.join(root, ".moku", "bunfig.toml"),
+      engine: { id: `${VERSION}+src`, version: VERSION, dist: "src", folder: REPO }
     });
+  });
+
+  it("preparePage returns the engine the page was written for, and .moku/dev.ts carries its id", async () => {
+    const root = game();
+    const { engine } = await preparePage(root);
+
+    expect(page(root, "dev.ts")).toContain(
+      `globalThis.__MOKU_GAME_ENGINE__ = ${JSON.stringify(engine.id)};`
+    );
+    expect(page(root, "dev.ts")).toContain('globalThis.__MOKU_GAME_BUILD__ = "dev";');
   });
 
   it("a second preparePage with the same input rewrites nothing", async () => {
@@ -95,7 +117,7 @@ describe.skipIf(typeof Bun === "undefined")("preparePage", () => {
         "",
         "[serve.static]",
         `plugins = [${JSON.stringify(path.join(REPO, "src", "hot.ts"))}, ${JSON.stringify(bundle)}]`,
-        'define = { "__MOKU_GAME_DEV__" = "true" }',
+        'define = { "__MOKU_GAME_DEV__" = "true", "__MOKU_GAME_AGENT__" = "true", "__MOKU_GAME_CONTROL__" = "true" }',
         ""
       ].join("\n")
     );

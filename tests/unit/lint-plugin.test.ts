@@ -478,7 +478,7 @@ export const all = [show, homeNode, homeFeature, deep];
   "features/home/__tests__/isolated/home.test.ts": "export const home = 1;\n"
 };
 
-/** What the ten rules find in the layout game with `LAYOUT_BAD` planted: nothing else. */
+/** What the eleven rules find in the layout game with `LAYOUT_BAD` planted: nothing else. */
 const LAYOUT_TALLY = {
   "core/bad-layer.ts layer-imports": 1,
   "features/home/__tests__/isolated/home.test.ts test-suffix": 1,
@@ -505,8 +505,8 @@ function layoutGame(into = ".", withTsconfig = true): (folder: string) => void {
 }
 
 describe("the layout rules under oxlint", () => {
-  it("find nothing in the clean layout game with all ten rules on", () => {
-    expect(Object.keys(ALL_RULES)).toHaveLength(10);
+  it("find nothing in the clean layout game with all eleven rules on", () => {
+    expect(Object.keys(ALL_RULES)).toHaveLength(11);
     expect(runOxlint({}, ALL_RULES, SOURCE, layoutGame())).toEqual([]);
   });
 
@@ -560,6 +560,52 @@ describe("the layout rules under oxlint", () => {
       "src/shared/views/bad-layer.ts layer-imports": 1,
       "src/tests/e2e/first.test.ts test-suffix": 1
     });
+  });
+});
+
+/** The fixture game with a parent feature and three sub-features, clean: spec 07's episodes game. */
+const EPISODES_GAME = path.join(ROOT, "tests/fixtures/episodes-game");
+
+/** Planted over a copy of the episodes game: one file per kind of violation of a nested game. */
+const EPISODES_BAD = {
+  // feature-door: a sub-feature imports its parent's door by alias and a file of it by path.
+  "features/episodes/ep01/flow/bad-parent.ts":
+    'import { episodesFeature } from "@features/episodes";\nimport { pickNode } from "../../flow/pick";\nexport const both = [episodesFeature, pickNode];\n',
+  // feature-door: a sibling by relative path, and a deep alias into the sibling.
+  "features/episodes/ep01/flow/bad-sibling.ts":
+    'import { openEpisode } from "../../episodes-kit";\nimport { openNode } from "@features/episodes/episodes-kit/flow/open";\nexport const both = [openEpisode, openNode];\n',
+  // sub-features: a sub-feature owner named unlike its folder, and missing from the parent's door.
+  "features/episodes/ep03/index.ts":
+    'import { defineFeature } from "@core/kit";\nexport const ep03Feature = defineFeature("episode3", {});\n',
+  "features/episodes/ep03/strings/en.json": '{ "ep03.title": "Ep 3" }\n'
+};
+
+/** What the eleven rules find in the episodes game with `EPISODES_BAD` planted: nothing else. */
+const EPISODES_TALLY = {
+  "features/episodes/ep01/flow/bad-parent.ts feature-door": 2,
+  "features/episodes/ep01/flow/bad-sibling.ts feature-door": 2,
+  "features/episodes/ep03/index.ts sub-features": 1,
+  "features/episodes/index.ts sub-features": 1
+};
+
+/**
+ * Copy the episodes game into a fixture folder without its tsconfig.json: its `paths` point into
+ * the repo, so the copy reads the v15 aliases, which map the same prefixes.
+ *
+ * @param folder - The fixture folder.
+ */
+function episodesGame(folder: string): void {
+  cpSync(EPISODES_GAME, folder, { recursive: true });
+  rmSync(path.join(folder, "tsconfig.json"));
+}
+
+describe("the layout rules under oxlint on a game with sub-features", () => {
+  it("find nothing in the clean episodes game with all eleven rules on", () => {
+    expect(runOxlint({}, ALL_RULES, SOURCE, episodesGame)).toEqual([]);
+  });
+
+  it("fire once on each planted violation of EPISODES_BAD and on nothing else", () => {
+    expect(tally(runOxlint(EPISODES_BAD, ALL_RULES, SOURCE, episodesGame))).toEqual(EPISODES_TALLY);
   });
 });
 
@@ -1587,5 +1633,471 @@ describe("layout rules and the project index", () => {
       [path.join(root, "features/home/index.ts")],
       []
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-process on a game folder with sub-features: the units of the features
+// layer at any depth, and the declaration rule `sub-features`.
+// ---------------------------------------------------------------------------
+
+/** A game whose features nest: owners, a code-only sub-feature its parent lists, an unlisted door folder, a flat barrel folder. */
+const EPISODES_TREE: Record<string, string> = {
+  "features/home/index.ts":
+    'import { defineFeature } from "@core/kit";\nimport { format } from "./helpers";\nexport const homeFeature = defineFeature("home", { views: [format] });\n',
+  "features/home/flow/home.ts": "export const home = 1;\n",
+  "features/home/helpers/index.ts": 'export { format } from "./format";\n',
+  "features/home/helpers/format.ts": "export const format = 1;\n",
+  "features/episodes/index.ts":
+    'import { defineFeature } from "@core/kit";\nimport { ep01Feature } from "./ep01";\nimport { episodesKitFeature } from "./episodes-kit";\nimport { episodesToolsFeature } from "./episodes-tools";\nexport const episodesFeature = defineFeature("episodes", {\n  features: [episodesKitFeature, episodesToolsFeature, ep01Feature]\n});\n',
+  "features/episodes/flow/pick.ts": "export const pickNode = 1;\n",
+  "features/episodes/ep01/index.ts":
+    'import { defineFeature } from "@core/kit";\nimport { scene1Feature } from "./scene1";\nexport const ep01Feature = defineFeature("ep01", { features: [scene1Feature] });\n',
+  "features/episodes/ep01/strings/en.json": '{ "ep01.title": "Ep 1" }\n',
+  "features/episodes/ep01/flow/story.ts": "export const story = 1;\n",
+  "features/episodes/ep01/scene1/index.ts":
+    'import { defineFeature } from "@core/kit";\nexport const scene1Feature = defineFeature("scene1", {});\n',
+  "features/episodes/ep01/scene1/assets.ts": "export const assets = {};\n",
+  "features/episodes/episodes-kit/index.ts":
+    'import { defineFeature } from "@core/kit";\nexport const episodesKitFeature = defineFeature("episodes-kit", {});\n',
+  "features/episodes/episodes-kit/assets/frame.png": "",
+  "features/episodes/episodes-tools/index.ts":
+    'import { defineFeature } from "@core/kit";\nexport const episodesToolsFeature = defineFeature("episodes-tools", {});\n',
+  "features/episodes/episodes-tools/flow/tool.ts": "export const tool = 1;\n",
+  "features/episodes/notes/index.ts": 'export { draft } from "./draft";\n',
+  "features/episodes/notes/draft.ts": "export const draft = 1;\n"
+};
+
+/**
+ * What feature-door says about a sub-feature that imports a feature it lives in.
+ *
+ * @param importer - The unit of the importing file.
+ * @param ancestor - The unit it imports.
+ * @param kit - The sibling sub-feature the message suggests.
+ * @returns The message.
+ */
+const ancestorSays = (importer: string, ancestor: string, kit: string): string =>
+  `Door: a sub-feature does not import the feature it lives in: ${importer} imports ${ancestor}. Move what they share into a sibling sub-feature, such as ${kit}, and import it from its door.`;
+
+/**
+ * An import declaration node with the names it binds.
+ *
+ * @param from - The specifier.
+ * @param locals - The local names.
+ * @returns The node.
+ */
+const importOf = (from: string, ...locals: string[]): GameLintNode => ({
+  type: "ImportDeclaration",
+  source: literal(from),
+  importKind: "value",
+  specifiers: locals.map(name => ({ type: "ImportSpecifier", local: id(name) }))
+});
+
+/**
+ * A `features: [...]` property node.
+ *
+ * @param elements - The elements of the array.
+ * @returns The node.
+ */
+const listing = (...elements: (GameLintNode | null)[]): GameLintNode => ({
+  type: "Property",
+  key: id("features"),
+  computed: false,
+  value: { type: "ArrayExpression", elements }
+});
+
+/**
+ * A call node with a string literal first argument.
+ *
+ * @param callee - The callee.
+ * @param name - The literal.
+ * @returns The node.
+ */
+const callOf = (callee: GameLintNode, name: string): GameLintNode => ({
+  type: "CallExpression",
+  callee,
+  arguments: [literal(name), { type: "ObjectExpression" }]
+});
+
+/**
+ * Run sub-features on one file whose nodes are visited in order, between Program and its exit.
+ *
+ * @param cwd - The game folder.
+ * @param file - The file path relative to the game folder.
+ * @param nodes - The nodes, each visited under its own type.
+ * @returns The messages reported.
+ */
+function declares(cwd: string, file: string, nodes: GameLintNode[]): string[] {
+  const program: GameLintNode = { type: "Program" };
+  const visits: [string, GameLintNode][] = [
+    ["Program", program],
+    ...nodes.map((node): [string, GameLintNode] => [node.type, node]),
+    ["Program:exit", program]
+  ];
+
+  return check("sub-features", file, visits, [], NO_NAMES, cwd);
+}
+
+/** The imports of the clean episodes door. */
+const EPISODES_IMPORTS = [
+  importOf("@core/kit", "defineFeature"),
+  importOf("./ep01", "ep01Feature"),
+  importOf("./episodes-kit", "episodesKitFeature"),
+  importOf("./episodes-tools", "episodesToolsFeature")
+];
+
+/** The registration of the episodes feature. */
+const EPISODES_CALL = callOf(id("defineFeature"), "episodes");
+
+/** The ep01 door's import and listing of its own sub-feature. */
+const EP01_SCENE = [importOf("./scene1", "scene1Feature"), listing(id("scene1Feature"))];
+
+/**
+ * The rows of a feature-door table as `doorsOf` prints them when every row says what it should.
+ *
+ * @param cases - Importer, specifier and what the rule says (empty when the import passes).
+ * @returns One line per row.
+ */
+const saysOf = (cases: [string, string, string][]): string[] =>
+  cases.map(([file, from, says]) => `${file} ${from}: ${says}`);
+
+/**
+ * What sub-features says about an entry of the episodes door that is not from a sub-feature folder.
+ *
+ * @param name - The entry.
+ * @returns The message.
+ */
+const strayEntry = (name: string): string =>
+  `Sub-features: features: [...] lists ${name}, which is not imported from a sub-feature folder of episodes. A sub-feature lives in features/episodes/<name> and is imported from "./<name>".`;
+
+/**
+ * What sub-features says about a code-only sub-feature that declares sub-features.
+ *
+ * @param dir - Its folder.
+ * @param parent - The feature it lives in.
+ * @returns The message.
+ */
+const codeOnly = (dir: string, parent: string): string =>
+  `Sub-features: ${dir} has no assets/, assets.ts or strings/, so its sub-features are invisible to the scanner and the compiler. Give it a resource of its own, or move them to ${parent}.`;
+
+describe("the layout rules on a game with sub-features", () => {
+  let game = "";
+
+  beforeAll(() => {
+    game = tempFolder();
+    writeFiles(game, EPISODES_TREE);
+  });
+
+  /**
+   * What feature-door says about each row on the episodes game.
+   *
+   * @param cases - Importer, specifier and what the rule says (empty when the import passes).
+   * @returns One line per row: importer, specifier and the messages.
+   */
+  const doorsOf = (cases: [string, string, string][]): string[] =>
+    cases.map(
+      ([file, from]) =>
+        `${file} ${from}: ${importsIn("feature-door", file, from, [], game).join(" | ")}`
+    );
+
+  const ep01 = "features/episodes/ep01";
+  const story = `${ep01}/flow/story.ts`;
+  const episodesKit = "features/episodes/episodes-kit";
+
+  it("a sub-feature's file importing its own door gets the own-door message", () => {
+    const cases: [string, string, string][] = [
+      [story, "@features/episodes/ep01", OWN_DOOR],
+      [story, "../index", OWN_DOOR]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a deep import into a sub-feature names its full door alias; another top-level feature imports its door", () => {
+    const cases: [string, string, string][] = [
+      ["features/home/flow/home.ts", "@features/episodes/ep01/flow/story", deep("feature", ep01)],
+      ["features/home/flow/home.ts", "@features/episodes/ep01", ""]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a sub-feature importing its parent's door by alias, or a file inside its parent by relative path, gets the ancestor message with the <parent>-kit fix", () => {
+    const says = ancestorSays(ep01, "features/episodes", episodesKit);
+
+    const cases: [string, string, string][] = [
+      [story, "@features/episodes", says],
+      [story, "../../flow/pick", says],
+      [`${ep01}/index.ts`, "..", says]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a sub-feature of a sub-feature importing its grandparent names the grandparent and its kit", () => {
+    const scene = `${ep01}/scene1`;
+
+    const cases: [string, string, string][] = [
+      [
+        `${scene}/assets.ts`,
+        "@features/episodes",
+        ancestorSays(scene, "features/episodes", episodesKit)
+      ],
+      [`${scene}/assets.ts`, "../flow/story", ancestorSays(scene, ep01, `${ep01}/ep01-kit`)]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a parent reaches its child's door by ./ep01 from its door and ../ep01 from its flow, and is told deep for ./ep01/flow/story", () => {
+    const cases: [string, string, string][] = [
+      ["features/episodes/index.ts", "./ep01", ""],
+      ["features/episodes/index.ts", "./ep01/index.ts", ""],
+      ["features/episodes/index.ts", "./ep01/scene1", ""],
+      ["features/episodes/flow/pick.ts", "../ep01", ""],
+      ["features/episodes/flow/pick.ts", "@features/episodes/ep01", ""],
+      ["features/episodes/index.ts", "./ep01/flow/story", deep("feature", ep01)]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a sibling sub-feature passes by its door alias and gets the escape message by relative path", () => {
+    const cases: [string, string, string][] = [
+      [story, "@features/episodes/episodes-kit", ""],
+      [story, "../../episodes-kit", leaves(ep01)]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a code-only folder the parent's door lists is a unit: its file importing the parent gets the ancestor message, and a sibling reaches it by its door alias", () => {
+    const tools = "features/episodes/episodes-tools";
+
+    const cases: [string, string, string][] = [
+      [
+        `${tools}/flow/tool.ts`,
+        "@features/episodes",
+        ancestorSays(tools, "features/episodes", episodesKit)
+      ],
+      [story, "@features/episodes/episodes-tools", ""],
+      ["features/home/flow/home.ts", `@${tools}/flow/tool`, deep("feature", tools)]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a door folder the parent does not list stays part of the parent: notes/draft.ts importing ../flow/pick passes and another feature importing @features/episodes/notes is told deep", () => {
+    const cases: [string, string, string][] = [
+      ["features/episodes/notes/draft.ts", "../flow/pick", ""],
+      ["features/episodes/notes/draft.ts", "@features/episodes", OWN_DOOR],
+      [
+        "features/home/flow/home.ts",
+        "@features/episodes/notes",
+        deep("feature", "features/episodes")
+      ]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+  });
+
+  it("a flat feature with a barrel folder helpers/index.ts not listed in features: [...] gives today's result", () => {
+    const cases: [string, string, string][] = [
+      ["features/home/flow/home.ts", "../helpers", ""],
+      ["features/home/helpers/format.ts", "../flow/home", ""],
+      ["features/episodes/flow/pick.ts", "@features/home/helpers", deep("feature", "features/home")]
+    ];
+
+    expect(doorsOf(cases)).toEqual(saysOf(cases));
+    expect(
+      declares(game, "features/home/helpers/index.ts", [importOf("./format", "format")])
+    ).toEqual([]);
+  });
+
+  it("a feature name clash is reported once per features file by feature-door, and the units fall back to the top level", () => {
+    const clash = tempFolder();
+    const program: [string, GameLintNode] = ["Program", { type: "Program" }];
+
+    writeFiles(clash, {
+      "features/a/index.ts": "",
+      "features/a/x/index.ts": "",
+      "features/a/x/strings/en.json": "{}\n",
+      "features/a/x/flow/s.ts": "",
+      "features/b/index.ts": "",
+      "features/b/x/index.ts": "",
+      "features/b/x/strings/en.json": "{}\n"
+    });
+
+    expect(importsIn("feature-door", "features/a/x/flow/s.ts", "@features/a", [], clash)).toEqual([
+      'Lint: features: the feature name "x" is taken by two folders: features/a/x and features/b/x. The layout rules read the top-level features only until it is fixed.',
+      OWN_DOOR
+    ]);
+    expect(check("feature-door", "core/kit.ts", [program], [], NO_NAMES, clash)).toEqual([]);
+    expect(
+      check("layer-imports", "features/a/x/flow/s.ts", [program], [], NO_NAMES, clash)
+    ).toEqual([]);
+    expect(declares(clash, "features/a/x/index.ts", [])).toEqual([]);
+  });
+
+  it("aliasTargetsOf maps @features/episodes/ep01 to the sub-feature's door", () => {
+    expect(aliasTargetsOf("/game/tsconfig.json", "/game", "@features/episodes/ep01")).toEqual([
+      "/game/features/episodes/ep01/index.ts"
+    ]);
+  });
+
+  it("sub-features: a parent door that does not import a child owner", () => {
+    const [kit, , kitImport, toolsImport] = EPISODES_IMPORTS;
+    const nodes = [kit, kitImport, toolsImport].filter(node => node !== undefined);
+
+    expect(
+      declares(game, "features/episodes/index.ts", [
+        ...nodes,
+        listing(id("episodesKitFeature"), id("episodesToolsFeature")),
+        EPISODES_CALL
+      ])
+    ).toEqual([
+      'Sub-features: features/episodes/ep01 is a sub-feature of episodes, and this door does not import it. Import it from "./ep01" and list it in features: [...].'
+    ]);
+  });
+
+  it("sub-features: a child owner imported but not listed in features", () => {
+    expect(
+      declares(game, "features/episodes/index.ts", [
+        ...EPISODES_IMPORTS,
+        listing(id("episodesKitFeature"), id("episodesToolsFeature")),
+        EPISODES_CALL
+      ])
+    ).toEqual([
+      'Sub-features: "./ep01" is imported but not listed in features: [...]. List the sub-feature: features: [..., ep01Feature].'
+    ]);
+  });
+
+  it("sub-features: a features entry that is a spread, or a hole", () => {
+    const entries = [id("episodesKitFeature"), id("episodesToolsFeature"), id("ep01Feature")];
+    const shape =
+      'Sub-features: list each sub-feature by the name it is imported under from "./<folder>".';
+
+    expect(
+      declares(game, "features/episodes/index.ts", [
+        ...EPISODES_IMPORTS,
+        listing(...entries, { type: "SpreadElement" }),
+        EPISODES_CALL
+      ])
+    ).toEqual([shape]);
+    expect(
+      declares(game, "features/episodes/index.ts", [
+        ...EPISODES_IMPORTS,
+        // eslint-disable-next-line unicorn/no-null -- ESTree marks a hole of an array with null.
+        listing(...entries, null),
+        EPISODES_CALL
+      ])
+    ).toEqual([shape]);
+  });
+
+  it("sub-features: a features entry imported from a code-only door folder passes", () => {
+    expect(
+      declares(game, "features/episodes/index.ts", [
+        ...EPISODES_IMPORTS,
+        listing(id("episodesKitFeature"), id("episodesToolsFeature"), id("ep01Feature")),
+        EPISODES_CALL
+      ])
+    ).toEqual([]);
+  });
+
+  it("sub-features: a features entry imported from a kind folder, from a file, from another feature, or not imported", () => {
+    const strays = ["homeViews", "format", "homeFeature", "ghost"];
+
+    expect(
+      declares(game, "features/episodes/index.ts", [
+        ...EPISODES_IMPORTS,
+        importOf("./views", "homeViews"),
+        importOf("./helpers.ts", "format"),
+        importOf("@features/home", "homeFeature"),
+        listing(
+          id("episodesKitFeature"),
+          id("episodesToolsFeature"),
+          id("ep01Feature"),
+          ...strays.map(name => id(name))
+        ),
+        EPISODES_CALL
+      ])
+    ).toEqual(strays.map(name => strayEntry(name)));
+  });
+
+  it("sub-features: a sub-feature door registering another name with defineFeature, owner and code-only", () => {
+    expect(
+      declares(game, `${ep01}/index.ts`, [
+        ...EP01_SCENE,
+        callOf(id("t"), "title"),
+        callOf(id("defineFeature"), "episode1")
+      ])
+    ).toEqual([
+      'Sub-features: features/episodes/ep01/index.ts registers the feature "episode1"; a sub-feature is named like its folder: "ep01".'
+    ]);
+    expect(
+      declares(game, "features/episodes/episodes-tools/index.ts", [
+        callOf(id("defineFeature"), "tools")
+      ])
+    ).toEqual([
+      'Sub-features: features/episodes/episodes-tools/index.ts registers the feature "tools"; a sub-feature is named like its folder: "episodes-tools".'
+    ]);
+  });
+
+  it("sub-features: a sub-feature door registering none, owner and code-only", () => {
+    expect(declares(game, `${ep01}/index.ts`, EP01_SCENE)).toEqual([
+      'Sub-features: the door of features/episodes/ep01 registers no feature named "ep01". A sub-feature is named like its folder: defineFeature("ep01", { … }).'
+    ]);
+    expect(declares(game, "features/episodes/episodes-tools/index.ts", [])).toEqual([
+      'Sub-features: the door of features/episodes/episodes-tools registers no feature named "episodes-tools". A sub-feature is named like its folder: defineFeature("episodes-tools", { … }).'
+    ]);
+  });
+
+  it("sub-features: a sub-feature door that registers its name through a factory call passes", () => {
+    expect(
+      declares(game, `${ep01}/index.ts`, [...EP01_SCENE, callOf(id("defineEpisode"), "ep01")])
+    ).toEqual([]);
+    expect(
+      declares(game, `${ep01}/index.ts`, [
+        ...EP01_SCENE,
+        callOf(member("kit", "defineFeature"), "ep01")
+      ])
+    ).toEqual([]);
+  });
+
+  it("sub-features: a top-level door without children, a file that is not a door, and the index.ts of an unlisted folder report nothing", () => {
+    const other = callOf(id("defineFeature"), "other");
+
+    expect(
+      declares(game, "features/home/index.ts", [
+        importOf("./helpers", "format"),
+        callOf(id("defineFeature"), "home")
+      ])
+    ).toEqual([]);
+    expect(declares(game, "features/episodes/notes/index.ts", [other])).toEqual([]);
+    expect(declares(game, story, [other])).toEqual([]);
+    expect(declares("/game", "features/episodes/ep01/index.ts", [other])).toEqual([]);
+  });
+
+  it("sub-features: a code-only sub-feature that declares sub-features, listed or on disk, is told it has no resources", () => {
+    const lonely = tempFolder();
+
+    writeFiles(lonely, {
+      "features/episodes/index.ts":
+        'import { toolsFeature } from "./tools";\nexport const episodesFeature = defineFeature("episodes", { features: [toolsFeature] });\n',
+      "features/episodes/tools/index.ts": "",
+      "features/episodes/tools/inner/index.ts": "",
+      "features/episodes/tools/inner/strings/en.json": "{}\n"
+    });
+
+    expect(
+      declares(game, "features/episodes/episodes-tools/index.ts", [
+        importOf("./inner", "innerFeature"),
+        listing(id("innerFeature")),
+        callOf(id("defineFeature"), "episodes-tools")
+      ])
+    ).toEqual([codeOnly("features/episodes/episodes-tools", "episodes")]);
+    expect(
+      declares(lonely, "features/episodes/tools/index.ts", [callOf(id("defineFeature"), "tools")])
+    ).toEqual([codeOnly("features/episodes/tools", "episodes")]);
   });
 });
