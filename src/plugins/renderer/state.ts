@@ -1,6 +1,7 @@
 /**
  * @file renderer plugin — state factory.
  */
+import { createDemandState } from "./demand/state";
 import { createHostState } from "./host/state";
 import { createMonitorState } from "./monitor/state";
 import { createSyncState } from "./sync/state";
@@ -57,6 +58,7 @@ export function createRendererState(ctx: { readonly config: Readonly<Config> }):
     host: createHostState(),
     viewport: createViewportState(),
     sync: createSyncState(ctx.config.debug),
-    monitor: createMonitorState(ctx.config.monitor)
+    monitor: createMonitorState(ctx.config.monitor),
+    demand: createDemandState(ctx.config.debug.verifyFrames === true)
   };
 }

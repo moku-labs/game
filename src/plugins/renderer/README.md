@@ -204,11 +204,17 @@ no view and whose `ecs.ownerOf` is `undefined`, so an entity that despawned afte
 already left is forgotten too. A live entity keeps its filters for its next visual, in
 the same frame (a `ui` element that trades its shape for a nine-slice keeps its glow) or later. A `rebuildAll` after a restore applies them again. The renderer never destroys a filter.
 
+### `invalidate` — `app.renderer.invalidate(entity)`
+
+| Method | Behaviour |
+|---|---|
+| `invalidate(entity)` | Tells the renderer, **before** the write, that the Pixi object of an entity's view is about to change in a way it cannot see: a game's own `Display` object, a filter value of `effects`, a particle step. With `onDemand` the frame is drawn when the view was or will be seen (see "Render on demand"); without it nothing changes. No whole-frame form: whole frames come from the renderer's own reasons. Inert, and for an entity without a view: a no-op. |
+
 ### `monitor` — `app.renderer.stats()`, `app.renderer.capture()`, `app.renderer.monitor`
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses }`, plus `drawCalls` in a dev or debug build, a fresh object. Inert: all 0. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses }`, plus `drawCalls` in a dev or debug build, a fresh object. Inert: all 0. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
@@ -220,9 +226,12 @@ names, the path id as the flow path. `textureMbSplit` splits `textureMb` into th
 the render targets Pixi draws into, and the pictures the engine keeps (`host.keep`, from F12/C14).
 | `capture(options?)` | Dev builds only. `{ png }`: a PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `{ png, legend }` with `legend: true`. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). Options: `legend`, `layers`, `sheet`, `against`; see "Capture". |
 
-- `fps` counts frame starts over one second of `clock` time; 0 before the first full second and
-  when no frame was drawn in the last second. A gap over one second, a pause or a hidden tab,
-  restarts the window instead of reading as one slow frame.
+- `fps` counts the frames of the loop, drawn or not, over one second of `clock` time; 0 before the
+  first full second and when no frame ran in the last second. A gap over one second, a pause or a
+  hidden tab, restarts the window instead of reading as one slow frame.
+- `drawn` counts the frames really drawn over the same second: equal to `fps` without `onDemand`,
+  0 on a screen at rest with it. `drawCalls` is the count of the last drawn frame: a skipped frame
+  keeps it.
 - `frameMs` is the mean CPU work of a frame over the same second: from the renderer's callback in
   phase `input` to the end of `render`. The clock is the `clock` plugin's: lint L3 keeps the device
   clock out of the renderer. `clock.now()` is whole milliseconds, so one frame reads 3 or 4 ms and
@@ -444,7 +453,8 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `poolLimit` | `number` | `256` | Display objects kept in all pools together. |
 | `unsupportedMessage` | `string` | `"This device cannot run the game."` | Text of the unsupported-device screen. |
 | `loadPixi` | `() => Promise<PixiModule>` | `() => import("pixi.js")` | Loader seam. Tests pass a fake module. |
-| `debug` | `{ nineSlice }` | `{ nineSlice: false }` | Debug drawing at start; `sync.debug.nineSlice(on)` switches it at run time. |
+| `debug` | `{ nineSlice?, verifyFrames? }` | `{ nineSlice: false, verifyFrames: false }` | Debug drawing and checks at start, a switch left out is off; `sync.debug.nineSlice(on)` and `sync.debug.verifyFrames(on)` switch them at run time. `verifyFrames` works in dev and debug builds only. |
+| `onDemand` | `boolean` | `false` | Draw a frame only when something on the screen changed (see "Render on demand"). Off: every frame is drawn, as before. |
 | `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
 
 ```ts
@@ -464,10 +474,51 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then `app.renderer.render(app.stage)` when `ready`, then `monitor` closes the frame and its draw count and hands it to the `capture()` calls due on it. |
+| `render` | A pending resize is applied, then `demand` decides whether the frame is drawn, `app.renderer.render(app.stage)` when it is and `ready`, then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame and its draw count and hands a drawn one to the `capture()` calls due on it. |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
+
+## Render on demand
+
+`pluginConfigs: { renderer: { onDemand: true } }` draws a frame only when the player could see a
+difference; the loop keeps its rate, so input, systems and `sync` run every frame. Off by default:
+every frame is drawn, as before. `stats().drawn` counts the frames really drawn.
+
+A frame is drawn for a counted change mark, a resize or a new resolution, a device restore, a new
+list of layers from the scene, the nine-slice switch, a wake of `time` since the last frame
+(`time.wakes()`), a waiting `capture()`, a frame the engine asks for itself, and the first frame
+after the host came up. Otherwise `app.renderer.render` is skipped and the canvas keeps its last
+picture.
+
+Where the marks come from. `sync` is the only writer of Pixi for the engine's views: every write
+site compares the new value with what Pixi holds (or, for the path of a `Shape` and the mask of a
+clip, with what the engine drew last) and marks the entity before the first write that differs, so
+an equal write writes and marks nothing; a structural write (attach, detach, a wrapper, a new
+filter list, a new or pooled view, a Display swap, a texture key resolved again) always marks. A
+plugin's display adapter reports its own write by answering anything but `false` from `update`
+(`text` answers `false` for a label it left as it was). Everything else calls
+`renderer.invalidate(entity)` **before** its write: `effects` before it writes a filter value, the
+particle system around a step, a game before it writes into its own `Display` object. From a world
+system, which has no plugin context, write the component again
+(`world.set(entity, Display, { object })`): the renderer attaches and measures it again, a
+structural write.
+
+Which marks count. A mark counts only when its view is drawn now or was at the last drawn frame
+(F6): a loop under a hidden ancestor (alpha 0, `visible` or `renderable` false) asks for nothing,
+and the frame a view hides or shows is drawn, because a mark is judged before its write and again
+when the frame is decided. A leaf fully off the screen, the padding of every filter on its chain
+included, is not drawn (F18a); a view with children is never exempt.
+
+Pixi's change lists are never read to decide. A dev build reads them on a skipped frame only to
+warn: `renderer:missed-mark` names a view written without a mark, once per entity (the fix: call
+`renderer.invalidate(entity)` before writing into the `Display` object). `sync.debug.verifyFrames(true)`
+(dev and debug builds, door `game.debug { verifyFrames: true }`) compares every skipped frame with
+the same frame drawn live, by pixels at half resolution: a difference logs `renderer:missed-frame`
+with the views marked since the last drawn frame and draws the frame at once. With `onDemand` off it
+runs in shadow, so a game can be checked before it turns `onDemand` on. It costs one read-back per
+frame. The visual runner's browser leg turns it on for every test (`--no-verify-frames` leaves it
+off).
 
 ## Layers, sort and lift
 
@@ -648,7 +699,7 @@ production build. Both are read again every frame (`changes: "frame"`).
 
 | Key in `sources` | id | Input | Reads |
 |---|---|---|---|
-| `render` | `game.render` | none | `stats()`: `renderPasses` always, `drawCalls` in a dev build |
+| `render` | `game.render` | none | `stats()`: `renderPasses` and `drawn` always, `drawCalls` in a dev build |
 | `at` | `game.at` | `{ x: "number", y: "number" }`, page CSS px in client coordinates | What lies under the point, topmost first: `viewport.toReference(x, y)`, then `sync.hitAll`, each entity named `{ entity, owner, key, layer }` (`Under`): `world.ecs.ownerOf`, `world.projection.keyOf`, and `Layer.name` of its own `Layer` (`undefined` for a `Parent` child). An entity that despawned this frame is left out. `[]` while inert |
 
 `control.ts` holds two commands of the editor's write door, `@moku-labs/game/control`, dev builds
@@ -657,7 +708,7 @@ only. Each logs a `moku:dev` debug entry; the one of `game.capture` lists the op
 | Key in `commands` | id | Input | Effect | Does |
 |---|---|---|---|---|
 | `capture` | `game.capture` | `{ legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" }` | read | `capture(options)`: `{ png, legend? }` of the canvas after the next drawn frame. `undefined` while inert |
-| `debug` | `game.debug` | `{ nineSlice: "boolean" }` | cosmetic | `sync.debug.nineSlice(on)`. Answers `sync.debug.state()` |
+| `debug` | `game.debug` | `{ nineSlice: "boolean?", verifyFrames: "boolean?" }` | cosmetic | `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)`, each field given. Answers `sync.debug.state()` |
 
 `game.capture` checks the shapes, `renderer.capture()` the values: `layers` must be a JSON array of
 strings, `sheet` an object of two numbers `{ frames, everyMs }`, `diff` a bookmark (`readBookmark`

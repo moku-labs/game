@@ -67,13 +67,38 @@ const tick = async (times = 40): Promise<void> => {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
 };
 
+/** A filter value: the strength of a glint. */
+const Glint = component("Glint", { amount: 0.2 });
+
+/** The glints' cycle: up in 500 ms, a hold of 3 s, down in 500 ms, forever. */
+const GLINT_CYCLE = [
+  { at: 0.125, ease: "linear", to: { amount: 0.6 } },
+  { at: 0.875, ease: "linear", to: { amount: 0.6 } },
+  { at: 1, ease: "linear", to: { amount: 0.2 } }
+] as const;
+
 /**
- * Starts an app with one card projection whose views sway, and mounts it with one card.
+ * The card projection: the views sway, or glint when `glints` is set.
  *
- * @returns The started app.
+ * @param glints - True for the glint cycle on a `Glint` component instead of the sway.
+ * @returns The projection spec.
  */
-async function startCards() {
-  const cards = projection({
+function cardsProjection(glints: boolean) {
+  if (glints) {
+    return projection({
+      name: "hud.cards",
+      layer: "cards",
+      from: (player: Player) => player.items,
+      key: (item: Item) => item.id,
+      view: (item: Item) => [Label({ id: item.id }), Glint({ amount: 0.2 })],
+      motion: {
+        loop: view =>
+          view.tween(Glint, { amount: 0.2 }, { ms: 4000, repeat: "forever", segments: GLINT_CYCLE })
+      }
+    });
+  }
+
+  return projection({
     name: "hud.cards",
     layer: "cards",
     from: (player: Player) => player.items,
@@ -84,6 +109,16 @@ async function startCards() {
     ],
     motion: sway
   });
+}
+
+/**
+ * Starts an app with one card projection whose views sway (or glint), and mounts it with one card.
+ *
+ * @param glints - True for the glint cycle instead of the sway.
+ * @returns The started app.
+ */
+async function startCards(glints = false) {
+  const cards = cardsProjection(glints);
   const hud = defineFeature("hud", { flows: [main], projections: [cards] });
   const app = createApp({
     plugins: [worldPlugin, rendererPlugin, animPlugin, hud],
@@ -222,6 +257,41 @@ describe("anim — a defineMotion loop on a projection", () => {
     // Only the loop of the card that left died with its view.
     expect(app.world.projection.entityOf("hud.cards", "b")).toBeUndefined();
     expect(app.anim.active()).toBe(1);
+
+    await app.stop();
+  });
+});
+
+describe("anim — a glint cycle with a pause on the real world", () => {
+  it("marks its component changed in no frame of the pause, and in every frame it moves", async () => {
+    const app = await startCards(true);
+    const entity = app.world.projection.entityOf("hud.cards", "a") ?? 0;
+    const frames: Array<{ marked: boolean; amount: number | undefined }> = [];
+
+    // After anim wrote the frame (animate) and before the world forgets its marks (signals).
+    app.time.onFrame("sync", () => {
+      frames.push({
+        marked: [...app.world.ecs.changed(Glint)].includes(entity),
+        amount: app.world.ecs.get(entity, Glint)?.amount
+      });
+    });
+
+    for (let frame = 0; frame < 300; frame += 1) app.time.step(16);
+
+    let held = 0;
+    let longestHold = 0;
+
+    for (const [index, seen] of frames.entries()) {
+      const moved = index === 0 || seen.amount !== frames[index - 1]?.amount;
+
+      // A frame is marked exactly when the value moved: the hold marks nothing.
+      expect(seen.marked).toBe(moved);
+      held = moved ? 0 : held + 1;
+      longestHold = Math.max(longestHold, held);
+    }
+
+    // The 3 s hold stands as some 187 frames of 16 ms in a row with no mark.
+    expect(longestHold).toBeGreaterThan(180);
 
     await app.stop();
   });

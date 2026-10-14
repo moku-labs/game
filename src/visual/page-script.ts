@@ -358,9 +358,59 @@ export async function pagePause(
 }
 
 /**
+ * Turns on the pixel check of the frames the renderer skips, through the door `game.debug`, and
+ * starts reading the log of the page from its end: from here on, `pageMissed` fails a step on the
+ * first `renderer:missed-frame` or `renderer:missed-mark`.
+ *
+ * @param _argument - The test and the step, for the leg's message.
+ * @returns Nothing, or why the page refused the switch.
+ */
+export async function pageVerify(_argument: Place): Promise<PageAnswer<undefined>> {
+  try {
+    const { game, doors } = pageHandles();
+
+    await doors.run(game, doors.commands.debug, { verifyFrames: true });
+    Reflect.set(globalThis, "__mokuVisualTrace", game.log.trace().length);
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    return { ok: false, reason: pageMessage(error) };
+  }
+}
+
+/**
+ * Reads the log of the page since the last read, once `pageVerify` turned the check on, for the
+ * first line of the frame oracles: a skipped frame that differed from the frame drawn live, or a
+ * view written without a mark.
+ *
+ * @param handles - The game and the doors.
+ * @returns The line, as its event and its data, or `undefined` when none was logged.
+ */
+function pageMissed(handles: PageHandles): string | undefined {
+  const from: unknown = Reflect.get(globalThis, "__mokuVisualTrace");
+
+  if (typeof from !== "number") return undefined;
+
+  const entries = handles.game.log.trace();
+
+  Reflect.set(globalThis, "__mokuVisualTrace", entries.length);
+
+  for (let at = from; at < entries.length; at += 1) {
+    const entry = entries[at];
+
+    if (entry?.event === "renderer:missed-frame" || entry?.event === "renderer:missed-mark") {
+      return `${entry.event} ${JSON.stringify(entry.data)}`;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Runs one `/control` command through the doors of the page, the way an editor does, with frames
  * stepped while it waits for them, then settles. The leg restores the start of a test with it
- * too, as the command `restore`.
+ * too, as the command `restore`. With the frame check on, a missed frame or mark logged in the
+ * meantime fails the step.
  *
  * @param argument - The test and the step, the command by its short name, its input, and the most
  *   frames to settle.
@@ -377,9 +427,11 @@ export async function pageStep(
     const unfinished = await pageRun(handles, argument, argument.settleFrames, argument);
     const unsettled = unfinished ?? (await pageSettle(handles, argument.settleFrames, argument));
 
-    return unsettled === undefined
-      ? { ok: true, value: undefined }
-      : { ok: false, error: unsettled };
+    if (unsettled !== undefined) return { ok: false, error: unsettled };
+
+    const missed = pageMissed(handles);
+
+    return missed === undefined ? { ok: true, value: undefined } : { ok: false, reason: missed };
   } catch (error) {
     return { ok: false, reason: pageMessage(error) };
   }
@@ -388,7 +440,8 @@ export async function pageStep(
 /**
  * Plays a checkpoint in the page: settle, land every track and loop, two stepped frames, then the
  * picture of the whole canvas as lossless WebP and the state through the doors. The game is
- * paused, so the picture is the stage after the last stepped frame.
+ * paused, so the picture is the stage after the last stepped frame. With the frame check on, a
+ * missed frame or mark logged in the meantime fails the checkpoint.
  *
  * @param argument - The test and the step, and the most frames to settle.
  * @param argument.settleFrames - The most frames to settle.
@@ -414,6 +467,9 @@ export async function pageCheckpoint(
       path: doors.read(game, doors.sources.position).path,
       ...doors.read(game, doors.sources.model)
     };
+    const missed = pageMissed(handles);
+
+    if (missed !== undefined) return { ok: false, reason: missed };
 
     return { ok: true, value: { state, screen } };
   } catch (error) {
@@ -619,6 +675,8 @@ const pageFunctions: ReadonlyArray<{ readonly name: string }> = [
   pageRun,
   pageStart,
   pagePause,
+  pageVerify,
+  pageMissed,
   pageStep,
   pageCheckpoint,
   channelDelta,

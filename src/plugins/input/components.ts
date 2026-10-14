@@ -22,12 +22,13 @@ export type IntentValue = { intent: string; payload: Json };
  * projection keys of views of the same projection that ride along on top of it, such as the cards
  * that lie on a solitaire card. `aim` is a point of the view in its own units, the units of its
  * hit box: with it the hover and the drop look the target up under that point of the view in the
- * hand, not under the finger. `null`, the default, looks under the finger; a projection takes an
- * aim away by not giving it.
+ * hand, not under the finger. Absent, the default, or `null`, it looks under the finger; a
+ * projection takes an aim away by not giving it. Absent by default, so a view without an aim is
+ * stored and serialised exactly as before the aim existed.
  *
  * @example
  * ```ts
- * const value: CarryValue = { payload: { from: "c7" }, carry: ["c8", "c9"], aim: null };
+ * const value: CarryValue = { payload: { from: "c7" }, carry: ["c8", "c9"] };
  * // A board item whose picture is lifted above the finger: the drop goes to the cell under the picture.
  * const lifted: CarryValue = { payload: { from: "c7" }, carry: [], aim: { x: 25, y: 12 } };
  * ```
@@ -35,8 +36,8 @@ export type IntentValue = { intent: string; payload: Json };
 export type CarryValue = {
   payload: Json;
   carry: readonly string[];
-  /** A point of the view in the hand, in its own units, that aims the drop; `null` (the default) aims with the finger. */
-  aim: { x: number; y: number } | null;
+  /** A point of the view in the hand, in its own units, that aims the drop; absent (the default) or `null` aims with the finger. */
+  aim?: { x: number; y: number } | null;
 };
 
 /**
@@ -83,12 +84,11 @@ function intentDefaults(): IntentValue {
  * @returns An empty payload and nothing carried along.
  * @example
  * ```ts
- * carryDefaults(); // { payload: {}, carry: [], aim: null }
+ * carryDefaults(); // { payload: {}, carry: [] }
  * ```
  */
 function carryDefaults(): CarryValue {
-  // eslint-disable-next-line unicorn/no-null -- `aim: null` is the default, so a projection's whole-value write takes an earlier aim away.
-  return { payload: {}, carry: [], aim: null };
+  return { payload: {}, carry: [] };
 }
 
 const pointerDefaults: PointerValue = {

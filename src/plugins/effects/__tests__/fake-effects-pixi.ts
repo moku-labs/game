@@ -131,7 +131,15 @@ export class FakeFxGlProgram extends FakeGlProgram {
   }
 }
 
-/** Pixi's `Filter` with the resolution it was built at: a number, `"inherit"`, or 1 by default. */
+/** What a fake filter's `apply` hands its draw to: Pixi's `FilterSystem.applyFilter`. */
+export type FakeFilterManager = {
+  applyFilter(filter: unknown, input: unknown, output: unknown, clear: boolean): void;
+};
+
+/**
+ * Pixi's `Filter` with the resolution it was built at: a number, `"inherit"`, or 1 by default.
+ * Its `apply` draws through the manager, as Pixi's `Filter.apply` does.
+ */
 export class FakeFxFilter extends FakeFilter {
   public resolution: number | "inherit";
 
@@ -141,11 +149,28 @@ export class FakeFxFilter extends FakeFilter {
 
     this.resolution = resolution === "inherit" || typeof resolution === "number" ? resolution : 1;
   }
+
+  /**
+   * Draws the filter, as Pixi's `Filter.apply`: one `applyFilter` of itself.
+   *
+   * @param manager - The filter system.
+   * @param input - The input texture.
+   * @param output - The output.
+   * @param clear - Whether the output is cleared.
+   */
+  public apply(manager: FakeFilterManager, input: unknown, output: unknown, clear: boolean): void {
+    manager.applyFilter(this, input, output, clear);
+  }
 }
 
-/** The fake of Pixi's `BlurFilter`: its four setters recorded in call order. */
+/**
+ * The fake of Pixi's `BlurFilter`: its four setters recorded in call order, and its two passes,
+ * which its `apply` draws one after the other, as Pixi's does.
+ */
 export class FakeFxBlurFilter extends FakeFilter {
   public readonly calls: string[] = [];
+  public readonly blurXFilter = new FakeFxFilter();
+  public readonly blurYFilter = new FakeFxFilter();
   private strengthValue: number;
   private qualityValue: number;
   private resolutionValue: number;
@@ -196,6 +221,19 @@ export class FakeFxBlurFilter extends FakeFilter {
   public set repeatEdgePixels(value: boolean) {
     this.calls.push(`repeatEdgePixels=${value}`);
     this.repeatValue = value;
+  }
+
+  /**
+   * Draws both passes, the horizontal one first, as Pixi's `BlurFilter.apply` does.
+   *
+   * @param manager - The filter system.
+   * @param input - The input texture.
+   * @param output - The output.
+   * @param clear - Whether the output is cleared.
+   */
+  public apply(manager: FakeFilterManager, input: unknown, output: unknown, clear: boolean): void {
+    this.blurXFilter.apply(manager, input, output, true);
+    this.blurYFilter.apply(manager, input, output, clear);
   }
 }
 

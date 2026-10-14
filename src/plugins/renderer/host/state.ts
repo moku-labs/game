@@ -39,6 +39,7 @@ export function createHostState(): HostState {
     resolution: { dpr: 1, cap: 2, override: undefined, pending: undefined },
     onResolutionChange: [],
     ownGpu: undefined,
-    kept: emptyWeakSet()
+    kept: emptyWeakSet(),
+    pixelsFailed: false
   };
 }

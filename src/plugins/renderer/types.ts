@@ -9,6 +9,7 @@ import type { Api as FlowApi } from "../flow/types";
 import type { Api as LifecycleApi } from "../lifecycle/types";
 import type { Api as TimeApi } from "../time/types";
 import type { Entity, Owner, ProjectionKey, Api as WorldApi } from "../world/types";
+import type { DemandInternal, DemandState } from "./demand/types";
 import type { HostApi, HostInternal, HostState } from "./host/types";
 import type { MonitorApi, MonitorInternal, MonitorState, PerfMonitorApi } from "./monitor/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
@@ -44,6 +45,7 @@ export type PixiModule = Pick<
   | "BitmapText"
   | "BitmapTextPipe"
   | "BlurFilter"
+  | "Bounds"
   | "Cache"
   | "ColorMatrixFilter"
   | "Container"
@@ -96,6 +98,12 @@ export type PixiApplication = InstanceType<PixiModule["Application"]>;
  * A Pixi display object. `Sprite` and `NineSliceSprite` are containers too, so every view is one.
  */
 export type PixiContainer = InstanceType<PixiModule["Container"]>;
+
+/**
+ * The axis-aligned box Pixi measures a display object into: what `getBounds` fills. The off-screen test of the
+ * demand module keeps one and measures into it.
+ */
+export type PixiBounds = InstanceType<PixiModule["Bounds"]>;
 
 /**
  * A Pixi sprite.
@@ -181,6 +189,8 @@ export type AspectRange = { min: number; max: number };
  * });
  * // A debug build of the fixture outlines every nine-slice from the first frame.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", debug: { nineSlice: true } } } });
+ * // Draw only what changes: a still screen draws nothing.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", onDemand: true }, time: { idleFps: 0 } } });
  * ```
  */
 export type Config = {
@@ -206,8 +216,18 @@ export type Config = {
   unsupportedMessage: string;
   /** Loader seam. Tests pass a fake module. */
   loadPixi: () => Promise<PixiModule>;
-  /** Debug drawing at start. `app.renderer.sync.debug` switches it while the game runs. */
-  debug: DebugSwitches;
+  /**
+   * Debug drawing and checks at start; a switch left out is off. `app.renderer.sync.debug` switches them while the
+   * game runs. `verifyFrames` works in dev and debug builds only.
+   */
+  debug: Partial<DebugSwitches>;
+  /**
+   * Draw a frame only when something on the screen changed: a view the engine wrote, a filter value, a plugin's own
+   * object it reported, a resize, a wake of `time`, a waiting capture. The loop keeps its rate for input and systems.
+   * A game that writes into its own `Display` objects calls `renderer.invalidate(entity)` before it does. Off by
+   * default: every frame is drawn, as before.
+   */
+  onDemand: boolean;
   /** The performance monitor of an agent build: the spike budget and the frames the ring keeps. */
   monitor: MonitorConfig;
 };
@@ -239,6 +259,7 @@ export type State = {
   viewport: ViewportState;
   sync: SyncState;
   monitor: MonitorState;
+  demand: DemandState;
 };
 
 /**
@@ -259,6 +280,25 @@ export type Api = {
   viewport: ViewportApi;
   sync: SyncApi;
   monitor: PerfMonitorApi;
+  /**
+   * Tells the renderer that the Pixi object of an entity's view is about to be drawn differently in a way it cannot
+   * see: a plugin or a game writes into its own `Display` object or a Pixi object it built, `effects` writes a filter
+   * value, particles step. Call it **before** the write: the view is judged as it was last drawn (so a view that
+   * leaves the screen or hides itself still gets its frame) and again when the frame is decided (so a view that
+   * arrives gets it too). The frame is drawn when the entity's view was or will be seen. There is no whole-frame form
+   * (LEAD-FIXES-4): whole frames come from the renderer's own reasons. Writes the renderer makes itself never need
+   * it. Without `onDemand` it changes nothing; inert, and for an entity without a view, a no-op.
+   *
+   * @param entity - The entity whose own Pixi object is about to change.
+   * @example
+   * ```ts
+   * // A game plugin redraws the flame of the stove into the Graphics it owns.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.invalidate(1_048_590); // first: with onDemand this frame is drawn, stats().drawn counts it
+   * drawFlame(flame, 0.8); // then the write into the Graphics of the Display on entity 1_048_590
+   * ```
+   */
+  invalidate(entity: Entity): void;
 } & MonitorApi;
 
 /**
@@ -334,11 +374,18 @@ export type SyncModule = SyncApi & SyncInternal;
 export type MonitorModule = MonitorApi & PerfMonitorApi & MonitorInternal;
 
 /**
- * The four modules in injection order.
+ * The demand module: change marks, the draw decision of the render phase and the oracles. Internal only: the public
+ * member is `Api.invalidate`. The one home of this name; every file imports it from here.
+ */
+export type DemandModule = DemandInternal;
+
+/**
+ * The five modules in injection order.
  */
 export type Modules = {
   host: HostModule;
   viewport: ViewportModule;
+  demand: DemandModule;
   sync: SyncModule;
   monitor: MonitorModule;
 };
@@ -348,6 +395,7 @@ export type Modules = {
  */
 export type TeardownScope = { readonly config: Readonly<Config>; readonly state: State };
 
+export type { DemandFrame, DemandReason, DemandState } from "./demand/types";
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
 export type {
   FrameColumns,

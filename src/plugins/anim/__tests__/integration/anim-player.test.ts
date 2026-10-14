@@ -12,6 +12,8 @@ import {
   tag,
   type
 } from "../../../../index";
+import { fakeClock } from "../../../clock/fake";
+import type { ClockSource } from "../../../clock/types";
 import { stepFrames } from "../../../flow/headless";
 import { rendererPlugin } from "../../../renderer";
 import { worldPlugin } from "../../../world";
@@ -163,22 +165,27 @@ const pluginConfigs = {
 /**
  * Creates the board app: world, renderer, anim and the board feature. Not started.
  *
+ * @param clock - A clock source for the app; the system clock when left out.
  * @returns The app.
  */
-function createBoard() {
+function createBoard(clock?: ClockSource) {
   return createApp({
     plugins: [worldPlugin, rendererPlugin, animPlugin, boardFeature],
-    pluginConfigs
+    pluginConfigs: {
+      ...pluginConfigs,
+      ...(clock === undefined ? {} : { clock: { source: clock } })
+    }
   });
 }
 
 /**
  * Starts the board app, mounts the items and answers the views of items "a" and "b".
  *
+ * @param clock - A clock source for the app; the system clock when left out.
  * @returns The started app and the two view entities.
  */
-async function startBoard() {
-  const app = createBoard();
+async function startBoard(clock?: ClockSource) {
+  const app = createBoard(clock);
 
   await app.start();
   app.world.projection.setLayers([{ name: "items", sort: "none" }]);
@@ -284,9 +291,11 @@ describe("AnimPlayer: a system plays animations", () => {
     await app.stop();
   });
 
-  it("gives two apps that take the same steps the same world", async () => {
-    const first = await startBoard();
-    const second = await startBoard();
+  // Same steps on the same clock: world writes the clock's moment into its Now resource (spec 15),
+  // so two apps on the system clock differ by the milliseconds between their starts.
+  it("gives two apps that take the same steps on the same clock the same world", async () => {
+    const first = await startBoard(fakeClock(1000));
+    const second = await startBoard(fakeClock(1000));
 
     hoverPressRelease(first.app, first.a);
     hoverPressRelease(second.app, second.a);

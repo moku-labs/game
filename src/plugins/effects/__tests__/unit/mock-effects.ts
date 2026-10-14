@@ -10,6 +10,7 @@ import { vi } from "vitest";
 import type { Require } from "../../../../config";
 import type { AnimApi } from "../../../anim/types";
 import type { Api as AssetsApi } from "../../../assets/types";
+import type { Api as ClockApi } from "../../../clock/types";
 import type { FeatureDescription, Api as FlowApi } from "../../../flow/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
 import type { FakeTexture } from "../../../renderer/__tests__/fake-pixi";
@@ -191,7 +192,14 @@ export function createMockEffects(
 
   const worldConfig = { settleMs: 350, reconciledEvent: false };
   const worldState = createWorldState({ config: worldConfig });
-  const worldApis: Record<string, unknown> = { time: timeApi, model: modelApi, flow: flowApi };
+  // World writes the frame's moment into its `Now` resource (spec 15): a still clock is enough here.
+  const clockApi = { now: () => 0 } as unknown as ClockApi;
+  const worldApis: Record<string, unknown> = {
+    time: timeApi,
+    model: modelApi,
+    flow: flowApi,
+    clock: clockApi
+  };
   const worldCtx: WorldKernelSlice = {
     config: worldConfig,
     state: worldState,
@@ -223,6 +231,7 @@ export function createMockEffects(
       size: () => ({ ...renderer.viewport, scale: 1, orientation: "portrait" })
     },
     monitor: { event: vi.fn() },
+    invalidate: vi.fn(),
     stats: (): never => {
       throw new Error("effects reads renderer.sync.renderPasses(), never renderer.stats()");
     }

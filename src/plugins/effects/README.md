@@ -45,6 +45,9 @@ view.tween(Glow, { strength: 0 }, { ms: 200 });
 
 ## Particles
 
+Particles report their steps to the renderer (`renderer.invalidate` around a step), so with `renderer.onDemand` a
+frame is drawn while they live and once when the last one dies: nothing for a game to do.
+
 `defineEmitter(id, config)` validates and freezes `{ id, config }`, every default filled in. Every field is optional except `textures` and exactly one of `burst` and `rate`. A mistake throws at definition, in the `[game]` two-line format.
 
 | Field | Default | Rule |
@@ -124,10 +127,15 @@ Every filter but `Blur` renders at `resolution: "inherit"`: the resolution of th
 One system, `effects:filters`, phase `sync`, in every world mode. It walks the views the world hooks recorded, never the whole world:
 
 - One instance per view and kind, made the first frame the kind is seen and kept until the component or the entity leaves. An instance of ours carries both programs, a `GpuProgram` of the WGSL and a `GlProgram` of the GLSL over `defaultFilterVert`, and one uniform group: Pixi binds it as `fu` on WebGPU and by bare uniform name on WebGL. `GpuProgram.from` and `GlProgram.from` cache by source, so every view of a kind shares its programs.
-- Our kinds write every uniform every frame, no `update()`; the core kinds go through their setters when the component changed (`ColorMatrix` starts from `reset()`). `enabled` is written every frame.
+- Every write compares first. Ours compare each uniform with what the group holds (a number as it is, a colour or a tuple element by element as the `Float32Array` stores it, rounded to float32; two NaN are equal) and the padding named after a uniform; only what differs is written, no `update()`. The core kinds compare the fields their setters were last given, only on a frame their component changed, and call the setters only when one differs (`ColorMatrix` starts from `reset()`); an equal value written by a system calls no setter. `enabled` is written only when it flips.
+- A write the player can see, a filter switched on or off or a new value of a filter that is on, calls `renderer.invalidate(entity)` first, once per view and frame, so the renderer judges the view as it was last drawn. A filter that is off and stays off takes its new values silently; so does a kind a debug switch turned off. A new instance, a new order or new passes reach the renderer through `filters.set`, never through `invalidate`.
 - `renderer.sync.filters.set(entity, slots)` with a new frozen list of `{ filter, passes }` only when the kinds, their order or their passes changed. A filter covers the entity's subtree: a glow on a button glows its label.
 - A removed kind, or a despawn, destroys every uniform buffer of the instance, then the instance; `Filter.destroy()` alone leaves the buffer to a GC that runs after a minute. A despawned entity gets no call: the renderer let its view go.
 - In a dev build a kind with its own shaders is compiled once on the backend that draws, `renderer.host.kind()`, before its first instance. On WebGPU the WGSL goes through `renderer.host.device()`: every error logs `effects:wgsl` with its line and column, and the kind waits for the answer. On WebGL the GLSL goes through `renderer.host.gl()`, at once: every error line of the info log logs `effects:glsl` `{ filter, line, message }`, and the shader is deleted. Lines count in the assembled source. A broken kind never gets an instance, so the view renders as if it had none: one bad shader would otherwise blank the whole frame. A production build compiles nothing twice.
+
+### A filter whose apply throws
+
+Every Pixi filter the engine builds, ours and the core kinds, a `Blur` on both its passes too, has one guard around its `apply`. A shader that binds a texture the engine never filled, or a destroyed `Displacement` map, throws inside Pixi's `apply`; Pixi's `FilterSystem.pop` has no `try/finally`, so the throw would skip the return of the view's pooled textures every frame. Instead the instance is switched off for good: the view is drawn straight through, unfiltered, in that same frame and from then on, the instance stays off whatever its component says, and the log holds one `effects:broken` error `{ filter, reason: "apply", message }` per kind per run, however many instances of it break. No pooled texture is lost, with one exception: inside a `Blur` of quality 2 or more, the pass that threw keeps the one temp texture of its own multi-pass loop, once, in the frame it breaks (Pixi takes it inside that pass, out of the guard's reach). Nothing is retried. The instance stays until the filter sync retires it (the kind leaves the view, the entity despawns, its map is retired, a hot swap rebuilds it); a new instance starts unbroken. The fix is in the shader or its bindings.
 
 ## Config
 

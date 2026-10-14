@@ -177,6 +177,36 @@ function startInstance(
 }
 
 /**
+ * Steps an instance and tells the renderer about it, since the particles of a container are
+ * written straight into Pixi: before the step when the container holds particles (they move or
+ * die now, judged as they were drawn), after it when it held none and now holds some (an empty
+ * container shows nothing before the step). A step of no time moves nothing and tells nothing.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param instance - The instance.
+ * @param deltaMs - Milliseconds of game time.
+ * @param offset - Where the emission is, in the container's space.
+ * @param emitting - True while the stream emits.
+ */
+function stepShown(
+  ectx: EffectsCtx,
+  instance: EmitterInstance,
+  deltaMs: number,
+  offset: Readonly<Point>,
+  emitting: boolean
+): void {
+  const held = instance.container.particleChildren.length > 0;
+
+  if (deltaMs > 0 && held) ectx.deps.renderer.invalidate(instance.entity);
+
+  stepInstance(instance, deltaMs, offset, emitting);
+
+  if (deltaMs > 0 && !held && instance.container.particleChildren.length > 0) {
+    ectx.deps.renderer.invalidate(instance.entity);
+  }
+}
+
+/**
  * Runs the `Emitter` of one entity for one frame: an instance of another effect is retired, a
  * missing one is started, and the instance steps. A local-space container follows its host even
  * while its stream stands still under reduced motion.
@@ -211,7 +241,7 @@ function runEmitter(
   const offset = followHost(ectx, instance);
 
   if (!standsStill(instance, reducedMotion)) {
-    stepInstance(instance, deltaMs, offset, emitter.active);
+    stepShown(ectx, instance, deltaMs, offset, emitter.active);
   }
 }
 
@@ -226,7 +256,7 @@ function runOrphans(ectx: EffectsCtx, deltaMs: number): void {
 
   // eslint-disable-next-line unicorn/no-useless-spread -- an orphan that ran empty leaves the set
   for (const orphan of [...state.orphans]) {
-    stepInstance(orphan, deltaMs, STILL, false);
+    stepShown(ectx, orphan, deltaMs, STILL, false);
 
     if (orphan.container.particleChildren.length > 0) continue;
 

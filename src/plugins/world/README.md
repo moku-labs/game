@@ -118,6 +118,42 @@ system keeps its own state in a resource. `snapshot()` leaves a value that is no
 const Looks = resource("boardLooks", () => ({ shown: new Map<Entity, { look: string }>() }));
 ```
 
+#### `Now` — the frame's moment
+
+`Now` (`{ now }`, exported from the package root) is the moment of the frame on the game's clock:
+`world` writes `clock.now()` into it once when it starts and first thing in every `input` callback,
+before the reconcile and the systems of `input`, headless too. Every system of a frame reads the same
+moment, the one a node gets as `now`, so a fake clock makes it exact in tests. A write by a system is
+overwritten at the next frame. It is `0` only before the world started, and after the internal
+`ecs.clear()` until the next frame. `snapshot().resources` holds it as `Now: { now }`.
+
+A system that shows time reads it and writes its component only when its picture changes; with
+`renderer.onDemand` that is when a frame is drawn.
+
+```ts
+// A toast shows the seconds left of its energy timer: it is written once a second, not every frame.
+const toastTime = system({
+  name: "shared.toastTime",
+  phase: "animate",
+  query: [ToastTime],
+  run: (rows, { world, res }) => {
+    const { now } = res(Now);
+
+    for (const [entity, time] of rows) {
+      const left = Math.max(0, time.until - now);
+
+      if (Math.ceil(left / 1000) !== Math.ceil(time.left / 1000)) world.set(entity, ToastTime, { left });
+    }
+  }
+});
+```
+
+The engine's resource names are reserved: `"Now"` (the frame's moment), `"Pointer"` (`input`),
+`"AnimPlayer"` (`anim`) and `"UiCounters"` (`ui`). The first type read under one of these names is
+the only one read under it; a game resource of the same name throws at its first read
+`[game] world: the resource name "Now" is the engine's (the frame's moment).` with the hint to rename
+it. A resource of any other name is the game's own.
+
 ### `systemTimes()` — the time per system of a debug build
 
 `app.world.systemTimes()` answers the timing table of an agent build (`__MOKU_GAME_AGENT__`: dev
@@ -155,7 +191,7 @@ const app = createApp({
 
 | `time` phase | What `world` does, in order |
 |---|---|
-| `input` | reconcile when dirty → drop the hint buffer → systems of `input` → flush commands |
+| `input` | write `Now` from `clock.now()` → reconcile when dirty → drop the hint buffer → systems of `input` → flush commands |
 | `animate` | sweep ended motions (the driver advanced its tracks first) → forget dead elements → start the owed loops → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
@@ -332,7 +368,7 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   mode it reconciles at once, direct. What each cause does is in
   [The cause of a reconcile](#the-cause-of-a-reconcile).
 - **onStart** `connectWorld` reads every feature description and registers its `components`, then
-  `systems`, then `projections`, in feature order; registers the five `time.onFrame` callbacks, the
+  `systems`, then `projections`, in feature order; writes `Now` once from `clock.now()`; registers the five `time.onFrame` callbacks, the
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
@@ -396,4 +432,5 @@ production `define` drops it from the bundle. Its first frame logs
 ## Dependencies
 
 `time` for the five frame phases, `model` for the `model:committed` hook and `store.snapshot()`,
-`flow` for `features.all()`, the effective mode of a walk and `fx.onHint`. Core APIs: `ctx.log`.
+`flow` for `features.all()`, the effective mode of a walk and `fx.onHint`, `clock` for `now()`, the
+moment written into `Now` every frame. Core APIs: `ctx.log`.

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FakeFilter, FakeUniformGroup } from "../../../renderer/__tests__/fake-pixi";
 import type { PixiModule } from "../../../renderer/types";
 import { Alpha, Blur, ColorMatrix, Displacement, Glow, Noise } from "../../filters/builtins";
@@ -7,6 +7,7 @@ import { createFilter, destroyFilter, writeFilter } from "../../filters/instance
 import type { FilterFields, FilterInstance, FilterKind } from "../../filters/types";
 import {
   atlasTexture,
+  type FakeFilterManager,
   type FakeFxAlphaFilter,
   type FakeFxBlurFilter,
   type FakeFxColorMatrixFilter,
@@ -18,6 +19,9 @@ import {
   FakeFxSprite
 } from "../fake-effects-pixi";
 import { createMockEffects, type MockEffects } from "./mock-effects";
+
+/** A `before` of `writeFilter` for the cases that do not count its calls. */
+const ignore = (): void => undefined;
 
 // ---------------------------------------------------------------------------
 // Unit test: the only file that builds Pixi filters — ours with a program and
@@ -280,7 +284,7 @@ describe("createFilter — the Pixi-core kinds", () => {
 });
 
 describe("writeFilter", () => {
-  it("writes every uniform of ours on every call, with enabled and the live padding", () => {
+  it("writes the uniforms of ours that changed, with enabled and the live padding", () => {
     const { mock, pixi } = started();
     const instance = build(mock, pixi, "fx.tint", Tint().value);
     const filter = instance.filter as unknown as FakeFilter;
@@ -290,7 +294,8 @@ describe("writeFilter", () => {
       mock.ectx,
       instance,
       Tint({ amount: 0.9, color: 0x00_00_ff, offset: [4, 5], enabled: false }).value,
-      false
+      false,
+      ignore
     );
 
     expect(group.uniforms.amount).toBe(0.9);
@@ -300,7 +305,7 @@ describe("writeFilter", () => {
 
     const glow = build(mock, pixi, "effects.glow", Glow().value);
 
-    writeFilter(mock.ectx, glow, Glow({ distance: 20 }).value, false);
+    writeFilter(mock.ectx, glow, Glow({ distance: 20 }).value, false, ignore);
     expect((glow.filter as unknown as FakeFilter).padding).toBe(20);
   });
 
@@ -310,10 +315,16 @@ describe("writeFilter", () => {
     const filter = instance.filter as unknown as FakeFxColorMatrixFilter;
 
     filter.calls.length = 0;
-    writeFilter(mock.ectx, instance, ColorMatrix({ brightness: 1.2, hue: 30 }).value, false);
+    writeFilter(
+      mock.ectx,
+      instance,
+      ColorMatrix({ brightness: 1.2, hue: 30 }).value,
+      false,
+      ignore
+    );
     expect(filter.calls).toEqual([]);
 
-    writeFilter(mock.ectx, instance, ColorMatrix({ brightness: 1.2, hue: 30 }).value, true);
+    writeFilter(mock.ectx, instance, ColorMatrix({ brightness: 1.2, hue: 30 }).value, true, ignore);
     expect(filter.calls).toEqual([
       "reset",
       "brightness(1.2,true)",
@@ -329,7 +340,7 @@ describe("writeFilter", () => {
     const filter = instance.filter as unknown as FakeFxBlurFilter;
 
     filter.calls.length = 0;
-    writeFilter(mock.ectx, instance, Blur({ strength: 4, quality: 3 }).value, true);
+    writeFilter(mock.ectx, instance, Blur({ strength: 4, quality: 3 }).value, true, ignore);
 
     expect(filter.calls).toEqual([
       "strength=4",
@@ -340,7 +351,7 @@ describe("writeFilter", () => {
     expect(instance.passes).toBe(6);
 
     filter.calls.length = 0;
-    writeFilter(mock.ectx, instance, Blur({ strength: 4, enabled: false }).value, false);
+    writeFilter(mock.ectx, instance, Blur({ strength: 4, enabled: false }).value, false, ignore);
     expect(filter.calls).toEqual([]);
     expect(filter.enabled).toBe(false);
   });
@@ -360,13 +371,14 @@ describe("writeFilter", () => {
       Displacement({ map: "fx.ripple" }).value
     );
 
-    writeFilter(mock.ectx, noise, Noise({ amount: 0.2, seed: 3 }).value, true);
-    writeFilter(mock.ectx, alpha, Alpha({ alpha: 0.3 }).value, true);
+    writeFilter(mock.ectx, noise, Noise({ amount: 0.2, seed: 3 }).value, true, ignore);
+    writeFilter(mock.ectx, alpha, Alpha({ alpha: 0.3 }).value, true, ignore);
     writeFilter(
       mock.ectx,
       displacement,
       Displacement({ map: "fx.waves", scaleX: 1, scaleY: 2 }).value,
-      true
+      true,
+      ignore
     );
 
     const map = displacement.filter as unknown as FakeFxDisplacementFilter;
@@ -377,9 +389,172 @@ describe("writeFilter", () => {
     expect(map.sprite.texture).toBe(mock.textures.get("fx.waves"));
 
     // A map that is not loaded keeps the old one and warns once.
-    writeFilter(mock.ectx, displacement, Displacement({ map: "fx.gone" }).value, true);
+    writeFilter(mock.ectx, displacement, Displacement({ map: "fx.gone" }).value, true, ignore);
     expect(map.sprite.texture).toBe(mock.textures.get("fx.waves"));
     expect(mock.log.warn).toHaveBeenCalledWith("effects:missing-texture", { key: "fx.gone" });
+  });
+});
+
+describe("createFilter — the instance is the builder's object", () => {
+  it("createFilter hands back the builder's object: the guard's break shows on the instance the sync holds", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "fx.tint", Tint().value);
+    const manager: FakeFilterManager = {
+      applyFilter: vi.fn((filter: unknown) => {
+        if ((filter as FakeFilter).enabled)
+          throw new Error("the resource bound as 'uMap' was destroyed");
+      })
+    };
+
+    (instance.filter as unknown as FakeFxFilter).apply(manager, "input", "output", true);
+
+    expect(instance.broken).toBe(true);
+    expect(instance.filter.enabled).toBe(false);
+  });
+});
+
+/**
+ * The uniforms of an instance of ours.
+ *
+ * @param instance - The instance.
+ * @returns The values of its uniform group.
+ */
+function uniformsOf(instance: FilterInstance): Record<string, unknown> {
+  return ((instance.filter as unknown as FakeFilter).resources.fu as FakeUniformGroup).uniforms;
+}
+
+describe("writeFilter — compare on write", () => {
+  it("writes nothing and asks for nothing when an own filter holds the value already, float32 rounding included", () => {
+    const { mock, pixi } = started();
+    const value = Tint({ amount: 0.6, color: 0x33_66_99, offset: [0.1, 0.2] }).value;
+    const instance = build(mock, pixi, "fx.tint", value);
+    const color = uniformsOf(instance).color;
+    const before = vi.fn();
+
+    expect(writeFilter(mock.ectx, instance, { ...value }, true, before)).toBe(false);
+    expect(before).not.toHaveBeenCalled();
+    expect(uniformsOf(instance).color).toBe(color);
+    expect([...(uniformsOf(instance).offset as Float32Array)]).toEqual([
+      Math.fround(0.1),
+      Math.fround(0.2)
+    ]);
+  });
+
+  it.each([
+    ["number", "fx.tint", Tint().value, Tint({ amount: 0.25 }).value, "amount", 0.25],
+    [
+      "one vector element",
+      "fx.tint",
+      Tint().value,
+      Tint({ offset: [2, 0.5] }).value,
+      "offset",
+      [2, 0.5]
+    ],
+    [
+      "colour",
+      "fx.tint",
+      Tint({ color: 0xff_d7_00 }).value,
+      Tint({ color: 0x00_ff_00 }).value,
+      "color",
+      [0, 1, 0]
+    ],
+    [
+      "padding uniform",
+      "effects.glow",
+      Glow({ distance: 4 }).value,
+      Glow({ distance: 9 }).value,
+      "distance",
+      9
+    ]
+  ])("a %s change asks once and lands in the group", (_name, id, start, next, uniform, written) => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, id, start);
+    const before = vi.fn();
+
+    expect(writeFilter(mock.ectx, instance, next, false, before)).toBe(true);
+    expect(before).toHaveBeenCalledTimes(1);
+
+    const held = uniformsOf(instance)[uniform];
+
+    expect(held instanceof Float32Array ? [...held] : held).toEqual(written);
+    if (id === "effects.glow") expect((instance.filter as unknown as FakeFilter).padding).toBe(9);
+  });
+
+  it("a switched-off filter is a visible change, takes new values silently and asks on its way back on", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "fx.tint", Tint().value);
+    const before = vi.fn();
+
+    expect(writeFilter(mock.ectx, instance, Tint({ enabled: false }).value, false, before)).toBe(
+      true
+    );
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(instance.filter.enabled).toBe(false);
+
+    expect(
+      writeFilter(mock.ectx, instance, Tint({ enabled: false, amount: 0.9 }).value, false, before)
+    ).toBe(false);
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(uniformsOf(instance).amount).toBe(0.9);
+
+    expect(writeFilter(mock.ectx, instance, Tint({ amount: 0.9 }).value, false, before)).toBe(true);
+    expect(before).toHaveBeenCalledTimes(2);
+    expect(instance.filter.enabled).toBe(true);
+  });
+
+  it("a built-in kind rewritten with an equal value calls no setter, though the ECS marked it changed", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "effects.blur", Blur().value);
+    const filter = instance.filter as unknown as FakeFxBlurFilter;
+    const before = vi.fn();
+
+    filter.calls.length = 0;
+
+    expect(writeFilter(mock.ectx, instance, Blur().value, true, before)).toBe(false);
+    expect(filter.calls).toEqual([]);
+    expect(before).not.toHaveBeenCalled();
+  });
+
+  it("a built-in kind with one field changed calls its setters and asks once; the same value again calls none", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "effects.blur", Blur().value);
+    const filter = instance.filter as unknown as FakeFxBlurFilter;
+    const before = vi.fn();
+
+    filter.calls.length = 0;
+
+    expect(writeFilter(mock.ectx, instance, Blur({ strength: 4 }).value, true, before)).toBe(true);
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(filter.calls).toContain("strength=4");
+
+    filter.calls.length = 0;
+
+    expect(writeFilter(mock.ectx, instance, Blur({ strength: 4 }).value, true, before)).toBe(false);
+    expect(filter.calls).toEqual([]);
+  });
+
+  it("a broken instance stays off whatever its component says, and asks for nothing", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "fx.tint", Tint().value);
+    const before = vi.fn();
+
+    instance.broken = true;
+    instance.filter.enabled = false;
+
+    expect(writeFilter(mock.ectx, instance, Tint({ amount: 0.2 }).value, true, before)).toBe(false);
+    expect(instance.filter.enabled).toBe(false);
+    expect(before).not.toHaveBeenCalled();
+  });
+
+  it("a NaN value is not a change every frame", () => {
+    const { mock, pixi } = started();
+    const instance = build(mock, pixi, "fx.tint", Tint({ amount: Number.NaN }).value);
+    const before = vi.fn();
+
+    expect(
+      writeFilter(mock.ectx, instance, Tint({ amount: Number.NaN }).value, false, before)
+    ).toBe(false);
+    expect(before).not.toHaveBeenCalled();
   });
 });
 

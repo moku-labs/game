@@ -153,7 +153,10 @@ function inHand(ctx: InputCtx): Entity[] {
 /**
  * Where a drop is looked up: under the aim of the view in the hand, posed the way `moveHeld`
  * writes it for this finger point, so a release is not one frame behind; under the finger when
- * nothing is held, the view has no `Transform` or it names no aim.
+ * nothing is held, the view has no `Transform` or it names no aim. A view's aim is the one its
+ * projection gives now, read from the rest pose: the projection's write merges into the stored
+ * `Draggable`, so an aim it stopped giving would stay there. An entity no projection made reads
+ * its stored `Draggable`.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - Where the finger is, in reference units.
@@ -161,11 +164,11 @@ function inHand(ctx: InputCtx): Entity[] {
  */
 function aimPoint(ctx: InputCtx, point: Point): Point {
   const { entity, grabOffset } = ctx.state;
-  const { ecs } = ctx.deps.world;
+  const { ecs, projection } = ctx.deps.world;
 
   if (entity === undefined || !ecs.has(entity, Transform)) return point;
 
-  const aim = ecs.get(entity, Draggable)?.aim;
+  const aim = (projection.restOf(entity, Draggable) ?? ecs.get(entity, Draggable))?.aim;
 
   if (aim === undefined || aim === null) return point;
 

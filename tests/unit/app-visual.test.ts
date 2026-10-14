@@ -249,6 +249,15 @@ describe("moku-game visual, the tests module and the baselines", () => {
     });
   });
 
+  // A dropped flag would leave the frame check on in a run that asked it off (spec 14 D6.4).
+  it("passes --no-verify-frames on to the runner", async () => {
+    const root = makeGame();
+    const { code, seen } = await run(["visual", "--no-pixels", "--no-verify-frames"], root);
+
+    expect(code).toBe(0);
+    expect(seen.calls[0]?.options.verifyFrames).toBe(false);
+  });
+
   it("reads the module and the baselines of the --root game", async () => {
     const root = makeGame();
     const cwd = path.dirname(root);

@@ -374,7 +374,8 @@ const setup = (options: SetupOptions) => {
       // Recorded apart from `calls`, with the call it followed: the order is the assertion.
       wake: (): void => {
         wakes.push(calls.at(-1) ?? "start");
-      }
+      },
+      wakes: () => wakes.length
     },
     model: { store: model.store, rng: { peek: vi.fn() } },
     clock: {

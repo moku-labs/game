@@ -95,6 +95,7 @@ describe("renderer plugin integration", () => {
     expect(app.renderer.viewport.toScreen({ x: 540, y: 960 })).toEqual({ x: 540, y: 960 });
     expect(app.renderer.stats()).toEqual({
       fps: 0,
+      drawn: 0,
       frameMs: 0,
       textures: 0,
       textureMb: 0,

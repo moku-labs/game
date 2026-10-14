@@ -5,7 +5,7 @@
 import type { HostModule, PixiContainer, PixiModule, RendererCtx, RendererKind } from "../types";
 import { liveDevice, liveGl, watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
-import { extractStage, textureUsage } from "./readback";
+import { extractStage, readPixels, textureUsage } from "./readback";
 import {
   askResolution,
   type ResolutionReason,
@@ -131,6 +131,20 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       }
 
       return textureUsage(app, state.kept);
+    },
+
+    pixels: (): Uint8ClampedArray | undefined => {
+      const app = state.app;
+
+      if (!state.ready || app === undefined) return undefined;
+
+      return readPixels(ctx, app);
+    },
+
+    screen: (): { x: number; y: number; width: number; height: number } | undefined => {
+      const app = state.app;
+
+      return state.ready && app !== undefined ? app.screen : undefined;
     },
 
     init: async (): Promise<void> => {

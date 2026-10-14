@@ -45,6 +45,7 @@ describe("parseVisualArgv", () => {
 
   it("reads --pixels as the pixel leg forced on; the last of --pixels and --no-pixels wins", () => {
     expect(parseVisualArgv(["--pixels"])).toEqual({ pixels: true });
+    expect(parseVisualArgv(["--no-verify-frames"])).toEqual({ verifyFrames: false });
     expect(parseVisualArgv(["--pixels", "--no-pixels"])).toEqual({ pixels: false });
     expect(parseVisualArgv(["--no-pixels", "--pixels"])).toEqual({ pixels: true });
   });
@@ -69,6 +70,7 @@ describe("resolveVisualOptions", () => {
       dir: "tests/visual",
       update: false,
       pixels: false,
+      verifyFrames: true,
       renderer: "webgpu",
       settleFrames: 600,
       tolerance: { ratio: 0.001, threshold: 24 }
@@ -117,12 +119,26 @@ describe("resolveVisualOptions", () => {
     expect(run).toEqual({
       update: false,
       pixels: true,
+      verifyFrames: true,
       only: ["reward-popup"],
       dir: "baselines",
       renderer: "webgpu",
       settleFrames: 30,
       tolerance: { ratio: 0, threshold: 0 }
     });
+  });
+
+  it("checks the skipped frames unless --no-verify-frames or the option says no", () => {
+    expect(resolveVisualOptions(withPage, { argv: ["--no-verify-frames"] }).verifyFrames).toBe(
+      false
+    );
+    expect(resolveVisualOptions(withPage, { argv: [], verifyFrames: false }).verifyFrames).toBe(
+      false
+    );
+    expect(
+      resolveVisualOptions(withPage, { argv: ["--no-verify-frames"], verifyFrames: true })
+        .verifyFrames
+    ).toBe(true);
   });
 
   it("takes the WebGL leg from --webgl or from the renderer option", () => {

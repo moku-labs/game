@@ -4,6 +4,7 @@
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type {
+  DemandModule,
   PixiBitmapFont,
   PixiContainer,
   PixiFilter,
@@ -28,9 +29,8 @@ export type ViewKind = "Sprite" | "NineSlice" | "Shape" | "Display" | "adapter";
  * ```ts
  * const adapter: DisplayAdapter<{ resolved: string }> = {
  *   create: value => buildRuns(value.resolved),
- *   update: (object, previous, next) => {
- *     if (previous.resolved !== next.resolved) rebuild(object, next.resolved);
- *   },
+ *   // false: the same string, nothing drawn changes, so a renderer drawing on demand skips the frame
+ *   update: (object, previous, next) => previous.resolved !== next.resolved && rebuild(object, next.resolved),
  *   destroy: object => (object as Container).destroy({ children: true, texture: false })
  * };
  * ```
@@ -52,8 +52,11 @@ export type DisplayAdapter<Value extends object = object> = {
    * @param object - What `create` returned.
    * @param previous - The value of the last pass.
    * @param next - The value now.
+   * @returns `false` when nothing drawn changed, so a renderer drawing on demand skips the frame; anything else
+   *   (`true`, nothing) marks the view.
    */
-  update(object: unknown, previous: Readonly<Value>, next: Readonly<Value>): void;
+  // biome-ignore lint/suspicious/noConfusingVoidType: an adapter typed `: void` before keeps compiling; `void` names that honestly
+  update(object: unknown, previous: Readonly<Value>, next: Readonly<Value>): boolean | void;
 
   /**
    * Frees the object. Called when the component or the entity leaves, and when the renderer stops.
@@ -85,6 +88,27 @@ export type DisplayEntry = {
  * ```
  */
 export type HitBox = { x: number; y: number; width: number; height: number };
+
+/**
+ * The fields of a `Shape` last drawn into its `Graphics`: an equal value draws no path again. Private to `sync`.
+ */
+export type DrawnShape = {
+  kind: "rect" | "triangle";
+  w: number;
+  h: number;
+  fill: number;
+  fillAlpha: number;
+  radius: number;
+  stroke: number;
+  strokeWidth: number;
+  dash: number;
+};
+
+/**
+ * The fields of the clip rectangle last drawn into a view's mask: an equal value draws no mask again. Private to
+ * `sync`.
+ */
+export type ClipDrawn = { kind: "rect" | "triangle"; w: number; h: number; radius: number };
 
 /**
  * What `sync` knows about one drawn entity.
@@ -122,6 +146,10 @@ export type View = {
   /** The debug outline of a nine-slice, in its wrapper; `undefined` while debug is off. */
   outline: PixiGraphics | undefined;
   hitBox: HitBox;
+  /** What the `Graphics` of a `Shape` was last drawn with; `undefined` before its first draw. */
+  drawn: DrawnShape | undefined;
+  /** What the mask of a clipping view was last drawn with; `undefined` while it clips nothing. */
+  clipDrawn: ClipDrawn | undefined;
 };
 
 /**
@@ -423,14 +451,14 @@ export type FiltersApi = {
 };
 
 /**
- * The debug switches of the renderer.
+ * The debug switches of the renderer: the nine-slice outline and the pixel check of skipped frames.
  *
  * @example
  * ```ts
- * const switches: DebugSwitches = { nineSlice: true };
+ * const switches: DebugSwitches = { nineSlice: true, verifyFrames: false };
  * ```
  */
-export type DebugSwitches = { nineSlice: boolean };
+export type DebugSwitches = { nineSlice: boolean; verifyFrames: boolean };
 
 /**
  * The debug drawing of the renderer, `app.renderer.sync.debug`. The switch outlines every
@@ -441,7 +469,7 @@ export type DebugSwitches = { nineSlice: boolean };
  * ```ts
  * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
  * app.renderer.sync.debug.nineSlice(true);
- * app.renderer.sync.debug.state(); // { nineSlice: true }
+ * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false }
  * ```
  */
 export type DebugApi = {
@@ -465,13 +493,29 @@ export type DebugApi = {
   nineSlice(on: boolean): void;
 
   /**
+   * Checks every frame the renderer does not draw against the same frame drawn live, by pixels, and logs
+   * `renderer:missed-frame` with the views marked since the last drawn frame when they differ; the frame is then
+   * drawn. Works with `onDemand` off too: the renderer decides as if it were on and compares, drawing every frame.
+   * Costs a read-back of the canvas each frame: dev and debug builds only; elsewhere the switch stays off.
+   *
+   * @param on - True to check.
+   * @example
+   * ```ts
+   * // The visual runner checks every stepped frame of a test in the browser.
+   * app.renderer.sync.debug.verifyFrames(true);
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: true }
+   * ```
+   */
+  verifyFrames(on: boolean): void;
+
+  /**
    * What the debug switches are set to, as a fresh object.
    *
    * @returns The switches.
    * @example
    * ```ts
    * // An e2e test makes sure no outline is drawn before it compares a screenshot.
-   * app.renderer.sync.debug.state(); // { nineSlice: false }
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false }
    * ```
    */
   state(): DebugSwitches;
@@ -602,7 +646,7 @@ export type SyncApi = {
    * ```ts
    * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
    * app.renderer.sync.debug.nineSlice(true);
-   * app.renderer.sync.debug.state(); // { nineSlice: true }
+   * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false }
    * ```
    */
   debug: DebugApi;
@@ -752,8 +796,8 @@ export type SyncState = {
   removed: Set<Entity>;
   /** Entities whose `Parent` was removed: `world` marks no change then, only `onRemoved` fires. */
   reparented: Set<Entity>;
-  /** The debug switches, from `config.debug` and `debug.nineSlice`. */
-  debug: DebugSwitches;
+  /** The nine-slice switch, from `config.debug` and `debug.nineSlice`; the pixel check lives in `demand`. */
+  debug: { nineSlice: boolean };
   /** The nine-slice switch moved: the next pass writes every nine-slice again. */
   outlinesStale: boolean;
   /** The filters `effects` set per entity, kept while the entity lives, view or not. */
@@ -767,9 +811,13 @@ export type SyncState = {
 };
 
 /**
- * What `sync` gets injected: the two modules below it.
+ * What `sync` gets injected: the two modules below it, and `demand`, which every write site marks before it writes.
  */
-export type SyncDeps = { host: HostApi & HostInternal; viewport: ViewportApi & ViewportInternal };
+export type SyncDeps = {
+  host: HostApi & HostInternal;
+  viewport: ViewportApi & ViewportInternal;
+  demand: DemandModule;
+};
 
 /**
  * Domain context of the sync module.

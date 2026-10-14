@@ -14,7 +14,9 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   of the map is written over the table (a new name is added, a known one keeps its owner), the
   fonts are read, the layout cache is dropped, every label is marked and the loop is woken. The
   next frame redraws a label with the new style even when its text and its style name did not
-  change: the display adapter compares the drawn style object with the current one.
+  change: the display adapter compares the drawn style object with the current one. For a label
+  it leaves as it was (the same string, style and anchor, and the same alpha) the adapter answers
+  `false`, so a renderer drawing on demand (`renderer.onDemand`) skips the frame.
 - **Missing glyphs:** a character the loaded font has no glyph for (an emoji, CJK) is drawn as
   nothing by Pixi, so it measures 0 wide, letter spacing included, and is reported once per font
   and character. `"ab😀"` measures as `"ab"`, and a label is as wide as what is drawn.

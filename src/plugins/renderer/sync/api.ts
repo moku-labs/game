@@ -68,7 +68,7 @@ function emptyEntitySet(): Set<Entity> {
  * test.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param deps - The injected `host` and `viewport` modules.
+ * @param deps - The injected `host`, `viewport` and `demand` modules.
  * @returns The sync API and its internal half.
  */
 export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
@@ -275,6 +275,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       for (const entity of state.byKey.get(key) ?? []) {
         withView(entity, view => {
+          // Structural: the key resolved again, a bundle came or went, or a hot swap.
+          deps.demand.mark(entity);
           writeVisual(sctx, entity, view);
           applyTransform(sctx, entity, view);
         });
@@ -289,6 +291,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     if (!state.outlinesStale) return;
 
     state.outlinesStale = false;
+    deps.demand.whole("debug");
 
     for (const [entity, view] of state.views) {
       if (view.kind === "NineSlice") guard(entity, () => applyNineSlice(sctx, entity, view));
@@ -327,7 +330,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       if (!state.views.has(entity)) forgetLeft(state, ctx.deps.world.ecs, entity);
     }
 
-    syncLayers(sctx);
+    if (syncLayers(sctx)) deps.demand.whole("layers");
 
     const built = emptyEntitySet();
 
@@ -465,11 +468,14 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         state.outlinesStale = true;
       },
 
-      state: (): DebugSwitches => ({ ...state.debug })
+      verifyFrames: (on: boolean): void => deps.demand.verifyFrames(on),
+
+      state: (): DebugSwitches => ({ ...state.debug, verifyFrames: deps.demand.verifying() })
     },
 
     filters: {
-      set: (entity: Entity, slots: readonly FilterSlot[]): void => setFilters(state, entity, slots)
+      set: (entity: Entity, slots: readonly FilterSlot[]): void =>
+        setFilters(state, entity, slots, deps.demand.mark)
     },
 
     renderPasses: (): number => renderPassesOf(state),

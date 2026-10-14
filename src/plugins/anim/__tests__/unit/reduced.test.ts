@@ -256,7 +256,8 @@ describe("anim reduced motion — a held loop writes once", () => {
 
     for (let frame = 0; frame < 5; frame += 1) mock.frame(16);
 
-    expect(writes()).toBe(1);
+    // The first key of a fresh loop is the value the field holds: the hold writes nothing (F19b).
+    expect(writes()).toBe(0);
     expect(mock.world.ecs.get(entity, Transform)?.x).toBe(0);
 
     // Off: the loop walks from its first key and writes every frame.
@@ -264,7 +265,7 @@ describe("anim reduced motion — a held loop writes once", () => {
     mock.frame(100);
     mock.frame(100);
 
-    expect(writes()).toBe(3);
+    expect(writes()).toBe(2);
     expect(mock.world.ecs.get(entity, Transform)?.x).toBe(50);
 
     // On again: one write back to the first key, then nothing.
@@ -272,7 +273,7 @@ describe("anim reduced motion — a held loop writes once", () => {
 
     for (let frame = 0; frame < 5; frame += 1) mock.frame(16);
 
-    expect(writes()).toBe(4);
+    expect(writes()).toBe(3);
     expect(mock.world.ecs.get(entity, Transform)?.x).toBe(0);
     expect(mock.api.active()).toBe(1);
   });

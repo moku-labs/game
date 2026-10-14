@@ -184,9 +184,9 @@ type ButtonSchema<S extends InputSchema> = string extends keyof S
 type CommandOverlay<S extends InputSchema, App> =
   | {
       /** Not shown in the overlay. */
-      readonly overlay?: undefined;
+      readonly overlay?: never;
       /** Only a toggle has a value. */
-      readonly value?: undefined;
+      readonly value?: never;
     }
   | {
       /** A switch of the overlay, run with `{ on: !value(app) }`. */
@@ -200,7 +200,7 @@ type CommandOverlay<S extends InputSchema, App> =
       readonly overlay: "button";
       readonly input: ButtonSchema<S>;
       /** Only a toggle has a value. */
-      readonly value?: undefined;
+      readonly value?: never;
     };
 
 /**

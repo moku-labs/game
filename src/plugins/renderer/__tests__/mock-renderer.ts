@@ -147,7 +147,14 @@ function createWorld(
     store: { snapshot: emptySnapshot },
     rng: { peek: vi.fn() }
   } as unknown as ModelApi;
-  const apis: Record<string, unknown> = { time: timeApi, model: modelApi, flow: flowApi };
+  // World writes the frame's moment into its `Now` resource (spec 15): a still clock is enough here.
+  const worldClock = { now: () => 0 } as unknown as ClockApi;
+  const apis: Record<string, unknown> = {
+    time: timeApi,
+    model: modelApi,
+    flow: flowApi,
+    clock: worldClock
+  };
   const config = { settleMs: 350, reconciledEvent: false };
   const kernel = {
     config,
@@ -159,7 +166,7 @@ function createWorld(
   } as unknown as WorldKernelSlice;
   const modules = createWorldModules({
     ...kernel,
-    deps: { time: timeApi, model: modelApi, flow: flowApi }
+    deps: { time: timeApi, model: modelApi, flow: flowApi, clock: worldClock }
   });
 
   return {
@@ -226,8 +233,9 @@ export function createMockRenderer(
     poolLimit: 256,
     unsupportedMessage: "This device cannot run the game.",
     loadPixi: () => Promise.resolve(pixi.module),
-    debug: { nineSlice: false },
+    debug: { nineSlice: false, verifyFrames: false },
     monitor: { budgetMs: "rate", frames: 1024 },
+    onDemand: false,
     ...options.config
   };
   const state = createRendererState({ config });
@@ -236,7 +244,7 @@ export function createMockRenderer(
   const frames: FrameRegistration[] = [];
   const pauses: Array<{ action: "push" | "pop"; reason: PauseReason }> = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
-  const clock = { now: 0, paused: false };
+  const clock = { now: 0, paused: false, wakes: 0 };
   const measures: MeasureListener[] = [];
   const charged: number[] = [];
   const flowState = { path: "home" };
@@ -260,6 +268,10 @@ export function createMockRenderer(
     resume: vi.fn(),
     isPaused: () => clock.paused,
     isRunning: () => false,
+    wake: () => {
+      clock.wakes += 1;
+    },
+    wakes: () => clock.wakes,
     step: vi.fn(),
     measure: (listener: MeasureListener): (() => void) => {
       measures.push(listener);

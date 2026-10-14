@@ -314,6 +314,25 @@ function addOffset(actx: AnimCtx, track: Track, field: string, delta: number, le
 }
 
 /**
+ * Tells whether a field already holds the value a track would write into it. Two NaN are the same
+ * value, so a field that stands on NaN is not written again every frame. A value that is not a
+ * number differs from every number.
+ *
+ * @param stored - What the field of the stored component holds.
+ * @param next - What the track would write.
+ * @returns True when writing `next` changes nothing.
+ * @example
+ * ```ts
+ * same(0.6, 0.6); // true
+ * same(Number.NaN, Number.NaN); // true
+ * same("0.6", 0.6); // false
+ * ```
+ */
+function same(stored: unknown, next: number): boolean {
+  return stored === next || (Number.isNaN(stored) && Number.isNaN(next));
+}
+
+/**
  * Writes one frame of a track: the eased value for an absolute track, the contributed delta for
  * an additive one, and in both cases the base plus every offset of the field. A component the
  * entity no longer carries ends the track silently.
@@ -324,6 +343,10 @@ function addOffset(actx: AnimCtx, track: Track, field: string, delta: number, le
  *
  * A field another writer owns is left alone. An additive track remembers that it skipped the
  * field, and adds to the value it finds there once the field is given back.
+ *
+ * A field whose value is the one the component holds is not written, and nothing is written when
+ * no field changed, so a holding loop marks nothing changed. The bases and offsets are booked
+ * every frame all the same.
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track to write.
@@ -342,11 +365,15 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
 
   const from = readFrom(actx, track, stored);
   const owned = track.muted();
-  const patch: Record<string, number> = {};
   const walksOffsets = track.additive && track.segments !== undefined;
+  let patch: Record<string, number> | undefined;
 
-  for (const [field, target] of Object.entries(track.to)) {
-    if (skipsOwned(track, owned, field)) continue;
+  // `for…in` and not `Object.entries`: no array of pairs per track per frame. `to` is a plain
+  // record of own fields.
+  for (const field in track.to) {
+    const target = track.to[field];
+
+    if (target === undefined || skipsOwned(track, owned, field)) continue;
 
     const key = keyOf(track, field);
     const start = from[field] ?? target;
@@ -356,10 +383,15 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
     if (track.additive) addOffset(actx, track, field, value - origin, stored[field]);
     else actx.state.bases.set(key, value);
 
-    patch[field] = (actx.state.bases.get(key) ?? start) + sumOffsets(actx, key);
+    const next = (actx.state.bases.get(key) ?? start) + sumOffsets(actx, key);
+
+    if (!same(stored[field], next)) {
+      patch ??= {};
+      patch[field] = next;
+    }
   }
 
-  if (Object.keys(patch).length > 0) ecs.set(track.entity, track.component, patch);
+  if (patch !== undefined) ecs.set(track.entity, track.component, patch);
 }
 
 /**
@@ -368,11 +400,17 @@ function writeFields(actx: AnimCtx, track: Track, fraction: number, final: boole
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track that ends.
- * @returns The fields whose last additive track just left, with the base to write them back to.
+ * @param stored - The stored component value, or `undefined` when the entity no longer carries it.
+ * @returns The fields whose last additive track just left and that stand off their base, with
+ *   the base to write them back to; `undefined` when no field has to be written.
  */
-function releaseFields(actx: AnimCtx, track: Track): Record<string, number> {
+function releaseFields(
+  actx: AnimCtx,
+  track: Track,
+  stored: Readonly<Record<string, unknown>> | undefined
+): Record<string, number> | undefined {
   const owned = track.muted();
-  const clean: Record<string, number> = {};
+  let clean: Record<string, number> | undefined;
 
   for (const field of Object.keys(track.to)) {
     const key = keyOf(track, field);
@@ -383,7 +421,16 @@ function releaseFields(actx: AnimCtx, track: Track): Record<string, number> {
 
     if (offsets?.delete(track.id) === true && offsets.size === 0) {
       actx.state.offsets.delete(key);
-      if (base !== undefined && !owned.has(field)) clean[field] = base;
+
+      if (
+        base !== undefined &&
+        stored !== undefined &&
+        !owned.has(field) &&
+        !same(stored[field], base)
+      ) {
+        clean ??= {};
+        clean[field] = base;
+      }
     }
 
     if (!actx.state.owner.has(key) && !actx.state.offsets.has(key)) actx.state.bases.delete(key);
@@ -394,8 +441,8 @@ function releaseFields(actx: AnimCtx, track: Track): Record<string, number> {
 
 /**
  * Takes a track out of the table: it releases the fields it owned, drops its offsets, writes a
- * field whose last additive track just left once more without offsets, and counts `Animation`
- * down.
+ * field whose last additive track just left once more without offsets, when it stands off its
+ * base, and counts `Animation` down.
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track that ends.
@@ -407,12 +454,10 @@ function endTrack(actx: AnimCtx, track: Track): void {
   actx.state.tracks.delete(track.id);
   if (track.additive) unfileAdditive(actx, track);
 
-  const clean = releaseFields(actx, track);
   const ecs = actx.deps.world.ecs;
+  const clean = releaseFields(actx, track, ecs.get(track.entity, track.component));
 
-  if (Object.keys(clean).length > 0 && ecs.get(track.entity, track.component) !== undefined) {
-    ecs.set(track.entity, track.component, clean);
-  }
+  if (clean !== undefined) ecs.set(track.entity, track.component, clean);
 
   countPlaying(ecs, track.entity, -1);
   if (actx.state.tracks.size <= actx.config.maxTracks) actx.state.overMaxTracks = false;

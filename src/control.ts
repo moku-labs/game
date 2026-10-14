@@ -8,7 +8,7 @@
  */
 export { commands } from "./plugins/flow/doors/commands";
 export { defineCommand } from "./plugins/flow/doors/define";
-export type { ControlReadOnlyError } from "./plugins/flow/doors/dev";
+export type { ControlReadOnlyError, ControlRefusedError } from "./plugins/flow/doors/dev";
 export { controlReadOnly, controlRefused } from "./plugins/flow/doors/dev";
 export { run } from "./plugins/flow/doors/run";
 export type { Command, Ran } from "./plugins/flow/doors/types";

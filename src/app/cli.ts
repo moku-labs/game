@@ -133,6 +133,7 @@ const ALL_OPTIONS = {
   update: { type: "boolean" },
   only: { type: "string", multiple: true },
   "no-pixels": { type: "boolean" },
+  "no-verify-frames": { type: "boolean" },
   pixels: { type: "boolean" },
   dir: { type: "string" },
   webgl: { type: "boolean" },
@@ -141,7 +142,7 @@ const ALL_OPTIONS = {
 } as const;
 
 /** The flags of `visual` that `parseVisualArgv` reads, in the runner's words. */
-const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl)$/;
+const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl|no-verify-frames)$/;
 
 /** The flags of one command besides the global ones. */
 const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIONS)[]>> = {
@@ -150,7 +151,17 @@ const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIO
   native: ["simulator", "debug", "editor"],
   keys: ["check"],
   pack: ["no-cache"],
-  visual: ["tests", "url", "update", "only", "no-pixels", "pixels", "dir", "webgl"]
+  visual: [
+    "tests",
+    "url",
+    "update",
+    "only",
+    "no-pixels",
+    "pixels",
+    "dir",
+    "webgl",
+    "no-verify-frames"
+  ]
 };
 
 /** The native verbs, in the order the messages name them. */
@@ -183,7 +194,7 @@ const USAGE = [
   "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
   "  pack [--no-cache]                     pack the assets into dist/assets",
   "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
-  "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",
+  "    [--no-pixels | --pixels] [--webgl] [--no-verify-frames] [--dir tests/visual/baselines]",
   "    [--tests tests/visual/index.ts] [--url <url>]",
   "  help                                  print this text",
   "",

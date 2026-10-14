@@ -44,16 +44,20 @@ export function sortOf(state: SyncState, name: string): LayerSort {
 }
 
 /**
- * Writes `zIndex` only when the number really changed. Pixi resorts a container exactly when a
- * child's `zIndex` was written with a new value, so a still board never resorts.
+ * Writes a view's depth only when the number really changed, and marks the entity before. Pixi
+ * resorts a container exactly when a child's `zIndex` was written with a new value, so a still
+ * board never resorts; a new depth moves the view among its siblings.
  *
- * @param object - The child of a layer container.
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param target - The child of a layer container or a wrapper.
  * @param value - The new depth.
  */
-export function writeZIndex(object: PixiContainer, value: number): void {
-  if (object.zIndex === value) return;
+function writeDepth(sctx: SyncCtx, entity: Entity, target: PixiContainer, value: number): void {
+  if (target.zIndex === value) return;
 
-  object.zIndex = value;
+  sctx.deps.demand.mark(entity);
+  target.zIndex = value;
 }
 
 /**
@@ -70,7 +74,7 @@ export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
   const target = view.wrapper ?? view.object;
 
   if (parentOf(ecs, entity) !== 0) {
-    writeZIndex(target, ecs.get(entity, Order)?.value ?? 0);
+    writeDepth(sctx, entity, target, ecs.get(entity, Order)?.value ?? 0);
 
     return;
   }
@@ -79,18 +83,18 @@ export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (sort === "none") {
     // A depth left over from a sorted layer would decide the hit-test order here.
-    writeZIndex(target, 0);
+    writeDepth(sctx, entity, target, 0);
 
     return;
   }
 
   if (sort === "y") {
-    writeZIndex(target, ecs.get(entity, Transform)?.y ?? 0);
+    writeDepth(sctx, entity, target, ecs.get(entity, Transform)?.y ?? 0);
 
     return;
   }
 
-  writeZIndex(target, ecs.get(entity, Order)?.value ?? 0);
+  writeDepth(sctx, entity, target, ecs.get(entity, Order)?.value ?? 0);
 }
 
 /**

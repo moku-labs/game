@@ -32,6 +32,7 @@ const createMockTime = (): TimeApi => ({
   pause: vi.fn(),
   resume: vi.fn(),
   wake: vi.fn(),
+  wakes: () => 0,
   measure: vi.fn(),
   agentClock: () => undefined,
   chargeAgent: vi.fn(),

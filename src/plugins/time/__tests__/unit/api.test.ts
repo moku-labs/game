@@ -598,3 +598,21 @@ describe("time api types", () => {
     expect(typeof api.onFrame("sync", () => {})).toBe("function");
   });
 });
+
+// ─── wakes, the count the renderer reads ──────────────────────
+
+describe("wakes", () => {
+  it("grows by one per wake and per resume, not per step", () => {
+    const { api } = createApi();
+
+    expect(api.wakes()).toBe(0);
+
+    api.wake();
+    api.wake();
+    api.step(16);
+    api.pause();
+    api.resume();
+
+    expect(api.wakes()).toBe(3);
+  });
+});

@@ -523,3 +523,109 @@ describe("the filter sync — kinds a debug switch turned off", () => {
     expect(mock.log.warn).toHaveBeenCalledWith("effects:full-screen-filters", { count: 2 });
   });
 });
+
+describe("the filter sync — compare on write and renderer.invalidate", () => {
+  it("a system that rewrites a filter with the same value every frame makes no invalidate call", () => {
+    const mock = started();
+    const entity = view(mock, [Tint({ amount: 0.6 }), Blur({ strength: 4 })]);
+
+    for (let index = 0; index < 30; index += 1) {
+      mock.world.ecs.set(entity, Tint, { amount: 0.6 });
+      mock.world.ecs.set(entity, Blur, { strength: 4 });
+      mock.frame();
+    }
+
+    expect(mock.ectx.deps.renderer.invalidate).not.toHaveBeenCalled();
+  });
+
+  it("two kinds of one view changing in one frame make one invalidate call, and the next frame may ask again", () => {
+    const mock = started();
+    const entity = view(mock, [Glow(), Tint()]);
+    const invalidate = vi.mocked(mock.ectx.deps.renderer.invalidate);
+
+    mock.frame();
+    mock.world.ecs.set(entity, Glow, { strength: 5 });
+    mock.world.ecs.set(entity, Tint, { amount: 0.3 });
+    mock.frame();
+
+    expect(invalidate.mock.calls).toEqual([[entity]]);
+
+    mock.world.ecs.set(entity, Tint, { amount: 0.4 });
+    mock.frame();
+
+    expect(invalidate).toHaveBeenCalledTimes(2);
+  });
+
+  it("a new filter list goes to set, not to invalidate: a kind added, an order changed", () => {
+    const mock = started();
+    const entity = view(mock, [Glow(), Tint()]);
+
+    mock.frame();
+    mock.world.ecs.add(entity, Heavy());
+    mock.frame();
+    mock.world.ecs.set(entity, Glow, { order: 5 });
+    mock.frame();
+
+    expect(mock.renderer.sets).toHaveLength(3);
+    expect(mock.ectx.deps.renderer.invalidate).not.toHaveBeenCalled();
+  });
+
+  it("invalidate comes before the new value reaches the Pixi filter", () => {
+    const mock = started();
+    const entity = view(mock, [Glow({ distance: 4 }), Tint({ amount: 0.1 })]);
+    const seen: unknown[] = [];
+
+    mock.frame();
+
+    const glow = filterOf(mock, entity, "effects.glow");
+    const tint = filterOf(mock, entity, "fx.tint");
+
+    vi.mocked(mock.ectx.deps.renderer.invalidate).mockImplementation(() => {
+      seen.push(glow?.padding, (tint?.resources.fu as FakeUniformGroup).uniforms.amount);
+    });
+    mock.world.ecs.set(entity, Glow, { distance: 12 });
+    mock.world.ecs.set(entity, Tint, { amount: 0.8 });
+    mock.frame();
+
+    expect(seen).toEqual([4, 0.1]);
+    expect(glow?.padding).toBe(12);
+  });
+
+  it("an off kind's value change asks for no frame and is still written; without the agent flag it asks", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const mock = started();
+    const entity = view(mock, [Glow({ strength: 0.6 })]);
+
+    mock.frame();
+    mock.api.diagnostics.disable("effects.glow");
+    mock.frame();
+    mock.world.ecs.set(entity, Glow, { strength: 0.2 });
+    mock.frame();
+
+    const glow = filterOf(mock, entity, "effects.glow");
+
+    expect(mock.ectx.deps.renderer.invalidate).not.toHaveBeenCalled();
+    expect((glow?.resources.fu as FakeUniformGroup).uniforms.strength).toBe(0.2);
+
+    const sets = mock.renderer.sets.length;
+
+    mock.api.diagnostics.enable("effects.glow");
+    mock.frame();
+
+    expect(mock.renderer.sets).toHaveLength(sets + 1);
+    expect(lastFilters(mock)).toEqual([glow]);
+
+    vi.unstubAllGlobals();
+
+    const release = started();
+    const other = view(release, [Glow({ strength: 0.6 })]);
+
+    release.frame();
+    release.api.diagnostics.disable("effects.glow");
+    release.world.ecs.set(other, Glow, { strength: 0.2 });
+    release.frame();
+
+    expect(release.ectx.deps.renderer.invalidate).toHaveBeenCalledTimes(1);
+  });
+});

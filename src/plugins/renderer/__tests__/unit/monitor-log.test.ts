@@ -158,7 +158,7 @@ describe("the header and the delivery", () => {
       engine: "0.14.13+9c41e0",
       timeOrigin: performance.timeOrigin,
       gpu: { backend: "webgpu", timer: null },
-      measured: ["passes", "stencilPasses", "draws", "filters", "uploads"]
+      measured: ["passes", "stencilPasses", "draws", "filters", "uploads", "marks"]
     });
     expect(lines[1]).toMatchObject({
       kind: "mark",

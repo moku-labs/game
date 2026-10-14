@@ -206,6 +206,10 @@ export type State = {
    */
   lastWakeMs: number;
   /**
+   * Wakes since the app started, `resume` included: the renderer draws the frame after any wake.
+   */
+  wakes: number;
+  /**
    * True while the loop runs at `idleFps`.
    */
   idle: boolean;
@@ -370,6 +374,21 @@ export type Api = {
    * ```
    */
   wake(): void;
+
+  /**
+   * How many wakes the clock has had since the app started, `resume` included. A plugin that must notice a wake
+   * between two of its own frames compares two readings: the renderer draws the frame after any wake.
+   *
+   * @returns The count; it only grows.
+   * @example
+   * ```ts
+   * const time = ctx.require(timePlugin);
+   * time.wakes(); // 41
+   * time.wake();
+   * time.wakes(); // 42
+   * ```
+   */
+  wakes(): number;
 
   /**
    * Hands what `time` measured of every frame to `listener`, after the `render` phase: the gap, the skipped ticks, the

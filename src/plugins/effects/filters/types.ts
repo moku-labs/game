@@ -296,7 +296,7 @@ export type FilterKind = KindEntry & { readonly index: number };
 
 /**
  * The values of the uniform group of one of our filter instances: a number per `f32`, a vector
- * per colour and tuple. Written every frame.
+ * per colour and tuple. Written where they differ from the stored value.
  */
 export type UniformValues = Record<string, number | Float32Array>;
 
@@ -307,7 +307,8 @@ export type FilterUniforms = { readonly uniforms: UniformValues };
 
 /**
  * The Pixi object of one kind on one view, with the passes one apply of it costs now: what the
- * builders of `instance.ts` make before the instance gets its sort keys.
+ * builders of `instance.ts` make before the instance gets its sort keys. A Pixi-core kind keeps
+ * the fields its setters were last given, `applied`, so an equal value calls no setter.
  */
 export type FilterBody =
   | {
@@ -320,22 +321,30 @@ export type FilterBody =
   | {
       readonly kind: "blur";
       readonly filter: InstanceType<PixiModule["BlurFilter"]>;
+      /** The fields the setters were last given; compared before a write. */
+      readonly applied: Record<string, FilterField>;
       passes: number;
     }
   | {
       readonly kind: "colorMatrix";
       readonly filter: InstanceType<PixiModule["ColorMatrixFilter"]>;
+      /** The fields the setters were last given; compared before a write. */
+      readonly applied: Record<string, FilterField>;
       passes: number;
     }
   | {
       readonly kind: "noise";
       readonly filter: InstanceType<PixiModule["NoiseFilter"]>;
+      /** The fields the setters were last given; compared before a write. */
+      readonly applied: Record<string, FilterField>;
       passes: number;
     }
   | {
       readonly kind: "displacement";
       readonly filter: InstanceType<PixiModule["DisplacementFilter"]>;
       readonly sprite: PixiSprite;
+      /** The fields the setters were last given; compared before a write. */
+      readonly applied: Record<string, FilterField>;
       /** The asset key the map sprite shows now. */
       map: string;
       passes: number;
@@ -343,20 +352,30 @@ export type FilterBody =
   | {
       readonly kind: "alpha";
       readonly filter: InstanceType<PixiModule["AlphaFilter"]>;
+      /** The fields the setters were last given; compared before a write. */
+      readonly applied: Record<string, FilterField>;
       passes: number;
     };
 
 /**
  * The instance of one kind on one view: its Pixi object, and what it sorts by on the view, the
- * `order` of its component (written every frame) and the `index` of its kind.
+ * `order` of its component (written every frame) and the `index` of its kind. The instance is
+ * the object the builder made, never a copy: a closure made while building (the apply guard)
+ * reads and writes the same fields the filter sync does.
  */
-export type FilterInstance = FilterBody & { order: number; readonly index: number };
+export type FilterInstance = FilterBody & {
+  order: number;
+  readonly index: number;
+  /** True once an `apply` of this instance threw: it stays switched off until it is retired. */
+  broken: boolean;
+};
 
 /**
  * What the filter sync keeps for one entity: the kinds it carries, one instance per kind, the
  * instances waiting to be destroyed after the next assignment, the slots last handed to
- * `renderer.sync.filters.set`, the core kinds whose component changed this frame, and the
- * instances of this frame in their sorted order (one array, reused every frame).
+ * `renderer.sync.filters.set`, the core kinds whose component changed this frame, the
+ * instances of this frame in their sorted order (one array, reused every frame), and the one
+ * `renderer.invalidate` call a visible filter write of the frame makes.
  */
 export type FilteredView = {
   readonly kinds: Set<string>;
@@ -365,4 +384,8 @@ export type FilteredView = {
   assigned: readonly FilterSlot[];
   readonly changed: Set<string>;
   readonly placed: FilterInstance[];
+  /** True once `renderer.invalidate` was called for this view in the current frame. */
+  signalled: boolean;
+  /** Calls `renderer.invalidate(entity)` once per frame for this view, before the write; made once with the record. */
+  readonly signal: () => void;
 };

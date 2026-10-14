@@ -178,6 +178,8 @@ function measuredOf(pc: PerfCtx): PerfMeasured[] {
   if ((bits & MEASURE.draws) !== 0) list.push("draws");
   if ((bits & MEASURE.counted) !== 0) list.push("filters", "uploads");
   if ((bits & MEASURE.compiles) !== 0) list.push("compiles");
+  // The draw decision of spec 14 fills `marks` in every agent build.
+  list.push("marks");
   if (pc.perf.longFrames.type !== undefined) list.push("longFrames");
   if (heapMb() !== null) list.push("heap");
   if (pc.ctx.deps.world.systemTimes() !== undefined) list.push("systems");

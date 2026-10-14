@@ -5,7 +5,7 @@ import type { Json } from "../../model/types";
 import type * as Time from "../../time/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { SyncApi, SyncInternal } from "../sync/types";
-import type { PixiModule, RendererCtx } from "../types";
+import type { DemandModule, PixiModule, RendererCtx } from "../types";
 import type { ViewportApi, ViewportInternal } from "../viewport/types";
 import type {
   FrameColumns,
@@ -27,18 +27,27 @@ import type {
  * ```ts
  * // The board of Timber Town in a dev build: one glowing button on screen.
  * const stats: RenderStats = {
- *   fps: 60, frameMs: 3.4, textures: 12, textureMb: 41.25,
+ *   fps: 60, drawn: 60, frameMs: 3.4, textures: 12, textureMb: 41.25,
  *   textureMbSplit: { art: 31.5, targets: 9.75, kept: 0 }, views: 180, pooled: 24,
  *   renderPasses: 3, drawCalls: 14
  * };
+ * // The same board at rest with `onDemand`: the loop runs, nothing is drawn.
+ * const still: RenderStats = { ...stats, drawn: 0 };
  * ```
  */
 export type RenderStats = {
   /**
-   * Frames drawn per second, measured over the last full second of `clock` time. 0 before the
-   * first second, while inert, and when no frame was drawn in the last second (a paused clock).
+   * Frames of the loop per second, measured over the last full second of `clock` time, drawn or
+   * not (see `drawn`). 0 before the first second, while inert, and when no frame ran in the last
+   * second (a paused clock).
    */
   fps: number;
+  /**
+   * Frames drawn per second over the same second as `fps`. Equal to `fps` without `onDemand`;
+   * with it, 0 on a screen that stands still. 0 before the first second, while inert and while no
+   * frame ran.
+   */
+  drawn: number;
   /**
    * Mean milliseconds of `clock` time one frame took over that second, CPU side: from the
    * renderer's callback in phase `input` to the end of `render`.
@@ -64,8 +73,9 @@ export type RenderStats = {
    */
   renderPasses: number;
   /**
-   * Draw calls of the last drawn frame. Dev and debug builds only, counted on WebGPU: absent in a
-   * production build, 0 while inert and on the WebGL fallback.
+   * Draw calls of the last drawn frame: a skipped frame keeps the count. Dev and debug builds
+   * only, counted on WebGPU: absent in a production build, 0 while inert and on the WebGL
+   * fallback.
    */
   drawCalls?: number;
 };
@@ -402,6 +412,12 @@ export type MonitorState = {
   frames: number;
   /** Frames per second of the last closed window. */
   fps: number;
+  /** Intervals of the open window that belong to a drawn frame. */
+  drawnIntervals: number;
+  /** Drawn frames per second of the last closed window. */
+  drawnFps: number;
+  /** The last frame that ended was drawn: the interval to the next start is a drawn one. */
+  lastDrawn: boolean;
   /** Mean frame work of the last closed window, in milliseconds. */
   frameMs: number;
   /** Captures waiting for a drawn frame, served in `end()`. */
@@ -421,7 +437,7 @@ export type MonitorState = {
  * @example
  * ```ts
  * // A headless test: nothing is drawn, so every counter is 0 and there is no picture.
- * app.renderer.stats(); // { fps: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0, renderPasses: 0 }
+ * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0, renderPasses: 0 }
  * await app.renderer.capture(); // undefined
  * ```
  */
@@ -437,8 +453,9 @@ export type MonitorApi = {
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
-   * app.renderer.stats(); // { fps: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0, renderPasses: 1 }
+   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0, renderPasses: 1 }
    * // The same frame in a dev build also counts the one sprite batch: { ..., drawCalls: 1 }
+   * app.renderer.stats(); // { fps: 120, drawn: 0, … }: a still board with onDemand
    * ```
    */
   stats(): RenderStats;
@@ -601,11 +618,19 @@ export type MonitorInternal = {
 
   /**
    * Marks the end of a frame: adds its work to the window, closes the draw count, and hands a
-   * drawn frame to the captures that wait for it.
+   * drawn frame to the captures that wait for it. A skipped frame keeps the draw count of the last
+   * drawn one, and serves no capture.
    *
-   * @param drawn - True when the frame called Pixi.
+   * @param drawn - True when the render phase drew the frame.
    */
   end(drawn: boolean): void;
+
+  /**
+   * Tells whether a capture waits for a drawn frame: the render phase then draws one.
+   *
+   * @returns True while a capture waits.
+   */
+  waiting(): boolean;
 
   /**
    * Notes a change of the frame running now, for its record. Agent builds only.
@@ -667,6 +692,8 @@ export type MonitorDeps = {
   host: HostApi & HostInternal;
   viewport: ViewportApi & ViewportInternal;
   sync: SyncApi & SyncInternal;
+  /** The draw decision of the frame, for the `marks` and `reason` columns of the ring. */
+  demand: DemandModule;
 };
 
 /**

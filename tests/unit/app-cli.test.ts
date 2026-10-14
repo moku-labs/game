@@ -1053,7 +1053,7 @@ describe("the command line", () => {
       "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
       "  pack [--no-cache]                     pack the assets into dist/assets",
       "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
-      "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",
+      "    [--no-pixels | --pixels] [--webgl] [--no-verify-frames] [--dir tests/visual/baselines]",
       "    [--tests tests/visual/index.ts] [--url <url>]",
       "  help                                  print this text",
       "",

@@ -1,5 +1,6 @@
 import { expectTypeOf } from "vitest";
 import type { Config as GameConfig } from "../../../../config";
+import type { Api as TimeApi } from "../../../time/types";
 import type { Entity } from "../../../world/types";
 import type {
   NineSliceValue,
@@ -16,6 +17,7 @@ import type {
   Config,
   CreateTextureOptions,
   DebugSwitches,
+  DisplayAdapter,
   FilterSlot,
   HitBox,
   LegendEntry,
@@ -161,8 +163,14 @@ renderer.viewport.apply;
 // ─── debug switches and the long side of the reference space ──
 
 expectTypeOf(renderer.sync.debug.nineSlice).toEqualTypeOf<(on: boolean) => void>();
-expectTypeOf(renderer.sync.debug.state()).toEqualTypeOf<{ nineSlice: boolean }>();
-expectTypeOf<Config["debug"]>().toEqualTypeOf<DebugSwitches>();
+expectTypeOf(renderer.sync.debug.state()).toEqualTypeOf<{
+  nineSlice: boolean;
+  verifyFrames: boolean;
+}>();
+expectTypeOf(renderer.sync.debug.verifyFrames).toEqualTypeOf<(on: boolean) => void>();
+// A game that sets only the outline at start keeps compiling: a switch left out is off.
+expectTypeOf<{ nineSlice: true }>().toExtend<Config["debug"]>();
+expectTypeOf<Config["debug"]>().toEqualTypeOf<Partial<DebugSwitches>>();
 expectTypeOf<GameConfig["referenceLong"]>().toEqualTypeOf<number>();
 
 // @ts-expect-error — the switch takes a boolean
@@ -174,6 +182,7 @@ expectTypeOf(renderer.viewport.toScreen).toEqualTypeOf<(point: Point) => Point>(
 expectTypeOf(renderer.stats()).toEqualTypeOf<RenderStats>();
 expectTypeOf<RenderStats>().toEqualTypeOf<{
   fps: number;
+  drawn: number;
   frameMs: number;
   textures: number;
   textureMb: number;
@@ -278,3 +287,29 @@ renderer.capture({ sheet: { frames: 6 } });
 
 // @ts-expect-error — layers are names, not one name
 renderer.capture({ layers: "hud" });
+
+// ─── render on demand: the switch, invalidate, adapters that answer, wakes ──
+
+expectTypeOf<Config["onDemand"]>().toEqualTypeOf<boolean>();
+expectTypeOf(renderer.invalidate).toEqualTypeOf<(entity: Entity) => void>();
+
+// @ts-expect-error — there is no whole-frame form: invalidate names the entity it is about to write
+renderer.invalidate();
+
+// An adapter typed `: void` before the change still compiles, and so does one that answers.
+const quiet: DisplayAdapter<{ s: string }> = {
+  create: () => undefined,
+  update: (): void => undefined,
+  destroy: () => undefined
+};
+const answering: DisplayAdapter<{ s: string }> = {
+  create: () => undefined,
+  update: (_object, previous, next) => previous.s !== next.s,
+  destroy: () => undefined
+};
+
+// biome-ignore lint/suspicious/noConfusingVoidType: the return type of the adapter, as it is declared
+expectTypeOf(quiet.update).returns.toEqualTypeOf<boolean | void>();
+// biome-ignore lint/suspicious/noConfusingVoidType: the return type of the adapter, as it is declared
+expectTypeOf(answering.update).returns.toEqualTypeOf<boolean | void>();
+expectTypeOf<TimeApi["wakes"]>().toEqualTypeOf<() => number>();

@@ -6,6 +6,8 @@
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../../config";
+import { fakeClock } from "../../../clock/fake";
+import type { Api as ClockApi, FakeClock } from "../../../clock/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { Api as FlowApi, Hint } from "../../../flow/types";
 import type { Json, Api as ModelApi, Root, Snapshot } from "../../../model/types";
@@ -37,6 +39,8 @@ export type MockWorld = {
   features: Array<{ name: string; description: FeatureDescription }>;
   frames: FrameRegistration[];
   time: Time;
+  /** The game's clock the world reads `Now` from; a case moves it with `advance`. */
+  clock: FakeClock;
   /** The tween driver installed on the world, advanced by `frame`. */
   driver: FakeDriver;
   /** Takes the driver back, so the world writes every target at once. */
@@ -138,7 +142,14 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
     }
   } as unknown as FlowApi;
 
-  const apis: Record<string, unknown> = { time: timeApi, model: modelApi, flow: flowApi };
+  const clock = fakeClock(1_790_000_000_000);
+  const clockApi = { now: () => clock.now() } as unknown as ClockApi;
+  const apis: Record<string, unknown> = {
+    time: timeApi,
+    model: modelApi,
+    flow: flowApi,
+    clock: clockApi
+  };
 
   const ctx: KernelSlice = {
     config,
@@ -165,6 +176,7 @@ export function createMockWorld(options: Partial<Config> = {}): MockWorld {
     features,
     frames,
     time,
+    clock,
     driver,
     offDriver: removeDriver,
     start: (): void => {

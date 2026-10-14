@@ -152,3 +152,32 @@ export async function extractStage(
     return undefined;
   }
 }
+
+/** The resolution the pixel oracle reads the stage at: a quarter of the pixels, a 2-px change still shows. */
+const ORACLE_RESOLUTION = 0.5;
+
+/**
+ * Draws the stage live into RGBA pixels with Pixi's extract system, framed as a capture is, at
+ * half resolution. A failed read is logged once per application state and answers `undefined`.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param app - The application that draws.
+ * @returns The pixels, or `undefined` when Pixi could not read them.
+ */
+export function readPixels(ctx: RendererCtx, app: PixiApplication): Uint8ClampedArray | undefined {
+  try {
+    return app.renderer.extract.pixels({
+      target: app.stage,
+      frame: app.screen,
+      clearColor: ctx.config.background,
+      resolution: ORACLE_RESOLUTION
+    }).pixels;
+  } catch (error) {
+    if (!ctx.state.host.pixelsFailed) {
+      ctx.state.host.pixelsFailed = true;
+      ctx.log.error("renderer: pixel read failed", { error });
+    }
+
+    return undefined;
+  }
+}

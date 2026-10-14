@@ -12,7 +12,7 @@ The drop TARGET names the intent. The engine owns the pointer capture, the lifti
 |---|---|---|---|
 | `Tappable({ intent, payload? })` | component | `{ intent: "", payload: {} }` | A tap answers `{ intent, payload }` |
 | `Pressable({ intent, payload? })` | component | same | A long press answers `{ intent, payload }` |
-| `Draggable({ payload?, carry?, aim? })` | component | `{ payload: {}, carry: [], aim: null }` | The view can be carried. It names no intent. `carry` lists projection keys of the same projection that ride along on top of it. `aim`, a point of the view in its own units: the hover and the drop look under it instead of under the finger |
+| `Draggable({ payload?, carry?, aim? })` | component | `{ payload: {}, carry: [] }`, no `aim` | The view can be carried. It names no intent. `carry` lists projection keys of the same projection that ride along on top of it. `aim`, a point of the view in its own units: the hover and the drop look under it instead of under the finger |
 | `DropTarget({ intent, payload? })` | component | same as `Tappable` | A drop here answers THIS intent |
 | `Swipeable({ intent, payload? })` | component | same as `Tappable` | A swipe answers `{ intent, payload: { ...payload, direction } }` |
 | `Traceable({ intent, payload? })` | component | same as `Tappable` | A finger drawn through these views answers once, on the release: `{ intent, payload: { path: [payload, …] } }` |
@@ -210,9 +210,9 @@ A carried view must leave the held view before its `settle`: settled while still
 
 ### The aim
 
-A board item drawn above the finger is dropped where its picture is: `Draggable({ payload: { from: "c7" }, aim: { x: 25, y: 12 } })`. The point is in the view's own units, the units of its hit box (the `Transform` puts the `pivot` there; a `Sprite` anchored at its centre has its box from `-w/2`). The engine poses it the way the finger moves the view — rotation, pivot and the lifted scale of `heldScale` included — and, at the release, from where the finger let go, so a finger that lifts in the frame it moved still drops under the picture. `aim: null`, the default, looks under the finger. The carried views and the held view are never targets, with or without an aim.
+A board item drawn above the finger is dropped where its picture is: `Draggable({ payload: { from: "c7" }, aim: { x: 25, y: 12 } })`. The point is in the view's own units, the units of its hit box (the `Transform` puts the `pivot` there; a `Sprite` anchored at its centre has its box from `-w/2`). The engine poses it the way the finger moves the view — rotation, pivot and the lifted scale of `heldScale` included — and, at the release, from where the finger let go, so a finger that lifts in the frame it moved still drops under the picture. No `aim`, the default, or `aim: null` looks under the finger; the default has no `aim` key, so a view without one is stored, snapshotted and described exactly as before the aim existed. The carried views and the held view are never targets, with or without an aim.
 
-A projection takes an aim away by not giving it: `Draggable({ payload })` carries `aim: null`, and the projection's write of the changed component replaces the earlier aim.
+A projection takes an aim away by not giving it: `Draggable({ payload })` names no aim, and the hover and the drop read the aim from the view's rest pose (`world.projection.restOf`), the last output of its `view`. The projection's write merges into the stored component, so the stored `Draggable` keeps the old `aim` key until something replaces the whole value; the drop never reads it. An entity no projection made reads its stored `Draggable`.
 
 ### A view with a parent
 

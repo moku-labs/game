@@ -1,8 +1,9 @@
 /**
  * @file effects/filters — the `sync` system that keeps one filter instance per view and kind,
  * writes them, hands the sorted list to `renderer.sync.filters.set` only when the kinds, their
- * order or their passes changed, destroys what left, and keeps the two filter budgets. It walks
- * the views the world hooks recorded, never the whole world.
+ * order or their passes changed, destroys what left, and keeps the two filter budgets. A value
+ * write the player can see calls `renderer.invalidate(entity)` first, once per view and frame. It
+ * walks the views the world hooks recorded, never the whole world.
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import type { FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
@@ -12,21 +13,35 @@ import { checkShader } from "./check";
 import { createFilter, destroyFilter, writeFilter } from "./instance";
 import type { FilteredView, FilterInstance, FilterKind } from "./types";
 
+/** The `before` of a kind a debug switch turned off: it is not drawn, so it asks for no frame. */
+const NO_SIGNAL = (): void => {};
+
 /**
- * Creates the record of a view with no filter yet. Its change marks and its sorted list are made
- * here once and reused every frame.
+ * Creates the record of a view with no filter yet. Its change marks, its sorted list and its
+ * `signal` are made here once and reused every frame.
  *
+ * @param ectx - Domain context of the effects plugin.
+ * @param entity - The entity.
  * @returns An empty view.
  */
-function emptyView(): FilteredView {
-  return {
+function emptyView(ectx: EffectsCtx, entity: Entity): FilteredView {
+  const view: FilteredView = {
     kinds: new Set(),
     instances: new Map(),
     retired: [],
     assigned: [],
     changed: new Set(),
-    placed: []
+    placed: [],
+    signalled: false,
+    signal: (): void => {
+      if (view.signalled) return;
+
+      view.signalled = true;
+      ectx.deps.renderer.invalidate(entity);
+    }
   };
+
+  return view;
 }
 
 /**
@@ -101,7 +116,9 @@ function isSwitchedOff(ectx: EffectsCtx, id: string): boolean {
 
 /**
  * Brings one kind of one view up to date: the first frame it is seen it gets its instance, once
- * its shader check answered ok; after that it is written.
+ * its shader check answered ok, which reaches the renderer through the new slot list; after that
+ * it is written, and a visible write asks the renderer for the frame first. A kind a debug switch
+ * turned off is written but asks for nothing.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -109,6 +126,7 @@ function isSwitchedOff(ectx: EffectsCtx, id: string): boolean {
  * @param view - Its record.
  * @param kind - The kind.
  * @param changed - Whether its component changed this frame.
+ * @param off - Whether a debug switch turned the kind off.
  * @returns The instance, its `order` up to date, or `undefined` while it has none.
  */
 function syncKind(
@@ -117,7 +135,8 @@ function syncKind(
   entity: Entity,
   view: FilteredView,
   kind: FilterKind,
-  changed: boolean
+  changed: boolean,
+  off: boolean
 ): FilterInstance | undefined {
   const value = ectx.deps.world.ecs.get(entity, kind.component);
 
@@ -134,7 +153,7 @@ function syncKind(
 
     view.instances.set(kind.id, instance);
   } else {
-    writeFilter(ectx, instance, value, changed);
+    writeFilter(ectx, instance, value, changed, off ? NO_SIGNAL : view.signal);
     instance.order = value.order;
   }
 
@@ -171,15 +190,17 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
   const { placed } = view;
 
   placed.length = 0;
+  view.signalled = false;
 
   for (const id of view.kinds) {
     const kind = ectx.state.kinds.get(id);
     const changed = view.changed.delete(id);
+    const off = isSwitchedOff(ectx, id);
     const instance =
-      kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed);
+      kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed, off);
 
     // A kind a debug switch turned off stays written above and leaves the slots.
-    if (instance !== undefined && !isSwitchedOff(ectx, id)) placed.push(instance);
+    if (instance !== undefined && !off) placed.push(instance);
   }
 
   // A kind that left this frame leaves no mark behind for a later frame.
@@ -378,7 +399,7 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
  * @param entity - The entity.
  */
 export function trackFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity): void {
-  const view = ectx.state.views.get(entity) ?? emptyView();
+  const view = ectx.state.views.get(entity) ?? emptyView(ectx, entity);
 
   view.kinds.add(kind.id);
   ectx.state.views.set(entity, view);

@@ -1,6 +1,6 @@
 import { expectTypeOf } from "vitest";
 import type { World } from "../../../../index";
-import { defineFeature, defineGame } from "../../../../index";
+import { defineFeature, defineGame, Now } from "../../../../index";
 import { component, mut, resource, system, tag } from "../../ecs/define";
 import type {
   AnySystem,
@@ -233,3 +233,15 @@ gameSystem({
 expectTypeOf(looks).toExtend<AnySystem>();
 ecs.system(looks);
 defineFeature("board", { systems: [looks] });
+
+// ─── Now, the frame's moment, reaches a game from the package root ────
+
+expectTypeOf(Now).toEqualTypeOf<ResourceType<{ now: number }>>();
+system({
+  name: "test.clock",
+  phase: "animate",
+  query: [],
+  run: (_rows, { res }) => {
+    expectTypeOf(res(Now).now).toEqualTypeOf<number>();
+  }
+});

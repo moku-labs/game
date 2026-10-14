@@ -175,12 +175,20 @@ export type VisualRenderer = "webgpu" | "webgl";
  * const options: VisualOptions = { only: ["reward-popup"], pixels: false };
  * // The same as `bun tests/visual/run.ts --webgl`.
  * const webgl: VisualOptions = { renderer: "webgl" };
+ * // The same as `bun tests/visual/run.ts --no-verify-frames`: skipped frames are not checked.
+ * const unchecked: VisualOptions = { verifyFrames: false };
  * ```
  */
 export type VisualOptions = {
   dir?: string;
   update?: boolean;
   pixels?: boolean;
+  /**
+   * The browser leg turns on `debug.verifyFrames` and fails a test on the first
+   * `renderer:missed-frame` or `renderer:missed-mark` of the page; `true` by default, `false` with
+   * `--no-verify-frames`.
+   */
+  verifyFrames?: boolean;
   renderer?: VisualRenderer;
   only?: readonly string[];
   settleFrames?: number;
@@ -256,6 +264,7 @@ export type VisualRun = {
   dir: string;
   update: boolean;
   pixels: boolean;
+  verifyFrames: boolean;
   renderer: VisualRenderer;
   only?: readonly string[];
   settleFrames: number;
@@ -267,6 +276,7 @@ export type VisualFlags = {
   dir?: string;
   update?: boolean;
   pixels?: boolean;
+  verifyFrames?: boolean;
   renderer?: VisualRenderer;
   only?: readonly string[];
 };

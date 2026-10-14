@@ -70,6 +70,8 @@ export type HostState = {
   ownGpu: OwnGpu | undefined;
   /** Texture sources the engine keeps as pictures (F12, C14): `textures()` counts them apart. */
   kept: WeakSet<object>;
+  /** A pixel read of the oracle failed and was logged: the next failures stay quiet. */
+  pixelsFailed: boolean;
 };
 
 /**
@@ -344,6 +346,22 @@ export type HostInternal = {
    * @returns The usage; zero while nothing draws.
    */
   textures(): TextureUsage;
+
+  /**
+   * Draws the stage live into RGBA pixels over the whole canvas at half resolution, a quarter of
+   * the pixels, for the pixel oracle of `debug.verifyFrames`. A failed read is logged once.
+   *
+   * @returns The pixels, or `undefined` while nothing draws or when Pixi could not read them.
+   */
+  pixels(): Uint8ClampedArray | undefined;
+
+  /**
+   * The rectangle of the canvas in CSS pixels, the stage's own space: what a view is measured
+   * against to know whether it lands on the screen.
+   *
+   * @returns The rectangle, or `undefined` while nothing draws.
+   */
+  screen(): { x: number; y: number; width: number; height: number } | undefined;
 
   /**
    * Runs the init sequence: resolve the mount, load Pixi, create the application, append the

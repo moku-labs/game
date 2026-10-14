@@ -1,18 +1,21 @@
 /**
  * @file effects/filters — the only file that builds, writes and destroys Pixi filters. Ours: a
  * `Filter` over a `GpuProgram` of the assembled WGSL and a `GlProgram` of the assembled GLSL, with
- * one `UniformGroup` both read, written every frame. The Pixi-core kinds: their own class, written
- * through their setters when the component changed. Every kind but `Blur` renders at
+ * one `UniformGroup` both read. The Pixi-core kinds: their own class, written through their setters
+ * when a field differs from what they were last given. Every kind but `Blur` renders at
  * `resolution: "inherit"`, the resolution of the canvas, so a filtered view stays sharp on DPR 2-3
- * (decision 32). A destroy frees the uniform buffers first: `Filter.destroy()` leaves them to a GC
- * that runs after a minute (P10).
+ * (decision 32). Every write compares first: a value the filter holds already writes nothing and
+ * asks the renderer for no frame. A destroy frees the uniform buffers first: `Filter.destroy()`
+ * leaves them to a GC that runs after a minute (P10).
  */
 import type { PixiModule } from "../../renderer/types";
 import type { EffectsCtx } from "../types";
+import { guardApply } from "./guard";
 import type {
   CoreKind,
   FilterBody,
   FilterDefinition,
+  FilterField,
   FilterFields,
   FilterInstance,
   FilterKind,
@@ -31,6 +34,24 @@ type UniformStructure = { value: number | Float32Array; type: UniformSpec["type"
 
 /** A GPU resource that holds a buffer of its own: a uniform group once Pixi uploaded it. */
 type BufferedResource = { uniforms: object; buffer: { destroy(): void } };
+
+/** An instance of a Pixi-core kind: the one with an `applied` copy of its fields. */
+type CoreInstance = Exclude<FilterInstance, { kind: "wgsl" }>;
+
+/**
+ * Tells whether two numbers are the same value for the GPU: equal, or both NaN.
+ *
+ * @param a - One number.
+ * @param b - The other.
+ * @returns True when writing `b` over `a` changes nothing.
+ * @example
+ * ```ts
+ * same(0.6, 0.6); // true
+ * ```
+ */
+function same(a: number, b: number): boolean {
+  return a === b || (Number.isNaN(a) && Number.isNaN(b));
+}
 
 /**
  * A number field of a stored filter value.
@@ -67,15 +88,39 @@ function vectorOf(value: Readonly<FilterFields>, name: string): readonly number[
 }
 
 /**
- * Writes the three channels of a `0xrrggbb` colour into a vector, 0..1 each.
+ * Compares one element of a vector with a number as the vector stores it, rounded to float32,
+ * and writes it when it differs and `write` asks for it.
+ *
+ * @param target - The vector.
+ * @param index - The element.
+ * @param next - The number.
+ * @param write - False to compare only.
+ * @returns True when the element differs.
+ */
+function writeAt(target: Float32Array, index: number, next: number, write: boolean): boolean {
+  const rounded = Math.fround(next);
+  const held = target[index];
+
+  if (held !== undefined && same(held, rounded)) return false;
+  if (write) target[index] = rounded;
+
+  return true;
+}
+
+/**
+ * Writes the three channels of a `0xrrggbb` colour into a vector, 0..1 each, where they differ.
  *
  * @param target - The `vec3<f32>` of the uniform.
  * @param hex - The colour.
+ * @param write - False to compare only.
+ * @returns True when a channel differs.
  */
-function writeColor(target: Float32Array, hex: number): void {
-  target[0] = ((hex >> 16) & 0xff) / 255;
-  target[1] = ((hex >> 8) & 0xff) / 255;
-  target[2] = (hex & 0xff) / 255;
+function writeColor(target: Float32Array, hex: number, write = true): boolean {
+  const red = writeAt(target, 0, ((hex >> 16) & 0xff) / 255, write);
+  const green = writeAt(target, 1, ((hex >> 8) & 0xff) / 255, write);
+  const blue = writeAt(target, 2, (hex & 0xff) / 255, write);
+
+  return red || green || blue;
 }
 
 /**
@@ -230,6 +275,29 @@ function mapTexture(
 }
 
 /**
+ * The fields a core kind's setters are given: a copy of the stored value without `enabled` and
+ * `order`.
+ *
+ * @param value - The stored filter value.
+ * @returns A fresh record, kept by the instance as `applied`.
+ * @example
+ * ```ts
+ * appliedOf({ enabled: true, order: 2, alpha: 0.4 }); // { alpha: 0.4 }
+ * ```
+ */
+function appliedOf(value: Readonly<FilterFields>): Record<string, FilterField> {
+  const applied: Record<string, FilterField> = {};
+
+  for (const field of Object.keys(value)) {
+    const held = value[field];
+
+    if (field !== "enabled" && field !== "order" && held !== undefined) applied[field] = held;
+  }
+
+  return applied;
+}
+
+/**
  * Builds a `Displacement` over a map sprite the instance owns.
  *
  * @param ectx - Domain context of the effects plugin.
@@ -254,7 +322,7 @@ function createDisplacement(
     resolution: CANVAS_RESOLUTION
   });
 
-  return { kind: "displacement", filter, sprite, map, passes: 1 };
+  return { kind: "displacement", filter, sprite, map, applied: appliedOf(value), passes: 1 };
 }
 
 /**
@@ -284,14 +352,14 @@ function createCore(
 
       filter.repeatEdgePixels = value.repeatEdgePixels === true;
 
-      return { kind: "blur", filter, passes: 2 * quality };
+      return { kind: "blur", filter, applied: appliedOf(value), passes: 2 * quality };
     }
     case "colorMatrix": {
       const filter = new pixi.ColorMatrixFilter({ resolution: CANVAS_RESOLUTION });
 
       composeMatrix(filter, value);
 
-      return { kind: "colorMatrix", filter, passes: 1 };
+      return { kind: "colorMatrix", filter, applied: appliedOf(value), passes: 1 };
     }
     case "noise": {
       const filter = new pixi.NoiseFilter({
@@ -300,7 +368,7 @@ function createCore(
         resolution: CANVAS_RESOLUTION
       });
 
-      return { kind: "noise", filter, passes: 1 };
+      return { kind: "noise", filter, applied: appliedOf(value), passes: 1 };
     }
     case "displacement": {
       return createDisplacement(ectx, pixi, value);
@@ -312,6 +380,7 @@ function createCore(
           alpha: numberOf(value, "alpha"),
           resolution: CANVAS_RESOLUTION
         }),
+        applied: appliedOf(value),
         passes: 1
       };
     }
@@ -321,6 +390,8 @@ function createCore(
 /**
  * Builds the instance of one kind on one view, its uniforms or settings at the stored value, its
  * `enabled` switch set, and its sort keys: the `order` of the value and the `index` of the kind.
+ * The instance is the builder's own object with its sort keys added, and its `apply` is guarded
+ * (see `guardApply`).
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -343,44 +414,94 @@ export function createFilter(
 
   body.filter.enabled = value.enabled;
 
-  return { ...body, order: value.order, index: kind.index };
+  const instance: FilterInstance = Object.assign(body, {
+    order: value.order,
+    index: kind.index,
+    broken: false
+  });
+
+  guardApply(ectx, instance, kind.id);
+
+  return instance;
 }
 
 /**
- * Writes one uniform of a uniform group: a number in place, a colour or a tuple into the vector
- * the group already holds. A vector uniform without its vector is left alone.
+ * Compares one uniform of a uniform group with the stored value and writes it where it differs:
+ * a number in place, a colour or a tuple element by element into the vector the group already
+ * holds, rounded to float32 as the vector stores it. A vector uniform without its vector is left
+ * alone.
  *
  * @param uniforms - The values of the uniform group.
  * @param uniform - The uniform.
  * @param value - The stored filter value.
+ * @param write - False to compare only.
+ * @returns True when the uniform differs.
  */
 function writeUniform(
   uniforms: UniformValues,
   uniform: UniformSpec,
-  value: Readonly<FilterFields>
-): void {
+  value: Readonly<FilterFields>,
+  write: boolean
+): boolean {
+  const { name } = uniform;
+
   if (uniform.form === "number") {
-    uniforms[uniform.name] = numberOf(value, uniform.name);
+    const next = numberOf(value, name);
+    const held = uniforms[name];
 
-    return;
+    if (typeof held === "number" && same(held, next)) return false;
+    if (write) uniforms[name] = next;
+
+    return true;
   }
 
-  const target = uniforms[uniform.name];
+  const target = uniforms[name];
 
-  if (!(target instanceof Float32Array)) return;
+  if (!(target instanceof Float32Array)) return false;
+  if (uniform.form === "color") return writeColor(target, numberOf(value, name), write);
 
-  if (uniform.form === "color") {
-    writeColor(target, numberOf(value, uniform.name));
+  // The indices `set(vector.slice(0, size))` would write, without the slice.
+  const vector = vectorOf(value, name);
+  const count = Math.min(uniform.size, vector.length);
+  let differs = false;
 
-    return;
+  for (let index = 0; index < count; index += 1) {
+    if (writeAt(target, index, vector[index] ?? 0, write)) differs = true;
   }
 
-  target.set(vectorOf(value, uniform.name).slice(0, uniform.size));
+  return differs;
 }
 
 /**
- * Writes the uniforms of one of ours: every uniform, every frame, no `update()` (a non-static
- * group uploads every draw), and the live padding.
+ * Tells whether one of ours holds another value than the stored one: a uniform, or a padding
+ * named after a uniform.
+ *
+ * @param instance - The instance.
+ * @param definition - Its filter definition.
+ * @param value - The stored filter value.
+ * @returns True when a write would change the filter.
+ */
+function oursDiffer(
+  instance: FilterInstance & { kind: "wgsl" },
+  definition: FilterDefinition,
+  value: Readonly<FilterFields>
+): boolean {
+  if (instance.group !== undefined) {
+    for (const uniform of definition.uniforms) {
+      if (writeUniform(instance.group.uniforms, uniform, value, false)) return true;
+    }
+  }
+
+  return (
+    typeof definition.padding === "string" &&
+    !same(instance.filter.padding, paddingOf(definition, value))
+  );
+}
+
+/**
+ * Writes the uniforms of one of ours and the padding that differ from what the group holds;
+ * nothing is written for a value the group holds already, and no `update()` (a non-static group
+ * uploads every draw).
  *
  * @param instance - The instance.
  * @param definition - Its filter definition.
@@ -393,25 +514,94 @@ function writeOurs(
 ): void {
   if (instance.group !== undefined) {
     for (const uniform of definition.uniforms)
-      writeUniform(instance.group.uniforms, uniform, value);
+      writeUniform(instance.group.uniforms, uniform, value, true);
   }
 
-  if (typeof definition.padding === "string")
-    instance.filter.padding = paddingOf(definition, value);
+  if (typeof definition.padding !== "string") return;
+
+  const padding = paddingOf(definition, value);
+
+  if (!same(instance.filter.padding, padding)) instance.filter.padding = padding;
 }
 
 /**
- * Writes a core kind through its setters. Called only when the component changed this frame.
+ * Tells whether two stored fields are the same value: equal, or two NaN numbers.
+ *
+ * @param a - One field.
+ * @param b - The other.
+ * @returns True when a setter given `b` after `a` changes nothing.
+ * @example
+ * ```ts
+ * sameField("fx.ripple", "fx.ripple"); // true
+ * ```
+ */
+function sameField(a: FilterField | undefined, b: FilterField | undefined): boolean {
+  return typeof a === "number" && typeof b === "number" ? same(a, b) : a === b;
+}
+
+/**
+ * Tells whether a core kind's stored value differs from what its setters were last given. The
+ * `Displacement` map compares with the map the sprite shows, since a map whose texture is not
+ * loaded is not applied yet.
+ *
+ * @param instance - The instance.
+ * @param value - The stored filter value.
+ * @returns True when a write would call a setter with a new value.
+ */
+function coreDiffers(instance: CoreInstance, value: Readonly<FilterFields>): boolean {
+  for (const field of Object.keys(instance.applied)) {
+    if (instance.kind === "displacement" && field === "map") {
+      if (mapOf(value) !== instance.map) return true;
+    } else if (!sameField(instance.applied[field], value[field])) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * The map key of a stored `Displacement` value.
+ *
+ * @param value - The stored value.
+ * @returns The key, or `""` for a map not chosen yet.
+ * @example
+ * ```ts
+ * mapOf({ enabled: true, order: 0, map: "fx.ripple" }); // "fx.ripple"
+ * ```
+ */
+function mapOf(value: Readonly<FilterFields>): string {
+  return typeof value.map === "string" ? value.map : "";
+}
+
+/**
+ * Writes a core kind through its setters, then keeps the written fields as `applied`. Called
+ * only when the component changed this frame and a field differs.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param instance - The instance.
  * @param value - The stored filter value.
  */
-function writeCore(
-  ectx: EffectsCtx,
-  instance: FilterInstance,
-  value: Readonly<FilterFields>
-): void {
+function writeCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<FilterFields>): void {
+  setCore(ectx, instance, value);
+
+  // Copied in place: the record was made once with the instance.
+  for (const field of Object.keys(instance.applied)) {
+    const next = value[field];
+
+    if (next !== undefined) instance.applied[field] = next;
+  }
+}
+
+/**
+ * Calls the setters of a core kind with the stored value. The `Displacement` map moves only
+ * when its texture was found.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param instance - The instance.
+ * @param value - The stored filter value.
+ */
+function setCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<FilterFields>): void {
   switch (instance.kind) {
     case "blur": {
       const quality = blurQuality(ectx, value);
@@ -439,7 +629,7 @@ function writeCore(
       instance.filter.scale.x = numberOf(value, "scaleX");
       instance.filter.scale.y = numberOf(value, "scaleY");
 
-      const map = typeof value.map === "string" ? value.map : "";
+      const map = mapOf(value);
       const texture = map === instance.map ? undefined : mapTexture(ectx, map);
 
       if (texture === undefined) return;
@@ -449,36 +639,58 @@ function writeCore(
 
       return;
     }
-    case "alpha": {
-      instance.filter.alpha = numberOf(value, "alpha");
-
-      return;
-    }
     default: {
-      return;
+      instance.filter.alpha = numberOf(value, "alpha");
     }
   }
 }
 
 /**
- * Writes one instance for a frame: `enabled` always (a disabled filter costs nothing and is
- * reassigned nothing), the uniforms of ours always, a core kind when its component changed.
+ * Brings one instance up to the stored value for a frame, comparing before anything is written.
+ * A broken instance stays off whatever its component says. Switching on or off is a visible
+ * change; so is a new value of a filter that is on. A filter that is off and stays off still gets
+ * its new values written, so it is current when it comes back on, but asks for nothing: an off
+ * filter draws no pixel. Ours compare every frame; a core kind only when its component changed.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param instance - The instance.
  * @param value - The stored filter value.
  * @param changed - Whether `ecs.changed(Kind)` holds the entity this frame.
+ * @param before - Called once, before the first write, when the change can be seen.
+ * @returns True when a change the player can see was written.
  */
 export function writeFilter(
   ectx: EffectsCtx,
   instance: FilterInstance,
   value: Readonly<FilterFields>,
-  changed: boolean
-): void {
-  instance.filter.enabled = value.enabled;
+  changed: boolean,
+  before: () => void
+): boolean {
+  if (instance.broken) {
+    instance.filter.enabled = false;
 
-  if (instance.kind === "wgsl") writeOurs(instance, instance.definition, value);
-  else if (changed) writeCore(ectx, instance, value);
+    return false;
+  }
+
+  const toggled = instance.filter.enabled !== value.enabled;
+  const differs =
+    instance.kind === "wgsl"
+      ? oursDiffer(instance, instance.definition, value)
+      : changed && coreDiffers(instance, value);
+
+  if (!toggled && !differs) return false;
+
+  const visible = toggled || value.enabled;
+
+  if (visible) before();
+  if (toggled) instance.filter.enabled = value.enabled;
+
+  if (differs) {
+    if (instance.kind === "wgsl") writeOurs(instance, instance.definition, value);
+    else writeCore(ectx, instance, value);
+  }
+
+  return visible;
 }
 
 /**

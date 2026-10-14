@@ -410,12 +410,23 @@ describe("the aim of a carried view", () => {
     expect(page.app.flow.gate.answer({ intent: "plain" })).toBe(true);
     await page.frames(2);
 
-    expect(page.app.world.ecs.get(aimed, Draggable)?.aim).toBeNull();
+    expect(page.app.world.projection.restOf(aimed, Draggable)).not.toHaveProperty("aim");
 
     await take(page, 1, "aimed");
     await dropAt(page, 1, PICTURE_ON_A);
 
     expect(page.session().drops).toEqual([{ from: "aimed", to: "b" }]);
+  });
+
+  it("a Draggable without aim serializes exactly as before: no aim key in the world snapshot", async () => {
+    const page = await open();
+    const plain = page.view("fingers.items", "plain");
+    const row = page.app.world.ecs.snapshot().entities.find(entity => entity.id === plain);
+
+    // A game on the API before the aim gets the same describe and visual baselines, byte for byte.
+    expect(JSON.stringify(row?.components.Draggable)).toBe(
+      '{"payload":{"from":"plain"},"carry":[]}'
+    );
   });
 });
 

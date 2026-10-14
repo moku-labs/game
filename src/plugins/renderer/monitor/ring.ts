@@ -3,6 +3,8 @@
  * @file renderer/monitor — the frame ring: its allocation, its writes and reads, the spike rule, and `frameAt`. Every
  * write of the per-frame path here is an indexed store into a typed array allocated once.
  */
+
+import { DEMAND_REASONS } from "../demand/types";
 import type {
   FrameColumns,
   FrameReadout,
@@ -30,7 +32,7 @@ export const KIND_STRIDE = 4;
 /** An empty slot of `sysIdx`. */
 export const NO_SYSTEM = 0xff_ff;
 
-/** The `reason` column before spec 14 fills it: not measured. */
+/** The `reason` column of a slot written without a decision: not measured. */
 export const NO_REASON = 255;
 
 /** A WebGL pass: its stencil is not measured. */
@@ -649,8 +651,7 @@ export function recordAt(ring: FrameRing, slot: number): FrameRecord {
     drawn: cell(c.drawn, slot) === 1,
     idle: cell(c.idle, slot) === 1,
     stepped: cell(c.stepped, slot) === 1,
-    // Spec 14 (block 3A) fills the reason column from `demand.frame()`.
-    reason: null,
+    reason: DEMAND_REASONS[cell(c.reason, slot)] ?? null,
     passes: measured(cell(c.passes, slot)),
     stencilPasses: measured(cell(c.stencilPasses, slot)),
     draws: measured(cell(c.draws, slot)),

@@ -47,7 +47,7 @@ function emptyWeakMap<Key extends WeakKey, Value>(): WeakMap<Key, Value> {
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
  */
-export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
+export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncState {
   return {
     root: undefined,
     layerList: undefined,
@@ -68,7 +68,7 @@ export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
     added: emptySet(),
     removed: emptySet(),
     reparented: emptySet(),
-    debug: { nineSlice: debug.nineSlice },
+    debug: { nineSlice: debug.nineSlice === true },
     outlinesStale: false,
     filters: emptyMap(),
     filterKinds: emptyWeakMap(),

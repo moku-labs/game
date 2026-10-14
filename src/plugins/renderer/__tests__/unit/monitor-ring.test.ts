@@ -17,6 +17,24 @@ afterEach(() => {
 const AT_120 = 1000 / 120;
 
 describe("the frame ring", () => {
+  it("fills the marks and the reason columns from the draw decision of the frame", async () => {
+    const agent = await startAgent({ config: { onDemand: true } });
+
+    agent.frame({ at: 0, workMs: 2, rateMs: AT_120 });
+    agent.mock.modules.demand.markLoose(42);
+    agent.frame({ at: AT_120, workMs: 2, rateMs: AT_120 });
+    agent.mock.ctx.state.viewport.resizePending = true;
+    agent.frame({ at: 2 * AT_120, workMs: 2, rateMs: AT_120 });
+
+    const ring = agent.mock.api.monitor.frames();
+
+    expect([0, 1, 2].map(age => frameAt(ring, age))).toMatchObject([
+      { drawn: true, reason: "resize", marks: 0 },
+      { drawn: false, reason: "none", marks: 1 },
+      { drawn: true, reason: "first", marks: 0 }
+    ]);
+  });
+
   it("writes each column of every frame and wraps at its capacity", async () => {
     const agent = await startAgent({ config: { monitor: { budgetMs: "rate", frames: 64 } } });
 
@@ -62,10 +80,11 @@ describe("the frame ring", () => {
       workMs: 3,
       drawn: true,
       stepped: false,
-      reason: null,
+      // The draw decision of the frame: onDemand is off, nothing was marked.
+      reason: "always",
       passes: 0,
       compiles: null,
-      marks: null,
+      marks: 0,
       rebuilds: null,
       systems: null,
       gpuMs: null,

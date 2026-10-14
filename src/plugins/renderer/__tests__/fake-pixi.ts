@@ -170,6 +170,46 @@ export class FakePoint {
 }
 
 /**
+ * The fake of Pixi's `Bounds`: the four edges `getBounds` fills, empty after `clear`, as Pixi's
+ * are (`minX` Infinity, `maxX` -Infinity).
+ */
+export class FakeBounds {
+  public minX = Number.POSITIVE_INFINITY;
+  public minY = Number.POSITIVE_INFINITY;
+  public maxX = Number.NEGATIVE_INFINITY;
+  public maxY = Number.NEGATIVE_INFINITY;
+
+  /**
+   * Empties the box.
+   *
+   * @returns The same box.
+   */
+  public clear(): this {
+    this.minX = Number.POSITIVE_INFINITY;
+    this.minY = Number.POSITIVE_INFINITY;
+    this.maxX = Number.NEGATIVE_INFINITY;
+    this.maxY = Number.NEGATIVE_INFINITY;
+
+    return this;
+  }
+
+  /**
+   * Sets the four edges.
+   *
+   * @param minX - Left.
+   * @param minY - Top.
+   * @param maxX - Right.
+   * @param maxY - Bottom.
+   */
+  public set(minX: number, minY: number, maxX: number, maxY: number): void {
+    this.minX = minX;
+    this.minY = minY;
+    this.maxX = maxX;
+    this.maxY = maxY;
+  }
+}
+
+/**
  * A fake Pixi filter: the resources `effects` writes its uniforms into, the switch Pixi skips a
  * disabled filter by, and its destroy.
  */
@@ -272,6 +312,8 @@ export class FakeContainer {
   public zIndex = 0;
   public sortableChildren = false;
   public visible = true;
+  /** Drawn or left out with its transform kept, as Pixi's `renderable` is. */
+  public renderable = true;
   public alpha = 1;
   public rotation = 0;
   public destroyed = false;
@@ -372,6 +414,30 @@ export class FakeContainer {
    */
   public getLocalBounds(): { x: number; y: number; width: number; height: number } {
     return { x: -50, y: -50, width: 100, height: 100 };
+  }
+
+  /**
+   * The bounds in the stage's space, the fake way: the local bounds moved by the positions of the
+   * chain, no scale, no rotation. A box of no area is Pixi's empty one, the zero rectangle.
+   *
+   * @param _skipUpdate - Pixi's switch; the fake always walks the chain.
+   * @param bounds - The box to fill.
+   * @returns The same box.
+   */
+  public getBounds(_skipUpdate: boolean, bounds: FakeBounds = new FakeBounds()): FakeBounds {
+    const local = this.getLocalBounds();
+    let x = local.x + this.position.x;
+    let y = local.y + this.position.y;
+
+    for (let node = this.parent; node !== null; node = node.parent) {
+      x += node.position.x;
+      y += node.position.y;
+    }
+
+    if (local.width <= 0 || local.height <= 0) bounds.set(0, 0, 0, 0);
+    else bounds.set(x, y, x + local.width, y + local.height);
+
+    return bounds;
   }
 
   /**
@@ -1530,8 +1596,17 @@ export type FakeRenderer = FakeDrawTarget & {
   gl?: FakeGlContext;
   /** The GPU texture sources, as Pixi's `renderer.texture.managedTextures`. */
   texture: { managedTextures: FakeManagedSource[] };
-  /** Pixi's extract system: `base64` records its options and answers `FAKE_PNG`. */
-  extract: { calls: unknown[]; base64(options: unknown): Promise<string> };
+  /**
+   * Pixi's extract system: `base64` records its options and answers `FAKE_PNG`; `pixels` records
+   * its options and answers a copy of `picture`, what the stage looks like now.
+   */
+  extract: {
+    calls: unknown[];
+    base64(options: unknown): Promise<string>;
+    picture: Uint8ClampedArray;
+    pixelCalls: unknown[];
+    pixels(options: unknown): { pixels: Uint8ClampedArray; width: number; height: number };
+  };
   /** Pixi's public runners a monitor hangs items on. */
   runners: { prerender: FakeRunner; renderStart: FakeRunner; postrender: FakeRunner };
   /** Pixi's render target system: the bound target and its change runner. */
@@ -1671,6 +1746,13 @@ export class FakeApplication {
           renderer.extract.calls.push(options);
 
           return Promise.resolve(FAKE_PNG);
+        },
+        picture: new Uint8ClampedArray(16),
+        pixelCalls: [],
+        pixels: (options: unknown) => {
+          renderer.extract.pixelCalls.push(options);
+
+          return { pixels: new Uint8ClampedArray(renderer.extract.picture), width: 2, height: 2 };
         }
       },
       render: () => {
@@ -1815,6 +1897,7 @@ export function createFakePixi(
     defaultFilterVert: FAKE_FILTER_VERT,
     UniformGroup: FakeUniformGroup,
     BlurFilter: FakeBlurFilter,
+    Bounds: FakeBounds,
     ColorMatrixFilter: FakeColorMatrixFilter,
     NoiseFilter: FakeNoiseFilter,
     DisplacementFilter: FakeDisplacementFilter,

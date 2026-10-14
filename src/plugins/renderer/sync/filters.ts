@@ -48,15 +48,18 @@ export function clearFilters(target: PixiContainer): void {
 /**
  * Hangs the filters on a view: on its wrapper when it has one, so they cover the entity's whole
  * subtree, otherwise on the object. Written only when the instances differ from what the target
- * holds.
+ * holds, and `before` runs once just before that write: the caller marks the entity there.
  *
  * @param view - The view.
  * @param slots - The filters in draw order; empty clears them.
+ * @param before - Called once, before the write, when there is one.
  */
-export function applyFilters(view: View, slots: readonly FilterSlot[]): void {
+export function applyFilters(view: View, slots: readonly FilterSlot[], before: () => void): void {
   const target = view.wrapper ?? view.object;
 
   if (holds(target, slots)) return;
+
+  before();
 
   // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
   target.filters = slots.length === 0 ? null : slots.map(slot => slot.filter);
@@ -107,13 +110,19 @@ function nameKind(state: SyncState, slot: FilterSlot): void {
 
 /**
  * Keeps the filters of an entity and writes them onto its view when it has one. An empty list
- * forgets the entity.
+ * forgets the entity. A new list on the view is structural: `mark` runs before it is written.
  *
  * @param state - The sync branch of the plugin state.
  * @param entity - The entity.
  * @param slots - The filters in draw order.
+ * @param mark - Marks the entity before its view is written.
  */
-export function setFilters(state: SyncState, entity: Entity, slots: readonly FilterSlot[]): void {
+export function setFilters(
+  state: SyncState,
+  entity: Entity,
+  slots: readonly FilterSlot[],
+  mark: (entity: Entity) => void
+): void {
   if (slots.length === 0) state.filters.delete(entity);
   else state.filters.set(entity, [...slots]);
 
@@ -124,7 +133,7 @@ export function setFilters(state: SyncState, entity: Entity, slots: readonly Fil
 
   const view = state.views.get(entity);
 
-  if (view !== undefined) applyFilters(view, slots);
+  if (view !== undefined) applyFilters(view, slots, () => mark(entity));
 }
 
 /**
@@ -133,14 +142,21 @@ export function setFilters(state: SyncState, entity: Entity, slots: readonly Fil
  * @param state - The sync branch of the plugin state.
  * @param entity - The entity.
  * @param view - Its view, wrapper set.
+ * @param before - Called before a write of the object's or the wrapper's filters.
  */
-export function moveFilters(state: SyncState, entity: Entity, view: View): void {
+export function moveFilters(
+  state: SyncState,
+  entity: Entity,
+  view: View,
+  before: () => void
+): void {
   const slots = state.filters.get(entity);
 
   if (slots === undefined) return;
 
+  if (heldFilters(view.object).length > 0) before();
   clearFilters(view.object);
-  applyFilters(view, slots);
+  applyFilters(view, slots, before);
 }
 
 /**

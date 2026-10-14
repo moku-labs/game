@@ -1,8 +1,9 @@
 /**
- * @file renderer plugin — API factory. The one place that builds `host`, `viewport`, `sync` and
- * `monitor` in the accepted injection order, and the one place that reduces them to their public
- * half.
+ * @file renderer plugin — API factory. The one place that builds `host`, `viewport`, `demand`,
+ * `sync` and `monitor` in the accepted injection order, and the one place that reduces them to
+ * their public half.
  */
+import { createDemandApi } from "./demand/api";
 import { createHostApi } from "./host/api";
 import type { HostApi, InstallCounting } from "./host/types";
 import { resolveDeps } from "./lifecycle";
@@ -31,22 +32,24 @@ function countingOf(ctx: RendererCtx): InstallCounting | undefined {
 }
 
 /**
- * Builds the four modules in the accepted order `host → viewport → sync → monitor`. Each keeps
- * its data in its branch of `ctx.state`, so these objects are views on the plugin state, not
- * owners of it. `host` gets the counting of `monitor` up front, because it installs the classes
- * before `monitor` exists; `monitor` gets the other three, since a legend places views on the
- * picture and the performance log reads all of them.
+ * Builds the five modules in the accepted order `host → viewport → demand → sync → monitor`.
+ * Each keeps its data in its branch of `ctx.state`, so these objects are views on the plugin
+ * state, not owners of it. `host` gets the counting of `monitor` up front, because it installs
+ * the classes before `monitor` exists; `demand` reads the views of `sync` through the state, whose
+ * map keeps its identity; `sync` marks every write in `demand`; `monitor` gets the other four,
+ * since a legend places views on the picture and the performance log reads all of them.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @returns The four modules with their public and internal methods.
+ * @returns The five modules with their public and internal methods.
  */
 export function createModules(ctx: RendererCtx): Modules {
   const host = createHostApi(ctx, { installCounting: countingOf(ctx) });
   const viewport = createViewportApi(ctx, { host });
-  const sync = createSyncApi(ctx, { host, viewport });
-  const monitor = createMonitorApi(ctx, { host, viewport, sync });
+  const demand = createDemandApi(ctx, { host, views: ctx.state.sync.views });
+  const sync = createSyncApi(ctx, { host, viewport, demand });
+  const monitor = createMonitorApi(ctx, { host, viewport, sync, demand });
 
-  return { host, viewport, sync, monitor };
+  return { host, viewport, demand, sync, monitor };
 }
 
 /**
@@ -100,7 +103,7 @@ function exposeSync(sync: SyncModule): SyncApi {
  */
 export function createRendererApi(ctx: KernelSlice): Api {
   const rendererCtx: RendererCtx = { ...ctx, deps: resolveDeps(ctx) };
-  const { host, viewport, sync, monitor } = createModules(rendererCtx);
+  const { host, viewport, demand, sync, monitor } = createModules(rendererCtx);
   const publicViewport: ViewportApi = {
     toReference: viewport.toReference,
     toScreen: viewport.toScreen,
@@ -120,6 +123,7 @@ export function createRendererApi(ctx: KernelSlice): Api {
       endAgent: monitor.endAgent,
       setResolution: monitor.setResolution
     },
+    invalidate: demand.invalidate,
     stats: monitor.stats,
     capture: monitor.capture
   };

@@ -58,7 +58,8 @@ export function createAdapterObject(
 
 /**
  * Hands a changed component value to the adapter that drew it. The stored copy is what makes
- * `previous` honest: the world writes a component in place.
+ * `previous` honest: the world writes a component in place. The adapter wrote its own object, so
+ * the renderer hears of it after the write: any answer but `false` is a loose mark of the view.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -73,8 +74,10 @@ export function updateAdapterView(sctx: SyncCtx, entity: Entity, view: View): vo
 
   if (next === undefined) return;
 
-  entry.adapter.update(view.object, view.value ?? next, next);
+  const answer = entry.adapter.update(view.object, view.value ?? next, next);
+
   view.value = { ...next };
+  if (answer !== false) sctx.deps.demand.markLoose(entity);
 }
 
 /**

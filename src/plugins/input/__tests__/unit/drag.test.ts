@@ -1082,4 +1082,22 @@ describe("the aim of the view in the hand", () => {
 
     expect(mock.answers).toEqual([{ intent: "b", payload: { from: "i1" } }]);
   });
+
+  it("a view whose projection no longer gives an aim drops under the finger, though the stored Draggable still holds the old aim", () => {
+    const mock = createMockInput();
+
+    rows(mock);
+
+    const item = holdItem(mock, [
+      Draggable({ payload: { from: "i1" }, aim: aimedUp }),
+      Transform({ x: 50, y: 450 })
+    ]);
+
+    // The projection's write merges into the stored value, so the old `aim` key stays there.
+    mock.setRest(item, Draggable({ payload: { from: "i1" } }));
+    // With the old aim the drop would look at (50, 80), on `a`; the finger at (50, 170) is on `b`.
+    release(mock.input, { x: 50, y: 170 });
+
+    expect(mock.answers).toEqual([{ intent: "b", payload: { from: "i1" } }]);
+  });
 });

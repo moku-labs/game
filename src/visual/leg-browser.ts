@@ -1,7 +1,8 @@
 /**
  * @file visual — the browser leg: Chrome with WebGPU on a Mac, driven by Playwright. It loads
  * `playwright-core` with a dynamic import only here, opens the dev page once per test, waits until
- * the page has loaded what it asked for, pauses the game and steps it to the start time, plays the
+ * the page has loaded what it asked for, turns on the renderer's check of skipped frames
+ * (`debug.verifyFrames`), pauses the game and steps it to the start time, plays the
  * test inside the page through `globalThis.game` and `globalThis.doors` on stepped frames, and at
  * each checkpoint checks the page's state against `state.json` and its picture against
  * `screen.webp`. The WebGL leg opens the page with `?renderer=webgl` and keeps its pictures in
@@ -20,7 +21,8 @@ import {
   pageReady,
   pageScript,
   pageStart,
-  pageStep
+  pageStep,
+  pageVerify
 } from "./page-script";
 import { stepEntry } from "./steps";
 import type {
@@ -479,9 +481,10 @@ async function checkpoint(play: Play, name: string, where: string): Promise<Pixe
 }
 
 /**
- * Plays the start and the steps of a test in the open page, the way the headless leg does: pause
- * the game and step it to the start time, restore the start, run each command and settle on
- * stepped frames, and check each checkpoint.
+ * Plays the start and the steps of a test in the open page, the way the headless leg does: turn
+ * on the check of skipped frames (unless `--no-verify-frames`), pause the game and step it to the
+ * start time, restore the start, run each command and settle on stepped frames, and check each
+ * checkpoint. A missed frame or mark the page logs fails the step it happened in.
  *
  * @param play - The test being played.
  * @param found - Where what each checkpoint found goes, as soon as it is known.
@@ -490,6 +493,9 @@ async function playSteps(play: Play, found: Map<string, PixelFound>): Promise<vo
   const { test, run } = play;
   const repro = { ...test.start, route: [] };
   const base = { test: test.name, settleFrames: run.settleFrames };
+
+  if (run.verifyFrames)
+    await callPage(play.page, pageVerify, { test: test.name, where: "the start" });
 
   await callPage(play.page, pagePause, {
     test: test.name,

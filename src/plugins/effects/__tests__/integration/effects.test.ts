@@ -30,6 +30,8 @@ import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import {
   createFakeEffectsPixi,
+  type FakeFilterManager,
+  type FakeFxFilter,
   FakeFxGlProgram,
   FakeFxGpuProgram,
   FakeFxParticleContainer
@@ -440,6 +442,53 @@ describe("effects plugin integration", () => {
     step(app, 5);
 
     expect(positions().slice(0, still.length)).not.toEqual(still);
+
+    await app.stop();
+  });
+
+  it("a filter whose apply throws draws its view unfiltered from that frame on and logs once", async () => {
+    const app = await startApp([{ id: "card", kind: "card" }]);
+
+    step(app, 1);
+
+    const entity = app.world.projection.entityOf("board.items", "card") ?? 0;
+    const object = app.renderer.sync.displayOf(entity) as FakeContainer;
+    const filters = (object.filters ?? []) as FakeFxFilter[];
+    const tint = filters[1];
+
+    if (tint === undefined) throw new Error("no Tint on the card");
+
+    const drawn: unknown[] = [];
+    // The stand-in of Pixi's filter system: the Tint's binding is gone, so its draw throws.
+    const manager: FakeFilterManager = {
+      applyFilter: (filter, input) => {
+        if (filter === tint && tint.enabled)
+          throw new Error("the resource bound as 'uMap' was destroyed");
+        drawn.push(input);
+      }
+    };
+    const enabled: boolean[] = [];
+
+    for (let frame = 0; frame < 5; frame += 1) {
+      app.time.step(16);
+      enabled.push(tint.enabled);
+      // The stand-in render: every enabled filter of the view draws once.
+      for (const filter of filters)
+        if (filter.enabled) filter.apply(manager, "view", "screen", true);
+    }
+
+    const broken = app.log.trace().filter(entry => entry.event === "effects:broken");
+
+    expect(broken).toHaveLength(1);
+    expect(broken[0]?.data).toEqual({
+      filter: "fx.tint",
+      reason: "apply",
+      message: "the resource bound as 'uMap' was destroyed"
+    });
+    expect(enabled).toEqual([true, false, false, false, false]);
+    expect(app.world.ecs.get(entity, Tint)?.enabled).toBe(true);
+    // Frame 1 drew the Glow and the Tint straight through; frames 2-5 the Glow alone.
+    expect(drawn).toHaveLength(2 + 4);
 
     await app.stop();
   });

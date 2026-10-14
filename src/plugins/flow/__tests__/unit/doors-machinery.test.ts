@@ -97,6 +97,11 @@ describe("isDev", () => {
       "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
     );
   });
+
+  // An editor reads the reason to show a dev-only refusal as "not in this build", not as a failure.
+  it("marks the refusal with reason dev-only", () => {
+    expect(controlRefused().reason).toBe("dev-only");
+  });
 });
 
 describe("notInstalled", () => {

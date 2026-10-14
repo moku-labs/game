@@ -165,18 +165,35 @@ export function isControl(): boolean {
 }
 
 /**
- * Builds the error a control command throws outside a dev build.
+ * The error a control command throws when its body runs outside the builds its guard allows. It
+ * carries `reason: "dev-only"`, so an editor tells a refusal by the body's guard apart from a
+ * failure, as `reason: "read-only"` tells the refusal of `run` on a `--debug` page.
+ *
+ * @example
+ * ```ts
+ * const refused: ControlRefusedError = controlRefused();
+ * refused.reason; // "dev-only"
+ * ```
+ */
+export type ControlRefusedError = Error & { readonly reason: "dev-only" };
+
+/**
+ * Builds the error a control command throws outside a dev build. It carries `reason: "dev-only"`.
  *
  * @returns The error, ready to throw.
  * @example
  * ```ts
  * // A production build called a /control command.
  * controlRefused().message; // "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
+ * controlRefused().reason; // "dev-only"
  * ```
  */
-export function controlRefused(): Error {
-  return new Error(
-    "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
+export function controlRefused(): ControlRefusedError {
+  return Object.assign(
+    new Error(
+      "[game] Control commands run in dev builds only.\n  Define __MOKU_GAME_DEV__ as true in the dev build."
+    ),
+    { reason: "dev-only" as const }
   );
 }
 

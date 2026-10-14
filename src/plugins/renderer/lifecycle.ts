@@ -8,6 +8,7 @@ import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { createModules } from "./api";
+import { stopDemand } from "./demand/state";
 import { stopHost } from "./host/init";
 import { stopMonitor } from "./monitor/api";
 import { stopSync } from "./sync/views";
@@ -43,12 +44,17 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
 
 /**
  * The draw callback of the renderer: a pending resize is applied first (a pending resolution
- * takes the same path: the backing store changes, the frame and the scale do not), then the
- * frame is drawn, then `monitor` closes the frame and hands it to a waiting capture. The display
- * objects are written by the `sync` system.
+ * takes the same path: the backing store changes, the frame and the scale do not), then `demand`
+ * decides whether the frame is drawn, the frame is drawn or skipped, `demand` settles it (the dev
+ * check, the pixel oracle), and `monitor` closes the frame and hands a drawn one to a waiting
+ * capture. The display objects are written by the `sync` system.
+ *
+ * With `onDemand`, a frame in which nothing visible changed is not drawn: the canvas keeps the
+ * last picture (WebGPU presents a canvas texture only when one is rendered; a WebGL canvas keeps
+ * what it composited until the next draw).
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param modules - The four modules.
+ * @param modules - The five modules.
  */
 function renderFrame(ctx: RendererCtx, modules: Modules): void {
   if (modules.host.resolutionPending()) ctx.state.viewport.resizePending = true;
@@ -59,9 +65,15 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
     modules.monitor.changed("resize");
 
     if (root !== undefined) modules.viewport.apply(root);
+    // The browser emptied the canvas when it took its new size: the frame is drawn.
+    modules.demand.whole("resize");
   }
 
-  modules.monitor.end(modules.host.render());
+  const drawn = modules.demand.decide(modules.monitor.waiting());
+
+  if (drawn) modules.host.render();
+  modules.demand.settle(drawn);
+  modules.monitor.end(modules.demand.frame().drawn);
 }
 
 /**
@@ -79,6 +91,9 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
   const rendererCtx = withDeps(ctx);
   const modules = createModules(rendererCtx);
 
+  // A resolution applied by a frame or a restore empties the canvas: the frame is drawn.
+  modules.host.onResolution(() => modules.demand.whole("resize"));
+
   modules.host.onReady(() => {
     modules.viewport.start();
     modules.sync.start();
@@ -94,6 +109,7 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
   modules.host.onRestore(() => {
     // The new canvas starts at Pixi's own size: measure the mount again before the next frame.
     rendererCtx.state.viewport.resizePending = true;
+    modules.demand.whole("restore");
     modules.sync.rebuildAll();
     modules.monitor.attach();
   });
@@ -103,7 +119,7 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
 
 /**
  * Stops the renderer in the reverse order of the start: `monitor` answers the waiting captures
- * and stops its performance monitor,
+ * and stops its performance monitor, `demand` forgets its marks and pictures,
  * `sync` lets its views go while `world` is still alive, `viewport` drops its observer and its
  * probe, and `host` destroys the application. Textures are left to `assets`; a `Display` object
  * is left to the game.
@@ -112,6 +128,8 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
  */
 export function stopRenderer(scope: TeardownScope): void {
   stopMonitor(scope.state.monitor);
+  // After the monitor, so a captured or verified frame never outlives the app.
+  stopDemand(scope.state.demand);
   stopSync(scope.state.sync);
   stopViewport(scope.state.viewport);
   stopHost(scope.state.host);

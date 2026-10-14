@@ -54,6 +54,7 @@ function clearWorldState(ctx: WorldCtx): void {
   state.types.clear();
   state.stores.clear();
   state.resources.clear();
+  state.engineResources.clear();
   state.systems.input.length = 0;
   state.systems.animate.length = 0;
   state.systems.layout.length = 0;

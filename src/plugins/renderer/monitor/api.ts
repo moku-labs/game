@@ -67,7 +67,7 @@ function resolutionMessage(value: unknown): string {
  * performance monitor of an agent build.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param deps - The injected `host`, `viewport` and `sync` modules.
+ * @param deps - The injected `host`, `viewport`, `sync` and `demand` modules.
  * @returns The monitor API and its internal half.
  */
 export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorModule {
@@ -88,6 +88,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       const drawing = state.lastStart !== undefined && clock.now() - state.lastStart <= STALE_MS;
       const stats: RenderStats = {
         fps: drawing ? roundTo(state.fps, 1) : 0,
+        drawn: drawing ? roundTo(state.drawnFps, 1) : 0,
         frameMs: roundTo(state.frameMs, 2),
         textures: usage.count,
         textureMb: roundTo(usage.bytes / BYTES_PER_MB, 2),
@@ -191,15 +192,20 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
 
     end: (drawn: boolean): void => {
       endFrame(state, clock.now());
-      state.draws.last = state.draws.frame;
+      // A skipped frame keeps the draw calls of the last drawn one.
+      if (drawn) state.draws.last = state.draws.frame;
       state.draws.frame = 0;
+      state.lastDrawn = drawn;
 
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
         pc.perf.drawn = drawn;
       }
 
-      serveCaptures(mctx);
+      // A capture waits for a drawn frame; a waiting capture makes the frame drawn.
+      if (drawn) serveCaptures(mctx);
     },
+
+    waiting: (): boolean => state.captures.length > 0,
 
     changed: (change: PerfChange): void => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {

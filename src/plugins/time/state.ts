@@ -6,7 +6,7 @@ import type { Config, State } from "./types";
 
 /**
  * Creates the initial time state: empty callback lists for the six phases, a zeroed `Time`
- * with scale 1, not paused, not running, awake with an empty unscaled clock, nothing asked of
+ * with scale 1, not paused, not running, awake with an empty unscaled clock and no wake counted, nothing asked of
  * the native shell. An agent build also gets the measure state; a build without the flag gets
  * none, so its frames never measure.
  *
@@ -27,6 +27,7 @@ export function createTimeState(_ctx: { readonly config: Readonly<Config> }): St
     lastTimestamp: undefined,
     unscaledElapsedMs: 0,
     lastWakeMs: 0,
+    wakes: 0,
     idle: false,
     // Inline and positive: Bun folds the guard under a production `define`.
     measure:

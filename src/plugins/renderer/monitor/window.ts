@@ -1,6 +1,7 @@
 /**
- * @file renderer/monitor — the measuring window: frames per second and the mean frame work over
- * one second of clock time. Plain arithmetic on the state, no allocation per frame.
+ * @file renderer/monitor — the measuring window: frames per second, drawn frames per second and
+ * the mean frame work over one second of clock time. Plain arithmetic on the state, no allocation
+ * per frame.
  */
 import type { MonitorState } from "./types";
 
@@ -18,6 +19,7 @@ export const STALE_MS = 1000;
 function openWindow(state: MonitorState): void {
   state.windowMs = 0;
   state.intervals = 0;
+  state.drawnIntervals = 0;
   state.workMs = 0;
   state.frames = 0;
 }
@@ -29,14 +31,16 @@ function openWindow(state: MonitorState): void {
  */
 function closeWindow(state: MonitorState): void {
   state.fps = (state.intervals * WINDOW_MS) / state.windowMs;
+  state.drawnFps = (state.drawnIntervals * WINDOW_MS) / state.windowMs;
   state.frameMs = state.frames > 0 ? state.workMs / state.frames : 0;
   openWindow(state);
 }
 
 /**
  * Marks the start of a frame. The interval since the last start joins the window, and a window
- * that reached one second closes. A gap longer than `STALE_MS` restarts the window, so a pause or
- * a hidden tab does not read as one very slow frame.
+ * that reached one second closes. The interval belongs to the last frame, whose decision is known:
+ * it counts as a drawn one when that frame was drawn. A gap longer than `STALE_MS` restarts the
+ * window, so a pause or a hidden tab does not read as one very slow frame.
  *
  * @param state - The monitor branch of the plugin state.
  * @param now - Clock time of the frame start, in milliseconds.
@@ -55,6 +59,7 @@ export function beginFrame(state: MonitorState, now: number): void {
 
   state.windowMs += now - previous;
   state.intervals += 1;
+  if (state.lastDrawn) state.drawnIntervals += 1;
 
   if (state.windowMs >= WINDOW_MS) closeWindow(state);
 }
@@ -84,5 +89,7 @@ export function resetWindow(state: MonitorState): void {
   state.frameStart = undefined;
   state.lastStart = undefined;
   state.fps = 0;
+  state.drawnFps = 0;
+  state.lastDrawn = false;
   state.frameMs = 0;
 }

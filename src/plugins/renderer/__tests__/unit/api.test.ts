@@ -12,6 +12,7 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api).toSorted()).toEqual([
       "capture",
       "host",
+      "invalidate",
       "monitor",
       "stats",
       "sync",
@@ -50,7 +51,11 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
     expect(Object.keys(mock.api.sync.filters)).toEqual(["set"]);
     expect(Object.keys(mock.api.sync.fonts).toSorted()).toEqual(["install", "installed"]);
-    expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual(["nineSlice", "state"]);
+    expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual([
+      "nineSlice",
+      "state",
+      "verifyFrames"
+    ]);
   });
 
   it("answers nothing about a renderer that never started", () => {

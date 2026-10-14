@@ -4,6 +4,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
+import type { Api as ClockApi } from "../clock/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Json, Api as ModelApi, Events as ModelEvents } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
@@ -97,7 +98,7 @@ export type Api = {
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { time: TimeApi; model: ModelApi; flow: FlowApi };
+export type Deps = { time: TimeApi; model: ModelApi; flow: FlowApi; clock: ClockApi };
 
 /**
  * What the kernel context offers before the deps are attached.

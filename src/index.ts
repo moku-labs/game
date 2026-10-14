@@ -42,7 +42,8 @@
  * | renderer | poolLimit | 256 |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
- * | renderer | debug | { nineSlice: false } |
+ * | renderer | debug | { nineSlice: false, verifyFrames: false } |
+ * | renderer | onDemand | false, every frame is drawn; true draws only a frame in which something changed |
  * | renderer | monitor | { budgetMs: "rate", frames: 1024 }, the performance log of an agent build |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
@@ -261,6 +262,7 @@ export {
   Exiting,
   Layer,
   mut,
+  Now,
   Order,
   resource,
   system,

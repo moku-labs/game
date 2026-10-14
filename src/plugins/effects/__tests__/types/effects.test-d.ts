@@ -5,6 +5,7 @@ import type { Target } from "../../../anim/types";
 import type { EmitterIdOf } from "../../../flow/types";
 import { Blur, Displacement, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
+import type { FilterInstance } from "../../filters/types";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import type {
@@ -100,3 +101,6 @@ expectTypeOf(api.stats()).toEqualTypeOf<EffectsStats>();
 expectTypeOf<EffectsStats["renderPasses"]>().toEqualTypeOf<number>();
 expectTypeOf<Config["phone"]>().toEqualTypeOf<boolean | "auto">();
 expectTypeOf<Config["blur"]>().toEqualTypeOf<{ quality: number; phoneResolution: number }>();
+
+// An instance carries its own broken flag: the apply guard sets it, the filter sync reads it.
+expectTypeOf<FilterInstance["broken"]>().toEqualTypeOf<boolean>();

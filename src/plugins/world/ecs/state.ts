@@ -29,6 +29,7 @@ export function createEcsState(): EcsState {
     types: emptyMap(),
     stores: emptyMap(),
     resources: emptyMap(),
+    engineResources: emptyMap(),
     systems: { input: [], animate: [], layout: [], sync: [] },
     running: undefined,
     commands: [],

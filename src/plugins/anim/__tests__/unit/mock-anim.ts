@@ -6,6 +6,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../../config";
+import type { Api as ClockApi } from "../../../clock/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { Descriptor, Api as FlowApi, FxHandler, Hint } from "../../../flow/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
@@ -141,7 +142,13 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
 
   const worldConfig = { settleMs: 350, reconciledEvent: false };
   const worldState = createWorldState({ config: worldConfig });
-  const worldApis: Record<string, unknown> = { time: timeApi, model: modelApi, flow: flowApi };
+  const clockApi = { now: (): number => time.elapsed } as unknown as ClockApi;
+  const worldApis: Record<string, unknown> = {
+    time: timeApi,
+    model: modelApi,
+    flow: flowApi,
+    clock: clockApi
+  };
   const worldCtx: WorldKernelSlice = {
     config: worldConfig,
     state: worldState,

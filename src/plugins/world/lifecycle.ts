@@ -2,11 +2,13 @@
  * @file world plugin — lifecycle functions: dependency resolution, the `onStart` wiring and the
  * teardown that empties the world.
  */
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import type { FeatureDescription } from "../flow/types";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
 import { createModules } from "./api";
+import { Now } from "./ecs/define";
 import { recordFrame, resetHistory } from "./ecs/history";
 import { registerType } from "./ecs/storage";
 import { startTiming } from "./ecs/systems";
@@ -15,16 +17,17 @@ import type { AnyProjectionSpec } from "./projection/types";
 import type { Deps, EcsModule, KernelSlice, ProjectionModule, State, WorldCtx } from "./types";
 
 /**
- * Resolves the dependency APIs `time`, `model` and `flow` with `ctx.require`.
+ * Resolves the dependency APIs `time`, `model`, `flow` and `clock` with `ctx.require`.
  *
  * @param ctx - Kernel context of the world plugin.
- * @returns The three dependency APIs.
+ * @returns The four dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     time: ctx.require(timePlugin),
     model: ctx.require(modelPlugin),
-    flow: ctx.require(flowPlugin)
+    flow: ctx.require(flowPlugin),
+    clock: ctx.require(clockPlugin)
   };
 }
 
@@ -149,7 +152,8 @@ function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionM
  * callbacks of the phases and listens to the released hints. In a dev build the `signals`
  * callback records the frame history before it clears the change sets; in an agent build the
  * timing table starts with the page clock of `time` and the `input` callback zeroes it each
- * frame. `onStart` has no access to the
+ * frame. The resource `Now` gets `clock.now()` once here and first thing in every `input`
+ * callback, so every system of a frame reads one moment. `onStart` has no access to the
  * plugin's own API, so it builds its own module objects — they are views on `ctx.state`, which is
  * the one place the modules keep their data.
  *
@@ -160,7 +164,7 @@ function registerFeatures(ctx: WorldCtx, ecs: EcsModule, projection: ProjectionM
 export function connectWorld(ctx: KernelSlice): void {
   const worldCtx = withDeps(ctx);
   const { ecs, projection } = createModules(worldCtx);
-  const time = worldCtx.deps.time;
+  const { time, clock } = worldCtx.deps;
 
   // Inline and positive, as the frame history below: Bun folds the guard under a production
   // `define`, so a release bundle times no system.
@@ -171,10 +175,13 @@ export function connectWorld(ctx: KernelSlice): void {
   }
 
   registerFeatures(worldCtx, ecs, projection);
+  ecs.resource(Now).now = clock.now();
 
   worldCtx.state.ecs.offFrame.push(
     ecs.onOwnerLeft(owner => projection.ownerLeft(owner)),
     time.onFrame("input", frame => {
+      // Read each frame, never kept: after `ecs.clear()` the resource is a new object.
+      ecs.resource(Now).now = clock.now();
       // The time per system of the frame starts from 0, in place: no allocation.
       worldCtx.state.ecs.timing?.ms.fill(0);
       projection.reconcileIfDirty();
@@ -237,6 +244,7 @@ export function clearWorld(state: State): void {
   state.ecs.types.clear();
   state.ecs.stores.clear();
   state.ecs.resources.clear();
+  state.ecs.engineResources.clear();
   state.ecs.systems.input.length = 0;
   state.ecs.systems.animate.length = 0;
   state.ecs.systems.layout.length = 0;

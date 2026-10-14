@@ -1,7 +1,7 @@
 import { expectTypeOf } from "vitest";
 import { LocalWrite } from "../../../ui/components";
 import type { AnyComponentType, EcsApi, Entity, TagType } from "../../../world/types";
-import type { PointerValue } from "../../components";
+import type { CarryValue, PointerValue } from "../../components";
 import { Draggable, PointerOver, Traceable, Traced } from "../../components";
 import type {
   Config,
@@ -164,13 +164,15 @@ Draggable({ carry: "children" });
 
 // A board item whose picture is lifted above the finger is dropped where the picture is.
 export const lifted = Draggable({ payload: { from: "c7" }, carry: [], aim: { x: 25, y: 12 } });
-// eslint-disable-next-line unicorn/no-null -- the rule under test is that null takes an aim away.
+// A carried value from before the aim needs none: the aim is absent by default.
+export const aimless: CarryValue = { payload: { from: "c7" }, carry: [] };
+// eslint-disable-next-line unicorn/no-null -- a projection that writes the aim away explicitly.
 export const unaimed = Draggable({ aim: null });
 
 // @ts-expect-error — an aim is a point: both coordinates
 Draggable({ aim: { x: 25 } });
 
-// @ts-expect-error — null takes an aim away; undefined is no value under exactOptionalPropertyTypes
+// @ts-expect-error — no aim is left out or `null`; undefined is no value under exactOptionalPropertyTypes
 Draggable({ aim: undefined });
 
 expectTypeOf(Traced).toEqualTypeOf<TagType>();

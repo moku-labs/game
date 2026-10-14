@@ -6,7 +6,7 @@ import { createMonitorState } from "../../monitor/state";
 import { beginFrame, endFrame } from "../../monitor/window";
 import type { PixiApplication } from "../../types";
 import { fakePictureUrl, installFakeCanvas, readFakePicture } from "../fake-canvas";
-import { FAKE_PNG, FakeTexture } from "../fake-pixi";
+import { FAKE_PNG, type FakeScene, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -70,6 +70,7 @@ describe("renderer stats", () => {
 
     expect(stats).toEqual({
       fps: 0,
+      drawn: 0,
       frameMs: 0,
       textures: 0,
       textureMb: 0,
@@ -1055,5 +1056,124 @@ describe("capture against", () => {
 
     expect(shot?.legend?.map(entry => entry.key)).toEqual(["claim"]);
     expect(ops.indexOf("putImageData")).toBeLessThan(ops.indexOf("fillText"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Render on demand (spec 14 D3.3, D4.4): `stats().drawn` counts the frames
+// really drawn over the same second as `fps`; a skipped frame keeps the draw
+// calls of the last drawn one and serves no capture.
+// ---------------------------------------------------------------------------
+
+/**
+ * Starts a mock renderer with the switch of render on demand.
+ *
+ * @param onDemand - `config.onDemand`.
+ * @param scene - What every drawn frame of the fake draws.
+ * @returns The started mock.
+ */
+async function startedOnDemand(
+  onDemand: boolean,
+  scene?: Partial<FakeScene>
+): Promise<MockRenderer> {
+  const mock = createMockRenderer({
+    config: { onDemand },
+    ...(scene === undefined ? {} : { scene })
+  });
+
+  await mock.start();
+
+  return mock;
+}
+
+/**
+ * Runs frames 16 ms apart, 4 ms of work each, from a clock time on.
+ *
+ * @param mock - The started mock renderer.
+ * @param from - Clock time of the first frame.
+ * @param count - How many frames.
+ * @returns The clock time after the last one.
+ */
+function framesFrom(mock: MockRenderer, from: number, count: number): number {
+  for (let index = 0; index < count; index += 1) frame(mock, from + index * 16, 4);
+
+  return from + count * 16;
+}
+
+describe("renderer stats: frames drawn", () => {
+  it("drawn equals fps when every frame is drawn", async () => {
+    const mock = await startedOnDemand(false);
+
+    framesFrom(mock, 0, 80);
+
+    const stats = mock.api.stats();
+
+    expect(stats.fps).toBeGreaterThan(60);
+    expect(stats.drawn).toBe(stats.fps);
+  });
+
+  it("drawn is 0 when no frame is drawn, while fps stays at the loop rate", async () => {
+    const mock = await startedOnDemand(true);
+
+    framesFrom(mock, 0, 140);
+
+    const stats = mock.api.stats();
+
+    expect(stats.fps).toBeGreaterThan(60);
+    expect(stats.drawn).toBe(0);
+  });
+
+  it("a skipped frame keeps the draw calls of the last drawn frame", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(true, { batches: 2, graphics: [3], draws: 1, indirect: 1 });
+
+    framesFrom(mock, 0, 1);
+
+    expect(mock.api.stats().drawCalls).toBe(7);
+
+    framesFrom(mock, 16, 3);
+
+    expect(mock.pixi.last().renderer.renders).toBe(1);
+    expect(mock.api.stats().drawCalls).toBe(7);
+  });
+
+  it("a capture is served only by a drawn frame", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(true);
+    let served = false;
+
+    framesFrom(mock, 0, 2);
+
+    const pending = mock.api.capture().then(() => {
+      served = true;
+    });
+
+    mock.modules.monitor.end(false);
+    await settle();
+
+    expect(served).toBe(false);
+
+    // A waiting capture makes the next frame drawn, and that frame serves it.
+    framesFrom(mock, 32, 1);
+    await pending;
+
+    expect(mock.modules.demand.frame().reason).toBe("capture");
+    expect(served).toBe(true);
+    expect(mock.pixi.last().renderer.renders).toBe(2);
+  });
+
+  it("draws the frame of a resize and of a new resolution, with onDemand", async () => {
+    const mock = await startedOnDemand(true);
+
+    framesFrom(mock, 0, 2);
+    mock.ctx.state.viewport.resizePending = true;
+    framesFrom(mock, 32, 1);
+
+    expect(mock.modules.demand.frame()).toMatchObject({ drawn: true, reason: "resize" });
+
+    mock.api.monitor.setResolution(1.5);
+    framesFrom(mock, 48, 2);
+
+    expect(mock.pixi.last().renderer.renders).toBe(3);
   });
 });

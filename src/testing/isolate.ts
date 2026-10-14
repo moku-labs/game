@@ -5,6 +5,7 @@
  * `createApp` from the package root. It imports no `node:` module.
  */
 import type { AnyPluginInstance } from "@moku-labs/core";
+import type { WithGameState } from "../app/types";
 import type { Clock, Flow, Model } from "../index";
 import { createApp, exit, flattenFeatures, type } from "../index";
 
@@ -66,12 +67,16 @@ export type StubsOf<Nodes extends Flow.NodeTable> = {
  *
  * @example
  * ```ts
- * const options: IsolateOptions<typeof boardFlow.nodes> = {
+ * const options: IsolateOptions<typeof boardFlow.nodes, Player> = {
  *   flow: boardFlow, shared: sharedLayer, stubs: { settings: stub("closed") }, player: fresh
  * };
  * ```
  */
-export type IsolateOptions<Nodes extends Flow.NodeTable> = {
+export type IsolateOptions<
+  Nodes extends Flow.NodeTable,
+  Player extends Model.Json = Model.Json,
+  Session extends Model.Json = Model.Json
+> = {
   /** The feature's flow. It becomes the one node of the harness main flow, named by `as`. */
   flow: Flow.AnyFlow & { readonly nodes: Nodes };
   /**
@@ -91,10 +96,10 @@ export type IsolateOptions<Nodes extends Flow.NodeTable> = {
   stubs?: StubsOf<Nodes>;
   /** More plugins the feature needs headless, for example a feature-own plugin. */
   plugins?: readonly AnyPluginInstance[];
-  /** The player a new save starts from. */
-  player: Model.Json;
-  /** The session at start. `{}` by default. */
-  session?: Model.Json;
+  /** The player a new save starts from. Its type types `model.store.snapshot().player`. */
+  player: Player;
+  /** The session at start. `{}` by default. Its type types `model.store.snapshot().session`. */
+  session?: Session;
   /** The rng seed. `1` by default. */
   seed?: number;
 };
@@ -123,6 +128,13 @@ export type IsolateSeams = {
  * plugins on it.
  */
 type IsolatedApp = ReturnType<typeof createApp>;
+
+/**
+ * The app of an isolated feature with `model.store.snapshot()` typed by the player and session
+ * of the `isolate` call, as `WithGameState` types `game.headless()`. A call whose player and
+ * session are `Model.Json` reads a `Model.Json` snapshot, as before. Only the type.
+ */
+type IsolatedAppOf<Player, Session> = WithGameState<IsolatedApp, Player, Session>;
 
 /**
  * A stub: the replaced node or sub-flow ends at once with this outcome. Written as a sub-flow of
@@ -286,7 +298,8 @@ export function harnessOf(flow: Flow.AnyFlow, name: string = flow.id): Flow.AnyF
  * runs for real, even when it belongs to a feature that is not composed.
  *
  * @param feature - The feature under test.
- * @param options - Its flow, the shared layer, the stubs, the starting state.
+ * @param options - Its flow, the shared layer, the stubs, the starting state. The types of
+ *   `player` and `session` type the app's `model.store.snapshot()`.
  * @returns A factory of apps, not started; pass one to `createHeadless`.
  * @throws {Error} For a stub key that is not a node of the flow, or an outcome the node does not declare.
  * @example
@@ -295,20 +308,28 @@ export function harnessOf(flow: Flow.AnyFlow, name: string = flow.id): Flow.AnyF
  * const homeOnly = isolate(homeFeature, {
  *   flow: mainFlow, stubs: { info: stub("ok") }, player: startingPlayer, session: startingSession
  * });
- * const game = await createHeadless(homeOnly());
+ * const app = homeOnly();
+ * const game = await createHeadless(app);
  * const state = await game.walk([{ at: "main/home", intent: "info" }]);
  * state.path; // "main/home"
+ * app.model.store.snapshot().player.count; // 0, typed number: startingPlayer types the snapshot
  * ```
  */
-export function isolate<Nodes extends Flow.NodeTable>(
+export function isolate<
+  Nodes extends Flow.NodeTable,
+  Player extends Model.Json = Model.Json,
+  Session extends Model.Json = Model.Json
+>(
   feature: Flow.FeaturePlugin,
-  options: IsolateOptions<Nodes>
-): (seams?: IsolateSeams) => IsolatedApp {
+  options: IsolateOptions<Nodes, Player, Session>
+): (seams?: IsolateSeams) => IsolatedAppOf<Player, Session> {
   const mainFlow = harnessOf(withStubs(options.flow, options.stubs ?? {}), options.as);
   const shared = options.shared === undefined ? [] : [options.shared.logicOnly];
   const plugins = [...shared, ...flattenFeatures([feature.logicOnly]), ...(options.plugins ?? [])];
 
-  return (seams: IsolateSeams = {}): IsolatedApp =>
+  // `createApp` types the snapshot `Json`; the store holds the options' player and session, so
+  // the one cast narrows only the type, as `defineGame` does for `game.headless()`.
+  return (seams: IsolateSeams = {}) =>
     createApp({
       plugins: [...plugins],
       pluginConfigs: {
@@ -320,5 +341,5 @@ export function isolate<Nodes extends Flow.NodeTable>(
         flow: { mainFlow },
         clock: { source: seams.clock }
       }
-    });
+    }) as IsolatedAppOf<Player, Session>;
 }

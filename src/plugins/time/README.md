@@ -28,6 +28,7 @@ Callbacks of one phase run in registration order. A callback registered during a
 | `isPaused()` | True while paused. |
 | `isRunning()` | True while a real frame source drives the loop. False in plain Bun. |
 | `wake()` | Resets the idle timer: the next frame runs at `maxFps` again. Cheap, idempotent, safe inside a frame. Called by `input` (a pointer sample), `anim` (a track starts), `flow` (an edge), `assets` (a load settles), `scenes` (a switch), `text` (a locale change), `ui` (a reconcile). |
+| `wakes()` | How many wakes the clock has had since the app started, `resume` included; it only grows. The renderer compares two readings and draws the frame after any wake, a safety net of `renderer.onDemand`. `step` does not count. |
 | `step(deltaMs)` | Runs exactly one frame with the given unscaled delta, ignoring the fps cap, the pause flag and `maxDeltaMs`; the scale still applies. Throws when called from inside a frame callback. For tests and tools. |
 | `measure(listener)` | Agent builds: hands `listener` what `time` measured of every frame, after `render` (see "Measuring a frame"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `agentClock()` | Agent builds: the page clock for measurement (`performance.now()`); `undefined` otherwise. `world` times its systems with it. Never for game logic. |

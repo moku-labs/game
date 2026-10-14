@@ -395,21 +395,25 @@ export const captureCommand = defineCommand({
 });
 
 /**
- * Switches the debug drawing: `nineSlice` outlines every nine-slice and the lines Pixi cuts its
- * texture at. Answers the switches as they are afterwards.
+ * Switches the debug drawing and checks: `nineSlice` outlines every nine-slice and the lines Pixi
+ * cuts its texture at, `verifyFrames` compares every frame the renderer skips with the same frame
+ * drawn live. Each field given is applied, one left out keeps its switch; a call with neither
+ * answers the switches unchanged. Answers the switches as they are afterwards.
  *
  * @example
  * ```ts
  * // Check where the settings popup cuts its parchment.
- * (await run(app, commands.debug, { nineSlice: true })).value; // { nineSlice: true }
+ * (await run(app, commands.debug, { nineSlice: true })).value; // { nineSlice: true, verifyFrames: false }
+ * // The visual runner checks the skipped frames of a test in the browser.
+ * (await run(app, commands.debug, { verifyFrames: true })).value; // { nineSlice: true, verifyFrames: true }
  * ```
  */
 export const debugCommand = defineCommand({
   id: "game.debug",
   title: "Debug drawing",
-  input: { nineSlice: "boolean" },
+  input: { nineSlice: "boolean?", verifyFrames: "boolean?" },
   effect: "cosmetic",
-  run: (app: RendererApp, { nineSlice }) => {
+  run: (app: RendererApp, { nineSlice, verifyFrames }) => {
     if (
       (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
       (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
@@ -417,8 +421,13 @@ export const debugCommand = defineCommand({
       throw controlRefused();
     }
 
-    app.log.debug("moku:dev", { command: "game.debug", nineSlice });
-    app.renderer.sync.debug.nineSlice(nineSlice);
+    app.log.debug("moku:dev", {
+      command: "game.debug",
+      ...(nineSlice === undefined ? {} : { nineSlice }),
+      ...(verifyFrames === undefined ? {} : { verifyFrames })
+    });
+    if (nineSlice !== undefined) app.renderer.sync.debug.nineSlice(nineSlice);
+    if (verifyFrames !== undefined) app.renderer.sync.debug.verifyFrames(verifyFrames);
 
     return app.renderer.sync.debug.state();
   }

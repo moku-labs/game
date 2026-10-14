@@ -81,12 +81,14 @@ function runFrame(ctx: TimeCtx, unscaledDeltaMs: number, at?: number): void {
 }
 
 /**
- * Resets the idle timer and lifts the idle cap at once, so the next frame runs at `maxFps`.
- * Three assignments: safe to call from inside a frame, and safe to call on every pointer sample.
+ * Resets the idle timer and lifts the idle cap at once, so the next frame runs at `maxFps`, and
+ * counts the wake for the renderer. Four assignments: safe to call from inside a frame, and safe
+ * to call on every pointer sample.
  *
  * @param ctx - Domain context of the time plugin.
  */
 function wakeClock(ctx: TimeCtx): void {
+  ctx.state.wakes += 1;
   ctx.state.lastWakeMs = ctx.state.unscaledElapsedMs;
   ctx.state.idle = false;
   ctx.state.time.idle = false;
@@ -224,6 +226,8 @@ export function createTimeApi(ctx: TimeCtx): Api {
     isRunning: () => ctx.state.running,
 
     wake: () => wakeClock(ctx),
+
+    wakes: () => ctx.state.wakes,
 
     measure: listener => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {

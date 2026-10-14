@@ -7,6 +7,7 @@
 
 import type { FrameMeasure } from "../../time/types";
 import type { SystemTiming } from "../../world/types";
+import { DEMAND_REASONS, type DemandReason } from "../demand/types";
 import { usedHeapBytes } from "./long-frames";
 import {
   bucketOf,
@@ -69,10 +70,28 @@ function writeCounters(pc: PerfCtx, slot: number): void {
   c.uploads[slot] = counted ? cell(counts, COUNT.uploads) : Number.NaN;
   c.uploadMb[slot] = counted ? cell(counts, COUNT.uploadBytes) / BYTES_PER_MB : Number.NaN;
   c.compiles[slot] = (bits & MEASURE.compiles) === 0 ? Number.NaN : cell(counts, COUNT.compiles);
-  // Spec 14 (block 3A) fills `marks` and `reason` from `demand.frame()`; B8 feeds `rebuilds`.
-  c.marks[slot] = Number.NaN;
-  c.reason[slot] = NO_REASON;
+  // The draw decision of the frame (spec 14): its marks and the index of its reason; B8 feeds `rebuilds`.
+  const decided = pc.deps.demand.frame();
+
+  c.marks[slot] = decided.marks;
+  c.reason[slot] = reasonIndex(decided.reason);
   c.rebuilds[slot] = perf.produced === 0 ? Number.NaN : cell(counts, COUNT.rebuilds);
+}
+
+/**
+ * The index of a draw reason in ring order, `NO_REASON` for a name the order does not know.
+ *
+ * @param reason - The reason of the decision.
+ * @returns Its index.
+ * @example
+ * ```ts
+ * reasonIndex("first"); // 1
+ * ```
+ */
+function reasonIndex(reason: DemandReason): number {
+  const index = DEMAND_REASONS.indexOf(reason);
+
+  return index === -1 ? NO_REASON : index;
 }
 
 /**

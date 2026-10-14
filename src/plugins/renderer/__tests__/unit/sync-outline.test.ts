@@ -228,7 +228,7 @@ describe("sync nine-slice debug switch", () => {
     mock.modules.sync.pass();
     mock.api.sync.debug.nineSlice(true);
 
-    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: true });
+    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: true, verifyFrames: false });
 
     mock.modules.sync.pass();
 
@@ -266,14 +266,14 @@ describe("sync nine-slice debug switch", () => {
 
     const { entity } = spawnNine(mock);
 
-    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: true });
+    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: true, verifyFrames: false });
     expect(outlineOf(mock, entity)?.strokes[0]?.color).toBe(CYAN);
   });
 
   it("answers a fresh state object every call", async () => {
     const mock = await started();
 
-    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: false });
+    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: false, verifyFrames: false });
     expect(mock.api.sync.debug.state()).not.toBe(mock.api.sync.debug.state());
   });
 
@@ -283,6 +283,6 @@ describe("sync nine-slice debug switch", () => {
     await mock.start();
     mock.api.sync.debug.nineSlice(true);
 
-    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: true });
+    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: true, verifyFrames: false });
   });
 });

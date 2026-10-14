@@ -612,6 +612,11 @@ export type EcsState = {
   types: Map<string, AnyComponentType>;
   stores: Map<string, Map<Entity, object | true>>;
   resources: Map<string, object>;
+  /**
+   * The type object stored under each engine resource name (`"Now"`, `"Pointer"`, …), so a game
+   * resource of the same name is refused instead of sharing the engine's value.
+   */
+  engineResources: Map<string, object>;
   systems: Record<WorldPhase, SystemEntry[]>;
   running: WorldPhase | undefined;
   commands: Command[];
