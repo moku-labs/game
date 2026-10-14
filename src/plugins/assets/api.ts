@@ -180,6 +180,9 @@ export function createAssetsApi(ctx: KernelSlice): Api {
     texture: (key: string): Texture | undefined => lookupTexture(assets, key),
     font: (key: string): FontAsset | undefined => loadedRecord(assets, key)?.fonts.get(key),
     audio: (key: string): AudioAsset | undefined => loadedRecord(assets, key)?.audio.get(key),
-    usage: (): Usage => usage(assets)
+    usage: (): Usage => usage(assets),
+    sceneBundles: (named: readonly string[]): void => {
+      ctx.state.sceneNamed = [...named];
+    }
   };
 }

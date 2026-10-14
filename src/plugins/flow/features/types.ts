@@ -1,6 +1,7 @@
 /**
  * @file flow/features — type definitions.
  */
+import type { AnyPluginInstance } from "@moku-labs/core";
 import type { Snapshot } from "../../model/types";
 import type { AnyFlow, AnyNode } from "../runner/types";
 
@@ -206,4 +207,30 @@ export type FeaturesInternal = {
    * Closes the registry. Called once by `run()` after the graph was collected.
    */
   seal(): void;
+};
+
+/**
+ * A feature plugin with the sub-features it declares, as `flattenFeatures` reads it: a full plugin or its `logicOnly`.
+ *
+ * @example
+ * ```ts
+ * const tree: FeatureTree = episodesFeature.logicOnly;
+ * tree.features.map(child => child.name); // ["kit", "ep01", "ep02"]
+ * ```
+ */
+export type FeatureTree = AnyPluginInstance & { readonly features: readonly FeatureTree[] };
+
+/**
+ * One entry of the feature registry: the name, the description and, for a sub-feature, the feature that declares it.
+ *
+ * @example
+ * ```ts
+ * const entry: RegisteredFeature = { name: "ep01", description: { flows: [ep01Flow] }, parent: "episodes" };
+ * ```
+ */
+export type RegisteredFeature = {
+  name: string;
+  description: FeatureDescription;
+  /** Name of the feature that declares this one in its `features`; absent for a top-level feature. */
+  parent?: string;
 };

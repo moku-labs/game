@@ -7,6 +7,7 @@ import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as AssetsApi } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
+import type { Json } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
 import type { LayerSort, LayerSpec, Owner, Api as WorldApi } from "../world/types";
 
@@ -180,6 +181,22 @@ export type SceneDefinition = {
   readonly layers: readonly LayerSpec[];
   /** Names of the projections the scene mounts. */
   readonly projections: readonly string[];
+  /** What `defineScene` was given as `bundles`; absent when the scene names no bundle of state. */
+  readonly bundles?: (state: SceneState) => readonly string[];
+};
+
+/**
+ * The committed state a scene's `bundles` reads: the frozen `player` and `session` of `model.store.snapshot()`, never a
+ * draft of the node being entered.
+ *
+ * @example
+ * ```ts
+ * const state: SceneState<{ coins: number }, { episode: string }> = { player: { coins: 4 }, session: { episode: "ep01" } };
+ * ```
+ */
+export type SceneState<Player extends Json = Json, Session extends Json = Json> = {
+  readonly player: Player;
+  readonly session: Session;
 };
 
 /**

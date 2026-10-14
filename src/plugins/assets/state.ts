@@ -50,6 +50,7 @@ export function createAssetsState(): State {
     warned: emptySet(),
     removers: [],
     stamps: undefined,
-    swapping: undefined
+    swapping: undefined,
+    sceneNamed: []
   };
 }

@@ -527,6 +527,8 @@ export type State = {
   stamps: Readonly<Record<string, string>> | undefined;
   /** The running dev hot swap. The next one waits for it, so two swaps never overlap. */
   swapping: Promise<void> | undefined;
+  /** The list the mounted scene names, from the last `sceneBundles` call (E9). */
+  sceneNamed: readonly string[];
 };
 
 /**
@@ -725,6 +727,21 @@ export type Api = {
    * ```
    */
   usage(): Usage;
+
+  /**
+   * Tells assets which bundles the mounted scene names: its `bundle`, then what its `bundles(state)` returned.
+   * Each call replaces the list before it. A bundle in the list is never a victim of the budget and is not
+   * released by `release: "leave"` while it stays in the list. Called by `scenes`; a game never calls it.
+   *
+   * @param named - The bundle names of the mounted scene, the scene bundle first.
+   * @example
+   * ```ts
+   * // scenes, right after it mounted the ward for episode 1 (and after a re-read that changed the list).
+   * ctx.require(assetsPlugin).sceneBundles(["ui", "ep01"]);
+   * // ep01 (release "leave") now stays while the ward shows it, even after the ep01 flow left the stack
+   * ```
+   */
+  sceneBundles(named: readonly string[]): void;
 };
 
 /**
@@ -760,3 +777,25 @@ export type FlowRest = { path: string; checkpoint: boolean };
  * the keys watch, `module.default` is the `AssetStamps`.
  */
 export type HotSwap = GlobalEvents["ui:hot-swap"];
+
+/**
+ * When a bundle leaves besides the budget. `"budget"` (default): only the LRU unloads it when memory runs out.
+ * `"leave"`: also unloaded at the next rest once no node of its feature is on the stack and no mounted scene names it.
+ *
+ * @example
+ * ```ts
+ * const release: BundleRelease = "leave";
+ * ```
+ */
+export type BundleRelease = "budget" | "leave";
+
+/**
+ * What travels with a bundle: loaded in parallel with its files, dropped after it is released. i18n registers one for
+ * the strings of a sub-feature (spec 02 G1 has the full example).
+ */
+export type BundleCompanion = {
+  /** Brings what travels with the bundle. */
+  load(bundle: string): Promise<void>;
+  /** Drops what travels with the bundle. */
+  unload(bundle: string): void;
+};
