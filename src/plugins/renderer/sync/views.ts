@@ -95,24 +95,38 @@ function markView(sctx: SyncCtx, entity: Entity): void {
 }
 
 /**
- * Writes a point only when it differs from what Pixi holds, and marks the entity before.
+ * Marks an entity before a write of its own top's transform: the frame is decided as for any mark, and a kept picture
+ * of the view only moves (spec 23 P9.4).
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity whose top is about to move.
+ */
+function markMoved(sctx: SyncCtx, entity: Entity): void {
+  sctx.deps.demand.markMoved(entity);
+}
+
+/**
+ * Writes a point only when it differs from what Pixi holds, and marks the entity before: a move of the view's own top,
+ * or a change of what it draws for a node inside it.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity of the view.
  * @param point - The point of the display object.
  * @param x - The new x.
  * @param y - The new y.
+ * @param mark - The mark to make: `markMoved` for the top, `markView` inside it.
  */
 function writePoint(
   sctx: SyncCtx,
   entity: Entity,
   point: WritablePoint,
   x: number,
-  y: number
+  y: number,
+  mark: (sctx: SyncCtx, entity: Entity) => void = markView
 ): void {
   if (point.x === x && point.y === y) return;
 
-  markView(sctx, entity);
+  mark(sctx, entity);
   point.set(x, y);
 }
 
@@ -781,18 +795,33 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
   const target = view.wrapper ?? view.object;
   const stretch: Point = view.drawScale;
 
-  writePoint(sctx, entity, target.position, value.x, value.y);
-  writeRotation(sctx, entity, target, value.rotation);
+  // The top's own pose moves the view: a kept picture follows it (P9.4). Writes inside a wrapper change the picture.
+  writePoint(sctx, entity, target.position, value.x, value.y, markMoved);
+  writeRotation(sctx, entity, target, value.rotation, markMoved);
 
   if (view.wrapper === undefined) {
-    writePoint(sctx, entity, target.scale, value.scale * stretch.x, value.scale * stretch.y);
-    writePoint(sctx, entity, target.pivot, value.pivot.x / stretch.x, value.pivot.y / stretch.y);
+    writePoint(
+      sctx,
+      entity,
+      target.scale,
+      value.scale * stretch.x,
+      value.scale * stretch.y,
+      markMoved
+    );
+    writePoint(
+      sctx,
+      entity,
+      target.pivot,
+      value.pivot.x / stretch.x,
+      value.pivot.y / stretch.y,
+      markMoved
+    );
 
     return;
   }
 
-  writePoint(sctx, entity, target.scale, value.scale, value.scale);
-  writePoint(sctx, entity, target.pivot, value.pivot.x, value.pivot.y);
+  writePoint(sctx, entity, target.scale, value.scale, value.scale, markMoved);
+  writePoint(sctx, entity, target.pivot, value.pivot.x, value.pivot.y, markMoved);
   writePoint(sctx, entity, view.object.position, 0, 0);
   writeRotation(sctx, entity, view.object, 0);
   writePoint(sctx, entity, view.object.pivot, 0, 0);
@@ -806,16 +835,18 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
  * @param entity - The entity.
  * @param target - The display object.
  * @param rotation - The new rotation, in radians.
+ * @param mark - The mark to make: `markMoved` for the top, `markView` inside it.
  */
 function writeRotation(
   sctx: SyncCtx,
   entity: Entity,
   target: PixiContainer,
-  rotation: number
+  rotation: number,
+  mark: (sctx: SyncCtx, entity: Entity) => void = markView
 ): void {
   if (target.rotation === rotation) return;
 
-  markView(sctx, entity);
+  mark(sctx, entity);
   target.rotation = rotation;
 }
 
@@ -861,7 +892,13 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   writeRenderable(view);
   applyTransform(sctx, parentEntity, view);
   // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.
-  moveFilters(sctx.ctx.state.sync, parentEntity, view, () => markView(sctx, parentEntity));
+  moveFilters(
+    sctx.ctx.state.sync,
+    parentEntity,
+    view,
+    () => markView(sctx, parentEntity),
+    sctx.ctx.state.kept
+  );
   if (ownsAlpha(view)) applyAlpha(sctx, parentEntity, view, view.object.alpha);
 
   return wrapper;
@@ -1044,7 +1081,11 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
   writeVisual(sctx, entity, view);
   applyTransform(sctx, entity, view);
   attach(sctx, entity, view);
-  applyFilters(view, filtersOf(state, entity), () => markView(sctx, entity));
+  const slots = filtersOf(state, entity);
+
+  applyFilters(view, slots, () => markView(sctx, entity));
+  // A view built with filters kept for it gets its record of the kept cache (spec 23 P9.1).
+  if (slots.length > 0) sctx.deps.kept.slots(entity, slots);
   resort(sctx, entity, view);
 
   return true;
@@ -1108,6 +1149,8 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 
   // Structural: the view leaves the tree, judged where it was drawn.
   markView(sctx, entity);
+  // Its picture goes before the object returns to the pool (P9.3): no quad, no reason, no render group left.
+  sctx.deps.kept.forget(entity);
 
   const host = view.clipped ?? view.wrapper;
 

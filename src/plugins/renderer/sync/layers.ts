@@ -56,7 +56,8 @@ export function sortOf(state: SyncState, name: string): LayerSort {
 function writeDepth(sctx: SyncCtx, entity: Entity, target: PixiContainer, value: number): void {
   if (target.zIndex === value) return;
 
-  sctx.deps.demand.mark(entity);
+  // The depth of the view's top: its kept picture only moves with it (spec 23 P9.4).
+  sctx.deps.demand.markMoved(entity);
   target.zIndex = value;
 }
 

@@ -1,16 +1,19 @@
 /**
  * @file renderer plugin — API factory. The one place that builds `host`, `viewport`, `demand`,
- * `sync` and `monitor` in the accepted injection order, and the one place that reduces them to
- * their public half.
+ * `kept`, `sync` and `monitor` in the accepted injection order, and the one place that reduces
+ * them to their public half.
  */
 import { createDemandApi } from "./demand/api";
 import { createHostApi } from "./host/api";
 import type { HostApi, InstallCounting } from "./host/types";
+import { createKeptApi } from "./kept/api";
 import { resolveDeps } from "./lifecycle";
 import { createMonitorApi } from "./monitor/api";
-import { installCounting } from "./monitor/draw-calls";
+import { installCounting, installPassCounting } from "./monitor/draw-calls";
 import { createSyncApi } from "./sync/api";
-import type { SyncApi } from "./sync/types";
+import { applyFilters, clearFilters } from "./sync/filters";
+import { hiddenBy, hiddenOnlyAmong, liftFor, swapHidden } from "./sync/hidden";
+import type { SyncApi, SyncWriters } from "./sync/types";
 import type { Api, HostModule, KernelSlice, Modules, RendererCtx, SyncModule } from "./types";
 import { createViewportApi } from "./viewport/api";
 import type { ViewportApi } from "./viewport/types";
@@ -32,24 +35,43 @@ function countingOf(ctx: RendererCtx): InstallCounting | undefined {
 }
 
 /**
- * Builds the five modules in the accepted order `host → viewport → demand → sync → monitor`.
+ * The writers of `sync` the kept cache draws through: the one owner of `renderable` and the one writer of a view's
+ * filters. Injected here, since a module never imports another's run-time code.
+ */
+const syncWriters: SyncWriters = {
+  swapHidden,
+  hiddenBy,
+  hiddenOnlyAmong,
+  liftFor,
+  applyFilters,
+  clearFilters
+};
+
+/**
+ * Builds the six modules in the accepted order `host → viewport → demand → kept → sync → monitor`.
  * Each keeps its data in its branch of `ctx.state`, so these objects are views on the plugin
  * state, not owners of it. `host` gets the counting of `monitor` up front, because it installs
- * the classes before `monitor` exists; `demand` reads the views of `sync` through the state, whose
- * map keeps its identity; `sync` marks every write in `demand`; `monitor` gets the other four,
- * since a legend places views on the picture and the performance log reads all of them.
+ * the classes before `monitor` exists (the six of a dev or debug build, the pass counter of the
+ * others); `demand` reads the views of `sync` and the kept pictures through the state, whose maps
+ * keep their identity; `kept` reads the views of `sync` the same way; `sync` marks every write in
+ * `demand` and asks `kept` where a view's filters hang; `monitor` gets the others, since a legend
+ * places views on the picture and the performance log reads all of them.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @returns The five modules with their public and internal methods.
+ * @returns The six modules with their public and internal methods.
  */
 export function createModules(ctx: RendererCtx): Modules {
-  const host = createHostApi(ctx, { installCounting: countingOf(ctx) });
+  const host = createHostApi(ctx, {
+    installCounting: countingOf(ctx),
+    installPasses: pixi => installPassCounting(pixi, ctx.state.monitor.sinks)
+  });
   const viewport = createViewportApi(ctx, { host });
   const demand = createDemandApi(ctx, { host, views: ctx.state.sync.views });
-  const sync = createSyncApi(ctx, { host, viewport, demand });
-  const monitor = createMonitorApi(ctx, { host, viewport, sync, demand });
+  const kept = createKeptApi(ctx, { host, demand, sync: syncWriters });
+  const sync = createSyncApi(ctx, { host, viewport, demand, kept });
+  const monitor = createMonitorApi(ctx, { host, viewport, sync, demand, kept });
 
-  return { host, viewport, demand, sync, monitor };
+  return { host, viewport, demand, kept, sync, monitor };
 }
 
 /**

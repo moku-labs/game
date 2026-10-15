@@ -25,7 +25,8 @@ function openWindow(state: MonitorState): void {
 }
 
 /**
- * Turns the open window into the reported numbers and opens the next one.
+ * Turns the open window into the reported numbers and opens the next one: the most passes of a
+ * frame in it become `renderPassesMax`.
  *
  * @param state - The monitor branch of the plugin state.
  */
@@ -33,6 +34,8 @@ function closeWindow(state: MonitorState): void {
   state.fps = (state.intervals * WINDOW_MS) / state.windowMs;
   state.drawnFps = (state.drawnIntervals * WINDOW_MS) / state.windowMs;
   state.frameMs = state.frames > 0 ? state.workMs / state.frames : 0;
+  state.passes.max = state.passes.open;
+  state.passes.open = 0;
   openWindow(state);
 }
 
@@ -44,8 +47,9 @@ function closeWindow(state: MonitorState): void {
  *
  * @param state - The monitor branch of the plugin state.
  * @param now - Clock time of the frame start, in milliseconds.
+ * @returns True when a window closed: its counts were read.
  */
-export function beginFrame(state: MonitorState, now: number): void {
+export function beginFrame(state: MonitorState, now: number): boolean {
   const previous = state.lastStart;
 
   state.lastStart = now;
@@ -54,14 +58,18 @@ export function beginFrame(state: MonitorState, now: number): void {
   if (previous === undefined || now - previous > STALE_MS) {
     openWindow(state);
 
-    return;
+    return false;
   }
 
   state.windowMs += now - previous;
   state.intervals += 1;
   if (state.lastDrawn) state.drawnIntervals += 1;
 
-  if (state.windowMs >= WINDOW_MS) closeWindow(state);
+  if (state.windowMs < WINDOW_MS) return false;
+
+  closeWindow(state);
+
+  return true;
 }
 
 /**
@@ -92,4 +100,7 @@ export function resetWindow(state: MonitorState): void {
   state.drawnFps = 0;
   state.lastDrawn = false;
   state.frameMs = 0;
+  state.passes.last = 0;
+  state.passes.open = 0;
+  state.passes.max = 0;
 }

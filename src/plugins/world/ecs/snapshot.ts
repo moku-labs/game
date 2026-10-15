@@ -50,19 +50,35 @@ export function componentsOf(
     const value = store.get(entity);
 
     if (value === undefined) continue;
-    // An element description belongs to `ui`, not to the save file: named, never serialised.
-    if (name === Tree.componentName) {
-      skipped.push(name);
-    } else if (value === true) {
-      components[name] = true;
-    } else if (isJson(value)) {
-      components[name] = value;
-    } else {
-      skipped.push(name);
-    }
+
+    const json = jsonOf(name, value);
+
+    if (json === undefined) skipped.push(name);
+    else components[name] = json;
   }
 
   return { components, skipped };
+}
+
+/**
+ * The JSON of one stored component value, the rule `snapshot()` and the frame history share: a
+ * tag is `true`, a plain JSON value is itself, an element description (`Tree`) and any value that
+ * is not JSON have none. The value is the stored object, not a copy.
+ *
+ * @param name - The component name.
+ * @param value - The stored value, or nothing when the entity does not carry it.
+ * @returns The JSON, or `undefined` when nothing of it is recorded.
+ * @example
+ * ```ts
+ * jsonOf("Score", { value: 3 }); // { value: 3 }
+ * ```
+ */
+export function jsonOf(name: string, value: object | true | undefined): Json | undefined {
+  // An element description belongs to `ui`, not to the save file: named, never serialised.
+  if (value === undefined || name === Tree.componentName) return undefined;
+  if (value === true) return true;
+
+  return isJson(value) ? value : undefined;
 }
 
 /**

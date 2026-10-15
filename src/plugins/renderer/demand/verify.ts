@@ -47,6 +47,21 @@ export function differingPixels(expected: Uint8ClampedArray, actual: Uint8Clampe
 }
 
 /**
+ * The resolution the oracle reads the stage at: half, a quarter of the pixels; the renderer's own while a kept
+ * picture or a range picture exists (spec 23), since an extract at another resolution draws a live filter other than
+ * the canvas does while a picture is a texture of the canvas resolution.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param host - The host module (`resolution()`).
+ * @returns Device pixels per CSS pixel; `undefined` for the half resolution of `host.pixels`.
+ */
+function readResolution(ctx: RendererCtx, host: HostModule): number | undefined {
+  const { kept } = ctx.state;
+
+  return kept.records.length > 0 || kept.ranges.size > 0 ? host.resolution() : undefined;
+}
+
+/**
  * The pixel oracle step of `settle`. After a frame whose decision drew (or, with `onDemand` off, would have drawn),
  * the picture becomes the reference. After a `"none"` decision the frame is read live and compared with it: above the
  * runner's ratio the frame was missed, `renderer:missed-frame` names the views marked since the last drawn frame, and,
@@ -63,13 +78,15 @@ export function verifyFrame(
   host: HostModule,
   decided: DemandFrame
 ): void {
+  const resolution = readResolution(ctx, host);
+
   if (decided.reason !== "none") {
-    state.verify.reference = host.pixels();
+    state.verify.reference = host.pixels(resolution);
 
     return;
   }
 
-  const live = host.pixels();
+  const live = host.pixels(resolution);
   const reference = state.verify.reference;
 
   if (live === undefined) return;

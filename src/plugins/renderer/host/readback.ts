@@ -162,15 +162,20 @@ const ORACLE_RESOLUTION = 0.5;
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param app - The application that draws.
+ * @param resolution - Device pixels per CSS pixel of the read; half by default.
  * @returns The pixels, or `undefined` when Pixi could not read them.
  */
-export function readPixels(ctx: RendererCtx, app: PixiApplication): Uint8ClampedArray | undefined {
+export function readPixels(
+  ctx: RendererCtx,
+  app: PixiApplication,
+  resolution = ORACLE_RESOLUTION
+): Uint8ClampedArray | undefined {
   try {
     return app.renderer.extract.pixels({
       target: app.stage,
       frame: app.screen,
       clearColor: ctx.config.background,
-      resolution: ORACLE_RESOLUTION
+      resolution
     }).pixels;
   } catch (error) {
     if (!ctx.state.host.pixelsFailed) {

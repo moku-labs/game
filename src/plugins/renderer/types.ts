@@ -11,6 +11,7 @@ import type { Api as TimeApi } from "../time/types";
 import type { Entity, Owner, ProjectionKey, Api as WorldApi } from "../world/types";
 import type { DemandInternal, DemandState } from "./demand/types";
 import type { HostApi, HostInternal, HostState } from "./host/types";
+import type { KeptInternal, KeptState } from "./kept/types";
 import type { MonitorApi, MonitorInternal, MonitorState, PerfMonitorApi } from "./monitor/types";
 import type { DebugSwitches, SyncApi, SyncInternal, SyncState } from "./sync/types";
 import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/types";
@@ -20,8 +21,10 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * crop of a `"cover"` sprite), the bitmap-font pieces `fonts.install` needs, the `BitmapText` a
  * plugin above builds through `host.pixi()`, the filter and particle classes `effects` builds
  * through it (a custom filter carries a `GpuProgram` and a `GlProgram` over `defaultFilterVert`),
- * and the extension registry with the six classes the counting of a dev or debug build swaps
- * (the three WebGPU draw classes, the filter system and both texture systems) and the bitmap text
+ * the render textures and matrices the kept pictures are drawn with (an `AlphaFilter` runs their pre-pass), and the
+ * extension registry with the six classes the counting of a dev or debug build swaps
+ * (the three WebGPU draw classes, the filter system and both texture systems; production swaps the encoder alone, to
+ * count the passes) and the bitmap text
  * pipe `host` swaps for one whose SDF shader applies the alpha once (with the WGSL and GLSL shader
  * pieces it compiles that shader from). The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
@@ -66,6 +69,7 @@ export type PixiModule = Pick<
   | "Particle"
   | "ParticleContainer"
   | "Rectangle"
+  | "RenderTexture"
   | "Shader"
   | "Sprite"
   | "Texture"
@@ -125,6 +129,16 @@ export type PixiGraphics = InstanceType<PixiModule["Graphics"]>;
  * A Pixi texture. `assets` owns its lifetime; the renderer only makes and destroys it on request.
  */
 export type PixiTexture = InstanceType<PixiModule["Texture"]>;
+
+/**
+ * A texture Pixi renders into: what a kept picture is drawn into, engine-owned and destroyed by the engine.
+ */
+export type PixiRenderTexture = InstanceType<PixiModule["RenderTexture"]>;
+
+/**
+ * A Pixi matrix: a world transform read with `getGlobalTransform`, or the transform of a render.
+ */
+export type PixiMatrix = InstanceType<PixiModule["Matrix"]>;
 
 /**
  * A Pixi filter: what `effects` builds and `sync.filters.set` hangs on a view. `effects` owns
@@ -203,6 +217,7 @@ export type AspectRange = { min: number; max: number };
  * createApp({ pluginConfigs: { renderer: { mount: "#game", debug: { nineSlice: true } } } });
  * // Draw only what changes: a still screen draws nothing.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", onDemand: true }, time: { idleFps: 0 } } });
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", keptMb: 32 } } }); // a game with small art
  * ```
  */
 export type Config = {
@@ -242,6 +257,11 @@ export type Config = {
   onDemand: boolean;
   /** The performance monitor of an agent build: the spike budget and the frames the ring keeps. */
   monitor: MonitorConfig;
+  /**
+   * MiB the kept pictures may hold: a filtered view whose subtree and filter values did not change is drawn from a texture
+   * instead of filtering it again. The least recently drawn picture goes first when the budget is full. 0 keeps none.
+   */
+  keptMb: number;
 };
 
 /**
@@ -272,6 +292,7 @@ export type State = {
   sync: SyncState;
   monitor: MonitorState;
   demand: DemandState;
+  kept: KeptState;
 };
 
 /**
@@ -392,12 +413,19 @@ export type MonitorModule = MonitorApi & PerfMonitorApi & MonitorInternal;
 export type DemandModule = DemandInternal;
 
 /**
- * The five modules in injection order.
+ * The kept module: filtered views drawn from engine-owned pictures, and the range pictures of overlays. Internal only
+ * (O18: the same type as `KeptInternal`). The one home of this name; every file imports it from here.
+ */
+export type KeptModule = KeptInternal;
+
+/**
+ * The six modules in injection order.
  */
 export type Modules = {
   host: HostModule;
   viewport: ViewportModule;
   demand: DemandModule;
+  kept: KeptModule;
   sync: SyncModule;
   monitor: MonitorModule;
 };
@@ -409,6 +437,7 @@ export type TeardownScope = { readonly config: Readonly<Config>; readonly state:
 
 export type { DemandFrame, DemandReason, DemandState } from "./demand/types";
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
+export type { FilterCache, KeptInternal, KeptRange, KeptState, KeptStats } from "./kept/types";
 export type {
   FrameColumns,
   FrameReadout,

@@ -214,7 +214,7 @@ the same frame (a `ui` element that trades its shape for a nine-slice keeps its 
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses }`, plus `drawCalls` in a dev or debug build, a fresh object. Inert: all 0. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls` in a dev or debug build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
@@ -243,15 +243,27 @@ the render targets Pixi draws into, and the pictures the engine keeps (`host.kee
   `GCSystem` keeps its resource hashes private.
   `textureMb` estimates their memory: 4 bytes per pixel (PNG and WebP decode to RGBA8), every mip
   level, in MiB.
-- `views` and `pooled` are read from the `sync` state, `renderPasses` through `sync.renderPasses()`.
+- `views` and `pooled` are read from the `sync` state. `renderPasses` is the measured count of the last drawn frame,
+  `renderPassesMax` the most of one drawn frame in the last full second (see "Render passes"). `kept` reports the
+  kept pictures (see "Kept pictures"): the quads drawn in the last drawn frame, the MiB their textures hold, the
+  pictures taken in the last full second.
 - The frame timing costs two `clock.now()` calls and a few number writes per frame; no allocation.
   The rest is read only when `stats()` is called.
 
 #### Render passes
 
-`renderPasses` is computed from the filter slots `sync` holds, never asked of the GPU, at call time:
+`stats().renderPasses` is measured in every build (F8): on WebGPU an encoder subclass counts every
+`beginRenderPass` inside a frame (the six counting classes of a dev or debug build count it too; a
+production build swaps the encoder alone, one boolean test and one typed-array increment per pass);
+on WebGL the public runners count a bound target (count-only items in a production build). A frame
+that is not drawn counts nothing and keeps the number of the last drawn frame; `renderPassesMax` is
+the most of one drawn frame in the last full second, so the frame that took a picture shows there.
+Where nothing counts (headless, a test stage, a fake application) both report the estimate below.
+
+`sync.renderPasses()` is the estimate, computed from the filter slots `sync` holds, never asked of the GPU, at call time:
 0 while inert; otherwise `1 + Σ over views in the tree with an enabled filter (1 + Σ passes of the
-enabled slots)`. A filtered view costs one pass for its content and one per filter apply (spike
+enabled slots)`; a view drawn from its kept picture costs nothing, and the passes the last flush of the kept
+pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A filtered view costs one pass for its content and one per filter apply (spike
 P10); a disabled filter costs nothing, and a view whose filters are all disabled counts 0. A view
 out of the tree (an unknown layer) counts 0. The pins from P10: no filter `1`; one glow of 1 pass
 on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and a tint on ten
@@ -355,9 +367,11 @@ Compare frame pacing and late frames across rates, never raw GPU ms: the A26's G
 #### What is not counted
 
 Passes Pixi opens on command encoders of its own (a stand-alone clear between frames, the mipmap
-generator, the MSAA restore) and an upload between two frames (zeroed by the next frame's start;
-Pixi uploads lazily at the first draw, inside a frame). A WebGL pass has no stencil count and no GPU
-time of its own. A WebKit page reports no long frames.
+generator, the MSAA restore), a pass outside a frame (an extract, a capture), and an upload between
+two frames (zeroed by the next frame's start; Pixi uploads lazily at the first draw, inside a frame).
+The passes of the kept pictures are counted: they are rendered inside the frame, before the stage
+pass (`kept:<label>#1|#2.<k>|#3` and `freeze:<id>` name them in an agent build's pass records). A
+WebGL pass has no stencil count and no GPU time of its own. A WebKit page reports no long frames.
 
 #### Capture
 
@@ -453,9 +467,10 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `poolLimit` | `number` | `256` | Display objects kept in all pools together. |
 | `unsupportedMessage` | `string` | `"This device cannot run the game."` | Text of the unsupported-device screen. |
 | `loadPixi` | `() => Promise<PixiModule>` | `() => import("pixi.js")` | Loader seam. Tests pass a fake module. |
-| `debug` | `{ nineSlice?, verifyFrames? }` | `{ nineSlice: false, verifyFrames: false }` | Debug drawing and checks at start, a switch left out is off; `sync.debug.nineSlice(on)` and `sync.debug.verifyFrames(on)` switch them at run time. `verifyFrames` works in dev and debug builds only. |
+| `debug` | `{ nineSlice?, verifyFrames?, kept? }` | `{ nineSlice: false, verifyFrames: false, kept: true }` | Debug drawing and checks at start, a switch left out is off (`kept` left out is on); `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)` and `sync.debug.kept(on)` switch them at run time. `verifyFrames` works in dev and debug builds only. |
 | `onDemand` | `boolean` | `false` | Draw a frame only when something on the screen changed (see "Render on demand"). Off: every frame is drawn, as before. |
 | `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
+| `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
 
 ```ts
 const app = createApp({
@@ -474,7 +489,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then `demand` decides whether the frame is drawn, `app.renderer.render(app.stage)` when it is and `ready`, then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame and its draw count and hands a drawn one to the `capture()` calls due on it. |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame renders the kept pictures first (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it. |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -519,6 +534,69 @@ with the views marked since the last drawn frame and draws the frame at once. Wi
 runs in shadow, so a game can be checked before it turns `onDemand` on. It costs one read-back per
 frame. The visual runner's browser leg turns it on for every test (`--no-verify-frames` leaves it
 off).
+
+## Kept pictures
+
+A view whose filters allow it is kept as a picture while nothing it depends on changes: its subtree is
+rendered once into an engine-owned texture (stage 1, `kept:<label>#1`), the pre-pass of its first
+enabled filter with inputs runs once over that picture into engine-owned targets (stage 2,
+`#2.<k>`, spec 24's `FilterSlotInputs`), and the filter stack runs once over both into a third
+texture (stage 3, `#3`). The stage pass then draws one sprite, the quad, in the view's place, while
+the view itself is hidden (`renderable = false`, reason `"kept"` of `sync/hidden.ts`, swapped
+without a mark: both draw the same pixels). Every render happens in a flush before the stage pass,
+so the canvas stays one pass. A picture's render makes the top a render group while it is kept; a
+top drawn live again stops being one (drawn with its filters inside a parent's filter pass, a render
+group draws other pixels than the container did: found by the browser leg). On by default
+(`renderer.keptMb: 64`); `keptMb: 0` turns it off and the renderer draws as before.
+
+What each stage depends on, and the only stage redone when it changes:
+
+| Change | Redone |
+|---|---|
+| A mark under the view, its own alpha or tint, a `Display` or adapter view's own `invalidate`, its world scale or rotation, the stack resolution | stages 1, 2, 3 |
+| What the chain of the first filter with inputs draws (`inputs.version()`) | stages 2, 3 |
+| A filter value (`effects` calls `invalidate` before the write), the renderer resolution, the padding, a `"placed"` filter's move | stage 3 |
+| A move of the view itself | nothing: the quad moves |
+
+Moving and changing. A view that moves keeps its picture: only the quad's position is written. A move
+of a fraction of a texel draws the quad off its grid (sampled linearly) while it moves; at rest it is
+taken once more at its new phase (a settle retake, for which one frame is asked). Adaptivity: a view
+is taken after it stood still for 2 drawn frames; a kept view whose subtree changes in 3 drawn frames
+in a row goes back to drawing live until it stood still for 8 (a picture that churns costs one pass
+more than live). A kept view inside another is rendered first; its change retakes the outer one too.
+
+Not kept: a filter of category `"screen"` (see the effects README, "Filters that are kept"), a slot
+of a game that names no category, a filter that blends with the backdrop (`blendRequired`) or a blend
+mode other than normal, a top that blends otherwise, an ancestor that is translucent, tinted or blends
+otherwise (its alpha would be applied after the filter instead of before it), a `"placed"` filter
+under a filtered ancestor, a view hidden for the player, a picture over 4096 device pixels on a side,
+and without `onDemand` a subtree holding a `Display` view: a game that never turned `onDemand` on
+never promised to call `renderer.invalidate` before writing into its own Pixi objects.
+
+The grid. Every texture works on the pixel grid of Pixi's live filter pass: the subtree picture on the
+grid of the stack's resolution (`min` of the enabled filters', `"inherit"` the renderer's), the
+output at the renderer's. When the renderer resolution over the stack resolution (`r / rs`) is a whole
+number the quad reproduces the live frame texel for texel at rest; otherwise (the owner's phone at
+2.8125 under a `Blur` of 0.5) it is up to one device pixel off the canvas grid and sampled linearly,
+which a blurred output does not show and the oracle's tolerance covers; `cache: false` on that filter
+or `keptMb: 0` draws it live.
+
+Budget. `renderer.keptMb` MiB at 4 bytes a texel. A take that would pass it evicts the pictures not
+drawn in this frame, the least recently drawn first; an evicted view draws live and its textures are
+destroyed. A take that still does not fit is refused, the view drawn live, `renderer:kept-budget`
+logged once per run, and it is not offered again until it fits. Every texture is registered with
+`host.keep` (`textureMbSplit.kept`) and destroyed explicitly: on a drop, a device loss, a rebuild and
+at `onStop`. `stats().kept` is `{ pictures, mb, retakes }`.
+
+`sync.debug.kept(false)` (door `game.debug { kept: false }`) draws every filtered view live from the
+next drawn frame, `true` lets them be taken again: the A/B switch of a measurement, in every build.
+With `debug.verifyFrames` on (dev and debug builds), every drawn frame in which a picture stood is
+read twice, as drawn and with every picture drawn live, and compared; a difference logs
+`renderer:stale-picture` and draws every view live until the policy takes it again.
+
+Range pictures. The same machinery renders the canvas-sized picture of an overlay's range that
+`Overlay` (spec 22) asks for (`take`, `retake`, `move`, `release`): one render of the stage root with
+only the range drawn, shown by a sprite placed before the overlay, kept in the same budget.
 
 ## Layers, sort and lift
 
@@ -708,7 +786,7 @@ only. Each logs a `moku:dev` debug entry; the one of `game.capture` lists the op
 | Key in `commands` | id | Input | Effect | Does |
 |---|---|---|---|---|
 | `capture` | `game.capture` | `{ legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" }` | read | `capture(options)`: `{ png, legend? }` of the canvas after the next drawn frame. `undefined` while inert |
-| `debug` | `game.debug` | `{ nineSlice: "boolean?", verifyFrames: "boolean?" }` | cosmetic | `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)`, each field given. Answers `sync.debug.state()` |
+| `debug` | `game.debug` | `{ nineSlice: "boolean?", verifyFrames: "boolean?", kept: "boolean?" }` | cosmetic | `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)`, `sync.debug.kept(on)`, each field given; `{ kept: false }` alone is the editor's A/B switch. Answers `sync.debug.state()` |
 
 `game.capture` checks the shapes, `renderer.capture()` the values: `layers` must be a JSON array of
 strings, `sheet` an object of two numbers `{ frames, everyMs }`, `diff` a bookmark (`readBookmark`

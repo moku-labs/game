@@ -223,8 +223,18 @@ function createOurs(
     };
   }
 
+  // The canvas origin of a kept picture for `canvasPixel`: 0 drawn live, written in place by the renderer (spec 23).
+  if (definition.origin !== undefined) {
+    structures[definition.origin.name] = {
+      value: new Float32Array(definition.origin.size),
+      type: definition.origin.type
+    };
+  }
+
   const group =
-    definition.uniforms.length > 0 || definition.inputs.length > 0
+    definition.uniforms.length > 0 ||
+    definition.inputs.length > 0 ||
+    definition.origin !== undefined
       ? new pixi.UniformGroup(structures)
       : undefined;
   const resources: Record<string, unknown> = group === undefined ? {} : { fu: group };

@@ -14,7 +14,8 @@ const config: Config = {
   loadPixi: () => Promise.reject(new Error("not loaded in this test")),
   debug: { nineSlice: false, verifyFrames: false },
   monitor: { budgetMs: "rate", frames: 1024 },
-  onDemand: false
+  onDemand: false,
+  keptMb: 64
 };
 
 describe("renderer state", () => {

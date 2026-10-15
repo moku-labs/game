@@ -396,24 +396,27 @@ export const captureCommand = defineCommand({
 
 /**
  * Switches the debug drawing and checks: `nineSlice` outlines every nine-slice and the lines Pixi
- * cuts its texture at, `verifyFrames` compares every frame the renderer skips with the same frame
- * drawn live. Each field given is applied, one left out keeps its switch; a call with neither
- * answers the switches unchanged. Answers the switches as they are afterwards.
+ * cuts its texture at, `verifyFrames` compares every frame the renderer skips (and every kept
+ * picture) with the same frame drawn live, `kept` draws every filtered view live (false) or lets
+ * the renderer keep pictures (true). Each field given is applied, one left out keeps its switch; a
+ * call with none answers the switches unchanged. Answers the switches as they are afterwards.
  *
  * @example
  * ```ts
  * // Check where the settings popup cuts its parchment.
- * (await run(app, commands.debug, { nineSlice: true })).value; // { nineSlice: true, verifyFrames: false }
+ * (await run(app, commands.debug, { nineSlice: true })).value; // { nineSlice: true, verifyFrames: false, kept: true }
  * // The visual runner checks the skipped frames of a test in the browser.
- * (await run(app, commands.debug, { verifyFrames: true })).value; // { nineSlice: true, verifyFrames: true }
+ * (await run(app, commands.debug, { verifyFrames: true })).value; // { nineSlice: true, verifyFrames: true, kept: true }
+ * // The editor measures the memory screen without kept pictures.
+ * (await run(app, commands.debug, { kept: false })).value; // { nineSlice: true, verifyFrames: true, kept: false }
  * ```
  */
 export const debugCommand = defineCommand({
   id: "game.debug",
   title: "Debug drawing",
-  input: { nineSlice: "boolean?", verifyFrames: "boolean?" },
+  input: { nineSlice: "boolean?", verifyFrames: "boolean?", kept: "boolean?" },
   effect: "cosmetic",
-  run: (app: RendererApp, { nineSlice, verifyFrames }) => {
+  run: (app: RendererApp, { nineSlice, verifyFrames, kept }) => {
     if (
       (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
       (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
@@ -424,10 +427,12 @@ export const debugCommand = defineCommand({
     app.log.debug("moku:dev", {
       command: "game.debug",
       ...(nineSlice === undefined ? {} : { nineSlice }),
-      ...(verifyFrames === undefined ? {} : { verifyFrames })
+      ...(verifyFrames === undefined ? {} : { verifyFrames }),
+      ...(kept === undefined ? {} : { kept })
     });
     if (nineSlice !== undefined) app.renderer.sync.debug.nineSlice(nineSlice);
     if (verifyFrames !== undefined) app.renderer.sync.debug.verifyFrames(verifyFrames);
+    if (kept !== undefined) app.renderer.sync.debug.kept(kept);
 
     return app.renderer.sync.debug.state();
   }

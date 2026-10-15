@@ -5,8 +5,8 @@ import type { Snapshot } from "../../model/types";
 import type { Time } from "../../time/types";
 import type { WorldCtx } from "../types";
 import { flushCommands } from "./commands";
-import { runQuery } from "./query";
-import { asError, registerType, resourceValue, termType } from "./storage";
+import { planOf, walkPlan } from "./query";
+import { asError, resourceValue } from "./storage";
 import type {
   AnySystem,
   EcsApi,
@@ -123,7 +123,8 @@ export function frameSnapshot(ctx: WorldCtx, time: Readonly<Time>): Snapshot {
 }
 
 /**
- * Registers a system at the end of its phase list and returns the remover.
+ * Registers a system at the end of its phase list and returns the remover. Its query is resolved
+ * here, once: a later change to the definition's `query` array is not seen.
  *
  * @param ctx - Domain context of the world plugin.
  * @param definition - The system.
@@ -143,9 +144,12 @@ export function registerSystem(ctx: WorldCtx, definition: AnySystem): () => void
     }
   }
 
-  for (const term of definition.query) registerType(ctx, termType(term));
-
-  const entry = { definition, frame: ctx.deps.time.snapshot().frame };
+  // The query is read once, here: the plan registers every term's type and keeps the names.
+  const entry: SystemEntry = {
+    definition,
+    frame: ctx.deps.time.snapshot().frame,
+    plan: planOf(ctx, definition.query)
+  };
   const list = state.systems[definition.phase];
 
   list.push(entry);
@@ -193,7 +197,7 @@ export function runPhase(
       if (entry.frame >= time.frame) continue;
 
       try {
-        entry.definition.run(runQuery(ctx, entry.definition.query), context);
+        entry.definition.run(walkPlan(ctx, entry.plan), context);
       } catch (error) {
         ctx.log.error(
           "world:system-failed",
@@ -241,7 +245,7 @@ function runTimed(
     const started = timing.clock();
 
     try {
-      entry.definition.run(runQuery(ctx, entry.definition.query), context);
+      entry.definition.run(walkPlan(ctx, entry.plan), context);
     } catch (error) {
       ctx.log.error(
         "world:system-failed",

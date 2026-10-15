@@ -8,9 +8,10 @@
  * stand-in.
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
-import type { FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
+import type { FilterCache, FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
 import type { AnySystem, Entity } from "../../world/types";
 import type { EffectsCtx } from "../types";
+import { CORE_CACHE } from "./builtins";
 import { kindStatus, pollChecks, startChecks } from "./check";
 import { createFilter, createStandIn, destroyFilter, refreshInputs, writeFilter } from "./instance";
 import type { FilteredView, FilterFields, FilterInstance, FilterKind } from "./types";
@@ -96,9 +97,35 @@ function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstanc
 
     if (slot?.filter !== instance.filter || slot.passes !== instance.passes) return true;
     if (instance.kind === "wgsl" && slot.inputs !== instance.inputs?.slot) return true;
+    if (slot.cache !== cacheOfInstance(instance) || slot.blurs !== blursOf(instance)) return true;
   }
 
   return false;
+}
+
+/**
+ * What the kept-picture cache may do with an instance (spec 23 P8.4): its definition's category for one of ours (a
+ * stand-in's is its fallback's or the dev mark's), the category of the Pixi-core kind otherwise.
+ *
+ * @param instance - The instance.
+ * @returns The category.
+ */
+function cacheOfInstance(instance: FilterInstance): FilterCache {
+  return instance.kind === "wgsl" ? instance.definition.cache : CORE_CACHE[instance.kind];
+}
+
+/**
+ * Whether an instance shows a blurred copy of what is under it (spec 23 P8.5): the built-in `Blur`, or one of ours
+ * with inputs. The predicate an overlay's held loops read (spec 22).
+ *
+ * @param instance - The instance.
+ * @returns True, or `undefined` for every other filter (the slot leaves the key out).
+ */
+function blursOf(instance: FilterInstance): true | undefined {
+  return instance.kind === "blur" ||
+    (instance.kind === "wgsl" && instance.definition.inputs.length > 0)
+    ? true
+    : undefined;
 }
 
 /**
@@ -229,20 +256,31 @@ function syncKind(
 }
 
 /**
- * The slot of one instance: its filter, its passes, its kind id for the performance log, and the
- * seam of its inputs when it has some.
+ * The slot of one instance: its filter, its passes, its kind id for the performance log, the
+ * seam of its inputs when it has some, and what the kept-picture cache may do with it (its
+ * category, a placed filter's origin, whether it shows a blurred copy).
  *
  * @param instance - The instance.
  * @returns The slot.
  */
 function slotOf(instance: FilterInstance): FilterSlot {
+  const cache = cacheOfInstance(instance);
   const slot: FilterSlot = {
     filter: instance.filter,
     passes: instance.passes,
-    kind: instance.kindId
+    kind: instance.kindId,
+    cache
   };
 
   if (instance.kind === "wgsl" && instance.inputs !== undefined) slot.inputs = instance.inputs.slot;
+  if (blursOf(instance)) slot.blurs = true;
+
+  // A placed filter hands over its `keptOrigin` by reference, once: the renderer writes it in place.
+  if (cache === "placed" && instance.kind === "wgsl") {
+    const origin = instance.group?.uniforms.keptOrigin;
+
+    if (origin instanceof Float32Array) slot.origin = origin;
+  }
 
   return slot;
 }

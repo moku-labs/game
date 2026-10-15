@@ -183,6 +183,8 @@ function measuredOf(pc: PerfCtx): PerfMeasured[] {
   if (pc.perf.longFrames.type !== undefined) list.push("longFrames");
   if (heapMb() !== null) list.push("heap");
   if (pc.ctx.deps.world.systemTimes() !== undefined) list.push("systems");
+  // The kept pictures of spec 23 are counted in every agent build.
+  list.push("kept");
 
   return list;
 }
@@ -398,6 +400,9 @@ type Totals = {
   uploadMb: number;
   compiles: number;
   rebuilds: number;
+  /** The most kept pictures of a drawn frame, and the takes of the window. */
+  keptMax: number;
+  retakes: number;
 };
 
 /**
@@ -440,6 +445,7 @@ function addFrame(totals: Totals, c: PerfRing["columns"], slot: number): void {
   totals.uploadMb += cell(c.uploadMb, slot);
   totals.compiles += cell(c.compiles, slot);
   totals.rebuilds += cell(c.rebuilds, slot);
+  totals.retakes += cell(c.retakes, slot);
 }
 
 /**
@@ -459,6 +465,7 @@ function addDrawn(totals: Totals, c: PerfRing["columns"], slot: number): void {
   totals.applies += cell(c.filterApplies, slot);
   totals.appliesMax = Math.max(totals.appliesMax, cell(c.filterApplies, slot));
   totals.mpx += cell(c.filterMpx, slot);
+  totals.keptMax = Math.max(totals.keptMax, cell(c.kept, slot));
 }
 
 /**
@@ -494,7 +501,9 @@ function totalsOf(pc: PerfCtx, window: { first: number; count: number }): Totals
     uploads: 0,
     uploadMb: 0,
     compiles: 0,
-    rebuilds: 0
+    rebuilds: 0,
+    keptMax: 0,
+    retakes: 0
   };
 
   for (let age = window.first; age < window.first + window.count; age += 1) {
@@ -707,6 +716,12 @@ export function sampleLine(pc: PerfCtx, start: number, end: number): PerfSampleL
     rebuilds: perf.produced === 0 ? null : totals.rebuilds,
     longFrames: longFramesOfSecond(pc, start, end),
     heapMb: heapMb(),
+    kept: {
+      pictures: totals.keptMax,
+      mb: roundTo(pc.ctx.state.kept.bytes / BYTES_PER_MB, 2),
+      retakes: totals.retakes,
+      refreshes: deps.kept.drainRefreshes()
+    },
     textures: {
       count: usage.count,
       mb: ms(usage.bytes / BYTES_PER_MB),

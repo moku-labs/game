@@ -47,6 +47,12 @@ export type DemandState = {
   pending: Set<Entity>;
   /** Entities a display adapter reported after its `update` (not `false`): counted unless an ancestor is hidden. */
   loose: Set<Entity>;
+  /** Marked by a write that changes what the view draws (`mark`): the kept cache retakes its picture. */
+  visual: Set<Entity>;
+  /** Marked by a write of the view's own transform or depth (`markMoved`): a kept picture only moves. */
+  moved: Set<Entity>;
+  /** Marked through the public `invalidate`: a filter value or a self-drawn object about to change. */
+  published: Set<Entity>;
   /**
    * Every whole-frame reason found since the last decision (O17, LEAD-FIXES-3). The first one added is
    * `frame().reason`, as spec 14 says; the set keeps the others visible to the overlay step and `kept.collect`.
@@ -79,6 +85,8 @@ export type DemandState = {
 export type DemandInternal = {
   /** Before a write that changes what Pixi holds for the entity's view, and before every structural write. */
   mark(entity: Entity): void;
+  /** Before a write of the transform or the depth of the view's own top: `mark` for the decision, a move for `kept`. */
+  markMoved(entity: Entity): void;
   /** After an adapter `update` that did not answer `false`. */
   markLoose(entity: Entity): void;
   /** Adds a whole-frame reason to `wholes` (O17). */
@@ -99,6 +107,12 @@ export type DemandInternal = {
   marked(): ReadonlySet<Entity>;
   /** The adapter marks of the current decision, as `marked()` for the others. */
   loose(): ReadonlySet<Entity>;
+  /** The marks of the current decision made by `mark`: what a view draws changed. */
+  visual(): ReadonlySet<Entity>;
+  /** The marks of the current decision made by `markMoved`: a view's own transform or depth changed. */
+  moved(): ReadonlySet<Entity>;
+  /** The marks of the current decision made through the public `invalidate`. */
+  published(): ReadonlySet<Entity>;
   /** The pixel oracle switch, behind `DebugApi.verifyFrames`. */
   verifyFrames(on: boolean): void;
   /** Whether the pixel oracle is on. */

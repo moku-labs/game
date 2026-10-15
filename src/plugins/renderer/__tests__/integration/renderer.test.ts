@@ -102,7 +102,9 @@ describe("renderer plugin integration", () => {
       textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
-      renderPasses: 0
+      renderPasses: 0,
+      renderPassesMax: 0,
+      kept: { pictures: 0, mb: 0, retakes: 0 }
     });
 
     vi.stubGlobal("__MOKU_GAME_DEV__", true);

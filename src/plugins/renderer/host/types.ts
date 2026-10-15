@@ -1,7 +1,14 @@
 /**
  * @file renderer/host — type definitions: the one Pixi application, its backend and its listeners.
  */
-import type { PixiApplication, PixiContainer, PixiModule, RendererKind } from "../types";
+import type {
+  PixiApplication,
+  PixiContainer,
+  PixiMatrix,
+  PixiModule,
+  PixiRenderTexture,
+  RendererKind
+} from "../types";
 import type { ResolutionReason } from "./resolution";
 
 /**
@@ -56,6 +63,11 @@ export type HostState = {
    * build, so a restore reuses the installed classes; `undefined` in a production build.
    */
   uninstallCounting: (() => void) | undefined;
+  /**
+   * Swaps Pixi's own encoder back in. Set once per host state by the pass counting of a production build (F8), so a
+   * restore reuses the installed class; `undefined` in a dev or debug build, which counts with the six classes.
+   */
+  uninstallPasses: (() => void) | undefined;
   /**
    * Swaps Pixi's own bitmap text pipe back in. Set once per host state when the renderer's pipe,
    * whose SDF shader applies the alpha once, went into Pixi's registry, so a restore reuses it;
@@ -218,9 +230,13 @@ export type TextureUsage = {
 export type InstallCounting = (pixi: PixiModule) => () => void;
 
 /**
- * What `host` gets injected: the counting of a dev or debug build, `undefined` in production.
+ * What `host` gets injected: the counting of a dev or debug build, `undefined` in production, and the pass counting
+ * every other build installs instead (F8).
  */
-export type HostDeps = { installCounting: InstallCounting | undefined };
+export type HostDeps = {
+  installCounting: InstallCounting | undefined;
+  installPasses: InstallCounting;
+};
 
 /**
  * host methods injected into `viewport`, `sync` and `monitor`, and driven by the plugin root. Not
@@ -280,6 +296,24 @@ export type HostInternal = {
    * @returns True when it called Pixi.
    */
   render(): boolean;
+
+  /**
+   * Renders a container into an engine-owned texture before the stage pass, with Pixi's public
+   * `renderer.render({ container, target, transform, clear })`: the kept pictures. Cleared to
+   * premultiplied transparent. A no-op while nothing draws.
+   *
+   * @param container - The root of the render: a view's top, a stand-in, the stage root.
+   * @param target - The texture.
+   * @param transform - The world transform the root is drawn with in the texture.
+   * @param clear - True to clear the texture first.
+   * @returns True when it called Pixi.
+   */
+  renderTo(
+    container: PixiContainer,
+    target: PixiRenderTexture,
+    transform: PixiMatrix,
+    clear: boolean
+  ): boolean;
 
   /**
    * Asks for a drawing resolution; the next frame applies it on the resize path. A burst of asks
@@ -349,11 +383,14 @@ export type HostInternal = {
 
   /**
    * Draws the stage live into RGBA pixels over the whole canvas at half resolution, a quarter of
-   * the pixels, for the pixel oracle of `debug.verifyFrames`. A failed read is logged once.
+   * the pixels, for the pixel oracle of `debug.verifyFrames`; at another resolution when asked (the
+   * kept pictures are compared at the renderer's, where their filters run as on the canvas). A
+   * failed read is logged once.
    *
+   * @param resolution - Device pixels per CSS pixel of the read; half by default.
    * @returns The pixels, or `undefined` while nothing draws or when Pixi could not read them.
    */
-  pixels(): Uint8ClampedArray | undefined;
+  pixels(resolution?: number): Uint8ClampedArray | undefined;
 
   /**
    * The rectangle of the canvas in CSS pixels, the stage's own space: what a view is measured

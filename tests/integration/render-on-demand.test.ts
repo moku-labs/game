@@ -207,6 +207,7 @@ async function open(
 afterEach(async () => {
   for (const fixture of running.splice(0)) {
     fixture.oracle.expectNoMissedFrame();
+    fixture.oracle.expectPicturesCurrent();
     await fixture.app.stop();
   }
 

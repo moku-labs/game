@@ -45,6 +45,7 @@ const running: Array<{ app: App; watched: Watched }> = [];
 afterEach(async () => {
   for (const { app, watched } of running.splice(0)) {
     watched.oracle.expectNoMissedFrame();
+    watched.oracle.expectPicturesCurrent();
     await app.stop();
   }
 

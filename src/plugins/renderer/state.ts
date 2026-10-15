@@ -3,6 +3,7 @@
  */
 import { createDemandState } from "./demand/state";
 import { createHostState } from "./host/state";
+import { createKeptState } from "./kept/state";
 import { createMonitorState } from "./monitor/state";
 import { createSyncState } from "./sync/state";
 import type { Config, State } from "./types";
@@ -13,14 +14,15 @@ const RING_FRAMES = { min: 64, max: 16_384 } as const;
 
 /**
  * Checks the numbers of the config a game can get wrong, at `createApp`, in every build: the
- * resolution cap and the performance monitor.
+ * resolution cap, the performance monitor and the budget of the kept pictures.
  *
  * @param config - The resolved plugin config.
  * @throws {Error} When `maxResolution` is not a number above 0, `monitor.budgetMs` is neither
- *   `"rate"` nor a number above 0, or `monitor.frames` is not a whole number from 64 to 16384.
+ *   `"rate"` nor a number above 0, `monitor.frames` is not a whole number from 64 to 16384, or
+ *   `keptMb` is not a finite number of at least 0.
  */
 function checkConfig(config: Readonly<Config>): void {
-  const { maxResolution } = config;
+  const { maxResolution, keptMb } = config;
   const { budgetMs, frames } = config.monitor;
 
   if (!Number.isFinite(maxResolution) || maxResolution <= 0) {
@@ -37,6 +39,12 @@ function checkConfig(config: Readonly<Config>): void {
   if (!Number.isInteger(frames) || frames < RING_FRAMES.min || frames > RING_FRAMES.max) {
     throw new Error(
       `[game] renderer.monitor.frames is ${frames}.\n  Give a whole number from 64 to 16384.`
+    );
+  }
+
+  if (typeof keptMb !== "number" || !Number.isFinite(keptMb) || keptMb < 0) {
+    throw new Error(
+      `[game] renderer.keptMb is ${String(keptMb)}.\n  Give the MiB kept pictures may hold, or 0 to keep none.`
     );
   }
 }
@@ -59,6 +67,7 @@ export function createRendererState(ctx: { readonly config: Readonly<Config> }):
     viewport: createViewportState(),
     sync: createSyncState(ctx.config.debug),
     monitor: createMonitorState(ctx.config.monitor),
-    demand: createDemandState(ctx.config.debug.verifyFrames === true)
+    demand: createDemandState(ctx.config.debug.verifyFrames === true),
+    kept: createKeptState(ctx.config)
   };
 }

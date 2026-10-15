@@ -114,7 +114,8 @@ export function createSinks(draws?: DrawCounter): MonitorSinks {
     kindPixels: new Float64Array(KIND_SLOTS),
     filterKinds: undefined,
     compiles: createCompileRing(),
-    passes: undefined
+    passes: undefined,
+    measuring: false
   };
 }
 
@@ -198,6 +199,8 @@ export function createMonitorState(config: Readonly<MonitorConfig>): MonitorStat
     perf:
       typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__
         ? createPerfState(config, sinks)
-        : undefined
+        : undefined,
+    passes: { last: 0, open: 0, max: 0 },
+    passDetach: []
   };
 }

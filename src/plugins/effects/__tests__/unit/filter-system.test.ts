@@ -2,7 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FakeFilter, FakeUniformGroup } from "../../../renderer/__tests__/fake-pixi";
 import { NineSlice, Shape, Sprite, Transform } from "../../../renderer/components";
 import type { AnyComponentValue, Entity } from "../../../world/types";
-import { Blur, Displacement, Glow } from "../../filters/builtins";
+import {
+  Alpha,
+  Blur,
+  ColorMatrix,
+  Displacement,
+  Glow,
+  Noise,
+  Outline
+} from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { atlasTexture, type FakeFxBlurFilter } from "../fake-effects-pixi";
 import { Bad, Hazy, Smaller, Soft, SoftDim } from "../filter-fixtures";
@@ -794,5 +802,88 @@ describe("the filter sync — inputs, broken kinds and pending checks", () => {
     mock.frame();
 
     expect(version()).toBe(2);
+  });
+});
+
+describe("the filter sync — what the kept-picture cache may do with a slot (spec 23 P8.5)", () => {
+  /** A body that asks for its canvas position. */
+  const Lamp = defineFilter("fx.lamp", {
+    wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { let at = canvasPixel(uv); return textureSample(uTexture, uSampler, uv) * fu.amount + vec4<f32>(at * 0.0, 0.0, 0.0); }",
+    glsl: "void main() { vec2 at = canvasPixel(vTextureCoord); finalColor = texture(uTexture, vTextureCoord) * amount + vec4(at * 0.0, 0.0, 0.0); }",
+    uniforms: { amount: 1 }
+  });
+
+  it("slots carry their category: noise and displacement are screen; blur, colorMatrix, alpha, glow and outline are local", () => {
+    const mock = createMockEffects();
+
+    mock.features.push({ name: "board", description: { filters: [Tint] } });
+    mock.start();
+    mock.textures.set("fx.ripple", atlasTexture({ width: 8, height: 8, destroyed: false }));
+
+    const views = [
+      view(mock, [Noise()]),
+      view(mock, [Displacement({ map: "fx.ripple" })]),
+      view(mock, [Blur()]),
+      view(mock, [ColorMatrix({ saturation: 0.5 })]),
+      view(mock, [Alpha({ alpha: 0.5 })]),
+      view(mock, [Glow()]),
+      view(mock, [Outline()]),
+      view(mock, [Tint()])
+    ];
+
+    mock.frame();
+
+    const cacheOf = (entity: Entity) =>
+      mock.renderer.sets.findLast(set => set.entity === entity)?.slots[0]?.cache;
+
+    expect(views.map(entity => cacheOf(entity))).toEqual([
+      "screen",
+      "screen",
+      "local",
+      "local",
+      "local",
+      "local",
+      "local",
+      "local"
+    ]);
+  });
+
+  it("a placed filter's slot hands over its keptOrigin array by reference; another slot has no origin", () => {
+    const mock = createMockEffects();
+
+    mock.features.push({ name: "ward", description: { filters: [Lamp, Tint] } });
+    mock.start();
+
+    const lamp = view(mock, [Lamp()]);
+    const tint = view(mock, [Tint()]);
+
+    mock.frame();
+
+    const slotOf = (entity: Entity) =>
+      mock.renderer.sets.findLast(set => set.entity === entity)?.slots[0];
+    const group = mock.state.views.get(lamp)?.instances.get("fx.lamp")?.filter.resources.fu as
+      | FakeUniformGroup
+      | undefined;
+
+    expect(slotOf(lamp)?.cache).toBe("placed");
+    expect(slotOf(lamp)?.origin).toBeInstanceOf(Float32Array);
+    expect(slotOf(lamp)?.origin).toBe(group?.uniforms.keptOrigin);
+    expect([...(slotOf(lamp)?.origin ?? [])]).toEqual([0, 0]);
+    expect(slotOf(tint)?.origin).toBeUndefined();
+    expect("origin" in (slotOf(tint) ?? {})).toBe(false);
+  });
+
+  it("marks a slot that shows a blurred copy: a Blur and a filter with inputs, no other", () => {
+    const mock = softMock();
+    const soft = view(mock, [Soft()]);
+    const blur = view(mock, [Blur()]);
+    const glow = view(mock, [Glow()]);
+
+    mock.frame();
+
+    const blursOf = (entity: Entity) =>
+      mock.renderer.sets.findLast(set => set.entity === entity)?.slots[0]?.blurs;
+
+    expect([blursOf(soft), blursOf(blur), blursOf(glow)]).toEqual([true, true, undefined]);
   });
 });

@@ -18,9 +18,11 @@ import type {
   CreateTextureOptions,
   DebugSwitches,
   DisplayAdapter,
+  FilterCache,
   FilterSlot,
   FilterSlotInputs,
   HitBox,
+  KeptStats,
   LegendEntry,
   Orientation,
   PictureRect,
@@ -167,7 +169,11 @@ expectTypeOf(renderer.sync.debug.nineSlice).toEqualTypeOf<(on: boolean) => void>
 expectTypeOf(renderer.sync.debug.state()).toEqualTypeOf<{
   nineSlice: boolean;
   verifyFrames: boolean;
+  kept: boolean;
 }>();
+expectTypeOf(renderer.sync.debug.kept).toEqualTypeOf<(on: boolean) => void>();
+// The editor's A/B switch of a measurement passes the one key it changes.
+expectTypeOf<{ kept: false }>().toExtend<Config["debug"]>();
 expectTypeOf(renderer.sync.debug.verifyFrames).toEqualTypeOf<(on: boolean) => void>();
 // A game that sets only the outline at start keeps compiling: a switch left out is off.
 expectTypeOf<{ nineSlice: true }>().toExtend<Config["debug"]>();
@@ -191,8 +197,16 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   views: number;
   pooled: number;
   renderPasses: number;
+  renderPassesMax: number;
+  kept: KeptStats;
   drawCalls?: number;
 }>();
+expectTypeOf<RenderStats["kept"]>().toEqualTypeOf<{
+  pictures: number;
+  mb: number;
+  retakes: number;
+}>();
+expectTypeOf<Config["keptMb"]>().toEqualTypeOf<number>();
 expectTypeOf(renderer.capture).toEqualTypeOf<
   (options?: CaptureOptions) => Promise<Captured | undefined>
 >();
@@ -212,6 +226,9 @@ expectTypeOf<FilterSlot>().toEqualTypeOf<{
   passes: number;
   kind?: string;
   inputs?: FilterSlotInputs;
+  cache?: FilterCache;
+  origin?: Float32Array;
+  blurs?: boolean;
 }>();
 expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void
@@ -221,6 +238,13 @@ expectTypeOf(renderer.host.gl).toEqualTypeOf<() => WebGL2RenderingContext | unde
 expectTypeOf(renderer.sync.renderPasses).toEqualTypeOf<() => number>();
 
 renderer.sync.filters.set(1_048_576, [{ filter: glow, passes: 1 }]);
+// A slot of effects says what the kept cache may do with its filter; a game's own slot leaves it out.
+renderer.sync.filters.set(1_048_580, [
+  { filter: glow, passes: 1, cache: "placed", origin: new Float32Array(2) }
+]);
+
+// @ts-expect-error — a slot's cache is one of the three categories
+renderer.sync.filters.set(1_048_579, [{ filter: glow, passes: 1, cache: "always" }]);
 
 // @ts-expect-error — a slot says what one apply of its filter costs
 renderer.sync.filters.set(1_048_577, [{ filter: glow }]);

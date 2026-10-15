@@ -401,6 +401,21 @@ describe("the check of skipped frames", () => {
     });
   });
 
+  // A kept picture that no longer matches its live frame shows the player an old screen (spec 23 P13.3).
+  it("fails a checkpoint on a stale picture", async () => {
+    installCodec();
+
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pageVerify({ test: "open-popup", where: "the start" });
+    app.log.warn("renderer:stale-picture", { entity: 12 });
+
+    expect(
+      await pageCheckpoint({ test: "open-popup", where: "step 1 (checkpoint)", settleFrames: 60 })
+    ).toEqual({ ok: false, reason: 'renderer:stale-picture {"entity":12}' });
+  });
+
   it("reads nothing of the log while the check is off", async () => {
     const { app } = await pageGame();
 

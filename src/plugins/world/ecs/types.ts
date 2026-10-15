@@ -5,6 +5,7 @@
 import type { Json, Snapshot, SnapshotOf } from "../../model/types";
 import type { Time } from "../../time/types";
 import type { ProjectionKey } from "../projection/types";
+import type { QueryPlan } from "./query";
 import type { SystemTiming } from "./systems";
 
 /**
@@ -230,7 +231,9 @@ export type ResourceType<Value extends object> = {
 };
 
 /**
- * A query term marked as written by `mut()`. Its only effect is change detection.
+ * A query term marked as written by `mut()`. Its only effect is change detection: every row it
+ * yields is marked changed, written or not; a system that writes only some rows queries the plain
+ * term and calls `set` (README, "Marking what changed").
  *
  * @example
  * ```ts
@@ -410,15 +413,20 @@ export type AnySystem = {
 };
 
 /**
- * One registered system and the frame it was registered in. A system registered during a frame
- * runs from the next frame on.
+ * One registered system, the frame it was registered in and its query resolved once. A system
+ * registered during a frame runs from the next frame on. Spec 28 (deferred) extends it with the
+ * system's scope.
  *
  * @example
  * ```ts
- * const entry: SystemEntry = { definition: bobSystem, frame: 12 };
+ * const entry: SystemEntry = { definition: bobSystem, frame: 12, plan: { names: ["Transform"], written: ["Transform"] } };
  * ```
  */
-export type SystemEntry = { readonly definition: AnySystem; readonly frame: number };
+export type SystemEntry = {
+  readonly definition: AnySystem;
+  readonly frame: number;
+  readonly plan: QueryPlan;
+};
 
 /**
  * A structural change queued while a phase runs. Applied in call order when the phase ends.
@@ -598,7 +606,18 @@ export type History = {
   newest: number | undefined;
   /** The frame the recording started on: the shadow is the world at its end. */
   started: number | undefined;
+  /** Rows marked and rows that changed, per component, over the current window of frames. */
+  marks: Map<string, MarkCount>;
+  /** Recorded frames in the current window; the counts are judged and zeroed at `HISTORY_FRAMES`. */
+  markFrames: number;
+  /** The components `world:mut-unchanged` already named: each is named once. */
+  warned: Set<string>;
 };
+
+/**
+ * Rows of one component marked changed in a window of frames, and how many of them changed.
+ */
+export type MarkCount = { marked: number; changed: number };
 
 /**
  * ecs module state.
@@ -633,6 +652,8 @@ export type EcsState = {
   timing: SystemTiming | undefined;
   /** The row of each timed system in `timing`, by name: a system that comes back keeps its row. */
   timingSlots: Map<string, number>;
+  /** A dev build reported a store whose keys changed while a phase walked it: reported once. */
+  walkReported: boolean;
 };
 
 /**
@@ -830,7 +851,10 @@ export type EcsApi = {
 
   /**
    * Walks the store of the FIRST term in insertion order and keeps the entities that carry every
-   * term. Deterministic. A `mut()` term marks every yielded entity changed for that component.
+   * term. Deterministic. A `mut()` term marks every yielded entity changed for that component
+   * (README, "Marking what changed"). Inside a system the walk reads the store live (changes are
+   * queued until the phase ends); outside one it walks the keys taken at the start. Every row is a
+   * new array: keep it if you like. Put the rarest component first: the walk visits its store.
    *
    * @param terms - Component types, tag types and `mut()` terms.
    * @returns The matching rows: the entity and one value per term.

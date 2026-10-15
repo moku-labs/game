@@ -10,7 +10,7 @@
 
 import type { GpuTimer } from "./gpu-timer";
 import { NO_STENCIL, writePass } from "./ring";
-import { COUNT, type PassSink, type PassTarget, type PerfCtx } from "./types";
+import { COUNT, type MonitorSinks, type PassSink, type PassTarget, type PerfCtx } from "./types";
 import { cell } from "./units";
 
 /** The pass kinds by index: canvas, texture, filter. */
@@ -95,13 +95,19 @@ export function createPassSink(pc: PerfCtx, timer: GpuTimer | undefined): PassSi
 /**
  * Counts the WebGL passes of every frame on Pixi's public runners: a target change emitted by `bind` is one pass; at
  * `renderStart` (added after Pixi's systems, so the root is bound by then) the root is one pass when `bind` emitted
- * nothing, because the previous render call ended on the root. Only inside a frame. Stencil is not measured on WebGL.
+ * nothing, because the previous render call ended on the root. Only inside a frame. Every build counts (F8); `record`
+ * also writes each pass into the ring of an agent build. Stencil is not measured on WebGL.
  *
  * @param renderer - Pixi's WebGL renderer.
- * @param pc - The perf context.
+ * @param sinks - The sinks the count goes into.
+ * @param record - Writes the pass with its index in the frame; an agent build's ring, `undefined` elsewhere.
  * @returns The remover.
  */
-export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void {
+export function countGlPasses(
+  renderer: PassRenderer,
+  sinks: MonitorSinks,
+  record?: (target: PassTarget, index: number) => void
+): () => void {
   const state = { changed: false };
 
   /**
@@ -110,21 +116,11 @@ export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void 
    * @param target - The target.
    */
   const count = (target: PassTarget): void => {
-    const { counts } = pc.sinks;
-    const kind = kindOf(pc, target);
+    const { counts } = sinks;
     const index = cell(counts, COUNT.passes);
 
     counts[COUNT.passes] = index + 1;
-    writePass(
-      pc.perf.ring.passes,
-      pc.perf.frame,
-      index,
-      kind,
-      NO_STENCIL,
-      target.pixelWidth,
-      target.pixelHeight,
-      labelOf(pc, target, kind)
-    );
+    record?.(target, index);
   };
   const prerender = {
     /** A render call starts: no target changed yet. */
@@ -141,16 +137,17 @@ export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void 
     onRenderTargetChange: (target: PassTarget): void => {
       state.changed = true;
 
-      if (pc.sinks.inFrame) count(target);
+      if (sinks.inFrame) count(target);
     }
   };
   const start = {
     /** The root is bound: one pass when no change was emitted for it. */
     renderStart: (): void => {
-      if (pc.sinks.inFrame && !state.changed) count(renderer.renderTarget.renderTarget);
+      if (sinks.inFrame && !state.changed) count(renderer.renderTarget.renderTarget);
     }
   };
 
+  sinks.measuring = true;
   renderer.runners.prerender.add(prerender);
   renderer.renderTarget.onRenderTargetChange.add(change);
   renderer.runners.renderStart.add(start);
@@ -160,4 +157,29 @@ export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void 
     renderer.renderTarget.onRenderTargetChange.remove(change);
     renderer.runners.renderStart.remove(start);
   };
+}
+
+/**
+ * Counts and records the WebGL passes of an agent build: `countGlPasses` with each pass written into the ring, with
+ * its kind and its label.
+ *
+ * @param renderer - Pixi's WebGL renderer.
+ * @param pc - The perf context.
+ * @returns The remover.
+ */
+export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void {
+  return countGlPasses(renderer, pc.sinks, (target, index) => {
+    const kind = kindOf(pc, target);
+
+    writePass(
+      pc.perf.ring.passes,
+      pc.perf.frame,
+      index,
+      kind,
+      NO_STENCIL,
+      target.pixelWidth,
+      target.pixelHeight,
+      labelOf(pc, target, kind)
+    );
+  });
 }

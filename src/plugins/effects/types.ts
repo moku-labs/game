@@ -258,6 +258,7 @@ export type AssetsReplaced = AssetsEvents["assets:replaced"];
  */
 export type HotSwap = GlobalEvents["ui:hot-swap"];
 
+export type { FilterCache } from "../renderer/types";
 export type {
   AlphaValue,
   BlurValue,

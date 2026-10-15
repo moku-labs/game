@@ -1,7 +1,8 @@
 /**
  * @file renderer/demand — what "shown" means (F6, F18a): a view drawn in the frame as it stands, a leaf off the screen
- * excepted. Everything read is a public Pixi property: `parent`, `visible`, `renderable`, `alpha`, `filters`,
- * `Filter.padding`, `getBounds` and `Application.screen`.
+ * excepted. A kept top is drawn through its quad (spec 23 P10.1): the walk goes on through it, with the padding its
+ * filters hang with on the stand-in. Everything read is a public Pixi property: `parent`, `visible`, `renderable`,
+ * `alpha`, `filters`, `Filter.padding`, `getBounds` and `Application.screen`.
  */
 import type { Entity } from "../../world/types";
 import type { View } from "../sync/types";
@@ -31,19 +32,47 @@ function paddingOf(node: PixiContainer): number {
 const HIDDEN = -1;
 
 /**
- * Walks from a node up to the stage: every node on the way is visible, renderable and not fully transparent, and the
- * chain reaches the stage. The paddings of the filters met on the way are summed; no object is made.
+ * What a node whose `renderable` is false adds to a chain: the padding of a kept top its quad draws, or `HIDDEN`.
+ */
+export type DrawnThrough = (node: PixiContainer) => number;
+
+/**
+ * The reader without kept pictures: no quad draws any node.
+ *
+ * @returns `HIDDEN`.
+ */
+function noneThrough(): number {
+  return HIDDEN;
+}
+
+/**
+ * Walks from a node up to the stage: every node on the way is visible, renderable (or a kept top its quad draws) and
+ * not fully transparent, and the chain reaches the stage. The paddings of the filters met on the way are summed; no
+ * object is made.
  *
  * @param from - The first node of the walk.
  * @param stage - The stage of the application.
+ * @param through - The kept reader: the padding of a kept top drawn through its quad, or `HIDDEN`.
  * @returns The sum of the paddings of the chain, or `HIDDEN` when the chain is not drawn.
  */
-function chainPadding(from: PixiContainer | null, stage: PixiContainer): number {
+function chainPadding(
+  from: PixiContainer | null,
+  stage: PixiContainer,
+  through: DrawnThrough
+): number {
   let pad = 0;
 
   for (let node = from; node !== stage; node = node.parent) {
     if (node === null) return HIDDEN;
-    if (!node.visible || !node.renderable || node.alpha <= 0) return HIDDEN;
+    if (!node.visible || node.alpha <= 0) return HIDDEN;
+
+    if (!node.renderable) {
+      const kept = through(node);
+
+      if (kept === HIDDEN) return HIDDEN;
+
+      pad += kept;
+    }
 
     pad += paddingOf(node);
   }
@@ -108,13 +137,15 @@ function onScreen(state: DemandState, host: HostModule, top: PixiContainer, pad:
  * @param host - The host module (`stage()`, `screen()`).
  * @param views - The views by entity.
  * @param entity - The marked entity.
+ * @param through - The kept reader: the padding of a kept top drawn through its quad, or `HIDDEN`; none by default.
  * @returns True when the view is drawn.
  */
 export function isShown(
   state: DemandState,
   host: HostModule,
   views: ReadonlyMap<Entity, View>,
-  entity: Entity
+  entity: Entity,
+  through: DrawnThrough = noneThrough
 ): boolean {
   const view = views.get(entity);
   const stage = host.stage();
@@ -122,7 +153,7 @@ export function isShown(
   if (view === undefined || stage === undefined) return false;
 
   const top = view.wrapper ?? view.object;
-  const pad = chainPadding(top, stage);
+  const pad = chainPadding(top, stage, through);
 
   if (pad === HIDDEN) return false;
   if (view.wrapper !== undefined || top.children.length > 0) return true;
@@ -138,17 +169,19 @@ export function isShown(
  * @param host - The host module (`stage()`).
  * @param views - The views by entity.
  * @param entity - The entity of a loose mark.
+ * @param through - The kept reader: the padding of a kept top drawn through its quad, or `HIDDEN`; none by default.
  * @returns True when the ancestors of the view draw it.
  */
 export function ancestorsShown(
   host: HostModule,
   views: ReadonlyMap<Entity, View>,
-  entity: Entity
+  entity: Entity,
+  through: DrawnThrough = noneThrough
 ): boolean {
   const view = views.get(entity);
   const stage = host.stage();
 
   if (view === undefined || stage === undefined) return false;
 
-  return chainPadding((view.wrapper ?? view.object).parent, stage) !== HIDDEN;
+  return chainPadding((view.wrapper ?? view.object).parent, stage, through) !== HIDDEN;
 }

@@ -567,3 +567,54 @@ describe("the history reset", () => {
     expect(world.api.ecs.diff(4, 5).entities).toEqual([]);
   });
 });
+
+describe("the frame history walks the marked pairs (spec 26 W2)", () => {
+  const Score = component("Score", { value: 0 });
+
+  it("records only the marked component of an entity; an unmarked in-place write is not recorded", () => {
+    const world = recording();
+    const entity = world.api.ecs.spawn(owner, [Position({ x: 1 }), Score(), Route()]);
+
+    world.frame();
+    // A write past the marks, as into a row of a plain term, and one marked write.
+    Object.assign(world.ctx.state.ecs.stores.get("Position")?.get(entity) ?? {}, { x: 50 });
+    world.api.ecs.set(entity, Score, { value: 3 });
+    world.frame();
+
+    expect(changesAt(world, 2)).toEqual([
+      { id: entity, owner, component: "Score", from: { value: 0 }, to: { value: 3 } }
+    ]);
+    expect(world.ctx.state.ecs.history?.shadow.get(entity)?.components.get("Position")).toEqual({
+      x: 1,
+      y: 0
+    });
+  });
+
+  it("compares JSON as before: equal copies, key sets, array lengths and orders, arrays against objects", () => {
+    const world = recording();
+    const entity = world.api.ecs.spawn(owner, [Payload({ data: { a: 1, b: [1, 2] } })]);
+    const steps: Array<[data: object, recorded: boolean]> = [
+      [{ a: 1, b: [1, 2] }, false],
+      [{ a: 1, b: [1, 2], c: 0 }, true],
+      [{ a: 1, b: [1, 2] }, true],
+      [{ a: 1, c: [1, 2] }, true],
+      [{ a: 1, c: [1, 2, 3] }, true],
+      [{ a: 1, c: [1, 3, 2] }, true],
+      [{ a: 1, c: { 0: 1, 1: 3, 2: 2 } }, true],
+      [{ a: 1, c: { 0: 1, 1: 3, 2: 2 } }, false],
+      [{ a: { deep: [{ x: 1 }] }, c: {} }, true],
+      [{ a: { deep: [{ x: 1 }] }, c: {} }, false]
+    ];
+
+    world.frame();
+
+    const recorded = steps.map(([data], index) => {
+      world.api.ecs.set(entity, Payload, { data });
+      world.frame();
+
+      return (changesAt(world, index + 2) ?? []).length > 0;
+    });
+
+    expect(recorded).toEqual(steps.map(([, expected]) => expected));
+  });
+});

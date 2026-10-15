@@ -5,7 +5,8 @@
  */
 import type { EcsApi } from "../../world/ecs/types";
 import type { Entity } from "../../world/types";
-import type { PixiContainer, PixiFilter } from "../types";
+import type { KeptState } from "../kept/types";
+import type { KeptModule, PixiContainer, PixiFilter } from "../types";
 import type { FilterSlot, SyncState, View } from "./types";
 
 /**
@@ -47,16 +48,21 @@ export function clearFilters(target: PixiContainer): void {
 
 /**
  * Hangs the filters on a view: on its wrapper when it has one, so they cover the entity's whole
- * subtree, otherwise on the object. Written only when the instances differ from what the target
+ * subtree, otherwise on the object; on the stand-in of its kept picture while it has one
+ * (`kept.filterTarget`, spec 23 P9.1). Written only when the instances differ from what the target
  * holds, and `before` runs once just before that write: the caller marks the entity there.
  *
  * @param view - The view.
  * @param slots - The filters in draw order; empty clears them.
  * @param before - Called once, before the write, when there is one.
+ * @param target - Where the filters hang: the view's top unless the kept cache says otherwise.
  */
-export function applyFilters(view: View, slots: readonly FilterSlot[], before: () => void): void {
-  const target = view.wrapper ?? view.object;
-
+export function applyFilters(
+  view: View,
+  slots: readonly FilterSlot[],
+  before: () => void,
+  target: PixiContainer = view.wrapper ?? view.object
+): void {
   if (holds(target, slots)) return;
 
   before();
@@ -113,19 +119,22 @@ function nameKind(state: SyncState, slot: FilterSlot): void {
 }
 
 /**
- * Keeps the filters of an entity and writes them onto its view when it has one. An empty list
- * forgets the entity. A new list on the view is structural: `mark` runs before it is written.
+ * Keeps the filters of an entity and writes them onto its view when it has one, then tells the
+ * kept cache (spec 23 P9.1). An empty list forgets the entity. A new list on the view is
+ * structural: `mark` runs before it is written.
  *
  * @param state - The sync branch of the plugin state.
  * @param entity - The entity.
  * @param slots - The filters in draw order.
  * @param mark - Marks the entity before its view is written.
+ * @param kept - The kept cache: where the filters hang, and the record it keeps.
  */
 export function setFilters(
   state: SyncState,
   entity: Entity,
   slots: readonly FilterSlot[],
-  mark: (entity: Entity) => void
+  mark: (entity: Entity) => void,
+  kept: KeptModule
 ): void {
   if (slots.length === 0) state.filters.delete(entity);
   else state.filters.set(entity, [...slots]);
@@ -137,26 +146,32 @@ export function setFilters(
 
   const view = state.views.get(entity);
 
-  if (view !== undefined) applyFilters(view, slots, () => mark(entity));
+  if (view !== undefined) applyFilters(view, slots, () => mark(entity), kept.filterTarget(view));
+
+  kept.slots(entity, slots);
 }
 
 /**
- * Moves the filters of an entity from its object to the wrapper it has just been given.
+ * Moves the filters of an entity from its object to the wrapper it has just been given. Nothing
+ * while its picture is kept: the filters hang on the stand-in, and the wrapper is a new top, so
+ * the next flush draws it live and moves them (spec 23 P9.1).
  *
  * @param state - The sync branch of the plugin state.
  * @param entity - The entity.
  * @param view - Its view, wrapper set.
  * @param before - Called before a write of the object's or the wrapper's filters.
+ * @param kept - The kept state.
  */
 export function moveFilters(
   state: SyncState,
   entity: Entity,
   view: View,
-  before: () => void
+  before: () => void,
+  kept: KeptState
 ): void {
   const slots = state.filters.get(entity);
 
-  if (slots === undefined) return;
+  if (slots === undefined || kept.byEntity.get(entity)?.mode === "kept") return;
 
   if (heldFilters(view.object).length > 0) before();
   clearFilters(view.object);
@@ -219,20 +234,23 @@ function passesOf(slots: readonly FilterSlot[]): number {
 }
 
 /**
- * The render passes of a frame: 1 for the frame, plus what every filtered view in the tree costs.
- * Read from the slots, never asked of the GPU.
+ * The render passes of a frame: 1 for the frame, plus what every filtered view in the tree costs,
+ * a view drawn from its kept picture excepted, plus what the last flush of the kept cache cost
+ * (spec 23 P9.2). Read from the slots, never asked of the GPU.
  *
  * @param state - The sync branch of the plugin state.
+ * @param kept - The kept state.
  * @returns The passes; 0 while inert.
  */
-export function renderPassesOf(state: SyncState): number {
+export function renderPassesOf(state: SyncState, kept: KeptState): number {
   const root = state.root;
 
   if (root === undefined) return 0;
 
-  let passes = 1;
+  let passes = 1 + kept.flushPasses;
 
   for (const [entity, slots] of state.filters) {
+    if (kept.byEntity.get(entity)?.mode === "kept") continue;
     if (isDrawn(state.views.get(entity), root)) passes += passesOf(slots);
   }
 

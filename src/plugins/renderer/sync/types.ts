@@ -3,8 +3,10 @@
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
 import type { HostApi, HostInternal } from "../host/types";
+import type { FilterCache } from "../kept/types";
 import type {
   DemandModule,
+  KeptModule,
   PixiBitmapFont,
   PixiContainer,
   PixiFilter,
@@ -15,6 +17,7 @@ import type {
   RendererCtx
 } from "../types";
 import type { Point, ViewportApi, ViewportInternal } from "../viewport/types";
+import type { HiddenCtx, HiddenReason } from "./hidden";
 
 /**
  * Which component gave an entity its display object. `"adapter"` is a component a plugin above
@@ -409,12 +412,14 @@ export type FontsApi = {
 
 /**
  * One filter on an entity's view: a Pixi filter instance `effects` built, how many render passes
- * one apply of it costs, and the filter kind id the performance log names it by.
+ * one apply of it costs, the filter kind id the performance log names it by, and what the
+ * kept-picture cache may do with it.
  *
  * @example
  * ```ts
  * // A full-screen blur of quality 4 applies 8 times.
- * const slot: FilterSlot = { filter: blur, passes: 8, kind: "blur" };
+ * const blurSlot: FilterSlot = { filter: blur, passes: 8, kind: "blur", cache: "local", blurs: true };
+ * const slot: FilterSlot = { filter: glow, passes: 1, kind: "effects.glow", cache: "local" };
  * ```
  */
 export type FilterSlot = {
@@ -424,6 +429,15 @@ export type FilterSlot = {
   kind?: string;
   /** The stages of a filter's inputs and the seam of the kept-picture cache; filled by effects, left out by a game. */
   inputs?: FilterSlotInputs;
+  /** What the kept-picture cache may do with the filter; left out, it is `"screen"` (drawn live). */
+  cache?: FilterCache;
+  /** The filter's `keptOrigin` uniform, which the renderer sets to the canvas origin of a picture. */
+  origin?: Float32Array;
+  /**
+   * The filter shows a blurred copy of what is under it (the built-in `Blur`, a filter with inputs); an overlay over
+   * it holds the loops under it (spec 22).
+   */
+  blurs?: boolean;
 };
 
 /**
@@ -537,14 +551,14 @@ export type FiltersApi = {
 };
 
 /**
- * The debug switches of the renderer: the nine-slice outline and the pixel check of skipped frames.
+ * The debug switches of the renderer: the nine-slice outline, the pixel check of skipped frames and the kept pictures.
  *
  * @example
  * ```ts
- * const switches: DebugSwitches = { nineSlice: true, verifyFrames: false };
+ * const switches: DebugSwitches = { nineSlice: true, verifyFrames: false, kept: true };
  * ```
  */
-export type DebugSwitches = { nineSlice: boolean; verifyFrames: boolean };
+export type DebugSwitches = { nineSlice: boolean; verifyFrames: boolean; kept: boolean };
 
 /**
  * The debug drawing of the renderer, `app.renderer.sync.debug`. The switch outlines every
@@ -555,7 +569,7 @@ export type DebugSwitches = { nineSlice: boolean; verifyFrames: boolean };
  * ```ts
  * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
  * app.renderer.sync.debug.nineSlice(true);
- * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false }
+ * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true }
  * ```
  */
 export type DebugApi = {
@@ -589,10 +603,25 @@ export type DebugApi = {
    * ```ts
    * // The visual runner checks every stepped frame of a test in the browser.
    * app.renderer.sync.debug.verifyFrames(true);
-   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: true }
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: true, kept: true }
    * ```
    */
   verifyFrames(on: boolean): void;
+
+  /**
+   * Draws every kept picture live again (false) or lets the renderer keep them (true): the A/B switch of a measurement.
+   * Off takes effect in the next drawn frame, all views at once; on lets each view be taken again by the usual rule.
+   * Works in every build; with `keptMb: 0` the pictures stay off.
+   *
+   * @param on - False to draw every filtered view live.
+   * @example
+   * ```ts
+   * // The editor's tools page compares the memory screen with and without kept pictures.
+   * app.renderer.sync.debug.kept(false);
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: false }
+   * ```
+   */
+  kept(on: boolean): void;
 
   /**
    * What the debug switches are set to, as a fresh object.
@@ -601,7 +630,7 @@ export type DebugApi = {
    * @example
    * ```ts
    * // An e2e test makes sure no outline is drawn before it compares a screenshot.
-   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false }
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: true }
    * ```
    */
   state(): DebugSwitches;
@@ -732,7 +761,7 @@ export type SyncApi = {
    * ```ts
    * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
    * app.renderer.sync.debug.nineSlice(true);
-   * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false }
+   * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true }
    * ```
    */
   debug: DebugApi;
@@ -904,15 +933,53 @@ export type SyncState = {
 };
 
 /**
- * What `sync` gets injected: the two modules below it, and `demand`, which every write site marks before it writes.
+ * What `sync` gets injected: the two modules below it, `demand`, which every write site marks before it writes, and
+ * `kept`, which says where a view's filters hang and keeps its picture.
  */
 export type SyncDeps = {
   host: HostApi & HostInternal;
   viewport: ViewportApi & ViewportInternal;
   demand: DemandModule;
+  kept: KeptModule;
 };
 
 /**
  * Domain context of the sync module.
  */
 export type SyncCtx = { ctx: RendererCtx; deps: SyncDeps };
+
+export type { HiddenCtx, HiddenReason } from "./hidden";
+
+/**
+ * The writers of `sync` the kept cache draws through, injected by `createModules`, since a module never imports
+ * another's run-time code: the one owner of `renderable` (`hidden.ts`) and the one writer of a view's filters.
+ */
+export type SyncWriters = {
+  /** Changes one reason of a view and its `renderable` without a mark. */
+  readonly swapHidden: (sctx: HiddenCtx, view: View, reason: HiddenReason, hidden: boolean) => void;
+  /** Tells whether one reason hides a view. */
+  readonly hiddenBy: (view: View, reason: HiddenReason) => boolean;
+  /** Tells whether a node is hidden by these reasons alone. */
+  readonly hiddenOnlyAmong: (
+    sctx: HiddenCtx,
+    node: PixiContainer,
+    reasons: readonly HiddenReason[]
+  ) => boolean;
+  /** Draws a picture of nodes hidden only by one reason, every node back from its mask after. */
+  readonly liftFor: <Result>(
+    sctx: HiddenCtx,
+    lift: readonly PixiContainer[],
+    hide: readonly PixiContainer[],
+    reason: HiddenReason,
+    draw: () => Result
+  ) => Result;
+  /** Hangs the filters on a view's top, or on a target. */
+  readonly applyFilters: (
+    view: View,
+    slots: readonly FilterSlot[],
+    before: () => void,
+    target?: PixiContainer
+  ) => void;
+  /** Takes every filter off a display object. */
+  readonly clearFilters: (target: PixiContainer) => void;
+};

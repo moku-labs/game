@@ -13,6 +13,7 @@ import { cancelCaptures, captureFrame, serveCaptures } from "./capture";
 import { pageNow } from "./clock";
 import { openFrame } from "./commit";
 import type { FrameRing, PerfChange, PerfEventName, PerfLogLine } from "./log-types";
+import { countGlPasses } from "./passes";
 import {
   attachPerf,
   beginAgent,
@@ -73,6 +74,7 @@ function resolutionMessage(value: unknown): string {
 export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorModule {
   const state = ctx.state.monitor;
   const clock = ctx.deps.clock;
+  const { passes, sinks } = state;
   const mctx: MonitorCtx = { ctx, deps };
   // Inline and positive: a production `define` folds it to `undefined`, and every branch below
   // that reads it goes with it.
@@ -80,6 +82,33 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && state.perf !== undefined
       ? { ctx, deps, perf: state.perf, sinks: state.sinks }
       : undefined;
+
+  /**
+   * A measured pass number, or the slot estimate where no counter saw a drawn frame (F8): headless, a test stage.
+   *
+   * @param counted - The measured number; 0 before a counter saw one.
+   * @returns The number `stats()` reports.
+   */
+  const measured = (counted: number): number =>
+    sinks.measuring && counted > 0 ? counted : deps.sync.renderPasses();
+
+  /**
+   * Closes the pass count of a frame: a drawn frame whose passes a counter saw is the new `renderPasses`; a skipped
+   * frame keeps both numbers. The frame closes here, except in an agent build, whose commit closes it after the
+   * record is written.
+   *
+   * @param drawn - True when the render phase drew the frame.
+   */
+  const notePasses = (drawn: boolean): void => {
+    const count = cell(sinks.counts, COUNT.passes);
+
+    if (drawn && count > 0) {
+      passes.last = count;
+      passes.open = Math.max(passes.open, count);
+    }
+
+    if (pc === undefined) sinks.inFrame = false;
+  };
 
   return {
     stats: (): RenderStats => {
@@ -99,7 +128,9 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
         },
         views: counts.views,
         pooled: counts.pooled,
-        renderPasses: deps.sync.renderPasses()
+        renderPasses: measured(passes.last),
+        renderPassesMax: measured(passes.max),
+        kept: deps.kept.stats()
       };
 
       // The dev or agent guard, inline as in `capture()`: the field is absent from a production
@@ -181,9 +212,13 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     },
 
     begin: (): void => {
-      beginFrame(state, clock.now());
+      // A closed window reads the takes of its second: `stats().kept.retakes`.
+      if (beginFrame(state, clock.now())) deps.kept.drainTakes();
       // A draw between two frames, as the extract of a capture, is not a draw of this frame.
       state.draws.frame = 0;
+      // The passes of this frame, counted in every build (F8); a pass between frames is not.
+      sinks.counts[COUNT.passes] = 0;
+      sinks.inFrame = true;
 
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
         openFrame(pc.sinks);
@@ -196,6 +231,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
       if (drawn) state.draws.last = state.draws.frame;
       state.draws.frame = 0;
       state.lastDrawn = drawn;
+      notePasses(drawn);
 
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
         pc.perf.drawn = drawn;
@@ -216,6 +252,20 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     attach: (): void => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
         attachPerf(pc);
+      }
+    },
+
+    attachPasses: (): void => {
+      // An agent build counts through `attach`; WebGPU through the encoder `host` installed.
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) return;
+
+      for (const off of state.passDetach) off();
+      state.passDetach.length = 0;
+
+      const app = ctx.state.host.app;
+
+      if (deps.host.kind() === "webgl" && app !== undefined) {
+        state.passDetach.push(countGlPasses(app.renderer, sinks));
       }
     },
 
@@ -265,6 +315,10 @@ export function stopMonitor(state: MonitorState): void {
   resetWindow(state);
   state.draws.frame = 0;
   state.draws.last = 0;
+  state.sinks.inFrame = false;
+
+  for (const off of state.passDetach) off();
+  state.passDetach.length = 0;
 
   if (
     typeof __MOKU_GAME_AGENT__ !== "undefined" &&

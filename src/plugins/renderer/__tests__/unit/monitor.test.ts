@@ -1,13 +1,18 @@
+import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
 import { Parent, Shape, Sprite, Transform } from "../../components";
 import { sourceBytes, textureUsage } from "../../host/readback";
+import { frameAt } from "../../monitor/ring";
 import { createMonitorState } from "../../monitor/state";
 import { beginFrame, endFrame } from "../../monitor/window";
 import type { PixiApplication } from "../../types";
+import { startDrawn } from "../demand-harness";
 import { fakePictureUrl, installFakeCanvas, readFakePicture } from "../fake-canvas";
 import { FAKE_PNG, type FakeScene, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
+import { linesOf, startAgent } from "../perf-harness";
+import { stagePixi } from "../stage-pixi";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -77,7 +82,9 @@ describe("renderer stats", () => {
       textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
-      renderPasses: 0
+      renderPasses: 0,
+      renderPassesMax: 0,
+      kept: { pictures: 0, mb: 0, retakes: 0 }
     });
     expect("drawCalls" in stats).toBe(false);
   });
@@ -1175,5 +1182,83 @@ describe("renderer stats: frames drawn", () => {
     framesFrom(mock, 48, 2);
 
     expect(mock.pixi.last().renderer.renders).toBe(3);
+  });
+});
+
+describe("the kept pictures in the stats and the agent ring (spec 23 P12)", () => {
+  it("stats().kept reports the pictures drawn, the MiB they hold and the takes of the last second", async () => {
+    const drawn = await startDrawn({ onDemand: false });
+    const entity = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
+    /** One frame 200 ms of clock after the last. */
+    const step = (at: number): void => {
+      drawn.mock.setNow(at);
+      drawn.frame();
+    };
+
+    drawn.mock.api.sync.filters.set(entity, [
+      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+    ]);
+
+    for (const at of [0, 200, 400, 600, 800]) step(at);
+
+    // Taken, the second still open: no take counted yet.
+    expect(drawn.mock.api.stats().kept).toEqual({ pictures: 1, mb: 0.01, retakes: 0 });
+
+    step(1000);
+
+    expect(drawn.mock.api.stats().kept).toEqual({ pictures: 1, mb: 0.01, retakes: 1 });
+
+    for (const at of [1200, 1400, 1600, 1800, 2000]) step(at);
+
+    expect(drawn.mock.api.stats().kept.retakes).toBe(0);
+    drawn.mock.stop();
+  });
+
+  it("the agent ring writes kept and retakes per frame, the sample line kept per second", async () => {
+    const stage = stagePixi();
+    const agent = await startAgent({
+      config: { onDemand: false, loadPixi: () => Promise.resolve(stage.module) }
+    });
+    const lines = agent.listen();
+    const { mock } = agent;
+
+    mock.world.projection.setLayers([{ name: "items", sort: "order" }]);
+
+    const entity = mock.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Layer({ name: "items" }),
+      Transform({ x: 100, y: 100 }),
+      Shape({ w: 40, h: 40 })
+    ]);
+    /** One frame of the agent build at a page time. */
+    const step = (at: number): void => {
+      agent.clock.now = at;
+      mock.modules.sync.pass();
+      mock.world.clearChanges();
+      agent.frame({ at });
+    };
+
+    mock.api.sync.filters.set(entity, [
+      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+    ]);
+    step(0);
+
+    expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 0, retakes: 0 });
+
+    step(16);
+    step(32);
+
+    expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 1, retakes: 1 });
+
+    step(48);
+
+    expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 1, retakes: 0 });
+
+    step(1100);
+
+    const [sample] = linesOf(lines, "sample");
+
+    expect(sample?.kept).toEqual({ pictures: 1, mb: 0.01, retakes: 1, refreshes: 0 });
+    expect(linesOf(lines, "header")[0]?.measured).toContain("kept");
+    mock.stop();
   });
 });

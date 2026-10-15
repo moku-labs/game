@@ -10,8 +10,9 @@ import { Layer } from "../../world/ecs/define";
 import type { AnyComponentValue, Entity } from "../../world/types";
 import { createDemandApi } from "../demand/api";
 import { createDemandState } from "../demand/state";
+import { createKeptState } from "../kept/state";
 import type { View } from "../sync/types";
-import type { DemandModule, HostModule, PixiContainer, RendererCtx } from "../types";
+import type { Config, DemandModule, HostModule, PixiContainer, RendererCtx } from "../types";
 import { createMockRenderer, type MockRenderer } from "./mock-renderer";
 import { type FrameOracle, watchFrames } from "./stage-oracle";
 import { type StagePixi, stagePixi } from "./stage-pixi";
@@ -102,7 +103,11 @@ export function demandAlone(
   } as unknown as HostModule;
   const ctx = {
     config: { onDemand: options.onDemand ?? true, background: 0 },
-    state: { demand: createDemandState(), sync: { root: stage, views } },
+    state: {
+      demand: createDemandState(),
+      sync: { root: stage, views },
+      kept: createKeptState({ keptMb: 64, debug: {} })
+    },
     log,
     deps: { time: { wakes: () => time.wakes, snapshot: () => ({ frame: 7 }) } }
   } as unknown as RendererCtx;
@@ -163,19 +168,21 @@ export type Drawn = {
  * Starts the renderer over the real Pixi of `stagePixi` with one `items` layer (sorted by
  * `Order`) and the oracle watching every frame, and runs the first frames so the tree rests.
  *
- * @param options - The switch and the dev flag.
+ * @param options - The switch, the dev flag and other config.
  * @param options.onDemand - `config.onDemand`; on when left out.
  * @param options.dev - Stubs `__MOKU_GAME_DEV__` true.
+ * @param options.config - Other config of the renderer, as `keptMb`.
  * @returns The running renderer.
  */
 export async function startDrawn(
-  options: { onDemand?: boolean; dev?: boolean } = {}
+  options: { onDemand?: boolean; dev?: boolean; config?: Partial<Config> } = {}
 ): Promise<Drawn> {
   if (options.dev === true) vi.stubGlobal("__MOKU_GAME_DEV__", true);
 
   const stage = stagePixi();
   const mock = createMockRenderer({
     config: {
+      ...options.config,
       onDemand: options.onDemand ?? true,
       loadPixi: () => Promise.resolve(stage.module)
     }

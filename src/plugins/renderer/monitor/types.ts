@@ -4,8 +4,9 @@
 import type { Json } from "../../model/types";
 import type * as Time from "../../time/types";
 import type { HostApi, HostInternal } from "../host/types";
+import type { KeptStats } from "../kept/types";
 import type { SyncApi, SyncInternal } from "../sync/types";
-import type { DemandModule, PixiModule, RendererCtx } from "../types";
+import type { DemandModule, KeptModule, PixiModule, RendererCtx } from "../types";
 import type { ViewportApi, ViewportInternal } from "../viewport/types";
 import type {
   FrameColumns,
@@ -25,11 +26,11 @@ import type {
  *
  * @example
  * ```ts
- * // The board of Timber Town in a dev build: one glowing button on screen.
+ * // The board of Timber Town in a dev build: one glowing button on screen, kept as a picture at rest.
  * const stats: RenderStats = {
  *   fps: 60, drawn: 60, frameMs: 3.4, textures: 12, textureMb: 41.25,
- *   textureMbSplit: { art: 31.5, targets: 9.75, kept: 0 }, views: 180, pooled: 24,
- *   renderPasses: 3, drawCalls: 14
+ *   textureMbSplit: { art: 31.5, targets: 9.75, kept: 1.4 }, views: 180, pooled: 24,
+ *   renderPasses: 1, renderPassesMax: 3, kept: { pictures: 1, mb: 1.4, retakes: 0 }, drawCalls: 14
  * };
  * // The same board at rest with `onDemand`: the loop runs, nothing is drawn.
  * const still: RenderStats = { ...stats, drawn: 0 };
@@ -67,11 +68,18 @@ export type RenderStats = {
   /** Display objects waiting in the pools. */
   pooled: number;
   /**
-   * Render passes of a frame, computed from the filter slots `sync` holds: 1 for the frame, and
-   * for every view in the tree with an enabled filter 1 for its content plus the passes of its
-   * enabled slots. 0 while inert. What filters cost on a phone.
+   * Render passes of the last drawn frame, counted where the GPU begins them (WebGPU) or a new target is bound
+   * (WebGL): the canvas, every filter pass, and every kept picture taken or refreshed in that frame. Where nothing
+   * counts (headless, a test stage) it is estimated from the filter slots. 0 while inert.
    */
   renderPasses: number;
+  /** The most render passes of one drawn frame in the last full second: the frame that took a picture shows here. */
+  renderPassesMax: number;
+  /**
+   * Kept pictures: views drawn as one texture in the last drawn frame, the MiB their textures hold, and the pictures
+   * taken in the last full second. `{ pictures: 0, mb: 0, retakes: 0 }` while inert or with `keptMb: 0`.
+   */
+  kept: KeptStats;
   /**
    * Draw calls of the last drawn frame: a skipped frame keeps the count. Dev and debug builds
    * only, counted on WebGPU: absent in a production build, 0 while inert and on the WebGL
@@ -205,6 +213,8 @@ export type MonitorSinks = {
   compiles: CompileRing;
   /** The WebGPU pass sink, set at attach. */
   passes: PassSink | undefined;
+  /** A pass counter runs (F8): the counting encoder exists, or the WebGL runner items are subscribed. */
+  measuring: boolean;
 };
 
 /**
@@ -428,6 +438,13 @@ export type MonitorState = {
   sinks: MonitorSinks;
   /** The performance monitor of an agent build; `undefined` without the flag. */
   perf: PerfState | undefined;
+  /**
+   * The measured passes (F8): of the last drawn frame, the most of a frame in the open window, and the most of the
+   * last closed one. Zeros until a counter saw a drawn frame.
+   */
+  passes: { last: number; open: number; max: number };
+  /** Removers of the count-only WebGL pass items of a build without the agent flag (F8). */
+  passDetach: Array<() => void>;
 };
 
 /**
@@ -437,25 +454,28 @@ export type MonitorState = {
  * @example
  * ```ts
  * // A headless test: nothing is drawn, so every counter is 0 and there is no picture.
- * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0, renderPasses: 0 }
+ * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0 } }
  * await app.renderer.capture(); // undefined
  * ```
  */
 export type MonitorApi = {
   /**
-   * The counters of the renderer, as a fresh object. The frame timing and the draw calls are kept
-   * each frame without an allocation; the rest is read at call time from `sync` and Pixi.
-   * `drawCalls` is there in a dev build only.
+   * The counters of the renderer, as a fresh object. The frame timing, the draw calls and the
+   * render passes are kept each frame without an allocation; the rest is read at call time from
+   * `sync`, the kept pictures and Pixi. `renderPasses` is measured on the GPU path in every build
+   * (the estimate of the filter slots where nothing counts). `drawCalls` is there in a dev build only.
    *
    * @returns Frames per second, frame work, GPU textures and their memory, views, pooled objects,
-   *   render passes, and in a dev build the draw calls of the last frame. Inert: all 0.
+   *   render passes and their most in the last second, the kept pictures, and in a dev build the
+   *   draw calls of the last frame. Inert: all 0.
    * @example
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
-   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0, renderPasses: 1 }
+   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0 } }
    * // The same frame in a dev build also counts the one sprite batch: { ..., drawCalls: 1 }
    * app.renderer.stats(); // { fps: 120, drawn: 0, … }: a still board with onDemand
+   * // the ward at rest with its lamps kept: { renderPasses: 1, renderPassesMax: 1, kept: { pictures: 4, mb: 1.6, retakes: 0 }, … }
    * ```
    */
   stats(): RenderStats;
@@ -646,6 +666,13 @@ export type MonitorInternal = {
   attach(): void;
 
   /**
+   * Attaches the count-only WebGL pass items of a build without the agent flag (F8), at the first
+   * ready and after every restore; an agent build counts through `attach`, and WebGPU through the
+   * encoder `host` installed.
+   */
+  attachPasses(): void;
+
+  /**
    * Writes the partial second of a sample now, as a pause does. Agent builds only.
    */
   flush(): void;
@@ -694,6 +721,8 @@ export type MonitorDeps = {
   sync: SyncApi & SyncInternal;
   /** The draw decision of the frame, for the `marks` and `reason` columns of the ring. */
   demand: DemandModule;
+  /** The kept pictures, for `stats().kept` and the ring's `kept` and `retakes` columns. */
+  kept: KeptModule;
 };
 
 /**

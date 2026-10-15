@@ -3,6 +3,7 @@
  * the built-in filter components, and what the filter sync keeps per kind and per view.
  */
 import type {
+  FilterCache,
   FilterSlot,
   FilterSlotInputs,
   PixiFilter,
@@ -103,6 +104,16 @@ export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
    * filter leaves its view unfiltered.
    */
   readonly fallback?: FilterStage;
+  /**
+   * What the renderer may do with a view this filter draws on, while nothing it depends on changes: `"local"` (the
+   * default) keeps it as a picture, also while the view moves; `"placed"` keeps it with its canvas origin, for a body
+   * that reads where it is drawn through `canvasPixel(uv)` (a body that calls the helper is placed by itself); set
+   * `false` for a body whose look depends on where the view is drawn in a way the engine cannot see (a time read from
+   * a texture, a hash of the screen position): the view is then drawn live in every frame. A body that reads
+   * `uGlobalFrame`, `@builtin(position)`, `gl_FragCoord`, `uOutputTexture` or the origin of `uOutputFrame` and
+   * declares nothing is drawn live as well, and a dev build warns once: declare `cache: false`.
+   */
+  readonly cache?: "local" | "placed" | false;
 };
 
 /**
@@ -131,6 +142,7 @@ export type UniformSpec = {
  * Tint.filter.glsl.startsWith("#version 300 es"); // true: the GLSL, drawn on WebGL
  * Tint.filter.uniforms.map(uniform => uniform.name); // ["amount", "color"]
  * Tint.filter.inputs.length; // 0: it reads no second texture
+ * Tint.filter.cache; // "local": a still view under it is drawn from a picture
  * ```
  */
 export type FilterDefinition = {
@@ -146,6 +158,13 @@ export type FilterDefinition = {
   readonly inputs: readonly FilterInputDefinition[];
   /** What draws in its place when it is broken: another definition over a subset of its uniforms. */
   readonly fallback: FilterDefinition | undefined;
+  /** What the kept-picture cache may do with it: the worst of its declaration, its body and its stages' bodies. */
+  readonly cache: FilterCache;
+  /**
+   * The engine's `keptOrigin` uniform (`vec2<f32>`) of a body that calls `canvasPixel(uv)`, kept out of `uniforms`;
+   * `undefined` for any other body.
+   */
+  readonly origin: UniformSpec | undefined;
 };
 
 /**

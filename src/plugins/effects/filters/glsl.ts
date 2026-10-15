@@ -80,13 +80,21 @@ export function glslInputs(inputs: readonly FilterInputDefinition[]): string {
     .join("");
 }
 
+/** The GLSL twin of `canvasPixel(uv)`: the pixel's canvas position in CSS px (spec 23 P8.3). */
+export const GLSL_CANVAS_PIXEL = /* glsl */ `vec2 canvasPixel(vec2 uv) {
+  return uOutputFrame.xy + keptOrigin + uv * uInputSize.xy;
+}
+
+`;
+
 /**
- * The whole GLSL of a filter: the header, the uniforms (then the scale and the clamp of each input), the inputs, the
- * body.
+ * The whole GLSL of a filter: the header, the uniforms (then the scale and the clamp of each input, then the
+ * engine's `keptOrigin` of a body that calls `canvasPixel`), the inputs, the helper, the body.
  *
  * @param uniforms - The uniforms in declaration order.
  * @param inputs - The inputs in declaration order.
  * @param body - The fragment body the game wrote.
+ * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
  * @returns The GLSL fragment source the `GlProgram` is built from.
  * @example
  * ```ts
@@ -96,12 +104,15 @@ export function glslInputs(inputs: readonly FilterInputDefinition[]): string {
 export function assembleGlsl(
   uniforms: readonly UniformSpec[],
   inputs: readonly FilterInputDefinition[],
-  body: string
+  body: string,
+  origin?: UniformSpec
 ): string {
   const declared = glslUniforms([
     ...uniforms,
-    ...inputs.flatMap(input => [input.scale, input.clamp])
+    ...inputs.flatMap(input => [input.scale, input.clamp]),
+    ...(origin === undefined ? [] : [origin])
   ]);
+  const helper = origin === undefined ? "" : GLSL_CANVAS_PIXEL;
 
-  return `${GLSL_HEADER}${declared}${glslInputs(inputs)}${body}`;
+  return `${GLSL_HEADER}${declared}${glslInputs(inputs)}${helper}${body}`;
 }

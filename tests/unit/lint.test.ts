@@ -1,5 +1,5 @@
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Unit test: probes of eslint.config.ts. A later block that sets a rule again
@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 // ---------------------------------------------------------------------------
 
 /** The repository root, where eslint.config.ts lives. */
+// Every probe lints a file with the project's whole ESLint config: seconds each on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
+
 const ROOT = new URL("../../", import.meta.url).pathname;
 
 /** The folders of block 6d2 (L1), which sets the L2 rule again, and one folder only block 6c covers. */

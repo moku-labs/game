@@ -339,3 +339,26 @@ export function layerHiddenBy(sctx: HiddenCtx, name: string, reason: HiddenReaso
 export function onlyHiddenBy(sctx: HiddenCtx, node: PixiContainer, reason: HiddenReason): boolean {
   return nodeMask(sctx.ctx.state.sync, node) === BITS[reason];
 }
+
+/**
+ * Tells whether a node is hidden, and by these reasons alone: spec 23's eligibility of a picture whose ancestor is in
+ * an overlay's range (`"freeze"`) or is itself a kept top drawn through its quad (`"kept"`).
+ *
+ * @param sctx - The sync context, or any `HiddenCtx`.
+ * @param node - A view top, a layer container or an engine object.
+ * @param reasons - The reasons allowed.
+ * @returns True when a reason hides the node and every reason that does is one of them.
+ */
+export function hiddenOnlyAmong(
+  sctx: HiddenCtx,
+  node: PixiContainer,
+  reasons: readonly HiddenReason[]
+): boolean {
+  let allowed = 0;
+
+  for (const reason of reasons) allowed |= BITS[reason];
+
+  const mask = nodeMask(sctx.ctx.state.sync, node);
+
+  return mask !== 0 && (mask & ~allowed) === 0;
+}

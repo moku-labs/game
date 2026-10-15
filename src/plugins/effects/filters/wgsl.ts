@@ -88,12 +88,25 @@ export function inputBindings(inputs: readonly FilterInputDefinition[]): string 
 }
 
 /**
+ * The helper a body that needs its canvas position calls (spec 23 P8.3): the pixel's canvas position in CSS px. Drawn
+ * live `keptOrigin` is `(0, 0)`; inside a kept picture the renderer writes the picture's canvas origin there, so the
+ * answer is the same.
+ */
+export const CANVAS_PIXEL = /* wgsl */ `fn canvasPixel(uv: vec2<f32>) -> vec2<f32> {
+  return gfu.uOutputFrame.xy + fu.keptOrigin + uv * gfu.uInputSize.xy;
+}
+
+`;
+
+/**
  * The whole source of a filter: the header, the uniform struct (the uniforms, then the scale and the clamp of each
- * input), the input bindings, the body.
+ * input, then the engine's `keptOrigin` of a body that calls `canvasPixel`), the input bindings, the helper, the
+ * body. A body without the helper assembles byte-identically to one without the cache.
  *
  * @param uniforms - The uniforms in declaration order.
  * @param inputs - The inputs in declaration order.
  * @param body - The fragment body the game wrote.
+ * @param origin - The `keptOrigin` uniform, for a body that calls `canvasPixel`.
  * @returns The WGSL source both stages are built from.
  * @example
  * ```ts
@@ -103,12 +116,15 @@ export function inputBindings(inputs: readonly FilterInputDefinition[]): string 
 export function assemble(
   uniforms: readonly UniformSpec[],
   inputs: readonly FilterInputDefinition[],
-  body: string
+  body: string,
+  origin?: UniformSpec
 ): string {
   const struct = uniformStruct([
     ...uniforms,
-    ...inputs.flatMap(input => [input.scale, input.clamp])
+    ...inputs.flatMap(input => [input.scale, input.clamp]),
+    ...(origin === undefined ? [] : [origin])
   ]);
+  const helper = origin === undefined ? "" : CANVAS_PIXEL;
 
-  return `${HEADER}${struct}${inputBindings(inputs)}${body}`;
+  return `${HEADER}${struct}${inputBindings(inputs)}${helper}${body}`;
 }

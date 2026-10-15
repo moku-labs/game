@@ -26,6 +26,7 @@ import {
 afterEach(async () => {
   for (const still of running.splice(0)) {
     still.oracle.expectNoMissedFrame();
+    still.oracle.expectPicturesCurrent();
     await still.app.stop();
   }
 

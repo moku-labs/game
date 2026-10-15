@@ -35,6 +35,9 @@ export function createDemandState(verifyFrames = false): DemandState {
     marked: emptyEntities(),
     pending: emptyEntities(),
     loose: emptyEntities(),
+    visual: emptyEntities(),
+    moved: emptyEntities(),
+    published: emptyEntities(),
     wholes: emptyReasons(),
     counted: false,
     wakes: 0,
@@ -65,6 +68,9 @@ export function stopDemand(state: DemandState): void {
   state.marked.clear();
   state.pending.clear();
   state.loose.clear();
+  state.visual.clear();
+  state.moved.clear();
+  state.published.clear();
   state.wholes.clear();
   state.sinceDraw.clear();
   state.check.warned.clear();

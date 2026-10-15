@@ -5,6 +5,7 @@
  * shader a kind can draw is checked on the running backend when the renderer first draws, in
  * every build, by the filter sync.
  */
+import type { FilterCache } from "../../renderer/types";
 import { component } from "../../world/ecs/define";
 import { assembleGlsl } from "./glsl";
 import type {
@@ -42,7 +43,163 @@ const MAIN_GLSL = /\bvoid\s+main\s*\(/;
  * GLSL header also declares `finalColor` and `vTextureCoord`.
  */
 const RESERVED_NAME =
-  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler|finalColor|vTextureCoord)$/;
+  /^(?:enabled|order|uInputSize|uInputPixel|uInputClamp|uOutputFrame|uGlobalFrame|uOutputTexture|uTexture|uSampler|finalColor|vTextureCoord|keptOrigin|canvasPixel)$/;
+
+/**
+ * What a body reads of the screen: the root target's frame, the fragment position, the output target's size, the
+ * origin of the output frame (its size `.zw` is the same in a picture and live).
+ */
+const SCREEN_READS: readonly RegExp[] = [
+  /\buGlobalFrame\b/,
+  /@builtin\s*\(\s*position\s*\)/,
+  /\bgl_FragCoord\b/,
+  /\buOutputTexture\b/,
+  /\buOutputFrame\b(?!\s*\.\s*[wz]{1,2}\b)/
+];
+
+/** A body that asks for its canvas position. */
+const CANVAS_PIXEL_CALL = /\bcanvasPixel\s*\(/;
+
+/** A line comment or a block comment of WGSL or GLSL. */
+const COMMENT = /\/\/[^\n]*|\/\*[\s\S]*?\*\//g;
+
+/** The engine's uniform of a body that calls `canvasPixel`: the canvas origin of a kept picture. */
+const KEPT_ORIGIN: UniformSpec = Object.freeze({
+  name: "keptOrigin",
+  type: "vec2<f32>",
+  form: "vector",
+  size: 2
+});
+
+/**
+ * Creates the set of the definitions whose bodies read the screen. A function: the module-scope rule sees no
+ * collection literal.
+ *
+ * @returns An empty weak set.
+ */
+function emptyReaders(): WeakSet<FilterDefinition> {
+  return new WeakSet();
+}
+
+/** The definitions whose bodies read the screen: a dev build warns about the ones that declared no `cache: false`. */
+const screenReaders = emptyReaders();
+
+/** How bad a category is for the cache, for "the worst of": a screen read beats a placed one beats a local one. */
+const WORST: Readonly<Record<FilterCache, number>> = { local: 0, placed: 1, screen: 2 };
+
+/**
+ * The text of a shader body without its comments.
+ *
+ * @param body - A WGSL or GLSL body.
+ * @returns The body, comments stripped.
+ * @example
+ * ```ts
+ * codeOf("let a = 1; // uGlobalFrame"); // "let a = 1; "
+ * ```
+ */
+function codeOf(body: string): string {
+  return body.replaceAll(COMMENT, "");
+}
+
+/**
+ * Tells whether a body reads the screen: `uGlobalFrame`, `@builtin(position)`, `gl_FragCoord`, `uOutputTexture` or
+ * the origin of `uOutputFrame`, outside a comment.
+ *
+ * @param body - A WGSL or GLSL body the game wrote.
+ * @returns True when it does.
+ * @example
+ * ```ts
+ * readsScreenIn("let p = gfu.uOutputFrame.xy + uv * gfu.uInputSize.xy;"); // true
+ * ```
+ */
+function readsScreenIn(body: string): boolean {
+  const code = codeOf(body);
+
+  return SCREEN_READS.some(read => read.test(code));
+}
+
+/**
+ * The worst of two categories: the one the cache may do less with.
+ *
+ * @param a - One category.
+ * @param b - The other.
+ * @returns The worse one.
+ * @example
+ * ```ts
+ * worstOf("local", "placed"); // "placed"
+ * ```
+ */
+function worstOf(a: FilterCache, b: FilterCache): FilterCache {
+  return WORST[b] > WORST[a] ? b : a;
+}
+
+/**
+ * What the kept-picture cache may do with a filter, from what the game declared and what its bodies read only, never
+ * the engine's header (LEAD-FIXES-4 item 3): `cache: false` is `"screen"`; a body that reads the screen and declares
+ * nothing is `"screen"` too (the safe direction); a body that calls `canvasPixel` is `"placed"`, as is
+ * `cache: "placed"`; everything else is `"local"`.
+ *
+ * @param wgsl - The WGSL body.
+ * @param glsl - The GLSL body.
+ * @param cache - What the game declared.
+ * @returns The category.
+ * @example
+ * ```ts
+ * cacheOf("let p = gfu.uOutputFrame.xy + uv * gfu.uInputSize.xy;", "", undefined); // "screen"
+ * ```
+ */
+function cacheOf(
+  wgsl: string,
+  glsl: string,
+  cache: "local" | "placed" | false | undefined
+): FilterCache {
+  if (cache === false) return "screen";
+  if (cache === undefined && (readsScreenIn(wgsl) || readsScreenIn(glsl))) return "screen";
+  if (cache === "placed" || callsCanvasPixel(wgsl, glsl)) return "placed";
+
+  return "local";
+}
+
+/**
+ * Tells whether a body asks for its canvas position through the engine's helper.
+ *
+ * @param wgsl - The WGSL body.
+ * @param glsl - The GLSL body.
+ * @returns True when either calls `canvasPixel(`.
+ * @example
+ * ```ts
+ * callsCanvasPixel("let canvas = canvasPixel(uv);", ""); // true
+ * ```
+ */
+function callsCanvasPixel(wgsl: string, glsl: string): boolean {
+  return CANVAS_PIXEL_CALL.test(codeOf(wgsl)) || CANVAS_PIXEL_CALL.test(codeOf(glsl));
+}
+
+/**
+ * Tells whether a definition's bodies read the screen while it declared no `cache: false`: a dev build warns once per
+ * kind, "Filter "X" reads the screen; declare cache: false".
+ *
+ * @param definition - A definition `defineFilter` made.
+ * @returns True when it reads the screen undeclared.
+ */
+export function readsScreen(definition: FilterDefinition): boolean {
+  return screenReaders.has(definition);
+}
+
+/**
+ * Checks the declared cache category: a JavaScript caller may pass anything.
+ *
+ * @param id - The filter id.
+ * @param cache - What the game declared.
+ * @throws {Error} When it is not `"local"`, `"placed"`, `false` or left out.
+ */
+function checkCache(id: string, cache: unknown): void {
+  if (cache === undefined || cache === false || cache === "local" || cache === "placed") return;
+
+  throw new Error(
+    `[game] Filter "${id}": cache must be "local", "placed" or false.\n  Got ${JSON.stringify(cache)}.`
+  );
+}
 
 /**
  * Tells whether a value is a list of 2 to 4 finite numbers.
@@ -432,7 +589,9 @@ function readFallback(
 
 /**
  * Turns a WGSL fragment body and its GLSL ES 3.0 twin into a filter component type; Pixi draws
- * the one of the running backend. To the WGSL the engine prepends the vertex stage, the input
+ * the one of the running backend. A still view under the filter is kept as a picture by the
+ * renderer (`cache`, default `"local"`); a body that needs its canvas position calls
+ * `canvasPixel(uv)`, and then the view can still be kept as a picture. To the WGSL the engine prepends the vertex stage, the input
  * bindings and a `FilterUniforms` struct in declaration order, bound as `fu`. To the GLSL it
  * prepends `#version 300 es`, `vTextureCoord`, `finalColor`, `uTexture`, the global filter
  * uniforms as `vec4` and one `uniform` per declared uniform under its bare name. Every number
@@ -454,6 +613,7 @@ function readFallback(
  * const Tint = defineFilter("fx.tint", { wgsl: tintWgsl, glsl: tintGlsl, uniforms: { amount: 0, color: { color: 0xffd700 } } });
  * Tint({ amount: 1 }).value; // { amount: 1, color: 0xffd700, enabled: true, order: 0 }
  * Tint.filter.glsl.includes("uniform vec3 color;"); // true
+ * Tint.filter.cache; // "local"
  * // A Memory Missing's frost reads a blurred copy of the scene drawn by its chain.
  * const Frost = defineFilter("Frost", { wgsl: FROST_WGSL, glsl: FROST_GLSL, uniforms: { strength: 16 }, inputs: { blur: { stages: [FrostBox4, FrostGauss], chain: frostChain } } });
  * Frost.filter.inputs.map(input => input.sample); // ["sampleBlur"]
@@ -500,17 +660,33 @@ export function defineFilter<
   const padding = spec.padding ?? 0;
 
   checkCost(id, passes, padding, uniforms);
+  checkCache(id, spec.cache);
+
+  const origin = callsCanvasPixel(spec.wgsl, spec.glsl) ? KEPT_ORIGIN : undefined;
+  // A filter with inputs is as bad for the cache as the worst of its body and its stages: a kept pre-pass result is a
+  // picture of the stages.
+  let cache = cacheOf(spec.wgsl, spec.glsl, spec.cache);
+
+  for (const input of inputs) {
+    for (const stage of input.stages) cache = worstOf(cache, stage.filter.cache);
+  }
 
   const filter: FilterDefinition = Object.freeze({
     id,
-    source: assemble(uniforms, inputs, spec.wgsl),
-    glsl: assembleGlsl(uniforms, inputs, spec.glsl),
+    source: assemble(uniforms, inputs, spec.wgsl, origin),
+    glsl: assembleGlsl(uniforms, inputs, spec.glsl, origin),
     uniforms,
     passes,
     padding,
     inputs,
-    fallback
+    fallback,
+    cache,
+    origin
   });
+
+  if (spec.cache !== false && (readsScreenIn(spec.wgsl) || readsScreenIn(spec.glsl))) {
+    screenReaders.add(filter);
+  }
   // The defaults are built from the declaration, so their type is the one the declaration maps to.
   const defaults = Object.fromEntries([
     ...read.map(entry => [entry.spec.name, entry.value] as const),

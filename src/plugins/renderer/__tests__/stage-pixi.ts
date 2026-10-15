@@ -3,7 +3,9 @@
  * the renderer draws on demand. Not a test. Every display object, filter, uniform group, texture
  * and particle container a test builds is real Pixi; only the GPU is gone. The stand-in's stage is
  * a real `Container`, its screen a real `Rectangle`, its canvas a `fake-dom` element, and its
- * `renderer.render(stage)` only counts. It never reads or writes a Pixi field that is not public,
+ * `renderer.render(stage)` only counts. A render into a texture (a kept picture, spec 23) is logged
+ * with its arguments, makes its container a render group as Pixi does, and is told to the
+ * watchers; only a render onto the canvas counts as a drawn frame. It never reads or writes a Pixi field that is not public,
  * never empties a change list and never calls `_onUpdate`: the engine decides from its own marks,
  * so a stand-in that knows nothing of Pixi's internals cannot keep a frozen screen green (spec 14
  * T0).
@@ -13,16 +15,40 @@ import type { PixiModule } from "../types";
 import { createFakeElement, type FakeElement } from "./fake-dom";
 import { FAKE_PNG } from "./fake-pixi";
 
+/** One `render` call: onto the canvas (`target` undefined) or into a texture, with what it was given. */
+export type RenderCall = {
+  container: pixi.Container;
+  target: pixi.Texture | undefined;
+  /** The world transform the container was drawn with, copied at the call; `undefined` for its own. */
+  transform: { a: number; b: number; c: number; d: number; tx: number; ty: number } | undefined;
+  clear: boolean | undefined;
+};
+
+/** What `render` takes: the stage, or Pixi's render options. */
+type RenderArguments =
+  | pixi.Container
+  | {
+      container: pixi.Container;
+      target?: pixi.Texture;
+      transform?: pixi.Matrix;
+      clear?: boolean;
+      clearColor?: unknown;
+    };
+
 /** What the stand-in's renderer offers the engine. */
 export type StageRenderer = {
   name: "webgpu" | "webgl";
   /** Device pixels per CSS pixel. */
   resolution: number;
-  /** Frames drawn onto the canvas: `render` calls. */
+  /** Frames drawn onto the canvas: `render` calls without a target. */
   renders: number;
+  /** Every render into a texture, oldest first. */
+  targets: RenderCall[];
+  /** Told every render, onto the canvas or into a texture, at the call. */
+  watchers: Array<(call: RenderCall) => void>;
   /** Every size `resize` was asked for. */
   sizes: Array<{ width: number; height: number }>;
-  render(stage: pixi.Container): void;
+  render(options: RenderArguments): void;
   resize(width: number, height: number, resolution?: number): void;
   texture: { managedTextures: unknown[] };
   extract: {
@@ -58,6 +84,8 @@ export type StagePixi = {
   last(): StageApplication;
   /** Frames drawn onto the canvas of the last application. */
   renders(): number;
+  /** Renders into a texture of the last application, oldest first. */
+  targets(): RenderCall[];
 };
 
 /**
@@ -68,6 +96,37 @@ export type StagePixi = {
  */
 function compileShader(): { getCompilationInfo(): Promise<{ messages: unknown[] }> } {
   return { getCompilationInfo: () => Promise.resolve({ messages: [] }) };
+}
+
+/**
+ * What a `render` call was given, with the transform copied: the engine reuses its matrices.
+ *
+ * @param options - The stage, or Pixi's render options.
+ * @returns The call.
+ */
+function callOf(options: RenderArguments): RenderCall {
+  if (options instanceof pixi.Container) {
+    return { container: options, target: undefined, transform: undefined, clear: undefined };
+  }
+
+  const { transform } = options;
+
+  return {
+    container: options.container,
+    target: options.target,
+    transform:
+      transform === undefined
+        ? undefined
+        : {
+            a: transform.a,
+            b: transform.b,
+            c: transform.c,
+            d: transform.d,
+            tx: transform.tx,
+            ty: transform.ty
+          },
+    clear: options.clear
+  };
 }
 
 /**
@@ -87,9 +146,21 @@ function createRenderer(
     name: kind,
     resolution,
     renders: 0,
+    targets: [],
+    watchers: [],
     sizes: [],
-    render: () => {
-      renderer.renders += 1;
+    render: options => {
+      const call = callOf(options);
+
+      // A render into a texture makes its container a render group, as Pixi's own does.
+      if (call.target !== undefined) {
+        call.container.enableRenderGroup();
+        renderer.targets.push(call);
+      }
+
+      for (const watcher of renderer.watchers) watcher(call);
+
+      if (call.target === undefined) renderer.renders += 1;
     },
     resize: (width, height, next) => {
       screen.width = width;
@@ -188,6 +259,7 @@ export function stagePixi(options: { kind?: "webgpu" | "webgl" } = {}): StagePix
 
       return app;
     },
-    renders: () => applications.at(-1)?.renderer.renders ?? 0
+    renders: () => applications.at(-1)?.renderer.renders ?? 0,
+    targets: () => applications.at(-1)?.renderer.targets ?? []
   };
 }

@@ -210,7 +210,15 @@ export function release(sctx: SyncCtx, view: View): void {
     return;
   }
 
-  // The renderer's own object goes back to its pool, reset for its next life.
+  // The renderer's own object goes back to its pool, reset for its next life: without a render group the kept
+  // cache made of it (spec 23 P9.3).
+  const groups = sctx.ctx.state.kept.madeGroups;
+
+  if (groups.has(view.object)) {
+    view.object.disableRenderGroup();
+    groups.delete(view.object);
+  }
+
   resetObject(view);
 
   const pool = state.pools.get(view.poolKey) ?? emptyPool();

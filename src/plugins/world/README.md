@@ -22,14 +22,14 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 
 | Method | Behaviour |
 |---|---|
-| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. |
+| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. Its `query` is read once, when it registers. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. |
 | `spawn(owner, components): Entity` | The id is reserved and returned at once. Owner is required by the type. |
 | `despawn(entity)` / `despawnOwnedBy(owner)` | Removes every component (each fires `onRemoved`), frees the index, bumps the generation. A stale id is a no-op. |
 | `get(entity, Component)` | The stored value, read-only, or `undefined`. A stale id gives `undefined`. |
 | `set(entity, Component, patch)` | Shallow merge into the stored object, marks changed. Never queued. Throws for a stale entity or a missing component. |
 | `add(entity, value)` / `remove(entity, Component)` | Structural. `add` on an existing component replaces the value and marks changed, no `onAdded`. |
 | `has(entity, Component)` / `tag` / `untag` | Structural and idempotent. False for a stale id. |
-| `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C`. |
+| `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C` ("Marking what changed", below). Inside a system the walk reads the store live (changes are queued until the phase ends); outside one it walks the keys taken at the start, and skips an entity despawned before its turn. Every row is a new array: keep it if you like. |
 | `resource(Resource)` | The one mutable value per world, made on first read: a deep clone of plain defaults, or one call of a factory default. |
 | `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied, for a component or a tag. A component listener gets the entity and the value; a tag listener gets the entity. A throwing listener is logged; the others still run. |
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
@@ -37,7 +37,7 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
 | `snapshot(): WorldSnapshot` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
-| `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. The caller is `game.diff`. |
+| `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. Only marked components are compared: a value written in place without a mark (into a row of a plain term) is not recorded, also when another component of the entity was marked. The caller is `game.diff`. |
 | `schema(): ComponentSchema[]` | Every component and tag type the world met so far, sorted by name, with the JSON kind of each field. A new list on every call. The caller is `game.schema`, the editor's component palette. |
 
 A game writes its systems with the kit's `system`, from `defineGame`: the same function as the root
@@ -58,6 +58,48 @@ export const looks = system({
 ```
 
 The types are `World.SystemFor`, `World.SystemContextOf` and `World.GameSystemDefinition`.
+
+### Marking what changed
+
+`mut(C)` marks every row it yields changed for `C`, written or not. The renderer, effects and the
+dev frame history look at each marked row again: a system that walks 60 frosted scene roots with
+`mut(Frost)` and writes two of them makes all 60 look changed, 120 times a second.
+
+A system that writes only some rows queries the plain term and writes with
+`world.set(entity, C, patch)` when a value changes: `set` marks only the entity it writes.
+
+```ts
+// Before: the Frost of every scene root is marked every frame, moved or not.
+const frostApply = system({
+  name: "shared.frostApply",
+  phase: "animate",
+  query: [mut(Frost), SheetOpen],
+  run: rows => {
+    for (const [, frost, open] of rows) frost.amount = open.progress;
+  }
+});
+
+// After: only a Frost whose amount moved is marked.
+const frostApply = system({
+  name: "shared.frostApply",
+  phase: "animate",
+  query: [Frost, SheetOpen],
+  run: (rows, { world }) => {
+    for (const [entity, frost, open] of rows) {
+      if (frost.amount !== open.progress) world.set(entity, Frost, { amount: open.progress });
+    }
+  }
+});
+```
+
+A dev build counts, per component, the rows marked and the rows that changed over 120 recorded
+frames. A component marked on at least 32 rows a frame, of which at most 5 % changed, and written
+by a `mut()` term of a registered system, is reported once per app:
+`ctx.log.warn("world:mut-unchanged", { component: "Frost", rowsPerFrame: 61.2, changedShare: 0, systems: ["shared.frostApply"] })`.
+A few rows marked by a tween that does change are never reported.
+
+Put the rarest component first in a query: the walk visits every entity of the first term's store
+and builds a row only for those that carry every term.
 
 `snapshot()` is typed. Both types reach a game as `World.WorldSnapshot` and `World.EntitySnapshot`;
 `diff()` and `schema()` answer `World.FrameDiff` (with `World.EntityDiff` entries) and
@@ -200,7 +242,9 @@ const app = createApp({
 
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
-`ctx.log.error("world:system-failed", …)` and skipped for this frame; the frame goes on.
+`ctx.log.error("world:system-failed", …)` and skipped for this frame; the frame goes on. A dev
+build that sees a store gain or lose a key while a phase walks it (an engine path past the command
+queue) logs `ctx.log.error("world:store-changed-during-walk", { component })` once per app.
 
 While a phase runs, `spawn`, `despawn`, `despawnOwnedBy`, `add`, `remove`, `tag` and `untag` are
 queued and applied in call order when the phase ends. `set` is never queued. A queued command on an
@@ -411,9 +455,11 @@ production `define` drops it from the bundle. Its first frame logs
   a spawn from a component added to a live entity. Records cost memory only when something
   changes: 120 full snapshots of a 400-cell board would hold about 48 MB.
 - **When it records.** The first frame copies the whole world into the shadow and records
-  nothing: it is the start of the window. Every later frame compares each changed entity with the
-  shadow, with the filter of `snapshot()` (a value that is not JSON is never recorded) and deep JSON
-  equality, so a write of the same value records nothing. A despawn, and a removed component,
+  nothing: it is the start of the window. Every later frame walks the change sets: a new entity is
+  recorded whole, once; for a known one each marked component is compared with the shadow, with
+  the filter of `snapshot()` (a value that stops being JSON is recorded as gone) and deep JSON
+  equality, so a write of the same value records nothing. A value written in place without a mark
+  is not recorded. A despawn, and a removed component,
   record at once, into the frame that is open: a write after `signals` belongs to the next frame.
   Every frame gets a slot, also an empty one.
 - **What `diff(from, to)` answers.** The records of frames `from + 1 .. to`, folded per entity and

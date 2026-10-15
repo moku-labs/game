@@ -76,6 +76,11 @@ function writeCounters(pc: PerfCtx, slot: number): void {
   c.marks[slot] = decided.marks;
   c.reason[slot] = reasonIndex(decided.reason);
   c.rebuilds[slot] = perf.produced === 0 ? Number.NaN : cell(counts, COUNT.rebuilds);
+  // The kept pictures of the frame (spec 23), read from the state: no object per frame.
+  const kept = pc.ctx.state.kept;
+
+  c.kept[slot] = perf.drawn ? kept.drawnPictures : 0;
+  c.retakes[slot] = kept.frameTakes;
 }
 
 /**

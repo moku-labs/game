@@ -2,7 +2,15 @@
  * @file renderer/host — API factory. The module keeps its data in `ctx.state.host`; nothing
  * above it ever touches Pixi's `Application`.
  */
-import type { HostModule, PixiContainer, PixiModule, RendererCtx, RendererKind } from "../types";
+import type {
+  HostModule,
+  PixiContainer,
+  PixiMatrix,
+  PixiModule,
+  PixiRenderTexture,
+  RendererCtx,
+  RendererKind
+} from "../types";
 import { liveDevice, liveGl, watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
 import { extractStage, readPixels, textureUsage } from "./readback";
@@ -44,7 +52,7 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
     destroyApplication(state);
 
     try {
-      await createApplication(ctx, mount, deps.installCounting);
+      await createApplication(ctx, mount, deps);
     } catch (error) {
       showUnsupported(ctx, mount, error);
 
@@ -86,6 +94,22 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       if (!state.ready || app === undefined) return false;
 
       app.renderer.render(app.stage);
+
+      return true;
+    },
+
+    renderTo: (
+      container: PixiContainer,
+      target: PixiRenderTexture,
+      transform: PixiMatrix,
+      clear: boolean
+    ): boolean => {
+      const app = state.app;
+
+      if (!state.ready || app === undefined) return false;
+
+      // A fresh colour each call: Pixi keeps the options of the render for its runners.
+      app.renderer.render({ container, target, transform, clear, clearColor: [0, 0, 0, 0] });
 
       return true;
     },
@@ -133,12 +157,12 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       return textureUsage(app, state.kept);
     },
 
-    pixels: (): Uint8ClampedArray | undefined => {
+    pixels: (resolution?: number): Uint8ClampedArray | undefined => {
       const app = state.app;
 
       if (!state.ready || app === undefined) return undefined;
 
-      return readPixels(ctx, app);
+      return readPixels(ctx, app, resolution);
     },
 
     screen: (): { x: number; y: number; width: number; height: number } | undefined => {
@@ -155,7 +179,7 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       state.mount = mount;
 
       try {
-        await createApplication(ctx, mount, deps.installCounting);
+        await createApplication(ctx, mount, deps);
       } catch (error) {
         showUnsupported(ctx, mount, error);
 

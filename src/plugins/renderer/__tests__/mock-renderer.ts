@@ -242,6 +242,7 @@ export function createMockRenderer(
     debug: { nineSlice: false, verifyFrames: false },
     monitor: { budgetMs: "rate", frames: 1024 },
     onDemand: false,
+    keptMb: 64,
     ...options.config
   };
   const state = createRendererState({ config });

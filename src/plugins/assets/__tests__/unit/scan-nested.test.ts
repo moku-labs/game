@@ -232,7 +232,7 @@ describe("scanAssets over nested owners", () => {
 describe("scanAssets on a flat game", () => {
   // The mini game's assets.ts imports the engine through its kit: the first import takes seconds.
   it("writes the committed manifest and key module of the mini game byte for byte", {
-    timeout: 30_000
+    timeout: 90_000
   }, async () => {
     // The manifest of a game without sub-features carries no `parent`, `dir`, `release` or `mips`:
     // `moku-game keys --check` stays green right after the engine update.

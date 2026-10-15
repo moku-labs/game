@@ -42,6 +42,7 @@ export function createEcsState(): EcsState {
     frameSnapshot: undefined,
     history: undefined,
     timing: undefined,
-    timingSlots: emptyMap()
+    timingSlots: emptyMap(),
+    walkReported: false
   };
 }

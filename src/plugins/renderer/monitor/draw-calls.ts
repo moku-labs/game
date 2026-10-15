@@ -186,6 +186,8 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
     public constructor(renderer: EncoderRenderer) {
       super(renderer);
       this.owner = renderer;
+      // A pass counter runs: `stats().renderPasses` reads the count from now on (F8).
+      sinks.measuring = true;
     }
 
     /**
@@ -353,5 +355,53 @@ export function installCounting(pixi: PixiModule, sinks: MonitorSinks): () => vo
   return (): void => {
     pixi.extensions.remove(...swaps);
     pixi.extensions.add(...bases);
+  };
+}
+
+/**
+ * Swaps Pixi's encoder alone for one that counts the render passes of a frame, the production half
+ * of F8: `stats().renderPasses` is measured on the GPU path in every build. One boolean test and one
+ * typed-array increment per real pass; no ring, no record, no label, no allocation. A pass outside
+ * a frame (an extract, a capture) is not counted. The registry is global to the module object, so
+ * the remover swaps Pixi's own class back.
+ *
+ * @param pixi - The loaded Pixi module.
+ * @param sinks - The sinks of the renderer that installs it.
+ * @returns The remover.
+ */
+export function installPassCounting(pixi: PixiModule, sinks: MonitorSinks): () => void {
+  /** Counts one pass per `beginRenderPass` inside a frame, and nothing else. */
+  class PassCountingEncoder extends pixi.GpuEncoderSystem {
+    public static override readonly extension = pixi.GpuEncoderSystem.extension;
+
+    /**
+     * Makes the encoder, and tells the monitor a counter runs.
+     *
+     * @param renderer - The WebGPU renderer.
+     */
+    public constructor(renderer: EncoderRenderer) {
+      super(renderer);
+      sinks.measuring = true;
+    }
+
+    /**
+     * Counts the pass inside a frame, then begins it.
+     *
+     * @param gpuRenderTarget - The GPU render target with the descriptor Pixi built for the pass.
+     * @returns The pass encoder.
+     */
+    public override beginRenderPass(gpuRenderTarget: GpuRenderTarget): GPURenderPassEncoder {
+      if (sinks.inFrame) sinks.counts[COUNT.passes] = cell(sinks.counts, COUNT.passes) + 1;
+
+      return super.beginRenderPass(gpuRenderTarget);
+    }
+  }
+
+  pixi.extensions.remove(pixi.GpuEncoderSystem);
+  pixi.extensions.add(PassCountingEncoder);
+
+  return (): void => {
+    pixi.extensions.remove(PassCountingEncoder);
+    pixi.extensions.add(pixi.GpuEncoderSystem);
   };
 }

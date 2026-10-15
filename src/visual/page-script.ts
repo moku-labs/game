@@ -360,7 +360,8 @@ export async function pagePause(
 /**
  * Turns on the pixel check of the frames the renderer skips, through the door `game.debug`, and
  * starts reading the log of the page from its end: from here on, `pageMissed` fails a step on the
- * first `renderer:missed-frame` or `renderer:missed-mark`.
+ * first `renderer:missed-frame`, `renderer:missed-mark` or `renderer:stale-picture` (a kept picture
+ * that no longer matches its live frame, spec 23).
  *
  * @param _argument - The test and the step, for the leg's message.
  * @returns Nothing, or why the page refused the switch.
@@ -398,7 +399,11 @@ function pageMissed(handles: PageHandles): string | undefined {
   for (let at = from; at < entries.length; at += 1) {
     const entry = entries[at];
 
-    if (entry?.event === "renderer:missed-frame" || entry?.event === "renderer:missed-mark") {
+    if (
+      entry?.event === "renderer:missed-frame" ||
+      entry?.event === "renderer:missed-mark" ||
+      entry?.event === "renderer:stale-picture"
+    ) {
       return `${entry.event} ${JSON.stringify(entry.data)}`;
     }
   }

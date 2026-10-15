@@ -1,7 +1,8 @@
 /**
  * Very Complex tier — pixels: one Pixi v8 application on one canvas. `host` creates it and
  * survives a lost device, `viewport` maps the window to the reference space, `sync` owns every
- * display object, `monitor` counts and, in an agent build, measures every frame. Emits
+ * display object, `kept` draws a still filtered view from a picture, `monitor` counts and, in an
+ * agent build, measures every frame. Emits
  * `renderer:device-lost`. Hooks `lifecycle:changed` (a pause serves the waiting captures and, in an
  * agent build, flushes the performance log), and in an agent build `flow:edge`, `flow:rest` (the
  * flow path of the frames) and `time:thermal` (the thermal line).
@@ -31,9 +32,10 @@ const config: Config = {
   poolLimit: 256,
   unsupportedMessage: "This device cannot run the game.",
   loadPixi: () => import("pixi.js"),
-  debug: { nineSlice: false, verifyFrames: false },
+  debug: { nineSlice: false, verifyFrames: false, kept: true },
   monitor: { budgetMs: "rate", frames: 1024 },
-  onDemand: false
+  onDemand: false,
+  keptMb: 64
 };
 
 /**

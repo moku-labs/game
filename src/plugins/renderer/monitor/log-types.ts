@@ -56,6 +56,10 @@ export type FrameColumns = {
   fltKind: Uint8Array;
   fltApplies: Uint16Array;
   fltMpx: Float32Array;
+  /** Kept pictures drawn in the frame (spec 23); NaN before attach. */
+  kept: Float32Array;
+  /** Kept pictures and range pictures taken in the frame; refreshes go to the per-second count only. */
+  retakes: Float32Array;
 };
 
 /**
@@ -172,7 +176,8 @@ export type PerfMeasured =
   | "rebuilds"
   | "longFrames"
   | "heap"
-  | "systems";
+  | "systems"
+  | "kept";
 
 /**
  * What the screen is: in the header and in every `display` event.
@@ -310,6 +315,8 @@ export type PerfSampleLine = PerfLine<"sample"> & {
   longFrames: { count: number; maxMs: number; blockingMs: number | null } | null;
   heapMb: number | null;
   textures: { count: number; mb: number; art: number; targets: number; kept: number };
+  /** Kept pictures: the most drawn in a frame, their MiB, the takes and the stage-3 refreshes of the second. */
+  kept: { pictures: number; mb: number; retakes: number; refreshes: number } | null;
   views: number;
   pooled: number;
   resolution: number;
@@ -377,6 +384,8 @@ export type FrameRecord = {
   path: string;
   changed: readonly PerfChangeEntry[];
   causes: readonly PerfCause[];
+  /** Kept pictures drawn and taken in the frame (spec 23). */
+  kept: { pictures: number; retakes: number } | null;
 };
 
 /**
@@ -441,6 +450,10 @@ export type PerfEventName =
  * Something that happened, at the frame it happened in.
  */
 export type PerfEventLine = PerfLine<"event"> & {
+  /**
+   * The frame the event happened in; `null` when it happened between frames (a `game.frameRate`
+   * or `time.setRate` switch, a door command): its `t` then lies between the frames around it.
+   */
   frame: number | null;
   name: PerfEventName;
   detail: Readonly<Record<string, Json>>;

@@ -5,6 +5,7 @@
  * frames by pixels (`verify.ts`). Both run behind inline positive guards, so a production bundle drops them.
  */
 import type { Entity } from "../../world/types";
+import { changeBelow, drawnThrough } from "../kept/readers";
 import type { View } from "../sync/types";
 import type { DemandModule, HostModule, RendererCtx } from "../types";
 import { checkMissedMarks } from "./check";
@@ -47,6 +48,9 @@ function clearMarks(state: DemandState): void {
   state.marked.clear();
   state.pending.clear();
   state.loose.clear();
+  state.visual.clear();
+  state.moved.clear();
+  state.published.clear();
   state.wholes.clear();
   state.counted = false;
 }
@@ -80,7 +84,16 @@ export function createDemandApi(
    * @param entity - The entity.
    * @returns True when its view is drawn as the frame stands.
    */
-  const shown = (entity: Entity): boolean => isShown(state, host, views, entity);
+  const shown = (entity: Entity): boolean => isShown(state, host, views, entity, through);
+
+  /**
+   * The padding a kept top adds when its quad draws it (P10.1), read from the kept state.
+   *
+   * @param node - A node whose `renderable` is false.
+   * @returns The padding, or -1 when no quad draws it.
+   */
+  const through = (node: Parameters<typeof drawnThrough>[1]): number =>
+    drawnThrough(ctx.state.kept, node);
 
   /**
    * The loose rule: an adapter view counts unless an ancestor hides it.
@@ -88,7 +101,7 @@ export function createDemandApi(
    * @param entity - The entity of a loose mark.
    * @returns True when it counts.
    */
-  const looseShown = (entity: Entity): boolean => ancestorsShown(host, views, entity);
+  const looseShown = (entity: Entity): boolean => ancestorsShown(host, views, entity, through);
 
   /**
    * Notes an entity in the record since the last drawn frame, in a dev or an agent build.
@@ -105,12 +118,18 @@ export function createDemandApi(
   };
 
   /**
-   * The mark of a write the renderer makes or is told about, before the write: judged as the view was drawn.
+   * The mark of a write the renderer makes or is told about, before the write: judged as the view was drawn. The
+   * callers note first which kind of mark it is.
    *
    * @param entity - The entity whose view is about to change.
    */
-  const mark = (entity: Entity): void => {
-    if (ctx.state.sync.root === undefined || state.marked.has(entity)) return;
+  const judge = (entity: Entity): void => {
+    if (state.marked.has(entity)) return;
+
+    const view = views.get(entity);
+
+    // Before the write: the pictures above the view as it stands now owe a retake (it may be leaving them).
+    if (view !== undefined) changeBelow(ctx.state.kept, view.wrapper ?? view.object);
 
     state.marked.add(entity);
     remember(entity);
@@ -203,8 +222,27 @@ export function createDemandApi(
     }
   };
 
+  /**
+   * The mark of a write that changes what the view draws: judged for the decision, a retake for `kept`.
+   *
+   * @param entity - The entity whose view is about to change.
+   */
+  const mark = (entity: Entity): void => {
+    if (ctx.state.sync.root === undefined) return;
+
+    state.visual.add(entity);
+    judge(entity);
+  };
+
   return {
     mark,
+
+    markMoved: (entity: Entity): void => {
+      if (ctx.state.sync.root === undefined) return;
+
+      state.moved.add(entity);
+      judge(entity);
+    },
 
     markLoose: (entity: Entity): void => {
       if (ctx.state.sync.root === undefined) return;
@@ -235,6 +273,12 @@ export function createDemandApi(
 
     loose: (): ReadonlySet<Entity> => state.loose,
 
+    visual: (): ReadonlySet<Entity> => state.visual,
+
+    moved: (): ReadonlySet<Entity> => state.moved,
+
+    published: (): ReadonlySet<Entity> => state.published,
+
     verifyFrames: (on: boolean): void => {
       // Inline and positive: a production `define` folds the guard, and `verify.ts` leaves the bundle.
       state.verify.on =
@@ -247,7 +291,10 @@ export function createDemandApi(
     verifying: (): boolean => state.verify.on,
 
     invalidate: (entity: Entity): void => {
-      if (views.has(entity)) mark(entity);
+      if (ctx.state.sync.root === undefined || !views.has(entity)) return;
+
+      state.published.add(entity);
+      judge(entity);
     }
   };
 }

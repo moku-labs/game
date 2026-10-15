@@ -353,6 +353,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    * where the old application and everything in it are already gone.
    */
   const forgetTree = (): void => {
+    // Every picture goes first: its textures belong to the application that goes (P15).
+    deps.kept.reset();
+
     for (const view of state.views.values()) {
       state.viewOfTop.delete(view.wrapper ?? view.object);
       if (view.kind === "Display") detach(view.object);
@@ -474,15 +477,21 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       verifyFrames: (on: boolean): void => deps.demand.verifyFrames(on),
 
-      state: (): DebugSwitches => ({ ...state.debug, verifyFrames: deps.demand.verifying() })
+      kept: (on: boolean): void => deps.kept.enabled(on),
+
+      state: (): DebugSwitches => ({
+        ...state.debug,
+        verifyFrames: deps.demand.verifying(),
+        kept: deps.kept.isOn()
+      })
     },
 
     filters: {
       set: (entity: Entity, slots: readonly FilterSlot[]): void =>
-        setFilters(state, entity, slots, deps.demand.mark)
+        setFilters(state, entity, slots, deps.demand.mark, deps.kept)
     },
 
-    renderPasses: (): number => renderPassesOf(state),
+    renderPasses: (): number => renderPassesOf(state, ctx.state.kept),
 
     root: (): PixiContainer | undefined => state.root,
 

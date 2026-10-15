@@ -35,6 +35,7 @@ export function createHostState(): HostState {
     cleanups: [],
     unsupported: undefined,
     uninstallCounting: undefined,
+    uninstallPasses: undefined,
     uninstallSdfText: undefined,
     resolution: { dpr: 1, cap: 2, override: undefined, pending: undefined },
     onResolutionChange: [],

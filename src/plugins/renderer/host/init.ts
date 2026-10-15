@@ -6,7 +6,7 @@ import type { PixiModule, RendererCtx } from "../types";
 import { initTimed, startupMark } from "./gpu";
 import { devicePixels, targetResolution } from "./resolution";
 import { installSdfTextPipe } from "./sdf-text";
-import type { HostState, InstallCounting } from "./types";
+import type { HostDeps, HostState, InstallCounting } from "./types";
 
 /**
  * Finds the element the canvas goes into. A missing document or a missing `mount` keeps the
@@ -47,40 +47,61 @@ export function resolveMount(ctx: RendererCtx): HTMLElement | undefined {
 }
 
 /**
- * Swaps Pixi's six counting bases for counting subclasses, so `stats().drawCalls` sees every draw
- * and the monitor of a debug build every pass, filter apply and upload. It runs before
- * `new Application()`, because Pixi builds its systems and adaptors inside `init`. Once per host
- * state: a restore reuses the installed classes. Dev and debug builds only, behind the inline dev
- * or agent guard, so a production `define` folds it and its log marker leaves the bundle.
- * A Pixi without these classes draws on uncounted, with a warning.
+ * Installs the pass counting of a production build (F8): the encoder alone, swapped once per host
+ * state, so `stats().renderPasses` is measured on the GPU path in every build. A Pixi without the
+ * encoder draws on with the estimate, with a warning.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param pixi - The module the application is built from.
- * @param install - The counting the plugin root injected, `undefined` in a production build.
+ * @param install - The pass counting the plugin root injected.
  */
-function installCounting(
-  ctx: RendererCtx,
-  pixi: PixiModule,
-  install: InstallCounting | undefined
-): void {
+function installPasses(ctx: RendererCtx, pixi: PixiModule, install: InstallCounting): void {
   const state = ctx.state.host;
-  // A counter was injected and none is installed yet.
-  const canInstall = install !== undefined && state.uninstallCounting === undefined;
+
+  if (state.uninstallPasses !== undefined) return;
+
+  try {
+    state.uninstallPasses = install(pixi);
+  } catch (error) {
+    ctx.log.warn("renderer: passes are not counted", { error });
+  }
+}
+
+/**
+ * Swaps Pixi's six counting bases for counting subclasses, so `stats().drawCalls` sees every draw
+ * and the monitor of a debug build every pass, filter apply and upload; any other build swaps the
+ * encoder alone, for the pass count (F8). It runs before `new Application()`, because Pixi builds
+ * its systems and adaptors inside `init`. Once per host state: a restore reuses the installed
+ * classes. The two branches are an if/else written positive behind the inline dev or agent guard,
+ * so each build keeps one of them and a production `define` drops the log marker. A Pixi without
+ * these classes draws on uncounted, with a warning.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param pixi - The module the application is built from.
+ * @param deps - The counting the plugin root injected: `installCounting` is `undefined` in a production build.
+ */
+function installCounting(ctx: RendererCtx, pixi: PixiModule, deps: HostDeps): void {
+  const state = ctx.state.host;
+  const install = deps.installCounting;
 
   // The dev or agent guard of `capture()`, written as a positive branch: Bun 1.3.14 drops code
   // used only inside a folded `if`, but keeps code used after a folded early `return`.
   if (
-    ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
-      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)) &&
-    canInstall
+    (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+    (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
   ) {
-    ctx.log.debug("moku:dev", { command: "renderer.monitor" });
+    // A counter was injected and none is installed yet.
+    if (install !== undefined && state.uninstallCounting === undefined) {
+      ctx.log.debug("moku:dev", { command: "renderer.monitor" });
 
-    try {
-      state.uninstallCounting = install(pixi);
-    } catch (error) {
-      ctx.log.warn("renderer: frames are not counted", { error });
+      try {
+        state.uninstallCounting = install(pixi);
+      } catch (error) {
+        ctx.log.warn("renderer: frames are not counted", { error });
+      }
     }
+  } else {
+    installPasses(ctx, pixi, deps.installPasses);
   }
 }
 
@@ -114,13 +135,13 @@ function installSdfText(ctx: RendererCtx, pixi: PixiModule): void {
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param mount - Where the canvas goes.
- * @param install - The counting of a dev or debug build, `undefined` in production.
+ * @param deps - The counting of a dev or debug build and the pass counting of the others.
  * @returns Resolves when the canvas is in the page.
  */
 export async function createApplication(
   ctx: RendererCtx,
   mount: HTMLElement,
-  install: InstallCounting | undefined
+  deps: HostDeps
 ): Promise<void> {
   const state = ctx.state.host;
   const loaded = state.pixi;
@@ -137,7 +158,7 @@ export async function createApplication(
   }
 
   state.pixi = pixi;
-  installCounting(ctx, pixi, install);
+  installCounting(ctx, pixi, deps);
   installSdfText(ctx, pixi);
 
   state.resolution.dpr = devicePixels();
@@ -208,6 +229,8 @@ export function stopHost(state: HostState): void {
 
   state.uninstallCounting?.();
   state.uninstallCounting = undefined;
+  state.uninstallPasses?.();
+  state.uninstallPasses = undefined;
   state.uninstallSdfText?.();
   state.uninstallSdfText = undefined;
   state.unsupported?.remove();

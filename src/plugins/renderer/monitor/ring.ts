@@ -187,7 +187,9 @@ function createColumns(capacity: number): FrameColumns {
     sysMs: new Float32Array(capacity * SYSTEM_STRIDE),
     fltKind: new Uint8Array(capacity * KIND_STRIDE),
     fltApplies: new Uint16Array(capacity * KIND_STRIDE),
-    fltMpx: new Float32Array(capacity * KIND_STRIDE)
+    fltMpx: new Float32Array(capacity * KIND_STRIDE),
+    kept: new Float32Array(capacity).fill(Number.NaN),
+    retakes: new Float32Array(capacity).fill(Number.NaN)
   };
 }
 
@@ -299,6 +301,8 @@ function readRing(ring: PerfRing, into: FrameReadout, since: number): Readonly<F
   copyColumn(into.fltKind, columns.fltKind, KIND_STRIDE, ring, oldest, count);
   copyColumn(into.fltApplies, columns.fltApplies, KIND_STRIDE, ring, oldest, count);
   copyColumn(into.fltMpx, columns.fltMpx, KIND_STRIDE, ring, oldest, count);
+  copyColumn(into.kept, columns.kept, 1, ring, oldest, count);
+  copyColumn(into.retakes, columns.retakes, 1, ring, oldest, count);
 
   return result;
 }
@@ -628,6 +632,7 @@ export function recordAt(ring: FrameRing, slot: number): FrameRecord {
   const phase = slot * PHASE_STRIDE;
   const applies = measured(cell(c.filterApplies, slot));
   const uploads = measured(cell(c.uploads, slot));
+  const kept = measured(cell(c.kept, slot));
 
   return {
     frame: cell(c.frame, slot),
@@ -668,7 +673,8 @@ export function recordAt(ring: FrameRing, slot: number): FrameRecord {
     gpuPartial: cell(c.gpuPartial, slot) === 1,
     path: ring.paths[cell(c.path, slot)] ?? OVERFLOW_PATH,
     changed: changesAt(ring, slot),
-    causes: namesOf(cell(c.causes, slot), CAUSE_NAMES)
+    causes: namesOf(cell(c.causes, slot), CAUSE_NAMES),
+    kept: kept === null ? null : { pictures: kept, retakes: cell(c.retakes, slot) }
   };
 }
 

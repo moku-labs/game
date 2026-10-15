@@ -270,5 +270,6 @@ describe("render on demand under seeded random writes", () => {
     expect(still.oracle.counts.drawn).toBeGreaterThan(0);
     expect(still.oracle.counts.drawn).toBeLessThan(still.oracle.counts.frames);
     still.oracle.expectNoMissedFrame();
+    still.oracle.expectPicturesCurrent();
   }, 60_000);
 });

@@ -10,6 +10,7 @@ import { worldPlugin } from "../world";
 import { createModules } from "./api";
 import { stopDemand } from "./demand/state";
 import { stopHost } from "./host/init";
+import { stopKept } from "./kept/state";
 import { stopMonitor } from "./monitor/api";
 import { stopSync } from "./sync/views";
 import type { Deps, KernelSlice, Modules, RendererCtx, TeardownScope } from "./types";
@@ -44,10 +45,12 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
 
 /**
  * The draw callback of the renderer: a pending resize is applied first (a pending resolution
- * takes the same path: the backing store changes, the frame and the scale do not), then `demand`
- * decides whether the frame is drawn, the frame is drawn or skipped, `demand` settles it (the dev
- * check, the pixel oracle), and `monitor` closes the frame and hands a drawn one to a waiting
- * capture. The display objects are written by the `sync` system.
+ * takes the same path: the backing store changes, the frame and the scale do not), then the
+ * overlay step (spec 22), then `kept` reads the marks before `demand` decides whether the frame is
+ * drawn and clears them; a drawn frame renders the kept pictures first (`kept.flush`, so the canvas
+ * stays one pass, E7), then the stage, then the pixel leg of the kept oracle; `demand` settles the
+ * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
+ * waiting capture. The display objects are written by the `sync` system.
  *
  * With `onDemand`, a frame in which nothing visible changed is not drawn: the canvas keeps the
  * last picture (WebGPU presents a canvas texture only when one is rendered; a WebGL canvas keeps
@@ -55,7 +58,7 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * frame rate, and only when Pixi drew it: an inert or lost host reports none.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param modules - The five modules.
+ * @param modules - The six modules.
  */
 function renderFrame(ctx: RendererCtx, modules: Modules): void {
   if (modules.host.resolutionPending()) ctx.state.viewport.resizePending = true;
@@ -70,9 +73,19 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
     modules.demand.whole("resize");
   }
 
+  modules.sync.stepOverlays();
+  // Before the decision clears the marks: they become the dirty flags of the pictures.
+  modules.kept.collect();
+
   const drawn = modules.demand.decide(modules.monitor.waiting());
 
-  if (drawn && modules.host.render()) ctx.deps.time.frameDrawn();
+  if (drawn) {
+    // The pictures before the stage pass: every render a picture needs is done when the canvas is drawn.
+    modules.kept.flush();
+    if (modules.host.render()) ctx.deps.time.frameDrawn();
+    modules.kept.after();
+  }
+
   modules.demand.settle(drawn);
   modules.monitor.end(modules.demand.frame().drawn);
 }
@@ -103,6 +116,7 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
       rendererCtx.deps.time.onFrame("render", () => renderFrame(rendererCtx, modules))
     );
     modules.monitor.attach();
+    modules.monitor.attachPasses();
   });
 
   modules.host.onLoss(() => modules.sync.forget());
@@ -113,6 +127,7 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
     modules.demand.whole("restore");
     modules.sync.rebuildAll();
     modules.monitor.attach();
+    modules.monitor.attachPasses();
   });
 
   await modules.host.init();
@@ -120,8 +135,8 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
 
 /**
  * Stops the renderer in the reverse order of the start: `monitor` answers the waiting captures
- * and stops its performance monitor, `demand` forgets its marks and pictures,
- * `sync` lets its views go while `world` is still alive, `viewport` drops its observer and its
+ * and stops its performance monitor, `demand` forgets its marks and pictures, `kept` destroys its
+ * textures, `sync` lets its views go while `world` is still alive, `viewport` drops its observer and its
  * probe, and `host` destroys the application. Textures are left to `assets`; a `Display` object
  * is left to the game.
  *
@@ -131,6 +146,8 @@ export function stopRenderer(scope: TeardownScope): void {
   stopMonitor(scope.state.monitor);
   // After the monitor, so a captured or verified frame never outlives the app.
   stopDemand(scope.state.demand);
+  // Every kept texture is destroyed while the application exists, before the views let go.
+  stopKept(scope.state.kept);
   stopSync(scope.state.sync);
   stopViewport(scope.state.viewport);
   stopHost(scope.state.host);

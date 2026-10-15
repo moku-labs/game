@@ -46,6 +46,7 @@ function settled(drawn: Drawn, ...components: Parameters<Drawn["spawn"]>): Entit
 afterEach(() => {
   for (const drawn of running.splice(0)) {
     drawn.oracle.expectNoMissedFrame();
+    drawn.oracle.expectPicturesCurrent();
     drawn.mock.stop();
   }
 

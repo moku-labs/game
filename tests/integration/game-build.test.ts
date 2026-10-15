@@ -25,6 +25,9 @@ const effectsFolder = fileURLToPath(new URL("../../src/plugins/effects/", import
 /** The names Pixi's three WebGPU draw classes go by: only the counting subclasses name them. */
 const drawClasses = ["GpuBatchAdaptor", "GpuGraphicsAdaptor", "GpuEncoderSystem"];
 
+/** The pass counter every build installs (spec 23 F8): the encoder alone stays in a release bundle. */
+const passClass = "GpuEncoderSystem";
+
 /** The command the dev install of the draw-call counter logs under `moku:dev`. */
 const drawCallsMarker = '"renderer.monitor"';
 
@@ -88,6 +91,9 @@ function effectsMarkers(): string[] {
 
 /** The log events of the debug switches of effects: agent-only, so a release bundle drops them. */
 const agentOnlyEffectsMarkers = ["effects:diagnostics", "effects:diagnostics-unknown"];
+
+/** The dev warning of the shader scan (LEAD-FIXES-4 item 3): dev-only, so a release bundle drops it. */
+const devOnlyEffectsMarkers = ["effects:filter-reads-screen"];
 
 /** The bundles built so far, by composition and profile: each build takes a second. */
 const built = new Map<string, string>();
@@ -167,9 +173,13 @@ describe("a game build with and without effectsPlugin", () => {
   it("carries every effects marker when the game composes effectsPlugin", () => {
     const code = bundle("screen+effects", "release");
 
-    const markers = effectsMarkers().filter(marker => !agentOnlyEffectsMarkers.includes(marker));
+    const markers = effectsMarkers().filter(
+      marker => !agentOnlyEffectsMarkers.includes(marker) && !devOnlyEffectsMarkers.includes(marker)
+    );
 
     expect(markers.filter(marker => !code.includes(marker))).toEqual([]);
+    expect(devOnlyEffectsMarkers.filter(marker => code.includes(marker))).toEqual([]);
+    expect(bundle("screen+effects", "dev")).toContain(devOnlyEffectsMarkers[0]);
     expect(code).toContain("mainFragment");
   }, 60_000);
 
@@ -200,11 +210,12 @@ describe("the debug switches, the trigger counter and the overlay call in a game
 });
 
 describe("the draw-call counter of the renderer in a game build", () => {
-  it("leaves the bundle when the three flags are defined false", () => {
+  it("leaves the bundle when the three flags are defined false, the pass counter of the encoder stays", () => {
     const code = bundle("screen", "release");
 
     expect(code).not.toContain(drawCallsMarker);
-    expect(drawClasses.filter(name => code.includes(name))).toEqual([]);
+    expect(drawClasses.filter(name => name !== passClass && code.includes(name))).toEqual([]);
+    expect(code).toContain(passClass);
   }, 60_000);
 
   it("stays in the bundle, with the three counting classes, when the dev page defines the flags true", () => {
