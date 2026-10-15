@@ -288,7 +288,7 @@ A store save that cannot be read rejects the load: `[game] The save could not be
 | Package | When | Install |
 |---|---|---|
 | `@moku-labs/system` | `config.ts` names a `system` plugin, or `save` is `"store"` | `bun add @moku-labs/system@^0.3.1` |
-| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.2` |
+| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.9` |
 
 The page imports the shell only when the game needs it. The generated `main.ts` then imports `systemShellOf` from `@moku-labs/game/app/system` and passes `systemShellOf({ ... })` to `startPage`. It writes one `import()` for the package and one per named plugin, in the order `lifecycle`, `back`, `haptics`, `keepAwake`, `store`; the store when `system` names it or `save` is `"store"`. The engine holds no `import()` of the package, so the page bundles only the named plugins. A game with `system: ["haptics"]` and a memory save builds without `@tauri-apps/plugin-store`.
 

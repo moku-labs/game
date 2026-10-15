@@ -328,7 +328,7 @@ describe("runNative", () => {
         fresh.runNative("build", settingsOf(), where, { target: "ios" })
       ).rejects.toThrow(
         new Error(
-          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.2."
+          "[game] moku-game native needs @moku-labs/native.\n  Install it: bun add -d @moku-labs/native@^0.3.9."
         )
       );
     } finally {
