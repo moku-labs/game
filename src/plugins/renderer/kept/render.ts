@@ -69,7 +69,9 @@ export function labelOf(top: PixiContainer): string {
 
 /**
  * Gives a texture the asked size and resolution: the one held, resized in place when it differs, or a new one,
- * registered with `host.keep`. Pixi rounds the device size at `resize`.
+ * registered with `host.keep`. Pixi rounds the device size at `resize`. Every texture is dynamic: Pixi's sprites follow
+ * a texture's resize only then, so the quad, the stand-ins and a range's sprite draw a picture retaken at another size
+ * at its new size, not scaled into the old one.
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -106,6 +108,7 @@ export function fitTexture(
     resolution,
     antialias: false,
     autoGarbageCollect: false,
+    dynamic: true,
     label
   });
 

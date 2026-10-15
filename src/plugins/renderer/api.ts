@@ -55,7 +55,9 @@ const syncWriters: SyncWriters = {
  * state, not owners of it. `host` gets the counting of `monitor` up front, because it installs
  * the classes before `monitor` exists (the six of a dev or debug build, the pass counter of the
  * others); `demand` reads the views of `sync` and the kept pictures through the state, whose maps
- * keep their identity; `kept` reads the views of `sync` the same way; `sync` marks every write in
+ * keep their identity; `kept` reads the views of `sync` the same way, and gives a bare view its
+ * wrapper through `sync.wrapForPicture` (spec 23 D4), reached through a holder filled once `sync`
+ * exists; `sync` marks every write in
  * `demand` and asks `kept` where a view's filters hang; `monitor` gets the others, since a legend
  * places views on the picture and the performance log reads all of them.
  *
@@ -69,8 +71,17 @@ export function createModules(ctx: RendererCtx): Modules {
   });
   const viewport = createViewportApi(ctx, { host });
   const demand = createDemandApi(ctx, { host, views: ctx.state.sync.views, hiddenBy });
-  const kept = createKeptApi(ctx, { host, demand, sync: syncWriters });
+  // `kept` is built before `sync`: its wrap reaches `sync` through this holder, filled below, first called in a flush.
+  const built: { sync?: SyncModule } = {};
+  const kept = createKeptApi(ctx, {
+    host,
+    demand,
+    sync: syncWriters,
+    wrap: entity => built.sync?.wrapForPicture(entity)
+  });
   const sync = createSyncApi(ctx, { host, viewport, demand, kept });
+
+  built.sync = sync;
   const monitor = createMonitorApi(ctx, { host, viewport, sync, demand, kept });
 
   return { host, viewport, demand, kept, sync, monitor };

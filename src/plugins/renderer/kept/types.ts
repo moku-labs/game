@@ -243,6 +243,8 @@ export type KeptCtx = {
   readonly hidden: HiddenCtx;
   /** The writers of `sync` it draws through. */
   readonly sync: SyncWriters;
+  /** Gives a bare view its wrapper before its first take (D4), without a mark; `sync.wrapForPicture`. */
+  readonly wrap: (entity: Entity) => PixiContainer | undefined;
   readonly state: KeptState;
   /** Made at the first flush with a Pixi module. */
   matrices: KeptMatrices | undefined;

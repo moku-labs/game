@@ -51,12 +51,20 @@ import {
   attach,
   createView,
   dropView,
+  wrapForPicture,
   writeVisual
 } from "./views";
 import { startWarm, warmFilter, warmStep } from "./warm";
 
 /** Label of the container the viewport transform is written on. */
 const ROOT_LABEL = "renderer.root";
+
+/**
+ * The mark of the quiet context: a write the kept cache makes for its picture changes no pixel and marks nothing.
+ */
+function noMark(): void {
+  // Nothing to judge: the frame draws the same pixels.
+}
 
 /**
  * Copies a change set, so a pass can clear it and still know what it took. It lives in its own
@@ -138,6 +146,11 @@ function unseenHolds(
  */
 export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   const sctx: SyncCtx = { ctx, deps };
+  // The kept cache's own writes draw the same pixels, so they mark nothing (spec 23 D4, as OQ23-7 for "kept").
+  const quiet: SyncCtx = {
+    ctx,
+    deps: { ...deps, demand: { ...deps.demand, mark: noMark, markMoved: noMark } }
+  };
   const state = ctx.state.sync;
   // What a pass with nothing to build hands its change steps: made once, so a still frame builds no set.
   const nothingBuilt: ReadonlySet<Entity> = emptyEntitySet();
@@ -615,6 +628,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     hitBoxOf: (entity: Entity): HitBox | undefined => hitBoxOf(state, entity),
 
     displayOf: (entity: Entity): unknown | undefined => state.views.get(entity)?.object,
+
+    wrapForPicture: (entity: Entity): PixiContainer | undefined => wrapForPicture(quiet, entity),
 
     textures: {
       provide: (fn: TextureProvider): (() => void) => {

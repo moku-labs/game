@@ -2,7 +2,8 @@
  * @file The browser leg of kept pictures (spec 23 T4): the engine's kept pictures on the real Pixi and the real GPU, in
  * Chrome, on WebGPU and on WebGL (`?renderer=webgl`), with `debug.verifyFrames` on. Every scene — a glow at rest, the
  * same after a fractional move, a blur at resolution 0.5, the same at renderer resolution 2.8125, a placed filter
- * with `canvasPixel`, a nested kept view, a kept view inside a card drawn live — must be drawn from a picture, equal its live frame within the thresholds
+ * with `canvasPixel`, a nested kept view, a kept view inside a card drawn live, a bare sprite and a shape at alpha
+ * 0.5 (both taken through a wrapper, spec 23 D4) — must be drawn from a picture, equal its live frame within the thresholds
  * of the frame oracle (a channel over 24, a ratio over 0.001), and log no `renderer:stale-picture`,
  * `renderer:missed-frame` or `renderer:missed-mark`. Not a vitest file: `bun tests/visual/kept-pictures.visual.ts`. It
  * bundles `kept-pictures/page.ts` with the flags of a dev page, serves it, and exits 1 when a run fails.

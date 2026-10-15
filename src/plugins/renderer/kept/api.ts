@@ -115,11 +115,17 @@ function stepRecords(kctx: KeptCtx, pixi: PixiModule, matrices: KeptMatrices): v
  * @param deps.host - The host module.
  * @param deps.demand - The demand module.
  * @param deps.sync - The writers of `sync`.
+ * @param deps.wrap - Gives a bare view its wrapper before its first take (D4): `sync.wrapForPicture`, built after.
  * @returns The kept module.
  */
 export function createKeptApi(
   ctx: RendererCtx,
-  deps: { host: HostModule; demand: DemandModule; sync: SyncWriters }
+  deps: {
+    host: HostModule;
+    demand: DemandModule;
+    sync: SyncWriters;
+    wrap: (entity: Entity) => PixiContainer | undefined;
+  }
 ): KeptModule {
   const state = ctx.state.kept;
   const kctx: KeptCtx = {
@@ -128,6 +134,7 @@ export function createKeptApi(
     demand: deps.demand,
     hidden: { ctx, deps: { demand: deps.demand } },
     sync: deps.sync,
+    wrap: deps.wrap,
     state,
     matrices: undefined,
     pixi: undefined

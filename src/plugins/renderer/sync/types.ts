@@ -995,6 +995,16 @@ export type SyncInternal = {
    * @param fn - Called with the probe draws made since the queue last started.
    */
   onWarm(fn: WarmListener): void;
+
+  /**
+   * Gives the view of an entity its wrapper before the kept cache takes its first picture (spec 23 D4), so the
+   * picture's root is a plain container; marks nothing, since the wrapper draws the same pixels. The wrapper stays
+   * until the view leaves.
+   *
+   * @param entity - The entity.
+   * @returns The wrapper, or `undefined` when the entity has no view or Pixi is not loaded.
+   */
+  wrapForPicture(entity: Entity): PixiContainer | undefined;
 };
 
 /**

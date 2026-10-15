@@ -659,8 +659,23 @@ the view itself is hidden (`renderable = false`, reason `"kept"` of `sync/hidden
 without a mark: both draw the same pixels). Every render happens in a flush before the stage pass,
 so the canvas stays one pass. A picture's render makes the top a render group while it is kept; a
 top drawn live again stops being one (drawn with its filters inside a parent's filter pass, a render
-group draws other pixels than the container did: found by the browser leg). On by default
+group draws other pixels than the container did: found by the browser leg), and the colour of its
+subtree is worked out again: Pixi's `disableRenderGroup` leaves the children with the colour they had
+inside the group, without the top's own alpha and tint, so a top at alpha 0.5 would draw its subtree
+at 1 (an alpha written away and back through Pixi's setter flags it). On by default
 (`renderer.keptMb: 64`); `keptMb: 0` turns it off and the renderer draws as before.
+
+The root of a picture's render is always a plain `Container` (spec 23 D4). A bare view (a sprite, a
+nine-slice, a shape or a game's own view that draws itself, without children) gets its wrapper just
+before its first take, the way a parent does: the pose, the filters, the filter area and a built-in
+visual's alpha move up to the wrapper, and the visual inside keeps its stretch and its tint. A view
+that draws itself made the root of a render group draws other pixels than live: Pixi's sprite pipe
+keeps the group transform it cached before, so a sprite landed outside its picture (an empty
+picture), and the root's own tint and alpha were applied twice. The wrapper carries the view's own
+label, so the pictures and their passes still name the view, and it is made without a mark (it draws
+the same pixels): no extra frame, no retake. It stays with the view until the view leaves, also
+while the view is drawn live, so a view that pulses wraps once. A filtered view that never stands
+still gets none. A visual that blends otherwise than normally keeps its view live, as a top does.
 
 What each stage depends on, and the only stage redone when it changes:
 

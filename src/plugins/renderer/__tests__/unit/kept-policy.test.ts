@@ -243,6 +243,27 @@ describe("taking a picture", () => {
   });
 });
 
+describe("a picture retaken at another size", () => {
+  // Bug: a retake at another size resizes the picture's textures in place, and Pixi's sprites follow a texture's
+  // resize only when it is dynamic: the quad and the stand-in kept the old size and drew the picture scaled
+  // (ticktoe's pieces as they settled, `renderer:stale-picture` with 895 pixels).
+  it("draws its quad at the size of the new picture", async () => {
+    const drawn = await open();
+    const entity = kept(drawn);
+    const quad = quadOf(drawn, entity) as pixi.Sprite | undefined;
+    const before = quad?.texture.width ?? 0;
+
+    drawn.mock.world.ecs.set(entity, Transform, { scale: 2 });
+    drawn.frame();
+
+    const bounds = quad?.bounds;
+
+    expect(keptNow(drawn, entity)).toBe(true);
+    expect(quad?.texture.width).toBeGreaterThan(before * 1.5);
+    expect(bounds === undefined ? 0 : bounds.maxX - bounds.minX).toBe(quad?.texture.width);
+  });
+});
+
 describe("only the stage whose key changed is redone", () => {
   it("a filter value change redoes stage 3 only", async () => {
     const drawn = await open();
@@ -443,16 +464,37 @@ describe("nested pictures, new tops, dropped views", () => {
   });
 
   it("a view that gets a wrapper (it became a parent) is drawn live in that frame and taken again later", async () => {
-    const drawn = await open();
-    const entity = kept(drawn);
+    // A game's container draws nothing itself, so it is kept without a wrapper (D4) until it becomes a parent.
+    const drawn = await open(true);
+    const panel = new pixi.Container();
+    const lamp = drawn.spawn(Transform({ x: 300, y: 100 }), Shape({ w: 8, h: 8 }));
+    let lampX = 300;
+
+    /** One drawn frame: the lamp moves. */
+    const step = (): void => {
+      lampX += 1;
+      drawn.mock.world.ecs.set(lamp, Transform, { x: lampX });
+      drawn.frame();
+    };
+
+    panel.addChild(new pixi.Graphics().rect(0, 0, 30, 30).fill(0xff_80_00));
+
+    const entity = drawn.spawn(Transform({ x: 100, y: 100 }), Display({ object: panel }));
+
+    drawn.mock.api.sync.filters.set(entity, [slotOf(new pixi.AlphaFilter())]);
+    for (let frame = 0; frame < 4; frame += 1) step();
+
     const object = topOf(drawn, entity);
+
+    expect(object).toBe(panel);
+    expect(keptNow(drawn, entity)).toBe(true);
 
     drawn.mock.world.ecs.spawn(OWNER, [
       Transform({ x: 4, y: 4 }),
       Shape({ w: 8, h: 8 }),
       Parent({ entity })
     ]);
-    drawn.frame();
+    step();
 
     const wrapper = topOf(drawn, entity);
 
@@ -461,8 +503,28 @@ describe("nested pictures, new tops, dropped views", () => {
     expect(wrapper.filters).toHaveLength(1);
     expect(keptNow(drawn, entity)).toBe(false);
 
-    drawn.frames(2);
+    step();
+    step();
 
+    expect(keptNow(drawn, entity)).toBe(true);
+  });
+
+  it("a kept bare view that becomes a parent keeps its wrapper: the child hangs in it and the picture is retaken", async () => {
+    const drawn = await open();
+    const entity = kept(drawn);
+    const wrapper = topOf(drawn, entity);
+    const from = drawn.stage.targets().length;
+
+    drawn.mock.world.ecs.spawn(OWNER, [
+      Transform({ x: 4, y: 4 }),
+      Shape({ w: 8, h: 8 }),
+      Parent({ entity })
+    ]);
+    drawn.frame();
+
+    expect(topOf(drawn, entity)).toBe(wrapper);
+    expect(wrapper.children).toHaveLength(2);
+    expect(rendersOf(drawn, entity, "#1", from)).toBe(1);
     expect(keptNow(drawn, entity)).toBe(true);
   });
 

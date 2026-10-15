@@ -146,6 +146,24 @@ function labelOf(entity: World.Entity): string {
   return `#${entity}`;
 }
 
+/** What a test reads of a display object: its label, whether it is drawn, the container it hangs in. */
+type Node = { label: string; renderable: boolean; parent: Node | null };
+
+/**
+ * The top of a view from its object: the wrapper it hangs in when it has one, a parent's (`parent#<entity>`) or a kept
+ * bare view's, which carries the view's own label (spec 23 D4); the object otherwise.
+ *
+ * @param object - The view's display object.
+ * @returns Its top.
+ */
+function topOf(object: Node): Node {
+  const parent = object.parent;
+  const wrapped =
+    parent !== null && (parent.label.startsWith("parent#") || parent.label === object.label);
+
+  return wrapped ? parent : object;
+}
+
 /** The fixtures started by the running test, stopped by `afterEach`. */
 const running: Array<{ app: Kept["app"]; watched: Watched }> = [];
 
@@ -208,14 +226,9 @@ async function open(onDemand = true): Promise<Kept> {
         return mine && target.endsWith(stage) && !container.endsWith("#2");
       }).length,
     isKept: entity => {
-      const object = app.renderer.sync.displayOf(entity) as
-        | { parent: unknown; renderable: boolean }
-        | undefined;
-      const top = (object?.parent as { label?: string } | undefined)?.label?.startsWith("parent#")
-        ? (object?.parent as { renderable: boolean })
-        : object;
+      const object = app.renderer.sync.displayOf(entity) as Node | undefined;
 
-      return top !== undefined && !top.renderable;
+      return object !== undefined && !topOf(object).renderable;
     }
   };
 

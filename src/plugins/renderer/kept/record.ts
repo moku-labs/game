@@ -248,8 +248,9 @@ function ancestorsPlain(kctx: KeptCtx, record: KeptRecord, stage: PixiContainer)
 }
 
 /**
- * Whether a record may be kept this frame (P4.1): an enabled filter, filters that draw like a picture, a top that
- * blends normally and is drawn, ancestors that draw it as a picture would, and the switch on.
+ * Whether a record may be kept this frame (P4.1): an enabled filter, filters that draw like a picture, a top and a
+ * visual that blend normally (the visual sits inside the wrapper of a kept bare view, D4), a top that is drawn,
+ * ancestors that draw it as a picture would, and the switch on.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -270,6 +271,7 @@ function eligible(kctx: KeptCtx, record: KeptRecord, view: View, stack: Stack): 
     top.visible &&
     top.alpha > 0 &&
     plainBlend(top.blendMode) &&
+    plainBlend(view.object.blendMode) &&
     topDrawn(kctx.sync, view) &&
     ancestorsPlain(kctx, record, stage)
   );
@@ -399,7 +401,7 @@ export function goLive(
 /**
  * Undoes the render group the cache made of a top that is drawn live again: drawn with its filters inside a parent's
  * filter pass, a top that stays a render group draws other pixels than the container it was (found by the browser
- * leg, T4). The next take makes it one again.
+ * leg, T4). Its subtree's colour is worked out again. The next take makes it one again.
  *
  * @param kctx - The kept context.
  * @param record - The record.
@@ -409,8 +411,28 @@ function ungroup(kctx: KeptCtx, record: KeptRecord): void {
 
   if (!madeGroups.has(record.top)) return;
 
-  if (!record.top.destroyed) record.top.disableRenderGroup();
+  if (!record.top.destroyed) {
+    record.top.disableRenderGroup();
+    recolour(record.top);
+  }
+
   madeGroups.delete(record.top);
+}
+
+/**
+ * Makes Pixi work out the colour of a top's subtree again after it stopped being a render group. Pixi's
+ * `disableRenderGroup` hands the children to the parent's group with the colour and alpha they had inside the group
+ * they left, which leave out the top's own: a top at alpha 0.5 would draw its subtree at 1 from then on (Pixi's
+ * `enableRenderGroup` flags them, the way back does not). An alpha written away and back, through Pixi's public
+ * setter, flags the top, and Pixi's next update carries the flag down the subtree; nothing is drawn in between.
+ *
+ * @param top - The top, no render group any more.
+ */
+function recolour(top: PixiContainer): void {
+  const alpha = top.alpha;
+
+  top.alpha = alpha === 0 ? 1 : 0;
+  top.alpha = alpha;
 }
 
 /**
@@ -804,7 +826,69 @@ function toKept(kctx: KeptCtx, record: KeptRecord, view: View): void {
 }
 
 /**
- * A live record's frame (P4.2): still frames are counted; at two (eight after churning) the record is taken.
+ * Tells whether a node draws itself: a Pixi view (a sprite, a nine-slice, a graphics, a particle container), not a
+ * plain container. Pixi types `renderPipeId` on every container, but only a view holds one.
+ *
+ * @param node - The node.
+ * @returns True for a view.
+ */
+function drawsItself(node: PixiContainer): boolean {
+  const pipe: string | undefined = node.renderPipeId;
+
+  return pipe !== undefined;
+}
+
+/**
+ * Reads the world transform of a record's top into this frame's numbers.
+ *
+ * @param record - The record.
+ */
+function readWorld(record: KeptRecord): void {
+  const world = record.top.getGlobalTransform(record.matrix, false);
+
+  NOW.a = world.a;
+  NOW.b = world.b;
+  NOW.c = world.c;
+  NOW.d = world.d;
+  NOW.tx = world.tx;
+  NOW.ty = world.ty;
+}
+
+/**
+ * Gives a bare view its wrapper before its first take (spec 23 D4): the root of the picture's first render is then a
+ * plain container, and the visual inside keeps its own transform, tint and alpha. A view that draws itself made the
+ * root of a render group draws other pixels than live (Pixi's sprite pipe keeps the group transform it cached, so a
+ * sprite lands outside its picture; the root's own tint and alpha are applied twice). The record moves to the new
+ * top, which keeps it from then on, also while the view is drawn live, so a view that pulses wraps once. The wrap
+ * marks nothing: it draws the same pixels. The numbers of the frame and the keys of the last one are read again from
+ * the wrapper.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record, live and about to be taken.
+ * @param view - Its view.
+ */
+function wrapBare(kctx: KeptCtx, record: KeptRecord, view: View): void {
+  if (view.wrapper !== undefined || !drawsItself(record.top)) return;
+
+  const wrapper = kctx.wrap(record.entity);
+
+  if (wrapper === undefined || wrapper === record.top) return;
+
+  const { state } = kctx;
+
+  if (state.byTop.get(record.top) === record) state.byTop.delete(record.top);
+  record.top = wrapper;
+  record.wasGroup = wrapper.isRenderGroup;
+  state.byTop.set(wrapper, record);
+  // One level deeper now: the list is sorted again before the next flush.
+  state.unsorted = true;
+  readWorld(record);
+  writeSeen(record, NOW);
+}
+
+/**
+ * A live record's frame (P4.2): still frames are counted; at two (eight after churning) the record is taken, a bare
+ * view in a wrapper of its own (D4).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -828,6 +912,8 @@ function stepLive(
   if (record.still < (record.calm ? CALM_AFTER : TAKE_AFTER)) return;
   // A refused take is not offered again until it fits (P6.3): no thrash.
   if (record.refused > 0 && state.bytes + record.refused - record.bytes > state.budget) return;
+
+  wrapBare(kctx, record, view);
 
   if (takePicture(kctx, pixi, matrices, record, view, NOW)) toKept(kctx, record, view);
   else record.still = 0;
@@ -1080,14 +1166,8 @@ function stepEligible(
   view: View
 ): void {
   const { state } = kctx;
-  const world = record.top.getGlobalTransform(record.matrix, false);
 
-  NOW.a = world.a;
-  NOW.b = world.b;
-  NOW.c = world.c;
-  NOW.d = world.d;
-  NOW.tx = world.tx;
-  NOW.ty = world.ty;
+  readWorld(record);
 
   if (record.mode === "live") stepLive(kctx, pixi, matrices, record, view);
   else stepKept(kctx, pixi, matrices, record, view);

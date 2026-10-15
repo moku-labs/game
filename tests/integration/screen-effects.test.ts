@@ -305,7 +305,9 @@ describe("a lens with an area (spec 27 B4)", () => {
     await watched.frames(12);
 
     const entity = app.world.projection.entityOf("memory.cover", "memory.cover");
-    const top = app.renderer.sync.displayOf(entity ?? 0) as pixi.Container | undefined;
+    const object = app.renderer.sync.displayOf(entity ?? 0) as pixi.Container | undefined;
+    // The kept cover is a bare shape in the wrapper of its picture (spec 23 D4): the area hangs on that top.
+    const top = object?.parent?.label === object?.label ? object?.parent : object;
     const area = top?.filterArea;
 
     // rev 84, soft 4: the 176 × 176 box around (195, 189), in the cover's own units (a shape at scale 1).

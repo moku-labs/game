@@ -12,6 +12,7 @@ import { defineGameApp } from "../../../src/app";
 import type { Assets, World } from "../../../src/index";
 import {
   Blur,
+  ColorMatrix,
   component,
   defineFilter,
   defineGame,
@@ -21,6 +22,7 @@ import {
   Noise,
   Parent,
   Shape,
+  Sprite,
   system,
   Transform,
   type
@@ -176,6 +178,42 @@ function compare(
   }
 
   return { differing, total: kept.data.length / 4, lit };
+}
+
+/** The texture of the piece, drawn once into a canvas: a disc with a dark square in it. */
+let piece: unknown;
+
+/**
+ * The texture of the bare sprite scene: a salmon disc with a dark square, drawn into a canvas once.
+ *
+ * @param pixiModule - The Pixi module the renderer loaded.
+ * @returns The texture.
+ */
+function pieceTexture(
+  pixiModule: NonNullable<ReturnType<App["renderer"]["host"]["pixi"]>>
+): InstanceType<typeof pixiModule.Texture> {
+  if (piece instanceof pixiModule.Texture) return piece;
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  canvas.width = 64;
+  canvas.height = 64;
+
+  if (context !== null) {
+    context.fillStyle = "#f8ad98";
+    context.beginPath();
+    context.arc(32, 32, 30, 0, Math.PI * 2);
+    context.fill();
+    context.fillStyle = "#3a2212";
+    context.fillRect(22, 22, 20, 20);
+  }
+
+  const texture = pixiModule.Texture.from(canvas);
+
+  piece = texture;
+
+  return texture;
 }
 
 /** The app of the page. */
@@ -341,6 +379,33 @@ async function play(): Promise<KeptPicturesResult> {
     Glow({ strength: 2, distance: 8 })
   );
   scenes.push(await measure(app, "kept inside a live card", [noisy]));
+
+  // A bare sprite, scaled, pivoted and standing on its foot, greyed by a colour matrix (ticktoe's piece, D4): its
+  // first picture is taken through a wrapper, never with the sprite as the root of its own render group.
+  const pixiModule = app.renderer.host.pixi();
+
+  if (pixiModule !== undefined) {
+    app.renderer.sync.textures.provide(key =>
+      key === "visual.piece" ? pieceTexture(pixiModule) : undefined
+    );
+  }
+
+  const piece = spawn(
+    Transform({ x: 140, y: 220, scale: 0.6, pivot: { x: 0, y: -60 } }),
+    Sprite({ texture: "visual.piece", width: 120, height: 120, anchor: { x: 0.5, y: 1 } }),
+    ColorMatrix({ grayscale: 0.6 })
+  );
+
+  scenes.push(await measure(app, "bare sprite", [piece]));
+
+  // A fill-only shape at alpha 0.5 with a glow: its tint and its alpha are applied once in the picture (D4).
+  const ghost = spawn(
+    Transform({ x: 100, y: 100 }),
+    Shape({ w: 120, h: 60, fill: 0x33_ff_88, radius: 12, alpha: 0.5 }),
+    Glow({ strength: 3, distance: 12 })
+  );
+
+  scenes.push(await measure(app, "shape at alpha 0.5", [ghost]));
 
   const warnings = app.log
     .trace()

@@ -1071,6 +1071,33 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
 }
 
 /**
+ * Gives a view whose picture the kept cache is about to take its wrapper, so the picture's first render has a plain
+ * `Container` for its root (spec 23 D4): a sprite, a nine-slice or a shape made the root of a render group draws other
+ * pixels than it does live. Pixi's sprite pipe keeps the group transform it cached before, so the sprite lands outside
+ * its picture, and the root's own tint and alpha are applied twice. Inside the wrapper the visual keeps its stretch and
+ * its tint; the pose, the filters, the filter area and a built-in visual's alpha move up, as for a parent. The wrapper
+ * carries the view's label, so the pictures and their passes still name the view, and it stays with the view until
+ * the view leaves. Called with the quiet context of the cache: the wrapper draws the same pixels, so it marks nothing.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the view.
+ * @returns The wrapper, or `undefined` when the entity has no view or Pixi is not loaded.
+ */
+export function wrapForPicture(sctx: SyncCtx, entity: Entity): PixiContainer | undefined {
+  const view = sctx.ctx.state.sync.views.get(entity);
+
+  if (view === undefined) return undefined;
+  if (view.wrapper !== undefined) return view.wrapper;
+
+  const label = view.object.label;
+  const wrapper = ensureWrapper(sctx, entity);
+
+  if (wrapper !== undefined) wrapper.label = label;
+
+  return wrapper;
+}
+
+/**
  * The container the children of a parent hang in: the masked one while the parent clips, its
  * wrapper otherwise.
  *
