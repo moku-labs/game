@@ -12,7 +12,11 @@ import { controlRefused } from "./doors/dev";
 import type { ControlApp } from "./doors/types";
 import { type HeadlessApp, reproBookmark } from "./headless";
 import { readBookmark, readRepro, readRoute } from "./json";
+import { graphHash } from "./runner/registry";
 import type { Bookmark, FlowState } from "./types";
+
+// eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
+const noPayload: Json = null;
 
 /** An app that may carry the screen plugins: the doors read and set its scene when it has one. */
 type SceneApp = { readonly scenes?: ScenesApi };
@@ -113,6 +117,26 @@ function readSave(save: Json): SaveTrees {
   }
 
   throw new Error("[game] game.saveImport needs { player, session, rng } of game.saveExport.");
+}
+
+/**
+ * Builds the bookmark a save is imported at: the start of the main flow with the save's trees and
+ * the hash of the graph that runs now. The start may be a transit node: `flow.restore` enters
+ * one of the graph it was made for and plays it, as a fresh start does, on the imported trees.
+ *
+ * @param app - The started app.
+ * @param save - The player, the session and the rng of the save.
+ * @returns The bookmark, as JSON for `restoreFrom`.
+ */
+function startBookmark(app: HeadlessApp, save: SaveTrees): Json {
+  const graph = app.flow.describe();
+
+  return {
+    path: graph.flows[graph.main]?.start ?? "",
+    input: noPayload,
+    ...save,
+    graph: graphHash(graph)
+  };
 }
 
 /**
@@ -288,16 +312,21 @@ export const saveExportCommand = defineCommand({
 
 /**
  * Puts a save of `game.saveExport` in place and writes it, so the next start of the app reads it:
- * the trees are restored at the main flow's start, the way `game.restore` restores a repro, then
- * the store flushes. Replaces the state outside the graph, so the session is tainted and the
+ * the trees are restored at the main flow's start, and the game lands where a fresh start with
+ * them lands. A start that is a rest node is entered; a transit node runs again on the imported
+ * trees, rng included, up to the first gate it opens, at a rest node or a popup. Then the store
+ * flushes. Replaces the state outside the graph, so the session is tainted and the
  * command journaled. A `--debug` page refuses it; `--debug=full` and the dev page run it.
  *
  * @throws {Error} `[game] game.saveImport needs { player, session, rng } of game.saveExport.` for
  *   a value without the three trees.
  * @example
  * ```ts
- * // The debug app beside the store app gets the save exported from the store app.
- * (await run(app, commands.saveImport, { save: exported })).value; // { restored: true }
+ * // The debug app beside the store app gets the save exported from the store app. Its main
+ * // flow starts at "boot", a transit node: boot runs again on the save and the game rests at home.
+ * const ran = await run(app, commands.saveImport, { save: exported });
+ * ran.value; // { restored: true }
+ * ran.state.path; // "home"
  * ```
  */
 export const saveImportCommand = defineCommand({
@@ -315,9 +344,9 @@ export const saveImportCommand = defineCommand({
 
     app.log.debug("moku:dev", { command: "game.saveImport" });
 
-    const { player, session, rng } = readSave(save);
-
-    await restoreFrom(app, { repro: { player, session, rng, route: [] } });
+    // The start of the main flow, with the save's trees, played to the gate it opens first.
+    await restoreFrom(app, { bookmark: startBookmark(app, readSave(save)) });
+    await app.flow.walk([]);
     await app.model.store.flush();
 
     return { restored: true };
