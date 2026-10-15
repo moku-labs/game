@@ -273,10 +273,13 @@ function turned(pc: PerfCtx): boolean {
  * @param measure - What `time` measured of the frame.
  */
 function stageBudget(perf: PerfState, measure: Readonly<FrameMeasure>): void {
+  const ticksSlower =
+    Number.isNaN(measure.displayMs) && cell(perf.ticks.periodMs, 0) > measure.rateMs;
+
   perf.staged[0] = measure.rateMs;
 
   if (measure.displayMs > measure.rateMs) perf.staged[0] = measure.displayMs;
-  else if (Number.isNaN(measure.displayMs) && cell(perf.ticks.periodMs, 0) > measure.rateMs) {
+  else if (ticksSlower) {
     perf.staged[0] = cell(perf.ticks.periodMs, 0);
   }
   if (perf.budget !== "rate") perf.staged[0] = perf.budget;

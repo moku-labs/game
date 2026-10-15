@@ -55,6 +55,7 @@ export function noteTicks(ticks: TickEstimate, measure: Readonly<FrameMeasure>):
   ticks.next = (ticks.next + 1) % TICK_SAMPLES;
   ticks.size = Math.min(ticks.size + 1, TICK_SAMPLES);
 
+  // Insertion-sort the held samples into scratch to take the median.
   for (let index = 0; index < ticks.size; index += 1) {
     const value = cell(samples, index);
     let place = index;
