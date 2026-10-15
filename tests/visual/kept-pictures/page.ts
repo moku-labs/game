@@ -6,6 +6,12 @@
  * difference. Each scene is captured with its pictures kept and again with `debug.kept(false)`, so the two Pixi facts
  * no Node test can pin are pinned here: a top hidden by `renderable = false` still draws itself in its own render
  * call, and a render group with filters draws what the container did. It answers in `globalThis.keptPictures`.
+ *
+ * Once the scene is up the clock is paused and every frame is a `time.step` of 1000/60 ms, as the visual runner's
+ * browser leg plays: browser frames do not map to game frames (the loop caps at 60 fps, and a frame with the oracle's
+ * read-backs runs long), so a wait in browser frames gave a scene 2 to 6 game frames, and a scene the policy takes on
+ * its third drawn frame was measured live on a loaded machine. A scene is measured once it is at rest and the engine
+ * drew it from a picture, within `SETTLE_FRAMES`.
  */
 
 import { defineGameApp } from "../../../src/app";
@@ -34,6 +40,8 @@ export type SceneResult = {
   name: string;
   /** Quads drawn in the last drawn frame, with the pictures kept. */
   pictures: number;
+  /** Game frames from the spawn until the scene was at rest and drawn from a picture; `SETTLE_FRAMES` when it never was. */
+  frames: number;
   /** Pixels of the kept capture that differ from the live capture by more than 24 in a channel. */
   differing: number;
   /** Pixels of a capture. */
@@ -49,6 +57,15 @@ export type KeptPicturesResult = {
   /** The warnings of the run that fail it: stale pictures, missed frames and marks. */
   warnings: Array<{ event: string; data: unknown }>;
 };
+
+/** One game frame of the paused clock: the frame of the visual runner. */
+const FRAME_MS = 1000 / 60;
+
+/**
+ * The most game frames a scene may take to come to rest and be drawn from a picture: the longest drift (20 frames),
+ * a calm record's 8 still frames and the take, with room to spare.
+ */
+export const SETTLE_FRAMES = 60;
 
 /** The owner of every view the page spawns. */
 const OWNER = { kind: "plugin", name: "visual" } as const;
@@ -122,7 +139,7 @@ const manifest: Assets.Manifest = {
 };
 
 /**
- * Waits for frames of the page.
+ * Waits for frames of the page, while the clock still runs on them.
  *
  * @param count - How many.
  */
@@ -130,6 +147,39 @@ async function frames(count: number): Promise<void> {
   for (let frame = 0; frame < count; frame += 1) {
     await new Promise(resolve => requestAnimationFrame(resolve));
   }
+}
+
+/**
+ * Runs game frames on the paused clock, each followed by a task, so the promises a frame started go on.
+ *
+ * @param app - The app.
+ * @param count - How many.
+ */
+async function step(app: App, count: number): Promise<void> {
+  for (let frame = 0; frame < count; frame += 1) {
+    app.time.step(FRAME_MS);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+}
+
+/**
+ * Runs game frames until a scene is at rest (no drift left) and the engine drew a picture in the last frame, at most
+ * `SETTLE_FRAMES`.
+ *
+ * @param app - The app.
+ * @param entities - The entities of the scene.
+ * @returns The frames it took; `SETTLE_FRAMES` when it never got there.
+ */
+async function settle(app: App, entities: readonly World.Entity[]): Promise<number> {
+  for (let frame = 1; frame <= SETTLE_FRAMES; frame += 1) {
+    await step(app, 1);
+
+    const still = entities.every(entity => (app.world.ecs.get(entity, Drift)?.frames ?? 0) === 0);
+
+    if (still && app.renderer.stats().kept.pictures > 0) return frame;
+  }
+
+  return SETTLE_FRAMES;
 }
 
 /**
@@ -232,24 +282,28 @@ async function measure(
   name: string,
   entities: readonly World.Entity[]
 ): Promise<SceneResult> {
-  await frames(8);
-
+  const settled = await settle(app, entities);
   const pictures = app.renderer.stats().kept.pictures;
   const kept = await app.renderer.capture();
 
   app.renderer.sync.debug.kept(false);
-  await frames(3);
+  await step(app, 3);
 
   const live = await app.renderer.capture();
 
   app.renderer.sync.debug.kept(true);
 
   for (const entity of entities) app.world.ecs.despawn(entity);
-  await frames(3);
+  await step(app, 3);
 
   if (kept === undefined || live === undefined) throw new Error(`no capture of ${name}`);
 
-  return { name, pictures, ...compare(await pixelsOf(kept.png), await pixelsOf(live.png)) };
+  return {
+    name,
+    pictures,
+    frames: settled,
+    ...compare(await pixelsOf(kept.png), await pixelsOf(live.png))
+  };
 }
 
 /**
@@ -286,6 +340,8 @@ async function play(): Promise<KeptPicturesResult> {
 
   // The scene of the rest node mounts its layers in the frames after the flow got there.
   await frames(30);
+  // From here on the page plays game frames itself, the same ones on every machine.
+  app.time.pause();
 
   const ecs = app.world.ecs;
   const spawn = (...components: World.AnyComponentValue[]): World.Entity =>
@@ -326,7 +382,7 @@ async function play(): Promise<KeptPicturesResult> {
 
   // The same blur with the renderer at 2.8125: r / rs is 5.625, the quad off the device grid at rest.
   app.renderer.monitor.setResolution(2.8125);
-  await frames(3);
+  await step(app, 3);
 
   const fine = spawn(
     Transform({ x: 60, y: 60 }),
@@ -337,7 +393,7 @@ async function play(): Promise<KeptPicturesResult> {
   child(fine, Transform({ x: 20, y: 20 }), Shape({ w: 60, h: 160, fill: 0xff_40_40 }));
   scenes.push(await measure(app, "blur at 0.5, resolution 2.8125", [fine]));
   app.renderer.monitor.setResolution(undefined);
-  await frames(3);
+  await step(app, 3);
 
   // A placed filter that reads its canvas position through canvasPixel, moved by whole pixels.
   const lamp = spawn(

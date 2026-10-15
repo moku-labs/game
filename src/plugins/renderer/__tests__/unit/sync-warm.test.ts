@@ -428,31 +428,70 @@ describe("the warm-up of a filter", () => {
     ]);
   });
 
-  // Bug: a broken probe stops the queue, or floods the log once per variant.
-  it("a probe whose render throws is counted done and reported once", async () => {
-    const warmed = await startWarm();
-    const filter = new pixi.AlphaFilter();
+  // Bug: a probe whose render throws is counted done and the queue goes on. A throw inside Pixi's render leaves its
+  // filter stack unbalanced, which no public API rebalances: every probe after it throws again, and the stage pass of
+  // the same frame throws in a real filter's apply, which effects then breaks for the session.
+  it("a probe whose render throws ends the warm-up of the application, logged once as an error", async () => {
+    const warmed = await startWarm({ config: { warm: 3 } });
+    const broken = new pixi.AlphaFilter();
+    const after = new pixi.AlphaFilter();
+    const heard: number[] = [];
 
-    warmed.stage.last().renderer.watchers.unshift(call => {
-      const holder = call.container.children[0];
+    // An agent build: a run that ended on a throw is not reported as a finished warm-up.
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    warmed.mock.modules.sync.onWarm(draws => heard.push(draws));
 
-      if (holder !== undefined && holdsFilter(holder, filter)) throw new Error("no pipeline");
+    warmed.name(broken, "broken");
+    warmed.name(after, "after");
+    // After the watcher that records the probe: the broken one is seen, then throws.
+    warmed.stage.last().renderer.watchers.push(call => {
+      const top = call.container.children[0];
+
+      if (top !== undefined && holdsFilter(top, broken)) throw new Error("no pipeline");
     });
-    warmed.frames(16);
 
-    const answer = watchAnswer(warmed.mock.api.sync.filters.warm(filter));
+    const answers = [
+      watchAnswer(warmed.mock.api.sync.filters.warm(broken)),
+      watchAnswer(warmed.mock.api.sync.filters.warm(after))
+    ];
 
-    warmed.frames(4);
+    // 16 content draws, three a frame: the sixth frame draws the last content probe, then the broken one.
+    expect(warmed.frames(6)).toBe(6);
     await settle();
 
-    expect(answer.answer).toBe(true);
-    expect(warmed.mock.log.warn).toHaveBeenCalledTimes(1);
-    expect(warmed.mock.log.warn).toHaveBeenCalledWith(
-      "renderer:warm-failed",
-      expect.objectContaining({ subject: "filter", variant: "canvas" })
-    );
-    // The queue went on: nothing left, nothing drawn on the next still frame.
-    expect(warmed.frames(2)).toBe(0);
+    expect(warmed.probes().slice(15)).toEqual(["particles-add texture+clip", "broken canvas"]);
+    expect(warmed.calls.at(-1)).toBe("stage");
+    expect(answers.map(answer => answer.answer)).toEqual([false, false]);
+    expect(heard).toEqual([]);
+    expect(warmed.mock.log.warn).not.toHaveBeenCalled();
+    expect(warmed.mock.log.error).toHaveBeenCalledTimes(1);
+    expect(warmed.mock.log.error).toHaveBeenCalledWith("renderer:warm-failed", {
+      subject: "filter",
+      filter: "AlphaFilter",
+      variant: "canvas",
+      error: expect.any(Error)
+    });
+
+    // Nothing more on this application: not the queue, not a filter handed over now, not the text of a new font.
+    const late = watchAnswer(warmed.mock.api.sync.filters.warm(new pixi.AlphaFilter()));
+
+    installFont(warmed);
+    await settle();
+
+    expect(late.answer).toBe(false);
+    expect(warmed.frames(3)).toBe(0);
+    expect(warmed.probes()).toHaveLength(17);
+
+    // A new application has a new filter stack: its warm-up runs again, without the filters whose callers were told
+    // false (they may have destroyed them).
+    warmed.mock.modules.sync.forget();
+    warmed.mock.modules.sync.rebuildAll();
+    warmed.frames(10);
+
+    expect(warmed.probes().slice(17)).toEqual([
+      ...CONTENT.flatMap(subject => inFour(subject)),
+      ...inFour("text")
+    ]);
   });
 
   // Bug: the renderer destroys a filter `effects` owns, or a waiting caller hangs forever.

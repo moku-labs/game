@@ -358,20 +358,70 @@ export async function pagePause(
 }
 
 /**
+ * Tells whether a log line fails a visual test wherever the page logged it, its load included: a
+ * filter broken for good (`effects:broken`), a warm-up probe whose render threw inside Pixi
+ * (`renderer:warm-failed`), a read of the frame oracles that failed (`renderer: pixel read failed`).
+ * No frame oracle can see them: the oracles compare the engine with itself.
+ *
+ * @param event - The event of the line.
+ * @returns True for one of the three.
+ * @example
+ * ```ts
+ * pageBroke("effects:broken"); // true
+ * ```
+ */
+function pageBroke(event: string | undefined): boolean {
+  return (
+    event === "effects:broken" ||
+    event === "renderer:warm-failed" ||
+    event === "renderer: pixel read failed"
+  );
+}
+
+/**
+ * Tells whether a log line is a finding of the frame oracles: a skipped frame that differed from
+ * the frame drawn live, a view written without a mark, a kept picture that no longer matches its
+ * live frame (spec 23).
+ *
+ * @param event - The event of the line.
+ * @returns True for one of the three.
+ * @example
+ * ```ts
+ * pageOracle("renderer:stale-picture"); // true
+ * ```
+ */
+function pageOracle(event: string | undefined): boolean {
+  return (
+    event === "renderer:missed-frame" ||
+    event === "renderer:missed-mark" ||
+    event === "renderer:stale-picture"
+  );
+}
+
+/**
  * Turns on the pixel check of the frames the renderer skips, through the door `game.debug`, and
  * starts reading the log of the page from its end: from here on, `pageMissed` fails a step on the
- * first `renderer:missed-frame`, `renderer:missed-mark` or `renderer:stale-picture` (a kept picture
- * that no longer matches its live frame, spec 23).
+ * first line of the frame oracles or of `pageBroke`. A `pageBroke` line the page logged while it
+ * loaded, before the check, fails the start.
  *
  * @param _argument - The test and the step, for the leg's message.
- * @returns Nothing, or why the page refused the switch.
+ * @returns Nothing, or why the page refused the switch or broke while it loaded.
  */
 export async function pageVerify(_argument: Place): Promise<PageAnswer<undefined>> {
   try {
     const { game, doors } = pageHandles();
 
     await doors.run(game, doors.commands.debug, { verifyFrames: true });
-    Reflect.set(globalThis, "__mokuVisualTrace", game.log.trace().length);
+
+    const entries = game.log.trace();
+
+    Reflect.set(globalThis, "__mokuVisualTrace", entries.length);
+
+    for (const entry of entries) {
+      if (pageBroke(entry.event)) {
+        return { ok: false, reason: `${entry.event} ${JSON.stringify(entry.data)}` };
+      }
+    }
 
     return { ok: true, value: undefined };
   } catch (error) {
@@ -381,8 +431,7 @@ export async function pageVerify(_argument: Place): Promise<PageAnswer<undefined
 
 /**
  * Reads the log of the page since the last read, once `pageVerify` turned the check on, for the
- * first line of the frame oracles: a skipped frame that differed from the frame drawn live, or a
- * view written without a mark.
+ * first line of the frame oracles (`pageOracle`) or of an error no oracle can see (`pageBroke`).
  *
  * @param handles - The game and the doors.
  * @returns The line, as its event and its data, or `undefined` when none was logged.
@@ -399,11 +448,7 @@ function pageMissed(handles: PageHandles): string | undefined {
   for (let at = from; at < entries.length; at += 1) {
     const entry = entries[at];
 
-    if (
-      entry?.event === "renderer:missed-frame" ||
-      entry?.event === "renderer:missed-mark" ||
-      entry?.event === "renderer:stale-picture"
-    ) {
+    if (entry !== undefined && (pageOracle(entry.event) || pageBroke(entry.event))) {
       return `${entry.event} ${JSON.stringify(entry.data)}`;
     }
   }
@@ -680,6 +725,8 @@ const pageFunctions: ReadonlyArray<{ readonly name: string }> = [
   pageRun,
   pageStart,
   pagePause,
+  pageBroke,
+  pageOracle,
   pageVerify,
   pageMissed,
   pageStep,

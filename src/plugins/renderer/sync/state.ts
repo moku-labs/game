@@ -82,6 +82,7 @@ function createWarmState(): WarmState {
     textFont: undefined,
     objects: undefined,
     draws: 0,
+    failed: false,
     reported: emptySet(),
     listeners: []
   };

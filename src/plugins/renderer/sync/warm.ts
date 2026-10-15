@@ -7,8 +7,10 @@
  * the canvas without a clear just before the stage pass, which clears the canvas first: nothing shows. A texture variant
  * is rendered into a small texture the module owns, never through a filter of its own: a filter probe is always the one
  * filter of its render, so the warm-up never opens a second level of Pixi's filter stack (Pixi 8.21 reads the stale
- * input texture of that level at its next push, and a pool trim destroys it in between). The end of a run reaches the
- * monitor through `onWarm`; this file never imports the monitor (LEAD-FIXES-3 O24).
+ * input texture of that level at its next push, and a pool trim destroys it in between). A probe whose render throws
+ * ends the warm-up of the application: a throw inside Pixi's render leaves its filter stack unbalanced, which no public
+ * API rebalances, so another probe would only throw again. The end of a run reaches the monitor through `onWarm`; this
+ * file never imports the monitor (LEAD-FIXES-3 O24).
  */
 import type { PixiContainer, PixiFilter, PixiModule, PixiSprite } from "../types";
 import { clearFilters } from "./filters";
@@ -180,7 +182,7 @@ function dropObjects(warm: WarmState): void {
 }
 
 /**
- * Logs one line once per key: a subject whose render failed, or the canvas variants left out.
+ * Logs one warning once per key: a probe tree Pixi could not build, or the canvas variants left out.
  *
  * @param sctx - Domain context of the sync module.
  * @param key - What the line is about.
@@ -230,21 +232,47 @@ function enqueue(warm: WarmState, subject: WarmSubject, variants: readonly WarmV
 }
 
 /**
- * Tells whether the renderer can warm anything now: the config asks for draws, and a device draws.
+ * Tells whether the renderer can warm anything now: the config asks for draws, a device draws, and no probe threw on
+ * this application.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when probes may be queued.
  */
 function canWarm(sctx: SyncCtx): boolean {
+  const state = sctx.ctx.state.sync;
+
   return (
-    sctx.ctx.config.warm > 0 && sctx.deps.host.ready() && sctx.ctx.state.sync.root !== undefined
+    sctx.ctx.config.warm > 0 &&
+    sctx.deps.host.ready() &&
+    state.root !== undefined &&
+    !state.warm.failed
   );
+}
+
+/**
+ * Ends the warm-up of this application early: every waiting promise answers false and the queue empties. A filter
+ * answered false is forgotten, since its caller may destroy it; a filter warmed already stays known, so a new
+ * application queues it again.
+ *
+ * @param warm - The warm branch of the sync state.
+ */
+function abandon(warm: WarmState): void {
+  for (const [filter, entry] of warm.waiting) {
+    warm.filters.delete(filter);
+    for (const resolve of entry.resolve) resolve(false);
+  }
+
+  warm.waiting.clear();
+  warm.queue.length = 0;
+  warm.head = 0;
+  warm.draws = 0;
 }
 
 /**
  * Starts the warm-up of a device, at `sync.start()` and after every rebuild of a restore: the probe tree of an earlier
  * device goes, and the queue starts over with the content subjects, the text when a font is installed, and every filter
- * handed over before (the device is new; no promise is answered again). Asks for a frame.
+ * handed over before (the device is new; no promise is answered again). A probe that threw on the earlier application
+ * stops nothing here: the new application has a filter stack of its own. Asks for a frame.
  *
  * @param sctx - Domain context of the sync module.
  */
@@ -257,6 +285,7 @@ export function startWarm(sctx: SyncCtx): void {
   warm.head = 0;
   warm.draws = 0;
   warm.textQueued = false;
+  warm.failed = false;
 
   if (!canWarm(sctx)) return;
 
@@ -393,21 +422,60 @@ function nodeOf(
 }
 
 /**
+ * The name of a probe's filter in the log: the name of its WebGPU program (the definition id of one of `effects`'
+ * filters), else its class, as Pixi's own filters name no program.
+ *
+ * @param filter - The filter.
+ * @returns The name; `"filter"` when it has neither.
+ */
+function filterName(filter: PixiFilter): string {
+  const program: unknown = filter.gpuProgram?.name;
+
+  if (typeof program === "string" && program !== "") return program;
+
+  const name = filter.constructor.name.replace(/^_/, "");
+
+  return name === "" ? "filter" : name;
+}
+
+/**
+ * Ends the warm-up of this application after a probe whose render threw, and logs it at error level with the kind of
+ * the probe, its variant and, for a filter, its name.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param draw - The draw whose render threw.
+ * @param error - What Pixi threw.
+ */
+function failWarm(sctx: SyncCtx, draw: WarmDraw, error: unknown): void {
+  const { warm } = sctx.ctx.state.sync;
+  const { subject, variant } = draw;
+
+  warm.failed = true;
+  abandon(warm);
+  sctx.ctx.log.error(
+    "renderer:warm-failed",
+    typeof subject === "string"
+      ? { subject, variant, error }
+      : { subject: "filter", filter: filterName(subject), variant, error }
+  );
+}
+
+/**
  * Draws one probe: hangs the subject in its variant under the root, renders the root onto the canvas or, for a texture
  * variant, into the module's texture, and takes it all down again, so the tree holds the subject only during its own
- * render. A render that throws counts the draw done and is reported once per subject: a broken filter is the business
- * of `effects`, and the probe never stops the queue.
+ * render. A render that throws ends the warm-up of the application (`failWarm`).
  *
  * @param sctx - Domain context of the sync module.
  * @param pixi - The module that draws.
  * @param objects - The probe tree.
  * @param draw - The draw.
+ * @returns False when the render threw.
  */
-function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: WarmDraw): void {
+function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: WarmDraw): boolean {
   const { warm } = sctx.ctx.state.sync;
   const node = nodeOf(pixi, warm, objects, draw.subject);
 
-  if (node === undefined) return;
+  if (node === undefined) return true;
 
   const clipped = draw.variant === "canvas+clip" || draw.variant === "texture+clip";
   const textured = draw.variant === "texture" || draw.variant === "texture+clip";
@@ -421,14 +489,12 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
 
   try {
     sctx.deps.host.renderProbe(objects.root, textured ? objects.target : undefined);
-  } catch (error) {
-    const subject = typeof draw.subject === "string" ? draw.subject : "filter";
 
-    reportOnce(sctx, draw.subject, "renderer:warm-failed", {
-      subject,
-      variant: draw.variant,
-      error
-    });
+    return true;
+  } catch (error) {
+    failWarm(sctx, draw, error);
+
+    return false;
   } finally {
     node.removeFromParent();
     objects.clipFrame.removeFromParent();
@@ -497,13 +563,7 @@ function objectsOf(sctx: SyncCtx, pixi: PixiModule): WarmObjects | undefined {
     return warm.objects;
   } catch (error) {
     reportOnce(sctx, "probes", "renderer:warm-failed", { subject: "probes", error });
-
-    for (const entry of warm.waiting.values()) for (const resolve of entry.resolve) resolve(false);
-
-    warm.waiting.clear();
-    warm.queue.length = 0;
-    warm.head = 0;
-    warm.draws = 0;
+    abandon(warm);
 
     return undefined;
   }
@@ -512,8 +572,8 @@ function objectsOf(sctx: SyncCtx, pixi: PixiModule): WarmObjects | undefined {
 /**
  * Draws up to `renderer.warm` probes before the stage pass of a drawn frame; answers whether it drew any, so the frame
  * is told to `time` as a probed one. A draw is counted only after its own render call ran; a queue that still holds
- * draws asks for the next frame. Allocates nothing while the queue is empty, and nothing but Pixi's own work on a warm
- * frame: the probe tree is made once per device.
+ * draws asks for the next frame; a probe that threw ends the warm-up there. Allocates nothing while the queue is empty,
+ * and nothing but Pixi's own work on a warm frame: the probe tree is made once per device.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when a probe was drawn in this frame.
@@ -538,8 +598,10 @@ export function warmStep(sctx: SyncCtx): boolean {
 
     if (draw === undefined) continue;
 
-    drawProbe(sctx, pixi, objects, draw);
     drawn += 1;
+
+    // A throw ended the warm-up: the queue is empty and nothing more is drawn on this application.
+    if (!drawProbe(sctx, pixi, objects, draw)) return true;
 
     if (typeof draw.subject !== "string") drawnOnce(warm, draw.subject);
   }
@@ -571,6 +633,7 @@ export function stopWarm(state: SyncState): void {
   warm.draws = 0;
   warm.textQueued = false;
   warm.textFont = undefined;
+  warm.failed = false;
   warm.reported.clear();
   warm.listeners.length = 0;
 }

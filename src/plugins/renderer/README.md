@@ -182,7 +182,7 @@ internal markup: select them by nothing, set the properties instead.
 | `debug.state()` | `{ nineSlice }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
 | `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
-| `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`) or when the renderer stops first. Never destroys the filter. |
+| `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`), and `false` when the renderer stops first or a probe's render threw. Never destroys the filter. |
 | `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
@@ -260,11 +260,16 @@ task, so a probe never shows. One probe draw is one subject in one target:
 The probes hang in a tree of their own, never in the stage, and only during their own render. The
 queue asks `demand` for the next frame (`"request"`), so a renderer drawing on demand draws through
 it; a draw is counted only after its render call ran in a drawn frame. A probe whose render throws
-is counted done and reported once (`renderer:warm-failed`); a Pixi that cannot build the probe tree
-ends the warm-up of the device. A frame that drew probes is told to `time` with `frameProbed()`: it
+ends the warm-up of the application: Pixi's filter stack may be left unbalanced, which no public API
+rebalances, so no probe is drawn after it. It is logged once at error level (`renderer:warm-failed`
+with `subject`, `variant`, `error` and, for a filter, `filter`: its program's name or its class),
+every waiting promise answers `false` and its filter is forgotten (its caller may destroy it); a
+new application after a restore warms again. A Pixi that cannot build the probe tree ends the
+warm-up of the device too (`renderer:warm-failed`, `subject: "probes"`, a warning: nothing was
+drawn). A frame that drew probes is told to `time` with `frameProbed()`: it
 is drawn but never a sample of the adaptive rate. A restore queues everything again on the new
 device; `onStop` answers waiting promises `false` and destroys the probe tree, never a filter it was
-handed. In an agent build the end of a run writes a `warm` event line (`{ draws }`). Not warmed: a
+handed. In an agent build the end of a run writes a `warm` event line (`{ draws }`); a run a throw ended writes none. Not warmed: a
 game's own `Display` objects with custom shaders (hand their filters to `filters.warm`; their
 meshes are not covered), blend modes other than normal and add, MSAA. `renderer.warm: 0` turns it
 off: every pipeline is created in the first frame that draws with it, as before.

@@ -591,8 +591,9 @@ export type FiltersApi = {
    * Creates the GPU pipelines of a filter before a screen needs them: the renderer draws it, invisibly and before a
    * frame, on the canvas and on a texture, with and without a clip (WebGPU; once on WebGL), `renderer.warm` draws a
    * frame. Answers `true` once every draw was made, `false` at once when there is nothing to warm (no device, a headless
-   * app, `warm: 0`) or when the renderer stops first. A filter handed over again on the same device answers `true` at
-   * once when its draws were made. The renderer never destroys the filter.
+   * app, `warm: 0`), and `false` when the renderer stops first or a probe's render threw, which ends the warm-up of the
+   * application (`renderer:warm-failed`). A filter handed over again on the same device answers `true` at once when its
+   * draws were made. The renderer never destroys the filter.
    *
    * @param filter - A filter the caller built and keeps alive while it waits.
    * @returns Whether the filter's pipelines were created.
@@ -1097,7 +1098,12 @@ export type WarmState = {
   objects: WarmObjects | undefined;
   /** The draws made since the queue last started, for the `warm` event line. */
   draws: number;
-  /** The subjects whose failed render was logged, and `"canvas-off"` once it was logged. */
+  /**
+   * A probe's render threw on this application: Pixi's filter stack may be unbalanced, so no probe is drawn again until
+   * a new application starts the warm-up.
+   */
+  failed: boolean;
+  /** The warnings logged once: `"probes"` (a tree Pixi could not build) and `"canvas-off"`. */
   reported: Set<unknown>;
   listeners: WarmListener[];
 };

@@ -185,8 +185,9 @@ export type VisualOptions = {
   pixels?: boolean;
   /**
    * The browser leg turns on `debug.verifyFrames` and fails a test on the first
-   * `renderer:missed-frame` or `renderer:missed-mark` of the page; `true` by default, `false` with
-   * `--no-verify-frames`.
+   * `renderer:missed-frame`, `renderer:missed-mark` or `renderer:stale-picture` of the page, and on
+   * the first `effects:broken`, `renderer:warm-failed` or `renderer: pixel read failed`, also one
+   * logged while the page loaded; `true` by default, `false` with `--no-verify-frames`.
    */
   verifyFrames?: boolean;
   renderer?: VisualRenderer;

@@ -104,7 +104,13 @@ try {
       "error" in answer
         ? ""
         : JSON.stringify(
-            answer.scenes.map(scene => [scene.name, scene.pictures, scene.differing, scene.lit])
+            answer.scenes.map(scene => [
+              scene.name,
+              scene.pictures,
+              scene.frames,
+              scene.differing,
+              scene.lit
+            ])
           ),
       problems.join("; ")
     );

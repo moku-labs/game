@@ -416,6 +416,40 @@ describe("the check of skipped frames", () => {
     ).toEqual({ ok: false, reason: 'renderer:stale-picture {"entity":12}' });
   });
 
+  // Bug: the K5 oracles compare the engine with itself, so a filter broken for good, a warm-up probe that threw inside
+  // Pixi, or an oracle whose read failed passed every step in silence (the merge game's lost Glow).
+  it.each([
+    ["effects:broken", { filter: "effects.glow", reason: "apply" }],
+    ["renderer:warm-failed", { subject: "filter", variant: "texture" }],
+    ["renderer: pixel read failed", { error: {} }]
+  ])("fails a step on %s, an error that no frame oracle can see", async (event, data) => {
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pageVerify({ test: "open-popup", where: "the start" });
+    app.log.error(event, data);
+
+    expect(await pageStep(restore)).toEqual({
+      ok: false,
+      reason: `${event} ${JSON.stringify(data)}`
+    });
+  });
+
+  // Bug: a filter that broke while the page loaded, before the check turned on, is never read: every checkpoint after
+  // it is drawn without the filter and passes.
+  it("fails the start on an error the page logged before the check turned on", async () => {
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    app.log.warn("renderer:missed-frame", { frame: 2, pixels: 40, marked: [] });
+    app.log.error("effects:broken", { filter: "effects.glow", reason: "apply" });
+
+    expect(await pageVerify({ test: "open-popup", where: "the start" })).toEqual({
+      ok: false,
+      reason: 'effects:broken {"filter":"effects.glow","reason":"apply"}'
+    });
+  });
+
   it("reads nothing of the log while the check is off", async () => {
     const { app } = await pageGame();
 
