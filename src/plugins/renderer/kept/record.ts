@@ -15,6 +15,7 @@ import {
   linearBounds,
   onGrid,
   paddingOnGrid,
+  storeMatrix,
   textureBytes
 } from "./geometry";
 import {
@@ -62,6 +63,24 @@ type Numbers = Stack & {
 
 /** The numbers of the record being stepped. One object: a step allocates nothing. */
 const NOW: Numbers = { enabled: 0, rs: 1, P: 0, r: 1, a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+
+/** What a record draws: its life, the passes of the flush so far, its quad's translation and whether the quad shows. */
+type Drawing = {
+  mode: KeptRecord["mode"];
+  passes: number;
+  qtx: number;
+  qty: number;
+  shown: boolean;
+};
+
+/** What the record being stepped drew before its step. One object: a step allocates nothing. */
+const BEFORE: Drawing = {
+  mode: "live",
+  passes: 0,
+  qtx: Number.NaN,
+  qty: Number.NaN,
+  shown: false
+};
 
 /**
  * The resolution one filter draws at: its own, or the target's for `"inherit"` (Pixi's own rule).
@@ -169,6 +188,44 @@ function topDrawn(sync: SyncWriters, view: View): boolean {
 }
 
 /**
+ * Tells whether an ancestor draws what is under it unchanged: visible, opaque, untinted, blending normally.
+ *
+ * @param node - The ancestor.
+ * @returns True when it does.
+ */
+function drawsPlain(node: PixiContainer): boolean {
+  return node.visible && node.alpha === 1 && node.tint === WHITE && plainBlend(node.blendMode);
+}
+
+/**
+ * Tells whether an ancestor is drawn: renderable, or hidden only by an overlay's range or a kept ancestor's picture,
+ * which draw it anyway.
+ *
+ * @param kctx - The kept context.
+ * @param node - The ancestor.
+ * @returns True when it is drawn.
+ */
+function drawnAnyway(kctx: KeptCtx, node: PixiContainer): boolean {
+  return node.renderable || kctx.sync.hiddenOnlyAmong(kctx.hidden, node, DRAWN_ANYWAY);
+}
+
+/**
+ * Tells whether an ancestor filters a placed record's view: a filter of its own or its kept picture. A placed filter's
+ * canvas position would then not be the canvas pixel live.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @param node - The ancestor.
+ * @returns True when the record is placed and the ancestor filters it.
+ */
+function filtersPlaced(kctx: KeptCtx, record: KeptRecord, node: PixiContainer): boolean {
+  return (
+    record.category === "placed" &&
+    (holdsFilters(node) || kctx.state.byTop.get(node)?.mode === "kept")
+  );
+}
+
+/**
  * Tells whether every ancestor up to the stage draws the view as a picture would: visible, opaque, untinted, blending
  * normally, drawn (an overlay's range and a kept ancestor's picture count), and for a placed filter without a filter
  * above it (its canvas position would not be the canvas pixel live).
@@ -181,15 +238,7 @@ function topDrawn(sync: SyncWriters, view: View): boolean {
 function ancestorsPlain(kctx: KeptCtx, record: KeptRecord, stage: PixiContainer): boolean {
   for (let node = record.top.parent; node !== stage; node = node.parent) {
     if (node === null) return false;
-    if (!node.visible || node.alpha !== 1 || node.tint !== WHITE || !plainBlend(node.blendMode)) {
-      return false;
-    }
-    if (!node.renderable && !kctx.sync.hiddenOnlyAmong(kctx.hidden, node, DRAWN_ANYWAY))
-      return false;
-    if (
-      record.category === "placed" &&
-      (holdsFilters(node) || kctx.state.byTop.get(node)?.mode === "kept")
-    ) {
+    if (!drawsPlain(node) || !drawnAnyway(kctx, node) || filtersPlaced(kctx, record, node)) {
       return false;
     }
   }
@@ -502,6 +551,40 @@ function handFilters(kctx: KeptCtx, pixi: PixiModule, record: KeptRecord): void 
 }
 
 /**
+ * Writes the take keys of a record: the linear part, the stack resolution and the translation of this frame, and the
+ * picture's box on the canvas.
+ *
+ * @param record - The record.
+ * @param now - This frame's numbers.
+ * @param box - The picture's box: its first texel on each axis and its size in CSS px.
+ * @param box.x - The span of the picture across, on the `rs` grid.
+ * @param box.x.first - Its first texel.
+ * @param box.y - The span of the picture down, on the `rs` grid.
+ * @param box.y.first - Its first texel.
+ * @param box.w1 - The picture's width, CSS px.
+ * @param box.h1 - The picture's height, CSS px.
+ */
+function writeTakeKeys(
+  record: KeptRecord,
+  now: Numbers,
+  box: { x: { first: number }; y: { first: number }; w1: number; h1: number }
+): void {
+  const { key } = record;
+
+  key[KEY.a] = now.a;
+  key[KEY.b] = now.b;
+  key[KEY.c] = now.c;
+  key[KEY.d] = now.d;
+  key[KEY.rs] = now.rs;
+  key[KEY.tx] = now.tx;
+  key[KEY.ty] = now.ty;
+  key[KEY.X0] = box.x.first / now.rs;
+  key[KEY.Y0] = box.y.first / now.rs;
+  key[KEY.w1] = box.w1;
+  key[KEY.h1] = box.h1;
+}
+
+/**
  * Takes or retakes the picture of a record: stages 1, 2 (when its first filter has inputs) and 3, at the phase of this
  * frame. Refused, and the view drawn live, for a `Display` in the subtree without `onDemand`, empty bounds, a picture
  * over 4096 device pixels, or a budget that has no room (P6.3, warned once).
@@ -522,14 +605,16 @@ function takePicture(
   view: View,
   now: Numbers
 ): boolean {
-  const { top, key } = record;
+  const { top } = record;
 
+  // A game's own object it may write unseen without `onDemand`, and an empty subtree, are never kept.
   if (!kctx.ctx.config.onDemand && holdsDisplay(kctx, top)) return false;
 
   const local = top.getLocalBounds();
 
   if (!(local.maxX > local.minX && local.maxY > local.minY)) return false;
 
+  // The picture's box on the grid of the stack resolution, and its padding; both textures must fit.
   const box = linearBounds(now.a, now.b, now.c, now.d, local);
   const x = gridSpan(now.tx + box.x0, now.tx + box.x1, now.rs);
   const y = gridSpan(now.ty + box.y0, now.ty + box.y1, now.rs);
@@ -539,6 +624,7 @@ function takePicture(
 
   if (!fitsTexture(w1, h1, now.rs) || !fitsTexture(w1 + 2 * Ps, h1 + 2 * Ps, now.r)) return false;
 
+  // The budget makes room by drawing the least recently drawn pictures live; no room refuses the take (P6.3).
   const needed = neededBytes(record, now, { w1, h1, Ps });
 
   if (
@@ -553,18 +639,9 @@ function takePicture(
   }
 
   record.refused = 0;
-  key[KEY.a] = now.a;
-  key[KEY.b] = now.b;
-  key[KEY.c] = now.c;
-  key[KEY.d] = now.d;
-  key[KEY.rs] = now.rs;
-  key[KEY.tx] = now.tx;
-  key[KEY.ty] = now.ty;
-  key[KEY.X0] = x.first / now.rs;
-  key[KEY.Y0] = y.first / now.rs;
-  key[KEY.w1] = w1;
-  key[KEY.h1] = h1;
+  writeTakeKeys(record, now, { x, y, w1, h1 });
 
+  // The stages: the subtree picture, the pre-pass results of the first filter with inputs, the filter output.
   const live = record.mode === "live";
 
   if (live) handFilters(kctx, pixi, record);
@@ -585,6 +662,7 @@ function takePicture(
   ok = ok && renderStage3(kctx, pixi, matrices, record, now);
   account(kctx, record);
 
+  // A live view whose take failed draws live again: its filters go back on its top.
   if (!ok && live) {
     // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
     if (record.standIn !== undefined) record.standIn.filters = null;
@@ -644,6 +722,7 @@ function placeQuad(
   const parent = top.parent;
   const output = record.s3 ?? pixi.Texture.EMPTY;
 
+  // The quad: made once, drawing the filter output.
   if (record.quad === undefined || record.quad.destroyed) {
     record.quad = new pixi.Sprite(output);
     record.quad.label = `kept:${labelOf(top)}`;
@@ -654,6 +733,7 @@ function placeQuad(
   if (quad.texture !== output) quad.texture = output;
   if (parent === null) return;
 
+  // Right above its top in the same parent, at the top's depth and blend.
   if (quad.parent !== parent || parent.children[parent.getChildIndex(top) + 1] !== quad) {
     quad.removeFromParent();
     parent.addChildAt(quad, parent.getChildIndex(top) + 1);
@@ -662,32 +742,24 @@ function placeQuad(
   if (quad.zIndex !== top.zIndex) quad.zIndex = top.zIndex;
   if (quad.blendMode !== top.blendMode) quad.blendMode = top.blendMode;
 
+  // The filter output at its canvas place `O + Δ`, brought into the parent's space with an identity world scale.
   const inverse = parent.getGlobalTransform(matrices.parent, false).invert();
   const Ps = key[KEY.Ps] ?? 0;
   const x = (key[KEY.X0] ?? 0) - Ps + NOW.tx - (key[KEY.tx] ?? 0);
   const y = (key[KEY.Y0] ?? 0) - Ps + NOW.ty - (key[KEY.ty] ?? 0);
-  const { a, b, c, d } = inverse;
-  const qtx = a * x + c * y + inverse.tx;
-  const qty = b * x + d * y + inverse.ty;
+  const { local } = matrices;
 
-  if (
-    key[KEY.qa] !== a ||
-    key[KEY.qb] !== b ||
-    key[KEY.qc] !== c ||
-    key[KEY.qd] !== d ||
-    key[KEY.qtx] !== qtx ||
-    key[KEY.qty] !== qty
-  ) {
-    matrices.local.set(a, b, c, d, qtx, qty);
-    quad.setFromMatrix(matrices.local);
-    key[KEY.qa] = a;
-    key[KEY.qb] = b;
-    key[KEY.qc] = c;
-    key[KEY.qd] = d;
-    key[KEY.qtx] = qtx;
-    key[KEY.qty] = qty;
-  }
+  // Written field by field, not through `set`: a computed double handed to a call is boxed, and this runs every frame.
+  local.a = inverse.a;
+  local.b = inverse.b;
+  local.c = inverse.c;
+  local.d = inverse.d;
+  local.tx = inverse.a * x + inverse.c * y + inverse.tx;
+  local.ty = inverse.b * x + inverse.d * y + inverse.ty;
 
+  if (storeMatrix(key, KEY.qa, local)) quad.setFromMatrix(local);
+
+  // Shown while the top is visible and no cover or alpha hides it.
   const visible = top.visible && !sync.hiddenBy(view, "alpha") && !sync.hiddenBy(view, "cover");
 
   if (quad.visible !== visible) quad.visible = visible;
@@ -739,6 +811,73 @@ function stepLive(
 }
 
 /**
+ * Retakes a kept record's picture at this frame; a refused take draws the view live.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, kept.
+ * @param view - Its view.
+ */
+function retakeOrGoLive(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View
+): void {
+  if (!takePicture(kctx, pixi, matrices, record, view, NOW)) goLive(kctx, record, view, true);
+}
+
+/**
+ * A stage-1 change of a kept record (P4.3): retaken, or after three in a row drawn live and calm, so it stands still
+ * for eight frames before the next take.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record, kept.
+ * @param view - Its view.
+ */
+function churn(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View
+): void {
+  record.churn += 1;
+
+  if (record.churn < CHURN_LIMIT) {
+    retakeOrGoLive(kctx, pixi, matrices, record, view);
+
+    return;
+  }
+
+  goLive(kctx, record, view, true);
+  record.calm = true;
+  writeSeen(record, NOW);
+}
+
+/**
+ * Notes a move of a kept record: a quad that left its picture's texel grid owes one settle retake at rest, and asks
+ * for the frame it happens in.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record, kept.
+ */
+function noteMove(kctx: KeptCtx, record: KeptRecord): void {
+  const { key } = record;
+
+  record.settle =
+    !onGrid(NOW.tx - (key[KEY.tx] ?? 0), NOW.rs, NOW.r) ||
+    !onGrid(NOW.ty - (key[KEY.ty] ?? 0), NOW.rs, NOW.r);
+
+  // The settle retake happens at rest: a frame is asked for, in which the view stands where it is now.
+  if (record.settle) kctx.demand.request();
+}
+
+/**
  * A kept record's frame (P4.3): a stage-1 change retakes (three in a row go live and calm); otherwise a new chain
  * version redoes stages 2 and 3, a filter value, the resolution, the padding or (placed) a move stage 3; at rest after
  * an off-grid move one settle retake is owed.
@@ -759,17 +898,7 @@ function stepKept(
   const { key } = record;
 
   if (record.dirtyS1 || linearDiffers(key, NOW, KEY.a, KEY.rs)) {
-    record.churn += 1;
-
-    if (record.churn >= CHURN_LIMIT) {
-      goLive(kctx, record, view, true);
-      record.calm = true;
-      writeSeen(record, NOW);
-
-      return;
-    }
-
-    if (!takePicture(kctx, pixi, matrices, record, view, NOW)) goLive(kctx, record, view, true);
+    churn(kctx, pixi, matrices, record, view);
 
     return;
   }
@@ -779,21 +908,14 @@ function stepKept(
   const moved = NOW.tx !== key[KEY.lastTx] || NOW.ty !== key[KEY.lastTy];
 
   if (!moved && record.settle) {
-    if (!takePicture(kctx, pixi, matrices, record, view, NOW)) goLive(kctx, record, view, true);
+    retakeOrGoLive(kctx, pixi, matrices, record, view);
 
     return;
   }
 
   refresh(kctx, pixi, matrices, record);
 
-  if (moved) {
-    record.settle =
-      !onGrid(NOW.tx - (key[KEY.tx] ?? 0), NOW.rs, NOW.r) ||
-      !onGrid(NOW.ty - (key[KEY.ty] ?? 0), NOW.rs, NOW.r);
-
-    // The settle retake happens at rest: a frame is asked for, in which the view stands where it is now.
-    if (record.settle) kctx.demand.request();
-  }
+  if (moved) noteMove(kctx, record);
 }
 
 /**
@@ -813,28 +935,76 @@ function refresh(
   const { key } = record;
   const first = firstInputs(record.slots);
   const inputs = first?.inputs;
-  const s2 =
+  // Stage 2 is owed for a new chain, a new chain version, or a new subtree picture under it.
+  const stageTwoOwed =
     inputs !== undefined &&
     (record.dirtyS2 ||
       inputs !== record.s2Of ||
       inputs.version() !== record.s2InputsVersion ||
       record.s1Version !== record.s2PictureVersion);
-  const left = inputs === undefined && record.s2Of !== undefined;
-  const s3 =
-    s2 ||
-    left ||
+  const inputsLeft = inputs === undefined && record.s2Of !== undefined;
+  // Stage 3 follows stage 2, a chain that left, a filter value, the resolution, the padding, and a placed filter's move.
+  const stageThreeOwed =
+    stageTwoOwed ||
+    inputsLeft ||
     record.dirtyS3 ||
     NOW.r !== key[KEY.r] ||
     NOW.P !== key[KEY.P] ||
     (record.category === "placed" && (NOW.tx !== key[KEY.s3Tx] || NOW.ty !== key[KEY.s3Ty]));
 
-  if (left) releaseInputs(kctx, record);
-  if (s2) renderStage2(kctx, pixi, matrices, record, { inputs, resolution: NOW.r, padding: NOW.P });
-  if (!s3) return;
+  if (inputsLeft) releaseInputs(kctx, record);
+  if (stageTwoOwed) {
+    renderStage2(kctx, pixi, matrices, record, { inputs, resolution: NOW.r, padding: NOW.P });
+  }
+  if (!stageThreeOwed) return;
 
   renderStage3(kctx, pixi, matrices, record, NOW);
   account(kctx, record);
-  if (!s2) kctx.state.refreshesOpen += 1;
+  if (!stageTwoOwed) kctx.state.refreshesOpen += 1;
+}
+
+/**
+ * Tells whether a record's quad shows: visible and hanging in the tree.
+ *
+ * @param record - The record.
+ * @returns True when it does.
+ */
+function quadShown(record: KeptRecord): boolean {
+  return record.quad?.visible === true && record.quad.parent !== null;
+}
+
+/**
+ * Notes what a record draws before its step, into the one object of the module.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @param into - Where it goes.
+ */
+function noteDrawing(kctx: KeptCtx, record: KeptRecord, into: Drawing): void {
+  into.mode = record.mode;
+  into.passes = kctx.state.flushPasses;
+  into.qtx = record.key[KEY.qtx] ?? Number.NaN;
+  into.qty = record.key[KEY.qty] ?? Number.NaN;
+  into.shown = quadShown(record);
+}
+
+/**
+ * Tells whether a step changed what a record draws: its life, a pass of the flush, its quad's place or whether the
+ * quad shows.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record, stepped.
+ * @param before - What it drew before the step.
+ * @returns True when the pictures above it hold something else now.
+ */
+function drawingChanged(kctx: KeptCtx, record: KeptRecord, before: Readonly<Drawing>): boolean {
+  return (
+    before.mode !== record.mode ||
+    before.passes !== kctx.state.flushPasses ||
+    !Object.is(before.qtx, record.key[KEY.qtx]) ||
+    !Object.is(before.qty, record.key[KEY.qty]) ||
+    before.shown !== quadShown(record)
+  );
 }
 
 /**
@@ -856,13 +1026,9 @@ export function stepRecord(
 ): void {
   const { state, host } = kctx;
   const { key } = record;
-  // What the record draws before this frame: a change of it is a change of every picture above it (P4.5).
-  const mode = record.mode;
-  const passes = state.flushPasses;
-  const qtx = key[KEY.qtx];
-  const qty = key[KEY.qty];
-  const shown = record.quad?.visible === true && record.quad.parent !== null;
 
+  // What the record draws before this frame: a change of it is a change of every picture above it (P4.5).
+  noteDrawing(kctx, record, BEFORE);
   NOW.r = host.resolution();
   readStack(record.slots, NOW.r, NOW);
 
@@ -893,15 +1059,7 @@ export function stepRecord(
     record.still = 0;
   }
 
-  if (
-    mode !== record.mode ||
-    passes !== state.flushPasses ||
-    !Object.is(qtx, key[KEY.qtx]) ||
-    !Object.is(qty, key[KEY.qty]) ||
-    shown !== (record.quad?.visible === true && record.quad.parent !== null)
-  ) {
-    dirtyAbove(kctx, record);
-  }
+  if (drawingChanged(kctx, record, BEFORE)) dirtyAbove(kctx, record);
 
   record.dirtyS1 = false;
   record.dirtyS2 = false;

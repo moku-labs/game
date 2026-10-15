@@ -148,6 +148,8 @@ export function setFilters(
   const view = state.views.get(entity);
 
   if (view !== undefined) applyFilters(view, slots, () => mark(entity), kept.filterTarget(view));
+  // Kept for an entity without a view: the pass looks for its despawn.
+  else if (slots.length > 0) state.viewlessEntries = true;
 
   kept.slots(entity, slots);
 }
@@ -326,6 +328,8 @@ export function setArea(
   const view = state.views.get(entity);
 
   if (view !== undefined) applyArea(sctx, entity, view);
+  // Kept for an entity without a view: the pass looks for its despawn.
+  else if (area !== undefined) state.viewlessEntries = true;
 }
 
 /**

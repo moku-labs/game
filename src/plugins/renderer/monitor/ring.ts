@@ -4,7 +4,7 @@
  * write of the per-frame path here is an indexed store into a typed array allocated once.
  */
 
-import { DEMAND_REASONS } from "../demand/types";
+import { DEMAND_REASONS } from "../reasons";
 import type {
   FrameColumns,
   FrameReadout,

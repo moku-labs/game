@@ -50,6 +50,12 @@ const noStream = (): void => {};
  */
 const NO_DETAIL: Readonly<Record<string, Json>> = Object.freeze({});
 
+/** The fewest device pixels per CSS pixel `setResolution` draws at. */
+const MIN_RESOLUTION = 0.5;
+
+/** The most device pixels per CSS pixel `setResolution` draws at. */
+const MAX_RESOLUTION = 4;
+
 /**
  * Message of a resolution `setResolution` refuses.
  *
@@ -58,8 +64,26 @@ const NO_DETAIL: Readonly<Record<string, Json>> = Object.freeze({});
  */
 function resolutionMessage(value: unknown): string {
   return (
-    `[game] renderer.monitor.setResolution(${String(value)}) needs a number from 0.5 to 4.\n` +
+    `[game] renderer.monitor.setResolution(${String(value)}) needs a number from ${MIN_RESOLUTION} to ${MAX_RESOLUTION}.\n` +
     "  Pass undefined to go back to maxResolution."
+  );
+}
+
+/**
+ * Tells whether `setResolution` takes a value: a number from `MIN_RESOLUTION` to `MAX_RESOLUTION`, or `undefined` to
+ * go back.
+ *
+ * @param value - What the caller passed.
+ * @returns True when it is taken.
+ * @example
+ * ```ts
+ * takesResolution(1.75); // true
+ * ```
+ */
+function takesResolution(value: number | undefined): boolean {
+  return (
+    value === undefined ||
+    (typeof value === "number" && value >= MIN_RESOLUTION && value <= MAX_RESOLUTION)
   );
 }
 
@@ -206,12 +230,7 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
 
     setResolution: (resolution: number | undefined): number => {
       // Every build (LEAD-FIXES-4 item 1): a player's graphics setting is applied through here.
-      if (
-        resolution !== undefined &&
-        !(typeof resolution === "number" && resolution >= 0.5 && resolution <= 4)
-      ) {
-        throw new RangeError(resolutionMessage(resolution));
-      }
+      if (!takesResolution(resolution)) throw new RangeError(resolutionMessage(resolution));
 
       return deps.host.overrideResolution(resolution);
     },

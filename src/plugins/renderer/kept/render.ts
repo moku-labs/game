@@ -413,31 +413,45 @@ export function renderStage2(
 
   record.s2Of = inputs;
 
+  // An empty chain holds nothing: its targets go.
   if (scales === undefined) {
     endLoan(inputs);
     for (const target of record.s2.splice(0)) dropTexture(kctx, target);
-  } else {
-    const output = outputOf(kctx, pixi, record, resolution, padding);
-    const keeper = keeperOf(pixi, record, record.key[KEY.rs] ?? 1, padding);
-    const Ps = record.key[KEY.Ps] ?? 0;
+    noteStage2(record, inputs);
 
-    // The loan ends while the chain draws: the targets are its own, written in place.
-    endLoan(inputs);
-    sizeTargets(kctx, pixi, record, scales, padding);
-    matrices.m3.set(1, 0, 0, 1, Ps, Ps);
-    kctx.host.renderTo(keeper, output, matrices.m3, true);
-
-    const after = scalesOf(inputs);
-
-    if (after?.some((scale, index) => scale !== scales[index])) {
-      sizeTargets(kctx, pixi, record, after, padding);
-      kctx.host.renderTo(keeper, output, matrices.m3, true);
-    }
-
-    inputs.hold(record.s2);
-    kctx.state.flushPasses += 1 + inputs.stages.length;
+    return;
   }
 
+  const output = outputOf(kctx, pixi, record, resolution, padding);
+  const keeper = keeperOf(pixi, record, record.key[KEY.rs] ?? 1, padding);
+  const Ps = record.key[KEY.Ps] ?? 0;
+
+  // The loan ends while the chain draws: the targets are its own, written in place.
+  endLoan(inputs);
+  sizeTargets(kctx, pixi, record, scales, padding);
+  matrices.m3.set(1, 0, 0, 1, Ps, Ps);
+  kctx.host.renderTo(keeper, output, matrices.m3, true);
+
+  // A scale that changed inside the draw resizes the targets and draws once more.
+  const after = scalesOf(inputs);
+
+  if (after?.some((scale, index) => scale !== scales[index])) {
+    sizeTargets(kctx, pixi, record, after, padding);
+    kctx.host.renderTo(keeper, output, matrices.m3, true);
+  }
+
+  inputs.hold(record.s2);
+  kctx.state.flushPasses += 1 + inputs.stages.length;
+  noteStage2(record, inputs);
+}
+
+/**
+ * Notes the versions stage 2 drew: the chain's, and the subtree picture's it drew over.
+ *
+ * @param record - The record, stage 2 done.
+ * @param inputs - The seam of the first filter with inputs.
+ */
+function noteStage2(record: KeptRecord, inputs: FilterSlotInputs): void {
   record.s2InputsVersion = inputs.version();
   record.s2PictureVersion = record.s1Version;
 }

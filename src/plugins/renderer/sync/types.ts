@@ -1301,6 +1301,12 @@ export type SyncState = {
   filters: Map<Entity, readonly FilterSlot[]>;
   /** The filter area `effects` set per entity, kept like its filters (B4). */
   areas: Map<Entity, AreaEntry>;
+  /**
+   * True while a filter or area entry may belong to an entity without a view: the pass then forgets the entries of the
+   * despawned ones, and stays on while a live entity without a view holds one. False when every entry belongs to a
+   * view, so a still frame walks no entry.
+   */
+  viewlessEntries: boolean;
   /** The pipeline warm-up (F4). */
   warm: WarmState;
   /**

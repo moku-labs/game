@@ -30,6 +30,56 @@ const l2Paths = [
   }
 ];
 
+// L1 — the module folders of model, flow, world, renderer, anim, ui and effects. A module imports a sibling module
+// only as `import type` from its types (`types.ts`, and the monitor's `log-types.ts`); index.ts injects sibling APIs.
+const l1Modules = [
+  "store",
+  "rng",
+  "features",
+  "fx",
+  "gate",
+  "inbox",
+  "runner",
+  "ecs",
+  "projection",
+  "host",
+  "sync",
+  "viewport",
+  "demand",
+  "kept",
+  "monitor",
+  "tween",
+  "timeline",
+  "jsx",
+  "styles",
+  "layout"
+].join("|");
+
+/**
+ * The L1 patterns of `@typescript-eslint/no-restricted-imports`, with the run-time seams a file is sanctioned to
+ * import. Every block that sets the rule for module files builds its patterns here, so a seam never drops the rest.
+ *
+ * @param seams - Import paths the file may reach as run-time code, as regex sources with the dots escaped.
+ * @returns The patterns.
+ */
+function l1Patterns(
+  seams: readonly string[] = []
+): { regex: string; allowTypeImports?: boolean; message: string }[] {
+  const sanctioned = seams.map(seam => `(?!${seam}$)`).join("");
+
+  return [
+    {
+      regex: String.raw`^${sanctioned}\.\./(${l1Modules})/(?!(?:log-)?types$)`,
+      message: "Modules do not import each other's run-time code. index.ts injects sibling APIs."
+    },
+    {
+      regex: String.raw`^\.\./(${l1Modules})/(?:log-)?types$`,
+      allowTypeImports: true,
+      message: "Import a sibling module's types with `import type` only."
+    }
+  ];
+}
+
 /**
  * Tells whether an import or export declaration is `import type` or `export type`: erased by
  * TypeScript, so it loads nothing. Used by L13.
@@ -593,21 +643,28 @@ export default [
     rules: {
       "@typescript-eslint/no-restricted-imports": [
         "error",
-        {
-          paths: l2Paths,
-          patterns: [
-            {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline|jsx|styles|layout)/(?!types$)`,
-              message:
-                "Modules do not import each other's run-time code. index.ts injects sibling APIs."
-            },
-            {
-              regex: String.raw`^\.\./(store|rng|features|fx|gate|inbox|runner|ecs|projection|host|sync|viewport|tween|timeline|jsx|styles|layout)/types$`,
-              allowTypeImports: true,
-              message: "Import a sibling module's types with `import type` only."
-            }
-          ]
-        }
+        { paths: l2Paths, patterns: l1Patterns() }
+      ]
+    }
+  },
+  // 6d2b. L1's sanctioned seams of the renderer. `demand` is built before `kept` and reads its state through
+  // `kept/readers` (O18); `kept` and the pool trim of `host` share the byte and rounding helpers of `monitor/units`
+  // (O24). Every other run-time import between the renderer's modules stays refused.
+  {
+    files: ["src/plugins/renderer/demand/api.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        { paths: l2Paths, patterns: l1Patterns([String.raw`\.\./kept/readers`]) }
+      ]
+    }
+  },
+  {
+    files: ["src/plugins/renderer/kept/*.ts", "src/plugins/renderer/host/pool.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        { paths: l2Paths, patterns: l1Patterns([String.raw`\.\./monitor/units`]) }
       ]
     }
   },

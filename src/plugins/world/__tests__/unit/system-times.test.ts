@@ -51,6 +51,21 @@ describe("world.systemTimes in an agent build", () => {
     expect([...(times?.ms.subarray(0, 2) ?? [])]).toEqual([0.5, 0.5]);
   });
 
+  it("answers the same live table every frame, so the monitor's read allocates nothing", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { world } = timedWorld();
+
+    world.api.ecs.system(quiet("ward.pan"));
+    world.start();
+    world.frame();
+
+    const first = world.api.systemTimes();
+
+    world.frame();
+
+    expect(world.api.systemTimes()).toBe(first);
+  });
+
   it("grows the table for a system registered after start and keeps the rows it had", () => {
     vi.stubGlobal("__MOKU_GAME_AGENT__", true);
     const { world } = timedWorld();

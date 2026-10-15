@@ -83,7 +83,12 @@ export type Api = {
    * same order, written while the systems run and zeroed at the start of the next frame. `undefined` without the agent
    * flag. The renderer's monitor reads it after the frame; read it, never write it.
    *
-   * @returns The timing table, or `undefined`.
+   * A live view, not a copy: the table is the world's own, the same object every call, and the next frame zeroes and
+   * rewrites `ms` in place. The monitor reads it every frame of an agent build without allocating, which a copy would
+   * break. A caller that keeps numbers past the frame copies them (`[...systems.ms]`); a write into it changes what the
+   * monitor logs.
+   *
+   * @returns The live timing table, or `undefined`.
    * @example
    * ```ts
    * // The renderer's monitor, at the end of a frame of a debug build:

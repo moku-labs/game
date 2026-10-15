@@ -69,6 +69,12 @@ const MISSED = 1;
 /** Bit of a sample whose frame was heavy for the higher rate. */
 const HEAVY = 2;
 
+/** The thermal rank from which the rule never steps up: `"moderate"` and every hotter status. */
+const HEAT_LIMIT_RANK = 2;
+
+/** Milliseconds in a second: turns a rate into the period of one frame. */
+const SECOND_MS = 1000;
+
 /** What a promise of the shell that nobody reads settles into. */
 const ignore = (): void => {};
 
@@ -523,10 +529,13 @@ function closeDisplayWindow(ctx: TimeCtx, g: Governor, at: number): void {
   g.ticks = 0;
   g.tickCounts.fill(0);
 
-  if (windowHz !== 0 && (g.displayHz === null || windowHz > g.displayHz)) {
+  const risesAbove = windowHz !== 0 && (g.displayHz === null || windowHz > g.displayHz);
+  const dropsBelow = windowHz !== 0 && windowHz < (g.displayHz ?? 0) && !heldByUs(ctx, g);
+
+  if (risesAbove) {
     g.lowerStreak = 0;
     learnDisplay(ctx, g, windowHz, at);
-  } else if (windowHz !== 0 && windowHz < (g.displayHz ?? 0) && !heldByUs(ctx, g)) {
+  } else if (dropsBelow) {
     g.lowerStreak += 1;
 
     if (g.lowerStreak >= DISPLAY_LOWER_WINDOWS) {
@@ -584,6 +593,34 @@ function isSample(ctx: TimeCtx, g: Governor, intervalMs: number): boolean {
 }
 
 /**
+ * Tells whether the drop window is late enough to step down: late intervals reach `max(8, 10 %)` of the second's.
+ *
+ * @param g - The governor.
+ * @returns True when the rate should drop one step.
+ */
+function shouldDrop(g: Governor): boolean {
+  return g.dropMissed >= Math.max(DROP_MIN_MISSES, Math.ceil(DROP_SHARE * g.dropDrawn));
+}
+
+/**
+ * Tells whether the return window has room to step up: no heat, the dwell passed, 90 drawn frames in three seconds
+ * with at most one late and a tenth heavy.
+ *
+ * @param g - The governor.
+ * @param at - The page time of the sample.
+ * @returns True when the rate may return one step.
+ */
+function canReturn(g: Governor, at: number): boolean {
+  return (
+    thermalRank(g.thermal) < HEAT_LIMIT_RANK &&
+    at - g.switchedAt >= g.dwellMs &&
+    g.returnDrawn >= RETURN_MIN_FRAMES &&
+    g.returnMissed <= RETURN_MAX_MISSES &&
+    g.returnHeavy <= Math.floor(RETURN_HEAVY_SHARE * g.returnDrawn)
+  );
+}
+
+/**
  * Decides on the windows after a sample: down one step when late intervals reach `max(8, 10 %)` of the second's,
  * up one step after the dwell with 90 steady drawn frames in three seconds, at most one late and a tenth heavy, and
  * no heat.
@@ -597,19 +634,9 @@ function decide(ctx: TimeCtx, g: Governor, at: number): void {
   const lower = stepBelow(g.ladder, fps);
   const higher = stepAbove(g.ladder, fps);
 
-  if (
-    lower !== undefined &&
-    g.dropMissed >= Math.max(DROP_MIN_MISSES, Math.ceil(DROP_SHARE * g.dropDrawn))
-  ) {
+  if (lower !== undefined && shouldDrop(g)) {
     switchRate(ctx, lower, "auto", "missed", at);
-  } else if (
-    higher !== undefined &&
-    thermalRank(g.thermal) < 2 &&
-    at - g.switchedAt >= g.dwellMs &&
-    g.returnDrawn >= RETURN_MIN_FRAMES &&
-    g.returnMissed <= RETURN_MAX_MISSES &&
-    g.returnHeavy <= Math.floor(RETURN_HEAVY_SHARE * g.returnDrawn)
-  ) {
+  } else if (higher !== undefined && canReturn(g, at)) {
     switchRate(ctx, higher, "auto", "headroom", at);
   }
 }
@@ -625,6 +652,7 @@ function decide(ctx: TimeCtx, g: Governor, at: number): void {
  * @param at - The timestamp that ends it.
  */
 export function judgeFrame(ctx: TimeCtx, g: Governor, intervalMs: number, at: number): void {
+  // The first interval after a change spans two rates: it is skipped.
   if (g.skipNext) {
     g.skipNext = false;
 
@@ -633,10 +661,13 @@ export function judgeFrame(ctx: TimeCtx, g: Governor, intervalMs: number, at: nu
 
   if (!isSample(ctx, g, intervalMs)) return;
 
+  // Grade the interval: late past the miss line, heavy for the step above.
   const { fps } = ctx.state.rate;
   const higher = stepAbove(g.ladder, fps);
   const missed = intervalMs > missLineMs(fps, g.displayHz ?? fps);
-  const heavy = higher !== undefined && g.lastWorkMs > (RETURN_WORK_SHARE * 1000) / higher;
+  const heavy = higher !== undefined && g.lastWorkMs > (RETURN_WORK_SHARE * SECOND_MS) / higher;
+
+  // Write it into the ring and count it in both windows.
   const slot = g.written % RING;
 
   evict(g, at);
@@ -653,6 +684,7 @@ export function judgeFrame(ctx: TimeCtx, g: Governor, intervalMs: number, at: nu
 
   if (heavy) g.returnHeavy += 1;
 
+  // The rule decides on the windows.
   decide(ctx, g, at);
 }
 
@@ -719,6 +751,24 @@ function autoRate(g: Governor, maxFps: number): number {
 }
 
 /**
+ * Gives a forced rate back to the rule: with a governor the rate `"auto"` resolves to, without one `maxFps` again.
+ *
+ * @param ctx - Domain context of the time plugin.
+ */
+function resumeAuto(ctx: TimeCtx): void {
+  const { maxFps } = ctx.config;
+  const g = ctx.state.rate.governor;
+
+  if (g === undefined) {
+    switchRate(ctx, maxFps, "fixed", "auto", nowOf());
+
+    return;
+  }
+
+  switchRate(ctx, autoRate(g, maxFps), "auto", "auto", nowOf());
+}
+
+/**
  * Forces the rate (the exact cap, never above `maxFps`) or gives it back to the config with `"auto"`.
  *
  * @param ctx - Domain context of the time plugin.
@@ -736,14 +786,11 @@ export function setRateChoice(ctx: TimeCtx, choice: RateChoice): Readonly<FrameR
   }
 
   const { rate } = ctx.state;
-  const { maxFps } = ctx.config;
-  const g = rate.governor;
 
   if (value !== "auto") {
-    switchRate(ctx, Math.min(value, maxFps), "forced", "forced", nowOf());
+    switchRate(ctx, Math.min(value, ctx.config.maxFps), "forced", "forced", nowOf());
   } else if (rate.mode === "forced") {
-    if (g === undefined) switchRate(ctx, maxFps, "fixed", "auto", nowOf());
-    else switchRate(ctx, autoRate(g, maxFps), "auto", "auto", nowOf());
+    resumeAuto(ctx);
   }
 
   return rate.snapshot;

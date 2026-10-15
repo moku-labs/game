@@ -53,6 +53,9 @@ export const KEY = {
 /** Numbers a key holds. */
 export const KEY_SIZE = 29;
 
+/** Numbers of a 2D affine matrix: `a`, `b`, `c`, `d`, `tx`, `ty`. */
+export const MATRIX_CELLS = 6;
+
 /** The most device pixels a picture has on a side (P2.7). */
 export const MAX_SIDE = 4096;
 
@@ -193,4 +196,43 @@ export function fitsTexture(width: number, height: number, resolution: number): 
  */
 export function textureBytes(width: number, height: number, resolution: number): number {
   return Math.ceil(width * resolution) * Math.ceil(height * resolution) * TEXEL_BYTES;
+}
+
+/**
+ * Keeps the six numbers of a matrix in `cells` from `at` on, written only when one differs from what they hold: a
+ * frame whose transform stands writes nothing. A held NaN always differs, so a fresh row is written.
+ *
+ * @param cells - Where the numbers are kept.
+ * @param at - The index of `a`; `b`, `c`, `d`, `tx` and `ty` follow it.
+ * @param matrix - The matrix now.
+ * @returns True when a number differed and the six were written.
+ * @example
+ * ```ts
+ * storeMatrix(new Float64Array(6).fill(Number.NaN), 0, { a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 5 }); // true
+ * ```
+ */
+export function storeMatrix(
+  cells: Float64Array,
+  at: number,
+  matrix: Readonly<{ a: number; b: number; c: number; d: number; tx: number; ty: number }>
+): boolean {
+  if (
+    cells[at] === matrix.a &&
+    cells[at + 1] === matrix.b &&
+    cells[at + 2] === matrix.c &&
+    cells[at + 3] === matrix.d &&
+    cells[at + 4] === matrix.tx &&
+    cells[at + 5] === matrix.ty
+  ) {
+    return false;
+  }
+
+  cells[at] = matrix.a;
+  cells[at + 1] = matrix.b;
+  cells[at + 2] = matrix.c;
+  cells[at + 3] = matrix.d;
+  cells[at + 4] = matrix.tx;
+  cells[at + 5] = matrix.ty;
+
+  return true;
 }

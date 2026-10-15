@@ -6,7 +6,7 @@
 import type { Entity } from "../../world/types";
 import type { PixiModule, PixiSprite } from "../types";
 import { makeRoom } from "./budget";
-import { textureBytes } from "./geometry";
+import { MATRIX_CELLS, storeMatrix, textureBytes } from "./geometry";
 import { canKeep, dropTexture, fitTexture, matricesOf } from "./render";
 import type { KeptCtx, KeptMatrices, KeptRange, KeptRecord, RangeRecord } from "./types";
 
@@ -53,24 +53,8 @@ function placeSprite(matrices: KeptMatrices, range: RangeRecord): void {
   if (sprite.zIndex !== before.zIndex) sprite.zIndex = before.zIndex;
 
   const inverse = container.getGlobalTransform(matrices.parent, false).invert();
-  const { local } = range;
 
-  if (
-    local[0] !== inverse.a ||
-    local[1] !== inverse.b ||
-    local[2] !== inverse.c ||
-    local[3] !== inverse.d ||
-    local[4] !== inverse.tx ||
-    local[5] !== inverse.ty
-  ) {
-    sprite.setFromMatrix(inverse);
-    local[0] = inverse.a;
-    local[1] = inverse.b;
-    local[2] = inverse.c;
-    local[3] = inverse.d;
-    local[4] = inverse.tx;
-    local[5] = inverse.ty;
-  }
+  if (storeMatrix(range.local, 0, inverse)) sprite.setFromMatrix(inverse);
 
   range.moved = false;
 }
@@ -152,7 +136,7 @@ export function takeRange(
       moved: true,
       lastDrawn: state.frame,
       bytes: 0,
-      local: new Float64Array(6).fill(Number.NaN)
+      local: new Float64Array(MATRIX_CELLS).fill(Number.NaN)
     };
     state.ranges.set(range.id, record);
   }

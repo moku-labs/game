@@ -206,8 +206,10 @@ same order, the time each system took in the current frame. The world takes the 
 unchanged), and zeroes `ms` in place at the start of the next frame, so after a frame it holds that
 frame's time. A system that comes back under the same name keeps its row; the table grows only when
 a system registers past its end, never per frame. The renderer's monitor reads it after each frame
-for the five slowest systems of the frame and of the second. `undefined` without the flag: a release
-build times nothing.
+for the five slowest systems of the frame and of the second. It is the live table, the same object
+every call and never a copy, so that read allocates nothing; a reader that keeps numbers past the
+frame copies them, and never writes into it. `undefined` without the flag: a release build times
+nothing.
 
 ```ts
 // The renderer's monitor, at the end of a frame of a debug build:

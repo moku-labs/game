@@ -3,48 +3,9 @@
  * logs `renderer:missed-frame` and draws it. Dev and agent builds only: the call site guards it inline, so a production
  * bundle drops this module.
  */
+import { differingPixels, NAMED, withinRatio } from "../pixels";
 import type { HostModule, RendererCtx } from "../types";
 import type { DemandFrame, DemandState } from "./types";
-
-/** A channel that differs by more than this is a differing pixel: the visual runner's default threshold. */
-const CHANNEL_DELTA = 24;
-
-/** More than this share of differing pixels is a missed frame: the visual runner's default ratio. */
-const PIXEL_RATIO = 0.001;
-
-/** Bytes of one RGBA pixel. */
-const CHANNELS = 4;
-
-/** Entities a missed-frame line names at the most. */
-const NAMED = 20;
-
-/**
- * Counts the pixels of two pictures of the same size that differ by more than `CHANNEL_DELTA` in a channel.
- *
- * @param expected - The reference RGBA bytes.
- * @param actual - The live RGBA bytes, as long as `expected`.
- * @returns The differing pixels.
- * @example
- * ```ts
- * differingPixels(new Uint8ClampedArray([0, 0, 0, 255, 9, 9, 9, 255]), new Uint8ClampedArray([0, 0, 0, 255, 90, 9, 9, 255])); // 1
- * ```
- */
-export function differingPixels(expected: Uint8ClampedArray, actual: Uint8ClampedArray): number {
-  let differing = 0;
-
-  for (let at = 0; at < expected.length; at += CHANNELS) {
-    for (let channel = 0; channel < CHANNELS; channel += 1) {
-      const delta = Math.abs((expected[at + channel] ?? 0) - (actual[at + channel] ?? 0));
-
-      if (delta > CHANNEL_DELTA) {
-        differing += 1;
-        break;
-      }
-    }
-  }
-
-  return differing;
-}
 
 /**
  * The resolution the oracle reads the stage at: half, a quarter of the pixels; the renderer's own while a kept
@@ -97,7 +58,7 @@ export function verifyFrame(
 
   const pixels = differingPixels(reference, live);
 
-  if (pixels <= (live.length / CHANNELS) * PIXEL_RATIO) {
+  if (withinRatio(pixels, live.length)) {
     // Equal enough: the reference stays the picture of the last drawn frame.
     state.verify.reference = reference;
 

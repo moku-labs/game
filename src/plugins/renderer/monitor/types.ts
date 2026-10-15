@@ -29,7 +29,7 @@ import type {
  * // The board of Timber Town in a dev build: one glowing button on screen, kept as a picture at rest.
  * const stats: RenderStats = {
  *   fps: 60, drawn: 60, frameMs: 3.4, textures: 12, textureMb: 41.25,
- *   textureMbSplit: { art: 31.5, targets: 9.75, kept: 1.4 }, views: 180, pooled: 24,
+ *   textureMbSplit: { art: 30.1, targets: 9.75, kept: 1.4 }, views: 180, pooled: 24,
  *   renderPasses: 1, renderPassesMax: 3, kept: { pictures: 1, mb: 1.4, retakes: 0 }, drawCalls: 14
  * };
  * // The same board at rest with `onDemand`: the loop runs, nothing is drawn.
@@ -478,7 +478,7 @@ export type MonitorState = {
  * @example
  * ```ts
  * // A headless test: nothing is drawn, so every counter is 0 and there is no picture.
- * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0 } }
+ * app.renderer.stats(); // { fps: 0, drawn: 0, frameMs: 0, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 0, pooled: 0, renderPasses: 0, renderPassesMax: 0, kept: { pictures: 0, mb: 0, retakes: 0 } }
  * await app.renderer.capture(); // undefined
  * ```
  */
@@ -497,7 +497,7 @@ export type MonitorApi = {
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
-   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0 } }
+   * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, textureMbSplit: { art: 0, targets: 0, kept: 0 }, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0 } }
    * // The same frame in a dev build also counts the one sprite batch, and the one instruction build of the first
    * // frame: { ..., drawCalls: 1, redraws: 0, rebuilds: 1 }
    * app.renderer.stats(); // { fps: 120, drawn: 0, … }: a still board with onDemand

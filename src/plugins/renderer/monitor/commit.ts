@@ -7,7 +7,8 @@
 
 import type { FrameMeasure } from "../../time/types";
 import type { SystemTiming } from "../../world/types";
-import { DEMAND_REASONS, type DemandReason } from "../demand/types";
+import type { DemandReason } from "../demand/types";
+import { DEMAND_REASONS } from "../reasons";
 import { usedHeapBytes } from "./long-frames";
 import {
   bucketOf,
@@ -33,6 +34,12 @@ const GC_DROP_BYTES = 0.5 * BYTES_PER_MB;
 
 /** Pixels per megapixel. */
 const PIXELS_PER_MPX = 1_000_000;
+
+/** The most skipped frames the 8-bit `skipped` column holds; more are written as this. */
+const SKIPPED_MAX = 255;
+
+/** A gap spike whose work stayed under this share of the budget may be a collection: the `gc?` hint. */
+const GC_WORK_SHARE = 0.5;
 
 /**
  * Opens a frame: the counters and the filter kinds of the frame start at 0 and the passes from
@@ -249,6 +256,42 @@ function turned(pc: PerfCtx): boolean {
 }
 
 /**
+ * Writes what `time` measured of the frame into its slot: the clock numbers, the phases, the work, the flags of the
+ * frame, and the budget staged in `perf.staged[0]`, read from the column so no double is handed over.
+ *
+ * @param pc - The perf context.
+ * @param slot - The ring slot.
+ * @param measure - What `time` measured of the frame.
+ */
+function writeMeasure(pc: PerfCtx, slot: number, measure: Readonly<FrameMeasure>): void {
+  const { perf } = pc;
+  const c = perf.ring.columns;
+  const phase = slot * PHASE_STRIDE;
+
+  c.frame[slot] = measure.frame;
+  c.t[slot] = measure.at;
+  c.gapMs[slot] = measure.gapMs;
+  c.capMs[slot] = measure.capMs;
+  c.skipped[slot] = Math.min(SKIPPED_MAX, measure.skipped);
+  c.startMs[slot] = measure.startMs;
+  c.rateMs[slot] = measure.rateMs;
+  c.budgetMs[slot] = cell(perf.staged, 0);
+
+  for (let index = 0; index < PHASE_STRIDE; index += 1) {
+    c.phaseMs[phase + index] = cell(measure.phaseMs, index);
+  }
+
+  c.agentMs[slot] = perf.agentMs;
+  c.workMs[slot] = measure.workMs;
+  c.drawn[slot] = perf.drawn ? 1 : 0;
+  c.idle[slot] = measure.idle ? 1 : 0;
+  c.stepped[slot] = measure.stepped ? 1 : 0;
+  c.gpuMs[slot] = Number.NaN;
+  c.path[slot] = perf.pathId;
+  c.changed[slot] = perf.flags;
+}
+
+/**
  * The `time.measure` listener of the monitor: writes the frame into the next slot of the ring,
  * then the spike rule, the GPU timer's frame, the flush that is due, the accumulators, a
  * `display` event after a resize, a restore or a turn, and closes the frame.
@@ -272,48 +315,29 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   const budget = cell(perf.staged, 0);
   const { agentMs } = perf;
   const timing = pc.ctx.deps.world.systemTimes();
-  const phase = slot * PHASE_STRIDE;
 
-  c.frame[slot] = measure.frame;
-  c.t[slot] = measure.at;
-  c.gapMs[slot] = measure.gapMs;
-  c.capMs[slot] = measure.capMs;
-  c.skipped[slot] = Math.min(255, measure.skipped);
-  c.startMs[slot] = measure.startMs;
-  c.rateMs[slot] = measure.rateMs;
-  c.budgetMs[slot] = budget;
-
-  for (let index = 0; index < PHASE_STRIDE; index += 1) {
-    c.phaseMs[phase + index] = cell(measure.phaseMs, index);
-  }
-
-  c.agentMs[slot] = agentMs;
-  c.workMs[slot] = measure.workMs;
-  c.drawn[slot] = perf.drawn ? 1 : 0;
-  c.idle[slot] = measure.idle ? 1 : 0;
-  c.stepped[slot] = measure.stepped ? 1 : 0;
+  // The record of the frame: what `time` measured, the counters, the slowest systems, the filter kinds.
+  writeMeasure(pc, slot, measure);
   writeCounters(pc, slot);
-  c.gpuMs[slot] = Number.NaN;
-  c.path[slot] = perf.pathId;
-  c.changed[slot] = perf.flags;
   writeSystems(pc, slot, timing);
   writeKinds(pc, slot);
 
+  // The spike rule. The `gc?` hint of a gap spike with little work: the heap dropped by half a megabyte or more
+  // since the previous commit (Chromium only; a hint, never a certainty). Written here, not in a
+  // function: a computed double handed to a call is boxed, and this runs every frame.
   const heap = usedHeapBytes();
   const heapDrop = perf.lastHeap - heap;
   let causes = spikeCauses(measure, agentMs, budget);
 
-  // The `gc?` hint of a gap spike with little work: the heap dropped by half a megabyte or more
-  // since the previous commit (Chromium only; a hint, never a certainty). Written here, not in a
-  // function: a computed double handed to a call is boxed, and this runs every frame.
   if (
     (causes & CAUSE.gap) !== 0 &&
-    measure.workMs - agentMs < budget / 2 &&
+    measure.workMs - agentMs < budget * GC_WORK_SHARE &&
     heapDrop >= GC_DROP_BYTES
   ) {
     causes |= CAUSE["gc?"];
   }
 
+  // The slot becomes the newest of the ring; a spike is annotated and the GPU timer gets the frame.
   perf.lastHeap = heap;
   ring.newest = slot;
   ring.size = Math.min(ring.size + 1, ring.capacity);
@@ -322,12 +346,15 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   c.gpuPartial[slot] = 0;
   perf.timer?.commit(slot, measure.frame);
 
+  // Once a second of page clock: the flush.
   if (Number.isNaN(perf.lastFlushAt)) perf.lastFlushAt = measure.at;
   else if (measure.at - perf.lastFlushAt >= FLUSH_MS) {
     perf.staged[1] = measure.at;
     flushPerf(pc);
   }
 
+  // The per-second accumulators, the pending spike, the first drawn frame, and a `display` event after a resize, a
+  // restore or a turn.
   accumulate(perf, measure, timing);
 
   if (causes !== 0) addPending(perf, sequenceOf(ring, slot));
@@ -336,6 +363,7 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   }
   if ((perf.flags & (CHANGED.resize | CHANGED.restore)) !== 0 || turned(pc)) writeDisplay(pc);
 
+  // The frame closes: the next one starts with clean flags.
   perf.flags = 0;
   perf.drawn = false;
   perf.agentMs = 0;

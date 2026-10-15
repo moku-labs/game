@@ -1,6 +1,6 @@
 # debug
 
-> Micro plugin — the editor's overlay from the game: `app.debug.overlay.open() / close() / toggle() / isOpen()`.
+> Standard plugin — the editor's overlay from the game: `app.debug.overlay.open() / close() / toggle() / isOpen()`.
 
 Every app has it, headless and screen, as it has `clock`: it is one of the core plugins of `createCore`. It has no
 config, no state, no events and no `depends`.

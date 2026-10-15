@@ -873,6 +873,29 @@ describe("the filter sync — what the kept-picture cache may do with a slot (sp
     expect("origin" in (slotOf(tint) ?? {})).toBe(false);
   });
 
+  it("binds a uniform group for a placed filter with no uniform of its own, so its origin can be written", () => {
+    const Spot = defineFilter("fx.spot", {
+      wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { let at = canvasPixel(uv); return textureSample(uTexture, uSampler, uv) + vec4<f32>(at * 0.0, 0.0, 0.0); }",
+      glsl: "void main() { vec2 at = canvasPixel(vTextureCoord); finalColor = texture(uTexture, vTextureCoord) + vec4(at * 0.0, 0.0, 0.0); }"
+    });
+    const mock = createMockEffects();
+
+    mock.features.push({ name: "ward", description: { filters: [Spot] } });
+    mock.start();
+
+    const spot = view(mock, [Spot()]);
+
+    mock.frame();
+
+    const slot = mock.renderer.sets.findLast(set => set.entity === spot)?.slots[0];
+    const group = mock.state.views.get(spot)?.instances.get("fx.spot")?.filter.resources.fu as
+      | FakeUniformGroup
+      | undefined;
+
+    expect(slot?.origin).toBeInstanceOf(Float32Array);
+    expect(slot?.origin).toBe(group?.uniforms.keptOrigin);
+  });
+
   it("marks a slot that shows a blurred copy: a Blur and a filter with inputs, no other", () => {
     const mock = softMock();
     const soft = view(mock, [Soft()]);

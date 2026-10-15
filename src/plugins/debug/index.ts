@@ -1,5 +1,5 @@
 /**
- * Micro tier — the editor's overlay from the game: `app.debug.overlay`, a no-op without the agent.
+ * Standard tier — the editor's overlay from the game: `app.debug.overlay`, a no-op without the agent.
  *
  * @see README.md
  */

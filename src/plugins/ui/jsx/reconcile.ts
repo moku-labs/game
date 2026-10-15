@@ -155,10 +155,7 @@ type Change = {
  * @returns True when no component of the element has to be written for these props.
  * @example
  * ```ts
- * writesSame(
- *   { type: "button", props: { intent: "claim", payload: { id: 1 } }, children: [] },
- *   { type: "button", props: { intent: "claim", payload: { id: 2 } }, children: [] }
- * ); // false
+ * writesSame({ type: "row", props: { payload: { id: 1 } }, children: [] }, { type: "row", props: { payload: { id: 2 } }, children: [] }); // false
  * ```
  */
 function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
@@ -240,10 +237,7 @@ export function withKey(node: DescriptionNode, key: string | undefined): Descrip
  * @returns The seven flags.
  * @example
  * ```ts
- * isFlagsOf(
- *   { type: "button", props: { state: { active: true } }, children: [] },
- *   { pressed: false, hover: true, focus: false, covered: false }
- * ).hover; // true
+ * isFlagsOf({ type: "button", props: { state: { active: true } }, children: [] }, { pressed: false, hover: true, focus: false, covered: false }).active; // true
  * ```
  */
 export function isFlagsOf(node: DescriptionNode, live: LiveFlags): IsFlags {
@@ -388,8 +382,7 @@ function listedOf(node: DescriptionNode): readonly AnyComponentValue[] {
  * @returns The values to carry, by component name.
  * @example
  * ```ts
- * const node = { type: "row", props: { components: [Transform({ x: 10 }), Held()] }, children: [] };
- * [...extrasOf({ node }).keys()]; // ["Held"]
+ * [...extrasOf({ node: { type: "row", props: { components: [Transform({ x: 10 }), Held()] }, children: [] } }).keys()]; // ["Held"]
  * ```
  */
 export function extrasOf(element: Pick<Element, "node">): ReadonlyMap<string, AnyComponentValue> {
@@ -813,16 +806,39 @@ export function createReconciler(
     const next = extrasOf(element);
 
     warnOwned(element);
+    removeLeftExtras(element, next);
+    applyChangedExtras(element, next);
 
-    // Remove the extras that left the `components` prop, with the motion of their last change.
+    // Remember them for the next diff.
+    element.extras = next;
+  }
+
+  /**
+   * Removes the extras that left the `components` prop, with the motion of their last change.
+   *
+   * @param element - The live element that changed.
+   * @param next - The extras of this render, by component name.
+   */
+  function removeLeftExtras(element: Element, next: ReadonlyMap<string, AnyComponentValue>): void {
     for (const [name, previous] of element.extras) {
       if (next.has(name)) continue;
 
       cancelExtra(element, name);
       ecs.remove(element.entity, previous.type);
     }
+  }
 
-    // Add a new, tag or missing extra whole; play or patch the changed fields of the rest.
+  /**
+   * Adds a new, tag or missing extra whole, and plays or patches the changed fields of the rest.
+   * An extra with the same fields writes nothing.
+   *
+   * @param element - The live element that changed.
+   * @param next - The extras of this render, by component name.
+   */
+  function applyChangedExtras(
+    element: Element,
+    next: ReadonlyMap<string, AnyComponentValue>
+  ): void {
     for (const [name, value] of next) {
       const previous = element.extras.get(name);
       const isUnchanged = previous !== undefined && sameFields(previous.value, value.value);
@@ -852,9 +868,6 @@ export function createReconciler(
 
       ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
     }
-
-    // Remember them for the next diff.
-    element.extras = next;
   }
 
   /**

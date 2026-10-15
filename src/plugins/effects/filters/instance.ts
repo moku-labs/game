@@ -231,12 +231,12 @@ function createOurs(
     };
   }
 
-  const group =
+  // A group only for a filter that binds a uniform of its own: a declared one, an input's or the canvas origin.
+  const bindsUniforms =
     definition.uniforms.length > 0 ||
     definition.inputs.length > 0 ||
-    definition.origin !== undefined
-      ? new pixi.UniformGroup(structures)
-      : undefined;
+    definition.origin !== undefined;
+  const group = bindsUniforms ? new pixi.UniformGroup(structures) : undefined;
   const resources: Record<string, unknown> = group === undefined ? {} : { fu: group };
   const empty = pixi.Texture.EMPTY.source;
 

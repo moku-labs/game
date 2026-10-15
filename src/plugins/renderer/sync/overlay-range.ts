@@ -252,8 +252,7 @@ export function noteLeaving(state: SyncState, view: View): void {
 
 /**
  * Tells whether a change mark of this decision (adapter marks included) lies in the range (K1), or a view left its
- * place in it. The marks the step
- * made itself, flipping a reason, are no change of the range's pixels.
+ * place in it. The marks the step made itself, flipping a reason, are no change of the range's pixels.
  *
  * @param sctx - Domain context of the sync module.
  * @param set - The entries.
@@ -314,6 +313,27 @@ function blursIn(slots: readonly FilterSlot[]): boolean {
 }
 
 /**
+ * Tells whether a view's bounds hold the whole canvas, within `COVER_SLACK`.
+ *
+ * @param top - The view's top.
+ * @param screen - The canvas size, CSS px.
+ * @returns True when it covers the canvas.
+ */
+function coversCanvas(
+  top: PixiContainer,
+  screen: Readonly<{ width: number; height: number }>
+): boolean {
+  const bounds = top.getBounds();
+
+  return (
+    bounds.x <= COVER_SLACK &&
+    bounds.y <= COVER_SLACK &&
+    bounds.x + bounds.width >= screen.width - COVER_SLACK &&
+    bounds.y + bounds.height >= screen.height - COVER_SLACK
+  );
+}
+
+/**
  * Whether a range is blurred (O9.2, OQ22-3): an entry root that is a view, or a view inside the range whose bounds
  * hold the canvas, carries an enabled blurring slot. Read from the slots, never from where the filters hang.
  *
@@ -339,17 +359,7 @@ function measureBlurred(
 
     if (set.has(top)) return true;
     if (screen === undefined || !inRange(set, top, root)) continue;
-
-    const bounds = top.getBounds();
-
-    if (
-      bounds.x <= COVER_SLACK &&
-      bounds.y <= COVER_SLACK &&
-      bounds.x + bounds.width >= screen.width - COVER_SLACK &&
-      bounds.y + bounds.height >= screen.height - COVER_SLACK
-    ) {
-      return true;
-    }
+    if (coversCanvas(top, screen)) return true;
   }
 
   return false;
@@ -527,35 +537,14 @@ function stepKept(
   root: PixiContainer,
   context: { wholes: ReadonlySet<DemandReason>; othersChanged: boolean }
 ): HiddenReason | undefined {
-  const overlay = sctx.ctx.state.sync.overlay;
-
   if (context.othersChanged) range.othersStale = true;
 
-  let taken = false;
+  const owed = retakeOwed(sctx, range, owner, root);
 
-  if (range.catchUp) {
-    range.catchUp = false;
-    range.touched = false;
-    taken = retake(sctx, range, owner, root);
-  } else if (markedInRange(sctx, overlay.wantSet, root)) {
-    range.streak += 1;
+  if (owed === "live") return undefined;
 
-    if (range.streak >= RETAKE_STREAK) {
-      range.streak = 0;
-      range.calm = 0;
-      range.fallback = true;
-      range.kept = false;
-      noteFallback(sctx, owner, "live");
-
-      return undefined;
-    }
-
-    taken = retake(sctx, range, owner, root);
-  } else {
-    range.streak = 0;
-  }
-
-  if (!taken && RETAKE_WHOLES.some(reason => context.wholes.has(reason))) {
+  // The screen changed whole: the picture is taken again, unless this frame took it already.
+  if (owed === "none" && RETAKE_WHOLES.some(reason => context.wholes.has(reason))) {
     retake(sctx, range, owner, root);
   }
 
@@ -565,6 +554,51 @@ function stepKept(
   }
 
   return range.kept ? "freeze" : undefined;
+}
+
+/**
+ * The retakes a held picture owes its own range (O8.3, O8.4): the catch-up frame of held loops, and a mark in the
+ * range, which after three frames in a row lets the range go live instead.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param range - The range, a picture held.
+ * @param owner - The owner overlay.
+ * @param root - The stage root.
+ * @returns `"taken"` when a picture holds the range after a retake, `"live"` when it fell back, `"none"` otherwise.
+ */
+function retakeOwed(
+  sctx: SyncCtx,
+  range: ActiveRange,
+  owner: OverlayRecord,
+  root: PixiContainer
+): "taken" | "live" | "none" {
+  // The held loops wrote their catch-up frame: the picture is taken with them.
+  if (range.catchUp) {
+    range.catchUp = false;
+    range.touched = false;
+
+    return retake(sctx, range, owner, root) ? "taken" : "none";
+  }
+
+  // No mark in the range: the streak ends.
+  if (!markedInRange(sctx, sctx.ctx.state.sync.overlay.wantSet, root)) {
+    range.streak = 0;
+
+    return "none";
+  }
+
+  range.streak += 1;
+
+  if (range.streak < RETAKE_STREAK) return retake(sctx, range, owner, root) ? "taken" : "none";
+
+  // Three marked frames in a row: the range is drawn live until it calms down.
+  range.streak = 0;
+  range.calm = 0;
+  range.fallback = true;
+  range.kept = false;
+  noteFallback(sctx, owner, "live");
+
+  return "live";
 }
 
 /**
@@ -708,12 +742,14 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
   const root = state.root;
   const owner = ownerOf(overlay.order);
 
+  // No overlay covers or keeps: the range goes.
   if (owner === undefined || root === undefined) {
     clearRange(sctx);
 
     return;
   }
 
+  // The wanted lists of this frame, and what changed against the range held since the last one.
   computeRange(sctx, owner, root);
 
   const previous = overlay.active;
@@ -728,6 +764,7 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
 
   overlay.range = range;
 
+  // A range held by no one starts empty; a new owner, or a new mode, starts its counters again.
   if (previous === undefined) {
     range.entries.length = 0;
     range.others.length = 0;
@@ -738,6 +775,7 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
 
   range.mode = mode;
 
+  // The reason of this frame: `"cover"` for an opaque owner, otherwise what the freeze rules decide.
   const to =
     mode === "cover"
       ? "cover"
@@ -745,13 +783,16 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
 
   if (mode === "cover") range.kept = false;
 
+  // The new reason on before the old one comes off, then the wanted lists become the range.
   writeReasons(sctx, range, from, to);
   keepWanted(sctx, range);
   range.reason = to;
   overlay.active = range;
 
+  // The last owner's picture goes after the new one was taken.
   if (held !== undefined && (held !== owner.entity || !range.kept)) sctx.deps.kept.release(held);
 
+  // A held picture follows its owner's dim, or its root, in this frame.
   const before = owner.dim ?? owner.object;
 
   if (range.kept && range.before !== before) {

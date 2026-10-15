@@ -228,12 +228,14 @@ function seeOverlay(sctx: SyncCtx, entity: Entity): void {
   const ecs = sctx.ctx.deps.world.ecs;
   const owner = ecs.ownerOf(entity);
 
+  // Only a ui element is an overlay.
   if (owner?.kind !== "plugin" || owner.name !== UI_OWNER_NAME) {
     warnOnce(sctx, "renderer:overlay-ignored", entity, { reason: "not a ui element" });
 
     return;
   }
 
+  // Its root's view and the layer that view hangs in: the record waits until both are there.
   const top = rootOf(sctx, entity);
   const view = state.views.get(top);
   const raw = ecs.get(entity, Overlay);
@@ -245,12 +247,14 @@ function seeOverlay(sctx: SyncCtx, entity: Entity): void {
 
   if (slot === undefined || object.parent === null) return;
 
+  // An overlay in or above the HUD layer is refused: the HUD stays over every overlay.
   if (slot.hud !== -1 && slot.index >= slot.hud) {
     warnOnce(sctx, "renderer:overlay-above-hud", entity, { layer: slot.name });
 
     return;
   }
 
+  // The record, found or made: its place, its level and its phase read again, a turn noted.
   const known = state.overlay.records.get(entity);
   const record = known ?? createRecord(entity, object, object.parent);
   const level = ecs.get(entity, OverlayLevel);
@@ -444,6 +448,21 @@ function modeReported(overlay: OverlayState, record: OverlayRecord): OverlayMode
 }
 
 /**
+ * Tells whether the overlay step has nothing to do: no marked entity, no HUD part, no record and no range held.
+ *
+ * @param overlay - The overlay state.
+ * @returns True when the step can return at once.
+ */
+function overlaysIdle(overlay: OverlayState): boolean {
+  return (
+    overlay.entities.size === 0 &&
+    overlay.parts.size === 0 &&
+    overlay.records.size === 0 &&
+    overlay.active === undefined
+  );
+}
+
+/**
  * The overlay step of the render phase (the body of `SyncInternal.stepOverlays`): the records, their order and modes,
  * the dims, the range with its reasons and its picture, and the HUD parts, in that order. New layers let the range go
  * first; it is built again from the new layers in the same step.
@@ -454,16 +473,7 @@ export function stepOverlays(sctx: SyncCtx): void {
   const state = sctx.ctx.state.sync;
   const overlay = state.overlay;
 
-  if (state.root === undefined) return;
-
-  if (
-    overlay.entities.size === 0 &&
-    overlay.parts.size === 0 &&
-    overlay.records.size === 0 &&
-    overlay.active === undefined
-  ) {
-    return;
-  }
+  if (state.root === undefined || overlaysIdle(overlay)) return;
 
   const wholes = sctx.deps.demand.wholes();
 

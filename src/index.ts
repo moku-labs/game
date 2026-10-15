@@ -38,15 +38,16 @@
  * | renderer | background | 0x000000 |
  * | renderer | antialias | false |
  * | renderer | maxResolution | 2 |
- * | renderer | poolTrim | { restMs: 1000, aboveMb: 16 }, the idle render targets of Pixi's pool go after a second at rest, a second after a scene change and on a pause; false keeps them |
+ * | renderer | poolTrim | { restMs: 1000, aboveMb: 16 }, the idle render targets of Pixi's pool go after a second at rest, a second after a scene change and on a pause; false keeps them; shallow merge: a game that sets `poolTrim` gives both fields |
  * | renderer | preference | "webgpu", WebGL is Pixi's fallback |
- * | renderer | aspect | { min: 4/3, max: 21/9 } |
+ * | renderer | aspect | { min: 4/3, max: 21/9 }; shallow merge: a game that sets `aspect` gives both fields |
  * | renderer | poolLimit | 256 |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
- * | renderer | debug | { nineSlice: false, verifyFrames: false } |
+ * | renderer | debug | { nineSlice: false, verifyFrames: false, kept: true }; shallow merge: a game that sets `debug` replaces the whole object, and a switch it leaves out is off, except `kept`, which stays on unless set to false |
  * | renderer | onDemand | false, every frame is drawn; true draws only a frame in which something changed |
- * | renderer | monitor | { budgetMs: "rate", frames: 1024 }, the performance log of an agent build |
+ * | renderer | monitor | { budgetMs: "rate", frames: 1024 }, the performance log of an agent build; shallow merge: a game that sets `monitor` gives both fields |
+ * | renderer | keptMb | 64, MiB the kept pictures may hold: a filtered view that did not change is drawn from its picture, the least recently drawn goes first; 0 keeps none |
  * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
@@ -54,7 +55,7 @@
  * | input | swipeMinPx | 48 |
  * | input | swipeMaxMs | 300 |
  * | input | heldScale | 1 |
- * | input | cursor | { control: "pointer", idle: "" } |
+ * | input | cursor | { control: "pointer", idle: "" }; shallow merge: a game that sets `cursor` gives both fields |
  * | input | traceStepPx | 32 |
  * | input | traceInset | 0.4 |
  * | assets | manifest | undefined, a URL or an inline manifest |
@@ -67,12 +68,12 @@
  * | i18n | locale | "en" |
  * | i18n | fallback | "en" |
  * | i18n | locales | {} |
- * | text | fonts | { body: "ui.font-body", digits: "ui.font-digits" } |
+ * | text | fonts | { body: "ui.font-body", digits: "ui.font-digits" }; shallow merge: a game that sets `fonts` gives both fields |
  * | ui | tapTargetPt | 44 |
- * | ui | breakpoints | { tall: 2, wide: 1.5 } |
+ * | ui | breakpoints | { tall: 2, wide: 1.5 }; shallow merge: a game that sets `breakpoints` gives both fields |
  * | ui | focusRing | { stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }; shallow merge: a game that sets `focusRing` gives all six fields |
  * | ui | textInput | { caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35, composingUnderline: 3, keyboardMargin: 16 }; shallow merge |
- * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
+ * | audio | buses | { master: 1, music: 0.6, sfx: 1 }; shallow merge: a game that sets `buses` gives all three fields |
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |
  * | audio | context | undefined, the real AudioContext |

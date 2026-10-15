@@ -359,9 +359,51 @@ export type State = {
  * ```
  */
 export type Api = {
+  /**
+   * The one Pixi application: whether it draws, what it draws with, and the canvas it draws on.
+   *
+   * @example
+   * ```ts
+   * // A game shows a DOM fallback while nothing can draw: a headless test, the unsupported screen.
+   * if (!app.renderer.host.ready()) showFallback();
+   * app.renderer.host.kind(); // "webgpu" in Chrome; "none" while inert
+   * ```
+   */
   host: HostApi;
+  /**
+   * The drawn frame in reference units, and the mapping between reference units and the page.
+   *
+   * @example
+   * ```ts
+   * // A 390 x 844 phone, the canvas at the top left: the 1080 reference units across are 390 CSS pixels.
+   * app.renderer.viewport.toScreen({ x: 540, y: 960 }); // { x: 195, y: 346.666… }
+   * app.renderer.viewport.toScreen({ x: 1080, y: 0 }).x; // 390
+   * ```
+   */
   viewport: ViewportApi;
+  /**
+   * The display objects of the entities: the hit tests, and the textures, displays, fonts and filters other plugins
+   * hand the renderer.
+   *
+   * @example
+   * ```ts
+   * // The first entity of the world is a sprite drawn at (540, 300); nothing is drawn at (10, 10).
+   * app.renderer.sync.hitTest(540, 300, () => true); // 1048576
+   * app.renderer.sync.hitTest(10, 10, () => true); // undefined
+   * ```
+   */
   sync: SyncApi;
+  /**
+   * The performance monitor of an agent build: the log stream, the frame ring, marks, events, agent spans and the
+   * resolution switch.
+   *
+   * @example
+   * ```ts
+   * // The editor's frame graph reads the ring of a debug build on the phone; a production build keeps none.
+   * app.renderer.monitor.frames().capacity; // 1024 once the debug build draws; 0 in production
+   * app.renderer.monitor.mark("shop open"); // a stream() listener gets { kind: "mark", label: "shop open", … }
+   * ```
+   */
   monitor: PerfMonitorApi;
   /**
    * Tells the renderer that the Pixi object of an entity's view is about to be drawn differently in a way it cannot

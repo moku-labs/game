@@ -346,10 +346,10 @@ function cacheOfInstance(instance: FilterInstance): FilterCache {
  * @returns True, or `undefined` for every other filter (the slot leaves the key out).
  */
 function blursOf(instance: FilterInstance): true | undefined {
-  return instance.kind === "blur" ||
-    (instance.kind === "wgsl" && instance.definition.inputs.length > 0)
-    ? true
-    : undefined;
+  const showsBlur =
+    instance.kind === "blur" || (instance.kind === "wgsl" && instance.definition.inputs.length > 0);
+
+  return showsBlur ? true : undefined;
 }
 
 /**

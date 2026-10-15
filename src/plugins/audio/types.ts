@@ -389,6 +389,9 @@ export type AudioApi = {
    * and a music switch to the track that already plays are not in it. Empty while
    * `config.journal` is 0, the default, and after the app stopped.
    *
+   * No copy and no live view: the list and its entries are never written. Every new sound replaces the plugin's list
+   * with a new frozen one, so a list read earlier keeps what it held, and a caller cannot change the journal through it.
+   *
    * @returns The journal, frozen; a later sound replaces the list and leaves this one as it was.
    * @example
    * ```ts

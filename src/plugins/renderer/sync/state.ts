@@ -120,6 +120,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     outlinesStale: false,
     filters: emptyMap(),
     areas: emptyMap(),
+    viewlessEntries: false,
     warm: createWarmState(),
     filterKinds: emptyWeakMap(),
     objectHidden: emptyWeakMap(),

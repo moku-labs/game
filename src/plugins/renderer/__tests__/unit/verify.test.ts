@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDemandState } from "../../demand/state";
-import { differingPixels } from "../../demand/verify";
+import { differingPixels } from "../../pixels";
 import { box, demandAlone } from "../demand-harness";
 import { createMockRenderer } from "../mock-renderer";
 

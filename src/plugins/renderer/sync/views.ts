@@ -1357,6 +1357,8 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
   if (host !== undefined) detachChildren(sctx, entity, host);
 
   state.views.delete(entity);
+  // Its filters and area stay while the entity lives: the pass looks for its despawn.
+  if (state.filters.has(entity) || state.areas.has(entity)) state.viewlessEntries = true;
   state.orphans.delete(entity);
   state.entityOf.delete(view.object);
   state.viewOfTop.delete(view.wrapper ?? view.object);
@@ -1424,6 +1426,7 @@ export function stopSync(state: SyncState): void {
   state.providers.length = 0;
   state.filters.clear();
   state.areas.clear();
+  state.viewlessEntries = false;
   stopWarm(state);
   state.held.clear();
   state.redraws = 0;

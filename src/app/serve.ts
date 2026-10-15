@@ -711,7 +711,7 @@ export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageSer
       fetch: request => fileResponse(staticPath(base, new URL(request.url).pathname))
     });
   } catch (error) {
-    if ((error as { code?: unknown }).code === "EADDRINUSE") {
+    if (error instanceof Error && "code" in error && error.code === "EADDRINUSE") {
       throw new Error(`[game] dev: port ${run.port} is in use.\n  Pass --port 0 for a free port.`, {
         cause: error
       });

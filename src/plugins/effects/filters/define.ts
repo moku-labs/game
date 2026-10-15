@@ -609,6 +609,60 @@ function readFallback(
 }
 
 /**
+ * Refuses a definition without an id or without the entry point of a body: `mainFragment` in the WGSL, `void main(`
+ * in the GLSL.
+ *
+ * @param id - The filter id.
+ * @param spec - Both bodies of the definition.
+ * @param spec.wgsl - The WGSL body.
+ * @param spec.glsl - The GLSL body.
+ * @throws {Error} When the id is empty or a body has no entry point.
+ */
+function readSpec(id: string, spec: Readonly<{ wgsl: string; glsl: string }>): void {
+  if (typeof id !== "string" || id === "") {
+    throw new Error(
+      "[game] A filter needs an id.\n  Pass a non-empty string as the first argument."
+    );
+  }
+
+  if (!MAIN_FRAGMENT.test(spec.wgsl)) {
+    throw new Error(
+      `[game] Filter "${id}" has no mainFragment.\n` +
+        "  Write fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32>."
+    );
+  }
+
+  // A JavaScript caller may leave `glsl` out: the test of `undefined` finds no main either.
+  if (!MAIN_GLSL.test(spec.glsl)) {
+    throw new Error(
+      `[game] Filter "${id}" has no main in its glsl.\n` +
+        "  Write void main() in GLSL ES 3.0 and set finalColor."
+    );
+  }
+}
+
+/**
+ * The cache category of a filter with its inputs: as bad as the worst of its body and its stages, since a kept
+ * pre-pass result is a picture of the stages.
+ *
+ * @param cache - The category of the body.
+ * @param inputs - The read inputs.
+ * @returns The category of the whole filter.
+ */
+function cacheWithInputs(
+  cache: FilterCache,
+  inputs: readonly FilterInputDefinition[]
+): FilterCache {
+  let worst = cache;
+
+  for (const input of inputs) {
+    for (const stage of input.stages) worst = worstOf(worst, stage.filter.cache);
+  }
+
+  return worst;
+}
+
+/**
  * Turns a WGSL fragment body and its GLSL ES 3.0 twin into a filter component type; Pixi draws
  * the one of the running backend. A still view under the filter is kept as a picture by the
  * renderer (`cache`, default `"local"`); a body that needs its canvas position calls
@@ -639,38 +693,15 @@ function readFallback(
  * Tint({ amount: 1 }).value; // { amount: 1, color: 0xffd700, enabled: true, order: 0 }
  * Tint.filter.glsl.includes("uniform vec3 color;"); // true
  * Tint.filter.cache; // "local"
- * // A Memory Missing's frost reads a blurred copy of the scene drawn by its chain.
- * const Frost = defineFilter("Frost", { wgsl: FROST_WGSL, glsl: FROST_GLSL, uniforms: { strength: 16 }, inputs: { blur: { stages: [FrostBox4, FrostGauss], chain: frostChain } } });
- * Frost.filter.inputs.map(input => input.sample); // ["sampleBlur"]
- * // A Memory Missing's lens draws nothing outside its disc: Pixi renders and fills only this box.
- * const Lens = defineFilter("LensWindow", { wgsl: LENS_WGSL, glsl: LENS_GLSL, uniforms: { cx: 195, cy: 189, rev: 84, soft: 4 }, area: v => [v.cx - v.rev - v.soft, v.cy - v.rev - v.soft, 2 * (v.rev + v.soft), 2 * (v.rev + v.soft)] });
- * Lens.filter.area?.(Lens().value); // [107, 101, 176, 176]
  * ```
+ * The README shows a filter with a blur input and one with an `area`.
  */
 export function defineFilter<
   Uniforms extends Record<string, UniformDeclaration> = Record<never, never>
 >(id: string, spec: FilterSpec<Uniforms>): FilterComponent<FilterValueOf<Uniforms>> {
-  if (typeof id !== "string" || id === "") {
-    throw new Error(
-      "[game] A filter needs an id.\n  Pass a non-empty string as the first argument."
-    );
-  }
+  readSpec(id, spec);
 
-  if (!MAIN_FRAGMENT.test(spec.wgsl)) {
-    throw new Error(
-      `[game] Filter "${id}" has no mainFragment.\n` +
-        "  Write fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32>."
-    );
-  }
-
-  // A JavaScript caller may leave `glsl` out: the test of `undefined` finds no main either.
-  if (!MAIN_GLSL.test(spec.glsl)) {
-    throw new Error(
-      `[game] Filter "${id}" has no main in its glsl.\n` +
-        "  Write void main() in GLSL ES 3.0 and set finalColor."
-    );
-  }
-
+  // Read the declaration in order: each reader throws on the first rule it breaks.
   const read = Object.entries(spec.uniforms ?? {}).map(([name, declaration]) =>
     readUniform(id, name, declaration)
   );
@@ -692,15 +723,9 @@ export function defineFilter<
 
   const area = readArea(id, spec.area);
 
+  // Assemble the frozen definition: both shaders with the engine's header, and what the renderer's cache may keep.
   const origin = callsCanvasPixel(spec.wgsl, spec.glsl) ? KEPT_ORIGIN : undefined;
-  // A filter with inputs is as bad for the cache as the worst of its body and its stages: a kept pre-pass result is a
-  // picture of the stages.
-  let cache = cacheOf(spec.wgsl, spec.glsl, spec.cache);
-
-  for (const input of inputs) {
-    for (const stage of input.stages) cache = worstOf(cache, stage.filter.cache);
-  }
-
+  const cache = cacheWithInputs(cacheOf(spec.wgsl, spec.glsl, spec.cache), inputs);
   const filter: FilterDefinition = Object.freeze({
     id,
     source: assemble(uniforms, inputs, spec.wgsl, origin),
@@ -719,7 +744,8 @@ export function defineFilter<
   if (spec.cache !== false && (readsScreenIn(spec.wgsl) || readsScreenIn(spec.glsl))) {
     screenReaders.add(filter);
   }
-  // The defaults are built from the declaration, so their type is the one the declaration maps to.
+
+  // The component type: its defaults are built from the declaration, so their type is the one the declaration maps to.
   const defaults = Object.fromEntries([
     ...read.map(entry => [entry.spec.name, entry.value] as const),
     ["enabled", true],

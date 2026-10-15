@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stopDemand } from "../../demand/state";
-import { DEMAND_REASONS, type DemandReason } from "../../demand/types";
+import type { DemandReason } from "../../demand/types";
+import { DEMAND_REASONS } from "../../reasons";
 import { box, demandAlone } from "../demand-harness";
 
 // ---------------------------------------------------------------------------
