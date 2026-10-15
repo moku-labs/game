@@ -132,9 +132,12 @@ function createLocalUniforms(
 
   Object.defineProperty(group.uniforms, "uDistance", {
     enumerable: true,
-    get: (): number =>
-      (text === undefined || perScale === 0 ? css : perScale * scaleOf(text.worldTransform)) *
-      density.resolution,
+    get: (): number => {
+      const hasScale = text !== undefined && perScale !== 0;
+      const distance =
+        hasScale && text !== undefined ? perScale * scaleOf(text.worldTransform) : css;
+      return distance * density.resolution;
+    },
     set: (value: number): void => {
       const scale = writing.text === undefined ? 0 : scaleOf(writing.text.groupTransform);
 
