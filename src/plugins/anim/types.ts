@@ -317,6 +317,11 @@ export type State = {
   frameMutes: Map<Entity, () => void>;
   /** Removers of the `onAdded` and `onRemoved` hooks on `Frames`. */
   offFrames: Array<() => void>;
+  /**
+   * The renderer's `sync.loopsHeld`, bound in `onStart`: an endless loop of an entity it answers true for writes
+   * nothing while its clock runs on (spec 22 O9). `undefined` before the start and after the stop: nothing is held.
+   */
+  loopsHeld: ((entity: Entity) => boolean) | undefined;
 };
 
 /**

@@ -13,6 +13,9 @@ export const REPO = path.resolve(import.meta.dirname, "../..");
 /** The mini game fixture. */
 export const MINI_GAME = path.join(REPO, "tests", "fixtures", "mini-game");
 
+/** The sheets game: the fixture of the overlay tests and of the visual suite `tests/visual-sheets`. */
+export const SHEETS_GAME = path.join(REPO, "tests", "fixtures", "sheets-game");
+
 /** The test bin: `runCli` of `src/cli.ts`. */
 export const BIN = path.join(REPO, "tests", "fixtures", "moku-game.ts");
 

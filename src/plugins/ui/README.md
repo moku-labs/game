@@ -154,6 +154,13 @@ on a `layer`: a `<layer components={[Blur(...)]} />` blurs its own children only
   the fields its type gives to a plugin; a name that left is removed. The same fields write
   nothing, so a tween on `Glow.strength` from a motion hook survives an unrelated re-render.
 - Exit: nothing is removed. An exiting element keeps its extras until it despawns.
+- `Overlay` (renderer, "Overlays and the HUD"): the element also gets the engine's `OverlayLevel`.
+  Its level is one of the element's own motion tracks: 0 to 1 with its enter motion (the length,
+  delay and ease of the longest timed track its `enter` hook started), back to 0 with its exit
+  motion; `fade` (default 250 ms, kept under reduced motion) times it only when the hook played no
+  timed track, and `fade: 0` sets it at once. `landed` turns true at the end of the solve in which
+  every enter handle and the level track are over. The exit waits for the level: the dim and the HUD
+  parts are back before the element despawns. A flow never waits for it.
 - A `scroll` gets them on the container, not on its content.
 - Of two values of one type, the last wins.
 

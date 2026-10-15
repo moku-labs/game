@@ -435,6 +435,7 @@ export type Modules = {
  */
 export type TeardownScope = { readonly config: Readonly<Config>; readonly state: State };
 
+export type { HudPartValue, OverlayLevelValue, OverlayValue } from "./components";
 export type { DemandFrame, DemandReason, DemandState } from "./demand/types";
 export type { HostApi, HostInternal, HostState, TextureUsage } from "./host/types";
 export type { FilterCache, KeptInternal, KeptRange, KeptState, KeptStats } from "./kept/types";
@@ -445,6 +446,8 @@ export type {
   FrameRecord,
   FrameRing,
   LongFrameEntry,
+  OverlayEventDetail,
+  OverlayWhat,
   PassKind,
   PassRecord,
   PerfCause,
@@ -493,6 +496,9 @@ export type {
   HitBox,
   LayerEntry,
   NineBorders,
+  OverlayMode,
+  OverlayPhase,
+  OverlayReport,
   SliceFrame,
   SyncApi,
   SyncCounts,

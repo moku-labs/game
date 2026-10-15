@@ -7,6 +7,7 @@
 import { flowPlugin } from "../flow";
 import type { Descriptor, FxHandler } from "../flow/types";
 import type { Json } from "../model/types";
+import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import type { Time } from "../time/types";
 import { worldPlugin } from "../world";
@@ -385,6 +386,8 @@ export function startAnim(ctx: KernelSlice): void {
     runInFast: false
   });
   openFrameLoops(actx);
+  // The one renderer member anim reads: whether an endless loop of a view the player cannot see writes nothing.
+  actx.state.loopsHeld = ctx.require(rendererPlugin).sync.loopsHeld;
 }
 
 /**
@@ -405,6 +408,7 @@ export function stopAnim(state: State): void {
   state.removeDriver = undefined;
   state.offFrame = undefined;
   state.offPlay = undefined;
+  state.loopsHeld = undefined;
 
   state.tracks.clear();
   state.owner.clear();

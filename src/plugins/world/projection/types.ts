@@ -26,14 +26,16 @@ import type { WorldCtx } from "../types";
 export type LayerSort = "none" | "y" | "order";
 
 /**
- * One named layer of a scene. The order of the list is draw order.
+ * One named layer of a scene. The order of the list is draw order. `above: "overlays"` marks the HUD layer of the
+ * scene: drawn above every overlay, never kept in a picture.
  *
  * @example
  * ```ts
  * const layer: LayerSpec = { name: "items", sort: "y" };
+ * const hud: LayerSpec = { name: "hud", sort: "none", above: "overlays" };
  * ```
  */
-export type LayerSpec = { name: string; sort: LayerSort };
+export type LayerSpec = { name: string; sort: LayerSort; above?: "overlays" };
 
 /**
  * Easing of a tween: one of the named curves the driver knows, or a function that gets the

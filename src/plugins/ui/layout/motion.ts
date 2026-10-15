@@ -6,7 +6,14 @@
 import type { Hint } from "../../flow/types";
 import { Transform, type TransformValue } from "../../renderer/components";
 import type { Point } from "../../renderer/types";
-import type { Motion, MotionHandle, ViewHandle } from "../../world/projection/types";
+import type {
+  Motion,
+  MotionHandle,
+  NumericFields,
+  RestOptions,
+  TweenOptions,
+  ViewHandle
+} from "../../world/projection/types";
 import type { ComponentType } from "../../world/types";
 import { UI_OWNER } from "../components";
 import { asError } from "../errors";
@@ -14,7 +21,7 @@ import type { Element } from "../jsx/types";
 import type { Origin, ResolvedStyle } from "../styles/types";
 import type { UiCtx } from "../types";
 import { CONTENT, samePose, visualOf } from "../visual";
-import type { Rect } from "./types";
+import type { MotionSpan, Rect } from "./types";
 
 /**
  * The local point an element turns and scales around, from the `origin` of its style.
@@ -137,6 +144,69 @@ export function handleOf(ctx: UiCtx, element: Element): ViewHandle<unknown> | un
 }
 
 /**
+ * Notes one track a hook started, when it is finite, timed and ends later than the ones noted before. A track whose
+ * length is left to the world's `settleMs` is not noted.
+ *
+ * @param span - The span being measured.
+ * @param options - The options the hook gave the track.
+ */
+function noteTrack(span: MotionSpan, options: TweenOptions | RestOptions | undefined): void {
+  const ms = options?.ms;
+
+  if (options === undefined || ms === undefined || !Number.isFinite(ms) || ms <= 0) return;
+
+  const repeat = "repeat" in options ? options.repeat : undefined;
+
+  if (repeat === "forever") return;
+
+  const length = ms * (1 + (repeat ?? 0));
+  const delayMs = options.delayMs ?? 0;
+
+  if (delayMs + length <= span.end) return;
+
+  span.end = delayMs + length;
+  span.ms = length;
+  span.delayMs = delayMs;
+  span.ease = options.ease;
+  span.reduced = options.reduced;
+}
+
+/**
+ * The view handle of a hook whose tracks are measured: every call goes to the real handle, `tween` and `toRest` note
+ * their track first.
+ *
+ * @param handle - The real handle.
+ * @param span - The span being measured.
+ * @returns The measuring handle.
+ */
+function spanned(handle: ViewHandle<unknown>, span: MotionSpan): ViewHandle<unknown> {
+  return {
+    entity: handle.entity,
+    key: handle.key,
+    get: <Value extends object>(component: ComponentType<Value>) => handle.get(component),
+    rest: <Value extends object>(component: ComponentType<Value>) => handle.rest(component),
+    set: <Value extends object>(component: ComponentType<Value>, patch: Partial<Value>) =>
+      handle.set(component, patch),
+    tween: <Value extends object>(
+      component: ComponentType<Value>,
+      to: Partial<NumericFields<Value>>,
+      options: TweenOptions
+    ) => {
+      noteTrack(span, options);
+
+      return handle.tween(component, to, options);
+    },
+    toRest: <Value extends object>(component: ComponentType<Value>, options?: RestOptions) => {
+      noteTrack(span, options);
+
+      return handle.toRest(component, options);
+    },
+    all: (handles: readonly Motion[]) => handle.all(handles),
+    peer: (key: string) => handle.peer(key)
+  };
+}
+
+/**
  * Runs one motion hook and keeps the handle it returned, so the exit sweep knows when the
  * element is still playing. Without a hook the value the solve wrote stands; a throwing hook is
  * logged and the same happens.
@@ -144,12 +214,14 @@ export function handleOf(ctx: UiCtx, element: Element): ViewHandle<unknown> | un
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element the hook belongs to.
  * @param hook - What to run with the handle.
+ * @param span - Notes the longest finite track the hook starts, for the level of an overlay.
  * @returns The motion the hook returned; `undefined` without a hook, a handle, or a motion.
  */
 export function play(
   ctx: UiCtx,
   element: Element,
-  hook: ((view: ViewHandle<unknown>) => Motion) | undefined
+  hook: ((view: ViewHandle<unknown>) => Motion) | undefined,
+  span?: MotionSpan
 ): MotionHandle | undefined {
   if (hook === undefined) return undefined;
 
@@ -158,7 +230,7 @@ export function play(
   if (handle === undefined) return undefined;
 
   try {
-    const motion = hook(handle);
+    const motion = hook(span === undefined ? handle : spanned(handle, span));
 
     if (motion === undefined) return undefined;
 

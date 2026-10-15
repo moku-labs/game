@@ -1,7 +1,7 @@
 /**
  * @file renderer/sync — state factory.
  */
-import type { DebugSwitches, SyncState } from "./types";
+import type { DebugSwitches, OverlayState, SyncState } from "./types";
 
 /**
  * Creates an empty collection. It lives in its own non-exported function because lint rule L5
@@ -41,8 +41,33 @@ function emptyWeakMap<Key extends WeakKey, Value>(): WeakMap<Key, Value> {
 }
 
 /**
+ * Creates the empty overlay state: no overlay, no HUD part, no range. Its own non-exported function, as `emptyMap`.
+ *
+ * @returns The overlay branch of the sync state.
+ */
+function createOverlayState(): OverlayState {
+  return {
+    entities: emptySet(),
+    parts: emptySet(),
+    records: emptyMap(),
+    order: [],
+    active: undefined,
+    range: undefined,
+    offTops: emptySet(),
+    warned: emptySet(),
+    events: [],
+    wantEntries: [],
+    wantOthers: [],
+    wantSet: emptySet(),
+    flipped: emptySet(),
+    nextOff: emptySet(),
+    left: false
+  };
+}
+
+/**
  * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter, no
- * slice and no hidden mask.
+ * slice, no hidden mask and no overlay.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -74,6 +99,7 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     filterKinds: emptyWeakMap(),
     objectHidden: emptyWeakMap(),
     viewOfTop: emptyWeakMap(),
+    overlay: createOverlayState(),
     cleanups: []
   };
 }

@@ -1,0 +1,18 @@
+{
+  "path": "board",
+  "player": {
+    "energy": 5,
+    "gems": 12,
+    "level": 3
+  },
+  "rng": {
+    "seed": 1,
+    "streams": {}
+  },
+  "session": {
+    "at": "board",
+    "over": "none",
+    "page": false,
+    "sheet": "none"
+  }
+}

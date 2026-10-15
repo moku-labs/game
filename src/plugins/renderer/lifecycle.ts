@@ -74,6 +74,7 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
   }
 
   modules.sync.stepOverlays();
+  modules.sync.drainOverlayEvents(modules.monitor);
   // Before the decision clears the marks: they become the dirty flags of the pictures.
   modules.kept.collect();
 

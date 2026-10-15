@@ -921,6 +921,17 @@ function dirtyAbove(kctx: KeptCtx, record: KeptRecord): void {
 
     if (above !== undefined) above.dirtyS1 = true;
   }
+
+  // A range picture of an overlay that holds the record draws it too: rendered again after the records (spec 22 K1).
+  for (const range of kctx.state.ranges.values()) {
+    for (let node: typeof record.top | null = record.top; node !== null; node = node.parent) {
+      if (range.entries.includes(node)) {
+        range.due = true;
+
+        break;
+      }
+    }
+  }
 }
 
 /**

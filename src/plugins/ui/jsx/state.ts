@@ -82,6 +82,7 @@ export function createJsxState(): JsxState {
     styled: 0,
     written: 0,
     debugTaps: [],
-    debugWarned: false
+    debugWarned: false,
+    overlays: emptySet()
   };
 }

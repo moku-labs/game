@@ -219,6 +219,14 @@ const orderCard = defineMotion({
   builds its motion again. `printOf(hook)` (module `anim/motion`, for engine plugins) reads it; a
   hand-written hook and a loop whose keys hold a function ease carry none.
 
+### Loops of views nobody sees
+
+An endless track (a `motion.loop`, a `"forever"` tween) and an endless `Frames` loop write nothing to an
+entity whose view lies under an opaque overlay or in the blurred kept picture of one: before such a
+write `anim` asks `renderer.sync.loopsHeld(entity)`, the one renderer member it calls. Its clock runs
+on, so when it writes again it stands where it would have been; bases and offsets are left as they
+are. Finite tracks, timelines and motions a node waits for always write.
+
 ## Repeat
 
 A track with `repeat` (from `ViewHandle.tween`) walks again from its first segment when a run ends: a

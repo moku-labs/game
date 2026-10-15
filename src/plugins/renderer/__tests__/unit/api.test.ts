@@ -38,6 +38,7 @@ describe("renderer api", () => {
       "hitAll",
       "hitBoxOf",
       "hitTest",
+      "loopsHeld",
       "renderPasses",
       "textures"
     ]);
@@ -54,6 +55,7 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual([
       "kept",
       "nineSlice",
+      "overlays",
       "state",
       "verifyFrames"
     ]);

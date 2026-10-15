@@ -24,14 +24,17 @@ export type SortRule = LayerSort;
 
 /**
  * What a scene declares about its layers: the key is the layer name, the order of the keys is
- * draw order, bottom first. An omitted `sort` means `"none"`.
+ * draw order, bottom first. An omitted `sort` means `"none"`. `above: "overlays"` makes the layer
+ * the scene's HUD layer: it draws above every overlay and is never part of the picture an overlay
+ * keeps. At most one per scene.
  *
  * @example
  * ```ts
  * const layers: LayerMap = { background: {}, cells: {}, items: { sort: "y" }, lifted: {} };
+ * const ward: LayerMap = { scene: {}, ui: { sort: "order" }, hud: { above: "overlays" } };
  * ```
  */
-export type LayerMap = Record<string, { sort?: SortRule }>;
+export type LayerMap = Record<string, { sort?: SortRule; above?: "overlays" }>;
 
 /**
  * The name of the layer every scene gets on top of the layers it declared, where popups and the

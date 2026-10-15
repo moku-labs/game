@@ -29,6 +29,8 @@ import { clearHidden, writeRenderable } from "./hidden";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
 import { bordersOf, drawOutline, type OutlineShape } from "./outline";
+import { noteLeaving } from "./overlay-range";
+import { stopOverlays } from "./overlay-state";
 import {
   acquire,
   destroyPools,
@@ -356,20 +358,66 @@ function ownsAlpha(view: View): boolean {
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - The view of a `Sprite`, a `NineSlice` or a `Shape`.
- * @param alpha - The alpha of the component.
+ * @param alpha - The alpha of the component; the view's HUD factor multiplies it.
  */
 function applyAlpha(sctx: SyncCtx, entity: Entity, view: View, alpha: number): void {
   const target = view.wrapper ?? view.object;
+  // A HUD part an overlay fades draws its own alpha times the factor (spec 22 O7.4); every other view at 1.
+  const drawn = alpha * view.hud;
 
-  if (target.alpha !== alpha) {
+  if (target.alpha !== drawn) {
     markView(sctx, entity);
-    target.alpha = alpha;
+    target.alpha = drawn;
   }
 
   if (view.wrapper !== undefined && view.object.alpha !== 1) {
     markView(sctx, entity);
     view.object.alpha = 1;
   }
+}
+
+/**
+ * The alpha the component of a built-in visual asks for, before the HUD factor.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - The view of a `Sprite`, a `NineSlice` or a `Shape`.
+ * @returns The component's alpha, 1 when it has none.
+ */
+function componentAlpha(sctx: SyncCtx, entity: Entity, view: View): number {
+  const ecs = sctx.ctx.deps.world.ecs;
+
+  if (view.kind === "Sprite") return ecs.get(entity, Sprite)?.alpha ?? 1;
+  if (view.kind === "NineSlice") return ecs.get(entity, NineSlice)?.alpha ?? 1;
+
+  return ecs.get(entity, Shape)?.alpha ?? 1;
+}
+
+/**
+ * Fades a HUD part by the factor the overlays give it (spec 22 O7.4), marked before. A built-in visual multiplies its
+ * own alpha by it, on its top; any other view (a text, a game's object) gets a wrapper whose alpha is the factor, so
+ * its adapter keeps writing its own object's alpha. An equal factor writes nothing.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the part.
+ * @param view - Its view.
+ * @param factor - The factor, 0 to 1.
+ */
+export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: number): void {
+  if (view.hud === factor) return;
+
+  markView(sctx, entity);
+  view.hud = factor;
+
+  if (ownsAlpha(view)) {
+    applyAlpha(sctx, entity, view, componentAlpha(sctx, entity, view));
+
+    return;
+  }
+
+  const wrapper = ensureWrapper(sctx, entity);
+
+  if (wrapper !== undefined && wrapper.alpha !== factor) wrapper.alpha = factor;
 }
 
 /**
@@ -899,7 +947,8 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
     () => markView(sctx, parentEntity),
     sctx.ctx.state.kept
   );
-  if (ownsAlpha(view)) applyAlpha(sctx, parentEntity, view, view.object.alpha);
+  if (ownsAlpha(view))
+    applyAlpha(sctx, parentEntity, view, componentAlpha(sctx, parentEntity, view));
 
   return wrapper;
 }
@@ -932,6 +981,8 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
 
   // Structural: `addChild` re-adds the view and moves it among equal depths, so it always marks.
   markView(sctx, entity);
+  // A view that leaves an overlay's range changes its picture: judged where it was.
+  noteLeaving(state, view);
 
   if (parentEntity !== 0) {
     const host = childHostOf(sctx, parentEntity);
@@ -1069,7 +1120,8 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     drawn: undefined,
     clipDrawn: undefined,
     hiddenSelf: 0,
-    hiddenTop: 0
+    hiddenTop: 0,
+    hud: 1
   };
 
   object.label = labelOf(sctx, nameOf(visual), entity);
@@ -1149,6 +1201,7 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 
   // Structural: the view leaves the tree, judged where it was drawn.
   markView(sctx, entity);
+  noteLeaving(state, view);
   // Its picture goes before the object returns to the pool (P9.3): no quad, no reason, no render group left.
   sctx.deps.kept.forget(entity);
 
@@ -1204,6 +1257,7 @@ export function stopSync(state: SyncState): void {
     view.wrapper = undefined;
   }
 
+  stopOverlays(state);
   clearAdapters(state);
   clearFonts(state);
   clearFrames(state);

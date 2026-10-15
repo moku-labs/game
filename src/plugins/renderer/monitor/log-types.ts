@@ -4,6 +4,8 @@
  */
 import type { Json } from "../../model/types";
 import type * as Time from "../../time/types";
+import type { Entity } from "../../world/types";
+import type { OverlayMode } from "../sync/types";
 
 /**
  * The frame ring's columns: one typed array per measure, indexed by slot.
@@ -445,6 +447,33 @@ export type PerfEventName =
   | "recorder"
   | "rate"
   | "devtools";
+
+/**
+ * What an `overlay` event line says happened to an overlay (spec 22 O10.2): it opened, landed (its enter motion is
+ * over), started to leave, is gone, or its range went live or was kept again (the live fallback).
+ *
+ * @example
+ * ```ts
+ * const what: OverlayWhat = "landed";
+ * ```
+ */
+export type OverlayWhat = "open" | "landed" | "leave" | "gone" | "live" | "kept";
+
+/**
+ * The detail of an `overlay` event line: the marked entity, its view's label, what happened and the overlay's mode
+ * then. The editor mirrors it by these names.
+ *
+ * @example
+ * ```ts
+ * const detail: OverlayEventDetail = { entity: 1_048_601, label: "Shape#1048601 shop.dim:shopDimLayer", what: "open", mode: "freeze" };
+ * ```
+ */
+export type OverlayEventDetail = {
+  entity: Entity;
+  label: string;
+  what: OverlayWhat;
+  mode: OverlayMode;
+};
 
 /**
  * Something that happened, at the frame it happened in.

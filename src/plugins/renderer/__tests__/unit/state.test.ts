@@ -76,7 +76,8 @@ describe("renderer state", () => {
       drawn: undefined,
       clipDrawn: undefined,
       hiddenSelf: 0,
-      hiddenTop: 0
+      hiddenTop: 0,
+      hud: 1
     });
 
     expect(second.sync.views.size).toBe(0);

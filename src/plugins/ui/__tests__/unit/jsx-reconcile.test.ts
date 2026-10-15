@@ -337,6 +337,7 @@ function harness() {
     repose,
     lift: vi.fn(),
     exit: vi.fn(),
+    playTrack: vi.fn(),
     settled: () => true,
     scroll: vi.fn(),
     clampScroll: () => 0,

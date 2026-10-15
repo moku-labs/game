@@ -276,7 +276,7 @@ describe("sync hidden", () => {
     const dim = new pixi.Graphics();
     const seen: boolean[] = [];
 
-    state.layers.set("board", { container, sort: "none", hidden: 0 });
+    state.layers.set("board", { container, sort: "none", hidden: 0, hud: false });
     demand.whole.mockImplementation(() => seen.push(container.renderable));
     setLayerHidden(hctx, "board", "cover", true);
     setLayerHidden(hctx, "board", "cover", true);
@@ -346,7 +346,7 @@ describe("sync hidden", () => {
     const layer = new pixi.Container();
     const quad = new pixi.Sprite();
 
-    state.layers.set("board", { container: layer, sort: "none", hidden: 0 });
+    state.layers.set("board", { container: layer, sort: "none", hidden: 0, hud: false });
     setHidden(hctx, 1, frozen, "freeze", true);
     setHidden(hctx, 2, covered, "freeze", true);
     setHidden(hctx, 2, covered, "cover", true);

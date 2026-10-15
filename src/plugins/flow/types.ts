@@ -180,7 +180,24 @@ export type GameTypes = {
   strings: StringTableLike;
   textStyles?: string;
   emitters?: string;
+  /** The keys of the game's HUD parts: what `HudPart({ key })` and the `hud` list of `Overlay` take. */
+  hud?: string;
 };
+
+/**
+ * The HUD part key union of a game, `string` when the game passed none. `defineGame` types `HudPart({ key })` and
+ * the `hud` list of `Overlay` with it, so a key the game did not declare does not compile.
+ *
+ * @example
+ * ```ts
+ * type Keys = HudKeysOf<{ player: {}; session: {}; assets: string; strings: {}; hud: "energy" | "gems" }>; // "energy" | "gems"
+ * ```
+ */
+export type HudKeysOf<Types extends GameTypes> = Types extends {
+  hud: infer Keys extends string;
+}
+  ? Keys
+  : string;
 
 /**
  * The text style key union of a game, `string` when the game passed none.

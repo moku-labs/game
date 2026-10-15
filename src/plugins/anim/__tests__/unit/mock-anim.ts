@@ -14,7 +14,11 @@ import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/t
 import { createWorldApi } from "../../../world/api";
 import { connectWorld } from "../../../world/lifecycle";
 import { createWorldState } from "../../../world/state";
-import type { Api as WorldApi, KernelSlice as WorldKernelSlice } from "../../../world/types";
+import type {
+  Entity,
+  Api as WorldApi,
+  KernelSlice as WorldKernelSlice
+} from "../../../world/types";
 import { createAnimApi } from "../../api";
 import { initAnim, startAnim, withDeps } from "../../lifecycle";
 import { createAnimState } from "../../state";
@@ -45,6 +49,8 @@ export type MockAnim = {
   features: Array<{ name: string; description: FeatureDescription }>;
   /** How often `time.wake()` was called. */
   wakes: { count: number };
+  /** The entities the stand-in renderer's `sync.loopsHeld` answers true for: an overlay hides their views. */
+  held: Set<Entity>;
   time: Time;
   /** Runs `initAnim`, then `connectWorld`, then `startAnim`, as the kernel would. */
   start(): void;
@@ -159,7 +165,9 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
   };
   const world = createWorldApi(worldCtx);
 
-  const apis: Record<string, unknown> = { ...worldApis, world, renderer: {} };
+  const held = new Set<Entity>();
+  const renderer = { sync: { loopsHeld: (entity: Entity): boolean => held.has(entity) } };
+  const apis: Record<string, unknown> = { ...worldApis, world, renderer };
   const ctx: KernelSlice = {
     config,
     state,
@@ -183,6 +191,7 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
     handlers,
     features,
     wakes,
+    held,
     time,
     start: (): void => {
       initAnim(ctx);

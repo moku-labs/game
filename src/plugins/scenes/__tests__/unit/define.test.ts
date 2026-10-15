@@ -252,6 +252,76 @@ describe("defineScene and the ui layer", () => {
   });
 });
 
+describe("defineScene and the HUD layer", () => {
+  it("puts ui right under the HUD layer when the scene declares no ui", () => {
+    const scene = defineScene("ward", {
+      bundle: "ward",
+      layers: { scene: {}, hud: { above: "overlays" } },
+      projections: []
+    });
+
+    expect(scene.layers).toEqual([
+      { name: "scene", sort: "none" },
+      { name: "ui", sort: "none" },
+      { name: "hud", sort: "none", above: "overlays" }
+    ]);
+  });
+
+  it("gives a scene without above the same entries as before, with no above key at all", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {}, items: { sort: "y" } },
+      projections: []
+    });
+
+    expect(JSON.stringify(scene.layers)).toBe(
+      '[{"name":"cells","sort":"none"},{"name":"items","sort":"y"},{"name":"ui","sort":"none"}]'
+    );
+  });
+
+  it("keeps a layer declared after the HUD layer above it", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {}, ui: { sort: "order" }, hud: { above: "overlays" }, lifted: {} },
+      projections: []
+    });
+
+    expect(scene.layers.map(layer => layer.name)).toEqual(["cells", "ui", "hud", "lifted"]);
+  });
+
+  it("throws for two HUD layers", () => {
+    expect(() =>
+      defineScene("ward", {
+        bundle: "ward",
+        layers: { hud: { above: "overlays" }, top: { above: "overlays" } },
+        projections: []
+      })
+    ).toThrow(
+      '[game] Scene "ward": two layers say above "overlays" ("hud", "top").\n  Keep one HUD layer.'
+    );
+  });
+
+  it("throws for a ui declared after the HUD layer", () => {
+    expect(() =>
+      defineScene("ward", {
+        bundle: "ward",
+        layers: { hud: { above: "overlays" }, ui: {} },
+        projections: []
+      })
+    ).toThrow(
+      '[game] Scene "ward": the layer "ui" comes after the HUD layer "hud".\n  Declare ui before it: popups are overlays and draw under the HUD.'
+    );
+  });
+
+  it("throws for above with another value, for a caller without types", () => {
+    const layers = { hud: { above: "ui" } } as unknown as Record<string, { above?: "overlays" }>;
+
+    expect(() => defineScene("ward", { bundle: "ward", layers, projections: [] })).toThrow(
+      '[game] Scene "ward": the layer "hud" has above "ui".\n  Use "overlays" or leave it out.'
+    );
+  });
+});
+
 /**
  * The ward's bundles of state: the episode the session plays.
  *

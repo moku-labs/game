@@ -130,7 +130,8 @@ export function syncLayers(sctx: SyncCtx): boolean {
     next.set(spec.name, {
       container,
       sort: spec.sort,
-      hidden: state.layers.get(spec.name)?.hidden ?? 0
+      hidden: state.layers.get(spec.name)?.hidden ?? 0,
+      hud: spec.above === "overlays"
     });
   }
 

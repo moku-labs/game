@@ -7,7 +7,7 @@ import type { Element } from "../jsx/types";
 import type { UiCtx } from "../types";
 import { play, still } from "./motion";
 import { detachNode } from "./nodes";
-import type { LayoutState } from "./types";
+import type { LayoutState, MotionSpan } from "./types";
 
 /**
  * Starts the exit of one element: out of the Yoga tree at once, tagged `Exiting` so `input`
@@ -17,8 +17,14 @@ import type { LayoutState } from "./types";
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state.
  * @param element - The element that left the description.
+ * @param span - Notes the longest finite track the exit hook starts, for the level of an overlay.
  */
-export function beginExit(ctx: UiCtx, state: LayoutState, element: Element): void {
+export function beginExit(
+  ctx: UiCtx,
+  state: LayoutState,
+  element: Element,
+  span?: MotionSpan
+): void {
   detachNode(state, element);
   element.dropKey?.();
   element.dropKey = undefined;
@@ -30,7 +36,7 @@ export function beginExit(ctx: UiCtx, state: LayoutState, element: Element): voi
 
   const hook = element.motion?.exit;
 
-  play(ctx, element, hook === undefined ? undefined : view => hook(view, element.node));
+  play(ctx, element, hook === undefined ? undefined : view => hook(view, element.node), span);
 }
 
 /**

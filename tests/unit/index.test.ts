@@ -57,11 +57,15 @@ describe("root index", () => {
     expect(kit.defineEmitter).toBe(engine.defineEmitter);
     expect(kit.Emitter).toBe(engine.Emitter);
     expect(kit.Displacement).toBe(engine.Displacement);
+    expect(kit.Overlay).toBe(engine.Overlay);
+    expect(kit.HudPart).toBe(engine.HudPart);
     expect(Object.keys(kit).toSorted()).toEqual([
       "Displacement",
       "Emitter",
       "Frames",
+      "HudPart",
       "NineSlice",
+      "Overlay",
       "Sprite",
       "defineAnimation",
       "defineBundles",

@@ -139,6 +139,7 @@ import type {
   BundlesOf,
   EmitterIdOf,
   GameTypes,
+  HudKeysOf,
   SceneIdOf,
   TextStylesOf
 } from "./plugins/flow/types";
@@ -195,8 +196,8 @@ export const createPlugin = framework.createPlugin;
  * plugins export. The kit's `system` and `volumes` read the game's player and session; `key` types
  * a string key written in code (a key that comes from data is checked with `app.i18n.isKey`).
  *
- * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`
- *   and `emitters`.
+ * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`,
+ *   `emitters` and `hud` (the HUD part keys of `HudPart` and `Overlay`).
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
@@ -209,7 +210,7 @@ export function defineGame<Types extends GameTypes>() {
     ...flowFor<{ player: Types["player"]; session: Types["session"]; scenes: SceneIdOf<Types> }>(),
     ...projectionFor<Types["player"], Types["session"]>(),
     ...systemsFor<Types["player"], Types["session"]>(),
-    ...componentsFor<Types["assets"]>(),
+    ...componentsFor<Types["assets"], HudKeysOf<Types>>(),
     ...bundlesFor<BundlesOf<Types>>(),
     ...scenesFor<Types["assets"], BundlesOf<Types>, Types["player"], Types["session"]>(),
     ...animFor<Types["assets"]>(),
@@ -274,13 +275,16 @@ export { projection } from "./plugins/world/projection/define";
 // renderer: the display components
 export {
   Display,
+  HudPart,
   NineSlice,
+  Overlay,
   Parent,
   Shape,
   Sprite,
   sprite,
   Transform
 } from "./plugins/renderer/components";
+export type { HudPartValue, OverlayValue } from "./plugins/renderer/components";
 // renderer: the performance log of an agent build, its frame ring and the record of one frame
 export { PERF_GAP_BUCKETS, PERF_LOG_VERSION } from "./plugins/renderer/monitor/log-types";
 export { frameAt } from "./plugins/renderer/monitor/ring";
@@ -292,6 +296,8 @@ export type {
   FrameRing,
   LongFrameEntry,
   MonitorConfig,
+  OverlayEventDetail,
+  OverlayWhat,
   PassKind,
   PassRecord,
   PerfCause,

@@ -5,6 +5,7 @@
 import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import { Text } from "../../text/components";
+import type { Motion, ViewHandle } from "../../world/projection/types";
 import { Box } from "../components";
 import type { Element, JsxModule } from "../jsx/types";
 import type { UiCtx } from "../types";
@@ -17,7 +18,14 @@ import { createNode, freeNode, placeChildren } from "./nodes";
 import { createPopupHandler } from "./popup";
 import { clampScroll, stepScroll } from "./scroll";
 import { solveRoot } from "./solve";
-import type { ElementLookup, LayoutModule, LayoutState, Rect, TextSource } from "./types";
+import type {
+  ElementLookup,
+  LayoutModule,
+  LayoutState,
+  MotionSpan,
+  Rect,
+  TextSource
+} from "./types";
 import { windowOf } from "./window";
 import { loadYogaModule } from "./yoga";
 
@@ -101,10 +109,10 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
       writeRest(ctx, element, parent);
     },
 
-    enter: (element: Element): void => {
+    enter: (element: Element, span?: MotionSpan): void => {
       const hook = element.motion?.enter;
 
-      play(ctx, element, hook === undefined ? undefined : view => hook(view, element.node));
+      play(ctx, element, hook === undefined ? undefined : view => hook(view, element.node), span);
       startLoop(ctx, element);
     },
 
@@ -132,7 +140,11 @@ export function createLayoutApi(ctx: UiCtx): LayoutModule {
 
     lift: (element: Element, units: number): void => liftRest(ctx, element, units),
 
-    exit: (element: Element): void => beginExit(ctx, state, element),
+    exit: (element: Element, span?: MotionSpan): void => beginExit(ctx, state, element, span),
+
+    playTrack: (element: Element, hook: (view: ViewHandle<unknown>) => Motion): void => {
+      play(ctx, element, hook);
+    },
 
     settled: (element: Element): boolean => canDespawn(element),
 

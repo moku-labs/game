@@ -2,17 +2,21 @@
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
+import type { OverlayValue } from "../components";
 import type { HostApi, HostInternal } from "../host/types";
 import type { FilterCache } from "../kept/types";
 import type {
   DemandModule,
   KeptModule,
+  OverlayEventDetail,
+  PerfEventName,
   PixiBitmapFont,
   PixiContainer,
   PixiFilter,
   PixiFilterManager,
   PixiGraphics,
   PixiModule,
+  PixiSprite,
   PixiTexture,
   RendererCtx
 } from "../types";
@@ -158,6 +162,8 @@ export type View = {
   hiddenSelf: number;
   /** The reasons that hide the whole subtree, on the top (`hidden.ts`). */
   hiddenTop: number;
+  /** The HUD factor an overlay fades this view with (a `HudPart`), 1 for every other view (spec 22 O7). */
+  hud: number;
 };
 
 /**
@@ -173,10 +179,15 @@ export type CoverFrame = { base: PixiTexture; texture: PixiTexture; users: Set<E
 export type PoseReader = Pick<EcsApi, "get">;
 
 /**
- * One layer of the scene: its container, the sort rule its children follow, and the reasons that hide the container
- * (`hidden.ts`).
+ * One layer of the scene: its container, the sort rule its children follow, the reasons that hide the container
+ * (`hidden.ts`), and whether it is the scene's HUD layer (`above: "overlays"`).
  */
-export type LayerEntry = { container: PixiContainer | undefined; sort: LayerSort; hidden: number };
+export type LayerEntry = {
+  container: PixiContainer | undefined;
+  sort: LayerSort;
+  hidden: number;
+  hud: boolean;
+};
 
 /**
  * A texture source `assets` registered.
@@ -624,6 +635,21 @@ export type DebugApi = {
   kept(on: boolean): void;
 
   /**
+   * What every overlay does this frame, bottom first: its phase, its mode, its level, how many entries its range has
+   * and whether a picture holds them. The level and the landing are the engine's state of the overlay, read here. For
+   * the editor's tools page and for tests.
+   *
+   * @returns One report per overlay, a fresh array; `[]` with none, and while inert.
+   * @example
+   * ```ts
+   * // The shop rests over the board.
+   * app.renderer.sync.debug.overlays();
+   * // [{ entity: 1_048_601, label: "Shape#1048601 shop.dim:shopDimLayer", phase: "shown", mode: "freeze", level: 1, range: 2, kept: true }]
+   * ```
+   */
+  overlays(): readonly OverlayReport[];
+
+  /**
    * What the debug switches are set to, as a fresh object.
    *
    * @returns The switches.
@@ -796,6 +822,24 @@ export type SyncApi = {
   renderPasses(): number;
 
   /**
+   * Tells whether the endless cosmetic loops of an entity should write nothing now: its view lies under an opaque
+   * overlay that hides it, or in the kept picture of an overlay that blurs what is under it. A loop that writes nothing
+   * keeps its phase from time and stands where it would have been when it writes again. The seam of `anim`: finite
+   * tracks never ask. Inert, and for an entity without a view: false.
+   *
+   * @param entity - The entity a loop is about to write.
+   * @returns True when the write would change nothing the player can see.
+   * @example
+   * ```ts
+   * // anim, before a forever track writes the glint of a ward object while the frosted shop lies over the ward:
+   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // true: the write is skipped, the loop's clock runs on
+   * // the same track once the shop is gone:
+   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // false
+   * ```
+   */
+  loopsHeld(entity: Entity): boolean;
+
+  /**
    * The Pixi object of an entity, for debugging and for the plugins that draw their own thing.
    *
    * @param entity - The entity to ask about.
@@ -870,6 +914,169 @@ export type SyncInternal = {
 
   /** The overlays of this frame: modes, ranges, reasons, dims, HUD parts, and the pictures to take (spec 22). */
   stepOverlays(): void;
+
+  /**
+   * Hands the `overlay` event lines the step queued (agent builds only) to the monitor, oldest first, and forgets them.
+   *
+   * @param monitor - The monitor's event writer.
+   */
+  drainOverlayEvents(monitor: OverlayEventSink): void;
+};
+
+/**
+ * Where the overlay step's event lines go: the monitor's `event`. Private to the renderer.
+ */
+export type OverlayEventSink = {
+  event(name: PerfEventName, detail: Readonly<OverlayEventDetail>): void;
+};
+
+/**
+ * Where an overlay is in its life: coming in, landed (its enter motion is over), or leaving.
+ *
+ * @example
+ * ```ts
+ * const phase: OverlayPhase = "shown";
+ * ```
+ */
+export type OverlayPhase = "entering" | "shown" | "exiting";
+
+/**
+ * What an overlay does to what is drawn before it this frame: `"cover"` draws none of it (an opaque overlay, landed
+ * at alpha 1), `"freeze"` draws it as one kept picture, `"live"` draws it as it is (an opaque overlay leaving, an
+ * overlay inside another one's picture, a range drawn live).
+ *
+ * @example
+ * ```ts
+ * const mode: OverlayMode = "freeze";
+ * ```
+ */
+export type OverlayMode = "cover" | "freeze" | "live";
+
+/**
+ * One overlay as `debug.overlays()` reports it: the marked entity and its view's label, its phase, its mode, its level
+ * (0 to 1), how many entries the range it owns has (0 for an overlay that owns none), and whether a picture holds them.
+ *
+ * @example
+ * ```ts
+ * const report: OverlayReport = {
+ *   entity: 1_048_601, label: "Shape#1048601 shop.dim:shopDimLayer", phase: "shown", mode: "freeze", level: 1, range: 2, kept: true
+ * };
+ * ```
+ */
+export type OverlayReport = {
+  entity: Entity;
+  label: string;
+  phase: OverlayPhase;
+  mode: OverlayMode;
+  level: number;
+  range: number;
+  kept: boolean;
+};
+
+/**
+ * One overlay the step knows: the marked element, the root it hangs from and where that root is drawn, the clamped
+ * marker, its level, phase and mode, and its dim. Private to the renderer.
+ */
+export type OverlayRecord = {
+  readonly entity: Entity;
+  /** The label of the marked view's object, kept for the line of the frame it is gone in. */
+  label: string;
+  /** The end of its `Parent` chain: the root that hangs in a layer container. */
+  top: Entity;
+  /** That root's top object (`wrapper ?? object`). */
+  object: PixiContainer;
+  /** The layer container the root hangs in. */
+  container: PixiContainer;
+  layer: string;
+  /** Index in the scene's layer list. */
+  layerIndex: number;
+  /** The marker, clamped (O1); the record's own object, written in place. */
+  readonly value: OverlayValue;
+  /** The engine's level of the overlay, 0 to 1. */
+  level: number;
+  phase: OverlayPhase;
+  /** The phase it turned to this frame: `"shown"` at landing, `"exiting"` at the first exit frame. */
+  turned: OverlayPhase | undefined;
+  mode: OverlayMode;
+  /** The engine's dim, made when `dim` is above 0. */
+  dim: PixiSprite | undefined;
+  /** The dim was sized for the canvas at least once. */
+  sized: boolean;
+  /** Seen by the step this frame; a record not seen is dropped. */
+  seen: boolean;
+  /** The event to log once the step has decided the modes: `"open"`, `"landed"` or `"leave"`. */
+  news: OverlayEventDetail["what"] | undefined;
+};
+
+/**
+ * The one range an overlay keeps or covers: its owner, the reason written on its entries, the entries and the nodes
+ * its picture hides, and the counters of the retake rules. Private to the renderer.
+ */
+export type ActiveRange = {
+  owner: Entity;
+  mode: "cover" | "freeze";
+  /** The reason on the entries now: `"cover"`, `"freeze"`, or none while the range is drawn live. */
+  reason: HiddenReason | undefined;
+  /** Bottom first: lower layer containers, then roots and engine objects of the owner's layer. */
+  readonly entries: PixiContainer[];
+  /** What the range picture hides for its render: layers above, the owner and above. */
+  readonly others: PixiContainer[];
+  /** The entries, for the membership walk. */
+  set: Set<PixiContainer>;
+  /** The node the picture stands before: the owner's dim, or its root. */
+  before: PixiContainer | undefined;
+  /** A picture holds the range (freeze only). */
+  kept: boolean;
+  /** The last take was refused; tried again when the owner or the entries change. */
+  refused: boolean;
+  /** An entry, or a view inside the range that covers the canvas, holds a blurring filter (O9.2). */
+  blurred: boolean;
+  /** A loop write was held back since the last take. */
+  touched: boolean;
+  /** The held loops write once in the next frame, and the picture is taken again with them (landing, first exit frame). */
+  catchUp: boolean;
+  /** The others changed since the last hand-over: the next retake hands the lists over again. */
+  othersStale: boolean;
+  /** Frames in a row retaken for a mark (O8.4). */
+  streak: number;
+  /** Frames in a row with no mark in the range, while the fallback is live. */
+  calm: number;
+  /** Drawn live because it changed in every frame. */
+  fallback: boolean;
+};
+
+/**
+ * The overlay step's state, `ctx.state.sync.overlay`. Collections and arrays are reused: a frame allocates nothing.
+ * Private to the renderer.
+ */
+export type OverlayState = {
+  /** Entities with `Overlay`, from `onAdded` / `onRemoved`. */
+  entities: Set<Entity>;
+  /** Entities with `HudPart`, from `onAdded` / `onRemoved`. */
+  parts: Set<Entity>;
+  records: Map<Entity, OverlayRecord>;
+  /** The records bottom first, reused. */
+  order: OverlayRecord[];
+  /** The range of the owner, or `undefined` with none. */
+  active: ActiveRange | undefined;
+  /** The range object, made once and reused. */
+  range: ActiveRange | undefined;
+  /** Top objects of the HUD parts that take no tap. */
+  offTops: Set<PixiContainer>;
+  /** `"<code>:<entity>"` of the warnings logged once. */
+  warned: Set<string>;
+  /** The `overlay` event lines of an agent build, until the frame hands them to the monitor. */
+  events: OverlayEventDetail[];
+  /** Scratch: the entries and others wanted this frame, and the set of the entries. */
+  wantEntries: PixiContainer[];
+  wantOthers: PixiContainer[];
+  wantSet: Set<PixiContainer>;
+  /** Entities whose reason the step itself flipped this frame: their marks are no change of the range's pixels. */
+  flipped: Set<Entity>;
+  /** Scratch of the tap set. */
+  nextOff: Set<PixiContainer>;
+  /** A view left its place in the held range since the last step (it moved, or its view went). */
+  left: boolean;
 };
 
 /**
@@ -929,6 +1136,8 @@ export type SyncState = {
   objectHidden: WeakMap<PixiContainer, number>;
   /** The view whose top (`wrapper ?? object`) a node is, for the hidden masks (O15; skeleton choice, confirmed in LEAD-FIXES-3). */
   viewOfTop: WeakMap<PixiContainer, View>;
+  /** The overlays, their ranges, dims and HUD parts (spec 22). */
+  overlay: OverlayState;
   cleanups: Array<() => void>;
 };
 

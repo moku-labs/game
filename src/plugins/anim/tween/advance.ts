@@ -727,6 +727,16 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
   const fraction = track.ms <= 0 ? 1 : Math.min(run / track.ms, 1);
   const final = fraction >= 1 && (track.repeatsLeft === 0 || track.ms <= 0);
 
+  // An endless loop of a view the player cannot see writes nothing; its clock ran on, so it writes the phase of the
+  // time when it is shown again (spec 22 O9). Bases and offsets stay as they are.
+  if (
+    !final &&
+    track.repeatsLeft === Number.POSITIVE_INFINITY &&
+    actx.state.loopsHeld?.(track.entity) === true
+  ) {
+    return 0;
+  }
+
   writeFields(actx, track, fraction, final);
   if (!final) return 0;
 

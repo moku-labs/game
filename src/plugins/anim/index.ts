@@ -40,8 +40,9 @@ const config: Config = { maxTracks: 2000, reducedMotion: false };
  * ```
  */
 export const animPlugin = /*#__PURE__*/ createPlugin("anim", {
-  // rendererPlugin: no API is required; the edge orders the plugins, so the `Sprite` a `frames`
-  // step writes and the `Transform` and `rootPoseOf` `at` reads belong to a plugin already there.
+  // rendererPlugin: the edge orders the plugins, so the `Sprite` a `frames` step writes and the
+  // `Transform` and `rootPoseOf` `at` reads belong to a plugin already there; `sync.loopsHeld` is
+  // the one member anim calls, before an endless loop writes.
   depends: [timePlugin, flowPlugin, worldPlugin, rendererPlugin],
   config,
   events: (register: RegisterFunction) =>

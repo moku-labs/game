@@ -442,6 +442,8 @@ export type JsxState = {
   debugTaps: number[];
   /** Whether `ui:debug-trigger-no-agent` was logged: once per app. */
   debugWarned: boolean;
+  /** Elements that carry `Overlay`, from their enter to their despawn (spec 22 O4.5). */
+  overlays: Set<Entity>;
 };
 
 /**

@@ -112,6 +112,7 @@ function exposeSync(sync: SyncModule): SyncApi {
     debug: sync.debug,
     filters: sync.filters,
     renderPasses: sync.renderPasses,
+    loopsHeld: sync.loopsHeld,
     displayOf: sync.displayOf
   };
 }

@@ -188,7 +188,16 @@ function stepFrameLoop(
 
   loop.index = index;
 
-  if (due) writeLoopKey(actx, entity, loop, key);
+  if (!due) return;
+
+  // An endless loop of a view the player cannot see writes nothing; the key of the time is owed (spec 22 O9).
+  if (value.loop && actx.state.loopsHeld?.(entity) === true) {
+    loop.written = false;
+
+    return;
+  }
+
+  writeLoopKey(actx, entity, loop, key);
 }
 
 /**

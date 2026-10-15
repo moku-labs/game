@@ -13,7 +13,16 @@ import { installFont, isFontInstalled } from "./fonts";
 import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
 import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
+import {
+  drainOverlayEvents,
+  loopsHeld,
+  overlayReports,
+  stepOverlays,
+  watchOverlays
+} from "./overlay";
+import { forgetOverlays } from "./overlay-state";
 import { destroyPools, detach, dropPooled } from "./pools";
+import { parentOf } from "./pose";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
 import type {
@@ -22,6 +31,8 @@ import type {
   DisplayAdapter,
   FilterSlot,
   HitBox,
+  OverlayEventSink,
+  OverlayReport,
   SliceFrame,
   SyncCounts,
   SyncCtx,
@@ -304,10 +315,44 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    *
    * @returns The entities of this pass, so the change step skips what the build just wrote.
    */
-  const takeAdded = (): ReadonlySet<Entity> => {
+  const takeAdded = (): Set<Entity> => {
     const built = copyOf(state.added);
 
     state.added.clear();
+
+    return built;
+  };
+
+  /**
+   * Builds the views of a waiting set, each parent before its child when the parent waits in the
+   * same set (spec 16 U2.3): a child built first finds no parent view and is detached for good.
+   * An entity leaves the set before its parent is built, so a cycle of parents ends.
+   *
+   * @param waiting - The entities to build; emptied as they are built.
+   * @returns The entities a view was built for now.
+   */
+  const buildParentFirst = (waiting: Set<Entity>): ReadonlySet<Entity> => {
+    const built = emptyEntitySet();
+    const ecs = ctx.deps.world.ecs;
+
+    /**
+     * Builds one waiting entity, its waiting parent first.
+     *
+     * @param entity - The entity.
+     */
+    const build = (entity: Entity): void => {
+      if (!waiting.delete(entity)) return;
+
+      const parent = parentOf(ecs, entity);
+
+      if (parent !== 0 && waiting.has(parent)) build(parent);
+
+      guard(entity, () => {
+        if (createView(sctx, entity)) built.add(entity);
+      });
+    };
+
+    for (const entity of copyOf(waiting)) build(entity);
 
     return built;
   };
@@ -333,13 +378,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     if (syncLayers(sctx)) deps.demand.whole("layers");
 
-    const built = emptyEntitySet();
-
-    for (const entity of takeAdded()) {
-      guard(entity, () => {
-        if (createView(sctx, entity)) built.add(entity);
-      });
-    }
+    const built = buildParentFirst(takeAdded());
 
     applyChanges(built);
     applyReparented(built);
@@ -355,6 +394,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   const forgetTree = (): void => {
     // Every picture goes first: its textures belong to the application that goes (P15).
     deps.kept.reset();
+    // The dims and the range go with the tree; the overlays are found again in the new one (spec 22 O5.6).
+    forgetOverlays(state);
 
     for (const view of state.views.values()) {
       state.viewOfTop.delete(view.wrapper ?? view.object);
@@ -394,9 +435,10 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     deps.viewport.apply(root);
     syncLayers(sctx);
 
-    for (const [entity] of ctx.deps.world.ecs.query(Layer)) {
-      guard(entity, () => createView(sctx, entity));
-    }
+    const waiting = emptyEntitySet();
+
+    for (const [entity] of ctx.deps.world.ecs.query(Layer)) waiting.add(entity);
+    buildParentFirst(waiting);
 
     state.added.clear();
     state.removed.clear();
@@ -479,6 +521,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       kept: (on: boolean): void => deps.kept.enabled(on),
 
+      overlays: (): readonly OverlayReport[] => overlayReports(sctx),
+
       state: (): DebugSwitches => ({
         ...state.debug,
         verifyFrames: deps.demand.verifying(),
@@ -499,9 +543,11 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     layerOf: (entity: Entity): string | undefined => layerOf(sctx, entity),
 
-    stepOverlays: (): void => {
-      // The overlay step of spec 22 (block 3B wave 3) writes this body; until then nothing is an overlay.
-    },
+    stepOverlays: (): void => stepOverlays(sctx),
+
+    drainOverlayEvents: (monitor: OverlayEventSink): void => drainOverlayEvents(sctx, monitor),
+
+    loopsHeld: (entity: Entity): boolean => loopsHeld(sctx, entity),
 
     counts: (): SyncCounts => ({
       views: state.views.size,
@@ -529,6 +575,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         ecs.onRemoved(Shape, markRemoved),
         ecs.onRemoved(Display, markRemoved),
         ecs.onRemoved(Parent, markReparented),
+        ...watchOverlays(sctx),
         ecs.system(createSyncSystem(pass))
       );
 

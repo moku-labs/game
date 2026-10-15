@@ -52,6 +52,26 @@ defineScene("board", { bundle: "board", layers: { cells: {}, items: { sort: "y" 
 
 `sort` left out means `"none"`. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is plain frozen data, so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey, Player, Session>`.
 
+## The HUD layer: `{ above: "overlays" }`
+
+A layer that says `above: "overlays"` is the scene's HUD layer: it is drawn above every overlay and is never part of the picture an overlay keeps (renderer, "Overlays and the HUD"). A scene that declares a HUD layer and no `ui` gets `ui` right under the HUD layer, not on top: popups are overlays and draw under the HUD. Layers declared after the HUD layer (a drag layer such as `lifted`) stay above it. A scene without `above` gives the same list as before.
+
+```ts
+defineScene("ward", { bundle: "ui", layers: { scene: {}, hud: { above: "overlays" } }, projections }).layers;
+// [{ name: "scene", sort: "none" }, { name: "ui", sort: "none" }, { name: "hud", sort: "none", above: "overlays" }]
+```
+
+Three mistakes throw:
+
+```
+[game] Scene "ward": two layers say above "overlays" ("hud", "top").
+  Keep one HUD layer.
+[game] Scene "ward": the layer "ui" comes after the HUD layer "hud".
+  Declare ui before it: popups are overlays and draw under the HUD.
+[game] Scene "ward": the layer "hud" has above "ui".
+  Use "overlays" or leave it out.
+```
+
 ## Bundles of state: `bundles`
 
 A scene may name bundles that depend on the committed state. `bundles` receives `SceneState`: the frozen `player` and `session` of `model.store.snapshot()`, in a frozen wrapper, never the draft of the node being entered. Through `defineGame` it is typed with the game's `Player` and `Session` and must return the game's bundle keys, so `() => ["ep03"]` and `session.level` do not compile. The loose `defineScene` reads the state as `Json`; annotate the parameter (`({ session }: SceneState<Json, { episode: string }>) => …`) and the session type is inferred from it.

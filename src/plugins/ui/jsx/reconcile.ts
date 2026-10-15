@@ -11,6 +11,7 @@ import { PointerOver, Pressed, Tappable, Touchable } from "../../input/component
 import type { Json } from "../../model/types";
 import {
   NineSlice,
+  OverlayLevel,
   Parent,
   Shape,
   Sprite,
@@ -31,6 +32,7 @@ import type { Fields } from "./fields";
 import { hintOf } from "./hints";
 import { hostViews, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
+import { createSpan, enterOverlay, exitOverlay, overlayOf, settleOverlays } from "./overlay";
 import { settlePopups } from "./popups";
 import { createRange } from "./range";
 import { markResizedIcons, markResizedTexts } from "./remeasure";
@@ -1075,7 +1077,16 @@ export function createReconciler(
   function exitSubtree(element: Element): void {
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
-    modules.layout.exit(element);
+
+    if (overlayOf(element) === undefined) {
+      modules.layout.exit(element);
+    } else {
+      // The level of an overlay goes back with its exit motion, so the dim and the HUD are back before it goes.
+      const span = createSpan();
+
+      modules.layout.exit(element, span);
+      exitOverlay(ctx, modules.layout, element, span);
+    }
 
     if (element.type === "input") fields.exit(element);
 
@@ -1150,6 +1161,7 @@ export function createReconciler(
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
     state.exiting.delete(element.entity);
+    state.overlays.delete(element.entity);
     state.elements.delete(element.entity);
     ecs.despawn(element.entity);
   }
@@ -1233,6 +1245,8 @@ export function createReconciler(
     warnOwned(element);
 
     for (const value of element.extras.values()) recordRest(ctx, element, value);
+    // An overlay's level and landing are the engine's: they start at 0, and its enter (at `Box`) moves them.
+    if (overlayOf(element) !== undefined) ecs.add(element.entity, OverlayLevel());
     for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
 
     element.live = true;
@@ -1280,8 +1294,17 @@ export function createReconciler(
 
     element.entered = true;
 
-    if (element.scrolledIn) modules.layout.loop(element);
-    else modules.layout.enter(element);
+    if (element.scrolledIn) {
+      modules.layout.loop(element);
+    } else if (overlayOf(element) === undefined) {
+      modules.layout.enter(element);
+    } else {
+      // The level of an overlay follows its enter motion: the hook's tracks are measured as it plays.
+      const span = createSpan();
+
+      modules.layout.enter(element, span);
+      enterOverlay(ctx, state, modules.layout, { element, span });
+    }
   }
 
   /**
@@ -1491,6 +1514,8 @@ export function createReconciler(
 
     if (changed) ctx.deps.time.wake();
 
+    // Land the overlays whose enter is over: the renderer reads it in this frame.
+    settleOverlays(ctx, state, modules.layout);
     state.hints.length = 0;
     writeCounters();
   }
