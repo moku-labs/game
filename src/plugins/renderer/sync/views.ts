@@ -25,6 +25,7 @@ import type {
 import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
 import { applyFilters, clearFilters, filtersOf, moveFilters } from "./filters";
 import { clearFonts } from "./fonts";
+import { clearHidden, writeRenderable } from "./hidden";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
 import { bordersOf, drawOutline, type OutlineShape } from "./outline";
@@ -854,6 +855,10 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   view.object.zIndex = 0;
   wrapper.addChild(view.object);
   view.wrapper = wrapper;
+  // The subtree reasons move from the visual up to the wrapper; the visual keeps only its own.
+  sctx.ctx.state.sync.viewOfTop.delete(view.object);
+  sctx.ctx.state.sync.viewOfTop.set(wrapper, view);
+  writeRenderable(view);
   applyTransform(sctx, parentEntity, view);
   // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.
   moveFilters(sctx.ctx.state.sync, parentEntity, view, () => markView(sctx, parentEntity));
@@ -1025,12 +1030,15 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     outline: undefined,
     hitBox: { x: 0, y: 0, width: 0, height: 0 },
     drawn: undefined,
-    clipDrawn: undefined
+    clipDrawn: undefined,
+    hiddenSelf: 0,
+    hiddenTop: 0
   };
 
   object.label = labelOf(sctx, nameOf(visual), entity);
   state.views.set(entity, view);
   state.entityOf.set(object, entity);
+  state.viewOfTop.set(object, view);
   if (visual.textureKey !== "") trackKey(state, entity, visual.textureKey);
 
   writeVisual(sctx, entity, view);
@@ -1107,6 +1115,7 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 
   state.views.delete(entity);
   state.entityOf.delete(view.object);
+  state.viewOfTop.delete(view.wrapper ?? view.object);
   untrackKey(state, entity, view.textureKey);
 
   if (view.frameKey !== "") {
@@ -1123,7 +1132,7 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 /**
  * Drops every view, every layer, every pool and every filter slot. Works on the state alone,
  * because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
- * destroyed, and leaves without the filters the renderer hung on it.
+ * destroyed, and leaves without the filters and the hidden reasons the renderer gave it.
  *
  * @param state - The sync branch of the plugin state.
  */
@@ -1132,6 +1141,9 @@ export function stopSync(state: SyncState): void {
   state.cleanups.length = 0;
 
   for (const view of state.views.values()) {
+    clearHidden(view);
+    state.viewOfTop.delete(view.wrapper ?? view.object);
+
     if (view.kind === "Display") {
       detach(view.object);
       clearFilters(view.object);

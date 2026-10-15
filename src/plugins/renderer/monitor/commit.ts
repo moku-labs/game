@@ -255,7 +255,9 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   const { perf, sinks } = pc;
   const { ring } = perf;
   const c = ring.columns;
-  const slot = (ring.newest + 1) % ring.capacity;
+  // Frame k always lives in slot k % capacity (spec 11), also after a stop and start: the commit
+  // number keeps counting while the ring is emptied.
+  const slot = ring.written % ring.capacity;
   // Staged in the column, not chosen with `?:`: a choice between a double of the record and the
   // tagged budget would box the double every frame.
   perf.staged[0] = measure.rateMs;

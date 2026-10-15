@@ -10,6 +10,7 @@ import { provideDisplay, updateAdapterView } from "./adapters";
 import { boundsOf, hitBoxOf, layerOf } from "./bounds";
 import { forgetLeft, renderPassesOf, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
+import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
 import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
 import { destroyPools, detach, dropPooled } from "./pools";
@@ -353,9 +354,12 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    */
   const forgetTree = (): void => {
     for (const view of state.views.values()) {
+      state.viewOfTop.delete(view.wrapper ?? view.object);
       if (view.kind === "Display") detach(view.object);
       view.wrapper = undefined;
       view.outline = undefined;
+      // A game's object outlives the application: it goes back drawn, for the view the rebuild gives it.
+      if (view.kind === "Display") clearHidden(view);
     }
 
     state.views.clear();
@@ -485,6 +489,10 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     layerContainer: (name: string): PixiContainer | undefined => layerContainer(state, name),
 
     layerOf: (entity: Entity): string | undefined => layerOf(sctx, entity),
+
+    stepOverlays: (): void => {
+      // The overlay step of spec 22 (block 3B wave 3) writes this body; until then nothing is an overlay.
+    },
 
     counts: (): SyncCounts => ({
       views: state.views.size,

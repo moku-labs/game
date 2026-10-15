@@ -18,6 +18,7 @@
  * | time | maxDeltaMs | 50 |
  * | time | idleFps | 30 |
  * | time | idleAfterMs | 2000 |
+ * | time | adaptive | false |
  * | clock | source | undefined, the system source |
  * | model | playerProvider | undefined, in memory |
  * | model | initialPlayer | {} |

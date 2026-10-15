@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import { component, Exiting } from "../../ecs/define";
+import { component, Exiting, Tree } from "../../ecs/define";
 import type { AnyComponent, Entity, Owner } from "../../ecs/types";
-import type { Motion, MotionHandle, ProjectionMotion, ViewHandle } from "../../projection/types";
+import { projection } from "../../projection/define";
+import type {
+  AnyProjectionSpec,
+  Motion,
+  MotionCause,
+  MotionHandle,
+  ProjectionMotion,
+  ViewHandle
+} from "../../projection/types";
 import type { Item } from "./board";
 import {
   BOARD,
@@ -2181,5 +2189,208 @@ describe("projection reconcile — a rest change under the loop of a view is kep
 
     expect(world.api.projection.entityOf(BOARD, "a")).toBe(entity);
     expect(world.api.ecs.get(entity, Transform)).toEqual({ x: 10, y: 70, scale: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C3: every enter and exit hook learns why it plays, and `causeOf` answers how a view came or
+// how it is leaving, also from a removal hook of the despawn.
+// ---------------------------------------------------------------------------
+
+/**
+ * Records the cause `causeOf` answers for every entity that loses its `Level`, which a despawn
+ * removes: the removal hook of a view.
+ *
+ * @param world - The mock world.
+ * @returns The causes, in removal order.
+ */
+function recordRemovals(world: MockWorld): Array<MotionCause | undefined> {
+  const causes: Array<MotionCause | undefined> = [];
+
+  world.api.ecs.onRemoved(Level, entity => {
+    causes.push(world.api.projection.causeOf(entity));
+  });
+
+  return causes;
+}
+
+describe("projection reconcile — C3: the motion cause", () => {
+  it("hands an enter hook a commit plays the cause change", () => {
+    const world = createMockWorld();
+    const causes: Array<MotionCause | undefined> = [];
+
+    mountBoard(world, [], {
+      enter: (_view, _item, _hint, cause) => {
+        causes.push(cause);
+      }
+    });
+    commitItems(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+    world.frame(16);
+
+    expect(causes).toEqual(["change"]);
+  });
+
+  it("plays no enter on a mount, and causeOf answers mount for the view", () => {
+    const world = createMockWorld();
+    const enter = vi.fn();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], { enter });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    expect(enter).not.toHaveBeenCalled();
+    expect(world.api.projection.causeOf(entity)).toBe("mount");
+  });
+
+  it("answers change for a view a commit added", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, []);
+    commitItems(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+    world.frame(16);
+
+    expect(world.api.projection.causeOf(world.api.projection.entityOf(BOARD, "a") ?? 0)).toBe(
+      "change"
+    );
+  });
+
+  it("hands an exit hook a commit plays the cause change", () => {
+    const world = createMockWorld();
+    const causes: Array<MotionCause | undefined> = [];
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      exit: (_view, _item, _hint, cause) => {
+        causes.push(cause);
+      }
+    });
+    commitItems(world, []);
+    world.frame(16);
+
+    expect(causes).toEqual(["change"]);
+  });
+
+  it("answers change in the removal hook of a view a commit removed after its exit", () => {
+    const world = createMockWorld();
+    const causes = recordRemovals(world);
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      exit: view => view.tween(Transform, { scale: 0 }, { ms: 100, ease: "linear" })
+    });
+    commitItems(world, []);
+    world.frame(16);
+
+    expect(causes).toEqual([]);
+
+    settleFrames(world);
+
+    expect(causes).toEqual(["change"]);
+  });
+
+  it("answers mount in the removal hook of a Tree a scene unmount despawns, also one a commit added", () => {
+    const world = createMockWorld();
+    const causes: Array<MotionCause | undefined> = [];
+
+    world.model.player = {};
+    world.api.projection.setLayers(LAYERS);
+    world.api.projection.register(
+      projection({
+        name: "hud.screen",
+        layer: "items",
+        from: (player: { screen?: { title: string } }) => player.screen,
+        view: () => ({ type: "box", props: {}, children: [] })
+      }) as AnyProjectionSpec
+    );
+    world.start();
+    world.api.projection.mount(["hud.screen"], MOUNT_OWNER);
+    world.model.player = { screen: { title: "shop" } };
+    world.commit();
+    world.frame(16);
+
+    const root = world.api.projection.entityOf("hud.screen", "hud.screen") ?? 0;
+
+    expect(world.api.projection.causeOf(root)).toBe("change");
+
+    world.api.ecs.onRemoved(Tree, entity => {
+      causes.push(world.api.projection.causeOf(entity));
+    });
+    world.api.projection.unmount(["hud.screen"]);
+
+    expect(causes).toEqual(["mount"]);
+  });
+
+  it("answers mount for a view a load removed and for one a restore added", () => {
+    const world = createMockWorld();
+    const causes = recordRemovals(world);
+
+    mountBoard(world, [
+      { id: "a", level: 1, x: 0, y: 0 },
+      { id: "b", level: 1, x: 0, y: 0 }
+    ]);
+    world.model.player = { items: [{ id: "a", level: 1, x: 0, y: 0 }] };
+    world.commit("load");
+    world.frame(16);
+
+    expect(causes).toEqual(["mount"]);
+
+    world.model.player = {
+      items: [
+        { id: "a", level: 1, x: 0, y: 0 },
+        { id: "c", level: 1, x: 0, y: 0 }
+      ]
+    };
+    world.commit("restore");
+    world.frame(16);
+
+    expect(world.api.projection.causeOf(world.api.projection.entityOf(BOARD, "c") ?? 0)).toBe(
+      "mount"
+    );
+  });
+
+  it("answers mount for an exiting view a load brings back", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }], {
+      exit: view => view.tween(Transform, { scale: 0 }, { ms: 300, ease: "linear" })
+    });
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, []);
+    world.frame(16);
+
+    expect(world.api.projection.causeOf(entity)).toBe("change");
+
+    world.model.player = { items: [{ id: "a", level: 1, x: 0, y: 0 }] };
+    world.commit("load");
+    world.frame(16);
+
+    expect(world.api.projection.entityOf(BOARD, "a")).toBe(entity);
+    expect(world.api.projection.causeOf(entity)).toBe("mount");
+  });
+
+  it("forgets the cause of a despawned view at the next sweep", () => {
+    const world = createMockWorld();
+    const causes = recordRemovals(world);
+
+    mountBoard(world, [{ id: "a", level: 1, x: 0, y: 0 }]);
+
+    const entity = world.api.projection.entityOf(BOARD, "a") ?? 0;
+
+    commitItems(world, []);
+    world.frame(16);
+
+    expect(causes).toEqual(["change"]);
+    expect(world.api.projection.causeOf(entity)).toBeUndefined();
+    expect(world.ctx.state.projection.leaving.size).toBe(0);
+  });
+
+  it("answers undefined for an entity no projection made", () => {
+    const world = createMockWorld();
+
+    mountBoard(world, []);
+
+    const element = world.api.ecs.spawn({ kind: "plugin", name: "ui" }, [Level({ level: 1 })]);
+
+    expect(world.api.projection.causeOf(element)).toBeUndefined();
   });
 });

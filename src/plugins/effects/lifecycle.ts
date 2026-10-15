@@ -10,12 +10,13 @@ import { rendererPlugin } from "../renderer";
 import { worldPlugin } from "../world";
 import type { ComponentHandle } from "../world/types";
 import { builtInKinds } from "./filters/builtins";
+import { dropChecks, gateChecks } from "./filters/check";
 import { createFilterSystem, forgetFilter, retireAllFilters, trackFilter } from "./filters/system";
 import type { FilterDefinition, FilterFields, FilterKind, KindEntry } from "./filters/types";
 import { Emitter } from "./particles/component";
 import { createParticleSystem, forgetEmitter, retireAllParticles } from "./particles/system";
 import type { EmitterDefinition } from "./particles/types";
-import { NO_KINDS } from "./state";
+import { NO_KINDS, resetChecks } from "./state";
 import type { EffectsCtx, KernelSlice, State } from "./types";
 
 /** The short side, in CSS pixels, at or under which a coarse pointer is a phone. */
@@ -229,7 +230,8 @@ function openWorld(ectx: EffectsCtx, kinds: readonly FilterKind[]): void {
 /**
  * Starts the plugin in `onStart`. The teardown closure goes first into `state.removers`, because
  * a teardown context carries no `ctx`: it captures the world and the renderer here. Then the
- * phone, the kinds, the emitters and the world side. Every definition is checked even headless.
+ * phone, the kinds, the `load` gate that holds every node entry until the shader checks answered,
+ * the emitters and the world side. Nothing is compiled here: the host is not ready yet.
  *
  * @param ctx - Kernel context of the effects plugin.
  */
@@ -240,10 +242,12 @@ export function startEffects(ctx: KernelSlice): void {
   state.removers.push(() => {
     retireAllParticles(ectx);
     retireAllFilters(ectx);
+    dropChecks(ectx);
   });
   state.phone = resolvePhone(ctx.config.phone);
   registerKinds(ectx);
   state.diagnostics.kinds = Object.freeze([...state.kinds.keys()]);
+  state.removers.push(ectx.deps.flow.onEnter("load", (node, run) => gateChecks(ectx, node, run)));
   registerEmitters(ectx);
   openWorld(ectx, [...state.kinds.values()]);
 }
@@ -262,9 +266,9 @@ export function stopEffects(state: State): void {
   state.baked.clear();
   state.instances.clear();
   state.orphans.clear();
-  state.broken.clear();
   state.kinds.clear();
-  state.checks.clear();
+  // A check still in flight belongs to this run: its answer is ignored.
+  resetChecks(state);
   state.views.clear();
   state.warned.clear();
   state.particles = 0;

@@ -263,6 +263,8 @@ it draws at 0 in markup order. A new value from a variant or a new render update
 a child that drops its `zIndex` goes back to 0. The views a slot hosts keep their own `Order`.
 A root element ignores `zIndex` (it draws at the order of its root in its layer), and `lint()`
 reports it as `z-index-on-root`.
+A JSX root draws in the layer its projection names (`layer: "scene"` puts it under every `ui`
+root); a `Tree` spawned by hand without a `Layer` draws in `ui`.
 
 ```tsx
 <column key="board">

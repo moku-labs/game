@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stopDemand } from "../../demand/state";
-import type { DemandReason } from "../../demand/types";
+import { DEMAND_REASONS, type DemandReason } from "../../demand/types";
 import { box, demandAlone } from "../demand-harness";
 
 // ---------------------------------------------------------------------------
@@ -214,5 +214,57 @@ describe("demand.decide", () => {
     expect(demand.wholes().size).toBe(0);
     expect(demand.decide(false)).toBe(true);
     expect(demand.frame().reason).toBe("first");
+  });
+
+  it("a retake and an overlay change draw the frame", () => {
+    const { demand } = resting();
+
+    demand.whole("retake");
+
+    expect(demand.decide(false)).toBe(true);
+    expect(demand.frame().reason).toBe("retake");
+
+    demand.whole("overlay");
+
+    expect(demand.decide(false)).toBe(true);
+    expect(demand.frame().reason).toBe("overlay");
+    expect(demand.decide(false)).toBe(false);
+  });
+
+  it("loose() and wholes() report the current decision, a mark after a resize keeps the resize", () => {
+    const { demand, view } = resting();
+
+    view(1, box(10, 10));
+    view(2, box(60, 10));
+    demand.markLoose(2);
+    demand.whole("resize");
+    demand.mark(1);
+
+    expect([...demand.loose()]).toEqual([2]);
+    expect([...demand.marked()]).toEqual([1]);
+    expect([...demand.wholes()]).toEqual(["resize"]);
+    expect(demand.decide(false)).toBe(true);
+    expect(demand.frame().reason).toBe("resize");
+    expect(demand.loose().size + demand.wholes().size).toBe(0);
+  });
+
+  it("overlay and retake come after none, so the ring indices of the older reasons stay", () => {
+    // The monitor's ring stores the index of the reason: an older reason moved is a wrong column in every saved log.
+    expect(DEMAND_REASONS).toEqual([
+      "always",
+      "first",
+      "resize",
+      "restore",
+      "layers",
+      "debug",
+      "wake",
+      "capture",
+      "request",
+      "mark",
+      "verify",
+      "none",
+      "overlay",
+      "retake"
+    ]);
   });
 });

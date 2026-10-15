@@ -1,13 +1,14 @@
 /**
  * @file renderer plugin — the hooks: a pause hands the captures still waiting for a drawn frame
  * their picture, since no frame comes while the clock is paused. In an agent build the
- * performance monitor also hears the pause stack, the flow path and the thermal readings.
+ * performance monitor also hears the pause stack, the flow path, the thermal readings and the
+ * changes of the frame rate.
  */
 import { flowPlugin } from "../flow";
 import type { Events as FlowEvents } from "../flow/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import { timePlugin } from "../time";
-import type { ThermalReading } from "../time/types";
+import type { RateChange, ThermalReading } from "../time/types";
 import { createModules } from "./api";
 import { withDeps } from "./lifecycle";
 import { servePaused } from "./monitor/capture";
@@ -32,6 +33,7 @@ export function createHandlers(ctx: KernelSlice): {
   "flow:edge": () => void;
   "flow:rest": (payload: FlowRest) => void;
   "time:thermal": (reading: ThermalReading) => void;
+  "time:rate": (change: RateChange) => void;
 } {
   let monitor: MonitorModule | undefined;
 
@@ -100,6 +102,18 @@ export function createHandlers(ctx: KernelSlice): {
     "time:thermal": (reading: ThermalReading): void => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
         monitorOf().thermal(reading);
+      }
+    },
+
+    /**
+     * Writes a change of the frame rate as a `rate` event line, the payload as its detail. Agent
+     * builds only.
+     *
+     * @param change - The change `time:rate` carried.
+     */
+    "time:rate": (change: RateChange): void => {
+      if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+        monitorOf().event("rate", change);
       }
     }
   };

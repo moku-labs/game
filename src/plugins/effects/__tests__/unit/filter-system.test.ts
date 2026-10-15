@@ -5,6 +5,7 @@ import type { AnyComponentValue, Entity } from "../../../world/types";
 import { Blur, Displacement, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { atlasTexture, type FakeFxBlurFilter } from "../fake-effects-pixi";
+import { Bad, Hazy, Smaller, Soft, SoftDim } from "../filter-fixtures";
 import { createMockEffects, type MockEffects } from "./mock-effects";
 
 // ---------------------------------------------------------------------------
@@ -299,15 +300,17 @@ describe("the filter sync — instances and assignment", () => {
   });
 });
 
-describe("the filter sync — the dev WGSL check", () => {
+describe("the filter sync — the WGSL check, in every build", () => {
   it("instantiates a kind only once its WGSL compiled clean", async () => {
-    vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const mock = started();
+
+    mock.renderer.device = mock.gpu.device;
+
     const entity = view(mock, [Tint()]);
 
     mock.frame();
     expect(filterOf(mock, entity, "fx.tint")).toBeUndefined();
-    expect(mock.state.checks.get("fx.tint")).toBe("pending");
+    expect(mock.state.checks.status.get(Tint.filter)).toBe("pending");
 
     for (let index = 0; index < 5; index += 1) await Promise.resolve();
     mock.frame();
@@ -316,9 +319,9 @@ describe("the filter sync — the dev WGSL check", () => {
   });
 
   it("never instantiates a broken kind, and the view renders as if it had none", async () => {
-    vi.stubGlobal("__MOKU_GAME_DEV__", true);
     const mock = started();
 
+    mock.renderer.device = mock.gpu.device;
     mock.gpu.messages.push({ type: "error", lineNum: 3, linePos: 9, message: "bad" });
 
     const entity = view(mock, [Tint()]);
@@ -627,5 +630,169 @@ describe("the filter sync — compare on write and renderer.invalidate", () => {
     release.frame();
 
     expect(release.ectx.deps.renderer.invalidate).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * A started mock with the fixture filters of the inputs: `Soft` and `Hazy`, whose stage `Bad` compiles on no device.
+ *
+ * @returns The started mock, on WebGPU with its device.
+ */
+function inputsMock(): MockEffects {
+  const mock = createMockEffects();
+
+  mock.renderer.device = mock.gpu.device;
+  mock.gpu.answer = code =>
+    code === Bad.filter.source ? [{ type: "error", lineNum: 12, linePos: 1, message: "bad" }] : [];
+  mock.features.push({ name: "fixture", description: { filters: [Soft, Hazy] } });
+  mock.start();
+
+  return mock;
+}
+
+/**
+ * A started mock with the fixture filter `Soft`; every check answers ok at the first frame.
+ *
+ * @param resolution - The renderer's resolution.
+ * @returns The started mock.
+ */
+function softMock(resolution = 1): MockEffects {
+  const mock = createMockEffects();
+
+  mock.renderer.resolution = resolution;
+  mock.features.push({ name: "fixture", description: { filters: [Soft] } });
+  mock.start();
+
+  return mock;
+}
+
+/** Lets the compilation info resolve. */
+async function answered(): Promise<void> {
+  for (let index = 0; index < 8; index += 1) await Promise.resolve();
+}
+
+describe("the filter sync — inputs, broken kinds and pending checks", () => {
+  it("draws a broken kind's checked fallback with the kind's value", async () => {
+    const mock = inputsMock();
+    const entity = view(mock, [Hazy({ spread: 0.5 })]);
+
+    mock.frame();
+    await answered();
+    mock.frame();
+
+    const [slot] = mock.renderer.sets.at(-1)?.slots ?? [];
+    const standIn = mock.state.views.get(entity)?.instances.get("fixture.hazy");
+
+    expect(standIn?.kind === "wgsl" ? standIn.definition : undefined).toBe(SoftDim.filter);
+    expect(slot?.filter).toBe(standIn?.filter);
+    expect(slot?.kind).toBe("fixture.hazy");
+    expect(slot?.passes).toBe(1);
+
+    const invalidate = vi.mocked(mock.ectx.deps.renderer.invalidate);
+
+    invalidate.mockClear();
+    mock.world.ecs.set(entity, Hazy, { spread: 0.75 });
+    mock.frame();
+
+    expect((standIn?.filter.resources.fu as FakeUniformGroup).uniforms.spread).toBe(0.75);
+    expect(invalidate).toHaveBeenCalledExactlyOnceWith(entity);
+  });
+
+  it("waits for a broken kind's fallback to answer, and never draws an unchecked shader", async () => {
+    const held = Promise.withResolvers<void>();
+    const mock = inputsMock();
+
+    mock.gpu.waits.set(SoftDim.filter.source, held.promise);
+
+    const entity = view(mock, [Hazy()]);
+
+    mock.frame();
+    await answered();
+    mock.frame();
+
+    expect(mock.state.broken.has("fixture.hazy")).toBe(true);
+    expect(mock.renderer.sets).toHaveLength(0);
+    expect(mock.state.views.get(entity)?.instances.size).toBe(0);
+
+    held.resolve();
+    await answered();
+    mock.frame();
+
+    expect(mock.renderer.sets).toHaveLength(1);
+  });
+
+  it("logs effects:check-pending once per kind for a view left unfiltered while its check is pending", () => {
+    const mock = inputsMock();
+
+    view(mock, [Soft()]);
+    view(mock, [Soft()]);
+    mock.frame();
+    mock.frame();
+
+    expect(mock.log.warn).toHaveBeenCalledExactlyOnceWith("effects:check-pending", {
+      filter: "fixture.soft"
+    });
+    expect(mock.renderer.sets).toHaveLength(0);
+  });
+
+  it("hands a slot of a filter with inputs that counts the main body and every step, with its seam", () => {
+    const mock = softMock(2);
+    const entity = view(mock, [Soft()]);
+
+    mock.frame();
+
+    const [slot] = mock.renderer.sets.at(-1)?.slots ?? [];
+    const instance = mock.state.views.get(entity)?.instances.get("fixture.soft");
+
+    // The main body and three steps: the first stage and a Gaussian along x and along y.
+    expect(slot?.passes).toBe(4);
+    expect(slot?.inputs).toBe(instance?.kind === "wgsl" ? instance.inputs?.slot : "none");
+    expect(slot?.inputs?.count).toBe(1);
+    expect(slot?.inputs?.stages).toHaveLength(3);
+  });
+
+  it("hands a new slot list when a place is rebuilt, naming the new stage filter", () => {
+    const mock = softMock();
+    const entity = view(mock, [Soft()]);
+
+    mock.frame();
+
+    const first = mock.renderer.sets.at(-1)?.slots[0]?.inputs;
+
+    mock.world.ecs.set(entity, Soft, { spread: 3 });
+    mock.frame();
+
+    const instance = mock.state.views.get(entity)?.instances.get("fixture.soft");
+    const place = instance?.kind === "wgsl" ? instance.inputs?.places[0]?.[0] : undefined;
+    const next = mock.renderer.sets.at(-1)?.slots[0]?.inputs;
+
+    expect(mock.renderer.sets).toHaveLength(2);
+    expect(place?.definition).toBe(Smaller.filter);
+    expect(next).not.toBe(first);
+    expect(next?.stages[0]).toBe(place?.body.filter);
+  });
+
+  it("evaluates no chain of a kind switched off by the diagnostics, and catches up when it is on", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const mock = softMock();
+    const entity = view(mock, [Soft()]);
+
+    mock.frame();
+
+    const instance = mock.state.views.get(entity)?.instances.get("fixture.soft");
+    const version = (): number | undefined =>
+      instance?.kind === "wgsl" ? instance.inputs?.version : undefined;
+
+    mock.api.diagnostics.disable("fixture.soft");
+    mock.world.ecs.set(entity, Soft, { spread: 3 });
+    mock.frame();
+
+    expect(version()).toBe(1);
+
+    mock.api.diagnostics.enable("fixture.soft");
+    mock.frame();
+
+    expect(version()).toBe(2);
   });
 });

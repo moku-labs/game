@@ -132,6 +132,9 @@ export function clipInsets(options: Omit<ClipOptions, "scale">): SafeArea {
   const { insets, frame, canvas } = options;
 
   if (frame.width <= 0 || frame.height <= 0) return { ...NONE };
+  // A page with no window size (headless, a stand-in page) has no edges to avoid: measured against a
+  // 0 × 0 window the whole frame would count as unsafe.
+  if (options.window.width <= 0 || options.window.height <= 0) return { ...NONE };
 
   const left = canvas.left + frame.x;
   const top = canvas.top + frame.y;

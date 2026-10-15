@@ -22,7 +22,9 @@ export const DEMAND_REASONS = [
   "request", // the engine asked for a frame itself (block 4: the warm-up probe of F4)
   "mark", // a counted change mark
   "verify", // the pixel oracle found a missed frame and drew it (D6.3)
-  "none"
+  "none",
+  "overlay", // a range was hidden or shown, a dim moved
+  "retake" // a picture was taken or retaken
 ] as const;
 
 /**
@@ -95,6 +97,8 @@ export type DemandInternal = {
   shown(entity: Entity): boolean;
   /** Marks of the current decision. */
   marked(): ReadonlySet<Entity>;
+  /** The adapter marks of the current decision, as `marked()` for the others. */
+  loose(): ReadonlySet<Entity>;
   /** The pixel oracle switch, behind `DebugApi.verifyFrames`. */
   verifyFrames(on: boolean): void;
   /** Whether the pixel oracle is on. */

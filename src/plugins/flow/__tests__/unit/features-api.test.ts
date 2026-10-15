@@ -81,6 +81,10 @@ const createMockDeps = (): Deps => ({
     measure: vi.fn(),
     agentClock: () => undefined,
     chargeAgent: vi.fn(),
+    rate: vi.fn(),
+    setRate: vi.fn(),
+    frameDrawn: vi.fn(),
+    frameProbed: vi.fn(),
     isPaused: vi.fn(),
     isRunning: vi.fn(() => false),
     step: vi.fn()

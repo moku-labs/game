@@ -8,6 +8,7 @@ import type {
   PixiBitmapFont,
   PixiContainer,
   PixiFilter,
+  PixiFilterManager,
   PixiGraphics,
   PixiModule,
   PixiTexture,
@@ -150,6 +151,10 @@ export type View = {
   drawn: DrawnShape | undefined;
   /** What the mask of a clipping view was last drawn with; `undefined` while it clips nothing. */
   clipDrawn: ClipDrawn | undefined;
+  /** The reasons that hide the visual itself (`hidden.ts`). */
+  hiddenSelf: number;
+  /** The reasons that hide the whole subtree, on the top (`hidden.ts`). */
+  hiddenTop: number;
 };
 
 /**
@@ -165,9 +170,10 @@ export type CoverFrame = { base: PixiTexture; texture: PixiTexture; users: Set<E
 export type PoseReader = Pick<EcsApi, "get">;
 
 /**
- * One layer of the scene: its container and the sort rule its children follow.
+ * One layer of the scene: its container, the sort rule its children follow, and the reasons that hide the container
+ * (`hidden.ts`).
  */
-export type LayerEntry = { container: PixiContainer | undefined; sort: LayerSort };
+export type LayerEntry = { container: PixiContainer | undefined; sort: LayerSort; hidden: number };
 
 /**
  * A texture source `assets` registered.
@@ -416,6 +422,86 @@ export type FilterSlot = {
   passes: number;
   /** The filter kind id, for the performance log; optional: a slot without it counts as "other". */
   kind?: string;
+  /** The stages of a filter's inputs and the seam of the kept-picture cache; filled by effects, left out by a game. */
+  inputs?: FilterSlotInputs;
+};
+
+/**
+ * The stages of a filter's inputs and the seam of the kept-picture cache, on the filter's slot. `effects` fills it;
+ * a game's own slots leave it out.
+ *
+ * @example
+ * ```ts
+ * // The kept-picture cache (spec 23) reads the Frost slot it keeps for the ward's root.
+ * slot.inputs?.count; // 1
+ * ```
+ */
+export type FilterSlotInputs = {
+  /**
+   * The Pixi filter of every place of every chain, in draw order; the monitor counts their applies under the slot's kind.
+   *
+   * @example
+   * ```ts
+   * slot.inputs?.stages.length; // 4 on the owner's phone: FrostBox4, FrostHalf, FrostGauss, FrostGauss
+   * ```
+   */
+  readonly stages: readonly PixiFilter[];
+  /**
+   * How many inputs the filter reads.
+   *
+   * @example
+   * ```ts
+   * slot.inputs?.count; // 1 for the Frost
+   * ```
+   */
+  readonly count: number;
+  /**
+   * A number that changes whenever what the stages draw changes: another step list, scale or stage uniform, or another
+   * resolution. Read it after `draw`.
+   *
+   * @returns The version; 1 after the first evaluation.
+   * @example
+   * ```ts
+   * // The Frost's panel rect follows the shop sheet sliding in: the chain returns the same steps every frame.
+   * slot.inputs?.version(); // 1, and still 1 at the end of the slide
+   * ```
+   */
+  version(): number;
+  /**
+   * The share of the picture's resolution the result of one input has.
+   *
+   * @param index - The input, in declaration order.
+   * @returns The scale of its last step; `undefined` for an empty chain, whose result is the view's own input.
+   * @example
+   * ```ts
+   * slot.inputs?.scaleOf(0); // 0.125 on the owner's phone
+   * ```
+   */
+  scaleOf(index: number): number | undefined;
+  /**
+   * Draws the stages of every input from a picture, the last place of input `index` into `targets[index]`; pooled
+   * textures in between go back to Pixi's pool before it returns. Call it only from inside a filter's `apply`.
+   *
+   * @param manager - Pixi's filter system, as the `apply` received it.
+   * @param picture - The kept picture of the view's subtree.
+   * @param targets - One engine-owned texture per input, of the picture's frame at `scaleOf(index)` × its resolution.
+   * @example
+   * ```ts
+   * // Spec 23 runs the stages once on the kept picture of the ward, inside a filter pass of its own.
+   * keeper.apply = (manager, picture) => slot.inputs?.draw(manager, picture, [blurred]);
+   * ```
+   */
+  draw(manager: PixiFilterManager, picture: PixiTexture, targets: readonly PixiTexture[]): void;
+  /**
+   * Lends kept results to the filter: while held, its apply binds them and draws its main body only.
+   *
+   * @param results - One texture per input, or `undefined` to end the loan. A filter with an empty chain is never held.
+   * @example
+   * ```ts
+   * slot.inputs?.hold([blurred]); // the next apply of the Frost draws one pass: its body over the kept blur
+   * ```
+   */
+  hold(results: readonly PixiTexture[] | undefined): void;
 };
 
 /**
@@ -752,6 +838,9 @@ export type SyncInternal = {
    * @returns The layer name, or `undefined` when the root of the chain has no `Layer`.
    */
   layerOf(entity: Entity): string | undefined;
+
+  /** The overlays of this frame: modes, ranges, reasons, dims, HUD parts, and the pictures to take (spec 22). */
+  stepOverlays(): void;
 };
 
 /**
@@ -807,6 +896,10 @@ export type SyncState = {
    * blur's two passes are filters of their own and are in it too. Empty in a production build.
    */
   filterKinds: WeakMap<object, string>;
+  /** Hidden masks of engine objects that are no view (an overlay's dim, a kept quad). */
+  objectHidden: WeakMap<PixiContainer, number>;
+  /** The view whose top (`wrapper ?? object`) a node is, for the hidden masks (O15; skeleton choice, confirmed in LEAD-FIXES-3). */
+  viewOfTop: WeakMap<PixiContainer, View>;
   cleanups: Array<() => void>;
 };
 

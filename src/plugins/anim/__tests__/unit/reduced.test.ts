@@ -301,3 +301,150 @@ describe("anim reduced motion — a held loop writes once", () => {
     expect(mock.api.active()).toBe(0);
   });
 });
+
+describe("anim reduced motion — a track the author keeps", () => {
+  it("lets a keep tween take its full ms", () => {
+    const mock = createMockAnim({ reducedMotion: true });
+
+    mock.start();
+
+    const driver = createDriver(mock.actx);
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const handle = driver.track(
+      entity,
+      Transform,
+      { x: 100 },
+      { ms: 400, ease: "linear", reduced: "keep" },
+      open
+    );
+
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(25);
+    expect(handle.active()).toBe(true);
+  });
+
+  it("keeps the delay and the repeats of a keep tween", () => {
+    const mock = createMockAnim({ reducedMotion: true });
+
+    mock.start();
+
+    const driver = createDriver(mock.actx);
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const handle = driver.track(
+      entity,
+      Transform,
+      { x: 100 },
+      { ms: 100, ease: "linear", delayMs: 100, repeat: 1, reduced: "keep" },
+      open
+    );
+
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(0);
+
+    mock.frame(150);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBeCloseTo(50, 6);
+    expect(handle.active()).toBe(true);
+
+    mock.frame(50);
+
+    expect(handle.active()).toBe(false);
+  });
+
+  it("walks a keep loop while a cut loop stands on its first key", () => {
+    const mock = createMockAnim({ reducedMotion: true });
+
+    mock.start();
+
+    const driver = createDriver(mock.actx);
+    const kept = spawnTestEntity(mock, [Transform()]);
+    const cut = spawnTestEntity(mock, [Transform()]);
+    const loop = { ms: 400, ease: "linear", repeat: "forever" } as const;
+
+    driver.track(kept, Transform, { x: 100 }, { ...loop, reduced: "keep" }, open);
+    driver.track(cut, Transform, { x: 100 }, { ...loop, reduced: "cut" }, open);
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(kept, Transform)?.x).toBe(25);
+    expect(mock.world.ecs.get(cut, Transform)?.x).toBe(0);
+  });
+
+  it("plays the enter, exit and change of a motion with transition.reduced keep at their length", () => {
+    const kept = defineMotion({
+      states: { small: { Transform: { scale: 0.5 } }, gone: { Shape: { alpha: 0 } } },
+      transition: { ms: 1000, ease: "linear", reduced: "keep" },
+      on: { enter: "small", exit: "gone", change: ["Transform"] }
+    });
+    const entering = createViewProbe({ reducedMotion: true });
+    const exiting = createViewProbe({ reducedMotion: true });
+    const changing = createViewProbe({ reducedMotion: true });
+
+    kept.enter?.(entering.view, {});
+    kept.exit?.(exiting.view, {});
+    changing.view.set(Transform, { x: 0 });
+    kept.change?.Transform?.(changing.view, {} as never, {} as never);
+    stepProbe(entering, 500);
+    stepProbe(exiting, 500);
+    stepProbe(changing, 500);
+
+    expect(poseOf(entering).scale).toBeCloseTo(0.75, 6);
+    expect(poseOf(exiting).alpha).toBeCloseTo(0.5, 6);
+    expect(poseOf(changing).x).toBeCloseTo(270, 6);
+  });
+
+  it("walks the keyframe enter and exit of a motion with transition.reduced keep at their length", () => {
+    const kept = defineMotion({
+      keyframes: {
+        dropIn: [{ at: 0, Transform: { dy: -780 } }],
+        flyOff: [{ at: 1, ease: "linear", Transform: { dy: 400 } }]
+      },
+      transition: { ms: 1000, reduced: "keep" },
+      on: { enter: "dropIn", exit: "flyOff" }
+    });
+    const entering = createViewProbe({ reducedMotion: true });
+    const exiting = createViewProbe({ reducedMotion: true });
+
+    kept.enter?.(entering.view, {});
+    kept.exit?.(exiting.view, {});
+    stepProbe(entering, 500);
+    stepProbe(exiting, 500);
+
+    expect(poseOf(entering).y).toBeLessThan(300);
+    expect(poseOf(exiting).y).toBeCloseTo(500, 6);
+  });
+
+  it("walks a loop with loop.reduced keep", () => {
+    const keptWiggle = defineMotion({
+      keyframes: { wiggle: WIGGLE },
+      transition: { ms: 1000 },
+      loop: { track: "wiggle", reduced: "keep" },
+      on: {}
+    });
+    const probe = createViewProbe({ reducedMotion: true });
+
+    keptWiggle.loop?.(probe.view);
+    stepProbe(probe, 16);
+    stepProbe(probe, 234);
+
+    expect(poseOf(probe).rotation).toBeCloseTo(0, 6);
+  });
+
+  it("throws for an unknown reduced value of the transition or the loop, in the house format", () => {
+    expect(() =>
+      defineMotion({
+        states: { small: {} },
+        transition: { reduced: "fade" as never },
+        on: { enter: "small" }
+      })
+    ).toThrow('[game] Motion has reduced "fade".\n  Use "cut" or "keep".');
+    expect(() =>
+      defineMotion({
+        keyframes: { wiggle: WIGGLE },
+        loop: { track: "wiggle", reduced: "slow" as never },
+        on: {}
+      })
+    ).toThrow('[game] Motion has reduced "slow".\n  Use "cut" or "keep".');
+  });
+});

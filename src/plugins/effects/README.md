@@ -91,7 +91,7 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 
 ## Filters
 
-`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
+`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding?, inputs?, fallback? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
 
 - `wgsl` is the WGSL fragment body only: `fn mainFragment` and its helpers. The engine prepends the vertex stage, the input bindings `gfu`, `uTexture`, `uSampler`, and a `FilterUniforms` struct in declaration order bound as `fu`. The body reads `fu.amount`.
 - `glsl` is the same math in GLSL ES 3.0: `void main()`, which sets `finalColor`, and its helpers. The engine prepends `#version 300 es`, `precision highp float;`, `in vec2 vTextureCoord;`, `out vec4 finalColor;`, `uniform sampler2D uTexture;`, Pixi's global filter uniforms `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture` as `vec4`, and one `uniform` per declared uniform under its bare name. The body reads `amount`. The vertex stage is Pixi's `defaultFilterVert`.
@@ -105,6 +105,32 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 | `offset: [2, 3]` (2 to 4 numbers) | `vec2<f32>` … `vec4<f32>` | `uniform vec2 offset;` … `vec4` | an array, not tweenable |
 
 Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is. A WGSL without `mainFragment`, a GLSL without `void main(`, a reserved or badly named uniform, a bad `passes` or `padding` throw at definition; a duplicate id or the id of a built-in throws in `onStart`. The reserved names are `enabled`, `order` and the names the headers declare: `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture`, `uTexture`, `uSampler`, and the GLSL header's `finalColor` and `vTextureCoord`.
+
+### Inputs: a second texture drawn by a chain of stages
+
+`inputs: { blur: { stages, chain } }` gives the body a second texture to read, by name. For each input (at most 4) the engine declares, in the WGSL and in the GLSL it assembles, the texture `blurTexture`, its sampler `blurSampler` (WGSL only: on WebGL a texture carries its sampler state, `@group(1)` bindings `1 + 2k` and `2 + 2k`), two uniforms of its own, `blurScale: vec2<f32>` and `blurClamp: vec4<f32>`, and the function `sampleBlur(uv)`: the body calls `sampleBlur(uv)` and the scale and the clamp happen inside. The engine's two uniforms are no fields of the component and not in `filter.uniforms`; they are in `filter.inputs[k].scale` and `.clamp`.
+
+- `stages` is the static list of the filters the chain may draw, each made by `defineFilter` and drawing alone (no inputs, no fallback of its own); a built-in kind cannot be a stage. They are checked on the device with the kind, before its first instance.
+- `chain(value, { resolution })` returns the steps `{ stage, scale, uniforms? }`, in draw order, at most 16. Each place draws from the one before, the first from the view's own input, into a pooled texture of the input's frame at `resolution × scale` (the scale is a share of the input's resolution, above 0 and at most 1); the body reads the last one. A uniform a step leaves out takes the stage's default. An empty chain binds the view's own input and draws no stage.
+- The chain runs at creation, when a uniform of the value changed (an in-place `world.set` included) and when the resolution of the view's input changed, never per frame and never for `enabled` or `order`; a filter that is off, or a kind switched off by the diagnostics, runs it when it is drawn again.
+- Each place is its own Pixi `Filter` with its own uniform group, drawn through Pixi's public `applyFilter` from inside the main filter's `apply`. Every pooled texture goes back to the pool in a `finally`, also when a place throws, and the inputs are bound to Pixi's empty texture again after every apply: a filter never holds a pooled texture between frames. A place that leaves the chain is destroyed by the next sync, never inside a render.
+- The engine counts the passes: `1` (the body) plus the steps; leave `passes` out (with `inputs`, `passes` throws). `stats().filters` counts instances: the stages are counted in `renderPasses`, not in `filters`.
+- A step whose stage is not in `stages`, a bad scale, a stage uniform the stage does not declare or of another form, more than 16 steps, a result that is not an array and a chain that throws break the instance (reason `"chain"`) in every build: the step is never drawn.
+
+The slot the renderer gets carries `inputs`, `FilterSlotInputs`: the stage filters (so the monitor counts their applies under the kind), `count`, `version()` (it moves when a place, a scale, a stage uniform or the resolution changed), `scaleOf(index)`, and `draw` and `hold`, the seam of the kept-picture cache.
+
+```ts
+const Frost = defineFilter("Frost", {
+  wgsl: FROST_WGSL, // let blurred = sampleBlur(uv);
+  glsl: FROST_GLSL, // vec4 blurred = sampleBlur(vTextureCoord);
+  uniforms: { view: [0, 0, 1], strength: 16, vivid: 1.2 },
+  inputs: { blur: { stages: [FrostBox4, FrostHalf, FrostGauss], chain: frostChain } },
+  fallback: FrostVeil
+});
+Frost.filter.inputs.map(input => input.sample); // ["sampleBlur"]
+```
+
+`fallback` is another filter made by `defineFilter`, drawing alone, over a subset of the filter's uniforms with the same types: it draws with the kind's value when the filter is broken.
 
 ### Built-in filters
 
@@ -129,13 +155,21 @@ One system, `effects:filters`, phase `sync`, in every world mode. It walks the v
 - One instance per view and kind, made the first frame the kind is seen and kept until the component or the entity leaves. An instance of ours carries both programs, a `GpuProgram` of the WGSL and a `GlProgram` of the GLSL over `defaultFilterVert`, and one uniform group: Pixi binds it as `fu` on WebGPU and by bare uniform name on WebGL. `GpuProgram.from` and `GlProgram.from` cache by source, so every view of a kind shares its programs.
 - Every write compares first. Ours compare each uniform with what the group holds (a number as it is, a colour or a tuple element by element as the `Float32Array` stores it, rounded to float32; two NaN are equal) and the padding named after a uniform; only what differs is written, no `update()`. The core kinds compare the fields their setters were last given, only on a frame their component changed, and call the setters only when one differs (`ColorMatrix` starts from `reset()`); an equal value written by a system calls no setter. `enabled` is written only when it flips.
 - A write the player can see, a filter switched on or off or a new value of a filter that is on, calls `renderer.invalidate(entity)` first, once per view and frame, so the renderer judges the view as it was last drawn. A filter that is off and stays off takes its new values silently; so does a kind a debug switch turned off. A new instance, a new order or new passes reach the renderer through `filters.set`, never through `invalidate`.
-- `renderer.sync.filters.set(entity, slots)` with a new frozen list of `{ filter, passes }` only when the kinds, their order or their passes changed. A filter covers the entity's subtree: a glow on a button glows its label.
+- `renderer.sync.filters.set(entity, slots)` with a new frozen list of `{ filter, passes, kind, inputs? }` only when the kinds, their order, their passes or the stage filters of their inputs changed. A filter covers the entity's subtree: a glow on a button glows its label.
 - A removed kind, or a despawn, destroys every uniform buffer of the instance, then the instance; `Filter.destroy()` alone leaves the buffer to a GC that runs after a minute. A despawned entity gets no call: the renderer let its view go.
-- In a dev build a kind with its own shaders is compiled once on the backend that draws, `renderer.host.kind()`, before its first instance. On WebGPU the WGSL goes through `renderer.host.device()`: every error logs `effects:wgsl` with its line and column, and the kind waits for the answer. On WebGL the GLSL goes through `renderer.host.gl()`, at once: every error line of the info log logs `effects:glsl` `{ filter, line, message }`, and the shader is deleted. Lines count in the assembled source. A broken kind never gets an instance, so the view renders as if it had none: one bad shader would otherwise blank the whole frame. A production build compiles nothing twice.
+- The shader check runs in every build. Every definition a registered kind can draw, its body, every stage of its inputs and its fallback, is compiled once on the backend that draws, `renderer.host.kind()`, when the renderer first draws (the first frame with a ready host, or the first node entry, whichever comes first), once per definition object. On WebGPU the WGSL goes through `renderer.host.device()`: every error logs `effects:wgsl` with its line and column. On WebGL the GLSL goes through `renderer.host.gl()`: in the background with `KHR_parallel_shader_compile`, answered on a later frame, otherwise at once; every error line of the info log logs `effects:glsl` `{ filter, line, message }`, and the shader is deleted. Lines count in the assembled source. When every definition answered, `effects:checks` `{ definitions, broken, ms }` is logged once. The check costs one extra shader module (WebGPU) or one extra fragment compile (WebGL) per definition, once per run, at the first drawn frame.
+- A kind gets no instance until its body and every stage answered ok: a view of a pending kind draws unfiltered, never with an unchecked shader, and logs `effects:check-pending` `{ filter }` once per kind. The `load` stage of every node entry waits for any check still pending (`effects:mount-waited` `{ node, ms }`), so the boot's first scene mounts with its filtered views already filtered, together with the boot bundles, and no mounted scene draws a pending kind's view. A renderer that draws nothing (headless, the unsupported screen) waits for nothing; an aborted node stops waiting.
 
-### A filter whose apply throws
+### Broken: one state, `fallback`, the dev mark, never a blank frame
 
-Every Pixi filter the engine builds, ours and the core kinds, a `Blur` on both its passes too, has one guard around its `apply`. A shader that binds a texture the engine never filled, or a destroyed `Displacement` map, throws inside Pixi's `apply`; Pixi's `FilterSystem.pop` has no `try/finally`, so the throw would skip the return of the view's pooled textures every frame. Instead the instance is switched off for good: the view is drawn straight through, unfiltered, in that same frame and from then on, the instance stays off whatever its component says, and the log holds one `effects:broken` error `{ filter, reason: "apply", message }` per kind per run, however many instances of it break. No pooled texture is lost, with one exception: inside a `Blur` of quality 2 or more, the pass that threw keeps the one temp texture of its own multi-pass loop, once, in the frame it breaks (Pixi takes it inside that pass, out of the guard's reach). Nothing is retried. The instance stays until the filter sync retires it (the kind leaves the view, the entity despawns, its map is retired, a hot swap rebuilds it); a new instance starts unbroken. The fix is in the shader or its bindings.
+A shader that does not compile on the device (the body or one of its stages, reason `"compile"`, the whole kind), an `apply` that throws (reason `"apply"`, one instance) and a chain that throws or returns a step it may not draw (reason `"chain"`, one instance) lead to one state, broken, with one behaviour:
+
+- the log holds one `effects:broken` error per kind and reason per run, in every build: `{ filter, reason, message, stage?, input?, fallback? }` (`stage`: the stage that failed to compile; `input`: the input whose chain failed; `fallback`: the declared fallback's id). A fallback that fails its own check logs `effects:broken` under its own id, once;
+- the declared `fallback` draws instead, with the kind's value, once its own check answered ok (a broken kind waits a frame or two for that answer, unfiltered); without one, or with a broken one, the view draws unfiltered;
+- in a dev build a striped magenta mark is drawn over the view, over its fallback when there is one: diagonal stripes 6 CSS px wide over the whole filter area, visible on transparent pixels too, so a broken view cannot be mistaken for a design choice. A production or debug build never draws it, and a release bundle holds neither the mark nor its shader;
+- nothing is retried: a broken kind never gets an instance of its own definition again in this run, a broken instance stays until the filter sync retires it.
+
+Every Pixi filter the engine builds, ours and the core kinds, a `Blur` on both its passes too, has one guard around its `apply`. A shader that binds a texture the engine never filled, or a destroyed `Displacement` map, throws inside Pixi's `apply`; Pixi's `FilterSystem.pop` has no `try/finally`, so the throw would skip the return of the view's pooled textures every frame. Instead the instance breaks for good: in that same frame the guard draws its stand-in (the fallback, with the mark in a dev build) or, without one, the view straight through, unfiltered; the next sync puts the stand-in in the slot list without building it again, and a stand-in that breaks in its turn draws through, with no stand-in of its own. No pooled texture is lost, with one exception: inside a `Blur` of quality 2 or more, the pass that threw keeps the one temp texture of its own multi-pass loop, once, in the frame it breaks (Pixi takes it inside that pass, out of the guard's reach). Nothing is retried. The instance stays until the filter sync retires it (the kind leaves the view, the entity despawns, its map is retired, a hot swap rebuilds it); a new instance starts unbroken. The fix is in the shader or its bindings.
 
 ## Config
 
@@ -178,7 +212,7 @@ app.effects.stats().renderPasses; // 9; stats().filters stays 8
 
 ## Headless
 
-`renderer.host.ready()` is false: both systems return at once, no particle entity is spawned, no Pixi class is touched, `stats()` answers zeros. `onStart` still checks every definition, so a headless test catches a duplicate id. `Emitter` and every filter component are stored like any component: `snapshot()` shows `{ Emitter: { effect: "fx.steam", active: true }, "effects.glow": { strength: 2, … } }`.
+`renderer.host.ready()` is false: both systems return at once, no particle entity is spawned, no Pixi class is touched, no shader is checked, the `load` gate waits for nothing, `stats()` answers zeros. `onStart` still reads every definition, so a headless test catches a duplicate id. `Emitter` and every filter component are stored like any component: `snapshot()` shows `{ Emitter: { effect: "fx.steam", active: true }, "effects.glow": { strength: 2, … } }`.
 
 ## Hooks
 
@@ -194,7 +228,7 @@ Save `features/board/effects.ts` while the dev server runs: a changed `starsBurs
 
 ## Lifecycle
 
-`onStart` resolves the four dependencies and the phone flag, registers the built-in kinds and then the `filters` of every feature, reads the `emitters`, and opens the two systems with the world hooks. `onStop` runs from state alone: it destroys every container, orphan, filter and uniform buffer and clears the filters of every view, while `world` and `renderer` still run.
+`onStart` resolves the dependencies and the phone flag, registers the built-in kinds and then the `filters` of every feature, registers the `load` gate with `flow.onEnter`, reads the `emitters`, and opens the two systems with the world hooks. Nothing is compiled there: the host is not ready yet. `onStop` runs from state alone: it destroys every container, orphan, filter (with the places of its chains, its mark and a stand-in never put in place) and uniform buffer, clears the filters of every view and deletes the GLSL compiles still in flight while `world` and `renderer` still run, removes the gate, and starts the checks over: an answer of the stopped run is ignored.
 
 ## Doors
 
@@ -210,4 +244,4 @@ None. Nothing above `effects` needs to know a particle died or a filter was assi
 
 ## Dependencies
 
-`flow` (`features.all()`), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)`, the `assets:bundle-unloaded` and `assets:replaced` hooks), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.
+`flow` (`features.all()`, `onEnter("load", …)` for the gate of the shader checks), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `host.resolution()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)`, the `assets:bundle-unloaded` and `assets:replaced` hooks), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.

@@ -29,6 +29,7 @@ function setup(overrides: Partial<Config> = {}): { api: Api; ctx: TimeCtx } {
     maxDeltaMs: 50,
     idleFps: 30,
     idleAfterMs: 2000,
+    adaptive: false,
     ...overrides
   };
   const ctx: TimeCtx = {

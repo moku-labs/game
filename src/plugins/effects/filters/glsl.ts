@@ -3,9 +3,10 @@
  * `wgsl.ts`: the version and the precision, the inputs and the output Pixi's WebGL filter system
  * fills, and one `uniform` per declared uniform under its bare name. Pixi binds a `UniformGroup`
  * on WebGL by uniform name, so the one group of an instance serves both programs and the shader
- * cannot drift from it. Pure strings.
+ * cannot drift from it. For each input the engine declares the texture, its scale and clamp uniforms and
+ * `sample<Name>(uv)`; on WebGL a texture carries its sampler state. Pure strings.
  */
-import type { UniformSpec } from "./types";
+import type { FilterInputDefinition, UniformSpec } from "./types";
 
 /**
  * The head of every filter's GLSL. `#version 300 es` comes first, so Pixi compiles both stages
@@ -57,16 +58,50 @@ export function glslUniforms(uniforms: readonly UniformSpec[]): string {
 }
 
 /**
- * The whole GLSL of a filter: the header, the uniforms, the body.
+ * The engine's half of each input in GLSL: the texture, and the function that reads it at the body's uv, its scale
+ * and its clamp applied. The two uniforms it reads are declared before it by `glslUniforms`. Nothing without inputs.
+ *
+ * @param inputs - The inputs in declaration order.
+ * @returns The GLSL lines, or `""`.
+ * @example
+ * ```ts
+ * glslInputs([blurInput]).startsWith("uniform sampler2D blurTexture;"); // true
+ * ```
+ */
+export function glslInputs(inputs: readonly FilterInputDefinition[]): string {
+  return inputs
+    .map(
+      input =>
+        `uniform sampler2D ${input.texture};\n\n` +
+        `vec4 ${input.sample}(vec2 uv) {\n` +
+        `  return textureLod(${input.texture}, clamp(uv * uInputSize.xy * ${input.scale.name}, ${input.clamp.name}.xy, ${input.clamp.name}.zw), 0.0);\n` +
+        "}\n\n"
+    )
+    .join("");
+}
+
+/**
+ * The whole GLSL of a filter: the header, the uniforms (then the scale and the clamp of each input), the inputs, the
+ * body.
  *
  * @param uniforms - The uniforms in declaration order.
+ * @param inputs - The inputs in declaration order.
  * @param body - The fragment body the game wrote.
  * @returns The GLSL fragment source the `GlProgram` is built from.
  * @example
  * ```ts
- * assembleGlsl([], body).endsWith(body); // true
+ * assembleGlsl([], [], body).endsWith(body); // true
  * ```
  */
-export function assembleGlsl(uniforms: readonly UniformSpec[], body: string): string {
-  return `${GLSL_HEADER}${glslUniforms(uniforms)}${body}`;
+export function assembleGlsl(
+  uniforms: readonly UniformSpec[],
+  inputs: readonly FilterInputDefinition[],
+  body: string
+): string {
+  const declared = glslUniforms([
+    ...uniforms,
+    ...inputs.flatMap(input => [input.scale, input.clamp])
+  ]);
+
+  return `${GLSL_HEADER}${declared}${glslInputs(inputs)}${body}`;
 }

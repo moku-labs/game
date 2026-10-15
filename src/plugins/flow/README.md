@@ -112,6 +112,9 @@ a running `guide` lets it through. Otherwise the answer is dropped.
 | Above `0` | Until it is older than `holdMs` | The last wins |
 | `Infinity` | Until the next gate opens | The last wins |
 
+The gate keeps one answer: with `holdMs` above `0` a newer refused answer replaces the held one. A
+queue would replay answers given against a board the player no longer sees.
+
 The age is counted in game time, `time.snapshot().elapsed`, from the moment of the refusal. A
 paused game ages nothing.
 
@@ -128,6 +131,33 @@ These hold nothing or drop the answer, whatever `holdMs` is:
 - Entering a bookmark drops it. The press belongs to the position the restore left.
 - Giving up on a transition drops it, before the graph goes to `safeNode`. A retry keeps it.
 - A stop drops it. The next `run()` starts with nothing held.
+
+### A flight that does not close the gate
+
+A node that awaits its flight keeps the gate closed for as long as the flight runs, and the gate
+holds one answer only. Commit at once and start the flight instead:
+
+```ts
+// Before: the node waits for the flight; two merges inside 400 ms lose the first one.
+run: async ({ input, player, fx, out }) => {
+  await fx(play(mergeFlight, { item: { projection: "board.items", key: input.from } }));
+  mergeItems(player.board, input.from, input.to);
+  return out.done();
+}
+// After: the flight starts, the merge commits on this edge, the next drop is taken in the next frame.
+run: ({ input, player, fx, out }) => {
+  fx.start(play(mergeFlight, { item: { projection: "board.items", key: input.from } }));
+  mergeItems(player.board, input.from, input.to);
+  return out.done();
+}
+```
+
+A timeline fixes its targets when it starts, so the item it flies keeps flying after the commit
+removed it from its projection, while its exit plays. `fx.start` refuses only a descriptor with
+`answers` and a `guide`; `play(...)` is neither. `mergeItems` is the game's own rule.
+
+The second form needs no timeline: the item's projection draws the flight from state with a
+`change` hook, `motion: { change: { Transform: view => view.toRest(Transform, { ms: 350 }) } }`.
 
 ## When a node fails
 

@@ -14,7 +14,8 @@ describe("createEffectsState", () => {
     expect(state.instances.size).toBe(0);
     expect(state.orphans.size).toBe(0);
     expect(state.kinds.size).toBe(0);
-    expect(state.checks.size).toBe(0);
+    expect(state.checks.started).toBe(false);
+    expect(state.checks.waiting).toBe(0);
     expect(state.views.size).toBe(0);
     expect(state.broken.size).toBe(0);
     expect(state.warned.size).toBe(0);
@@ -36,13 +37,13 @@ describe("createEffectsState", () => {
 
     first.warned.add("emitter:fx.stars");
     first.broken.add("glow");
-    first.checks.set("glow", "ok");
+    first.checks.waiting = 3;
     first.removers.push(() => {});
     first.over.passes = true;
 
     expect(second.warned.size).toBe(0);
     expect(second.broken.size).toBe(0);
-    expect(second.checks.size).toBe(0);
+    expect(second.checks.waiting).toBe(0);
     expect(second.removers).toEqual([]);
     expect(second.over.passes).toBe(false);
     expect(second.views).not.toBe(first.views);

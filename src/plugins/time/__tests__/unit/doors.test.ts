@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../../../index";
 import { run } from "../../../flow/doors/run";
-import { stepCommand, timeScaleCommand } from "../../control";
+import { frameRateCommand, stepCommand, timeScaleCommand } from "../../control";
 
 // ---------------------------------------------------------------------------
 // Unit test: the time command of the /control door over the real time plugin
@@ -139,5 +139,40 @@ describe("game.timeScale", () => {
       event: "moku:dev",
       data: { command: "game.timeScale", scale: 0.5 }
     });
+  });
+});
+
+describe("game.frameRate", () => {
+  it("forces 60, and gives the rate back to the config without fps", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const app = createApp({ pluginConfigs: { time: { maxFps: 120 } } });
+
+    const forced = await run(app, frameRateCommand, { fps: 60 });
+    const released = await run(app, frameRateCommand, {});
+
+    expect(forced.value).toMatchObject({ fps: 60, mode: "forced" });
+    expect(released.value).toMatchObject({ fps: 120, mode: "fixed", reason: "auto" });
+    await expect(run(app, frameRateCommand, { fps: 90 })).rejects.toThrow(
+      /^\[game] time\.setRate takes "auto", 30, 60 or 120\./
+    );
+  });
+
+  it("is refused without the dev or agent flag, and leaves a moku:dev entry inside one", async () => {
+    const app = createApp();
+
+    expect(() => frameRateCommand.run(app, { fps: 30 })).toThrow("dev builds only");
+    expect(app.time.rate().fps).toBe(60);
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    await run(app, frameRateCommand, { fps: 30 });
+
+    expect(app.time.rate().fps).toBe(30);
+    expect(app.log.trace()).toContainEqual(
+      expect.objectContaining({
+        level: "debug",
+        event: "moku:dev",
+        data: { command: "game.frameRate", fps: 30 }
+      })
+    );
   });
 });

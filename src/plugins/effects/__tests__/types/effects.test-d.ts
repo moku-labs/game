@@ -3,6 +3,7 @@ import { defineGame } from "../../../../index";
 import { tween } from "../../../anim/timeline/steps";
 import type { Target } from "../../../anim/types";
 import type { EmitterIdOf } from "../../../flow/types";
+import type { FilterSlot, PixiFilter } from "../../../renderer/types";
 import { Blur, Displacement, Glow } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import type { FilterInstance } from "../../filters/types";
@@ -13,7 +14,11 @@ import type {
   EffectsApi,
   EffectsStats,
   EmitterDefinition,
-  FilterComponent
+  FilterComponent,
+  FilterDefinition,
+  FilterInputDefinition,
+  FilterStage,
+  FilterStep
 } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -104,3 +109,51 @@ expectTypeOf<Config["blur"]>().toEqualTypeOf<{ quality: number; phoneResolution:
 
 // An instance carries its own broken flag: the apply guard sets it, the filter sync reads it.
 expectTypeOf<FilterInstance["broken"]>().toEqualTypeOf<boolean>();
+
+// ─── filter inputs and fallback ──────────────────────────────────────────────
+
+const Small = defineFilter("fx.small", { wgsl: "", glsl: "" });
+const Along = defineFilter("fx.along", { wgsl: "", glsl: "", uniforms: { dir: [0, 0], sigma: 0 } });
+
+// The chain reads the filter's own value type.
+defineFilter("fx.soft", {
+  wgsl: "",
+  glsl: "",
+  uniforms: { spread: 1 },
+  inputs: {
+    soft: {
+      stages: [Small, Along],
+      chain: value => {
+        expectTypeOf(value.spread).toEqualTypeOf<number>();
+        // @ts-expect-error — the filter declares no `missing`
+        expectTypeOf(value.missing).toBeNumber();
+
+        return [{ stage: Along, scale: 0.5, uniforms: { dir: [1, 0] } }];
+      }
+    }
+  }
+});
+
+defineFilter("fx.soft", {
+  wgsl: "",
+  glsl: "",
+  // @ts-expect-error — a built-in Pixi-core kind has no definition: it cannot be a stage
+  inputs: { soft: { stages: [Blur], chain: () => [] } }
+});
+
+defineFilter("fx.soft", {
+  wgsl: "",
+  glsl: "",
+  inputs: {
+    // @ts-expect-error — a scale is a share of the resolution, a number
+    soft: { stages: [Small], chain: () => [{ stage: Small, scale: "half" }] }
+  }
+});
+
+// @ts-expect-error — a fallback is another filter made by defineFilter
+defineFilter("fx.soft", { wgsl: "", glsl: "", fallback: Blur });
+
+expectTypeOf<FilterDefinition["inputs"]>().toEqualTypeOf<readonly FilterInputDefinition[]>();
+expectTypeOf<FilterSlot>().toHaveProperty("inputs");
+expectTypeOf<{ filter: PixiFilter; passes: number }>().toMatchTypeOf<FilterSlot>();
+expectTypeOf<FilterStep["stage"]>().toEqualTypeOf<FilterStage>();

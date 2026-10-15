@@ -16,7 +16,7 @@ import {
   platformPlugin,
   screen
 } from "../index";
-import { fakeClock } from "../plugins/clock/fake";
+import { fakeClock, isFakeClock } from "../plugins/clock/fake";
 import { memory } from "../plugins/model/store/providers/memory";
 import type {
   GameApp,
@@ -250,7 +250,9 @@ function definedKeys<Seam extends object>(seam: Seam | undefined): Partial<Seam>
 
 /**
  * Merges the seam-owned keys over the game's plugin configs, one plugin at a time: a key the game
- * owns stays, a key the shell owns is written. With `screen` the screen keys are written too.
+ * owns stays, a key the shell owns is written. With `screen` the screen keys are written too. The
+ * game's adaptive frame rate stands only in a screen app on a device clock (the page): a headless
+ * app and a screen app on a fake clock never adapt.
  *
  * @param definition - The game's definition.
  * @param seams - The seams of this call.
@@ -275,7 +277,11 @@ function mergeConfigs(
       seed: seams.seed ?? definition.seed ?? defaultSeed
     },
     clock: { source: runtime.clock },
-    flow: { ...game.flow, mainFlow: definition.flow, safeNode: definition.safeNode }
+    flow: { ...game.flow, mainFlow: definition.flow, safeNode: definition.safeNode },
+    time: {
+      ...game.time,
+      ...(withScreen && !isFakeClock(runtime.clock) ? {} : { adaptive: false })
+    }
   };
 
   if (!withScreen) return logic;

@@ -20,10 +20,11 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 
 | Plugin | Key | Type | Default | Meaning |
 |---|---|---|---|---|
-| `time` | `maxFps` | `30 \| 60 \| 120` | `60` | Frame rate cap |
+| `time` | `maxFps` | `30 \| 60 \| 120` | `60` | Frame rate cap; the top of the ladder with `adaptive` |
 | `time` | `maxDeltaMs` | `number` | `50` | Upper bound of one frame's delta in milliseconds |
 | `time` | `idleFps` | `0 \| 30` | `30` | Frame rate cap of an idle screen. `0` turns the idle cap off. Any plugin lifts it with `wake()` |
 | `time` | `idleAfterMs` | `number` | `2000` | Unscaled milliseconds without a `wake()` after which the loop drops to `idleFps` |
+| `time` | `adaptive` | `false \| { floor: 30 \| 60 }` | `false` | Adaptive frame rate: the highest divisor of the display rate at or below `maxFps`, down one step when drawn frames come late, up again after steady room, never below `floor`. Off in a headless app and on a fake clock. See the [time README](../src/plugins/time/README.md) |
 | `lifecycle` | none | | | The plugin has no config |
 | `model` | `playerProvider` | `PlayerStateProvider \| undefined` | `undefined` | The save seam. `undefined` means an in-memory provider: the save lives as long as the app does |
 | `model` | `initialPlayer` | `Json` | `{}` | Player state of a new player. Deep-cloned |

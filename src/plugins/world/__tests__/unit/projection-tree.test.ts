@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Tree } from "../../ecs/define";
+import { Layer, Tree } from "../../ecs/define";
 import { projection } from "../../projection/define";
 import type { AnyProjectionSpec, DescriptionNode } from "../../projection/types";
 import { MOUNT_OWNER } from "./board";
@@ -147,5 +147,31 @@ describe("projection Tree", () => {
     world.frame(16);
 
     expect(changed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the Layer of a screen", () => {
+  it("is attached before Tree, so the Tree hook of a projection in layer scene reads scene", () => {
+    const world = createMockWorld();
+    const read: Array<string | undefined> = [];
+
+    world.model.player = { hud: { coins: 5 } };
+    world.api.projection.setLayers([
+      { name: "scene", sort: "none" },
+      { name: "ui", sort: "none" }
+    ]);
+    world.api.projection.register(
+      projection({
+        name: HUD,
+        layer: "scene",
+        from: (player: { hud: Hud }) => player.hud,
+        view: (hud: Hud) => [Tree({ node: hudNode(hud.coins) })]
+      }) as AnyProjectionSpec
+    );
+    world.start();
+    world.api.ecs.onAdded(Tree, entity => read.push(world.api.ecs.get(entity, Layer)?.name));
+    world.api.projection.mount([HUD], MOUNT_OWNER);
+
+    expect(read).toEqual(["scene"]);
   });
 });

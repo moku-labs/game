@@ -111,7 +111,7 @@ export function runMeasuredFrame(
   record.at = at;
   // NaN − lastAt stays NaN: the first frame and the first after a resume have no gap.
   record.gapMs = stepped ? Number.NaN : at - measure.lastAt;
-  record.rateMs = 1000 / ctx.config.maxFps;
+  record.rateMs = 1000 / ctx.state.rate.fps;
   record.skipped = measure.skipped;
   record.workMs = mark - at;
   record.listenersMs = measure.listenersMs;
@@ -119,7 +119,9 @@ export function runMeasuredFrame(
 
   if (stepped) {
     record.idle = ctx.state.idle;
-    record.capMs = 1000 / (ctx.state.idle ? ctx.config.idleFps : ctx.config.maxFps);
+    const { fps } = ctx.state.rate;
+
+    record.capMs = 1000 / (ctx.state.idle ? Math.min(ctx.config.idleFps, fps) : fps);
   }
 
   // Copy-on-write, as the callbacks: a listener added now is called from the next frame on.

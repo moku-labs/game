@@ -2,8 +2,11 @@
  * @file anim plugin — `defineMotion`: the sugar that turns named poses, keyframe tracks and a
  * loop into the three projection motion hooks of `world`. Pure, no ctx: it only builds hooks that
  * call `ViewHandle`, so a UI element and a projection view play the same way through the same
- * driver.
+ * driver. The loop hook carries a fingerprint of its data, so `ui` can tell an equal loop built
+ * again from a new one.
  */
+
+import type { Hint } from "../flow/types";
 import type {
   NineSliceValue,
   ShapeValue,
@@ -17,12 +20,14 @@ import type {
   ChangeHook,
   Ease,
   Motion,
+  MotionCause,
   NumericFields,
   ProjectionMotion,
+  ReducedMotion,
   ViewHandle
 } from "../world/types";
 import { asComponent } from "./components";
-import { checkLoop, checkTrack, playKeyframes, playLoop } from "./keyframes";
+import { checkLoop, checkTrack, playKeyframes, playLoop, reducedOption } from "./keyframes";
 import type { MotionKeyframe } from "./types";
 
 /** What a motion transition runs for when the author named nothing else. */
@@ -30,6 +35,9 @@ const DEFAULT_TRANSITION_MS = 250;
 
 /** What a motion transition eases with when the author named nothing else. */
 const DEFAULT_TRANSITION_EASE: Ease = "out";
+
+/** The key of the fingerprint `loopHook` stamps on the loop hook it builds. */
+const PRINT: unique symbol = Symbol("moku.motion.print");
 
 /**
  * The display components a pure `defineMotion` can name. A hook has no context, so it can only
@@ -62,15 +70,19 @@ export type MotionState = {
 };
 
 /**
- * The resolved way between two poses: `defineMotion` fills both fields in, so every track a hook
- * starts carries a concrete duration and curve.
+ * The resolved way between two poses: `defineMotion` fills every field in, so every track a hook
+ * starts carries a concrete duration, curve and reduced-motion rule.
  *
  * @example
  * ```ts
- * const transition: MotionTransition = { ms: 150, ease: "out" };
+ * const transition: MotionTransition = { ms: 150, ease: "out", reduced: "cut" };
  * ```
  */
-export type MotionTransition = { readonly ms: number; readonly ease: Ease };
+export type MotionTransition = {
+  readonly ms: number;
+  readonly ease: Ease;
+  readonly reduced: ReducedMotion;
+};
 
 /**
  * What `defineMotion` is given: the named poses, the keyframe tracks, how long the way takes, and
@@ -81,6 +93,10 @@ export type MotionTransition = { readonly ms: number; readonly ease: Ease };
  * added over whatever else moves it: one cycle is `loop.ms` (default `transition.ms`), every
  * Transform key is an offset from rest, and the last key repeats the first one. It is not part of
  * the motion `enter` returns.
+ *
+ * `when` says when `enter` and `exit` play: `"always"` (the default) or only for a commit
+ * (`"change"`). `transition.reduced` and `loop.reduced` say what reduced motion does to their
+ * tracks: `"cut"` (the default) or `"keep"`.
  *
  * @example
  * ```ts
@@ -98,19 +114,52 @@ export type MotionTransition = { readonly ms: number; readonly ease: Ease };
  *   loop: { track: "sway", ms: 2400 },
  *   on: { enter: "small" }
  * };
+ * // A card that stands at rest when its board mounts and fades in when a commit adds it, also
+ * // under reduced motion.
+ * const newCard: MotionSpec = {
+ *   states: { faded: { Shape: { alpha: 0 } } },
+ *   transition: { ms: 220, reduced: "keep" },
+ *   on: { enter: "faded" },
+ *   when: "change"
+ * };
  * ```
  */
 export type MotionSpec = {
   readonly states?: Readonly<Record<string, MotionState>>;
   readonly keyframes?: Readonly<Record<string, readonly MotionKeyframe[]>>;
-  readonly transition?: { readonly ms?: number; readonly ease?: Ease };
-  readonly loop?: { readonly track: string; readonly ms?: number };
+  readonly transition?: {
+    readonly ms?: number;
+    readonly ease?: Ease;
+    readonly reduced?: ReducedMotion;
+  };
+  readonly loop?: {
+    readonly track: string;
+    readonly ms?: number;
+    readonly reduced?: ReducedMotion;
+  };
   readonly on: {
     readonly enter?: string;
     readonly exit?: string;
     readonly change?: readonly (keyof MotionComponents & string)[];
   };
+  /**
+   * When `enter` and `exit` play: `"always"` (the default, as before) or only for a commit
+   * (`"change"`); with `"change"` an element that comes or goes with its screen stands at rest and
+   * leaves without a motion. The loop is not concerned.
+   */
+  readonly when?: "always" | "change";
 };
+
+/**
+ * The enter or exit hook `defineMotion` builds: it is told why it plays, and plays for no reason
+ * the motion does not accept.
+ */
+type MotionHook = (
+  view: ViewHandle<unknown>,
+  item?: unknown,
+  hint?: Hint,
+  cause?: MotionCause
+) => Motion;
 
 /**
  * The component type behind one of the four names a motion state may use.
@@ -171,9 +220,14 @@ function ownEntry<Value>(
 }
 
 /**
- * The resolved loop of a motion: the keys of its track and the length of one cycle.
+ * The resolved loop of a motion: the keys of its track, the length of one cycle and what reduced
+ * motion does to it.
  */
-type MotionLoop = { readonly keys: readonly MotionKeyframe[]; readonly ms: number };
+type MotionLoop = {
+  readonly keys: readonly MotionKeyframe[];
+  readonly ms: number;
+  readonly reduced: ReducedMotion;
+};
 
 /**
  * Resolves the loop a motion names, if it names one.
@@ -204,17 +258,42 @@ function loopOf(spec: MotionSpec, transitionMs: number): MotionLoop | undefined 
 
   checkLoop(track, keys);
 
-  return { keys, ms };
+  return { keys, ms, reduced: spec.loop.reduced ?? "cut" };
+}
+
+/**
+ * Checks the fields of a motion that take one of a few words: `when`, and `reduced` of the
+ * transition and of the loop. A plain JavaScript caller can pass any value.
+ *
+ * @param spec - What `defineMotion` was given.
+ * @throws {Error} With the value at fault, in the house format.
+ */
+function checkChoices(spec: MotionSpec): void {
+  const when: unknown = spec.when;
+
+  if (when !== undefined && when !== "always" && when !== "change") {
+    throw new Error(`[game] Motion has when "${String(when)}".\n  Use "always" or "change".`);
+  }
+
+  const rules: unknown[] = [spec.transition?.reduced, spec.loop?.reduced];
+
+  for (const reduced of rules) {
+    if (reduced === undefined || reduced === "cut" || reduced === "keep") continue;
+
+    throw new Error(`[game] Motion has reduced "${String(reduced)}".\n  Use "cut" or "keep".`);
+  }
 }
 
 /**
  * Checks a motion at definition time: every keyframe track, no name that is both a state and a
- * track, and an `on.enter` / `on.exit` that names one of them.
+ * track, an `on.enter` / `on.exit` that names one of them, and the words of `when` and `reduced`.
  *
  * @param spec - What `defineMotion` was given.
- * @throws {Error} With the name at fault, in the house format.
+ * @throws {Error} With the name or the value at fault, in the house format.
  */
 function checkMotion(spec: MotionSpec): void {
+  checkChoices(spec);
+
   for (const [name, keys] of Object.entries(spec.keyframes ?? {})) {
     checkTrack(name, keys);
 
@@ -239,15 +318,14 @@ function checkMotion(spec: MotionSpec): void {
 }
 
 /**
- * Builds the enter or exit hook for the name `on` gave it: a state is reached with tweens, a
- * keyframe track is walked.
+ * What plays the name `on` gave a hook: a state is reached with tweens, a keyframe track is walked.
  *
  * @param spec - What `defineMotion` was given, already checked.
  * @param hook - Which hook to build.
  * @param transition - The resolved transition.
- * @returns The hook, or `undefined` when `on` names nothing for it.
+ * @returns The player, or `undefined` when `on` names nothing for it.
  */
-function hookOf(
+function playerOf(
   spec: MotionSpec,
   hook: "enter" | "exit",
   transition: MotionTransition
@@ -266,11 +344,108 @@ function hookOf(
 
   const keys = ownEntry(spec.keyframes, name);
 
-  return keys === undefined ? undefined : view => playKeyframes(view, keys, transition.ms, hook);
+  return keys === undefined
+    ? undefined
+    : view => playKeyframes(view, keys, transition.ms, hook, transition.reduced);
+}
+
+/**
+ * Builds the enter or exit hook for the name `on` gave it. A motion that plays only for changes
+ * plays nothing for a cause `"mount"`: the view is not touched, so it stands at rest. A call
+ * without a cause plays.
+ *
+ * @param spec - What `defineMotion` was given, already checked.
+ * @param hook - Which hook to build.
+ * @param transition - The resolved transition.
+ * @param when - When the hook plays.
+ * @returns The hook, or `undefined` when `on` names nothing for it.
+ */
+function hookOf(
+  spec: MotionSpec,
+  hook: "enter" | "exit",
+  transition: MotionTransition,
+  when: "always" | "change"
+): MotionHook | undefined {
+  const play = playerOf(spec, hook, transition);
+
+  if (play === undefined) return undefined;
+
+  return (view, _item, _hint, cause) =>
+    when === "change" && cause === "mount" ? undefined : play(view);
+}
+
+/**
+ * Writes a value as JSON with the keys of every plain object sorted and its `undefined` fields
+ * left out, so two equal values built apart give the same text.
+ *
+ * @param value - The value to write.
+ * @returns The text, or `undefined` when the value holds a function anywhere.
+ * @example
+ * ```ts
+ * stableJson({ b: 1, a: [2] }); // '{"a":[2],"b":1}'
+ * ```
+ */
+function stableJson(value: unknown): string | undefined {
+  if (typeof value === "function") return undefined;
+  if (Array.isArray(value)) return listJson(value);
+  if (typeof value === "object" && value !== null) return recordJson(value);
+
+  return JSON.stringify(value);
+}
+
+/**
+ * Writes a list for `stableJson`, in order.
+ *
+ * @param list - The list to write.
+ * @returns The text, or `undefined` when an entry holds a function.
+ * @example
+ * ```ts
+ * listJson([{ b: 1, a: 2 }]); // '[{"a":2,"b":1}]'
+ * ```
+ */
+function listJson(list: readonly unknown[]): string | undefined {
+  const parts: string[] = [];
+
+  for (const entry of list) {
+    const part = entry === undefined ? "null" : stableJson(entry);
+
+    if (part === undefined) return undefined;
+    parts.push(part);
+  }
+
+  return `[${parts.join(",")}]`;
+}
+
+/**
+ * Writes a plain object for `stableJson`, its keys sorted and its `undefined` fields left out.
+ *
+ * @param record - The object to write.
+ * @returns The text, or `undefined` when a field holds a function.
+ * @example
+ * ```ts
+ * recordJson({ z: undefined, y: "a" }); // '{"y":"a"}'
+ * ```
+ */
+function recordJson(record: object): string | undefined {
+  const parts: string[] = [];
+  const fields = record as Readonly<Record<string, unknown>>;
+
+  for (const key of Object.keys(fields).toSorted()) {
+    if (fields[key] === undefined) continue;
+
+    const part = stableJson(fields[key]);
+
+    if (part === undefined) return undefined;
+    parts.push(`${JSON.stringify(key)}:${part}`);
+  }
+
+  return `{${parts.join(",")}}`;
 }
 
 /**
  * The loop hook: it starts the loop on a view and answers its motion, which never ends on its own.
+ * The hook carries the fingerprint of its keys, cycle and reduced-motion rule, under a symbol, so
+ * `printOf` reads it; a loop whose keys hold a function ease carries none.
  *
  * @param loop - The resolved loop, if any.
  * @returns The hook, or `undefined` when the motion names no loop.
@@ -280,7 +455,36 @@ function loopHook(
 ): ((view: ViewHandle<unknown>) => Motion) | undefined {
   if (loop === undefined) return undefined;
 
-  return view => playLoop(view, loop.keys, loop.ms);
+  const hook = (view: ViewHandle<unknown>): Motion =>
+    playLoop(view, loop.keys, loop.ms, loop.reduced);
+  const print = stableJson({ keys: loop.keys, ms: loop.ms, reduced: loop.reduced });
+
+  if (print !== undefined) Object.defineProperty(hook, PRINT, { value: print });
+
+  return hook;
+}
+
+/**
+ * The fingerprint `defineMotion` stamped on a loop hook: equal for two motions whose loop plays the same keys over the
+ * same length with the same reduced-motion rule, absent on a hand-written hook and on a loop whose keys hold a
+ * function ease.
+ *
+ * @param hook - A `loop` hook, or anything else.
+ * @returns The fingerprint, or `undefined`.
+ * @example
+ * ```ts
+ * const keys = [{ at: 0, Transform: { rotation: 0 } }, { at: 0.5, Transform: { rotation: 0.05 } }, { at: 1, Transform: { rotation: 0 } }];
+ * const spec = { keyframes: { sway: keys }, loop: { track: "sway", ms: 1200 }, on: {} };
+ * printOf(defineMotion(spec).loop) === printOf(defineMotion(spec).loop); // true
+ * printOf(() => undefined); // undefined
+ * ```
+ */
+export function printOf(hook: unknown): string | undefined {
+  if (typeof hook !== "function") return undefined;
+
+  const print: unknown = Reflect.get(hook, PRINT);
+
+  return typeof print === "string" ? print : undefined;
 }
 
 /**
@@ -300,7 +504,7 @@ function playEnter(
 
   for (const [component, fields] of poses) view.set(component, fields);
 
-  return view.all(poses.map(([component]) => view.toRest(component, transition)));
+  return view.all(poses.map(([component]) => view.toRest(component, trackOptionsOf(transition))));
 }
 
 /**
@@ -319,7 +523,28 @@ function playExit(
 ): Motion {
   const poses = posesOf(state);
 
-  return view.all(poses.map(([component, fields]) => view.tween(component, fields, transition)));
+  return view.all(
+    poses.map(([component, fields]) => view.tween(component, fields, trackOptionsOf(transition)))
+  );
+}
+
+/**
+ * The options a transition starts a track with: its length and curve, and `reduced` only for a
+ * kept track, so a cut track starts with the options it always had.
+ *
+ * @param transition - The resolved transition.
+ * @returns The track options.
+ * @example
+ * ```ts
+ * trackOptionsOf({ ms: 150, ease: "out", reduced: "cut" }); // { ms: 150, ease: "out" }
+ * ```
+ */
+function trackOptionsOf(transition: MotionTransition): {
+  ms: number;
+  ease: Ease;
+  reduced?: ReducedMotion;
+} {
+  return { ms: transition.ms, ease: transition.ease, ...reducedOption(transition.reduced) };
 }
 
 /**
@@ -337,7 +562,8 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
 
     if (component === undefined) continue;
 
-    hooks[name] = (view: ViewHandle<unknown>): Motion => view.toRest(component, transition);
+    hooks[name] = (view: ViewHandle<unknown>): Motion =>
+      view.toRest(component, trackOptionsOf(transition));
   }
 
   return hooks;
@@ -350,15 +576,16 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
  * the `loop` hook: `world` and `ui` play it wherever they play `enter`, so a projection view loops
  * from its enter, or from the first live frame after a direct reconcile, and `ui` swaps it when
  * the motion prop of an element changes. One cycle of the loop is `loop.ms`, or `transition.ms`
- * when it is left out.
+ * when it is left out. With `when: "change"` the enter and exit play only for a commit: an element
+ * that comes or goes with its screen stands at rest and leaves without a motion.
  *
  * @param spec - The named poses, the keyframe tracks, the transition, the loop and the hooks to
  *   build.
  * @returns The `enter`, `loop`, `exit` and `change` hooks. `settle` is left out: the default of
  *   `world` applies.
  * @throws {Error} When a track is invalid, a name is both a state and a track, `on` names
- *   neither, `loop.track` names no track, `loop.ms` is not a finite number above 0, or the loop
- *   ends somewhere else than it starts.
+ *   neither, `loop.track` names no track, `loop.ms` is not a finite number above 0, the loop
+ *   ends somewhere else than it starts, or `when` or a `reduced` is not one of its words.
  * @example
  * ```ts
  * const buttonMotion = defineMotion({
@@ -367,6 +594,14 @@ function changeHooks(names: readonly string[], transition: MotionTransition): Ch
  *   on: { enter: "hidden", exit: "hidden", change: ["Transform"] }
  * });
  * buttonMotion.settle; // undefined
+ *
+ * const cardMotion = defineMotion({
+ *   states: { small: { Transform: { scale: 0.8 }, Shape: { alpha: 0 } } },
+ *   transition: { ms: 220, ease: "out" },
+ *   on: { enter: "small", exit: "small" },
+ *   when: "change"
+ * });
+ * // a scene mount shows it at rest; a commit that adds it grows it in over 220 ms
  * ```
  */
 export function defineMotion(spec: MotionSpec): ProjectionMotion<unknown> {
@@ -374,11 +609,13 @@ export function defineMotion(spec: MotionSpec): ProjectionMotion<unknown> {
 
   const transition: MotionTransition = {
     ms: spec.transition?.ms ?? DEFAULT_TRANSITION_MS,
-    ease: spec.transition?.ease ?? DEFAULT_TRANSITION_EASE
+    ease: spec.transition?.ease ?? DEFAULT_TRANSITION_EASE,
+    reduced: spec.transition?.reduced ?? "cut"
   };
-  const enter = hookOf(spec, "enter", transition);
+  const when = spec.when ?? "always";
+  const enter = hookOf(spec, "enter", transition, when);
   const loop = loopHook(loopOf(spec, transition.ms));
-  const exit = hookOf(spec, "exit", transition);
+  const exit = hookOf(spec, "exit", transition, when);
   const changed = spec.on.change ?? [];
 
   return {

@@ -19,6 +19,7 @@ import type {
   DebugSwitches,
   DisplayAdapter,
   FilterSlot,
+  FilterSlotInputs,
   HitBox,
   LegendEntry,
   Orientation,
@@ -206,7 +207,12 @@ renderer.begin;
 
 declare const glow: PixiFilter;
 
-expectTypeOf<FilterSlot>().toEqualTypeOf<{ filter: PixiFilter; passes: number; kind?: string }>();
+expectTypeOf<FilterSlot>().toEqualTypeOf<{
+  filter: PixiFilter;
+  passes: number;
+  kind?: string;
+  inputs?: FilterSlotInputs;
+}>();
 expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void
 >();

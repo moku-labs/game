@@ -121,4 +121,18 @@ describe("viewport safe area", () => {
       })
     ).toEqual(noInsets);
   });
+
+  // Found by A Memory Missing's headless page: measured against a 0 × 0 window the whole frame was
+  // unsafe, so every grow area laid out at height 0 and views counted as off screen.
+  it("cuts nothing on a page with no window size", () => {
+    expect(
+      clipToFrame({
+        insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        frame: { x: 0, y: 0, width: 390, height: 844 },
+        canvas: { left: 0, top: 0 },
+        window: { width: 0, height: 0 },
+        scale: 1
+      })
+    ).toEqual(noInsets);
+  });
 });

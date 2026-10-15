@@ -371,6 +371,10 @@ const setup = (options: SetupOptions) => {
       measure: vi.fn(),
       agentClock: () => undefined,
       chargeAgent: vi.fn(),
+      rate: vi.fn(),
+      setRate: vi.fn(),
+      frameDrawn: vi.fn(),
+      frameProbed: vi.fn(),
       // Recorded apart from `calls`, with the call it followed: the order is the assertion.
       wake: (): void => {
         wakes.push(calls.at(-1) ?? "start");

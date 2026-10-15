@@ -11,9 +11,11 @@ import type { Api as ClockApi } from "../../clock/types";
 import type { Api as FlowApi } from "../../flow/types";
 import type { Api as LifecycleApi, PauseReason } from "../../lifecycle/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../model/types";
+import { createRateState } from "../../time/rate";
 import type {
   FrameCallback,
   FrameMeasure,
+  FrameRate,
   MeasureListener,
   Phase,
   Time,
@@ -70,6 +72,10 @@ export type MockRenderer = {
   measures: MeasureListener[];
   /** Every `time.chargeAgent` span, in call order. */
   charged: number[];
+  /** How many times the renderer told the fake `time` that a frame was drawn. */
+  drawnCount(): number;
+  /** Sets the frame rate the fake `time.rate()` answers. */
+  setRate(rate: Readonly<FrameRate>): void;
   /** Hands a measured frame to the `time.measure` listeners; the fields left out are of a quiet 60 fps frame. */
   measureFrame(record?: Partial<FrameMeasure>): void;
   /** Runs one frame: phase input, phase render, then the measure listeners with the record. */
@@ -247,6 +253,17 @@ export function createMockRenderer(
   const clock = { now: 0, paused: false, wakes: 0 };
   const measures: MeasureListener[] = [];
   const charged: number[] = [];
+  // The rate of a game without `adaptive`, as the real time state starts it.
+  const rate: { now: Readonly<FrameRate>; drawn: number } = {
+    now: createRateState({
+      maxFps: 60,
+      maxDeltaMs: 50,
+      idleFps: 30,
+      idleAfterMs: 2000,
+      adaptive: false
+    }).snapshot,
+    drawn: 0
+  };
   const flowState = { path: "home" };
   const systems: { timing: SystemTiming | undefined } = { timing: undefined };
 
@@ -285,7 +302,13 @@ export function createMockRenderer(
     agentClock: () => undefined,
     chargeAgent: (ms: number) => {
       charged.push(ms);
-    }
+    },
+    rate: () => rate.now,
+    setRate: vi.fn(),
+    frameDrawn: () => {
+      rate.drawn += 1;
+    },
+    frameProbed: vi.fn()
   } as unknown as TimeApi;
   const flowApi = {
     state: () => ({ mode: "live", path: flowState.path }),
@@ -383,6 +406,10 @@ export function createMockRenderer(
     stop: () => stopRenderer({ config, state }),
     measures,
     charged,
+    drawnCount: () => rate.drawn,
+    setRate: (next: Readonly<FrameRate>): void => {
+      rate.now = next;
+    },
     measureFrame,
     drawFrame: (record: Partial<FrameMeasure> = quiet): void => {
       time.frame += 1;

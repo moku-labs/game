@@ -17,7 +17,7 @@ import type {
   SlotValues,
   Target
 } from "../types";
-import { advanceCursor, cancelCursor, createCursor, entitiesOf, finishCursor } from "./cursor";
+import { advanceCursor, cancelCursor, createCursor, finishCursor, resolveTargets } from "./cursor";
 import { assertUniqueSpawns } from "./spawn";
 import type { CursorCtx, RunningTimeline, TimelineRuntime } from "./types";
 
@@ -110,7 +110,13 @@ function emptySpawnTable(): Map<string, Entity> {
  * @returns The cursor context.
  */
 function cursorCtxOf(rt: TimelineRuntime, running: RunningTimeline): CursorCtx {
-  return { rt, animation: running.animation, marks: running.marks, spawned: running.spawned };
+  return {
+    rt,
+    animation: running.animation,
+    marks: running.marks,
+    spawned: running.spawned,
+    targets: running.targets
+  };
 }
 
 /**
@@ -143,6 +149,8 @@ function endTimeline(actx: AnimCtx, running: RunningTimeline, finished: boolean)
 /**
  * Builds the step tree of an animation with the given targets and starts it. The build runs here,
  * once per play, so the same animation may play twice at once, each play with its own spawn table.
+ * Every `{ projection, key }` target is resolved here, once: each step writes the entity that held
+ * the key now, also after it left its projection.
  *
  * @param actx - Domain context of the anim plugin.
  * @param rt - The timeline runtime.
@@ -169,7 +177,7 @@ export function startTimeline<Tags extends SlotTags>(
   actx.state.nextId += 1;
 
   const cursor = createCursor(step);
-  const entities = entitiesOf(rt, step);
+  const { targets, entities } = resolveTargets(rt, step);
 
   for (const entity of entities) countPlaying(actx.deps.world.ecs, entity, 1);
 
@@ -183,6 +191,7 @@ export function startTimeline<Tags extends SlotTags>(
     cursor,
     marks: [],
     entities,
+    targets,
     spawned,
     resolve: (): void => settle(),
     ended: false

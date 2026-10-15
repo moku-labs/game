@@ -69,6 +69,7 @@ export type PixiModule = Pick<
   | "Shader"
   | "Sprite"
   | "Texture"
+  | "TexturePool"
   | "UniformGroup"
   | "bitmapFontTextParser"
   | "bitmapFontXMLStringParser"
@@ -130,6 +131,17 @@ export type PixiTexture = InstanceType<PixiModule["Texture"]>;
  * the instance; the renderer only assigns it.
  */
 export type PixiFilter = InstanceType<PixiModule["Filter"]>;
+
+/**
+ * Pixi's filter system as a filter's `apply` receives it: what a stage or a stand-in draws through.
+ *
+ * @example
+ * ```ts
+ * // A stage of the frost draws into a pooled texture from inside the frost's own apply.
+ * manager.applyFilter(gauss, last, target, true);
+ * ```
+ */
+export type PixiFilterManager = Parameters<PixiFilter["apply"]>[0];
 
 /**
  * A bitmap font the renderer installed for a font asset key. One per key.
@@ -446,6 +458,7 @@ export type {
   DisplayEntry,
   DisplaysApi,
   FilterSlot,
+  FilterSlotInputs,
   FiltersApi,
   FontsApi,
   HitBox,

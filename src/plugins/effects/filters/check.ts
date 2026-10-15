@@ -1,15 +1,18 @@
 /**
- * @file effects/filters — the dev shader check. One bad shader blanks the whole frame and only the
- * browser console says why (P10), so in a dev build a kind with its own shaders is compiled once on
- * the running backend before its first instance: the WGSL through the renderer's device on WebGPU,
- * the GLSL through its WebGL context on WebGL. An error is logged with its line and the kind never
- * gets an instance. A production build never compiles twice.
+ * @file effects/filters — the shader check, in every build: every definition a registered kind can draw (its body,
+ * every stage of its inputs, its fallback) is compiled once on the running backend when the renderer first draws; a
+ * kind gets no instance until all of its own answered; one that fails breaks the kind (E5). The WGSL goes through the
+ * renderer's device on WebGPU, the GLSL through its WebGL context on WebGL, in parallel where the driver can
+ * (`KHR_parallel_shader_compile`). An error is logged with its line, once per definition. The `load` stage of a node
+ * entry waits for the answers, so no mounted scene shows a filtered view unfiltered while its shader is checked.
  */
-import { isDev } from "../../flow/doors/dev";
+import type { NodeInfo } from "../../flow/types";
+import { pageNow } from "../../renderer/monitor/clock";
 import type { EffectsCtx } from "../types";
+import { logBroken } from "./guard";
 import type { FilterDefinition, FilterKind } from "./types";
 
-/** Where the check of one kind stands. */
+/** Where the check of one definition stands. */
 type CheckStatus = "pending" | "ok" | "broken";
 
 /** One compile error of a GLSL shader: its line in the assembled GLSL and what the driver said. */
@@ -21,79 +24,197 @@ const GL_ERROR_LINE = /^ERROR: \d+:(\d+):(.*)$/;
 /** The message of a failed compile whose info log is empty. */
 const SILENT_FAILURE = "The GLSL did not compile and the driver said nothing.";
 
+/** The WebGL extension that compiles in the background and answers on a later frame. */
+const PARALLEL = "KHR_parallel_shader_compile";
+
+/** Where the reader of an `effects:broken` line of a definition that does not compile looks next. */
+const READ_LINES = "read the effects:wgsl or effects:glsl lines.";
+
+/** The definitions of a Pixi-core kind: none, it draws Pixi's own shaders. */
+const NO_DEFINITIONS: readonly FilterDefinition[] = Object.freeze([]);
+
 /**
- * Records the answer of a check: ok, or broken for good, so the kind never gets an instance.
+ * Milliseconds rounded to 0.1, as the check lines report them.
  *
- * @param ectx - Domain context of the effects plugin.
- * @param id - The kind id.
- * @param passed - Whether the shader compiled without an error.
- * @returns `"ok"` or `"broken"`.
+ * @param ms - Milliseconds.
+ * @returns The rounded value.
+ * @example
+ * ```ts
+ * tenths(12.345); // 12.3
+ * ```
  */
-function finish(ectx: EffectsCtx, id: string, passed: boolean): CheckStatus {
-  const { state } = ectx;
-
-  if (passed) {
-    state.checks.set(id, "ok");
-
-    return "ok";
-  }
-
-  state.checks.delete(id);
-  state.broken.add(id);
-
-  return "broken";
+function tenths(ms: number): number {
+  return Math.round(ms * 10) / 10;
 }
 
 /**
- * Takes the WGSL compilation messages of one kind: every error is one log line, and one error
- * breaks the kind. A check the teardown dropped meanwhile is ignored.
+ * Every definition a kind can draw as itself: its body, then the distinct stage definitions of every input, in input
+ * then listed order. The fallback is not in it: it is checked on its own, so a broken kind can still draw it.
+ *
+ * @param kind - The registered kind.
+ * @returns The definitions; none for a Pixi-core kind.
+ */
+function definitionsOf(kind: FilterKind): readonly FilterDefinition[] {
+  if (kind.source === "core") return NO_DEFINITIONS;
+
+  const list = [kind.definition];
+
+  for (const input of kind.definition.inputs) {
+    for (const stage of input.stages) if (!list.includes(stage.filter)) list.push(stage.filter);
+  }
+
+  return list;
+}
+
+/**
+ * Every definition the registered kinds can draw, each once by identity, in registration order: each kind's own
+ * definitions, then its fallback.
  *
  * @param ectx - Domain context of the effects plugin.
- * @param id - The kind id.
+ * @returns The definitions to check.
+ */
+function checkList(ectx: EffectsCtx): FilterDefinition[] {
+  const list: FilterDefinition[] = [];
+
+  for (const kind of ectx.state.kinds.values()) {
+    if (kind.source !== "wgsl") continue;
+
+    const fallback = kind.definition.fallback;
+
+    for (const definition of definitionsOf(kind))
+      if (!list.includes(definition)) list.push(definition);
+    if (fallback !== undefined && !list.includes(fallback)) list.push(fallback);
+  }
+
+  return list;
+}
+
+/**
+ * Logs the line of a fallback that fails its own check, once: no kind can draw it in place of its own.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param definition - The definition that failed.
+ */
+function reportFallback(ectx: EffectsCtx, definition: FilterDefinition): void {
+  for (const kind of ectx.state.kinds.values()) {
+    if (kind.source === "wgsl" && kind.definition.fallback === definition) {
+      logBroken(
+        ectx,
+        definition.id,
+        undefined,
+        "compile",
+        `The shader does not compile on this device: ${READ_LINES}`
+      );
+
+      return;
+    }
+  }
+}
+
+/**
+ * Logs `effects:checks` once the last definition answered, and lets every waiting node entry go on.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ */
+function complete(ectx: EffectsCtx): void {
+  const { checks } = ectx.state;
+
+  ectx.log.info("effects:checks", {
+    definitions: checks.checked,
+    broken: checks.failed,
+    ms: tenths(pageNow() - checks.startedAt)
+  });
+  checks.resolve();
+}
+
+/**
+ * Records the answer of one definition's check, ok or broken for good. An answer of an earlier run, or of a
+ * definition that already answered, is dropped.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param run - The run the check was started in.
+ * @param definition - The definition.
+ * @param passed - Whether its shader compiled without an error.
+ */
+function finish(
+  ectx: EffectsCtx,
+  run: number,
+  definition: FilterDefinition,
+  passed: boolean
+): void {
+  const { checks } = ectx.state;
+
+  if (checks.run !== run || checks.status.get(definition) !== "pending") return;
+
+  checks.status.set(definition, passed ? "ok" : "broken");
+
+  if (!passed) {
+    checks.failed += 1;
+    reportFallback(ectx, definition);
+  }
+
+  checks.waiting -= 1;
+
+  if (checks.started && checks.waiting === 0) complete(ectx);
+}
+
+/**
+ * Takes the WGSL compilation messages of one definition: every error is one log line, and one error breaks it. An
+ * answer of an earlier run is ignored.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param run - The run the check was started in.
+ * @param definition - The definition.
  * @param messages - What the compiler said.
  */
-function settle(ectx: EffectsCtx, id: string, messages: readonly GPUCompilationMessage[]): void {
-  if (ectx.state.checks.get(id) !== "pending") return;
+function settle(
+  ectx: EffectsCtx,
+  run: number,
+  definition: FilterDefinition,
+  messages: readonly GPUCompilationMessage[]
+): void {
+  const { checks } = ectx.state;
+
+  if (checks.run !== run || checks.status.get(definition) !== "pending") return;
 
   const errors = messages.filter(message => message.type === "error");
 
   for (const error of errors) {
     ectx.log.error("effects:wgsl", {
-      filter: id,
+      filter: definition.id,
       line: error.lineNum,
       column: error.linePos,
       message: error.message
     });
   }
 
-  finish(ectx, id, errors.length === 0);
+  finish(ectx, run, definition, errors.length === 0);
 }
 
 /**
- * Starts the WGSL check of a kind through the renderer's device. With no device (lost) the kind is
- * `"ok"` and never checked again; otherwise it is `"pending"` until `getCompilationInfo()`
- * resolves. A check that cannot read its info counts as `"ok"`.
+ * Starts the WGSL check of a definition through the renderer's device. With no device (lost) it is ok at once;
+ * otherwise it answers when `getCompilationInfo()` resolves. A check that cannot read its info counts as ok.
  *
  * @param ectx - Domain context of the effects plugin.
- * @param id - The kind id.
- * @param definition - Its filter definition.
- * @returns `"pending"`, or `"ok"` without a device.
+ * @param run - The current run.
+ * @param definition - The definition.
  */
-function checkWgsl(ectx: EffectsCtx, id: string, definition: FilterDefinition): CheckStatus {
+function checkWgsl(ectx: EffectsCtx, run: number, definition: FilterDefinition): void {
   const device = ectx.deps.renderer.host.device();
 
-  if (device === undefined) return finish(ectx, id, true);
+  if (device === undefined) {
+    finish(ectx, run, definition, true);
 
-  ectx.state.checks.set(id, "pending");
+    return;
+  }
+
   device
     .createShaderModule({ code: definition.source })
     .getCompilationInfo()
     .then(
-      info => settle(ectx, id, info.messages),
-      () => settle(ectx, id, [])
+      info => settle(ectx, run, definition, info.messages),
+      () => settle(ectx, run, definition, [])
     );
-
-  return "pending";
 }
 
 /**
@@ -124,65 +245,272 @@ function glslErrors(infoLog: string): GlslError[] {
 }
 
 /**
- * Compiles the GLSL of a kind on the renderer's WebGL context, at once: every error is one log
- * line, and one error breaks the kind. The shader is deleted either way. With no context, or one
- * that makes no shader (lost), the kind is `"ok"` and never checked again.
+ * Answers a GLSL compile that finished: every error is one log line, one error breaks the definition, and the shader
+ * is deleted either way. A lost context answers `null`, not false: only a real failure breaks it.
  *
  * @param ectx - Domain context of the effects plugin.
- * @param id - The kind id.
- * @param definition - Its filter definition.
- * @returns `"ok"` or `"broken"`, never `"pending"`.
+ * @param run - The run the compile was started in.
+ * @param gl - The renderer's WebGL context.
+ * @param definition - The definition.
+ * @param shader - Its compiled fragment shader.
  */
-function checkGlsl(ectx: EffectsCtx, id: string, definition: FilterDefinition): CheckStatus {
-  const gl = ectx.deps.renderer.host.gl();
-
-  if (gl === undefined) return finish(ectx, id, true);
-
-  const shader = gl.createShader(gl.FRAGMENT_SHADER);
-
-  if (shader === null) return finish(ectx, id, true);
-
-  gl.shaderSource(shader, definition.glsl);
-  gl.compileShader(shader);
-
-  // A lost context answers null here, not false: only a real failure breaks the kind.
+function answerGlsl(
+  ectx: EffectsCtx,
+  run: number,
+  gl: WebGL2RenderingContext,
+  definition: FilterDefinition,
+  shader: WebGLShader
+): void {
   const compiled: unknown = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
   const errors = compiled === false ? glslErrors(gl.getShaderInfoLog(shader) ?? "") : [];
 
   gl.deleteShader(shader);
 
   for (const error of errors) {
-    ectx.log.error("effects:glsl", { filter: id, line: error.line, message: error.message });
+    ectx.log.error("effects:glsl", {
+      filter: definition.id,
+      line: error.line,
+      message: error.message
+    });
   }
 
-  return finish(ectx, id, errors.length === 0);
+  finish(ectx, run, definition, errors.length === 0);
 }
 
 /**
- * Where the shader check of a kind stands, starting it on the first ask on the backend that draws:
- * the WGSL on WebGPU, `"pending"` until its compilation info resolves; the GLSL on WebGL, answered
- * at once. A Pixi-core kind and every kind in a production build are `"ok"` at once, and so is
- * every kind while nothing draws.
+ * Compiles the GLSL of a definition on the renderer's WebGL context. With `KHR_parallel_shader_compile` the compile
+ * runs in the background and `pollChecks` answers it on a later frame; without it, it is answered at once. With no
+ * context, or one that makes no shader (lost), the definition is ok.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param run - The current run.
+ * @param definition - The definition.
+ */
+function checkGlsl(ectx: EffectsCtx, run: number, definition: FilterDefinition): void {
+  const gl = ectx.deps.renderer.host.gl();
+  const shader = gl?.createShader(gl.FRAGMENT_SHADER);
+
+  if (gl === undefined || shader === undefined || shader === null) {
+    finish(ectx, run, definition, true);
+
+    return;
+  }
+
+  gl.shaderSource(shader, definition.glsl);
+  gl.compileShader(shader);
+
+  if (gl.getExtension(PARALLEL) === null) answerGlsl(ectx, run, gl, definition, shader);
+  else ectx.state.checks.gl.push({ definition, shader });
+}
+
+/**
+ * Starts the shader check of every definition the registered kinds can draw, on the backend that draws: the WGSL on
+ * WebGPU, the GLSL on WebGL; on any other backend every definition is ok at once. Called once per run, by the filter
+ * system's first run with a ready host or by the first node entry, whichever comes first.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ */
+export function startChecks(ectx: EffectsCtx): void {
+  const { checks } = ectx.state;
+  const backend = ectx.deps.renderer.host.kind();
+
+  checks.startedAt = pageNow();
+
+  for (const definition of checkList(ectx)) {
+    if (checks.status.has(definition)) continue;
+
+    checks.status.set(definition, "pending");
+    checks.waiting += 1;
+    checks.checked += 1;
+
+    if (backend === "webgpu") checkWgsl(ectx, checks.run, definition);
+    else if (backend === "webgl") checkGlsl(ectx, checks.run, definition);
+    else finish(ectx, checks.run, definition, true);
+  }
+
+  checks.started = true;
+
+  if (checks.waiting === 0) complete(ectx);
+}
+
+/**
+ * Where a background compile stands: done once `COMPLETION_STATUS_KHR` answers true (or the extension is gone, so a
+ * read waits for it), lost when the context is gone or answers `null`, waiting otherwise.
+ *
+ * @param gl - The renderer's WebGL context, if any.
+ * @param parallel - Its `KHR_parallel_shader_compile`, if any.
+ * @param shader - The shader in flight.
+ * @returns `"done"`, `"lost"` or `"waiting"`.
+ */
+function progressOf(
+  gl: WebGL2RenderingContext | undefined,
+  parallel: KHR_parallel_shader_compile | null | undefined,
+  shader: WebGLShader
+): "done" | "lost" | "waiting" {
+  if (gl === undefined) return "lost";
+  if (parallel === undefined || parallel === null) return "done";
+
+  const status: unknown = gl.getShaderParameter(shader, parallel.COMPLETION_STATUS_KHR);
+
+  if (status === true) return "done";
+
+  return status === null ? "lost" : "waiting";
+}
+
+/**
+ * Answers the GLSL compiles that finished in the background: each one whose `COMPLETION_STATUS_KHR` is true is read
+ * as a compile at once; one that answers `null` (a lost context) is ok. Run at the start of every filter system run
+ * while compiles are in flight.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ */
+export function pollChecks(ectx: EffectsCtx): void {
+  const { checks } = ectx.state;
+  const { run, gl: inFlight } = checks;
+  const gl = ectx.deps.renderer.host.gl();
+  const parallel = gl?.getExtension(PARALLEL);
+  let kept = 0;
+
+  for (const entry of inFlight) {
+    const progress = progressOf(gl, parallel, entry.shader);
+
+    if (progress === "done" && gl !== undefined) {
+      answerGlsl(ectx, run, gl, entry.definition, entry.shader);
+    } else if (progress === "lost") {
+      gl?.deleteShader(entry.shader);
+      finish(ectx, run, entry.definition, true);
+    } else {
+      inFlight[kept] = entry;
+      kept += 1;
+    }
+  }
+
+  inFlight.length = kept;
+}
+
+/**
+ * Deletes the GLSL compiles still in flight, while the context is still there: the teardown of a run.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ */
+export function dropChecks(ectx: EffectsCtx): void {
+  const gl = ectx.deps.renderer.host.gl();
+
+  for (const entry of ectx.state.checks.gl) gl?.deleteShader(entry.shader);
+
+  ectx.state.checks.gl.length = 0;
+}
+
+/**
+ * Breaks a kind one of whose definitions failed its check: it never gets an instance of its own definition again in
+ * this run, and one `effects:broken` line says so, under the stage's id when the stage failed.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param kind - The kind, made by `defineFilter`.
+ * @param failed - The definition that failed.
+ */
+function breakKind(
+  ectx: EffectsCtx,
+  kind: FilterKind & { source: "wgsl" },
+  failed: FilterDefinition
+): void {
+  const isMain = failed === kind.definition;
+  const message = isMain
+    ? `The shader does not compile on this device: ${READ_LINES}`
+    : `Its stage "${failed.id}" does not compile on this device: ${READ_LINES}`;
+
+  ectx.state.broken.add(kind.id);
+  logBroken(
+    ectx,
+    kind.id,
+    kind.definition.fallback,
+    "compile",
+    message,
+    isMain ? undefined : { stage: failed.id }
+  );
+}
+
+/**
+ * Where the shader check of a kind stands: `"ok"` once its body and every stage answered ok (then a set lookup),
+ * `"broken"` once one of them failed, `"pending"` before the checks started and while one is pending. A Pixi-core
+ * kind is ok at once.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param kind - The registered kind.
  * @returns `"pending"`, `"ok"` or `"broken"`.
  */
-export function checkShader(ectx: EffectsCtx, kind: FilterKind): CheckStatus {
+export function kindStatus(ectx: EffectsCtx, kind: FilterKind): CheckStatus {
   const { state } = ectx;
 
+  if (state.ready.has(kind.id)) return "ok";
   if (state.broken.has(kind.id)) return "broken";
   if (kind.source === "core") return "ok";
+  if (!state.checks.started) return "pending";
 
-  const known = state.checks.get(kind.id);
+  let pending = false;
 
-  if (known !== undefined) return known;
+  for (const definition of definitionsOf(kind)) {
+    const status = state.checks.status.get(definition);
 
-  // A production build never compiles twice: it asks the renderer nothing.
-  const backend = isDev() ? ectx.deps.renderer.host.kind() : "none";
+    if (status === "broken") {
+      breakKind(ectx, kind, definition);
 
-  if (backend === "webgpu") return checkWgsl(ectx, kind.id, kind.definition);
-  if (backend === "webgl") return checkGlsl(ectx, kind.id, kind.definition);
+      return "broken";
+    }
 
-  return finish(ectx, kind.id, true);
+    if (status !== "ok") pending = true;
+  }
+
+  if (pending) return "pending";
+
+  state.ready.add(kind.id);
+
+  return "ok";
+}
+
+/**
+ * A promise that resolves when a node is aborted.
+ *
+ * @param signal - The abort signal of the node.
+ * @returns The promise.
+ */
+function whenAborted(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+
+  return new Promise(resolve => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
+/**
+ * The `load` stage of every node entry: waits for every pending shader check before the node's scene is switched, so
+ * no mounted scene shows a filtered view unfiltered. Waits for nothing when the renderer draws nothing or every check
+ * answered; starts the checks itself when the renderer is ready and they have not started yet. An aborted node stops
+ * waiting. A wait logs `effects:mount-waited` once.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param node - The node being entered.
+ * @param run - The stage's context: the node's abort signal.
+ * @param run.signal - The abort signal of the node.
+ * @returns A promise that resolves when the node may go on.
+ */
+export async function gateChecks(
+  ectx: EffectsCtx,
+  node: NodeInfo,
+  run: { readonly signal: AbortSignal }
+): Promise<void> {
+  if (!ectx.deps.renderer.host.ready()) return;
+  if (!ectx.state.checks.started) startChecks(ectx);
+
+  const { checks } = ectx.state;
+
+  if (checks.waiting === 0) return;
+
+  const began = pageNow();
+
+  await Promise.race([checks.settled, whenAborted(run.signal)]);
+
+  if (run.signal.aborted) return;
+
+  ectx.log.info("effects:mount-waited", { node: node.path, ms: tenths(pageNow() - began) });
 }

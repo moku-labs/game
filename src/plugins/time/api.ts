@@ -3,6 +3,7 @@
  */
 import { addMeasureListener, pageNow, runMeasuredFrame } from "./measure";
 import { capturePhases, PHASES } from "./phases";
+import { closeFrame, judgeFrame, observeTick, resetGovernor, setRateChoice } from "./rate";
 import type { Api, FrameCallback, Phase, TimeCtx } from "./types";
 
 export { PHASES } from "./phases";
@@ -42,17 +43,45 @@ function runPhases(ctx: TimeCtx): void {
 }
 
 /**
+ * Runs the phases of one frame, measured in an agent build with a measure listener, plain otherwise, and answers its
+ * work for the adaptive rate: from `at` to the clock read that ends the `render` phase, never after the measure
+ * listeners. The plain path reads the clock once, and only for a frame of the frame source with a governor.
+ *
+ * @param ctx - Domain context of the time plugin.
+ * @param at - The `requestAnimationFrame` timestamp; left out for a frame of `step()`.
+ * @returns The work of the frame, ms; 0 when nobody reads it.
+ */
+function runFrameWork(ctx: TimeCtx, at: number | undefined): number {
+  // Inline and positive, as the renderer's capture: Bun folds this guard under a production
+  // `define` and drops the measured runner with it; `flow/doors/dev.ts` declares the global.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    const { measure } = ctx.state;
+
+    if (measure !== undefined && measure.listeners.length > 0) {
+      runMeasuredFrame(ctx, measure, at ?? pageNow(), at === undefined);
+
+      return measure.record.workMs;
+    }
+  }
+
+  runPhases(ctx);
+
+  return at !== undefined && ctx.state.rate.governor !== undefined ? pageNow() - at : 0;
+}
+
+/**
  * Runs exactly one frame: advances `Time` by the scaled delta, then calls the six phases.
  * The frame guard is open for the whole frame, so `step` cannot be re-entered from a callback.
- * In an agent build a frame with a measure listener runs measured; a frame from the frame source
- * hands back the agent's spans charged to it once its phases and listeners ran.
+ * In an agent build a frame with a measure listener runs measured. A frame from the frame source
+ * then hands its drawn flag and its work to the adaptive rate, and in an agent build hands back
+ * the agent's spans charged to it. Every frame forgets its drawn report, a stepped one too.
  *
  * @param ctx - Domain context of the time plugin.
  * @param unscaledDeltaMs - Delta of this frame in milliseconds, before the time scale.
  * @param at - The `requestAnimationFrame` timestamp; left out for a frame of `step()`.
  */
 function runFrame(ctx: TimeCtx, unscaledDeltaMs: number, at?: number): void {
-  const { time } = ctx.state;
+  const { time, rate } = ctx.state;
 
   time.delta = unscaledDeltaMs * time.scale;
   time.elapsed += time.delta;
@@ -60,23 +89,21 @@ function runFrame(ctx: TimeCtx, unscaledDeltaMs: number, at?: number): void {
 
   ctx.state.stepping = true;
   try {
-    // Inline and positive, as the renderer's capture: Bun folds this guard under a production
-    // `define` and drops the measured runner with it; `flow/doors/dev.ts` declares the global.
+    const workMs = runFrameWork(ctx, at);
+    const { governor } = rate;
+
+    // After the phases: `closeFrame` reads the agent's spans before they are zeroed.
+    if (at !== undefined && governor !== undefined) closeFrame(ctx, governor, workMs);
+
     if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
       const { measure } = ctx.state;
 
-      if (measure !== undefined && measure.listeners.length > 0) {
-        runMeasuredFrame(ctx, measure, at ?? pageNow(), at === undefined);
-      } else {
-        runPhases(ctx);
-      }
-
       if (measure !== undefined && at !== undefined) measure.agentMs = 0;
-    } else {
-      runPhases(ctx);
     }
   } finally {
     ctx.state.stepping = false;
+    rate.drawnNow = false;
+    rate.probedNow = false;
   }
 }
 
@@ -112,12 +139,45 @@ function updateIdle(ctx: TimeCtx, unscaledDeltaMs: number): void {
 }
 
 /**
- * Runs one frame of the real frame source. A paused clock runs no phase. The first frame, and
- * the first frame after a `resume`, counts as one capped frame instead of the gap to a stale
- * timestamp. A frame that arrives before the current cap allows it is skipped — the cap is
- * `idleFps` while the screen is idle and `maxFps` otherwise — and a long gap is clamped at
- * `maxDeltaMs` so a backgrounded tab does not produce a giant step. An agent build counts the
- * skipped ticks and notes the cap the frame ran under for its measure record.
+ * Counts a tick the cap skipped, for the measure record of an agent build.
+ *
+ * @param ctx - Domain context of the time plugin.
+ */
+function countSkipped(ctx: TimeCtx): void {
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    const { measure } = ctx.state;
+
+    if (measure !== undefined) measure.skipped += 1;
+  }
+}
+
+/**
+ * Notes the cap that let a frame through, for the measure record of an agent build, before the
+ * idle timer moves on.
+ *
+ * @param ctx - Domain context of the time plugin.
+ * @param frameMs - One frame of the cap.
+ */
+function noteCap(ctx: TimeCtx, frameMs: number): void {
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    const { measure } = ctx.state;
+
+    if (measure !== undefined) {
+      measure.record.capMs = frameMs;
+      measure.record.idle = ctx.state.idle;
+    }
+  }
+}
+
+/**
+ * Runs one frame of the real frame source. A paused clock runs no phase. Every tick, run or
+ * skipped, is a sample of the display for the adaptive rate. The first frame, and the first frame
+ * after a `resume`, counts as one capped frame instead of the gap to a stale timestamp. A frame
+ * that arrives before the current cap allows it is skipped — the cap is `idleFps` while the
+ * screen is idle and the loop's rate (`rate().fps`) otherwise — and a long gap is clamped at
+ * `maxDeltaMs` so a backgrounded tab does not produce a giant step. The interval that ends at a
+ * run frame is judged by the adaptive rate. An agent build counts the skipped ticks and notes the
+ * cap the frame ran under for its measure record.
  *
  * @param ctx - Domain context of the time plugin.
  * @param timestamp - Timestamp handed over by `requestAnimationFrame`, in milliseconds.
@@ -125,33 +185,29 @@ function updateIdle(ctx: TimeCtx, unscaledDeltaMs: number): void {
 export function tickFrame(ctx: TimeCtx, timestamp: number): void {
   if (ctx.state.paused) return;
 
-  const frameMs = 1000 / (ctx.state.idle ? ctx.config.idleFps : ctx.config.maxFps);
+  const { rate } = ctx.state;
+  const { governor } = rate;
+
+  if (governor !== undefined) observeTick(ctx, governor, timestamp);
+
+  // `Math.min`: the idle cap never raises a rate below `idleFps`.
+  const frameMs = 1000 / (ctx.state.idle ? Math.min(ctx.config.idleFps, rate.fps) : rate.fps);
   const { lastTimestamp } = ctx.state;
   const rawDeltaMs = lastTimestamp === undefined ? frameMs : timestamp - lastTimestamp;
 
   // One millisecond of tolerance: a frame source rarely hits the cap exactly.
   if (rawDeltaMs < frameMs - 1) {
-    if (
-      typeof __MOKU_GAME_AGENT__ !== "undefined" &&
-      __MOKU_GAME_AGENT__ &&
-      ctx.state.measure !== undefined
-    ) {
-      ctx.state.measure.skipped += 1;
-    }
+    countSkipped(ctx);
 
     return;
   }
 
-  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
-    const { measure } = ctx.state;
-
-    if (measure !== undefined) {
-      // The cap that let this frame through, before the idle timer moves on below.
-      measure.record.capMs = frameMs;
-      measure.record.idle = ctx.state.idle;
-    }
+  // The interval that ends here belongs to the frame that ran last.
+  if (governor !== undefined && lastTimestamp !== undefined) {
+    judgeFrame(ctx, governor, rawDeltaMs, timestamp);
   }
 
+  noteCap(ctx, frameMs);
   ctx.state.lastTimestamp = timestamp;
 
   const unscaledDeltaMs = Math.min(rawDeltaMs, ctx.config.maxDeltaMs);
@@ -184,8 +240,8 @@ function addFrameCallback(ctx: TimeCtx, phase: Phase, callback: FrameCallback): 
 
 /**
  * Creates the time API: frame callbacks per phase, the `Time` resource, scale, pause and
- * resume, `wake` for the idle cap, the measurement of an agent build, and `step` for tests and
- * tools.
+ * resume, `wake` for the idle cap, the measurement of an agent build, the frame rate, and `step`
+ * for tests and tools.
  *
  * @param ctx - Domain context of the time plugin.
  * @returns The public API of the time plugin.
@@ -209,6 +265,10 @@ export function createTimeApi(ctx: TimeCtx): Api {
       ctx.state.lastTimestamp = undefined;
       // A resume is a wake: the screen comes back, so it comes back at the full frame rate.
       wakeClock(ctx);
+
+      const { governor } = ctx.state.rate;
+
+      if (governor !== undefined) resetGovernor(governor);
 
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
         const { measure } = ctx.state;
@@ -248,6 +308,18 @@ export function createTimeApi(ctx: TimeCtx): Api {
 
         if (measure !== undefined && Number.isFinite(ms) && ms > 0) measure.agentMs += ms;
       }
+    },
+
+    rate: () => ctx.state.rate.snapshot,
+
+    setRate: choice => setRateChoice(ctx, choice),
+
+    frameDrawn: () => {
+      ctx.state.rate.drawnNow = true;
+    },
+
+    frameProbed: () => {
+      ctx.state.rate.probedNow = true;
     },
 
     step: deltaMs => {

@@ -88,12 +88,13 @@ app.world.ecs.snapshot().entities[0];
 | `register(spec)` | Stores a projection. A duplicate name throws. Nothing is drawn until `mount`. |
 | `replace(spec)` | Swaps the spec of a registered projection. A mounted one has its layers checked and runs the new `view` for every item on the next frame, directly. An unmounted one is only stored. An unknown name throws; a throw changes nothing. The caller is the dev hot swap in `ui`. |
 | `setLayers(list)` / `layers()` | The layer list of the scene; order is draw order. Every call stores a new frozen array, so a reader compares by identity. |
-| `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. Throws for an unknown name and for a `layer` or `lift` the scene does not declare; nothing is mounted then. |
+| `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. Throws for an unknown name and for a `layer` or `lift` the scene does not declare; nothing is mounted then. A new view is spawned with its `Layer` first, so an `onAdded` hook of a view component (the `Tree` hook of `ui`) already reads the layer. |
 | `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call. |
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. |
+| `causeOf(entity)` | Why the view's motion hooks play: `"mount"` when the view came or goes with its screen (a scene mount, a load, a restore), `"change"` when a commit changed a live screen; also answers for a view that just left, until the next sweep. A world projection passes the same value to `enter`/`exit` as their fourth argument. |
 | `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
 | `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. A driver may report what its additive tracks add right now with the optional `offsetsOf(entity, component)`: the world then compares the value under a loop with the rest pose. |
@@ -336,7 +337,7 @@ and in play mode a change, a revive, a rollback settle and `settle(entity)` that
 motions of the view and start no new one. A view the finger still holds carries no pending drop
 and stays lifted.
 
-`ViewHandle.tween`, `toRest` and `all` run on the driver `anim` installs with `setDriver`
+`ViewHandle.tween`, `toRest` and `all` (both take `reduced: "cut" | "keep"`: under reduced motion a `"keep"` track plays as written, `"cut"`, the default, jumps to its end) run on the driver `anim` installs with `setDriver`
 (`projection/driver.ts`). A track reads its start values when its `delayMs` ends, writes the exact
 target on its last frame and goes through `ecs.set`; muted fields are never written, also not on
 `finish()`. Without a driver the instant default writes every target at once and hands back an

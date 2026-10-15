@@ -11,7 +11,7 @@ import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Entity, Api as WorldApi } from "../world/types";
-import type { FilteredView, FilterKind } from "./filters/types";
+import type { CheckState, FilteredView, FilterKind } from "./filters/types";
 import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particles/types";
 
 /**
@@ -58,12 +58,14 @@ export type State = {
   seedCounter: number;
   /** Live particles after the last step. */
   particles: number;
-  /** Filter kinds whose shader failed the dev check on the running backend. */
+  /** Filter kinds whose shader or one of whose stages failed the check on the running backend, in every build. */
   broken: Set<string>;
+  /** Filter kinds whose main definition and every stage answered ok: a kind's status is a set lookup once settled. */
+  ready: Set<string>;
   /** The filter kinds, built-ins first, then the filters of every feature. */
   kinds: Map<string, FilterKind>;
-  /** The dev shader check per kind; `broken` holds the failed ones. */
-  checks: Map<string, "pending" | "ok">;
+  /** The shader check of every definition a kind can draw, in every build. */
+  checks: CheckState;
   /** Entity to the filters the sync keeps for it. */
   views: Map<Entity, FilteredView>;
   /** Keys of the one-shot warnings: `"emitter:fx.x"`, `"texture:board.cell"`, `"atlas:fx.x"`. */
@@ -93,7 +95,7 @@ export type EffectsStats = {
   particles: number;
   /** Running instances plus the orphans still flying. */
   emitters: number;
-  /** Filter instances over every view. */
+  /** Filter instances over every view; the stages of a filter's inputs are counted in `renderPasses`, not here. */
   filters: number;
   /** `renderer.sync.renderPasses()`, read at call time. */
   renderPasses: number;
@@ -262,9 +264,14 @@ export type {
   ColorMatrixValue,
   CoreKind,
   DisplacementValue,
+  FilterChainContext,
   FilterComponent,
   FilterDefinition,
+  FilterInput,
+  FilterInputDefinition,
   FilterSpec,
+  FilterStage,
+  FilterStep,
   FilterValueOf,
   GlowValue,
   NoiseValue,

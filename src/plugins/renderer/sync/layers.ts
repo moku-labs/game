@@ -99,8 +99,8 @@ export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
 
 /**
  * Rebuilds the layer containers when `world.projection.layers()` handed out a new list. A name
- * that stayed keeps its container and every view in it; a name that left is detached, and the
- * views that still name it are reported.
+ * that stayed keeps its container, its hidden mask and every view in it; a name that left is
+ * detached, and the views that still name it are reported.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when the list was new and the containers were rebuilt.
@@ -125,7 +125,12 @@ export function syncLayers(sctx: SyncCtx): boolean {
 
     container.label = `layer:${spec.name}`;
     container.sortableChildren = spec.sort !== "none";
-    next.set(spec.name, { container, sort: spec.sort });
+    // A container that stays keeps the reasons that hide it; a new one starts drawn.
+    next.set(spec.name, {
+      container,
+      sort: spec.sort,
+      hidden: state.layers.get(spec.name)?.hidden ?? 0
+    });
   }
 
   dropLeftLayers(sctx, next);

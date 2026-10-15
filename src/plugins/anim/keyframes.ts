@@ -12,6 +12,7 @@ import type {
   Ease,
   Motion,
   MotionHandle,
+  ReducedMotion,
   TrackSegment,
   ViewHandle
 } from "../world/types";
@@ -23,6 +24,22 @@ const KEY_EASE: Ease = "inOut";
 
 /** The numeric fields one key gives one component, as absolute values. */
 type KeyPose = Record<string, number>;
+
+/**
+ * The `reduced` field of the options a motion starts a track with: written only for a kept track,
+ * so a cut track starts with the options it always had.
+ *
+ * @param reduced - What reduced motion does to the track.
+ * @returns `{ reduced: "keep" }`, or an empty object.
+ * @example
+ * ```ts
+ * reducedOption("keep"); // { reduced: "keep" }
+ * reducedOption("cut"); // {}
+ * ```
+ */
+export function reducedOption(reduced: ReducedMotion): { reduced?: ReducedMotion } {
+  return reduced === "keep" ? { reduced } : {};
+}
 
 /**
  * One component a key may name, as the view carries it: the type to write, the rest fields and
@@ -269,13 +286,15 @@ function lastValues(segments: readonly TrackSegment[]): KeyPose {
  * @param lane - The lane.
  * @param keys - The keys of the track.
  * @param ms - The length of the whole track.
+ * @param reduced - What reduced motion does to the walk.
  * @returns The motion, or `undefined` when no key names the lane.
  */
 function enterLane(
   view: ViewHandle<unknown>,
   lane: Lane,
   keys: readonly MotionKeyframe[],
-  ms: number
+  ms: number,
+  reduced: ReducedMotion
 ): Motion {
   const segments = segmentsOf(lane, keys);
   const named = lastValues(segments);
@@ -293,7 +312,12 @@ function enterLane(
 
   segments.push({ at: 1, ease: tail?.ease ?? KEY_EASE, to: rest });
 
-  return view.tween(lane.component, rest, { ms, ease: KEY_EASE, segments });
+  return view.tween(lane.component, rest, {
+    ms,
+    ease: KEY_EASE,
+    segments,
+    ...reducedOption(reduced)
+  });
 }
 
 /**
@@ -304,20 +328,27 @@ function enterLane(
  * @param lane - The lane.
  * @param keys - The keys of the track.
  * @param ms - The length of the whole track.
+ * @param reduced - What reduced motion does to the walk.
  * @returns The motion, or `undefined` when no key names the lane.
  */
 function exitLane(
   view: ViewHandle<unknown>,
   lane: Lane,
   keys: readonly MotionKeyframe[],
-  ms: number
+  ms: number,
+  reduced: ReducedMotion
 ): Motion {
   const segments = segmentsOf(lane, keys);
   const target = lastValues(segments);
 
   if (Object.keys(target).length === 0) return undefined;
 
-  return view.tween(lane.component, target, { ms, ease: KEY_EASE, segments });
+  return view.tween(lane.component, target, {
+    ms,
+    ease: KEY_EASE,
+    segments,
+    ...reducedOption(reduced)
+  });
 }
 
 /**
@@ -385,13 +416,15 @@ function loopLanesOf(view: ViewHandle<unknown>): Lane[] {
  * @param lane - The lane.
  * @param keys - The checked keys of the loop.
  * @param ms - The length of one cycle.
+ * @param reduced - Whether reduced motion holds the loop on its first key or lets it walk.
  * @returns The handle of the walk, or `undefined` when the lane moves nothing.
  */
 function loopLane(
   view: ViewHandle<unknown>,
   lane: Lane,
   keys: readonly MotionKeyframe[],
-  ms: number
+  ms: number,
+  reduced: ReducedMotion
 ): MotionHandle | undefined {
   const segments = segmentsOf(lane, keys);
   const target = lastValues(segments);
@@ -405,7 +438,8 @@ function loopLane(
     ease: KEY_EASE,
     additive: true,
     repeat: "forever",
-    segments
+    segments,
+    ...reducedOption(reduced)
   });
 }
 
@@ -417,17 +451,20 @@ function loopLane(
  * @param view - The view handle the hook was given.
  * @param keys - The checked keys of the loop.
  * @param ms - The length of one cycle: `loop.ms`, or `transition.ms` when it is left out.
+ * @param reduced - `loop.reduced`: `"cut"` holds the loop on its first key under reduced motion,
+ *   `"keep"` lets it walk.
  * @returns One motion over every walk; it never ends on its own.
  */
 export function playLoop(
   view: ViewHandle<unknown>,
   keys: readonly MotionKeyframe[],
-  ms: number
+  ms: number,
+  reduced: ReducedMotion
 ): Motion {
   const walks: MotionHandle[] = [];
 
   for (const lane of loopLanesOf(view)) {
-    const walk = loopLane(view, lane, keys, ms);
+    const walk = loopLane(view, lane, keys, ms, reduced);
 
     if (walk !== undefined) walks.push(walk);
   }
@@ -442,15 +479,18 @@ export function playLoop(
  * @param keys - The checked keys of the track.
  * @param ms - The length of the whole track: `transition.ms`.
  * @param direction - `"enter"` walks first key → rest, `"exit"` walks rest → last key.
+ * @param reduced - `transition.reduced`: `"cut"` lands the walk at once under reduced motion,
+ *   `"keep"` plays it at its length.
  * @returns One motion over every lane.
  */
 export function playKeyframes(
   view: ViewHandle<unknown>,
   keys: readonly MotionKeyframe[],
   ms: number,
-  direction: "enter" | "exit"
+  direction: "enter" | "exit",
+  reduced: ReducedMotion
 ): Motion {
   const walk = direction === "enter" ? enterLane : exitLane;
 
-  return view.all(lanesOf(view).map(lane => walk(view, lane, keys, ms)));
+  return view.all(lanesOf(view).map(lane => walk(view, lane, keys, ms, reduced)));
 }

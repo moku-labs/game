@@ -581,7 +581,8 @@ function repeatsOf(repeat: number | "forever" | undefined): number {
  * Starts one track. The start values are read when the delay ends, never here. A track with
  * keyframe segments walks them over `ms` and books every field they name; one with `repeat`
  * walks again when a run ends. With reduced motion on, every track but a loop takes 0 ms, its
- * delay and its repeats dropped: it lands on its target at its first frame step.
+ * delay and its repeats dropped: it lands on its target at its first frame step. A track started
+ * with `reduced: "keep"` keeps its length, its delay and its repeats.
  *
  * @param actx - Domain context of the anim plugin.
  * @param entity - The entity to animate.
@@ -603,7 +604,8 @@ export function startTrack(
 ): Track {
   const target = targetOf(to, options.segments);
   const repeats = repeatsOf(options.repeat);
-  const instant = actx.state.reducedMotion && repeats !== Number.POSITIVE_INFINITY;
+  const keep = options.reduced === "keep";
+  const instant = actx.state.reducedMotion && !keep && repeats !== Number.POSITIVE_INFINITY;
   const track: Track = {
     id: actx.state.nextId,
     entity,
@@ -623,7 +625,8 @@ export function startTrack(
     segments: options.segments,
     repeatsLeft: instant ? 0 : repeats,
     held: false,
-    masked: noMaskedFields()
+    masked: noMaskedFields(),
+    keep
   };
 
   actx.state.nextId += 1;
@@ -641,8 +644,9 @@ export function startTrack(
 }
 
 /**
- * Tells whether a loop stands on its first key instead of walking: with reduced motion on, or
- * when it has no length to walk. It stays in the table either way, so it never ends by itself.
+ * Tells whether a loop stands on its first key instead of walking: with reduced motion on, unless
+ * the author kept it, or when it has no length to walk. It stays in the table either way, so it
+ * never ends by itself.
  *
  * @param actx - Domain context of the anim plugin.
  * @param track - The track.
@@ -650,7 +654,8 @@ export function startTrack(
  */
 function holdsFirstKey(actx: AnimCtx, track: Track): boolean {
   return (
-    track.repeatsLeft === Number.POSITIVE_INFINITY && (track.ms <= 0 || actx.state.reducedMotion)
+    track.repeatsLeft === Number.POSITIVE_INFINITY &&
+    (track.ms <= 0 || (actx.state.reducedMotion && !track.keep))
   );
 }
 

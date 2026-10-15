@@ -133,6 +133,10 @@ function createFakeTime(record: Recorder): TimeApi {
     measure: vi.fn(),
     agentClock: () => undefined,
     chargeAgent: vi.fn(),
+    rate: vi.fn(),
+    setRate: vi.fn(),
+    frameDrawn: vi.fn(),
+    frameProbed: vi.fn(),
     isPaused: () => false,
     isRunning: () => true,
     step: vi.fn()

@@ -16,7 +16,7 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
  *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 },
  *   keys: { x: "1048576:Transform:x" }, ms: 350, ease: "out", delayMs: 0, elapsed: 0,
  *   from: undefined, muted: () => new Set(), additive: false, driven: false, bornFrame: 4,
- *   ended: false, segments: undefined, repeatsLeft: 0, held: false, masked: new Set()
+ *   ended: false, segments: undefined, repeatsLeft: 0, held: false, masked: new Set(), keep: false
  * };
  * ```
  */
@@ -65,6 +65,8 @@ export type Track = {
    * base it kept. Empty for a track that owns its fields.
    */
   masked: Set<string>;
+  /** Started with `reduced: "keep"`: reduced motion neither shortens nor holds it. */
+  readonly keep: boolean;
 };
 
 /**

@@ -3,15 +3,17 @@
  * writes them, hands the sorted list to `renderer.sync.filters.set` only when the kinds, their
  * order or their passes changed, destroys what left, and keeps the two filter budgets. A value
  * write the player can see calls `renderer.invalidate(entity)` first, once per view and frame. It
- * walks the views the world hooks recorded, never the whole world.
+ * walks the views the world hooks recorded, never the whole world. Its first run with a ready host
+ * starts the shader checks; a kind whose check is pending gets no instance, a broken kind its
+ * stand-in.
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import type { FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
 import type { AnySystem, Entity } from "../../world/types";
 import type { EffectsCtx } from "../types";
-import { checkShader } from "./check";
-import { createFilter, destroyFilter, writeFilter } from "./instance";
-import type { FilteredView, FilterInstance, FilterKind } from "./types";
+import { kindStatus, pollChecks, startChecks } from "./check";
+import { createFilter, createStandIn, destroyFilter, refreshInputs, writeFilter } from "./instance";
+import type { FilteredView, FilterFields, FilterInstance, FilterKind } from "./types";
 
 /** The `before` of a kind a debug switch turned off: it is not drawn, so it asks for no frame. */
 const NO_SIGNAL = (): void => {};
@@ -75,7 +77,7 @@ function byOrder(a: FilterInstance, b: FilterInstance): number {
 
 /**
  * Tells whether the sorted instances of this frame differ from the last list handed over: other
- * instances, another order, or other passes.
+ * instances, another order, other passes, or other stage filters of their inputs.
  *
  * @param assigned - The last list handed over.
  * @param placed - The sorted instances of this frame.
@@ -93,6 +95,7 @@ function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstanc
     index += 1;
 
     if (slot?.filter !== instance.filter || slot.passes !== instance.passes) return true;
+    if (instance.kind === "wgsl" && slot.inputs !== instance.inputs?.slot) return true;
   }
 
   return false;
@@ -115,10 +118,69 @@ function isSwitchedOff(ectx: EffectsCtx, id: string): boolean {
 }
 
 /**
+ * Puts the stand-in a broken instance built while it was drawing in its place: the broken one waits
+ * in `retired` and is destroyed after the new list is handed over.
+ *
+ * @param view - The view's record.
+ * @param kind - The kind.
+ * @param instance - Its instance now.
+ * @returns The instance to keep: the stand-in, or the same instance.
+ */
+function installReplacement(
+  view: FilteredView,
+  kind: FilterKind,
+  instance: FilterInstance
+): FilterInstance {
+  const { replacement } = instance;
+
+  if (replacement === undefined) return instance;
+
+  instance.replacement = undefined;
+  view.instances.set(kind.id, replacement);
+  view.retired.push(instance);
+
+  return replacement;
+}
+
+/**
+ * Builds the first instance of a kind on a view: nothing while its shader check is pending (the
+ * view draws unfiltered, logged once per kind), the stand-in of a broken kind, the kind's own
+ * instance once every definition it draws answered ok.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param kind - The kind.
+ * @param value - The stored filter value.
+ * @returns The instance, or `undefined` while it has none.
+ */
+function firstInstance(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  kind: FilterKind,
+  value: Readonly<FilterFields>
+): FilterInstance | undefined {
+  const status = kindStatus(ectx, kind);
+
+  if (status === "ok") return createFilter(ectx, pixi, kind, value);
+  if (status === "broken") return createStandIn(ectx, pixi, kind, value);
+
+  // Never a blank frame: nothing unchecked is drawn. By the gate of the load stage, never on a mounted scene.
+  const key = `check-pending:${kind.id}`;
+
+  if (!ectx.state.warned.has(key)) {
+    ectx.state.warned.add(key);
+    ectx.log.warn("effects:check-pending", { filter: kind.id });
+  }
+
+  return undefined;
+}
+
+/**
  * Brings one kind of one view up to date: the first frame it is seen it gets its instance, once
- * its shader check answered ok, which reaches the renderer through the new slot list; after that
- * it is written, and a visible write asks the renderer for the frame first. A kind a debug switch
- * turned off is written but asks for nothing.
+ * its shader check answered (its stand-in when the kind is broken), which reaches the renderer
+ * through the new slot list; after that it is written, its chains run again when a uniform changed,
+ * and a visible write asks the renderer for the frame first. A stand-in a broken instance built
+ * takes its place. A kind a debug switch turned off is written but asks for nothing.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -144,34 +206,45 @@ function syncKind(
 
   let instance = view.instances.get(kind.id);
 
-  if (instance === undefined) {
-    if (checkShader(ectx, kind) !== "ok") return undefined;
-
-    instance = createFilter(ectx, pixi, kind, value);
-
-    if (instance === undefined) return undefined;
-
-    view.instances.set(kind.id, instance);
-  } else {
+  if (instance !== undefined) {
+    instance = installReplacement(view, kind, instance);
+    instance.value = value;
     writeFilter(ectx, instance, value, changed, off ? NO_SIGNAL : view.signal);
     instance.order = value.order;
+    refreshInputs(ectx, pixi, instance, off);
+
+    // A chain that broke in this sync built its stand-in: it takes the place now.
+    return installReplacement(view, kind, instance);
   }
+
+  instance = firstInstance(ectx, pixi, kind, value);
+
+  if (instance === undefined) return undefined;
+
+  // A chain that broke at its first evaluation built its stand-in already.
+  instance = installReplacement(view, kind, instance);
+  view.instances.set(kind.id, instance);
 
   return instance;
 }
 
 /**
- * The id of the kind an instance belongs to: the key its view keeps it under. Read only when the
- * slots change, never per frame.
+ * The slot of one instance: its filter, its passes, its kind id for the performance log, and the
+ * seam of its inputs when it has some.
  *
- * @param view - The view's record.
- * @param instance - One of its instances.
- * @returns The kind id, `"other"` for an instance the view does not keep.
+ * @param instance - The instance.
+ * @returns The slot.
  */
-function kindIdOf(view: FilteredView, instance: FilterInstance): string {
-  for (const [id, kept] of view.instances) if (kept === instance) return id;
+function slotOf(instance: FilterInstance): FilterSlot {
+  const slot: FilterSlot = {
+    filter: instance.filter,
+    passes: instance.passes,
+    kind: instance.kindId
+  };
 
-  return "other";
+  if (instance.kind === "wgsl" && instance.inputs !== undefined) slot.inputs = instance.inputs.slot;
+
+  return slot;
 }
 
 /**
@@ -210,11 +283,7 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
   placed.sort(byOrder);
 
   if (differs(view.assigned, placed)) {
-    const slots = placed.map(instance => ({
-      filter: instance.filter,
-      passes: instance.passes,
-      kind: kindIdOf(view, instance)
-    }));
+    const slots = placed.map(instance => slotOf(instance));
 
     // A despawned entity gets no call: the renderer forgot its slots when it let the view go.
     const needsSet = slots.length > 0 || ectx.deps.world.ecs.ownerOf(entity) !== undefined;
@@ -375,6 +444,10 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
       const pixi = host.ready() ? host.pixi() : undefined;
 
       if (pixi === undefined) return;
+
+      // The shader checks start at the first frame with a ready host, whatever is on screen.
+      if (!ectx.state.checks.started) startChecks(ectx);
+      if (ectx.state.checks.gl.length > 0) pollChecks(ectx);
 
       // With no filtered view only the budgets need a look: no change to mark.
       if (ectx.state.views.size === 0) {

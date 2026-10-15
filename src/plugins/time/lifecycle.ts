@@ -3,7 +3,8 @@
  * the native shell for the length of the app.
  */
 import { tickFrame } from "./api";
-import { followNativeRate, stopShell, watchThermal } from "./native";
+import { stopShell } from "./native";
+import { startRate, stopRate } from "./rate";
 import type { State, TimeCtx } from "./types";
 
 /**
@@ -57,16 +58,15 @@ export function startLoop(ctx: TimeCtx): void {
 }
 
 /**
- * The `onStart` of the plugin: the frame loop, then the frame rate asked of the native shell and,
- * on the shell in an agent build, the one thermal listener. The shell exists only in the page, so
- * its requests follow the app's life.
+ * The `onStart` of the plugin: the frame loop, then the frame rate: the rate asked of the native
+ * shell and, on the shell in an agent build or with `adaptive`, the one thermal listener. The
+ * shell exists only in the page, so its requests follow the app's life.
  *
  * @param ctx - Domain context of the time plugin.
  */
 export function startTime(ctx: TimeCtx): void {
   startLoop(ctx);
-  followNativeRate(ctx);
-  watchThermal(ctx);
+  startRate(ctx);
 }
 
 /**
@@ -77,5 +77,6 @@ export function startTime(ctx: TimeCtx): void {
  */
 export function stopTime(state: State): void {
   stopLoop(state);
+  stopRate(state);
   stopShell(state);
 }

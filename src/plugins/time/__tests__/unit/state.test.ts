@@ -1,9 +1,16 @@
+/* eslint-disable unicorn/no-null -- a frame rate is JSON: an unknown display and an absent shell are null. */
 import { describe, expect, it } from "vitest";
 import { PHASES } from "../../api";
 import { createTimeState } from "../../state";
 import type { Config } from "../../types";
 
-const config: Config = { maxFps: 60, maxDeltaMs: 50, idleFps: 30, idleAfterMs: 2000 };
+const config: Config = {
+  maxFps: 60,
+  maxDeltaMs: 50,
+  idleFps: 30,
+  idleAfterMs: 2000,
+  adaptive: false
+};
 
 // ─── createTimeState ──────────────────────────────────────────
 
@@ -46,6 +53,46 @@ describe("createTimeState", () => {
     first.callbacks.animate.push(() => {});
 
     expect(second.callbacks.animate).toEqual([]);
+  });
+});
+
+// ─── the adaptive config ──────────────────────────────────────
+
+describe("createTimeState with adaptive", () => {
+  it("refuses an adaptive that is not false or { floor: 30 | 60 }, naming the value", () => {
+    expect(() =>
+      createTimeState({ config: { ...config, adaptive: { floor: 45 } as unknown as false } })
+    ).toThrow('[game] time.adaptive is {"floor":45}.\n  Give false, or { floor: 60 } (or 30).');
+    expect(() =>
+      createTimeState({ config: { ...config, adaptive: true as unknown as false } })
+    ).toThrow("[game] time.adaptive is true.");
+  });
+
+  it("refuses a floor above maxFps", () => {
+    expect(() =>
+      createTimeState({ config: { ...config, maxFps: 30, adaptive: { floor: 60 } } })
+    ).toThrow(
+      "[game] time.adaptive.floor is 60, above time.maxFps 30.\n  Give a floor at or below maxFps."
+    );
+  });
+
+  it("starts at maxFps in mode auto with a governor, and in mode fixed without one", () => {
+    const adaptive = createTimeState({
+      config: { ...config, maxFps: 120, adaptive: { floor: 60 } }
+    });
+    const fixed = createTimeState({ config });
+
+    expect(adaptive.rate.snapshot).toEqual({
+      fps: 120,
+      mode: "auto",
+      reason: "start",
+      displayHz: null,
+      ladder: [],
+      thermal: null
+    });
+    expect(adaptive.rate.governor).toBeDefined();
+    expect(fixed.rate.snapshot.mode).toBe("fixed");
+    expect(fixed.rate.governor).toBeUndefined();
   });
 });
 

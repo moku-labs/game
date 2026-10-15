@@ -1,8 +1,9 @@
 /* eslint-disable unicorn/no-null -- the thermal reading and the shell's fields are JSON-shaped: a field the shell left out is `null` (spec 11 T2.4, native's contract v1). */
 /**
- * @file time — the one reader of the native shell (`__MOKU_NATIVE__`) in the engine: the frame-rate request, the one
+ * @file time — the one reader of the native shell (`__MOKU_NATIVE__`) in the engine: the frame-rate requests, the one
  * thermal listener, and the shell's readiness. The renderer's performance header reads the shell through
- * `nativeShell()` too; no other file names the global, and the engine declares no global of the native package.
+ * `nativeShell()` too; no other file names the global, and the engine declares no global of the native package. Only
+ * the talk to the shell lives here: what the adaptive rate makes of an answer or a reading is `rate.ts`'s.
  */
 import type { State, ThermalReading, TimeCtx } from "./types";
 
@@ -173,36 +174,74 @@ function warnRate(ctx: TimeCtx, error: unknown): void {
 }
 
 /**
- * Asks the shell for a frame rate; a throw and a rejected answer are caught and warned about once.
+ * What the shell answers to `setFrameRate`: the rate the panel was set to and the panel's highest rate.
+ */
+export type RateAnswer = { panelHz: number | null; maxHz: number | null };
+
+/**
+ * A refresh rate the shell sent: a finite number above 0.
+ *
+ * @param value - What the shell sent.
+ * @returns The rate, or `null`.
+ * @example
+ * ```ts
+ * hertzOf(120); // 120
+ * ```
+ */
+export function hertzOf(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
+ * Reads the answer of `setFrameRate` (contract v1: `{ panelHz, maxHz }`).
+ *
+ * @param answer - What the request resolved to.
+ * @returns Both rates; a field the shell left out or sent wrong is `null`.
+ * @example
+ * ```ts
+ * answerOf({ panelHz: 60, maxHz: 120 }); // { panelHz: 60, maxHz: 120 }
+ * ```
+ */
+function answerOf(answer: unknown): RateAnswer {
+  return { panelHz: hertzOf(field(answer, "panelHz")), maxHz: hertzOf(field(answer, "maxHz")) };
+}
+
+/**
+ * Asks the shell found at start for the loop's rate now, so the panel follows it: at start and on every change. A
+ * throw and a rejected answer are warned about once; the app runs on.
  *
  * @param ctx - Domain context of the time plugin.
- * @param shell - The shell.
- * @param fps - The rate; `null` hands the request back.
+ * @param onAnswer - Gets the answer of this request.
  */
-function askRate(ctx: TimeCtx, shell: NativeShell, fps: number | null): void {
-  try {
-    const answer = shell.display.setFrameRate(fps);
+export function followNativeRate(ctx: TimeCtx, onAnswer: (answer: RateAnswer) => void): void {
+  const shell = ctx.state.rate.native;
 
-    if (answer instanceof Promise) answer.catch((error: unknown) => warnRate(ctx, error));
+  if (shell === undefined) return;
+
+  try {
+    Promise.resolve(shell.display.setFrameRate(ctx.state.rate.fps)).then(
+      answer => onAnswer(answerOf(answer)),
+      (error: unknown) => warnRate(ctx, error)
+    );
   } catch (error) {
     warnRate(ctx, error);
   }
 }
 
 /**
- * Asks the shell for the loop's frame rate at start, so the panel does not run at 120 Hz for a 60 fps game, and keeps
- * the request that hands it back at stop. Every build: product behaviour, not measurement. Spec 21 replaces the
- * request with `rate.fps` and owns the stop request (O11).
+ * Hands the frame rate back to the shell at stop (`setFrameRate(null)`). A throw and a rejection are dropped: no log
+ * exists at stop.
  *
- * @param ctx - Domain context of the time plugin.
+ * @param shell - The shell found at start.
  */
-export function followNativeRate(ctx: TimeCtx): void {
-  const shell = nativeShell();
+export function handBackRate(shell: NativeShell): void {
+  try {
+    const answer = shell.display.setFrameRate(null);
 
-  if (shell === undefined) return;
-
-  askRate(ctx, shell, ctx.config.maxFps);
-  ctx.state.shell.stopRate = (): void => askRate(ctx, shell, null);
+    if (answer instanceof Promise) answer.catch(nothing);
+  } catch {
+    // The panel keeps whatever rate it has: the app is stopping.
+  }
 }
 
 /**
@@ -216,22 +255,30 @@ function detailOf(event: Event): unknown {
 }
 
 /**
- * Listens once to the window event `moku-native:thermal` (agent build; spec 21 widens it to the governor) and emits
- * `time:thermal` with the normalized reading. The engine's one listener of that event: the renderer logs it through
- * the hook. Without a shell, without a window, or without the flag, nothing is added.
+ * Listens once to the window event `moku-native:thermal` and emits `time:thermal` with the normalized reading, after
+ * handing it to `onReading` (the adaptive rate) when there is one. The engine's one listener of that event: the
+ * renderer logs it through the hook. It is added on the shell, in an agent build or for the adaptive rate; without a
+ * shell, without a window, or with neither, nothing is added.
  *
  * @param ctx - Domain context of the time plugin.
+ * @param onReading - The adaptive rate's input; left out without `adaptive`.
  */
-export function watchThermal(ctx: TimeCtx): void {
+export function watchThermal(ctx: TimeCtx, onReading?: (reading: ThermalReading) => void): void {
   const { shell } = ctx.state;
 
-  if (shell.removeThermal !== undefined || nativeShell() === undefined) return;
+  if (shell.removeThermal !== undefined || ctx.state.rate.native === undefined) return;
   if (typeof globalThis.addEventListener !== "function") return;
 
-  // Inline and positive: Bun folds the guard under a production `define` and drops the listener.
-  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+  // Inline and positive: Bun folds the agent guard under a production `define`; the adaptive rate keeps it.
+  if (
+    (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) ||
+    onReading !== undefined
+  ) {
     const onThermal = (event: Event): void => {
-      ctx.emit("time:thermal", readingOf(detailOf(event)));
+      const reading = readingOf(detailOf(event));
+
+      onReading?.(reading);
+      ctx.emit("time:thermal", reading);
     };
 
     globalThis.addEventListener(THERMAL_EVENT, onThermal);
@@ -240,17 +287,13 @@ export function watchThermal(ctx: TimeCtx): void {
 }
 
 /**
- * Hands the frame rate back to the shell and removes the thermal listener. Works on the state alone, because `onStop`
- * has no context.
+ * Removes the thermal listener. Works on the state alone, because `onStop` has no context.
  *
  * @param state - State of the time plugin.
  */
 export function stopShell(state: State): void {
-  const { shell } = state;
-  const { stopRate, removeThermal } = shell;
+  const { removeThermal } = state.shell;
 
-  shell.stopRate = undefined;
-  shell.removeThermal = undefined;
-  stopRate?.();
+  state.shell.removeThermal = undefined;
   removeThermal?.();
 }

@@ -41,8 +41,8 @@ function emptyWeakMap<Key extends WeakKey, Value>(): WeakMap<Key, Value> {
 }
 
 /**
- * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter and
- * no slice.
+ * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter, no
+ * slice and no hidden mask.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -72,6 +72,8 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     outlinesStale: false,
     filters: emptyMap(),
     filterKinds: emptyWeakMap(),
+    objectHidden: emptyWeakMap(),
+    viewOfTop: emptyWeakMap(),
     cleanups: []
   };
 }

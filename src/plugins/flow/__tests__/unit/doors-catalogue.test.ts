@@ -59,6 +59,7 @@ describe("the base catalogue", () => {
       "reducedMotion",
       "fill",
       "timeScale",
+      "frameRate",
       "mute",
       "trace",
       "filter"

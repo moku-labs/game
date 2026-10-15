@@ -11,7 +11,7 @@ import type { Require } from "../../../../config";
 import type { AnimApi } from "../../../anim/types";
 import type { Api as AssetsApi } from "../../../assets/types";
 import type { Api as ClockApi } from "../../../clock/types";
-import type { FeatureDescription, Api as FlowApi } from "../../../flow/types";
+import type { EnterCallback, FeatureDescription, Api as FlowApi, Stage } from "../../../flow/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
 import type { FakeTexture } from "../../../renderer/__tests__/fake-pixi";
 import type { FilterSlot, Api as RendererApi, RendererKind } from "../../../renderer/types";
@@ -54,8 +54,13 @@ export type FakeRendererState = {
   passes: number;
   /** `host.kind()`: `"webgpu"` by default. */
   kind: RendererKind;
-  /** `host.device()`. */
+  /**
+   * `host.device()`: `undefined` by default, so every shader check answers ok at the first frame; a test of the WGSL
+   * check sets `gpu.device`.
+   */
   device: GPUDevice | undefined;
+  /** `host.resolution()`: 1 by default. */
+  resolution: number;
   /** `host.gl()`: `undefined` by default, as on WebGPU. */
   gl: WebGL2RenderingContext | undefined;
   /** Every `sync.filters.set` call, in order. */
@@ -84,6 +89,8 @@ export type MockEffects = {
   features: Array<{ name: string; description: FeatureDescription }>;
   /** The flow mode the world reads; `"fast"` makes the world fast. */
   flow: { mode: "live" | "fast" };
+  /** Every `flow.onEnter` registration still in force, in order. */
+  enters: Array<{ stage: Stage; callback: EnterCallback }>;
   /** What `anim.reducedMotion()` answers. */
   anim: { reducedMotion: boolean };
   time: Time;
@@ -143,6 +150,7 @@ export function createMockEffects(
   const frames: FrameRegistration[] = [];
   const textures = new Map<string, FakeTexture>();
   const flowMode: { mode: "live" | "fast" } = { mode: "live" };
+  const enters: Array<{ stage: Stage; callback: EnterCallback }> = [];
   const animState = { reducedMotion: false };
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
   const model: { player: Json; session: Json } = { player: {}, session: {} };
@@ -150,7 +158,8 @@ export function createMockEffects(
     ready: options.ready ?? true,
     passes: 1,
     kind: "webgpu",
-    device: gpu.device,
+    device: undefined,
+    resolution: 1,
     gl: undefined,
     sets: [],
     displays: new Set(),
@@ -187,7 +196,18 @@ export function createMockEffects(
   const flowApi = {
     state: () => ({ mode: flowMode.mode }),
     features: { all: () => features },
-    fx: { onHint: (): (() => void) => noRemover }
+    fx: { onHint: (): (() => void) => noRemover },
+    onEnter: (stage: Stage, callback: EnterCallback): (() => void) => {
+      const registration = { stage, callback };
+
+      enters.push(registration);
+
+      return () => {
+        const at = enters.indexOf(registration);
+
+        if (at !== -1) enters.splice(at, 1);
+      };
+    }
   } as unknown as FlowApi;
 
   const worldConfig = { settleMs: 350, reconciledEvent: false };
@@ -216,7 +236,8 @@ export function createMockEffects(
       pixi: () => (renderer.ready ? pixi.module : undefined),
       kind: () => renderer.kind,
       device: () => renderer.device,
-      gl: () => renderer.gl
+      gl: () => renderer.gl,
+      resolution: () => renderer.resolution
     },
     sync: {
       filters: {
@@ -273,6 +294,7 @@ export function createMockEffects(
     textures,
     features,
     flow: flowMode,
+    enters,
     anim: animState,
     time,
     start: (): void => {

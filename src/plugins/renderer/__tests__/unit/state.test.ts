@@ -73,7 +73,9 @@ describe("renderer state", () => {
       outline: undefined,
       hitBox: { x: 0, y: 0, width: 1, height: 1 },
       drawn: undefined,
-      clipDrawn: undefined
+      clipDrawn: undefined,
+      hiddenSelf: 0,
+      hiddenTop: 0
     });
 
     expect(second.sync.views.size).toBe(0);

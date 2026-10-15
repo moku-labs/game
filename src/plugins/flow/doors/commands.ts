@@ -9,7 +9,7 @@ import { filterCommand } from "../../effects/control";
 import { dragCommand, keyCommand, traceCommand } from "../../input/control";
 import { pauseCommand, resumeCommand } from "../../lifecycle/control";
 import { captureCommand, debugCommand } from "../../renderer/control";
-import { stepCommand, timeScaleCommand } from "../../time/control";
+import { frameRateCommand, stepCommand, timeScaleCommand } from "../../time/control";
 import { fillCommand, tapCommand } from "../../ui/control";
 import {
   answerCommand,
@@ -50,6 +50,7 @@ export const commands = Object.freeze({
   reducedMotion: reducedMotionCommand,
   fill: fillCommand,
   timeScale: timeScaleCommand,
+  frameRate: frameRateCommand,
   mute: muteCommand,
   trace: traceCommand,
   filter: filterCommand

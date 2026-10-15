@@ -35,6 +35,7 @@ const ECS_MEMBERS = [
 const ECS_INTERNALS = ["onOwnerLeft", "runPhase", "flush", "clearChanges", "clear"];
 
 const PROJECTION_MEMBERS = [
+  "causeOf",
   "entitiesOf",
   "entityOf",
   "keyOf",

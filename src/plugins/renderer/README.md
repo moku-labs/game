@@ -329,12 +329,12 @@ measured on this build or backend" is `null`, never 0.
 
 | Kind | When |
 |---|---|
-| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent), the GPU and its timer, the display, the shell's thermal reading, the config, what is measured. On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
+| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config, what is measured. On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
 | `startup` | Once, at the first flush after the first drawn frame, and to every later subscriber after its header: HTML, the bundle's download, parse, evaluate, the Pixi chunk, `app.init`, the first frame, the boot long frames. |
 | `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost. |
 | `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label, the long frames around it. |
 | `longFrame` | When the observer delivers one. |
-| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display`, `compile`/`upload` (at a flush), and every `monitor.event` call. |
+| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display`, `compile`/`upload` (at a flush), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
 | `mark` | `monitor.mark(label)`, and an auto mark when the flow rests on a new path. |
 | `thermal` | Every `time:thermal` reading of the native shell. |
 
@@ -737,7 +737,9 @@ pause left waiting, `clock` for `now()`, the time source of the frame counters,
 `world` for `ecs.system`, `ecs.onAdded`/`onRemoved`/`changed`/`get`/`query`/`snapshot`,
 `projection.layers`/`keyOf` and, in an agent build, `systemTimes()`, `flow` for the flow path of
 the frames in the performance log (`state()`, and the `flow:edge`/`flow:rest` hooks), `time` also
-for `measure` and `chargeAgent` in an agent build. The doors read `world.ecs.ownerOf` and, for `game.capture` with
+for `frameDrawn()` (every build: the render phase reports a frame Pixi drew, for the adaptive frame
+rate) and `rate()` (the header), and for `measure`, `chargeAgent` and the `time:thermal`/`time:rate`
+hooks in an agent build. The doors read `world.ecs.ownerOf` and, for `game.capture` with
 `diff`, the app's `flow`. Core APIs: `ctx.log`. `pixi.js` is a peer dependency, reached only
 through `config.loadPixi`.
 

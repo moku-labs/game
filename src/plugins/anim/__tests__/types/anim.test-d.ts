@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import type { Anim, HAPTIC_KINDS, HapticKind } from "../../../../index";
+import type { Anim, HAPTIC_KINDS, HapticKind, World } from "../../../../index";
 import { defineGame } from "../../../../index";
 import { type } from "../../../flow/runner/define";
 import type { NodeFx } from "../../../flow/types";
@@ -177,6 +177,61 @@ defineMotion({
   loop: { track: "sway", ms: "2400" },
   on: {}
 });
+
+// `when` plays enter and exit always or only for a commit; nothing else.
+defineMotion({ states: { small: {} }, on: { enter: "small" }, when: "change" });
+defineMotion({ states: { small: {} }, on: { enter: "small" }, when: "always" });
+// @ts-expect-error — "mount" is a cause, not a when
+defineMotion({ states: { small: {} }, on: { enter: "small" }, when: "mount" });
+
+// `reduced` is "cut" or "keep" wherever a track is described.
+tween(card, Transform, { x: 10 }, { ms: 100, reduced: "keep" });
+// @ts-expect-error — a fade is not a reduced rule
+tween(card, Transform, { x: 10 }, { ms: 100, reduced: "fade" });
+defineMotion({ states: { small: {} }, transition: { reduced: "keep" }, on: { enter: "small" } });
+// @ts-expect-error — the transition takes "cut" or "keep"
+defineMotion({ states: { small: {} }, transition: { reduced: "fade" }, on: { enter: "small" } });
+defineMotion({
+  keyframes: {
+    sway: [
+      { at: 0, Transform: { rotation: 0 } },
+      { at: 1, Transform: { rotation: 0 } }
+    ]
+  },
+  loop: { track: "sway", reduced: "keep" },
+  on: {}
+});
+defineMotion({
+  keyframes: {
+    sway: [
+      { at: 0, Transform: { rotation: 0 } },
+      { at: 1, Transform: { rotation: 0 } }
+    ]
+  },
+  // @ts-expect-error — the loop takes "cut" or "keep"
+  loop: { track: "sway", reduced: true },
+  on: {}
+});
+const keptFade: World.TweenOptions = { ms: 200, reduced: "keep" };
+// @ts-expect-error — TweenOptions takes "cut" or "keep"
+const wrongFade: World.TweenOptions = { ms: 200, reduced: "off" };
+
+expectTypeOf(keptFade.reduced).toEqualTypeOf<World.ReducedMotion | undefined>();
+expectTypeOf(wrongFade).toEqualTypeOf<World.TweenOptions>();
+
+// A hand-written enter may read why it plays.
+const caused: World.ProjectionMotion<{ id: string }> = {
+  enter: (view, _item, _hint, cause) => {
+    expectTypeOf(cause).toEqualTypeOf<World.MotionCause | undefined>();
+
+    return cause === "mount" ? undefined : view.toRest(Transform, { ms: 200 });
+  }
+};
+
+expectTypeOf(caused.enter).not.toBeUndefined();
+expectTypeOf<ReturnType<World.ProjectionApi["causeOf"]>>().toEqualTypeOf<
+  World.MotionCause | undefined
+>();
 
 expectTypeOf(api.reducedMotion()).toEqualTypeOf<boolean>();
 expectTypeOf(api.setReducedMotion(true)).toEqualTypeOf<void>();

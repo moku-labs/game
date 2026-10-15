@@ -1,0 +1,425 @@
+/**
+ * @file ui plugin — the drawn harness of the ui integration tests. Not a test file. The screen set
+ * runs on the fake DOM and the fake Pixi of the renderer's own tests, so `sync` builds a real
+ * display tree, the layers are real containers and the hit test walks what is drawn. A press and
+ * a drag are pointer events on the fake canvas, which `input` listens to.
+ *
+ * Two scenes and a popup. `ward`: the JSX root `wardScene` in layer `scene` (a slot `pan` that
+ * hosts the world projection `ward.pan`, a child stack with the door, and a badge at `zIndex: 10`)
+ * and the `ui` root `wardHud`, whose shop button lies exactly over the door. `board`: the JSX root
+ * `boardBack`, whose child `field` hosts `board.cells` (drop targets) and `board.items`
+ * (draggable), and the JSX projection `orders.row`. The popup `Shop` opens from the ward.
+ */
+import {
+  createApp,
+  Draggable,
+  DropTarget,
+  defineGame,
+  defineScene,
+  projection,
+  Sprite,
+  screen,
+  Transform,
+  type
+} from "../../../index";
+import type { Manifest } from "../../assets/types";
+import type { CompiledMessages } from "../../i18n/types";
+import { type FakeDom, installFakeDom } from "../../renderer/__tests__/fake-dom";
+import { createFakePixi, type FakePixi, FakeTexture } from "../../renderer/__tests__/fake-pixi";
+import type { Entity } from "../../world/types";
+import { popup } from "../components";
+import { defineComponent } from "../jsx/component";
+
+/** The player of the drawn fixture: the cells of the board and the items on them. */
+export type DrawnPlayer = {
+  cells: Array<{ id: string; x: number }>;
+  items: Array<{ id: string; cell: string }>;
+};
+
+const { defineNode, defineFlow, defineFeature } = defineGame<{
+  player: DrawnPlayer;
+  session: { visits: number };
+  assets: string;
+  strings: { "drawn.title": Record<string, never> };
+}>();
+
+/** The manifest of the fixture: the two scene bundles, with no files to fetch. */
+const manifest: Manifest = {
+  version: 2,
+  bundles: {
+    ward: { feature: "drawn", tier: "lazy", mb: 0, files: [] },
+    board: { feature: "drawn", tier: "lazy", mb: 0, files: [] }
+  }
+};
+
+/** The one compiled locale of the fixture. */
+const english: CompiledMessages = {
+  "drawn.title": () => [{ kind: "text", text: "drawn" }]
+};
+
+/** The x of every cell of the board, in the field's own units. */
+const CELL_X: Readonly<Record<string, number>> = { c1: 150, c2: 450 };
+
+/** The shop popup: a panel with a close button. */
+export const Shop = defineComponent("Shop", {
+  outcomes: { close: type() },
+  view: () => (
+    <panel key="shopPanel" style={{ width: 600, height: 600 }}>
+      <button key="shopClose" intent="close" escape style={{ width: 100, height: 100 }} />
+    </panel>
+  )
+});
+
+/** One pan of the ward, a world sprite hosted in the scene's slot. */
+type Pan = { id: string };
+
+/** The ward's pan: one sprite, drawn in the `scene` layer unless the slot hosts it. */
+export const wardPan = projection({
+  name: "ward.pan",
+  layer: "scene",
+  from: (): Pan[] => [{ id: "pan" }],
+  key: (item: Pan) => item.id,
+  view: () => [
+    Sprite({ texture: "ward.pan", width: 200, height: 200 }),
+    Transform({ x: 300, y: 300 })
+  ]
+});
+
+/** One row of a single-root screen. */
+type ScreenItem = { id: string };
+
+/**
+ * The scene of the ward, a JSX root in layer `scene`, as A Memory Missing's `location.scene` is.
+ * The door, 400 × 200 at (0, 1200), lies under the hud's shop button.
+ */
+export const wardScene = projection({
+  name: "ward.scene",
+  layer: "scene",
+  from: (): ScreenItem => ({ id: "wardScene" }),
+  view: () => (
+    <stack key="wardScene" style={{ width: 1080, height: 1920 }}>
+      <stack
+        key="pan"
+        hosts={["ward.pan"]}
+        style={{ position: "absolute", top: 0, left: 0, width: 1080, height: 1080, reason: "pan" }}
+      />
+      <column
+        key="wardStack"
+        style={{
+          position: "absolute",
+          top: 1200,
+          left: 0,
+          width: 1080,
+          height: 400,
+          reason: "door"
+        }}
+      >
+        <button key="wardDoor" intent="board" style={{ width: 400, height: 200 }} />
+      </column>
+      <button
+        key="wardBadge"
+        intent="shop"
+        style={{
+          position: "absolute",
+          top: 1600,
+          left: 800,
+          width: 200,
+          height: 200,
+          zIndex: 10,
+          reason: "badge"
+        }}
+      />
+    </stack>
+  )
+});
+
+/** The hud of the ward, a JSX root in layer `ui`: its shop button covers the scene's door. */
+export const wardHud = projection({
+  name: "ward.hud",
+  layer: "ui",
+  from: (): ScreenItem => ({ id: "wardHud" }),
+  view: () => (
+    <stack key="wardHud" style={{ width: 1080, height: 1920 }}>
+      <button
+        key="hudShop"
+        intent="shop"
+        style={{ position: "absolute", top: 1200, left: 0, width: 400, height: 200, reason: "hud" }}
+      />
+    </stack>
+  )
+});
+
+/** The cells of the board: drop targets hosted in the field. */
+export const boardCells = projection({
+  name: "board.cells",
+  layer: "cells",
+  from: (player: DrawnPlayer) => player.cells,
+  key: (cell: { id: string }) => cell.id,
+  view: (cell: { id: string; x: number }) => [
+    Sprite({ texture: "board.cell", width: 200, height: 200 }),
+    Transform({ x: cell.x, y: 300 }),
+    DropTarget({ intent: "drop", payload: { cell: cell.id } })
+  ]
+});
+
+/** The items of the board: draggable sprites on their cells, hosted in the field. */
+export const boardItems = projection({
+  name: "board.items",
+  layer: "items",
+  lift: "lifted",
+  from: (player: DrawnPlayer) => player.items,
+  key: (item: { id: string }) => item.id,
+  view: (item: { id: string; cell: string }) => [
+    Sprite({ texture: "board.item", width: 120, height: 120 }),
+    Transform({ x: CELL_X[item.cell] ?? 0, y: 300 }),
+    Draggable({ payload: { item: item.id } })
+  ]
+});
+
+/** The back of the board, a JSX root whose field hosts the cells and the items. */
+export const boardBack = projection({
+  name: "board.back",
+  layer: "cells",
+  from: (): ScreenItem => ({ id: "boardBack" }),
+  view: () => (
+    <column key="boardBack" style={{ width: 1080, height: 1920 }}>
+      <stack
+        key="field"
+        hosts={["board.cells", "board.items"]}
+        style={{ width: 600, height: 600 }}
+      />
+      <button key="boardBackButton" intent="back" style={{ width: 200, height: 100 }} />
+    </column>
+  )
+});
+
+/** A row of orders, a JSX projection of the board. */
+export const ordersRow = projection({
+  name: "orders.row",
+  layer: "ui",
+  from: (): ScreenItem => ({ id: "ordersRow" }),
+  view: () => (
+    <row
+      key="ordersRow"
+      style={{ position: "absolute", top: 1700, left: 0, width: 1080, height: 200, reason: "row" }}
+    />
+  )
+});
+
+/** The ward. The hud is listed first: only the layers put the scene root under it. */
+export const wardSceneDef = defineScene("ward", {
+  bundle: "ward",
+  layers: { scene: {} },
+  projections: [wardHud, wardScene, wardPan]
+});
+
+/** The board. */
+export const boardSceneDef = defineScene("board", {
+  bundle: "board",
+  layers: { cells: {}, items: {}, lifted: {} },
+  projections: [boardBack, boardCells, boardItems, ordersRow]
+});
+
+const ward = defineNode({
+  rest: true,
+  scene: "ward",
+  outcomes: { board: type(), shop: type() }
+});
+
+const shop = defineNode({
+  outcomes: { close: type() },
+  run: async ({ fx, out }) => {
+    await fx(popup(Shop, {}));
+
+    return out.close();
+  }
+});
+
+const board = defineNode({
+  rest: true,
+  scene: "board",
+  outcomes: { drop: type<{ item: string; cell: string }>(), back: type() }
+});
+
+const move = defineNode({
+  input: type<{ item: string; cell: string }>(),
+  outcomes: { done: type() },
+  run: ({ input, player, out }) => {
+    const item = player.items.find(entry => entry.id === input.item);
+
+    if (item !== undefined) item.cell = input.cell;
+
+    return out.done();
+  }
+});
+
+const main = defineFlow("main", {
+  nodes: { ward, shop, board, move },
+  start: "ward",
+  outcomes: {},
+  edges: {
+    ward: { board: "board", shop: "shop" },
+    shop: { close: "ward" },
+    board: { drop: "move", back: "ward" },
+    move: { done: "board" }
+  }
+});
+
+/** The feature of the drawn fixture. */
+export const drawnFeature = defineFeature("drawn", {
+  flows: [main],
+  scenes: [wardSceneDef, boardSceneDef],
+  projections: [wardPan, wardScene, wardHud, boardCells, boardItems, boardBack, ordersRow],
+  ui: [Shop],
+  strings: { en: english }
+});
+
+/**
+ * Yields the microtask queue to the loop, the way a test waits without a timer.
+ *
+ * @param times - How many turns to give it.
+ */
+export async function tick(times = 80): Promise<void> {
+  for (let index = 0; index < times; index += 1) await Promise.resolve();
+}
+
+/**
+ * Starts the screen set plus the drawn feature on the fake page, with the flow resting on `ward`
+ * and the ward drawn. The fake page stubs globals: the test takes them down with
+ * `vi.unstubAllGlobals()` after each case.
+ *
+ * @returns The started app, its page and its Pixi.
+ */
+export async function startDrawnApp() {
+  const dom: FakeDom = installFakeDom({ width: 1080, height: 1920 });
+  const pixi: FakePixi = createFakePixi();
+  const app = createApp({
+    plugins: [...screen, drawnFeature],
+    pluginConfigs: {
+      assets: { manifest },
+      flow: { mainFlow: main },
+      i18n: { locale: "en", fallback: "en" },
+      model: {
+        initialPlayer: {
+          cells: [
+            { id: "c1", x: CELL_X.c1 ?? 0 },
+            { id: "c2", x: CELL_X.c2 ?? 0 }
+          ],
+          items: [{ id: "i1", cell: "c1" }]
+        },
+        initialSession: { visits: 0 },
+        seed: 1
+      },
+      renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+    }
+  });
+
+  await app.start();
+  app.renderer.sync.textures.provide(() => new FakeTexture({}) as never);
+  app.flow.run().catch(() => undefined);
+  await settle(app, 4);
+
+  return { app, dom, pixi };
+}
+
+/** The app `startDrawnApp` builds. */
+export type DrawnApp = Awaited<ReturnType<typeof startDrawnApp>>["app"];
+
+/**
+ * Lets the runner move, then runs frames, so the next node is entered and the screen follows.
+ *
+ * @param app - The running app.
+ * @param frames - How many frames to step after the runner moved.
+ */
+export async function settle(app: DrawnApp, frames = 3): Promise<void> {
+  await tick();
+
+  for (let frame = 0; frame < frames; frame += 1) app.time.step(16);
+
+  await tick();
+}
+
+/** A point in reference units. */
+export type DrawnPoint = { x: number; y: number };
+
+/**
+ * Dispatches one pointer event of the first touch on the canvas, at a point in reference units.
+ *
+ * @param app - The running app.
+ * @param pixi - Its Pixi, whose canvas `input` listens to.
+ * @param name - The DOM event name.
+ * @param point - Where, in reference units.
+ */
+function pointer(app: DrawnApp, pixi: FakePixi, name: string, point: DrawnPoint): void {
+  const client = app.renderer.viewport.toScreen(point);
+
+  pixi.last().canvas.dispatch(name, {
+    pointerType: "touch",
+    pointerId: 1,
+    clientX: client.x,
+    clientY: client.y,
+    preventDefault: () => undefined
+  });
+}
+
+/**
+ * A tap at a point: down, a frame, up, a frame, and the runner's turn.
+ *
+ * @param app - The running app.
+ * @param pixi - Its Pixi.
+ * @param point - Where, in reference units.
+ */
+export async function press(app: DrawnApp, pixi: FakePixi, point: DrawnPoint): Promise<void> {
+  pointer(app, pixi, "pointerdown", point);
+  app.time.step(16);
+  pointer(app, pixi, "pointerup", point);
+  app.time.step(16);
+  await settle(app, 1);
+}
+
+/**
+ * A drag from one point to another in four steps, a frame after each, then the release.
+ *
+ * @param app - The running app.
+ * @param pixi - Its Pixi.
+ * @param from - Where the finger goes down, in reference units.
+ * @param to - Where it is lifted, in reference units.
+ */
+export async function drag(
+  app: DrawnApp,
+  pixi: FakePixi,
+  from: DrawnPoint,
+  to: DrawnPoint
+): Promise<void> {
+  pointer(app, pixi, "pointerdown", from);
+  app.time.step(16);
+
+  for (let step = 1; step <= 4; step += 1) {
+    const at = {
+      x: from.x + ((to.x - from.x) * step) / 4,
+      y: from.y + ((to.y - from.y) * step) / 4
+    };
+
+    pointer(app, pixi, "pointermove", at);
+    app.time.step(16);
+  }
+
+  pointer(app, pixi, "pointerup", to);
+  app.time.step(16);
+  await settle(app, 1);
+}
+
+/**
+ * The centre of the box a view is drawn and hit in, in reference units.
+ *
+ * @param app - The running app.
+ * @param entity - The drawn entity.
+ * @returns The centre, or `undefined` when the view is not drawn.
+ */
+export function pointOf(app: DrawnApp, entity: Entity): DrawnPoint | undefined {
+  const box = app.renderer.sync.boundsOf(entity);
+
+  if (box === undefined) return undefined;
+
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}

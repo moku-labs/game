@@ -41,7 +41,8 @@ export function enqueueExit(
 }
 
 /**
- * Despawns one view and forgets everything the projection kept about it.
+ * Despawns one view and forgets everything the projection kept about it, but the cause it leaves
+ * with: that stays until the next sweep, so a removal hook can ask.
  *
  * @param pctx - Domain context of the projection module.
  * @param mounted - The mounted projection.
@@ -59,6 +60,7 @@ export function despawnView(pctx: ProjectionCtx, mounted: Mounted, view: View): 
   pctx.ctx.state.projection.byEntity.delete(view.entity);
   pctx.ctx.state.projection.mutes.delete(view.entity);
   pctx.ctx.state.projection.rests.delete(view.entity);
+  pctx.ctx.state.projection.leaving.set(view.entity, view.cause);
   pctx.deps.ecs.despawn(view.entity);
 }
 
@@ -118,13 +120,18 @@ export function dropIfStill(pctx: ProjectionCtx, view: View): void {
 }
 
 /**
- * The sweep of phase `animate`: queued views whose motions ended are despawned, and a live view
- * that came to rest is checked against its rest pose and gets its pending `lift(false)`.
+ * The sweep of phase `animate`: the cause of every view despawned since the last sweep is
+ * forgotten, queued views whose motions ended are despawned, and a live view that came to rest is
+ * checked against its rest pose and gets its pending `lift(false)`.
  *
  * @param pctx - Domain context of the projection module.
  */
 export function sweepQueue(pctx: ProjectionCtx): void {
   const state = pctx.ctx.state.projection;
+
+  for (const entity of state.leaving.keys()) {
+    if (pctx.deps.ecs.ownerOf(entity) === undefined) state.leaving.delete(entity);
+  }
 
   forgetEndedTracks(pctx);
 
@@ -238,7 +245,8 @@ export function flushQueues(pctx: ProjectionCtx): void {
 }
 
 /**
- * Unmounts one projection: flush first, then despawn the live views too.
+ * Unmounts one projection: flush first, then despawn the live views too. They leave with their
+ * screen, so their cause is `"mount"`; a queued view keeps the cause it left with.
  *
  * @param pctx - Domain context of the projection module.
  * @param mounted - The mounted projection.
@@ -247,6 +255,9 @@ export function clearMounted(pctx: ProjectionCtx, mounted: Mounted): void {
   flushMounted(pctx, mounted);
   // A copy: despawning deletes from the very map this loop walks.
   // eslint-disable-next-line unicorn/no-useless-spread -- iterated while mutated
-  for (const view of [...mounted.live.values()]) despawnView(pctx, mounted, view);
+  for (const view of [...mounted.live.values()]) {
+    view.cause = "mount";
+    despawnView(pctx, mounted, view);
+  }
   mounted.items = emptyItems();
 }

@@ -1,9 +1,10 @@
 /**
  * @file effects/filters — the WGSL the engine writes around a fragment body: the inputs Pixi's
  * filter system fills, the vertex stage, and the uniform struct generated from the declaration,
- * so the shader and the uniform layout cannot drift. Pure strings.
+ * so the shader and the uniform layout cannot drift. For each input the engine declares the texture,
+ * its sampler (WGSL only), its scale and clamp uniforms and `sample<Name>(uv)`. Pure strings.
  */
-import type { UniformSpec } from "./types";
+import type { FilterInputDefinition, UniformSpec } from "./types";
 
 /**
  * The head of every filter shader: the global filter uniforms and the input texture and sampler
@@ -63,16 +64,51 @@ export function uniformStruct(uniforms: readonly UniformSpec[]): string {
 }
 
 /**
- * The whole source of a filter: the header, the uniform struct, the body.
+ * The engine's half of each input: the texture and the sampler in `@group(1)` after `fu`, and the function that
+ * reads the input at the body's uv, its scale and its clamp applied. Nothing without inputs.
+ *
+ * @param inputs - The inputs in declaration order.
+ * @returns The WGSL lines, or `""`.
+ * @example
+ * ```ts
+ * inputBindings([blurInput]).includes("fn sampleBlur(uv: vec2<f32>) -> vec4<f32>"); // true
+ * ```
+ */
+export function inputBindings(inputs: readonly FilterInputDefinition[]): string {
+  return inputs
+    .map(
+      (input, index) =>
+        `@group(1) @binding(${1 + 2 * index}) var ${input.texture}: texture_2d<f32>;\n` +
+        `@group(1) @binding(${2 + 2 * index}) var ${input.sampler}: sampler;\n\n` +
+        `fn ${input.sample}(uv: vec2<f32>) -> vec4<f32> {\n` +
+        `  return textureSampleLevel(${input.texture}, ${input.sampler}, clamp(uv * gfu.uInputSize.xy * fu.${input.scale.name}, fu.${input.clamp.name}.xy, fu.${input.clamp.name}.zw), 0.0);\n` +
+        "}\n\n"
+    )
+    .join("");
+}
+
+/**
+ * The whole source of a filter: the header, the uniform struct (the uniforms, then the scale and the clamp of each
+ * input), the input bindings, the body.
  *
  * @param uniforms - The uniforms in declaration order.
+ * @param inputs - The inputs in declaration order.
  * @param body - The fragment body the game wrote.
  * @returns The WGSL source both stages are built from.
  * @example
  * ```ts
- * assemble([], body).endsWith(body); // true
+ * assemble([], [], body).endsWith(body); // true
  * ```
  */
-export function assemble(uniforms: readonly UniformSpec[], body: string): string {
-  return `${HEADER}${uniformStruct(uniforms)}${body}`;
+export function assemble(
+  uniforms: readonly UniformSpec[],
+  inputs: readonly FilterInputDefinition[],
+  body: string
+): string {
+  const struct = uniformStruct([
+    ...uniforms,
+    ...inputs.flatMap(input => [input.scale, input.clamp])
+  ]);
+
+  return `${HEADER}${struct}${inputBindings(inputs)}${body}`;
 }

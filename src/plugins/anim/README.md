@@ -46,7 +46,7 @@ Durations live in the steps and in `defineMotion` (`{ ms: 250, ease: "out" }`), 
 ```ts
 defineAnimation(id, { slots, build })   // slots: { name: type<Target>() | type<Target[]>() }
 sequence(...steps)  parallel(...steps)  stagger(items, ms, item => Step)  wait(ms)  mark(name)
-tween(target, Component, to, { ms, ease?, delayMs?, additive?, space? })   set(target, Component, patch)
+tween(target, Component, to, { ms, ease?, delayMs?, additive?, space?, reduced? })   set(target, Component, patch)
 frames(target, { keys, fps, loop? })    // writes Sprite.texture, one key per frame
 spawn(id, components, { layer?, order? }) // a temporary entity, made when the step is reached
 spawned(id)                             // the target of an entity a spawn step of this timeline made
@@ -56,7 +56,7 @@ HAPTIC_KINDS                            // the kinds haptic takes: light, medium
 use(animation, slots, tools?)           // nests one animation; pass the outer tools when it reads `at`
 play(animation, slots)                  // the fx descriptor a node awaits
 external(player, clip)                  // reserved for Spine: always throws
-defineMotion({ states?, keyframes?, transition?, loop?, on })
+defineMotion({ states?, keyframes?, transition?, loop?, on, when? })
 ```
 
 A `Target` is a projection key `{ projection, key }`, an entity, or `spawned(id)`.
@@ -75,6 +75,26 @@ resolves the target through `world.projection.entityOf` and answers its **root p
 a flight lands on a cell inside a scaled board slot. An entity without a parent answers its rest
 `Transform` as is. A target nothing resolves gives `{ x: 0, y: 0, rotation: 0, scale: 1 }` and one
 warning.
+
+## Targets
+
+A timeline resolves every `{ projection, key }` target once, when it starts, to the entity that
+holds the key then. Every step of the timeline writes that entity:
+
+- The target is fixed at play. A step that starts after a commit removed the key still writes the
+  view, and a view that plays its exit keeps being animated until it is despawned. A step on a view
+  that is gone is skipped.
+- A view despawned and spawned again under the same key is a new view and is not followed.
+- A key nothing held when the timeline started is looked up when its step starts.
+- An entity and `spawned(id)` resolve as before. `at(target)` in `build` is unchanged: it reads the
+  rest poses when the tree is built.
+
+## Flights and the gate
+
+A node that awaits a flight keeps the gate closed while the flight runs. For a flight that must not
+close the gate, commit at once and start it with `fx.start(play(...))`, or draw it from state with a
+`change` hook. See "A flight that does not close the gate" in the
+[flow README](../flow/README.md#a-flight-that-does-not-close-the-gate).
 
 ## Keyframe motions
 
@@ -111,6 +131,30 @@ const swing = defineMotion({
   owns its fields for the whole track. A component the view does not carry is left alone.
 - Definition-time errors: a track with no key, an `at` outside 0..1, keys not strictly ascending, a
   name that is both a state and a track, and an `on.enter`/`on.exit` that names neither.
+
+## When enter and exit play
+
+Every enter and exit hook is told why it plays, as its fourth argument (`World.MotionCause`):
+`"mount"` when the element comes or goes with its screen (a scene mount or unmount, a load, a
+restore, a paused or fast world), `"change"` when a commit changed a live screen. A world projection
+plays them only for `"change"`; `ui` plays them for both. `when: "change"` makes a motion play its
+enter and exit only for a commit:
+
+```ts
+// An order card: grows in when a commit adds it, stands at rest when the board mounts.
+const cardMotion = defineMotion({
+  states: { small: { Transform: { scale: 0.8 }, Shape: { alpha: 0 } } },
+  transition: { ms: 220, ease: "out" },
+  on: { enter: "small", exit: "small" },
+  when: "change"
+});
+```
+
+- `"always"` is the default, as before. A hook called without a cause plays.
+- With `"change"`, a hook called for `"mount"` returns nothing and leaves the view alone, so an
+  element that mounts stands at rest and one that unmounts leaves without a motion.
+- The loop is not concerned, and neither are the change hooks.
+- Any other value throws `[game] Motion has when "<value>".`
 
 ## Loops
 
@@ -170,6 +214,10 @@ const orderCard = defineMotion({
 - A loop does not keep the clock awake: two seconds after the last `wake()` it steps at `time.idleFps`.
 - `loop.ms` is one cycle; left out, it is `transition.ms`. A `loop.ms` that is not a finite number above 0 throws
   `[game] Motion loop "<name>" has ms <ms>.` A `loop.track` that names no keyframe track throws too.
+- `defineMotion` stamps its loop hook with a fingerprint of the keys, the cycle and `loop.reduced`.
+  Two motions built from equal data carry the same one, so `ui` keeps a loop running when a render
+  builds its motion again. `printOf(hook)` (module `anim/motion`, for engine plugins) reads it; a
+  hand-written hook and a loop whose keys hold a function ease carry none.
 
 ## Repeat
 
@@ -187,6 +235,24 @@ sounds and `wait` steps of a timeline are untouched. Every loop stands on its fi
 one at once, and walks on from its first key when the switch goes off. A loop that stands writes its
 first key once, not every frame. Tracks already running keep their length. A `Frames` loop stops on
 the frame it shows and walks on from that frame when the switch goes off.
+
+The author marks the tracks reduced motion keeps, a fade for one: the engine never guesses.
+`reduced: "keep"` plays a track as written, with its length, delay and repeats, and a kept loop
+walks. `"cut"` is the default. It is taken by a `tween` step, by `transition` and `loop` of
+`defineMotion`, and by the options of `ViewHandle.tween` and `toRest`. Any other value of
+`transition.reduced` or `loop.reduced` throws `[game] Motion has reduced "<value>".`
+
+```ts
+// A sheet: its slide is cut under reduced motion, its fade is kept.
+const sheetFade = defineAnimation("sheet.fade", {
+  slots: { sheet: type<Anim.Target>() },
+  build: ({ sheet }) =>
+    sequence(
+      tween(sheet, Transform, { y: 0 }, { ms: 250 }),
+      tween(sheet, Shape, { alpha: 1 }, { ms: 250, reduced: "keep" })
+    )
+});
+```
 
 ```ts
 // web/main.ts follows the system setting

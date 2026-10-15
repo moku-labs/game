@@ -33,6 +33,7 @@ import type {
   Cause,
   Dirty,
   LayerSpec,
+  MotionCause,
   Mounted,
   ProjectionCtx,
   ProjectionDeps,
@@ -268,7 +269,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     lifted: false,
     dropWhenStill: false,
     loopOwed: false,
-    exiting: false
+    exiting: false,
+    cause: "mount"
   });
 
   const api: ProjectionModule = {
@@ -447,6 +449,9 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         : { projection: view.projection, key: view.key };
     },
 
+    causeOf: (entity: Entity): MotionCause | undefined =>
+      state.byEntity.get(entity)?.cause ?? state.leaving.get(entity),
+
     motionsOf: (entity: Entity): readonly string[] => runningComponents(state.tracks, entity),
 
     entityOf: (projection: string, key: string): Entity | undefined =>
@@ -581,6 +586,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.rests.clear();
       state.keys.clear();
       state.keysByEntity.clear();
+      state.leaving.clear();
       state.tracks.length = 0;
       state.hints.length = 0;
       state.dirty = undefined;

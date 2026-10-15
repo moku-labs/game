@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createTimeApi, PHASES, tickFrame } from "../../api";
 import { createTimeState } from "../../state";
 import type { Api, Config, Phase, Time, TimeCtx } from "../../types";
+import { createScript } from "./rate-script";
 
 const global = { orientation: "portrait", referenceSide: 1080 };
 
@@ -27,6 +28,7 @@ function createCtx(overrides: Partial<Config> = {}): TimeCtx {
     maxDeltaMs: 50,
     idleFps: 30,
     idleAfterMs: 2000,
+    adaptive: false,
     ...overrides
   };
 
@@ -614,5 +616,98 @@ describe("wakes", () => {
     api.resume();
 
     expect(api.wakes()).toBe(3);
+  });
+});
+
+// ─── the frame rate: rate() and setRate ───────────────────────
+
+describe("setRate", () => {
+  it("forces the exact cap, and the rule leaves it alone", () => {
+    const s = createScript();
+
+    s.play(2000);
+
+    expect(s.api.setRate(60)).toMatchObject({
+      fps: 60,
+      mode: "forced",
+      reason: "forced",
+      displayHz: 120,
+      ladder: [120, 60]
+    });
+
+    s.play(6000);
+    const before = s.api.snapshot().frame;
+
+    s.play(1000);
+
+    // 60 frames a second on a 120 Hz display, and no return after the dwell.
+    expect(s.api.snapshot().frame - before).toBeGreaterThanOrEqual(59);
+    expect(s.api.snapshot().frame - before).toBeLessThanOrEqual(61);
+    expect(s.api.rate()).toMatchObject({ fps: 60, mode: "forced" });
+
+    s.api.setRate(120);
+    s.gaps(17, 30);
+    expect(s.api.rate()).toMatchObject({ fps: 120, mode: "forced" });
+  });
+
+  it("never forces above maxFps", () => {
+    const s = createScript({ config: { maxFps: 60, adaptive: false } });
+
+    expect(s.api.setRate(120)).toMatchObject({ fps: 60, mode: "forced" });
+  });
+
+  it("auto goes back to the top of the ladder, or to maxFps without adaptive", () => {
+    const adaptive = createScript();
+    const fixed = createScript({ config: { maxFps: 60, adaptive: false } });
+
+    adaptive.play(2000);
+    adaptive.api.setRate(60);
+    fixed.api.setRate(30);
+
+    expect(adaptive.api.setRate("auto")).toMatchObject({ fps: 120, mode: "auto", reason: "auto" });
+    expect(fixed.api.setRate("auto")).toMatchObject({ fps: 60, mode: "fixed", reason: "auto" });
+    expect(adaptive.changes().map(change => [change.from, change.to, change.mode])).toEqual([
+      [120, 60, "forced"],
+      [60, 120, "auto"]
+    ]);
+  });
+
+  it("a choice equal to the current one changes nothing and emits nothing", () => {
+    const adaptive = createScript();
+    const fixed = createScript({ config: { maxFps: 60, adaptive: false } });
+    const before = adaptive.api.rate();
+
+    adaptive.api.setRate("auto");
+    fixed.api.setRate("auto");
+    adaptive.api.setRate(60);
+    adaptive.api.setRate(60);
+
+    expect(adaptive.changes()).toHaveLength(1);
+    expect(fixed.changes()).toEqual([]);
+    expect(before).toMatchObject({ mode: "auto", reason: "start" });
+  });
+
+  it("refuses 90 with the message naming the choices", () => {
+    const { api } = createApi();
+
+    expect(() => api.setRate(90 as never)).toThrow(
+      '[game] time.setRate takes "auto", 30, 60 or 120.\n  Pass one of them, not 90.'
+    );
+    expect(api.rate().fps).toBe(60);
+  });
+});
+
+describe("rate", () => {
+  it("is the same frozen object until something changes", () => {
+    const s = createScript();
+    const first = s.api.rate();
+
+    s.gaps(1000 / 120, 100);
+
+    expect(s.api.rate()).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+
+    s.api.setRate(60);
+    expect(s.api.rate()).not.toBe(first);
   });
 });

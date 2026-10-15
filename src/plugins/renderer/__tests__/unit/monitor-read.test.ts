@@ -78,3 +78,23 @@ describe("FrameRing.read", () => {
     expect(ring.read(into, ring.written)).toEqual({ copied: 0, lost: 0 });
   });
 });
+
+describe("the frame ring across a stop and a start", () => {
+  // A reader that finds frame k at k % capacity (spec 11: the editor's overlay) would read the
+  // wrong frame if a restart began writing at slot 0 again while the commit number kept counting.
+  it("keeps frame k in slot k % capacity after the renderer stops and starts again", async () => {
+    const agent = await startAgent({ config: { monitor: { budgetMs: "rate", frames: 64 } } });
+
+    for (let index = 1; index <= 5; index += 1) agent.frame({ at: index, workMs: index });
+    await agent.mock.stop();
+    await agent.mock.start();
+    for (let index = 6; index <= 8; index += 1) agent.frame({ at: index, workMs: index * 10 });
+
+    const perf = agent.mock.ctx.state.monitor.perf;
+    const ring = perf?.ring;
+
+    expect(ring?.written).toBe(8);
+    // Frames 5, 6, 7 (commit numbers) were written after the restart, with work 60, 70, 80.
+    expect([5, 6, 7].map(k => ring?.columns.workMs[k % 64])).toEqual([60, 70, 80]);
+  });
+});

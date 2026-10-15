@@ -11,7 +11,13 @@ import type { Config, TimeCtx } from "../../types";
 // panel is asked for, the one thermal listener, the shell's readiness.
 // ---------------------------------------------------------------------------
 
-const config: Config = { maxFps: 60, maxDeltaMs: 50, idleFps: 30, idleAfterMs: 2000 };
+const config: Config = {
+  maxFps: 60,
+  maxDeltaMs: 50,
+  idleFps: 30,
+  idleAfterMs: 2000,
+  adaptive: false
+};
 
 function createCtx(): TimeCtx {
   return {

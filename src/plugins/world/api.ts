@@ -112,6 +112,7 @@ function exposeProjection(projection: ProjectionModule): ProjectionApi {
     mute: projection.mute,
     lift: projection.lift,
     keyOf: projection.keyOf,
+    causeOf: projection.causeOf,
     motionsOf: projection.motionsOf,
     entityOf: projection.entityOf,
     entitiesOf: projection.entitiesOf,

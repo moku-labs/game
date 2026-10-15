@@ -211,7 +211,8 @@ export type PerfHeaderLine = PerfLine<"header"> & {
   };
   display: PerfDisplay;
   thermal: Time.ThermalReading | null;
-  // `rate?: Readonly<Time.FrameRate>` is added by spec 21 (block 3A, O9).
+  /** The loop's frame rate when the header was written (spec 21); optional for a reader of an older log. */
+  rate?: Readonly<Time.FrameRate>;
   config: {
     maxFps: number;
     idleFps: number;

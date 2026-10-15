@@ -223,8 +223,8 @@ export function shellThermal(): ThermalReading | Promise<unknown> | null {
 }
 
 /**
- * The header of a subscriber: the page, the device, the GPU, the display, the shell's thermal reading and the
- * configuration, built from the live state.
+ * The header of a subscriber: the page, the device, the GPU, the display, the shell's thermal reading, the loop's
+ * frame rate and the configuration, built from the live state.
  *
  * @param pc - The perf context.
  * @param thermal - The shell's reading, or `null`.
@@ -267,6 +267,7 @@ export function headerLine(pc: PerfCtx, thermal: ThermalReading | null): PerfHea
     },
     display: displayOf(pc),
     thermal,
+    rate: pc.ctx.deps.time.rate(),
     config: {
       maxFps: caps.maxFps,
       idleFps: caps.idleFps,

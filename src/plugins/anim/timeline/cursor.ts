@@ -1,12 +1,14 @@
 /**
  * @file anim/timeline — the cursor over a step tree: one mutable record per step, the advance
  * that carries the remainder of a finished step into the next one of the same frame, and the two
- * ways out. It reaches the world only through the injected runtime.
+ * ways out. It reaches the world only through the injected runtime. A `{ projection, key }`
+ * target names the entity that held the key when the timeline started, for every step.
  */
 import { Sprite } from "../../renderer/components";
 import type { Entity } from "../../world/types";
 import { asComponent } from "../components";
 import type { StepMotion } from "../tween/types";
+import type { Target } from "../types";
 import { frameIndexAt, framesDurationMs, writeFrame } from "./frames";
 import { spawnStep } from "./spawn";
 import type { Cursor, CursorCtx, Step, TimelineRuntime } from "./types";
@@ -62,8 +64,40 @@ function reportMark(cctx: CursorCtx, name: string): void {
 }
 
 /**
- * Resolves the target of a step to a live entity that carries the component. A spawned id is
- * looked up in the spawn table of this timeline only.
+ * The table key of a projection-key target; `undefined` for an entity or a spawned id, which need no table.
+ *
+ * @param target - The target a step names.
+ * @returns The key, or `undefined`.
+ * @example
+ * ```ts
+ * targetKey({ projection: "board.items", key: "i7" }); // '["board.items","i7"]'
+ * ```
+ */
+function targetKey(target: Target): string | undefined {
+  if (typeof target === "number" || "spawned" in target) return undefined;
+
+  return JSON.stringify([target.projection, target.key]);
+}
+
+/**
+ * The entity a target names for a step that starts now. A key target the timeline resolved when it
+ * started is that entity, never looked up again, also when it left its projection or is gone. Any
+ * other target is looked up now: a key nothing held at the start, an entity, a spawned id, which
+ * only the spawn table of this timeline answers.
+ *
+ * @param cctx - What the cursor carries down the tree.
+ * @param target - The target the step names.
+ * @returns The entity, or `undefined`.
+ */
+function entityFor(cctx: CursorCtx, target: Target): Entity | undefined {
+  const key = targetKey(target);
+  const held = key === undefined ? undefined : cctx.targets.get(key);
+
+  return held ?? cctx.rt.entityOf(target, cctx.spawned);
+}
+
+/**
+ * Resolves the target of a step to a live entity that carries the component.
  *
  * @param cctx - What the cursor carries down the tree.
  * @param step - A step that names a target and a component.
@@ -73,7 +107,7 @@ function targetOf(
   cctx: CursorCtx,
   step: Extract<Step, { kind: "tween" | "set" }>
 ): Entity | undefined {
-  const entity = cctx.rt.entityOf(step.target, cctx.spawned);
+  const entity = entityFor(cctx, step.target);
 
   if (entity === undefined || cctx.rt.read(entity, step.component) === undefined) return undefined;
 
@@ -88,7 +122,7 @@ function targetOf(
  * @returns The entity, or `undefined`.
  */
 function spriteOf(cctx: CursorCtx, step: Extract<Step, { kind: "frames" }>): Entity | undefined {
-  const entity = cctx.rt.entityOf(step.target, cctx.spawned);
+  const entity = entityFor(cctx, step.target);
 
   if (entity === undefined || cctx.rt.read(entity, asComponent(Sprite)) === undefined) {
     return undefined;
@@ -116,7 +150,8 @@ function startTween(
     ms: step.ms,
     ease: step.ease,
     delayMs: step.delayMs,
-    additive: step.additive
+    additive: step.additive,
+    reduced: step.reduced
   });
 }
 
@@ -565,18 +600,34 @@ export function cancelCursor(cctx: CursorCtx, cursor: Cursor): void {
 
 /**
  * Every entity a `tween`, `set` or `frames` step of the tree names, resolved once when the
- * timeline starts. They are the entities `Animation.playing` counts.
+ * timeline starts: the entities `Animation.playing` counts, and the entity of every
+ * `{ projection, key }` target, which every later step of the timeline writes.
  *
  * @param rt - The timeline runtime.
  * @param step - The step tree.
- * @returns The entities, each once, in tree order.
+ * @returns The entity of each key target by its table key, and the entities, each once, in tree
+ *   order.
  */
-export function entitiesOf(rt: TimelineRuntime, step: Step): readonly Entity[] {
+export function resolveTargets(
+  rt: TimelineRuntime,
+  step: Step
+): { targets: Map<string, Entity>; entities: readonly Entity[] } {
   const found = emptyEntitySet();
+  const targets = emptyTargetTable();
 
-  collectEntities(rt, step, found);
+  collectEntities(rt, step, found, targets);
 
-  return [...found];
+  return { targets, entities: [...found] };
+}
+
+/**
+ * Creates the empty target table of one walk. It lives in its own non-exported function because
+ * lint rule L5 refuses a collection built inside an exported declaration.
+ *
+ * @returns An empty map from target key to entity.
+ */
+function emptyTargetTable(): Map<string, Entity> {
+  return new Map();
 }
 
 /**
@@ -590,21 +641,28 @@ function emptyEntitySet(): Set<Entity> {
 }
 
 /**
- * Walks the tree and collects the entities its writing steps name.
+ * Walks the tree and collects the entities its writing steps name, and the entity of every key
+ * target under its table key.
  *
  * @param rt - The timeline runtime.
  * @param step - The step to look into.
  * @param found - The set the entities are collected in.
+ * @param targets - The table the key targets are recorded in.
  */
-function collectEntities(rt: TimelineRuntime, step: Step, found: Set<Entity>): void {
+function collectEntities(
+  rt: TimelineRuntime,
+  step: Step,
+  found: Set<Entity>,
+  targets: Map<string, Entity>
+): void {
   if (step.kind === "sequence" || step.kind === "parallel") {
-    for (const child of step.steps) collectEntities(rt, child, found);
+    for (const child of step.steps) collectEntities(rt, child, found, targets);
 
     return;
   }
 
   if (step.kind === "use") {
-    collectEntities(rt, step.step, found);
+    collectEntities(rt, step.step, found, targets);
 
     return;
   }
@@ -613,5 +671,10 @@ function collectEntities(rt: TimelineRuntime, step: Step, found: Set<Entity>): v
 
   const entity = rt.entityOf(step.target);
 
-  if (entity !== undefined) found.add(entity);
+  if (entity === undefined) return;
+
+  const key = targetKey(step.target);
+
+  found.add(entity);
+  if (key !== undefined) targets.set(key, entity);
 }

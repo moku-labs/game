@@ -130,7 +130,8 @@ export function createViewHandle(
         delayMs: options.delayMs ?? 0,
         additive: options.additive ?? false,
         ...(options.segments === undefined ? {} : { segments: options.segments }),
-        ...(options.repeat === undefined ? {} : { repeat: options.repeat })
+        ...(options.repeat === undefined ? {} : { repeat: options.repeat }),
+        ...(options.reduced === undefined ? {} : { reduced: options.reduced })
       }),
 
     toRest: <Value extends object>(
@@ -149,7 +150,8 @@ export function createViewHandle(
         ms: options?.ms ?? pctx.ctx.config.settleMs,
         ease: options?.ease ?? "out",
         delayMs: options?.delayMs ?? 0,
-        additive: false
+        additive: false,
+        ...(options?.reduced === undefined ? {} : { reduced: options.reduced })
       });
     },
 

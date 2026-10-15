@@ -51,7 +51,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  *
  * With `onDemand`, a frame in which nothing visible changed is not drawn: the canvas keeps the
  * last picture (WebGPU presents a canvas texture only when one is rendered; a WebGL canvas keeps
- * what it composited until the next draw).
+ * what it composited until the next draw). A drawn frame is reported to `time` for the adaptive
+ * frame rate, and only when Pixi drew it: an inert or lost host reports none.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param modules - The five modules.
@@ -71,7 +72,7 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
 
   const drawn = modules.demand.decide(modules.monitor.waiting());
 
-  if (drawn) modules.host.render();
+  if (drawn && modules.host.render()) ctx.deps.time.frameDrawn();
   modules.demand.settle(drawn);
   modules.monitor.end(modules.demand.frame().drawn);
 }

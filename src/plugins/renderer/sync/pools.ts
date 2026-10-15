@@ -4,6 +4,7 @@
  */
 import type { PixiContainer, PixiNineSliceSprite, PixiSprite } from "../types";
 import { clearFilters } from "./filters";
+import { clearHidden } from "./hidden";
 import type { SyncCtx, SyncState, View, ViewKind } from "./types";
 
 /**
@@ -109,12 +110,16 @@ export function poolKeyOf(kind: ViewKind, textureKey: string): string {
 }
 
 /**
- * Brings a display object back to the state a fresh one has.
+ * Brings the object of a view that left back to the state a fresh one has: detached, drawn, opaque, unmoved. Its
+ * hidden reasons go with `clearHidden`, so a pooled object never brings the reason of the view it belonged to.
  *
- * @param object - The display object.
+ * @param view - The view whose object goes back to its pool; its wrapper is gone already.
  */
-export function resetObject(object: PixiContainer): void {
+export function resetObject(view: View): void {
+  const object = view.object;
+
   detach(object);
+  clearHidden(view);
   object.visible = true;
   object.alpha = 1;
   object.rotation = 0;
@@ -188,23 +193,25 @@ export function release(sctx: SyncCtx, view: View): void {
     view.wrapper = undefined;
   }
 
-  // A `Display` object belongs to the game: it only leaves the tree.
+  // A `Display` object belongs to the game: it only leaves the tree, without the renderer's hidden reasons.
   if (view.kind === "Display") {
     detach(view.object);
+    clearHidden(view);
 
     return;
   }
 
-  // An adapter object belongs to the plugin that drew it: its adapter destroys it.
+  // An adapter object belongs to the plugin that drew it: its adapter destroys it, or keeps it drawn for a next life.
   if (view.kind === "adapter") {
     detach(view.object);
+    clearHidden(view);
     view.display?.adapter.destroy(view.object);
 
     return;
   }
 
   // The renderer's own object goes back to its pool, reset for its next life.
-  resetObject(view.object);
+  resetObject(view);
 
   const pool = state.pools.get(view.poolKey) ?? emptyPool();
 

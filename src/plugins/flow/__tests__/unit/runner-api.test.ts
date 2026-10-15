@@ -182,6 +182,10 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
       measure: vi.fn(),
       agentClock: () => undefined,
       chargeAgent: vi.fn(),
+      rate: vi.fn(),
+      setRate: vi.fn(),
+      frameDrawn: vi.fn(),
+      frameProbed: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => false,
       step: vi.fn()

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineGameApp, startMoment } from "../../../src/app/define";
 import type { Assets, Flow, Model, Platform } from "../../../src/index";
 import { createApp, createPlugin, defineFeature, flowPlugin, type } from "../../../src/index";
+import { systemSource } from "../../../src/plugins/clock/system";
 import { defineFlow, defineNode } from "../../../src/plugins/flow/runner/define";
 
 vi.mock("../../../src/index", async importOriginal => {
@@ -220,7 +221,8 @@ describe("headless", () => {
       "model",
       "time"
     ]);
-    expect(lastConfigs().time).toEqual({ maxFps: 30 });
+    // The headless app never adapts its frame rate (spec 21 G8.2).
+    expect(lastConfigs().time).toEqual({ maxFps: 30, adaptive: false });
 
     const listed = defineGameApp({
       flow: mainFlow,
@@ -707,5 +709,32 @@ describe("feature tree", () => {
         "[game] defineGameApp: shared declares sub-features.\n  The shared layer has none: declare them in a feature of features."
       )
     );
+  });
+});
+
+describe("the adaptive frame rate", () => {
+  const adaptiveGame = defineGameApp({
+    flow: mainFlow,
+    player,
+    session,
+    pluginConfigs: { time: { maxFps: 120, adaptive: { floor: 60 } } }
+  });
+
+  it("a headless app never adapts", () => {
+    const { app } = adaptiveGame.headless();
+
+    expect(lastConfigs().time).toEqual({ maxFps: 120, adaptive: false });
+    expect(app.time.rate()).toMatchObject({ fps: 120, mode: "fixed" });
+  });
+
+  it("a screen app on a fake clock never adapts, and the page's screen app keeps the game's adaptive", () => {
+    const onFake = adaptiveGame.screen();
+
+    expect(onFake.app.time.rate().mode).toBe("fixed");
+
+    const onDevice = adaptiveGame.screen({ clock: systemSource() });
+
+    expect(lastConfigs().time).toEqual({ maxFps: 120, adaptive: { floor: 60 } });
+    expect(onDevice.app.time.rate()).toMatchObject({ fps: 120, mode: "auto" });
   });
 });

@@ -4,7 +4,7 @@
  */
 import type { Json } from "../../model/types";
 import type { AnyComponent, AnyComponentValue, ComponentType } from "../../world/ecs/types";
-import type { Ease, Entity, TrackOptions } from "../../world/types";
+import type { Ease, Entity, ReducedMotion, TrackOptions } from "../../world/types";
 import type { StepMotion } from "../tween/types";
 import type { Target } from "../types";
 import type { HAPTIC_KINDS } from "./steps";
@@ -129,6 +129,8 @@ export type Step =
       readonly additive: boolean;
       /** `"root"`: the `Transform` fields are a root pose, turned local when the track starts. */
       readonly space: "local" | "root";
+      /** `"keep"`: reduced motion plays the track as written; `"cut"` lands it at once. */
+      readonly reduced: ReducedMotion;
     }
   | {
       readonly kind: "set";
@@ -293,18 +295,22 @@ export type TimelineRuntime = {
 
 /**
  * What the cursor functions carry down the tree: the runtime, the animation id marks are
- * reported under, the list of marks reached so far and the entities the timeline spawned, by id.
+ * reported under, the list of marks reached so far, the entities the timeline spawned, by id, and
+ * the entities its key targets named when it started.
  */
 export type CursorCtx = {
   readonly rt: TimelineRuntime;
   readonly animation: string;
   readonly marks: string[];
   readonly spawned: Map<string, Entity>;
+  /** The entities the key targets named when the timeline started. */
+  readonly targets: ReadonlyMap<string, Entity>;
 };
 
 /**
  * One running timeline: its cursor, the marks it reached, the entities it counts on, the entities
- * it spawned and despawns at its end, and the resolver of its `done` promise.
+ * its key targets named at its start, the entities it spawned and despawns at its end, and the
+ * resolver of its `done` promise.
  */
 export type RunningTimeline = {
   readonly id: number;
@@ -312,6 +318,8 @@ export type RunningTimeline = {
   readonly cursor: Cursor;
   readonly marks: string[];
   readonly entities: readonly Entity[];
+  /** The entities its `{ projection, key }` targets named when it started, by target key. */
+  readonly targets: ReadonlyMap<string, Entity>;
   /** The entities its `spawn` steps made, by spawn id. Despawned when the timeline ends. */
   readonly spawned: Map<string, Entity>;
   readonly resolve: () => void;

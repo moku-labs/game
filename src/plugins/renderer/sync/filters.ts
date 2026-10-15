@@ -77,9 +77,9 @@ export function filtersOf(state: SyncState, entity: Entity): readonly FilterSlot
 }
 
 /**
- * Notes the kind of a slot's filter for the performance log: the filter itself and, for a blur,
- * the two pass filters Pixi applies in its place. A slot without a kind is left out: it counts
- * as "other".
+ * Notes the kind of a slot's filter for the performance log: the filter itself, the stage filters
+ * of its inputs and, for a blur, the two pass filters Pixi applies in its place. A slot without a
+ * kind is left out: it counts as "other".
  *
  * @param state - The sync branch of the plugin state.
  * @param slot - The slot.
@@ -90,6 +90,10 @@ function nameKind(state: SyncState, slot: FilterSlot): void {
   if (kind === undefined) return;
 
   state.filterKinds.set(filter, kind);
+
+  const stages = slot.inputs?.stages;
+
+  if (stages !== undefined) for (const stage of stages) state.filterKinds.set(stage, kind);
 
   if (
     "blurXFilter" in filter &&

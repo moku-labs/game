@@ -18,6 +18,10 @@ export type FakeSource = {
   height: number;
   destroyed: boolean;
   resolution?: number;
+  /** The real pixels across, as Pixi's `TextureSource.pixelWidth`; a pooled texture has it. */
+  pixelWidth?: number;
+  /** The real pixels down, as Pixi's `TextureSource.pixelHeight`; a pooled texture has it. */
+  pixelHeight?: number;
   /** Whether Pixi would generate the mip chain on upload; `from` always writes it. */
   autoGenerateMipmaps?: boolean;
   released?: string[];
@@ -75,6 +79,11 @@ export class FakeTexture {
 
   /** The 1x1 white texture the placeholder is drawn with. */
   public static readonly WHITE = new FakeTexture({
+    source: { width: 1, height: 1, destroyed: false }
+  });
+
+  /** The empty texture, as Pixi's `Texture.EMPTY`: what a filter's unbound input names point at. */
+  public static readonly EMPTY = new FakeTexture({
     source: { width: 1, height: 1, destroyed: false }
   });
 
@@ -145,6 +154,83 @@ export class FakeTexture {
     this.releasedBeforeDestroy = [...(this.source.released ?? [])];
     if (destroySource === true) this.source.destroyed = true;
   }
+}
+
+/**
+ * The fake of Pixi's `TexturePool`: a request of a frame at a resolution gets a texture whose
+ * backing is the next power of two of the real pixels, as Pixi's `getOptimalTexture` sizes it, and
+ * a returned texture is handed out again for the same backing. Every take and return is recorded.
+ */
+export class FakeTexturePool {
+  /** Every texture handed out, in order. */
+  public readonly taken: FakeTexture[] = [];
+  /** Every texture given back, in order. */
+  public readonly returned: FakeTexture[] = [];
+  /** Every options object `getOptimalTexture` was handed, in order. */
+  public readonly requests: object[] = [];
+  private readonly free: FakeTexture[] = [];
+
+  /**
+   * Hands out a pooled texture of a frame at a resolution, as Pixi's does (8.21+: an options object).
+   *
+   * @param options - The frame in CSS pixels and the resolution.
+   * @param options.width - Frame width.
+   * @param options.height - Frame height.
+   * @param options.resolution - Real pixels per CSS pixel; 1 when left out.
+   * @returns The texture.
+   */
+  public getOptimalTexture(options: {
+    width: number;
+    height: number;
+    resolution?: number;
+  }): FakeTexture {
+    const resolution = options.resolution ?? 1;
+    const pixelWidth = nextPow2(Math.ceil(options.width * resolution - 1e-6));
+    const pixelHeight = nextPow2(Math.ceil(options.height * resolution - 1e-6));
+    const at = this.free.findIndex(
+      texture =>
+        texture.source.pixelWidth === pixelWidth && texture.source.pixelHeight === pixelHeight
+    );
+    const texture =
+      at === -1
+        ? new FakeTexture({
+            source: { width: 0, height: 0, destroyed: false, pixelWidth, pixelHeight }
+          })
+        : (this.free.splice(at, 1)[0] as FakeTexture);
+
+    texture.source.resolution = resolution;
+    texture.source.width = pixelWidth / resolution;
+    texture.source.height = pixelHeight / resolution;
+    texture.frame = new FakeRectangle(0, 0, options.width, options.height);
+    this.requests.push(options);
+    this.taken.push(texture);
+
+    return texture;
+  }
+
+  /**
+   * Takes a texture back.
+   *
+   * @param texture - A texture `getOptimalTexture` handed out.
+   */
+  public returnTexture(texture: FakeTexture): void {
+    this.returned.push(texture);
+    this.free.push(texture);
+  }
+}
+
+/**
+ * The next power of two at or above a number, as Pixi's pool sizes a backing.
+ *
+ * @param value - Real pixels, at least 1.
+ * @returns The power of two.
+ */
+function nextPow2(value: number): number {
+  let size = 1;
+
+  while (size < value) size *= 2;
+
+  return size;
 }
 
 /** A point with the `set` of Pixi's observable point. */
@@ -1884,6 +1970,7 @@ export function createFakePixi(
     Sprite: FakeSprite,
     NineSliceSprite: FakeNineSliceSprite,
     Texture: FakeTexture,
+    TexturePool: new FakeTexturePool(),
     Rectangle: FakeRectangle,
     Graphics: FakeGraphics,
     BitmapFont: FakeBitmapFont,

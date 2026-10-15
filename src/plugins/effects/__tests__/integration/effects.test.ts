@@ -23,7 +23,7 @@ import {
 import { Sprite, Transform } from "../../../renderer/components";
 import { worldPlugin } from "../../../world";
 import { projection } from "../../../world/projection/define";
-import { Glow } from "../../filters/builtins";
+import { Glow, Outline } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { effectsPlugin } from "../../index";
 import { Emitter } from "../../particles/component";
@@ -363,9 +363,7 @@ describe("effects plugin integration", () => {
     await app.stop();
   });
 
-  it("checks the GLSL on the WebGL fallback in a dev build and hangs both programs", async () => {
-    vi.stubGlobal("__MOKU_GAME_DEV__", true);
-
+  it("checks the GLSL on the WebGL fallback in every build and hangs both programs", async () => {
     const app = await startApp([{ id: "card", kind: "card" }], true, "webgl");
 
     step(app, 1);
@@ -376,8 +374,9 @@ describe("effects plugin integration", () => {
     const gl = app.renderer.host.gl() as unknown as FakeGlContext;
 
     expect(app.renderer.host.kind()).toBe("webgl");
-    // The check is synchronous on WebGL: both kinds hang in the first frame they are seen.
-    expect(gl.compiled).toEqual([Glow.filter.glsl, Tint.filter.glsl]);
+    // The check is synchronous on WebGL without the parallel extension: every registered kind is compiled at the
+    // first node entry, and both kinds hang in the first frame they are seen.
+    expect(gl.compiled).toEqual([Glow.filter.glsl, Outline.filter.glsl, Tint.filter.glsl]);
     expect(FakeFxGlProgram.made.map(program => program.options.fragment)).toEqual([
       Glow.filter.glsl,
       Tint.filter.glsl

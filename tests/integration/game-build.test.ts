@@ -172,6 +172,11 @@ describe("a game build with and without effectsPlugin", () => {
     expect(markers.filter(marker => !code.includes(marker))).toEqual([]);
     expect(code).toContain("mainFragment");
   }, 60_000);
+
+  it("the striped mark of a broken filter leaves a release bundle and stays in a dev bundle", () => {
+    expect(bundle("screen+effects", "release")).not.toContain("effects.broken-mark");
+    expect(bundle("screen+effects", "dev")).toContain("effects.broken-mark");
+  }, 60_000);
 });
 
 describe("the debug switches, the trigger counter and the overlay call in a game build", () => {

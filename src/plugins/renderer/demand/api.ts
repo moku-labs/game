@@ -233,6 +233,8 @@ export function createDemandApi(
 
     marked: (): ReadonlySet<Entity> => state.marked,
 
+    loose: (): ReadonlySet<Entity> => state.loose,
+
     verifyFrames: (on: boolean): void => {
       // Inline and positive: a production `define` folds the guard, and `verify.ts` leaves the bundle.
       state.verify.on =

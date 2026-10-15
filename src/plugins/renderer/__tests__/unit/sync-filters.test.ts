@@ -437,3 +437,42 @@ describe("renderPasses", () => {
     expect(counts).not.toHaveBeenCalled();
   });
 });
+
+describe("sync.filters.set — the kinds of the performance log", () => {
+  it("names the stage filters of a slot's inputs by the slot's kind in an agent build, and nothing without the flag", async () => {
+    const stages = [new FakeFilter(), new FakeFilter()].map(
+      stage => stage as unknown as PixiFilter
+    );
+    const inputs = {
+      stages,
+      count: 1,
+      version: () => 1,
+      scaleOf: () => 0.5,
+      draw: () => undefined,
+      hold: () => undefined
+    };
+    const filtered: FilterSlot = { ...slot(new FakeFilter(), 3), kind: "fixture.soft", inputs };
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const agent = await started();
+
+    agent.api.sync.filters.set(spawnSprite(agent), [filtered]);
+
+    expect(stages.map(stage => agent.ctx.state.sync.filterKinds.get(stage))).toEqual([
+      "fixture.soft",
+      "fixture.soft"
+    ]);
+
+    vi.unstubAllGlobals();
+
+    const release = await started();
+
+    release.api.sync.filters.set(spawnSprite(release), [filtered]);
+
+    expect(stages.map(stage => release.ctx.state.sync.filterKinds.get(stage))).toEqual([
+      undefined,
+      undefined
+    ]);
+  });
+});

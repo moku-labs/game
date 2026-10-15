@@ -3,7 +3,14 @@
  * and how the layer is written.
  */
 import type { AnyComponent, AnyComponentType, AnyComponentValue, Entity } from "../ecs/types";
-import type { AnyProjectionSpec, DescriptionNode, ProjectionCtx, View, ViewOutput } from "./types";
+import type {
+  AnyProjectionSpec,
+  DescriptionNode,
+  MotionCause,
+  ProjectionCtx,
+  View,
+  ViewOutput
+} from "./types";
 
 /**
  * Normalises a caught value into an `Error`, so the log always gets one.
@@ -130,6 +137,7 @@ export function writeValue(pctx: ProjectionCtx, entity: Entity, value: AnyCompon
  * @param key - The model key.
  * @param item - The model item.
  * @param rest - The output of `view(item)`, which is the rest pose.
+ * @param cause - How the view came: `"mount"` for a direct reconcile, `"change"` for a live commit.
  * @returns The view record.
  */
 export function createViewRecord(
@@ -137,7 +145,8 @@ export function createViewRecord(
   projection: string,
   key: string,
   item: unknown,
-  rest: Map<string, AnyComponentValue>
+  rest: Map<string, AnyComponentValue>,
+  cause: MotionCause = "mount"
 ): View {
   return {
     entity,
@@ -149,6 +158,7 @@ export function createViewRecord(
     lifted: false,
     dropWhenStill: false,
     loopOwed: false,
-    exiting: false
+    exiting: false,
+    cause
   };
 }
