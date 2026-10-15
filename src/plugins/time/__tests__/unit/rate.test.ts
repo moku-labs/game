@@ -279,7 +279,7 @@ describe("what counts as a sample", () => {
     expect(s.api.rate().fps).toBe(120);
   });
 
-  it("without adaptive no tick is observed and no clock is read", () => {
+  it("without adaptive no clock is read, and the ticks only teach the display rate", () => {
     const s = createScript({ config: { maxFps: 60, adaptive: false } });
     const reads = s.clockReads();
 
@@ -291,7 +291,7 @@ describe("what counts as a sample", () => {
       fps: 60,
       mode: "fixed",
       reason: "start",
-      displayHz: null,
+      displayHz: 120,
       ladder: [],
       thermal: null
     });

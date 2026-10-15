@@ -85,6 +85,8 @@ export type StageRenderer = {
   runners?: { prerender: pixi.SystemRunner; renderStart: pixi.SystemRunner };
   /** WebGL only: the render target system's runner and its bound target, for the pass counter. */
   renderTarget?: { onRenderTargetChange: pixi.SystemRunner; renderTarget: { isRoot: boolean } };
+  /** Pixi's view system: the canvas's render target, the one the pass counter tells the canvas pass by. */
+  view: { renderTarget: { isRoot: boolean } };
 };
 
 /** The stand-in application. */
@@ -302,9 +304,11 @@ function createRenderer(
   stage: pixi.Container,
   build?: (options: RenderArguments) => void
 ): StageRenderer {
+  const canvasTarget = { isRoot: true };
   const renderer: StageRenderer = {
     name: kind,
     resolution,
+    view: { renderTarget: canvasTarget },
     renders: 0,
     targets: [],
     probes: [],
@@ -364,7 +368,7 @@ function createRenderer(
     };
     renderer.renderTarget = {
       onRenderTargetChange: new pixi.SystemRunner("onRenderTargetChange"),
-      renderTarget: { isRoot: true }
+      renderTarget: canvasTarget
     };
   }
 

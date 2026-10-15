@@ -25,15 +25,18 @@ import {
   type PerfThermalLine
 } from "./log-types";
 import { entryOf, heapMb, longFramesIn } from "./long-frames";
-import { OVERFLOW_PATH, PHASE_STRIDE, passesOf, recordAt } from "./ring";
+import { CAUSE, OVERFLOW_PATH, PHASE_STRIDE, passesOf, recordAt } from "./ring";
 import { type LongFrameRecord, MEASURE, type PerfCtx, type PerfRing } from "./types";
 import { BYTES_PER_MB, cell, roundTo } from "./units";
 
 /** What follows the Android model in a user agent: `…; SM-A266B Build/…`. */
 const UA_BUILD = " Build/";
 
-/** The WebView's Chrome major in a user agent. */
+/** The Chrome major in a user agent: a browser's or a WebView's. */
 const UA_CHROME = /Chrome\/(\d+)/;
+
+/** What an Android WebView adds to its user agent: `(Linux; Android 15; SM-A266B Build/…; wv)`. */
+const UA_WEBVIEW = /; wv\)/;
 
 /** Bytes of one KiB. */
 const BYTES_PER_KB = 1024;
@@ -131,7 +134,8 @@ function modelOf(userAgent: string): { model: string | null; modelFrom: "shell" 
 }
 
 /**
- * The screen of the moment: resolution, canvas, CSS size, safe area in CSS pixels, backend and orientation.
+ * The screen of the moment: the refresh rate `time` learned, resolution, canvas, CSS size, safe area in CSS pixels,
+ * backend and orientation.
  *
  * @param pc - The perf context.
  * @returns A fresh display.
@@ -146,6 +150,7 @@ export function displayOf(pc: PerfCtx): PerfDisplay {
   const scale = size.scale;
 
   return {
+    hz: pc.ctx.deps.time.rate().displayHz,
     dpr: pc.ctx.state.host.resolution.dpr,
     resolution,
     maxResolution: pc.ctx.config.maxResolution,
@@ -193,9 +198,9 @@ function measuredOf(pc: PerfCtx): PerfMeasured[] {
  * The caps of the loop, from the newest non-idle and idle frames of the ring: 0 before any frame.
  *
  * @param ring - The ring.
- * @returns `maxFps`, `idleFps` and the newest frame's `rateMs`.
+ * @returns `maxFps`, `idleFps` and the newest frame's budget.
  */
-function capsOf(ring: PerfRing): { maxFps: number; idleFps: number; rateMs: number } {
+function capsOf(ring: PerfRing): { maxFps: number; idleFps: number; budgetMs: number } {
   const c = ring.columns;
   let maxFps = 0;
   let idleFps = 0;
@@ -208,7 +213,7 @@ function capsOf(ring: PerfRing): { maxFps: number; idleFps: number; rateMs: numb
     else maxFps ||= fps;
   }
 
-  return { maxFps, idleFps, rateMs: ring.size === 0 ? 0 : cell(c.rateMs, ring.newest) };
+  return { maxFps, idleFps, budgetMs: ring.size === 0 ? 0 : cell(c.budgetMs, ring.newest) };
 }
 
 /**
@@ -222,6 +227,20 @@ export function shellThermal(): ThermalReading | Promise<unknown> | null {
   if (answer === undefined) return null;
 
   return answer instanceof Promise ? answer : readingOf(answer);
+}
+
+/**
+ * The Chrome major of a user agent, as a WebView's and as a browser's: the WebView's only in an Android WebView or in
+ * the native shell.
+ *
+ * @param userAgent - The user agent.
+ * @returns `webview` and `browser`, `null` where they do not apply.
+ */
+function chromeOf(userAgent: string): { webview: string | null; browser: string | null } {
+  const browser = UA_CHROME.exec(userAgent)?.[1] ?? null;
+  const inWebView = UA_WEBVIEW.test(userAgent) || nativeShell() !== undefined;
+
+  return { webview: inWebView ? browser : null, browser };
 }
 
 /**
@@ -255,7 +274,7 @@ export function headerLine(pc: PerfCtx, thermal: ThermalReading | null): PerfHea
     device: {
       userAgent,
       ...modelOf(userAgent),
-      webview: UA_CHROME.exec(userAgent)?.[1] ?? null,
+      ...chromeOf(userAgent),
       cores: typeof cores === "number" ? cores : null,
       memoryGb: typeof memory === "number" ? memory : null
     },
@@ -273,7 +292,7 @@ export function headerLine(pc: PerfCtx, thermal: ThermalReading | null): PerfHea
     config: {
       maxFps: caps.maxFps,
       idleFps: caps.idleFps,
-      budgetMs: ms(budget === "rate" ? caps.rateMs : budget),
+      budgetMs: ms(budget === "rate" ? caps.budgetMs : budget),
       budget,
       frames: pc.perf.ring.capacity
     },
@@ -418,7 +437,8 @@ function addPhase(totals: Totals, index: number, value: number): void {
 }
 
 /**
- * Adds one frame of a window: its phases, its counts, its gap.
+ * Adds one frame of a window: its phases, its counts, its gap. A missed gap is a frame with the `gap` cause: the
+ * spike rule's line and the gaps it does not judge, one rule for the spike and the sample.
  *
  * @param totals - The sums.
  * @param c - The ring's columns.
@@ -426,7 +446,7 @@ function addPhase(totals: Totals, index: number, value: number): void {
  */
 function addFrame(totals: Totals, c: PerfRing["columns"], slot: number): void {
   const agent = cell(c.agentMs, slot);
-  const missed = cell(c.gapMs, slot) > 1.5 * cell(c.capMs, slot);
+  const missed = (cell(c.causes, slot) & CAUSE.gap) !== 0;
 
   addPhase(totals, 0, cell(c.startMs, slot));
 

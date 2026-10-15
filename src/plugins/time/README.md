@@ -49,7 +49,7 @@ expect(app.time.snapshot().frame).toBe(1);
 
 ## Frame algorithm
 
-The cap of a frame is `idleFps` while the screen is idle (never above the rate) and the loop's rate, `rate().fps`, otherwise: `maxFps` unless `adaptive` or `setRate` changed it. The first frame, and the first frame after a `resume`, counts as one capped frame (`1000 / cap`) instead of the gap to a stale timestamp. Otherwise the raw delta is `timestamp - lastTimestamp`. A frame that arrives earlier than `1000 / cap - 1` ms is skipped. The delta is clamped at `maxDeltaMs`, multiplied by `scale`, added to `elapsed`, and `frame` is increased before the phases run.
+The cap of a frame is `idleFps` while the screen is idle (never above the rate) and the loop's rate, `rate().fps`, otherwise: `maxFps` unless `adaptive` or `setRate` changed it. The first frame, and the first frame after a `resume`, counts as one capped frame (`1000 / cap`) instead of the gap to a stale timestamp. Otherwise the raw delta is `timestamp - lastTimestamp`. A frame that arrives earlier than `1000 / cap - slack` is skipped. The slack is half a display period when one frame of the cap is a whole number of display periods (8.3 ms for a 60 cap on a 60 Hz panel, 4.2 ms on a 120 Hz one), so vsync jitter (15.6–17.8 ms ticks at 60 Hz) never drops a frame and a tick one period early is still skipped. When the cap falls between two vsyncs it is 1 ms: a 144 Hz panel under a 60 cap runs every third tick, 48 fps, as before. Until the display rate is known the slack is 12 % of the frame, at least 1 ms (2 ms at 60). The delta is clamped at `maxDeltaMs`, multiplied by `scale`, added to `elapsed`, and `frame` is increased before the phases run.
 
 ## Measuring a frame (agent builds)
 
@@ -63,6 +63,7 @@ listeners). The record is one object rewritten every frame, `FrameMeasure`:
 | `frame`, `at` | `Time.frame`, and the start of the frame on the page clock: the `requestAnimationFrame` timestamp, or the moment `step()` began. |
 | `gapMs` | `at` minus `at` of the previous measured frame; NaN for the first, the first after a `resume()`, and a stepped frame. |
 | `capMs`, `rateMs` | `1000 / cap` of this frame (the idle cap included), and one frame of the loop's rate without the idle cap: `1000 / rate().fps`, from the frame a switch happens in. |
+| `displayMs` | One display period, `1000 / rate().displayHz`; NaN until the display rate is known. No frame comes sooner, so a spike budget is `max(rateMs, displayMs)`. |
 | `skipped` | Ticks the cap skipped since the previous measured frame. |
 | `startMs`, `phaseMs`, `workMs` | The delay before the first phase (0 when stepped), the six phase durations, and `at` to the end of `render`. |
 | `listenersMs` | What the measure listeners took in the frame before. |
@@ -89,7 +90,7 @@ page, and a build with neither, add no listener.
 
 ## The idle cap
 
-The loop counts unscaled time of the frame source since the last `wake()`. When `idleFps` is not 0 and that time passes `idleAfterMs`, the screen is idle: the cap drops to `idleFps` and `snapshot().idle` is true. The next `wake()` lifts it at once, and a `resume()` counts as a wake. The clock of the timer is unscaled, so `setScale(0)` does not stop the idle detection, and `step(deltaMs)` is never capped: a test drives its own frames.
+The loop counts unscaled time of the frame source since the last `wake()`: each frame adds its raw gap, at most `idleAfterMs` (not the delta clamped at `maxDeltaMs`), so a page the browser throttles to 1 Hz goes idle after two seconds, not forty. When `idleFps` is not 0 and that time passes `idleAfterMs`, the screen is idle: the cap drops to `idleFps` and `snapshot().idle` is true. The next `wake()` lifts it at once, and a `resume()` counts as a wake. The clock of the timer is unscaled, so `setScale(0)` does not stop the idle detection, and `step(deltaMs)` is never capped: a test drives its own frames.
 
 ## Adaptive frame rate
 
@@ -105,7 +106,9 @@ nothing to choose. Known limit: a 90 Hz panel with `floor: 60` has the ladder `[
 
 **The display rate** comes from the ticks of the frame source, the ones the cap skips included (at
 60 on a 120 Hz panel they are still 8.3 ms apart): a window of 120 ticks votes for the highest
-rate with a quarter of them. A higher rate is learned at once, a lower one after two windows (a
+rate with a quarter of them. Every app learns it, adaptive or not: without `adaptive` the window is
+30 ticks while the rate is unknown (half a second at 60 Hz), so `rate().displayHz`, the cap's
+slack and the monitor's `displayMs` know the panel early; the ladder stays empty. A higher rate is learned at once, a lower one after two windows (a
 battery saver), never from a panel the shell holds at 60 on our own request. On the native shell
 `maxHz` teaches it at once. No decision is made before it is known, about a second at start, which
 keeps the boot's long frames out. A rising display rate never raises the rate by itself.

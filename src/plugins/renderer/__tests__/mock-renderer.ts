@@ -345,6 +345,7 @@ export function createMockRenderer(
     gapMs: Number.NaN,
     capMs: 1000 / 60,
     rateMs: 1000 / 60,
+    displayMs: Number.NaN,
     skipped: 0,
     startMs: 0,
     phaseMs: new Float32Array(6),

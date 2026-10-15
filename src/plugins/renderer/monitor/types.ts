@@ -345,6 +345,23 @@ export type FrameTimer = {
 };
 
 /**
+ * The display's frame period guessed from the frame source's ticks, for the budget of a frame while `time` does not know
+ * the display. Not public.
+ */
+export type TickEstimate = {
+  /** The last tick intervals of 50 ms or less, written in turn. */
+  samples: Float32Array;
+  /** Scratch of the median: the samples held, sorted. */
+  sorted: Float32Array;
+  /** Samples held, at most `samples.length`. */
+  size: number;
+  /** The slot the next sample goes into. */
+  next: number;
+  /** `[0]`: the period of the display rate the median snaps to, ms; NaN while it snaps to none. */
+  periodMs: Float64Array;
+};
+
+/**
  * What the monitor of an agent build keeps. `undefined` in a build without the flag. Not public.
  */
 export type PerfState = {
@@ -357,6 +374,10 @@ export type PerfState = {
   scratch: Float32Array;
   /** Doubles kept unboxed: `[0]` the budget of the frame being committed, `[1]` the end of a flushed window. */
   staged: Float64Array;
+  /** The display's frame period from the ticks: the budget's display part while `time` does not know the display. */
+  ticks: TickEstimate;
+  /** The `time.rate()` snapshot the last frame saw: a new one may carry another `displayHz` (a `display` event). */
+  rate: Readonly<Time.FrameRate> | undefined;
   drawn: boolean;
   /** The `CHANGED` bits of the frame running now. */
   flags: number;

@@ -3,9 +3,10 @@
  * @file renderer/monitor — the render passes of an agent build (R6). On WebGPU the counting encoder counts each pass
  * where Pixi begins it and hands it to the pass sink here, which records it in the pass ring and asks the GPU timer
  * for its timestamp writes. On WebGL there is no encoder: a pass is a bound render target, seen on Pixi's public
- * runners. Passes are counted only inside a frame. Kind: `canvas` for the root, `filter` while a filter applies,
+ * runners. Passes are counted only inside a frame. Kind: `canvas` for the canvas, `filter` while a filter applies,
  * `texture` otherwise; the label is the target's or its texture's, and a pooled filter target is named by the kind
- * being applied.
+ * being applied. On WebGPU the canvas is the view's render target, kept at attach and compared by identity: Pixi 8.22
+ * marks every WebGPU target `isRoot` when it first binds it. On WebGL `isRoot` is the canvas's alone.
  */
 
 import type { GpuTimer } from "./gpu-timer";
@@ -36,11 +37,11 @@ export type PassRenderer = {
  * The kind of a pass by the rule of R6.1.
  *
  * @param pc - The perf context.
- * @param target - The target the pass draws into.
+ * @param canvas - The pass draws into the canvas.
  * @returns The kind's index.
  */
-function kindOf(pc: PerfCtx, target: PassTarget): number {
-  if (target.isRoot) return KIND.canvas;
+function kindOf(pc: PerfCtx, canvas: boolean): number {
+  if (canvas) return KIND.canvas;
 
   return pc.sinks.filterDepth > 0 ? KIND.filter : KIND.texture;
 }
@@ -68,12 +69,17 @@ function labelOf(pc: PerfCtx, target: PassTarget, kind: number): string | null {
  *
  * @param pc - The perf context.
  * @param timer - The GPU timer of the application, or `undefined` without `timestamp-query`.
+ * @param canvas - The application's canvas target, `renderer.view.renderTarget`; `undefined` without an application.
  * @returns The sink.
  */
-export function createPassSink(pc: PerfCtx, timer: GpuTimer | undefined): PassSink {
+export function createPassSink(
+  pc: PerfCtx,
+  timer: GpuTimer | undefined,
+  canvas: PassTarget | undefined
+): PassSink {
   return {
     begin: (descriptor, target) => {
-      const kind = kindOf(pc, target);
+      const kind = kindOf(pc, target === canvas);
       const sequence = writePass(
         pc.perf.ring.passes,
         pc.perf.frame,
@@ -169,7 +175,7 @@ export function countGlPasses(
  */
 export function attachGlPasses(renderer: PassRenderer, pc: PerfCtx): () => void {
   return countGlPasses(renderer, pc.sinks, (target, index) => {
-    const kind = kindOf(pc, target);
+    const kind = kindOf(pc, target.isRoot);
 
     writePass(
       pc.perf.ring.passes,

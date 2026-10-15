@@ -18,6 +18,7 @@ import { observeLongFrames } from "./long-frames";
 import { attachGlPasses, createPassSink } from "./passes";
 import { CHANGED, createFrameRing } from "./ring";
 import { deliver, flushPerf, writeEvent } from "./stream";
+import { resetTicks } from "./ticks";
 import { MEASURE, type MonitorSinks, type PerfCtx, type PerfState } from "./types";
 
 /** Flow paths the ring interns; the rest share the overflow path of id 0. */
@@ -181,8 +182,9 @@ function attachFirst(pc: PerfCtx): void {
 }
 
 /**
- * Attaches to a WebGPU application: the pass sink in the counting encoder, the GPU timer on the engine's own device
- * with `"timestamp-query"`, the compile counting on that device.
+ * Attaches to a WebGPU application: the pass sink in the counting encoder, with the application's canvas target kept
+ * to tell the canvas pass, the GPU timer on the engine's own device with `"timestamp-query"`, the compile counting on
+ * that device.
  *
  * @param pc - The perf context.
  * @param counted - The counting classes are installed.
@@ -196,7 +198,7 @@ function attachGpu(pc: PerfCtx, counted: boolean): number {
   if (counted) {
     const timer = device?.features.has("timestamp-query") ? createGpuTimer(device, pc) : undefined;
 
-    sinks.passes = createPassSink(pc, timer);
+    sinks.passes = createPassSink(pc, timer, pc.ctx.state.host.app?.renderer.view.renderTarget);
     bits |= MEASURE.passes | MEASURE.stencilPasses | MEASURE.draws;
 
     if (timer !== undefined) {
@@ -270,7 +272,7 @@ export function attachPerf(pc: PerfCtx): void {
 
 /**
  * Stops the monitor of an agent build: the per-application removers run, the timer stops, the observer disconnects,
- * the listeners, the pending spikes and the paths go. The ring keeps its arrays (a restart of the same app reuses
+ * the listeners, the pending spikes, the paths and the display's ticks go. The ring keeps its arrays (a restart of the same app reuses
  * them), empty.
  *
  * @param perf - The perf state.
@@ -301,6 +303,8 @@ export function stopPerf(perf: PerfState, sinks: MonitorSinks): void {
   perf.agentMs = 0;
   perf.flags = 0;
   perf.drawn = false;
+  perf.rate = undefined;
+  resetTicks(perf.ticks);
   sinks.passes = undefined;
   sinks.filterKinds = undefined;
   sinks.inFrame = false;

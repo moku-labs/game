@@ -124,7 +124,11 @@ export type FrameRate = {
   mode: RateMode;
   /** Why the rate is what it is. */
   reason: RateReason;
-  /** Refresh rate of the display in Hz: learned from the frame ticks or the native shell (`maxHz`); `null` until known, and always without `adaptive`. */
+  /**
+   * Refresh rate of the display in Hz, learned from the frame ticks (and with `adaptive` from the native shell's
+   * `maxHz`); `null` until known. Without `adaptive` the first window is 30 ticks (half a second at 60 Hz), with it
+   * 120, the adaptive rule's wait at boot.
+   */
   displayHz: number | null;
   /** The rates the adaptive rule chooses from, highest first; empty until `displayHz` is known, and without `adaptive`. */
   ladder: readonly number[];
@@ -149,7 +153,7 @@ export type RateChange = {
   reason: RateReason;
   /** Who decides the rate after it. */
   mode: RateMode;
-  /** The display rate the rule knew; `null` until known and without `adaptive`. */
+  /** The display rate known at the change; `null` until known. */
   displayHz: number | null;
   /** The shell's last thermal status; `null` without one and without `adaptive`. */
   thermal: ThermalStatus | null;
@@ -166,7 +170,7 @@ export type RateChange = {
  * @example
  * ```ts
  * // a 120 Hz frame of the board in a debug build:
- * const frame: FrameMeasure = { frame: 4812, at: 40123.5, gapMs: 8.3, capMs: 8.33, rateMs: 8.33, skipped: 0, startMs: 0.2, phaseMs: Float32Array.of(0.3, 0.1, 0.1, 0.4, 0.1, 2.2), workMs: 3.4, listenersMs: 0.05, idle: false, stepped: false };
+ * const frame: FrameMeasure = { frame: 4812, at: 40123.5, gapMs: 8.3, capMs: 8.33, rateMs: 8.33, displayMs: 8.33, skipped: 0, startMs: 0.2, phaseMs: Float32Array.of(0.3, 0.1, 0.1, 0.4, 0.1, 2.2), workMs: 3.4, listenersMs: 0.05, idle: false, stepped: false };
  * ```
  */
 export type FrameMeasure = {
@@ -180,6 +184,11 @@ export type FrameMeasure = {
   capMs: number;
   /** `1000 / fps` of the loop's rate in this frame, the idle cap left out: `1000 / time.rate().fps`. */
   rateMs: number;
+  /**
+   * One period of the display, `1000 / time.rate().displayHz`, ms; `NaN` until the display rate is known. No frame
+   * comes sooner than one period, so a spike budget is never below it: `max(rateMs, displayMs)`.
+   */
+  displayMs: number;
   /** `requestAnimationFrame` ticks the cap skipped since the previous measured frame. */
   skipped: number;
   /** From `at` to the first phase callback: the browser's delay and the events it dispatched first; 0 for a stepped frame. */
@@ -298,7 +307,8 @@ export type Config = {
    */
   idleFps: 0 | 30;
   /**
-   * Unscaled milliseconds without a `wake()` after which the loop drops to `idleFps`.
+   * Unscaled milliseconds without a `wake()` after which the loop drops to `idleFps`. A frame moves the idle timer by
+   * its raw gap (at most `idleAfterMs`), not by the clamped delta: a page throttled to 1 Hz goes idle in two seconds.
    */
   idleAfterMs: number;
   /**
@@ -384,6 +394,23 @@ export type ShellState = {
 };
 
 /**
+ * The display detection of every app, adaptive or not: the ticks of the window that is open and the rate they showed.
+ * Allocated once; a tick writes numbers only. Not public: exported for `rate.ts`.
+ */
+export type DisplayState = {
+  /** The display's refresh rate; `null` until a window or the native shell taught it. */
+  hz: number | null;
+  /** Timestamp of the last tick of the frame source; NaN at creation and after `resume()`. */
+  lastTickAt: number;
+  /** Ticks counted in the window that is open. */
+  ticks: number;
+  /** Ticks of the open window per rate of `DISPLAY_RATES`. */
+  tickCounts: Uint16Array;
+  /** Windows in a row that saw a display rate below `hz`. */
+  lowerStreak: number;
+};
+
+/**
  * The loop's frame rate and what decides it. Not public: exported for `rate.ts`.
  */
 export type RateState = {
@@ -401,31 +428,24 @@ export type RateState = {
   snapshot: Readonly<FrameRate>;
   /** The native shell found at start; `undefined` before start, after stop and without a shell. */
   native: NativeShell | undefined;
+  /** The display rate and its detection, with and without `adaptive`. */
+  display: DisplayState;
   /** The adaptive rule, allocated once when `adaptive` is configured; `undefined` otherwise. */
   governor: Governor | undefined;
 };
 
 /**
- * The numbers of the adaptive rule, allocated once: the display detection, the frame that ran last, the ring of
- * samples with the counts of its two windows, the dwell and the shell's requests. Not public: exported for `rate.ts`.
+ * The numbers of the adaptive rule, allocated once: the ladder, the frame that ran last, the ring of samples with the
+ * counts of its two windows, the dwell and the shell's requests. The display rate it reads is `RateState.display`.
+ * Not public: exported for `rate.ts`.
  */
 export type Governor = {
   /** The lowest rate the rule may choose. */
   floor: number;
-  /** The display's refresh rate; `null` until known. */
-  displayHz: number | null;
-  /** The rates the rule chooses from, highest first, frozen; empty until `displayHz` is known. */
+  /** The rates the rule chooses from, highest first, frozen; empty until the display rate is known. */
   ladder: readonly number[];
   /** The shell's last thermal status; `null` before the first reading. */
   thermal: ThermalStatus | null;
-  /** Timestamp of the last tick of the frame source; NaN at creation and after `resume()`. */
-  lastTickAt: number;
-  /** Ticks counted in the display window that is open. */
-  ticks: number;
-  /** Ticks of the open window per rate of `DISPLAY_RATES`. */
-  tickCounts: Uint16Array;
-  /** Windows in a row that saw a display rate below `displayHz`. */
-  lowerStreak: number;
   /** The frame that ran last was drawn. */
   lastDrawn: boolean;
   /** The frame that ran last ran under the idle cap. */

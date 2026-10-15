@@ -23,6 +23,7 @@ import {
   spikeCauses
 } from "./ring";
 import { addPending, annotate, flushPerf, writeDisplay } from "./stream";
+import { noteTicks } from "./ticks";
 import { COUNT, MEASURE, type MonitorSinks, type PerfCtx, type PerfState } from "./types";
 import { BYTES_PER_MB, cell } from "./units";
 
@@ -40,6 +41,12 @@ const SKIPPED_MAX = 255;
 
 /** A gap spike whose work stayed under this share of the budget may be a collection: the `gc?` hint. */
 const GC_WORK_SHARE = 0.5;
+
+/** A gap longer than this, the agent's work left out, is no collection: the `gc?` hint needs a shorter one. */
+const GC_GAP_MS = 500;
+
+/** A gap over this many ms after a gap over it too, with little work, is a throttled page: its gap is not judged. */
+const AWAY_GAP_MS = 500;
 
 /**
  * Opens a frame: the counters and the filter kinds of the frame start at 0 and the passes from
@@ -256,6 +263,80 @@ function turned(pc: PerfCtx): boolean {
 }
 
 /**
+ * Stages the budget of the frame in `perf.staged[0]`: one frame of the rate the loop can reach, the rate's or the
+ * display's when that is longer (a loop runs no faster than its panel), the display from the ticks while `time` does
+ * not know it (NaN compares false); a fixed `budgetMs` instead of both. Staged in the column, not chosen with `?:` and
+ * not returned: a choice between a double of the record and the tagged budget, or a double handed back from a call,
+ * would box the double every frame.
+ *
+ * @param perf - The perf state.
+ * @param measure - What `time` measured of the frame.
+ */
+function stageBudget(perf: PerfState, measure: Readonly<FrameMeasure>): void {
+  perf.staged[0] = measure.rateMs;
+
+  if (measure.displayMs > measure.rateMs) perf.staged[0] = measure.displayMs;
+  else if (Number.isNaN(measure.displayMs) && cell(perf.ticks.periodMs, 0) > measure.rateMs) {
+    perf.staged[0] = cell(perf.ticks.periodMs, 0);
+  }
+  if (perf.budget !== "rate") perf.staged[0] = perf.budget;
+}
+
+/**
+ * Tells whether `time` learned another display rate since the last `display` event. The rate's snapshot is compared by
+ * reference: while it stays the same object, a frame reads nothing else.
+ *
+ * @param pc - The perf context.
+ * @returns True when the snapshot's `displayHz` differs from the one last written.
+ */
+function retuned(pc: PerfCtx): boolean {
+  const { perf } = pc;
+  const rate = pc.ctx.deps.time.rate();
+
+  if (rate === perf.rate) return false;
+
+  perf.rate = rate;
+
+  return perf.display !== undefined && rate.displayHz !== perf.display.hz;
+}
+
+/**
+ * Tells whether the page is hidden: a hidden page's frames come when the browser lets them, their gaps say nothing.
+ *
+ * @returns True on a hidden page.
+ */
+function pageHidden(): boolean {
+  return typeof globalThis.document !== "undefined" && globalThis.document.hidden;
+}
+
+/**
+ * Tells whether the gap of a frame is judged at all: not on a hidden page, not on a throttled one (this gap and the
+ * previous one over 500 ms, with little work), and not between two frames that drew nothing (the ticks of a still
+ * screen). Reads the previous frame's columns: no allocation.
+ *
+ * @param pc - The perf context.
+ * @param measure - What `time` measured of the frame.
+ * @param previous - The ring slot of the previous frame; -1 for none.
+ * @param littleWork - The frame's work, the agent's left out, stayed under half its budget.
+ * @returns True when the gap rule applies.
+ */
+function gapJudged(
+  pc: PerfCtx,
+  measure: Readonly<FrameMeasure>,
+  previous: number,
+  littleWork: boolean
+): boolean {
+  if (pageHidden()) return false;
+  if (previous === -1) return true;
+
+  const c = pc.perf.ring.columns;
+  const throttled =
+    littleWork && measure.gapMs > AWAY_GAP_MS && cell(c.gapMs, previous) > AWAY_GAP_MS;
+
+  return !throttled && (pc.perf.drawn || cell(c.drawn, previous) === 1);
+}
+
+/**
  * Writes what `time` measured of the frame into its slot: the clock numbers, the phases, the work, the flags of the
  * frame, and the budget staged in `perf.staged[0]`, read from the column so no double is handed over.
  *
@@ -293,8 +374,8 @@ function writeMeasure(pc: PerfCtx, slot: number, measure: Readonly<FrameMeasure>
 
 /**
  * The `time.measure` listener of the monitor: writes the frame into the next slot of the ring,
- * then the spike rule, the GPU timer's frame, the flush that is due, the accumulators, a
- * `display` event after a resize, a restore or a turn, and closes the frame.
+ * then the spike rule, the GPU timer's frame, the display's ticks, the flush that is due, the accumulators, a
+ * `display` event after a resize, a restore, a turn or a new display rate, and closes the frame.
  *
  * @param pc - The perf context.
  * @param measure - What `time` measured of the frame; rewritten every frame, so only its numbers are kept.
@@ -306,11 +387,10 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   // Frame k always lives in slot k % capacity (spec 11), also after a stop and start: the commit
   // number keeps counting while the ring is emptied.
   const slot = ring.written % ring.capacity;
-  // Staged in the column, not chosen with `?:`: a choice between a double of the record and the
-  // tagged budget would box the double every frame.
-  perf.staged[0] = measure.rateMs;
+  // The frame before it, for the gap rule; the ring holds 64 frames at least, so it is never this slot.
+  const previous = ring.size === 0 ? -1 : ring.newest;
 
-  if (perf.budget !== "rate") perf.staged[0] = perf.budget;
+  stageBudget(perf, measure);
 
   const budget = cell(perf.staged, 0);
   const { agentMs } = perf;
@@ -322,26 +402,36 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   writeSystems(pc, slot, timing);
   writeKinds(pc, slot);
 
-  // The spike rule. The `gc?` hint of a gap spike with little work: the heap dropped by half a megabyte or more
+  // The spike rule; a gap that says nothing (a hidden or throttled page, a still screen) is not judged. The `gc?` hint
+  // of a gap spike with little work and a gap of half a second at most: the heap dropped by half a megabyte or more
   // since the previous commit (Chromium only; a hint, never a certainty). Written here, not in a
   // function: a computed double handed to a call is boxed, and this runs every frame.
   const heap = usedHeapBytes();
   const heapDrop = perf.lastHeap - heap;
-  let causes = spikeCauses(measure, agentMs, budget);
-  const cameLate = (causes & CAUSE.gap) !== 0;
+  let causes = spikeCauses(measure, agentMs, budget, cell(c.capMs, previous));
   const littleWork = measure.workMs - agentMs < budget * GC_WORK_SHARE;
+
+  if ((causes & CAUSE.gap) !== 0 && !gapJudged(pc, measure, previous, littleWork)) {
+    causes &= ~CAUSE.gap;
+  }
+
+  const cameLate = (causes & CAUSE.gap) !== 0;
   const heapDropped = heapDrop >= GC_DROP_BYTES;
+  const briefGap = measure.gapMs - agentMs <= GC_GAP_MS;
 
-  if (cameLate && littleWork && heapDropped) causes |= CAUSE["gc?"];
+  if (cameLate && littleWork && heapDropped && briefGap) causes |= CAUSE["gc?"];
 
-  // The slot becomes the newest of the ring; a spike is annotated and the GPU timer gets the frame.
+  // The slot becomes the newest of the ring; a spike is annotated (its causes written first: a gap spike reads them)
+  // and the GPU timer gets the frame. The display's ticks learn from the frame after it was judged.
   perf.lastHeap = heap;
   ring.newest = slot;
   ring.size = Math.min(ring.size + 1, ring.capacity);
   ring.written += 1;
-  c.causes[slot] = causes === 0 ? 0 : causes | annotate(pc, slot);
+  c.causes[slot] = causes;
+  if (causes !== 0) c.causes[slot] = causes | annotate(pc, slot);
   c.gpuPartial[slot] = 0;
   perf.timer?.commit(slot, measure.frame);
+  noteTicks(perf.ticks, measure);
 
   // Once a second of page clock: the flush.
   if (Number.isNaN(perf.lastFlushAt)) perf.lastFlushAt = measure.at;
@@ -351,14 +441,16 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   }
 
   // The per-second accumulators, the pending spike, the first drawn frame, and a `display` event after a resize, a
-  // restore or a turn.
+  // restore, a turn or a display rate `time` learned.
   accumulate(perf, measure, timing);
 
   if (causes !== 0) addPending(perf, sequenceOf(ring, slot));
   if (perf.drawn && Number.isNaN(perf.firstDrawnAt)) {
     perf.firstDrawnAt = measure.at + measure.workMs;
   }
-  if ((perf.flags & (CHANGED.resize | CHANGED.restore)) !== 0 || turned(pc)) writeDisplay(pc);
+  if ((perf.flags & (CHANGED.resize | CHANGED.restore)) !== 0 || turned(pc) || retuned(pc)) {
+    writeDisplay(pc);
+  }
 
   // The frame closes: the next one starts with clean flags.
   perf.flags = 0;

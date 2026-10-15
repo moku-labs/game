@@ -1,6 +1,12 @@
 import { expectTypeOf } from "vitest";
 import { createPlugin } from "../../../../config";
-import { frameAt, type PERF_GAP_BUCKETS, type PERF_LOG_VERSION } from "../../../../index";
+import {
+  DEMAND_REASONS,
+  frameAt,
+  PERF_CAUSES,
+  type PERF_GAP_BUCKETS,
+  type PERF_LOG_VERSION
+} from "../../../../index";
 import { timePlugin } from "../../../time";
 import type { ThermalReading } from "../../../time/types";
 import type {
@@ -8,6 +14,7 @@ import type {
   Config,
   FrameRecord,
   MonitorConfig,
+  PerfCause,
   PerfEventName,
   PerfLogLine,
   PoolTrimDetail,
@@ -57,6 +64,9 @@ if (line.kind === "spike") expectTypeOf(line.frame).toEqualTypeOf<FrameRecord>()
 
 expectTypeOf<typeof PERF_LOG_VERSION>().toEqualTypeOf<1>();
 expectTypeOf<typeof PERF_GAP_BUCKETS>().toEqualTypeOf<81>();
+// A reader of the ring names a cause bit and a draw reason from the root, without building a record.
+expectTypeOf(PERF_CAUSES[0]).toEqualTypeOf<PerfCause | undefined>();
+expectTypeOf(DEMAND_REASONS[1]).toEqualTypeOf<"first">();
 expectTypeOf(frameAt(app.renderer.monitor.frames(), 0)).toEqualTypeOf<FrameRecord | undefined>();
 
 // ─── the config: maxResolution is a number, budgetMs a number or "rate" ──

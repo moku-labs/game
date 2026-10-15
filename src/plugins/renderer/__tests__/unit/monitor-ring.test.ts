@@ -1,5 +1,6 @@
 /* eslint-disable unicorn/no-null -- a frame record and a log line are JSON: "not measured" is null. */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PERF_CAUSES } from "../../monitor/log-types";
 import { frameAt } from "../../monitor/ring";
 import { COUNT, MEASURE } from "../../monitor/types";
 import { linesOf, startAgent } from "../perf-harness";
@@ -155,6 +156,46 @@ describe("the spike rule", () => {
 
     agent.frame({ at: 120, workMs: 30 });
     expect(frameAt(ring, 0)?.causes).toEqual(["js", "compile", "upload", "longFrame"]);
+  });
+
+  it("annotates a gap spike with a compile of one of the 4 frames before it, not of the 5th, and no js spike", async () => {
+    const agent = await startAgent({ config: { monitor: { budgetMs: 16.7, frames: 64 } } });
+    const { pc } = agent;
+    const ring = agent.mock.api.monitor.frames();
+    const compiling = { now: false };
+    const causesOf = (compile: boolean, gapMs: number, workMs = 1): readonly string[] => {
+      compiling.now = compile;
+      agent.frame({ gapMs, workMs });
+
+      return frameAt(ring, 0)?.causes ?? [];
+    };
+
+    pc.perf.measuring |= MEASURE.compiles;
+    agent.mock.frames.push({
+      phase: "render",
+      callback: () => {
+        if (compiling.now) pc.sinks.counts[COUNT.compiles] = 1;
+      }
+    });
+
+    expect(causesOf(true, 16.7)).toEqual([]);
+    causesOf(false, 16.7);
+    causesOf(false, 16.7);
+    causesOf(false, 16.7);
+    expect(causesOf(false, 40)).toEqual(["gap", "compile"]);
+
+    // The bits as a reader of the column names them (PERF_CAUSES's example).
+    const bits = ring.columns.causes[ring.newest] ?? 0;
+
+    expect(bits).toBe(9);
+    expect(PERF_CAUSES.filter((_cause, index) => (bits & (1 << index)) !== 0)).toEqual([
+      "gap",
+      "compile"
+    ]);
+    expect(causesOf(false, 40)).toEqual(["gap"]);
+
+    causesOf(true, 16.7);
+    expect(causesOf(false, 16.7, 30)).toEqual(["js"]);
   });
 
   it("keeps the newest 64 spikes waiting for the stream", async () => {

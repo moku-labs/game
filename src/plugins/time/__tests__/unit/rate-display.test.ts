@@ -85,6 +85,34 @@ describe("the display rate from the ticks", () => {
   });
 });
 
+describe("the display rate without adaptive", () => {
+  it("a 60 Hz display is known within 32 ticks of a maxFps 120 game, then a window is 120 ticks", () => {
+    const s = createScript({ config: { adaptive: false }, displayHz: 60 });
+
+    s.play(32 * (1000 / 60));
+
+    expect(s.api.rate()).toEqual({
+      fps: 120,
+      mode: "fixed",
+      reason: "start",
+      displayHz: 60,
+      ladder: [],
+      thermal: null
+    });
+    expect(s.changes()).toEqual([]);
+
+    // The panel goes to 120 Hz: half a second of its ticks is not a whole window yet.
+    s.setDisplay(120);
+    s.play(500);
+
+    expect(s.api.rate().displayHz).toBe(60);
+
+    s.play(600);
+
+    expect(s.api.rate().displayHz).toBe(120);
+  });
+});
+
 describe("the display rate on the native shell", () => {
   it("16.7 ms ticks of a panel the shell holds at 60 on our request never lower the display", async () => {
     const setFrameRate = vi.fn(() => ({ panelHz: 60, maxHz: null }));

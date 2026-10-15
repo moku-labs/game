@@ -21,7 +21,7 @@ type ProfileNode = {
 
 /** The modules whose code runs on the per-frame path. */
 const PER_FRAME =
-  /src\/plugins\/(renderer\/monitor\/(commit|ring|draw-calls|units|long-frames|api|passes|clock)|time\/(measure|phases|api)|world\/ecs\/systems)\.ts/;
+  /src\/plugins\/(renderer\/monitor\/(commit|ring|ticks|draw-calls|units|long-frames|api|passes|clock)|time\/(measure|phases|api|rate-rules)|world\/ecs\/systems)\.ts/;
 
 /** An inspector session with a heap sampler, or `undefined` where the runtime has none. */
 async function heapSession(): Promise<

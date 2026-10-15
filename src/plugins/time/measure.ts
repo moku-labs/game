@@ -21,6 +21,7 @@ export function createMeasureState(): MeasureState {
     gapMs: Number.NaN,
     capMs: 0,
     rateMs: 0,
+    displayMs: Number.NaN,
     skipped: 0,
     startMs: 0,
     phaseMs: new Float32Array(PHASE_COUNT),
@@ -112,6 +113,10 @@ export function runMeasuredFrame(
   // NaN − lastAt stays NaN: the first frame and the first after a resume have no gap.
   record.gapMs = stepped ? Number.NaN : at - measure.lastAt;
   record.rateMs = 1000 / ctx.state.rate.fps;
+
+  const { hz } = ctx.state.rate.display;
+
+  record.displayMs = hz === null ? Number.NaN : 1000 / hz;
   record.skipped = measure.skipped;
   record.workMs = mark - at;
   record.listenersMs = measure.listenersMs;

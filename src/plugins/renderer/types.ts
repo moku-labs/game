@@ -318,8 +318,9 @@ export type Config = {
  */
 export type MonitorConfig = {
   /**
-   * A frame over this is a spike. `"rate"` (the default): one frame of the frame's own rate —
-   * 8.33 ms at the 120 fps target, 16.7 ms at the 60 fps fallback — so a switch of the rate needs
+   * A frame over this is a spike. `"rate"` (the default): one frame of the rate the loop can reach,
+   * the frame's own rate or the display's when that is slower — 8.33 ms at the 120 fps target on a
+   * 120 Hz panel, 16.7 ms at the 60 fps fallback or on a 60 Hz panel — so a switch of the rate needs
    * no config change; a number is a fixed budget in ms.
    */
   budgetMs: number | "rate";

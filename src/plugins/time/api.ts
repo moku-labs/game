@@ -3,7 +3,8 @@
  */
 import { addMeasureListener, pageNow, runMeasuredFrame } from "./measure";
 import { capturePhases, PHASES } from "./phases";
-import { closeFrame, judgeFrame, observeTick, resetGovernor, setRateChoice } from "./rate";
+import { closeFrame, judgeFrame, observeTick, resumeRate, setRateChoice } from "./rate";
+import { capSlackMs } from "./rate-rules";
 import type { Api, FrameCallback, Phase, TimeCtx } from "./types";
 
 export { PHASES } from "./phases";
@@ -128,12 +129,12 @@ function wakeClock(ctx: TimeCtx): void {
  * detection. `step` never touches it: a test drives its own frames and is never capped.
  *
  * @param ctx - Domain context of the time plugin.
- * @param unscaledDeltaMs - Delta of this frame in milliseconds, before the time scale.
+ * @param gapMs - The frame's raw gap in milliseconds, before the time scale, not clamped at `maxDeltaMs`.
  */
-function updateIdle(ctx: TimeCtx, unscaledDeltaMs: number): void {
+function updateIdle(ctx: TimeCtx, gapMs: number): void {
   const { idleFps, idleAfterMs } = ctx.config;
 
-  ctx.state.unscaledElapsedMs += unscaledDeltaMs;
+  ctx.state.unscaledElapsedMs += gapMs;
   ctx.state.idle = idleFps > 0 && ctx.state.unscaledElapsedMs - ctx.state.lastWakeMs >= idleAfterMs;
   ctx.state.time.idle = ctx.state.idle;
 }
@@ -171,13 +172,15 @@ function noteCap(ctx: TimeCtx, frameMs: number): void {
 
 /**
  * Runs one frame of the real frame source. A paused clock runs no phase. Every tick, run or
- * skipped, is a sample of the display for the adaptive rate. The first frame, and the first frame
- * after a `resume`, counts as one capped frame instead of the gap to a stale timestamp. A frame
- * that arrives before the current cap allows it is skipped — the cap is `idleFps` while the
- * screen is idle and the loop's rate (`rate().fps`) otherwise — and a long gap is clamped at
- * `maxDeltaMs` so a backgrounded tab does not produce a giant step. The interval that ends at a
- * run frame is judged by the adaptive rate. An agent build counts the skipped ticks and notes the
- * cap the frame ran under for its measure record.
+ * skipped, is a sample of the display rate. The first frame, and the first frame after a
+ * `resume`, counts as one capped frame instead of the gap to a stale timestamp. A frame that
+ * arrives more than the cap's slack before the current cap allows it is skipped — the cap is
+ * `idleFps` while the screen is idle and the loop's rate (`rate().fps`) otherwise, the slack half
+ * a display period (`capSlackMs`) — and a long gap is clamped at `maxDeltaMs` so a backgrounded
+ * tab does not produce a giant step. The idle timer moves by the raw gap, at most `idleAfterMs`,
+ * so a throttled page goes idle in `idleAfterMs`. The interval that ends at a run frame is judged
+ * by the adaptive rate. An agent build counts the skipped ticks and notes the cap the frame ran
+ * under for its measure record.
  *
  * @param ctx - Domain context of the time plugin.
  * @param timestamp - Timestamp handed over by `requestAnimationFrame`, in milliseconds.
@@ -188,15 +191,15 @@ export function tickFrame(ctx: TimeCtx, timestamp: number): void {
   const { rate } = ctx.state;
   const { governor } = rate;
 
-  if (governor !== undefined) observeTick(ctx, governor, timestamp);
+  observeTick(ctx, timestamp);
 
   // `Math.min`: the idle cap never raises a rate below `idleFps`.
   const frameMs = 1000 / (ctx.state.idle ? Math.min(ctx.config.idleFps, rate.fps) : rate.fps);
   const { lastTimestamp } = ctx.state;
   const rawDeltaMs = lastTimestamp === undefined ? frameMs : timestamp - lastTimestamp;
 
-  // One millisecond of tolerance: a frame source rarely hits the cap exactly.
-  if (rawDeltaMs < frameMs - 1) {
+  // The slack: vsync jitter (15.6–17.8 ms at 60 Hz) must not drop a frame of a 60 cap.
+  if (rawDeltaMs < frameMs - capSlackMs(rate.display.hz, frameMs)) {
     countSkipped(ctx);
 
     return;
@@ -212,7 +215,8 @@ export function tickFrame(ctx: TimeCtx, timestamp: number): void {
 
   const unscaledDeltaMs = Math.min(rawDeltaMs, ctx.config.maxDeltaMs);
 
-  updateIdle(ctx, unscaledDeltaMs);
+  // The raw gap, not the clamped delta: a page throttled to 1 Hz goes idle in `idleAfterMs`.
+  updateIdle(ctx, Math.min(rawDeltaMs, ctx.config.idleAfterMs));
   runFrame(ctx, unscaledDeltaMs, timestamp);
 }
 
@@ -265,10 +269,7 @@ export function createTimeApi(ctx: TimeCtx): Api {
       ctx.state.lastTimestamp = undefined;
       // A resume is a wake: the screen comes back, so it comes back at the full frame rate.
       wakeClock(ctx);
-
-      const { governor } = ctx.state.rate;
-
-      if (governor !== undefined) resetGovernor(governor);
+      resumeRate(ctx.state.rate);
 
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
         const { measure } = ctx.state;

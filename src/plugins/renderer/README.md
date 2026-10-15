@@ -292,7 +292,9 @@ off: every pipeline is created in the first frame that draws with it, as before.
 | `monitor.setResolution(n \| undefined)` | Every build: draws at `n` from the next frame; `undefined` goes back to the policy (see "Resolution"). Answers the resolution of the next frame. |
 
 `frameAt(ring, age)` (root export) turns one slot into a plain record: NaN as `null`, bits as
-names, the path id as the flow path. `textureMbSplit` splits `textureMb` into the art a game loaded,
+names, the path id as the flow path. A reader of the columns names the bits itself with two root exports:
+`PERF_CAUSES[i]` is bit `1 << i` of `causes` (a gap spike after a compile reads 9, `["gap", "compile"]`), and
+`DEMAND_REASONS[reason]` is the draw reason of `reason` (255: no decision). Both only ever grow at the end. `textureMbSplit` splits `textureMb` into the art a game loaded,
 the render targets Pixi draws into, and the pictures the engine keeps (`host.keep`, from F12/C14).
 | `capture(options?)` | Dev builds only. `{ png }`: a PNG data URL of the whole canvas, bars included, taken right after the next frame is drawn; at once while the clock is paused. `{ png, legend }` with `legend: true`. `undefined` in a production build, while inert, lost or unsupported, and when Pixi cannot read the frame (logged). Options: `legend`, `layers`, `sheet`, `against`; see "Capture". |
 
@@ -392,21 +394,33 @@ scene, bundle, restore). The counting is six subclasses swapped in through `exte
 (`GpuBatchAdaptor`, `GpuGraphicsAdaptor`, `GpuEncoderSystem`, `FilterSystem`, `GpuTextureSystem`,
 `GlTextureSystem`); on WebGL a pass is a bound target, seen on Pixi's public runners. Compiles are
 counted on GPU objects of this application only: own properties on the engine's own device and
-`linkProgram` on this app's WebGL context. Long Animation Frames come from a `PerformanceObserver`
+`linkProgram` on this app's WebGL context. A pass's kind is `canvas` for the canvas, `filter` while a filter applies,
+`texture` otherwise (a kept picture's take); on WebGPU the canvas is the view's render target, kept at attach and
+compared by identity, because Pixi 8.22 marks every WebGPU target `isRoot` when it first binds it. Long Animation
+Frames come from a `PerformanceObserver`
 (long tasks where the browser has no LoAF, none on WebKit), the heap from Chromium's
 `performance.memory`. The per-frame path allocates nothing: indexed stores into typed arrays
 allocated once; a dev-only probe (`monitor-alloc.test.ts`, under Node's heap sampler) checks it.
 `monitor/clock.ts` is the one renderer file that reads the page clock (lint L3 ignores it).
 
-**The spike rule.** The budget of a frame is one frame of its own rate (`monitor.budgetMs: "rate"`,
-the default): 8.33 ms at the 120 fps target, 16.7 ms at the 60 fps fallback; a number is a fixed
-line. A frame is a spike when its gap, the agent's work left out, is over `1.5 × max(budget,
-cap)` (`gap`), when its work, the agent's left out, is over the budget (`js`), or when its GPU time
-lands over the budget (`gpu`). With `budgetMs: 16.7`: a gap of 25.0 ms is no spike, 25.1 ms is; at
-the idle cap of 30 fps the line is 50 ms. A spike is annotated with `compile`, `upload` (1 MB or
-more), `longFrame` (an overlapping Long Animation Frame) and the hint `gc?` (a gap with little work
-after the heap dropped by 0.5 MB or more: Chromium only, a hint, never a certainty). A stepped
-frame is never a spike.
+**The spike rule.** The budget of a frame is one frame of the rate the loop can reach (`monitor.budgetMs: "rate"`,
+the default): `max(1000 / rate.fps, 1000 / displayHz)`, since a loop runs no faster than its panel. 8.33 ms at the
+120 fps target on a 120 Hz panel, 16.7 ms at the 60 fps fallback, and 16.7 ms at the 120 fps target on a 60 Hz panel.
+While `time` does not know the display yet (`FrameMeasure.displayMs` NaN), the display is guessed from the ticks: the
+median of the last nine tick intervals of 50 ms or less (a frame's gap over the ticks it spans), snapped to a display
+rate within 5 %; a median that matches none leaves the rate's budget. A number is a fixed line. The ring's `budgetMs`
+column keeps the budget each frame was judged by. A frame is a spike when its gap, the agent's work left out, is over
+`1.5 × max(budget, cap, the previous frame's cap)` (`gap`: the gap of a wake frame is an interval of the idle cap),
+when its work, the agent's left out, is over the budget (`js`), or when its GPU time lands over the budget (`gpu`).
+With `budgetMs: 16.7`: a gap of 25.0 ms is no spike, 25.1 ms is; at the idle cap of 30 fps the line is 50 ms, also
+for the frame that wakes. A gap that says nothing is not judged: on a hidden page, on a throttled one (this gap and
+the previous one over 500 ms, with work under half the budget), and between two frames that drew nothing (the ticks
+of a still screen); the frame that draws again is judged. A spike is annotated with `compile` (a compile in the frame
+or, for a gap spike, in one of the 4 frames before it: the stall comes after the compile), `upload` (1 MB or more),
+`longFrame` (an overlapping Long Animation Frame) and the hint `gc?` (a gap of 500 ms at most with work under half the
+budget, after the heap dropped by 0.5 MB or more: Chromium only, a hint, never a certainty). A stepped frame is never
+a spike. A sample's `gaps.missed` counts the frames with the `gap` cause: the same line and the same exceptions, one
+rule for both (a 120 fps loop on a 60 Hz panel misses none).
 
 #### The log
 
@@ -418,12 +432,12 @@ measured on this build or backend" is `null`, never 0.
 
 | Kind | When |
 |---|---|
-| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config, what is measured. On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
+| `header` | At once to each new subscriber: the device (model from the native shell, else the user agent; `webview` the Chrome major of an Android WebView, `; wv)` in the user agent, or of the page in the native shell, else `null`; `browser` the Chrome major of any Chromium page), the GPU and its timer, the display, the shell's thermal reading, the loop's frame rate (`rate`, `time.rate()`), the config (`budgetMs`: the newest frame's budget), what is measured. On the native shell it waits for `__MOKU_NATIVE__.ready`, 500 ms at most. |
 | `startup` | Once, at the first flush after the first drawn frame, and to every later subscriber after its header: HTML, the bundle's download, parse, evaluate, the Pixi chunk, `app.init`, the first frame, the boot long frames. |
 | `sample` | Once a second of page clock (and on a pause, for the partial second): counts, gaps with their histogram (`PERF_GAP_BUCKETS`), work, phases, systems, GPU time, passes, draws, filters, uploads, compiles, long frames, heap, textures, what measuring cost. |
 | `spike` | At a flush, once its GPU time landed or a flush later: the frame's record, systems, compiles, filters per kind, passes with GPU time, kind and label, the long frames around it. |
 | `longFrame` | When the observer delivers one. |
-| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display`, `compile`/`upload` (at a flush), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
+| `event` | As it happens: `resolution`, `device-lost`, `device-restored`, `pause`, `resume`, `display` (a resize, a restore, a turn, or a display rate `time` learned: the `PerfDisplay` of the moment, with `hz`, `time.rate().displayHz` or `null`), `compile`/`upload` (at a flush), `rate` (every `time:rate`, the payload as its detail), and every `monitor.event` call. |
 | `mark` | `monitor.mark(label)`, and an auto mark when the flow rests on a new path. |
 | `thermal` | Every `time:thermal` reading of the native shell. |
 
@@ -546,7 +560,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `loadPixi` | `() => Promise<PixiModule>` | `() => import("pixi.js")` | Loader seam. Tests pass a fake module. |
 | `debug` | `{ nineSlice?, verifyFrames?, kept? }` | `{ nineSlice: false, verifyFrames: false, kept: true }` | Debug drawing and checks at start, a switch left out is off (`kept` left out is on); `sync.debug.nineSlice(on)`, `sync.debug.verifyFrames(on)` and `sync.debug.kept(on)` switch them at run time. `verifyFrames` works in dev and debug builds only. |
 | `onDemand` | `boolean` | `false` | Draw a frame only when something on the screen changed (see "Render on demand"). Off: every frame is drawn, as before. |
-| `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
+| `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the rate the loop can reach, the frame's rate or the display's when slower, 8.33 ms at 120 fps on a 120 Hz panel, 16.7 ms at 60 or on a 60 Hz panel); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
 | `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |

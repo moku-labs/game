@@ -185,6 +185,11 @@ export type PerfMeasured =
  * What the screen is: in the header and in every `display` event.
  */
 export type PerfDisplay = {
+  /**
+   * The display's refresh rate `time` learned (`time.rate().displayHz`); `null` until it knows it. The engine always
+   * writes it; optional for a reader of an older log.
+   */
+  hz?: number | null;
   dpr: number;
   resolution: number;
   maxResolution: number;
@@ -205,7 +210,13 @@ export type PerfHeaderLine = PerfLine<"header"> & {
     userAgent: string;
     model: string | null;
     modelFrom: "shell" | "ua" | null;
+    /** The Chrome major of an Android WebView (`; wv)` in the user agent) or of the page in the native shell; `null` in a browser. */
     webview: string | null;
+    /**
+     * The Chrome major of the page, in a browser or a WebView; `null` without `Chrome/` in the user agent (Safari,
+     * Firefox). The engine always writes it; optional for a reader of an older log.
+     */
+    browser?: string | null;
     cores: number | null;
     memoryGb: number | null;
   };
@@ -290,6 +301,7 @@ export type PerfSampleLine = PerfLine<"sample"> & {
   frames: number;
   drawn: number;
   idle: number;
+  /** Frames with the `gap` cause (the spike rule's line, the gaps it does not judge left out), split by drawn / not drawn. */
   gaps: { missed: number; drawn: number; idle: number };
   gapMs: { p50: number; p90: number; p99: number } | null;
   frameHist: readonly number[];
@@ -327,9 +339,32 @@ export type PerfSampleLine = PerfLine<"sample"> & {
 };
 
 /**
- * Why a frame is a spike.
+ * Why a frame is a spike: a rule (`gap`, `js`, `gpu`) or an annotation of a spike. `compile` is a compile in the frame or,
+ * for a `gap` spike, in one of the 4 frames before it; `gc?` is a hint, never a certainty.
  */
 export type PerfCause = "gap" | "js" | "gpu" | "compile" | "upload" | "longFrame" | "gc?";
+
+/**
+ * The spike causes in bit order: bit `1 << index` of the ring's `causes` column is `PERF_CAUSES[index]`. New causes are
+ * only ever appended, so a stored bit keeps its meaning.
+ *
+ * @example
+ * ```ts
+ * // An overlay names the causes of the newest frame from the ring, without building a record.
+ * const ring = app.renderer.monitor.frames();
+ * const bits = ring.columns.causes[ring.newest] ?? 0; // 9: a gap spike after a pipeline compile
+ * PERF_CAUSES.filter((_cause, index) => (bits & (1 << index)) !== 0); // ["gap", "compile"]
+ * ```
+ */
+export const PERF_CAUSES: readonly PerfCause[] = [
+  "gap",
+  "js",
+  "gpu",
+  "compile",
+  "upload",
+  "longFrame",
+  "gc?"
+];
 
 /**
  * What changed in a frame.

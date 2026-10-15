@@ -17,7 +17,7 @@ import type {
   PerfChange,
   PerfChangeEntry
 } from "./log-types";
-import { PERF_GAP_BUCKETS } from "./log-types";
+import { PERF_CAUSES, PERF_GAP_BUCKETS } from "./log-types";
 import type { EventRing, PerfRing, RingPasses } from "./types";
 import { cell } from "./units";
 
@@ -72,7 +72,7 @@ export const CHANGED: Readonly<Record<PerfChange, number>> = {
   restore: 16
 };
 
-/** The bits of a frame's `causes` column. */
+/** The bits of a frame's `causes` column, in the order of `PERF_CAUSES`. */
 export const CAUSE: Readonly<Record<PerfCause, number>> = {
   gap: 1,
   js: 2,
@@ -85,17 +85,6 @@ export const CAUSE: Readonly<Record<PerfCause, number>> = {
 
 /** The changes in bit order. */
 const CHANGE_NAMES: readonly PerfChange[] = ["resize", "resolution", "scene", "bundle", "restore"];
-
-/** The causes in bit order. */
-const CAUSE_NAMES: readonly PerfCause[] = [
-  "gap",
-  "js",
-  "gpu",
-  "compile",
-  "upload",
-  "longFrame",
-  "gc?"
-];
 
 /** The pass kinds by their index in the pass ring. */
 const PASS_KINDS: readonly PassKind[] = ["canvas", "texture", "filter"];
@@ -448,8 +437,9 @@ export function bucketOf(gapMs: number): number {
 
 /**
  * The two spike rules a frame is judged by when it commits, the agent's own work left out of both: it came late by at
- * least half a budget (`gap`, against the larger of budget and cap), or its work ran over the budget (`js`). A
- * stepped frame is never a spike.
+ * least half a budget (`gap`, against the largest of the budget, its cap and the cap of the frame before it: the gap
+ * of a wake frame is an interval of the idle cap), or its work ran over the budget (`js`). A stepped frame is never a
+ * spike.
  *
  * @param frame - What `time` measured of the frame.
  * @param frame.gapMs - The gap; NaN for none.
@@ -458,22 +448,27 @@ export function bucketOf(gapMs: number): number {
  * @param frame.stepped - True for a frame of `step()`.
  * @param agentMs - The agent's work of the frame interval.
  * @param budget - The frame's budget.
+ * @param previousCapMs - The cap of the frame before it; NaN for none.
  * @returns The `CAUSE` bits.
  * @example
  * ```ts
- * spikeCauses({ gapMs: 25.1, capMs: 16.7, workMs: 3, stepped: false }, 0, 16.7); // 1: gap
+ * spikeCauses({ gapMs: 33.3, capMs: 16.7, workMs: 3, stepped: false }, 0, 16.7, 33.3); // 0: a wake after the idle cap
  * ```
  */
 export function spikeCauses(
   frame: { gapMs: number; capMs: number; workMs: number; stepped: boolean },
   agentMs: number,
-  budget: number
+  budget: number,
+  previousCapMs: number
 ): number {
   if (frame.stepped) return 0;
 
   let causes = 0;
+  let line = Math.max(budget, frame.capMs);
 
-  if (frame.gapMs - agentMs > LATE_FACTOR * Math.max(budget, frame.capMs)) causes |= CAUSE.gap;
+  // A comparison, not `Math.max`: no previous frame (NaN) leaves the line as it is.
+  if (previousCapMs > line) line = previousCapMs;
+  if (frame.gapMs - agentMs > LATE_FACTOR * line) causes |= CAUSE.gap;
   if (frame.workMs - agentMs > budget) causes |= CAUSE.js;
 
   return causes;
@@ -691,7 +686,7 @@ export function recordAt(ring: FrameRing, slot: number): FrameRecord {
     gpuPartial: cell(c.gpuPartial, slot) === 1,
     path: ring.paths[cell(c.path, slot)] ?? OVERFLOW_PATH,
     changed: changesAt(ring, slot),
-    causes: namesOf(cell(c.causes, slot), CAUSE_NAMES),
+    causes: namesOf(cell(c.causes, slot), PERF_CAUSES),
     kept: kept === null ? null : { pictures: kept, retakes: cell(c.retakes, slot) }
   };
 }

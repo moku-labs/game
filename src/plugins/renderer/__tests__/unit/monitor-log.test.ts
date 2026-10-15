@@ -60,8 +60,9 @@ describe("the sample", () => {
     const agent = await startAgent();
     const lines = agent.listen();
 
+    // Drawn frames: a gap between two frames that drew nothing is not judged, so it is no miss.
     for (const [index, gapMs] of [0.5, 49.5, 52, 250].entries()) {
-      agent.mock.measureFrame({ at: index * 10, gapMs });
+      agent.frame({ at: index * 10, gapMs });
     }
 
     agent.mock.measureFrame({ at: 1000 });

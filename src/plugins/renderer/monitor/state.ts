@@ -6,6 +6,7 @@
 import type { MonitorConfig } from "../types";
 import { PERF_GAP_BUCKETS } from "./log-types";
 import { createEventRing, createFrameRing } from "./ring";
+import { createTickEstimate } from "./ticks";
 import {
   COUNT,
   type CompileRing,
@@ -137,6 +138,8 @@ export function createPerfState(config: Readonly<MonitorConfig>, sinks: MonitorS
     ring: createFrameRing(0, events, sinks.kindNames),
     scratch: new Float32Array(0),
     staged: new Float64Array(2),
+    ticks: createTickEstimate(),
+    rate: undefined,
     drawn: false,
     flags: 0,
     pathIds: emptyMap(),

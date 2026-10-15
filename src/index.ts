@@ -289,8 +289,13 @@ export {
 } from "./plugins/renderer/components";
 export type { HudPartValue, OverlayValue } from "./plugins/renderer/components";
 // renderer: the performance log of an agent build, its frame ring and the record of one frame
-export { PERF_GAP_BUCKETS, PERF_LOG_VERSION } from "./plugins/renderer/monitor/log-types";
+export {
+  PERF_CAUSES,
+  PERF_GAP_BUCKETS,
+  PERF_LOG_VERSION
+} from "./plugins/renderer/monitor/log-types";
 export { frameAt } from "./plugins/renderer/monitor/ring";
+export { DEMAND_REASONS } from "./plugins/renderer/reasons";
 export type {
   FrameColumns,
   FrameReadout,

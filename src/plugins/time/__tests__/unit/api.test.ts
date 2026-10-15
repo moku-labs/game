@@ -58,6 +58,29 @@ function driveFrames(ctx: TimeCtx, from: number, count: number, stepMs = 16): nu
   return timestamp;
 }
 
+/** Ticks once at `from`, then `rounds` times through `intervals`; answers how many ticks it made. */
+function driveIntervals(
+  ctx: TimeCtx,
+  from: number,
+  intervals: readonly number[],
+  rounds: number
+): number {
+  let timestamp = from;
+  let ticks = 1;
+
+  tickFrame(ctx, timestamp);
+
+  for (let round = 0; round < rounds; round += 1) {
+    for (const interval of intervals) {
+      timestamp += interval;
+      tickFrame(ctx, timestamp);
+      ticks += 1;
+    }
+  }
+
+  return ticks;
+}
+
 // ─── onFrame ──────────────────────────────────────────────────
 
 describe("onFrame", () => {
@@ -390,6 +413,31 @@ describe("tickFrame", () => {
   });
 });
 
+// ─── the cap's slack ──────────────────────────────────────────
+
+describe("the cap's slack", () => {
+  it("vsync jitter of a 60 Hz panel (15.6 to 17.7 ms) skips no frame under a 60 cap", () => {
+    const { api, ctx } = createApi();
+    const ticks = driveIntervals(ctx, 1000, [16.7, 15.6, 16.6, 17.7, 16.5, 15.7, 16.8, 17.6], 10);
+
+    expect(api.snapshot().frame).toBe(ticks);
+  });
+
+  it("a 120 Hz panel with a millisecond of jitter runs every second tick under a 60 cap", () => {
+    const { api, ctx } = createApi();
+    const ticks = driveIntervals(ctx, 1000, [7.4, 7.6, 8.3, 8.4, 9.2, 9.1, 8.2, 8.5], 10);
+
+    expect(api.snapshot().frame).toBe((ticks + 1) / 2);
+  });
+
+  it("a 144 Hz panel under a 60 cap runs every third tick, 48 fps, never every second", () => {
+    const { api, ctx } = createApi();
+    const ticks = driveIntervals(ctx, 1000, [1000 / 144], 150);
+
+    expect(api.snapshot().frame).toBe((ticks - 1) / 3 + 1);
+  });
+});
+
 // ─── the idle cap ─────────────────────────────────────────────
 
 describe("the idle cap", () => {
@@ -453,6 +501,19 @@ describe("the idle cap", () => {
     driveFrames(ctx, 1000, 20);
 
     expect(api.snapshot()).toMatchObject({ frame: 20, idle: false });
+  });
+
+  it("a page throttled to 1 Hz goes idle after two frames, while its delta stays clamped", () => {
+    const { api, ctx } = createApi();
+
+    tickFrame(ctx, 1000);
+    tickFrame(ctx, 2000);
+
+    expect(api.snapshot()).toMatchObject({ idle: false, delta: 50 });
+
+    tickFrame(ctx, 3000);
+
+    expect(api.snapshot()).toMatchObject({ idle: true, delta: 50 });
   });
 
   it("keeps the idle timer running while the time scale is zero", () => {

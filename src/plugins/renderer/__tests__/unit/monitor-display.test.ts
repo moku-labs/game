@@ -1,3 +1,4 @@
+/* eslint-disable unicorn/no-null -- a display event is JSON: a refresh rate not known yet is null. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PerfDisplay } from "../../monitor/log-types";
 import { frameAt } from "../../monitor/ring";
@@ -37,6 +38,7 @@ describe("the display event", () => {
 
     expect(displays(lines)).toEqual([
       {
+        hz: null,
         dpr: 2,
         resolution: 2,
         maxResolution: 2,
@@ -77,6 +79,22 @@ describe("the display event", () => {
       "device-restored",
       "display"
     ]);
+  });
+
+  it("is written once when time learns the display rate, with its hz, and not for a new rate on the same display", async () => {
+    const agent = await startAgent();
+    const lines = agent.listen();
+    const learned = { ...agent.mock.time.rate(), displayHz: 120 };
+
+    agent.frame({ at: 0 });
+    agent.mock.setRate(learned);
+    agent.frame({ at: 16 });
+    agent.frame({ at: 32 });
+    agent.mock.setRate({ ...learned, fps: 120 });
+    agent.frame({ at: 48 });
+
+    expect(displays(lines).map(display => display.hz)).toEqual([120]);
+    expect(linesOf(agent.listen(), "header")[0]?.display.hz).toBe(120);
   });
 
   it("writes a resolution event and marks the frame that applied the change", async () => {

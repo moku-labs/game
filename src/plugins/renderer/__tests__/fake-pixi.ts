@@ -1762,6 +1762,8 @@ export type FakeRenderer = FakeDrawTarget & {
   runners: { prerender: FakeRunner; renderStart: FakeRunner; postrender: FakeRunner };
   /** Pixi's render target system: the bound target and its change runner. */
   renderTarget: { renderTarget: FakeRenderTarget; onRenderTargetChange: FakeRunner };
+  /** Pixi's view system: the canvas's render target, the one the render target system binds at start. */
+  view: { renderTarget: FakeRenderTarget };
   /** Every resize with the resolution it asked for, `undefined` for none. */
   resolutions: Array<number | undefined>;
   /** Pixi's background system: the canvas is cleared before every stage pass, Pixi's default. */
@@ -1888,6 +1890,8 @@ export class FakeApplication {
       throw new Error("fake pixi: no adapter");
     }
 
+    // The canvas target: the view's, bound by the render target system at the start of a render, as in Pixi.
+    const canvasTarget: FakeRenderTarget = { isRoot: true, pixelWidth: 1080, pixelHeight: 1920 };
     const renderer: FakeRenderer = {
       ...createDrawTarget(),
       name: FakeApplication.settings.kind,
@@ -1926,9 +1930,10 @@ export class FakeApplication {
         postrender: new FakeRunner("postrender")
       },
       renderTarget: {
-        renderTarget: { isRoot: true, pixelWidth: 1080, pixelHeight: 1920 },
+        renderTarget: canvasTarget,
         onRenderTargetChange: new FakeRunner("onRenderTargetChange")
       },
+      view: { renderTarget: canvasTarget },
       resolutions: [],
       background: { clearBeforeRender: true },
       resize: (width: number, height: number, resolution?: number) => {

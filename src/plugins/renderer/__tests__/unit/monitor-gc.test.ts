@@ -27,18 +27,19 @@ function stubHeap(): { bytes: number } {
   return heap;
 }
 
-/** The causes of a gap of 40 ms with `workMs` of work, after the heap dropped by `dropMb`. */
+/** The causes of a gap of `gapMs` (40 ms) with `workMs` of work, after the heap dropped by `dropMb`. */
 async function causesAfter(
   dropMb: number,
   workMs: number,
-  heap = true
+  heap = true,
+  gapMs = 40
 ): Promise<readonly string[]> {
   const agent = await startAgent({ config: { monitor: { budgetMs: 16.7, frames: 64 } } });
   const memory = heap ? stubHeap() : undefined;
 
   agent.frame({ gapMs: 16.7, workMs: 1 });
   if (memory !== undefined) memory.bytes -= dropMb * MB;
-  agent.frame({ gapMs: 40, workMs });
+  agent.frame({ gapMs, workMs });
 
   return frameAt(agent.mock.api.monitor.frames(), 0)?.causes ?? [];
 }
@@ -52,5 +53,10 @@ describe("the gc? hint", () => {
     expect(await causesAfter(0.4, 2)).toEqual(["gap"]);
     expect(await causesAfter(0.6, 12)).toEqual(["gap"]);
     expect(await causesAfter(0.6, 2, false)).toEqual(["gap"]);
+  });
+
+  it("needs a gap of 500 ms at most: a longer one is no collection", async () => {
+    expect(await causesAfter(0.6, 2, true, 500)).toEqual(["gap", "gc?"]);
+    expect(await causesAfter(0.6, 2, true, 501)).toEqual(["gap"]);
   });
 });

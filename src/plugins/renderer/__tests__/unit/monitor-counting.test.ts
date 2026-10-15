@@ -182,13 +182,14 @@ describe("installCounting", () => {
 });
 
 describe("the pass kinds of WebGPU", () => {
-  it("records the root as canvas, a pass inside a filter apply as filter, another target as texture with its label", async () => {
+  // Pixi 8.22 marks every WebGPU target `isRoot` when it first binds it: the canvas is the view's target alone.
+  it("records the canvas as canvas, a pass inside a filter apply as filter, another target as texture with its label", async () => {
     const agent = await startAgent({ config: { monitor: { budgetMs: 16.7, frames: 64 } } });
     const Encoder = fakeExtensions.named(WEBGPU_SYSTEM, "encoder") as unknown as new (
       renderer: unknown
     ) => FakeGpuEncoderSystem;
     const bound: { renderTarget: FakeRenderTarget } = {
-      renderTarget: { isRoot: true, pixelWidth: 1080, pixelHeight: 1920 }
+      renderTarget: agent.mock.pixi.last().renderer.view.renderTarget
     };
     const encoder = new Encoder({ renderTarget: bound });
 
@@ -197,13 +198,13 @@ describe("the pass kinds of WebGPU", () => {
       callback: () => {
         encoder.beginRenderPass({ descriptor: {} });
         bound.renderTarget = {
-          isRoot: false,
+          isRoot: true,
           pixelWidth: 256,
           pixelHeight: 128,
           colorTexture: { label: "kept:ward.scene" }
         };
         encoder.beginRenderPass({ descriptor: {} });
-        bound.renderTarget = { isRoot: false, pixelWidth: 64, pixelHeight: 64, label: "glow" };
+        bound.renderTarget = { isRoot: true, pixelWidth: 64, pixelHeight: 64, label: "glow" };
         agent.pc.sinks.filterDepth = 1;
         encoder.beginRenderPass({ descriptor: {} });
         agent.pc.sinks.filterDepth = 0;

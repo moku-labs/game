@@ -5,9 +5,17 @@
  */
 
 /**
- * Every reason in ring order: the monitor stores the index (spec 11 `FrameColumns.reason`). New reasons are only ever
- * appended (block 3B: `"overlay"`, `"retake"` after `"none"`), so stored indices keep their meaning. There is no
- * whole-frame reason for `renderer.invalidate`: it always names an entity (LEAD-FIXES-4).
+ * Every reason in ring order: the monitor stores the index (spec 11 `FrameColumns.reason`), 255 for a frame without a
+ * decision. New reasons are only ever appended (block 3B: `"overlay"`, `"retake"` after `"none"`), so stored indices
+ * keep their meaning. There is no whole-frame reason for `renderer.invalidate`: it always names an entity
+ * (LEAD-FIXES-4). A root export, so a reader of the ring names a reason without building a record.
+ *
+ * @example
+ * ```ts
+ * // An overlay names why the newest frame of a debug build was drawn: a piece moved, a counted change mark.
+ * const ring = app.renderer.monitor.frames();
+ * DEMAND_REASONS[ring.columns.reason[ring.newest] ?? 255]; // "mark"
+ * ```
  */
 export const DEMAND_REASONS = [
   "always", // onDemand is off: every frame is drawn

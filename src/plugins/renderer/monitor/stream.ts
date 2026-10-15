@@ -25,11 +25,14 @@ import { annotateLongFrame } from "./long-frames";
 import { CAUSE, CHANGED, noteSubject, slotOfSequence } from "./ring";
 import { buildStartup } from "./startup";
 import { PENDING_SLOTS } from "./state";
-import type { PerfCtx, PerfState } from "./types";
+import type { PerfCtx, PerfRing, PerfState } from "./types";
 import { cell } from "./units";
 
 /** How long the header waits for the native shell to answer at page start. */
 export const SHELL_WAIT_MS = 500;
+
+/** A gap spike is annotated `compile` for a compile in one of this many frames before it: the stall comes later. */
+const COMPILE_LOOKBACK = 4;
 
 /** What a refused promise of the shell leads to: nothing, the log goes on. */
 const ignore = (): void => {};
@@ -164,18 +167,38 @@ export function addPending(perf: PerfState, sequence: number): void {
 }
 
 /**
- * The annotations of a spike: a compile, an upload of a megabyte or more, an overlapping long frame. Read at the
- * commit and again at the flush, when late long frames have arrived. No allocation.
+ * Tells whether one of the 4 frames before a frame compiled, among the frames the ring still holds before it.
+ *
+ * @param ring - The ring.
+ * @param slot - The frame's slot.
+ * @returns True when one of them compiled.
+ */
+function compiledBefore(ring: PerfRing, slot: number): boolean {
+  const age = (ring.newest - slot + ring.capacity) % ring.capacity;
+
+  for (let back = 1; back <= COMPILE_LOOKBACK && age + back < ring.size; back += 1) {
+    if (cell(ring.columns.compiles, (slot - back + ring.capacity) % ring.capacity) > 0) return true;
+  }
+
+  return false;
+}
+
+/**
+ * The annotations of a spike: a compile (in the frame, or for a gap spike in one of the 4 frames before it), an upload
+ * of a megabyte or more, an overlapping long frame. Read at the commit, after the frame's causes are written, and again
+ * at the flush, when late long frames have arrived. No allocation.
  *
  * @param pc - The perf context.
  * @param slot - The ring slot of the frame.
  * @returns The `CAUSE` bits of the annotations.
  */
 export function annotate(pc: PerfCtx, slot: number): number {
-  const c = pc.perf.ring.columns;
+  const { ring } = pc.perf;
+  const c = ring.columns;
+  const late = (cell(c.causes, slot) & CAUSE.gap) !== 0;
   let bits = 0;
 
-  if (cell(c.compiles, slot) > 0) bits |= CAUSE.compile;
+  if (cell(c.compiles, slot) > 0 || (late && compiledBefore(ring, slot))) bits |= CAUSE.compile;
   if (cell(c.uploadMb, slot) >= 1) bits |= CAUSE.upload;
   if (annotateLongFrame(pc.perf, slot)) bits |= CAUSE.longFrame;
 

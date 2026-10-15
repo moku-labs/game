@@ -27,6 +27,14 @@ function stubShell(fields: Record<string, unknown>): void {
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 15; SM-A266B Build/AP3A.240905.015) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36";
 
+/** The device of the header a page with this user agent writes, without a native shell. */
+async function deviceOf(userAgent: string) {
+  vi.stubGlobal("navigator", { userAgent });
+  const agent = await startAgent();
+
+  return linesOf(agent.listen(), "header")[0]?.device;
+}
+
 describe("the thermal line", () => {
   it("is written from a time:thermal reading, with source shell and null for a missing field", async () => {
     const agent = await startAgent();
@@ -87,9 +95,21 @@ describe("the shell in the header", () => {
       model: "SM-A266B",
       modelFrom: "shell",
       webview: "131",
+      browser: "131",
       cores: 8,
       memoryGb: 4
     });
+  });
+
+  it("names a Chrome major the WebView's only in an Android WebView, and the browser's on every Chromium page", async () => {
+    const desktop =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+    const webView =
+      "Mozilla/5.0 (Linux; Android 15; SM-A266B Build/AP3A.240905.015; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.6778.135 Mobile Safari/537.36";
+
+    expect(await deviceOf(desktop)).toMatchObject({ webview: null, browser: "141" });
+    expect(await deviceOf(ANDROID_UA)).toMatchObject({ webview: null, browser: "131" });
+    expect(await deviceOf(webView)).toMatchObject({ webview: "131", browser: "131" });
   });
 
   it("reads the model from the user agent without a shell", async () => {

@@ -1,9 +1,10 @@
 /* eslint-disable unicorn/no-null -- `FrameRate` and `RateChange` are JSON: an unknown display rate and an absent thermal status are null (spec 21 G1.3). */
 /**
  * @file time — the adaptive frame rate (spec 21 G3–G6): the governor that drops to the next divisor of the display
- * rate when drawn frames come late and returns one step after steady room, the display rate it learns from the ticks
- * and the native shell, the thermal input, and `setRate`. Every number of the per-frame path lives in the governor,
- * allocated once; a frame allocates nothing here. Only a switch allocates: its payload, the snapshot, the request.
+ * rate when drawn frames come late and returns one step after steady room, the display rate learned from the ticks
+ * in every app (and with the governor from the native shell), the thermal input, and `setRate`. Every number of the
+ * per-frame path lives in the governor and the display state, allocated once; a frame allocates nothing here. Only a
+ * change allocates: its payload, the snapshot, the request.
  */
 import { pageNow } from "./measure";
 import {
@@ -17,6 +18,7 @@ import {
   watchThermal
 } from "./native";
 import {
+  DISPLAY_FIRST_WINDOW_TICKS,
   DISPLAY_LOWER_WINDOWS,
   DISPLAY_RATES,
   DISPLAY_SHARE,
@@ -47,6 +49,7 @@ import {
 } from "./rate-rules";
 import type {
   Config,
+  DisplayState,
   FrameRate,
   Governor,
   RateChange,
@@ -114,6 +117,21 @@ function floorOf(config: Readonly<Config>): number | undefined {
 }
 
 /**
+ * Allocates the display detection once: no rate known, no tick seen.
+ *
+ * @returns A fresh display state.
+ */
+function createDisplayState(): DisplayState {
+  return {
+    hz: null,
+    lastTickAt: Number.NaN,
+    ticks: 0,
+    tickCounts: new Uint16Array(DISPLAY_RATES.length),
+    lowerStreak: 0
+  };
+}
+
+/**
  * Allocates the governor once: every number and typed array the rule reads per frame.
  *
  * @param floor - The lowest rate the rule may choose.
@@ -122,13 +140,8 @@ function floorOf(config: Readonly<Config>): number | undefined {
 function createGovernor(floor: number): Governor {
   return {
     floor,
-    displayHz: null,
     ladder: NO_STEPS,
     thermal: null,
-    lastTickAt: Number.NaN,
-    ticks: 0,
-    tickCounts: new Uint16Array(DISPLAY_RATES.length),
-    lowerStreak: 0,
     lastDrawn: false,
     lastIdle: false,
     lastProbed: false,
@@ -156,11 +169,11 @@ function createGovernor(floor: number): Governor {
 /**
  * The frozen object `rate()` answers, built from the rate now.
  *
- * @param rate - The rate, its mode, its reason and the governor.
+ * @param rate - The rate, its mode, its reason, the display and the governor.
  * @returns A fresh frozen snapshot.
  */
 function snapshotOf(
-  rate: Pick<RateState, "fps" | "mode" | "reason" | "governor">
+  rate: Pick<RateState, "fps" | "mode" | "reason" | "display" | "governor">
 ): Readonly<FrameRate> {
   const { governor } = rate;
 
@@ -168,7 +181,7 @@ function snapshotOf(
     fps: rate.fps,
     mode: rate.mode,
     reason: rate.reason,
-    displayHz: governor?.displayHz ?? null,
+    displayHz: rate.display.hz,
     ladder: governor?.ladder ?? NO_STEPS,
     thermal: governor?.thermal ?? null
   });
@@ -176,7 +189,8 @@ function snapshotOf(
 
 /**
  * Creates the rate state of a time plugin: `maxFps` in mode `"auto"` with a governor when `adaptive` is configured,
- * in mode `"fixed"` without one. Validates `adaptive` at `createApp`, in every build.
+ * in mode `"fixed"` without one, and the display detection in both. Validates `adaptive` at `createApp`, in every
+ * build.
  *
  * @param config - Resolved plugin config.
  * @returns The rate branch of the time state.
@@ -185,10 +199,11 @@ function snapshotOf(
 export function createRateState(config: Readonly<Config>): RateState {
   const floor = floorOf(config);
   const mode: RateMode = floor === undefined ? "fixed" : "auto";
-  const parts: Pick<RateState, "fps" | "mode" | "reason" | "governor"> = {
+  const parts: Pick<RateState, "fps" | "mode" | "reason" | "display" | "governor"> = {
     fps: config.maxFps,
     mode,
     reason: "start",
+    display: createDisplayState(),
     governor: floor === undefined ? undefined : createGovernor(floor)
   };
 
@@ -345,7 +360,7 @@ function readAnswer(ctx: TimeCtx, g: Governor, seq: number, answer: RateAnswer):
 
   ctx.log.debug("time: the panel rate", { asked: g.requested, ...answer });
 
-  if (answer.maxHz !== null) learnDisplay(ctx, g, answer.maxHz, nowOf());
+  if (answer.maxHz !== null) learnDisplay(ctx, answer.maxHz, nowOf());
 }
 
 /**
@@ -417,7 +432,7 @@ function switchRate(
     to,
     reason,
     mode,
-    displayHz: g?.displayHz ?? null,
+    displayHz: rate.display.hz,
     thermal: g?.thermal ?? null,
     window: evidence,
     dwellMs: g?.dwellMs ?? 0
@@ -470,26 +485,29 @@ function statusOf(reading: ThermalReading): ThermalStatus | null {
 }
 
 /**
- * Learns a display rate: the ladder follows it, and in mode `"auto"` a rate that is not on the new ladder moves to
- * the highest step at or below it (the lowest when none is), reason `"display"`. A rising display never raises the
- * rate by itself. The first ladder also applies a thermal reading that came before it.
+ * Learns a display rate. Without a governor only `rate()` follows it. With one the ladder follows it, and in mode
+ * `"auto"` a rate that is not on the new ladder moves to the highest step at or below it (the lowest when none is),
+ * reason `"display"`. A rising display never raises the rate by itself. The first ladder also applies a thermal
+ * reading that came before it.
  *
  * @param ctx - Domain context of the time plugin.
- * @param g - The governor.
  * @param hz - The display rate.
  * @param at - When, on the page clock.
  */
-function learnDisplay(ctx: TimeCtx, g: Governor, hz: number, at: number): void {
-  if (hz === g.displayHz) return;
-
+function learnDisplay(ctx: TimeCtx, hz: number, at: number): void {
   const { rate } = ctx.state;
-  const first = g.ladder.length === 0;
+  const { display } = rate;
+  const g = rate.governor;
 
-  g.displayHz = hz;
-  g.ladder = ladderOf(hz, ctx.config.maxFps, g.floor);
+  if (hz === display.hz) return;
+
+  const first = display.hz === null;
+
+  display.hz = hz;
+  if (g !== undefined) g.ladder = ladderOf(hz, ctx.config.maxFps, g.floor);
   rate.snapshot = snapshotOf(rate);
 
-  if (rate.mode !== "auto") return;
+  if (g === undefined || rate.mode !== "auto") return;
 
   if (!g.ladder.includes(rate.fps)) {
     const to = g.ladder.find(step => step <= rate.fps) ?? g.ladder.at(-1) ?? rate.fps;
@@ -501,75 +519,94 @@ function learnDisplay(ctx: TimeCtx, g: Governor, hz: number, at: number): void {
 }
 
 /**
- * Tells whether the panel runs below its top on our own request: a panel the shell set to 60 Hz because we asked
- * for 60 shows 16.7 ms ticks that must not erase what it can do.
+ * Tells whether the panel runs below its top on our own request: a panel the shell set to 60 Hz because the
+ * governor asked for 60 shows 16.7 ms ticks that must not erase what it can do. Without a governor the panel's rate
+ * now is the display rate.
  *
  * @param ctx - Domain context of the time plugin.
- * @param g - The governor.
- * @returns True while the shell holds the panel below the ladder's top for us.
+ * @returns True while the shell holds the panel below the ladder's top for the governor.
  */
-function heldByUs(ctx: TimeCtx, g: Governor): boolean {
-  return ctx.state.rate.native !== undefined && g.requested < (g.ladder[0] ?? 0);
+function heldByUs(ctx: TimeCtx): boolean {
+  const { rate } = ctx.state;
+  const g = rate.governor;
+
+  return g !== undefined && rate.native !== undefined && g.requested < (g.ladder[0] ?? 0);
 }
 
 /**
  * Closes a display window: the highest rate with a quarter of its ticks is what the panel showed. A higher or a first
  * rate is learned at once; a lower one only after two windows in a row, and never while the shell holds the panel
- * low for us.
+ * low for the governor.
  *
  * @param ctx - Domain context of the time plugin.
- * @param g - The governor.
+ * @param display - The display state.
  * @param at - The timestamp of the tick that closed it.
  */
-function closeDisplayWindow(ctx: TimeCtx, g: Governor, at: number): void {
-  const need = DISPLAY_SHARE * g.ticks;
+function closeDisplayWindow(ctx: TimeCtx, display: DisplayState, at: number): void {
+  const need = DISPLAY_SHARE * display.ticks;
   let windowHz = 0;
 
   for (let index = DISPLAY_RATES.length - 1; index >= 0 && windowHz === 0; index -= 1) {
-    if ((g.tickCounts[index] ?? 0) >= need) windowHz = DISPLAY_RATES[index] ?? 0;
+    if ((display.tickCounts[index] ?? 0) >= need) windowHz = DISPLAY_RATES[index] ?? 0;
   }
 
-  g.ticks = 0;
-  g.tickCounts.fill(0);
+  display.ticks = 0;
+  display.tickCounts.fill(0);
 
-  const risesAbove = windowHz !== 0 && (g.displayHz === null || windowHz > g.displayHz);
-  const dropsBelow = windowHz !== 0 && windowHz < (g.displayHz ?? 0) && !heldByUs(ctx, g);
+  const known = display.hz;
+  const risesAbove = windowHz !== 0 && (known === null || windowHz > known);
+  const dropsBelow = windowHz !== 0 && windowHz < (known ?? 0) && !heldByUs(ctx);
 
   if (risesAbove) {
-    g.lowerStreak = 0;
-    learnDisplay(ctx, g, windowHz, at);
+    display.lowerStreak = 0;
+    learnDisplay(ctx, windowHz, at);
   } else if (dropsBelow) {
-    g.lowerStreak += 1;
+    display.lowerStreak += 1;
 
-    if (g.lowerStreak >= DISPLAY_LOWER_WINDOWS) {
-      g.lowerStreak = 0;
-      learnDisplay(ctx, g, windowHz, at);
+    if (display.lowerStreak >= DISPLAY_LOWER_WINDOWS) {
+      display.lowerStreak = 0;
+      learnDisplay(ctx, windowHz, at);
     }
   } else {
-    g.lowerStreak = 0;
+    display.lowerStreak = 0;
   }
 }
 
 /**
- * Counts one tick of the frame source, run or skipped, for the display rate: the cap skips frames inside the
- * callback, so the ticks show the panel's period at any rate. A tick after a hitch or a hidden page is not counted.
+ * The ticks of the window that is open: 30 while the display is unknown and no governor waits for it (the monitor
+ * and the cap want the display early), 120 otherwise (the governor's first window keeps the boot's long frames out).
+ *
+ * @param rate - The rate state.
+ * @returns The window's length in counted ticks.
+ */
+function windowTicksOf(rate: RateState): number {
+  return rate.display.hz === null && rate.governor === undefined
+    ? DISPLAY_FIRST_WINDOW_TICKS
+    : DISPLAY_WINDOW_TICKS;
+}
+
+/**
+ * Counts one tick of the frame source, run or skipped, for the display rate, with and without `adaptive`: the cap
+ * skips frames inside the callback, so the ticks show the panel's period at any rate. A tick after a hitch or a
+ * hidden page is not counted. Reads no clock: the timestamp is the tick's.
  *
  * @param ctx - Domain context of the time plugin.
- * @param g - The governor.
  * @param timestamp - The tick's `requestAnimationFrame` timestamp.
  */
-export function observeTick(ctx: TimeCtx, g: Governor, timestamp: number): void {
-  const tickMs = timestamp - g.lastTickAt;
+export function observeTick(ctx: TimeCtx, timestamp: number): void {
+  const { rate } = ctx.state;
+  const { display } = rate;
+  const tickMs = timestamp - display.lastTickAt;
 
-  g.lastTickAt = timestamp;
+  display.lastTickAt = timestamp;
 
   if (!(tickMs > 0 && tickMs <= TICK_IGNORE_MS)) return;
 
   const index = displayIndexOf(tickMs);
 
-  g.ticks += 1;
-  if (index !== -1) g.tickCounts[index] = (g.tickCounts[index] ?? 0) + 1;
-  if (g.ticks >= DISPLAY_WINDOW_TICKS) closeDisplayWindow(ctx, g, timestamp);
+  display.ticks += 1;
+  if (index !== -1) display.tickCounts[index] = (display.tickCounts[index] ?? 0) + 1;
+  if (display.ticks >= windowTicksOf(rate)) closeDisplayWindow(ctx, display, timestamp);
 }
 
 /**
@@ -591,7 +628,7 @@ function isSample(ctx: TimeCtx, g: Governor, intervalMs: number): boolean {
     intervalMs <= INTERVAL_IGNORE_MS &&
     g.lastFps === rate.fps &&
     rate.mode === "auto" &&
-    g.displayHz !== null
+    rate.display.hz !== null
   );
 }
 
@@ -667,7 +704,7 @@ export function judgeFrame(ctx: TimeCtx, g: Governor, intervalMs: number, at: nu
   // Grade the interval: late past the miss line, heavy for the step above.
   const { fps } = ctx.state.rate;
   const higher = stepAbove(g.ladder, fps);
-  const missed = intervalMs > missLineMs(fps, g.displayHz ?? fps);
+  const missed = intervalMs > missLineMs(fps, ctx.state.rate.display.hz ?? fps);
   const heavy = higher !== undefined && g.lastWorkMs > (RETURN_WORK_SHARE * SECOND_MS) / higher;
 
   // Write it into the ring and count it in both windows.
@@ -715,18 +752,23 @@ export function closeFrame(ctx: TimeCtx, g: Governor, workMs: number): void {
 }
 
 /**
- * Restarts the tick history and both windows after a resume, and skips the next interval: a return from the
- * background is a new situation.
+ * Restarts the tick history of the display after a resume and, with a governor, its windows, and skips the next
+ * interval: a return from the background is a new situation. The display rate already known stays.
  *
- * @param g - The governor.
+ * @param rate - The rate state.
  */
-export function resetGovernor(g: Governor): void {
-  g.lastTickAt = Number.NaN;
-  g.ticks = 0;
-  g.tickCounts.fill(0);
-  g.lowerStreak = 0;
-  g.skipNext = true;
-  emptyWindows(g);
+export function resumeRate(rate: RateState): void {
+  const { display, governor } = rate;
+
+  display.lastTickAt = Number.NaN;
+  display.ticks = 0;
+  display.tickCounts.fill(0);
+  display.lowerStreak = 0;
+
+  if (governor === undefined) return;
+
+  governor.skipNext = true;
+  emptyWindows(governor);
 }
 
 /**
@@ -803,18 +845,17 @@ export function setRateChoice(ctx: TimeCtx, choice: RateChoice): Readonly<FrameR
 }
 
 /**
- * Learns the panel's highest rate from the shell's `display.maxHz`: now when it is filled, else once the shell is
- * ready (null until then, native's contract). A null `maxHz` leaves the display to the ticks.
+ * Learns the panel's highest rate from the shell's `display.maxHz`, for the governor: now when it is filled, else
+ * once the shell is ready (null until then, native's contract). A null `maxHz` leaves the display to the ticks.
  *
  * @param ctx - Domain context of the time plugin.
- * @param g - The governor.
  * @param shell - The shell found at start.
  */
-function learnMaxHz(ctx: TimeCtx, g: Governor, shell: NativeShell): void {
+function learnMaxHz(ctx: TimeCtx, shell: NativeShell): void {
   const now = hertzOf(shell.display.maxHz);
 
   if (now !== null) {
-    learnDisplay(ctx, g, now, nowOf());
+    learnDisplay(ctx, now, nowOf());
 
     return;
   }
@@ -822,7 +863,7 @@ function learnMaxHz(ctx: TimeCtx, g: Governor, shell: NativeShell): void {
   shell.ready?.then(() => {
     const later = hertzOf(nativeShell()?.display.maxHz);
 
-    if (later !== null && ctx.state.rate.native !== undefined) learnDisplay(ctx, g, later, nowOf());
+    if (later !== null && ctx.state.rate.native !== undefined) learnDisplay(ctx, later, nowOf());
   }, ignore);
 }
 
@@ -872,7 +913,7 @@ export function startRate(ctx: TimeCtx): void {
 
   if (g === undefined) return;
 
-  learnMaxHz(ctx, g, shell);
+  learnMaxHz(ctx, shell);
   readThermal(ctx, g, shell);
 }
 

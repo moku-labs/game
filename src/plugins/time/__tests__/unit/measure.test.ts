@@ -216,6 +216,18 @@ describe("time.measure in an agent build", () => {
     expect(seen[1]?.rateMs).toBeCloseTo(8.33, 2);
   });
 
+  it("puts one display period in displayMs once the display is known, NaN before", () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { api, ctx } = setup({ maxFps: 120 });
+    const seen = recorder(api);
+
+    scriptClock([0]);
+    for (let tick = 0; tick < 32; tick += 1) tickFrame(ctx, 1000 + tick * (1000 / 60));
+
+    expect(seen[0]?.displayMs).toBeNaN();
+    expect(seen.at(-1)?.displayMs).toBeCloseTo(16.67, 2);
+  });
+
   it("charges the agent's spans to the running frame and hands them back at the end of a frame of the frame source", () => {
     vi.stubGlobal("__MOKU_GAME_AGENT__", true);
     const { api, ctx } = setup();

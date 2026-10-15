@@ -14,6 +14,12 @@ export const DISPLAY_TOLERANCE = 0.05;
 /** Ticks per display detection window: one second at 120 Hz. */
 export const DISPLAY_WINDOW_TICKS = 120;
 
+/** Ticks per window while the display is unknown and no governor waits for it: half a second at 60 Hz. */
+export const DISPLAY_FIRST_WINDOW_TICKS = 30;
+
+/** The cap's slack before the display is known, as a share of one frame of the cap: 2 ms at 60. */
+export const CAP_SLACK_SHARE = 0.12;
+
 /** A rate qualifies in a window with at least this share of its ticks. */
 export const DISPLAY_SHARE = 0.25;
 
@@ -141,6 +147,29 @@ export function displayIndexOf(tickMs: number): number {
  */
 export function missLineMs(fps: number, displayHz: number): number {
   return 1000 / fps + 500 / displayHz;
+}
+
+/**
+ * How much earlier than one frame of the cap a tick may come and still run. Half a display period when the frame is
+ * a whole number of display periods (within `DISPLAY_TOLERANCE`), so vsync jitter never drops a frame and a tick one
+ * period early is still skipped. One millisecond when it is not, so a cap between two vsyncs keeps its old rate. Before
+ * the display is known, `CAP_SLACK_SHARE` of the frame, at least one millisecond. Called per tick: no allocation.
+ *
+ * @param displayHz - The display's refresh rate, or `null` while unknown.
+ * @param frameMs - One frame of the cap, ms.
+ * @returns The slack, ms.
+ * @example
+ * ```ts
+ * capSlackMs(144, 1000 / 60); // 1: 13.9 ms ticks of a 144 Hz panel stay skipped under a 60 cap
+ * ```
+ */
+export function capSlackMs(displayHz: number | null, frameMs: number): number {
+  if (displayHz === null) return Math.max(1, CAP_SLACK_SHARE * frameMs);
+
+  const periods = (frameMs * displayHz) / 1000;
+  const whole = Math.round(periods);
+
+  return whole >= 1 && Math.abs(periods - whole) <= DISPLAY_TOLERANCE ? 500 / displayHz : 1;
 }
 
 /**
