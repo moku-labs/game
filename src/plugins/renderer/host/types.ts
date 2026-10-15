@@ -79,8 +79,11 @@ export type HostState = {
   restoring: boolean;
   /** `viewport` and `sync` subscribe here; run once, after the first successful init. */
   onReady: Array<() => void>;
-  /** Run after a restore created a new application, where `onReady` must not run twice. */
-  onRestore: Array<() => void>;
+  /**
+   * Run after every successful restore, where `onReady` must not run twice: `rebuilt` is true when a new application
+   * replaced the old one (WebGPU), false when a WebGL context came back on the same one.
+   */
+  onRestore: Array<(rebuilt: boolean) => void>;
   /** Run before the lost application is destroyed, while its display objects are still alive. */
   onLoss: Array<() => void>;
   cleanups: Array<() => void>;
@@ -101,6 +104,12 @@ export type HostState = {
    * `undefined` while inert and when the module lacked the pieces.
    */
   uninstallSdfText: (() => void) | undefined;
+  /**
+   * Swaps Pixi's own render-group pipe back in. Set once per host state when the renderer's pipe, which binds a
+   * filter's input again after a cached group refreshed inside it (F10), went into Pixi's registry; `undefined` while
+   * inert and when the module lacked the pieces.
+   */
+  uninstallRenderGroup: (() => void) | undefined;
   /** The drawing resolution: device pixels, cap, override and the pending change. */
   resolution: ResolutionState;
   /** Run after a frame applied a new resolution; emptied by `stopHost`. */
@@ -283,12 +292,14 @@ export type HostInternal = {
   onReady(fn: () => void): void;
 
   /**
-   * Subscribes to a successful restore, where a new application and a new canvas exist but the
-   * one-time registrations of `onReady` must not run again.
+   * Subscribes to a successful restore, where the one-time registrations of `onReady` must not run
+   * again. After a WebGPU restore a new application and a new canvas exist (`rebuilt` true); after
+   * a WebGL restore the application and its tree are the same, and every render texture came back
+   * empty (`rebuilt` false).
    *
-   * @param fn - Called after every successful restore.
+   * @param fn - Called after every successful restore, told whether the application is new.
    */
-  onRestore(fn: () => void): void;
+  onRestore(fn: (rebuilt: boolean) => void): void;
 
   /**
    * Subscribes to the moment just before a lost application is destroyed. This is the last point
@@ -345,6 +356,25 @@ export type HostInternal = {
     transform: PixiMatrix,
     clear: boolean
   ): boolean;
+
+  /**
+   * Draws a probe tree of the warm-up onto the canvas, without clearing it, with Pixi's public
+   * `renderer.render({ container, clear: false })`. Called before the stage pass of a drawn frame, which clears the canvas
+   * first, so a probe never reaches the screen. A no-op while nothing draws. What Pixi throws is thrown on: the caller
+   * counts the probe done and reports it.
+   *
+   * @param container - The root of the probe tree, never in the stage.
+   * @returns True when it called Pixi.
+   */
+  renderProbe(container: PixiContainer): boolean;
+
+  /**
+   * Tells whether the stage pass clears the canvas before it draws (`renderer.background.clearBeforeRender`, Pixi's
+   * default, which the engine never turns off): only then may a probe draw onto the canvas.
+   *
+   * @returns True while the application clears the canvas at every stage pass; false while nothing draws.
+   */
+  clearsCanvas(): boolean;
 
   /**
    * Asks for a drawing resolution; the next frame applies it on the resize path. A burst of asks

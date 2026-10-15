@@ -251,7 +251,8 @@ export function spriteOf(kctx: KeptCtx, id: Entity): PixiSprite | undefined {
 /**
  * Renders the picture of one range: one render of the stage root, inside `liftFor` (the entries hidden only by
  * `"freeze"` lifted, the others hidden, every node back from its mask after, without a mark). The root becomes a
- * render group once and stays one.
+ * render group once and stays one. The take costs its render and the passes of the filtered views drawn into it, read
+ * inside the lift, where the tree is the one the render draws (P9.2).
  *
  * @param kctx - The kept context.
  * @param pixi - The module that draws.
@@ -273,9 +274,13 @@ function renderRange(
 
   const transform = root.getGlobalTransform(matrices.m1, false);
   const group = root.isRenderGroup;
-  const rendered = kctx.sync.liftFor(kctx.hidden, range.entries, range.others, "freeze", () =>
-    host.renderTo(root, picture, transform, true)
-  );
+  let filtered = 0;
+  const rendered = kctx.sync.liftFor(kctx.hidden, range.entries, range.others, "freeze", () => {
+    // The estimate of the frame as the lift leaves it: the frame's own pass, the flush so far, the filtered views.
+    filtered = kctx.sync.renderPassesOf(kctx.ctx.state.sync, state) - 1 - state.flushPasses;
+
+    return host.renderTo(root, picture, transform, true);
+  });
 
   if (!rendered) return;
 
@@ -284,7 +289,7 @@ function renderRange(
   range.due = false;
   state.takesOpen += 1;
   state.frameTakes += 1;
-  state.flushPasses += 1;
+  state.flushPasses += 1 + filtered;
 }
 
 /**

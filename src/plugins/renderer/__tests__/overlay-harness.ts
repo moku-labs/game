@@ -76,16 +76,24 @@ export type OverlayStage = {
  * @param options.dev - Stubs `__MOKU_GAME_DEV__` true, for the dev warnings.
  * @param options.agent - Stubs `__MOKU_GAME_AGENT__` true, for the event lines.
  * @param options.config - Other config, as `keptMb`.
+ * @param options.kind - The backend the stand-in reports; WebGPU when left out.
  * @returns The stage.
  */
 export async function startOverlayStage(
-  options: { onDemand?: boolean; dev?: boolean; agent?: boolean; config?: Partial<Config> } = {}
+  options: {
+    onDemand?: boolean;
+    dev?: boolean;
+    agent?: boolean;
+    config?: Partial<Config>;
+    kind?: "webgpu" | "webgl";
+  } = {}
 ): Promise<OverlayStage> {
   if (options.agent === true) vi.stubGlobal("__MOKU_GAME_AGENT__", true);
 
   const drawn = await startDrawn({
     onDemand: options.onDemand ?? true,
     ...(options.dev === undefined ? {} : { dev: options.dev }),
+    ...(options.kind === undefined ? {} : { kind: options.kind }),
     config: options.config ?? {}
   });
   const { mock } = drawn;

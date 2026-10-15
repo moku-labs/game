@@ -20,8 +20,12 @@ export const FRAME_MS = 16;
 export type DrawnPage = {
   dom: FakeDom;
   stage: StagePixi;
-  /** The renderer seams of `game.screen()`. */
-  renderer: { mount: string; loadPixi: () => Promise<Renderer.PixiModule> };
+  /**
+   * The renderer seams of `game.screen()`. `warm: 0`: the warm-up of spec 27 asks for a drawn frame per probe while a
+   * game loads, and these tests count the frames a still or a changing screen draws; `warm-game.test.ts` runs the
+   * warm-up as a game ships it.
+   */
+  renderer: { mount: string; loadPixi: () => Promise<Renderer.PixiModule>; warm: number };
   /** Gives the mount another size and tells the observers, as a window resize does. */
   resize(width: number, height: number): void;
   /** Every size the renderer was resized to. */
@@ -45,7 +49,7 @@ export function openPage(width = 390, height = 844, options: { builds?: boolean 
   return {
     dom,
     stage,
-    renderer: { mount: "#game", loadPixi: () => Promise.resolve(stage.module) },
+    renderer: { mount: "#game", loadPixi: () => Promise.resolve(stage.module), warm: 0 },
     resize: (nextWidth, nextHeight) => {
       dom.mount.clientWidth = nextWidth;
       dom.mount.clientHeight = nextHeight;

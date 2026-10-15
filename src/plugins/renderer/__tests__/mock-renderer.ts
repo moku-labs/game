@@ -244,6 +244,9 @@ export function createMockRenderer(
     monitor: { budgetMs: "rate", frames: 1024 },
     onDemand: false,
     keptMb: 64,
+    // The warm-up draws probes for its first frames (F4): the tests of other behaviour leave it off, the warm-up
+    // tests turn it on.
+    warm: 0,
     ...options.config
   };
   const state = createRendererState({ config });

@@ -6,10 +6,10 @@ import { Layer, Order } from "../../world/ecs/define";
 import type { ComponentHandle, Entity } from "../../world/types";
 import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../components";
 import type { Unseen } from "../demand/types";
-import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
+import type { PixiContainer, PixiFilter, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { provideDisplay, updateAdapterView } from "./adapters";
 import { boundsOf, hitBoxOf, layerOf } from "./bounds";
-import { forgetLeft, renderPassesOf, setFilters } from "./filters";
+import { forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
 import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
@@ -39,7 +39,8 @@ import type {
   SyncCtx,
   SyncDeps,
   TextureProvider,
-  View
+  View,
+  WarmListener
 } from "./types";
 import {
   applyNineSlice,
@@ -51,6 +52,7 @@ import {
   dropView,
   writeVisual
 } from "./views";
+import { startWarm, warmFilter, warmStep } from "./warm";
 
 /** Label of the container the viewport transform is written on. */
 const ROOT_LABEL = "renderer.root";
@@ -424,8 +426,12 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.removed.clear();
 
     // An entity whose visual left in an earlier pass and that despawned since has no view to
-    // remove any more; its entry goes here, so no despawned entity keeps one.
+    // remove any more; its entries go here, so no despawned entity keeps one.
     for (const entity of state.filters.keys()) {
+      if (!state.views.has(entity)) forgetLeft(state, ctx.deps.world.ecs, entity);
+    }
+
+    for (const entity of state.areas.keys()) {
       if (!state.views.has(entity)) forgetLeft(state, ctx.deps.world.ecs, entity);
     }
 
@@ -475,7 +481,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Builds the root, the layers and a view for every entity that names a layer.
+   * Builds the root, the layers and a view for every entity that names a layer, then starts the
+   * warm-up of the device (F4).
    */
   const rebuildAll = (): void => {
     forgetTree();
@@ -503,6 +510,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.reparented.clear();
     // Every view was just written with the switch as it is now.
     state.outlinesStale = false;
+    startWarm(sctx);
   };
 
   return {
@@ -590,7 +598,12 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     filters: {
       set: (entity: Entity, slots: readonly FilterSlot[]): void =>
-        setFilters(state, entity, slots, deps.demand.mark, deps.kept)
+        setFilters(state, entity, slots, deps.demand.mark, deps.kept),
+
+      area: (entity: Entity, area: readonly [number, number, number, number] | undefined): void =>
+        setArea(sctx, entity, area),
+
+      warm: (filter: PixiFilter): Promise<boolean> => warmFilter(sctx, filter)
     },
 
     renderPasses: (): number => renderPassesOf(state, ctx.state.kept),
@@ -604,6 +617,12 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     stepOverlays: (): void => stepOverlays(sctx),
 
     drainOverlayEvents: (monitor: OverlayEventSink): void => drainOverlayEvents(sctx, monitor),
+
+    warmStep: (): boolean => warmStep(sctx),
+
+    onWarm: (fn: WarmListener): void => {
+      state.warm.listeners.push(fn);
+    },
 
     loopsHeld: (entity: Entity, reveals?: "alpha" | "place" | "both"): boolean =>
       loopsHeld(sctx, entity) || unseenHolds(sctx, entity, reveals),

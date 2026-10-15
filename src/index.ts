@@ -47,6 +47,7 @@
  * | renderer | debug | { nineSlice: false, verifyFrames: false } |
  * | renderer | onDemand | false, every frame is drawn; true draws only a frame in which something changed |
  * | renderer | monitor | { budgetMs: "rate", frames: 1024 }, the performance log of an agent build |
+ * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
  * | input | dragStartPx | 8 |
@@ -318,7 +319,8 @@ export type {
   PerfStartupLine,
   PerfThermalLine,
   PoolTrim,
-  PoolTrimDetail
+  PoolTrimDetail,
+  WarmDetail
 } from "./plugins/renderer/types";
 // input: gestures as data
 export {
@@ -388,6 +390,7 @@ export {
   Outline
 } from "./plugins/effects/filters/builtins";
 export { defineFilter } from "./plugins/effects/filters/define";
+export type { FilterArea } from "./plugins/effects/filters/types";
 export { Emitter } from "./plugins/effects/particles/component";
 export { defineEmitter } from "./plugins/effects/particles/define";
 // platform: the provider seam a game fills, and what one Back press ends in

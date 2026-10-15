@@ -1454,6 +1454,8 @@ export const fakeShaderCompiler = {
 export type FakePipeRenderer = {
   name: "webgpu" | "webgl";
   limits: { maxBatchableTextures: number };
+  /** Device pixels per CSS pixel: the edge width of distance-field text is read times it. */
+  resolution: number;
 };
 
 /** The shader Pixi's own pipe hands out: its `SdfShader`, which applies the alpha twice. */
@@ -1478,6 +1480,23 @@ export class FakeBitmapTextPipe {
    */
   protected getSdfShader(): FakeShader {
     return new FakeSdfShader({ resources: { localUniforms: new FakeUniformGroup({}) } });
+  }
+}
+
+/** The fake of Pixi's `RenderGroupPipe`: one per renderer, under the same name for every backend. */
+export class FakeRenderGroupPipe {
+  public static extension = { type: [WEBGL_PIPES, WEBGPU_PIPES], name: "renderGroup" };
+
+  /** Render groups executed by this pipe. */
+  public executed: unknown[] = [];
+
+  /**
+   * Executes one render group.
+   *
+   * @param renderGroup - The render group.
+   */
+  public execute(renderGroup: unknown): void {
+    this.executed.push(renderGroup);
   }
 }
 
@@ -1567,7 +1586,8 @@ export const fakeExtensions: FakeExtensions = {
       FakeGpuTextureSystem,
       FakeGlTextureSystem,
       FakeBatcherPipe,
-      FakeBitmapTextPipe
+      FakeBitmapTextPipe,
+      FakeRenderGroupPipe
     );
   }
 };
@@ -1744,6 +1764,8 @@ export type FakeRenderer = FakeDrawTarget & {
   renderTarget: { renderTarget: FakeRenderTarget; onRenderTargetChange: FakeRunner };
   /** Every resize with the resolution it asked for, `undefined` for none. */
   resolutions: Array<number | undefined>;
+  /** Pixi's background system: the canvas is cleared before every stage pass, Pixi's default. */
+  background: { clearBeforeRender: boolean };
   render(stage: FakeContainer): void;
   resize(width: number, height: number, resolution?: number): void;
 };
@@ -1908,6 +1930,7 @@ export class FakeApplication {
         onRenderTargetChange: new FakeRunner("onRenderTargetChange")
       },
       resolutions: [],
+      background: { clearBeforeRender: true },
       resize: (width: number, height: number, resolution?: number) => {
         renderer.resizes.push({ width, height });
         renderer.resolutions.push(resolution);
@@ -2049,6 +2072,7 @@ export function createFakePixi(
     GlTextureSystem: FakeGlTextureSystem,
     BitmapTextPipe: FakeBitmapTextPipe,
     BatcherPipe: FakeBatcherPipe,
+    RenderGroupPipe: FakeRenderGroupPipe,
     Shader: FakeShader,
     Matrix: FakeMatrix,
     compileHighShaderGpuProgram: fakeShaderCompiler.compile,

@@ -139,10 +139,13 @@ async function startFiltered(
       log: { mode: "test" },
       flow: { mainFlow: main },
       model: { initialPlayer: { n: 0 }, initialSession: { n: 0 }, seed: 1 },
+      // The warm-up of spec 27 would draw probes and ask for frames: the frames and filters counted here are the
+      // views' own.
       renderer: {
         mount: "#game",
         onDemand: options.onDemand === true,
-        loadPixi: () => Promise.resolve(pixi.module)
+        loadPixi: () => Promise.resolve(pixi.module),
+        warm: 0
       },
       assets: { manifest: MANIFEST, io: createIo() }
     }

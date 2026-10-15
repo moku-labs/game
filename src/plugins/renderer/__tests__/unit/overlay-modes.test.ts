@@ -252,6 +252,46 @@ describe("overlay modes", () => {
     expect(reports(stage)[0]).toMatchObject({ mode: "freeze", kept: true });
   });
 
+  // Bug: a burst of retakes (a frost region that moves, a resize) sends a blurred range live, and live its endless
+  // loops are no longer held: they write in every frame, the range never sees eight calm frames, and it is drawn live
+  // for as long as the sheet stays.
+  it("holds the endless loops of a blurred range the fallback draws live, and keeps it again after eight calm frames while they run", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const ecs = stage.drawn.mock.world.ecs;
+    const frost = stage.view({ order: 1, w: 1080, h: 1920 });
+    const glint = stage.view({ order: 1, x: 300, y: 300 });
+    const shop = stage.overlay({ dim: 0.56 }, { order: 2 });
+    let turn = 0;
+    // One frame of an endless loop on the glint, as anim writes it: nothing while it is held.
+    const loopFrame = (): void => {
+      turn += 1;
+      if (!sync.loopsHeld(glint)) ecs.set(glint, Transform, { rotation: turn / 100 });
+      stage.frame();
+    };
+
+    sync.filters.set(frost, [{ filter: new pixi.AlphaFilter(), passes: 1, blurs: true }]);
+    stage.level(shop, 1, true);
+    stage.frames(2);
+
+    // The frost under the sheet changes in three frames in a row: the range goes live.
+    for (let frame = 1; frame <= 3; frame += 1) {
+      ecs.set(frost, Shape, { fill: 0x10_20_30 + frame });
+      loopFrame();
+    }
+
+    expect(reports(stage)[0]).toMatchObject({ mode: "live", kept: false });
+
+    for (let frame = 0; frame < 7; frame += 1) loopFrame();
+
+    expect(reports(stage)[0]).toMatchObject({ mode: "live", kept: false });
+
+    loopFrame();
+
+    expect(reports(stage)[0]).toMatchObject({ mode: "freeze", kept: true });
+    expect(stage.topOf(frost).renderable).toBe(false);
+  });
+
   it("draws a range live when kept refuses its picture, with one debug line, writing no freeze reason before it asked", async () => {
     const stage = await stageOf({ config: { keptMb: 0.001 } });
     const under = stage.view({ order: 1 });

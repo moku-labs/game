@@ -1358,3 +1358,20 @@ describe("the pool-trim event of an agent build", () => {
     ]);
   });
 });
+
+describe("the warm event of an agent build", () => {
+  // Bug: the editor never sees when the warm-up of a device ended, or how many probe draws it took.
+  it("writes one warm line with the draws of the run when the warm-up's queue empties", async () => {
+    const agent = await startAgent();
+    const lines = agent.listen();
+
+    // What `sync/warm.ts` tells its listeners when the queue becomes empty.
+    for (const listener of agent.mock.ctx.state.sync.warm.listeners) listener(16);
+
+    expect(
+      linesOf(lines, "event")
+        .filter(line => line.name === "warm")
+        .map(line => line.detail)
+    ).toEqual([{ draws: 16 }]);
+  });
+});

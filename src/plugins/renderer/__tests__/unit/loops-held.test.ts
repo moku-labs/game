@@ -142,6 +142,48 @@ describe("loopsHeld", () => {
     expect(sync.loopsHeld(ward)).toBe(true);
   });
 
+  // Bug: the range of a sheet drawn live by the fallback (three retakes in a row) lets its loops write, so it never
+  // comes back to its picture; or the hold goes too far and freezes loops the player sees sharp, or keeps them frozen
+  // while the sheet leaves.
+  it("holds the loops of a blurred range the fallback draws live; not those of a sharp one, nor once its overlay leaves", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const ecs = stage.drawn.mock.world.ecs;
+    const glint = stage.view({ order: 1 });
+    const burst = (entity: number): void => {
+      for (let frame = 1; frame <= 3; frame += 1) {
+        ecs.set(entity, Shape, { fill: 0x10_20_30 + frame });
+        stage.frame();
+      }
+    };
+    const dimOnly = stage.overlay({ dim: 0.56 }, { order: 2 });
+
+    stage.level(dimOnly, 1, true);
+    stage.frames(2);
+    burst(glint);
+    expect(stage.drawn.mock.ctx.state.sync.overlay.active?.fallback).toBe(true);
+    expect(sync.loopsHeld(glint)).toBe(false);
+
+    ecs.despawn(dimOnly);
+    stage.frame();
+
+    const frost = stage.view({ order: 1, w: 1080, h: 1920 });
+
+    sync.filters.set(frost, [slotOf({ blurs: true })]);
+
+    const shop = stage.overlay({ dim: 0.56 }, { order: 2 });
+
+    stage.level(shop, 1, true);
+    stage.frames(2);
+    burst(frost);
+    expect(stage.drawn.mock.ctx.state.sync.overlay.active?.fallback).toBe(true);
+    expect(sync.loopsHeld(glint)).toBe(true);
+
+    stage.leave(shop);
+    stage.frame();
+    expect(sync.loopsHeld(glint)).toBe(false);
+  });
+
   it("does not hold a view above the overlay or in the HUD layer", async () => {
     const stage = await stageOf();
     const sync = stage.drawn.mock.api.sync;

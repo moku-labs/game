@@ -6,7 +6,7 @@
 import { readFile } from "node:fs/promises";
 import * as pixi from "pixi.js";
 import { vi } from "vitest";
-import type { Assets, Renderer } from "../../src";
+import type { Assets, PlatformProvider, Renderer } from "../../src";
 import { commands, run } from "../../src/control";
 import { fakeClock } from "../../src/plugins/clock/fake";
 import {
@@ -84,6 +84,7 @@ export async function readSheetsManifest(): Promise<Assets.Manifest> {
  * @param options.checkpoint - Restores a repro at this checkpoint once the ward rests, and steps no frame after it.
  * @param options.width - The CSS width of the page.
  * @param options.height - The CSS height of the page.
+ * @param options.platform - The phone's provider, for the Back chain; none when left out.
  * @returns The running game.
  */
 export async function openSheets(
@@ -93,6 +94,7 @@ export async function openSheets(
     checkpoint?: "ward" | "board";
     width?: number;
     height?: number;
+    platform?: PlatformProvider;
   } = {}
 ): Promise<Sheets> {
   const page = openPage(options.width ?? 390, options.height ?? 844);
@@ -104,7 +106,8 @@ export async function openSheets(
     renderer: page.renderer,
     clock,
     player: options.player ?? startingPlayer,
-    session: options.session ?? startingSession
+    session: options.session ?? startingSession,
+    ...(options.platform === undefined ? {} : { platform: options.platform })
   });
 
   await app.start();

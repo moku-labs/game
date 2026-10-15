@@ -14,7 +14,12 @@ import type { Api as ClockApi } from "../../../clock/types";
 import type { EnterCallback, FeatureDescription, Api as FlowApi, Stage } from "../../../flow/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
 import type { FakeTexture } from "../../../renderer/__tests__/fake-pixi";
-import type { FilterSlot, Api as RendererApi, RendererKind } from "../../../renderer/types";
+import type {
+  FilterSlot,
+  PixiFilter,
+  Api as RendererApi,
+  RendererKind
+} from "../../../renderer/types";
 import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/types";
 import { createWorldApi } from "../../../world/api";
 import { connectWorld } from "../../../world/lifecycle";
@@ -65,6 +70,17 @@ export type FakeRendererState = {
   gl: WebGL2RenderingContext | undefined;
   /** Every `sync.filters.set` call, in order. */
   sets: Array<{ entity: Entity; slots: readonly FilterSlot[] }>;
+  /** Every `sync.filters.area` call, in order. */
+  areas: Array<{ entity: Entity; area: readonly [number, number, number, number] | undefined }>;
+  /** Every filter handed to `sync.filters.warm`, in order. */
+  warms: PixiFilter[];
+  /**
+   * What `sync.filters.warm` answers, at once: `false` by default (a renderer with nothing to warm, `warm: 0`);
+   * `"later"` keeps every answer for `answerWarm`.
+   */
+  warmAnswer: boolean | "later";
+  /** Answers every warm still waiting. */
+  answerWarm(warmed: boolean): void;
   /** Entities `sync.displayOf` answers an object for. */
   displays: Set<Entity>;
   /** `viewport.size()` width and height, reference units. */
@@ -154,6 +170,7 @@ export function createMockEffects(
   const animState = { reducedMotion: false };
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
   const model: { player: Json; session: Json } = { player: {}, session: {} };
+  const warmWaiting: Array<(warmed: boolean) => void> = [];
   const renderer: FakeRendererState = {
     ready: options.ready ?? true,
     passes: 1,
@@ -162,6 +179,12 @@ export function createMockEffects(
     resolution: 1,
     gl: undefined,
     sets: [],
+    areas: [],
+    warms: [],
+    warmAnswer: false,
+    answerWarm: (warmed: boolean): void => {
+      for (const resolve of warmWaiting.splice(0)) resolve(warmed);
+    },
     displays: new Set(),
     viewport: { width: 1080, height: 1920 }
   };
@@ -243,6 +266,21 @@ export function createMockEffects(
       filters: {
         set: (entity: Entity, slots: readonly FilterSlot[]): void => {
           renderer.sets.push({ entity, slots });
+        },
+        area: (
+          entity: Entity,
+          area: readonly [number, number, number, number] | undefined
+        ): void => {
+          renderer.areas.push({ entity, area });
+        },
+        warm: (filter: PixiFilter): Promise<boolean> => {
+          renderer.warms.push(filter);
+
+          if (renderer.warmAnswer !== "later") return Promise.resolve(renderer.warmAnswer);
+
+          return new Promise(resolve => {
+            warmWaiting.push(resolve);
+          });
         }
       },
       renderPasses: (): number => renderer.passes,

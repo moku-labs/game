@@ -5,6 +5,7 @@
  */
 import type { BitmapFontData, PixiModule, PixiTexture } from "../types";
 import type { SyncCtx, SyncState } from "./types";
+import { queueText } from "./warm";
 
 /** What a font is cached under, so a `BitmapText` with that `fontFamily` finds it. */
 const CACHE_SUFFIX = "-bitmap";
@@ -69,7 +70,8 @@ function parseFont(pixi: PixiModule, key: string, fnt: string): BitmapFontData {
 
 /**
  * Installs a font for an asset key. Installing the same key again replaces the font, which is
- * what a bundle that was unloaded and loaded again needs.
+ * what a bundle that was unloaded and loaded again needs. The first font of a device queues the
+ * text probe of the warm-up (F4).
  *
  * @param sctx - Domain context of the sync module.
  * @param key - The asset key of the font.
@@ -98,6 +100,7 @@ export function installFont(sctx: SyncCtx, key: string, fnt: string, texture: Pi
   pixi.Cache.set(cacheKey, font);
   state.fonts.set(key, font);
   state.fontCache = pixi.Cache;
+  queueText(sctx, key);
 }
 
 /**

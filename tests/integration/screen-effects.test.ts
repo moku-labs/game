@@ -8,6 +8,9 @@
  */
 import { readFile } from "node:fs/promises";
 import type { Assets, Model } from "@moku-labs/game";
+import { defineFilter, defineGame, exit, Shape, Transform, type } from "@moku-labs/game";
+import { defineGameApp } from "@moku-labs/game/app";
+import type * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFakeEffectsPixi,
@@ -16,6 +19,7 @@ import {
 import { installFakeDom } from "../../src/plugins/renderer/__tests__/fake-dom";
 import { FakeRectangle, FakeTexture } from "../../src/plugins/renderer/__tests__/fake-pixi";
 import miniGame from "../fixtures/mini-game/index";
+import { openPage, watch } from "./drawn-helpers";
 import type { MiniGame } from "./mini-helpers";
 import { frames, miniFolder, readManifest, until } from "./mini-helpers";
 
@@ -95,13 +99,11 @@ async function startDrawn(): Promise<MiniGame> {
   installFakeDom({ width: 1080, height: 1920 });
 
   const manifest = await readManifest();
-  // The shared fake draws the labels of `text` and compiles the WGSL of `Glow` with no error.
+  // The shared fake draws the labels of `text` and compiles the WGSL of `Glow` with no error. It cannot build the
+  // probes of the warm-up (spec 27): the warm-up is off, as the counts below are the game's own.
   const pixi = createFakeEffectsPixi();
-  const { app } = miniGame.screen({
-    manifest,
-    io: diskIo(manifest),
-    renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
-  });
+  const renderer = { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 };
+  const { app } = miniGame.screen({ manifest, io: diskIo(manifest), renderer });
 
   await app.start();
   app.flow.run().catch(() => undefined);
@@ -206,5 +208,115 @@ describe("screen-effects — the mini game drawn with effectsPlugin", () => {
     });
     expect(FakeFxParticleContainer.made.length).toBeGreaterThan(0);
     expect(FakeFxParticleContainer.made.every(container => container.destroyed)).toBe(true);
+  });
+});
+
+/** The bundle of the lens's screen holds no file. */
+const LENS_MANIFEST: Assets.Manifest = {
+  version: 2,
+  bundles: { memory: { feature: "memory", tier: "core", mb: 0, files: [] } }
+};
+
+const lensKit = defineGame<{
+  player: { n: number };
+  session: { n: number };
+  assets: string;
+  scenes: "memory";
+  strings: Record<string, never>;
+}>();
+
+/**
+ * A Memory Missing's lens (spec 27 P1.7): outside its disc it draws nothing, so Pixi renders and fills only the box
+ * around it.
+ */
+const LensWindow = defineFilter("LensWindow", {
+  wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return textureSample(uTexture, uSampler, uv) * fu.inner; }",
+  glsl: "void main() { finalColor = texture(uTexture, vTextureCoord) * inner; }",
+  uniforms: { cx: 195, cy: 189, rev: 84, inner: 4, soft: 4 },
+  area: value => {
+    const reach = value.rev + value.soft;
+
+    return [value.cx - reach, value.cy - reach, 2 * reach, 2 * reach];
+  }
+});
+
+/** The full-screen cover the lens looks through. */
+const cover = lensKit.projection({
+  name: "memory.cover",
+  layer: "main",
+  from: () => ({}),
+  view: () => [
+    Transform({ x: 0, y: 0 }),
+    Shape({ kind: "rect", w: 390, h: 844, fill: 0x20_20_28 }),
+    LensWindow()
+  ]
+});
+
+const memoryNode = lensKit.defineNode({
+  scene: "memory",
+  outcomes: { done: type() },
+  rest: true,
+  checkpoint: true
+});
+
+const memoryFlow = lensKit.defineFlow("main", {
+  nodes: { memory: memoryNode },
+  start: "memory",
+  outcomes: { over: type() },
+  edges: { memory: { done: exit("over") } }
+});
+
+const memoryFeature = lensKit.defineFeature("memory", {
+  scenes: [
+    lensKit.defineScene("memory", {
+      bundle: "memory",
+      layers: { main: { sort: "order" } },
+      projections: [cover]
+    })
+  ],
+  projections: [cover],
+  filters: [LensWindow]
+});
+
+describe("a lens with an area (spec 27 B4)", () => {
+  // Bug: the lens of the memory screen fills the whole cover: 1.67–2.5 MPx a frame for a 0.24 MPx disc.
+  it("a lens with an area keeps its picture inside the area and draws nothing outside", async () => {
+    const page = openPage(390, 844);
+    const { app } = defineGameApp({
+      flow: memoryFlow,
+      safeNode: "memory",
+      player: { n: 0 },
+      session: { n: 0 },
+      referenceSide: 390,
+      features: [memoryFeature],
+      pluginConfigs: {
+        log: { mode: "test" },
+        flow: { holdMs: 0 },
+        // Every frame drawn: a still filtered view is taken as a picture after two drawn frames (spec 23).
+        renderer: { ...page.renderer, onDemand: false }
+      }
+    }).screen({ manifest: LENS_MANIFEST });
+
+    await app.start();
+    app.flow.run().catch(() => undefined);
+
+    const watched = watch(app, page);
+
+    await watched.frames(12);
+
+    const entity = app.world.projection.entityOf("memory.cover", "memory.cover");
+    const top = app.renderer.sync.displayOf(entity ?? 0) as pixi.Container | undefined;
+    const area = top?.filterArea;
+
+    // rev 84, soft 4: the 176 × 176 box around (195, 189), in the cover's own units (a shape at scale 1).
+    expect(
+      area === undefined || area === null ? undefined : [area.x, area.y, area.width, area.height]
+    ).toEqual([107, 101, 176, 176]);
+    // The still cover is drawn from its kept picture, taken with the lens; the picture is what the top draws now.
+    expect(app.renderer.stats().kept.pictures).toBe(1);
+    watched.oracle.expectNoMissedFrame();
+    watched.oracle.expectPicturesCurrent();
+
+    await app.stop();
   });
 });

@@ -12,6 +12,9 @@ import { createViewportState } from "./viewport/state";
 /** The fewest and the most frames the ring of the performance monitor keeps. */
 const RING_FRAMES = { min: 64, max: 16_384 } as const;
 
+/** The most probe draws of the warm-up a drawn frame may make. */
+const MAX_WARM = 16;
+
 /**
  * Tells a finite number of at least 0 from anything else a config can hold.
  *
@@ -62,12 +65,14 @@ function checkPoolTrim(poolTrim: unknown): void {
 
 /**
  * Checks the numbers of the config a game can get wrong, at `createApp`, in every build: the
- * resolution cap, the pool trim, the performance monitor and the budget of the kept pictures.
+ * resolution cap, the pool trim, the performance monitor, the budget of the kept pictures and the
+ * probe draws of the warm-up.
  *
  * @param config - The resolved plugin config.
  * @throws {Error} When `maxResolution` is not a number above 0, `poolTrim` fails its check,
  *   `monitor.budgetMs` is neither `"rate"` nor a number above 0, `monitor.frames` is not a whole
- *   number from 64 to 16384, or `keptMb` is not a finite number of at least 0.
+ *   number from 64 to 16384, `keptMb` is not a finite number of at least 0, or `warm` is not a
+ *   whole number from 0 to 16.
  */
 function checkConfig(config: Readonly<Config>): void {
   const { maxResolution, keptMb } = config;
@@ -95,6 +100,14 @@ function checkConfig(config: Readonly<Config>): void {
   if (typeof keptMb !== "number" || !Number.isFinite(keptMb) || keptMb < 0) {
     throw new Error(
       `[game] renderer.keptMb is ${String(keptMb)}.\n  Give the MiB kept pictures may hold, or 0 to keep none.`
+    );
+  }
+
+  const { warm } = config;
+
+  if (!Number.isInteger(warm) || warm < 0 || warm > MAX_WARM) {
+    throw new Error(
+      `[game] renderer.warm is ${String(warm)}.\n  Give the probe draws per frame, a whole number from 0 to 16.`
     );
   }
 }

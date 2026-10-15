@@ -181,6 +181,8 @@ internal markup: select them by nothing, set the properties instead.
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.state()` | `{ nineSlice }`, a fresh object. |
 | `filters.set(entity, slots)` | The filters drawn on the entity's view, in order: `slots` is `{ filter, passes }[]`, a Pixi filter instance `effects` built and the render passes one apply costs; `[]` clears. See "Filters". Works while inert: stored, nothing applied. |
+| `filters.area(entity, area)` | The rectangle `[x, y, width, height]`, in the entity's own units, outside of which the view's filters draw nothing; `undefined` goes back to the view's bounds. Kept per entity like its filters. See "Filter area". |
+| `filters.warm(filter)` | Creates the GPU pipelines of a filter before a screen needs them: drawn invisibly before a frame, in every target (see "Pipeline warm-up"). Answers `true` once drawn, `false` at once with nothing to warm (no device, headless, `warm: 0`) or when the renderer stops first. Never destroys the filter. |
 | `renderPasses()` | The render passes of the frame, the number `stats().renderPasses` reports, read from the filter slots at call time with no allocation. `effects` reads it once per frame for its pass budget. See "Render passes". Inert: 0. |
 
 There is no `sync.layers`: layers are declared by the scene, through `world.projection.setLayers`.
@@ -207,6 +209,60 @@ visual left, and when the renderer stops. Each pass also sweeps the entries of e
 no view and whose `ecs.ownerOf` is `undefined`, so an entity that despawned after its visual had
 already left is forgotten too. A live entity keeps its filters for its next visual, in
 the same frame (a `ui` element that trades its shape for a nine-slice keeps its glow) or later. A `rebuildAll` after a restore applies them again. The renderer never destroys a filter.
+
+### Filter area
+
+`filters.area(entity, [x, y, width, height])` (spec 27 B4) sets the rectangle outside of which the
+view's filters draw nothing, in the entity's own units; `effects` hands it the union of the areas its
+enabled filters declare (`defineFilter(id, { area })`). Pixi then sizes the filter's textures and its
+fill to that rectangle, transformed by the view's world transform, instead of the view's bounds: a
+lens that shows a 176 × 176 disc on a full-screen cover fills 0.24 MPx, not 1.67–2.5. Outside it Pixi
+draws nothing of the view at all, neither the filter nor the view's own content.
+
+The area is kept per entity like the filters (a view built later, pooled or rebuilt gets it again;
+it is forgotten when the entity despawns) and written into one Pixi `Rectangle` per entity, in
+place, as the `filterArea` of the view's top (`view.wrapper ?? view.object`), in the top's own
+units: without a wrapper the visual's stretch (`drawScale`) is folded into the object's scale, so
+the numbers are divided by it; a wrapper carries the pose alone. The entity is marked before every
+write, and nothing is written when the top already holds the same four numbers. It moves to a
+wrapper made later, follows a new stretch of a sprite, and comes off with the filters when the view
+lets its object go. While a view is drawn from its kept picture its filters hang on the picture's
+stand-in, which draws without an area (the kept output covers the view's bounds: the same pixels,
+by the area's contract); the top keeps it, inert, until the filters come back. The pass count is
+unchanged: an area changes the size of the passes, not their number.
+
+### Pipeline warm-up
+
+WebGPU creates a pipeline at the first draw that needs it, inside the frame, and keys it by the
+bound target (its formats and stencil state), the geometry layout, the program and the blend. The
+measured cost on the phone was a 283 ms splash frame and a 33 ms first shop. The renderer creates
+them while the game loads (spec 27 F4): a drawn frame first draws `renderer.warm` invisible probe
+draws (default 1), then the kept pictures, then the stage pass, which clears the canvas, in the same
+task, so a probe never shows. One probe draw is one subject in one target:
+
+- the subjects: a 4 × 4 sprite of `Texture.WHITE` (the batch pipeline of sprites, nine-slices and
+  plain bitmap text), a `Graphics` with `batchMode: "no-batch"`, a `ParticleContainer` with the
+  normal and the add blend, a `BitmapText` in the first font installed (queued when it arrives,
+  ahead of the filters still waiting), and every filter handed to `filters.warm` (`effects` hands it
+  every checked definition, every stage of its inputs and every Pixi-core kind once the shader
+  checks settled);
+- the targets on WebGPU: the canvas and a texture (the subject under the module's own `AlphaFilter`
+  at alpha 0), each with and without a stencil clip, as `sync` hangs clips; on WebGL one draw, the
+  program does not depend on the target. A canvas the stage pass does not clear
+  (`background.clearBeforeRender` false) gets the texture targets alone (`renderer:warm-canvas-off`,
+  once).
+
+The probes hang in a tree of their own, never in the stage, and only during their own render. The
+queue asks `demand` for the next frame (`"request"`), so a renderer drawing on demand draws through
+it; a draw is counted only after its render call ran in a drawn frame. A probe whose render throws
+is counted done and reported once (`renderer:warm-failed`); a Pixi that cannot build the probe tree
+ends the warm-up of the device. A frame that drew probes is told to `time` with `frameProbed()`: it
+is drawn but never a sample of the adaptive rate. A restore queues everything again on the new
+device; `onStop` answers waiting promises `false` and destroys the probe tree, never a filter it was
+handed. In an agent build the end of a run writes a `warm` event line (`{ draws }`). Not warmed: a
+game's own `Display` objects with custom shaders (hand their filters to `filters.warm`; their
+meshes are not covered), blend modes other than normal and add, MSAA. `renderer.warm: 0` turns it
+off: every pipeline is created in the first frame that draws with it, as before.
 
 ### `invalidate` — `app.renderer.invalidate(entity)`
 
@@ -483,6 +539,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
 | `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
 | `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
+| `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads (see "Pipeline warm-up"). `0` turns the warm-up off. Not a whole number from 0 to 16 throws at `createApp`. |
 
 ```ts
 const app = createApp({
@@ -701,7 +758,10 @@ the HUD takes nothing. A range that changes in three frames in a row is drawn li
 after eight calm frames. Endless loops are held only under an opaque cover or a blurred picture
 (a filter with `blurs` on an entry or on a view in it that covers the canvas): they write nothing,
 their phase follows time, and they write once in the frame after landing and after the first exit
-frame, which takes the picture again with them.
+frame, which takes the picture again with them. A blurred range the fallback draws live keeps its
+loops held until its overlay leaves, so only a real change counts against the eight calm frames
+(a frost that moved, a resize) and the picture comes back while the loops run on; the loops of a
+sharp range are never held, and keep it live.
 
 **The dim** is the engine's: one quad of `dimColor` at `dim × level`, right under the overlay's
 root, the size of the canvas; none under its own cover, gone with the overlay. A filter that painted
@@ -711,7 +771,7 @@ a glass tint under a panel draws it above the dim now, on the panel.
 longest timed track), and back to 0 with its exit motion; `fade` (default 250 ms) times it only when
 the root plays none. `landed` turns true when the enter motion is over; leaving is the `Exiting` of
 the root. Neither is a field of the marker: they are the engine's state (`OverlayLevel`, written by
-`ui`), read through `debug.overlays()`.
+`ui`), read through `app.renderer.sync.debug.overlays()`.
 
 **HUD parts.** A part of the HUD layer is drawn at a factor the overlays give it, bottom first, each
 overlay blending its keep (1 for `hud: "all"`, 0 for `"none"`, whether its list holds the key) by
@@ -894,13 +954,37 @@ against the real module pins the pipe's name and metadata, the exact WGSL and GL
 replaces, and the compiled fragment of both programs, so a Pixi that renames them, or fixes the
 double alpha itself, fails in CI.
 
+Distance-field text uses device pixels for its edge (PX1). Pixi writes the edge width `uDistance` in
+CSS pixels (`AbstractBitmapTextPipe._updateDistanceField`: the world scale times the font's range
+over its scale), while the shader measures it in device pixels, so on a phone at resolution 2.8 the
+glyph edge was smeared over three pixels. The text's uniform group, which the pipe makes, answers
+Pixi's distance times the renderer's resolution: its `uDistance` is an accessor, Pixi's write keeps
+the CSS value and every upload reads it times the resolution of the moment, so a change of
+resolution needs nothing more. Text at a resolution above 1 is sharper; text at 1 draws the same
+pixels. The canvas's resolution is used, also for a text inside a filter of another resolution,
+which only a blurred text shows. A unit test runs Pixi's own `_updateDistanceField` and fails the day
+Pixi multiplies by the resolution itself: the engine's factor must then go.
+
+### A cached group inside a filter
+
+A game's `Display` object may cache a group as a texture (`cacheAsTexture`). Pixi 8.22's
+`FilterSystem` binds a filter's input with `renderTarget.bind`, which is not on the target stack, and
+`RenderGroupPipe` refreshes a cached group with `push` … `pop`: the pop binds the canvas, and what
+the filter draws after it goes to the canvas (A Memory Missing's black memory screen). The renderer
+installs a subclass of `RenderGroupPipe` the same way as the text pipe (`host/render-group.ts`, every
+build, once per host state, swapped back at stop): around a refresh of a cached group it reads the
+bind state (`getBindState`) and, when Pixi's pop left another surface bound, binds it again with no
+clear. Nothing else changes; the engine never caches a group itself (its kept pictures are its own
+textures). A unit test against the real module pins the bug: it fails the day Pixi restores the
+bind itself, and the subclass may go. Reported upstream.
+
 ## Device loss and the hidden tab
 
 | Step | WebGPU | WebGL |
 |---|---|---|
 | Detect | the `renderer.gpu.device.lost` promise | the canvas event `webglcontextlost`, with `preventDefault()` |
 | On loss | `ready` false → `lifecycle.push("device-lost")` → `renderer:device-lost` | the same |
-| Restore | destroy the application, init again, new canvas, then `viewport.apply` and `sync.rebuildAll()` | Pixi restores on `webglcontextrestored` |
+| Restore | destroy the application, init again, new canvas, then `viewport.apply` and `sync.rebuildAll()`; the next frame is drawn whole (`restore`) | Pixi restores on `webglcontextrestored`; the tree stands, but the canvas and every render texture came back empty, so the next frame is drawn whole (`restore`) and takes every kept picture and range picture again |
 | After | `ready` true → `lifecycle.pop("device-lost")` | the same |
 | Restore fails | the unsupported-device screen; the pause reason stays | the same |
 
@@ -916,9 +1000,10 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
 ## Lifecycle
 
 - **onStart** `startRenderer` resolves the mount, loads Pixi, in a dev build swaps in the
-  draw-counting classes, creates the application and appends the canvas; then, in the `onReady` callback, `viewport` creates the two safe-area probes, the
+  draw-counting classes, in every build the bitmap text and render-group pipes, creates the
+  application and appends the canvas; then, in the `onReady` callback, `viewport` creates the two safe-area probes, the
   two resize observers and the `moku-native:insets` listener, `sync` creates the root, the world hooks and the `renderer.sync` system, and the
-  `render` frame callback is registered; in an agent build the monitor then attaches (and again
+  `render` frame callback is registered, and the warm-up queues its probes; in an agent build the monitor then attaches (and again
   after every restore). Inert without a document or without a mount: nothing is created and nothing
   is registered.
 - **onStop** `({ config, state }) => stopRenderer({ config, state })` answers a waiting capture

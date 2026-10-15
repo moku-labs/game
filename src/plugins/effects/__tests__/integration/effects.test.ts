@@ -234,9 +234,11 @@ async function startApp(items: Item[], mounted = true, kind: "webgpu" | "webgl" 
     pluginConfigs: {
       flow: { mainFlow: main },
       model: { initialPlayer: { items }, initialSession: { moves: 0 }, seed: 1 },
+      // The warm-up of spec 27 would hand the renderer a probe of every kind: the programs and filters counted here
+      // are the views' own (`warm.test.ts` tests the hand-over).
       renderer: mounted
-        ? { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
-        : { loadPixi: () => Promise.resolve(pixi.module) },
+        ? { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
+        : { loadPixi: () => Promise.resolve(pixi.module), warm: 0 },
       assets: mounted ? { manifest, io: createIo() } : { manifest }
     }
   });

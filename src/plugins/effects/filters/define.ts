@@ -202,6 +202,27 @@ function checkCache(id: string, cache: unknown): void {
 }
 
 /**
+ * Reads the declared area: a function of the value, or left out. A JavaScript caller may pass anything.
+ *
+ * @param id - The filter id.
+ * @param area - What the game declared.
+ * @returns The function with the kind erased, or `undefined`.
+ * @throws {TypeError} When it is given and is not a function.
+ */
+function readArea(id: string, area: unknown): FilterDefinition["area"] {
+  if (area === undefined) return undefined;
+
+  if (typeof area !== "function") {
+    throw new TypeError(
+      `[game] Filter "${id}": area must be a function of the value.\n  Give (value) => [x, y, width, height], or leave it out.`
+    );
+  }
+
+  // The area reads the stored value of this filter; the engine hands it over with the kind erased.
+  return area as FilterDefinition["area"];
+}
+
+/**
  * Tells whether a value is a list of 2 to 4 finite numbers.
  *
  * @param value - A uniform declaration.
@@ -599,14 +620,18 @@ function readFallback(
  * a `vec3`; a tuple is an array field and not tweenable. Every filter component also carries
  * `enabled: true` and `order: 0`. An input `blur` gives the body `sampleBlur(uv)`: the last texture
  * of its chain, read at the body's `uv`. A `fallback` draws instead when the filter is broken.
+ * An `area` answers, from the value, the rectangle in the entity's own units outside of which the
+ * filter draws nothing: Pixi then renders and fills only that box, not the view's bounds.
  * Register it through the `filters` key of a feature.
  *
  * @param id - The filter id, also the component name; unique, and not one of the built-ins.
- * @param spec - Both bodies, the uniforms, the passes one apply costs, the padding, the inputs and the fallback.
+ * @param spec - Both bodies, the uniforms, the passes one apply costs, the padding, the inputs, the fallback, the
+ *   cache category and the area.
  * @returns The component type, with the frozen `filter` definition attached.
  * @throws {Error} When the id is empty, the WGSL has no `mainFragment`, the GLSL no `void main(`,
  *   a uniform is reserved, badly named or of no known form, the passes or the padding break
- *   their rules, an input or the fallback breaks one of its rules, or `passes` is given with inputs.
+ *   their rules, an input or the fallback breaks one of its rules, `passes` is given with inputs,
+ *   or `area` is not a function.
  * @example
  * ```ts
  * // features/board/effects.ts: a gold tint a motion hook tweens on a merge, on WebGPU and WebGL.
@@ -617,6 +642,9 @@ function readFallback(
  * // A Memory Missing's frost reads a blurred copy of the scene drawn by its chain.
  * const Frost = defineFilter("Frost", { wgsl: FROST_WGSL, glsl: FROST_GLSL, uniforms: { strength: 16 }, inputs: { blur: { stages: [FrostBox4, FrostGauss], chain: frostChain } } });
  * Frost.filter.inputs.map(input => input.sample); // ["sampleBlur"]
+ * // A Memory Missing's lens draws nothing outside its disc: Pixi renders and fills only this box.
+ * const Lens = defineFilter("LensWindow", { wgsl: LENS_WGSL, glsl: LENS_GLSL, uniforms: { cx: 195, cy: 189, rev: 84, soft: 4 }, area: v => [v.cx - v.rev - v.soft, v.cy - v.rev - v.soft, 2 * (v.rev + v.soft), 2 * (v.rev + v.soft)] });
+ * Lens.filter.area?.(Lens().value); // [107, 101, 176, 176]
  * ```
  */
 export function defineFilter<
@@ -662,6 +690,8 @@ export function defineFilter<
   checkCost(id, passes, padding, uniforms);
   checkCache(id, spec.cache);
 
+  const area = readArea(id, spec.area);
+
   const origin = callsCanvasPixel(spec.wgsl, spec.glsl) ? KEPT_ORIGIN : undefined;
   // A filter with inputs is as bad for the cache as the worst of its body and its stages: a kept pre-pass result is a
   // picture of the stages.
@@ -681,7 +711,9 @@ export function defineFilter<
     inputs,
     fallback,
     cache,
-    origin
+    origin,
+    // The key is there only when the spec gave an area (`exactOptionalPropertyTypes`).
+    ...(area === undefined ? {} : { area })
   });
 
   if (spec.cache !== false && (readsScreenIn(spec.wgsl) || readsScreenIn(spec.glsl))) {

@@ -1,13 +1,14 @@
 /**
- * @file renderer/sync — the filters `effects` hangs on entities' views, and the render passes they
- * cost. The renderer never creates, writes or destroys a filter: it keeps the slot list per
- * entity, assigns the instances to the view, and takes them off when it lets the object go.
+ * @file renderer/sync — the filters `effects` hangs on entities' views, the rectangle they draw inside, and the render
+ * passes they cost. The renderer never creates, writes or destroys a filter: it keeps the slot list per entity, assigns
+ * the instances to the view, and takes them off when it lets the object go. The area (B4) is kept per entity the same
+ * way and written into one Pixi `Rectangle` on the view's top, in its own units.
  */
 import type { EcsApi } from "../../world/ecs/types";
 import type { Entity } from "../../world/types";
 import type { KeptState } from "../kept/types";
-import type { KeptModule, PixiContainer, PixiFilter } from "../types";
-import type { FilterSlot, SyncState, View } from "./types";
+import type { KeptModule, PixiContainer, PixiFilter, PixiRectangle } from "../types";
+import type { AreaEntry, FilterSlot, SyncCtx, SyncState, View } from "./types";
 
 /**
  * The filters a display object holds now. Pixi answers `undefined` before the first write and
@@ -179,7 +180,7 @@ export function moveFilters(
 }
 
 /**
- * Forgets the filters of an entity whose view left, only when the entity itself is gone. A live
+ * Forgets the filters and the filter area of an entity whose view left, only when the entity itself is gone. A live
  * entity keeps them for its next view, in this frame, as a `ui` element that swaps its shape for a
  * nine-slice, or in a later one.
  *
@@ -188,7 +189,160 @@ export function moveFilters(
  * @param entity - An entity of the pass's removed set.
  */
 export function forgetLeft(state: SyncState, ecs: Pick<EcsApi, "ownerOf">, entity: Entity): void {
-  if (ecs.ownerOf(entity) === undefined) state.filters.delete(entity);
+  if (ecs.ownerOf(entity) !== undefined) return;
+
+  state.filters.delete(entity);
+  state.areas.delete(entity);
+}
+
+/**
+ * The rectangle a display object's filters are drawn inside. Pixi answers `undefined` before the
+ * object has a filter effect and `null` after (the effect's own starting value), which its getter
+ * type does not say.
+ *
+ * @param target - The display object.
+ * @returns The rectangle, `undefined` when it has none.
+ */
+function heldArea(target: PixiContainer): PixiRectangle | undefined {
+  const held: PixiRectangle | null | undefined = target.filterArea;
+
+  return held ?? undefined;
+}
+
+/**
+ * Takes the filter area off a display object: its filters draw over its bounds again. Nothing is
+ * written when it holds none.
+ *
+ * @param target - The display object.
+ */
+export function clearArea(target: PixiContainer): void {
+  // `null` is the value Pixi's own filter effect starts with; the declaration of the setter only says `Rectangle`.
+  // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi holds no filter area.
+  if (heldArea(target) !== undefined) Reflect.set(target, "filterArea", null);
+}
+
+/**
+ * Writes the filter area of an entity onto its view, the one writer of `filterArea`: on the view's top (its wrapper
+ * when it has one, so the area covers the subtree as the filters do), in the top's own units. Without a wrapper the
+ * stretch of the visual is folded into the object's scale (`applyTransform`), so the entity's units are divided by it;
+ * a wrapper carries the pose alone. Written into the entity's one `Rectangle` only when the target does not hold it or
+ * a number differs, and the entity is marked before (C-c). Without an entry the area the renderer wrote comes off.
+ *
+ * While the view is drawn from its kept picture its filters hang on the picture's stand-in (spec 23), which draws
+ * without an area: the top keeps it, inert without filters, and it is in force again the frame the filters come back.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ */
+export function applyArea(sctx: SyncCtx, entity: Entity, view: View): void {
+  const entry = sctx.ctx.state.sync.areas.get(entity);
+  const target = view.wrapper ?? view.object;
+  const held = heldArea(target);
+
+  if (entry === undefined) {
+    if (held === undefined) return;
+
+    sctx.deps.demand.mark(entity);
+    clearArea(target);
+
+    return;
+  }
+
+  const stretch = view.wrapper === undefined ? view.drawScale : undefined;
+  // A stretch of 0 draws nothing: the area is then left in the entity's units.
+  const sx = stretch === undefined || stretch.x === 0 ? 1 : stretch.x;
+  const sy = stretch === undefined || stretch.y === 0 ? 1 : stretch.y;
+  const x = entry.x / sx;
+  const y = entry.y / sy;
+  const width = entry.width / sx;
+  const height = entry.height / sy;
+  const rect = entry.rect;
+
+  if (
+    rect !== undefined &&
+    held === rect &&
+    rect.x === x &&
+    rect.y === y &&
+    rect.width === width &&
+    rect.height === height
+  ) {
+    return;
+  }
+
+  const pixi = sctx.deps.host.pixi();
+
+  if (pixi === undefined) return;
+
+  sctx.deps.demand.mark(entity);
+
+  const next = rect ?? new pixi.Rectangle();
+
+  entry.rect = next;
+  next.x = x;
+  next.y = y;
+  next.width = width;
+  next.height = height;
+  if (held !== next) target.filterArea = next;
+}
+
+/**
+ * A new entry of the area map: no rectangle until its first write.
+ *
+ * @returns The entry, at zero.
+ */
+function emptyArea(): AreaEntry {
+  return { x: 0, y: 0, width: 0, height: 0, rect: undefined };
+}
+
+/**
+ * Keeps the filter area of an entity and writes it onto its view when it has one; `undefined` forgets it and takes the
+ * area the renderer wrote off the view. Works while inert: stored, applied when the view is built.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param area - x, y, width, height in the entity's own units, or `undefined`.
+ */
+export function setArea(
+  sctx: SyncCtx,
+  entity: Entity,
+  area: readonly [number, number, number, number] | undefined
+): void {
+  const state = sctx.ctx.state.sync;
+
+  if (area === undefined) {
+    state.areas.delete(entity);
+  } else {
+    let entry = state.areas.get(entity);
+
+    if (entry === undefined) {
+      entry = emptyArea();
+      state.areas.set(entity, entry);
+    }
+
+    [entry.x, entry.y, entry.width, entry.height] = area;
+  }
+
+  const view = state.views.get(entity);
+
+  if (view !== undefined) applyArea(sctx, entity, view);
+}
+
+/**
+ * Moves the filter area of an entity from its object to the wrapper it has just been given, as `moveFilters` moves the
+ * filters: the object's area comes off, the wrapper's is written in the wrapper's units.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view, wrapper set.
+ */
+export function moveArea(sctx: SyncCtx, entity: Entity, view: View): void {
+  if (heldArea(view.object) !== undefined) {
+    sctx.deps.demand.mark(entity);
+    clearArea(view.object);
+  }
+
+  applyArea(sctx, entity, view);
 }
 
 /**

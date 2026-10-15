@@ -5,8 +5,9 @@
  * ends with all three.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Blur, Transform } from "../../src";
 import { startingPlayer, startingSession } from "../fixtures/sheets-game/state";
-import { closeSheets, openSheets, type Sheets } from "./sheets-helpers";
+import { closeSheets, findKey, openSheets, type Sheets } from "./sheets-helpers";
 
 const running: Sheets[] = [];
 
@@ -85,6 +86,27 @@ function textOf(sheets: Sheets, key: string): string | undefined {
 
   return walk(sheets.app.ui.tree());
 }
+
+/** Frames of four whole turns of a glint's twinkle (900 ms) at 16 ms a frame: 3600 ms. */
+const FOUR_TWINKLES = 225;
+
+/** What changes under the shop in a few frames in a row, the frame's number given. */
+const bursts: ReadonlyArray<{ cause: string; burst: (sheets: Sheets, frame: number) => void }> = [
+  {
+    cause: "the frost under it moves",
+    burst: (sheets, frame) =>
+      sheets.app.world.ecs.set(findKey(sheets.app, "wardFrost") ?? 0, Blur, { strength: 4 + frame })
+  },
+  {
+    // The same aspect, so the frost still covers the canvas and the range stays blurred.
+    cause: "the window is resized and back",
+    burst: (sheets, frame) => {
+      const scale = [1.5, 2, 1.5][frame - 1] ?? 1;
+
+      sheets.page.resize(390 * scale, 844 * scale);
+    }
+  }
+];
 
 /**
  * Whether the scene layer is drawn live: no overlay keeps or covers it.
@@ -303,6 +325,56 @@ describe("overlays across the engine", () => {
 
     expect(renders.length).toBeGreaterThan(0);
     expect(renders.at(-1)?.target?.source.width).toBe(500);
+  });
+
+  // Bug: a burst of retakes under the shop sends the ward live (three in a row), and live the glints that loop under
+  // the frosted sheet write in every frame: the ward never stays calm for eight frames and is drawn live, at full cost,
+  // until the shop is gone.
+  it.each(
+    bursts
+  )("keeps the ward as a picture again eight calm frames after $cause, the glints running on", async ({
+    burst
+  }) => {
+    const sheets = await open();
+    const glint = findKey(sheets.app, "glintA") ?? 0;
+    const turn = (): number | undefined => sheets.app.world.ecs.get(glint, Transform)?.rotation;
+    let frames = 0;
+    const step = async (): Promise<void> => {
+      frames += 1;
+      await sheets.frame();
+    };
+    const sampled = turn();
+
+    sheets.press("shopButton");
+
+    while (frames < 60 && sheets.reports()[0]?.phase !== "shown") await step();
+    for (let index = 0; index < 10; index += 1) await step();
+
+    expect(sheets.reports()).toMatchObject([{ phase: "shown", mode: "freeze", kept: true }]);
+
+    // Retaken in three frames in a row: the ward is drawn live.
+    for (let index = 1; index <= 6 && sheets.reports()[0]?.kept === true; index += 1) {
+      burst(sheets, index);
+      await step();
+    }
+
+    expect(sheets.reports()).toMatchObject([{ mode: "live", kept: false }]);
+
+    const live = frames;
+
+    while (frames - live < 30 && sheets.reports()[0]?.kept !== true) await step();
+
+    expect(frames - live).toBeLessThanOrEqual(12);
+    expect(sheets.reports()).toMatchObject([{ mode: "freeze", kept: true }]);
+    expect(sceneLive(sheets)).toBe(false);
+
+    sheets.press("shopDim");
+
+    while (frames < FOUR_TWINKLES) await step();
+
+    // The glint stands where its loop is at this time: the turn it had four whole twinkles ago.
+    expect(sheets.reports()).toEqual([]);
+    expect(turn()).toBeCloseTo(sampled ?? Number.NaN, 6);
   });
 
   it("goes back to the live views when the sheet is gone, and the picture is freed", async () => {

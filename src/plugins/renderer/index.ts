@@ -36,7 +36,8 @@ const config: Config = {
   debug: { nineSlice: false, verifyFrames: false, kept: true },
   monitor: { budgetMs: "rate", frames: 1024 },
   onDemand: false,
-  keptMb: 64
+  keptMb: 64,
+  warm: 1
 };
 
 /**

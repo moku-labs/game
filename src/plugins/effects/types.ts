@@ -11,7 +11,7 @@ import type { Api as AssetsApi, Events as AssetsEvents } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Api as RendererApi } from "../renderer/types";
 import type { Entity, Api as WorldApi } from "../world/types";
-import type { CheckState, FilteredView, FilterKind } from "./filters/types";
+import type { CheckState, FilteredView, FilterKind, WarmProbe } from "./filters/types";
 import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particles/types";
 
 /**
@@ -79,6 +79,11 @@ export type State = {
    * turned off, and those as a frozen list in the order of `kinds`.
    */
   diagnostics: { kinds: readonly string[]; off: Set<string>; offList: readonly string[] };
+  /**
+   * The warm-up hand-over (spec 27 F4): started at the first frame with a ready host, the Pixi-core kinds noted then,
+   * and the probes handed to `renderer.sync.filters.warm`, kept until the app stops.
+   */
+  warm: { started: boolean; core: string[]; probes: WarmProbe[] };
 };
 
 /**
@@ -265,6 +270,7 @@ export type {
   ColorMatrixValue,
   CoreKind,
   DisplacementValue,
+  FilterArea,
   FilterChainContext,
   FilterComponent,
   FilterDefinition,

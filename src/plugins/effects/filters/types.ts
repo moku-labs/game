@@ -60,6 +60,18 @@ export type FilterValueOf<Uniforms extends Record<string, UniformDeclaration>> =
 } & { enabled: boolean; order: number };
 
 /**
+ * A rectangle in the filtered entity's own units — the space its box, its hit box and its children's positions are in
+ * (reference units for a view at the root without scale): x, y, width, height.
+ *
+ * @example
+ * ```ts
+ * // A lens disc of reach 88 around (195, 189): the 176 × 176 box it can draw in.
+ * const area: FilterArea = [107, 101, 176, 176];
+ * ```
+ */
+export type FilterArea = readonly [x: number, y: number, width: number, height: number];
+
+/**
  * What `defineFilter` takes besides the id. Both bodies are required, so the filter draws on
  * WebGPU and on the WebGL fallback: `wgsl` is the WGSL fragment body only, the engine prepends the
  * vertex stage, the input bindings and the `FilterUniforms` struct; `glsl` is its GLSL ES 3.0 twin
@@ -114,6 +126,14 @@ export type FilterSpec<Uniforms extends Record<string, UniformDeclaration>> = {
    * declares nothing is drawn live as well, and a dev build warns once: declare `cache: false`.
    */
   readonly cache?: "local" | "placed" | false;
+  /**
+   * The rectangle outside of which this filter draws nothing, in the filtered entity's own units, from the component's
+   * value; `undefined` for "the view's bounds" (the default). Outside it Pixi draws nothing of the view at all — neither
+   * the filter nor the view's own content — so declare it only for a filter whose output is transparent there. A view
+   * with several enabled filters gets the union; a view with an enabled filter that declares no area gets none. Called
+   * only when the value changed.
+   */
+  readonly area?: (value: Readonly<FilterValueOf<Uniforms>>) => FilterArea | undefined;
 };
 
 /**
@@ -165,6 +185,8 @@ export type FilterDefinition = {
    * `undefined` for any other body.
    */
   readonly origin: UniformSpec | undefined;
+  /** The rectangle outside of which the filter draws nothing, from the value; present only when the spec gave one. */
+  readonly area?: (value: Readonly<FilterFields>) => FilterArea | undefined;
 };
 
 /**
@@ -474,6 +496,10 @@ export type FilterBody =
       inputs: InputsState | undefined;
       /** The dev mark drawn after the fallback by a stand-in (E5.4); `undefined` otherwise. */
       readonly mark: OursBody | undefined;
+      /** The definition's last area answer, filled in place; `some: false` for `undefined` (B4). */
+      readonly area: AreaBox;
+      /** The value changed since the area was last asked: the next sync asks the definition again. */
+      areaStale: boolean;
     }
   | {
       readonly kind: "blur";
@@ -513,6 +539,16 @@ export type FilterBody =
       readonly applied: Record<string, FilterField>;
       passes: number;
     };
+
+/**
+ * A probe of the warm-up (spec 27 F4): the Pixi filter handed to `renderer.sync.filters.warm`, and its teardown.
+ */
+export type WarmProbe = { readonly filter: PixiFilter; destroy(): void };
+
+/**
+ * A filter area as the filter sync keeps it, written in place: the four numbers, and whether there is one.
+ */
+export type AreaBox = { x: number; y: number; width: number; height: number; some: boolean };
 
 /**
  * The instance of one kind on one view: its Pixi object, and what it sorts by on the view, the
@@ -619,4 +655,8 @@ export type FilteredView = {
   signalled: boolean;
   /** Calls `renderer.invalidate(entity)` once per frame for this view, before the write; made once with the record. */
   readonly signal: () => void;
+  /** The area last handed to `renderer.sync.filters.area`, written in place (B4). */
+  readonly areaSent: AreaBox;
+  /** The `enabled` switches of the placed instances when the area was last judged, one bit each in placed order. */
+  areaMask: number;
 };

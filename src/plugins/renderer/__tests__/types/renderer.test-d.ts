@@ -369,3 +369,17 @@ expectTypeOf(quiet.update).returns.toEqualTypeOf<boolean | void>();
 // biome-ignore lint/suspicious/noConfusingVoidType: the return type of the adapter, as it is declared
 expectTypeOf(answering.update).returns.toEqualTypeOf<boolean | void>();
 expectTypeOf<TimeApi["wakes"]>().toEqualTypeOf<() => number>();
+
+// ─── spec 27: the filter area and the warm-up ────────────────────────
+
+declare const filtersApi: Api["sync"]["filters"];
+declare const someFilter: PixiFilter;
+
+// An area is four numbers in the entity's units, or `undefined` for the view's bounds.
+filtersApi.area(1_048_590, [107, 101, 176, 176]);
+filtersApi.area(1_048_590, undefined);
+// @ts-expect-error — three numbers are no rectangle
+filtersApi.area(1_048_590, [107, 101, 176]);
+// The warm-up answers whether the pipelines were created.
+expectTypeOf(filtersApi.warm(someFilter)).toEqualTypeOf<Promise<boolean>>();
+expectTypeOf<Config["warm"]>().toEqualTypeOf<number>();

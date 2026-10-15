@@ -180,6 +180,71 @@ describe("overlay retakes", () => {
     });
   });
 
+  // Bug (A Memory Missing on c37ac97): the estimate counted the filters of the views under a resting sheet, which no
+  // frame draws (2 to 3 passes for a frame of 1); and the frame that takes the picture counted the take without the
+  // filters it draws into it (spec 23 P9.2).
+  it("counts the filters drawn into a range picture in the frame it is taken, and none of the views under it after", async () => {
+    const stage = await startOverlayStage();
+
+    running.push(stage);
+
+    const sync = stage.drawn.mock.api.sync;
+    const under = stage.view({ order: 1 });
+
+    sync.filters.set(under, [{ filter: new pixi.AlphaFilter(), passes: 2 }]);
+    stage.frames(2);
+    // Live: the frame, the view's content, two applies.
+    expect(sync.renderPasses()).toBe(4);
+
+    const shop = stage.overlay({ dim: 0.56 }, { order: 2 });
+    const from = stage.mark();
+
+    for (let frame = 0; frame < 5 && stage.rootRenders(from).length === 0; frame += 1)
+      stage.frame();
+
+    expect(stage.rootRenders(from)).toHaveLength(1);
+    // The take: the frame, then the picture's render with the view's content and its two applies in it.
+    expect(sync.renderPasses()).toBe(5);
+
+    stage.level(shop, 0.5);
+
+    expect(stage.frame()).toBe(true);
+    expect(stage.rootRenders(from)).toHaveLength(1);
+    expect(sync.renderPasses()).toBe(1);
+  });
+
+  // Bug: a WebGL context that comes back on the same canvas brings every render texture back empty, and nothing asks
+  // for a frame: the shop rests over a blank picture (and, drawing on demand, over a blank canvas) until something
+  // under it changes.
+  it("takes the picture again and draws the frame when a lost WebGL context comes back", async () => {
+    const stage = await startOverlayStage({ kind: "webgl" });
+
+    running.push(stage);
+
+    const under = stage.view({ order: 1 });
+    const shop = stage.overlay({ dim: 0.56 }, { order: 2 });
+
+    stage.level(shop, 1, true);
+    stage.frames(3);
+    expect(stage.frames(5)).toBe(0);
+
+    const canvas = stage.drawn.stage.last().canvas;
+    const top = stage.topOf(under);
+    const from = stage.mark();
+
+    canvas.dispatch("webglcontextlost", { preventDefault: () => undefined });
+    canvas.dispatch("webglcontextrestored");
+
+    expect(stage.frame()).toBe(true);
+    expect(stage.rootRenders(from)).toHaveLength(1);
+    // Pixi restored the context itself: the tree stands, nothing was built again.
+    expect(stage.topOf(under)).toBe(top);
+    expect(top.renderable).toBe(false);
+    expect(stage.drawn.mock.api.sync.debug.overlays()).toMatchObject([
+      { entity: shop, kept: true }
+    ]);
+  });
+
   it("catches a loop held on the way in up once after landing, and takes nothing when nothing was held", async () => {
     const stage = await startOverlayStage();
 

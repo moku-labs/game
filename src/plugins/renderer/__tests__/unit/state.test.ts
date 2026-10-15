@@ -16,7 +16,8 @@ const config: Config = {
   debug: { nineSlice: false, verifyFrames: false },
   monitor: { budgetMs: "rate", frames: 1024 },
   onDemand: false,
-  keptMb: 64
+  keptMb: 64,
+  warm: 1
 };
 
 describe("renderer state", () => {
@@ -141,5 +142,19 @@ describe("renderer state: the pool trim of the config", () => {
     expect(() =>
       createRendererState({ config: { ...config, poolTrim: { restMs: 0, aboveMb: 0 } } })
     ).not.toThrow();
+  });
+});
+
+describe("renderer state: the probe draws of the warm-up", () => {
+  // Bug: a fraction or a huge count reaches the frame loop: 2.5 draws a frame, or 1000 renders in one frame.
+  it("refuses a warm that is not a whole number from 0 to 16, and takes 0 and 16", () => {
+    for (const warm of [-1, 2.5, 17, Number.NaN, "1"]) {
+      expect(() => createRendererState({ config: { ...config, warm: warm as never } })).toThrow(
+        `[game] renderer.warm is ${String(warm)}.\n  Give the probe draws per frame, a whole number from 0 to 16.`
+      );
+    }
+
+    expect(() => createRendererState({ config: { ...config, warm: 0 } })).not.toThrow();
+    expect(() => createRendererState({ config: { ...config, warm: 16 } })).not.toThrow();
   });
 });

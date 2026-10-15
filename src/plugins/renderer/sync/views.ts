@@ -23,7 +23,15 @@ import type {
   Point
 } from "../types";
 import { adaptersOn, clearAdapters, createAdapterObject, writeAdapterAlpha } from "./adapters";
-import { applyFilters, clearFilters, filtersOf, moveFilters } from "./filters";
+import {
+  applyArea,
+  applyFilters,
+  clearArea,
+  clearFilters,
+  filtersOf,
+  moveArea,
+  moveFilters
+} from "./filters";
 import { clearFonts } from "./fonts";
 import { clearHidden, setHidden, writeRenderable } from "./hidden";
 import { labelOf } from "./labels";
@@ -68,6 +76,7 @@ import type {
   View,
   ViewKind
 } from "./types";
+import { stopWarm } from "./warm";
 
 /**
  * Which component gives an entity its display object, and what it draws.
@@ -422,13 +431,35 @@ export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: numb
 
 /**
  * Writes the `Sprite` component onto its display object: the texture, or its crop for a `"cover"`
- * sprite, the stretch into the box, and the box as the hit box, the anchor applied.
+ * sprite, the stretch into the box, and the box as the hit box, the anchor applied. A new stretch of
+ * a view without a wrapper changes the object's own units, so its filter area is written again (B4).
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - Its view.
  */
 export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
+  const stretch = view.drawScale;
+
+  writeSprite(sctx, entity, view);
+
+  if (
+    view.drawScale !== stretch &&
+    view.wrapper === undefined &&
+    sctx.ctx.state.sync.areas.has(entity)
+  ) {
+    applyArea(sctx, entity, view);
+  }
+}
+
+/**
+ * The body of `applySprite`: the texture or its crop, the stretch, the anchor and the hit box.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ */
+function writeSprite(sctx: SyncCtx, entity: Entity, view: View): void {
   const value = sctx.ctx.deps.world.ecs.get(entity, Sprite);
   const object = view.object;
 
@@ -1025,6 +1056,8 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
     () => markView(sctx, parentEntity),
     sctx.ctx.state.kept
   );
+  // The filter area hangs where the filters do (B4).
+  if (sctx.ctx.state.sync.areas.has(parentEntity)) moveArea(sctx, parentEntity, view);
   if (ownsAlpha(view))
     applyAlpha(sctx, parentEntity, view, componentAlpha(sctx, parentEntity, view));
 
@@ -1216,6 +1249,8 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
   const slots = filtersOf(state, entity);
 
   applyFilters(view, slots, () => markView(sctx, entity));
+  // The filter area kept for it lands with the filters (B4).
+  if (state.areas.has(entity)) applyArea(sctx, entity, view);
   // A view built with filters kept for it gets its record of the kept cache (spec 23 P9.1).
   if (slots.length > 0) sctx.deps.kept.slots(entity, slots);
   resort(sctx, entity, view);
@@ -1306,9 +1341,10 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 }
 
 /**
- * Drops every view, every layer, every pool and every filter slot. Works on the state alone,
+ * Drops every view, every layer, every pool, every filter slot and filter area, and the warm-up (its waiting promises
+ * answer false, its probe tree is destroyed). Works on the state alone,
  * because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
- * destroyed, and leaves without the filters and the hidden reasons the renderer gave it.
+ * destroyed, and leaves without the filters, the filter area and the hidden reasons the renderer gave it.
  *
  * @param state - The sync branch of the plugin state.
  */
@@ -1323,6 +1359,7 @@ export function stopSync(state: SyncState): void {
     if (view.kind === "Display") {
       detach(view.object);
       clearFilters(view.object);
+      clearArea(view.object);
     }
 
     if (view.kind === "adapter") {
@@ -1351,6 +1388,8 @@ export function stopSync(state: SyncState): void {
   state.reparented.clear();
   state.providers.length = 0;
   state.filters.clear();
+  state.areas.clear();
+  stopWarm(state);
   state.held.clear();
   state.redraws = 0;
 

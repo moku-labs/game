@@ -58,19 +58,25 @@ export function readingOrder(first: Rect, second: Rect): number {
 
 /**
  * The root the keyboard works in: the first uncovered popup in reader order, else the last screen
- * root, the one in the top layer. A root on its way out does not count.
+ * root, the one in the top layer. A root of the HUD layer never takes it: the HUD draws above every
+ * overlay, so the top sheet under it does. A root on its way out does not count.
  *
  * @param state - The jsx state.
  * @param layers - The layer names of the scene, in draw order.
+ * @param hud - The name of the scene's HUD layer (`above: "overlays"`), none without one.
  * @returns The root, or `undefined` when nothing is mounted.
  */
-export function focusRoot(state: JsxState, layers: readonly string[]): Root | undefined {
+export function focusRoot(
+  state: JsxState,
+  layers: readonly string[],
+  hud?: string
+): Root | undefined {
   const roots = sortedRoots(state, layers).filter(
     root => root.element !== undefined && !state.removing.has(root.entity)
   );
   const popup = roots.find(root => root.popup !== undefined && !root.covered);
 
-  return popup ?? roots.findLast(root => root.popup === undefined);
+  return popup ?? roots.findLast(root => root.popup === undefined && root.layer !== hud);
 }
 
 /**
@@ -135,21 +141,20 @@ function partOf(
  *
  * @param ctx - Domain context of the ui plugin.
  * @param mark - Sets the `focus` flag of an element and re-resolves its style.
- * @param layerNames - The layer names of the scene in draw order, shared with `tree` and `find`.
+ * @param topRoot - The root the keyboard works in now (`focusRoot`), shared with the text fields.
  * @param fields - The text fields: which one is edited, and how an editing starts and ends.
  * @returns The key listener, the pointer taps, the quiet focus and the frame step.
  */
 export function createFocus(
   ctx: UiCtx,
   mark: (entity: Entity, flag: PointerFlag, on: boolean) => void,
-  layerNames: () => readonly string[],
+  topRoot: () => Root | undefined,
   fields: FocusFields
 ): Focus {
   const state: JsxState = ctx.state.jsx;
   const focus = state.focus;
   const ecs = ctx.deps.world.ecs;
   const lookup = (entity: Entity): Element | undefined => state.elements.get(entity);
-  const topRoot = (): Root | undefined => focusRoot(state, layerNames());
   const usable = (element: Element): boolean => element.live && !state.exiting.has(element.entity);
 
   /**

@@ -11,7 +11,7 @@ import { resolveDeps } from "./lifecycle";
 import { createMonitorApi } from "./monitor/api";
 import { installCounting, installPassCounting } from "./monitor/draw-calls";
 import { createSyncApi } from "./sync/api";
-import { applyFilters, clearFilters } from "./sync/filters";
+import { applyFilters, clearFilters, renderPassesOf } from "./sync/filters";
 import { hiddenBy, hiddenOnlyAmong, liftFor, swapHidden } from "./sync/hidden";
 import type { SyncApi, SyncWriters } from "./sync/types";
 import type { Api, HostModule, KernelSlice, Modules, RendererCtx, SyncModule } from "./types";
@@ -35,8 +35,9 @@ function countingOf(ctx: RendererCtx): InstallCounting | undefined {
 }
 
 /**
- * The writers of `sync` the kept cache draws through: the one owner of `renderable` and the one writer of a view's
- * filters. Injected here, since a module never imports another's run-time code.
+ * The writers of `sync` the kept cache draws through: the one owner of `renderable`, the one writer of a view's
+ * filters, and the pass estimate a range picture reads while it is lifted. Injected here, since a module never
+ * imports another's run-time code.
  */
 const syncWriters: SyncWriters = {
   swapHidden,
@@ -44,7 +45,8 @@ const syncWriters: SyncWriters = {
   hiddenOnlyAmong,
   liftFor,
   applyFilters,
-  clearFilters
+  clearFilters,
+  renderPassesOf
 };
 
 /**

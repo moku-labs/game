@@ -12,7 +12,9 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Integration: the real time, lifecycle, model, clock, flow, world and renderer
+// Integration: the real time, lifecycle, model, clock, flow, world and renderer.
+// `warm: 0`: the warm-up of spec 27 draws probes in the first frames, and the
+// frames and draws counted here are the game's own (`sync-warm.test.ts`).
 // ---------------------------------------------------------------------------
 
 type Player = { items: Array<{ id: string; level: number; x: number }> };
@@ -127,7 +129,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -164,7 +166,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -194,7 +196,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -229,7 +231,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -308,7 +310,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -344,7 +346,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 

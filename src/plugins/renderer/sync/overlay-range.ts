@@ -762,9 +762,26 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
 }
 
 /**
+ * Whether a range holds the loops of its views at all: while its entries are hidden or kept, and while the live
+ * fallback draws it until its owner leaves (O8.4). Under the sheet the loops stay held as in its picture, so only a real
+ * change counts against the calm frames that bring the picture back; from the owner's first exit frame they run. A
+ * range drawn live for another cause (a refused picture, kept pictures off) holds nothing.
+ *
+ * @param state - The sync state.
+ * @param range - The range held now.
+ * @returns True when the loops of its views may be held.
+ */
+function holdsLoops(state: SyncState, range: ActiveRange): boolean {
+  if (range.reason !== undefined) return true;
+
+  return range.fallback && state.overlay.records.get(range.owner)?.phase !== "exiting";
+}
+
+/**
  * Tells whether the endless loops of a view should write nothing (the overlay cases of `loopsHeld`, O9.2): its view
- * lies in a range an opaque overlay covers, or in a held picture of a blurred range; the second touches the range, so
- * the held loops write once at landing and at the first exit frame. A range drawn live holds nothing.
+ * lies in a range an opaque overlay covers, or in a held picture of a blurred range, or in a blurred range the
+ * fallback draws live; the last two touch the range, so the held loops write once at landing and at the first exit
+ * frame.
  *
  * @param state - The sync state.
  * @param entity - The entity a loop is about to write.
@@ -773,7 +790,7 @@ export function stepRange(sctx: SyncCtx, wholes: ReadonlySet<DemandReason>): voi
 export function rangeHolds(state: SyncState, entity: Entity): boolean {
   const range = state.overlay.active;
 
-  if (range === undefined || range.reason === undefined || range.catchUp) return false;
+  if (range === undefined || range.catchUp || !holdsLoops(state, range)) return false;
 
   const view = state.views.get(entity);
   const root = state.root;

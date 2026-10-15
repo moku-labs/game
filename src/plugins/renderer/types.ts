@@ -71,6 +71,7 @@ export type PixiModule = Pick<
   | "Particle"
   | "ParticleContainer"
   | "Rectangle"
+  | "RenderGroupPipe"
   | "RenderTexture"
   | "Shader"
   | "Sprite"
@@ -136,6 +137,11 @@ export type PixiTexture = InstanceType<PixiModule["Texture"]>;
  * A texture Pixi renders into: what a kept picture is drawn into, engine-owned and destroyed by the engine.
  */
 export type PixiRenderTexture = InstanceType<PixiModule["RenderTexture"]>;
+
+/**
+ * A Pixi rectangle: the `filterArea` the renderer writes on a filtered view, one per entity, written in place.
+ */
+export type PixiRectangle = InstanceType<PixiModule["Rectangle"]>;
 
 /**
  * A Pixi matrix: a world transform read with `getGlobalTransform`, or the transform of a render.
@@ -248,6 +254,8 @@ export type PoolTrim = {
  * // Draw only what changes: a still screen draws nothing.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", onDemand: true }, time: { idleFps: 0 } } });
  * createApp({ pluginConfigs: { renderer: { mount: "#game", keptMb: 32 } } }); // a game with small art
+ * // A short splash: two probe draws a frame create the pipelines sooner.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", onDemand: true, warm: 2 } } });
  * ```
  */
 export type Config = {
@@ -297,6 +305,13 @@ export type Config = {
    * instead of filtering it again. The least recently drawn picture goes first when the budget is full. 0 keeps none.
    */
   keptMb: number;
+  /**
+   * Probe draws per drawn frame that create the GPU pipelines the game will need before a screen needs them: sprites,
+   * graphics, text, particles and every filter `effects` registers, on the canvas and on a texture, with and without a
+   * clip. Drawn before the frame and cleared by it: nothing shows. 0 turns the warm-up off: every pipeline is then
+   * created in the first frame that draws with it, as before. A whole number from 0 to 16; default 1.
+   */
+  warm: number;
 };
 
 /**
@@ -501,7 +516,8 @@ export type {
   PerfSpikeLine,
   PerfStartupLine,
   PerfThermalLine,
-  PoolTrimDetail
+  PoolTrimDetail,
+  WarmDetail
 } from "./monitor/log-types";
 export type {
   Captured,

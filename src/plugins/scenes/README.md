@@ -54,7 +54,7 @@ defineScene("board", { bundle: "board", layers: { cells: {}, items: { sort: "y" 
 
 ## The HUD layer: `{ above: "overlays" }`
 
-A layer that says `above: "overlays"` is the scene's HUD layer: it is drawn above every overlay and is never part of the picture an overlay keeps (renderer, "Overlays and the HUD"). A scene that declares a HUD layer and no `ui` gets `ui` right under the HUD layer, not on top: popups are overlays and draw under the HUD. Layers declared after the HUD layer (a drag layer such as `lifted`) stay above it. A scene without `above` gives the same list as before.
+A layer that says `above: "overlays"` is the scene's HUD layer: it is drawn above every overlay and is never part of the picture an overlay keeps (renderer, "Overlays and the HUD"). A scene that declares a HUD layer and no `ui` gets `ui` right under the HUD layer, not on top: popups are overlays and draw under the HUD. Layers declared after the HUD layer (a drag layer such as `lifted`) stay above it. The roots of the HUD layer never take the keyboard: Escape and the phone's Back press go to the top sheet under it (ui, "Keyboard focus"). A scene without `above` gives the same list as before.
 
 ```ts
 defineScene("ward", { bundle: "ui", layers: { scene: {}, hud: { above: "overlays" } }, projections }).layers;

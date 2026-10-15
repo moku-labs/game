@@ -428,8 +428,8 @@ export type PerfLongFrameLine = PerfLine<"longFrame"> &
 
 /**
  * The names of `event` lines (`"devtools"` is the editor's overlay event, in 2b because the editor's page agent emits
- * it on the 2b debug build; `"pool-trim"` is the pool trim of spec 25, detail `PoolTrimDetail`; the 3B/4 addendum
- * adds `"warm"`).
+ * it on the 2b debug build; `"pool-trim"` is the pool trim of spec 25, detail `PoolTrimDetail`; `"warm"` is the end of
+ * a pipeline warm-up run of spec 27, detail `WarmDetail`).
  */
 export type PerfEventName =
   | "scene"
@@ -448,7 +448,8 @@ export type PerfEventName =
   | "recorder"
   | "rate"
   | "devtools"
-  | "pool-trim";
+  | "pool-trim"
+  | "warm";
 
 /**
  * What an `overlay` event line says happened to an overlay (spec 22 O10.2): it opened, landed (its enter motion is
@@ -488,6 +489,18 @@ export type OverlayEventDetail = {
  * ```
  */
 export type PoolTrimDetail = { reason: "rest" | "scene" | "pause"; freedMb: number };
+
+/**
+ * The detail of a `warm` event line (spec 27 P2.3.8): the probe draws a pipeline warm-up run made since its queue last
+ * started, written when the queue became empty. The editor mirrors it by this name.
+ *
+ * @example
+ * ```ts
+ * // A WebGPU splash: four content subjects and the text, then 13 filters, each in four variants.
+ * const detail: WarmDetail = { draws: 72 };
+ * ```
+ */
+export type WarmDetail = { draws: number };
 
 /**
  * Something that happened, at the frame it happened in.

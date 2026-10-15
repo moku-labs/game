@@ -174,14 +174,20 @@ export type Drawn = {
  * @param options.onDemand - `config.onDemand`; on when left out.
  * @param options.dev - Stubs `__MOKU_GAME_DEV__` true.
  * @param options.config - Other config of the renderer, as `keptMb`.
+ * @param options.kind - The backend the stand-in reports; WebGPU when left out.
  * @returns The running renderer.
  */
 export async function startDrawn(
-  options: { onDemand?: boolean; dev?: boolean; config?: Partial<Config> } = {}
+  options: {
+    onDemand?: boolean;
+    dev?: boolean;
+    config?: Partial<Config>;
+    kind?: "webgpu" | "webgl";
+  } = {}
 ): Promise<Drawn> {
   if (options.dev === true) vi.stubGlobal("__MOKU_GAME_DEV__", true);
 
-  const stage = stagePixi();
+  const stage = stagePixi(options.kind === undefined ? {} : { kind: options.kind });
   const mock = createMockRenderer({
     config: {
       ...options.config,

@@ -80,7 +80,7 @@ export function resetChecks(state: State): void {
 }
 
 /**
- * Creates the initial effects state: no phone yet, nothing registered, nothing running.
+ * Creates the initial effects state: no phone yet, nothing registered, nothing running, nothing warmed.
  *
  * @returns A fresh state, owned by one app.
  */
@@ -93,6 +93,7 @@ export function createEffectsState(): State {
     particles: 0,
     over: { particles: false, passes: false, fullScreen: false },
     removers: [],
-    diagnostics: { kinds: NO_KINDS, off: new Set<string>(), offList: NO_KINDS }
+    diagnostics: { kinds: NO_KINDS, off: new Set<string>(), offList: NO_KINDS },
+    warm: { started: false, core: [], probes: [] }
   };
 }

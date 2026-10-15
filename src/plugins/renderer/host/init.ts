@@ -4,6 +4,7 @@
  */
 import type { PixiModule, RendererCtx } from "../types";
 import { initTimed, startupMark } from "./gpu";
+import { installRebindingRenderGroupPipe } from "./render-group";
 import { devicePixels, targetResolution } from "./resolution";
 import { installSdfTextPipe } from "./sdf-text";
 import { createPoolState } from "./state";
@@ -128,6 +129,26 @@ function installSdfText(ctx: RendererCtx, pixi: PixiModule): void {
 }
 
 /**
+ * Swaps Pixi's render-group pipe for the renderer's, which binds a filter's input again after a group cached as a
+ * texture was refreshed inside the filter (F10). Like the bitmap text pipe it runs before `new Application()`, once per
+ * host state, in every build. A Pixi without the pieces draws on with its own pipe, with a warning.
+ *
+ * @param ctx - Domain context of the renderer plugin.
+ * @param pixi - The module the application is built from.
+ */
+function installRenderGroup(ctx: RendererCtx, pixi: PixiModule): void {
+  const state = ctx.state.host;
+
+  if (state.uninstallRenderGroup !== undefined) return;
+
+  try {
+    state.uninstallRenderGroup = installRebindingRenderGroupPipe(pixi);
+  } catch (error) {
+    ctx.log.warn("renderer: a cached group inside a filter may draw to the canvas", { error });
+  }
+}
+
+/**
  * Loads Pixi once, creates the application and appends its canvas, at the target resolution of
  * now: a restore after a lost device comes back at it, override included. Pixi picks WebGL by
  * itself when WebGPU is missing, so only a device with neither ends up in the catch of the
@@ -161,6 +182,7 @@ export async function createApplication(
   state.pixi = pixi;
   installCounting(ctx, pixi, deps);
   installSdfText(ctx, pixi);
+  installRenderGroup(ctx, pixi);
 
   state.resolution.dpr = devicePixels();
   state.resolution.cap = ctx.config.maxResolution;
@@ -214,8 +236,8 @@ export function destroyApplication(state: HostState): void {
 /**
  * Undoes everything `init` created. Works on the state alone, because `onStop` has no context.
  * `ready` drops first, so a device that goes away during the teardown is ignored. The draw
- * counter and the bitmap text pipe swap Pixi's own classes back, so the next application on the
- * page starts from them. The pool trim starts over and its listeners go; Pixi's pool itself is left.
+ * counter, the bitmap text pipe and the render-group pipe swap Pixi's own classes back, so the next application on
+ * the page starts from them. The pool trim starts over and its listeners go; Pixi's pool itself is left.
  *
  * @param state - The host branch of the plugin state.
  */
@@ -234,6 +256,8 @@ export function stopHost(state: HostState): void {
   state.uninstallPasses = undefined;
   state.uninstallSdfText?.();
   state.uninstallSdfText = undefined;
+  state.uninstallRenderGroup?.();
+  state.uninstallRenderGroup = undefined;
   state.unsupported?.remove();
   state.unsupported = undefined;
   state.onReady.length = 0;

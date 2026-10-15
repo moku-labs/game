@@ -79,7 +79,7 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       state.onReady.push(fn);
     },
 
-    onRestore: (fn: () => void): void => {
+    onRestore: (fn: (rebuilt: boolean) => void): void => {
       state.onRestore.push(fn);
     },
 
@@ -114,6 +114,19 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
 
       return true;
     },
+
+    renderProbe: (container: PixiContainer): boolean => {
+      const app = state.app;
+
+      if (!state.ready || app === undefined) return false;
+
+      app.renderer.render({ container, clear: false });
+
+      return true;
+    },
+
+    clearsCanvas: (): boolean =>
+      state.ready && state.app?.renderer.background.clearBeforeRender === true,
 
     setResolution: (value: number, reason: ResolutionReason): boolean =>
       askResolution(state, value, reason),

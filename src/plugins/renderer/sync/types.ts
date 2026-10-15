@@ -5,7 +5,7 @@ import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../.
 import type { OverlayValue } from "../components";
 import type { Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
-import type { FilterCache } from "../kept/types";
+import type { FilterCache, KeptState } from "../kept/types";
 import type {
   DemandModule,
   KeptModule,
@@ -17,6 +17,7 @@ import type {
   PixiFilterManager,
   PixiGraphics,
   PixiModule,
+  PixiRectangle,
   PixiSprite,
   PixiTexture,
   RendererCtx
@@ -563,6 +564,44 @@ export type FiltersApi = {
    * ```
    */
   set(entity: Entity, slots: readonly FilterSlot[]): void;
+
+  /**
+   * Sets the rectangle outside of which the view's filters draw nothing, in the entity's own units; `undefined` goes
+   * back to the view's bounds. Pixi then sizes the filter's textures and its fill to that rectangle, which moves,
+   * scales and turns with the view. Outside it Pixi draws nothing of the view at all, neither the filters nor the
+   * view's own content. Kept for the entity like its filters: a view built later, pooled or rebuilt gets it again.
+   * Works while inert: stored, nothing applied.
+   *
+   * @param entity - The entity whose view is filtered.
+   * @param area - x, y, width, height in the entity's own units, or `undefined`.
+   * @example
+   * ```ts
+   * // `effects`: the lens on the full-screen cover now draws only around its disc.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.filters.area(cover, [107, 101, 176, 176]);
+   * renderer.sync.renderPasses(); // 3 as before; the lens pass now fills 176 × 176 units, not the screen
+   * renderer.sync.filters.area(cover, undefined); // the lens went: back to the view's bounds
+   * ```
+   */
+  area(entity: Entity, area: readonly [number, number, number, number] | undefined): void;
+
+  /**
+   * Creates the GPU pipelines of a filter before a screen needs them: the renderer draws it, invisibly and before a
+   * frame, on the canvas and on a texture, with and without a clip (WebGPU; once on WebGL), `renderer.warm` draws a
+   * frame. Answers `true` once every draw was made, `false` at once when there is nothing to warm (no device, a headless
+   * app, `warm: 0`) or when the renderer stops first. A filter handed over again on the same device answers `true` at
+   * once when its draws were made. The renderer never destroys the filter.
+   *
+   * @param filter - A filter the caller built and keeps alive while it waits.
+   * @returns Whether the filter's pipelines were created.
+   * @example
+   * ```ts
+   * // `effects`, during the splash: a probe of the Frost's body, before the shop is ever opened.
+   * const renderer = ctx.require(rendererPlugin);
+   * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true four drawn frames later (WebGPU, warm: 1)
+   * ```
+   */
+  warm(filter: PixiFilter): Promise<boolean>;
 };
 
 /**
@@ -937,6 +976,116 @@ export type SyncInternal = {
    * @param monitor - The monitor's event writer.
    */
   drainOverlayEvents(monitor: OverlayEventSink): void;
+
+  /**
+   * Draws up to `renderer.warm` probes of the pipeline warm-up (F4), in a drawn frame, before the kept pictures and the
+   * stage pass, which clears the canvas. Asks for the next frame while probes wait. Allocates nothing while the queue
+   * is empty.
+   *
+   * @returns True when it drew a probe in this frame: the frame is then no sample of the adaptive rate.
+   */
+  warmStep(): boolean;
+
+  /**
+   * Subscribes to the end of a warm-up run: the queue became empty (the monitor of an agent build writes the `warm`
+   * event line). Emptied by `stopSync`.
+   *
+   * @param fn - Called with the probe draws made since the queue last started.
+   */
+  onWarm(fn: WarmListener): void;
+};
+
+/**
+ * A listener of the end of a warm-up run: the probe draws made since its queue last started.
+ */
+export type WarmListener = (draws: number) => void;
+
+/**
+ * The rectangle `effects` set for an entity's filters, in the entity's own units, and the one Pixi `Rectangle` it is
+ * written into, made at its first write and kept for the entity's life. Not public.
+ */
+export type AreaEntry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rect: PixiRectangle | undefined;
+};
+
+/**
+ * What one probe draw of the warm-up draws: a content subject of the renderer (the batch pipeline of sprites, the
+ * graphics pipe's own, particles with either blend, distance-field text), or a filter handed to `filters.warm`.
+ */
+export type WarmSubject =
+  | "sprite"
+  | "graphics"
+  | "particles-normal"
+  | "particles-add"
+  | "text"
+  | PixiFilter;
+
+/**
+ * Where a probe draws: straight onto the canvas, or into a texture under a filter of the module's own, each with or
+ * without a stencil clip. A WebGPU pipeline is keyed by all four.
+ */
+export type WarmVariant = "canvas" | "canvas+clip" | "texture" | "texture+clip";
+
+/**
+ * One probe draw: one subject in one variant.
+ */
+export type WarmDraw = { readonly subject: WarmSubject; readonly variant: WarmVariant };
+
+/**
+ * The probe tree, made at the first warm frame and destroyed by `stopSync` and a rebuild: the root that is rendered,
+ * the clip (a container masked by a 4 × 4 graphics beside it, as `sync` hangs clips), the texture holder (filtered by
+ * the module's own alpha filter), the holder a filter subject hangs on, and the content subjects. None of it is ever in
+ * the stage.
+ */
+export type WarmObjects = {
+  root: PixiContainer;
+  /** Holds `clip` and `mask`. */
+  clipFrame: PixiContainer;
+  /** Masked by `mask`; the subject hangs in it for a clip variant. */
+  clip: PixiContainer;
+  mask: PixiGraphics;
+  /** Filtered by `probeAlpha`, so what hangs in it is drawn into a pooled texture first. */
+  texture: PixiContainer;
+  /** The module's own alpha filter, at alpha 0: a texture variant leaves no pixel even on a canvas not cleared. */
+  probeAlpha: PixiFilter;
+  /** A filter subject's container: its `filters` is the draw's filter, during the draw only. */
+  holder: PixiContainer;
+  /** The one-entry list `holder.filters` is set from. */
+  list: PixiFilter[];
+  sprite: PixiSprite;
+  graphics: PixiGraphics;
+  particlesNormal: PixiContainer;
+  particlesAdd: PixiContainer;
+  /** A `BitmapText` of "0" in `WarmState.textFont`; made at its first draw. */
+  text: PixiContainer | undefined;
+};
+
+/**
+ * The pipeline warm-up (F4): the queue of probe draws, the filters handed over and the promises waiting on them, the
+ * text probe's font, the probe tree, and the listeners of the end of a run. Not public.
+ */
+export type WarmState = {
+  /** The draws not yet drawn, from `head` on; emptied when the head reaches the end. */
+  queue: WarmDraw[];
+  head: number;
+  /** Every filter handed over on any device: queued again after a restore. */
+  filters: Set<PixiFilter>;
+  /** The filters whose draws are not all made yet: the draws left, and the promises to answer. */
+  waiting: Map<PixiFilter, { left: number; resolve: Array<(warmed: boolean) => void> }>;
+  /** The text probe is queued for this device. */
+  textQueued: boolean;
+  /** The font key of the text probe: the first font installed. */
+  textFont: string | undefined;
+  objects: WarmObjects | undefined;
+  /** The draws made since the queue last started, for the `warm` event line. */
+  draws: number;
+  /** The subjects whose failed render was logged, and `"canvas-off"` once it was logged. */
+  reported: Set<unknown>;
+  listeners: WarmListener[];
 };
 
 /**
@@ -1143,6 +1292,10 @@ export type SyncState = {
   outlinesStale: boolean;
   /** The filters `effects` set per entity, kept while the entity lives, view or not. */
   filters: Map<Entity, readonly FilterSlot[]>;
+  /** The filter area `effects` set per entity, kept like its filters (B4). */
+  areas: Map<Entity, AreaEntry>;
+  /** The pipeline warm-up (F4). */
+  warm: WarmState;
   /**
    * The kind of each Pixi filter a slot named, for the performance log of an agent build; a
    * blur's two passes are filters of their own and are in it too. Empty in a production build.
@@ -1214,4 +1367,6 @@ export type SyncWriters = {
   ) => void;
   /** Takes every filter off a display object. */
   readonly clearFilters: (target: PixiContainer) => void;
+  /** The render passes of the frame as the tree stands now, read from the filter slots (the estimate). */
+  readonly renderPassesOf: (state: SyncState, kept: KeptState) => number;
 };

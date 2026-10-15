@@ -261,7 +261,9 @@ function createOurs(
     definition,
     passes: definition.passes,
     inputs: undefined,
-    mark: undefined
+    mark: undefined,
+    area: { x: 0, y: 0, width: 0, height: 0, some: false },
+    areaStale: false
   };
 }
 
@@ -369,15 +371,17 @@ function appliedOf(value: Readonly<FilterFields>): Record<string, FilterField> {
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
  * @param value - The stored `Displacement` value.
+ * @param probeMap - The map of a warm-up probe instead of the value's key: the program does not depend on it.
  * @returns The Pixi object and its passes, or `undefined` while the map is not loaded.
  */
 function createDisplacement(
   ectx: EffectsCtx,
   pixi: PixiModule,
-  value: Readonly<FilterFields>
+  value: Readonly<FilterFields>,
+  probeMap: PixiTexture | undefined
 ): FilterBody | undefined {
   const map = typeof value.map === "string" ? value.map : "";
-  const texture = mapTexture(ectx, map);
+  const texture = probeMap ?? mapTexture(ectx, map);
 
   if (texture === undefined) return undefined;
 
@@ -398,6 +402,7 @@ function createDisplacement(
  * @param pixi - The module the renderer loaded.
  * @param core - The core kind.
  * @param value - The stored filter value.
+ * @param probeMap - The map a warm-up probe of a `Displacement` draws with; `undefined` otherwise.
  * @returns The Pixi object and its passes, or `undefined` for a `Displacement` whose map is not
  * loaded.
  */
@@ -405,7 +410,8 @@ function createCore(
   ectx: EffectsCtx,
   pixi: PixiModule,
   core: CoreKind,
-  value: Readonly<FilterFields>
+  value: Readonly<FilterFields>,
+  probeMap: PixiTexture | undefined
 ): FilterBody | undefined {
   switch (core) {
     case "blur": {
@@ -437,7 +443,7 @@ function createCore(
       return { kind: "noise", filter, applied: appliedOf(value), passes: 1 };
     }
     case "displacement": {
-      return createDisplacement(ectx, pixi, value);
+      return createDisplacement(ectx, pixi, value, probeMap);
     }
     default: {
       return {
@@ -458,28 +464,32 @@ function createCore(
  * `enabled` switch set, and its sort keys: the `order` of the value and the `index` of the kind.
  * The instance is the builder's own object with its sort keys added, and its `apply` is guarded
  * (see `guardApply`). A filter with inputs gets its own `apply`, which draws its chains, and runs
- * its chains once at the renderer's resolution.
+ * its chains once at the renderer's resolution. A definition with an `area` is asked for it at the
+ * next sync.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
  * @param kind - The registered kind.
  * @param value - The stored filter value.
+ * @param probeMap - The map a warm-up probe of a `Displacement` draws with instead of an asset (spec 27).
  * @returns The instance, or `undefined` for a `Displacement` whose map is not loaded.
  */
 export function createFilter(
   ectx: EffectsCtx,
   pixi: PixiModule,
   kind: FilterKind,
-  value: Readonly<FilterFields>
+  value: Readonly<FilterFields>,
+  probeMap?: PixiTexture
 ): FilterInstance | undefined {
   const body =
     kind.source === "wgsl"
       ? createOurs(pixi, kind.definition, value)
-      : createCore(ectx, pixi, kind.core, value);
+      : createCore(ectx, pixi, kind.core, value, probeMap);
 
   if (body === undefined) return undefined;
 
   body.filter.enabled = value.enabled;
+  if (body.kind === "wgsl") body.areaStale = body.definition.area !== undefined;
 
   const instance: FilterInstance = Object.assign(body, {
     order: value.order,
@@ -1192,6 +1202,7 @@ export function createStandIn(
   if (body === undefined) return undefined;
 
   body.filter.enabled = value.enabled;
+  body.areaStale = body.definition.area !== undefined;
 
   const standIn: FilterInstance = Object.assign(body, {
     order: value.order,
@@ -1482,6 +1493,16 @@ function setCore(ectx: EffectsCtx, instance: CoreInstance, value: Readonly<Filte
 }
 
 /**
+ * Marks the area of one of ours to be asked again at this sync (B4): the area is a pure function of the value, so only
+ * a value that changed can change it.
+ *
+ * @param instance - The instance whose value changed.
+ */
+function staleArea(instance: FilterInstance): void {
+  if (instance.kind === "wgsl" && instance.definition.area !== undefined) instance.areaStale = true;
+}
+
+/**
  * Brings one instance up to the stored value for a frame, comparing before anything is written.
  * A broken instance stays off whatever its component says. Switching on or off is a visible
  * change; so is a new value of a filter that is on. A filter that is off and stays off still gets
@@ -1515,6 +1536,8 @@ export function writeFilter(
       : changed && coreDiffers(instance, value);
 
   if (!toggled && !differs) return false;
+
+  staleArea(instance);
 
   const visible = toggled || value.enabled;
 

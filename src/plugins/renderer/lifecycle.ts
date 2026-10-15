@@ -47,8 +47,10 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * The draw callback of the renderer: a pending resize is applied first (a pending resolution
  * takes the same path: the backing store changes, the frame and the scale do not), then the
  * overlay step (spec 22), then `kept` reads the marks before `demand` decides whether the frame is
- * drawn and clears them; a drawn frame renders the kept pictures first (`kept.flush`, so the canvas
- * stays one pass, E7), then the stage, then the pixel leg of the kept oracle; `demand` settles the
+ * drawn and clears them; a drawn frame draws the probes of the warm-up onto the canvas first (F4: the
+ * stage pass clears them, in the same task, so they never show), then the kept pictures
+ * (`kept.flush`, so the canvas stays one pass, E7), then the stage, then the pixel leg of the kept
+ * oracle; `demand` settles the
  * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
  * waiting capture; last, `host` trims Pixi's texture pool when a rest or a scene change is due. The display objects
  * are written by the `sync` system.
@@ -56,7 +58,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * With `onDemand`, a frame in which nothing visible changed is not drawn: the canvas keeps the
  * last picture (WebGPU presents a canvas texture only when one is rendered; a WebGL canvas keeps
  * what it composited until the next draw). A drawn frame is reported to `time` for the adaptive
- * frame rate, and only when Pixi drew it: an inert or lost host reports none.
+ * frame rate, and only when Pixi drew it: an inert or lost host reports none. A frame that also drew
+ * probes is reported as probed: it created pipelines, so it is never a sample of the rate.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param modules - The six modules.
@@ -82,9 +85,17 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
   const drawn = modules.demand.decide(modules.monitor.waiting());
 
   if (drawn) {
+    // F4: probes drawn onto the canvas, then wiped by the stage pass below; never a pixel on screen.
+    const probed = modules.sync.warmStep();
+
     // The pictures before the stage pass: every render a picture needs is done when the canvas is drawn.
     modules.kept.flush();
-    if (modules.host.render()) ctx.deps.time.frameDrawn();
+
+    if (modules.host.render()) {
+      ctx.deps.time.frameDrawn();
+      if (probed) ctx.deps.time.frameProbed();
+    }
+
     modules.kept.after();
   }
 
@@ -128,10 +139,15 @@ export async function startRenderer(ctx: KernelSlice): Promise<void> {
 
   modules.host.onLoss(() => modules.sync.forget());
 
-  modules.host.onRestore(() => {
+  modules.host.onRestore(rebuilt => {
+    // The canvas and every kept picture came back empty: the next frame is drawn whole and takes them again.
+    modules.demand.whole("restore");
+
+    // A WebGL context came back on the same application: its tree, its canvas and its monitor stand.
+    if (!rebuilt) return;
+
     // The new canvas starts at Pixi's own size: measure the mount again before the next frame.
     rendererCtx.state.viewport.resizePending = true;
-    modules.demand.whole("restore");
     modules.sync.rebuildAll();
     modules.monitor.attach();
     modules.monitor.attachPasses();

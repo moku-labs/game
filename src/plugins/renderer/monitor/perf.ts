@@ -137,7 +137,8 @@ export function endAgent(pc: PerfCtx): void {
 
 /**
  * The first attach of a renderer state: the ring gets its capacity (the paths interned so far kept), the time
- * listener and the long-frame observer start, the host's resolution, loss, restore and pool trims are heard, the flow
+ * listener and the long-frame observer start, the host's resolution, loss, restore and pool trims and the end of a
+ * warm-up run are heard, the flow
  * path and the display of the moment are noted. The time listener and the observer stay across restores.
  *
  * @param pc - The perf context.
@@ -173,6 +174,8 @@ function attachFirst(pc: PerfCtx): void {
   });
   // The trim reaches the log through the host (O24): `host/pool.ts` never imports the monitor.
   host.onTrim((reason, freedMb) => writeEvent(pc, "pool-trim", { reason, freedMb }));
+  // The end of a warm-up run reaches it through sync the same way: `sync/warm.ts` never imports the monitor.
+  deps.sync.onWarm(draws => writeEvent(pc, "warm", { draws }));
   notePath(pc, ctx.deps.flow.state().path, false);
   perf.display = displayOf(pc);
 }

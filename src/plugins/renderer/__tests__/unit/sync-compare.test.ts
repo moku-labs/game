@@ -311,7 +311,8 @@ describe("sync marks every structural write (D2.8–D2.18)", () => {
 
     settled(drawn, Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
 
-    for (const restore of drawn.mock.ctx.state.host.onRestore) restore();
+    // A WebGPU restore: a new application replaced the old one.
+    for (const restore of drawn.mock.ctx.state.host.onRestore) restore(true);
 
     expect(drawn.frame()).toBe(true);
     expect(drawn.mock.modules.demand.frame().reason).toBe("restore");

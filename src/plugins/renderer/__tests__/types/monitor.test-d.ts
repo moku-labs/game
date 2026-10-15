@@ -10,7 +10,8 @@ import type {
   MonitorConfig,
   PerfEventName,
   PerfLogLine,
-  PoolTrimDetail
+  PoolTrimDetail,
+  WarmDetail
 } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -30,8 +31,12 @@ app.renderer.monitor.event("devtools", { mode: "card", tab: "frames" });
 app.renderer.monitor.event("command", { id: "game.filter", input: { kind: "glow" } });
 
 expectTypeOf<
-  "devtools" | "command" | "recorder" | "rate" | "pool-trim"
+  "devtools" | "command" | "recorder" | "rate" | "pool-trim" | "warm"
 >().toMatchTypeOf<PerfEventName>();
+
+// The detail of the end of a warm-up run, as the editor mirrors it (spec 27 P2.3.8).
+expectTypeOf<WarmDetail>().toEqualTypeOf<{ draws: number }>();
+app.renderer.monitor.event("warm", { draws: 72 } satisfies WarmDetail);
 
 // The detail of a pool trim, as the editor mirrors it (spec 25 M1.8).
 expectTypeOf<PoolTrimDetail>().toEqualTypeOf<{

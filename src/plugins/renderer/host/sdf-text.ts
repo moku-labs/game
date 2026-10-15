@@ -1,13 +1,15 @@
 /**
- * @file renderer/host — the shader of distance-field (MSDF, SDF) bitmap text. Pixi 8.22 applies
- * the alpha of such text twice: its fragment step hands `calculateMSDFAlpha` the premultiplied
- * vertex colour, the function raises that alpha into the glyph coverage, and the shader template
- * multiplies the coverage by the colour again, so a label at alpha 0.5 draws at about 0.25. The
- * renderer's own bitmap text pipe compiles the same shader with that one step changed: the
- * function gets the colour un-premultiplied at alpha 1, and every alpha, the label's, a parent's
- * or the world's, is applied once, by the template. The pipe is a subclass of Pixi's, put into
- * Pixi's extension registry before `app.init()` under the same name. No Pixi prototype and no
- * Pixi instance is patched. Both backends: the WGSL program on WebGPU, the GLSL one on WebGL.
+ * @file renderer/host — the shader of distance-field (MSDF, SDF) bitmap text, with two fixes of Pixi 8.22.
+ * The double alpha: Pixi's fragment step hands `calculateMSDFAlpha` the premultiplied vertex colour, the function
+ * raises that alpha into the glyph coverage, and the shader template multiplies the coverage by the colour again, so a
+ * label at alpha 0.5 draws at about 0.25. The renderer's own bitmap text pipe compiles the same shader with that one
+ * step changed: the function gets the colour un-premultiplied at alpha 1, and every alpha, the label's, a parent's or
+ * the world's, is applied once, by the template. The edge width (PX1): Pixi writes `uDistance` in CSS pixels, and the
+ * shader spreads the glyph edge over that many device pixels, so text on a phone at resolution 2.8 is smeared. The
+ * text's uniform group, which the renderer makes, answers Pixi's distance times the renderer's resolution, read at
+ * every draw. The pipe is a subclass of Pixi's, put into Pixi's extension registry before `app.init()` under the same
+ * name. No Pixi prototype and no Pixi instance is patched. Both backends: the WGSL program on WebGPU, the GLSL one on
+ * WebGL.
  */
 import type { PixiModule } from "../types";
 
@@ -53,16 +55,40 @@ const PROGRAM_NAME = "sdf-shader-single-alpha";
  * The local uniforms of one text, in the order of the WGSL struct, at Pixi's starting values. The
  * pipe writes `uDistance`, the graphics adaptor the rest, before every draw.
  *
+ * Pixi writes `uDistance` in CSS pixels (`AbstractBitmapTextPipe._updateDistanceField`: the world
+ * scale times the font's range over its scale), while the shader measures the glyph edge in device
+ * pixels, so at a resolution above 1 the edge is smeared over that many more pixels. The group's
+ * `uDistance` is therefore an accessor: Pixi's write keeps the CSS value, every read answers it
+ * times `density.resolution`, and Pixi reads the uniform by property each time it uploads it, on
+ * both backends. The resolution is read at the draw, so a change of resolution needs nothing more.
+ *
  * @param pixi - The loaded Pixi module.
+ * @param density - What the device pixels per CSS pixel are read from at each draw: the renderer.
+ * @param density.resolution - The renderer's resolution, read at each upload.
  * @returns A new uniform group.
  */
-function createLocalUniforms(pixi: PixiModule): InstanceType<PixiModule["UniformGroup"]> {
-  return new pixi.UniformGroup({
+function createLocalUniforms(
+  pixi: PixiModule,
+  density: { readonly resolution: number }
+): InstanceType<PixiModule["UniformGroup"]> {
+  const group = new pixi.UniformGroup({
     uColor: { value: new Float32Array([1, 1, 1, 1]), type: "vec4<f32>" },
     uTransformMatrix: { value: new pixi.Matrix(), type: "mat3x3<f32>" },
     uDistance: { value: 4, type: "f32" },
     uRound: { value: 0, type: "f32" }
   });
+  // Pixi's starting value, the one the group was made with.
+  let css = 4;
+
+  Object.defineProperty(group.uniforms, "uDistance", {
+    enumerable: true,
+    get: (): number => css * density.resolution,
+    set: (value: number): void => {
+      css = value;
+    }
+  });
+
+  return group;
 }
 
 /**
@@ -154,7 +180,8 @@ function glProgramCache(pixi: PixiModule): (maxTextures: number) => GlProgram {
  * Pixi's pipe arrives with the lazily loaded module. It keeps the base's `static extension` object
  * as it is, so the registry files it under the same types and name. Every text gets a new shader,
  * as from Pixi's pipe, over the one shared program of its backend; a WebGL shader also gets
- * Pixi's batch sampler slots, as Pixi's own `SdfShader` does.
+ * Pixi's batch sampler slots, as Pixi's own `SdfShader` does. Its `uDistance` answers Pixi's CSS
+ * distance times the renderer's resolution.
  *
  * @param pixi - The loaded Pixi module.
  * @returns The pipe class.
@@ -174,18 +201,20 @@ export function createSdfTextPipe(pixi: PixiModule): BitmapTextPipeClass {
      */
     protected override getSdfShader(): Shader | null {
       const maxTextures = this._renderer.limits.maxBatchableTextures;
+      // The canvas's resolution, read at each draw: the edge width in device pixels.
+      const density = this._renderer;
 
       if (this._renderer.name === "webgpu") {
         return new pixi.Shader({
           gpuProgram: gpuProgramFor(maxTextures),
-          resources: { localUniforms: createLocalUniforms(pixi) }
+          resources: { localUniforms: createLocalUniforms(pixi, density) }
         });
       }
 
       return new pixi.Shader({
         glProgram: glProgramFor(maxTextures),
         resources: {
-          localUniforms: createLocalUniforms(pixi),
+          localUniforms: createLocalUniforms(pixi, density),
           batchSamplers: pixi.getBatchSamplersUniformGroup(maxTextures)
         }
       });

@@ -5,7 +5,8 @@
  * a real `Container`, its screen a real `Rectangle`, its canvas a `fake-dom` element, and its
  * `renderer.render(stage)` only counts. A render into a texture (a kept picture, spec 23) is logged
  * with its arguments, makes its container a render group as Pixi does, and is told to the
- * watchers; only a render onto the canvas counts as a drawn frame. It never reads or writes a Pixi field that is not public,
+ * watchers; only a render of the stage onto the canvas counts as a drawn frame. A render of another
+ * container onto the canvas (a probe of the warm-up, spec 27) is logged apart and told to the watchers. It never reads or writes a Pixi field that is not public,
  * never empties a change list and never calls `_onUpdate`: the engine decides from its own marks,
  * so a stand-in that knows nothing of Pixi's internals cannot keep a frozen screen green (spec 14
  * T0). The one exception is asked for: with `builds: true` (spec 26 R2.3) a render also runs Pixi's own exported
@@ -48,6 +49,10 @@ export type StageRenderer = {
   renders: number;
   /** Every render into a texture, oldest first. */
   targets: RenderCall[];
+  /** Every render onto the canvas of a container that is not the stage (the warm-up's probes), oldest first. */
+  probes: RenderCall[];
+  /** Pixi's background system: the canvas is cleared before every stage pass, Pixi's default. */
+  background: { clearBeforeRender: boolean };
   /** Told every render, onto the canvas or into a texture, at the call. */
   watchers: Array<(call: RenderCall) => void>;
   /** Every size `resize` was asked for. */
@@ -67,6 +72,13 @@ export type StageRenderer = {
       };
     };
   };
+  /**
+   * WebGL only: Pixi's runners the pass counter hangs on (`SystemRunner`, public). Nothing emits them, as no GPU pass
+   * runs: the stats report the estimate.
+   */
+  runners?: { prerender: pixi.SystemRunner; renderStart: pixi.SystemRunner };
+  /** WebGL only: the render target system's runner and its bound target, for the pass counter. */
+  renderTarget?: { onRenderTargetChange: pixi.SystemRunner; renderTarget: { isRoot: boolean } };
 };
 
 /** The stand-in application. */
@@ -90,6 +102,8 @@ export type StagePixi = {
   renders(): number;
   /** Renders into a texture of the last application, oldest first. */
   targets(): RenderCall[];
+  /** Renders of the warm-up's probes onto the canvas of the last application, oldest first. */
+  probes(): RenderCall[];
 };
 
 /**
@@ -271,6 +285,7 @@ function createBuilds(registry: BatchRegistry): (options: RenderArguments) => vo
  * @param screen - The application's screen, which `resize` writes.
  * @param kind - The backend it reports.
  * @param resolution - The resolution it was created with.
+ * @param stage - The application's stage: only its render onto the canvas is a drawn frame.
  * @param build - Pixi's render group system to run on every render, with `builds: true`.
  * @returns The renderer.
  */
@@ -278,6 +293,7 @@ function createRenderer(
   screen: pixi.Rectangle,
   kind: "webgpu" | "webgl",
   resolution: number,
+  stage: pixi.Container,
   build?: (options: RenderArguments) => void
 ): StageRenderer {
   const renderer: StageRenderer = {
@@ -285,6 +301,8 @@ function createRenderer(
     resolution,
     renders: 0,
     targets: [],
+    probes: [],
+    background: { clearBeforeRender: true },
     watchers: [],
     sizes: [],
     render: options => {
@@ -296,10 +314,12 @@ function createRenderer(
         renderer.targets.push(call);
       }
 
+      if (call.target === undefined && call.container !== stage) renderer.probes.push(call);
+
       for (const watcher of renderer.watchers) watcher(call);
 
       build?.(options);
-      if (call.target === undefined) renderer.renders += 1;
+      if (call.target === undefined && call.container === stage) renderer.renders += 1;
     },
     resize: (width, height, next) => {
       screen.width = width;
@@ -318,6 +338,15 @@ function createRenderer(
     renderer.gpu = {
       // A device that is never lost: the promise never settles.
       device: { lost: new Promise(() => undefined), createShaderModule: compileShader }
+    };
+  } else {
+    renderer.runners = {
+      prerender: new pixi.SystemRunner("prerender"),
+      renderStart: new pixi.SystemRunner("renderStart")
+    };
+    renderer.renderTarget = {
+      onRenderTargetChange: new pixi.SystemRunner("onRenderTargetChange"),
+      renderTarget: { isRoot: true }
     };
   }
 
@@ -365,7 +394,7 @@ export function stagePixi(
     public stage = new pixi.Container();
     public screen = new pixi.Rectangle(0, 0, 1080, 1920);
     public canvas: FakeElement = createFakeElement("canvas");
-    public renderer: StageRenderer = createRenderer(this.screen, kind, 1);
+    public renderer: StageRenderer = createRenderer(this.screen, kind, 1, this.stage);
     private readonly build = builds ? createBuilds(registry) : undefined;
 
     public constructor() {
@@ -381,7 +410,7 @@ export function stagePixi(
     public init(initOptions: Record<string, unknown>): Promise<void> {
       const resolution = typeof initOptions.resolution === "number" ? initOptions.resolution : 1;
 
-      this.renderer = createRenderer(this.screen, kind, resolution, this.build);
+      this.renderer = createRenderer(this.screen, kind, resolution, this.stage, this.build);
 
       return Promise.resolve();
     }
@@ -408,6 +437,7 @@ export function stagePixi(
       return app;
     },
     renders: () => applications.at(-1)?.renderer.renders ?? 0,
-    targets: () => applications.at(-1)?.renderer.targets ?? []
+    targets: () => applications.at(-1)?.renderer.targets ?? [],
+    probes: () => applications.at(-1)?.renderer.probes ?? []
   };
 }

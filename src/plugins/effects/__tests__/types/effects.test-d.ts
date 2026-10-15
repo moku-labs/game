@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { defineGame } from "../../../../index";
+import { defineGame, type FilterArea } from "../../../../index";
 import { tween } from "../../../anim/timeline/steps";
 import type { Target } from "../../../anim/types";
 import type { EmitterIdOf } from "../../../flow/types";
@@ -157,3 +157,36 @@ expectTypeOf<FilterDefinition["inputs"]>().toEqualTypeOf<readonly FilterInputDef
 expectTypeOf<FilterSlot>().toHaveProperty("inputs");
 expectTypeOf<{ filter: PixiFilter; passes: number }>().toMatchTypeOf<FilterSlot>();
 expectTypeOf<FilterStep["stage"]>().toEqualTypeOf<FilterStage>();
+
+// ─── spec 27: the area of a filter ───────────────────────────────────
+
+defineFilter("fx.lens", {
+  wgsl: "",
+  glsl: "",
+  uniforms: { cx: 195, cy: 189, rev: 84 },
+  area: value => {
+    // The area reads the filter's own value: its uniforms, `enabled` and `order`.
+    expectTypeOf(value.cx).toEqualTypeOf<number>();
+    expectTypeOf(value.enabled).toEqualTypeOf<boolean>();
+
+    return [value.cx - value.rev, value.cy - value.rev, 2 * value.rev, 2 * value.rev];
+  }
+});
+defineFilter("fx.lens", { wgsl: "", glsl: "", uniforms: { cx: 0 }, area: () => undefined });
+defineFilter("fx.lens", {
+  wgsl: "",
+  glsl: "",
+  uniforms: { cx: 0 },
+  // @ts-expect-error — three numbers are no rectangle
+  area: value => [value.cx, 0, 1]
+});
+defineFilter("fx.lens", {
+  wgsl: "",
+  glsl: "",
+  uniforms: { cx: 0 },
+  // @ts-expect-error — the value has no uniform `cy`
+  area: value => [value.cy, 0, 1, 1]
+});
+expectTypeOf<FilterArea>().toEqualTypeOf<
+  readonly [x: number, y: number, width: number, height: number]
+>();

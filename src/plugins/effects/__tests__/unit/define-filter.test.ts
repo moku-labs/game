@@ -611,3 +611,51 @@ describe("defineFilter — refusals of inputs and fallback", () => {
     expect(define).toThrow(message);
   });
 });
+
+describe("defineFilter: the area (spec 27 B4)", () => {
+  // Bug: a box given instead of a function reaches the filter sync and throws in every frame.
+  it("an area that is not a function is refused, naming the filter", () => {
+    expect(() =>
+      defineFilter("fx.lens", {
+        wgsl: BODY,
+        glsl: GLSL,
+        uniforms: { amount: 0, color: { color: 0 } },
+        area: [0, 0, 10, 10] as never
+      })
+    ).toThrow(
+      '[game] Filter "fx.lens": area must be a function of the value.\n  Give (value) => [x, y, width, height], or leave it out.'
+    );
+  });
+
+  // Bug: the area lands in the component's value, and a game's test that compares `.value` whole breaks.
+  it("a definition keeps its area and its value has no area field", () => {
+    const Lens = defineFilter("LensWindow", {
+      wgsl: BODY,
+      glsl: GLSL,
+      uniforms: { amount: 0, color: { color: 0 }, cx: 195, cy: 189, rev: 84, soft: 4 },
+      area: value => {
+        const reach = value.rev + value.soft;
+
+        return [value.cx - reach, value.cy - reach, 2 * reach, 2 * reach];
+      }
+    });
+    const Plain = defineFilter("fx.plain", {
+      wgsl: BODY,
+      glsl: GLSL,
+      uniforms: { amount: 0, color: { color: 0 } }
+    });
+
+    expect(Lens.filter.area?.(Lens().value)).toEqual([107, 101, 176, 176]);
+    expect(Lens().value).toEqual({
+      amount: 0,
+      color: 0,
+      cx: 195,
+      cy: 189,
+      rev: 84,
+      soft: 4,
+      enabled: true,
+      order: 0
+    });
+    expect("area" in Plain.filter).toBe(false);
+  });
+});

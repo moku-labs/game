@@ -91,7 +91,7 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 
 ## Filters
 
-`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding?, inputs?, fallback? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
+`defineFilter(id, { wgsl, glsl, uniforms?, passes?, padding?, inputs?, fallback?, cache?, area? })` returns a component type named by its id with its `filter` attached. Both bodies are required: Pixi picks the one of the backend that draws, and iOS simulators, iPhones below iOS 26 and many Android phones draw with WebGL.
 
 - `wgsl` is the WGSL fragment body only: `fn mainFragment` and its helpers. The engine prepends the vertex stage, the input bindings `gfu`, `uTexture`, `uSampler`, and a `FilterUniforms` struct in declaration order bound as `fu`. The body reads `fu.amount`.
 - `glsl` is the same math in GLSL ES 3.0: `void main()`, which sets `finalColor`, and its helpers. The engine prepends `#version 300 es`, `precision highp float;`, `in vec2 vTextureCoord;`, `out vec4 finalColor;`, `uniform sampler2D uTexture;`, Pixi's global filter uniforms `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture` as `vec4`, and one `uniform` per declared uniform under its bare name. The body reads `amount`. The vertex stage is Pixi's `defaultFilterVert`.
@@ -105,6 +105,28 @@ A texture that is not loaded warns `effects:missing-texture` once per key and th
 | `offset: [2, 3]` (2 to 4 numbers) | `vec2<f32>` … `vec4<f32>` | `uniform vec2 offset;` … `vec4` | an array, not tweenable |
 
 Every filter component also carries `enabled: true` (a disabled filter costs nothing and reassigns nothing) and `order: 0` (the filters of a view sort by `order`, then by registration). `passes` (default 1) is what one apply costs; `padding` is pixels, or the name of a number uniform whose live value it is. A WGSL without `mainFragment`, a GLSL without `void main(`, a reserved or badly named uniform, a bad `passes` or `padding` throw at definition; a duplicate id or the id of a built-in throws in `onStart`. The reserved names are `enabled`, `order` and the names the headers declare: `uInputSize`, `uInputPixel`, `uInputClamp`, `uOutputFrame`, `uGlobalFrame`, `uOutputTexture`, `uTexture`, `uSampler`, and the GLSL header's `finalColor` and `vTextureCoord`.
+
+### Area: the box a filter draws in
+
+`area` (spec 27 B4) answers, from the component's value, the rectangle `[x, y, width, height]` outside of which the filter draws nothing, in the filtered entity's own units: the space its box, its hit box and its children's positions are in (reference units for a view at the root without scale). Pixi then renders the view and fills the filter only inside that box, which moves, scales and turns with the view, instead of the view's bounds. Outside it Pixi draws nothing of the view at all, neither the filter nor the view's own content: declare it only for a filter whose output is transparent there. `undefined` means the view's bounds.
+
+```ts
+export const LensWindow = defineFilter("LensWindow", {
+  wgsl: LENS_WGSL,
+  glsl: LENS_GLSL,
+  uniforms: { view: [0, 0, 1], cx: 195, cy: 189, rev: 84, inner: 4, soft: 4 },
+  // Outside the disc the lens draws nothing: Pixi renders and fills only this box.
+  area: value => {
+    const reach = value.rev + value.soft;
+
+    return [value.cx - reach, value.cy - reach, 2 * reach, 2 * reach];
+  }
+});
+// rev 84, soft 4: a 176 × 176 box at (107, 101) on the cover at the root, not the whole screen the cover covers.
+LensWindow().value; // { view: [0, 0, 1], cx: 195, cy: 189, rev: 84, inner: 4, soft: 4, enabled: true, order: 0 }
+```
+
+The value has no new field: `area` lives on the definition (`LensWindow.filter.area`). A view with several enabled filters gets the union of their areas; a view with an enabled filter that declares no area (every built-in kind, or an `area` that answered `undefined`) gets none. A disabled filter and a kind a debug switch turned off do not count. The area is asked only when the value changed, and the union is handed to `renderer.sync.filters.area` only when it changed. An `area` that throws logs `effects:area-failed` `{ kind, error }`, one that answers anything but four finite numbers with a width and a height of at least 0 logs `effects:bad-area` `{ kind, area }`, each once per kind, and counts as none. An `area` that is not a function throws at definition.
 
 ### Inputs: a second texture drawn by a chain of stages
 
@@ -194,6 +216,7 @@ One system, `effects:filters`, phase `sync`, in every world mode. It walks the v
 - `renderer.sync.filters.set(entity, slots)` with a new frozen list of `{ filter, passes, kind, inputs? }` only when the kinds, their order, their passes or the stage filters of their inputs changed. A filter covers the entity's subtree: a glow on a button glows its label.
 - A removed kind, or a despawn, destroys every uniform buffer of the instance, then the instance; `Filter.destroy()` alone leaves the buffer to a GC that runs after a minute. A despawned entity gets no call: the renderer let its view go.
 - The shader check runs in every build. Every definition a registered kind can draw, its body, every stage of its inputs and its fallback, is compiled once on the backend that draws, `renderer.host.kind()`, when the renderer first draws (the first frame with a ready host, or the first node entry, whichever comes first), once per definition object. On WebGPU the WGSL goes through `renderer.host.device()`: every error logs `effects:wgsl` with its line and column. On WebGL the GLSL goes through `renderer.host.gl()`: in the background with `KHR_parallel_shader_compile`, answered on a later frame, otherwise at once; every error line of the info log logs `effects:glsl` `{ filter, line, message }`, and the shader is deleted. Lines count in the assembled source. When every definition answered, `effects:checks` `{ definitions, broken, ms }` is logged once. The check costs one extra shader module (WebGPU) or one extra fragment compile (WebGL) per definition, once per run, at the first drawn frame.
+- The warm-up (spec 27 F4): the first frame with a ready host notes the Pixi-core kinds and, once every check of the run answered, hands the renderer a probe of each, then of every definition the checks passed (the body of every ready kind, every stage of its inputs, every checked fallback; never a definition that failed), through `renderer.sync.filters.warm`. The renderer draws them invisibly before its frames, so the first screen that draws a kind creates no pipeline. A core probe is an instance at the defaults of its component (a `Displacement` over Pixi's white texture: the program does not depend on the map), guarded like any instance; a probe of ours has no chain wired. The probes live until the app stops (the renderer warms them again after a restore). When the renderer answers `false` at once (nothing to warm: `renderer.warm: 0`), the probe is destroyed and no further probe is built.
 - A kind gets no instance until its body and every stage answered ok: a view of a pending kind draws unfiltered, never with an unchecked shader, and logs `effects:check-pending` `{ filter }` once per kind. The `load` stage of every node entry waits for any check still pending (`effects:mount-waited` `{ node, ms }`), so the boot's first scene mounts with its filtered views already filtered, together with the boot bundles, and no mounted scene draws a pending kind's view. A renderer that draws nothing (headless, the unsupported screen) waits for nothing; an aborted node stops waiting.
 
 ### Broken: one state, `fallback`, the dev mark, never a blank frame
@@ -264,7 +287,7 @@ Save `features/board/effects.ts` while the dev server runs: a changed `starsBurs
 
 ## Lifecycle
 
-`onStart` resolves the dependencies and the phone flag, registers the built-in kinds and then the `filters` of every feature, registers the `load` gate with `flow.onEnter`, reads the `emitters`, and opens the two systems with the world hooks. Nothing is compiled there: the host is not ready yet. `onStop` runs from state alone: it destroys every container, orphan, filter (with the places of its chains, its mark and a stand-in never put in place) and uniform buffer, clears the filters of every view and deletes the GLSL compiles still in flight while `world` and `renderer` still run, removes the gate, and starts the checks over: an answer of the stopped run is ignored.
+`onStart` resolves the dependencies and the phone flag, registers the built-in kinds and then the `filters` of every feature, registers the `load` gate with `flow.onEnter`, reads the `emitters`, and opens the two systems with the world hooks. Nothing is compiled there: the host is not ready yet. `onStop` runs from state alone: it destroys every container, orphan, filter (with the places of its chains, its mark and a stand-in never put in place), probe of the warm-up and uniform buffer, clears the filters and the filter area of every view and deletes the GLSL compiles still in flight while `world` and `renderer` still run, removes the gate, and starts the checks over: an answer of the stopped run is ignored.
 
 ## Doors
 
@@ -280,4 +303,4 @@ None. Nothing above `effects` needs to know a particle died or a filter was assi
 
 ## Dependencies
 
-`flow` (`features.all()`, `onEnter("load", …)` for the gate of the shader checks), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `host.resolution()`, `sync.filters.set`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)`, the `assets:bundle-unloaded` and `assets:replaced` hooks), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.
+`flow` (`features.all()`, `onEnter("load", …)` for the gate of the shader checks), `world` (systems, hooks, spawn and despawn, `Layer`, `Order`), `renderer` (`host.ready()`, `host.pixi()`, `host.kind()`, `host.device()`, `host.gl()`, `host.resolution()`, `sync.filters.set`, `sync.filters.area`, `sync.filters.warm`, `sync.renderPasses()`, `viewport.size()`, `Display`, `Transform`, `rootPoseOf`), `assets` (`texture(key)`, the `assets:bundle-unloaded` and `assets:replaced` hooks), `anim` (`reducedMotion()`). No package dependency: every Pixi class comes from `renderer.host.pixi()`.

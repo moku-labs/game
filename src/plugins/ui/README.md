@@ -302,7 +302,8 @@ For desktop development and keyboard players. `input` delivers the keys (`onKey`
 focus, because it knows the roots and the layout.
 
 - **The root the keyboard works in:** the top uncovered popup; with no popup, the screen root in
-  the top layer.
+  the top layer. A root of the scene's HUD layer (`{ above: "overlays" }`) never takes it: the HUD
+  draws above every sheet, so Escape and the phone's Back press reach the top sheet under it.
 - **Tab / Shift+Tab** move the focus through the controls of that root (the elements with
   `Tappable` or `LocalWrite`, and the text fields) in reading order: the upper rect first, then
   the left one. Both wrap. Tab landing on a text field starts its editing; leaving one ends it. With no control, Tab does nothing and the browser keeps the key. A button with `escape`
