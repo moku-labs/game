@@ -75,6 +75,9 @@ const HEAT_LIMIT_RANK = 2;
 /** Milliseconds in a second: turns a rate into the period of one frame. */
 const SECOND_MS = 1000;
 
+/** Every choice `setRate` takes: `"auto"` and the three fixed rates. */
+const RATE_CHOICES: readonly RateChoice[] = Object.freeze(["auto", 30, 60, 120]);
+
 /** What a promise of the shell that nobody reads settles into. */
 const ignore = (): void => {};
 
@@ -733,7 +736,10 @@ export function resetGovernor(g: Governor): void {
  * @returns True for `"auto"`, 30, 60 or 120.
  */
 function isChoice(value: unknown): value is RateChoice {
-  return value === "auto" || value === 30 || value === 60 || value === 120;
+  // Widened, not cast: a readonly list of choices is a readonly list of values.
+  const choices: readonly unknown[] = RATE_CHOICES;
+
+  return choices.includes(value);
 }
 
 /**

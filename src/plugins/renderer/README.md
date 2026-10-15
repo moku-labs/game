@@ -756,7 +756,9 @@ in the same frame.
 switch, takes it again in the same frame, and that frame is drawn. A change above the overlay or in
 the HUD takes nothing. A range that changes in three frames in a row is drawn live, and kept again
 after eight calm frames. Endless loops are held only under an opaque cover or a blurred picture
-(a filter with `blurs` on an entry or on a view in it that covers the canvas): they write nothing,
+(a filter with `blurs` on an entry or on a view in it that covers the viewport frame, so a window
+wider or taller than the frame answers as the phone does; measured at every take, and in every
+frame the fallback draws the range live, so a frost that comes on later is seen): they write nothing,
 their phase follows time, and they write once in the frame after landing and after the first exit
 frame, which takes the picture again with them. A blurred range the fallback draws live keeps its
 loops held until its overlay leaves, so only a real change counts against the eight calm frames

@@ -3,14 +3,14 @@
  * parts it fades, all written in one step of the render phase, after every writer of the frame and before the
  * decision (spec 22 O5–O10). A game without an overlay and a HUD part pays one size check.
  */
-import { Exiting } from "../../world/ecs/define";
 import type { Entity } from "../../world/types";
 import { HudPart, Overlay, OverlayLevel, type OverlayValue } from "../components";
 import type { OverlayEventDetail, PixiContainer, PixiModule } from "../types";
 import { stepDims, stepParts } from "./overlay-look";
 import { clearRange, rangeHolds, stepRange } from "./overlay-range";
-import { parentOf } from "./pose";
+import { isLeaving, parentOf } from "./pose";
 import type {
+  ActiveRange,
   OverlayEventSink,
   OverlayMode,
   OverlayPhase,
@@ -117,26 +117,6 @@ function rootOf(sctx: SyncCtx, entity: Entity): Entity {
   }
 
   return current;
-}
-
-/**
- * Tells whether the entity or a `Parent` ancestor of it carries `Exiting`: the overlay is leaving.
- *
- * @param sctx - Domain context of the sync module.
- * @param entity - The marked entity.
- * @returns True while it leaves.
- */
-function isLeaving(sctx: SyncCtx, entity: Entity): boolean {
-  const ecs = sctx.ctx.deps.world.ecs;
-  let current = entity;
-
-  for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
-    if (ecs.has(current, Exiting)) return true;
-
-    current = parentOf(ecs, current);
-  }
-
-  return false;
 }
 
 /**
@@ -258,7 +238,7 @@ function seeOverlay(sctx: SyncCtx, entity: Entity): void {
   const known = state.overlay.records.get(entity);
   const record = known ?? createRecord(entity, object, object.parent);
   const level = ecs.get(entity, OverlayLevel);
-  const phase = phaseOf(isLeaving(sctx, entity), level?.landed === true);
+  const phase = phaseOf(isLeaving(ecs, entity), level?.landed === true);
 
   state.overlay.records.set(entity, record);
   record.label = state.views.get(entity)?.object.label ?? record.label;
@@ -269,8 +249,10 @@ function seeOverlay(sctx: SyncCtx, entity: Entity): void {
   record.layerIndex = slot.index;
   record.level = Math.min(1, Math.max(0, level?.level ?? 0));
   // A new record opens in whatever phase it is found in; a known one notes the turn.
-  record.turned = known === undefined || phase === record.phase ? undefined : phase;
-  if (record.turned !== undefined) record.news = phase === "exiting" ? "leave" : "landed";
+  const turned = known === undefined || phase === record.phase ? undefined : phase;
+
+  record.turned = turned;
+  if (turned !== undefined) record.news = turned === "exiting" ? "leave" : "landed";
   record.phase = phase;
   record.seen = true;
   clampInto(sctx, entity, record.value, raw);
@@ -439,12 +421,22 @@ function modeOf(sctx: SyncCtx, record: OverlayRecord): OverlayMode {
  * @returns The reported mode.
  */
 function modeReported(overlay: OverlayState, record: OverlayRecord): OverlayMode {
+  return ownedRange(overlay, record)?.mode ?? "live";
+}
+
+/**
+ * The range an overlay owns and keeps hidden or as a picture now (not drawn live).
+ *
+ * @param overlay - The overlay state.
+ * @param record - The overlay.
+ * @returns The range held now when this overlay owns it and its entries carry a reason; `undefined` otherwise.
+ */
+function ownedRange(overlay: OverlayState, record: OverlayRecord): ActiveRange | undefined {
   const range = overlay.active;
 
-  if (range === undefined || range.owner !== record.entity || range.reason === undefined)
-    return "live";
-
-  return range.mode;
+  return range !== undefined && range.owner === record.entity && range.reason !== undefined
+    ? range
+    : undefined;
 }
 
 /**
@@ -524,16 +516,16 @@ export function overlayReports(sctx: SyncCtx): readonly OverlayReport[] {
   if (state.root === undefined) return [];
 
   return overlay.order.map(record => {
-    const owns = overlay.active?.owner === record.entity && overlay.active.reason !== undefined;
+    const owned = ownedRange(overlay, record);
 
     return {
       entity: record.entity,
       label: record.label,
       phase: record.phase,
-      mode: modeReported(overlay, record),
+      mode: owned?.mode ?? "live",
       level: record.level,
-      range: owns ? (overlay.active?.entries.length ?? 0) : 0,
-      kept: owns && sctx.deps.kept.kept(record.entity)
+      range: owned?.entries.length ?? 0,
+      kept: owned !== undefined && sctx.deps.kept.kept(record.entity)
     };
   });
 }

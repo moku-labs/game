@@ -17,8 +17,24 @@ import type {
   PerfChange,
   PerfChangeEntry
 } from "./log-types";
+import { PERF_GAP_BUCKETS } from "./log-types";
 import type { EventRing, PerfRing, RingPasses } from "./types";
 import { cell } from "./units";
+
+/** Gaps below this many ms fall into 1 ms buckets of `frameHist`. */
+const FINE_LIMIT_MS = 50;
+
+/** Gaps from `FINE_LIMIT_MS` up to this many ms fall into buckets `COARSE_STEP_MS` wide. */
+const COARSE_LIMIT_MS = 200;
+
+/** The width of a bucket between `FINE_LIMIT_MS` and `COARSE_LIMIT_MS`, ms. */
+const COARSE_STEP_MS = 5;
+
+/** The bucket of every gap of `COARSE_LIMIT_MS` and over: the last of `PERF_GAP_BUCKETS`. */
+const LAST_BUCKET = PERF_GAP_BUCKETS - 1;
+
+/** A frame whose gap is over this many budgets (or caps) came late: a `gap` spike. */
+const LATE_FACTOR = 1.5;
 
 /** Values of `phaseMs` per frame: the six phases. */
 export const PHASE_STRIDE = 6;
@@ -422,10 +438,12 @@ export function slotOfSequence(ring: PerfRing, sequence: number): number {
  * ```
  */
 export function bucketOf(gapMs: number): number {
-  if (gapMs < 50) return Math.max(0, Math.floor(gapMs));
-  if (gapMs < 200) return 50 + Math.floor((gapMs - 50) / 5);
+  if (gapMs < FINE_LIMIT_MS) return Math.max(0, Math.floor(gapMs));
+  if (gapMs < COARSE_LIMIT_MS) {
+    return FINE_LIMIT_MS + Math.floor((gapMs - FINE_LIMIT_MS) / COARSE_STEP_MS);
+  }
 
-  return 80;
+  return LAST_BUCKET;
 }
 
 /**
@@ -455,7 +473,7 @@ export function spikeCauses(
 
   let causes = 0;
 
-  if (frame.gapMs - agentMs > 1.5 * Math.max(budget, frame.capMs)) causes |= CAUSE.gap;
+  if (frame.gapMs - agentMs > LATE_FACTOR * Math.max(budget, frame.capMs)) causes |= CAUSE.gap;
   if (frame.workMs - agentMs > budget) causes |= CAUSE.js;
 
   return causes;

@@ -27,6 +27,7 @@ import {
   renderStage1,
   renderStage2,
   renderStage3,
+  setOrigins,
   standInOf
 } from "./render";
 import { destroyRecord } from "./state";
@@ -362,20 +363,6 @@ export function createRecord(
 }
 
 /**
- * Puts a placed filter's origin back to 0: drawn live, `canvasPixel` reads the canvas through `uOutputFrame` alone.
- *
- * @param slots - The record's slots.
- */
-function zeroOrigins(slots: readonly FilterSlot[]): void {
-  for (const slot of slots) {
-    if (slot.origin !== undefined) {
-      slot.origin[0] = 0;
-      slot.origin[1] = 0;
-    }
-  }
-}
-
-/**
  * Draws a kept record live again, in this frame (P4.4): the loan of stage 2 ends, the filters go back onto the top,
  * the reason `"kept"` goes without a mark (the two halves draw the same pixels), the quad hides. Its textures stay.
  *
@@ -391,7 +378,7 @@ export function goLive(
   putBack: boolean
 ): void {
   endLoan(record.s2Of);
-  zeroOrigins(record.slots);
+  setOrigins(record.slots, 0, 0);
 
   // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
   if (record.standIn !== undefined && !record.standIn.destroyed) record.standIn.filters = null;
@@ -454,11 +441,7 @@ export function dropRecord(
 
   endLoan(record.s2Of);
   destroyRecord(record, texture => dropTexture(kctx, texture));
-
-  if (state.madeGroups.has(record.top)) {
-    if (!record.top.destroyed) record.top.disableRenderGroup();
-    state.madeGroups.delete(record.top);
-  }
+  ungroup(kctx, record);
 
   state.bytes -= record.bytes;
   record.bytes = 0;
@@ -612,7 +595,7 @@ function takePicture(
 
   const local = top.getLocalBounds();
 
-  if (!(local.maxX > local.minX && local.maxY > local.minY)) return false;
+  if (isEmptyBounds(local)) return false;
 
   // The picture's box on the grid of the stack resolution, and its padding; both textures must fit.
   const box = linearBounds(now.a, now.b, now.c, now.d, local);
@@ -641,7 +624,51 @@ function takePicture(
   record.refused = 0;
   writeTakeKeys(record, now, { x, y, w1, h1 });
 
-  // The stages: the subtree picture, the pre-pass results of the first filter with inputs, the filter output.
+  const ok = renderStages(kctx, pixi, matrices, record, view, now);
+
+  record.settle = false;
+  writeSeen(record, now);
+
+  return ok;
+}
+
+/**
+ * Tells whether local bounds hold nothing to draw: no width or no height. Pure.
+ *
+ * @param bounds - The bounds of a subtree in its own space.
+ * @returns True when they are empty.
+ * @example
+ * ```ts
+ * isEmptyBounds({ minX: 0, minY: 0, maxX: 0, maxY: 40 }); // true
+ * ```
+ */
+function isEmptyBounds(
+  bounds: Readonly<{ minX: number; minY: number; maxX: number; maxY: number }>
+): boolean {
+  return !(bounds.maxX > bounds.minX && bounds.maxY > bounds.minY);
+}
+
+/**
+ * Renders the stages of a take whose keys are written: the subtree picture, the pre-pass results of the first filter
+ * with inputs, the filter output; the budget counts the textures after. A live view whose take failed draws live
+ * again: its filters go back on its top.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record.
+ * @param view - Its view.
+ * @param now - This frame's numbers.
+ * @returns True when every stage rendered.
+ */
+function renderStages(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View,
+  now: Numbers
+): boolean {
   const live = record.mode === "live";
 
   if (live) handFilters(kctx, pixi, record);
@@ -662,15 +689,11 @@ function takePicture(
   ok = ok && renderStage3(kctx, pixi, matrices, record, now);
   account(kctx, record);
 
-  // A live view whose take failed draws live again: its filters go back on its top.
   if (!ok && live) {
     // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
     if (record.standIn !== undefined) record.standIn.filters = null;
-    kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark, top);
+    kctx.sync.applyFilters(view, filtersOf(kctx.ctx.state.sync, record.entity), noMark, record.top);
   }
-
-  record.settle = false;
-  writeSeen(record, now);
 
   return ok;
 }
@@ -1024,46 +1047,87 @@ export function stepRecord(
   record: KeptRecord,
   view: View
 ): void {
-  const { state, host } = kctx;
-  const { key } = record;
-
   // What the record draws before this frame: a change of it is a change of every picture above it (P4.5).
   noteDrawing(kctx, record, BEFORE);
-  NOW.r = host.resolution();
+  NOW.r = kctx.host.resolution();
   readStack(record.slots, NOW.r, NOW);
 
-  if (eligible(kctx, record, view, NOW)) {
-    const world = record.top.getGlobalTransform(record.matrix, false);
-
-    NOW.a = world.a;
-    NOW.b = world.b;
-    NOW.c = world.c;
-    NOW.d = world.d;
-    NOW.tx = world.tx;
-    NOW.ty = world.ty;
-
-    if (record.mode === "live") stepLive(kctx, pixi, matrices, record, view);
-    else stepKept(kctx, pixi, matrices, record, view);
-
-    if (record.mode === "kept") {
-      placeQuad(kctx.sync, pixi, matrices, record, view);
-      record.lastDrawn = state.frame;
-      state.drawnPictures += 1;
-    }
-
-    key[KEY.lastTx] = NOW.tx;
-    key[KEY.lastTy] = NOW.ty;
-  } else {
-    if (record.mode === "kept") goLive(kctx, record, view, true);
-
-    record.still = 0;
-  }
+  if (eligible(kctx, record, view, NOW)) stepEligible(kctx, pixi, matrices, record, view);
+  else stepIneligible(kctx, record, view);
 
   if (drawingChanged(kctx, record, BEFORE)) dirtyAbove(kctx, record);
 
   record.dirtyS1 = false;
   record.dirtyS2 = false;
   record.dirtyS3 = false;
+}
+
+/**
+ * The frame of a record that may be kept: its world transform read into this frame's numbers, the policy of its life,
+ * and the quad of a kept one placed and counted as drawn.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws.
+ * @param matrices - The scratch matrices.
+ * @param record - The record.
+ * @param view - Its view.
+ */
+function stepEligible(
+  kctx: KeptCtx,
+  pixi: PixiModule,
+  matrices: KeptMatrices,
+  record: KeptRecord,
+  view: View
+): void {
+  const { state } = kctx;
+  const world = record.top.getGlobalTransform(record.matrix, false);
+
+  NOW.a = world.a;
+  NOW.b = world.b;
+  NOW.c = world.c;
+  NOW.d = world.d;
+  NOW.tx = world.tx;
+  NOW.ty = world.ty;
+
+  if (record.mode === "live") stepLive(kctx, pixi, matrices, record, view);
+  else stepKept(kctx, pixi, matrices, record, view);
+
+  if (record.mode === "kept") {
+    placeQuad(kctx.sync, pixi, matrices, record, view);
+    record.lastDrawn = state.frame;
+    state.drawnPictures += 1;
+  }
+
+  record.key[KEY.lastTx] = NOW.tx;
+  record.key[KEY.lastTy] = NOW.ty;
+}
+
+/**
+ * The frame of a record that may not be kept: a kept one is drawn live again, and its still frames start over.
+ *
+ * @param kctx - The kept context.
+ * @param record - The record.
+ * @param view - Its view.
+ */
+function stepIneligible(kctx: KeptCtx, record: KeptRecord, view: View): void {
+  if (record.mode === "kept") goLive(kctx, record, view, true);
+
+  record.still = 0;
+}
+
+/**
+ * Tells whether a range picture draws a node: the node, or a node above it, is one of the range's entries.
+ *
+ * @param entries - The entries of the range.
+ * @param node - The top of a record.
+ * @returns True when the range holds it.
+ */
+function rangeHolds(entries: readonly PixiContainer[], node: PixiContainer): boolean {
+  for (let current: PixiContainer | null = node; current !== null; current = current.parent) {
+    if (entries.includes(current)) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -1082,13 +1146,7 @@ function dirtyAbove(kctx: KeptCtx, record: KeptRecord): void {
 
   // A range picture of an overlay that holds the record draws it too: rendered again after the records (spec 22 K1).
   for (const range of kctx.state.ranges.values()) {
-    for (let node: typeof record.top | null = record.top; node !== null; node = node.parent) {
-      if (range.entries.includes(node)) {
-        range.due = true;
-
-        break;
-      }
-    }
+    if (rangeHolds(range.entries, record.top)) range.due = true;
   }
 }
 
@@ -1107,7 +1165,7 @@ export function bypassRecord(kctx: KeptCtx, record: KeptRecord, view: View, live
   if (live) {
     // eslint-disable-next-line unicorn/no-null -- `null` is how Pixi clears the filters.
     if (record.standIn !== undefined) record.standIn.filters = null;
-    zeroOrigins(record.slots);
+    setOrigins(record.slots, 0, 0);
     kctx.sync.applyFilters(view, filters, noMark, record.top);
     kctx.sync.swapHidden(kctx.hidden, view, "kept", false);
     if (record.quad !== undefined) record.quad.visible = false;

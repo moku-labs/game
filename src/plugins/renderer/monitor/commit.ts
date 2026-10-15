@@ -328,14 +328,11 @@ export function commitFrame(pc: PerfCtx, measure: Readonly<FrameMeasure>): void 
   const heap = usedHeapBytes();
   const heapDrop = perf.lastHeap - heap;
   let causes = spikeCauses(measure, agentMs, budget);
+  const cameLate = (causes & CAUSE.gap) !== 0;
+  const littleWork = measure.workMs - agentMs < budget * GC_WORK_SHARE;
+  const heapDropped = heapDrop >= GC_DROP_BYTES;
 
-  if (
-    (causes & CAUSE.gap) !== 0 &&
-    measure.workMs - agentMs < budget * GC_WORK_SHARE &&
-    heapDrop >= GC_DROP_BYTES
-  ) {
-    causes |= CAUSE["gc?"];
-  }
+  if (cameLate && littleWork && heapDropped) causes |= CAUSE["gc?"];
 
   // The slot becomes the newest of the ring; a spike is annotated and the GPU timer gets the frame.
   perf.lastHeap = heap;

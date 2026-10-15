@@ -61,7 +61,8 @@ function createOverlayState(): OverlayState {
     wantSet: emptySet(),
     flipped: emptySet(),
     nextOff: emptySet(),
-    left: false
+    left: false,
+    bounds: undefined
   };
 }
 

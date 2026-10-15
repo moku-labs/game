@@ -51,7 +51,7 @@ import {
   poolKeyOf,
   release
 } from "./pools";
-import { parentOf } from "./pose";
+import { isLeaving, parentOf } from "./pose";
 import { drawShapePath, strokeShape } from "./shape-path";
 import { anchoredBox, boxOf, layoutSprite } from "./sizing";
 import {
@@ -1306,16 +1306,19 @@ function displayObjectOf(sctx: SyncCtx, entity: Entity): PixiContainer | undefin
 }
 
 /**
- * Detaches the children of a parent that left, and names them.
+ * Detaches the children of a parent that left, and names the ones that stay. A child that leaves in the same teardown
+ * is no orphan: its view goes in this very pass (it waits in `removed`), or it plays its exit (`Exiting`).
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The parent entity.
  * @param host - The container its children hang in.
  */
 function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): void {
+  const state = sctx.ctx.state.sync;
+  const ecs = sctx.ctx.deps.world.ecs;
   const orphans: Entity[] = [];
 
-  for (const [child, childView] of sctx.ctx.state.sync.views) {
+  for (const [child, childView] of state.views) {
     if (child === entity) continue;
 
     const object = childView.wrapper ?? childView.object;
@@ -1324,9 +1327,9 @@ function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): voi
 
     markView(sctx, child);
     detach(object);
-    orphans.push(child);
     // A child that stays waits for the parent's next view (a new `Display`, a visual that comes back).
-    sctx.ctx.state.sync.orphans.add(child);
+    state.orphans.add(child);
+    if (!state.removed.has(child) && !isLeaving(ecs, child)) orphans.push(child);
   }
 
   if (orphans.length > 0) {
@@ -1384,9 +1387,11 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
  * @param state - The sync branch of the plugin state.
  */
 export function stopSync(state: SyncState): void {
+  // The world hooks and the system go first: nothing collects into the sets below any more.
   for (const off of state.cleanups) off();
   state.cleanups.length = 0;
 
+  // Every view: the game's objects and the adapters' leave the tree; the engine's own go with the root below.
   for (const view of state.views.values()) {
     clearHidden(view);
     state.viewOfTop.delete(view.wrapper ?? view.object);
@@ -1409,10 +1414,13 @@ export function stopSync(state: SyncState): void {
     view.wrapper = undefined;
   }
 
+  // The modules of sync that hold their own: overlays, adapters, fonts, crops.
   stopOverlays(state);
   clearAdapters(state);
   clearFonts(state);
   clearFrames(state);
+
+  // The maps and the change sets, empty for the next start.
   state.views.clear();
   state.entityOf.clear();
   state.byKey.clear();
@@ -1431,6 +1439,7 @@ export function stopSync(state: SyncState): void {
   state.held.clear();
   state.redraws = 0;
 
+  // The tree last: the layers, the pooled objects and the root with what still hangs in it.
   clearLayers(state);
   destroyPools(state);
   state.root?.destroy({ children: true });

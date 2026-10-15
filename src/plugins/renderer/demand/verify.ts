@@ -4,7 +4,7 @@
  * bundle drops this module.
  */
 import { differingPixels, NAMED, withinRatio } from "../pixels";
-import type { HostModule, RendererCtx } from "../types";
+import type { HostModule, KeptState, RendererCtx } from "../types";
 import type { DemandFrame, DemandState } from "./types";
 
 /**
@@ -17,9 +17,17 @@ import type { DemandFrame, DemandState } from "./types";
  * @returns Device pixels per CSS pixel; `undefined` for the half resolution of `host.pixels`.
  */
 function readResolution(ctx: RendererCtx, host: HostModule): number | undefined {
-  const { kept } = ctx.state;
+  return hasPictures(ctx.state.kept) ? host.resolution() : undefined;
+}
 
-  return kept.records.length > 0 || kept.ranges.size > 0 ? host.resolution() : undefined;
+/**
+ * Tells whether the kept cache holds a picture: a kept view's record or an overlay's range.
+ *
+ * @param kept - The kept state.
+ * @returns True while one exists.
+ */
+function hasPictures(kept: KeptState): boolean {
+  return kept.records.length > 0 || kept.ranges.size > 0;
 }
 
 /**

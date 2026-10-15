@@ -12,6 +12,7 @@ import type {
   OverlayEventDetail,
   PerfEventName,
   PixiBitmapFont,
+  PixiBounds,
   PixiContainer,
   PixiFilter,
   PixiFilterManager,
@@ -918,7 +919,8 @@ export type SyncInternal = {
   rebuildAll(): void;
 
   /**
-   * One pass over the change sets: removed, layers, added, changed, invalidated keys.
+   * One pass over the change sets: removed, layers, added, changed, the views that lost their `Parent`, the orphans
+   * whose parent has a view now, the adapters' values, the invalidated keys and the nine-slice switch.
    */
   pass(): void;
 
@@ -1194,7 +1196,10 @@ export type ActiveRange = {
   kept: boolean;
   /** The last take was refused; tried again when the owner or the entries change. */
   refused: boolean;
-  /** An entry, or a view inside the range that covers the canvas, holds a blurring filter (O9.2). */
+  /**
+   * An entry, or a view inside the range that covers the viewport frame, holds a blurring filter (O9.2): measured at
+   * every take and retake, and in every frame the fallback draws the range live.
+   */
   blurred: boolean;
   /** A loop write was held back since the last take. */
   touched: boolean;
@@ -1242,6 +1247,8 @@ export type OverlayState = {
   nextOff: Set<PixiContainer>;
   /** A view left its place in the held range since the last step (it moved, or its view went). */
   left: boolean;
+  /** Scratch of the cover test of `blurred`: made on first use from the Pixi module the renderer loaded. */
+  bounds: PixiBounds | undefined;
 };
 
 /**

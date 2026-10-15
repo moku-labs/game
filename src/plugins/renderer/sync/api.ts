@@ -210,6 +210,19 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
+   * Hangs a view again where it belongs now, under its parent or in its layer, at its own pose, sorted by the rule
+   * of the place it hangs in.
+   *
+   * @param entity - The entity.
+   * @param view - Its view.
+   */
+  const rehang = (entity: Entity, view: View): void => {
+    attach(sctx, entity, view);
+    applyTransform(sctx, entity, view);
+    resort(sctx, entity, view);
+  };
+
+  /**
    * Step 4 for the views whose `Parent` was removed: back to the layer the entity names, at its
    * own pose, sorted by that layer's rule. An entity that left has no view and is skipped.
    *
@@ -223,13 +236,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.reparented.clear();
 
     for (const entity of entities) {
-      if (built.has(entity)) continue;
-
-      withView(entity, view => {
-        attach(sctx, entity, view);
-        applyTransform(sctx, entity, view);
-        resort(sctx, entity, view);
-      });
+      if (!built.has(entity)) withView(entity, view => rehang(entity, view));
     }
   };
 
@@ -250,11 +257,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       if (!state.views.has(entity)) state.orphans.delete(entity);
       else if (parent === 0 || state.views.has(parent)) {
-        withView(entity, view => {
-          attach(sctx, entity, view);
-          applyTransform(sctx, entity, view);
-          resort(sctx, entity, view);
-        });
+        withView(entity, view => rehang(entity, view));
         touched?.add(entity);
       }
     }
@@ -362,11 +365,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     }
 
     for (const entity of ecs.changed(Parent)) {
-      writeUnbuilt(built, entity, view => {
-        attach(sctx, entity, view);
-        applyTransform(sctx, entity, view);
-        resort(sctx, entity, view);
-      });
+      writeUnbuilt(built, entity, view => rehang(entity, view));
     }
 
     // A new `Display` object of the game replaces the old view outright.

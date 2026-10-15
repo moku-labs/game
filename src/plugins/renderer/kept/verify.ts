@@ -60,9 +60,10 @@ function crossesEdge(
  */
 function edgeBand(kctx: KeptCtx, records: readonly KeptRecord[]): number {
   const screen = kctx.host.screen();
-  let band = 0;
 
   if (screen === undefined) return 0;
+
+  let band = 0;
 
   for (const record of records) {
     if (crossesEdge(record, screen)) band = Math.max(band, record.key[KEY.P] ?? 0);

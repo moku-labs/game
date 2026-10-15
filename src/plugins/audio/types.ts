@@ -169,10 +169,11 @@ export type RetiringTrack = { stream: StreamTrack; timer: ReturnType<typeof setT
  *
  * @example
  * ```ts
+ * // `volumes` comes from the game's `defineGame` kit, so `player` is the game's Player.
  * createApp({
  *   plugins: [...screen, audioPlugin],
  *   pluginConfigs: {
- *     audio: { musicFadeMs: 400, music: "stream", session: "playback", volumes: player => player.settings.audio }
+ *     audio: { musicFadeMs: 400, music: "stream", session: "playback", volumes: volumes(player => player.settings.audio) }
  *   }
  * });
  * ```

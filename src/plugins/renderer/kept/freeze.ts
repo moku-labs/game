@@ -25,6 +25,33 @@ function canvasBytes(kctx: KeptCtx): number {
 }
 
 /**
+ * Hangs a range's sprite in its slot: immediately before `before` while that node hangs in the container, at the end
+ * of the container otherwise. Moves it only when it hangs elsewhere.
+ *
+ * @param sprite - The range's sprite.
+ * @param slot - Where the picture draws.
+ */
+function hangSprite(sprite: PixiSprite, slot: RangeRecord["slot"]): void {
+  const { container, before } = slot;
+
+  if (before.parent !== container) {
+    if (sprite.parent !== container) {
+      sprite.removeFromParent();
+      container.addChild(sprite);
+    }
+
+    return;
+  }
+
+  const at = container.getChildIndex(before);
+
+  if (sprite.parent !== container || container.children[at - 1] !== sprite) {
+    sprite.removeFromParent();
+    container.addChildAt(sprite, container.getChildIndex(before));
+  }
+}
+
+/**
  * Places a range's sprite immediately before `slot.before` in `slot.container`, at its depth, covering the canvas in
  * that container's space: `inverse(container.getGlobalTransform())`. Compared before every write.
  *
@@ -38,18 +65,7 @@ function placeSprite(matrices: KeptMatrices, range: RangeRecord): void {
 
   const { container, before } = slot;
 
-  if (before.parent === container) {
-    const at = container.getChildIndex(before);
-
-    if (sprite.parent !== container || container.children[at - 1] !== sprite) {
-      sprite.removeFromParent();
-      container.addChildAt(sprite, container.getChildIndex(before));
-    }
-  } else if (sprite.parent !== container) {
-    sprite.removeFromParent();
-    container.addChild(sprite);
-  }
-
+  hangSprite(sprite, slot);
   if (sprite.zIndex !== before.zIndex) sprite.zIndex = before.zIndex;
 
   const inverse = container.getGlobalTransform(matrices.parent, false).invert();
@@ -99,6 +115,17 @@ function pictureOf(kctx: KeptCtx, pixi: PixiModule, range: RangeRecord): RangeRe
 }
 
 /**
+ * Tells whether a range picture can be taken at all: kept pictures are switched on and the device draws.
+ *
+ * @param kctx - The kept context.
+ * @param pixi - The module that draws, or `undefined` while inert.
+ * @returns True, with the module known, when a take may go on.
+ */
+function canTake(kctx: KeptCtx, pixi: PixiModule | undefined): pixi is PixiModule {
+  return kctx.state.on && kctx.host.ready() && canKeep(pixi);
+}
+
+/**
  * Takes the picture of a range (P7.3): makes or reuses the record of the id (a take of a held id is a retake), copies
  * the entries and the others, places the sprite and owes a render in this frame's flush. Answers false and places
  * nothing with the switch off, while nothing draws, and when the picture does not fit the budget after eviction.
@@ -117,7 +144,7 @@ export function takeRange(
   const pixi = kctx.host.pixi();
   const matrices = matricesOf(kctx);
 
-  if (!state.on || !kctx.host.ready() || !canKeep(pixi) || matrices === undefined) return false;
+  if (!canTake(kctx, pixi) || matrices === undefined) return false;
 
   let record = state.ranges.get(range.id);
   const held = record?.bytes ?? (state.spare === undefined ? 0 : canvasBytes(kctx));

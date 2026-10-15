@@ -28,7 +28,13 @@ const MAX_INPUTS = 4;
 /** What a uniform name looks like: a WGSL member name the engine can also use as a field. */
 const UNIFORM_NAME = /^[a-z][\dA-Za-z]*$/;
 
-/** The WGSL type of a vector uniform, by its size minus 2. */
+/** The fewest numbers a vector uniform holds: a `vec2`. */
+const MIN_VECTOR_SIZE = 2;
+
+/** The most numbers a vector uniform holds: a `vec4`. */
+const MAX_VECTOR_SIZE = 4;
+
+/** The WGSL type of a vector uniform, by its size minus `MIN_VECTOR_SIZE`. */
 const VECTOR_TYPES: readonly UniformSpec["type"][] = ["vec2<f32>", "vec3<f32>", "vec4<f32>"];
 
 /** What a WGSL body must define. */
@@ -235,8 +241,8 @@ function readArea(id: string, area: unknown): FilterDefinition["area"] {
 function isVector(value: unknown): value is readonly number[] {
   return (
     Array.isArray(value) &&
-    value.length >= 2 &&
-    value.length <= 4 &&
+    value.length >= MIN_VECTOR_SIZE &&
+    value.length <= MAX_VECTOR_SIZE &&
     value.every(entry => typeof entry === "number" && Number.isFinite(entry))
   );
 }
@@ -293,7 +299,9 @@ function readUniform(
     return { spec: { name, type: "vec3<f32>", form: "color", size: 3 }, value: declaration.color };
   }
 
-  const type = isVector(declaration) ? VECTOR_TYPES[declaration.length - 2] : undefined;
+  const type = isVector(declaration)
+    ? VECTOR_TYPES[declaration.length - MIN_VECTOR_SIZE]
+    : undefined;
 
   if (type === undefined || !isVector(declaration)) {
     throw new Error(
@@ -406,6 +414,31 @@ function namesOf(name: string): {
 }
 
 /**
+ * What a name an input makes clashes with: a uniform of the filter, a reserved name or a name an
+ * earlier input made, in that order.
+ *
+ * @param made - A name the input makes.
+ * @param uniforms - The read uniforms.
+ * @param taken - The names earlier inputs made.
+ * @returns The clash as the error message words it, or `undefined` when the name is free.
+ * @example
+ * ```ts
+ * clashOf("blurTexture", [], new Set(["blurTexture"])); // "made by another input"
+ * ```
+ */
+function clashOf(
+  made: string,
+  uniforms: readonly UniformSpec[],
+  taken: ReadonlySet<string>
+): string | undefined {
+  if (uniforms.some(uniform => uniform.name === made)) return "a uniform of the filter";
+  if (RESERVED_NAME.test(made)) return "reserved";
+  if (taken.has(made)) return "made by another input";
+
+  return undefined;
+}
+
+/**
  * Checks the name of an input and the names it makes against the uniforms, the reserved names and
  * the names earlier inputs made, which it then joins.
  *
@@ -432,11 +465,7 @@ function checkInputNames(
   const names = namesOf(name);
 
   for (const made of Object.values(names)) {
-    let clash: string | undefined;
-
-    if (uniforms.some(uniform => uniform.name === made)) clash = "a uniform of the filter";
-    else if (RESERVED_NAME.test(made)) clash = "reserved";
-    else if (taken.has(made)) clash = "made by another input";
+    const clash = clashOf(made, uniforms, taken);
 
     if (clash !== undefined) {
       throw new Error(
@@ -676,7 +705,8 @@ function cacheWithInputs(
  * of its chain, read at the body's `uv`. A `fallback` draws instead when the filter is broken.
  * An `area` answers, from the value, the rectangle in the entity's own units outside of which the
  * filter draws nothing: Pixi then renders and fills only that box, not the view's bounds.
- * Register it through the `filters` key of a feature.
+ * Register it through the `filters` key of a feature. The README shows a filter with a blur input
+ * and one with an `area`.
  *
  * @param id - The filter id, also the component name; unique, and not one of the built-ins.
  * @param spec - Both bodies, the uniforms, the passes one apply costs, the padding, the inputs, the fallback, the
@@ -694,7 +724,6 @@ function cacheWithInputs(
  * Tint.filter.glsl.includes("uniform vec3 color;"); // true
  * Tint.filter.cache; // "local"
  * ```
- * The README shows a filter with a blur input and one with an `area`.
  */
 export function defineFilter<
   Uniforms extends Record<string, UniformDeclaration> = Record<never, never>

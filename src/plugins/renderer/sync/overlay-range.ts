@@ -7,7 +7,8 @@
 import type { Entity } from "../../world/types";
 import type { DemandReason } from "../demand/types";
 import type { KeptRange } from "../kept/types";
-import type { PixiContainer } from "../types";
+import type { PixiBounds, PixiContainer } from "../types";
+import type { Rect } from "../viewport/types";
 import { type HiddenReason, hiddenBy, setHidden, setLayerHidden, setObjectHidden } from "./hidden";
 import type { ActiveRange, FilterSlot, OverlayRecord, SyncCtx, SyncState, View } from "./types";
 
@@ -20,7 +21,7 @@ const CALM_FRAMES = 8;
 /** How deep a walk up the tree goes. */
 const MAX_DEPTH = 32;
 
-/** CSS px a view may fall short of the canvas and still cover it: the reference frame rounds by a fraction. */
+/** CSS px a view may fall short of the viewport frame and still cover it: the reference frame rounds by a fraction. */
 const COVER_SLACK = 1;
 
 /** The whole-frame reasons after which a kept picture is taken again: the screen changed whole. */
@@ -313,29 +314,53 @@ function blursIn(slots: readonly FilterSlot[]): boolean {
 }
 
 /**
- * Tells whether a view's bounds hold the whole canvas, within `COVER_SLACK`.
+ * Tells whether global bounds hold the whole viewport frame, within `COVER_SLACK`. Pure.
  *
- * @param top - The view's top.
- * @param screen - The canvas size, CSS px.
- * @returns True when it covers the canvas.
+ * @param bounds - The bounds of a view's top, canvas CSS px.
+ * @param frame - The viewport frame inside the canvas, canvas CSS px.
+ * @returns True when the bounds cover the frame.
+ * @example
+ * ```ts
+ * coversFrame({ minX: 483, minY: 0, maxX: 1117, maxY: 844 }, { x: 483.5, y: 0, width: 633, height: 844 }); // true
+ * ```
  */
-function coversCanvas(
-  top: PixiContainer,
-  screen: Readonly<{ width: number; height: number }>
+function coversFrame(
+  bounds: Readonly<{ minX: number; minY: number; maxX: number; maxY: number }>,
+  frame: Readonly<Rect>
 ): boolean {
-  const bounds = top.getBounds();
-
   return (
-    bounds.x <= COVER_SLACK &&
-    bounds.y <= COVER_SLACK &&
-    bounds.x + bounds.width >= screen.width - COVER_SLACK &&
-    bounds.y + bounds.height >= screen.height - COVER_SLACK
+    bounds.minX <= frame.x + COVER_SLACK &&
+    bounds.minY <= frame.y + COVER_SLACK &&
+    bounds.maxX >= frame.x + frame.width - COVER_SLACK &&
+    bounds.maxY >= frame.y + frame.height - COVER_SLACK
   );
 }
 
 /**
+ * The bounds scratch of the cover test, made on first use from the Pixi module the renderer loaded, so a measure in
+ * every frame of a live fallback makes no object.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @returns The scratch, or `undefined` while nothing draws.
+ */
+function boundsScratch(sctx: SyncCtx): PixiBounds | undefined {
+  const overlay = sctx.ctx.state.sync.overlay;
+
+  if (overlay.bounds !== undefined) return overlay.bounds;
+
+  const pixi = sctx.deps.host.pixi();
+
+  if (pixi === undefined) return undefined;
+
+  overlay.bounds = new pixi.Bounds();
+
+  return overlay.bounds;
+}
+
+/**
  * Whether a range is blurred (O9.2, OQ22-3): an entry root that is a view, or a view inside the range whose bounds
- * hold the canvas, carries an enabled blurring slot. Read from the slots, never from where the filters hang.
+ * hold the viewport frame (not the canvas: the bars beside a frame show nothing), carries an enabled blurring slot.
+ * Read from the slots, never from where the filters hang.
  *
  * @param sctx - Domain context of the sync module.
  * @param set - The entries.
@@ -348,7 +373,7 @@ function measureBlurred(
   root: PixiContainer
 ): boolean {
   const state = sctx.ctx.state.sync;
-  const screen = sctx.deps.host.screen();
+  const frame = sctx.deps.viewport.frame();
 
   for (const [entity, slots] of state.filters) {
     const view = state.views.get(entity);
@@ -358,8 +383,14 @@ function measureBlurred(
     const top = view.wrapper ?? view.object;
 
     if (set.has(top)) return true;
-    if (screen === undefined || !inRange(set, top, root)) continue;
-    if (coversCanvas(top, screen)) return true;
+    if (!inRange(set, top, root)) continue;
+
+    const bounds = boundsScratch(sctx);
+
+    if (bounds === undefined) continue;
+
+    top.getBounds(false, bounds);
+    if (coversFrame(bounds, frame)) return true;
   }
 
   return false;
@@ -645,6 +676,9 @@ function stepFreeze(
   if (context.entriesChanged || context.wholes.has("debug")) range.refused = false;
 
   if (range.fallback) {
+    // Drawn live, the range is never retaken: whether it is blurred is measured in every frame it stays live, so a
+    // frost that comes on under loops that keep it moving holds them from the next frame and the range calms (O9.2).
+    range.blurred = measureBlurred(sctx, overlay.wantSet, root);
     range.calm = markedInRange(sctx, overlay.wantSet, root) ? 0 : range.calm + 1;
 
     if (range.calm < CALM_FRAMES) return undefined;

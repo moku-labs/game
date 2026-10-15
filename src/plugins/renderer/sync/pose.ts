@@ -10,7 +10,8 @@
  * `poseUnder`; `sync` places a box with `rootPointOf`. `input` places the drop lookup of an aimed
  * view with `applyPose`.
  */
-import type { Entity } from "../../world/types";
+import { Exiting } from "../../world/ecs/define";
+import type { EcsApi, Entity } from "../../world/types";
 import { Parent, Transform, type TransformValue } from "../components";
 import type { Point } from "../types";
 import type { PoseReader } from "./types";
@@ -29,6 +30,26 @@ export function parentOf(ecs: PoseReader, entity: Entity): Entity {
   const parent = ecs.get(entity, Parent)?.entity ?? 0;
 
   return parent === entity ? 0 : parent;
+}
+
+/**
+ * Tells whether an entity is on its way out: it or an ancestor of its `Parent` chain carries `Exiting` (a ui element
+ * whose exit plays, a world view in its exit queue). Its despawn is coming; nothing else of the teardown is owed.
+ *
+ * @param ecs - The world read.
+ * @param entity - The entity.
+ * @returns True while it, or what it hangs under, leaves.
+ */
+export function isLeaving(ecs: Pick<EcsApi, "get" | "has">, entity: Entity): boolean {
+  let current = entity;
+
+  for (let depth = 0; depth < MAX_DEPTH && current !== 0; depth += 1) {
+    if (ecs.has(current, Exiting)) return true;
+
+    current = parentOf(ecs, current);
+  }
+
+  return false;
 }
 
 /**

@@ -183,6 +183,15 @@ export type ViewportInternal = {
    * @returns True when the frame changed, so `sync` writes the root transform again.
    */
   applyPending(): boolean;
+
+  /**
+   * The drawn frame inside the canvas, in CSS pixels, the space `getBounds` answers in: the rectangle the game's
+   * reference space fills, the bars left out. What "covers the screen" is judged against, so a window of any shape
+   * answers as the phone does. The same object until a layout measures the frame again; never written by the caller.
+   *
+   * @returns The frame; an empty rectangle before the first measurement.
+   */
+  frame(): Readonly<Rect>;
 };
 
 /**

@@ -102,21 +102,28 @@ function nameKind(state: SyncState, slot: FilterSlot): void {
 
   if (stages !== undefined) for (const stage of stages) state.filterKinds.set(stage, kind);
 
-  if (
-    "blurXFilter" in filter &&
-    typeof filter.blurXFilter === "object" &&
-    filter.blurXFilter !== null
-  ) {
+  // A blur draws through two pass filters of its own: they count under the blur's kind.
+  if ("blurXFilter" in filter && isFilterObject(filter.blurXFilter)) {
     state.filterKinds.set(filter.blurXFilter, kind);
   }
 
-  if (
-    "blurYFilter" in filter &&
-    typeof filter.blurYFilter === "object" &&
-    filter.blurYFilter !== null
-  ) {
+  if ("blurYFilter" in filter && isFilterObject(filter.blurYFilter)) {
     state.filterKinds.set(filter.blurYFilter, kind);
   }
+}
+
+/**
+ * Tells whether a property a filter may carry holds an object: the pass filter Pixi's blur keeps under it. Pure.
+ *
+ * @param value - The property's value.
+ * @returns True for an object that is not `null`.
+ * @example
+ * ```ts
+ * isFilterObject(null); // false
+ * ```
+ */
+function isFilterObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
 }
 
 /**
@@ -242,6 +249,7 @@ export function applyArea(sctx: SyncCtx, entity: Entity, view: View): void {
   const target = view.wrapper ?? view.object;
   const held = heldArea(target);
 
+  // No entry: the area the renderer wrote comes off.
   if (entry === undefined) {
     if (held === undefined) return;
 
@@ -251,41 +259,71 @@ export function applyArea(sctx: SyncCtx, entity: Entity, view: View): void {
     return;
   }
 
+  // The entity's units in the top's: a wrapper carries the pose alone, a bare object the stretch of its visual too.
   const stretch = view.wrapper === undefined ? view.drawScale : undefined;
-  // A stretch of 0 draws nothing: the area is then left in the entity's units.
-  const sx = stretch === undefined || stretch.x === 0 ? 1 : stretch.x;
-  const sy = stretch === undefined || stretch.y === 0 ? 1 : stretch.y;
-  const x = entry.x / sx;
-  const y = entry.y / sy;
-  const width = entry.width / sx;
-  const height = entry.height / sy;
-  const rect = entry.rect;
+  const sx = scaleOrOne(stretch?.x);
+  const sy = scaleOrOne(stretch?.y);
 
-  if (
-    rect !== undefined &&
-    held === rect &&
-    rect.x === x &&
-    rect.y === y &&
-    rect.width === width &&
-    rect.height === height
-  ) {
-    return;
-  }
+  if (holdsArea(held, entry, sx, sy)) return;
 
   const pixi = sctx.deps.host.pixi();
 
   if (pixi === undefined) return;
 
+  // A new area is structural: the entity is marked before the write, into its one rectangle.
   sctx.deps.demand.mark(entity);
 
-  const next = rect ?? new pixi.Rectangle();
+  const next = entry.rect ?? new pixi.Rectangle();
 
   entry.rect = next;
-  next.x = x;
-  next.y = y;
-  next.width = width;
-  next.height = height;
+  next.x = entry.x / sx;
+  next.y = entry.y / sy;
+  next.width = entry.width / sx;
+  next.height = entry.height / sy;
   if (held !== next) target.filterArea = next;
+}
+
+/**
+ * The scale an area is divided by on one axis: the visual's stretch, or 1 without one. A stretch of 0 draws nothing,
+ * so the area is then left in the entity's units. Pure.
+ *
+ * @param stretch - The stretch on that axis, `undefined` for a top with a wrapper.
+ * @returns The divisor.
+ * @example
+ * ```ts
+ * scaleOrOne(0); // 1
+ * ```
+ */
+function scaleOrOne(stretch: number | undefined): number {
+  return stretch === undefined || stretch === 0 ? 1 : stretch;
+}
+
+/**
+ * Tells whether a top holds the entity's rectangle with the numbers of its entry already, divided by the stretch:
+ * nothing to write.
+ *
+ * @param held - The area the top holds.
+ * @param entry - The entity's entry.
+ * @param sx - The divisor on x.
+ * @param sy - The divisor on y.
+ * @returns True when the area stands.
+ */
+function holdsArea(
+  held: PixiRectangle | undefined,
+  entry: AreaEntry,
+  sx: number,
+  sy: number
+): boolean {
+  const rect = entry.rect;
+
+  return (
+    rect !== undefined &&
+    held === rect &&
+    rect.x === entry.x / sx &&
+    rect.y === entry.y / sy &&
+    rect.width === entry.width / sx &&
+    rect.height === entry.height / sy
+  );
 }
 
 /**

@@ -156,12 +156,6 @@ export type PixiFilter = InstanceType<PixiModule["Filter"]>;
 
 /**
  * Pixi's filter system as a filter's `apply` receives it: what a stage or a stand-in draws through.
- *
- * @example
- * ```ts
- * // A stage of the frost draws into a pooled texture from inside the frost's own apply.
- * manager.applyFilter(gauss, last, target, true);
- * ```
  */
 export type PixiFilterManager = Parameters<PixiFilter["apply"]>[0];
 

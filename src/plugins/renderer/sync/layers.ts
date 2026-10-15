@@ -8,7 +8,7 @@ import type { Entity, LayerSort } from "../../world/types";
 import { Transform } from "../components";
 import type { PixiContainer } from "../types";
 import { detach } from "./pools";
-import { parentOf } from "./pose";
+import { isLeaving, parentOf } from "./pose";
 import type { LayerEntry, SyncCtx, SyncState, View } from "./types";
 
 /**
@@ -148,14 +148,16 @@ export function syncLayers(sctx: SyncCtx): boolean {
 }
 
 /**
- * Detaches the containers of the layers that are no longer declared and names the views that
- * were still drawn in them.
+ * Detaches the containers of the layers that are no longer declared and names the views that stay in them. The views
+ * that went with the scene are gone already (the pass drops the removed ones first), and a view that plays its exit
+ * (`Exiting`, a root that leaves with a motion) goes with it: neither is named.
  *
  * @param sctx - Domain context of the sync module.
  * @param next - The new table of layers.
  */
 function dropLeftLayers(sctx: SyncCtx, next: Map<string, LayerEntry>): void {
   const state = sctx.ctx.state.sync;
+  const ecs = sctx.ctx.deps.world.ecs;
   const stranded: Entity[] = [];
 
   for (const [name, entry] of state.layers) {
@@ -164,7 +166,7 @@ function dropLeftLayers(sctx: SyncCtx, next: Map<string, LayerEntry>): void {
     if (entry.container !== undefined) detach(entry.container);
 
     for (const [entity, view] of state.views) {
-      if (view.layer === name) stranded.push(entity);
+      if (view.layer === name && !isLeaving(ecs, entity)) stranded.push(entity);
     }
   }
 

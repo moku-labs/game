@@ -377,6 +377,55 @@ describe("overlays across the engine", () => {
     expect(turn()).toBeCloseTo(sampled ?? Number.NaN, 6);
   });
 
+  // Bug (A Memory Missing): whether the frost under the shop covers the screen was judged against the canvas, not the
+  // viewport frame. In a window wider than the frame the frost spans only the frame, the range no longer counted as
+  // blurred, and the glints under the still sheet wrote in every frame: the ward was drawn live under a resting shop.
+  it("holds the glints under the frosted shop in a window wider than the frame, as on the phone", async () => {
+    const sheets = await open();
+    const glint = findKey(sheets.app, "glintA") ?? 0;
+
+    await openBy(sheets, "shopButton");
+    await landAll(sheets);
+    await sheets.frames(20);
+    sheets.page.resize(1600, 844);
+    await sheets.frames(30);
+
+    expect(sheets.reports()).toMatchObject([{ phase: "shown", mode: "freeze", kept: true }]);
+    expect(sheets.app.renderer.sync.loopsHeld(glint)).toBe(true);
+    expect(await sheets.frames(60)).toBe(0);
+  });
+
+  // Bug (A Memory Missing, 125 of 125 frames drawn under a story card): blurred was measured only when the picture was
+  // taken. A range whose glints keep it moving is drawn live and never taken again, so a frost that came on after the
+  // take was never seen, the glints were never held, and the ward never rested under the sheet.
+  it("finds the frost that comes on under a shop whose glints keep the ward live, holds them, and lets the ward rest", async () => {
+    const sheets = await open();
+    const ecs = sheets.app.world.ecs;
+    const frost = findKey(sheets.app, "wardFrost") ?? 0;
+    const glint = findKey(sheets.app, "glintA") ?? 0;
+
+    ecs.set(frost, Blur, { enabled: false });
+    await sheets.frames(2);
+    await openBy(sheets, "shopButton");
+    await landAll(sheets);
+    await sheets.frames(10);
+
+    // A sharp ward whose glints move in every frame is drawn live (O8.4), its loops running.
+    expect(sheets.reports()).toMatchObject([{ phase: "shown", mode: "live", kept: false }]);
+    expect(sheets.app.renderer.sync.loopsHeld(glint)).toBe(false);
+
+    ecs.set(frost, Blur, { enabled: true });
+
+    let frames = 0;
+
+    for (; frames < 40 && sheets.reports()[0]?.kept !== true; frames += 1) await sheets.frame();
+
+    // Found blurred within a frame, then eight calm frames with the glints held, then the picture.
+    expect(frames).toBeLessThanOrEqual(12);
+    expect(sheets.app.renderer.sync.loopsHeld(glint)).toBe(true);
+    expect(await sheets.frames(60)).toBe(0);
+  });
+
   it("goes back to the live views when the sheet is gone, and the picture is freed", async () => {
     const sheets = await open();
 

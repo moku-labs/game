@@ -457,6 +457,23 @@ function noteStage2(record: KeptRecord, inputs: FilterSlotInputs): void {
 }
 
 /**
+ * Writes the canvas origin every placed filter of a stack reads (`keptOrigin`): the picture's origin while it is
+ * rendered into a picture, 0 while it is drawn live (`canvasPixel` then reads the canvas through `uOutputFrame` alone).
+ *
+ * @param slots - The record's slots; a slot without an origin is left alone.
+ * @param x - The origin's x, canvas px.
+ * @param y - The origin's y, canvas px.
+ */
+export function setOrigins(slots: readonly FilterSlot[], x: number, y: number): void {
+  for (const slot of slots) {
+    if (slot.origin !== undefined) {
+      slot.origin[0] = x;
+      slot.origin[1] = y;
+    }
+  }
+}
+
+/**
  * Stage 3, the filter output: the stand-in, carrying the record's filters, is rendered at `M3 = translate(Ps, Ps)`
  * into the output texture. A placed filter's origin gets the picture's canvas origin first, `O + Δ`; a local one
  * writes nothing.
@@ -485,15 +502,11 @@ export function renderStage3(
   const Ps = key[KEY.Ps] ?? 0;
 
   if (record.category === "placed") {
-    const x = (key[KEY.X0] ?? 0) - Ps + now.tx - (key[KEY.tx] ?? 0);
-    const y = (key[KEY.Y0] ?? 0) - Ps + now.ty - (key[KEY.ty] ?? 0);
-
-    for (const slot of record.slots) {
-      if (slot.origin !== undefined) {
-        slot.origin[0] = x;
-        slot.origin[1] = y;
-      }
-    }
+    setOrigins(
+      record.slots,
+      (key[KEY.X0] ?? 0) - Ps + now.tx - (key[KEY.tx] ?? 0),
+      (key[KEY.Y0] ?? 0) - Ps + now.ty - (key[KEY.ty] ?? 0)
+    );
   }
 
   matrices.m3.set(1, 0, 0, 1, Ps, Ps);

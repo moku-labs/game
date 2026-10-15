@@ -6,7 +6,7 @@ import type { PixiContainer, RendererCtx, ViewportModule } from "../types";
 import { fitFrame, referenceOf, scaleOf } from "./fit";
 import { measureMount, watchResize, watchSafeArea } from "./resize";
 import { clipInsets, clipToFrame, createSafeAreaProbes, readInsets } from "./safe-area";
-import type { Point, ViewportCtx, ViewportDeps, ViewportSize } from "./types";
+import type { Point, Rect, ViewportCtx, ViewportDeps, ViewportSize } from "./types";
 
 /**
  * Where the canvas sits in the window, read at call time.
@@ -197,6 +197,8 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
       layout();
 
       return true;
-    }
+    },
+
+    frame: (): Readonly<Rect> => state.frame
   };
 }

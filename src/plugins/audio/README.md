@@ -19,9 +19,10 @@ export const deliver = defineNode({
 export const boardScene = defineScene("board", { bundle: "board", music: "board.theme", layers: {}, projections: [] });
 
 // web/main.ts — the buses follow the committed player
+// `volumes` comes from the game's `defineGame` kit, so `player` is the game's Player.
 createApp({
   plugins: [...screen, audio, settingsFeature],
-  pluginConfigs: { audio: { volumes: player => player.settings.audio } }
+  pluginConfigs: { audio: { volumes: volumes(player => player.settings.audio) } }
 });
 ```
 

@@ -752,6 +752,35 @@ function* probesOf(ectx: EffectsCtx, pixi: PixiModule): Generator<WarmProbe> {
 }
 
 /**
+ * Hands one probe to `renderer.sync.filters.warm` and keeps it; a probe the renderer answers false for is destroyed.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param probe - The probe.
+ * @returns The renderer's answer: true once the probe was warmed, false when there is nothing to warm.
+ */
+function handProbe(ectx: EffectsCtx, probe: WarmProbe): Promise<boolean> {
+  const answer = ectx.deps.renderer.sync.filters.warm(probe.filter);
+
+  ectx.state.warm.probes.push(probe);
+  answer.then(warmed => {
+    if (!warmed) dropProbe(ectx, probe);
+  });
+
+  return answer;
+}
+
+/**
+ * The answer of the first probe if it is given already, `"pending"` while it is not. "Nothing to warm" is an answer
+ * already given; a warm-up answers frames later.
+ *
+ * @param answer - The renderer's answer for the first probe.
+ * @returns Resolves to the answer when it was settled, otherwise to `"pending"`.
+ */
+function answerNow(answer: Promise<boolean>): Promise<boolean | "pending"> {
+  return Promise.race([answer, Promise.resolve("pending" as const)]);
+}
+
+/**
  * Hands every probe to `renderer.sync.filters.warm`, once the checks of this run settled. The probes live until the app
  * stops (the renderer warms them again after a restore). A probe the renderer answers false for is destroyed: there is
  * nothing to warm, which it answers at once, so after a first answer of false no later probe is built.
@@ -763,26 +792,17 @@ function* probesOf(ectx: EffectsCtx, pixi: PixiModule): Generator<WarmProbe> {
  */
 async function handOver(ectx: EffectsCtx, pixi: PixiModule, run: number): Promise<void> {
   const { warm } = ectx.state;
-  let first = true;
 
   if (ectx.state.checks.run !== run || !warm.started) return;
 
-  for (const probe of probesOf(ectx, pixi)) {
-    const answer = ectx.deps.renderer.sync.filters.warm(probe.filter);
+  const probes = probesOf(ectx, pixi);
+  const first = probes.next();
 
-    warm.probes.push(probe);
-    answer.then(warmed => {
-      if (!warmed) dropProbe(ectx, probe);
-    });
+  if (first.done === true) return;
+  if ((await answerNow(handProbe(ectx, first.value))) === false) return;
+  if (ectx.state.checks.run !== run || !warm.started) return;
 
-    if (first) {
-      first = false;
-
-      // "Nothing to warm" is an answer already given; a warm-up answers frames later.
-      if ((await Promise.race([answer, Promise.resolve()])) === false) return;
-      if (ectx.state.checks.run !== run || !warm.started) return;
-    }
-  }
+  for (const probe of probes) handProbe(ectx, probe);
 }
 
 /**

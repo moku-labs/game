@@ -977,10 +977,45 @@ function writeStep(place: Place, step: FilterStep): boolean {
 }
 
 /**
+ * The place that draws one step: the place at its slot when it draws the step's stage, otherwise a
+ * place of its own (a `Filter` with its own uniform group) built in that slot, the old one retired.
+ *
+ * @param pixi - The module the renderer loaded.
+ * @param retired - The bodies to destroy after the frame.
+ * @param places - The places of the input, changed in place.
+ * @param at - The slot of the step.
+ * @param step - The step.
+ * @returns The place, and true in `built` when it was built for this step.
+ */
+function placeFor(
+  pixi: PixiModule,
+  retired: OursBody[],
+  places: Place[],
+  at: number,
+  step: FilterStep
+): { place: Place; built: boolean } {
+  const kept = places[at];
+
+  if (kept?.definition === step.stage.filter) return { place: kept, built: false };
+
+  if (kept !== undefined) retired.push(kept.body);
+
+  const place: Place = {
+    definition: step.stage.filter,
+    body: createOurs(pixi, step.stage.filter, PROBE_VALUE),
+    scale: step.scale
+  };
+
+  places[at] = place;
+
+  return { place, built: true };
+}
+
+/**
  * Walks the steps of one input with its places: a place that draws the step's stage is kept and
- * written, any other is retired and a place of its own (a `Filter` with its own uniform group) is
- * built; places past the steps are retired. A built or dropped place replaces the slot seam, so the
- * next slot list names the new stage filters.
+ * written, any other is retired and a place of its own is built; places past the steps are
+ * retired. A built or dropped place replaces the slot seam, so the next slot list names the new
+ * stage filters.
  *
  * @param pixi - The module the renderer loaded.
  * @param inputs - The chains of the instance.
@@ -999,19 +1034,9 @@ function placeSteps(
   let rebuilt = false;
 
   for (const [at, step] of steps.entries()) {
-    let place = places[at];
+    const { place, built } = placeFor(pixi, inputs.retired, places, at, step);
 
-    if (place?.definition !== step.stage.filter) {
-      if (place !== undefined) inputs.retired.push(place.body);
-
-      place = {
-        definition: step.stage.filter,
-        body: createOurs(pixi, step.stage.filter, PROBE_VALUE),
-        scale: step.scale
-      };
-      places[at] = place;
-      rebuilt = true;
-    }
+    if (built) rebuilt = true;
 
     if (writeStep(place, step)) changed = true;
 
