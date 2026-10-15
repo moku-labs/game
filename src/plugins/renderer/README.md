@@ -983,6 +983,17 @@ pixels. The canvas's resolution is used, also for a text inside a filter of anot
 which only a blurred text shows. A unit test runs Pixi's own `_updateDistanceField` and fails the day
 Pixi multiplies by the resolution itself: the engine's factor must then go.
 
+The scale of that edge is the text's world scale, read at the draw too (K5). Pixi scales the
+distance by the text's group transform, the text against its render group, which leaves out the
+group's own scale, and writes it only when the group's instructions are built. A kept picture
+renders its view as a render group of its own, so the label of a view at world scale 0.25 drew its
+glyph edges four times sharper in the picture than live, and a label whose view scaled since its
+instructions were built kept the edge of the old scale. The pipe names the text while Pixi's
+`addRenderable` and `updateRenderable` write the distance; the uniform keeps Pixi's distance per unit
+of that group scale and answers it times the text's world scale and the resolution at every upload.
+Live text whose render group is the stage draws the same pixels as before; a picture of it now
+equals the live frame.
+
 ### A cached group inside a filter
 
 A game's `Display` object may cache a group as a texture (`cacheAsTexture`). Pixi 8.22's

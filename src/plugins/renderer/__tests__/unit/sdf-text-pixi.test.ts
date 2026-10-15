@@ -264,3 +264,114 @@ describe("the edge width of distance-field text (PX1)", () => {
     expect(data[(distance?.offset ?? 0) / 4]).toBeCloseTo(11.24, 5);
   });
 });
+
+/** The renderer's pipe on a stub whose graphics pipe takes a text's proxy, so Pixi's own `updateRenderable` runs. */
+type DrawingPipe = {
+  getSdfShader(): InstanceType<typeof pixi.Shader>;
+  updateRenderable(text: unknown): void;
+};
+
+/**
+ * Builds the renderer's pipe on a renderer stub whose graphics pipe takes the text's proxy, so Pixi's own
+ * `updateRenderable` runs: it syncs the proxy and writes `uDistance` through `_updateDistanceField`.
+ *
+ * @param resolution - Device pixels per CSS pixel.
+ * @returns The pipe.
+ */
+function drawingPipe(resolution: number): DrawingPipe {
+  const Pipe = createSdfTextPipe(pixi);
+  const renderer = {
+    ...rendererOf("webgpu"),
+    resolution,
+    renderPipes: { graphics: { updateRenderable: (): void => undefined } }
+  };
+
+  return new Pipe(
+    renderer as unknown as ConstructorParameters<typeof Pipe>[0]
+  ) as unknown as DrawingPipe;
+}
+
+/**
+ * A view at a scale with one label in it, on a stage that is a render group: real Pixi containers whose transforms
+ * Pixi's own `updateRenderGroupTransforms` brings up to date, as a render does first. The label is laid out by the
+ * pipe: its proxy holds the shader the pipe made, and its font is in Pixi's cache (`distanceField.range` 4 at a
+ * `baseRenderedFontSize` of 32, the label at 32).
+ *
+ * @param pipe - The pipe.
+ * @param scale - The view's scale.
+ * @returns The view, the label, the update of every transform and the label's uniforms.
+ */
+function labelledView(pipe: DrawingPipe, scale: number) {
+  const shader = pipe.getSdfShader();
+  const stage = new pixi.Container();
+  const view = new pixi.Container();
+  const label = Object.assign(new pixi.Container(), {
+    _gpuData: { 1: { context: { customShader: shader } } },
+    _style: { fontFamily: "sdf-pin", fontSize: 32 }
+  });
+
+  pixi.Cache.set("sdf-pin-bitmap", {
+    baseRenderedFontSize: 32,
+    distanceField: { range: 4, type: "msdf" }
+  });
+  stage.enableRenderGroup();
+  view.scale.set(scale);
+  stage.addChild(view);
+  view.addChild(label);
+
+  /** Brings every transform up to date, the child groups' too. */
+  const update = (): void => {
+    if (stage.renderGroup !== null) pixi.updateRenderGroupTransforms(stage.renderGroup, true);
+  };
+
+  update();
+
+  return {
+    view,
+    label,
+    update,
+    uniforms: shader.resources.localUniforms.uniforms as { uDistance: number }
+  };
+}
+
+describe("the edge width of distance-field text in a render group (K5)", () => {
+  afterEach(() => {
+    pixi.Cache.remove("sdf-pin-bitmap");
+  });
+
+  // Bug: a kept picture renders its view as a render group of its own (Pixi's `render` makes its root one), so the
+  // label's group transform leaves out the view's world scale 0.25 and the picture drew its glyph edges four times
+  // sharper than the live frame (merge-game's Play button: `renderer:stale-picture`, 844 pixels).
+  it("draws a label inside its view's picture with the edge width it has live", () => {
+    const pipe = drawingPipe(1);
+    const scene = labelledView(pipe, 0.25);
+
+    pipe.updateRenderable(scene.label);
+
+    const live = scene.uniforms.uDistance;
+
+    scene.view.enableRenderGroup();
+    scene.update();
+    pipe.updateRenderable(scene.label);
+
+    expect(live).toBeCloseTo(1, 10);
+    expect(scene.uniforms.uDistance).toBeCloseTo(1, 10);
+  });
+
+  // Bug: Pixi writes the distance only when the group's instructions are built, so a label whose view scaled since
+  // (a picture retaken after a scale, a popup that grew) drew the edge of the old scale while the live frame, rebuilt,
+  // drew the new one.
+  it("follows the label's world scale at each draw, without Pixi writing the distance again", () => {
+    const pipe = drawingPipe(2);
+    const scene = labelledView(pipe, 0.5);
+
+    pipe.updateRenderable(scene.label);
+
+    expect(scene.uniforms.uDistance).toBeCloseTo(4, 10);
+
+    scene.view.scale.set(0.75);
+    scene.update();
+
+    expect(scene.uniforms.uDistance).toBeCloseTo(6, 10);
+  });
+});
