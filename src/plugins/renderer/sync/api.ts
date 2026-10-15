@@ -5,6 +5,7 @@
 import { Layer, Order } from "../../world/ecs/define";
 import type { ComponentHandle, Entity } from "../../world/types";
 import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../components";
+import type { Unseen } from "../demand/types";
 import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { provideDisplay, updateAdapterView } from "./adapters";
 import { boundsOf, hitBoxOf, layerOf } from "./bounds";
@@ -73,6 +74,55 @@ function copyOf(entities: ReadonlySet<Entity>): Set<Entity> {
  */
 function emptyEntitySet(): Set<Entity> {
   return new Set();
+}
+
+/**
+ * Where the walk of `shown` stopped for an entity's view, walked once between two sync passes: an entity with several
+ * endless loops asks once a frame (spec 26 R1.7.3). Nothing is allocated once the map has grown.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity a loop is about to write.
+ * @returns Where the walk stopped; `"other"` while inert and for an entity without a view.
+ */
+function unseenOf(sctx: SyncCtx, entity: Entity): Unseen {
+  const state = sctx.ctx.state.sync;
+
+  if (state.root === undefined || !state.views.has(entity)) return "other";
+
+  const known = state.held.get(entity);
+
+  if (known !== undefined) return known;
+
+  const answer = sctx.deps.demand.unseenBy(entity);
+
+  state.held.set(entity, answer);
+
+  return answer;
+}
+
+/**
+ * The unseen cases of `loopsHeld` (spec 26 R1.7.1), asked after the overlay cases answered false: a view under a view
+ * at alpha 0 always holds; the view's own alpha 0 holds unless the loop writes its alpha; a leaf off the screen holds
+ * unless the loop writes its place. Every other stop holds nothing: an empty shape's own loop may be what fills it,
+ * and a kept view is still shown through its quad.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity a loop is about to write.
+ * @param reveals - What the loop writes that could show the view again.
+ * @returns True when the write would change nothing the player can see.
+ */
+function unseenHolds(
+  sctx: SyncCtx,
+  entity: Entity,
+  reveals: "alpha" | "place" | "both" | undefined
+): boolean {
+  const unseen = unseenOf(sctx, entity);
+
+  if (unseen === "alpha-above") return true;
+  if (unseen === "alpha-own") return reveals !== "alpha" && reveals !== "both";
+  if (unseen === "off-screen") return reveals !== "place" && reveals !== "both";
+
+  return false;
 }
 
 /**
@@ -363,6 +413,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    * view.
    */
   const pass = (): void => {
+    // The pass may change the tree: the unseen walks of the loops are taken again in the next frame.
+    state.held.clear();
+
     for (const entity of state.removed) {
       guard(entity, () => dropView(sctx, entity));
       forgetLeft(state, ctx.deps.world.ecs, entity);
@@ -376,7 +429,11 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
       if (!state.views.has(entity)) forgetLeft(state, ctx.deps.world.ecs, entity);
     }
 
-    if (syncLayers(sctx)) deps.demand.whole("layers");
+    // A new layer list is the renderer's own signal of a scene switch: the frame is drawn, the pool trimmed later.
+    if (syncLayers(sctx)) {
+      deps.demand.whole("layers");
+      deps.host.sceneChanged();
+    }
 
     const built = buildParentFirst(takeAdded());
 
@@ -396,6 +453,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     deps.kept.reset();
     // The dims and the range go with the tree; the overlays are found again in the new one (spec 22 O5.6).
     forgetOverlays(state);
+    state.held.clear();
 
     for (const view of state.views.values()) {
       state.viewOfTop.delete(view.wrapper ?? view.object);
@@ -547,7 +605,16 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     drainOverlayEvents: (monitor: OverlayEventSink): void => drainOverlayEvents(sctx, monitor),
 
-    loopsHeld: (entity: Entity): boolean => loopsHeld(sctx, entity),
+    loopsHeld: (entity: Entity, reveals?: "alpha" | "place" | "both"): boolean =>
+      loopsHeld(sctx, entity) || unseenHolds(sctx, entity, reveals),
+
+    takeRedraws: (): number => {
+      const redraws = state.redraws;
+
+      state.redraws = 0;
+
+      return redraws;
+    },
 
     counts: (): SyncCounts => ({
       views: state.views.size,

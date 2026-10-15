@@ -1,6 +1,7 @@
 /**
  * @file renderer/host — type definitions: the one Pixi application, its backend and its listeners.
  */
+import type { PoolTrimDetail } from "../monitor/log-types";
 import type {
   PixiApplication,
   PixiContainer,
@@ -30,6 +31,32 @@ export type ResolutionState = {
  * A listener of a resolution change: what Pixi drew at, what it draws at now, and why.
  */
 export type ResolutionListener = (from: number, to: number, reason: ResolutionReason) => void;
+
+/**
+ * Why the pool is trimmed: a still screen, a scene change `restMs` ago, a pause. Not public.
+ */
+export type TrimReason = PoolTrimDetail["reason"];
+
+/**
+ * A listener of a pool trim: why, and the MiB it freed (rounded to two decimals). The monitor of an agent build
+ * registers one to write the `pool-trim` event line.
+ */
+export type TrimListener = (reason: TrimReason, freedMb: number) => void;
+
+/**
+ * The pool trim of C14: when the screen last drew, the scene change no trim has followed yet, and the bytes of the
+ * render targets right after the last trim. Not public.
+ */
+export type PoolState = {
+  /** Clock ms of the last drawn frame; `undefined` before the first. */
+  lastDrawnAt: number | undefined;
+  /** Clock ms of a scene change no trim has followed yet. */
+  sceneAt: number | undefined;
+  /** A trim ran (or was judged not worth it) since the last drawn frame: one per rest. */
+  restDone: boolean;
+  /** Render-target bytes right after the last trim; 0 at start. Growth is measured from here. */
+  baseline: number;
+};
 
 /**
  * The engine's own WebGPU adapter and device of an agent build, handed to Pixi as `webgpu.gpu`.
@@ -84,6 +111,10 @@ export type HostState = {
   kept: WeakSet<object>;
   /** A pixel read of the oracle failed and was logged: the next failures stay quiet. */
   pixelsFailed: boolean;
+  /** The pool trim of C14. */
+  pool: PoolState;
+  /** The trim listeners: the monitor's, in an agent build. Emptied by `stopHost`. */
+  onTrim: TrimListener[];
 };
 
 /**
@@ -407,4 +438,36 @@ export type HostInternal = {
    * @returns Resolves when the application is up, or when the plugin decided to stay inert.
    */
   init(): Promise<void>;
+
+  /**
+   * The trim policy, once per frame after the frame closed (`host.render()` returned): a still screen of
+   * `restMs` or a scene change `restMs` ago trims the pool when the render targets grew by `aboveMb` since the last
+   * trim. Allocation-free on a frame where nothing is due; a no-op with `poolTrim: false` and while nothing draws.
+   *
+   * @param drawn - True when the frame was drawn.
+   */
+  afterFrame(drawn: boolean): void;
+
+  /**
+   * Notes a scene change: the policy trims `restMs` after it; a later change moves the moment.
+   */
+  sceneChanged(): void;
+
+  /**
+   * Gives back every idle render target of Pixi's pool now, with Pixi's public `TexturePool.clear(true)`: a texture
+   * handed out and not returned survives and is destroyed when it comes back; a kept picture is never in the pool.
+   * The new baseline is what the targets hold after it. Never call it inside a Pixi render call.
+   *
+   * @param reason - Why: a rest, a scene change, a pause.
+   * @returns The bytes of the render targets it freed; 0 while nothing draws.
+   */
+  trimPool(reason: TrimReason): number;
+
+  /**
+   * Subscribes to the trims (the monitor of an agent build writes the `pool-trim` event line). The list is emptied by
+   * `stopHost`.
+   *
+   * @param fn - Called after every trim with the reason and the MiB freed.
+   */
+  onTrim(fn: TrimListener): void;
 };

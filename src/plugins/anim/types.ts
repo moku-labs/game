@@ -319,9 +319,10 @@ export type State = {
   offFrames: Array<() => void>;
   /**
    * The renderer's `sync.loopsHeld`, bound in `onStart`: an endless loop of an entity it answers true for writes
-   * nothing while its clock runs on (spec 22 O9). `undefined` before the start and after the stop: nothing is held.
+   * nothing while its clock runs on (spec 22 O9), told what the loop reveals (spec 26 R1.7). `undefined` before the
+   * start and after the stop: nothing is held.
    */
-  loopsHeld: ((entity: Entity) => boolean) | undefined;
+  loopsHeld: ((entity: Entity, reveals?: "alpha" | "place" | "both") => boolean) | undefined;
 };
 
 /**

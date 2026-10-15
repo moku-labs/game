@@ -341,14 +341,14 @@ export type Tokens = {
 /**
  * styles module state: the flags of the frame and the viewport they were read from.
  */
-export type StylesState = { flags: WhenFlags; viewport: ViewportSize | undefined };
+export type StylesState = { flags: WhenFlags; viewport: Readonly<ViewportSize> | undefined };
 
 /**
  * styles module shape, injected into `layout` and `jsx`. Nothing here is public.
  */
 export type StylesModule = {
-  flagsOf(viewport: ViewportSize): WhenFlags;
+  flagsOf(viewport: Readonly<ViewportSize>): WhenFlags;
   resolveElement(style: Style | undefined, is: IsFlags): ResolvedStyle;
-  viewport(): ViewportSize | undefined;
-  useViewport(viewport: ViewportSize): boolean;
+  viewport(): Readonly<ViewportSize> | undefined;
+  useViewport(viewport: Readonly<ViewportSize>): boolean;
 };

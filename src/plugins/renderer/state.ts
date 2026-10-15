@@ -13,13 +13,61 @@ import { createViewportState } from "./viewport/state";
 const RING_FRAMES = { min: 64, max: 16_384 } as const;
 
 /**
+ * Tells a finite number of at least 0 from anything else a config can hold.
+ *
+ * @param value - The config value.
+ * @returns True for a finite number `>= 0`.
+ * @example
+ * ```ts
+ * isCount(0); // true
+ * ```
+ */
+function isCount(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * Checks the pool trim of the config: `false`, or an object of two numbers of at least 0.
+ *
+ * @param poolTrim - What the config holds.
+ * @throws {Error} When it is neither `false` nor an object, or `restMs` or `aboveMb` is not a
+ *   finite number of at least 0.
+ */
+function checkPoolTrim(poolTrim: unknown): void {
+  if (poolTrim === false) return;
+
+  if (typeof poolTrim !== "object" || poolTrim === null) {
+    throw new Error(
+      `[game] renderer.poolTrim is ${String(poolTrim)}.\n  Give { restMs, aboveMb } or false.`
+    );
+  }
+
+  const restMs = "restMs" in poolTrim ? poolTrim.restMs : undefined;
+  const aboveMb = "aboveMb" in poolTrim ? poolTrim.aboveMb : undefined;
+
+  if (!isCount(restMs)) {
+    throw new Error(
+      `[game] renderer.poolTrim.restMs is ${String(restMs)}.\n` +
+        "  Give the clock milliseconds of a still screen, 0 or more."
+    );
+  }
+
+  if (!isCount(aboveMb)) {
+    throw new Error(
+      `[game] renderer.poolTrim.aboveMb is ${String(aboveMb)}.\n` +
+        "  Give the MiB the targets must grow by, 0 or more."
+    );
+  }
+}
+
+/**
  * Checks the numbers of the config a game can get wrong, at `createApp`, in every build: the
- * resolution cap, the performance monitor and the budget of the kept pictures.
+ * resolution cap, the pool trim, the performance monitor and the budget of the kept pictures.
  *
  * @param config - The resolved plugin config.
- * @throws {Error} When `maxResolution` is not a number above 0, `monitor.budgetMs` is neither
- *   `"rate"` nor a number above 0, `monitor.frames` is not a whole number from 64 to 16384, or
- *   `keptMb` is not a finite number of at least 0.
+ * @throws {Error} When `maxResolution` is not a number above 0, `poolTrim` fails its check,
+ *   `monitor.budgetMs` is neither `"rate"` nor a number above 0, `monitor.frames` is not a whole
+ *   number from 64 to 16384, or `keptMb` is not a finite number of at least 0.
  */
 function checkConfig(config: Readonly<Config>): void {
   const { maxResolution, keptMb } = config;
@@ -28,6 +76,8 @@ function checkConfig(config: Readonly<Config>): void {
   if (!Number.isFinite(maxResolution) || maxResolution <= 0) {
     throw new Error(`[game] renderer.maxResolution is ${maxResolution}.\n  Give a number above 0.`);
   }
+
+  checkPoolTrim(config.poolTrim);
 
   if (budgetMs !== "rate" && !(Number.isFinite(budgetMs) && budgetMs > 0)) {
     throw new Error(

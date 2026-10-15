@@ -22,10 +22,10 @@ import type {
   PixiTexture,
   Point
 } from "../types";
-import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
+import { adaptersOn, clearAdapters, createAdapterObject, writeAdapterAlpha } from "./adapters";
 import { applyFilters, clearFilters, filtersOf, moveFilters } from "./filters";
 import { clearFonts } from "./fonts";
-import { clearHidden, writeRenderable } from "./hidden";
+import { clearHidden, setHidden, writeRenderable } from "./hidden";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
 import { bordersOf, drawOutline, type OutlineShape } from "./outline";
@@ -37,6 +37,7 @@ import {
   detach,
   dropMask,
   dropOutline,
+  isGraphics,
   isNineSlice,
   isSprite,
   poolKeyOf,
@@ -61,6 +62,7 @@ import type {
   ClipDrawn,
   DisplayEntry,
   DrawnShape,
+  HitBox,
   SyncCtx,
   SyncState,
   View,
@@ -84,6 +86,9 @@ type BuiltObject = { object: PixiContainer; value: Readonly<object> | undefined 
 
 /** A point of Pixi that `sync` writes: a position, a scale, a pivot, an anchor. */
 type WritablePoint = { x: number; y: number; set(x: number, y?: number): void };
+
+/** The tint that leaves a colour as it is: a painted shape's, and the white a tinted shape's path is drawn in. */
+const WHITE = 0xff_ff_ff;
 
 /**
  * Marks an entity before a write that changes what Pixi holds for its view: the demand module judges the view as it
@@ -142,16 +147,6 @@ function isDisplayObject(value: unknown): value is PixiContainer {
   return (
     typeof value === "object" && value !== null && "addChild" in value && "getLocalBounds" in value
   );
-}
-
-/**
- * Tells whether a display object draws paths, so a `Shape` can be written onto it.
- *
- * @param object - The display object.
- * @returns True for a graphics object.
- */
-function isGraphics(object: PixiContainer): object is PixiGraphics {
-  return "roundRect" in object;
 }
 
 /**
@@ -353,7 +348,9 @@ function ownsAlpha(view: View): boolean {
  * Writes the alpha of a built-in visual. It fades the entity's whole subtree: on a view with a
  * wrapper it goes on the wrapper, over the visual and the children, and the visual inside stays
  * at 1, so the alpha is applied once. A view without a wrapper keeps it on its object. Only a
- * value that differs from what Pixi holds is written, and the entity is marked before.
+ * value that differs from what Pixi holds is written, and the entity is marked before. A view
+ * drawn at alpha 0, its HUD factor counted, is not drawn at all (spec 26 B9): it leaves Pixi's
+ * build, its bounds and the passes of its filters, with its subtree.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -374,6 +371,8 @@ function applyAlpha(sctx: SyncCtx, entity: Entity, view: View, alpha: number): v
     markView(sctx, entity);
     view.object.alpha = 1;
   }
+
+  setHidden(sctx, entity, view, "alpha", drawn <= 0);
 }
 
 /**
@@ -418,6 +417,7 @@ export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: numb
   const wrapper = ensureWrapper(sctx, entity);
 
   if (wrapper !== undefined && wrapper.alpha !== factor) wrapper.alpha = factor;
+  if (view.kind === "adapter") writeAdapterAlpha(sctx, entity, view);
 }
 
 /**
@@ -496,6 +496,7 @@ function applyOutline(
 
   markView(sctx, shape.entity);
   drawOutline(pixi, wrapper, view, shape);
+  sctx.ctx.state.sync.redraws += 1;
 }
 
 /**
@@ -655,6 +656,7 @@ function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<Sh
   if (view.mask === undefined || !sameClip(view.clipDrawn, value)) {
     markView(sctx, entity);
     drawShapePath(mask, value, 1);
+    sctx.ctx.state.sync.redraws += 1;
     view.clipDrawn = copyClip(view.clipDrawn, value);
   }
 
@@ -710,19 +712,25 @@ function copyClip(drawn: ClipDrawn | undefined, value: Readonly<ShapeValue>): Cl
 
 /**
  * Tells whether a shape's graphics was drawn with this value already: the path, the fill and the
- * stroke. Its alpha and its clip are written apart.
+ * stroke. Its alpha, its clip and the fill of a tinted shape (its tint) are written apart.
  *
  * @param drawn - What the graphics was last drawn with.
  * @param value - The shape value now.
+ * @param tinted - True when the shape is drawn white and coloured by its tint.
  * @returns True when nothing has to be drawn.
  */
-function sameShape(drawn: DrawnShape | undefined, value: Readonly<ShapeValue>): boolean {
+function sameShape(
+  drawn: DrawnShape | undefined,
+  value: Readonly<ShapeValue>,
+  tinted: boolean
+): boolean {
   return (
     drawn !== undefined &&
+    drawn.tinted === tinted &&
+    (tinted || drawn.fill === value.fill) &&
     drawn.kind === value.kind &&
     drawn.w === value.w &&
     drawn.h === value.h &&
-    drawn.fill === value.fill &&
     drawn.fillAlpha === value.fillAlpha &&
     drawn.radius === value.radius &&
     drawn.stroke === value.stroke &&
@@ -737,17 +745,23 @@ function sameShape(drawn: DrawnShape | undefined, value: Readonly<ShapeValue>): 
  *
  * @param drawn - The copy so far.
  * @param value - The shape value it was drawn from.
+ * @param tinted - True when it was drawn white, coloured by its tint.
  * @returns The copy.
  */
-function copyShape(drawn: DrawnShape | undefined, value: Readonly<ShapeValue>): DrawnShape {
+function copyShape(
+  drawn: DrawnShape | undefined,
+  value: Readonly<ShapeValue>,
+  tinted: boolean
+): DrawnShape {
   if (drawn === undefined) {
     const { kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash } = value;
 
-    return { kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash };
+    return { tinted, kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash };
   }
 
   const copy = drawn;
 
+  copy.tinted = tinted;
   copy.kind = value.kind;
   copy.w = value.w;
   copy.h = value.h;
@@ -762,9 +776,75 @@ function copyShape(drawn: DrawnShape | undefined, value: Readonly<ShapeValue>): 
 }
 
 /**
+ * Tells whether a shape draws nothing: no stroke, and no fill alpha or no area. Pure.
+ *
+ * @param value - The shape value.
+ * @returns True for a shape whose `Graphics` would hold no instruction.
+ * @example
+ * ```ts
+ * isEmptyShape({ ...Shape.defaults, w: 1080, h: 200, fillAlpha: 0 }); // true
+ * ```
+ */
+function isEmptyShape(value: Readonly<ShapeValue>): boolean {
+  return value.strokeWidth <= 0 && (value.fillAlpha <= 0 || value.w <= 0 || value.h <= 0);
+}
+
+/**
+ * Draws the path of a shape that is not empty, only when it differs from the one drawn last, and writes its tint. A
+ * fill-only shape is drawn white and coloured by its tint (spec 26 R2.1): a colour change rewrites the tint, never the
+ * path, so Pixi rebuilds no instruction list. A shape with a stroke is painted in its own colours under a white tint.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param object - Its graphics.
+ * @param value - The shape value.
+ */
+function drawShape(
+  sctx: SyncCtx,
+  entity: Entity,
+  view: View,
+  object: PixiGraphics,
+  value: Readonly<ShapeValue>
+): void {
+  const tinted = value.strokeWidth <= 0;
+
+  if (!sameShape(view.drawn, value, tinted)) {
+    markView(sctx, entity);
+    drawShapePath(object, value, value.fillAlpha, tinted ? WHITE : value.fill);
+    strokeShape(object, value);
+    sctx.ctx.state.sync.redraws += 1;
+    view.drawn = copyShape(view.drawn, value, tinted);
+  }
+
+  const tint = tinted ? value.fill : WHITE;
+
+  if (object.tint !== tint) {
+    markView(sctx, entity);
+    object.tint = tint;
+  }
+}
+
+/**
+ * Writes the box of a shape into the hit box its view owns: a changed shape allocates nothing.
+ *
+ * @param box - The hit box of the view.
+ * @param width - The shape's width.
+ * @param height - The shape's height.
+ */
+function writeHitBox(box: HitBox, width: number, height: number): void {
+  box.x = 0;
+  box.y = 0;
+  box.width = width;
+  box.height = height;
+}
+
+/**
  * Writes the `Shape` component onto its graphics object and recomputes the hit box. The path is
  * drawn here and nowhere else, and only when it differs from the one drawn last, so a still shape
- * costs nothing per frame and an alpha-only change draws no path.
+ * costs nothing per frame and an alpha-only change draws no path. A shape that draws nothing is not
+ * drawn at all (spec 26 B7): its visual leaves Pixi's build and its bounds, while its children, its
+ * clip mask and its hit box stay.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -776,15 +856,13 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (value === undefined || !isGraphics(object)) return;
 
-  if (!sameShape(view.drawn, value)) {
-    markView(sctx, entity);
-    drawShapePath(object, value, value.fillAlpha);
-    strokeShape(object, value);
-    view.drawn = copyShape(view.drawn, value);
-  }
+  const empty = isEmptyShape(value);
+
+  setHidden(sctx, entity, view, "empty", empty);
+  if (!empty) drawShape(sctx, entity, view, object, value);
 
   applyAlpha(sctx, entity, view, value.alpha);
-  view.hitBox = { x: 0, y: 0, width: value.w, height: value.h };
+  writeHitBox(view.hitBox, value.w, value.h);
   applyClip(sctx, entity, view, value);
 }
 
@@ -1131,6 +1209,8 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
   if (visual.textureKey !== "") trackKey(state, entity, visual.textureKey);
 
   writeVisual(sctx, entity, view);
+  // An adapter's object built at alpha 0 is not drawn (B9); the built-in visuals do it in `applyAlpha`.
+  if (view.kind === "adapter") writeAdapterAlpha(sctx, entity, view);
   applyTransform(sctx, entity, view);
   attach(sctx, entity, view);
   const slots = filtersOf(state, entity);
@@ -1271,6 +1351,8 @@ export function stopSync(state: SyncState): void {
   state.reparented.clear();
   state.providers.length = 0;
   state.filters.clear();
+  state.held.clear();
+  state.redraws = 0;
 
   clearLayers(state);
   destroyPools(state);

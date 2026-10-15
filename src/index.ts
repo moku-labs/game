@@ -38,6 +38,7 @@
  * | renderer | background | 0x000000 |
  * | renderer | antialias | false |
  * | renderer | maxResolution | 2 |
+ * | renderer | poolTrim | { restMs: 1000, aboveMb: 16 }, the idle render targets of Pixi's pool go after a second at rest, a second after a scene change and on a pause; false keeps them |
  * | renderer | preference | "webgpu", WebGL is Pixi's fallback |
  * | renderer | aspect | { min: 4/3, max: 21/9 } |
  * | renderer | poolLimit | 256 |
@@ -315,7 +316,9 @@ export type {
   PerfSampleLine,
   PerfSpikeLine,
   PerfStartupLine,
-  PerfThermalLine
+  PerfThermalLine,
+  PoolTrim,
+  PoolTrimDetail
 } from "./plugins/renderer/types";
 // input: gestures as data
 export {

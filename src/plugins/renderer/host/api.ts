@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import { liveDevice, liveGl, watchDevice } from "./device";
 import { createApplication, destroyApplication, resolveMount } from "./init";
+import { afterFrame, sceneChanged, trimPool } from "./pool";
 import { extractStage, readPixels, textureUsage } from "./readback";
 import {
   askResolution,
@@ -22,7 +23,7 @@ import {
   targetResolution,
   watchPixelRatio
 } from "./resolution";
-import type { HostDeps, ResolutionListener, TextureUsage } from "./types";
+import type { HostDeps, ResolutionListener, TextureUsage, TrimListener, TrimReason } from "./types";
 import { showUnsupported } from "./unsupported";
 import { watchVisibility } from "./visibility";
 
@@ -169,6 +170,16 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       const app = state.app;
 
       return state.ready && app !== undefined ? app.screen : undefined;
+    },
+
+    afterFrame: (drawn: boolean): void => afterFrame(ctx, drawn),
+
+    sceneChanged: (): void => sceneChanged(ctx),
+
+    trimPool: (reason: TrimReason): number => trimPool(ctx, reason),
+
+    onTrim: (fn: TrimListener): void => {
+      state.onTrim.push(fn);
     },
 
     init: async (): Promise<void> => {

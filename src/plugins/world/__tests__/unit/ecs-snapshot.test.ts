@@ -82,4 +82,25 @@ describe("ecs snapshot", () => {
 
     expect(world.api.ecs.snapshot().resources).toEqual({ Pointer: { x: 0, down: true } });
   });
+
+  // A reader holding two snapshots saw "nothing changed" while anim loops wrote every frame: the
+  // snapshot handed out the stores' live objects (found in A Memory Missing's resting ward).
+  it("keeps the values of its moment: later writes do not reach it, and it writes nothing back", () => {
+    const world = createMockWorld();
+    const entity = world.api.ecs.spawn(test, [Position({ x: 1 })]);
+
+    world.api.ecs.resource(Pointer).x = 4;
+
+    const before = world.api.ecs.snapshot();
+
+    world.api.ecs.set(entity, Position, { x: 2 });
+    world.api.ecs.resource(Pointer).x = 5;
+
+    expect(before.entities[0]?.components).toEqual({ Position: { x: 1, y: 0 } });
+    expect(before.resources).toEqual({ Pointer: { x: 4, down: false } });
+
+    (before.entities[0]?.components.Position as { x: number }).x = 99;
+
+    expect(world.api.ecs.get(entity, Position)).toEqual({ x: 2, y: 0 });
+  });
 });

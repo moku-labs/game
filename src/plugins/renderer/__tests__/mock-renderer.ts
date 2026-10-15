@@ -234,6 +234,7 @@ export function createMockRenderer(
     background: 0x00_00_00,
     antialias: false,
     maxResolution: 2,
+    poolTrim: { restMs: 1000, aboveMb: 16 },
     preference: "webgpu",
     aspect: { min: 4 / 3, max: 21 / 9 },
     poolLimit: 256,

@@ -6,6 +6,7 @@ import { createSinks } from "../../monitor/state";
 import { COUNT, type MonitorSinks } from "../../monitor/types";
 import {
   createFakePixi,
+  FakeBatcherPipe,
   FakeFilterSystem,
   FakeGlTextureSystem,
   FakeGpuBatchAdaptor,
@@ -14,7 +15,9 @@ import {
   FakeGpuTextureSystem,
   type FakeRenderTarget,
   fakeExtensions,
+  WEBGL_PIPES,
   WEBGL_SYSTEM,
+  WEBGPU_PIPES,
   WEBGPU_PIPES_ADAPTOR,
   WEBGPU_SYSTEM
 } from "../fake-pixi";
@@ -134,11 +137,31 @@ describe("the counting texture systems", () => {
   });
 });
 
+describe("the counting batcher pipe", () => {
+  it("counts every instruction rebuild in the window, and in the frame's counter only inside a frame", () => {
+    const sinks = createSinks();
+    const classes = createCountingClasses(createFakePixi().module, sinks);
+    const Pipe = classes.batcher as unknown as new () => FakeBatcherPipe;
+    const pipe = new Pipe();
+
+    pipe.buildStart({});
+    sinks.inFrame = true;
+    pipe.buildStart({});
+    pipe.buildStart({});
+
+    expect(pipe.builds).toBe(3);
+    expect(sinks.rebuildsWindow).toBe(3);
+    expect(sinks.counts[COUNT.rebuilds]).toBe(2);
+  });
+});
+
 describe("installCounting", () => {
-  it("swaps the six classes for their counting subclasses under the same names, and swaps back", () => {
+  it("swaps the seven classes for their counting subclasses under the same names, and swaps back", () => {
     const pixi = createFakePixi();
     const off = installCounting(pixi.module, createSinks());
     const named = [
+      [WEBGPU_PIPES, "batch", FakeBatcherPipe],
+      [WEBGL_PIPES, "batch", FakeBatcherPipe],
       [WEBGPU_PIPES_ADAPTOR, "batch", FakeGpuBatchAdaptor],
       [WEBGPU_PIPES_ADAPTOR, "graphics", FakeGpuGraphicsAdaptor],
       [WEBGPU_SYSTEM, "encoder", FakeGpuEncoderSystem],

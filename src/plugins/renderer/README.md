@@ -121,7 +121,7 @@ the monitor writes it into the log, and B1, F12, C14 and PX1 subscribe in later 
 |---|---|
 | `toReference(clientX, clientY)` | `(client − canvas rect − frame offset) / scale`. The rectangle is read at call time. Inert: the input unchanged. |
 | `toScreen({ x, y })` | The inverse: reference units to client CSS pixels, `canvas rect + frame offset + point × scale`. The `game.locate` source places an element or a view on the page with it. Inert: the same numbers, a fresh object. |
-| `size()` | Reference units, a fresh object. `scale = min(short / referenceSide, (long − safe insets) / referenceLong)`: the short side is at least `referenceSide` and grows on a wide screen, the long side inside the safe area is at least `referenceLong`. Inert: the `aspect.min` frame, `scale: 1`, zero safe area. |
+| `size()` | Reference units, one frozen object, replaced only when the frame changes (a resize, a rotation, new insets, a new scale); compare with `===`, and never write into it: a write throws. A layout that gives the same frame (the observer's first echo, a resolution change with the same CSS size) keeps the object. `scale = min(short / referenceSide, (long − safe insets) / referenceLong)`: the short side is at least `referenceSide` and grows on a wide screen, the long side inside the safe area is at least `referenceLong`. Inert: the `aspect.min` frame, `scale: 1`, zero safe area, one frozen object too. |
 
 ### Safe area
 
@@ -176,7 +176,7 @@ internal markup: select them by nothing, set the properties instead.
 | `fonts.install(key, fnt, texture)` | Installs a BMFont file (text, XML or JSON) and its page texture under an asset key. Throws while the renderer does not draw. |
 | `fonts.installed(key)` | Whether that font key is installed in this application. |
 | `displayOf(entity)` | The Pixi object of the entity, for debugging. |
-| `loopsHeld(entity)` | The seam of `anim`: whether an endless loop of the entity writes nothing now (its view under an opaque cover or in a blurred kept picture of an overlay). Its clock runs on. Inert, and without a view: `false`. |
+| `loopsHeld(entity, reveals?)` | The seam of `anim`: whether an endless loop of the entity writes nothing now: its view lies under an opaque cover or in a blurred kept picture of an overlay, or nobody sees it (it or a view above it is at alpha 0, or it is a leaf wholly off the screen). `reveals` says what the loop writes that could show the view again (`"alpha"`, `"place"`, `"both"`): such a loop is not held for its own alpha 0 or for being off the screen. Its clock runs on. Inert, and without a view: `false`. See "What is not drawn". |
 | `debug.overlays()` | Every overlay, bottom first: `{ entity, label, phase, mode, level, range, kept }`, a fresh array; `[]` with none. |
 | `debug.nineSlice(on)` | Outlines every nine-slice (next pass). A nine-slice with its own `debug: true` keeps its outline while the switch is off. Works while inert. |
 | `debug.state()` | `{ nineSlice }`, a fresh object. |
@@ -218,7 +218,7 @@ the same frame (a `ui` element that trades its shape for a nine-slice keeps its 
 
 | Method | Behaviour |
 |---|---|
-| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls` in a dev or debug build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
+| `stats()` | `{ fps, drawn, frameMs, textures, textureMb, textureMbSplit, views, pooled, renderPasses, renderPassesMax, kept }`, plus `drawCalls`, `redraws` and `rebuilds` in a dev or debug build, a fresh object. Inert: all 0, `kept` `{ pictures: 0, mb: 0, retakes: 0 }`. |
 | `monitor.stream(listener)` | Agent builds: the performance log, line by line (see "The log"). The unsubscribe; a second call does nothing. Without the flag the listener is never called. |
 | `monitor.frames()` | The frame ring: typed-array columns written in place, the same object every call; `ring.read(into, cursor)` copies the new frames into the caller's arrays without allocating. Capacity 0 without the flag. |
 | `monitor.mark(label)`, `monitor.event(name, detail?)` | Agent builds: a mark, an event at the frame it happens in (`scene`, `bundle`, `switch`, the editor's `command`, `recorder`, `devtools`, …). Nothing otherwise. |
@@ -236,6 +236,12 @@ the render targets Pixi draws into, and the pictures the engine keeps (`host.kee
 - `drawn` counts the frames really drawn over the same second: equal to `fps` without `onDemand`,
   0 on a screen at rest with it. `drawCalls` is the count of the last drawn frame: a skipped frame
   keeps it.
+- `redraws` (dev and debug builds) counts the `Graphics` paths the engine drew per second over the same window:
+  shapes, clip masks, nine-slice outlines. A still screen draws none; a fill-only shape whose colour changes draws
+  none (its colour is a tint). `rebuilds` counts the times Pixi rebuilt a render group's instruction list per second:
+  a still screen rebuilds none, a fade to 0 and back rebuilds at its start and its end. The redraws are one integer
+  increment in every build, taken by `end()`; the rebuilds come from a seventh counting class, a `BatcherPipe`
+  subclass whose `buildStart` Pixi calls once per rebuild (see "Draw calls").
 - `frameMs` is the mean CPU work of a frame over the same second: from the renderer's callback in
   phase `input` to the end of `render`. The clock is the `clock` plugin's: lint L3 keeps the device
   clock out of the renderer. `clock.now()` is whole milliseconds, so one frame reads 3 or 4 ms and
@@ -257,7 +263,7 @@ the render targets Pixi draws into, and the pictures the engine keeps (`host.kee
 #### Render passes
 
 `stats().renderPasses` is measured in every build (F8): on WebGPU an encoder subclass counts every
-`beginRenderPass` inside a frame (the six counting classes of a dev or debug build count it too; a
+`beginRenderPass` inside a frame (the seven counting classes of a dev or debug build count it too; a
 production build swaps the encoder alone, one boolean test and one typed-array increment per pass);
 on WebGL the public runners count a bound target (count-only items in a production build). A frame
 that is not drawn counts nothing and keeps the number of the last drawn frame; `renderPassesMax` is
@@ -265,9 +271,10 @@ the most of one drawn frame in the last full second, so the frame that took a pi
 Where nothing counts (headless, a test stage, a fake application) both report the estimate below.
 
 `sync.renderPasses()` is the estimate, computed from the filter slots `sync` holds, never asked of the GPU, at call time:
-0 while inert; otherwise `1 + Σ over views in the tree with an enabled filter (1 + Σ passes of the
-enabled slots)`; a view drawn from its kept picture costs nothing, and the passes the last flush of the kept
-pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A filtered view costs one pass for its content and one per filter apply (spike
+0 while inert; otherwise `1 + Σ over views drawn under the root with an enabled filter (1 + Σ passes of the
+enabled slots)`; a view drawn from its kept picture costs nothing, nor does a view inside one or under any node that
+is not drawn (an empty or alpha-0 view, a hidden layer: `visible` or `renderable` false up to the root), and the
+passes the last flush of the kept pictures made are added (1 per subtree picture, 1 + the slots' passes per filter output, 1 per range picture). A filtered view costs one pass for its content and one per filter apply (spike
 P10); a disabled filter costs nothing, and a view whose filters are all disabled counts 0. A view
 out of the tree (an unknown layer) counts 0. The pins from P10: no filter `1`; one glow of 1 pass
 on a button `3`; one full-screen blur of quality 4 (8 applies) `10`; a glow and a tint on ten
@@ -290,7 +297,7 @@ from them. A Pixi module without the three classes draws on uncounted, with `ctx
 
 The install sits behind the inline dev or agent guard (a dev page and a debug page count draws)
 and logs `"moku:dev"` with `{ command: "renderer.monitor" }`, so a production `define` folds it
-and the counter leaves the bundle; `stats()` then has no `drawCalls` field. The guard is the one of
+and the counter leaves the bundle; `stats()` then has no `drawCalls`, `redraws` or `rebuilds` field. The guard is the one of
 `capture()` written as a positive branch (`(typeof __MOKU_GAME_DEV__ !== "undefined" &&
 __MOKU_GAME_DEV__) || (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)`): Bun 1.3.14 drops
 code used only inside a folded `if`, but keeps code used after a folded early `return`. `api.ts`
@@ -475,6 +482,7 @@ localPoseOf(world.ecs, slot, { x: 90, y: 160, rotation: 0, scale: 0.5, pivot: { 
 | `onDemand` | `boolean` | `false` | Draw a frame only when something on the screen changed (see "Render on demand"). Off: every frame is drawn, as before. |
 | `monitor` | `{ budgetMs, frames }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over `budgetMs` is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384), render passes 4x as many. |
 | `keptMb` | `number` | `64` | MiB the kept pictures may hold (see "Kept pictures"); the least recently drawn goes first when it is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp`. |
+| `poolTrim` | `{ restMs, aboveMb } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause (see "Render targets and memory"). `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp`. |
 
 ```ts
 const app = createApp({
@@ -493,7 +501,7 @@ here. `referenceLong` (default 1920) is the long side the layout needs inside th
 |---|---|
 | `sync` | The `renderer.sync` system runs one pass: removed views, layers, added views, changed components, invalidated texture keys. |
 | `input` | `monitor` marks the frame start for `stats()` and starts the draw count of the frame at 0. |
-| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame renders the kept pictures first (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it. |
+| `render` | A pending resize is applied, then the overlay step (spec 22), then `kept` reads the marks, `demand` decides whether the frame is drawn; a drawn frame renders the kept pictures first (`kept.flush`), then `app.renderer.render(app.stage)` when `ready`, then the pixel leg of the kept oracle; then `demand` settles it (the dev check, the pixel check) and `monitor` closes the frame, its draw count and its pass count and hands a drawn one to the `capture()` calls due on it; last, `host` trims Pixi's texture pool when a rest or a scene change is due (see "Render targets and memory"). |
 
 Pixi's own ticker never starts: `time` owns the one loop. The pass touches only what changed, and a
 throw costs one entity, not the frame: it is reported with `ctx.log.error` and the label of the view.
@@ -538,6 +546,50 @@ with the views marked since the last drawn frame and draws the frame at once. Wi
 runs in shadow, so a game can be checked before it turns `onDemand` on. It costs one read-back per
 frame. The visual runner's browser leg turns it on for every test (`--no-verify-frames` leaves it
 off).
+
+## Render targets and memory
+
+Pixi keeps every render target a filter pass asked for (one per filtered container, one ping-pong
+texture per chain of two or more filters, a blur's passes) in its one global `TexturePool`, idle
+between frames, until the page closes: Pixi's own garbage collector never frees a pooled texture, and
+a power-of-two bucket lives forever. After a walk through every screen of a game that is tens of MiB
+(about 90 MB of the 202 MB of GPU textures of A Memory Missing on a Galaxy A26).
+
+The renderer gives them back with Pixi's public `TexturePool.clear(true)`, strictly between frames
+(after `host.render()` returned, or from a hook outside the render phase), never inside a frame and
+never while the host is not ready or restores a lost device:
+
+| Trim | When | Floor |
+|---|---|---|
+| rest | the screen drew nothing for `restMs` (`onDemand`'s skipped frames), once per rest | the targets grew by `aboveMb` MiB since the last trim |
+| scene | `restMs` after a scene change (a new layer list from the scene), also while every frame is drawn; a second change moves the moment | `aboveMb` |
+| pause | `lifecycle:changed` with `paused` (the page in the background, a game's `pause()`) | none: whatever grew goes |
+
+`poolTrim: { restMs: 1000, aboveMb: 16 }` by default. One second is a screen the player reads, not
+the gap between two taps, and spec 21's settle time at start. 16 MiB is about one screen's working set
+at the shipping resolution (a full-screen target on the A26 at resolution 2 is 4.9 MiB, a frost's
+three passes ~15 MiB): a still shop keeps its own targets, so its taps never re-allocate. A rest or a
+scene change judged not worth it is not looked at again until the next one. `poolTrim: false` never
+touches the pool: exactly the behaviour before. `stats().textureMb` and `textureMbSplit.targets` show
+the drop; every trim logs `renderer:pool-trim` (debug) with its reason and the MiB freed, and an agent
+build writes a `pool-trim` event line (`{ reason, freedMb }`).
+
+What a trim costs: the next drawn frame that applies a filter takes new targets, only the ones it
+uses (one per filtered container on its stack, `effects.maxPasses` caps the applies). A render target
+has no upload (a texture, a view and a bind group on WebGPU; a texture and a framebuffer on WebGL) and
+pipelines are keyed by format, so no shader recompiles. It lands on a frame after a rest, a second
+after a scene change, or after a resume, never on a running motion.
+
+What a trim never touches: a texture handed out and not yet returned survives and is destroyed when it
+comes back (`cacheAsTexture`, canvas `Text`); the kept pictures are engine-owned `RenderTexture`s
+registered with `host.keep`, never taken from the pool; art is never pooled. A trim draws no frame and
+skips none: it changes no pixel.
+
+With `time: { idleFps: 0 }` the loop itself stops at rest: the rest trim waits for the next frame of
+the loop (the next wake); the pause and the scene rules still apply. The pool is module-global: two
+apps on one page (the editor's preview and a test page) trim each other's idle targets, and each takes
+new ones at its next filtered frame. The renderer does not clear the pool on stop, since another app
+may be drawing.
 
 ## Kept pictures
 
@@ -723,6 +775,28 @@ at alpha 0 is not hit. Pixi multiplies the alpha into every child, so overlappin
 through each other; the `effects` `Alpha` filter fades the subtree as one layer instead. A
 `Display` object and an adapter object keep their own alpha: the game and the plugin that draws
 them own it (`Text.alpha` is the alpha of the text's container).
+
+### What is not drawn
+
+An empty `Shape` (no stroke, and no fill alpha or no area: the `stack`, `row` and `column` boxes of `ui` without a
+fill) and any built-in view or text at alpha 0 are not drawn, not measured and not filtered: the one owner of
+`renderable` (`sync/hidden.ts`) hides them with the reasons `"empty"` and `"alpha"` (spec 26). An empty Shape hides
+only its own `Graphics`: its children hang in its wrapper and its clip mask is a `Graphics` of its own, so both are
+drawn; so a filter over a strip of empty boxes measures the strip, not the screen's corner. A built-in view (Sprite,
+NineSlice, Shape) at alpha 0, the HUD factor of an overlay counted, hides its whole subtree; a text or another
+adapter's object at alpha 0 hides only its own object, since its adapter writes its own alpha. Both stay hit-testable
+as before: an empty box takes presses, an alpha below 0.01 does not. A view at alpha 0.005 is still drawn. A game
+hides a view by alpha 0 and needs no flag; a `Display` object is the game's and is never hidden for its alpha. They
+leave the bounds Pixi draws and filters with (the fast global bounds of a filter's area, the renderable bounds), so a
+`Dim` over a strip of empty boxes measures the strip; Pixi 8.22's `Container.getBounds()` checks only `visible` and
+still counts them. A pooled object comes back drawable and, for a `Graphics`, white: a fill-only shape is drawn white and coloured
+by its tint, so a colour change rewrites the tint, never the path (a shape with a stroke is painted in its colours).
+
+Endless loops of a view the player cannot see — at alpha 0, under a view at alpha 0, or a leaf wholly off the screen
+— write nothing; their phase follows time (`sync.loopsHeld`, asked by `anim`, walked once per entity per frame). A
+loop that writes the view's own alpha or place keeps writing: it may bring the view back. In the frame a view comes
+back a held loop shows its old phase once.
+
 Removing `Parent` puts the view back in the layer its `Layer` names, at its own pose, in the same
 pass: `world` records no change for a removed component, so `sync` watches `onRemoved(Parent)`.
 
@@ -853,7 +927,9 @@ the renderer: a texture source keeps its CPU image and Pixi uploads it again.
   (`{ removeView: true }`, `{ children: true, texture: false }`), swaps Pixi's own draw classes
   back, removes the two safe-area probes and the unsupported element and clears every map, the filter slots too. It runs before `world` stops, so the world hooks are
   removed while `world` is alive. Textures are left to `assets`; a `Display` object is detached,
-  never destroyed.
+  never destroyed. The pool trim starts over and its listeners go, and both `viewport.size()`
+  objects are dropped; Pixi's texture pool itself is left alone, since it is module-global and
+  another app on the page may be drawing.
 
 ## Doors
 

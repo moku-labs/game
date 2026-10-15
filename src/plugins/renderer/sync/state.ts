@@ -67,7 +67,7 @@ function createOverlayState(): OverlayState {
 
 /**
  * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter, no
- * slice, no hidden mask and no overlay.
+ * slice, no hidden mask, no overlay, no redraw counted and no unseen walk kept.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
@@ -100,6 +100,8 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     objectHidden: emptyWeakMap(),
     viewOfTop: emptyWeakMap(),
     overlay: createOverlayState(),
+    redraws: 0,
+    held: emptyMap(),
     cleanups: []
   };
 }

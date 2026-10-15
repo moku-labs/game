@@ -66,7 +66,7 @@ export function createModules(ctx: RendererCtx): Modules {
     installPasses: pixi => installPassCounting(pixi, ctx.state.monitor.sinks)
   });
   const viewport = createViewportApi(ctx, { host });
-  const demand = createDemandApi(ctx, { host, views: ctx.state.sync.views });
+  const demand = createDemandApi(ctx, { host, views: ctx.state.sync.views, hiddenBy });
   const kept = createKeptApi(ctx, { host, demand, sync: syncWriters });
   const sync = createSyncApi(ctx, { host, viewport, demand, kept });
   const monitor = createMonitorApi(ctx, { host, viewport, sync, demand, kept });

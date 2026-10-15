@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ViewportSize } from "../../../renderer/viewport/types";
+import { createStylesApi } from "../../styles/api";
 import { defineStyle } from "../../styles/define";
 import { flagsOf, noFlags, sameViewport } from "../../styles/flags";
 import { resolve, type StyleFlags } from "../../styles/resolve";
+import { createStylesState } from "../../styles/state";
 import { defineTokens } from "../../styles/tokens";
+import type { UiCtx } from "../../types";
 
 /**
  * Builds a viewport for a test.
@@ -73,6 +76,46 @@ describe("when flags", () => {
     expect(sameViewport(viewportOf(), viewportOf())).toBe(true);
     expect(sameViewport(viewportOf(), viewportOf({ width: 720 }))).toBe(false);
     expect(sameViewport(undefined, viewportOf())).toBe(false);
+  });
+});
+
+// ─── the viewport of a frame ──────────────────────────────────
+
+/**
+ * Builds the styles module over a fresh state, with the default breakpoints.
+ *
+ * @returns The module and its state.
+ */
+function stylesModule() {
+  const state = createStylesState();
+  const ctx = {
+    config: { breakpoints: { tall: 2, wide: 1.5 } },
+    state: { styles: state }
+  } as unknown as UiCtx;
+
+  return { styles: createStylesApi(ctx), state };
+}
+
+describe("useViewport: the viewport of a frame", () => {
+  it("builds no new flags for the same viewport object", () => {
+    const { styles, state } = stylesModule();
+    const frame = Object.freeze(viewportOf());
+
+    styles.useViewport(frame);
+
+    const built = state.flags;
+
+    expect(styles.useViewport(frame)).toBe(false);
+    expect(state.flags).toBe(built);
+  });
+
+  it("answers unchanged for a new object with equal numbers, and changed for another size", () => {
+    const { styles } = stylesModule();
+
+    styles.useViewport(viewportOf());
+
+    expect(styles.useViewport(viewportOf())).toBe(false);
+    expect(styles.useViewport(viewportOf({ height: 2400 }))).toBe(true);
   });
 });
 

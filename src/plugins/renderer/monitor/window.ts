@@ -1,7 +1,7 @@
 /**
- * @file renderer/monitor — the measuring window: frames per second, drawn frames per second and
- * the mean frame work over one second of clock time. Plain arithmetic on the state, no allocation
- * per frame.
+ * @file renderer/monitor — the measuring window: frames per second, drawn frames per second, the
+ * mean frame work, and the engine's redraws and Pixi's rebuilds per second, over one second of clock
+ * time. Plain arithmetic on the state, no allocation per frame.
  */
 import type { MonitorState } from "./types";
 
@@ -22,6 +22,8 @@ function openWindow(state: MonitorState): void {
   state.drawnIntervals = 0;
   state.workMs = 0;
   state.frames = 0;
+  state.redrawsOpen = 0;
+  state.rebuildsOpen = 0;
 }
 
 /**
@@ -34,6 +36,8 @@ function closeWindow(state: MonitorState): void {
   state.fps = (state.intervals * WINDOW_MS) / state.windowMs;
   state.drawnFps = (state.drawnIntervals * WINDOW_MS) / state.windowMs;
   state.frameMs = state.frames > 0 ? state.workMs / state.frames : 0;
+  state.redraws = (state.redrawsOpen * WINDOW_MS) / state.windowMs;
+  state.rebuilds = (state.rebuildsOpen * WINDOW_MS) / state.windowMs;
   state.passes.max = state.passes.open;
   state.passes.open = 0;
   openWindow(state);
@@ -73,15 +77,19 @@ export function beginFrame(state: MonitorState, now: number): boolean {
 }
 
 /**
- * Marks the end of a frame and adds its work to the window. An end without a seen start, as the
- * first frame after the renderer came up mid-frame, is ignored.
+ * Marks the end of a frame and adds its work, its redraws and its rebuilds to the window. An end without a seen
+ * start, as the first frame after the renderer came up mid-frame, is ignored.
  *
  * @param state - The monitor branch of the plugin state.
  * @param now - Clock time at the end of `render`, in milliseconds.
+ * @param redraws - `Graphics` paths the engine drew since the last end.
+ * @param rebuilds - Pixi's instruction rebuilds since the last end.
  */
-export function endFrame(state: MonitorState, now: number): void {
+export function endFrame(state: MonitorState, now: number, redraws = 0, rebuilds = 0): void {
   if (state.frameStart === undefined) return;
 
+  state.redrawsOpen += redraws;
+  state.rebuildsOpen += rebuilds;
   state.workMs += now - state.frameStart;
   state.frames += 1;
   state.frameStart = undefined;
@@ -100,6 +108,8 @@ export function resetWindow(state: MonitorState): void {
   state.drawnFps = 0;
   state.lastDrawn = false;
   state.frameMs = 0;
+  state.redraws = 0;
+  state.rebuilds = 0;
   state.passes.last = 0;
   state.passes.open = 0;
   state.passes.max = 0;

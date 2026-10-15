@@ -156,17 +156,20 @@ export function dashesOf(outline: readonly Point[], dash: number): Point[][] {
 }
 
 /**
- * Draws the path of a shape and fills it in the colour of the value at the alpha given. At alpha
- * 0 the path stays unfilled, so only a stroke shows. A clip mask is drawn here too, never dashed.
+ * Draws the path of a shape and fills it in a colour at the alpha given. At alpha 0 the path stays unfilled, so only
+ * a stroke shows. A clip mask is drawn here too, never dashed. A fill-only shape is drawn white and coloured by the
+ * object's tint, so a colour change draws no path (spec 26 R2.1).
  *
  * @param object - The graphics to draw on.
  * @param value - The shape value.
  * @param fillAlpha - The alpha of the fill: the value's own for the shape, 1 for a clip mask.
+ * @param color - The colour of the fill: the value's own by default, white for a tinted shape.
  */
 export function drawShapePath(
   object: PixiGraphics,
   value: Readonly<ShapeValue>,
-  fillAlpha: number
+  fillAlpha: number,
+  color: number = value.fill
 ): void {
   object.clear();
 
@@ -184,7 +187,7 @@ export function drawShapePath(
 
   if (fillAlpha <= 0) return;
 
-  object.fill(fillAlpha < 1 ? { color: value.fill, alpha: fillAlpha } : { color: value.fill });
+  object.fill(fillAlpha < 1 ? { color, alpha: fillAlpha } : { color });
 }
 
 /**

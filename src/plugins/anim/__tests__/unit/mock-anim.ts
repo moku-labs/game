@@ -24,6 +24,9 @@ import { initAnim, startAnim, withDeps } from "../../lifecycle";
 import { createAnimState } from "../../state";
 import type { AnimApi, AnimCtx, Config, KernelSlice, State } from "../../types";
 
+/** What an endless loop writes that could show its view again, as `renderer.sync.loopsHeld` takes it. */
+type LoopReveals = "alpha" | "place" | "both";
+
 const PHASE_ORDER: readonly Phase[] = ["input", "animate", "layout", "sync", "signals"];
 
 /** The remover of a listener nothing ever calls. */
@@ -51,6 +54,10 @@ export type MockAnim = {
   wakes: { count: number };
   /** The entities the stand-in renderer's `sync.loopsHeld` answers true for: an overlay hides their views. */
   held: Set<Entity>;
+  /** Every ask of the stand-in's `sync.loopsHeld`, in call order, with what the loop reveals. */
+  asks: Array<{ entity: Entity; reveals: LoopReveals | undefined }>;
+  /** When set, answers `sync.loopsHeld` in place of `held`, as the renderer's rule for unseen views would. */
+  rule: { answer: ((entity: Entity, reveals: LoopReveals | undefined) => boolean) | undefined };
   time: Time;
   /** Runs `initAnim`, then `connectWorld`, then `startAnim`, as the kernel would. */
   start(): void;
@@ -166,7 +173,17 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
   const world = createWorldApi(worldCtx);
 
   const held = new Set<Entity>();
-  const renderer = { sync: { loopsHeld: (entity: Entity): boolean => held.has(entity) } };
+  const asks: MockAnim["asks"] = [];
+  const rule: MockAnim["rule"] = { answer: undefined };
+  const renderer = {
+    sync: {
+      loopsHeld: (entity: Entity, reveals?: LoopReveals): boolean => {
+        asks.push({ entity, reveals });
+
+        return rule.answer === undefined ? held.has(entity) : rule.answer(entity, reveals);
+      }
+    }
+  };
   const apis: Record<string, unknown> = { ...worldApis, world, renderer };
   const ctx: KernelSlice = {
     config,
@@ -192,6 +209,8 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
     features,
     wakes,
     held,
+    asks,
+    rule,
     time,
     start: (): void => {
       initAnim(ctx);

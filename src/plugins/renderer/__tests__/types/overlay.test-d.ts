@@ -68,7 +68,14 @@ const ward: LayerMap = { scene: {}, ui: { sort: "order" }, hud: { above: "overla
 // @ts-expect-error — a HUD layer is above the overlays, nothing else.
 const wrong: LayerMap = { hud: { above: "ui" } };
 
-expectTypeOf<Api["sync"]["loopsHeld"]>().toEqualTypeOf<(entity: Entity) => boolean>();
+expectTypeOf<Api["sync"]["loopsHeld"]>().toEqualTypeOf<
+  (entity: Entity, reveals?: "alpha" | "place" | "both") => boolean
+>();
+
+declare const sync: Api["sync"];
+
+// @ts-expect-error — a loop reveals the view's alpha, its place, or both; nothing else.
+sync.loopsHeld(1, "size");
 expectTypeOf<Api["sync"]["debug"]["overlays"]>().returns.toEqualTypeOf<readonly OverlayReport[]>();
 expectTypeOf(ward).toEqualTypeOf<LayerMap>();
 expectTypeOf(wrong).toEqualTypeOf<LayerMap>();

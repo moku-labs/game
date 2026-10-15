@@ -137,8 +137,8 @@ export function endAgent(pc: PerfCtx): void {
 
 /**
  * The first attach of a renderer state: the ring gets its capacity (the paths interned so far kept), the time
- * listener and the long-frame observer start, the host's resolution, loss and restore are heard, the flow path and
- * the display of the moment are noted. The time listener and the observer stay across restores.
+ * listener and the long-frame observer start, the host's resolution, loss, restore and pool trims are heard, the flow
+ * path and the display of the moment are noted. The time listener and the observer stay across restores.
  *
  * @param pc - The perf context.
  */
@@ -171,6 +171,8 @@ function attachFirst(pc: PerfCtx): void {
     perf.flags |= CHANGED.restore;
     writeEvent(pc, "device-restored", { kind: host.kind() });
   });
+  // The trim reaches the log through the host (O24): `host/pool.ts` never imports the monitor.
+  host.onTrim((reason, freedMb) => writeEvent(pc, "pool-trim", { reason, freedMb }));
   notePath(pc, ctx.deps.flow.state().path, false);
   perf.display = displayOf(pc);
 }

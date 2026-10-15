@@ -190,8 +190,9 @@ function stepFrameLoop(
 
   if (!due) return;
 
-  // An endless loop of a view the player cannot see writes nothing; the key of the time is owed (spec 22 O9).
-  if (value.loop && actx.state.loopsHeld?.(entity) === true) {
+  // An endless loop of a view the player cannot see writes nothing; the key of the time is owed (spec 22 O9). A new
+  // frame may change the sprite's size, so it reveals the view's place (spec 26 R1.7.4).
+  if (value.loop && actx.state.loopsHeld?.(entity, "place") === true) {
     loop.written = false;
 
     return;

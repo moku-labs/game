@@ -16,7 +16,8 @@ import type { Ease, Entity, MotionHandle, TrackSegment } from "../../world/types
  *   id: 1, entity: 1_048_576, component: Transform, to: { x: 200 },
  *   keys: { x: "1048576:Transform:x" }, ms: 350, ease: "out", delayMs: 0, elapsed: 0,
  *   from: undefined, muted: () => new Set(), additive: false, driven: false, bornFrame: 4,
- *   ended: false, segments: undefined, repeatsLeft: 0, held: false, masked: new Set(), keep: false
+ *   ended: false, segments: undefined, repeatsLeft: 0, held: false, masked: new Set(), keep: false,
+ *   reveals: "place"
  * };
  * ```
  */
@@ -67,6 +68,12 @@ export type Track = {
   masked: Set<string>;
   /** Started with `reduced: "keep"`: reduced motion neither shortens nor holds it. */
   readonly keep: boolean;
+  /**
+   * What the track writes that could show its view again, handed to `renderer.sync.loopsHeld` by an endless track
+   * (spec 26 R1.7.4): `"alpha"`, `"place"` (where the view is or how large), `"both"`, or `undefined` for a write
+   * that cannot (a tint, a fill colour). Computed once when the track is made.
+   */
+  readonly reveals: "alpha" | "place" | "both" | undefined;
 };
 
 /**

@@ -1,6 +1,6 @@
 /**
  * @file renderer plugin — the hooks: a pause hands the captures still waiting for a drawn frame
- * their picture, since no frame comes while the clock is paused. In an agent build the
+ * their picture, since no frame comes while the clock is paused, and trims Pixi's texture pool. In an agent build the
  * performance monitor also hears the pause stack, the flow path, the thermal readings and the
  * changes of the frame rate.
  */
@@ -10,6 +10,7 @@ import type { Events as LifecycleEvents } from "../lifecycle/types";
 import { timePlugin } from "../time";
 import type { RateChange, ThermalReading } from "../time/types";
 import { createModules } from "./api";
+import { trimOnPause } from "./host/pool";
 import { withDeps } from "./lifecycle";
 import { servePaused } from "./monitor/capture";
 import type { KernelSlice, MonitorModule } from "./types";
@@ -51,8 +52,8 @@ export function createHandlers(ctx: KernelSlice): {
   return {
     /**
      * Serves the captures still waiting for a drawn frame once the game pauses. Dev builds and
-     * debug builds only. An agent build also writes the pause or resume event and, on a pause,
-     * the partial second.
+     * debug builds only. Every build gives back what grew in Pixi's texture pool on a pause. An
+     * agent build also writes the pause or resume event and, on a pause, the partial second.
      *
      * @param payload - What changed on the pause stack.
      */
@@ -67,6 +68,9 @@ export function createHandlers(ctx: KernelSlice): {
       ) {
         servePaused(ctx.state.monitor, ctx.require(timePlugin));
       }
+
+      // Every build: a game in the background holds no render target it does not need (C14).
+      if (payload.paused && ctx.config.poolTrim !== false) trimOnPause(withDeps(ctx));
 
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
         monitorOf().pauses(payload.reasons, payload.paused, payload.resumed);

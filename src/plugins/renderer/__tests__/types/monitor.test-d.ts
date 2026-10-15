@@ -9,7 +9,8 @@ import type {
   FrameRecord,
   MonitorConfig,
   PerfEventName,
-  PerfLogLine
+  PerfLogLine,
+  PoolTrimDetail
 } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -28,7 +29,16 @@ app.renderer.monitor.event("rate", {});
 app.renderer.monitor.event("devtools", { mode: "card", tab: "frames" });
 app.renderer.monitor.event("command", { id: "game.filter", input: { kind: "glow" } });
 
-expectTypeOf<"devtools" | "command" | "recorder" | "rate">().toMatchTypeOf<PerfEventName>();
+expectTypeOf<
+  "devtools" | "command" | "recorder" | "rate" | "pool-trim"
+>().toMatchTypeOf<PerfEventName>();
+
+// The detail of a pool trim, as the editor mirrors it (spec 25 M1.8).
+expectTypeOf<PoolTrimDetail>().toEqualTypeOf<{
+  reason: "rest" | "scene" | "pause";
+  freedMb: number;
+}>();
+app.renderer.monitor.event("pool-trim", { reason: "rest", freedMb: 78.8 } satisfies PoolTrimDetail);
 
 // @ts-expect-error — `thermal` is a line kind of its own, not an event name
 app.renderer.monitor.event("thermal", {});

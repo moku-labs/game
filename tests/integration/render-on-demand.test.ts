@@ -6,7 +6,17 @@
  * checks every frame, so a frame skipped over a changed picture fails the test.
  */
 import type { Assets, World } from "@moku-labs/game";
-import { defineFilter, defineGame, mut, Shape, system, Transform, type } from "@moku-labs/game";
+import {
+  defineFilter,
+  defineGame,
+  Layer,
+  mut,
+  Parent,
+  Shape,
+  system,
+  Transform,
+  type
+} from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import { commands, run } from "@moku-labs/game/control";
 import { fakeClock } from "@moku-labs/game/testing";
@@ -169,12 +179,17 @@ const running: Running[] = [];
  * @param options - What differs from the game as it ships.
  * @param options.onDemand - The switch of the renderer; `true` when left out.
  * @param options.clock - The clock the game runs on; the device clock when left out.
+ * @param options.builds - True to run Pixi's render group system on every render: a dev build counts its rebuilds.
  * @returns The running fixture.
  */
 async function open(
-  options: { onDemand?: boolean | "default"; clock?: ReturnType<typeof fakeClock> } = {}
+  options: {
+    onDemand?: boolean | "default";
+    clock?: ReturnType<typeof fakeClock>;
+    builds?: boolean;
+  } = {}
 ): Promise<Running> {
-  const page = openPage();
+  const page = openPage(390, 844, options.builds === true ? { builds: true } : {});
   const onDemand = options.onDemand === "default" ? undefined : (options.onDemand ?? true);
   const { app } = fixtureGame(page, onDemand).screen({
     manifest: MANIFEST,
@@ -362,5 +377,106 @@ describe("renderer.onDemand: what waits for a drawn frame still gets one", () =>
     const ran = await captured;
 
     expect(ran.value?.png.startsWith("data:image/png")).toBe(true);
+  });
+});
+
+describe("renderer.onDemand: what a still sheet costs (spec 26 R2.3, dev counters)", () => {
+  it("a breathing button and a colour tween on a still sheet rebuild no instruction list and redraw no path", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const fixture = await open({ clock: fakeClock(1000), builds: true });
+    const box = fixture.view("fixture.box");
+
+    // Two windows of the monitor: the second holds only frames of the breath and the tween.
+    for (let frame = 0; frame < 130; frame += 1) {
+      fixture.app.world.ecs.set(box, Shape, {
+        alpha: 0.75 + 0.25 * Math.sin(frame / 8),
+        fill: 0x10_00_00 + frame * 0x01_01
+      });
+      await fixture.frames(1);
+    }
+
+    expect(fixture.app.renderer.stats()).toMatchObject({ redraws: 0, rebuilds: 0 });
+  });
+
+  it("a fade to 0 and back rebuilds twice: when the view leaves the build and when it comes back", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const clock = fakeClock(1000);
+    const fixture = await open({ clock, builds: true });
+    const box = fixture.view("fixture.box");
+
+    // Drawn frames first, so the lamp's picture is taken (spec 23 keeps a still filtered view) before the fade.
+    for (let frame = 0; frame < 8; frame += 1) {
+      fixture.app.world.ecs.set(box, Shape, { alpha: frame % 2 === 0 ? 0.9 : 1 });
+      await fixture.frames(1);
+    }
+
+    // A gap over a second opens a fresh window of the monitor: the whole fade lies in it.
+    clock.advance(1500);
+    await fixture.frames(1);
+
+    for (const alpha of [0.5, 0, 0, 0.5, 1]) {
+      fixture.app.world.ecs.set(box, Shape, { alpha });
+      await fixture.frames(1);
+    }
+
+    await fixture.frames(64);
+
+    expect(fixture.app.renderer.stats()).toMatchObject({ redraws: 0, rebuilds: 2 });
+  });
+});
+
+describe("renderer.onDemand: loops of views nobody sees (spec 26 R1.7)", () => {
+  it("a panel at alpha 0 with breathing glints under it writes no glint and draws no frame, and shows them at the phase of the time once it fades in", async () => {
+    const fixture = await open();
+    const { ecs, projection } = fixture.app.world;
+    const owner = { kind: "plugin", name: "fixture" } as const;
+    const panel = ecs.spawn(owner, [
+      Layer({ name: "main" }),
+      Transform({ x: 100, y: 400 }),
+      Shape({ w: 200, h: 200, fill: 0x22_33_44, alpha: 0 })
+    ]);
+    const glints = [20, 120].map(x =>
+      ecs.spawn(owner, [
+        Parent({ entity: panel }),
+        Transform({ x, y: 20 }),
+        Shape({ w: 20, h: 20, fill: 0xff_ff_ff })
+      ])
+    );
+    let writes = 0;
+
+    ecs.system(
+      system({
+        name: "fixture.glintWrites",
+        phase: "sync",
+        query: [Shape],
+        run: () => {
+          for (const entity of ecs.changed(Shape)) if (glints.includes(entity)) writes += 1;
+        }
+      })
+    );
+    await fixture.frames(2);
+
+    for (const glint of glints) {
+      projection
+        .viewOf(glint, owner)
+        ?.tween(Shape, { alpha: 0.2 }, { ms: 400, ease: "linear", repeat: "forever" });
+    }
+
+    // The start of the loops wakes the clock once.
+    await fixture.frames(1);
+    writes = 0;
+
+    expect(await fixture.frames(120)).toBe(0);
+    expect(writes).toBe(0);
+
+    ecs.set(panel, Shape, { alpha: 1 });
+
+    // The frame the panel comes back is drawn with the glints as they were; the next one at the phase of 123 frames.
+    expect(await fixture.frames(2)).toBe(2);
+    expect(writes).toBeGreaterThan(0);
+
+    for (const glint of glints) expect(ecs.get(glint, Shape)?.alpha).toBeCloseTo(0.264, 6);
   });
 });

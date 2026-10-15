@@ -142,7 +142,12 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
         return stats;
       }
 
-      return { ...stats, drawCalls: state.draws.last };
+      return {
+        ...stats,
+        drawCalls: state.draws.last,
+        redraws: roundTo(state.redraws, 1),
+        rebuilds: roundTo(state.rebuilds, 1)
+      };
     },
 
     capture: async (options: CaptureOptions = {}): Promise<Captured | undefined> => {
@@ -226,7 +231,9 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     },
 
     end: (drawn: boolean): void => {
-      endFrame(state, clock.now());
+      // The engine's redraws are counted in every build (an increment is cheaper than a guard) and taken every frame.
+      endFrame(state, clock.now(), deps.sync.takeRedraws(), sinks.rebuildsWindow);
+      sinks.rebuildsWindow = 0;
       // A skipped frame keeps the draw calls of the last drawn one.
       if (drawn) state.draws.last = state.draws.frame;
       state.draws.frame = 0;
@@ -252,6 +259,8 @@ export function createMonitorApi(ctx: RendererCtx, deps: MonitorDeps): MonitorMo
     attach: (): void => {
       if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__ && pc !== undefined) {
         attachPerf(pc);
+        // The counting batcher pipe feeds the rebuilds column from now on (spec 26 R2.3, spec 11 R8.8).
+        if (ctx.state.host.uninstallCounting !== undefined) pc.perf.produced |= 1;
       }
     },
 
@@ -316,6 +325,7 @@ export function stopMonitor(state: MonitorState): void {
   state.draws.frame = 0;
   state.draws.last = 0;
   state.sinks.inFrame = false;
+  state.sinks.rebuildsWindow = 0;
 
   for (const off of state.passDetach) off();
   state.passDetach.length = 0;

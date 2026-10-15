@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FakeContainer } from "../../../renderer/__tests__/fake-pixi";
 import { Tree } from "../../../world/ecs/define";
 import type { DescriptionNode } from "../../../world/projection/types";
+import { Box } from "../../components";
 import { type DrawnApp, pointOf, press, settle, startDrawnApp } from "../drawn-app";
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,41 @@ describe("the layer of a JSX root", () => {
     await settle(app);
 
     expect(drawnLayerOf(app, entityOf(app, "handRoot"))).toBe("ui");
+
+    await app.stop();
+  });
+});
+
+describe("empty layout boxes (spec 26 B7)", () => {
+  it("a screen of nested stacks and a column of buttons keeps its layout and its presses; the boxes are not drawn", async () => {
+    const { app, pixi } = await startDrawnApp();
+    const boxes = ["wardScene", "wardStack", "wardDoor", "wardBadge"].map(key =>
+      entityOf(app, key)
+    );
+    const drawnOf = (entity: number): boolean | undefined =>
+      (app.renderer.sync.displayOf(entity) as FakeContainer | undefined)?.renderable;
+
+    expect(boxes.map(entity => drawnOf(entity))).toEqual([false, false, false, false]);
+    expect(app.world.ecs.get(entityOf(app, "wardStack"), Box)).toEqual({
+      x: 0,
+      y: 1200,
+      w: 1080,
+      h: 400
+    });
+    expect(app.world.ecs.get(entityOf(app, "wardBadge"), Box)).toEqual({
+      x: 800,
+      y: 1600,
+      w: 200,
+      h: 200
+    });
+
+    const badge = pointOf(app, entityOf(app, "wardBadge"));
+
+    expect(badge).toEqual({ x: 900, y: 1700 });
+
+    await press(app, pixi, badge ?? { x: 0, y: 0 });
+
+    expect(app.ui.find("shopClose")).toBeDefined();
 
     await app.stop();
   });

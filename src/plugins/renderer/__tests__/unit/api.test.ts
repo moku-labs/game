@@ -101,10 +101,11 @@ describe("renderer api", () => {
     });
   });
 
-  it("returns a fresh size object every call", () => {
+  // Spec 25 F11 reverses the old rule ("a fresh size object every call"): one frozen object until the frame changes.
+  it("returns the same size object every call while the frame stays", () => {
     const mock = createMockRenderer({ dom: false });
 
-    expect(mock.api.viewport.size()).not.toBe(mock.api.viewport.size());
+    expect(mock.api.viewport.size()).toBe(mock.api.viewport.size());
   });
 
   it("takes texture providers while inert and removes them once", () => {

@@ -6,6 +6,7 @@ import type { PixiModule, RendererCtx } from "../types";
 import { initTimed, startupMark } from "./gpu";
 import { devicePixels, targetResolution } from "./resolution";
 import { installSdfTextPipe } from "./sdf-text";
+import { createPoolState } from "./state";
 import type { HostDeps, HostState, InstallCounting } from "./types";
 
 /**
@@ -214,7 +215,7 @@ export function destroyApplication(state: HostState): void {
  * Undoes everything `init` created. Works on the state alone, because `onStop` has no context.
  * `ready` drops first, so a device that goes away during the teardown is ignored. The draw
  * counter and the bitmap text pipe swap Pixi's own classes back, so the next application on the
- * page starts from them.
+ * page starts from them. The pool trim starts over and its listeners go; Pixi's pool itself is left.
  *
  * @param state - The host branch of the plugin state.
  */
@@ -239,6 +240,9 @@ export function stopHost(state: HostState): void {
   state.onRestore.length = 0;
   state.onLoss.length = 0;
   state.onResolutionChange.length = 0;
+  state.onTrim.length = 0;
+  // The pool is module-global and another app on the page may draw: it is not cleared here.
+  state.pool = createPoolState();
   state.resolution.pending = undefined;
   state.kind = "none";
   state.mount = undefined;

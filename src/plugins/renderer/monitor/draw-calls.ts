@@ -3,9 +3,10 @@
  * subclass. Pixi 8.22 has no counter of its own. Under WebGPU three classes issue every draw of the scene:
  * `GpuBatchAdaptor` (sprites, text), `GpuGraphicsAdaptor` (graphics) and `GpuEncoderSystem` (meshes, tiling sprites,
  * particles, filters); the encoder also begins every render pass Pixi draws a frame with. `FilterSystem` applies
- * every filter on both backends, and the two texture systems upload every source. Counting subclasses of the six go
- * into Pixi's own extension registry before `app.init()`, under the same names. No native prototype and no Pixi
- * instance is patched, and no private field is read. What is not counted (renderer README, "What is not counted"):
+ * every filter on both backends, the two texture systems upload every source, and `BatcherPipe.buildStart` begins
+ * every rebuild of a render group's instruction list (spec 26 R2.3). Counting subclasses of the seven go into Pixi's
+ * own extension registry before `app.init()`, under the same names. No native prototype and no Pixi instance is
+ * patched, and no private field is read. What is not counted (renderer README, "What is not counted"):
  * passes Pixi opens on command encoders of its own — a stand-alone clear between frames, the mipmap generator, the
  * MSAA restore — and draws outside the three classes.
  */
@@ -32,6 +33,9 @@ type EncoderRenderer = ConstructorParameters<PixiModule["GpuEncoderSystem"]>[0];
 type GpuRenderTarget = Parameters<
   InstanceType<PixiModule["GpuEncoderSystem"]>["beginRenderPass"]
 >[0];
+
+/** The instruction set a render group rebuilds. */
+type InstructionSet = Parameters<InstanceType<PixiModule["BatcherPipe"]>["buildStart"]>[0];
 
 /** The arguments of one filter apply. */
 type ApplyArguments = Parameters<InstanceType<PixiModule["FilterSystem"]>["applyFilter"]>;
@@ -121,7 +125,7 @@ function countUpload(sinks: MonitorSinks, source: Source): void {
 }
 
 /**
- * Builds the six counting subclasses from the module object. They are made at call time,
+ * Builds the seven counting subclasses from the module object. They are made at call time,
  * because the base classes arrive with the lazily loaded module. Each keeps the base's `static
  * extension` object as it is, so the registry files it under the same type and name.
  *
@@ -131,6 +135,26 @@ function countUpload(sinks: MonitorSinks, source: Source): void {
  */
 export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): CountingClasses {
   const counter = sinks.draws;
+
+  /**
+   * Counts every rebuild of a render group's instruction list: Pixi's render group system calls `buildStart` once per
+   * rebuild and nowhere else. It inherits the static batcher registry, so batchers resolve as before.
+   */
+  class CountingBatcherPipe extends pixi.BatcherPipe {
+    public static override readonly extension = pixi.BatcherPipe.extension;
+
+    /**
+     * Counts the rebuild, in the frame's counter only inside a frame, then begins it.
+     *
+     * @param instructionSet - The instruction set being rebuilt.
+     */
+    public override buildStart(instructionSet: InstructionSet): void {
+      if (sinks.inFrame) sinks.counts[COUNT.rebuilds] = cell(sinks.counts, COUNT.rebuilds) + 1;
+
+      sinks.rebuildsWindow += 1;
+      super.buildStart(instructionSet);
+    }
+  }
 
   /** Counts one draw per batch: `execute` issues one `drawIndexed`. */
   class CountingBatchAdaptor extends pixi.GpuBatchAdaptor {
@@ -311,6 +335,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
   }
 
   return {
+    batcher: CountingBatcherPipe,
     batch: CountingBatchAdaptor,
     graphics: CountingGraphicsAdaptor,
     encoder: CountingEncoderSystem,
@@ -321,10 +346,10 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
 }
 
 /**
- * Swaps Pixi's six counting bases for the counting subclasses in the module's extension
+ * Swaps Pixi's seven counting bases for the counting subclasses in the module's extension
  * registry: `remove` frees each name, `add` puts the subclass in under it. Every application made
  * afterwards counts into `sinks`. The registry is global to the module object, so the remover
- * matters: it swaps Pixi's own classes back. A module that lacks any of the six throws here.
+ * matters: it swaps Pixi's own classes back. A module that lacks any of the seven throws here.
  *
  * @param pixi - The loaded Pixi module.
  * @param sinks - The sinks of the renderer that installs it.
@@ -333,6 +358,7 @@ export function createCountingClasses(pixi: PixiModule, sinks: MonitorSinks): Co
 export function installCounting(pixi: PixiModule, sinks: MonitorSinks): () => void {
   const counting = createCountingClasses(pixi, sinks);
   const bases = [
+    pixi.BatcherPipe,
     pixi.GpuBatchAdaptor,
     pixi.GpuGraphicsAdaptor,
     pixi.GpuEncoderSystem,
@@ -341,6 +367,7 @@ export function installCounting(pixi: PixiModule, sinks: MonitorSinks): () => vo
     pixi.GlTextureSystem
   ];
   const swaps = [
+    counting.batcher,
     counting.batch,
     counting.graphics,
     counting.encoder,

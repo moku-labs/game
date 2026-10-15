@@ -1,6 +1,8 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { HudPart, Shape } from "../../components";
 import type { FilterSlot } from "../../sync/types";
+import { createMockRenderer } from "../mock-renderer";
 import { endStage, type OverlayStage, startOverlayStage } from "../overlay-harness";
 
 // ---------------------------------------------------------------------------
@@ -155,5 +157,153 @@ describe("loopsHeld", () => {
       false,
       false
     ]);
+  });
+});
+
+describe("loopsHeld — views the player cannot see (spec 26 R1.7)", () => {
+  it("holds the loops of a view at alpha 0; a loop that writes its alpha is not held", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const glint = stage.view({ order: 1, alpha: 0 });
+
+    stage.frames(2);
+
+    expect(sync.loopsHeld(glint)).toBe(true);
+    expect(sync.loopsHeld(glint, "place")).toBe(true);
+    expect(sync.loopsHeld(glint, "alpha")).toBe(false);
+    expect(sync.loopsHeld(glint, "both")).toBe(false);
+  });
+
+  it("holds every loop of a view under a view at alpha 0, reveals or not", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const panel = stage.view({ order: 1, alpha: 0 });
+    const glint = stage.view({ parent: panel, w: 20, h: 20 });
+
+    stage.frames(2);
+
+    expect([
+      sync.loopsHeld(glint),
+      sync.loopsHeld(glint, "alpha"),
+      sync.loopsHeld(glint, "place"),
+      sync.loopsHeld(glint, "both")
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it("holds the loops of a HUD part faded to factor 0", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const gems = stage.view({ layer: "hud", x: 100, y: 100, extra: [HudPart({ key: "gems" })] });
+    const shop = stage.overlay({ hud: "none" });
+
+    stage.frames(2);
+    expect(sync.loopsHeld(gems)).toBe(false);
+
+    stage.level(shop, 1);
+    stage.frame();
+
+    expect(sync.loopsHeld(gems)).toBe(true);
+    expect(sync.loopsHeld(gems, "alpha")).toBe(false);
+  });
+
+  it("holds the loops of a leaf wholly off the screen; a loop that writes its place is not held", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const comet = stage.view({ order: 1, x: 5000, y: 100 });
+
+    stage.frames(2);
+
+    expect(sync.loopsHeld(comet)).toBe(true);
+    expect(sync.loopsHeld(comet, "alpha")).toBe(true);
+    expect(sync.loopsHeld(comet, "place")).toBe(false);
+    expect(sync.loopsHeld(comet, "both")).toBe(false);
+  });
+
+  it("does not hold a leaf whose filter padding reaches the screen, nor a view with children off the screen", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const light = stage.view({ order: 1, x: 1085, y: 100 });
+    const filter = new pixi.AlphaFilter();
+    const panel = stage.view({ order: 1, x: 5000, y: 100 });
+
+    stage.view({ parent: panel, w: 20, h: 20 });
+    filter.padding = 10;
+    sync.filters.set(light, [slotOf({ filter })]);
+    stage.frames(2);
+
+    expect(sync.loopsHeld(light)).toBe(false);
+    expect(sync.loopsHeld(panel)).toBe(false);
+  });
+
+  it("does not hold a view hidden by empty or kept, nor a view out of the tree", async () => {
+    const stage = await stageOf({ onDemand: false });
+    const sync = stage.drawn.mock.api.sync;
+    const empty = stage.view({ order: 1, extra: [] });
+    const lamp = stage.view({ order: 1, x: 300, y: 300 });
+    const lost = stage.view({ layer: "nowhere" });
+
+    stage.drawn.mock.world.ecs.set(empty, Shape, { fillAlpha: 0 });
+    sync.filters.set(lamp, [slotOf({ cache: "local" })]);
+    stage.frames(8);
+
+    expect(stage.drawn.mock.ctx.state.kept.byEntity.get(lamp)?.mode).toBe("kept");
+    expect(stage.drawn.mock.ctx.state.sync.views.get(empty)?.object.renderable).toBe(false);
+    expect([sync.loopsHeld(empty), sync.loopsHeld(lamp), sync.loopsHeld(lost)]).toEqual([
+      false,
+      false,
+      false
+    ]);
+  });
+
+  it("answers the overlay cases the same with or without reveals", async () => {
+    const stage = await stageOf();
+    const sync = stage.drawn.mock.api.sync;
+    const glint = stage.view({ layer: "scene" });
+    const sheet = stage.overlay({ cover: "opaque" }, { order: 2 });
+
+    stage.level(sheet, 1, true);
+    stage.frames(2);
+
+    expect([
+      sync.loopsHeld(glint),
+      sync.loopsHeld(glint, "alpha"),
+      sync.loopsHeld(glint, "place"),
+      sync.loopsHeld(glint, "both")
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it("walks an entity with several loops once a frame", async () => {
+    const stage = await stageOf();
+    // The module the frames drive, built with the demand module the spy watches.
+    const sync = stage.drawn.mock.modules.sync;
+    const glint = stage.view({ order: 1, alpha: 0 });
+
+    stage.frames(2);
+
+    const walk = vi.spyOn(stage.drawn.mock.modules.demand, "unseenBy");
+
+    sync.loopsHeld(glint);
+    sync.loopsHeld(glint, "alpha");
+    sync.loopsHeld(glint, "place");
+
+    expect(walk).toHaveBeenCalledTimes(1);
+
+    stage.frame();
+    sync.loopsHeld(glint);
+    sync.loopsHeld(glint, "both");
+
+    expect(walk).toHaveBeenCalledTimes(2);
+  });
+
+  it("answers false while inert and for an entity without a view", async () => {
+    const inert = createMockRenderer({ dom: false });
+
+    expect(inert.api.sync.loopsHeld(1_048_576)).toBe(false);
+
+    const stage = await stageOf();
+
+    stage.frames(2);
+
+    expect(stage.drawn.mock.api.sync.loopsHeld(1_048_999)).toBe(false);
   });
 });

@@ -1,8 +1,9 @@
 import * as pixi from "pixi.js";
 import { describe, expect, it } from "vitest";
+import { Display, Parent, Shape, Transform } from "../../components";
 import { ancestorsShown } from "../../demand/shown";
 import type { HostModule } from "../../types";
-import { box, demandAlone } from "../demand-harness";
+import { box, demandAlone, OWNER, startDrawn } from "../demand-harness";
 
 // ---------------------------------------------------------------------------
 // What "shown" means (F6, F18a): a view drawn in the frame as it stands. Real
@@ -127,5 +128,50 @@ describe("demand.shown", () => {
 
     expect(ancestorsShown(host, views, 1)).toBe(false);
     expect(ancestorsShown(host, views, 2)).toBe(false);
+  });
+});
+
+describe("demand.unseenBy", () => {
+  it("answers where the walk stopped, and shown is unseenBy === shown", async () => {
+    const drawn = await startDrawn();
+    const { ecs } = drawn.mock.world;
+    const seen = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 50, h: 50 }));
+    const faded = drawn.spawn(Transform({ x: 200, y: 100 }), Shape({ w: 50, h: 50, alpha: 0 }));
+    const panel = drawn.spawn(Transform({ x: 300, y: 100 }), Shape({ w: 200, h: 200, alpha: 0 }));
+    const far = drawn.spawn(Transform({ x: 5000, y: 100 }), Shape({ w: 50, h: 50 }));
+    const empty = drawn.spawn(Transform({ x: 400, y: 600 }), Shape({ w: 50, h: 50, fillAlpha: 0 }));
+    const own = box(0, 0);
+
+    own.alpha = 0;
+
+    const game = drawn.spawn(Transform({ x: 500, y: 600 }), Display({ object: own }));
+
+    drawn.frame();
+
+    const glint = ecs.spawn(OWNER, [
+      Parent({ entity: panel }),
+      Transform(),
+      Shape({ w: 20, h: 20 })
+    ]);
+
+    drawn.frames(2);
+
+    const demand = drawn.mock.modules.demand;
+    const table = [seen, faded, glint, far, empty, game, 9_999_999].map(entity => [
+      demand.unseenBy(entity),
+      demand.shown(entity)
+    ]);
+
+    expect(table).toEqual([
+      ["shown", true],
+      ["alpha-own", false],
+      ["alpha-above", false],
+      ["off-screen", false],
+      ["other", false],
+      ["other", false],
+      ["other", false]
+    ]);
+    drawn.oracle.expectNoMissedFrame();
+    drawn.mock.stop();
   });
 });

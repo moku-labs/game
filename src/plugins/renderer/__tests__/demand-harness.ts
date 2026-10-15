@@ -11,6 +11,7 @@ import type { AnyComponentValue, Entity } from "../../world/types";
 import { createDemandApi } from "../demand/api";
 import { createDemandState } from "../demand/state";
 import { createKeptState } from "../kept/state";
+import { hiddenBy } from "../sync/hidden";
 import type { View } from "../sync/types";
 import type { Config, DemandModule, HostModule, PixiContainer, RendererCtx } from "../types";
 import { createMockRenderer, type MockRenderer } from "./mock-renderer";
@@ -114,7 +115,7 @@ export function demandAlone(
   } as unknown as RendererCtx;
 
   return {
-    demand: createDemandApi(ctx, { host, views }),
+    demand: createDemandApi(ctx, { host, views, hiddenBy }),
     ctx,
     stage,
     views,

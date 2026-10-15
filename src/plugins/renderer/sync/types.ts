@@ -3,6 +3,7 @@
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
 import type { OverlayValue } from "../components";
+import type { Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
 import type { FilterCache } from "../kept/types";
 import type {
@@ -98,9 +99,12 @@ export type DisplayEntry = {
 export type HitBox = { x: number; y: number; width: number; height: number };
 
 /**
- * The fields of a `Shape` last drawn into its `Graphics`: an equal value draws no path again. Private to `sync`.
+ * The fields of a `Shape` last drawn into its `Graphics`: an equal value draws no path again. A fill-only shape is
+ * `tinted`: its path is drawn white and its fill is the object's tint, so its `fill` is not compared. Private to `sync`.
  */
 export type DrawnShape = {
+  /** Drawn white, coloured by the object's tint (no stroke); false for a shape painted in its own colours. */
+  tinted: boolean;
   kind: "rect" | "triangle";
   w: number;
   h: number;
@@ -823,21 +827,25 @@ export type SyncApi = {
 
   /**
    * Tells whether the endless cosmetic loops of an entity should write nothing now: its view lies under an opaque
-   * overlay that hides it, or in the kept picture of an overlay that blurs what is under it. A loop that writes nothing
+   * overlay that hides it, or in the kept picture of an overlay that blurs what is under it, or the player cannot see
+   * it at all — it or a view above it is at alpha 0, or it is a leaf wholly off the screen. A loop that writes nothing
    * keeps its phase from time and stands where it would have been when it writes again. The seam of `anim`: finite
    * tracks never ask. Inert, and for an entity without a view: false.
    *
    * @param entity - The entity a loop is about to write.
+   * @param reveals - What the loop writes that could show the view again: `"alpha"` (its alpha), `"place"` (where it
+   *   is or how large), `"both"`. Such a loop is not held for the view's own alpha 0 (`"alpha"`) or for being off the
+   *   screen (`"place"`), since its next write may bring the view back.
    * @returns True when the write would change nothing the player can see.
    * @example
    * ```ts
-   * // anim, before a forever track writes the glint of a ward object while the frosted shop lies over the ward:
-   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // true: the write is skipped, the loop's clock runs on
-   * // the same track once the shop is gone:
-   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // false
+   * // anim, before a forever blink writes the alpha of a pill's glint sprite that rests at alpha 0:
+   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity, "alpha"); // false: the blink's next write may show it
+   * // the same sprite's forever tint loop, which reveals nothing:
+   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // true: nothing of it is drawn, the loop's clock runs on
    * ```
    */
-  loopsHeld(entity: Entity): boolean;
+  loopsHeld(entity: Entity, reveals?: "alpha" | "place" | "both"): boolean;
 
   /**
    * The Pixi object of an entity, for debugging and for the plugins that draw their own thing.
@@ -914,6 +922,14 @@ export type SyncInternal = {
 
   /** The overlays of this frame: modes, ranges, reasons, dims, HUD parts, and the pictures to take (spec 22). */
   stepOverlays(): void;
+
+  /**
+   * The `Graphics` paths the engine drew since the last call (shapes, clip masks, nine-slice outlines), and zeroes the
+   * count: the monitor's `stats().redraws` (spec 26 R2.3).
+   *
+   * @returns The paths drawn.
+   */
+  takeRedraws(): number;
 
   /**
    * Hands the `overlay` event lines the step queued (agent builds only) to the monitor, oldest first, and forgets them.
@@ -1138,6 +1154,13 @@ export type SyncState = {
   viewOfTop: WeakMap<PixiContainer, View>;
   /** The overlays, their ranges, dims and HUD parts (spec 22). */
   overlay: OverlayState;
+  /** `Graphics` paths drawn since the monitor last took them: shapes, clip masks, outlines (spec 26 R2.3). */
+  redraws: number;
+  /**
+   * Where the walk of `shown` stopped for the entities whose loops asked since the last sync pass (spec 26 R1.7.3):
+   * an entity with several endless loops is walked once a frame. Cleared by every pass, which may change the tree.
+   */
+  held: Map<Entity, Unseen>;
   cleanups: Array<() => void>;
 };
 

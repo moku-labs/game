@@ -50,7 +50,8 @@ export function withDeps(ctx: KernelSlice): RendererCtx {
  * drawn and clears them; a drawn frame renders the kept pictures first (`kept.flush`, so the canvas
  * stays one pass, E7), then the stage, then the pixel leg of the kept oracle; `demand` settles the
  * frame (the dev check, the pixel oracle), and `monitor` closes it and hands a drawn one to a
- * waiting capture. The display objects are written by the `sync` system.
+ * waiting capture; last, `host` trims Pixi's texture pool when a rest or a scene change is due. The display objects
+ * are written by the `sync` system.
  *
  * With `onDemand`, a frame in which nothing visible changed is not drawn: the canvas keeps the
  * last picture (WebGPU presents a canvas texture only when one is rendered; a WebGL canvas keeps
@@ -88,7 +89,12 @@ function renderFrame(ctx: RendererCtx, modules: Modules): void {
   }
 
   modules.demand.settle(drawn);
-  modules.monitor.end(modules.demand.frame().drawn);
+
+  const settled = modules.demand.frame().drawn;
+
+  modules.monitor.end(settled);
+  // Last: Pixi submitted the frame, so the idle render targets of its pool may go (C14).
+  modules.host.afterFrame(settled);
 }
 
 /**

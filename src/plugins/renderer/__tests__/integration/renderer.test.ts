@@ -331,4 +331,38 @@ describe("renderer plugin integration", () => {
 
     await app.stop();
   });
+
+  it("a frame that applies a pending resolution with the same CSS size keeps the viewport.size() object", async () => {
+    installFakeDom({ width: 390, height: 844, dpr: 2 });
+    const pixi = createFakePixi();
+    const app = createApp({
+      plugins: [worldPlugin, rendererPlugin, boardFeature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        model: {
+          initialPlayer: { items: [{ id: "a", level: 1, x: 0 }] },
+          initialSession: { moves: 0 },
+          seed: 1
+        },
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+      }
+    });
+
+    await app.start();
+    app.flow.run().catch(() => undefined);
+    await tick();
+
+    const size = app.renderer.viewport.size();
+    const resizes = pixi.last().renderer.resizes.length;
+
+    // The player's graphics setting: the backing store changes, the frame does not.
+    app.renderer.monitor.setResolution(1.5);
+    app.time.step(16);
+
+    expect(pixi.last().renderer.resizes.length).toBeGreaterThan(resizes);
+    expect(app.renderer.host.resolution()).toBe(1.5);
+    expect(app.renderer.viewport.size()).toBe(size);
+
+    await app.stop();
+  });
 });

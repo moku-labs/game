@@ -33,11 +33,14 @@ export type DrawnPage = {
  *
  * @param width - CSS width of the mount.
  * @param height - CSS height of the mount.
+ * @param options - With `builds: true` every render runs Pixi's render group system, so a dev build counts Pixi's
+ *   instruction rebuilds (spec 26 R2.3).
+ * @param options.builds - True to run Pixi's render group system on every render.
  * @returns The page.
  */
-export function openPage(width = 390, height = 844): DrawnPage {
+export function openPage(width = 390, height = 844, options: { builds?: boolean } = {}): DrawnPage {
   const dom = installFakeDom({ width, height });
-  const stage = stagePixi();
+  const stage = stagePixi(options.builds === true ? { builds: true } : {});
 
   return {
     dom,

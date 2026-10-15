@@ -3,7 +3,7 @@
  * module's internal API.
  */
 import type { Entity } from "../../world/types";
-import type { PixiBounds } from "../types";
+import type { PixiBounds, PixiContainer } from "../types";
 
 /**
  * Every reason in ring order: the monitor stores the index (spec 11 `FrameColumns.reason`). New reasons are only ever
@@ -31,6 +31,14 @@ export const DEMAND_REASONS = [
  * Why the render phase drew a frame, or `"none"` when it did not. Internal: `monitor` and the agent log read it.
  */
 export type DemandReason = (typeof DEMAND_REASONS)[number];
+
+/**
+ * Where the walk of `shown` stopped (spec 26 R1.7.3): `"shown"` when the view is drawn; `"alpha-above"` at a view
+ * above it hidden by `"alpha"`; `"alpha-own"` at its own view hidden by `"alpha"`; `"off-screen"` for a leaf whose
+ * padded bounds miss the screen; `"other"` for anything else (empty, kept, a hidden layer, a game's object at alpha 0,
+ * out of the tree, no view). Internal: `sync.loopsHeld` reads it.
+ */
+export type Unseen = "shown" | "alpha-above" | "alpha-own" | "off-screen" | "other";
 
 /**
  * The last decision of the render phase, one object reused every frame.
@@ -70,6 +78,8 @@ export type DemandState = {
   frame: DemandFrame;
   /** The Pixi `Bounds` the off-screen test measures into; made on first use. */
   bounds: PixiBounds | undefined;
+  /** The node at alpha 0 where the last walk of a chain stopped; one object, rewritten by every walk (R1.7.3). */
+  stop: { node: PixiContainer | undefined };
   /** Every entity marked since the last drawn frame: dev and agent builds only, for the check and the oracle. */
   sinceDraw: Set<Entity>;
   /** The dev missed-mark check: entities already reported, and whether the check switched itself off. */
@@ -101,8 +111,10 @@ export type DemandInternal = {
   settle(drawn: boolean): void;
   /** The last decision, for `monitor` and the agent log. */
   frame(): Readonly<DemandFrame>;
-  /** The F6/F18a predicate. */
+  /** The F6/F18a predicate: `unseenBy(entity) === "shown"`. */
   shown(entity: Entity): boolean;
+  /** Where the walk of `shown` stopped for the entity's view, for `sync.loopsHeld` (spec 26 R1.7.3). */
+  unseenBy(entity: Entity): Unseen;
   /** Marks of the current decision. */
   marked(): ReadonlySet<Entity>;
   /** The adapter marks of the current decision, as `marked()` for the others. */

@@ -428,7 +428,8 @@ export type PerfLongFrameLine = PerfLine<"longFrame"> &
 
 /**
  * The names of `event` lines (`"devtools"` is the editor's overlay event, in 2b because the editor's page agent emits
- * it on the 2b debug build; the 3B/4 addendum adds `"pool-trim"`, `"warm"`).
+ * it on the 2b debug build; `"pool-trim"` is the pool trim of spec 25, detail `PoolTrimDetail`; the 3B/4 addendum
+ * adds `"warm"`).
  */
 export type PerfEventName =
   | "scene"
@@ -446,7 +447,8 @@ export type PerfEventName =
   | "command"
   | "recorder"
   | "rate"
-  | "devtools";
+  | "devtools"
+  | "pool-trim";
 
 /**
  * What an `overlay` event line says happened to an overlay (spec 22 O10.2): it opened, landed (its enter motion is
@@ -474,6 +476,18 @@ export type OverlayEventDetail = {
   what: OverlayWhat;
   mode: OverlayMode;
 };
+
+/**
+ * The detail of a `pool-trim` event line (spec 25 M1.8): why the renderer gave back the idle render targets of Pixi's
+ * texture pool (a still screen, a scene change a `restMs` ago, a pause), and the MiB that freed. The editor mirrors it
+ * by these names.
+ *
+ * @example
+ * ```ts
+ * const detail: PoolTrimDetail = { reason: "rest", freedMb: 78.8 };
+ * ```
+ */
+export type PoolTrimDetail = { reason: "rest" | "scene" | "pause"; freedMb: number };
 
 /**
  * Something that happened, at the frame it happened in.

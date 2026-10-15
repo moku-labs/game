@@ -1107,6 +1107,63 @@ function framesFrom(mock: MockRenderer, from: number, count: number): number {
   return from + count * 16;
 }
 
+describe("renderer stats: redraws and rebuilds (spec 26 R2.3)", () => {
+  it("counts the engine's Graphics draws per second, and none on a still screen", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(false);
+
+    mock.world.projection.setLayers([{ name: "items", sort: "none" }]);
+
+    const bar = mock.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 10, h: 10 })
+    ]);
+
+    // 64 frames 16 ms apart: a bar that grows every frame draws one path a frame; the 64th closes the window.
+    for (let index = 0; index < 64; index += 1) {
+      mock.world.ecs.set(bar, Shape, { w: 10 + index });
+      mock.modules.sync.pass();
+      frame(mock, index * 16, 4);
+    }
+
+    expect(mock.api.stats().redraws).toBe(62.5);
+
+    // Two more windows: the next one still holds the last frame's draw, the one after holds none.
+    for (let index = 64; index < 192; index += 1) {
+      mock.modules.sync.pass();
+      frame(mock, index * 16, 4);
+    }
+
+    expect(mock.api.stats().redraws).toBe(0);
+  });
+
+  it("counts Pixi's instruction rebuilds per second, and none on a still screen", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(false, { rebuilds: 1 });
+
+    framesFrom(mock, 0, 64);
+
+    expect(mock.api.stats().rebuilds).toBe(62.5);
+
+    mock.pixi.settings.scene.rebuilds = 0;
+    framesFrom(mock, 64 * 16, 128);
+
+    expect(mock.api.stats().rebuilds).toBe(0);
+  });
+
+  it("has neither field in a production build", async () => {
+    const mock = await startedOnDemand(false, { rebuilds: 1 });
+
+    framesFrom(mock, 0, 64);
+
+    const stats = mock.api.stats();
+
+    expect("redraws" in stats).toBe(false);
+    expect("rebuilds" in stats).toBe(false);
+  });
+});
+
 describe("renderer stats: frames drawn", () => {
   it("drawn equals fps when every frame is drawn", async () => {
     const mock = await startedOnDemand(false);
@@ -1260,5 +1317,44 @@ describe("the kept pictures in the stats and the agent ring (spec 23 P12)", () =
     expect(sample?.kept).toEqual({ pictures: 1, mb: 0.01, retakes: 1, refreshes: 0 });
     expect(linesOf(lines, "header")[0]?.measured).toContain("kept");
     mock.stop();
+  });
+});
+
+describe("the pool-trim event of an agent build", () => {
+  it("writes one pool-trim line per trim with its reason and the MiB freed, also after a restore of the device", async () => {
+    const agent = await startAgent();
+    const lines = agent.listen();
+    const managed = agent.mock.pixi.last().renderer.texture.managedTextures as unknown[];
+    // 8 MiB of idle filter targets: 1024 x 2048 RGBA.
+    const idle = {
+      pixelWidth: 1024,
+      pixelHeight: 2048,
+      mipLevelCount: 1,
+      uploadMethodId: "unknown",
+      // eslint-disable-next-line unicorn/no-null -- a render target's resource is null in Pixi.
+      resource: null
+    };
+    const pool = agent.mock.pixi.module.TexturePool as unknown as {
+      onClear: (() => void) | undefined;
+    };
+
+    managed.push(idle);
+    pool.onClear = () => {
+      if (managed.includes(idle)) managed.splice(managed.indexOf(idle), 1);
+    };
+    agent.mock.modules.host.trimPool("pause");
+
+    agent.mock.pixi.last().lose("unknown");
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    agent.mock.modules.host.trimPool("rest");
+
+    expect(
+      linesOf(lines, "event")
+        .filter(line => line.name === "pool-trim")
+        .map(line => line.detail)
+    ).toEqual([
+      { reason: "pause", freedMb: 8 },
+      { reason: "rest", freedMb: 0 }
+    ]);
   });
 });

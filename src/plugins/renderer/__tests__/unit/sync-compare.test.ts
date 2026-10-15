@@ -137,7 +137,7 @@ describe("sync compares before it writes (D2.1–D2.7)", () => {
     expect(redraw).not.toHaveBeenCalled();
   });
 
-  it("an equal Shape rewrite redraws nothing; a new fill redraws once", async () => {
+  it("an equal Shape rewrite redraws nothing; a new fill is a tint (spec 26 R2.1); a new size redraws once", async () => {
     const drawn = await open();
     const entity = settled(
       drawn,
@@ -152,6 +152,12 @@ describe("sync compares before it writes (D2.1–D2.7)", () => {
     expect(redraw).not.toHaveBeenCalled();
 
     drawn.mock.world.ecs.set(entity, Shape, { fill: 0x22 });
+
+    expect(drawn.frame()).toBe(true);
+    expect(redraw).not.toHaveBeenCalled();
+    expect((drawn.objectOf(entity) as pixi.Graphics).tint).toBe(0x22);
+
+    drawn.mock.world.ecs.set(entity, Shape, { w: 50 });
 
     expect(drawn.frame()).toBe(true);
     expect(redraw).toHaveBeenCalledTimes(1);

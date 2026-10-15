@@ -6,11 +6,11 @@
  */
 import type { Entity } from "../../world/types";
 import { changeBelow, drawnThrough } from "../kept/readers";
-import type { View } from "../sync/types";
-import type { DemandModule, HostModule, RendererCtx } from "../types";
+import type { HiddenReason, View } from "../sync/types";
+import type { DemandModule, HostModule, PixiContainer, RendererCtx } from "../types";
 import { checkMissedMarks } from "./check";
-import { ancestorsShown, isShown } from "./shown";
-import type { DemandFrame, DemandReason, DemandState } from "./types";
+import { ancestorsShown, isShown, unseenBy } from "./shown";
+import type { DemandFrame, DemandReason, DemandState, Unseen } from "./types";
 import { verifyFrame } from "./verify";
 
 /**
@@ -59,17 +59,22 @@ function clearMarks(state: DemandState): void {
  * Builds the demand module. Inert while the sync root is undefined: a mark is a no-op there.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param deps - The host and the views of sync.
+ * @param deps - The host, the views of sync and its reader of the hidden reasons.
  * @param deps.host - The host module.
  * @param deps.views - The views by entity: `ctx.state.sync.views`, whose identity sync keeps.
+ * @param deps.hiddenBy - Sync's `hiddenBy`: whether one reason hides a view (spec 26 R1.7.1).
  * @returns The demand module.
  */
 export function createDemandApi(
   ctx: RendererCtx,
-  deps: { host: HostModule; views: ReadonlyMap<Entity, View> }
+  deps: {
+    host: HostModule;
+    views: ReadonlyMap<Entity, View>;
+    hiddenBy: (view: View, reason: HiddenReason) => boolean;
+  }
 ): DemandModule {
   const state = ctx.state.demand;
-  const { host, views } = deps;
+  const { host, views, hiddenBy } = deps;
 
   /**
    * Whether the render phase decides this frame: `onDemand` is on, or the pixel oracle runs in shadow.
@@ -85,6 +90,20 @@ export function createDemandApi(
    * @returns True when its view is drawn as the frame stands.
    */
   const shown = (entity: Entity): boolean => isShown(state, host, views, entity, through);
+
+  /**
+   * Whether a node is the top or the visual of a view hidden by `"alpha"` (spec 26 R1.7.1), read from sync's state.
+   *
+   * @param node - A node at alpha 0 on the chain of a view.
+   * @returns True when the alpha of a view the renderer writes put it there.
+   */
+  const alphaHidden = (node: PixiContainer): boolean => {
+    const sync = ctx.state.sync;
+    const entity = sync.entityOf.get(node);
+    const view = sync.viewOfTop.get(node) ?? (entity === undefined ? undefined : views.get(entity));
+
+    return view !== undefined && hiddenBy(view, "alpha");
+  };
 
   /**
    * The padding a kept top adds when its quad draws it (P10.1), read from the kept state.
@@ -268,6 +287,9 @@ export function createDemandApi(
     frame: (): Readonly<DemandFrame> => state.frame,
 
     shown,
+
+    unseenBy: (entity: Entity): Unseen =>
+      unseenBy(state, host, views, entity, through, alphaHidden),
 
     marked: (): ReadonlySet<Entity> => state.marked,
 

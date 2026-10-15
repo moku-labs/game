@@ -222,10 +222,17 @@ const orderCard = defineMotion({
 ### Loops of views nobody sees
 
 An endless track (a `motion.loop`, a `"forever"` tween) and an endless `Frames` loop write nothing to an
-entity whose view lies under an opaque overlay or in the blurred kept picture of one: before such a
-write `anim` asks `renderer.sync.loopsHeld(entity)`, the one renderer member it calls. Its clock runs
-on, so when it writes again it stands where it would have been; bases and offsets are left as they
-are. Finite tracks, timelines and motions a node waits for always write.
+entity whose view the player cannot see: under an opaque overlay or in the blurred kept picture of one,
+at alpha 0, under a view at alpha 0, or a leaf wholly off the screen. Before such a write `anim` asks
+`renderer.sync.loopsHeld(entity, track.reveals)`, the one renderer member it calls. `reveals` is what the
+track writes that could show the view again, computed once when the track is made: `"alpha"` for an
+`alpha` field, `"place"` for a field of `Transform` or a size of a Sprite, NineSlice or Shape, `"both"`
+for both and for any other component (a game's own, a filter's values, a text's style: anim cannot know
+what is made of it), nothing for a tint or a fill colour; an endless `Frames` loop passes `"place"`. A
+loop that writes the view's own alpha or place is not held for its own alpha 0 or for being off the
+screen: a blink whose trough is 0 keeps blinking. Its clock runs on, so when it writes again it stands
+where it would have been; bases and offsets are left as they are. Finite tracks, a timeline's own
+tracks and motions a node waits for always write.
 
 ## Repeat
 

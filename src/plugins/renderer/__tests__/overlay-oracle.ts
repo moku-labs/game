@@ -3,7 +3,8 @@
  * Pixi state, the renders the stand-in logged and `debug.overlays()`:
  *
  * - every leaf the last drawn frame drew live and this drawn frame hides by `renderable` (still in the tree, visible,
- *   not transparent) is drawn by a range picture shown now, which rendered it, or lies under an opaque cover;
+ *   not transparent) is drawn by a range picture shown now, which rendered it, or lies under an opaque cover, or is the
+ *   visual of a Shape that draws nothing (spec 26 B7);
  * - an overlay reported in mode `"freeze"` has its range picture shown in the frame;
  * - every HUD part of the HUD layer is drawn with the factor the overlays' levels of the same frame give it.
  *
@@ -179,6 +180,25 @@ function layerOfRoot(ecs: OverlayTarget["ecs"], entity: Entity): string | undefi
 }
 
 /**
+ * The visuals of the Shapes that draw nothing (spec 26 B7: no stroke, and no fill alpha or no area). They are hidden by
+ * `renderable` and change no pixel, whether the object was drawn live before or not.
+ *
+ * @param target - The watched app.
+ * @returns Their display objects.
+ */
+function emptyShapesOf(target: OverlayTarget): Set<unknown> {
+  const empty = new Set<unknown>();
+
+  for (const [entity, shape] of target.ecs.query(Shape)) {
+    if (shape.strokeWidth <= 0 && (shape.fillAlpha <= 0 || shape.w <= 0 || shape.h <= 0)) {
+      empty.add(target.displayOf(entity));
+    }
+  }
+
+  return empty;
+}
+
+/**
  * Watches a running renderer for K3.
  *
  * @param target - The watched app.
@@ -297,6 +317,7 @@ export function watchOverlays(target: OverlayTarget, pixi: PixiClasses): Overlay
       }
 
       const liveNow = new Set<Pixi.Container>();
+      const empty = emptyShapesOf(target);
 
       for (const leaf of leavesOf(stage.stage, pixi, new Set())) {
         if (drawnLive(leaf, stage.stage)) liveNow.add(leaf);
@@ -304,7 +325,8 @@ export function watchOverlays(target: OverlayTarget, pixi: PixiClasses): Overlay
 
       for (const leaf of liveBefore) {
         if (liveNow.has(leaf) || !shownButHidden(leaf, stage.stage)) continue;
-        if (covered || pictures.leaves.has(leaf) || underPictured(leaf)) continue;
+        if (covered || pictures.leaves.has(leaf) || underPictured(leaf) || empty.has(leaf))
+          continue;
 
         breaks.push({
           frame,

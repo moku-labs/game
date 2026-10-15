@@ -74,8 +74,8 @@ export function watchSafeArea(vctx: ViewportCtx): void {
 }
 
 /**
- * Drops the observers, the listener and the probes. Works on the state alone, because `onStop`
- * has no context.
+ * Drops the observers, the listener, the probes and the two `size()` objects. Works on the state
+ * alone, because `onStop` has no context.
  *
  * @param state - The viewport branch of the plugin state.
  */
@@ -90,4 +90,6 @@ export function stopViewport(state: ViewportState): void {
   state.reference = { width: 0, height: 0 };
   state.safeArea = { top: 0, right: 0, bottom: 0, left: 0 };
   state.scale = 1;
+  state.size = undefined;
+  state.inert = undefined;
 }

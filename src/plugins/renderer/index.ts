@@ -3,9 +3,9 @@
  * survives a lost device, `viewport` maps the window to the reference space, `sync` owns every
  * display object, `kept` draws a still filtered view from a picture, `monitor` counts and, in an
  * agent build, measures every frame. Emits
- * `renderer:device-lost`. Hooks `lifecycle:changed` (a pause serves the waiting captures and, in an
- * agent build, flushes the performance log), and in an agent build `flow:edge`, `flow:rest` (the
- * flow path of the frames) and `time:thermal` (the thermal line).
+ * `renderer:device-lost`. Hooks `lifecycle:changed` (a pause serves the waiting captures, trims
+ * Pixi's texture pool and, in an agent build, flushes the performance log), and in an agent build
+ * `flow:edge`, `flow:rest` (the flow path of the frames) and `time:thermal` (the thermal line).
  *
  * @see README.md
  */
@@ -27,6 +27,7 @@ const config: Config = {
   background: 0x00_00_00,
   antialias: false,
   maxResolution: 2,
+  poolTrim: { restMs: 1000, aboveMb: 16 },
   preference: "webgpu",
   aspect: { min: 4 / 3, max: 21 / 9 },
   poolLimit: 256,

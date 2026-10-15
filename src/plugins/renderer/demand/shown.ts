@@ -2,12 +2,13 @@
  * @file renderer/demand — what "shown" means (F6, F18a): a view drawn in the frame as it stands, a leaf off the screen
  * excepted. A kept top is drawn through its quad (spec 23 P10.1): the walk goes on through it, with the padding its
  * filters hang with on the stand-in. Everything read is a public Pixi property: `parent`, `visible`, `renderable`,
- * `alpha`, `filters`, `Filter.padding`, `getBounds` and `Application.screen`.
+ * `alpha`, `filters`, `Filter.padding`, `getBounds` and `Application.screen`. The same walk says where it stopped
+ * (`unseenBy`, spec 26 R1.7.3), so `sync.loopsHeld` holds the loops of a view nobody sees.
  */
 import type { Entity } from "../../world/types";
 import type { View } from "../sync/types";
 import type { HostModule, PixiBounds, PixiContainer } from "../types";
-import type { DemandState } from "./types";
+import type { DemandState, Unseen } from "./types";
 
 /**
  * The paddings of every filter a node holds, enabled or not: a superset of what any of them could spill onto the
@@ -37,12 +38,29 @@ const HIDDEN = -1;
 export type DrawnThrough = (node: PixiContainer) => number;
 
 /**
+ * Whether a node is the top or the visual of a view hidden by `"alpha"`: sync's reasons, read by `unseenBy`.
+ */
+export type AlphaHidden = (node: PixiContainer) => boolean;
+
+/** Where a walk notes the node at alpha 0 it stopped at. */
+type WalkStop = { node: PixiContainer | undefined };
+
+/**
  * The reader without kept pictures: no quad draws any node.
  *
  * @returns `HIDDEN`.
  */
 function noneThrough(): number {
   return HIDDEN;
+}
+
+/**
+ * The reader without sync's reasons: no node is hidden by `"alpha"`.
+ *
+ * @returns False.
+ */
+function noAlpha(): boolean {
+  return false;
 }
 
 /**
@@ -53,18 +71,25 @@ function noneThrough(): number {
  * @param from - The first node of the walk.
  * @param stage - The stage of the application.
  * @param through - The kept reader: the padding of a kept top drawn through its quad, or `HIDDEN`.
+ * @param stop - Where the walk notes a visible node at alpha 0 it stopped at; left as it is for any other stop.
  * @returns The sum of the paddings of the chain, or `HIDDEN` when the chain is not drawn.
  */
 function chainPadding(
   from: PixiContainer | null,
   stage: PixiContainer,
-  through: DrawnThrough
+  through: DrawnThrough,
+  stop?: WalkStop
 ): number {
   let pad = 0;
 
   for (let node = from; node !== stage; node = node.parent) {
-    if (node === null) return HIDDEN;
-    if (!node.visible || node.alpha <= 0) return HIDDEN;
+    if (node === null || !node.visible) return HIDDEN;
+
+    if (node.alpha <= 0) {
+      if (stop !== undefined) stop.node = node;
+
+      return HIDDEN;
+    }
 
     if (!node.renderable) {
       const kept = through(node);
@@ -128,10 +153,65 @@ function onScreen(state: DemandState, host: HostModule, top: PixiContainer, pad:
 }
 
 /**
- * Whether the entity's view is drawn in the frame as it stands now: it hangs under the stage, nothing on its chain
- * hides it, and a leaf meets the screen with the paddings of its chain. A view with children, its wrapper's or Pixi
- * children of its own object, is never exempt off the screen: a child may carry a filter whose padding Pixi's bounds
- * leave out.
+ * What a walk that stopped at a node at alpha 0 answers: the view's own alpha, the alpha of a view above it, or a node
+ * no `"alpha"` reason hides (a game's object, a layer).
+ *
+ * @param node - The node at alpha 0, or `undefined` when the walk stopped for another reason.
+ * @param top - The top of the view the walk started from.
+ * @param alphaHidden - Sync's reader of the `"alpha"` reason.
+ * @returns `"alpha-own"`, `"alpha-above"` or `"other"`.
+ */
+function alphaStop(
+  node: PixiContainer | undefined,
+  top: PixiContainer,
+  alphaHidden: AlphaHidden
+): Unseen {
+  if (node === undefined || !alphaHidden(node)) return "other";
+
+  return node === top ? "alpha-own" : "alpha-above";
+}
+
+/**
+ * Where the walk of `isShown` stops for the entity's view: `"shown"` when it is drawn in the frame as it stands now
+ * (it hangs under the stage, nothing on its chain hides it, and a leaf meets the screen with the paddings of its
+ * chain), else the reason it is not. A view with children, its wrapper's or Pixi children of its own object, is never
+ * exempt off the screen: a child may carry a filter whose padding Pixi's bounds leave out.
+ *
+ * @param state - The demand state (its `bounds` and `stop` scratch).
+ * @param host - The host module (`stage()`, `screen()`).
+ * @param views - The views by entity.
+ * @param entity - The entity.
+ * @param through - The kept reader: the padding of a kept top drawn through its quad, or `HIDDEN`; none by default.
+ * @param alphaHidden - Sync's reader of the `"alpha"` reason; none by default.
+ * @returns Where the walk stopped.
+ */
+export function unseenBy(
+  state: DemandState,
+  host: HostModule,
+  views: ReadonlyMap<Entity, View>,
+  entity: Entity,
+  through: DrawnThrough = noneThrough,
+  alphaHidden: AlphaHidden = noAlpha
+): Unseen {
+  const view = views.get(entity);
+  const stage = host.stage();
+
+  if (view === undefined || stage === undefined) return "other";
+
+  const top = view.wrapper ?? view.object;
+
+  state.stop.node = undefined;
+
+  const pad = chainPadding(top, stage, through, state.stop);
+
+  if (pad === HIDDEN) return alphaStop(state.stop.node, top, alphaHidden);
+  if (view.wrapper !== undefined || top.children.length > 0) return "shown";
+
+  return onScreen(state, host, top, pad) ? "shown" : "off-screen";
+}
+
+/**
+ * Whether the entity's view is drawn in the frame as it stands now: `unseenBy` answers `"shown"`.
  *
  * @param state - The demand state (its `bounds` scratch).
  * @param host - The host module (`stage()`, `screen()`).
@@ -147,18 +227,7 @@ export function isShown(
   entity: Entity,
   through: DrawnThrough = noneThrough
 ): boolean {
-  const view = views.get(entity);
-  const stage = host.stage();
-
-  if (view === undefined || stage === undefined) return false;
-
-  const top = view.wrapper ?? view.object;
-  const pad = chainPadding(top, stage, through);
-
-  if (pad === HIDDEN) return false;
-  if (view.wrapper !== undefined || top.children.length > 0) return true;
-
-  return onScreen(state, host, top, pad);
+  return unseenBy(state, host, views, entity, through) === "shown";
 }
 
 /**

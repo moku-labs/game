@@ -159,7 +159,8 @@ export class FakeTexture {
 /**
  * The fake of Pixi's `TexturePool`: a request of a frame at a resolution gets a texture whose
  * backing is the next power of two of the real pixels, as Pixi's `getOptimalTexture` sizes it, and
- * a returned texture is handed out again for the same backing. Every take and return is recorded.
+ * a returned texture is handed out again for the same backing. Every take, return and clear is
+ * recorded; `clear(true)` destroys the idle textures, as Pixi's does.
  */
 export class FakeTexturePool {
   /** Every texture handed out, in order. */
@@ -168,7 +169,26 @@ export class FakeTexturePool {
   public readonly returned: FakeTexture[] = [];
   /** Every options object `getOptimalTexture` was handed, in order. */
   public readonly requests: object[] = [];
+  /** The argument of every `clear`, in order. */
+  public readonly clears: Array<boolean | undefined> = [];
+  /** Told after every `clear`: a test drops the GPU sources its scripted idle targets stood for. */
+  public onClear: (() => void) | undefined;
   private readonly free: FakeTexture[] = [];
+
+  /**
+   * Forgets every idle texture and destroys it unless told not to, as Pixi's `clear` does.
+   *
+   * @param destroyTextures - False keeps the textures alive; destroyed otherwise.
+   */
+  public clear(destroyTextures?: boolean): void {
+    this.clears.push(destroyTextures);
+
+    for (const texture of this.free.splice(0)) {
+      if (destroyTextures !== false) texture.destroy(true);
+    }
+
+    this.onClear?.();
+  }
 
   /**
    * Hands out a pooled texture of a frame at a resolution, as Pixi's does (8.21+: an options object).
@@ -1183,6 +1203,26 @@ export const WEBGL_PIPES = "webgl-pipes";
 /** Pixi's `ExtensionType.WebGPUPipes`: the bitmap text pipe registers here and under WebGL. */
 export const WEBGPU_PIPES = "webgpu-pipes";
 
+/**
+ * The fake of Pixi's `BatcherPipe`: Pixi calls `buildStart` once per instruction rebuild of a render group, the one
+ * method the rebuild counter overrides.
+ */
+export class FakeBatcherPipe {
+  public static extension = { type: [WEBGL_PIPES, WEBGPU_PIPES], name: "batch" };
+
+  /** Instruction rebuilds begun on this pipe. */
+  public builds = 0;
+
+  /**
+   * Begins one rebuild of a render group's instruction list.
+   *
+   * @param _instructionSet - The instruction set being rebuilt.
+   */
+  public buildStart(_instructionSet: unknown): void {
+    this.builds += 1;
+  }
+}
+
 /** The fake of Pixi's `Matrix`: the identity. */
 export class FakeMatrix {
   public a = 1;
@@ -1514,7 +1554,7 @@ export const fakeExtensions: FakeExtensions = {
   },
 
   /**
-   * Empties the registry and registers Pixi's own six counted classes and its bitmap text pipe,
+   * Empties the registry and registers Pixi's own seven counted classes and its bitmap text pipe,
    * as importing Pixi does.
    */
   reset(): void {
@@ -1526,6 +1566,7 @@ export const fakeExtensions: FakeExtensions = {
       FakeFilterSystem,
       FakeGpuTextureSystem,
       FakeGlTextureSystem,
+      FakeBatcherPipe,
       FakeBitmapTextPipe
     );
   }
@@ -1545,6 +1586,8 @@ export type FakeScene = {
   indirect: number;
   /** Render passes the encoder begins, on the bound target, then one submit. */
   passes: number;
+  /** Instruction rebuilds the batcher pipe begins, as Pixi's render group system does on a changed structure. */
+  rebuilds: number;
 };
 
 /** The three draw classes an application found in the registry at `init`, as Pixi does. */
@@ -1552,6 +1595,8 @@ export type FakeDrawClasses = {
   batch: typeof FakeGpuBatchAdaptor;
   graphics: typeof FakeGpuGraphicsAdaptor;
   encoder: typeof FakeGpuEncoderSystem;
+  /** The batcher pipe found under `"batch"` of the WebGPU pipes. */
+  batcher: typeof FakeBatcherPipe;
 };
 
 /** The compilation messages of a fake shader module: always none. */
@@ -1709,6 +1754,7 @@ type FakeDrawInstances = {
   batch: FakeGpuBatchAdaptor;
   graphics: FakeGpuGraphicsAdaptor;
   encoder: FakeGpuEncoderSystem;
+  batcher: FakeBatcherPipe;
   descriptor: { colorAttachments: unknown[] };
   target: FakeGpuRenderTarget;
   context: FakeGraphicsContext;
@@ -1734,6 +1780,7 @@ function createDrawInstances(renderer: FakeRenderer, classes: FakeDrawClasses): 
     batch: new classes.batch(),
     graphics: new classes.graphics(),
     encoder,
+    batcher: new classes.batcher(),
     descriptor,
     target: { descriptor },
     context,
@@ -1760,6 +1807,7 @@ function drawScene(draw: FakeDrawInstances, scene: FakeScene): void {
   for (let index = 0; index < scene.indirect; index += 1) encoder.drawIndirect(draw);
   for (let index = 0; index < scene.passes; index += 1) encoder.beginRenderPass(draw.target);
   if (scene.passes > 0) encoder.postrender();
+  for (let index = 0; index < scene.rebuilds; index += 1) draw.batcher.buildStart(draw.descriptor);
 }
 
 /** What `createFakePixi` sets for every application, because a Pixi class takes no options. */
@@ -1771,7 +1819,7 @@ export type FakeSettings = { kind: "webgpu" | "webgl"; failInit: boolean; scene:
  * @returns The empty scene.
  */
 function emptyScene(): FakeScene {
-  return { batches: 0, graphics: [], draws: 0, indirect: 0, passes: 0 };
+  return { batches: 0, graphics: [], draws: 0, indirect: 0, passes: 0, rebuilds: 0 };
 }
 
 /** A fake Pixi application. */
@@ -1884,7 +1932,8 @@ export class FakeApplication {
           WEBGPU_PIPES_ADAPTOR,
           "graphics"
         ) as typeof FakeGpuGraphicsAdaptor,
-        encoder: fakeExtensions.named(WEBGPU_SYSTEM, "encoder") as typeof FakeGpuEncoderSystem
+        encoder: fakeExtensions.named(WEBGPU_SYSTEM, "encoder") as typeof FakeGpuEncoderSystem,
+        batcher: fakeExtensions.named(WEBGPU_PIPES, "batch") as typeof FakeBatcherPipe
       };
       this.drawInstances = createDrawInstances(renderer, this.drawClasses);
     }
@@ -1999,6 +2048,7 @@ export function createFakePixi(
     GpuTextureSystem: FakeGpuTextureSystem,
     GlTextureSystem: FakeGlTextureSystem,
     BitmapTextPipe: FakeBitmapTextPipe,
+    BatcherPipe: FakeBatcherPipe,
     Shader: FakeShader,
     Matrix: FakeMatrix,
     compileHighShaderGpuProgram: fakeShaderCompiler.compile,

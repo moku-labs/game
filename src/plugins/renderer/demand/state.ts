@@ -45,6 +45,7 @@ export function createDemandState(verifyFrames = false): DemandState {
     requests: 0,
     frame: { drawn: false, reason: "none", marks: 0 },
     bounds: undefined,
+    stop: { node: undefined },
     sinceDraw: emptyEntities(),
     check: { warned: emptyEntities(), off: false },
     verify: {

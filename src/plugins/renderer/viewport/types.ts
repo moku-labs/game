@@ -89,6 +89,10 @@ export type ViewportState = {
   /** The two hidden elements whose size is the safe area. */
   probes: SafeAreaProbes | undefined;
   cleanups: Array<() => void>;
+  /** What `size()` answers once the frame was measured: frozen, replaced only by a layout that changed it. */
+  size: Readonly<ViewportSize> | undefined;
+  /** What `size()` answers before the first measurement: frozen, made on first use. */
+  inert: Readonly<ViewportSize> | undefined;
 };
 
 /**
@@ -140,17 +144,20 @@ export type ViewportApi = {
   toScreen(point: Point): Point;
 
   /**
-   * The drawn frame in reference units, as a fresh object.
+   * The drawn frame in reference units. One frozen object: the same object until the frame really changes (a resize,
+   * a rotation, new insets, a new scale), so a plugin that follows the frame every frame compares with `===` and
+   * allocates nothing. Read it, never write it: a write throws.
    *
    * @returns Width, height, scale, designed orientation and the safe area.
    * @example
    * ```ts
-   * // A board keeps its bottom row above the home bar of the phone.
-   * const { height, safeArea } = app.renderer.viewport.size();
-   * const bottom = height - safeArea.bottom; // 1920 - 34
+   * // The panorama re-lays its strip only on a frame that changed, at up to 120 calls a second.
+   * const size = app.renderer.viewport.size(); // { width: 1080, height: 2340, scale: 0.3555…, … }
+   * app.renderer.viewport.size() === size; // true until the phone rotates or the window resizes
+   * const bottom = size.height - size.safeArea.bottom; // 2340 - 34
    * ```
    */
-  size(): ViewportSize;
+  size(): Readonly<ViewportSize>;
 };
 
 /**

@@ -56,6 +56,19 @@ describe("the draw classes of the real Pixi module", () => {
     });
   });
 
+  it("register BatcherPipe under the name the rebuild counter swaps, with buildStart public", () => {
+    expect(pixi.BatcherPipe.extension).toEqual({
+      type: [
+        pixi.ExtensionType.WebGLPipes,
+        pixi.ExtensionType.WebGPUPipes,
+        pixi.ExtensionType.CanvasPipes
+      ],
+      name: "batch"
+    });
+    expect(typeof pixi.BatcherPipe.prototype.buildStart).toBe("function");
+    expect(typeof pixi.BatcherPipe.getBatcher).toBe("function");
+  });
+
   it("ask the device for the features the engine's own device keeps", () => {
     const source = readFileSync(
       new URL(
@@ -85,6 +98,9 @@ describe("the draw classes of the real Pixi module", () => {
     expect(classes.filter.extension).toBe(pixi.FilterSystem.extension);
     expect(classes.gpuTexture.extension).toBe(pixi.GpuTextureSystem.extension);
     expect(classes.glTexture.extension).toBe(pixi.GlTextureSystem.extension);
+    expect(Object.getPrototypeOf(classes.batcher)).toBe(pixi.BatcherPipe);
+    expect(classes.batcher.extension).toBe(pixi.BatcherPipe.extension);
+    expect(classes.batcher.getBatcher).toBe(pixi.BatcherPipe.getBatcher);
   });
 
   it("exports every name the renderer and effects build with", () => {

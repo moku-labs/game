@@ -3,6 +3,7 @@
  * offsets accumulator of the additive tracks, the per-frame advance with its repeats, reduced
  * motion and the two ways out. Deterministic: the only clock is the `delta` a caller hands in.
  */
+import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import type { AnyComponent } from "../../world/ecs/types";
 import type { Ease, Entity, TrackOptions, TrackSegment } from "../../world/types";
 import { Animation, countPlaying } from "../components";
@@ -562,6 +563,55 @@ function targetOf(
 }
 
 /**
+ * Tells whether a field sizes a built-in visual: a loop of it may bring the view onto the screen. Pure.
+ *
+ * @param field - A field of a Sprite, a NineSlice or a Shape.
+ * @returns True for `w`, `h`, `width` and `height`.
+ * @example
+ * ```ts
+ * isSizeField("width"); // true
+ * ```
+ */
+function isSizeField(field: string): boolean {
+  return field === "w" || field === "h" || field === "width" || field === "height";
+}
+
+/**
+ * What a track writes that could show its view again (spec 26 R1.7.4): `"alpha"`, `"place"` (any field of
+ * `Transform`, a size of a built-in visual), both, or nothing. A component anim cannot read (a game's own, a filter's
+ * values, a text's style) may show the view any way: `"both"`. Pure.
+ *
+ * @param component - The component the track writes.
+ * @param fields - The fields it writes.
+ * @returns What it reveals, or `undefined` for a write that cannot show the view (a tint, a fill colour).
+ * @example
+ * ```ts
+ * revealsOf(Transform, ["rotation"]); // "place"
+ * ```
+ */
+function revealsOf(
+  component: AnyComponent,
+  fields: Readonly<Record<string, number>>
+): "alpha" | "place" | "both" | undefined {
+  const visual = component === Sprite || component === NineSlice || component === Shape;
+
+  if (component !== Transform && !visual) return "both";
+
+  let alpha = false;
+  let place = false;
+
+  for (const field in fields) {
+    if (field === "alpha") alpha = true;
+    else if (component === Transform || isSizeField(field)) place = true;
+  }
+
+  if (alpha && place) return "both";
+  if (alpha) return "alpha";
+
+  return place ? "place" : undefined;
+}
+
+/**
  * How many runs a track has after its first one.
  *
  * @param repeat - The `repeat` of the track options.
@@ -626,7 +676,8 @@ export function startTrack(
     repeatsLeft: instant ? 0 : repeats,
     held: false,
     masked: noMaskedFields(),
-    keep
+    keep,
+    reveals: revealsOf(component, target)
   };
 
   actx.state.nextId += 1;
@@ -728,11 +779,12 @@ export function advanceTrack(actx: AnimCtx, track: Track, deltaMs: number): numb
   const final = fraction >= 1 && (track.repeatsLeft === 0 || track.ms <= 0);
 
   // An endless loop of a view the player cannot see writes nothing; its clock ran on, so it writes the phase of the
-  // time when it is shown again (spec 22 O9). Bases and offsets stay as they are.
+  // time when it is shown again (spec 22 O9, spec 26 R1.7). A timeline's own track never asks. Bases and offsets stay.
   if (
     !final &&
+    !track.driven &&
     track.repeatsLeft === Number.POSITIVE_INFINITY &&
-    actx.state.loopsHeld?.(track.entity) === true
+    actx.state.loopsHeld?.(track.entity, track.reveals) === true
   ) {
     return 0;
   }

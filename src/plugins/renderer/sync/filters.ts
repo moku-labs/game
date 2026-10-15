@@ -192,30 +192,33 @@ export function forgetLeft(state: SyncState, ecs: Pick<EcsApi, "ownerOf">, entit
 }
 
 /**
- * Tells whether a display object hangs in the drawn tree: its parents lead to the root.
+ * Tells whether a display object is drawn under the root: it and every node up to the root are visible and renderable.
+ * A node hidden by `"empty"`, `"alpha"` (spec 26 R1.5), `"kept"` or `"freeze"` takes its whole subtree out of the
+ * frame: Pixi runs none of the filters under it.
  *
  * @param object - The display object.
  * @param root - The root container of the renderer.
  * @returns True when the object is drawn.
  */
-function inTree(object: PixiContainer, root: PixiContainer): boolean {
-  for (let parent = object.parent; parent !== null; parent = parent.parent) {
-    if (parent === root) return true;
+function drawnUnder(object: PixiContainer, root: PixiContainer): boolean {
+  for (let node: PixiContainer | null = object; node !== null; node = node.parent) {
+    if (!node.visible || !node.renderable) return false;
+    if (node === root) return true;
   }
 
   return false;
 }
 
 /**
- * Tells whether the view of a filtered entity is drawn this frame: it exists and hangs under the
- * root. A view outside the tree costs no pass.
+ * Tells whether the view of a filtered entity is drawn this frame: it exists and its top is drawn under the root. A
+ * view outside the tree, hidden, or inside another view's kept picture costs no pass.
  *
  * @param view - The view of the entity, `undefined` when it has none.
  * @param root - The root container of the renderer.
- * @returns True when the view is in the drawn tree.
+ * @returns True when the view is drawn.
  */
 function isDrawn(view: View | undefined, root: PixiContainer): view is View {
-  return view !== undefined && inTree(view.wrapper ?? view.object, root);
+  return view !== undefined && drawnUnder(view.wrapper ?? view.object, root);
 }
 
 /**
@@ -234,8 +237,8 @@ function passesOf(slots: readonly FilterSlot[]): number {
 }
 
 /**
- * The render passes of a frame: 1 for the frame, plus what every filtered view in the tree costs,
- * a view drawn from its kept picture excepted, plus what the last flush of the kept cache cost
+ * The render passes of a frame: 1 for the frame, plus what every filtered view drawn under the root costs, a view
+ * drawn from its kept picture and every view inside one excepted, plus what the last flush of the kept cache cost
  * (spec 23 P9.2). Read from the slots, never asked of the GPU.
  *
  * @param state - The sync branch of the plugin state.

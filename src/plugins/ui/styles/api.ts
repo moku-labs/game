@@ -9,7 +9,7 @@ import { resolve } from "./resolve";
 import type { IsFlags, ResolvedStyle, Style, StylesModule } from "./types";
 
 /** What an element is resolved against before the first frame read the real viewport. */
-const FALLBACK_VIEWPORT: ViewportSize = {
+const FALLBACK_VIEWPORT: Readonly<ViewportSize> = {
   width: 0,
   height: 0,
   scale: 1,
@@ -27,11 +27,14 @@ export function createStylesApi(ctx: UiCtx): StylesModule {
   const state = ctx.state.styles;
 
   return {
-    flagsOf: (viewport: ViewportSize) => flagsOf(viewport, ctx.config.breakpoints),
+    flagsOf: (viewport: Readonly<ViewportSize>) => flagsOf(viewport, ctx.config.breakpoints),
 
     viewport: () => state.viewport,
 
-    useViewport: (viewport: ViewportSize): boolean => {
+    useViewport: (viewport: Readonly<ViewportSize>): boolean => {
+      // The same frame: `renderer.viewport.size()` hands out one frozen object until the frame changes.
+      if (viewport === state.viewport) return false;
+
       const changed = !sameViewport(state.viewport, viewport);
 
       state.viewport = viewport;

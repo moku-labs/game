@@ -34,6 +34,8 @@ import type {
  * };
  * // The same board at rest with `onDemand`: the loop runs, nothing is drawn.
  * const still: RenderStats = { ...stats, drawn: 0 };
+ * // A dev build on a still board with a breathing button: its alpha writes nothing to the path.
+ * const breathing: RenderStats = { ...stats, fps: 120, drawn: 120, redraws: 0, rebuilds: 0 };
  * ```
  */
 export type RenderStats = {
@@ -86,6 +88,16 @@ export type RenderStats = {
    * fallback.
    */
   drawCalls?: number;
+  /**
+   * Graphics paths the engine drew in the last second: shapes, clip masks, nine-slice outlines. A still screen draws
+   * none. Dev and debug builds only.
+   */
+  redraws?: number;
+  /**
+   * Times Pixi rebuilt a render group's instruction list in the last second. A still screen rebuilds none; a fade
+   * rebuilds at its start and its end. Dev and debug builds only.
+   */
+  rebuilds?: number;
 };
 
 /**
@@ -95,9 +107,11 @@ export type RenderStats = {
 export type DrawCounter = { frame: number; last: number };
 
 /**
- * The six counting subclasses, built from the Pixi module at run time.
+ * The seven counting subclasses, built from the Pixi module at run time.
  */
 export type CountingClasses = {
+  /** Counts Pixi's instruction rebuilds, one per `buildStart` (spec 26 R2.3). */
+  batcher: PixiModule["BatcherPipe"];
   batch: PixiModule["GpuBatchAdaptor"];
   graphics: PixiModule["GpuGraphicsAdaptor"];
   encoder: PixiModule["GpuEncoderSystem"];
@@ -215,6 +229,8 @@ export type MonitorSinks = {
   passes: PassSink | undefined;
   /** A pass counter runs (F8): the counting encoder exists, or the WebGL runner items are subscribed. */
   measuring: boolean;
+  /** Pixi's instruction rebuilds since the monitor last took them, in a frame or between frames (spec 26 R2.3). */
+  rebuildsWindow: number;
 };
 
 /**
@@ -430,6 +446,14 @@ export type MonitorState = {
   lastDrawn: boolean;
   /** Mean frame work of the last closed window, in milliseconds. */
   frameMs: number;
+  /** `Graphics` paths the engine drew in the open window (spec 26 R2.3). */
+  redrawsOpen: number;
+  /** Pixi's instruction rebuilds in the open window. */
+  rebuildsOpen: number;
+  /** Paths drawn per second over the last closed window. */
+  redraws: number;
+  /** Instruction rebuilds per second over the last closed window. */
+  rebuilds: number;
   /** Captures waiting for a drawn frame, served in `end()`. */
   captures: PictureRequest[];
   /** The draws the dev counter saw; stays at 0 in a production build. */
@@ -463,17 +487,19 @@ export type MonitorApi = {
    * The counters of the renderer, as a fresh object. The frame timing, the draw calls and the
    * render passes are kept each frame without an allocation; the rest is read at call time from
    * `sync`, the kept pictures and Pixi. `renderPasses` is measured on the GPU path in every build
-   * (the estimate of the filter slots where nothing counts). `drawCalls` is there in a dev build only.
+   * (the estimate of the filter slots where nothing counts). `drawCalls`, `redraws` and `rebuilds` are there in a dev
+   * build only.
    *
    * @returns Frames per second, frame work, GPU textures and their memory, views, pooled objects,
    *   render passes and their most in the last second, the kept pictures, and in a dev build the
-   *   draw calls of the last frame. Inert: all 0.
+   *   draw calls of the last frame and the Graphics redraws and Pixi rebuilds per second. Inert: all 0.
    * @example
    * ```ts
    * // The editor's stats panel reads it every frame. Here the game drew one sprite for 51 frames,
    * // 20 ms apart with 4 ms of work each, and its texture is not uploaded yet.
    * app.renderer.stats(); // { fps: 50, drawn: 50, frameMs: 4, textures: 0, textureMb: 0, views: 1, pooled: 0, renderPasses: 1, renderPassesMax: 1, kept: { pictures: 0, mb: 0, retakes: 0 } }
-   * // The same frame in a dev build also counts the one sprite batch: { ..., drawCalls: 1 }
+   * // The same frame in a dev build also counts the one sprite batch, and the one instruction build of the first
+   * // frame: { ..., drawCalls: 1, redraws: 0, rebuilds: 1 }
    * app.renderer.stats(); // { fps: 120, drawn: 0, … }: a still board with onDemand
    * // the ward at rest with its lamps kept: { renderPasses: 1, renderPassesMax: 1, kept: { pictures: 4, mb: 1.6, retakes: 0 }, … }
    * ```

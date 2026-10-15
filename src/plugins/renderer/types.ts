@@ -22,9 +22,9 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * plugin above builds through `host.pixi()`, the filter and particle classes `effects` builds
  * through it (a custom filter carries a `GpuProgram` and a `GlProgram` over `defaultFilterVert`),
  * the render textures and matrices the kept pictures are drawn with (an `AlphaFilter` runs their pre-pass), and the
- * extension registry with the six classes the counting of a dev or debug build swaps
- * (the three WebGPU draw classes, the filter system and both texture systems; production swaps the encoder alone, to
- * count the passes) and the bitmap text
+ * extension registry with the seven classes the counting of a dev or debug build swaps
+ * (the three WebGPU draw classes, the filter system, both texture systems and the batcher pipe whose `buildStart`
+ * begins every instruction rebuild; production swaps the encoder alone, to count the passes) and the bitmap text
  * pipe `host` swaps for one whose SDF shader applies the alpha once (with the WGSL and GLSL shader
  * pieces it compiles that shader from). The module object
  * never arrives through a static import: `config.loadPixi()` returns it, so a game without a screen carries no
@@ -36,6 +36,7 @@ import type { ViewportApi, ViewportInternal, ViewportState } from "./viewport/ty
  * pixi.Texture.WHITE.width; // 1
  * pixi.GpuBatchAdaptor.extension.name; // "batch"
  * pixi.FilterSystem.extension.name; // "filter"
+ * pixi.BatcherPipe.extension.name; // "batch"
  * pixi.BitmapTextPipe.extension.name; // "bitmapText"
  * pixi.defaultFilterVert.startsWith("in vec2 aPosition;"); // true
  * ```
@@ -44,6 +45,7 @@ export type PixiModule = Pick<
   typeof import("pixi.js"),
   | "AlphaFilter"
   | "Application"
+  | "BatcherPipe"
   | "BitmapFont"
   | "BitmapText"
   | "BitmapTextPipe"
@@ -205,6 +207,32 @@ export type Events = {
 export type AspectRange = { min: number; max: number };
 
 /**
+ * When the renderer gives back the render targets Pixi's texture pool keeps between frames: the textures of filter
+ * passes and of a blur's ping-pong, idle once a frame is drawn. A trim runs strictly between frames.
+ *
+ * @example
+ * ```ts
+ * // A game that rests on long reading screens trims sooner and only for a large pool.
+ * const trim: PoolTrim = { restMs: 500, aboveMb: 32 };
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", onDemand: true, poolTrim: trim } } });
+ * // after the shop, the board and the memory screen were seen, half a second of a still board:
+ * app.renderer.stats().textureMbSplit.targets; // 91.4 before, 12.6 after the trim
+ * ```
+ */
+export type PoolTrim = {
+  /**
+   * Clock milliseconds a screen must stand still (no frame drawn, `onDemand`), or must have passed since a scene
+   * change, before the pool is trimmed. Default 1000.
+   */
+  restMs: number;
+  /**
+   * MiB the render targets must have grown by since the last trim. Less is not worth the re-allocation of the next
+   * filtered frame. Default 16. A pause trims whatever grew.
+   */
+  aboveMb: number;
+};
+
+/**
  * renderer plugin config.
  *
  * @example
@@ -213,6 +241,8 @@ export type AspectRange = { min: number; max: number };
  *   plugins: [...screen],
  *   pluginConfigs: { renderer: { mount: "#game", background: 0x101018, maxResolution: 2 } }
  * });
+ * // A debug session keeps every render target of Pixi's pool, as before the trim.
+ * createApp({ pluginConfigs: { renderer: { mount: "#game", poolTrim: false } } });
  * // A debug build of the fixture outlines every nine-slice from the first frame.
  * createApp({ pluginConfigs: { renderer: { mount: "#game", debug: { nineSlice: true } } } });
  * // Draw only what changes: a still screen draws nothing.
@@ -233,6 +263,11 @@ export type Config = {
    * graphics setting is applied by `renderer.monitor.setResolution` from an effect.
    */
   maxResolution: number;
+  /**
+   * Gives back the render targets Pixi's pool keeps between frames: at rest, after a scene change, on a pause.
+   * `false` keeps them until the app stops, as before.
+   */
+  poolTrim: PoolTrim | false;
   /** Passed to Pixi. Pixi falls back to WebGL by itself. */
   preference: "webgpu" | "webgl";
   /** Allowed long side / short side of the frame. A window outside it gets bars. */
@@ -465,7 +500,8 @@ export type {
   PerfSampleLine,
   PerfSpikeLine,
   PerfStartupLine,
-  PerfThermalLine
+  PerfThermalLine,
+  PoolTrimDetail
 } from "./monitor/log-types";
 export type {
   Captured,

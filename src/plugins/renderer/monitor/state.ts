@@ -115,7 +115,8 @@ export function createSinks(draws?: DrawCounter): MonitorSinks {
     filterKinds: undefined,
     compiles: createCompileRing(),
     passes: undefined,
-    measuring: false
+    measuring: false,
+    rebuildsWindow: 0
   };
 }
 
@@ -192,6 +193,10 @@ export function createMonitorState(config: Readonly<MonitorConfig>): MonitorStat
     drawnFps: 0,
     lastDrawn: false,
     frameMs: 0,
+    redrawsOpen: 0,
+    rebuildsOpen: 0,
+    redraws: 0,
+    rebuilds: 0,
     captures: [],
     draws,
     sinks,

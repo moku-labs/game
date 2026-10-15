@@ -29,6 +29,7 @@ import type {
   PixiFilter,
   PixiTexture,
   Point,
+  PoolTrim,
   RenderStats,
   SafeArea,
   SliceFrame,
@@ -141,14 +142,21 @@ expectTypeOf(renderer.sync.hitTest).toEqualTypeOf<
 // @ts-expect-error — the caller always names its filter
 renderer.sync.hitTest(540, 300);
 
-expectTypeOf(renderer.viewport.size).toEqualTypeOf<() => ViewportSize>();
+// One frozen object (spec 25 F11): read-only, and still assignable where a game annotates a `ViewportSize`.
+expectTypeOf(renderer.viewport.size).toEqualTypeOf<() => Readonly<ViewportSize>>();
 expectTypeOf(renderer.viewport.size()).toEqualTypeOf<{
-  width: number;
-  height: number;
-  scale: number;
-  orientation: Orientation;
-  safeArea: SafeArea;
+  readonly width: number;
+  readonly height: number;
+  readonly scale: number;
+  readonly orientation: Orientation;
+  readonly safeArea: SafeArea;
 }>();
+expectTypeOf(renderer.viewport.size()).toExtend<ViewportSize>();
+
+const frame = renderer.viewport.size();
+
+// @ts-expect-error — the frame is read, never written: the object is frozen
+frame.width = 1;
 expectTypeOf(renderer.viewport.size().orientation).toEqualTypeOf<"portrait" | "landscape">();
 expectTypeOf(renderer.viewport.size().safeArea).toEqualTypeOf<{
   top: number;
@@ -200,7 +208,11 @@ expectTypeOf<RenderStats>().toEqualTypeOf<{
   renderPassesMax: number;
   kept: KeptStats;
   drawCalls?: number;
+  redraws?: number;
+  rebuilds?: number;
 }>();
+expectTypeOf<RenderStats["redraws"]>().toEqualTypeOf<number | undefined>();
+expectTypeOf<RenderStats["rebuilds"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<RenderStats["kept"]>().toEqualTypeOf<{
   pictures: number;
   mb: number;
@@ -321,6 +333,20 @@ renderer.capture({ layers: "hud" });
 // ─── render on demand: the switch, invalidate, adapters that answer, wakes ──
 
 expectTypeOf<Config["onDemand"]>().toEqualTypeOf<boolean>();
+
+// ─── the pool trim (spec 25 C14) ──────────────────────────────
+
+expectTypeOf<false>().toExtend<Config["poolTrim"]>();
+expectTypeOf<{ restMs: number; aboveMb: number }>().toExtend<Config["poolTrim"]>();
+expectTypeOf<PoolTrim>().toExtend<Config["poolTrim"]>();
+
+declare function trimWith(poolTrim: Config["poolTrim"]): void;
+
+trimWith({ restMs: 500, aboveMb: 32 });
+// @ts-expect-error — `true` is not a trim: give the two numbers, or false to keep the targets
+trimWith(true);
+// @ts-expect-error — a trim names both numbers
+trimWith({ restMs: 1000 });
 expectTypeOf(renderer.invalidate).toEqualTypeOf<(entity: Entity) => void>();
 
 // @ts-expect-error — there is no whole-frame form: invalidate names the entity it is about to write

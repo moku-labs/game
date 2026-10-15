@@ -82,7 +82,9 @@ export function jsonOf(name: string, value: object | true | undefined): Json | u
 }
 
 /**
- * Builds the whole world as plain JSON, sorted by entity index.
+ * Builds the whole world as plain JSON, sorted by entity index. Every value is a copy of the
+ * moment: the stores write their objects in place, so a snapshot that held them would follow
+ * every later write, and a write into it would reach the world.
  *
  * @param state - ecs module state.
  * @param mode - The effective mode to report.
@@ -91,18 +93,23 @@ export function jsonOf(name: string, value: object | true | undefined): Json | u
 export function snapshotWorld(state: EcsState, mode: WorldMode): WorldSnapshot {
   const entities: EntitySnapshot[] = [...state.owners.entries()]
     .toSorted(([left], [right]) => indexOf(left) - indexOf(right))
-    .map(([entity, owner]) => ({
-      id: entity,
-      index: indexOf(entity),
-      generation: generationOf(entity),
-      owner: { kind: owner.kind, name: owner.name },
-      ...componentsOf(state, entity)
-    }));
+    .map(([entity, owner]) => {
+      const { components, skipped } = componentsOf(state, entity);
+
+      return {
+        id: entity,
+        index: indexOf(entity),
+        generation: generationOf(entity),
+        owner: { kind: owner.kind, name: owner.name },
+        components: structuredClone(components),
+        skipped
+      };
+    });
 
   const resources: Record<string, Json> = {};
 
   for (const [name, value] of state.resources) {
-    if (isJson(value)) resources[name] = value;
+    if (isJson(value)) resources[name] = structuredClone(value);
   }
 
   return { mode, entities, resources };

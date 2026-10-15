@@ -2,7 +2,7 @@
  * @file renderer/sync — the pools. A released object keeps its class and its texture key, so the
  * next entity with the same look gets it back without an allocation.
  */
-import type { PixiContainer, PixiNineSliceSprite, PixiSprite } from "../types";
+import type { PixiContainer, PixiGraphics, PixiNineSliceSprite, PixiSprite } from "../types";
 import { clearFilters } from "./filters";
 import { clearHidden } from "./hidden";
 import type { SyncCtx, SyncState, View, ViewKind } from "./types";
@@ -16,6 +16,16 @@ import type { SyncCtx, SyncState, View, ViewKind } from "./types";
  */
 export function isSprite(object: PixiContainer): object is PixiSprite {
   return "texture" in object && !("leftWidth" in object);
+}
+
+/**
+ * Tells whether a display object draws paths, so a `Shape` can be written onto it.
+ *
+ * @param object - The display object.
+ * @returns True for a graphics object.
+ */
+export function isGraphics(object: PixiContainer): object is PixiGraphics {
+  return "roundRect" in object;
 }
 
 /**
@@ -110,8 +120,9 @@ export function poolKeyOf(kind: ViewKind, textureKey: string): string {
 }
 
 /**
- * Brings the object of a view that left back to the state a fresh one has: detached, drawn, opaque, unmoved. Its
- * hidden reasons go with `clearHidden`, so a pooled object never brings the reason of the view it belonged to.
+ * Brings the object of a view that left back to the state a fresh one has: detached, drawn, opaque, unmoved, white.
+ * Its hidden reasons go with `clearHidden`, so a pooled object never brings the reason of the view it belonged to; a
+ * sprite and a graphics lose their tint (a fill-only shape is coloured by it, spec 26 R2.1).
  *
  * @param view - The view whose object goes back to its pool; its wrapper is gone already.
  */
@@ -127,7 +138,7 @@ export function resetObject(view: View): void {
   object.position.set(0, 0);
   object.pivot.set(0, 0);
   object.scale.set(1);
-  if (isSprite(object)) object.tint = 0xff_ff_ff;
+  if (isSprite(object) || isGraphics(object)) object.tint = 0xff_ff_ff;
 }
 
 /**

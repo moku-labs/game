@@ -4,6 +4,7 @@
  * adapter is stored while the renderer is inert and never called there.
  */
 import type { ComponentHandle, Entity } from "../../world/types";
+import { setHidden } from "./hidden";
 import type { DisplayAdapter, DisplayEntry, SyncCtx, SyncState, View } from "./types";
 
 /**
@@ -57,9 +58,22 @@ export function createAdapterObject(
 }
 
 /**
+ * Hides the object of an adapter view while it is drawn at alpha 0 (spec 26 B9): the public `alpha` the adapter wrote
+ * on its own object, times the HUD factor its wrapper carries. Only the object: its children hang in the wrapper.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view; a `Display` view takes no `"alpha"` reason.
+ */
+export function writeAdapterAlpha(sctx: SyncCtx, entity: Entity, view: View): void {
+  setHidden(sctx, entity, view, "alpha", view.object.alpha * view.hud <= 0);
+}
+
+/**
  * Hands a changed component value to the adapter that drew it. The stored copy is what makes
  * `previous` honest: the world writes a component in place. The adapter wrote its own object, so
  * the renderer hears of it after the write: any answer but `false` is a loose mark of the view.
+ * An object the adapter left at alpha 0 is not drawn.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -78,6 +92,7 @@ export function updateAdapterView(sctx: SyncCtx, entity: Entity, view: View): vo
 
   view.value = { ...next };
   if (answer !== false) sctx.deps.demand.markLoose(entity);
+  writeAdapterAlpha(sctx, entity, view);
 }
 
 /**

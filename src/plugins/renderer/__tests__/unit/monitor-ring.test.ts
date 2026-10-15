@@ -85,7 +85,8 @@ describe("the frame ring", () => {
       passes: 0,
       compiles: null,
       marks: 0,
-      rebuilds: null,
+      // The counting classes of the agent build count Pixi's rebuilds from the attach on (spec 26 R2.3).
+      rebuilds: 0,
       systems: null,
       gpuMs: null,
       gpuPartial: false,
