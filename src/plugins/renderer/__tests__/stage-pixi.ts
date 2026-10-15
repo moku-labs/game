@@ -5,8 +5,9 @@
  * a real `Container`, its screen a real `Rectangle`, its canvas a `fake-dom` element, and its
  * `renderer.render(stage)` only counts. A render into a texture (a kept picture, spec 23) is logged
  * with its arguments, makes its container a render group as Pixi does, and is told to the
- * watchers; only a render of the stage onto the canvas counts as a drawn frame. A render of another
- * container onto the canvas (a probe of the warm-up, spec 27) is logged apart and told to the watchers. It never reads or writes a Pixi field that is not public,
+ * watchers; only a render of the stage onto the canvas counts as a drawn frame. A render of the warm-up's probe root
+ * (spec 27), onto the canvas or into its own texture, and of any other container onto the canvas is logged apart and
+ * told to the watchers. It never reads or writes a Pixi field that is not public,
  * never empties a change list and never calls `_onUpdate`: the engine decides from its own marks,
  * so a stand-in that knows nothing of Pixi's internals cannot keep a frozen screen green (spec 14
  * T0). The one exception is asked for: with `builds: true` (spec 26 R2.3) a render also runs Pixi's own exported
@@ -47,9 +48,12 @@ export type StageRenderer = {
   resolution: number;
   /** Frames drawn onto the canvas: `render` calls without a target. */
   renders: number;
-  /** Every render into a texture, oldest first. */
+  /** Every render into a texture but the warm-up's, oldest first: the kept pictures. */
   targets: RenderCall[];
-  /** Every render onto the canvas of a container that is not the stage (the warm-up's probes), oldest first. */
+  /**
+   * Every render of the warm-up's probe root, onto the canvas or into its texture, and every render onto the canvas of
+   * another container that is not the stage, oldest first.
+   */
   probes: RenderCall[];
   /** Pixi's background system: the canvas is cleared before every stage pass, Pixi's default. */
   background: { clearBeforeRender: boolean };
@@ -102,9 +106,9 @@ export type StagePixi = {
   last(): StageApplication;
   /** Frames drawn onto the canvas of the last application. */
   renders(): number;
-  /** Renders into a texture of the last application, oldest first. */
+  /** Renders into a texture of the last application but the warm-up's, oldest first. */
   targets(): RenderCall[];
-  /** Renders of the warm-up's probes onto the canvas of the last application, oldest first. */
+  /** Renders of the warm-up's probes of the last application, oldest first. */
   probes(): RenderCall[];
 };
 
@@ -309,14 +313,18 @@ function createRenderer(
     sizes: [],
     render: options => {
       const call = callOf(options);
+      // A probe of the warm-up is drawn onto the canvas or into the warm-up's own texture.
+      const probe = call.container.label === "renderer.warm";
 
       // A render into a texture makes its container a render group, as Pixi's own does.
       if (call.target !== undefined) {
         call.container.enableRenderGroup();
-        renderer.targets.push(call);
+        if (!probe) renderer.targets.push(call);
       }
 
-      if (call.target === undefined && call.container !== stage) renderer.probes.push(call);
+      if (probe || (call.target === undefined && call.container !== stage)) {
+        renderer.probes.push(call);
+      }
 
       for (const watcher of renderer.watchers) watcher(call);
 

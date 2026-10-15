@@ -115,12 +115,13 @@ export function createHostApi(ctx: RendererCtx, deps: HostDeps): HostModule {
       return true;
     },
 
-    renderProbe: (container: PixiContainer): boolean => {
+    renderProbe: (container: PixiContainer, target?: PixiRenderTexture): boolean => {
       const app = state.app;
 
       if (!state.ready || app === undefined) return false;
 
-      app.renderer.render({ container, clear: false });
+      if (target === undefined) app.renderer.render({ container, clear: false });
+      else app.renderer.render({ container, target, clear: true });
 
       return true;
     },

@@ -19,6 +19,7 @@ import type {
   PixiGraphics,
   PixiModule,
   PixiRectangle,
+  PixiRenderTexture,
   PixiSprite,
   PixiTexture,
   RendererCtx
@@ -1060,10 +1061,11 @@ export type WarmObjects = {
   /** Masked by `mask`; the subject hangs in it for a clip variant. */
   clip: PixiContainer;
   mask: PixiGraphics;
-  /** Filtered by `probeAlpha`, so what hangs in it is drawn into a pooled texture first. */
-  texture: PixiContainer;
-  /** The module's own alpha filter, at alpha 0: a texture variant leaves no pixel even on a canvas not cleared. */
-  probeAlpha: PixiFilter;
+  /**
+   * The texture a texture variant is rendered into: the module's own, so the subject is drawn into a texture with no
+   * filter around it, and a texture variant never touches the canvas.
+   */
+  target: PixiRenderTexture;
   /** A filter subject's container: its `filters` is the draw's filter, during the draw only. */
   holder: PixiContainer;
   /** The one-entry list `holder.filters` is set from. */

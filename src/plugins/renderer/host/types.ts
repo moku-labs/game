@@ -358,15 +358,16 @@ export type HostInternal = {
   ): boolean;
 
   /**
-   * Draws a probe tree of the warm-up onto the canvas, without clearing it, with Pixi's public
-   * `renderer.render({ container, clear: false })`. Called before the stage pass of a drawn frame, which clears the canvas
-   * first, so a probe never reaches the screen. A no-op while nothing draws. What Pixi throws is thrown on: the caller
-   * counts the probe done and reports it.
+   * Draws a probe tree of the warm-up with Pixi's public `renderer.render`: onto the canvas without clearing it
+   * (`{ container, clear: false }`), or into the warm-up's own texture, cleared (`{ container, target, clear: true }`).
+   * Called before the stage pass of a drawn frame, which clears the canvas first, so a probe never reaches the screen.
+   * A no-op while nothing draws. What Pixi throws is thrown on: the caller counts the probe done and reports it.
    *
    * @param container - The root of the probe tree, never in the stage.
+   * @param target - The texture of a texture variant; `undefined` for the canvas.
    * @returns True when it called Pixi.
    */
-  renderProbe(container: PixiContainer): boolean;
+  renderProbe(container: PixiContainer, target?: PixiRenderTexture): boolean;
 
   /**
    * Tells whether the stage pass clears the canvas before it draws (`renderer.background.clearBeforeRender`, Pixi's

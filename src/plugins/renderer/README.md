@@ -246,11 +246,16 @@ task, so a probe never shows. One probe draw is one subject in one target:
   ahead of the filters still waiting), and every filter handed to `filters.warm` (`effects` hands it
   every checked definition, every stage of its inputs and every Pixi-core kind once the shader
   checks settled);
-- the targets on WebGPU: the canvas and a texture (the subject under the module's own `AlphaFilter`
-  at alpha 0), each with and without a stencil clip, as `sync` hangs clips; on WebGL one draw, the
+- the targets on WebGPU: the canvas and a texture (a 4 × 4 render texture the module owns, cleared
+  at each draw), each with and without a stencil clip, as `sync` hangs clips; on WebGL one draw, the
   program does not depend on the target. A canvas the stage pass does not clear
   (`background.clearBeforeRender` false) gets the texture targets alone (`renderer:warm-canvas-off`,
   once).
+- a filter probe is the one filter of its render: a texture draw renders into the module's texture,
+  never through a filter of its own, so the warm-up never opens a second level of Pixi's filter
+  stack. Pixi 8.21 reads the input texture of such a level as it last left it at its next push, and a
+  pool trim destroys that texture in between: the push throws inside Pixi's render, and the stack it
+  leaves unbalanced breaks every filter of the frames after it.
 
 The probes hang in a tree of their own, never in the stage, and only during their own render. The
 queue asks `demand` for the next frame (`"request"`), so a renderer drawing on demand draws through

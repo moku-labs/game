@@ -3,9 +3,12 @@
  * create the GPU pipelines a game will need while it loads, instead of in the frame that first needs them. A WebGPU
  * pipeline is keyed by the bound target's formats and stencil state, so every subject is drawn onto the canvas and into
  * a texture, each with and without a stencil clip; WebGL compiles one program per shader whatever the target, so one
- * draw is enough there. The probes hang in a tree of their own, never in the stage, rendered onto the canvas without a
- * clear just before the stage pass, which clears the canvas first: nothing shows. The end of a run reaches the monitor
- * through `onWarm`; this file never imports the monitor (LEAD-FIXES-3 O24).
+ * draw is enough there. The probes hang in a tree of their own, never in the stage. A canvas variant is rendered onto
+ * the canvas without a clear just before the stage pass, which clears the canvas first: nothing shows. A texture variant
+ * is rendered into a small texture the module owns, never through a filter of its own: a filter probe is always the one
+ * filter of its render, so the warm-up never opens a second level of Pixi's filter stack (Pixi 8.21 reads the stale
+ * input texture of that level at its next push, and a pool trim destroys it in between). The end of a run reaches the
+ * monitor through `onWarm`; this file never imports the monitor (LEAD-FIXES-3 O24).
  */
 import type { PixiContainer, PixiFilter, PixiModule, PixiSprite } from "../types";
 import { clearFilters } from "./filters";
@@ -96,8 +99,8 @@ function particlesOf(pixi: PixiModule, blendMode: "normal" | "add"): PixiContain
 }
 
 /**
- * Builds the probe tree once, at the first warm frame of a device: the root, the clip and its mask, the texture holder
- * and its alpha filter, the filter holder and the content subjects. The text is made at its first draw.
+ * Builds the probe tree once, at the first warm frame of a device: the root, the clip and its mask, the texture of the
+ * texture variants, the filter holder and the content subjects. The text is made at its first draw.
  *
  * @param pixi - The module that draws.
  * @returns The probe tree.
@@ -107,22 +110,25 @@ function buildObjects(pixi: PixiModule): WarmObjects {
   const clipFrame = new pixi.Container();
   const clip = new pixi.Container();
   const mask = new pixi.Graphics().rect(0, 0, PROBE_SIZE, PROBE_SIZE).fill(0xff_ff_ff);
-  // Alpha 0: the pipeline is the same, and a texture variant leaves no pixel even on a canvas nobody clears.
-  const probeAlpha = new pixi.AlphaFilter({ alpha: 0 });
-  const texture = new pixi.Container();
+  // A target like a filter pass's: the same format, one sample, a stencil once a clip draws into it.
+  const target = pixi.RenderTexture.create({
+    width: PROBE_SIZE,
+    height: PROBE_SIZE,
+    antialias: false,
+    autoGarbageCollect: false,
+    label: "renderer.warm.texture"
+  });
   const holder = new pixi.Container();
   const graphics = new pixi.Graphics().rect(0, 0, PROBE_SIZE, PROBE_SIZE).fill(0xff_ff_ff);
 
   // Labels name the pieces in a picture of the tree and in the tests; none of them is ever in the stage.
   root.label = "renderer.warm";
   clipFrame.label = "renderer.warm.clip";
-  texture.label = "renderer.warm.texture";
   holder.label = "renderer.warm.filter";
   graphics.label = "renderer.warm.graphics";
   // The clip as `sync` hangs one: the masked container, its mask beside it.
   clip.mask = mask;
   clipFrame.addChild(clip, mask);
-  texture.filters = [probeAlpha];
   holder.addChild(whiteSprite(pixi));
   // The graphics pipe's own shader: a small graphics is batched with the sprites otherwise.
   graphics.context.batchMode = "no-batch";
@@ -132,8 +138,7 @@ function buildObjects(pixi: PixiModule): WarmObjects {
     clipFrame,
     clip,
     mask,
-    texture,
-    probeAlpha,
+    target,
     holder,
     list: [],
     sprite: whiteSprite(pixi),
@@ -145,7 +150,7 @@ function buildObjects(pixi: PixiModule): WarmObjects {
 }
 
 /**
- * Destroys the probe tree of a device that went or of a renderer that stops: the module's own alpha filter and mask
+ * Destroys the probe tree of a device that went or of a renderer that stops: the module's own texture and mask
  * included, never a filter it was handed.
  *
  * @param warm - The warm branch of the sync state.
@@ -162,7 +167,6 @@ function dropObjects(warm: WarmState): void {
   const nodes = [
     objects.root,
     objects.clipFrame,
-    objects.texture,
     objects.holder,
     objects.sprite,
     objects.graphics,
@@ -172,7 +176,7 @@ function dropObjects(warm: WarmState): void {
   ];
 
   for (const node of nodes) node?.destroy({ children: true });
-  objects.probeAlpha.destroy();
+  objects.target.destroy(true);
 }
 
 /**
@@ -389,9 +393,10 @@ function nodeOf(
 }
 
 /**
- * Draws one probe: hangs the subject in its variant under the root, renders the root onto the canvas, and takes it all
- * down again, so the tree holds the subject only during its own render. A render that throws counts the draw done and
- * is reported once per subject: a broken filter is the business of `effects`, and the probe never stops the queue.
+ * Draws one probe: hangs the subject in its variant under the root, renders the root onto the canvas or, for a texture
+ * variant, into the module's texture, and takes it all down again, so the tree holds the subject only during its own
+ * render. A render that throws counts the draw done and is reported once per subject: a broken filter is the business
+ * of `effects`, and the probe never stops the queue.
  *
  * @param sctx - Domain context of the sync module.
  * @param pixi - The module that draws.
@@ -406,22 +411,16 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
 
   const clipped = draw.variant === "canvas+clip" || draw.variant === "texture+clip";
   const textured = draw.variant === "texture" || draw.variant === "texture+clip";
-  let top = node;
 
   if (clipped) {
-    objects.clip.addChild(top);
-    top = objects.clipFrame;
+    objects.clip.addChild(node);
+    objects.root.addChild(objects.clipFrame);
+  } else {
+    objects.root.addChild(node);
   }
-
-  if (textured) {
-    objects.texture.addChild(top);
-    top = objects.texture;
-  }
-
-  objects.root.addChild(top);
 
   try {
-    sctx.deps.host.renderProbe(objects.root);
+    sctx.deps.host.renderProbe(objects.root, textured ? objects.target : undefined);
   } catch (error) {
     const subject = typeof draw.subject === "string" ? draw.subject : "filter";
 
@@ -433,7 +432,6 @@ function drawProbe(sctx: SyncCtx, pixi: PixiModule, objects: WarmObjects, draw: 
   } finally {
     node.removeFromParent();
     objects.clipFrame.removeFromParent();
-    objects.texture.removeFromParent();
 
     if (node === objects.holder) {
       clearFilters(objects.holder);

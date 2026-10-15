@@ -7,7 +7,7 @@
  * objects (`drawn-helpers.ts`, a WebGPU stand-in), the warm-up as a game ships it: one probe draw a frame.
  */
 import type { Assets } from "@moku-labs/game";
-import { defineFilter, defineGame, exit, Shape, Transform, type } from "@moku-labs/game";
+import { defineFilter, defineGame, exit, Glow, Shape, Transform, type } from "@moku-labs/game";
 import { defineGameApp } from "@moku-labs/game/app";
 import type * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -75,6 +75,18 @@ const bar = projection({
   ]
 });
 
+/** The primary button of the splash: it glows from its first frame, as the merge game's Play does at home. */
+const play = projection({
+  name: "splash.play",
+  layer: "main",
+  from: () => ({}),
+  view: () => [
+    Transform({ x: 95, y: 600 }),
+    Shape({ kind: "rect", w: 200, h: 60, fill: 0x4c_9a_2a }),
+    Glow({ strength: 1.8, distance: 18, color: 0xf2_b4_3d })
+  ]
+});
+
 const splash = defineNode({
   scene: "splash",
   outcomes: { done: type() },
@@ -98,6 +110,19 @@ const splashScene = defineScene("splash", {
 const splashFeature = defineFeature("splash", {
   scenes: [splashScene],
   projections: [bar],
+  filters: [Frost, Tint, Veil]
+});
+
+/** The same splash with its glowing button. */
+const glowingScene = defineScene("splash", {
+  bundle: "splash",
+  layers: { main: { sort: "order" } },
+  projections: [bar, play]
+});
+
+const glowingFeature = defineFeature("splash", {
+  scenes: [glowingScene],
+  projections: [bar, play],
   filters: [Frost, Tint, Veil]
 });
 
@@ -156,17 +181,13 @@ function filterName(filter: pixi.Filter | undefined): string {
  * What a probe root holds while it is rendered: the subject, and the target it is drawn into.
  *
  * @param root - The probe root.
+ * @param into - The texture of the render; `undefined` for the canvas.
  * @returns `"subject variant"`.
  */
-function probeOf(root: pixi.Container): string {
+function probeOf(root: pixi.Container, into: pixi.Texture | undefined): string {
   let node: pixi.Container | undefined = root.children[0];
-  let target = "canvas";
+  const target = into === undefined ? "canvas" : "texture";
   let clip = "";
-
-  if (node?.label === "renderer.warm.texture") {
-    target = "texture";
-    node = node.children[0];
-  }
 
   if (node?.label === "renderer.warm.clip") {
     clip = "+clip";
@@ -198,11 +219,52 @@ function holdsProbe(node: pixi.Container): boolean {
 }
 
 /**
+ * The most filtered containers on one path of a tree: 1 for a filter alone, 2 for a filter inside a filter.
+ *
+ * @param node - The root of the tree.
+ * @returns The depth of filters; 0 for a tree with none.
+ */
+function filterDepth(node: pixi.Container): number {
+  const own = (node.filters?.length ?? 0) > 0 ? 1 : 0;
+  let deepest = 0;
+
+  for (const child of node.children) deepest = Math.max(deepest, filterDepth(child));
+
+  return own + deepest;
+}
+
+/**
+ * The enabled `Glow` filters a tree draws with.
+ *
+ * @param node - The root of the tree.
+ * @returns How many containers carry one.
+ */
+function glowsIn(node: pixi.Container): number {
+  const own = node.filters?.some(
+    filter => filter.enabled && filter.gpuProgram?.name === "effects.glow"
+  )
+    ? 1
+    : 0;
+
+  return own + node.children.reduce((sum, child) => sum + glowsIn(child), 0);
+}
+
+/**
  * Starts the game on its splash with the warm-up as it ships, drawing on demand, and records the probes of every frame.
  *
+ * @param options - What differs from the splash of the other tests.
+ * @param options.feature - The splash feature; the one without a filtered view when left out.
+ * @param options.onStage - Told the stage at every stage pass.
+ * @param options.onProbe - Told the root and the target of every probe render.
  * @returns The running splash.
  */
-async function openSplash(): Promise<Splash> {
+async function openSplash(
+  options: {
+    feature?: typeof splashFeature;
+    onStage?: (stage: pixi.Container) => void;
+    onProbe?: (root: pixi.Container, target: pixi.Texture | undefined) => void;
+  } = {}
+): Promise<Splash> {
   const page = openPage(390, 844);
   const { app } = defineGameApp({
     flow: mainFlow,
@@ -210,12 +272,12 @@ async function openSplash(): Promise<Splash> {
     player: { n: 0 },
     session: { n: 0 },
     referenceSide: 390,
-    features: [splashFeature],
+    features: [options.feature ?? splashFeature],
     pluginConfigs: {
       log: { mode: "test" },
       flow: { holdMs: 0 },
-      // The engine's default warm-up: one probe draw a frame.
-      renderer: { ...page.renderer, onDemand: true, warm: 1 }
+      // The engine's default warm-up: one probe draw a frame. No kept picture: every frame draws the views live.
+      renderer: { ...page.renderer, onDemand: true, warm: 1, keptMb: 0 }
     }
   }).screen({ manifest: MANIFEST });
   const probes: string[][] = [[]];
@@ -224,16 +286,20 @@ async function openSplash(): Promise<Splash> {
   app.flow.run().catch(() => undefined);
 
   page.stage.last().renderer.watchers.push(call => {
+    if (call.container.label === "renderer.warm") {
+      options.onProbe?.(call.container, call.target);
+      probes.at(-1)?.push(probeOf(call.container, call.target));
+
+      return;
+    }
+
     if (call.target !== undefined) return;
 
     if (call.container === page.stage.last().stage) {
       // The stage never holds a probe.
       expect(holdsProbe(call.container)).toBe(false);
-
-      return;
+      options.onStage?.(call.container);
     }
-
-    probes.at(-1)?.push(probeOf(call.container));
   });
 
   const watched = watch(app, page);
@@ -297,6 +363,32 @@ describe("the warm-up of a game while its splash stands", () => {
     expect(Math.max(...frames)).toBe(1);
     // The queue is empty: the still splash draws nothing more.
     expect(await game.frames(10)).toBe(0);
+  });
+
+  // Bug: a probe draws a filter inside another filter. On Pixi 8.21 a pool trim between two such draws destroys the
+  // texture the inner level of Pixi's filter stack last held, and the next one makes Pixi throw inside its render; the
+  // stack it leaves unbalanced makes the Glow on screen throw in the stage pass, and effects breaks the kind for the
+  // session: the merge game's primary buttons lost their glow.
+  it("a view that glows from the first frame keeps its glow while every probe draws one filter level", async () => {
+    const depths = new Set<number>();
+    const glows: number[] = [];
+    const game = await openSplash({
+      feature: glowingFeature,
+      onStage: stage => glows.push(glowsIn(stage)),
+      onProbe: root => depths.add(filterDepth(root))
+    });
+
+    await game.each(SPLASH_FRAMES);
+
+    // Probes of every filter kind were drawn, none of them through a second filter.
+    expect(depths).toEqual(new Set([0, 1]));
+    // The glow is drawn once its shader check answered, in the first frames, and in every stage pass after.
+    const first = glows.indexOf(1);
+
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(first).toBeLessThan(3);
+    expect(glows.slice(first).every(count => count === 1)).toBe(true);
+    expect(glows.length - first).toBeGreaterThan(50);
   });
 
   // Bug: a probe hangs in the stage, or stays there after its frame, and the player sees it.

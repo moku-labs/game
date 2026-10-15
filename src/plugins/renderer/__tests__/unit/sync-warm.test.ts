@@ -53,18 +53,18 @@ afterEach(() => {
  * What a probe root holds while it is rendered: the subject, and the target it is drawn into.
  *
  * @param root - The probe root handed to `renderer.render`.
+ * @param into - The texture of the render; `undefined` for the canvas.
  * @param names - The labels of handed filters.
  * @returns `"subject variant"`.
  */
-function probeOf(root: pixi.Container, names: Map<unknown, string>): string {
+function probeOf(
+  root: pixi.Container,
+  into: pixi.Texture | undefined,
+  names: Map<unknown, string>
+): string {
   let node: pixi.Container | undefined = root.children[0];
-  let target = "canvas";
+  const target = into === undefined ? "canvas" : "texture";
   let clip = "";
-
-  if (node?.label === "renderer.warm.texture") {
-    target = "texture";
-    node = node.children[0];
-  }
 
   if (node?.label === "renderer.warm.clip") {
     clip = "+clip";
@@ -108,6 +108,21 @@ function holdsFilter(node: PixiContainer, filter: PixiFilter): boolean {
 }
 
 /**
+ * The most filtered containers on one path of a tree: 1 for a filter alone, 2 for a filter inside a filter.
+ *
+ * @param node - The root of the tree.
+ * @returns The depth of filters; 0 for a tree with none.
+ */
+function filterDepth(node: PixiContainer): number {
+  const own = (node.filters?.length ?? 0) > 0 ? 1 : 0;
+  let deepest = 0;
+
+  for (const child of node.children) deepest = Math.max(deepest, filterDepth(child));
+
+  return own + deepest;
+}
+
+/**
  * Starts the renderer over the real Pixi of `stagePixi`, drawing on demand with the warm-up on, and watches every
  * render onto the canvas. No frame runs yet.
  *
@@ -140,20 +155,22 @@ async function startWarm(
   await mock.start();
   mock.world.projection.setLayers([{ name: "items", sort: "order" }]);
   stage.last().renderer.watchers.push(call => {
-    if (call.target !== undefined) return;
-
-    if (call.container === stage.last().stage) {
-      // The stage never holds a piece of the warm-up.
-      expect(holdsProbe(call.container)).toBe(false);
-      calls.push("stage");
+    if (call.container.label === "renderer.warm") {
+      // A probe root is never in the stage, and holds its one subject only.
+      expect(call.container.parent).toBeNull();
+      expect(call.container.children).toHaveLength(1);
+      calls.push(probeOf(call.container, call.target, names));
 
       return;
     }
 
-    // A probe root is never in the stage, and holds its one subject only.
-    expect(call.container.parent).toBeNull();
-    expect(call.container.children).toHaveLength(1);
-    calls.push(probeOf(call.container, names));
+    if (call.target !== undefined) return;
+
+    // Onto the canvas the renderer draws the probes and the stage, nothing else.
+    expect(call.container).toBe(stage.last().stage);
+    // The stage never holds a piece of the warm-up.
+    expect(holdsProbe(call.container)).toBe(false);
+    calls.push("stage");
   });
 
   const frame = (): boolean => {
@@ -379,6 +396,38 @@ describe("the warm-up of a filter", () => {
     expect(again.answer).toBe(true);
   });
 
+  // Bug: a texture variant draws its filter through a second filter (a filter inside a filter). Pixi 8.21 reads the
+  // input texture that second level of its filter stack used last at its next push; a pool trim destroys that texture
+  // in between, the probe's render throws inside Pixi, and the stack it leaves unbalanced makes every later frame's
+  // filters throw: the merge game lost its Glow for the session.
+  it("a filter probe is the only filter of its render: a texture variant draws into a texture of its own", async () => {
+    const warmed = await startWarm();
+    const filter = new pixi.AlphaFilter();
+    const drawn: Array<{ onto: string; depth: number }> = [];
+
+    warmed.stage.last().renderer.watchers.push(call => {
+      const top = call.container.children[0];
+
+      if (call.container.label !== "renderer.warm" || top === undefined) return;
+      if (!holdsFilter(top, filter)) return;
+
+      drawn.push({
+        onto: call.target === undefined ? "canvas" : "texture",
+        depth: filterDepth(call.container)
+      });
+    });
+    warmed.frames(16);
+    warmed.mock.api.sync.filters.warm(filter);
+    warmed.frames(4);
+
+    expect(drawn).toEqual([
+      { onto: "canvas", depth: 1 },
+      { onto: "canvas", depth: 1 },
+      { onto: "texture", depth: 1 },
+      { onto: "texture", depth: 1 }
+    ]);
+  });
+
   // Bug: a broken probe stops the queue, or floods the log once per variant.
   it("a probe whose render throws is counted done and reported once", async () => {
     const warmed = await startWarm();
@@ -419,8 +468,6 @@ describe("the warm-up of a filter", () => {
 
     if (objects === undefined) throw new Error("no probe tree after a warm frame");
 
-    const destroyAlpha = vi.spyOn(objects.probeAlpha, "destroy");
-
     running.splice(0);
     warmed.mock.stop();
     await settle();
@@ -428,7 +475,7 @@ describe("the warm-up of a filter", () => {
     expect(answer.answer).toBe(false);
     expect(objects.root.destroyed).toBe(true);
     expect(objects.mask.destroyed).toBe(true);
-    expect(destroyAlpha).toHaveBeenCalled();
+    expect(objects.target.destroyed).toBe(true);
     expect(destroyFilter).not.toHaveBeenCalled();
     expect(await warmed.mock.api.sync.filters.warm(filter)).toBe(false);
   });
