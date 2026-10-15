@@ -59,8 +59,10 @@ function beginLoss(ctx: RendererCtx, kind: "webgpu" | "webgl", reason: string): 
 }
 
 /**
- * Ends a restore: the renderer draws again and the pause reason goes. After a WebGPU restore the
- * whole display tree is new, so the `onRestore` callbacks rebuild it first.
+ * Ends a restore: the renderer draws again and the pause reason goes. The `onRestore` callbacks
+ * run first: after a WebGPU restore the whole display tree is new and they rebuild it; after a
+ * WebGL restore the tree stands, but the canvas and every render texture came back empty, so they
+ * ask for a whole frame and the pictures again.
  *
  * @param ctx - Domain context of the renderer plugin.
  * @param rebuild - True when a new application replaced the old one.
@@ -73,7 +75,7 @@ export function finishRestore(ctx: RendererCtx, rebuild: boolean): void {
   state.ready = true;
   state.restoring = false;
 
-  if (rebuild) for (const fn of state.onRestore) fn();
+  for (const fn of state.onRestore) fn(rebuild);
 
   ctx.deps.lifecycle.pop("device-lost");
 }

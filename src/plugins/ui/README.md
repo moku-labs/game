@@ -6,7 +6,7 @@ rect from one Yoga solve per change.
 
 | Module | Owns |
 |---|---|
-| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()` |
+| `jsx` | the runtime, the intrinsic types, `defineComponent`, instances and their `local`, the reconcile, the windowed rows of a `scroll`, the routing of hints to elements, the `onTap` application of `LocalWrite`, the keyboard focus, the text fields and their hidden input, `tree()`, `find()`, `lint()`, `fill()`, the tap counter of `DebugTrigger` |
 | `styles` | `defineStyle`, `defineTokens`, the `is` and `when` flags, `resolve` |
 | `layout` | Yoga load and node lifetime, the solve, `Box` writes, the rest pose, motion, exiting elements, scroll and the range of a windowed scroll, the `popup` and `guide` handlers |
 | `visual.ts` | pure, shared by `jsx` and `layout`: the visual component of an element, the fit scale and the drawn rect under `fit` |
@@ -15,7 +15,7 @@ rect from one Yoga solve per change.
 |---|---|
 | `app.ui.tree()` | the live screen as plain data: natural rect, style, seven state flags, local, `fitScale` on a fitted element, `content` on a text (the words it draws, after `tr()` and `bind`, tags left out), `textStyle` on a text given a style key, `value` on a text field, `window` on a windowed scroll, children |
 | `app.ui.find(key)` | the entity of a keyed element, live only |
-| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
+| `app.ui.lint()` | tap targets under `tapTargetPt` at their drawn size (text fields and `DebugTrigger` views count), text that overflows in some locale, an absolute element with no `reason`, a nine-slice on a clipping element (`nine-slice-clipped`), a `zIndex` on a root element (`z-index-on-root`) |
 | `app.ui.fill(key, value)` | types into the text field with that `key`: it becomes the one edited, `value` cut to its `maxLength` is written into it and into its component's `local`; `false` and the warning `ui:fill-without-input` when no live `input` has the key |
 
 Config:
@@ -154,6 +154,13 @@ on a `layer`: a `<layer components={[Blur(...)]} />` blurs its own children only
   the fields its type gives to a plugin; a name that left is removed. The same fields write
   nothing, so a tween on `Glow.strength` from a motion hook survives an unrelated re-render.
 - Exit: nothing is removed. An exiting element keeps its extras until it despawns.
+- `Overlay` (renderer, "Overlays and the HUD"): the element also gets the engine's `OverlayLevel`.
+  Its level is one of the element's own motion tracks: 0 to 1 with its enter motion (the length,
+  delay and ease of the longest timed track its `enter` hook started), back to 0 with its exit
+  motion; `fade` (default 250 ms, kept under reduced motion) times it only when the hook played no
+  timed track, and `fade: 0` sets it at once. `landed` turns true at the end of the solve in which
+  every enter handle and the level track are over. The exit waits for the level: the dim and the HUD
+  parts are back before the element despawns. A flow never waits for it.
 - A `scroll` gets them on the container, not on its content.
 - Of two values of one type, the last wins.
 
@@ -257,12 +264,36 @@ The child form, a `scroll` with children and no `rows`, is unchanged: keep it fo
 
 ## Draw order
 
-A child draws with its parent, over the siblings before it. `zIndex` (an integer) changes that:
-it is written as the child's `Order`, so `renderer` sorts the siblings by it; a sibling without
-it draws at 0 in markup order. A new value from a variant or a new render updates the `Order`;
-a child that drops its `zIndex` goes back to 0. The views a slot hosts keep their own `Order`.
+The order of a ui tree is what is drawn and hit. A child draws with its parent, always at an
+`Order` of its own: its `zIndex` (an integer, 0 without one), less a half, plus its place among
+its siblings in small steps (`childOrder` of `ui/jsx/order.ts`). So children draw and are hit in
+markup order at equal `zIndex`, whatever order they were mounted in: a child a condition mounts
+again draws under the sibling written after it. `zIndex` still lifts a child over its siblings; a
+new value from a variant or a new render updates the `Order`, and a child that drops it goes back
+to its markup place. A parent with more than 4096 children spills into the next `zIndex` step; a
+dev build names it once (`ui:too-many-children`).
+
+Inside one element, bottom first:
+
+1. its own visual (depth −0.5);
+2. its children at `zIndex` 0, in markup order;
+3. what hangs under it at `Order` 0: the views a slot hosts, a game's own entities;
+4. its children at `zIndex` 1, then 2, and so on.
+
+The roots of a scene draw in the order of its `projections` (the k-th of n takes `Order` k − n − 1),
+also after a commit mounts one again. The `ui` layer sorts by `Order` (`scenes` makes it so); a scene
+that writes `ui: { sort: "none" }` keeps insertion order. Inside the `ui` layer, bottom first:
+
+1. the scene's JSX roots, in list order;
+2. the focus ring of a root, right above it;
+3. everything at `Order` 0 or without one: a world view drawn in `ui`, a timeline `spawn`;
+4. the popups (1, 2, …);
+5. the guide dim.
+
 A root element ignores `zIndex` (it draws at the order of its root in its layer), and `lint()`
 reports it as `z-index-on-root`.
+A JSX root draws in the layer its projection names (`layer: "scene"` puts it under every `ui`
+root); a `Tree` spawned by hand without a `Layer` draws in `ui`.
 
 ```tsx
 <column key="board">
@@ -293,7 +324,8 @@ For desktop development and keyboard players. `input` delivers the keys (`onKey`
 focus, because it knows the roots and the layout.
 
 - **The root the keyboard works in:** the top uncovered popup; with no popup, the screen root in
-  the top layer.
+  the top layer. A root of the scene's HUD layer (`{ above: "overlays" }`) never takes it: the HUD
+  draws above every sheet, so Escape and the phone's Back press reach the top sheet under it.
 - **Tab / Shift+Tab** move the focus through the controls of that root (the elements with
   `Tappable` or `LocalWrite`, and the text fields) in reading order: the upper rect first, then
   the left one. Both wrap. Tab landing on a text field starts its editing; leaving one ends it. With no control, Tab does nothing and the browser keeps the key. A button with `escape`
@@ -358,10 +390,18 @@ const cardMotion: Ui.ElementMotion = {
 ```
 
 A motion with a `loop` hook (a `defineMotion` with `loop`) starts it when the element enters,
-next to `enter`, and keeps its motion apart: the exit sweep never waits for it. When the motion
-prop of a live element names another `loop`, the running loop is cancelled and the new one
-starts; a motion without a loop, or no motion, stops it. Keep a motion a module constant: a
-`defineMotion` called inside a view builds a new loop every render and restarts it.
+next to `enter`, whatever the cause, and keeps its motion apart: the exit sweep never waits for it.
+When the motion prop of a live element names another `loop`, the running loop is cancelled and the
+new one starts; a motion without a loop, or no motion, stops it. A `defineMotion` built again with
+the same loop (the same keys, cycle and reduced-motion rule) is the same loop: it runs on. Still,
+declare a motion at module level: a dev build names an element whose loop was rebuilt by three
+renders in a row (`ui:motion-rebuilt`), and a hand-written loop of a new reference restarts.
+
+`ui` tells the `enter` and `exit` hooks why they play, as their fourth argument: `"mount"` when the
+element comes or goes with its screen (a scene mount or unmount, a restore, a load), `"change"` when
+a commit adds it to or removes it from a live tree, and for every element of a popup. A
+`defineMotion({ when: "change" })` plays nothing for `"mount"`: the element stands at rest from its
+first drawn frame, and leaves with no exit when its scene goes. A default motion plays for both.
 
 ```tsx
 <row key="card" motion={order.ready ? swayWide : swayGentle} />
@@ -389,7 +429,8 @@ So nothing a mount does is written a second time, and a game needs no extra code
 - What a mount does not bring is gone with the old tree, as after a remount of the scene: the
   local state of a component, a scroll offset, the keyboard focus, a text being edited, a hover.
 - The entity of an element is another one after a restore. Ask `ui.find(key)` again.
-- A view hosted in a slot is without its parent for one frame, as after a mount.
+- A view hosted in a slot hangs under the new slot in the frame that builds it, as after a mount.
+- Every element enters with the cause `"mount"`: a `when: "change"` motion stands at rest.
 - A root that is leaving keeps leaving.
 
 `ui` builds in phase `layout`, which a `paused` or `fast` world skips. Until the world runs
@@ -458,13 +499,16 @@ full-screen `button` with a dim fill, and its panel; the panel swallows the taps
 
 ## Hosts
 
-`screen`, `row`, `column` and `stack` take `hosts`: projection names. Each `ui.reconcile`, every
-live view of those projections (`world.projection.entitiesOf`) without a `Parent` and not `Held` by
-a drag gets `Parent({ entity: element })`. It draws in the element's local space, scales with it and
-keeps its `Order` inside it. When the element leaves, or stops naming the projection, the views lose
-that `Parent` and fall back to their layer. An exiting view keeps its host while its exit plays.
-A `guide` whose target is a hosted view cuts its hole where the view is drawn: its pose through
-the `Parent` chain, and its nine-slice or sprite size times that scale.
+`screen`, `row`, `column` and `stack` take `hosts`: projection names. Every live view of those
+projections (`world.projection.entitiesOf`) without a `Parent` and not `Held` by a drag gets
+`Parent({ entity: element })`, in the frame the slot comes: the solve hosts the views of a slot
+that became live in it, so they are drawn under it from their first frame and never alone in their
+layer. A view draws in the element's local space, scales with it and keeps its `Order` inside it
+(over the slot's children at `zIndex` 0). When the element leaves, or stops naming the projection,
+the views lose that `Parent` and fall back to their layer; after a restore the new slot takes them
+in the same frame. An exiting view keeps its host while its exit plays. A `guide` whose target is a
+hosted view cuts its hole where the view is drawn: its pose through the `Parent` chain, and its
+nine-slice or sprite size times that scale.
 
 ```tsx
 <stack
@@ -473,6 +517,29 @@ the `Parent` chain, and its nine-slice or sprite size times that scale.
   style={{ width: 970, height: 970, fit: "contain" }}
 />
 ```
+
+A JSX projection named in `hosts` is laid out in the slot: its root is solved in the slot's
+content box (the box less its padding), in the slot's own units, hangs under the slot at the place
+`hosts` lists it, and moves and scales with the slot without a solve. A resized slot solves it again
+in the same frame. A slot takes a projection with one root, or roots that place themselves
+(`position: "absolute"`): every root of a keyed projection is solved in the whole box.
+
+```tsx
+<stack key="boardBack" style={backStyles.root}>
+  <stack key="rowSlot" style={backStyles.rowSlot} hosts={["orders.row"]} />
+  <stack key="boardField" style={backStyles.field} hosts={["board.cells", "board.items"]} />
+</stack>
+```
+
+- A slot that exits keeps its root until it is gone: the root leaves with it.
+- A slot that stops naming the projection gives the root back to its layer, solved at the viewport
+  size, with no change motion: its rects changed units, not places.
+- Two slots that name one projection: the first takes it, and a dev build names the other
+  (`ui:slot-taken`). Two roots slotted in each other are laid out at the viewport and logged
+  (`ui:slot-cycle`).
+- The rects of a slotted root are in the slot's units. Every reader converts them to root
+  coordinates: the focus ring, a text field, a guide hole and `tree()` (so the `ui` and `locate`
+  doors and the `tap` and `drag` commands land where the element is drawn).
 
 ## Doors
 
@@ -487,6 +554,38 @@ one with `ui`, `renderer` and `world`.
 
 `game.locate` answers where something is drawn, by either address the doors use. It replaces
 `game.rect`, which answered the key form only; `{ key }` answers the same numbers.
+
+## Debug trigger
+
+`DebugTrigger()` is an extra (see [Extra components](#extra-components)) for the view a player
+taps five times to open the editor's overlay on a debug build, with no computer attached: the
+version line of the settings, usually.
+
+```tsx
+// The version line of the settings sheet. Five taps open the overlay of `moku-game build --debug` on the phone.
+<button key="versionLine" style={versionLineStyle} components={[DebugTrigger()]}>
+  <text key="version" style="settings.version" content={tr("settings.version", { version: "1.4.0" })} />
+</button>
+```
+
+- Five taps within 3000 ms (inclusive, first to fifth) open it. The window slides over the last
+  five taps, and after an open five new taps are needed. Taps on other views neither count nor
+  reset the count.
+- The window is wall time (`performance.now()`), not game time: under a time scale of 0 (the
+  editor's pause) or a slowed game it stays three real seconds. Taps still arrive from frames that
+  run.
+- Underneath is `app.debug.overlay.open()` (the `debug` plugin): a game that wants another gesture
+  calls it from its own listener.
+- The tag adds no component: the view must take a press itself. A `button` naming nothing is the
+  plain choice; a `button` with an intent still answers it. A trigger on a view that takes no press
+  (no `Tappable`, `Pressable`, `Draggable`, `Swipeable`, `Traceable` or `Touchable`) warns
+  `ui:debug-trigger-untouchable` `{ key }` once: five taps can never reach it.
+- `lint()` checks a trigger view against `tapTargetPt` in every build, as a tap target.
+- An open logs `ui:debug-trigger` `{ key }`. When no overlay took it (no agent on the page), one
+  `ui:debug-trigger-no-agent` `{ key }` per app.
+- The counter and its hook are registered on a page with the agent flag only (`moku-game dev`,
+  `moku-game build --debug`): a release build carries the tag's descriptor and no counting code,
+  and five taps do nothing.
 
 1. Exactly one of `key` and `target`, else it throws `[game] game.locate takes a key or a target.`
    `target` is read the way `game.tap` reads it.

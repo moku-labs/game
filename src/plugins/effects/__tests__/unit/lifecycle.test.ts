@@ -214,3 +214,54 @@ describe("stopEffects", () => {
     expect(FakeFxParticleContainer.made).toHaveLength(2);
   });
 });
+
+describe("the shader scan of the kept category (LEAD-FIXES-4 item 3)", () => {
+  /** A lamp computing its canvas pixel the old way, declaring nothing. */
+  const OldLamp = defineFilter("fx.old-lamp", {
+    wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { let p = gfu.uOutputFrame.xy + uv * gfu.uInputSize.xy; return textureSample(uTexture, uSampler, uv + p * 0.0); }",
+    glsl: "void main() { vec2 p = uOutputFrame.xy + vTextureCoord * uInputSize.xy; finalColor = texture(uTexture, vTextureCoord + p * 0.0); }"
+  });
+  /** The same lamp, drawn live on purpose. */
+  const Scan = defineFilter("fx.scan", {
+    wgsl: "@fragment fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { let p = gfu.uGlobalFrame.xy; return textureSample(uTexture, uSampler, uv + p * 0.0); }",
+    glsl: "void main() { finalColor = texture(uTexture, vTextureCoord + uGlobalFrame.xy * 0.0); }",
+    cache: false
+  });
+
+  it("warns once per kind that reads the screen without cache: false, in a dev build only", () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const dev = createMockEffects();
+
+    dev.features.push({ name: "ward", description: { filters: [OldLamp, Scan] } });
+    dev.start();
+
+    expect(
+      vi
+        .mocked(dev.log.warn)
+        .mock.calls.filter(([event]) => event === "effects:filter-reads-screen")
+    ).toEqual([
+      [
+        "effects:filter-reads-screen",
+        {
+          filter: "fx.old-lamp",
+          cache: "screen",
+          hint: 'Filter "fx.old-lamp" reads the screen; declare cache: false'
+        }
+      ]
+    ]);
+
+    vi.unstubAllGlobals();
+
+    const release = createMockEffects();
+
+    release.features.push({ name: "ward", description: { filters: [OldLamp, Scan] } });
+    release.start();
+
+    expect(
+      vi
+        .mocked(release.log.warn)
+        .mock.calls.some(([event]) => event === "effects:filter-reads-screen")
+    ).toBe(false);
+  });
+});

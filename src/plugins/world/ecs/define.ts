@@ -11,6 +11,7 @@ import type {
   QueryTerm,
   ResourceType,
   SystemDefinition,
+  SystemFor,
   TagType,
   TagValue
 } from "./types";
@@ -144,6 +145,22 @@ export function system<const Terms extends readonly QueryTerm[]>(
 }
 
 /**
+ * Binds `system` to one game's player and session, so `run` reads a typed snapshot. Type-only:
+ * the same function.
+ *
+ * @returns `{ system }` whose `run` reads the game's state types.
+ * @example
+ * ```ts
+ * const { system: gameSystem } = systemsFor<{ board: { cells: number[] } }, {}>();
+ * gameSystem({ name: "looks", phase: "animate", query: [Transform], run: (rows, { snapshot }) => void snapshot.player.board.cells });
+ * ```
+ */
+export function systemsFor<Player, Session>(): { system: SystemFor<Player, Session> } {
+  // The world hands the committed snapshot, which the game's types describe.
+  return { system: system as SystemFor<Player, Session> };
+}
+
+/**
  * The layer a view is drawn in. Written only by the projection; a `view` that returns it is
  * logged and the value ignored.
  */
@@ -168,3 +185,32 @@ const emptyNode: DescriptionNode = { type: "", props: {}, children: [] };
  * object, so the world diffs it by identity and `snapshot()` leaves it out.
  */
 export const Tree = /*#__PURE__*/ component("Tree", { node: emptyNode });
+
+/**
+ * The moment of the frame on the game's clock: `clock.now()`, read by `world` once at the start of
+ * every frame (before the systems of `input`) and once when the world starts, headless too. It is
+ * the moment a node gets as `now`, so a fake clock makes it exact in tests. A system that shows
+ * time reads it and writes its component only when its picture changes; with `renderer.onDemand`
+ * that is when a frame is drawn. A write by a system is overwritten at the next frame. `0` only
+ * before the world started, and after `ecs.clear()` until the next frame. `"Now"` is an engine
+ * resource name: a game resource of that name is refused.
+ *
+ * @example
+ * ```ts
+ * // A toast shows the seconds left of its energy timer: it is written once a second, not every frame.
+ * const toastTime = system({
+ *   name: "shared.toastTime",
+ *   phase: "animate",
+ *   query: [ToastTime],
+ *   run: (rows, { world, res }) => {
+ *     const { now } = res(Now); // 1_790_000_016_000: the fake clock of the test stands there
+ *     for (const [entity, time] of rows) {
+ *       const left = Math.max(0, time.until - now);
+ *       if (Math.ceil(left / 1000) !== Math.ceil(time.left / 1000)) world.set(entity, ToastTime, { left });
+ *     }
+ *   }
+ * });
+ * app.world.ecs.resource(Now).now; // 1_790_000_016_000
+ * ```
+ */
+export const Now = /*#__PURE__*/ resource("Now", { now: 0 });

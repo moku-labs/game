@@ -666,6 +666,49 @@ describe("watchKeysAt, what starts a scan", () => {
   );
 });
 
+describe("watchKeysAt, sub-features", () => {
+  /** The image of a folder inside a feature, a sub-feature once it gets a door. */
+  const ROOM = "features/episodes/ep03/assets/room.png";
+
+  it("scans when a folder becomes a sub-feature while no asset or strings file changed, and prints the folder", async () => {
+    const game = await startGame({ files: { [ROOM]: "png" } });
+
+    put(game.root, "features/episodes/ep03/index.ts", "export {};\n");
+    await batch(game);
+
+    expect(game.seen.scans).toHaveLength(2);
+    expect(game.seen.printed.at(-1)).toBe("info keys: features/episodes/ep03/");
+  });
+
+  it("keeps watching through a feature name clash: the first batch resolves and the scan runs", async () => {
+    const game = await startGame({
+      files: {
+        "features/kit/index.ts": "export {};\n",
+        "features/episodes/kit/index.ts": "export {};\n",
+        "features/episodes/kit/assets/room.png": "png"
+      }
+    });
+
+    expect(game.seen.scans).toHaveLength(1);
+
+    // Renaming the folder ends the clash: the input moves and the next batch scans.
+    put(game.root, "features/episodes/episodes-kit/index.ts", "export {};\n");
+    put(game.root, "features/episodes/episodes-kit/assets/room.png", "png");
+    rmSync(path.join(game.root, "features/episodes/kit"), { recursive: true });
+    await batch(game);
+
+    expect(game.seen.scans).toHaveLength(2);
+  });
+
+  it("keeps sub-feature folders out of the stamp module", async () => {
+    const game = await startGame({
+      files: { "features/episodes/ep03/index.ts": "export {};\n", [ROOM]: "png" }
+    });
+
+    expect(Object.keys(stampsOf(game.root).files)).toEqual([ROOM, DOT]);
+  });
+});
+
 describe("watchKeysAt, the stamp", () => {
   it("writes the stamp with the first scan, and leaves it when the assets are the same at the next start", async () => {
     const root = makeGame();

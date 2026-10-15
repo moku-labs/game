@@ -31,11 +31,27 @@ describe("music", () => {
   });
 });
 
+/**
+ * The volumes reader of a game whose player keeps a music setting.
+ *
+ * @param player - The committed player.
+ * @param player.settings - The player's settings.
+ * @param player.settings.music - The music volume the player chose.
+ * @returns The music bus.
+ */
+function read(player: { settings: { music: number } }): { music: number } {
+  return { music: player.settings.music };
+}
+
 describe("audioFor", () => {
   it("hands back the same music function, bound to the keys of one game", () => {
     const kit = audioFor<"board.theme">();
 
     expect(kit.music).toBe(music);
     expect(kit.music("board.theme").kind).toBe("music");
+  });
+
+  it("hands the plugin config the game's own volumes reader, so its buses apply", () => {
+    expect(audioFor<"board.theme", { settings: { music: number } }>().volumes(read)).toBe(read);
   });
 });

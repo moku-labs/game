@@ -1,6 +1,7 @@
 /**
- * @file i18n plugin, build time — `compileStrings`: the walk over `features/*​/strings/<locale>.json`
- * and the `strings/` of every layer turned into the generated modules, and on request the
+ * @file i18n plugin, build time — `compileStrings`: the walk over the `strings/` of every feature
+ * owner (top-level features and sub-features at any depth) and of every layer turned into the
+ * generated modules (a sub-feature's keys into a module of its own), and on request the
  * pseudo-locale `en-XA` derived from English. Every problem of a run is collected and reported in
  * one error, so a game fixes its messages in one round. Node and Bun only: nothing under `src/`
  * outside this folder and `src/assets.ts` imports it, so no game bundles the ICU parser.
@@ -10,6 +11,9 @@ import { emitLocale, emitTypes, type LocaleEntry, type TypeEntry, writeIfChanged
 import { compileElements, type ParameterType, parseMessage } from "./message";
 import { pseudoMessage } from "./pseudo";
 import { compileFailure, listStringFiles, PREFIX, type Walk, walkStrings } from "./walk";
+
+/** One generated module: its path and its text. */
+type Output = { file: string; text: string };
 
 /** The locale the pseudo-locale is derived from. */
 const PSEUDO_SOURCE = "en";
@@ -23,7 +27,10 @@ const PSEUDO_LOCALE = "en-XA";
 export type CompileReport = {
   /** True when an output on disk differs from what the compile produced. */
   changed: boolean;
-  /** Every locale a feature brought a file for, and `en-XA` with `pseudo`, sorted. */
+  /**
+   * Every locale a feature, a sub-feature or a layer brought a file for, and `en-XA` with `pseudo`,
+   * sorted.
+   */
   locales: readonly string[];
   /** Every message key, sorted. */
   keys: readonly string[];
@@ -56,26 +63,30 @@ export type CompileOptions = {
   layers?: Readonly<Record<string, string>>;
 };
 
+/** The entries of one game locale: the whole-game module's and each sub-feature module's. */
+type SplitLocale = { game: LocaleEntry[]; byFeature: Map<string, LocaleEntry[]> };
+
 /**
  * Wraps a pseudo run without English in the message shape of the framework.
  *
+ * @param features - Name of the folder that holds the features.
  * @returns The error to reject with.
  */
-function pseudoNeedsEnglish(): Error {
+function pseudoNeedsEnglish(features: string): Error {
   return new Error(
     `${PREFIX}"--pseudo" needs an "en" string file in at least one feature.\n` +
-      '  Add features/<feature>/strings/en.json or drop "--pseudo".'
+      `  Add ${features}/<feature>/strings/en.json (a sub-feature's own strings/en.json counts too) or drop "--pseudo".`
   );
 }
 
 /**
- * Tells whether at least one feature or layer brings a string file for a locale.
+ * Tells whether at least one feature, sub-feature or layer brings a string file for a locale.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param features - Name of the folder that holds the features.
  * @param layers - Folder under the root to the name its keys take.
  * @param locale - The locale to look for.
- * @returns True when a feature or a layer has `strings/<locale>.json`.
+ * @returns True when a feature, a sub-feature or a layer has `strings/<locale>.json`.
  */
 async function bringsLocale(
   root: string,
@@ -126,6 +137,69 @@ function localeModules(walk: Walk, pseudo: boolean): Map<string, LocaleEntry[]> 
 }
 
 /**
+ * Splits the entries of one locale by the owner of each key: a sub-feature's keys go to its own
+ * module, every other key to the whole-game module.
+ *
+ * @param walk - What the walk collected.
+ * @param entries - The entries of one locale, the pseudo-locale included.
+ * @returns The whole-game entries and the entries of each sub-feature that has some.
+ */
+function splitLocale(walk: Walk, entries: readonly LocaleEntry[]): SplitLocale {
+  const split: SplitLocale = { game: [], byFeature: new Map() };
+
+  for (const entry of entries) {
+    const owner = walk.owner.get(entry.key);
+
+    if (owner?.parent === undefined) {
+      split.game.push(entry);
+      continue;
+    }
+
+    const own = split.byFeature.get(owner.feature) ?? [];
+
+    own.push(entry);
+    split.byFeature.set(owner.feature, own);
+  }
+
+  return split;
+}
+
+/**
+ * The locale outputs of one compile: per locale the whole-game module `strings.<locale>.ts`, then
+ * for every sub-feature with string files (sorted by name) and every locale its
+ * `strings.<feature>.<locale>.ts`, an empty table where it brought nothing for that locale.
+ *
+ * @param walk - What the walk collected.
+ * @param modules - The compiled messages per locale, the pseudo-locale included.
+ * @param out - The generated directory.
+ * @returns The file and the text of each locale output.
+ */
+function localeOutputs(
+  walk: Walk,
+  modules: ReadonlyMap<string, readonly LocaleEntry[]>,
+  out: string
+): Output[] {
+  const locales = [...modules.keys()].toSorted();
+  const split = new Map(
+    locales.map(locale => [locale, splitLocale(walk, modules.get(locale) ?? [])])
+  );
+  const subFeatures = [...walk.subFeatures.keys()].toSorted();
+
+  return [
+    ...locales.map(locale => ({
+      file: path.join(out, `strings.${locale}.ts`),
+      text: emitLocale(split.get(locale)?.game ?? [])
+    })),
+    ...subFeatures.flatMap(feature =>
+      locales.map(locale => ({
+        file: path.join(out, `strings.${feature}.${locale}.ts`),
+        text: emitLocale(split.get(locale)?.byFeature.get(feature) ?? [])
+      }))
+    )
+  ];
+}
+
+/**
  * Lists the keys a locale is missing, so a translator sees the gap without the build stopping.
  *
  * @param walk - What the compile collects.
@@ -171,11 +245,14 @@ function typeEntries(walk: Walk): TypeEntry[] {
 }
 
 /**
- * Walks `features/*​/strings/<locale>.json` of a game and the `strings/` of every layer, compiles
- * every message and writes the generated modules: the types module `strings.ts` and one
- * `strings.<locale>.ts` per locale, plus `strings.en-XA.ts` with `pseudo`. A check run writes
- * nothing and only reports whether something would change; it checks `strings.en-XA.ts` only with
- * `pseudo`.
+ * Walks the `strings/<locale>.json` of every feature of a game, sub-features at any depth
+ * included, and the `strings/` of every layer, compiles every message and writes the generated
+ * modules: the types module `strings.ts` with every key; one `strings.<locale>.ts` per locale with
+ * the keys of the top-level features and the layers; and for every sub-feature that brings string
+ * files one `strings.<feature>.<locale>.ts` per locale with its own keys (an empty table where it
+ * lacks the locale). `strings.en-XA.ts` and its per-feature twins come with `pseudo`. A game
+ * without sub-features writes exactly the modules 0.14.12 wrote. A check run writes nothing and
+ * only reports whether something would change; it checks the `en-XA` modules only with `pseudo`.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param out - The generated directory the modules are written into.
@@ -194,6 +271,7 @@ function typeEntries(walk: Walk): TypeEntry[] {
  * // shared/strings/en.json { "ui.ok": "OK" } compile together.
  * const layered = await compileStrings("src", "src/generated", { layers: { shared: "ui" } });
  * // layered.keys: ["board.full", "ui.ok"]
+ * // features/episodes/ep01/strings/en.json { "ep01.title": "Ward" } also writes generated/strings.ep01.en.ts
  * ```
  */
 export async function compileStrings(
@@ -207,7 +285,7 @@ export async function compileStrings(
 
   // The pseudo-locale is derived from English: without it, refuse before reading a message.
   if (pseudo && !(await bringsLocale(root, features, layers, PSEUDO_SOURCE))) {
-    throw pseudoNeedsEnglish();
+    throw pseudoNeedsEnglish(features);
   }
 
   // Collect every message of every feature and layer, and fail once with every problem found.
@@ -221,16 +299,14 @@ export async function compileStrings(
 
   if (brought.length === 0) return { changed: false, locales: brought, keys, notes: [] };
 
-  // Build the types module and one module per locale, the pseudo-locale included on request.
+  // Build the types module of every key, then the whole-game and the per-feature modules of
+  // every locale, the pseudo-locale included on request.
   const modules = localeModules(walk, pseudo);
   const locales = [...modules.keys()].toSorted();
   const write = options.check !== true;
   const outputs = [
     { file: path.join(out, "strings.ts"), text: emitTypes(typeEntries(walk)) },
-    ...locales.map(locale => ({
-      file: path.join(out, `strings.${locale}.ts`),
-      text: emitLocale(modules.get(locale) ?? [])
-    }))
+    ...localeOutputs(walk, modules, out)
   ];
   let changed = false;
 

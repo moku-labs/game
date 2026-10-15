@@ -526,3 +526,61 @@ describe("exchange with layers", () => {
     );
   });
 });
+
+/**
+ * The fixture game with a sub-feature `features/hud/ep01` (a door, and one English key) inside `hud`.
+ *
+ * @returns The game source root and a folder for the translation files.
+ */
+async function nestedFixture(): Promise<{ root: string; dir: string }> {
+  const game = await fixture();
+  const ep01 = path.join(game.root, "features", "hud", "ep01");
+
+  await mkdir(ep01, { recursive: true });
+  await writeFile(path.join(ep01, "index.ts"), "export {};\n");
+  await writeJson(path.join(ep01, "strings", "en.json"), { "ep01.title": "Ward" });
+
+  return game;
+}
+
+describe("exchange with sub-features", () => {
+  it("exports a sub-feature key in every locale file, sorted with the rest", async () => {
+    // Bug: the exchange walks one level of features/ only, and the translators never see the episode texts.
+    const { root, dir } = await nestedFixture();
+
+    await exportStrings(root, dir);
+
+    const russian = JSON.parse(await readFile(path.join(dir, "ru.json"), "utf8")) as object;
+
+    expect(Object.keys(russian)).toEqual([
+      "ep01.title",
+      "hud.bonus",
+      "hud.coins",
+      "hud.deliver",
+      "hud.orders",
+      "hud.title",
+      "orders.coins"
+    ]);
+    expect(russian).toMatchObject({ "ep01.title": { text: "", source: "Ward" } });
+  });
+
+  it("imports a sub-feature text into the sub-feature's own string file and compiles its module", async () => {
+    // Bug: the text lands in the parent's strings/ru.json, so the next compile refuses the key without its owner.
+    const { root, dir } = await nestedFixture();
+
+    await writeJson(path.join(dir, "ru.json"), { "ep01.title": { text: "Палата" } });
+
+    const report = await importStrings(root, dir);
+    const russian = evaluateModule(
+      await readFile(path.join(root, "generated", "strings.ep01.ru.ts"), "utf8")
+    );
+
+    expect(report.files).toEqual(["features/hud/ep01/strings/ru.json"]);
+    expect(
+      await readFile(path.join(root, "features", "hud", "ep01", "strings", "ru.json"), "utf8")
+    ).toBe(jsonText({ "ep01.title": "Палата" }));
+    expect(russian["ep01.title"]?.({}, createIntlKit("ru"))).toEqual([
+      { kind: "text", text: "Палата" }
+    ]);
+  });
+});

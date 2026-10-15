@@ -451,3 +451,111 @@ describe("anim/timeline cursor: a frames step over a Frames loop", () => {
     expect(mock.state.framesHeld.size).toBe(0);
   });
 });
+
+describe("anim/timeline cursor — key targets are fixed when the timeline starts", () => {
+  const coinKey: Target = { projection: "hud", key: "coin" };
+
+  it("plays a timeline tween step with reduced keep at its length under reduced motion", () => {
+    const mock = createMockAnim({ reducedMotion: true });
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+
+    playOn(mock, entity, it =>
+      tween(it, Transform, { x: 100 }, { ms: 100, ease: "linear", reduced: "keep" })
+    );
+    mock.frame(50);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(50);
+  });
+
+  it("writes the entity resolved at play in a step that starts after the key left", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const drop = mock.world.projection.registerKey("hud", "coin", entity);
+
+    playOn(mock, coinKey, it =>
+      sequence(
+        tween(it, Transform, { x: 100 }, { ms: 100, ease: "linear" }),
+        tween(it, Transform, { y: 100 }, { ms: 100, ease: "linear" })
+      )
+    );
+    mock.frame(50);
+    drop();
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 50 });
+  });
+
+  it("looks up a key nothing held at play when its step starts", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+
+    playOn(mock, coinKey, it =>
+      sequence(wait(50), tween(it, Transform, { x: 100 }, { ms: 100, ease: "linear" }))
+    );
+    mock.world.projection.registerKey("hud", "coin", entity);
+    mock.frame(100);
+
+    expect(mock.world.ecs.get(entity, Transform)?.x).toBe(50);
+  });
+
+  it("skips a target resolved at play that despawned, and never follows a new entity under its key", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const first = spawnTestEntity(mock, [Transform()]);
+
+    mock.world.projection.registerKey("hud", "coin", first);
+
+    const handle = playOn(mock, coinKey, it =>
+      sequence(
+        wait(50),
+        tween(it, Transform, { x: 100 }, { ms: 100, ease: "linear" }),
+        mark("after")
+      )
+    );
+
+    mock.world.ecs.despawn(first);
+
+    const second = spawnTestEntity(mock, [Transform()]);
+
+    mock.world.projection.registerKey("hud", "coin", second);
+    mock.frame(50);
+
+    expect(handle.marks()).toEqual(["after"]);
+
+    mock.frame(50);
+
+    expect(mock.world.ecs.get(second, Transform)?.x).toBe(0);
+  });
+
+  it("writes the entity resolved at play when a finish reaches a step that never started", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const drop = mock.world.projection.registerKey("hud", "coin", entity);
+    const handle = playOn(mock, coinKey, it =>
+      sequence(
+        tween(it, Transform, { x: 100 }, { ms: 100, ease: "linear" }),
+        tween(it, Transform, { y: 100 }, { ms: 100, ease: "linear" })
+      )
+    );
+
+    mock.frame(50);
+    drop();
+    handle.finish();
+
+    expect(mock.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 100 });
+  });
+});

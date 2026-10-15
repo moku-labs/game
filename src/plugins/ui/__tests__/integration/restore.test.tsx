@@ -740,13 +740,14 @@ describe("ui — after a restore an element stands as if its root had just been 
     app.world.projection.mount(["tokens", "slotScreen"], { kind: "plugin", name: "test" });
     app.time.step(16);
 
-    // The first frame after a mount: the slot is built and not live yet.
-    expect(parents()).toEqual([undefined, undefined]);
-
-    app.time.step(16);
-    app.time.step(16);
-
+    // The first frame after a mount: the slot is built and hosts its views in it (spec 16 U2).
     const slot = app.ui.find("slot");
+
+    expect(parents()).toEqual([slot, slot]);
+
+    app.time.step(16);
+    app.time.step(16);
+
     const bookmark = app.flow.bookmark();
 
     expect(parents()).toEqual([slot, slot]);
@@ -755,12 +756,8 @@ describe("ui — after a restore an element stands as if its root had just been 
     await stackTick();
     app.time.step(16);
 
-    // The frame that builds the roots again: the old slot is gone and the new one is not live
-    // yet, exactly as in the first frame after the mount above.
-    expect(parents()).toEqual([undefined, undefined]);
-
-    app.time.step(16);
-
+    // The frame that builds the roots again: the old slot is gone and the new one hosts the views
+    // in that same frame, exactly as in the first frame after the mount above.
     const again = app.ui.find("slot");
 
     expect(again).toBeDefined();

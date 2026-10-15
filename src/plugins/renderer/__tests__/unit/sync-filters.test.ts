@@ -1,10 +1,12 @@
+import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
 import type { Entity } from "../../../world/types";
-import { Display, NineSlice, Parent, Sprite, Transform } from "../../components";
+import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../../components";
 import type { FilterSlot, PixiFilter } from "../../types";
 import { FakeContainer, FakeFilter } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
+import { endStage, startOverlayStage } from "../overlay-harness";
 
 // ---------------------------------------------------------------------------
 // Unit test: sync.filters.set, the seam effects hangs its filter instances on
@@ -422,6 +424,43 @@ describe("renderPasses", () => {
     expect(passesOf(mock)).toBe(1);
   });
 
+  it("costs no pass for the filters of an empty view or of a view at alpha 0", async () => {
+    const mock = await started();
+    const strip = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 400, h: 100, fillAlpha: 0 })
+    ]);
+    const card = spawnSprite(mock);
+
+    mock.modules.sync.pass();
+    mock.api.sync.filters.set(strip, [slot(new FakeFilter())]);
+    mock.api.sync.filters.set(card, [slot(new FakeFilter())]);
+
+    expect(passesOf(mock)).toBe(3);
+
+    mock.world.ecs.set(card, Sprite, { alpha: 0 });
+    mock.modules.sync.pass();
+
+    expect(passesOf(mock)).toBe(1);
+  });
+
+  it("leaves out the passes of every filter under an ancestor that is not drawn", async () => {
+    const mock = await started();
+    const button = spawnSprite(mock);
+    const label = mock.world.ecs.spawn(owner, [Transform(), Sprite(), Parent({ entity: button })]);
+
+    mock.modules.sync.pass();
+    mock.api.sync.filters.set(label, [slot(new FakeFilter())]);
+
+    expect(passesOf(mock)).toBe(3);
+
+    mock.world.ecs.set(button, Sprite, { alpha: 0 });
+    mock.modules.sync.pass();
+
+    expect(passesOf(mock)).toBe(1);
+  });
+
   it("reads the slots alone: no texture walk, no counts object", async () => {
     const mock = await started();
     const button = spawnSprite(mock);
@@ -435,5 +474,62 @@ describe("renderPasses", () => {
     expect(mock.api.sync.renderPasses()).toBe(3);
     expect(textures).not.toHaveBeenCalled();
     expect(counts).not.toHaveBeenCalled();
+  });
+});
+
+describe("sync.filters.set — the kinds of the performance log", () => {
+  it("names the stage filters of a slot's inputs by the slot's kind in an agent build, and nothing without the flag", async () => {
+    const stages = [new FakeFilter(), new FakeFilter()].map(
+      stage => stage as unknown as PixiFilter
+    );
+    const inputs = {
+      stages,
+      count: 1,
+      version: () => 1,
+      scaleOf: () => 0.5,
+      draw: () => undefined,
+      hold: () => undefined
+    };
+    const filtered: FilterSlot = { ...slot(new FakeFilter(), 3), kind: "fixture.soft", inputs };
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+
+    const agent = await started();
+
+    agent.api.sync.filters.set(spawnSprite(agent), [filtered]);
+
+    expect(stages.map(stage => agent.ctx.state.sync.filterKinds.get(stage))).toEqual([
+      "fixture.soft",
+      "fixture.soft"
+    ]);
+
+    vi.unstubAllGlobals();
+
+    const release = await started();
+
+    release.api.sync.filters.set(spawnSprite(release), [filtered]);
+
+    expect(stages.map(stage => release.ctx.state.sync.filterKinds.get(stage))).toEqual([
+      undefined,
+      undefined
+    ]);
+  });
+});
+
+describe("renderPasses with kept pictures", () => {
+  it("counts no pass of a filter inside another view's kept picture: the splash at rest draws one", async () => {
+    const stage = await startOverlayStage({ onDemand: false });
+    const sync = stage.drawn.mock.api.sync;
+    const scene = stage.view({ order: 1, w: 1080, h: 1920 });
+    const sharp = stage.view({ parent: scene, x: 200, y: 400, w: 400, h: 400 });
+
+    sync.filters.set(scene, [{ filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }]);
+    sync.filters.set(sharp, [{ filter: new pixi.AlphaFilter(), passes: 1 }]);
+    stage.frames(8);
+
+    expect(stage.drawn.mock.ctx.state.kept.byEntity.get(scene)?.mode).toBe("kept");
+    expect(stage.drawn.mock.ctx.state.kept.byEntity.get(sharp)?.mode).not.toBe("kept");
+    expect(sync.renderPasses()).toBe(1);
+    endStage(stage);
   });
 });

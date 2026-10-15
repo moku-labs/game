@@ -1,13 +1,18 @@
+import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Layer } from "../../../world/ecs/define";
 import { Parent, Shape, Sprite, Transform } from "../../components";
 import { sourceBytes, textureUsage } from "../../host/readback";
+import { frameAt } from "../../monitor/ring";
 import { createMonitorState } from "../../monitor/state";
 import { beginFrame, endFrame } from "../../monitor/window";
 import type { PixiApplication } from "../../types";
+import { startDrawn } from "../demand-harness";
 import { fakePictureUrl, installFakeCanvas, readFakePicture } from "../fake-canvas";
-import { FAKE_PNG, FakeTexture } from "../fake-pixi";
+import { FAKE_PNG, type FakeScene, FakeTexture } from "../fake-pixi";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
+import { linesOf, startAgent } from "../perf-harness";
+import { stagePixi } from "../stage-pixi";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -70,12 +75,16 @@ describe("renderer stats", () => {
 
     expect(stats).toEqual({
       fps: 0,
+      drawn: 0,
       frameMs: 0,
       textures: 0,
       textureMb: 0,
+      textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
-      renderPasses: 0
+      renderPasses: 0,
+      renderPassesMax: 0,
+      kept: { pictures: 0, mb: 0, retakes: 0 }
     });
     expect("drawCalls" in stats).toBe(false);
   });
@@ -107,7 +116,7 @@ describe("renderer stats", () => {
   });
 
   it("restarts the window after a long gap instead of counting it as one slow frame", () => {
-    const state = createMonitorState();
+    const state = createMonitorState({ budgetMs: "rate", frames: 1024 });
 
     beginFrame(state, 0);
     endFrame(state, 2);
@@ -120,7 +129,7 @@ describe("renderer stats", () => {
   });
 
   it("ignores the end of a frame whose start it never saw", () => {
-    const state = createMonitorState();
+    const state = createMonitorState({ budgetMs: "rate", frames: 1024 });
 
     endFrame(state, 10);
 
@@ -142,6 +151,35 @@ describe("renderer stats", () => {
     expect(mock.api.stats()).toMatchObject({ textures: 2, textureMb: 5 });
   });
 
+  it("splits the texture memory into art, render targets and the pictures the engine keeps", async () => {
+    const mock = await started();
+    const kept = { pixelWidth: 512, pixelHeight: 512, mipLevelCount: 1, uploadMethodId: "unknown" };
+
+    mock.pixi.last().renderer.texture.managedTextures.push(
+      { pixelWidth: 1024, pixelHeight: 1024, mipLevelCount: 1 },
+      {
+        pixelWidth: 1024,
+        pixelHeight: 512,
+        mipLevelCount: 1,
+        uploadMethodId: "unknown",
+        // eslint-disable-next-line unicorn/no-null -- a render target's resource is null in Pixi.
+        resource: null
+      } as never,
+      kept as never
+    );
+    mock.modules.host.keep(kept, true);
+
+    expect(mock.api.stats()).toMatchObject({
+      textures: 3,
+      textureMb: 7,
+      textureMbSplit: { art: 4, targets: 2, kept: 1 }
+    });
+
+    mock.modules.host.keep(kept, false);
+
+    expect(mock.api.stats().textureMbSplit).toEqual({ art: 4, targets: 3, kept: 0 });
+  });
+
   it("answers no texture for Pixi's canvas renderer, which keeps none on a GPU", async () => {
     const mock = await started();
 
@@ -161,7 +199,7 @@ describe("renderer stats", () => {
   });
 
   it("skips the empty slots Pixi keeps for unloaded texture sources", () => {
-    // Pixi 8.21 GpuTextureSystem and GlTextureSystem answer `Object.values` of a GCManagedHash,
+    // Pixi 8.22 GpuTextureSystem and GlTextureSystem answer `Object.values` of a GCManagedHash,
     // which keeps `null` where a source was unloaded.
     // eslint-disable-next-line unicorn/no-null -- Pixi's empty slot is `null`, the bug is about it
     const emptySlot = null;
@@ -180,7 +218,13 @@ describe("renderer stats", () => {
     } as unknown as PixiApplication;
 
     // (16 + 4) pixels * 4 bytes.
-    expect(textureUsage(app)).toEqual({ count: 2, bytes: 80 });
+    expect(textureUsage(app, new WeakSet())).toEqual({
+      count: 2,
+      bytes: 80,
+      art: 80,
+      targets: 0,
+      kept: 0
+    });
   });
 
   it("estimates the bytes of one texture source", () => {
@@ -258,6 +302,17 @@ describe("renderer capture", () => {
     mock.setPaused(true);
 
     await expect(mock.api.capture()).resolves.toEqual({ png: FAKE_PNG });
+  });
+
+  it("draws on a debug page with only AGENT true, and serves a waiting capture when the game pauses", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const mock = await started();
+    const waiting = mock.api.capture();
+
+    pause(mock);
+
+    await expect(waiting).resolves.toEqual({ png: FAKE_PNG });
+    expect(mock.ctx.state.monitor.captures).toHaveLength(0);
   });
 
   it("takes a waiting capture at once when the game pauses before its frame came", async () => {
@@ -1008,5 +1063,315 @@ describe("capture against", () => {
 
     expect(shot?.legend?.map(entry => entry.key)).toEqual(["claim"]);
     expect(ops.indexOf("putImageData")).toBeLessThan(ops.indexOf("fillText"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Render on demand (spec 14 D3.3, D4.4): `stats().drawn` counts the frames
+// really drawn over the same second as `fps`; a skipped frame keeps the draw
+// calls of the last drawn one and serves no capture.
+// ---------------------------------------------------------------------------
+
+/**
+ * Starts a mock renderer with the switch of render on demand.
+ *
+ * @param onDemand - `config.onDemand`.
+ * @param scene - What every drawn frame of the fake draws.
+ * @returns The started mock.
+ */
+async function startedOnDemand(
+  onDemand: boolean,
+  scene?: Partial<FakeScene>
+): Promise<MockRenderer> {
+  const mock = createMockRenderer({
+    config: { onDemand },
+    ...(scene === undefined ? {} : { scene })
+  });
+
+  await mock.start();
+
+  return mock;
+}
+
+/**
+ * Runs frames 16 ms apart, 4 ms of work each, from a clock time on.
+ *
+ * @param mock - The started mock renderer.
+ * @param from - Clock time of the first frame.
+ * @param count - How many frames.
+ * @returns The clock time after the last one.
+ */
+function framesFrom(mock: MockRenderer, from: number, count: number): number {
+  for (let index = 0; index < count; index += 1) frame(mock, from + index * 16, 4);
+
+  return from + count * 16;
+}
+
+describe("renderer stats: redraws and rebuilds (spec 26 R2.3)", () => {
+  it("counts the engine's Graphics draws per second, and none on a still screen", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(false);
+
+    mock.world.projection.setLayers([{ name: "items", sort: "none" }]);
+
+    const bar = mock.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 10, h: 10 })
+    ]);
+
+    // 64 frames 16 ms apart: a bar that grows every frame draws one path a frame; the 64th closes the window.
+    for (let index = 0; index < 64; index += 1) {
+      mock.world.ecs.set(bar, Shape, { w: 10 + index });
+      mock.modules.sync.pass();
+      frame(mock, index * 16, 4);
+    }
+
+    expect(mock.api.stats().redraws).toBe(62.5);
+
+    // Two more windows: the next one still holds the last frame's draw, the one after holds none.
+    for (let index = 64; index < 192; index += 1) {
+      mock.modules.sync.pass();
+      frame(mock, index * 16, 4);
+    }
+
+    expect(mock.api.stats().redraws).toBe(0);
+  });
+
+  it("counts Pixi's instruction rebuilds per second, and none on a still screen", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(false, { rebuilds: 1 });
+
+    framesFrom(mock, 0, 64);
+
+    expect(mock.api.stats().rebuilds).toBe(62.5);
+
+    mock.pixi.settings.scene.rebuilds = 0;
+    framesFrom(mock, 64 * 16, 128);
+
+    expect(mock.api.stats().rebuilds).toBe(0);
+  });
+
+  it("has neither field in a production build", async () => {
+    const mock = await startedOnDemand(false, { rebuilds: 1 });
+
+    framesFrom(mock, 0, 64);
+
+    const stats = mock.api.stats();
+
+    expect("redraws" in stats).toBe(false);
+    expect("rebuilds" in stats).toBe(false);
+  });
+});
+
+describe("renderer stats: frames drawn", () => {
+  it("drawn equals fps when every frame is drawn", async () => {
+    const mock = await startedOnDemand(false);
+
+    framesFrom(mock, 0, 80);
+
+    const stats = mock.api.stats();
+
+    expect(stats.fps).toBeGreaterThan(60);
+    expect(stats.drawn).toBe(stats.fps);
+  });
+
+  it("drawn is 0 when no frame is drawn, while fps stays at the loop rate", async () => {
+    const mock = await startedOnDemand(true);
+
+    framesFrom(mock, 0, 140);
+
+    const stats = mock.api.stats();
+
+    expect(stats.fps).toBeGreaterThan(60);
+    expect(stats.drawn).toBe(0);
+  });
+
+  it("a skipped frame keeps the draw calls of the last drawn frame", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(true, { batches: 2, graphics: [3], draws: 1, indirect: 1 });
+
+    framesFrom(mock, 0, 1);
+
+    expect(mock.api.stats().drawCalls).toBe(7);
+
+    framesFrom(mock, 16, 3);
+
+    expect(mock.pixi.last().renderer.renders).toBe(1);
+    expect(mock.api.stats().drawCalls).toBe(7);
+  });
+
+  it("a capture is served only by a drawn frame", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = await startedOnDemand(true);
+    let served = false;
+
+    framesFrom(mock, 0, 2);
+
+    const pending = mock.api.capture().then(() => {
+      served = true;
+    });
+
+    mock.modules.monitor.end(false);
+    await settle();
+
+    expect(served).toBe(false);
+
+    // A waiting capture makes the next frame drawn, and that frame serves it.
+    framesFrom(mock, 32, 1);
+    await pending;
+
+    expect(mock.modules.demand.frame().reason).toBe("capture");
+    expect(served).toBe(true);
+    expect(mock.pixi.last().renderer.renders).toBe(2);
+  });
+
+  it("draws the frame of a resize and of a new resolution, with onDemand", async () => {
+    const mock = await startedOnDemand(true);
+
+    framesFrom(mock, 0, 2);
+    mock.ctx.state.viewport.resizePending = true;
+    framesFrom(mock, 32, 1);
+
+    expect(mock.modules.demand.frame()).toMatchObject({ drawn: true, reason: "resize" });
+
+    mock.api.monitor.setResolution(1.5);
+    framesFrom(mock, 48, 2);
+
+    expect(mock.pixi.last().renderer.renders).toBe(3);
+  });
+});
+
+describe("the kept pictures in the stats and the agent ring (spec 23 P12)", () => {
+  it("stats().kept reports the pictures drawn, the MiB they hold and the takes of the last second", async () => {
+    const drawn = await startDrawn({ onDemand: false });
+    const entity = drawn.spawn(Transform({ x: 100, y: 100 }), Shape({ w: 40, h: 40 }));
+    /** One frame 200 ms of clock after the last. */
+    const step = (at: number): void => {
+      drawn.mock.setNow(at);
+      drawn.frame();
+    };
+
+    drawn.mock.api.sync.filters.set(entity, [
+      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+    ]);
+
+    for (const at of [0, 200, 400, 600, 800]) step(at);
+
+    // Taken, the second still open: no take counted yet.
+    expect(drawn.mock.api.stats().kept).toEqual({ pictures: 1, mb: 0.01, retakes: 0 });
+
+    step(1000);
+
+    expect(drawn.mock.api.stats().kept).toEqual({ pictures: 1, mb: 0.01, retakes: 1 });
+
+    for (const at of [1200, 1400, 1600, 1800, 2000]) step(at);
+
+    expect(drawn.mock.api.stats().kept.retakes).toBe(0);
+    drawn.mock.stop();
+  });
+
+  it("the agent ring writes kept and retakes per frame, the sample line kept per second", async () => {
+    const stage = stagePixi();
+    const agent = await startAgent({
+      config: { onDemand: false, loadPixi: () => Promise.resolve(stage.module) }
+    });
+    const lines = agent.listen();
+    const { mock } = agent;
+
+    mock.world.projection.setLayers([{ name: "items", sort: "order" }]);
+
+    const entity = mock.world.ecs.spawn({ kind: "plugin", name: "test" }, [
+      Layer({ name: "items" }),
+      Transform({ x: 100, y: 100 }),
+      Shape({ w: 40, h: 40 })
+    ]);
+    /** One frame of the agent build at a page time. */
+    const step = (at: number): void => {
+      agent.clock.now = at;
+      mock.modules.sync.pass();
+      mock.world.clearChanges();
+      agent.frame({ at });
+    };
+
+    mock.api.sync.filters.set(entity, [
+      { filter: new pixi.AlphaFilter(), passes: 1, cache: "local" }
+    ]);
+    step(0);
+
+    expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 0, retakes: 0 });
+
+    step(16);
+    step(32);
+
+    expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 1, retakes: 1 });
+
+    step(48);
+
+    expect(frameAt(mock.api.monitor.frames(), 0)?.kept).toEqual({ pictures: 1, retakes: 0 });
+
+    step(1100);
+
+    const [sample] = linesOf(lines, "sample");
+
+    expect(sample?.kept).toEqual({ pictures: 1, mb: 0.01, retakes: 1, refreshes: 0 });
+    expect(linesOf(lines, "header")[0]?.measured).toContain("kept");
+    mock.stop();
+  });
+});
+
+describe("the pool-trim event of an agent build", () => {
+  it("writes one pool-trim line per trim with its reason and the MiB freed, also after a restore of the device", async () => {
+    const agent = await startAgent();
+    const lines = agent.listen();
+    const managed = agent.mock.pixi.last().renderer.texture.managedTextures as unknown[];
+    // 8 MiB of idle filter targets: 1024 x 2048 RGBA.
+    const idle = {
+      pixelWidth: 1024,
+      pixelHeight: 2048,
+      mipLevelCount: 1,
+      uploadMethodId: "unknown",
+      // eslint-disable-next-line unicorn/no-null -- a render target's resource is null in Pixi.
+      resource: null
+    };
+    const pool = agent.mock.pixi.module.TexturePool as unknown as {
+      onClear: (() => void) | undefined;
+    };
+
+    managed.push(idle);
+    pool.onClear = () => {
+      if (managed.includes(idle)) managed.splice(managed.indexOf(idle), 1);
+    };
+    agent.mock.modules.host.trimPool("pause");
+
+    agent.mock.pixi.last().lose("unknown");
+    for (let index = 0; index < 20; index += 1) await Promise.resolve();
+    agent.mock.modules.host.trimPool("rest");
+
+    expect(
+      linesOf(lines, "event")
+        .filter(line => line.name === "pool-trim")
+        .map(line => line.detail)
+    ).toEqual([
+      { reason: "pause", freedMb: 8 },
+      { reason: "rest", freedMb: 0 }
+    ]);
+  });
+});
+
+describe("the warm event of an agent build", () => {
+  // Bug: the editor never sees when the warm-up of a device ended, or how many probe draws it took.
+  it("writes one warm line with the draws of the run when the warm-up's queue empties", async () => {
+    const agent = await startAgent();
+    const lines = agent.listen();
+
+    // What `sync/warm.ts` tells its listeners when the queue becomes empty.
+    for (const listener of agent.mock.ctx.state.sync.warm.listeners) listener(16);
+
+    expect(
+      linesOf(lines, "event")
+        .filter(line => line.name === "warm")
+        .map(line => line.detail)
+    ).toEqual([{ draws: 16 }]);
   });
 });

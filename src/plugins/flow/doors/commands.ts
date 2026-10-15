@@ -5,16 +5,25 @@
  */
 import { reducedMotionCommand } from "../../anim/control";
 import { muteCommand } from "../../audio/control";
+import { filterCommand } from "../../effects/control";
 import { dragCommand, keyCommand, traceCommand } from "../../input/control";
 import { pauseCommand, resumeCommand } from "../../lifecycle/control";
 import { captureCommand, debugCommand } from "../../renderer/control";
-import { stepCommand, timeScaleCommand } from "../../time/control";
+import { frameRateCommand, stepCommand, timeScaleCommand } from "../../time/control";
 import { fillCommand, tapCommand } from "../../ui/control";
-import { answerCommand, bookmarkCommand, restoreCommand, walkCommand } from "../control";
+import {
+  answerCommand,
+  bookmarkCommand,
+  restoreCommand,
+  saveExportCommand,
+  saveImportCommand,
+  walkCommand
+} from "../control";
 
 /**
  * Every command of the engine, keyed by its short name: what an editor lists as buttons and MCP
- * tools. Frozen. Each runs in dev builds only.
+ * tools. Frozen. Each runs on the dev page and on a debug page, by the profile `run` checks: a
+ * `--debug` page runs the read and cosmetic ones.
  *
  * @example
  * ```ts
@@ -31,6 +40,8 @@ export const commands = Object.freeze({
   walk: walkCommand,
   bookmark: bookmarkCommand,
   restore: restoreCommand,
+  saveExport: saveExportCommand,
+  saveImport: saveImportCommand,
   step: stepCommand,
   pause: pauseCommand,
   resume: resumeCommand,
@@ -39,6 +50,8 @@ export const commands = Object.freeze({
   reducedMotion: reducedMotionCommand,
   fill: fillCommand,
   timeScale: timeScaleCommand,
+  frameRate: frameRateCommand,
   mute: muteCommand,
-  trace: traceCommand
+  trace: traceCommand,
+  filter: filterCommand
 });

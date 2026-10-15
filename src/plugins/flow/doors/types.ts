@@ -138,8 +138,79 @@ export type Source<S extends InputSchema, O, App = HeadlessApp> = {
 };
 
 /**
- * A dev-only action on a running game: an id, a title, the input it takes, its effect and how to
- * run it. The body starts with the inline dev guard, so a production build drops it.
+ * Where the editor's overlay shows a command: a switch (`"toggle"`) or a button (`"button"`). A
+ * command without the marker is not shown there.
+ *
+ * @example
+ * ```ts
+ * // The overlay's "Glow" switch of a game.
+ * const marker: OverlayMarker = "toggle";
+ * ```
+ */
+export type OverlayMarker = "toggle" | "button";
+
+/**
+ * The input schema of an overlay toggle: the state the switch asks for, and nothing else.
+ *
+ * @example
+ * ```ts
+ * // The overlay runs a toggle with { on: !value(app) }.
+ * const input: ToggleInput = { on: "boolean" };
+ * ```
+ */
+export type ToggleInput = { readonly on: "boolean" };
+
+/** The schema a toggle accepts: exactly `{ on: "boolean" }`; any schema while `S` is the wide one. */
+type ToggleSchema<S extends InputSchema> = string extends keyof S
+  ? S
+  : [Exclude<keyof S, "on">] extends [never]
+    ? S extends ToggleInput
+      ? S
+      : never
+    : never;
+
+/** The schema a button accepts: no required field; any schema while `S` is the wide one. */
+type ButtonSchema<S extends InputSchema> = string extends keyof S
+  ? S
+  : [RequiredKeys<S>] extends [never]
+    ? S
+    : never;
+
+/**
+ * The overlay part of a command, one of three shapes told apart by `overlay`: none, a toggle
+ * with its input `{ on: "boolean" }` and its `value`, or a button with no required input and no
+ * `value`. Any other combination does not compile.
+ */
+type CommandOverlay<S extends InputSchema, App> =
+  | {
+      /** Not shown in the overlay. */
+      readonly overlay?: never;
+      /** Only a toggle has a value. */
+      readonly value?: never;
+    }
+  | {
+      /** A switch of the overlay, run with `{ on: !value(app) }`. */
+      readonly overlay: "toggle";
+      readonly input: ToggleSchema<S>;
+      /** The current value of the switch, read by the overlay to draw it. */
+      readonly value: (app: App) => boolean;
+    }
+  | {
+      /** A button of the overlay, run with `{}`. */
+      readonly overlay: "button";
+      readonly input: ButtonSchema<S>;
+      /** Only a toggle has a value. */
+      readonly value?: never;
+    };
+
+/**
+ * An action on a running game, on the dev page and on a debug page: an id, a title, the input it
+ * takes, its effect and how to run it. Its body starts with the guard of its effect: the agent
+ * form for `read` and `cosmetic`, the control form for the others (see docs/doors.md), so a
+ * production build drops it. A game's `.dev` command with only the `__MOKU_GAME_DEV__` guard runs
+ * in dev and is refused on a debug page. With `overlay` the editor's overlay shows it: a toggle
+ * takes the input `{ on: "boolean" }` and a `value(app)`, a button no required input and no
+ * value; the types refuse every other shape.
  *
  * @example
  * ```ts
@@ -163,7 +234,7 @@ export type Command<S extends InputSchema, O, App = HeadlessApp> = {
   readonly input: S;
   readonly effect: Effect;
   readonly run: (app: App, input: InputOf<S>) => O | Promise<O>;
-};
+} & CommandOverlay<S, App>;
 
 /**
  * Where the game stands after a command: the graph path, the frame and whether the session

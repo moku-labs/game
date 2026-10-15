@@ -103,3 +103,16 @@ describe("planGroups", () => {
     expect(planGroups([])).toEqual({ groups: new Map(), loose: [] });
   });
 });
+
+describe("groupOf with mipmaps and sub-feature keys", () => {
+  it("keeps a mipmapped texture loose, also an fx stem and a small one", () => {
+    expect(groupOf({ key: "ep01.fx-glow", width: 64, height: 64, mips: true })).toBeUndefined();
+    expect(groupOf({ key: "ep01.items.cup", width: 336, height: 288, mips: true })).toBeUndefined();
+  });
+
+  it("reads the first segment of a sub-feature's key as its bundle", () => {
+    expect(groupOf(texture("ep01.fx.leaf"))).toBe("fx");
+    // A sub-feature named fx: "fx" is its bundle, not a folder.
+    expect(groupOf(texture("fx.leaf"))).toBe("main");
+  });
+});

@@ -1,6 +1,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import { describe, expect, it, vi } from "vitest";
 import type { Require } from "../../../../config";
+import { defineFeature } from "../../feature";
 import { createFeaturesApi } from "../../features/api";
 import { createFeaturesState } from "../../features/state";
 import type { FeatureDescription } from "../../features/types";
@@ -76,6 +77,14 @@ const createMockDeps = (): Deps => ({
     pause: vi.fn(),
     resume: vi.fn(),
     wake: vi.fn(),
+    wakes: () => 0,
+    measure: vi.fn(),
+    agentClock: () => undefined,
+    chargeAgent: vi.fn(),
+    rate: vi.fn(),
+    setRate: vi.fn(),
+    frameDrawn: vi.fn(),
+    frameProbed: vi.fn(),
     isPaused: vi.fn(),
     isRunning: vi.fn(() => false),
     step: vi.fn()
@@ -348,5 +357,66 @@ describe("seal", () => {
 
     expect(api.all()).toHaveLength(1);
     expect(api.contributions("afterWin")).toHaveLength(1);
+  });
+});
+
+// ─── parents ──────────────────────────────────────────────────
+
+describe("parents", () => {
+  const kit = defineFeature("kit", {});
+  const ep01 = defineFeature("ep01", {});
+
+  it("all() names the parent of a sub-feature and has no parent key for a top-level feature", () => {
+    const { api } = setup();
+    const episodes: FeatureDescription = { features: [kit, ep01] };
+
+    api.register("home", {});
+    api.register("episodes", episodes);
+    api.register("kit", {});
+    api.register("ep01", {});
+
+    expect(api.all()).toStrictEqual([
+      { name: "home", description: {} },
+      { name: "episodes", description: episodes },
+      { name: "kit", description: {}, parent: "episodes" },
+      { name: "ep01", description: {}, parent: "episodes" }
+    ]);
+    expect(
+      api.all().map(({ name, parent }) => (parent === undefined ? name : `${parent}/${name}`))
+    ).toEqual(["home", "episodes", "episodes/kit", "episodes/ep01"]);
+  });
+
+  it("all() names the parent also when the sub-feature registered before it", () => {
+    const { api } = setup();
+
+    api.register("kit", {});
+    api.register("episodes", { features: [kit] });
+
+    expect(api.all()[0]).toStrictEqual({ name: "kit", description: {}, parent: "episodes" });
+  });
+
+  it("register throws when a second feature declares a sub-feature another one declares, naming both", () => {
+    const { api } = setup();
+
+    api.register("episodes", { features: [kit] });
+
+    expect(() => api.register("minigames", { features: [kit] })).toThrow(
+      '[game] Feature "kit" is declared by the features "episodes" and "minigames".\n' +
+        '  A sub-feature has one parent: declare it in one of them, and give the other its own kit, such as "minigames-kit".'
+    );
+  });
+
+  it("a refused registration records no parent for its sub-features", () => {
+    const { api, state } = setup();
+
+    api.register("episodes", { features: [kit] });
+    // ep01 comes before the clash on kit: a write while checking would keep it.
+    expect(() => api.register("minigames", { features: [ep01, kit] })).toThrow();
+    expect(() => api.register("episodes", { features: [ep01] })).toThrow();
+    api.seal();
+    expect(() => api.register("late", { features: [ep01] })).toThrow();
+
+    expect([...state.features.parentOf]).toEqual([["kit", "episodes"]]);
+    expect(state.features.byName.has("minigames")).toBe(false);
   });
 });

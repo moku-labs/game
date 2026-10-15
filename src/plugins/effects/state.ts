@@ -3,9 +3,12 @@
  * the systems fill the tables as entities carry effects.
  */
 import type { Entity } from "../world/types";
-import type { FilteredView, FilterKind } from "./filters/types";
+import type { CheckState, FilteredView, FilterKind } from "./filters/types";
 import type { BakedEmitter, EmitterDefinition, EmitterInstance } from "./particles/types";
 import type { State } from "./types";
+
+/** The empty kind list of the switches: one frozen array, shared, so an unchanged list is the same array. */
+export const NO_KINDS: readonly string[] = Object.freeze([]);
 
 /**
  * Creates the particle tables. Its own function because lint rule L5 refuses a collection built
@@ -23,22 +26,61 @@ function particleTables(): Pick<State, "emitters" | "baked" | "instances" | "orp
 }
 
 /**
+ * Creates the shader checks of one run: nothing started, nothing answered, and the promise the boot's first node
+ * waits for.
+ *
+ * @param run - The run the answers belong to.
+ * @returns The fresh check state.
+ */
+function createCheckState(run: number): CheckState {
+  const settle: { resolve?: () => void } = {};
+  const settled = new Promise<void>(resolve => {
+    settle.resolve = resolve;
+  });
+
+  return {
+    run,
+    started: false,
+    status: new WeakMap(),
+    waiting: 0,
+    checked: 0,
+    failed: 0,
+    gl: [],
+    startedAt: 0,
+    settled,
+    resolve: () => settle.resolve?.()
+  };
+}
+
+/**
  * Creates the filter tables and the shared one-shot sets.
  *
- * @returns The empty kinds, checks, views, broken marks and warnings.
+ * @returns The empty kinds, checks, views, broken and ready marks and warnings.
  */
-function filterTables(): Pick<State, "kinds" | "checks" | "views" | "broken" | "warned"> {
+function filterTables(): Pick<State, "kinds" | "checks" | "views" | "broken" | "ready" | "warned"> {
   return {
     kinds: new Map<string, FilterKind>(),
-    checks: new Map<string, "pending" | "ok">(),
+    checks: createCheckState(0),
     views: new Map<Entity, FilteredView>(),
     broken: new Set<string>(),
+    ready: new Set<string>(),
     warned: new Set<string>()
   };
 }
 
 /**
- * Creates the initial effects state: no phone yet, nothing registered, nothing running.
+ * Starts the shader checks over for the next run: an answer still in flight belongs to the old run and is ignored.
+ *
+ * @param state - The plugin state.
+ */
+export function resetChecks(state: State): void {
+  state.checks = createCheckState(state.checks.run + 1);
+  state.ready.clear();
+  state.broken.clear();
+}
+
+/**
+ * Creates the initial effects state: no phone yet, nothing registered, nothing running, nothing warmed.
  *
  * @returns A fresh state, owned by one app.
  */
@@ -50,6 +92,8 @@ export function createEffectsState(): State {
     seedCounter: 0,
     particles: 0,
     over: { particles: false, passes: false, fullScreen: false },
-    removers: []
+    removers: [],
+    diagnostics: { kinds: NO_KINDS, off: new Set<string>(), offList: NO_KINDS },
+    warm: { started: false, core: [], probes: [] }
   };
 }

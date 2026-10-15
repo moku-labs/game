@@ -6,7 +6,9 @@ import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Events as GlobalEvents, Require } from "../../config";
 import type { Descriptor, Api as FlowApi, NodeInfo } from "../flow/types";
+import type { Api as ModelApi } from "../model/types";
 import type { PixiTexture, Api as RendererApi, SliceFrame } from "../renderer/types";
+import type { SceneDefinition } from "../scenes/types";
 import type { Api as TimeApi } from "../time/types";
 
 /**
@@ -54,14 +56,15 @@ export type DecodedImage = ImageBitmap | HTMLImageElement;
 export type NineBorders = readonly [number, number, number, number];
 
 /**
- * Options of `io.createTexture`. Same shape as `renderer.sync.textures.create`.
+ * Options of `io.createTexture`. Same shape as `renderer.sync.textures.create`: `nine` gives the
+ * default nine-slice borders, `mips` asks for the full mip chain.
  *
  * @example
  * ```ts
- * const options: CreateTextureOptions = { nine: [48, 48, 48, 48] };
+ * const options: CreateTextureOptions = { nine: [48, 48, 48, 48], mips: true };
  * ```
  */
-export type CreateTextureOptions = { nine?: NineBorders };
+export type CreateTextureOptions = { nine?: NineBorders; mips?: true };
 
 /**
  * The part of a fetch response the plugin reads: the manifest is `json`, a texture is a `blob`,
@@ -128,7 +131,8 @@ export type AssetsIo = {
    * Uploads one decoded image to the GPU.
    *
    * @param image - The decoded image.
-   * @param options - `nine` becomes the default nine-slice borders of the texture.
+   * @param options - `nine` becomes the default nine-slice borders of the texture; `mips` uploads
+   *   it with its full mip chain.
    * @returns The new texture.
    */
   createTexture(image: DecodedImage, options?: CreateTextureOptions): Texture;
@@ -212,11 +216,11 @@ export type AtlasPage = { id: string; path: string; width: number; height: numbe
 export type FontPage = { path: string; width: number; height: number; mb: number };
 
 /**
- * One file of a bundle. `mb` is what it costs: `width × height × 4` bytes for a texture, the sum
- * of the pages for a font, the size of the file for audio, and `0` for a texture packed in an
- * atlas, whose page carries the cost. `kind` is absent for a texture, which is what every
- * manifest written before fonts and audio carries. A loose file has `path`; a packed texture has
- * `atlas` and no `path`.
+ * One file of a bundle. `mb` is what it costs: `width × height × 4` bytes for a texture (every
+ * level of the chain for one with `mips`), the sum of the pages for a font, the size of the file
+ * for audio, and `0` for a texture packed in an atlas, whose page carries the cost. `kind` is
+ * absent for a texture, which is what every manifest written before fonts and audio carries. A
+ * loose file has `path`; a packed texture has `atlas` and no `path`.
  *
  * @example
  * ```ts
@@ -239,6 +243,16 @@ export type FontPage = { path: string; width: number; height: number; mb: number
  *   nine: { left: 48, top: 48, right: 48, bottom: 48 },
  *   atlas: { page: "ui/main-0", x: 583, y: 595, width: 256, height: 128 }
  * };
+ *
+ * // A texture of features/episodes/ep01 with `mipmaps: ["items/**"]`: 336×288 and its chain.
+ * const cup: ManifestFile = {
+ *   key: "ep01.items.cup",
+ *   path: "features/episodes/ep01/assets/items/cup.png",
+ *   width: 336,
+ *   height: 288,
+ *   mb: 0.492,
+ *   mips: true
+ * };
  * ```
  */
 export type ManifestFile = {
@@ -248,24 +262,48 @@ export type ManifestFile = {
   width: number;
   height: number;
   mb: number;
+  /** A texture uploaded with its full mip chain; `mb` counts every level. Never on an atlas page. */
+  mips?: true;
   pages?: readonly FontPage[];
   nine?: NineSlice;
   atlas?: AtlasFrame;
 };
 
 /**
- * One bundle of the manifest: which feature owns it, when it loads and what it costs. `pages` is
- * written by the packer only, sorted by id; `mb` is then its pages, its loose textures, its font
- * pages and its audio bytes together.
+ * One bundle of the manifest: which feature owns it, when it loads, when it leaves and what it
+ * costs. `pages` is written by the packer only, sorted by id; `mb` is then its pages, its loose
+ * textures, its font pages and its audio bytes together. Only the bundle of a sub-feature carries
+ * `parent` and `dir`.
  *
  * @example
  * ```ts
  * const bundle: ManifestBundle = { feature: "ui", tier: "core", mb: 0.125, files: [] };
+ *
+ * // The bundle of the sub-feature features/episodes/ep01: it leaves with the episode.
+ * const episode: ManifestBundle = {
+ *   feature: "ep01",
+ *   parent: "episodes",
+ *   dir: "features/episodes/ep01",
+ *   tier: "lazy",
+ *   release: "leave",
+ *   mb: 0.492,
+ *   files: []
+ * };
  * ```
  */
 export type ManifestBundle = {
   feature: string;
+  /** The parent feature of a sub-feature's bundle. */
+  parent?: string;
+  /**
+   * The owner folder of a sub-feature's bundle, POSIX, relative to the scan root. Absent for a
+   * top-level feature's and a layer's bundle (the hot swap derives their folder) and in an older
+   * manifest.
+   */
+  dir?: string;
   tier: Tier;
+  /** `"leave"`: unloaded at the next rest once its feature left. Absent: `"budget"`. */
+  release?: "leave";
   mb: number;
   pages?: readonly AtlasPage[];
   files: readonly ManifestFile[];
@@ -302,13 +340,21 @@ export type Manifest = { version: 1 | 2; bundles: Readonly<Record<string, Manife
 /**
  * What a feature declares about one of its bundles. `files` are globs relative to the feature's
  * `assets/`; a bundle with `files` takes those files out of the feature's default bundle.
+ * `mipmaps` is `true` (every texture of the bundle) or globs relative to `assets/`; a mipmapped
+ * texture is uploaded with its full mip chain, stays loose in a pack and costs about a third more.
  *
  * @example
  * ```ts
- * const spec: BundleSpec = { tier: "lazy", files: ["chains/*.png"] };
+ * // features/episodes/ep01/assets.ts: the episode's art leaves with the episode; the items shrink smoothly.
+ * const spec: BundleSpec = { tier: "lazy", release: "leave", mipmaps: ["items/**"] };
  * ```
  */
-export type BundleSpec = { tier: Tier; files?: readonly string[] };
+export type BundleSpec = {
+  tier: Tier;
+  files?: readonly string[];
+  release?: BundleRelease;
+  mipmaps?: true | readonly string[];
+};
 
 /**
  * What `defineBundles` returns: plain data the scanner and the plugin both read.
@@ -317,7 +363,10 @@ export type BundleSpec = { tier: Tier; files?: readonly string[] };
  * ```ts
  * const bundles: BundleMap = {
  *   kind: "bundles",
- *   map: { board: { tier: "scene" }, "board.chains": { tier: "lazy", files: ["chains/*.png"] } }
+ *   map: {
+ *     board: { tier: "scene" },
+ *     "board.chains": { tier: "lazy", files: ["chains/*.png"], release: "leave" }
+ *   }
  * };
  * ```
  */
@@ -340,14 +389,17 @@ export type DefineBundles<Key extends string> = (
 ) => BundleMap<Key>;
 
 /**
- * The `load` descriptor helper bound to the bundle keys of one game.
+ * The `load` descriptor helper bound to the bundle keys of one game. The descriptor resolves
+ * `LoadResult`, or `undefined` in an app without `assets`.
  *
  * @example
  * ```ts
  * const loadGameBundle: LoadBundles<"board" | "board.chains"> = load;
  * ```
  */
-export type LoadBundles<Key extends string> = (bundle: Key | readonly Key[]) => Descriptor;
+export type LoadBundles<Key extends string> = (
+  bundle: Key | readonly Key[]
+) => Descriptor<LoadResult | undefined>;
 
 /**
  * What the `load` effect resolves with, so a loading node can write its own progress.
@@ -507,15 +559,15 @@ export type State = {
   manifest: Manifest;
   /** Asset key to the bundle that carries it. */
   bundleOfKey: Map<string, string>;
-  /** Scene id to its bundle, read from the `scenes` key of `flow.features`. */
-  bundleOfScene: Map<string, string>;
+  /** Scene id to its declaration, read from the `scenes` key of `flow.features`. */
+  scenes: Map<string, SceneDefinition>;
   /** Flow id to the feature that owns it, read from the `flows` key of `flow.features`. */
   featureOfFlow: Map<string, string>;
   records: Map<string, BundleRecord>;
   /** Bundles of the node entered last. They are never unloaded. */
   pinned: Set<string>;
-  /** The bundle of the scene entered last. A node without `scene` keeps it. */
-  sceneBundle: string | undefined;
+  /** The scene of the node entered last. A node without `scene` keeps it. */
+  sceneId: string | undefined;
   queue: PreloadQueue | undefined;
   current: NodeInfo | undefined;
   useCounter: number;
@@ -527,6 +579,12 @@ export type State = {
   stamps: Readonly<Record<string, string>> | undefined;
   /** The running dev hot swap. The next one waits for it, so two swaps never overlap. */
   swapping: Promise<void> | undefined;
+  /** The list the mounted scene names, from the last `sceneBundles` call. */
+  sceneNamed: readonly string[];
+  /** Registered companions, in registration order. */
+  companions: BundleCompanion[];
+  /** A live rest was announced; the arriving node's `load` stage runs the release. */
+  restPending: boolean;
 };
 
 /**
@@ -577,6 +635,8 @@ export type Usage = { textureMb: number; budgetMb: number; bundles: readonly Bun
  *     for (const key of keys) ctx.state.decoded.delete(key); // the next play decodes the new bytes
  *   }
  * }); // a save of features/ui/assets/click.mp3 sends { bundle: "ui", keys: ["ui.click"] }
+ *
+ * // The episode was left: { bundle: "ep01", tier: "lazy", mb: 0.492, reason: "leave", keys: ["ep01.items.cup"] }
  * ```
  */
 export type Events = {
@@ -588,12 +648,15 @@ export type Events = {
    * `loaded === total` and comes before `assets:bundle-loaded`. An aborted load sends none.
    */
   "assets:bundle-progress": { bundle: string; loaded: number; total: number };
-  /** The textures of a bundle were destroyed. `keys` names every asset that went with it. */
+  /**
+   * The textures of a bundle were destroyed. `keys` names every asset that went with it. `reason`
+   * "leave": its feature left (release "leave").
+   */
   "assets:bundle-unloaded": {
     bundle: string;
     tier: Tier;
     mb: number;
-    reason: "budget" | "request";
+    reason: "budget" | "request" | "leave";
     keys: readonly string[];
   };
   /**
@@ -617,11 +680,13 @@ export type Events = {
  */
 export type Api = {
   /**
-   * Loads every file of a bundle. An already loaded bundle resolves at once, a loading one joins
-   * the running load. Headless it resolves at once and touches nothing.
+   * Loads every file of a bundle and waits for its companions. An already loaded bundle resolves
+   * at once, a loading one joins the running load. Headless it resolves at once and touches
+   * nothing.
    *
    * @param bundle - Name of a bundle of the manifest.
-   * @returns A promise that resolves when every texture of the bundle exists.
+   * @returns A promise that resolves when every texture of the bundle exists and every companion
+   *   brought what travels with it.
    * @throws {Error} When the manifest has no such bundle, and when a file fails to load.
    * @example
    * ```ts
@@ -633,8 +698,9 @@ export type Api = {
   load(bundle: string): Promise<void>;
 
   /**
-   * Destroys the textures of a bundle and tells `renderer` that its keys are gone. A pinned
-   * bundle and the tiers `boot` and `core` are refused with a warning. A running load is aborted.
+   * Destroys the textures of a bundle and tells `renderer` that its keys are gone; every
+   * companion's `unload` runs. A pinned bundle and the tiers `boot` and `core` are refused with a
+   * warning. A running load is aborted.
    *
    * @param bundle - Name of a loaded bundle.
    * @example
@@ -725,12 +791,69 @@ export type Api = {
    * ```
    */
   usage(): Usage;
+
+  /**
+   * Tells assets which bundles the mounted scene names: its `bundle`, then what its `bundles(state)` returned.
+   * Each call replaces the list before it. A bundle in the list is never a victim of the budget and is not
+   * released by `release: "leave"` while it stays in the list. Called by `scenes`; a game never calls it.
+   *
+   * @param named - The bundle names of the mounted scene, the scene bundle first.
+   * @example
+   * ```ts
+   * // scenes, right after it mounted the ward for episode 1 (and after a re-read that changed the list).
+   * ctx.require(assetsPlugin).sceneBundles(["ui", "ep01"]);
+   * // ep01 (release "leave") now stays while the ward shows it, even after the ep01 flow left the stack
+   * ```
+   */
+  sceneBundles(named: readonly string[]): void;
+
+  /**
+   * Tells whether the manifest carries a bundle, loaded or not. It reads the manifest only, so it
+   * answers the same live and headless.
+   *
+   * @param bundle - A bundle name.
+   * @returns True when the manifest has that bundle.
+   * @example
+   * ```ts
+   * // i18n ties the lazy strings of the sub-feature ep01 to its bundle only when the bundle exists.
+   * const assets = ctx.require(assetsPlugin);
+   * assets.has("ep01"); // true: the scanner wrote a bundle for features/episodes/ep01
+   * assets.has("ep99"); // false: the manifest lacks it, so its strings load with the locale
+   * ```
+   */
+  has(bundle: string): boolean;
+
+  /**
+   * What loads and unloads with every bundle. The lazy strings of a feature use it to arrive and
+   * leave with the bundle named like the feature: a node entry, a scene's switch, `load`, a
+   * restore and a `safeNode` recovery all wait for them, because they wait for the bundle.
+   */
+  companions: {
+    /**
+     * Adds a companion. It is called for every later load and unload of every bundle; bundles
+     * loaded before are not replayed, so a plugin adds it in `onInit`.
+     *
+     * @param companion - The `load` and `unload` pair.
+     * @returns A function that removes the companion.
+     * @example
+     * ```ts
+     * // i18n, in its onInit, when assets is composed: the strings of ep01 arrive and leave with the bundle "ep01".
+     * if (ctx.has("assets")) {
+     *   ctx.require(assetsPlugin).companions.add({
+     *     load: bundle => loadBundleStrings(ctx, bundle), // resolves at once for a bundle without strings
+     *     unload: bundle => dropBundleStrings(ctx, bundle)
+     *   }); // await app.assets.load("ep01") now resolves after the ep01 strings of the locale arrived
+     * }
+     * ```
+     */
+    add(companion: BundleCompanion): () => void;
+  };
 };
 
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { flow: FlowApi; renderer: RendererApi; time: TimeApi };
+export type Deps = { flow: FlowApi; renderer: RendererApi; time: TimeApi; model: ModelApi };
 
 /**
  * What the kernel context offers before the deps are attached.
@@ -760,3 +883,43 @@ export type FlowRest = { path: string; checkpoint: boolean };
  * the keys watch, `module.default` is the `AssetStamps`.
  */
 export type HotSwap = GlobalEvents["ui:hot-swap"];
+
+/**
+ * When a bundle leaves besides the budget. `"budget"` (default): only the LRU unloads it when memory
+ * runs out. `"leave"`: also unloaded at the next rest once no node of its feature is on the stack
+ * and no mounted scene names it.
+ *
+ * @example
+ * ```ts
+ * const release: BundleRelease = "leave";
+ * ```
+ */
+export type BundleRelease = "budget" | "leave";
+
+/**
+ * Something that loads and unloads with every bundle, registered through `assets.companions.add`.
+ * `load` is called once per load of a bundle, with its name, in parallel with its files; the bundle
+ * counts as loaded (and every waiter resumes) only after it resolved. It is called for every
+ * bundle: a companion resolves at once for a bundle it has nothing for. It is never called for a
+ * bundle that is already loaded, never while `assets` is headless (no io: no bundle really loads),
+ * and never from `assets`' `onStop`. A rejection fails the load of the bundle like a broken file.
+ * `unload` is synchronous; it is called once when the bundle's textures are destroyed (budget,
+ * request, leave), and also after a load that failed or was aborted, so it must be safe for a
+ * bundle the companion holds nothing of. `load` can come from `assets`' own `onStart` (the boot and
+ * core tiers), before the companion's plugin ran its `onStart`.
+ *
+ * @example
+ * ```ts
+ * // i18n's companion: the lazy strings of a feature travel with the bundle named like it.
+ * const strings: BundleCompanion = {
+ *   load: async bundle => { if (bundle === "ep01") await loadStringsOf("ep01"); },
+ *   unload: bundle => { if (bundle === "ep01") dropStringsOf("ep01"); }
+ * };
+ * ```
+ */
+export type BundleCompanion = {
+  /** Brings what travels with the bundle. */
+  load(bundle: string): Promise<void>;
+  /** Drops what travels with the bundle. */
+  unload(bundle: string): void;
+};

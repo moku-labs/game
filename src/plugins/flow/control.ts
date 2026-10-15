@@ -1,19 +1,32 @@
 /**
  * @file flow plugin — the flow commands of the `/control` door: answer the gate, walk a route,
- * take a bookmark, restore a bookmark or a repro. Dev builds only: every body starts with the
- * inline dev guard, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
+ * take a bookmark, restore a bookmark or a repro, export and import the save. Dev and debug
+ * builds: every body starts with the inline guard of its effect (the agent guard for a read, the
+ * control guard for a route or raw write), so a bundler `define` of `false` drops it, and logs
+ * the `moku:dev` marker.
  */
-import type { Json } from "../model/types";
+import type { Json, Snapshot, StoreApi } from "../model/types";
 import type { ScenesApi } from "../scenes/types";
 import { defineCommand } from "./doors/define";
 import { controlRefused } from "./doors/dev";
 import type { ControlApp } from "./doors/types";
 import { type HeadlessApp, reproBookmark } from "./headless";
 import { readBookmark, readRepro, readRoute } from "./json";
+import { graphHash } from "./runner/registry";
 import type { Bookmark, FlowState } from "./types";
+
+// eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "no payload".
+const noPayload: Json = null;
 
 /** An app that may carry the screen plugins: the doors read and set its scene when it has one. */
 type SceneApp = { readonly scenes?: ScenesApi };
+
+/** What the save commands need of an app: the control app, its scenes when it has them, the store. */
+type SaveApp = ControlApp &
+  SceneApp & { readonly model: { readonly store: Pick<StoreApi, "snapshot" | "flush"> } };
+
+/** The three trees of a save, as `game.saveExport` answers them and `game.saveImport` takes them. */
+type SaveTrees = { player: Json; session: Json; rng: Json };
 
 /**
  * Restores a bookmark with its `scene` expected first, so the node the restore enters mounts it.
@@ -84,6 +97,49 @@ async function restoreFrom(
 }
 
 /**
+ * Reads the save `game.saveImport` got: an object with the three trees of `game.saveExport`.
+ *
+ * @param save - The JSON the editor sent.
+ * @returns The player, the session and the rng.
+ * @throws {Error} When it is not an object with `player`, `session` and `rng`.
+ * @example
+ * ```ts
+ * readSave({ player: { coins: 40 }, session: {}, rng: { seed: 42, streams: {} } }).player; // { coins: 40 }
+ * ```
+ */
+function readSave(save: Json): SaveTrees {
+  if (typeof save === "object" && save !== null && !Array.isArray(save)) {
+    const { player, session, rng } = save;
+
+    if (player !== undefined && session !== undefined && rng !== undefined) {
+      return { player, session, rng };
+    }
+  }
+
+  throw new Error("[game] game.saveImport needs { player, session, rng } of game.saveExport.");
+}
+
+/**
+ * Builds the bookmark a save is imported at: the start of the main flow with the save's trees and
+ * the hash of the graph that runs now. The start may be a transit node: `flow.restore` enters
+ * one of the graph it was made for and plays it, as a fresh start does, on the imported trees.
+ *
+ * @param app - The started app.
+ * @param save - The player, the session and the rng of the save.
+ * @returns The bookmark, as JSON for `restoreFrom`.
+ */
+function startBookmark(app: HeadlessApp, save: SaveTrees): Json {
+  const graph = app.flow.describe();
+
+  return {
+    path: graph.flows[graph.main]?.start ?? "",
+    input: noPayload,
+    ...save,
+    graph: graphHash(graph)
+  };
+}
+
+/**
  * Answers the gate, the way a tap on a button does. Goes through the graph: the session stays
  * clean.
  *
@@ -101,7 +157,12 @@ export const answerCommand = defineCommand({
   input: { intent: "string", payload: "json?" },
   effect: "route",
   run: (app: ControlApp, { intent, payload }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.answer", intent });
 
@@ -125,7 +186,12 @@ export const walkCommand = defineCommand({
   input: { route: "json" },
   effect: "route",
   run: (app: ControlApp, { route }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.walk" });
 
@@ -155,7 +221,12 @@ export const bookmarkCommand = defineCommand({
   input: {},
   effect: "read",
   run: (app: ControlApp & SceneApp): Bookmark => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.bookmark" });
 
@@ -195,10 +266,89 @@ export const restoreCommand = defineCommand({
   input: { bookmark: "json?", repro: "json?" },
   effect: "raw",
   run: (app: ControlApp & SceneApp, input) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.restore" });
 
     return restoreFrom(app, input);
+  }
+});
+
+/**
+ * Answers the committed state as the save holds it: the player, the session and the rng, plain
+ * JSON. A read: it runs on a `--debug` page too, so a tester's progress can leave the store app.
+ *
+ * @example
+ * ```ts
+ * // The editor takes the tester's progress from the store app on the phone.
+ * (await run(app, commands.saveExport, {})).value; // { player: { coins: 40, … }, session: { … }, rng: { seed: 42, streams: {} } }
+ * ```
+ */
+export const saveExportCommand = defineCommand({
+  id: "game.saveExport",
+  title: "Export the save",
+  input: {},
+  effect: "read",
+  run: (app: SaveApp): Snapshot => {
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
+
+    app.log.debug("moku:dev", { command: "game.saveExport" });
+
+    const { player, session, rng } = app.model.store.snapshot();
+
+    return { player, session, rng };
+  }
+});
+
+/**
+ * Puts a save of `game.saveExport` in place and writes it, so the next start of the app reads it:
+ * the trees are restored at the main flow's start, and the game lands where a fresh start with
+ * them lands. A start that is a rest node is entered; a transit node runs again on the imported
+ * trees, rng included, up to the first gate it opens, at a rest node or a popup. Then the store
+ * flushes. Replaces the state outside the graph, so the session is tainted and the
+ * command journaled. A `--debug` page refuses it; `--debug=full` and the dev page run it.
+ *
+ * @throws {Error} `[game] game.saveImport needs { player, session, rng } of game.saveExport.` for
+ *   a value without the three trees.
+ * @example
+ * ```ts
+ * // The debug app beside the store app gets the save exported from the store app. Its main
+ * // flow starts at "boot", a transit node: boot runs again on the save and the game rests at home.
+ * const ran = await run(app, commands.saveImport, { save: exported });
+ * ran.value; // { restored: true }
+ * ran.state.path; // "home"
+ * ```
+ */
+export const saveImportCommand = defineCommand({
+  id: "game.saveImport",
+  title: "Import a save",
+  input: { save: "json" },
+  effect: "raw",
+  run: async (app: SaveApp, { save }) => {
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlRefused();
+    }
+
+    app.log.debug("moku:dev", { command: "game.saveImport" });
+
+    // The start of the main flow, with the save's trees, played to the gate it opens first.
+    await restoreFrom(app, { bookmark: startBookmark(app, readSave(save)) });
+    await app.flow.walk([]);
+    await app.model.store.flush();
+
+    return { restored: true };
   }
 });

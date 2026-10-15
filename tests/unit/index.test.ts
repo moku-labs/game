@@ -57,11 +57,15 @@ describe("root index", () => {
     expect(kit.defineEmitter).toBe(engine.defineEmitter);
     expect(kit.Emitter).toBe(engine.Emitter);
     expect(kit.Displacement).toBe(engine.Displacement);
+    expect(kit.Overlay).toBe(engine.Overlay);
+    expect(kit.HudPart).toBe(engine.HudPart);
     expect(Object.keys(kit).toSorted()).toEqual([
       "Displacement",
       "Emitter",
       "Frames",
+      "HudPart",
       "NineSlice",
+      "Overlay",
       "Sprite",
       "defineAnimation",
       "defineBundles",
@@ -76,6 +80,7 @@ describe("root index", () => {
       "defineTokens",
       "frames",
       "intrinsics",
+      "key",
       "label",
       "load",
       "music",
@@ -84,7 +89,9 @@ describe("root index", () => {
       "projection",
       "sfx",
       "sprite",
-      "tr"
+      "system",
+      "tr",
+      "volumes"
     ]);
   });
 
@@ -107,7 +114,7 @@ describe("root index", () => {
     const plugins = [...barrel.matchAll(/export \{ (\w+Plugin) \} from/g)].map(([, name]) => name);
     const named = namedFromPlugins(readFileSync(new URL("index.ts", SRC), "utf8"));
 
-    expect(plugins).toHaveLength(17);
+    expect(plugins).toHaveLength(18);
     expect(plugins.filter(name => name !== undefined && !named.includes(name))).toEqual([]);
   });
 });

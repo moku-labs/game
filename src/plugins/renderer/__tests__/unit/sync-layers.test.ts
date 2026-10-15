@@ -248,7 +248,7 @@ describe("sync layers", () => {
     expect(zOf(high)).toBe(2);
     expect(zOf(low)).toBe(1);
     expect(zOf(plain)).toBe(0);
-    expect(mock.ctx.state.sync.views.get(parent)?.object.zIndex).toBe(0);
+    expect(mock.ctx.state.sync.views.get(parent)?.object.zIndex).toBe(-0.5);
 
     mock.world.ecs.set(low, Order, { value: 5 });
     mock.modules.sync.pass();

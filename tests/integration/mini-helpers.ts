@@ -113,7 +113,7 @@ export async function tick(times = 40): Promise<void> {
  * @param app - The running game.
  * @param count - How many frames.
  */
-export async function frames(app: MiniGame, count = 6): Promise<void> {
+export async function frames(app: Pick<MiniGame, "time">, count = 6): Promise<void> {
   for (let frame = 0; frame < count; frame += 1) {
     app.time.step(16);
     await tick();
@@ -131,7 +131,11 @@ export async function frames(app: MiniGame, count = 6): Promise<void> {
  * @param limit - How many frames at most.
  * @throws {Error} When the condition still does not hold after the last frame.
  */
-export async function until(app: MiniGame, done: () => boolean, limit = 200): Promise<void> {
+export async function until(
+  app: Pick<MiniGame, "time">,
+  done: () => boolean,
+  limit = 200
+): Promise<void> {
   for (let frame = 0; frame < limit && !done(); frame += 1) await frames(app, 1);
 
   if (!done()) throw new Error(`the mini game did not get there in ${limit} frames`);

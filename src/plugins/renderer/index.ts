@@ -1,14 +1,18 @@
 /**
  * Very Complex tier — pixels: one Pixi v8 application on one canvas. `host` creates it and
  * survives a lost device, `viewport` maps the window to the reference space, `sync` owns every
- * display object. Emits `renderer:device-lost`. Hooks `lifecycle:changed`: a pause serves the
- * captures still waiting for a drawn frame.
+ * display object, `kept` draws a still filtered view from a picture, `monitor` counts and, in an
+ * agent build, measures every frame. Emits
+ * `renderer:device-lost`. Hooks `lifecycle:changed` (a pause serves the waiting captures, trims
+ * Pixi's texture pool and, in an agent build, flushes the performance log), and in an agent build
+ * `flow:edge`, `flow:rest` (the flow path of the frames) and `time:thermal` (the thermal line).
  *
  * @see README.md
  */
 import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
 import { clockPlugin } from "../clock";
+import { flowPlugin } from "../flow";
 import { lifecyclePlugin } from "../lifecycle";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
@@ -23,12 +27,17 @@ const config: Config = {
   background: 0x00_00_00,
   antialias: false,
   maxResolution: 2,
+  poolTrim: { restMs: 1000, aboveMb: 16 },
   preference: "webgpu",
   aspect: { min: 4 / 3, max: 21 / 9 },
   poolLimit: 256,
   unsupportedMessage: "This device cannot run the game.",
   loadPixi: () => import("pixi.js"),
-  debug: { nineSlice: false }
+  debug: { nineSlice: false, verifyFrames: false, kept: true },
+  monitor: { budgetMs: "rate", frames: 1024 },
+  onDemand: false,
+  keptMb: 64,
+  warm: 1
 };
 
 /**
@@ -48,7 +57,7 @@ const config: Config = {
  * ```
  */
 export const rendererPlugin = /*#__PURE__*/ createPlugin("renderer", {
-  depends: [timePlugin, lifecyclePlugin, clockPlugin, worldPlugin],
+  depends: [timePlugin, lifecyclePlugin, clockPlugin, worldPlugin, flowPlugin],
   config,
   events: (register: RegisterFunction) =>
     register.map<Events>({

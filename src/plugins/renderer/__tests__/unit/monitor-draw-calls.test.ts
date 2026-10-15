@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createCountingClasses, installDrawCounting } from "../../monitor/draw-calls";
-import type { DrawCounter } from "../../monitor/types";
+import { createCountingClasses, installCounting } from "../../monitor/draw-calls";
+import { createSinks } from "../../monitor/state";
+import type { MonitorSinks } from "../../monitor/types";
 import type { PixiModule } from "../../types";
 import {
   createDrawTarget,
@@ -28,12 +29,12 @@ afterEach(() => {
 const scene = { batches: 2, graphics: [3], draws: 1, indirect: 1 };
 
 /**
- * A counter with nothing counted.
+ * Sinks with nothing counted.
  *
- * @returns The counter.
+ * @returns The sinks.
  */
-function freshCounter(): DrawCounter {
-  return { frame: 0, last: 0 };
+function freshSinks(): MonitorSinks {
+  return createSinks();
 }
 
 /**
@@ -56,7 +57,7 @@ async function tick(): Promise<void> {
 describe("createCountingClasses", () => {
   it("subclasses the three Pixi classes and keeps their extension metadata object", () => {
     const pixi = createFakePixi();
-    const classes = createCountingClasses(pixi.module, freshCounter());
+    const classes = createCountingClasses(pixi.module, freshSinks());
 
     expect(Object.getPrototypeOf(classes.batch)).toBe(FakeGpuBatchAdaptor);
     expect(Object.getPrototypeOf(classes.graphics)).toBe(FakeGpuGraphicsAdaptor);
@@ -68,8 +69,9 @@ describe("createCountingClasses", () => {
 
   it("counts one draw per batch, one per graphics instruction and one per encoder draw", () => {
     const pixi = createFakePixi();
-    const counter = freshCounter();
-    const classes = createCountingClasses(pixi.module, counter);
+    const sinks = freshSinks();
+    const counter = sinks.draws;
+    const classes = createCountingClasses(pixi.module, sinks);
     const renderer = createDrawTarget();
     const pipe = { renderer } as never;
 
@@ -90,10 +92,10 @@ describe("createCountingClasses", () => {
   });
 });
 
-describe("installDrawCounting", () => {
+describe("installCounting", () => {
   it("swaps each class for its counting subclass under the same name, and swaps back", () => {
     const pixi = createFakePixi();
-    const off = installDrawCounting(pixi.module, freshCounter());
+    const off = installCounting(pixi.module, freshSinks());
     const batch = fakeExtensions.named(WEBGPU_PIPES_ADAPTOR, "batch");
     const graphics = fakeExtensions.named(WEBGPU_PIPES_ADAPTOR, "graphics");
     const encoder = fakeExtensions.named(WEBGPU_SYSTEM, "encoder");
@@ -122,7 +124,7 @@ describe("stats().drawCalls", () => {
 
     // The application found the counting classes when it was initialised.
     expect(Object.getPrototypeOf(app.drawClasses?.batch)).toBe(FakeGpuBatchAdaptor);
-    expect(mock.log.debug).toHaveBeenCalledWith("moku:dev", { command: "renderer.drawCalls" });
+    expect(mock.log.debug).toHaveBeenCalledWith("moku:dev", { command: "renderer.monitor" });
 
     frame(mock);
 
@@ -131,6 +133,17 @@ describe("stats().drawCalls", () => {
 
     frame(mock);
 
+    expect(mock.api.stats().drawCalls).toBe(7);
+  });
+
+  it("installs the counter and reads the draws on a debug page with only AGENT true", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const mock = createMockRenderer({ scene });
+
+    await mock.start();
+    frame(mock);
+
+    expect(Object.getPrototypeOf(mock.pixi.last().drawClasses?.batch)).toBe(FakeGpuBatchAdaptor);
     expect(mock.api.stats().drawCalls).toBe(7);
   });
 
@@ -238,7 +251,7 @@ describe("stats().drawCalls", () => {
     expect(mock.api.host.ready()).toBe(true);
     expect(mock.ctx.state.host.uninstallCounting).toBeUndefined();
     expect(fakeExtensions.named(WEBGPU_PIPES_ADAPTOR, "batch")).toBe(FakeGpuBatchAdaptor);
-    expect(mock.log.warn).toHaveBeenCalledWith("renderer: draw calls are not counted", {
+    expect(mock.log.warn).toHaveBeenCalledWith("renderer: frames are not counted", {
       error: expect.any(TypeError)
     });
   });

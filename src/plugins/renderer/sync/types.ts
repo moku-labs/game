@@ -2,17 +2,30 @@
  * @file renderer/sync — type definitions: the one system that owns every display object.
  */
 import type { ComponentHandle, EcsApi, Entity, LayerSort, LayerSpec } from "../../world/types";
+import type { OverlayValue } from "../components";
+import type { Unseen } from "../demand/types";
 import type { HostApi, HostInternal } from "../host/types";
+import type { FilterCache, KeptState } from "../kept/types";
 import type {
+  DemandModule,
+  KeptModule,
+  OverlayEventDetail,
+  PerfEventName,
   PixiBitmapFont,
+  PixiBounds,
   PixiContainer,
   PixiFilter,
+  PixiFilterManager,
   PixiGraphics,
   PixiModule,
+  PixiRectangle,
+  PixiRenderTexture,
+  PixiSprite,
   PixiTexture,
   RendererCtx
 } from "../types";
 import type { Point, ViewportApi, ViewportInternal } from "../viewport/types";
+import type { HiddenCtx, HiddenReason } from "./hidden";
 
 /**
  * Which component gave an entity its display object. `"adapter"` is a component a plugin above
@@ -28,9 +41,8 @@ export type ViewKind = "Sprite" | "NineSlice" | "Shape" | "Display" | "adapter";
  * ```ts
  * const adapter: DisplayAdapter<{ resolved: string }> = {
  *   create: value => buildRuns(value.resolved),
- *   update: (object, previous, next) => {
- *     if (previous.resolved !== next.resolved) rebuild(object, next.resolved);
- *   },
+ *   // false: the same string, nothing drawn changes, so a renderer drawing on demand skips the frame
+ *   update: (object, previous, next) => previous.resolved !== next.resolved && rebuild(object, next.resolved),
  *   destroy: object => (object as Container).destroy({ children: true, texture: false })
  * };
  * ```
@@ -52,8 +64,11 @@ export type DisplayAdapter<Value extends object = object> = {
    * @param object - What `create` returned.
    * @param previous - The value of the last pass.
    * @param next - The value now.
+   * @returns `false` when nothing drawn changed, so a renderer drawing on demand skips the frame; anything else
+   *   (`true`, nothing) marks the view.
    */
-  update(object: unknown, previous: Readonly<Value>, next: Readonly<Value>): void;
+  // biome-ignore lint/suspicious/noConfusingVoidType: an adapter typed `: void` before keeps compiling; `void` names that honestly
+  update(object: unknown, previous: Readonly<Value>, next: Readonly<Value>): boolean | void;
 
   /**
    * Frees the object. Called when the component or the entity leaves, and when the renderer stops.
@@ -85,6 +100,30 @@ export type DisplayEntry = {
  * ```
  */
 export type HitBox = { x: number; y: number; width: number; height: number };
+
+/**
+ * The fields of a `Shape` last drawn into its `Graphics`: an equal value draws no path again. A fill-only shape is
+ * `tinted`: its path is drawn white and its fill is the object's tint, so its `fill` is not compared. Private to `sync`.
+ */
+export type DrawnShape = {
+  /** Drawn white, coloured by the object's tint (no stroke); false for a shape painted in its own colours. */
+  tinted: boolean;
+  kind: "rect" | "triangle";
+  w: number;
+  h: number;
+  fill: number;
+  fillAlpha: number;
+  radius: number;
+  stroke: number;
+  strokeWidth: number;
+  dash: number;
+};
+
+/**
+ * The fields of the clip rectangle last drawn into a view's mask: an equal value draws no mask again. Private to
+ * `sync`.
+ */
+export type ClipDrawn = { kind: "rect" | "triangle"; w: number; h: number; radius: number };
 
 /**
  * What `sync` knows about one drawn entity.
@@ -122,6 +161,16 @@ export type View = {
   /** The debug outline of a nine-slice, in its wrapper; `undefined` while debug is off. */
   outline: PixiGraphics | undefined;
   hitBox: HitBox;
+  /** What the `Graphics` of a `Shape` was last drawn with; `undefined` before its first draw. */
+  drawn: DrawnShape | undefined;
+  /** What the mask of a clipping view was last drawn with; `undefined` while it clips nothing. */
+  clipDrawn: ClipDrawn | undefined;
+  /** The reasons that hide the visual itself (`hidden.ts`). */
+  hiddenSelf: number;
+  /** The reasons that hide the whole subtree, on the top (`hidden.ts`). */
+  hiddenTop: number;
+  /** The HUD factor an overlay fades this view with (a `HudPart`), 1 for every other view (spec 22 O7). */
+  hud: number;
 };
 
 /**
@@ -137,9 +186,15 @@ export type CoverFrame = { base: PixiTexture; texture: PixiTexture; users: Set<E
 export type PoseReader = Pick<EcsApi, "get">;
 
 /**
- * One layer of the scene: its container and the sort rule its children follow.
+ * One layer of the scene: its container, the sort rule its children follow, the reasons that hide the container
+ * (`hidden.ts`), and whether it is the scene's HUD layer (`above: "overlays"`).
  */
-export type LayerEntry = { container: PixiContainer | undefined; sort: LayerSort };
+export type LayerEntry = {
+  container: PixiContainer | undefined;
+  sort: LayerSort;
+  hidden: number;
+  hud: boolean;
+};
 
 /**
  * A texture source `assets` registered.
@@ -162,14 +217,16 @@ export type TextureProvider = (key: string) => PixiTexture | undefined;
 export type NineBorders = readonly [number, number, number, number];
 
 /**
- * Options of `textures.create`.
+ * Options of `textures.create`. `nine` gives the default nine-slice borders in pixels; `mips`
+ * uploads the texture with its full mip chain, which Pixi builds on the GPU (`slice` ignores it:
+ * a slice shares the source of its page).
  *
  * @example
  * ```ts
- * const options: CreateTextureOptions = { nine: [12, 12, 12, 12] };
+ * const options: CreateTextureOptions = { nine: [12, 12, 12, 12], mips: true };
  * ```
  */
-export type CreateTextureOptions = { nine?: NineBorders };
+export type CreateTextureOptions = { nine?: NineBorders; mips?: true };
 
 /**
  * Where `textures.slice` cuts a texture out of an atlas page, in page pixels. The manifest `atlas`
@@ -217,7 +274,7 @@ export type TexturesApi = {
    *
    * @param image - The decoded image.
    * @param options - `nine` is left, top, right and bottom in pixels; it becomes the texture's
-   *   default nine-slice borders.
+   *   default nine-slice borders. `mips: true` uploads the full mip chain, generated on the GPU.
    * @returns The new texture.
    * @throws {Error} When the renderer does not draw.
    * @example
@@ -372,16 +429,112 @@ export type FontsApi = {
 };
 
 /**
- * One filter on an entity's view: a Pixi filter instance `effects` built, and how many render
- * passes one apply of it costs.
+ * One filter on an entity's view: a Pixi filter instance `effects` built, how many render passes
+ * one apply of it costs, the filter kind id the performance log names it by, and what the
+ * kept-picture cache may do with it.
  *
  * @example
  * ```ts
  * // A full-screen blur of quality 4 applies 8 times.
- * const slot: FilterSlot = { filter: blur, passes: 8 };
+ * const blurSlot: FilterSlot = { filter: blur, passes: 8, kind: "blur", cache: "local", blurs: true };
+ * const slot: FilterSlot = { filter: glow, passes: 1, kind: "effects.glow", cache: "local" };
  * ```
  */
-export type FilterSlot = { filter: PixiFilter; passes: number };
+export type FilterSlot = {
+  filter: PixiFilter;
+  passes: number;
+  /** The filter kind id, for the performance log; optional: a slot without it counts as "other". */
+  kind?: string;
+  /** The stages of a filter's inputs and the seam of the kept-picture cache; filled by effects, left out by a game. */
+  inputs?: FilterSlotInputs;
+  /** What the kept-picture cache may do with the filter; left out, it is `"screen"` (drawn live). */
+  cache?: FilterCache;
+  /** The filter's `keptOrigin` uniform, which the renderer sets to the canvas origin of a picture. */
+  origin?: Float32Array;
+  /**
+   * The filter shows a blurred copy of what is under it (the built-in `Blur`, a filter with inputs); an overlay over
+   * it holds the loops under it (spec 22).
+   */
+  blurs?: boolean;
+};
+
+/**
+ * The stages of a filter's inputs and the seam of the kept-picture cache, on the filter's slot. `effects` fills it;
+ * a game's own slots leave it out.
+ *
+ * @example
+ * ```ts
+ * // The kept-picture cache (spec 23) reads the Frost slot it keeps for the ward's root.
+ * slot.inputs?.count; // 1
+ * ```
+ */
+export type FilterSlotInputs = {
+  /**
+   * The Pixi filter of every place of every chain, in draw order; the monitor counts their applies under the slot's kind.
+   *
+   * @example
+   * ```ts
+   * slot.inputs?.stages.length; // 4 on the owner's phone: FrostBox4, FrostHalf, FrostGauss, FrostGauss
+   * ```
+   */
+  readonly stages: readonly PixiFilter[];
+  /**
+   * How many inputs the filter reads.
+   *
+   * @example
+   * ```ts
+   * slot.inputs?.count; // 1 for the Frost
+   * ```
+   */
+  readonly count: number;
+  /**
+   * A number that changes whenever what the stages draw changes: another step list, scale or stage uniform, or another
+   * resolution. Read it after `draw`.
+   *
+   * @returns The version; 1 after the first evaluation.
+   * @example
+   * ```ts
+   * // The Frost's panel rect follows the shop sheet sliding in: the chain returns the same steps every frame.
+   * slot.inputs?.version(); // 1, and still 1 at the end of the slide
+   * ```
+   */
+  version(): number;
+  /**
+   * The share of the picture's resolution the result of one input has.
+   *
+   * @param index - The input, in declaration order.
+   * @returns The scale of its last step; `undefined` for an empty chain, whose result is the view's own input.
+   * @example
+   * ```ts
+   * slot.inputs?.scaleOf(0); // 0.125 on the owner's phone
+   * ```
+   */
+  scaleOf(index: number): number | undefined;
+  /**
+   * Draws the stages of every input from a picture, the last place of input `index` into `targets[index]`; pooled
+   * textures in between go back to Pixi's pool before it returns. Call it only from inside a filter's `apply`.
+   *
+   * @param manager - Pixi's filter system, as the `apply` received it.
+   * @param picture - The kept picture of the view's subtree.
+   * @param targets - One engine-owned texture per input, of the picture's frame at `scaleOf(index)` × its resolution.
+   * @example
+   * ```ts
+   * // Spec 23 runs the stages once on the kept picture of the ward, inside a filter pass of its own.
+   * keeper.apply = (manager, picture) => slot.inputs?.draw(manager, picture, [blurred]);
+   * ```
+   */
+  draw(manager: PixiFilterManager, picture: PixiTexture, targets: readonly PixiTexture[]): void;
+  /**
+   * Lends kept results to the filter: while held, its apply binds them and draws its main body only.
+   *
+   * @param results - One texture per input, or `undefined` to end the loan. A filter with an empty chain is never held.
+   * @example
+   * ```ts
+   * slot.inputs?.hold([blurred]); // the next apply of the Frost draws one pass: its body over the kept blur
+   * ```
+   */
+  hold(results: readonly PixiTexture[] | undefined): void;
+};
 
 /**
  * The filters drawn on entities' views, `app.renderer.sync.filters`. `effects` builds, writes and
@@ -413,17 +566,56 @@ export type FiltersApi = {
    * ```
    */
   set(entity: Entity, slots: readonly FilterSlot[]): void;
+
+  /**
+   * Sets the rectangle outside of which the view's filters draw nothing, in the entity's own units; `undefined` goes
+   * back to the view's bounds. Pixi then sizes the filter's textures and its fill to that rectangle, which moves,
+   * scales and turns with the view. Outside it Pixi draws nothing of the view at all, neither the filters nor the
+   * view's own content. Kept for the entity like its filters: a view built later, pooled or rebuilt gets it again.
+   * Works while inert: stored, nothing applied.
+   *
+   * @param entity - The entity whose view is filtered.
+   * @param area - x, y, width, height in the entity's own units, or `undefined`.
+   * @example
+   * ```ts
+   * // `effects`: the lens on the full-screen cover now draws only around its disc.
+   * const renderer = ctx.require(rendererPlugin);
+   * renderer.sync.filters.area(cover, [107, 101, 176, 176]);
+   * renderer.sync.renderPasses(); // 3 as before; the lens pass now fills 176 × 176 units, not the screen
+   * renderer.sync.filters.area(cover, undefined); // the lens went: back to the view's bounds
+   * ```
+   */
+  area(entity: Entity, area: readonly [number, number, number, number] | undefined): void;
+
+  /**
+   * Creates the GPU pipelines of a filter before a screen needs them: the renderer draws it, invisibly and before a
+   * frame, on the canvas and on a texture, with and without a clip (WebGPU; once on WebGL), `renderer.warm` draws a
+   * frame. Answers `true` once every draw was made, `false` at once when there is nothing to warm (no device, a headless
+   * app, `warm: 0`), and `false` when the renderer stops first or a probe's render threw, which ends the warm-up of the
+   * application (`renderer:warm-failed`). A filter handed over again on the same device answers `true` at once when its
+   * draws were made. The renderer never destroys the filter.
+   *
+   * @param filter - A filter the caller built and keeps alive while it waits.
+   * @returns Whether the filter's pipelines were created.
+   * @example
+   * ```ts
+   * // `effects`, during the splash: a probe of the Frost's body, before the shop is ever opened.
+   * const renderer = ctx.require(rendererPlugin);
+   * const warmed = await renderer.sync.filters.warm(frostProbe.filter); // true four drawn frames later (WebGPU, warm: 1)
+   * ```
+   */
+  warm(filter: PixiFilter): Promise<boolean>;
 };
 
 /**
- * The debug switches of the renderer.
+ * The debug switches of the renderer: the nine-slice outline, the pixel check of skipped frames and the kept pictures.
  *
  * @example
  * ```ts
- * const switches: DebugSwitches = { nineSlice: true };
+ * const switches: DebugSwitches = { nineSlice: true, verifyFrames: false, kept: true };
  * ```
  */
-export type DebugSwitches = { nineSlice: boolean };
+export type DebugSwitches = { nineSlice: boolean; verifyFrames: boolean; kept: boolean };
 
 /**
  * The debug drawing of the renderer, `app.renderer.sync.debug`. The switch outlines every
@@ -434,7 +626,7 @@ export type DebugSwitches = { nineSlice: boolean };
  * ```ts
  * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
  * app.renderer.sync.debug.nineSlice(true);
- * app.renderer.sync.debug.state(); // { nineSlice: true }
+ * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true }
  * ```
  */
 export type DebugApi = {
@@ -458,13 +650,59 @@ export type DebugApi = {
   nineSlice(on: boolean): void;
 
   /**
+   * Checks every frame the renderer does not draw against the same frame drawn live, by pixels, and logs
+   * `renderer:missed-frame` with the views marked since the last drawn frame when they differ; the frame is then
+   * drawn. Works with `onDemand` off too: the renderer decides as if it were on and compares, drawing every frame.
+   * Costs a read-back of the canvas each frame: dev and debug builds only; elsewhere the switch stays off.
+   *
+   * @param on - True to check.
+   * @example
+   * ```ts
+   * // The visual runner checks every stepped frame of a test in the browser.
+   * app.renderer.sync.debug.verifyFrames(true);
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: true, kept: true }
+   * ```
+   */
+  verifyFrames(on: boolean): void;
+
+  /**
+   * Draws every kept picture live again (false) or lets the renderer keep them (true): the A/B switch of a measurement.
+   * Off takes effect in the next drawn frame, all views at once; on lets each view be taken again by the usual rule.
+   * Works in every build; with `keptMb: 0` the pictures stay off.
+   *
+   * @param on - False to draw every filtered view live.
+   * @example
+   * ```ts
+   * // The editor's tools page compares the memory screen with and without kept pictures.
+   * app.renderer.sync.debug.kept(false);
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: false }
+   * ```
+   */
+  kept(on: boolean): void;
+
+  /**
+   * What every overlay does this frame, bottom first: its phase, its mode, its level, how many entries its range has
+   * and whether a picture holds them. The level and the landing are the engine's state of the overlay, read here. For
+   * the editor's tools page and for tests.
+   *
+   * @returns One report per overlay, a fresh array; `[]` with none, and while inert.
+   * @example
+   * ```ts
+   * // The shop rests over the board.
+   * app.renderer.sync.debug.overlays();
+   * // [{ entity: 1_048_601, label: "Shape#1048601 shop.dim:shopDimLayer", phase: "shown", mode: "freeze", level: 1, range: 2, kept: true }]
+   * ```
+   */
+  overlays(): readonly OverlayReport[];
+
+  /**
    * What the debug switches are set to, as a fresh object.
    *
    * @returns The switches.
    * @example
    * ```ts
    * // An e2e test makes sure no outline is drawn before it compares a screenshot.
-   * app.renderer.sync.debug.state(); // { nineSlice: false }
+   * app.renderer.sync.debug.state(); // { nineSlice: false, verifyFrames: false, kept: true }
    * ```
    */
   state(): DebugSwitches;
@@ -595,7 +833,7 @@ export type SyncApi = {
    * ```ts
    * // Check where every panel of the open popup is cut: cyan lines, red where corners overlap.
    * app.renderer.sync.debug.nineSlice(true);
-   * app.renderer.sync.debug.state(); // { nineSlice: true }
+   * app.renderer.sync.debug.state(); // { nineSlice: true, verifyFrames: false, kept: true }
    * ```
    */
   debug: DebugApi;
@@ -630,6 +868,28 @@ export type SyncApi = {
   renderPasses(): number;
 
   /**
+   * Tells whether the endless cosmetic loops of an entity should write nothing now: its view lies under an opaque
+   * overlay that hides it, or in the kept picture of an overlay that blurs what is under it, or the player cannot see
+   * it at all — it or a view above it is at alpha 0, or it is a leaf wholly off the screen. A loop that writes nothing
+   * keeps its phase from time and stands where it would have been when it writes again. The seam of `anim`: finite
+   * tracks never ask. Inert, and for an entity without a view: false.
+   *
+   * @param entity - The entity a loop is about to write.
+   * @param reveals - What the loop writes that could show the view again: `"alpha"` (its alpha), `"place"` (where it
+   *   is or how large), `"both"`. Such a loop is not held for the view's own alpha 0 (`"alpha"`) or for being off the
+   *   screen (`"place"`), since its next write may bring the view back.
+   * @returns True when the write would change nothing the player can see.
+   * @example
+   * ```ts
+   * // anim, before a forever blink writes the alpha of a pill's glint sprite that rests at alpha 0:
+   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity, "alpha"); // false: the blink's next write may show it
+   * // the same sprite's forever tint loop, which reveals nothing:
+   * ctx.require(rendererPlugin).sync.loopsHeld(track.entity); // true: nothing of it is drawn, the loop's clock runs on
+   * ```
+   */
+  loopsHeld(entity: Entity, reveals?: "alpha" | "place" | "both"): boolean;
+
+  /**
    * The Pixi object of an entity, for debugging and for the plugins that draw their own thing.
    *
    * @param entity - The entity to ask about.
@@ -661,7 +921,8 @@ export type SyncInternal = {
   rebuildAll(): void;
 
   /**
-   * One pass over the change sets: removed, layers, added, changed, invalidated keys.
+   * One pass over the change sets: removed, layers, added, changed, the views that lost their `Parent`, the orphans
+   * whose parent has a view now, the adapters' values, the invalidated keys and the nine-slice switch.
    */
   pass(): void;
 
@@ -701,6 +962,311 @@ export type SyncInternal = {
    * @returns The layer name, or `undefined` when the root of the chain has no `Layer`.
    */
   layerOf(entity: Entity): string | undefined;
+
+  /** The overlays of this frame: modes, ranges, reasons, dims, HUD parts, and the pictures to take (spec 22). */
+  stepOverlays(): void;
+
+  /**
+   * The `Graphics` paths the engine drew since the last call (shapes, clip masks, nine-slice outlines), and zeroes the
+   * count: the monitor's `stats().redraws` (spec 26 R2.3).
+   *
+   * @returns The paths drawn.
+   */
+  takeRedraws(): number;
+
+  /**
+   * Hands the `overlay` event lines the step queued (agent builds only) to the monitor, oldest first, and forgets them.
+   *
+   * @param monitor - The monitor's event writer.
+   */
+  drainOverlayEvents(monitor: OverlayEventSink): void;
+
+  /**
+   * Draws up to `renderer.warm` probes of the pipeline warm-up (F4), in a drawn frame, before the kept pictures and the
+   * stage pass, which clears the canvas. Asks for the next frame while probes wait. Allocates nothing while the queue
+   * is empty.
+   *
+   * @returns True when it drew a probe in this frame: the frame is then no sample of the adaptive rate.
+   */
+  warmStep(): boolean;
+
+  /**
+   * Subscribes to the end of a warm-up run: the queue became empty (the monitor of an agent build writes the `warm`
+   * event line). Emptied by `stopSync`.
+   *
+   * @param fn - Called with the probe draws made since the queue last started.
+   */
+  onWarm(fn: WarmListener): void;
+
+  /**
+   * Gives the view of an entity its wrapper before the kept cache takes its first picture (spec 23 D4), so the
+   * picture's root is a plain container; marks nothing, since the wrapper draws the same pixels. The wrapper stays
+   * until the view leaves.
+   *
+   * @param entity - The entity.
+   * @returns The wrapper, or `undefined` when the entity has no view or Pixi is not loaded.
+   */
+  wrapForPicture(entity: Entity): PixiContainer | undefined;
+};
+
+/**
+ * A listener of the end of a warm-up run: the probe draws made since its queue last started.
+ */
+export type WarmListener = (draws: number) => void;
+
+/**
+ * The rectangle `effects` set for an entity's filters, in the entity's own units, and the one Pixi `Rectangle` it is
+ * written into, made at its first write and kept for the entity's life. Not public.
+ */
+export type AreaEntry = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rect: PixiRectangle | undefined;
+};
+
+/**
+ * What one probe draw of the warm-up draws: a content subject of the renderer (the batch pipeline of sprites, the
+ * graphics pipe's own, particles with either blend, distance-field text), or a filter handed to `filters.warm`.
+ */
+export type WarmSubject =
+  | "sprite"
+  | "graphics"
+  | "particles-normal"
+  | "particles-add"
+  | "text"
+  | PixiFilter;
+
+/**
+ * Where a probe draws: straight onto the canvas, or into a texture under a filter of the module's own, each with or
+ * without a stencil clip. A WebGPU pipeline is keyed by all four.
+ */
+export type WarmVariant = "canvas" | "canvas+clip" | "texture" | "texture+clip";
+
+/**
+ * One probe draw: one subject in one variant.
+ */
+export type WarmDraw = { readonly subject: WarmSubject; readonly variant: WarmVariant };
+
+/**
+ * The probe tree, made at the first warm frame and destroyed by `stopSync` and a rebuild: the root that is rendered,
+ * the clip (a container masked by a 4 × 4 graphics beside it, as `sync` hangs clips), the texture holder (filtered by
+ * the module's own alpha filter), the holder a filter subject hangs on, and the content subjects. None of it is ever in
+ * the stage.
+ */
+export type WarmObjects = {
+  root: PixiContainer;
+  /** Holds `clip` and `mask`. */
+  clipFrame: PixiContainer;
+  /** Masked by `mask`; the subject hangs in it for a clip variant. */
+  clip: PixiContainer;
+  mask: PixiGraphics;
+  /**
+   * The texture a texture variant is rendered into: the module's own, so the subject is drawn into a texture with no
+   * filter around it, and a texture variant never touches the canvas.
+   */
+  target: PixiRenderTexture;
+  /** A filter subject's container: its `filters` is the draw's filter, during the draw only. */
+  holder: PixiContainer;
+  /** The one-entry list `holder.filters` is set from. */
+  list: PixiFilter[];
+  sprite: PixiSprite;
+  graphics: PixiGraphics;
+  particlesNormal: PixiContainer;
+  particlesAdd: PixiContainer;
+  /** A `BitmapText` of "0" in `WarmState.textFont`; made at its first draw. */
+  text: PixiContainer | undefined;
+};
+
+/**
+ * The pipeline warm-up (F4): the queue of probe draws, the filters handed over and the promises waiting on them, the
+ * text probe's font, the probe tree, and the listeners of the end of a run. Not public.
+ */
+export type WarmState = {
+  /** The draws not yet drawn, from `head` on; emptied when the head reaches the end. */
+  queue: WarmDraw[];
+  head: number;
+  /** Every filter handed over on any device: queued again after a restore. */
+  filters: Set<PixiFilter>;
+  /** The filters whose draws are not all made yet: the draws left, and the promises to answer. */
+  waiting: Map<PixiFilter, { left: number; resolve: Array<(warmed: boolean) => void> }>;
+  /** The text probe is queued for this device. */
+  textQueued: boolean;
+  /** The font key of the text probe: the first font installed. */
+  textFont: string | undefined;
+  objects: WarmObjects | undefined;
+  /** The draws made since the queue last started, for the `warm` event line. */
+  draws: number;
+  /**
+   * A probe's render threw on this application: Pixi's filter stack may be unbalanced, so no probe is drawn again until
+   * a new application starts the warm-up.
+   */
+  failed: boolean;
+  /** The warnings logged once: `"probes"` (a tree Pixi could not build) and `"canvas-off"`. */
+  reported: Set<unknown>;
+  listeners: WarmListener[];
+};
+
+/**
+ * Where the overlay step's event lines go: the monitor's `event`. Private to the renderer.
+ */
+export type OverlayEventSink = {
+  event(name: PerfEventName, detail: Readonly<OverlayEventDetail>): void;
+};
+
+/**
+ * Where an overlay is in its life: coming in, landed (its enter motion is over), or leaving.
+ *
+ * @example
+ * ```ts
+ * const phase: OverlayPhase = "shown";
+ * ```
+ */
+export type OverlayPhase = "entering" | "shown" | "exiting";
+
+/**
+ * What an overlay does to what is drawn before it this frame: `"cover"` draws none of it (an opaque overlay, landed
+ * at alpha 1), `"freeze"` draws it as one kept picture, `"live"` draws it as it is (an opaque overlay leaving, an
+ * overlay inside another one's picture, a range drawn live).
+ *
+ * @example
+ * ```ts
+ * const mode: OverlayMode = "freeze";
+ * ```
+ */
+export type OverlayMode = "cover" | "freeze" | "live";
+
+/**
+ * One overlay as `debug.overlays()` reports it: the marked entity and its view's label, its phase, its mode, its level
+ * (0 to 1), how many entries the range it owns has (0 for an overlay that owns none), and whether a picture holds them.
+ *
+ * @example
+ * ```ts
+ * const report: OverlayReport = {
+ *   entity: 1_048_601, label: "Shape#1048601 shop.dim:shopDimLayer", phase: "shown", mode: "freeze", level: 1, range: 2, kept: true
+ * };
+ * ```
+ */
+export type OverlayReport = {
+  entity: Entity;
+  label: string;
+  phase: OverlayPhase;
+  mode: OverlayMode;
+  level: number;
+  range: number;
+  kept: boolean;
+};
+
+/**
+ * One overlay the step knows: the marked element, the root it hangs from and where that root is drawn, the clamped
+ * marker, its level, phase and mode, and its dim. Private to the renderer.
+ */
+export type OverlayRecord = {
+  readonly entity: Entity;
+  /** The label of the marked view's object, kept for the line of the frame it is gone in. */
+  label: string;
+  /** The end of its `Parent` chain: the root that hangs in a layer container. */
+  top: Entity;
+  /** That root's top object (`wrapper ?? object`). */
+  object: PixiContainer;
+  /** The layer container the root hangs in. */
+  container: PixiContainer;
+  layer: string;
+  /** Index in the scene's layer list. */
+  layerIndex: number;
+  /** The marker, clamped (O1); the record's own object, written in place. */
+  readonly value: OverlayValue;
+  /** The engine's level of the overlay, 0 to 1. */
+  level: number;
+  phase: OverlayPhase;
+  /** The phase it turned to this frame: `"shown"` at landing, `"exiting"` at the first exit frame. */
+  turned: OverlayPhase | undefined;
+  mode: OverlayMode;
+  /** The engine's dim, made when `dim` is above 0. */
+  dim: PixiSprite | undefined;
+  /** The dim was sized for the canvas at least once. */
+  sized: boolean;
+  /** Seen by the step this frame; a record not seen is dropped. */
+  seen: boolean;
+  /** The event to log once the step has decided the modes: `"open"`, `"landed"` or `"leave"`. */
+  news: OverlayEventDetail["what"] | undefined;
+};
+
+/**
+ * The one range an overlay keeps or covers: its owner, the reason written on its entries, the entries and the nodes
+ * its picture hides, and the counters of the retake rules. Private to the renderer.
+ */
+export type ActiveRange = {
+  owner: Entity;
+  mode: "cover" | "freeze";
+  /** The reason on the entries now: `"cover"`, `"freeze"`, or none while the range is drawn live. */
+  reason: HiddenReason | undefined;
+  /** Bottom first: lower layer containers, then roots and engine objects of the owner's layer. */
+  readonly entries: PixiContainer[];
+  /** What the range picture hides for its render: layers above, the owner and above. */
+  readonly others: PixiContainer[];
+  /** The entries, for the membership walk. */
+  set: Set<PixiContainer>;
+  /** The node the picture stands before: the owner's dim, or its root. */
+  before: PixiContainer | undefined;
+  /** A picture holds the range (freeze only). */
+  kept: boolean;
+  /** The last take was refused; tried again when the owner or the entries change. */
+  refused: boolean;
+  /**
+   * An entry, or a view inside the range that covers the viewport frame, holds a blurring filter (O9.2): measured at
+   * every take and retake, and in every frame the fallback draws the range live.
+   */
+  blurred: boolean;
+  /** A loop write was held back since the last take. */
+  touched: boolean;
+  /** The held loops write once in the next frame, and the picture is taken again with them (landing, first exit frame). */
+  catchUp: boolean;
+  /** The others changed since the last hand-over: the next retake hands the lists over again. */
+  othersStale: boolean;
+  /** Frames in a row retaken for a mark (O8.4). */
+  streak: number;
+  /** Frames in a row with no mark in the range, while the fallback is live. */
+  calm: number;
+  /** Drawn live because it changed in every frame. */
+  fallback: boolean;
+};
+
+/**
+ * The overlay step's state, `ctx.state.sync.overlay`. Collections and arrays are reused: a frame allocates nothing.
+ * Private to the renderer.
+ */
+export type OverlayState = {
+  /** Entities with `Overlay`, from `onAdded` / `onRemoved`. */
+  entities: Set<Entity>;
+  /** Entities with `HudPart`, from `onAdded` / `onRemoved`. */
+  parts: Set<Entity>;
+  records: Map<Entity, OverlayRecord>;
+  /** The records bottom first, reused. */
+  order: OverlayRecord[];
+  /** The range of the owner, or `undefined` with none. */
+  active: ActiveRange | undefined;
+  /** The range object, made once and reused. */
+  range: ActiveRange | undefined;
+  /** Top objects of the HUD parts that take no tap. */
+  offTops: Set<PixiContainer>;
+  /** `"<code>:<entity>"` of the warnings logged once. */
+  warned: Set<string>;
+  /** The `overlay` event lines of an agent build, until the frame hands them to the monitor. */
+  events: OverlayEventDetail[];
+  /** Scratch: the entries and others wanted this frame, and the set of the entries. */
+  wantEntries: PixiContainer[];
+  wantOthers: PixiContainer[];
+  wantSet: Set<PixiContainer>;
+  /** Entities whose reason the step itself flipped this frame: their marks are no change of the range's pixels. */
+  flipped: Set<Entity>;
+  /** Scratch of the tap set. */
+  nextOff: Set<PixiContainer>;
+  /** A view left its place in the held range since the last step (it moved, or its view went). */
+  left: boolean;
+  /** Scratch of the cover test of `blurred`: made on first use from the Pixi module the renderer loaded. */
+  bounds: PixiBounds | undefined;
 };
 
 /**
@@ -745,21 +1311,100 @@ export type SyncState = {
   removed: Set<Entity>;
   /** Entities whose `Parent` was removed: `world` marks no change then, only `onRemoved` fires. */
   reparented: Set<Entity>;
-  /** The debug switches, from `config.debug` and `debug.nineSlice`. */
-  debug: DebugSwitches;
+  /**
+   * Views whose `Parent` has no view yet: detached, drawn nowhere, attached at the end of the pass that builds the
+   * parent's view (spec 16 U2.4).
+   */
+  orphans: Set<Entity>;
+  /** Entities the tree check of a dev or agent build already reported, so each is reported once (spec 16 U2.5). */
+  mismatched: Set<Entity>;
+  /** The nine-slice switch, from `config.debug` and `debug.nineSlice`; the pixel check lives in `demand`. */
+  debug: { nineSlice: boolean };
   /** The nine-slice switch moved: the next pass writes every nine-slice again. */
   outlinesStale: boolean;
   /** The filters `effects` set per entity, kept while the entity lives, view or not. */
   filters: Map<Entity, readonly FilterSlot[]>;
+  /** The filter area `effects` set per entity, kept like its filters (B4). */
+  areas: Map<Entity, AreaEntry>;
+  /**
+   * True while a filter or area entry may belong to an entity without a view: the pass then forgets the entries of the
+   * despawned ones, and stays on while a live entity without a view holds one. False when every entry belongs to a
+   * view, so a still frame walks no entry.
+   */
+  viewlessEntries: boolean;
+  /** The pipeline warm-up (F4). */
+  warm: WarmState;
+  /**
+   * The kind of each Pixi filter a slot named, for the performance log of an agent build; a
+   * blur's two passes are filters of their own and are in it too. Empty in a production build.
+   */
+  filterKinds: WeakMap<object, string>;
+  /** Hidden masks of engine objects that are no view (an overlay's dim, a kept quad). */
+  objectHidden: WeakMap<PixiContainer, number>;
+  /** The view whose top (`wrapper ?? object`) a node is, for the hidden masks (O15; skeleton choice, confirmed in LEAD-FIXES-3). */
+  viewOfTop: WeakMap<PixiContainer, View>;
+  /** The overlays, their ranges, dims and HUD parts (spec 22). */
+  overlay: OverlayState;
+  /** `Graphics` paths drawn since the monitor last took them: shapes, clip masks, outlines (spec 26 R2.3). */
+  redraws: number;
+  /**
+   * Where the walk of `shown` stopped for the entities whose loops asked since the last sync pass (spec 26 R1.7.3):
+   * an entity with several endless loops is walked once a frame. Cleared by every pass, which may change the tree.
+   */
+  held: Map<Entity, Unseen>;
   cleanups: Array<() => void>;
 };
 
 /**
- * What `sync` gets injected: the two modules below it.
+ * What `sync` gets injected: the two modules below it, `demand`, which every write site marks before it writes, and
+ * `kept`, which says where a view's filters hang and keeps its picture.
  */
-export type SyncDeps = { host: HostApi & HostInternal; viewport: ViewportApi & ViewportInternal };
+export type SyncDeps = {
+  host: HostApi & HostInternal;
+  viewport: ViewportApi & ViewportInternal;
+  demand: DemandModule;
+  kept: KeptModule;
+};
 
 /**
  * Domain context of the sync module.
  */
 export type SyncCtx = { ctx: RendererCtx; deps: SyncDeps };
+
+export type { HiddenCtx, HiddenReason } from "./hidden";
+
+/**
+ * The writers of `sync` the kept cache draws through, injected by `createModules`, since a module never imports
+ * another's run-time code: the one owner of `renderable` (`hidden.ts`) and the one writer of a view's filters.
+ */
+export type SyncWriters = {
+  /** Changes one reason of a view and its `renderable` without a mark. */
+  readonly swapHidden: (sctx: HiddenCtx, view: View, reason: HiddenReason, hidden: boolean) => void;
+  /** Tells whether one reason hides a view. */
+  readonly hiddenBy: (view: View, reason: HiddenReason) => boolean;
+  /** Tells whether a node is hidden by these reasons alone. */
+  readonly hiddenOnlyAmong: (
+    sctx: HiddenCtx,
+    node: PixiContainer,
+    reasons: readonly HiddenReason[]
+  ) => boolean;
+  /** Draws a picture of nodes hidden only by one reason, every node back from its mask after. */
+  readonly liftFor: <Result>(
+    sctx: HiddenCtx,
+    lift: readonly PixiContainer[],
+    hide: readonly PixiContainer[],
+    reason: HiddenReason,
+    draw: () => Result
+  ) => Result;
+  /** Hangs the filters on a view's top, or on a target. */
+  readonly applyFilters: (
+    view: View,
+    slots: readonly FilterSlot[],
+    before: () => void,
+    target?: PixiContainer
+  ) => void;
+  /** Takes every filter off a display object. */
+  readonly clearFilters: (target: PixiContainer) => void;
+  /** The render passes of the frame as the tree stands now, read from the filter slots (the estimate). */
+  readonly renderPassesOf: (state: SyncState, kept: KeptState) => number;
+};

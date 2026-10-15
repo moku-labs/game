@@ -9,9 +9,15 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { BrandConsole } from "@moku-labs/common/cli";
-import type { HTMLBundle } from "bun";
 import type { parseVisualArgv, runVisualTests } from "../visual";
-import { keysArguments, packArguments, runBuild } from "./build";
+import {
+  type BuildRun,
+  DEFAULT_EDITOR,
+  type DebugLevel,
+  keysArguments,
+  packArguments,
+  runBuild
+} from "./build";
 import type { KeysWatcher } from "./keys";
 import type { NativeVerb, NativeVerbOptions, NativeWhere } from "./native";
 import { checkFiles, loadSettings, type ServeRun, serveChild, serveParent } from "./serve";
@@ -97,9 +103,11 @@ export type CliDeps = {
   /** Bun's resolver: the file a specifier gives from a folder. */
   resolve: (specifier: string, from: string) => string;
   /** Imports the written page; its default export is the bundle a Bun server serves. */
-  loadPage: (file: string) => Promise<{ default: Response | HTMLBundle }>;
+  loadPage: (file: string) => Promise<{ default: Response | Bun.HTMLBundle }>;
   /** Loads the visual test runner; only `moku-game visual` needs it. */
   visual: () => Promise<VisualRunner>;
+  /** Wall-clock ms; the build id of a debug build. */
+  now: () => number;
 };
 
 /** The commands of the line that run something; `help` only prints. */
@@ -125,22 +133,35 @@ const ALL_OPTIONS = {
   update: { type: "boolean" },
   only: { type: "string", multiple: true },
   "no-pixels": { type: "boolean" },
+  "no-verify-frames": { type: "boolean" },
   pixels: { type: "boolean" },
   dir: { type: "string" },
-  webgl: { type: "boolean" }
+  webgl: { type: "boolean" },
+  debug: { type: "string" },
+  editor: { type: "string" }
 } as const;
 
 /** The flags of `visual` that `parseVisualArgv` reads, in the runner's words. */
-const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl)$/;
+const VISUAL_FLAGS = /^(?:update|only|no-pixels|pixels|dir|webgl|no-verify-frames)$/;
 
 /** The flags of one command besides the global ones. */
 const COMMAND_OPTIONS: Readonly<Record<Command, readonly (keyof typeof ALL_OPTIONS)[]>> = {
   dev: ["port", "packed"],
-  build: ["out"],
-  native: ["simulator"],
+  build: ["out", "debug", "editor"],
+  native: ["simulator", "debug", "editor"],
   keys: ["check"],
   pack: ["no-cache"],
-  visual: ["tests", "url", "update", "only", "no-pixels", "pixels", "dir", "webgl"]
+  visual: [
+    "tests",
+    "url",
+    "update",
+    "only",
+    "no-pixels",
+    "pixels",
+    "dir",
+    "webgl",
+    "no-verify-frames"
+  ]
 };
 
 /** The native verbs, in the order the messages name them. */
@@ -158,19 +179,22 @@ const DEFAULT_PORT = "3000";
 /** The highest port number. */
 const MAX_PORT = 65_535;
 
+/** A host of `--editor`: a name or an IPv4 address, or an IPv6 address in brackets. */
+const EDITOR_HOST = /^(?:[\w.-]+|\[[\da-f:.]+\])$/i;
+
 /** The text of `moku-game help`. */
 const USAGE = [
   "moku-game <command> [options]",
   "",
   "  dev [--port 3000] [--packed]          serve the game with hot reload",
-  "  build [--out dist/web]                pack the assets and build the page",
-  "  native build <target> [--simulator]   build the native app (ios, macos, android)",
+  "  build [--out dist/web] [--debug[=full] [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent",
+  "  native build <target> [--simulator] [--debug[=full] [--editor host:port]]  build the native app (ios, macos, android)",
   "  native dev <target>                   run the native shell on the dev server",
   "  native doctor | native clean          check or remove the native project",
   "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
   "  pack [--no-cache]                     pack the assets into dist/assets",
   "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
-  "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",
+  "    [--no-pixels | --pixels] [--webgl] [--no-verify-frames] [--dir tests/visual/baselines]",
   "    [--tests tests/visual/index.ts] [--url <url>]",
   "  help                                  print this text",
   "",
@@ -279,14 +303,16 @@ function checkTokens(command: Command, tokens: ReturnType<typeof parseLoose>["to
 
 /**
  * Reads the command line into one command with its flags, the paths resolved against the
- * working directory.
+ * working directory. A bare `--debug` reads as `--debug=read`: a string flag without its value
+ * would take the next word.
  *
- * @param argv - The arguments after the bin.
+ * @param given - The arguments after the bin.
  * @param cwd - The working directory.
  * @returns The command, `"help"`, or `undefined` when no command is named.
  * @throws {Error} When the command is unknown or a flag is refused.
  */
-function parseCommand(argv: readonly string[], cwd: string): Parsed | "help" | undefined {
+function parseCommand(given: readonly string[], cwd: string): Parsed | "help" | undefined {
+  const argv = given.map(word => (word === "--debug" ? "--debug=read" : word));
   const loose = parseLoose(argv);
   const word = loose.positionals[0];
 
@@ -323,9 +349,66 @@ function parseCommand(argv: readonly string[], cwd: string): Parsed | "help" | u
 function refuseExtra(parsed: Parsed, count: number): void {
   const extra = parsed.rest[count];
 
-  if (extra !== undefined) {
-    throw new Error(`[game] ${parsed.command}: unexpected argument "${extra}".`);
-  }
+  if (extra === undefined) return;
+
+  // `--debug full` reads as `--debug` and an argument: say how to write the profile.
+  const profile = parsed.values.debug !== undefined && (extra === "full" || extra === "read");
+  const advice = profile ? ` Write --debug=${extra}.` : "";
+
+  throw new Error(`[game] ${parsed.command}: unexpected argument "${extra}".${advice}`);
+}
+
+/**
+ * Reads `--debug`: no flag is a release page, a bare flag or `read` the read profile, `full`
+ * every command.
+ *
+ * @param value - The value of the flag, `read` for a bare `--debug`.
+ * @param command - The command word, for the message.
+ * @returns The profile, or `undefined` without the flag.
+ * @throws {Error} When the value is another word.
+ * @example
+ * ```ts
+ * debugLevelOf("full"); // "full"
+ * ```
+ */
+function debugLevelOf(
+  value: string | undefined,
+  command: Command = "build"
+): DebugLevel | undefined {
+  if (value === undefined || value === "read" || value === "full") return value;
+
+  throw new Error(`[game] ${command}: --debug takes no value, "read" or "full", got "${value}".`);
+}
+
+/**
+ * Reads `--editor`: the `host:port` the page agent of a debug page dials, 127.0.0.1:47600 when
+ * left out.
+ *
+ * @param value - The value of the flag.
+ * @param command - The command word, for the message.
+ * @returns The address.
+ * @throws {Error} When the value is not a host and a whole port from 1 to 65535.
+ * @example
+ * ```ts
+ * editorOf("192.168.1.20:47600"); // "192.168.1.20:47600"
+ * ```
+ */
+function editorOf(value: string | undefined, command: Command = "build"): string {
+  if (value === undefined) return DEFAULT_EDITOR;
+
+  const colon = value.lastIndexOf(":");
+  const host = value.slice(0, Math.max(colon, 0));
+  const port = value.slice(colon + 1);
+  const isAddress =
+    colon > 0 &&
+    EDITOR_HOST.test(host) &&
+    /^\d+$/.test(port) &&
+    Number(port) >= 1 &&
+    Number(port) <= MAX_PORT;
+
+  if (!isAddress) throw new Error(`[game] ${command}: --editor takes host:port, got "${value}".`);
+
+  return value;
 }
 
 /**
@@ -413,14 +496,52 @@ async function runNativeVerb(parsed: Parsed, deps: CliDeps): Promise<number> {
 
   refuseExtra(parsed, 2);
 
+  const debug = nativeDebugOf(parsed, verb, target);
   const settings = await loadSettings(parsed.root);
   const where: NativeWhere = { cwd: parsed.root, command: selfCommand(parsed, deps) };
   const options: NativeVerbOptions = {
     ...(target === undefined ? {} : { target }),
-    ...(verb === "build" && parsed.values.simulator === true ? { simulator: true } : {})
+    ...(verb === "build" && parsed.values.simulator === true ? { simulator: true } : {}),
+    ...debug
   };
 
+  if (debug.debug !== undefined && target === "android") {
+    deps.ui.warn(
+      "native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store."
+    );
+  }
+
   return (await deps.native(verb, settings, where, options)) ? 0 : 1;
+}
+
+/**
+ * Reads `--debug` and `--editor` of `moku-game native`: they go with `native build android`
+ * only in this release.
+ *
+ * @param parsed - The command line.
+ * @param verb - The native verb.
+ * @param target - The target the command line names, unchecked.
+ * @returns The profile and the editor address as given, each only when given.
+ * @throws {Error} When either goes with another verb, `--editor` comes without `--debug`, a value
+ *   is refused, or the target is not `android`.
+ */
+function nativeDebugOf(
+  parsed: Parsed,
+  verb: NativeVerb,
+  target: string | undefined
+): Pick<NativeVerbOptions, "debug" | "editor"> {
+  const debug = debugLevelOf(parsed.values.debug, "native");
+  const editor = parsed.values.editor;
+
+  if (debug === undefined && editor === undefined) return {};
+  if (verb !== "build") throw new Error("[game] native: --debug goes with native build only.");
+  if (debug === undefined) throw new Error("[game] native: --editor goes with --debug.");
+
+  if (target !== undefined && target !== "android") {
+    throw new Error(`[game] native: --debug builds Android only in this release (got ${target}).`);
+  }
+
+  return editor === undefined ? { debug } : { debug, editor: editorOf(editor, "native") };
 }
 
 /**
@@ -504,6 +625,36 @@ function hop(argv: readonly string[], parsed: Parsed, deps: CliDeps): Promise<nu
 }
 
 /**
+ * Runs `moku-game build`: a release page, or with `--debug[=full]` a debug page whose agent dials
+ * `--editor`.
+ *
+ * @param parsed - The command line.
+ * @param deps - The process seams.
+ * @returns The exit code of the build.
+ * @throws {Error} When an argument, `--debug` or `--editor` is refused.
+ */
+function runBuildCommand(parsed: Parsed, deps: CliDeps): Promise<number> {
+  refuseExtra(parsed, 0);
+
+  const debug = debugLevelOf(parsed.values.debug);
+  const editor = parsed.values.editor;
+
+  if (debug === undefined && editor !== undefined) {
+    throw new Error("[game] build: --editor goes with --debug.");
+  }
+
+  const out = parsed.values.out ?? path.join(parsed.root, "dist", "web");
+  const run: BuildRun = {
+    root: parsed.root,
+    out: path.resolve(deps.cwd, out),
+    servePlugins: parsed.servePlugins,
+    ...(debug === undefined ? {} : { debug, editor: editorOf(editor) })
+  };
+
+  return runBuild(run, deps);
+}
+
+/**
  * Runs one checked command.
  *
  * @param argv - The arguments after the bin.
@@ -531,14 +682,7 @@ async function runParsed(argv: readonly string[], parsed: Parsed, deps: CliDeps)
       return runServe(parsed, deps);
     }
     case "build": {
-      refuseExtra(parsed, 0);
-
-      const out = parsed.values.out ?? path.join(parsed.root, "dist", "web");
-
-      return runBuild(
-        { root: parsed.root, out: path.resolve(deps.cwd, out), servePlugins: parsed.servePlugins },
-        deps
-      );
+      return runBuildCommand(parsed, deps);
     }
     case "native": {
       return runNativeVerb(parsed, deps);

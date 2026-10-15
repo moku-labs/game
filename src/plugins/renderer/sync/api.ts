@@ -5,28 +5,43 @@
 import { Layer, Order } from "../../world/ecs/define";
 import type { ComponentHandle, Entity } from "../../world/types";
 import { Display, NineSlice, Parent, Shape, Sprite, Transform } from "../components";
-import type { PixiContainer, PixiTexture, RendererCtx, SyncModule } from "../types";
+import type { Unseen } from "../demand/types";
+import type { PixiContainer, PixiFilter, PixiTexture, RendererCtx, SyncModule } from "../types";
 import { provideDisplay, updateAdapterView } from "./adapters";
 import { boundsOf, hitBoxOf, layerOf } from "./bounds";
-import { forgetLeft, renderPassesOf, setFilters } from "./filters";
+import { forgetLeft, renderPassesOf, setArea, setFilters } from "./filters";
 import { installFont, isFontInstalled } from "./fonts";
+import { clearHidden } from "./hidden";
 import { hitAll, hitTest } from "./hit-test";
 import { clearLayers, layerContainer, resort, syncLayers } from "./layers";
+import {
+  drainOverlayEvents,
+  loopsHeld,
+  overlayReports,
+  stepOverlays,
+  watchOverlays
+} from "./overlay";
+import { forgetOverlays } from "./overlay-state";
 import { destroyPools, detach, dropPooled } from "./pools";
+import { parentOf } from "./pose";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
+import { checkTree } from "./tree-check";
 import type {
   CreateTextureOptions,
   DebugSwitches,
   DisplayAdapter,
   FilterSlot,
   HitBox,
+  OverlayEventSink,
+  OverlayReport,
   SliceFrame,
   SyncCounts,
   SyncCtx,
   SyncDeps,
   TextureProvider,
-  View
+  View,
+  WarmListener
 } from "./types";
 import {
   applyNineSlice,
@@ -36,11 +51,20 @@ import {
   attach,
   createView,
   dropView,
+  wrapForPicture,
   writeVisual
 } from "./views";
+import { startWarm, warmFilter, warmStep } from "./warm";
 
 /** Label of the container the viewport transform is written on. */
 const ROOT_LABEL = "renderer.root";
+
+/**
+ * The mark of the quiet context: a write the kept cache makes for its picture changes no pixel and marks nothing.
+ */
+function noMark(): void {
+  // Nothing to judge: the frame draws the same pixels.
+}
 
 /**
  * Copies a change set, so a pass can clear it and still know what it took. It lives in its own
@@ -64,16 +88,72 @@ function emptyEntitySet(): Set<Entity> {
 }
 
 /**
+ * Where the walk of `shown` stopped for an entity's view, walked once between two sync passes: an entity with several
+ * endless loops asks once a frame (spec 26 R1.7.3). Nothing is allocated once the map has grown.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity a loop is about to write.
+ * @returns Where the walk stopped; `"other"` while inert and for an entity without a view.
+ */
+function unseenOf(sctx: SyncCtx, entity: Entity): Unseen {
+  const state = sctx.ctx.state.sync;
+
+  if (state.root === undefined || !state.views.has(entity)) return "other";
+
+  const known = state.held.get(entity);
+
+  if (known !== undefined) return known;
+
+  const answer = sctx.deps.demand.unseenBy(entity);
+
+  state.held.set(entity, answer);
+
+  return answer;
+}
+
+/**
+ * The unseen cases of `loopsHeld` (spec 26 R1.7.1), asked after the overlay cases answered false: a view under a view
+ * at alpha 0 always holds; the view's own alpha 0 holds unless the loop writes its alpha; a leaf off the screen holds
+ * unless the loop writes its place. Every other stop holds nothing: an empty shape's own loop may be what fills it,
+ * and a kept view is still shown through its quad.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity a loop is about to write.
+ * @param reveals - What the loop writes that could show the view again.
+ * @returns True when the write would change nothing the player can see.
+ */
+function unseenHolds(
+  sctx: SyncCtx,
+  entity: Entity,
+  reveals: "alpha" | "place" | "both" | undefined
+): boolean {
+  const unseen = unseenOf(sctx, entity);
+
+  if (unseen === "alpha-above") return true;
+  if (unseen === "alpha-own") return reveals !== "alpha" && reveals !== "both";
+  if (unseen === "off-screen") return reveals !== "place" && reveals !== "both";
+
+  return false;
+}
+
+/**
  * Creates the sync module: the world hooks, the one system, the texture registry and the hit
  * test.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @param deps - The injected `host` and `viewport` modules.
+ * @param deps - The injected `host`, `viewport` and `demand` modules.
  * @returns The sync API and its internal half.
  */
 export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   const sctx: SyncCtx = { ctx, deps };
+  // The kept cache's own writes draw the same pixels, so they mark nothing (spec 23 D4, as OQ23-7 for "kept").
+  const quiet: SyncCtx = {
+    ctx,
+    deps: { ...deps, demand: { ...deps.demand, mark: noMark, markMoved: noMark } }
+  };
   const state = ctx.state.sync;
+  // What a pass with nothing to build hands its change steps: made once, so a still frame builds no set.
+  const nothingBuilt: ReadonlySet<Entity> = emptyEntitySet();
 
   /**
    * Runs one piece of work for one entity. A throw costs that entity, never the frame.
@@ -143,6 +223,19 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
+   * Hangs a view again where it belongs now, under its parent or in its layer, at its own pose, sorted by the rule
+   * of the place it hangs in.
+   *
+   * @param entity - The entity.
+   * @param view - Its view.
+   */
+  const rehang = (entity: Entity, view: View): void => {
+    attach(sctx, entity, view);
+    applyTransform(sctx, entity, view);
+    resort(sctx, entity, view);
+  };
+
+  /**
    * Step 4 for the views whose `Parent` was removed: back to the layer the entity names, at its
    * own pose, sorted by that layer's rule. An entity that left has no view and is skipped.
    *
@@ -156,14 +249,49 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.reparented.clear();
 
     for (const entity of entities) {
-      if (built.has(entity)) continue;
-
-      withView(entity, view => {
-        attach(sctx, entity, view);
-        applyTransform(sctx, entity, view);
-        resort(sctx, entity, view);
-      });
+      if (!built.has(entity)) withView(entity, view => rehang(entity, view));
     }
+  };
+
+  /**
+   * Step 4 for the orphans (spec 16 U2.4): every view that waits for its parent's view is hung once the parent has one,
+   * placed and sorted there, in the pass that built the parent. A view that lost its `Parent` meanwhile goes to its
+   * layer. One whose parent still has no view is left alone: nothing is written, so no frame is asked for.
+   *
+   * @param touched - The entities the tree check reads, in a dev or agent build: the hung ones join it.
+   */
+  const attachOrphans = (touched: Set<Entity> | undefined): void => {
+    if (state.orphans.size === 0) return;
+
+    const ecs = ctx.deps.world.ecs;
+
+    for (const entity of copyOf(state.orphans)) {
+      const parent = parentOf(ecs, entity);
+
+      if (!state.views.has(entity)) state.orphans.delete(entity);
+      else if (parent === 0 || state.views.has(parent)) {
+        withView(entity, view => rehang(entity, view));
+        touched?.add(entity);
+      }
+    }
+  };
+
+  /**
+   * The entities the tree check of this pass reads: the ones it built and the ones it hangs again (a new `Parent` or
+   * `Layer`, a `Parent` that left). Read before the change steps clear the set of the views that lost their `Parent`.
+   *
+   * @param built - The entities this pass has just built.
+   * @returns A new set, which the orphan step adds to.
+   */
+  const touchedBy = (built: ReadonlySet<Entity>): Set<Entity> => {
+    const touched = copyOf(built);
+    const ecs = ctx.deps.world.ecs;
+
+    for (const entity of ecs.changed(Parent)) touched.add(entity);
+    for (const entity of ecs.changed(Layer)) touched.add(entity);
+    for (const entity of state.reparented) touched.add(entity);
+
+    return touched;
   };
 
   /**
@@ -186,6 +314,24 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
+   * Runs work on the view of an entity, unless this pass built it a moment ago. Made once, not per pass: a still frame
+   * makes no closure.
+   *
+   * @param built - The entities this pass has just built.
+   * @param entity - The entity.
+   * @param work - What to do with its view.
+   */
+  const writeUnbuilt = (
+    built: ReadonlySet<Entity>,
+    entity: Entity,
+    work: (view: View) => void
+  ): void => {
+    if (built.has(entity)) return;
+
+    withView(entity, work);
+  };
+
+  /**
    * Step 4: only the entities the frame really changed.
    *
    * @param built - The entities this pass has just built, which carry every value already.
@@ -193,21 +339,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   const applyChanges = (built: ReadonlySet<Entity>): void => {
     const ecs = ctx.deps.world.ecs;
 
-    /**
-     * Runs work on the view of an entity, unless this pass built it a moment ago.
-     *
-     * @param entity - The entity.
-     * @param work - What to do with its view.
-     */
-    const write = (entity: Entity, work: (view: View) => void): void => {
-      if (built.has(entity)) return;
-
-      withView(entity, work);
-    };
-
     // Placement: a moved entity gets a new transform and may sort differently.
     for (const entity of ecs.changed(Transform)) {
-      write(entity, view => {
+      writeUnbuilt(built, entity, view => {
         applyTransform(sctx, entity, view);
         resort(sctx, entity, view);
       });
@@ -215,7 +349,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
     // Look: the drawn content of the view changed.
     for (const entity of ecs.changed(Sprite)) {
-      write(entity, view => {
+      writeUnbuilt(built, entity, view => {
         applySprite(sctx, entity, view);
         // A new size or fit changes the stretch the transform folds into the scale.
         applyTransform(sctx, entity, view);
@@ -223,30 +357,28 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     }
 
     for (const entity of ecs.changed(NineSlice)) {
-      write(entity, view => applyNineSlice(sctx, entity, view));
+      writeUnbuilt(built, entity, view => applyNineSlice(sctx, entity, view));
     }
 
     for (const entity of ecs.changed(Shape)) {
-      write(entity, view => applyShape(sctx, entity, view));
+      writeUnbuilt(built, entity, view => applyShape(sctx, entity, view));
     }
 
     // Draw order: only the position among the siblings changed.
-    for (const entity of ecs.changed(Order)) write(entity, view => resort(sctx, entity, view));
+    for (const entity of ecs.changed(Order)) {
+      writeUnbuilt(built, entity, view => resort(sctx, entity, view));
+    }
 
     // Tree position: the view moves to another layer or parent, and is placed and sorted there.
     for (const entity of ecs.changed(Layer)) {
-      write(entity, view => {
+      writeUnbuilt(built, entity, view => {
         attach(sctx, entity, view);
         resort(sctx, entity, view);
       });
     }
 
     for (const entity of ecs.changed(Parent)) {
-      write(entity, view => {
-        attach(sctx, entity, view);
-        applyTransform(sctx, entity, view);
-        resort(sctx, entity, view);
-      });
+      writeUnbuilt(built, entity, view => rehang(entity, view));
     }
 
     // A new `Display` object of the game replaces the old view outright.
@@ -275,6 +407,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
 
       for (const entity of state.byKey.get(key) ?? []) {
         withView(entity, view => {
+          // Structural: the key resolved again, a bundle came or went, or a hot swap.
+          deps.demand.mark(entity);
           writeVisual(sctx, entity, view);
           applyTransform(sctx, entity, view);
         });
@@ -289,6 +423,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     if (!state.outlinesStale) return;
 
     state.outlinesStale = false;
+    deps.demand.whole("debug");
 
     for (const [entity, view] of state.views) {
       if (view.kind === "NineSlice") guard(entity, () => applyNineSlice(sctx, entity, view));
@@ -296,11 +431,11 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Takes the entities that are waiting to be built out of the change set.
+   * Takes the entities that are waiting to be built out of the change set. Called only when one waits.
    *
    * @returns The entities of this pass, so the change step skips what the build just wrote.
    */
-  const takeAdded = (): ReadonlySet<Entity> => {
+  const takeAdded = (): Set<Entity> => {
     const built = copyOf(state.added);
 
     state.added.clear();
@@ -309,39 +444,109 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * One pass: removed, layers, added, changed, invalidated. A despawned entity takes its filter
-   * slots with it, also when its view left in an earlier pass; a live one keeps them for its next
-   * view.
+   * Builds the views of a waiting set, each parent before its child when the parent waits in the
+   * same set (spec 16 U2.3): a child built first finds no parent view and is detached for good.
+   * An entity leaves the set before its parent is built, so a cycle of parents ends.
+   *
+   * @param waiting - The entities to build; emptied as they are built.
+   * @returns The entities a view was built for now.
    */
-  const pass = (): void => {
-    for (const entity of state.removed) {
-      guard(entity, () => dropView(sctx, entity));
-      forgetLeft(state, ctx.deps.world.ecs, entity);
-    }
-
-    state.removed.clear();
-
-    // An entity whose visual left in an earlier pass and that despawned since has no view to
-    // remove any more; its entry goes here, so no despawned entity keeps one.
-    for (const entity of state.filters.keys()) {
-      if (!state.views.has(entity)) forgetLeft(state, ctx.deps.world.ecs, entity);
-    }
-
-    syncLayers(sctx);
-
+  const buildParentFirst = (waiting: Set<Entity>): ReadonlySet<Entity> => {
     const built = emptyEntitySet();
+    const ecs = ctx.deps.world.ecs;
 
-    for (const entity of takeAdded()) {
+    /**
+     * Builds one waiting entity, its waiting parent first.
+     *
+     * @param entity - The entity.
+     */
+    const build = (entity: Entity): void => {
+      if (!waiting.delete(entity)) return;
+
+      const parent = parentOf(ecs, entity);
+
+      if (parent !== 0 && waiting.has(parent)) build(parent);
+
       guard(entity, () => {
         if (createView(sctx, entity)) built.add(entity);
       });
+    };
+
+    for (const entity of copyOf(waiting)) build(entity);
+
+    return built;
+  };
+
+  /**
+   * Forgets the filter and area entries of the entities without a view that despawned: a visual that left in an earlier
+   * pass, or entries set before any view. Such an entity has no view to remove any more, so no despawned entity keeps
+   * an entry.
+   *
+   * @returns True while a live entity without a view still holds an entry: the next pass looks again.
+   */
+  const forgetDespawned = (): boolean => {
+    const ecs = ctx.deps.world.ecs;
+    let viewless = false;
+
+    for (const entity of state.filters.keys()) {
+      if (state.views.has(entity)) continue;
+
+      forgetLeft(state, ecs, entity);
+      viewless ||= state.filters.has(entity);
     }
+
+    for (const entity of state.areas.keys()) {
+      if (state.views.has(entity)) continue;
+
+      forgetLeft(state, ecs, entity);
+      viewless ||= state.areas.has(entity);
+    }
+
+    return viewless;
+  };
+
+  /**
+   * One pass: removed, layers, added, changed, orphans, invalidated. A despawned entity takes its filter
+   * slots with it, also when its view left in an earlier pass; a live one keeps them for its next
+   * view. A still frame (nothing added, removed or left without a view) builds no set and walks no entry.
+   */
+  const pass = (): void => {
+    // The pass may change the tree: the unseen walks of the loops are taken again in the next frame.
+    state.held.clear();
+
+    if (state.removed.size > 0) {
+      for (const entity of state.removed) {
+        guard(entity, () => dropView(sctx, entity));
+        forgetLeft(state, ctx.deps.world.ecs, entity);
+      }
+
+      state.removed.clear();
+    }
+
+    if (state.viewlessEntries) state.viewlessEntries = forgetDespawned();
+
+    // A new layer list is the renderer's own signal of a scene switch: the frame is drawn, the pool trimmed later.
+    if (syncLayers(sctx)) {
+      deps.demand.whole("layers");
+      deps.host.sceneChanged();
+    }
+
+    const built = state.added.size === 0 ? nothingBuilt : buildParentFirst(takeAdded());
+    // The tree check runs in a dev or an agent build only; the guard is inline so a release build drops it (U2.5).
+    const touched =
+      (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+        ? touchedBy(built)
+        : undefined;
 
     applyChanges(built);
     applyReparented(built);
+    attachOrphans(touched);
     applyAdapterChanges(built);
     applyInvalidated();
     applyOutlines();
+
+    if (touched !== undefined) checkTree(sctx, touched);
   };
 
   /**
@@ -349,15 +554,29 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    * where the old application and everything in it are already gone.
    */
   const forgetTree = (): void => {
+    // Every picture goes first: its textures belong to the application that goes (P15).
+    deps.kept.reset();
+    // The dims and the range go with the tree; the overlays are found again in the new one (spec 22 O5.6).
+    forgetOverlays(state);
+    state.held.clear();
+
     for (const view of state.views.values()) {
+      state.viewOfTop.delete(view.wrapper ?? view.object);
       if (view.kind === "Display") detach(view.object);
       view.wrapper = undefined;
       view.outline = undefined;
+      // A game's object outlives the application: it goes back drawn, for the view the rebuild gives it.
+      if (view.kind === "Display") clearHidden(view);
     }
 
     state.views.clear();
+    // The entries stay for the views the rebuild gives back; the pass looks for the ones it does not.
+    if (state.filters.size > 0 || state.areas.size > 0) state.viewlessEntries = true;
     state.entityOf.clear();
     state.byKey.clear();
+    // The rebuild hangs every view again, parent first: nothing waits for a parent of the old tree.
+    state.orphans.clear();
+    state.mismatched.clear();
     // The views that showed the crops are gone; the rebuild cuts them again for its own views.
     clearFrames(state);
     destroyPools(state);
@@ -366,7 +585,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * Builds the root, the layers and a view for every entity that names a layer.
+   * Builds the root, the layers and a view for every entity that names a layer, then starts the
+   * warm-up of the device (F4).
    */
   const rebuildAll = (): void => {
     forgetTree();
@@ -384,15 +604,17 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     deps.viewport.apply(root);
     syncLayers(sctx);
 
-    for (const [entity] of ctx.deps.world.ecs.query(Layer)) {
-      guard(entity, () => createView(sctx, entity));
-    }
+    const waiting = emptyEntitySet();
+
+    for (const [entity] of ctx.deps.world.ecs.query(Layer)) waiting.add(entity);
+    buildParentFirst(waiting);
 
     state.added.clear();
     state.removed.clear();
     state.reparented.clear();
     // Every view was just written with the switch as it is now.
     state.outlinesStale = false;
+    startWarm(sctx);
   };
 
   return {
@@ -406,6 +628,8 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     hitBoxOf: (entity: Entity): HitBox | undefined => hitBoxOf(state, entity),
 
     displayOf: (entity: Entity): unknown | undefined => state.views.get(entity)?.object,
+
+    wrapForPicture: (entity: Entity): PixiContainer | undefined => wrapForPicture(quiet, entity),
 
     textures: {
       provide: (fn: TextureProvider): (() => void) => {
@@ -465,20 +689,57 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         state.outlinesStale = true;
       },
 
-      state: (): DebugSwitches => ({ ...state.debug })
+      verifyFrames: (on: boolean): void => deps.demand.verifyFrames(on),
+
+      kept: (on: boolean): void => deps.kept.enabled(on),
+
+      overlays: (): readonly OverlayReport[] => overlayReports(sctx),
+
+      state: (): DebugSwitches => ({
+        ...state.debug,
+        verifyFrames: deps.demand.verifying(),
+        kept: deps.kept.isOn()
+      })
     },
 
     filters: {
-      set: (entity: Entity, slots: readonly FilterSlot[]): void => setFilters(state, entity, slots)
+      set: (entity: Entity, slots: readonly FilterSlot[]): void =>
+        setFilters(state, entity, slots, deps.demand.mark, deps.kept),
+
+      area: (entity: Entity, area: readonly [number, number, number, number] | undefined): void =>
+        setArea(sctx, entity, area),
+
+      warm: (filter: PixiFilter): Promise<boolean> => warmFilter(sctx, filter)
     },
 
-    renderPasses: (): number => renderPassesOf(state),
+    renderPasses: (): number => renderPassesOf(state, ctx.state.kept),
 
     root: (): PixiContainer | undefined => state.root,
 
     layerContainer: (name: string): PixiContainer | undefined => layerContainer(state, name),
 
     layerOf: (entity: Entity): string | undefined => layerOf(sctx, entity),
+
+    stepOverlays: (): void => stepOverlays(sctx),
+
+    drainOverlayEvents: (monitor: OverlayEventSink): void => drainOverlayEvents(sctx, monitor),
+
+    warmStep: (): boolean => warmStep(sctx),
+
+    onWarm: (fn: WarmListener): void => {
+      state.warm.listeners.push(fn);
+    },
+
+    loopsHeld: (entity: Entity, reveals?: "alpha" | "place" | "both"): boolean =>
+      loopsHeld(sctx, entity) || unseenHolds(sctx, entity, reveals),
+
+    takeRedraws: (): number => {
+      const redraws = state.redraws;
+
+      state.redraws = 0;
+
+      return redraws;
+    },
 
     counts: (): SyncCounts => ({
       views: state.views.size,
@@ -506,6 +767,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
         ecs.onRemoved(Shape, markRemoved),
         ecs.onRemoved(Display, markRemoved),
         ecs.onRemoved(Parent, markReparented),
+        ...watchOverlays(sctx),
         ecs.system(createSyncSystem(pass))
       );
 

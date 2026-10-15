@@ -1,6 +1,6 @@
 # Configuration
 
-Global config and the config of every plugin, with defaults. A game sets them in `index.ts`: `referenceLong` and `pluginConfigs` of `defineGameApp`. The page, the native app, the system plugins and the save live in `config.ts`, see [config.ts of a game](#configts-of-a-game).
+Global config and the config of every plugin, with defaults. A game sets them in `index.ts`: `orientation`, `referenceSide`, `referenceLong` and `pluginConfigs` of `defineGameApp`. The page, the native app, the system plugins and the save live in `config.ts`, see [config.ts of a game](#configts-of-a-game).
 
 ## Global
 
@@ -20,10 +20,11 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 
 | Plugin | Key | Type | Default | Meaning |
 |---|---|---|---|---|
-| `time` | `maxFps` | `30 \| 60 \| 120` | `60` | Frame rate cap |
+| `time` | `maxFps` | `30 \| 60 \| 120` | `60` | Frame rate cap; the top of the ladder with `adaptive` |
 | `time` | `maxDeltaMs` | `number` | `50` | Upper bound of one frame's delta in milliseconds |
 | `time` | `idleFps` | `0 \| 30` | `30` | Frame rate cap of an idle screen. `0` turns the idle cap off. Any plugin lifts it with `wake()` |
 | `time` | `idleAfterMs` | `number` | `2000` | Unscaled milliseconds without a `wake()` after which the loop drops to `idleFps` |
+| `time` | `adaptive` | `false \| { floor: 30 \| 60 }` | `false` | Adaptive frame rate: the highest divisor of the display rate at or below `maxFps`, down one step when drawn frames come late, up again after steady room, never below `floor`. Off in a headless app and on a fake clock. See the [time README](../src/plugins/time/README.md) |
 | `lifecycle` | none | | | The plugin has no config |
 | `model` | `playerProvider` | `PlayerStateProvider \| undefined` | `undefined` | The save seam. `undefined` means an in-memory provider: the save lives as long as the app does |
 | `model` | `initialPlayer` | `Json` | `{}` | Player state of a new player. Deep-cloned |
@@ -31,6 +32,7 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `model` | `seed` | `"from-save" \| number` | `"from-save"` | `"from-save"`: a new player gets a random seed once. A number fixes it for tests |
 | `model` | `schemaVersion` | `number` | `1` | Version of the save schema this build writes |
 | `model` | `migrations` | `readonly Migration[]` | `[]` | Ordered chain. `up` of `from: n` produces version `n + 1` |
+| `debug` | none | | | The plugin has no config. `app.debug.overlay.open({ mode? })`, `close()`, `toggle()`, `isOpen()` drive the editor's overlay on a page with the agent and answer `false` elsewhere; the ui extra `DebugTrigger()` calls `open()` after five taps within three seconds of wall time. The start mode is `config.ts` `debug.overlay` |
 | `clock` | `source` | `ClockSource \| undefined` | `undefined` | Time source. `undefined` means the system source. Tests pass `fakeClock()` |
 | `flow` | `mainFlow` | `AnyFlow \| undefined` | `undefined` | The top-level flow. Required before `run()` |
 | `flow` | `safeNode` | `string \| undefined` | `undefined` | Path of the checkpoint entered after a failed retry. `undefined` means the main flow's `start` |
@@ -42,8 +44,14 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `world` | `reconciledEvent` | `boolean` | `false` | Emit `world:reconciled` after every reconcile (dev tools) |
 | `renderer` | `mount` | `string \| undefined` | `undefined` | Selector of the mount element. `undefined` keeps the renderer inert |
 | `renderer` | `preference` | `"webgpu" \| "webgl"` | `"webgpu"` | Preferred backend; Pixi falls back to WebGL |
-| `renderer` | `background`, `antialias`, `maxResolution`, `aspect`, `poolLimit`, `unsupportedMessage`, `loadPixi` | | see the plugin README | Host, viewport and pool settings; `loadPixi` is the lazy loader, a test passes a fake |
-| `renderer` | `debug` | `{ nineSlice: boolean }` | `{ nineSlice: false }` | Outline every nine-slice from the start; `sync.debug.nineSlice(on)` switches it live |
+| `renderer` | `background`, `antialias`, `aspect`, `poolLimit`, `unsupportedMessage`, `loadPixi` | | see the plugin README | Host, viewport and pool settings; `loadPixi` is the lazy loader, a test passes a fake |
+| `renderer` | `debug` | `{ nineSlice?: boolean; verifyFrames?: boolean; kept?: boolean }` | `{ nineSlice: false, verifyFrames: false, kept: true }` | Outline every nine-slice from the start; `sync.debug.nineSlice(on)` switches it live. `verifyFrames` (dev and debug builds only) checks every skipped frame, and every kept picture, against the frame drawn live, by pixels. `kept: false` draws every filtered view live; `sync.debug.kept(on)` switches it live |
+| `renderer` | `keptMb` | `number` | `64` | MiB the kept pictures may hold: a filtered view whose subtree and filter values did not change is drawn as one quad from an engine-owned texture, also while it moves; the least recently drawn picture goes first when the budget is full. `0` keeps none. Not a finite number of at least 0 throws at `createApp` |
+| `renderer` | `onDemand` | `boolean` | `false` | Draw a frame only when something on the screen changed: a written view, a filter value, a reported adapter, a resize, a wake of `time`, a waiting capture. The loop keeps its rate. A game that writes into its own `Display` objects calls `renderer.invalidate(entity)` before the write |
+| `renderer` | `maxResolution` | `number` | `2` | Cap of `devicePixelRatio`; a change of the ratio is followed from the next frame. A player's graphics setting is applied by `renderer.monitor.setResolution` from an effect |
+| `renderer` | `poolTrim` | `{ restMs: number; aboveMb: number } \| false` | `{ restMs: 1000, aboveMb: 16 }` | Gives back the render targets Pixi's texture pool keeps between frames (filter passes, a blur's ping-pong), strictly between frames: once the screen drew nothing for `restMs` (`onDemand`), `restMs` after a scene change, and on a pause. A rest or a scene change trims only when the targets grew by `aboveMb` MiB since the last trim; a pause trims whatever grew. `false` keeps them until the app stops. Neither `false` nor two finite numbers of at least 0 throws at `createApp` |
+| `renderer` | `warm` | `number` | `1` | Probe draws per drawn frame that create the GPU pipelines the game will need while it loads: sprites, graphics, text, particles and every filter `effects` registers with the stages of its inputs, on the canvas and on a texture, with and without a clip (one draw on WebGL). Drawn before the frame and cleared by it: nothing shows. `0` turns the warm-up off: every pipeline is created in the first frame that draws with it. Not a whole number from 0 to 16 throws at `createApp` |
+| `renderer` | `monitor` | `{ budgetMs: number \| "rate"; frames: number }` | `{ budgetMs: "rate", frames: 1024 }` | Agent builds: a frame over the budget is a spike (`"rate"`: one frame of the frame's rate, 8.33 ms at 120 fps, 16.7 ms at 60); the ring keeps `frames` (64 to 16384) |
 | `input` | `tapSlopPx`, `longPressMs`, `dragStartPx`, `swipeMinPx`, `swipeMaxMs` | `number` | `12`, `450`, `8`, `48`, `300` | Gesture thresholds in reference px and ms |
 | `input` | `cursor` | `{ control: string; idle: string }` | `{ control: "pointer", idle: "" }` | CSS cursor over a control and elsewhere |
 | `input` | `traceStepPx` | `number` | `32` | Reference px between two hit tests along the finger's path inside one frame of a trace. Keep it below the shortest cell span |
@@ -51,11 +59,11 @@ Set with `defineGameApp({ pluginConfigs: { <plugin>: { ... } } })`, or `createAp
 | `assets` | `manifest` | `string \| Manifest \| undefined` | `undefined` | Manifest URL, or the parsed file in a test |
 | `assets` | `textureBudgetMb` | `number` | `192` | Texture memory budget for the LRU unload |
 | `assets` | `preloadDepth` | `number` | `2` | Graph edges walked for the preload at a rest node |
-| `assets` | `baseUrl`, `io` | | `undefined` | The CDN seam and the fetch/decode/texture seam a test replaces |
+| `assets` | `baseUrl`, `io` | | `undefined` | The CDN seam and the fetch/decode/texture seam a test replaces. A bundle's own options are not config: its feature's `assets.ts` sets them, `defineBundles({ ep01: { tier: "feature", release: "leave", mipmaps: ["items/**"] } })` |
 | `anim` | `maxTracks` | `number` | `2000` | Dev guard: one warning each time the running track count rises past it. Durations live in the steps, never here |
 | `i18n` | `locale` | `string` | `"en"` | The locale at start |
 | `i18n` | `fallback` | `string` | `"en"` | The locale a missing key is read from before it is reported missing |
-| `i18n` | `locales` | `Record<string, module \| loader>` | `{}` | Compiled modules outside features, per locale |
+| `i18n` | `locales` | `Record<string, module \| loader>` | `{}` | Compiled modules outside features, per locale. A sub-feature's modules are not here: the sub-feature registers them, and they travel with its bundle |
 | `text` | `fonts` | `{ body, digits }` | `{ body: "ui.font-body", digits: "ui.font-digits" }` | The two boot fonts behind the built-in styles `body` and `digits` |
 | `ui` | `tapTargetPt` | `number` | `44` | The smallest tap target `lint()` accepts |
 | `ui` | `breakpoints` | `{ tall, wide }` | `{ tall: 2, wide: 1.5 }` | Aspect thresholds of the `when` style variants |
@@ -95,3 +103,4 @@ export default { page: { title: "mini-game" } } satisfies GameConfig;
 | `system` | `readonly SystemName[]` | `[]` | `lifecycle`, `back`, `haptics`, `keepAwake`, `store`: the system plugins the shell wires |
 | `save` | `"memory" \| "local" \| "store"` | `"memory"` | Where the player's save lives |
 | `assets.layers` | `Record<string, string>` | `{}` | Asset layers by folder: `{ shared: "ui" }` |
+| `debug.overlay` | `"closed" \| "pill" \| "open"` | `"closed"` | How the editor's overlay shows when a debug page starts: `"pill"` and `"open"` (the card) call `app.debug.overlay.open` right after the agents started. Only a page with the agent reads it |

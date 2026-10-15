@@ -20,7 +20,8 @@ describe("resolveConfig", () => {
       native: undefined,
       system: [],
       save: "memory",
-      assets: { layers: {} }
+      assets: { layers: {} },
+      debug: { overlay: "closed" }
     });
   });
 
@@ -37,10 +38,24 @@ describe("resolveConfig", () => {
       native: { name: "Лесной городок", identifier: "com.mokulabs.timber", targets: ["ios"] },
       system: ["lifecycle", "back", "haptics", "keepAwake"],
       save: "local",
-      assets: { layers: { shared: "ui" } }
+      assets: { layers: { shared: "ui" } },
+      debug: { overlay: "pill" }
     } satisfies GameConfig;
 
     expect(resolveConfig(config)).toEqual({ ...config, assets: { layers: { shared: "ui" } } });
+  });
+
+  it("debug.overlay defaults to closed; pill and open pass; another value throws naming it", () => {
+    expect(resolveConfig({ page: { title: "T" }, debug: {} }).debug).toEqual({ overlay: "closed" });
+    expect(resolveConfig({ page: { title: "T" }, debug: { overlay: "open" } }).debug).toEqual({
+      overlay: "open"
+    });
+
+    const config = { page: { title: "T" }, debug: { overlay: "card" } } as unknown as GameConfig;
+
+    expect(() => resolveConfig(config)).toThrow(
+      new Error('[game] config.ts: debug.overlay must be "closed", "pill" or "open", got "card".')
+    );
   });
 
   it("does not share the default lists between two configs", () => {

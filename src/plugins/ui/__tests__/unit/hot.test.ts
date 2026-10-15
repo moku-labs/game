@@ -361,6 +361,15 @@ describe("the swap: what it replaces", () => {
     expect(replaceStrings).toHaveBeenCalledExactlyOnceWith("pt-BR", ordersRu);
   });
 
+  it("replaces the strings of a sub-feature's generated module as its locale", () => {
+    const { swap, replaceStrings } = installed();
+
+    swap({ default: ordersRu }, "/game/generated/strings.ep01.ru.ts");
+    swap({ default: ordersRu }, "/game/generated/strings.ts");
+
+    expect(replaceStrings).toHaveBeenCalledExactlyOnceWith("ru", ordersRu);
+  });
+
   it("takes a record of functions for strings only in a generated strings file", () => {
     const { swap, replaceStrings } = installed();
 

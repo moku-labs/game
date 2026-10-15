@@ -18,7 +18,6 @@ import type { Entity } from "../../world/types";
 import { UI_OWNER } from "../components";
 import type { LayoutModule, Rect } from "../layout/types";
 import type { TextInputLook, UiCtx } from "../types";
-import { visualRectOf } from "../visual";
 import {
   configureInput,
   createHiddenInput,
@@ -40,6 +39,7 @@ import {
   type PartBox,
   paddingOf
 } from "./field-layout";
+import { rootRectOf } from "./hosts";
 import type {
   Composing,
   DescriptionNode,
@@ -800,7 +800,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
 
     // Find the rect the field is drawn at, in screen px.
     const viewport = ctx.deps.renderer.viewport;
-    const drawn = visualRectOf(field, lookup);
+    const drawn = rootRectOf(ctx, state, field, lookup);
     const topLeft = viewport.toScreen({ x: drawn.x, y: drawn.y });
     const bottomRight = viewport.toScreen({ x: drawn.x + drawn.w, y: drawn.y + drawn.h });
     const rect = {
@@ -864,7 +864,7 @@ export function createFields(ctx: UiCtx, links: FieldLinks): Fields {
       if (!isTopField) continue;
       if (state.exiting.has(field.entity)) continue;
 
-      const rect = visualRectOf(element, lookup);
+      const rect = rootRectOf(ctx, state, element, lookup);
 
       if (inside(point, { ...rect, y: rect.y - raise })) return setupOf(field);
     }

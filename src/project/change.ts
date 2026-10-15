@@ -17,12 +17,41 @@ function pathsOf(entry: ProjectIndex["symbols"][string]): string[] {
 }
 
 /**
+ * The feature names whose entry differs between two `features` tables: added, removed, or with
+ * another folder or parent.
+ *
+ * @param before - The table before the batch, when the index has one.
+ * @param after - The table after the batch, when the index has one.
+ * @returns The names, sorted.
+ * @example
+ * ```ts
+ * changedFeatures({ a: { dir: "features/a" } }, { b: { dir: "features/b" } }); // ["a", "b"]
+ * ```
+ */
+function changedFeatures(
+  before: ProjectIndex["features"] = {},
+  after: ProjectIndex["features"] = {}
+): string[] {
+  const names = new Set([...Object.keys(before), ...Object.keys(after)]);
+
+  return [...names]
+    .filter(name => {
+      const was = before[name];
+      const is = after[name];
+
+      return was?.dir !== is?.dir || was?.parent !== is?.parent;
+    })
+    .toSorted();
+}
+
+/**
  * Compares the index before a batch with the index after it.
  *
  * @param before - The index before the batch.
  * @param after - The index after the batch.
  * @param files - The paths whose bytes changed, appeared or vanished.
- * @returns The change: the new revision, the files sorted, the moves and the removed keys.
+ * @returns The change: the new revision, the files sorted, the moves, the removed keys and the
+ *   features that moved, when some did.
  */
 export function diffIndexes(
   before: ProjectIndex,
@@ -53,5 +82,13 @@ export function diffIndexes(
     }
   }
 
-  return { revision: after.revision, files: files.toSorted(), moved, removed };
+  const features = changedFeatures(before.features, after.features);
+
+  return {
+    revision: after.revision,
+    files: files.toSorted(),
+    moved,
+    removed,
+    ...(features.length === 0 ? {} : { features })
+  };
 }

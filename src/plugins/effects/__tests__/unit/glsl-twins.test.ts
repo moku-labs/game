@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Glow, Outline } from "../../filters/builtins";
 import { GLOW_GLSL } from "../../filters/glow-glsl";
 import { GLOW_WGSL } from "../../filters/glow-wgsl";
+import { brokenMark } from "../../filters/mark";
 import { OUTLINE_GLSL } from "../../filters/outline-glsl";
 import { OUTLINE_WGSL } from "../../filters/outline-wgsl";
 
@@ -136,5 +137,22 @@ describe("the Outline GLSL", () => {
     expect(OUTLINE_GLSL).toContain(
       "finalColor = source + vec4(color * line, line) * (1.0 - source.a);"
     );
+  });
+});
+
+describe("the dev mark", () => {
+  it("draws the WGSL's stripes in its GLSL: the same width, mix, floor of alpha and magenta", () => {
+    const { source, glsl, id } = brokenMark().filter;
+
+    expect(id).toBe("effects.broken-mark");
+    expect(brokenMark()).toBe(brokenMark());
+
+    for (const constant of ["/ 12.0", "0.45 * stripe", "max(c.a, 0.6)", "(1.0, 0.0, 1.0, 1.0)"]) {
+      expect(source).toContain(constant);
+      expect(glsl).toContain(constant);
+    }
+
+    expect(source).toContain("uv * gfu.uInputSize.xy");
+    expect(glsl).toContain("vTextureCoord * uInputSize.xy");
   });
 });

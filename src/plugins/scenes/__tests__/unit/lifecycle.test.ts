@@ -100,6 +100,21 @@ describe("stopScenes", () => {
     expect(mock.world.calls).toEqual([]);
   });
 
+  // Bug: a stale list survives a restart of the app.
+  it("forgets the named list", async () => {
+    const mock = createMockScenes();
+
+    mock.flow.features.push({ name: "menu", description: { scenes: [homeScene] } });
+    mock.start();
+    await mock.enter({ scene: "home", rest: true });
+
+    expect(mock.state.named).toEqual(["home"]);
+
+    mock.stop();
+
+    expect(mock.state.named).toEqual([]);
+  });
+
   it("is safe when the plugin never started", () => {
     const mock = createMockScenes();
 

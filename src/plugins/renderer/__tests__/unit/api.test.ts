@@ -12,6 +12,8 @@ describe("renderer api", () => {
     expect(Object.keys(mock.api).toSorted()).toEqual([
       "capture",
       "host",
+      "invalidate",
+      "monitor",
       "stats",
       "sync",
       "viewport"
@@ -23,7 +25,8 @@ describe("renderer api", () => {
       "gl",
       "kind",
       "pixi",
-      "ready"
+      "ready",
+      "resolution"
     ]);
     expect(Object.keys(mock.api.sync).toSorted()).toEqual([
       "boundsOf",
@@ -35,6 +38,7 @@ describe("renderer api", () => {
       "hitAll",
       "hitBoxOf",
       "hitTest",
+      "loopsHeld",
       "renderPasses",
       "textures"
     ]);
@@ -46,9 +50,15 @@ describe("renderer api", () => {
       "slice"
     ]);
     expect(Object.keys(mock.api.sync.displays)).toEqual(["provide"]);
-    expect(Object.keys(mock.api.sync.filters)).toEqual(["set"]);
+    expect(Object.keys(mock.api.sync.filters).toSorted()).toEqual(["area", "set", "warm"]);
     expect(Object.keys(mock.api.sync.fonts).toSorted()).toEqual(["install", "installed"]);
-    expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual(["nineSlice", "state"]);
+    expect(Object.keys(mock.api.sync.debug).toSorted()).toEqual([
+      "kept",
+      "nineSlice",
+      "overlays",
+      "state",
+      "verifyFrames"
+    ]);
   });
 
   it("answers nothing about a renderer that never started", () => {
@@ -91,10 +101,11 @@ describe("renderer api", () => {
     });
   });
 
-  it("returns a fresh size object every call", () => {
+  // Spec 25 F11 reverses the old rule ("a fresh size object every call"): one frozen object until the frame changes.
+  it("returns the same size object every call while the frame stays", () => {
     const mock = createMockRenderer({ dom: false });
 
-    expect(mock.api.viewport.size()).not.toBe(mock.api.viewport.size());
+    expect(mock.api.viewport.size()).toBe(mock.api.viewport.size());
   });
 
   it("takes texture providers while inert and removes them once", () => {

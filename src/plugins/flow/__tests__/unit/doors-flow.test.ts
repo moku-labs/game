@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Json } from "../../../model/types";
 import type { ScenesApi } from "../../../scenes/types";
-import { answerCommand, bookmarkCommand, restoreCommand, walkCommand } from "../../control";
+import {
+  answerCommand,
+  bookmarkCommand,
+  restoreCommand,
+  saveExportCommand,
+  saveImportCommand,
+  walkCommand
+} from "../../control";
 import { read } from "../../doors/read";
 import { run } from "../../doors/run";
+import { cheatsOf } from "../../doors/session";
 import {
   cheatsSource,
   graphSource,
@@ -447,5 +455,112 @@ describe("flow commands", () => {
     await expect(run(fake.app, restoreCommand, { repro })).rejects.toThrow(
       "The route is not a list of route steps"
     );
+  });
+});
+
+/**
+ * Gives the fake app a store whose flush is recorded next to the restores.
+ *
+ * @param fake - The fake app.
+ * @returns The app with the store, and the calls in order.
+ */
+const withStore = (fake: DoorsFake) => {
+  const calls: string[] = [];
+  const flow = {
+    ...fake.app.flow,
+    restore: async (entered: Parameters<DoorsFake["app"]["flow"]["restore"]>[0]) => {
+      calls.push(`restore ${entered.path}`);
+      await fake.app.flow.restore(entered);
+    }
+  };
+  const store = {
+    snapshot: fake.app.model.store.snapshot,
+    flush: async (): Promise<void> => {
+      calls.push("flush");
+    }
+  };
+
+  return { app: { ...fake.app, flow, model: { store } }, calls };
+};
+
+/** A save as game.saveExport answers it. */
+const save = {
+  player: { coins: 40 },
+  session: { taps: 2 },
+  rng: { seed: 42, streams: { dice: 5 } }
+};
+
+describe("the save transfer", () => {
+  it("game.saveExport answers the snapshot and runs on the read profile", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const fake = createDoorsFake();
+    const { app } = withStore(fake);
+
+    fake.commit({ coins: 40 });
+
+    const ran = await run(app, saveExportCommand, {});
+
+    expect(saveExportCommand.effect).toBe("read");
+    expect(ran.value).toEqual({
+      player: { coins: 40 },
+      session: {},
+      rng: { seed: 1, streams: {} }
+    });
+    expect(ran.state.tainted).toBe(false);
+  });
+
+  it("game.saveImport restores the exported save at the main flow's start, then flushes the store", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+    const { app, calls } = withStore(fake);
+
+    const ran = await run(app, saveImportCommand, { save });
+
+    expect(ran.value).toEqual({ restored: true });
+    expect(fake.restored).toEqual([
+      { path: "home", input: noPayload, ...save, graph: expect.any(String) }
+    ]);
+    expect(calls).toEqual(["restore home", "flush"]);
+    expect(ran.state.tainted).toBe(true);
+    expect(cheatsOf(app)).toMatchObject([{ id: "game.saveImport", input: { save } }]);
+  });
+
+  it("game.saveImport is refused with controlReadOnly on the read profile, before anything is restored", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const fake = createDoorsFake();
+    const { app, calls } = withStore(fake);
+    const refused = await run(app, saveImportCommand, { save }).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    expect(Reflect.get(Object(refused), "reason")).toBe("read-only");
+    expect(calls).toEqual([]);
+    expect(fake.restored).toEqual([]);
+  });
+
+  it("game.saveImport runs on the full profile", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    vi.stubGlobal("__MOKU_GAME_CONTROL__", true);
+    const { app, calls } = withStore(createDoorsFake());
+
+    await expect(run(app, saveImportCommand, { save })).resolves.toMatchObject({
+      value: { restored: true }
+    });
+    expect(calls).toEqual(["restore home", "flush"]);
+  });
+
+  it.each([
+    ["no rng", { player: {}, session: {} }],
+    ["a list", [save]]
+  ] as const)("game.saveImport refuses a save with %s and restores nothing", async (_name, value) => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const fake = createDoorsFake();
+    const { app, calls } = withStore(fake);
+
+    await expect(run(app, saveImportCommand, { save: value as Json })).rejects.toThrow(
+      "[game] game.saveImport needs { player, session, rng } of game.saveExport."
+    );
+    expect(calls).toEqual([]);
   });
 });

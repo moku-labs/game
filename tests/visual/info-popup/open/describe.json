@@ -319,6 +319,9 @@
           "y": 0
         },
         "Escapable": true,
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "infoScreen",
           "projection": "InfoPopup"
@@ -362,6 +365,9 @@
           "x": 505,
           "y": 645
         },
+        "Order": {
+          "value": -0.499755859375
+        },
         "Parent": {
           "key": "infoPanel",
           "projection": "InfoPopup"
@@ -387,6 +393,9 @@
           "w": 320,
           "x": 380,
           "y": 827
+        },
+        "Order": {
+          "value": -0.4996337890625
         },
         "Parent": {
           "key": "infoPanel",
@@ -431,6 +440,9 @@
           "x": 220,
           "y": 445
         },
+        "Order": {
+          "value": -0.499755859375
+        },
         "Parent": {
           "key": "infoScreen",
           "projection": "InfoPopup"
@@ -469,6 +481,9 @@
           "w": 120,
           "x": 480,
           "y": 493
+        },
+        "Order": {
+          "value": -0.4998779296875
         },
         "Parent": {
           "key": "infoPanel",
@@ -549,6 +564,9 @@
           "x": 505,
           "y": 432
         },
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "homeScreen",
           "projection": "home.screen"
@@ -571,6 +589,9 @@
       "components": {
         "Layer": {
           "name": "ui"
+        },
+        "Order": {
+          "value": -1
         }
       },
       "key": "home.screen",
@@ -588,7 +609,7 @@
           "name": "ui"
         },
         "Order": {
-          "value": 0
+          "value": -1
         },
         "Shape": {
           "alpha": 1,
@@ -624,6 +645,9 @@
           "w": 200,
           "x": 440,
           "y": 808
+        },
+        "Order": {
+          "value": -0.4996337890625
         },
         "Parent": {
           "key": "homeScreen",
@@ -676,6 +700,9 @@
           "x": 480,
           "y": 848
         },
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "info",
           "projection": "home.screen"
@@ -713,6 +740,9 @@
           "w": 464,
           "x": 308,
           "y": 630
+        },
+        "Order": {
+          "value": -0.499755859375
         },
         "Parent": {
           "key": "homeScreen",

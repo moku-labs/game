@@ -731,8 +731,9 @@ function redraw(
 /**
  * How a `Text` becomes Pixi objects. The renderer parents, orders and frees the container like a
  * sprite and never calls any of this while it is inert, so a headless run builds nothing. The
- * `alpha` of the value is the alpha of the container, written on every create and update; the
- * renderer's SDF shader applies it once, so it draws at its value.
+ * `alpha` of the value is the alpha of the container, written on create and whenever it differs;
+ * the renderer's SDF shader applies it once, so it draws at its value. `update` answers `false`
+ * for a label it left as it was, so a renderer drawing on demand skips the frame.
  *
  * @param ctx - Domain context of the text plugin.
  * @returns The adapter `renderer.sync.displays.provide` takes.
@@ -752,19 +753,24 @@ export function createTextAdapter(ctx: TextCtx): DisplayAdapter<TextValue> {
       return container;
     },
 
-    update: (object, previous, next): void => {
+    update: (object, previous, next): boolean => {
       const pixi = ctx.deps.renderer.host.pixi();
 
-      if (pixi === undefined || object === undefined) return;
+      // Nothing was drawn: nothing drawn changes.
+      if (pixi === undefined || object === undefined) return false;
 
       const container = asContainer(object);
-
       // The alpha fades the container, so a tween on it never touches the runs.
-      container.alpha = next.alpha;
+      const alphaChanged = container.alpha !== next.alpha;
 
-      if (isCurrent(ctx, container, previous, next)) return;
+      if (alphaChanged) container.alpha = next.alpha;
+
+      // The same string, style and anchor: only a new alpha asks for a frame.
+      if (isCurrent(ctx, container, previous, next)) return alphaChanged;
 
       redraw(ctx, pixi, container, previous, next);
+
+      return true;
     },
 
     destroy: (object): void => {

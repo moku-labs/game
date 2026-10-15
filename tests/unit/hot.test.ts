@@ -105,6 +105,7 @@ describe("hot()", () => {
     expect(filter.test("/game/features/board/effects.ts")).toBe(true);
     expect(filter.test("/game/generated/strings.ru.ts")).toBe(true);
     expect(filter.test("/game/generated/strings.pt-BR.ts")).toBe(true);
+    expect(filter.test("/game/generated/strings.ep01.ru.ts")).toBe(true);
     expect(filter.test("/game/generated/assets.ts")).toBe(false);
   });
 
@@ -190,7 +191,7 @@ describe("hot()", () => {
 
   it("anchors the view names and the kind folders in one default filter", () => {
     expect(register(hot()).filter.source).toBe(
-      String.raw`(\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.[\w-]+\.ts|` +
+      String.raw`(\.tsx|\/styles\.ts|\/view\.ts|\/animations\.ts|\/effects\.ts|\/generated\/strings\.(?:[\w-]+\.)?[\w-]+\.ts|` +
         String.raw`\/(?:styles|motion|effects|views)\/[^/]+\.ts|\/world\/(?:projections|layout)\/[^/]+\.ts|` +
         String.raw`\/\.moku\/assets-stamp\.ts)$`
     );
@@ -228,7 +229,8 @@ describe("hot()", () => {
     for (const relative of [
       "features/board/animations.ts",
       "features/board/effects.ts",
-      "generated/strings.ru.ts"
+      "generated/strings.ru.ts",
+      "generated/strings.ep01.ru.ts"
     ]) {
       const file = await writeTemp(relative);
       const loaded = await load({ path: file });

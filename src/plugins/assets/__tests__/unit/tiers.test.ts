@@ -1,7 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { bootTiers, isPermanent, loadBundle } from "../../tiers";
 import type { AssetsCtx, Manifest } from "../../types";
-import { createMockAssets, type MockAssets, manifestOf, packedManifest } from "./mock-assets";
+import {
+  createMockAssets,
+  leaving,
+  type MockAssets,
+  manifestOf,
+  packedManifest
+} from "./mock-assets";
 
 const boardManifest = manifestOf({
   board: { feature: "board", tier: "scene", keys: ["board.cell", "board.item"] }
@@ -127,6 +133,34 @@ describe("isPermanent", () => {
     expect(isPermanent("scene")).toBe(false);
     expect(isPermanent("feature")).toBe(false);
     expect(isPermanent("lazy")).toBe(false);
+  });
+});
+
+describe("loadBundle in the performance log", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("names the load in an agent build, and nowhere without the flag", async () => {
+    const plain = createMockAssets({ manifest: boardManifest });
+
+    await plain.start();
+    await loadBundle(plain.assetsCtx, "board", undefined, "request");
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const agent = createMockAssets({ manifest: boardManifest });
+
+    await agent.start();
+    await loadBundle(agent.assetsCtx, "board", undefined, "request");
+
+    expect(plain.renderer.api.monitor.event).not.toHaveBeenCalled();
+    expect(agent.renderer.api.monitor.event).toHaveBeenCalledWith("bundle", {
+      bundle: "board",
+      action: "load",
+      tier: "scene",
+      mb: 0.126,
+      reason: "request"
+    });
   });
 });
 
@@ -800,5 +834,295 @@ describe("a file the protocol answers with index.html", () => {
     await mock.start();
 
     expect(Object.keys(mock.ctx.state.manifest.bundles)).toEqual(["board"]);
+  });
+});
+
+/** A companion whose `load` waits until the test lets it go. */
+type HeldCompanion = {
+  load: ReturnType<typeof vi.fn<(bundle: string) => Promise<void>>>;
+  unload: ReturnType<typeof vi.fn<(bundle: string) => void>>;
+  resolve(): void;
+  reject(error: unknown): void;
+};
+
+/**
+ * Creates a companion whose every `load` waits for `resolve` or `reject`.
+ *
+ * @returns The companion and the two switches.
+ */
+function heldCompanion(): HeldCompanion {
+  const waiting: Array<{ resolve: () => void; reject: (error: unknown) => void }> = [];
+
+  return {
+    load: vi.fn(
+      (_bundle: string) =>
+        new Promise<void>((resolve, reject) => {
+          waiting.push({ resolve, reject });
+        })
+    ),
+    unload: vi.fn(),
+    resolve: () => {
+      for (const entry of waiting.splice(0)) entry.resolve();
+    },
+    reject: (error: unknown) => {
+      for (const entry of waiting.splice(0)) entry.reject(error);
+    }
+  };
+}
+
+/**
+ * The names of the events a mock recorded.
+ *
+ * @param mock - The mock plugin.
+ * @returns Their names, in order.
+ */
+function eventsOf(mock: MockAssets): string[] {
+  return mock.emitted.map(entry => entry.name);
+}
+
+describe("loadBundle with companions", () => {
+  it("calls a companion's load once with the bundle, and publishes the bundle only after it resolved", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+    const companion = heldCompanion();
+
+    await mock.start();
+    mock.api.companions.add(companion);
+
+    const first = loadBundle(mock.assetsCtx, "board", undefined, "enter");
+    const second = loadBundle(mock.assetsCtx, "board", undefined, "request");
+    let settled = false;
+    const watched = first.then(() => {
+      settled = true;
+    });
+
+    await tick();
+
+    // Every file arrived; the strings of the bundle did not.
+    expect(mock.io.created).toHaveLength(2);
+    expect(mock.ctx.state.records.get("board")?.status).toBe("loading");
+    expect(eventsOf(mock)).not.toContain("assets:bundle-loaded");
+    expect(settled).toBe(false);
+
+    companion.resolve();
+    await Promise.all([watched, second]);
+
+    expect(companion.load.mock.calls).toEqual([["board"]]);
+    expect(eventsOf(mock)).toContain("assets:bundle-loaded");
+    expect(mock.api.isLoaded("board")).toBe(true);
+  });
+
+  it("calls no load for a bundle that is already loaded, and none headless", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+    const headless = createMockAssets({ manifest: boardManifest, io: undefined });
+    const companion = { load: vi.fn(async () => undefined), unload: vi.fn() };
+
+    await mock.start();
+    await headless.start();
+    await mock.api.load("board");
+    mock.api.companions.add(companion);
+    headless.api.companions.add(companion);
+    await mock.api.load("board");
+    await headless.api.load("board");
+
+    expect(companion.load).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["rejects", (companion: HeldCompanion) => companion.reject(new Error("no strings"))],
+    [
+      "throws",
+      (companion: HeldCompanion) => {
+        companion.load.mockImplementation(() => {
+          throw new Error("no strings");
+        });
+      }
+    ]
+  ])("fails the bundle when a companion's load %s: files freed, every unload called, every waiter rejected", async (how, breakIt) => {
+    const mock = createMockAssets({ manifest: boardManifest });
+    const broken = heldCompanion();
+    const fine = { load: vi.fn(async () => undefined), unload: vi.fn() };
+
+    await mock.start();
+    mock.api.companions.add(broken);
+    mock.api.companions.add(fine);
+
+    if (how === "throws") breakIt(broken);
+
+    const first = loadBundle(mock.assetsCtx, "board", undefined, "enter");
+    const second = loadBundle(mock.assetsCtx, "board", undefined, "request");
+    // Both waiters are watched at once: a companion that throws fails the load within the tick.
+    const settled = Promise.allSettled([first, second]);
+
+    await tick();
+    if (how === "rejects") breakIt(broken);
+
+    const results = await settled;
+
+    expect(results.map(result => result.status)).toEqual(["rejected", "rejected"]);
+    await expect(first).rejects.toThrow("no strings");
+    await expect(second).rejects.toThrow("no strings");
+    expect(mock.ctx.state.records.get("board")?.status).toBe("idle");
+    expect(mock.io.destroyed).toHaveLength(2);
+    expect(broken.unload.mock.calls).toEqual([["board"]]);
+    expect(fine.unload.mock.calls).toEqual([["board"]]);
+    expect(mock.log.error).toHaveBeenCalledWith("assets: bundle failed", {
+      bundle: "board",
+      error: "Error: no strings"
+    });
+    expect(eventsOf(mock)).not.toContain("assets:bundle-loaded");
+  });
+
+  it("calls the companion's unload after an aborted load", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+    const companion = { load: vi.fn(async () => undefined), unload: vi.fn() };
+
+    await mock.start();
+    mock.api.companions.add(companion);
+    mock.io.control.gated = true;
+
+    const controller = new AbortController();
+    const only = loadBundle(mock.assetsCtx, "board", controller.signal, "preload");
+
+    await tick();
+    controller.abort();
+    await expect(only).rejects.toMatchObject({ name: "AbortError" });
+    await tick();
+
+    expect(companion.unload.mock.calls).toEqual([["board"]]);
+    expect(mock.log.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadBundle of a mipmapped file", () => {
+  it("uploads it with its mip chain and keeps the borders of a nine-slice", async () => {
+    const mipmapped: Manifest = {
+      version: 1,
+      bundles: {
+        ep01: {
+          feature: "ep01",
+          tier: "lazy",
+          mb: 0.659,
+          files: [
+            {
+              key: "ep01.cup",
+              path: "features/ep01/assets/cup.png",
+              width: 336,
+              height: 288,
+              mb: 0.492,
+              mips: true
+            },
+            {
+              key: "ep01.frame",
+              path: "features/ep01/assets/frame{nine=8}.png",
+              width: 256,
+              height: 128,
+              mb: 0.167,
+              mips: true,
+              nine: { left: 8, top: 8, right: 8, bottom: 8 }
+            }
+          ]
+        }
+      }
+    };
+    const mock = createMockAssets({ manifest: mipmapped });
+
+    await mock.start();
+    await mock.api.load("ep01");
+
+    expect(mock.io.created.map(texture => [texture.from, texture.mips, texture.nine])).toEqual([
+      ["/features/ep01/assets/cup.png", true, undefined],
+      ["/features/ep01/assets/frame{nine=8}.png", true, [8, 8, 8, 8]]
+    ]);
+  });
+});
+
+describe("the declared release", () => {
+  it("warns once when the declared release disagrees with the manifest", async () => {
+    const mock = createMockAssets({ manifest: boardManifest });
+
+    mock.flow.features.push({
+      name: "board",
+      description: {
+        assets: { kind: "bundles", map: { board: { tier: "scene", release: "leave" } } }
+      }
+    });
+    await mock.start();
+
+    expect(mock.log.warn).toHaveBeenCalledExactlyOnceWith(
+      "assets: bundle release disagrees with the manifest",
+      { feature: "board", bundle: "board", declared: "leave", manifest: "budget" }
+    );
+  });
+
+  it("says nothing when both sides leave", async () => {
+    const mock = createMockAssets({ manifest: leaving(boardManifest, "board") });
+
+    mock.flow.features.push({
+      name: "board",
+      description: {
+        assets: { kind: "bundles", map: { board: { tier: "scene", release: "leave" } } }
+      }
+    });
+    await mock.start();
+
+    expect(mock.log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("the dev check of sub-feature bundles", () => {
+  /** A manifest with the bundle of the sub-feature ep01 and the flat board. */
+  const nested: Manifest = {
+    version: 1,
+    bundles: {
+      ...boardManifest.bundles,
+      ep01: {
+        feature: "ep01",
+        parent: "episodes",
+        dir: "features/episodes/ep01",
+        tier: "lazy",
+        mb: 0,
+        files: []
+      }
+    }
+  };
+
+  it("warns once for a bundle with a parent whose feature nobody registered, never for a flat one", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const mock = createMockAssets({ manifest: nested });
+
+    mock.flow.features.push({ name: "episodes", description: {} });
+    await mock.start();
+
+    expect(mock.log.warn).toHaveBeenCalledExactlyOnceWith(
+      "assets: the manifest has a bundle of a feature nobody registered",
+      {
+        bundle: "ep01",
+        feature: "ep01",
+        parent: "episodes",
+        fix: 'List it in features: [...] of "episodes".'
+      }
+    );
+
+    vi.unstubAllGlobals();
+  });
+
+  it("says nothing once the sub-feature is registered, and nothing outside dev", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const registered = createMockAssets({ manifest: nested });
+
+    registered.flow.features.push({ name: "ep01", description: {} });
+    await registered.start();
+    vi.stubGlobal("__MOKU_GAME_DEV__", false);
+
+    const built = createMockAssets({ manifest: nested });
+
+    await built.start();
+
+    expect(registered.log.warn).not.toHaveBeenCalled();
+    expect(built.log.warn).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });

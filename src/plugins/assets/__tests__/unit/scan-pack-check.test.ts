@@ -92,6 +92,14 @@ describe("checkPacked", () => {
     ]);
   });
 
+  it("names a mipmapped texture that lies on a page", () => {
+    const mipmapped: ManifestFile = { ...packed("ui.a", 2), mips: true };
+
+    expect(checkPacked(source, packOf([mipmapped, packed("ui.b", 36), click]))).toEqual([
+      'the texture "ui.a" has mipmaps, so it must stay loose, but lies on page "ui/main-0".'
+    ]);
+  });
+
   it("names a frame on a page its bundle does not list, outside its page or of another size", () => {
     const elsewhere = {
       ...packed("ui.a", 2),

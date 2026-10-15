@@ -1,7 +1,7 @@
 import { expectTypeOf } from "vitest";
-import type { Descriptor } from "../../../flow/types";
+import type { Descriptor, NodeFx } from "../../../flow/types";
 import { defineBundles, load } from "../../bundles";
-import type { BundleMap, DefineBundles, LoadBundles, Texture } from "../../types";
+import type { BundleMap, DefineBundles, LoadBundles, LoadResult, Texture } from "../../types";
 
 // ---------------------------------------------------------------------------
 // Type-level only. This file is not collected by vitest: `tsc --noEmit` is the
@@ -37,8 +37,14 @@ defineGameBundles({ board: { tier: "huge" } });
 
 // ─── the load descriptor ──────────────────────────────────────
 
-expectTypeOf(loadGameBundle("board.chains")).toEqualTypeOf<Descriptor>();
-expectTypeOf(loadGameBundle(["board", "ui"])).toEqualTypeOf<Descriptor>();
+expectTypeOf(loadGameBundle("board.chains")).toEqualTypeOf<Descriptor<LoadResult | undefined>>();
+expectTypeOf(loadGameBundle(["board", "ui"])).toEqualTypeOf<Descriptor<LoadResult | undefined>>();
+
+// A loading node reads what was loaded; an app without assets (headless) resolves undefined.
+declare const fx: NodeFx;
+
+expectTypeOf(fx(loadGameBundle("board"))).toEqualTypeOf<Promise<LoadResult | undefined>>();
+expectTypeOf(fx(load("anything"))).toEqualTypeOf<Promise<LoadResult | undefined>>();
 
 // @ts-expect-error — "bord" is not a bundle key of this game.
 loadGameBundle("bord");

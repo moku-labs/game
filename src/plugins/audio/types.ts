@@ -60,7 +60,7 @@ export type MusicOptions = { fadeMs?: number };
 
 /**
  * `music` bound to the audio asset keys of one game. `defineGame` returns it through `audioFor`;
- * the loose export accepts any string.
+ * the loose export accepts any string. The descriptor resolves nothing.
  *
  * @example
  * ```ts
@@ -70,7 +70,7 @@ export type MusicOptions = { fadeMs?: number };
 export type MusicDescriptor<Asset extends string> = (
   key: Asset | null,
   options?: MusicOptions
-) => Descriptor;
+) => Descriptor<void>;
 
 /**
  * Reads the player's volume choice out of the committed player state. Every bus it names is
@@ -82,6 +82,20 @@ export type MusicDescriptor<Asset extends string> = (
  * ```
  */
 export type Volumes = (player: Json) => Partial<Record<Bus, number>>;
+
+/**
+ * `Volumes`, written against the player type of one game: `defineGame` hands it as `volumes`, so
+ * the callback reads the game's player with no cast. The same function at run time.
+ *
+ * @example
+ * ```ts
+ * // index.ts of a game: `volumes` comes from the kit, so `player` is the game's Player.
+ * pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.music })) } }
+ * ```
+ */
+export type VolumesFor<Player> = (
+  read: (player: Player) => Partial<Record<Bus, number>>
+) => Volumes;
 
 /**
  * How a music track is played. `"decode"`: one AudioBuffer per track, gapless, about 58 MB per
@@ -155,10 +169,11 @@ export type RetiringTrack = { stream: StreamTrack; timer: ReturnType<typeof setT
  *
  * @example
  * ```ts
+ * // `volumes` comes from the game's `defineGame` kit, so `player` is the game's Player.
  * createApp({
  *   plugins: [...screen, audioPlugin],
  *   pluginConfigs: {
- *     audio: { musicFadeMs: 400, music: "stream", session: "playback", volumes: player => player.settings.audio }
+ *     audio: { musicFadeMs: 400, music: "stream", session: "playback", volumes: volumes(player => player.settings.audio) }
  *   }
  * });
  * ```
@@ -374,6 +389,9 @@ export type AudioApi = {
    * began, at most `config.journal` of them. A sound dropped before the unlock, a missing file
    * and a music switch to the track that already plays are not in it. Empty while
    * `config.journal` is 0, the default, and after the app stopped.
+   *
+   * No copy and no live view: the list and its entries are never written. Every new sound replaces the plugin's list
+   * with a new frozen one, so a list read earlier keeps what it held, and a caller cannot change the journal through it.
    *
    * @returns The journal, frozen; a later sound replaces the list and leaves this one as it was.
    * @example

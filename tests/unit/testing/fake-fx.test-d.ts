@@ -1,5 +1,5 @@
-import type { Flow } from "@moku-labs/game";
-import { defineGame, type } from "@moku-labs/game";
+import type { Assets, Flow } from "@moku-labs/game";
+import { defineGame, load, type } from "@moku-labs/game";
 import type { FakeFx, FakeFxOptions } from "@moku-labs/game/testing";
 import { fakeFx } from "@moku-labs/game/testing";
 import { describe, expectTypeOf, it } from "vitest";
@@ -98,6 +98,17 @@ describe("fakeFx", () => {
     fx.started.length = 0;
 
     expectTypeOf(fx.started).toEqualTypeOf<Flow.Descriptor[]>();
+  });
+
+  it("resolves what the descriptor declares, and records a typed descriptor as any other", () => {
+    const fake = fakeFx();
+
+    expectTypeOf(fake.fx(load("board"))).toEqualTypeOf<Promise<Assets.LoadResult | undefined>>();
+    expectTypeOf(fake.fx({ kind: "drop" })).toEqualTypeOf<Promise<unknown>>();
+
+    fake.awaited.push(load("board"));
+
+    expectTypeOf(fake.awaited).toEqualTypeOf<Flow.Descriptor[]>();
   });
 
   it("starts and emits without a value: nothing waits for either", () => {

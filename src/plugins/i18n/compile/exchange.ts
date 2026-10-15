@@ -1,8 +1,8 @@
 /**
  * @file i18n plugin, build time — the exchange with translators. `exportStrings` writes one JSON
  * file per locale with every key, the source text and the note beside it; `importStrings` checks
- * the translated files against the game, writes them into the string files of the features and
- * layers that own the keys, and compiles. Node and Bun only, reached through `src/assets.ts`.
+ * the translated files against the game, writes them into the string files of the features,
+ * sub-features and layers that own the keys, and compiles. Node and Bun only, reached through `src/assets.ts`.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -99,7 +99,7 @@ export type ImportReport = {
   locales: readonly string[];
   /** How many keys were written. */
   keys: number;
-  /** The string files of the features and layers rewritten, relative to the root, sorted. */
+  /** The string files of the features, sub-features and layers rewritten, relative to the root, sorted. */
   files: readonly string[];
 };
 

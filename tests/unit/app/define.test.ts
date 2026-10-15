@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { defineGameApp, startMoment } from "../../../src/app/define";
 import type { Assets, Flow, Model, Platform } from "../../../src/index";
 import { createApp, createPlugin, defineFeature, flowPlugin, type } from "../../../src/index";
+import { systemSource } from "../../../src/plugins/clock/system";
 import { defineFlow, defineNode } from "../../../src/plugins/flow/runner/define";
 
 vi.mock("../../../src/index", async importOriginal => {
@@ -22,7 +23,7 @@ afterEach(() => {
 /** The options `createApp` was last called with. */
 type AppOptions = {
   plugins?: readonly { name: string }[];
-  config?: { referenceLong?: number };
+  config?: { orientation?: string; referenceSide?: number; referenceLong?: number };
   pluginConfigs?: Record<string, Record<string, unknown>>;
 };
 
@@ -220,7 +221,8 @@ describe("headless", () => {
       "model",
       "time"
     ]);
-    expect(lastConfigs().time).toEqual({ maxFps: 30 });
+    // The headless app never adapts its frame rate (spec 21 G8.2).
+    expect(lastConfigs().time).toEqual({ maxFps: 30, adaptive: false });
 
     const listed = defineGameApp({
       flow: mainFlow,
@@ -426,6 +428,65 @@ describe("screen", () => {
     defineGameApp({ flow: mainFlow, player, session, referenceLong: 2100 }).headless();
     expect(lastOptions().config).toEqual({ referenceLong: 2100 });
   });
+
+  it("the frame keys reach the engine config only when the definition sets them", () => {
+    defineGameApp({ flow: mainFlow, player, session }).headless();
+    expect(lastOptions()).not.toHaveProperty("config");
+
+    defineGameApp({ flow: mainFlow, player, session, referenceSide: 390 }).headless();
+    expect(lastOptions().config).toEqual({ referenceSide: 390 });
+
+    defineGameApp({ flow: mainFlow, player, session, orientation: "landscape" }).screen();
+    expect(lastOptions().config).toEqual({ orientation: "landscape" });
+
+    const framed = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      orientation: "landscape",
+      referenceSide: 390,
+      referenceLong: 763
+    });
+    const frame = { orientation: "landscape", referenceSide: 390, referenceLong: 763 };
+
+    framed.headless();
+    expect(lastOptions().config).toEqual(frame);
+    framed.screen();
+    expect(lastOptions().config).toEqual(frame);
+  });
+
+  it("a screen app lays out in the definition's frame", async () => {
+    const portrait = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      referenceSide: 390
+    }).screen();
+
+    await portrait.app.start();
+    expect(portrait.app.renderer.viewport.size()).toMatchObject({
+      width: 390,
+      height: 520,
+      orientation: "portrait"
+    });
+    await portrait.app.stop();
+
+    const landscape = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      orientation: "landscape",
+      referenceSide: 390
+    }).screen();
+
+    await landscape.app.start();
+    expect(landscape.app.renderer.viewport.size()).toMatchObject({
+      width: 520,
+      height: 390,
+      orientation: "landscape"
+    });
+    await landscape.app.stop();
+  });
 });
 
 describe("defineGameApp", () => {
@@ -459,6 +520,37 @@ describe("defineGameApp", () => {
     );
   });
 
+  it("refuses a referenceSide that is not a finite number above 0, naming the value", () => {
+    const sides: [number, string][] = [
+      [0, "0"],
+      [-390, "-390"],
+      [Number.NaN, "NaN"],
+      [Number.POSITIVE_INFINITY, "Infinity"],
+      // A game in JavaScript, or one that casts, may pass the side as a string.
+      ["390" as unknown as number, '"390"']
+    ];
+
+    for (const [referenceSide, got] of sides) {
+      expect(() => defineGameApp({ flow: mainFlow, player, session, referenceSide })).toThrow(
+        new Error(
+          `[game] defineGameApp: referenceSide must be a finite number above 0, got ${got}.\n  Pass the short side of the design frame in reference units: defineGameApp({ referenceSide: 390, ... }).`
+        )
+      );
+    }
+    expect(createApp).not.toHaveBeenCalled();
+  });
+
+  it("refuses an orientation other than portrait or landscape", () => {
+    // The value of page.orientation in config.ts, copied into the definition with a cast.
+    const orientation = "any" as unknown as "portrait";
+
+    expect(() => defineGameApp({ flow: mainFlow, player, session, orientation })).toThrow(
+      new Error(
+        '[game] defineGameApp: orientation must be "portrait" or "landscape", got "any".\n  The layout is designed for one orientation. A native build that turns with the device sets page.orientation: "any" in config.ts.'
+      )
+    );
+  });
+
   it("defineGameApp names the list and index of a non-feature", () => {
     // A plain plugin in a feature list: a game in JavaScript, or one that casts.
     const notFeature = scorePlugin as unknown as Flow.FeaturePlugin;
@@ -482,5 +574,167 @@ describe("defineGameApp", () => {
     expect(() => defineGameApp({ flow: mainFlow, player, session, shared: notFeature })).toThrow(
       notAFeature("shared")
     );
+  });
+});
+
+/**
+ * Reads the names the last `createApp` call composed after the engine's screen set.
+ *
+ * @returns The names after `platform`.
+ */
+function namesAfterEngine(): string[] {
+  const names = (lastOptions().plugins ?? []).map(plugin => plugin.name);
+
+  return names.slice(names.indexOf("platform") + 1);
+}
+
+/**
+ * The error `defineGameApp` throws for a feature name met twice in one list.
+ *
+ * @param name - The feature name.
+ * @param first - The earlier path in the walk.
+ * @param second - The later path.
+ * @returns The expected error.
+ */
+function listedTwice(name: string, first: string, second: string): Error {
+  return new Error(
+    `[game] defineGameApp: the feature "${name}" is listed twice: ${first} and ${second}.\n  List a sub-feature only in the features of its parent.`
+  );
+}
+
+describe("feature tree", () => {
+  // Three levels: episodes → [kit, ep01 → [ep01Extra]]; each a real defineFeature result.
+  const kitFeature = defineFeature("kit", {});
+  const ep01ExtraFeature = defineFeature("ep01Extra", {});
+  const ep01Feature = defineFeature("ep01", { features: [ep01ExtraFeature] });
+  const episodesFeature = defineFeature("episodes", { features: [kitFeature, ep01Feature] });
+
+  it("screen composes a parent before its sub-features, depth first, in declaration order", () => {
+    defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      features: [homeFeature, episodesFeature, rewardFeature]
+    }).screen();
+
+    expect(namesAfterEngine()).toEqual([
+      "homeScreen",
+      "episodes",
+      "kit",
+      "ep01",
+      "ep01Extra",
+      "reward"
+    ]);
+  });
+
+  it("headless composes the logicOnly of a parent and of its sub-features", () => {
+    const { app } = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      features: [homeFeature, episodesFeature]
+    }).headless();
+    const plugins = lastOptions().plugins ?? [];
+
+    expect(plugins).toHaveLength(5);
+    expect(plugins[0]).toBe(homeFeature.logicOnly);
+    expect(plugins[1]).toBe(episodesFeature.logicOnly);
+    expect(plugins[2]).toBe(kitFeature.logicOnly);
+    expect(plugins[3]).toBe(ep01Feature.logicOnly);
+    expect(plugins[4]).toBe(ep01ExtraFeature.logicOnly);
+    expect(app.has("ep01Extra")).toBe(true);
+  });
+
+  it("headless.features may name a sub-feature alone", () => {
+    const { app } = defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      features: [episodesFeature],
+      headless: { features: [ep01Feature] }
+    }).headless();
+
+    expect(lastOptions().plugins).toEqual([ep01Feature.logicOnly, ep01ExtraFeature.logicOnly]);
+    expect(app.has("episodes")).toBe(false);
+  });
+
+  it("refuses a feature listed twice, naming both paths", () => {
+    // The same plugin listed by the game and by its parent.
+    expect(() =>
+      defineGameApp({
+        flow: mainFlow,
+        player,
+        session,
+        features: [homeFeature, episodesFeature, ep01Feature]
+      })
+    ).toThrow(listedTwice("ep01", "features[1].features[1]", "features[2]"));
+    // In the headless list, the earlier path first.
+    expect(() =>
+      defineGameApp({
+        flow: mainFlow,
+        player,
+        session,
+        headless: { features: [ep01Feature, episodesFeature] }
+      })
+    ).toThrow(listedTwice("ep01", "headless.features[0]", "headless.features[1].features[1]"));
+    // Two plugins of one name: the name counts, not the object.
+    expect(() =>
+      defineGameApp({
+        flow: mainFlow,
+        player,
+        session,
+        features: [episodesFeature, defineFeature("kit", {})]
+      })
+    ).toThrow(listedTwice("kit", "features[0].features[0]", "features[1]"));
+  });
+
+  it("names the nested path of a sub-feature entry that is not a feature", () => {
+    // A cast parent: defineFeature would refuse the plain plugin among its children.
+    const notFeature = scorePlugin as unknown as Flow.FeaturePlugin;
+    const castParent: Flow.FeaturePlugin = {
+      ...episodesFeature,
+      features: [kitFeature, notFeature]
+    };
+
+    expect(() =>
+      defineGameApp({ flow: mainFlow, player, session, features: [castParent] })
+    ).toThrow(notAFeature("features[0].features[1]"));
+  });
+
+  it("refuses shared with sub-features", () => {
+    expect(() =>
+      defineGameApp({ flow: mainFlow, player, session, shared: episodesFeature })
+    ).toThrow(
+      new Error(
+        "[game] defineGameApp: shared declares sub-features.\n  The shared layer has none: declare them in a feature of features."
+      )
+    );
+  });
+});
+
+describe("the adaptive frame rate", () => {
+  const adaptiveGame = defineGameApp({
+    flow: mainFlow,
+    player,
+    session,
+    pluginConfigs: { time: { maxFps: 120, adaptive: { floor: 60 } } }
+  });
+
+  it("a headless app never adapts", () => {
+    const { app } = adaptiveGame.headless();
+
+    expect(lastConfigs().time).toEqual({ maxFps: 120, adaptive: false });
+    expect(app.time.rate()).toMatchObject({ fps: 120, mode: "fixed" });
+  });
+
+  it("a screen app on a fake clock never adapts, and the page's screen app keeps the game's adaptive", () => {
+    const onFake = adaptiveGame.screen();
+
+    expect(onFake.app.time.rate().mode).toBe("fixed");
+
+    const onDevice = adaptiveGame.screen({ clock: systemSource() });
+
+    expect(lastConfigs().time).toEqual({ maxFps: 120, adaptive: { floor: 60 } });
+    expect(onDevice.app.time.rate()).toMatchObject({ fps: 120, mode: "auto" });
   });
 });

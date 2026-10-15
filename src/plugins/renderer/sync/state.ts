@@ -1,7 +1,7 @@
 /**
  * @file renderer/sync — state factory.
  */
-import type { DebugSwitches, SyncState } from "./types";
+import type { DebugSwitches, OverlayState, SyncState, WarmState } from "./types";
 
 /**
  * Creates an empty collection. It lives in its own non-exported function because lint rule L5
@@ -32,13 +32,70 @@ function emptyWeakSet<Value extends WeakKey>(): WeakSet<Value> {
 }
 
 /**
- * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter and
- * no slice.
+ * Creates an empty weak map. Same reason as `emptyMap`.
+ *
+ * @returns An empty weak map.
+ */
+function emptyWeakMap<Key extends WeakKey, Value>(): WeakMap<Key, Value> {
+  return new WeakMap();
+}
+
+/**
+ * Creates the empty overlay state: no overlay, no HUD part, no range. Its own non-exported function, as `emptyMap`.
+ *
+ * @returns The overlay branch of the sync state.
+ */
+function createOverlayState(): OverlayState {
+  return {
+    entities: emptySet(),
+    parts: emptySet(),
+    records: emptyMap(),
+    order: [],
+    active: undefined,
+    range: undefined,
+    offTops: emptySet(),
+    warned: emptySet(),
+    events: [],
+    wantEntries: [],
+    wantOthers: [],
+    wantSet: emptySet(),
+    flipped: emptySet(),
+    nextOff: emptySet(),
+    left: false,
+    bounds: undefined
+  };
+}
+
+/**
+ * Creates the empty warm-up state: nothing queued, nothing handed over, no probe tree. Its own non-exported function,
+ * as `emptyMap`.
+ *
+ * @returns The warm branch of the sync state.
+ */
+function createWarmState(): WarmState {
+  return {
+    queue: [],
+    head: 0,
+    filters: emptySet(),
+    waiting: emptyMap(),
+    textQueued: false,
+    textFont: undefined,
+    objects: undefined,
+    draws: 0,
+    failed: false,
+    reported: emptySet(),
+    listeners: []
+  };
+}
+
+/**
+ * Creates the initial sync state: no root, no layers, no view, no orphan, no pool, no provider, no filter, no
+ * filter area, no slice, no hidden mask, no overlay, no warm-up, no redraw counted and no unseen walk kept.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
  * @returns The sync branch of the plugin state.
  */
-export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
+export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncState {
   return {
     root: undefined,
     layerList: undefined,
@@ -59,9 +116,20 @@ export function createSyncState(debug: Readonly<DebugSwitches>): SyncState {
     added: emptySet(),
     removed: emptySet(),
     reparented: emptySet(),
-    debug: { nineSlice: debug.nineSlice },
+    orphans: emptySet(),
+    mismatched: emptySet(),
+    debug: { nineSlice: debug.nineSlice === true },
     outlinesStale: false,
     filters: emptyMap(),
+    areas: emptyMap(),
+    viewlessEntries: false,
+    warm: createWarmState(),
+    filterKinds: emptyWeakMap(),
+    objectHidden: emptyWeakMap(),
+    viewOfTop: emptyWeakMap(),
+    overlay: createOverlayState(),
+    redraws: 0,
+    held: emptyMap(),
     cleanups: []
   };
 }

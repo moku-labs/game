@@ -6,7 +6,7 @@
  * assembles the result.
  */
 import type { AliasMap } from "./aliases";
-import { type Assembly, assembleIndex } from "./assemble";
+import { type Assembly, assembleIndex, type OwnersRead } from "./assemble";
 import { type Extracted, extractFile } from "./extract/definitions";
 import { type ModuleFacts, readModule } from "./extract/module";
 import { definersOf, type Resolution } from "./extract/resolve";
@@ -165,9 +165,15 @@ function refreshExtractions(catalog: Catalog, resolution: Resolution): void {
  * @param catalog - The catalog.
  * @param manifest - The root-relative manifest path when the file exists.
  * @param aliases - The tsconfig aliases when the game declares some.
+ * @param owners - The feature units of the game, when the catalog has a root.
  * @returns The index, frozen.
  */
-export function buildIndex(catalog: Catalog, manifest?: string, aliases?: AliasMap): ProjectIndex {
+export function buildIndex(
+  catalog: Catalog,
+  manifest?: string,
+  aliases?: AliasMap,
+  owners?: OwnersRead
+): ProjectIndex {
   const files = [...catalog.records].toSorted(([first], [second]) => (first < second ? -1 : 1));
   const modules = new Map<string, ModuleFacts>();
 
@@ -177,7 +183,7 @@ export function buildIndex(catalog: Catalog, manifest?: string, aliases?: AliasM
 
   refreshExtractions(catalog, { modules, aliases });
 
-  const assembly: Assembly = { files, modules, aliases };
+  const assembly: Assembly = { files, modules, aliases, owners };
 
   return assembleIndex(assembly, manifest);
 }

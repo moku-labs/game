@@ -12,7 +12,9 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Integration: the real time, lifecycle, model, clock, flow, world and renderer
+// Integration: the real time, lifecycle, model, clock, flow, world and renderer.
+// `warm: 0`: the warm-up of spec 27 draws probes in the first frames, and the
+// frames and draws counted here are the game's own (`sync-warm.test.ts`).
 // ---------------------------------------------------------------------------
 
 type Player = { items: Array<{ id: string; level: number; x: number }> };
@@ -95,12 +97,16 @@ describe("renderer plugin integration", () => {
     expect(app.renderer.viewport.toScreen({ x: 540, y: 960 })).toEqual({ x: 540, y: 960 });
     expect(app.renderer.stats()).toEqual({
       fps: 0,
+      drawn: 0,
       frameMs: 0,
       textures: 0,
       textureMb: 0,
+      textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
-      renderPasses: 0
+      renderPasses: 0,
+      renderPassesMax: 0,
+      kept: { pictures: 0, mb: 0, retakes: 0 }
     });
 
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
@@ -123,7 +129,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -160,7 +166,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -190,7 +196,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -225,7 +231,7 @@ describe("renderer plugin integration", () => {
           initialSession: { moves: 0 },
           seed: 1
         },
-        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
       }
     });
 
@@ -289,5 +295,76 @@ describe("renderer plugin integration", () => {
     expect(dom.mount.children).toHaveLength(0);
     expect(dom.documentListeners()).toBe(0);
     expect(dom.observers[0]?.disconnected).toBe(true);
+  });
+
+  it("a late inset reaches viewport.size() within one frame of the real loop", async () => {
+    // A 1080x2400 phone: the frame is the whole mount and a 47 px notch keeps the scale at 1.
+    const dom = installFakeDom({ width: 1080, height: 2400 });
+    const pixi = createFakePixi();
+    const app = createApp({
+      plugins: [worldPlugin, rendererPlugin, boardFeature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        model: {
+          initialPlayer: { items: [{ id: "a", level: 1, x: 0 }] },
+          initialSession: { moves: 0 },
+          seed: 1
+        },
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
+      }
+    });
+
+    await app.start();
+    app.flow.run().catch(() => undefined);
+    await tick();
+
+    expect(app.renderer.viewport.size().safeArea.top).toBe(0);
+
+    // An Android WebView reports its notch after the page started.
+    dom.insets.top = 47;
+    for (const observer of dom.observers) {
+      if (observer.targets.some(target => target.dataset.mokuSafeArea === "start")) {
+        observer.fire();
+      }
+    }
+    app.time.step(16);
+
+    expect(app.renderer.viewport.size().safeArea.top).toBe(47);
+
+    await app.stop();
+  });
+
+  it("a frame that applies a pending resolution with the same CSS size keeps the viewport.size() object", async () => {
+    installFakeDom({ width: 390, height: 844, dpr: 2 });
+    const pixi = createFakePixi();
+    const app = createApp({
+      plugins: [worldPlugin, rendererPlugin, boardFeature],
+      pluginConfigs: {
+        flow: { mainFlow: main },
+        model: {
+          initialPlayer: { items: [{ id: "a", level: 1, x: 0 }] },
+          initialSession: { moves: 0 },
+          seed: 1
+        },
+        renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
+      }
+    });
+
+    await app.start();
+    app.flow.run().catch(() => undefined);
+    await tick();
+
+    const size = app.renderer.viewport.size();
+    const resizes = pixi.last().renderer.resizes.length;
+
+    // The player's graphics setting: the backing store changes, the frame does not.
+    app.renderer.monitor.setResolution(1.5);
+    app.time.step(16);
+
+    expect(pixi.last().renderer.resizes.length).toBeGreaterThan(resizes);
+    expect(app.renderer.host.resolution()).toBe(1.5);
+    expect(app.renderer.viewport.size()).toBe(size);
+
+    await app.stop();
   });
 });

@@ -120,7 +120,7 @@ function hintFor(
 }
 
 /**
- * A key that is new: spawn the entity with the view components and the projection's layer, then
+ * A key that is new: spawn the entity with the projection's layer and the view components, then
  * play the `enter` hook and the `loop` hook when the reconcile plays motions. The loop is not
  * kept with the view's handles: a change cancels those, and the loop runs until the view dies.
  * A direct reconcile plays neither hook. The view then owes its loop, which the sweep starts.
@@ -142,11 +142,20 @@ function enterEntry(
   entry: { key: string; item: unknown; peers: Peers; direct: boolean; used: Set<Hint> }
 ): void {
   const values = collectView(pctx, spec, entry.item);
+  // `Layer` first: the ecs fires `onAdded` in list order, and the `Tree` hook of `ui` reads the
+  // layer a JSX root draws in when it fires.
   const entity = pctx.deps.ecs.spawn({ kind: "projection", name: spec.name }, [
-    ...values.values(),
-    pctx.deps.components.Layer({ name: spec.layer })
+    pctx.deps.components.Layer({ name: spec.layer }),
+    ...values.values()
   ]);
-  const view = createViewRecord(entity, spec.name, entry.key, entry.item, values);
+  const view = createViewRecord(
+    entity,
+    spec.name,
+    entry.key,
+    entry.item,
+    values,
+    entry.direct ? "mount" : "change"
+  );
 
   mounted.live.set(entry.key, view);
   pctx.ctx.state.projection.byEntity.set(entity, view);
@@ -166,7 +175,7 @@ function enterEntry(
 
   if (hook !== undefined) {
     const hint = hintFor(pctx, spec.name, entry.key, entry.used);
-    const played = runHook(pctx, view, "enter", () => hook(handle, entry.item, hint));
+    const played = runHook(pctx, view, "enter", () => hook(handle, entry.item, hint, "change"));
 
     if (played?.motion !== undefined) view.handles.push(played.motion);
   }
@@ -276,7 +285,7 @@ function changeEntry(
 /**
  * A key that came back while its exit still played: the SAME view is revived, no `enter` and no
  * `change` hook runs, and one settle over the loose components brings it home. A view no motion
- * moves after that gets its pending `lift(false)`.
+ * moves after that gets its pending `lift(false)`. Its cause is the way it came back.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -297,6 +306,7 @@ function reviveEntry(
 ): void {
   cancelHandles(view);
   dequeueRevive(pctx, mounted, view, spec);
+  view.cause = entry.direct ? "mount" : "change";
 
   const next = collectView(pctx, spec, entry.item);
   const { added, removed } = diffComponents(view.rest, next, treeName(pctx));
@@ -321,7 +331,8 @@ function reviveEntry(
 
 /**
  * A live key that is gone: despawned at once without an `exit` hook, otherwise moved into the
- * despawn queue where it stays drawn until its motion ends.
+ * despawn queue where it stays drawn until its motion ends. The view leaves with the cause of the
+ * reconcile, so a removal hook can ask how it left.
  *
  * @param pctx - Domain context of the projection module.
  * @param spec - The projection spec.
@@ -342,6 +353,7 @@ function exitEntry(
   const hook = spec.motion?.exit;
 
   mounted.live.delete(view.key);
+  view.cause = entry.direct ? "mount" : "change";
 
   if (entry.direct || hook === undefined) {
     despawnView(pctx, mounted, view);
@@ -354,7 +366,7 @@ function exitEntry(
 
   const handle = createViewHandle(pctx, view, entry.peers);
   const hint = hintFor(pctx, spec.name, view.key, entry.used);
-  const played = runHook(pctx, view, "exit", () => hook(handle, view.item, hint));
+  const played = runHook(pctx, view, "exit", () => hook(handle, view.item, hint, "change"));
 
   if (played?.motion !== undefined) view.handles.push(played.motion);
   if (!stillMoving(view)) despawnView(pctx, mounted, view);

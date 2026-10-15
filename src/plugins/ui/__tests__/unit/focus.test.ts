@@ -21,6 +21,9 @@ function rootOf(patch: Partial<Root>): Root {
     element: 100,
     popup: undefined,
     covered: false,
+    cause: undefined,
+    slot: undefined,
+    slotRect: undefined,
     ...patch
   };
 }
@@ -84,6 +87,28 @@ describe("focusRoot", () => {
     const empty = rootOf({ entity: 3, element: undefined });
 
     expect(focusRoot(stateOf([hud, leaving, empty], [2]), ["ui"])?.entity).toBe(1);
+  });
+
+  // Bug: the HUD layer draws after `ui`, so its resource panel or its toasts take every Escape and
+  // every Back press, and no sheet closes.
+  it("never gives the keyboard to a root of the HUD layer: the top sheet under it takes it", () => {
+    const ward = rootOf({ entity: 1, layer: "scene" });
+    const shop = rootOf({ entity: 2, layer: "ui" });
+    const resources = rootOf({ entity: 3, layer: "hud" });
+    const toast = rootOf({ entity: 4, layer: "hud" });
+    const layers = ["scene", "ui", "hud"];
+
+    expect(focusRoot(stateOf([ward, shop, resources, toast]), layers, "hud")?.entity).toBe(2);
+    expect(focusRoot(stateOf([ward, resources, toast]), layers, "hud")?.entity).toBe(1);
+    expect(focusRoot(stateOf([resources]), layers, "hud")).toBeUndefined();
+  });
+
+  // Bug: a scene with no HUD layer loses its top root to the HUD rule, by the name of a layer.
+  it("gives it to the root in the top layer as before when the scene has no HUD layer", () => {
+    const shop = rootOf({ entity: 1, layer: "ui" });
+    const resources = rootOf({ entity: 2, layer: "hud" });
+
+    expect(focusRoot(stateOf([resources, shop]), ["ui", "hud"])?.entity).toBe(2);
   });
 });
 

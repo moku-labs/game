@@ -154,15 +154,26 @@ The page, the save kinds, `?player=` scenarios, the system plugins and the nativ
 > Types reach a game through one namespace per plugin: `import type { Flow, Model, Clock, Lifecycle, Time } from "@moku-labs/game"`, then `Flow.RouteStep`, `Model.PlayerStateProvider`, `Time.Phase`. The screen and interface plugins follow the same rule: `World`, `Renderer`, `Input`, `Assets`, `Scenes`, `Anim`, `I18n`, `TextTypes`, `Ui`, `Audio`, `Effects`, `Platform`. `Text` is the component, so its type namespace is `TextTypes`.
 
 > [!TIP]
-> A larger worked example is the merge game in [moku-labs/demos](https://github.com/moku-labs/demos). It is written on the public API only, with sub-flows, a slot, features, timers and its own e2e and visual tests. The engine keeps a small fixture of its own, [`tests/fixtures/mini-game/`](../tests/fixtures/mini-game): one rest node, one popup flow and two features. It is not published.
+> A larger worked example is the merge game in [moku-labs/demos](https://github.com/moku-labs/demos). It is written on the public API only, with sub-flows, a slot, features, timers and its own e2e and visual tests. The engine keeps a small fixture of its own, [`tests/fixtures/mini-game/`](../tests/fixtures/mini-game): one rest node, one popup flow and two features, and a game with sub-features on the layered layout, [`tests/fixtures/episodes-game/`](../tests/fixtures/episodes-game). They are not published.
 
 ## A screen: the body font and the asset keys
 
-A game with a screen keeps its files in `features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. `moku-game keys` runs it on the game folder: it writes `generated/assets.ts`, the compiled strings and the dev manifest `generated/manifest.json`. `moku-game keys --check` fails when an output is out of date, and `moku-game pack` writes the production build into `dist/assets`.
+A game with a screen keeps its files in `features/<feature>/assets/`. The scanner of `@moku-labs/game/assets` turns them into typed keys, the feature name, a dot, then the path inside `assets/`. For a sub-feature the name is its own folder: `features/episodes/ep01/assets/ward/room.png` is `ep01.ward.room`, in the bundle `ep01`. `moku-game keys` runs it on the game folder: it writes `generated/assets.ts`, the compiled strings and the dev manifest `generated/manifest.json`. `moku-game keys --check` fails when an output is out of date, and `moku-game pack` writes the production build into `dist/assets`.
 
 A game on the layered layout names its layers in `config.ts`, `assets: { layers: { shared: "ui" } }`, so `shared/assets/*` keeps the `ui.*` keys.
 
-The package also ships one MSDF body font, Pangolin Regular under the SIL Open Font License 1.1. Copy it into the game, do not reference it: the scanner reads keys only from `features/<feature>/assets/` and from the layers. The licence goes next to `assets/`, not inside it.
+**Sub-features.** A feature can hold features of its own, one folder each, such as the episodes of a story:
+
+```
+features/episodes/          the parent: index.ts, flow/, views/, assets/, strings/
+  episodes-kit/             what the episodes share: index.ts, flow/, views/, assets/
+  ep01/                     index.ts, assets.ts, assets/ward/, assets/items/, strings/, flow/
+  ep02/                     index.ts, assets/ward/, strings/, flow/
+```
+
+A folder inside a feature is a sub-feature when it has a door `index.ts` and resources of its own: `assets/`, `assets.ts` or `strings/`. A kind folder (`flow/`, `views/`, `assets/` and the others) never is. A folder with a door and no resources is a sub-feature for lint and the project index when the parent's door imports it from `./<folder>` and lists it in `features: [...]`, but it has no bundle; such a code-only sub-feature declares no sub-features of its own. A feature name is used once in the game, at any depth: two folders with one name fail the scan, naming both. Name what the sub-features share after the parent, `episodes-kit`. The parent declares them, `defineFeature("episodes", { features: [episodesKitFeature, ep01Feature, ep02Feature] })`, and `index.ts` lists the parent only. See [Sub-features](./shell.md#sub-features).
+
+The package also ships one MSDF body font, Pangolin Regular under the SIL Open Font License 1.1. Copy it into the game, do not reference it: the scanner reads keys only from the `assets/` of the features, of the sub-features and of the layers. The licence goes next to `assets/`, not inside it.
 
 ```bash
 mkdir -p features/ui/assets
@@ -192,6 +203,6 @@ Every term of the graph, in full.
 | Flow | `defineFlow(id, { nodes, start, edges, input?, outcomes? })`. A flow with `outcomes` is used as a node of another flow. |
 | Edge target | A node name, `exit("outcome")` to leave a sub-flow, or `to("node", payload => input)` to adapt the payload. |
 | Slot | `slot("name")`. An extension point. Features contribute sub-flows to it with an `order`. |
-| Feature | `defineFeature(name, { nodes?, flows?, contribute? })`. An ordinary plugin that registers into `flow.features`. `feature.logicOnly` is the headless twin. |
+| Feature | `defineFeature(name, { nodes?, flows?, contribute?, features? })`. An ordinary plugin that registers into `flow.features`. `feature.logicOnly` is the headless twin. `features` declares the sub-features of the feature. |
 | Effect | `await fx(descriptor)` for awaited effects, `fx.start(descriptor)` to start one now and not wait for it, `fx.emit(hint(kind, payload))` for cosmetic ones. Hints are released after the commit and dropped in fast mode. |
 | Transition | Rest node to rest node. It is a transaction. An error rolls back to the last rest point, retries, then enters `safeNode`. Every failure is an `error` entry `flow:error` in the log. |

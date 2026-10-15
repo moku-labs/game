@@ -13,6 +13,8 @@ export type FakeElement = {
   parentNode: FakeElement | undefined;
   style: Record<string, string>;
   attributes: Record<string, string>;
+  /** The `data-*` attributes, camel-cased as `HTMLElement.dataset` names them. */
+  dataset: Record<string, string>;
   textContent: string;
   clientWidth: number;
   clientHeight: number;
@@ -40,10 +42,23 @@ export type FakeDom = {
     querySelector(selector: string): FakeElement | undefined;
   };
   mount: FakeElement;
-  /** Every live resize observer, so a test can fire one. */
-  observers: Array<{ target: FakeElement | undefined; fire(): void; disconnected: boolean }>;
-  /** CSS padding the safe-area probe reports, in pixels. */
+  /**
+   * Every live resize observer, so a test can fire one: `targets` holds every element it
+   * observes, `target` the last one.
+   */
+  observers: Array<{
+    target: FakeElement | undefined;
+    targets: FakeElement[];
+    fire(): void;
+    disconnected: boolean;
+  }>;
+  /**
+   * The safe area the page reports, in CSS pixels: the computed size of the two safe-area probes
+   * (`data-moku-safe-area`, `dataset.mokuSafeArea`), `start` left by top and `end` right by bottom.
+   */
   insets: { top: number; right: number; bottom: number; left: number };
+  /** The window as an event target: `globalThis.addEventListener` lands here. */
+  window: FakeElement;
   /** Number of listeners still attached to the document. */
   documentListeners(): number;
 };
@@ -61,6 +76,7 @@ export function createFakeElement(tagName: string): FakeElement {
     parentNode: undefined,
     style: {},
     attributes: {},
+    dataset: {},
     textContent: "",
     clientWidth: 0,
     clientHeight: 0,
@@ -110,8 +126,8 @@ export function createFakeElement(tagName: string): FakeElement {
 }
 
 /**
- * Installs a fake document, a fake `ResizeObserver`, `getComputedStyle`, `devicePixelRatio` and
- * the window size on `globalThis`. `vi.unstubAllGlobals()` takes them down again.
+ * Installs a fake document, a fake `ResizeObserver`, `getComputedStyle`, `devicePixelRatio`, the
+ * window size and the window's `addEventListener` on `globalThis`. `vi.unstubAllGlobals()` takes them down again.
  *
  * @param options - Size of the mount and of the window.
  * @param options.width - CSS width of the mount element.
@@ -128,6 +144,7 @@ export function installFakeDom(
   const mount = createFakeElement("div");
   const observers: FakeDom["observers"] = [];
   const insets = { top: 0, right: 0, bottom: 0, left: 0 };
+  const windowTarget = createFakeElement("#window");
 
   mount.clientWidth = width;
   mount.clientHeight = height;
@@ -146,6 +163,7 @@ export function installFakeDom(
   class FakeResizeObserver {
     private readonly callback: () => void;
     public target: FakeElement | undefined = undefined;
+    public readonly targets: FakeElement[] = [];
     public disconnected = false;
 
     public constructor(callback: () => void) {
@@ -155,6 +173,7 @@ export function installFakeDom(
 
     public observe(target: FakeElement): void {
       this.target = target;
+      this.targets.push(target);
     }
 
     public disconnect(): void {
@@ -171,18 +190,23 @@ export function installFakeDom(
   vi.stubGlobal("devicePixelRatio", options.dpr ?? 1);
   vi.stubGlobal("innerWidth", width);
   vi.stubGlobal("innerHeight", height);
-  vi.stubGlobal("getComputedStyle", () => ({
-    paddingTop: `${insets.top}px`,
-    paddingRight: `${insets.right}px`,
-    paddingBottom: `${insets.bottom}px`,
-    paddingLeft: `${insets.left}px`
-  }));
+  vi.stubGlobal("addEventListener", windowTarget.addEventListener);
+  vi.stubGlobal("removeEventListener", windowTarget.removeEventListener);
+  vi.stubGlobal("getComputedStyle", (element: FakeElement) => {
+    const side = element.dataset.mokuSafeArea;
+
+    if (side === "start") return { width: `${insets.left}px`, height: `${insets.top}px` };
+    if (side === "end") return { width: `${insets.right}px`, height: `${insets.bottom}px` };
+
+    return { width: "", height: "" };
+  });
 
   return {
     document,
     mount,
     observers,
     insets,
+    window: windowTarget,
     documentListeners: () => {
       let total = 0;
 

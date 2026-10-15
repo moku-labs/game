@@ -38,4 +38,10 @@ describe("i18nFor", () => {
 
     expect(kit.tr("home.play")).toEqual({ key: "home.play" });
   });
+
+  it("key returns its argument", () => {
+    const kit = i18nFor<{ "home.play": Record<never, never> }>();
+
+    expect(kit.key("home.play")).toBe("home.play");
+  });
 });

@@ -25,14 +25,38 @@ const effectsFolder = fileURLToPath(new URL("../../src/plugins/effects/", import
 /** The names Pixi's three WebGPU draw classes go by: only the counting subclasses name them. */
 const drawClasses = ["GpuBatchAdaptor", "GpuGraphicsAdaptor", "GpuEncoderSystem"];
 
+/** The pass counter every build installs (spec 23 F8): the encoder alone stays in a release bundle. */
+const passClass = "GpuEncoderSystem";
+
 /** The command the dev install of the draw-call counter logs under `moku:dev`. */
-const drawCallsMarker = "renderer.drawCalls";
+const drawCallsMarker = '"renderer.monitor"';
 
 /** The two packages of the production packer: only the node door `./assets` may name them. */
 const packerPackages = ["sharp", "maxrects-packer"];
 
 /** What the game composes: the screen set, or the screen set and `effectsPlugin`. */
 type Composition = "screen" | "screen+effects";
+
+/** The flags as each page defines them. */
+const PROFILES = {
+  /** `moku-game build`. */
+  release: {
+    __MOKU_GAME_DEV__: "false",
+    __MOKU_GAME_AGENT__: "false",
+    __MOKU_GAME_CONTROL__: "false"
+  },
+  /** `moku-game build --debug`. */
+  agent: {
+    __MOKU_GAME_DEV__: "false",
+    __MOKU_GAME_AGENT__: "true",
+    __MOKU_GAME_CONTROL__: "false"
+  },
+  /** The bunfig of `moku-game dev`. */
+  dev: { __MOKU_GAME_DEV__: "true", __MOKU_GAME_AGENT__: "true", __MOKU_GAME_CONTROL__: "true" }
+} as const;
+
+/** A page profile: which defines the bundle gets. */
+type Profile = keyof typeof PROFILES;
 
 /**
  * Every source file of the effects plugin, its tests left out.
@@ -65,21 +89,27 @@ function effectsMarkers(): string[] {
   return [...new Set(names)].toSorted();
 }
 
-/** The bundles built so far, by composition and dev flag: each build takes a second. */
+/** The log events of the debug switches of effects: agent-only, so a release bundle drops them. */
+const agentOnlyEffectsMarkers = ["effects:diagnostics", "effects:diagnostics-unknown"];
+
+/** The dev warning of the shader scan (LEAD-FIXES-4 item 3): dev-only, so a release bundle drops it. */
+const devOnlyEffectsMarkers = ["effects:filter-reads-screen"];
+
+/** The bundles built so far, by composition and profile: each build takes a second. */
 const built = new Map<string, string>();
 
 /**
- * Bundles a game entry the way a game ships it: minified, for the browser, with the dev flag
- * defined. The entry lives outside the package and imports the root module by path; it builds the
+ * Bundles a game entry the way a game ships it: minified, for the browser, with the flags of a
+ * page defined. The entry lives outside the package and imports the root module by path; it builds the
  * game's kit with `defineGame` and composes the app inside an exported function, so nothing runs.
  * Vitest runs on Node, so the build runs in a Bun child process.
  *
  * @param composition - The plugins the entry composes.
- * @param dev - The value `__MOKU_GAME_DEV__` is defined as.
+ * @param profile - The page whose defines the bundle gets.
  * @returns The bundled code.
  */
-function bundle(composition: Composition, dev: "true" | "false"): string {
-  const key = `${composition}:${dev}`;
+function bundle(composition: Composition, profile: Profile): string {
+  const key = `${composition}:${profile}`;
   const known = built.get(key);
 
   if (known !== undefined) return known;
@@ -99,7 +129,7 @@ function bundle(composition: Composition, dev: "true" | "false"): string {
     await Bun.write(entry, ${JSON.stringify(game)});
     const result = await Bun.build({
       entrypoints: [entry],
-      define: { __MOKU_GAME_DEV__: ${JSON.stringify(dev)} },
+      define: ${JSON.stringify(PROFILES[profile])},
       minify: true,
       target: "browser",
       external: ["pixi.js", "yoga-layout", "@moku-labs/*"]
@@ -132,7 +162,7 @@ describe("a game build with and without effectsPlugin", () => {
   });
 
   it("carries none of the effects markers when the game composes ...screen only", () => {
-    const code = bundle("screen", "false");
+    const code = bundle("screen", "release");
 
     expect(code).toContain("createApp");
     expect(effectsMarkers().filter(marker => code.includes(marker))).toEqual([]);
@@ -141,23 +171,62 @@ describe("a game build with and without effectsPlugin", () => {
   }, 60_000);
 
   it("carries every effects marker when the game composes effectsPlugin", () => {
-    const code = bundle("screen+effects", "false");
+    const code = bundle("screen+effects", "release");
 
-    expect(effectsMarkers().filter(marker => !code.includes(marker))).toEqual([]);
+    const markers = effectsMarkers().filter(
+      marker => !agentOnlyEffectsMarkers.includes(marker) && !devOnlyEffectsMarkers.includes(marker)
+    );
+
+    expect(markers.filter(marker => !code.includes(marker))).toEqual([]);
+    expect(devOnlyEffectsMarkers.filter(marker => code.includes(marker))).toEqual([]);
+    expect(bundle("screen+effects", "dev")).toContain(devOnlyEffectsMarkers[0]);
     expect(code).toContain("mainFragment");
+  }, 60_000);
+
+  it("the striped mark of a broken filter leaves a release bundle and stays in a dev bundle", () => {
+    expect(bundle("screen+effects", "release")).not.toContain("effects.broken-mark");
+    expect(bundle("screen+effects", "dev")).toContain("effects.broken-mark");
+  }, 60_000);
+});
+
+describe("the debug switches, the trigger counter and the overlay call in a game build", () => {
+  it("the diagnostics bodies leave a release bundle and stay in an agent bundle", () => {
+    const release = bundle("screen+effects", "release");
+    const agent = bundle("screen+effects", "agent");
+
+    expect(agentOnlyEffectsMarkers.filter(marker => release.includes(`"${marker}"`))).toEqual([]);
+    expect(agentOnlyEffectsMarkers.filter(marker => !agent.includes(`"${marker}"`))).toEqual([]);
+  }, 60_000);
+
+  it("a release bundle carries no ui:debug-trigger and no debug:overlay-failed marker; an agent bundle does", () => {
+    const release = bundle("screen", "release");
+    const agent = bundle("screen", "agent");
+
+    expect(release).not.toContain("ui:debug-trigger");
+    expect(release).not.toContain("debug:overlay-failed");
+    expect(agent).toContain("ui:debug-trigger");
+    expect(agent).toContain("debug:overlay-failed");
   }, 60_000);
 });
 
 describe("the draw-call counter of the renderer in a game build", () => {
-  it("leaves the bundle when __MOKU_GAME_DEV__ is defined false", () => {
-    const code = bundle("screen", "false");
+  it("leaves the bundle when the three flags are defined false, the pass counter of the encoder stays", () => {
+    const code = bundle("screen", "release");
 
     expect(code).not.toContain(drawCallsMarker);
-    expect(drawClasses.filter(name => code.includes(name))).toEqual([]);
+    expect(drawClasses.filter(name => name !== passClass && code.includes(name))).toEqual([]);
+    expect(code).toContain(passClass);
   }, 60_000);
 
-  it("stays in the bundle, with the three counting classes, when __MOKU_GAME_DEV__ is true", () => {
-    const code = bundle("screen", "true");
+  it("stays in the bundle, with the three counting classes, when the dev page defines the flags true", () => {
+    const code = bundle("screen", "dev");
+
+    expect(code).toContain(drawCallsMarker);
+    expect(drawClasses.filter(name => !code.includes(name))).toEqual([]);
+  }, 60_000);
+
+  it("stays in the bundle with AGENT true and DEV false, as a debug page has it", () => {
+    const code = bundle("screen", "agent");
 
     expect(code).toContain(drawCallsMarker);
     expect(drawClasses.filter(name => !code.includes(name))).toEqual([]);

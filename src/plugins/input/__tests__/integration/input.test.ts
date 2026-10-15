@@ -229,7 +229,8 @@ describe("input plugin integration", () => {
       y: 0,
       down: false,
       justPressed: false,
-      justReleased: false
+      justReleased: false,
+      id: -1
     });
 
     await app.stop();

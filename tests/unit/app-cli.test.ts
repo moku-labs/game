@@ -21,6 +21,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CliDeps, Signal, SpawnOptions } from "../../src/app/cli";
 import { runCommand } from "../../src/app/cli";
 import { resolveConfig } from "../../src/app/config";
+import { engineFingerprint } from "../../src/app/engine";
 import type { NativeVerb, NativeVerbOptions, NativeWhere } from "../../src/app/native";
 import { serveParent, staticPath, writePage } from "../../src/app/serve";
 import type { ResolvedGameConfig } from "../../src/app/types";
@@ -179,6 +180,7 @@ function fakeDeps(
     resolve: () => HOT,
     loadPage: async () => ({ default: new Response("<html>the page</html>") }),
     visual: () => Promise.reject(new Error("the visual runner is not loaded here")),
+    now: () => Date.UTC(2026, 9, 14, 15, 30, 12),
     ...change
   };
 
@@ -271,8 +273,85 @@ function read(root: string, file: string): string {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+/** A game with an installed engine: the game folder, the engine's hot plugin and its folder. */
+type EngineGame = { root: string; hot: string; engine: string };
+
+/**
+ * Makes a temp game with an installed engine 0.14.12 and a lock file.
+ *
+ * @param files - More files by path under the game.
+ * @returns The game, the hot plugin and the engine folder.
+ */
+function makeEngineGame(files: Record<string, string> = {}): EngineGame {
+  const engine = "node_modules/@moku-labs/game";
+  const root = makeGame({
+    "bun.lock": "{}\n",
+    [`${engine}/package.json`]: JSON.stringify({ name: "@moku-labs/game", version: "0.14.12" }),
+    [`${engine}/dist/hot.mjs`]: "export default 1;\n",
+    ...files
+  });
+
+  return {
+    root,
+    hot: path.join(root, engine, "dist", "hot.mjs"),
+    engine: path.join(root, engine)
+  };
+}
+
+/** Children that exit with 0 when they are killed, and the lines printed before each started. */
+type Children = {
+  /** The spawn seam. */
+  spawn: CliDeps["spawn"];
+  /** Ends the last child by itself with a code. */
+  exit(code: number): void;
+  /** What was printed before each child started, one list per child. */
+  printed: string[][];
+};
+
+/**
+ * Makes a spawn whose children exit with 0 when killed, as the dev child does on SIGTERM.
+ *
+ * @param seen - What the stub seams saw; the spawns and the kills go there.
+ * @returns The spawn, the exit of the last child and the printed lines.
+ */
+function killableChildren(seen: Seen): Children {
+  const exits: ((code: number) => void)[] = [];
+  const printed: string[][] = [];
+
+  return {
+    printed,
+    spawn: (command, options) => {
+      const exited = new Promise<number>(resolve => exits.push(resolve));
+      const exit = exits.at(-1);
+
+      seen.spawns.push({ command, options });
+      printed.push([...seen.out]);
+
+      return {
+        exited,
+        kill: signal => {
+          seen.kills.push(signal ?? "SIGTERM");
+          exit?.(0);
+        }
+      };
+    },
+    exit: code => exits.at(-1)?.(code)
+  };
+}
+
+/**
+ * Fires a change at the open watcher of a folder.
+ *
+ * @param seen - What the stub seams saw.
+ * @param folder - The watched folder.
+ */
+function touch(seen: Seen, folder: string): void {
+  seen.watches.find(watched => watched.folder === folder && !watched.closed)?.listener("change");
+}
 
 describe("moku-game dev, the parent", () => {
   it("dev defaults to port 3000 and the cwd", async () => {
@@ -640,6 +719,93 @@ describe("moku-game dev, the parent", () => {
     expect(read(root, ".moku/main.ts")).toContain("scenarios: {}");
   });
 
+  it("an engine change stops the child with SIGTERM and starts a new one on a page written again", async () => {
+    const { root, hot, engine } = makeEngineGame();
+    const { deps, seen } = fakeDeps(root, { resolve: () => hot });
+    const children = killableChildren(seen);
+    const first = engineFingerprint(root, hot).id;
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const running = runCommand(["dev"], { ...deps, spawn: children.spawn });
+
+    await vi.waitFor(() => expect(seen.spawns).toHaveLength(1));
+    put(hot, "export default 2;\n");
+    touch(seen, path.join(engine, "dist"));
+    await vi.advanceTimersByTimeAsync(300);
+    await vi.waitFor(() => expect(seen.spawns).toHaveLength(2));
+
+    const second = engineFingerprint(root, hot).id;
+
+    children.exit(0);
+
+    expect(await running).toBe(0);
+    expect(second).not.toBe(first);
+    expect(seen.kills).toEqual(["SIGTERM"]);
+    expect(seen.warnings).toEqual([
+      `[game] dev: the engine changed (${first} -> ${second}), restarting the dev server.`
+    ]);
+    expect(read(root, ".moku/dev.ts")).toContain(second);
+    // The engine line is the last one printed before each child.
+    expect(children.printed.map(lines => lines.at(-1))).toEqual([
+      `engine ${first}`,
+      `engine ${second}`
+    ]);
+    expect(seen.watches.filter(watched => !watched.closed)).toEqual([]);
+  });
+
+  it("a child that exits on its own ends dev with its code and no restart", async () => {
+    const { root, hot } = makeEngineGame();
+    const { deps, seen } = fakeDeps(root, { resolve: () => hot });
+    const children = killableChildren(seen);
+    const running = runCommand(["dev"], { ...deps, spawn: children.spawn });
+
+    await vi.waitFor(() => expect(seen.spawns).toHaveLength(1));
+
+    expect(seen.watches.some(watched => !watched.closed)).toBe(true);
+
+    children.exit(3);
+
+    expect(await running).toBe(3);
+    expect(seen.spawns).toHaveLength(1);
+    expect(seen.watches.filter(watched => !watched.closed)).toEqual([]);
+  });
+
+  it("a patch-only change warns and keeps the child", async () => {
+    const { root, hot } = makeEngineGame({
+      "package.json": JSON.stringify({
+        name: "g",
+        patchedDependencies: { "@moku-labs/game@0.14.12": "patches/game.patch" }
+      }),
+      "patches/game.patch": "one\n"
+    });
+    const { deps, seen } = fakeDeps(root, { resolve: () => hot });
+    const children = killableChildren(seen);
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const running = runCommand(["dev"], { ...deps, spawn: children.spawn });
+    const before = engineFingerprint(root, hot).patch?.hash.slice(0, 6);
+
+    await vi.waitFor(() => expect(seen.spawns).toHaveLength(1));
+    put(path.join(root, "patches", "game.patch"), "two\n");
+    touch(seen, path.join(root, "patches"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const after = engineFingerprint(root, hot).patch?.hash.slice(0, 6);
+
+    expect(seen.warnings).toEqual([
+      `[game] dev: the engine's patch changed (${before} -> ${after}), but the installed engine did not.`,
+      "  Run bun install; the dev server restarts by itself when the engine changes."
+    ]);
+    expect(seen.kills).toEqual([]);
+
+    children.exit(0);
+
+    expect(await running).toBe(0);
+    expect(seen.spawns).toHaveLength(1);
+  });
+
   it("a second dev with the same game rewrites nothing", async () => {
     const root = makeGame();
     const files = ["index.html", "dev.ts", "main.ts", "bunfig.toml", "assets-stamp.ts"].map(file =>
@@ -880,14 +1046,14 @@ describe("the command line", () => {
       "moku-game <command> [options]",
       "",
       "  dev [--port 3000] [--packed]          serve the game with hot reload",
-      "  build [--out dist/web]                pack the assets and build the page",
-      "  native build <target> [--simulator]   build the native app (ios, macos, android)",
+      "  build [--out dist/web] [--debug[=full] [--editor host:port]]  pack the assets and build the page; --debug adds the editor agent",
+      "  native build <target> [--simulator] [--debug[=full] [--editor host:port]]  build the native app (ios, macos, android)",
       "  native dev <target>                   run the native shell on the dev server",
       "  native doctor | native clean          check or remove the native project",
       "  keys [--check]                        write generated/assets.ts and generated/manifest.json",
       "  pack [--no-cache]                     pack the assets into dist/assets",
       "  visual [--update] [--only <name>]     run tests/visual/index.ts: headless, pixels on a Mac",
-      "    [--no-pixels | --pixels] [--webgl] [--dir tests/visual/baselines]",
+      "    [--no-pixels | --pixels] [--webgl] [--no-verify-frames] [--dir tests/visual/baselines]",
       "    [--tests tests/visual/index.ts] [--url <url>]",
       "  help                                  print this text",
       "",
@@ -962,6 +1128,36 @@ describe("keys and pack", () => {
       "--manifest",
       path.join(bare, "generated", "manifest.json")
     ]);
+  });
+
+  it("keys passes --pseudo when only a sub-feature has strings/en.json", async () => {
+    const root = makeGame({
+      "features/episodes/index.ts": "export {};\n",
+      "features/episodes/ep01/index.ts": "export {};\n",
+      "features/episodes/ep01/strings/en.json": english
+    });
+    const { seen } = await run(["keys"], root);
+
+    expect(seen.scans[0]?.at(-1)).toBe("--pseudo");
+  });
+
+  it("keys still runs the scan (and the scan reports it) when two folders share a feature name", async () => {
+    const root = makeGame({
+      "features/kit/index.ts": "export {};\n",
+      "features/episodes/kit/index.ts": "export {};\n",
+      "features/episodes/kit/strings/en.json": english
+    });
+    const scans: string[][] = [];
+    const { code } = await run(["keys"], root, {
+      assets: async argv => {
+        scans.push(argv);
+
+        return 1;
+      }
+    });
+
+    expect(scans).toHaveLength(1);
+    expect(code).toBe(1);
   });
 
   it("keys --check passes --check", async () => {
@@ -1074,6 +1270,109 @@ describe("native", () => {
   });
 });
 
+describe("--debug and --editor", () => {
+  /** A config with a native section, for the native verbs. */
+  const native =
+    'export default { page: { title: "t" }, native: { name: "T", identifier: "com.t" } };\n';
+
+  /** The warning of a native debug build. */
+  const nativeWarning =
+    "native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store.";
+
+  it("native build android takes --debug as read, --debug=read the same, --debug=full as full, and warns once", async () => {
+    const root = makeGame({ "config.ts": native });
+    const bare = await run(["native", "build", "android", "--debug"], root);
+    const read = await run(["native", "build", "android", "--debug=read"], root);
+    const full = await run(
+      ["native", "build", "android", "--debug=full", "--editor", "192.168.1.20:47600"],
+      root
+    );
+    const store = await run(["native", "build", "android"], root);
+
+    expect(bare.seen.natives[0]?.options).toEqual({ target: "android", debug: "read" });
+    expect(read.seen.natives[0]?.options).toEqual({ target: "android", debug: "read" });
+    expect(full.seen.natives[0]?.options).toEqual({
+      target: "android",
+      debug: "full",
+      editor: "192.168.1.20:47600"
+    });
+    expect(store.seen.natives[0]?.options).toEqual({ target: "android" });
+    expect([bare, full, store].map(ran => ran.seen.warnings)).toEqual([
+      [nativeWarning],
+      [nativeWarning],
+      []
+    ]);
+  });
+
+  it("native dev --debug is refused, native build ios --debug is refused as Android only, and --editor needs --debug", async () => {
+    const root = makeGame({ "config.ts": native });
+
+    expect(await errorsOf(["native", "dev", "android", "--debug"], root)).toEqual([
+      "[game] native: --debug goes with native build only."
+    ]);
+    expect(await errorsOf(["native", "build", "ios", "--debug"], root)).toEqual([
+      "[game] native: --debug builds Android only in this release (got ios)."
+    ]);
+    expect(await errorsOf(["native", "build", "android", "--editor", "h:1"], root)).toEqual([
+      "[game] native: --editor goes with --debug."
+    ]);
+    expect(await errorsOf(["native", "build", "android", "--debug", "full"], root)).toEqual([
+      '[game] native: unexpected argument "full". Write --debug=full.'
+    ]);
+  });
+
+  it("--debug=loud is refused naming the value, build --debug full says how to write it, and the other commands take no --debug", async () => {
+    const root = makeGame();
+
+    expect(await errorsOf(["build", "--debug=loud"], root)).toEqual([
+      '[game] build: --debug takes no value, "read" or "full", got "loud".'
+    ]);
+    expect(await errorsOf(["build", "--debug", "full"], root)).toEqual([
+      '[game] build: unexpected argument "full". Write --debug=full.'
+    ]);
+
+    for (const command of ["dev", "keys", "pack", "visual"]) {
+      expect(await errorsOf([command, "--debug"], root)).toEqual([
+        `[game] ${command}: unknown option "--debug".`
+      ]);
+    }
+  });
+
+  it("--editor takes host:port, refuses phone, :47600 and host:70000, and is refused without --debug", async () => {
+    const root = makeGame();
+
+    for (const editor of ["phone", ":47600", "host:70000", "host:0", "two words:47600"]) {
+      const { code, seen } = await run(["build", "--debug", "--editor", editor], root);
+
+      expect(code, editor).toBe(1);
+      expect(seen.errors).toEqual([`[game] build: --editor takes host:port, got "${editor}".`]);
+      expect(seen.scans).toEqual([]);
+    }
+
+    expect(await errorsOf(["build", "--editor", "192.168.1.20:47600"], root)).toEqual([
+      "[game] build: --editor goes with --debug."
+    ]);
+  });
+
+  it("with MOKU_NATIVE_PROFILE=store build --debug is refused before anything is built; with debug and no --debug a release page is built", async () => {
+    const root = makeGame();
+    const store = await run(["build", "--debug"], root, { env: { MOKU_NATIVE_PROFILE: "store" } });
+    const debug = await run(["build"], root, {
+      env: { MOKU_NATIVE_PROFILE: "debug" },
+      assets: async () => 2
+    });
+
+    expect(store.code).toBe(1);
+    expect(store.seen.errors).toEqual([
+      "[game] build: MOKU_NATIVE_PROFILE is store: a store page must not carry the editor agent.\n  Build the store app without --debug."
+    ]);
+    expect(store.seen.scans).toEqual([]);
+    // The release page went on to the pack: nothing refused it.
+    expect(debug.code).toBe(2);
+    expect(debug.seen.errors).toEqual([]);
+  });
+});
+
 describe("the --preload re-run", () => {
   it("--preload outside dev re-runs the bin once with --preload=", async () => {
     const root = makeGame({ "tree/preload.ts": "" });
@@ -1136,6 +1435,8 @@ describe.skipIf(typeof Bun === "undefined")("runCli", () => {
     expect(lines[0]).toBe("moku-game <command> [options]");
   });
 
+  // The scanner loads the game's assets.ts, which imports the whole engine through its kit: slow
+  // under coverage, so this test has its own timeout.
   it("runs keys --check through the real asset scanner", async () => {
     const copies = [copyMiniGame("cli-keys")];
 
@@ -1147,7 +1448,7 @@ describe.skipIf(typeof Bun === "undefined")("runCli", () => {
     } finally {
       removeCopies(copies);
     }
-  });
+  }, 30_000);
 
   it("runs keys through the real scanner on a game with no string file", async () => {
     const copies = [copyMiniGame("cli-keys-bare")];

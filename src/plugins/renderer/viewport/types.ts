@@ -46,6 +46,12 @@ export type Rect = { x: number; y: number; width: number; height: number };
 export type SafeArea = { top: number; right: number; bottom: number; left: number };
 
 /**
+ * The two hidden elements whose size is the safe area: `start` is left by top, `end` is right by
+ * bottom, in CSS px.
+ */
+export type SafeAreaProbes = { readonly start: HTMLElement; readonly end: HTMLElement };
+
+/**
  * What a game lays its board out in: the drawn frame in reference units.
  *
  * @example
@@ -80,9 +86,13 @@ export type ViewportState = {
   safeArea: SafeArea;
   /** The observer saw a new size; the `render` callback applies it before drawing. */
   resizePending: boolean;
-  /** The hidden element whose padding carries `env(safe-area-inset-*)`. */
-  probe: HTMLElement | undefined;
+  /** The two hidden elements whose size is the safe area. */
+  probes: SafeAreaProbes | undefined;
   cleanups: Array<() => void>;
+  /** What `size()` answers once the frame was measured: frozen, replaced only by a layout that changed it. */
+  size: Readonly<ViewportSize> | undefined;
+  /** What `size()` answers before the first measurement: frozen, made on first use. */
+  inert: Readonly<ViewportSize> | undefined;
 };
 
 /**
@@ -134,17 +144,20 @@ export type ViewportApi = {
   toScreen(point: Point): Point;
 
   /**
-   * The drawn frame in reference units, as a fresh object.
+   * The drawn frame in reference units. One frozen object: the same object until the frame really changes (a resize,
+   * a rotation, new insets, a new scale), so a plugin that follows the frame every frame compares with `===` and
+   * allocates nothing. Read it, never write it: a write throws.
    *
    * @returns Width, height, scale, designed orientation and the safe area.
    * @example
    * ```ts
-   * // A board keeps its bottom row above the home bar of the phone.
-   * const { height, safeArea } = app.renderer.viewport.size();
-   * const bottom = height - safeArea.bottom; // 1920 - 34
+   * // The panorama re-lays its strip only on a frame that changed, at up to 120 calls a second.
+   * const size = app.renderer.viewport.size(); // { width: 1080, height: 2340, scale: 0.3555…, … }
+   * app.renderer.viewport.size() === size; // true until the phone rotates or the window resizes
+   * const bottom = size.height - size.safeArea.bottom; // 2340 - 34
    * ```
    */
-  size(): ViewportSize;
+  size(): Readonly<ViewportSize>;
 };
 
 /**
@@ -160,7 +173,7 @@ export type ViewportInternal = {
   apply(root: PixiContainer): void;
 
   /**
-   * Creates the safe-area probe and the resize observer, and measures once.
+   * Creates the two safe-area probes and the two resize observers, and measures once.
    */
   start(): void;
 
@@ -170,6 +183,15 @@ export type ViewportInternal = {
    * @returns True when the frame changed, so `sync` writes the root transform again.
    */
   applyPending(): boolean;
+
+  /**
+   * The drawn frame inside the canvas, in CSS pixels, the space `getBounds` answers in: the rectangle the game's
+   * reference space fills, the bars left out. What "covers the screen" is judged against, so a window of any shape
+   * answers as the phone does. The same object until a layout measures the frame again; never written by the caller.
+   *
+   * @returns The frame; an empty rectangle before the first measurement.
+   */
+  frame(): Readonly<Rect>;
 };
 
 /**

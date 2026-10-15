@@ -35,6 +35,7 @@ const ECS_MEMBERS = [
 const ECS_INTERNALS = ["onOwnerLeft", "runPhase", "flush", "clearChanges", "clear"];
 
 const PROJECTION_MEMBERS = [
+  "causeOf",
   "entitiesOf",
   "entityOf",
   "keyOf",
@@ -72,7 +73,7 @@ describe("createWorldApi", () => {
   it("groups the API by module", () => {
     const world = createMockWorld();
 
-    expect(Object.keys(world.api).toSorted()).toEqual(["ecs", "projection"]);
+    expect(Object.keys(world.api).toSorted()).toEqual(["ecs", "projection", "systemTimes"]);
   });
 
   it("exposes exactly the public members of ecs", () => {

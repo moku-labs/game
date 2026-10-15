@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { Json } from "../../../model/types";
 import { projection } from "../../../world/projection/define";
 import { defineScene } from "../../define";
+import type { SceneState } from "../../types";
 
 type Item = { id: string };
 
@@ -51,7 +53,7 @@ describe("defineScene", () => {
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
       { name: "lifted", sort: "none" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
   });
 
@@ -176,20 +178,34 @@ describe("defineScene and the ui layer", () => {
     expect(scene.layers).toEqual([
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
   });
 
   it("appends it to a scene that declares no layer at all", () => {
     const scene = defineScene("boot", { bundle: "boot", layers: {}, projections: [] });
 
-    expect(scene.layers).toEqual([{ name: "ui", sort: "none" }]);
+    expect(scene.layers).toEqual([{ name: "ui", sort: "order" }]);
   });
 
-  it("appends it once and not twice when the scene declares ui itself", () => {
+  // Bug (C1, U1.7): the roots of a scene draw in mount order, so a root remounted by a commit covers the others.
+  it("appends it once and not twice when the scene declares ui itself, sorted by order", () => {
     const scene = defineScene("home", { bundle: "home", layers: { ui: {} }, projections: [] });
 
-    expect(scene.layers).toEqual([{ name: "ui", sort: "none" }]);
+    expect(scene.layers).toEqual([{ name: "ui", sort: "order" }]);
+  });
+
+  it("keeps insertion order for a ui layer the scene declares with sort none", () => {
+    const scene = defineScene("home", {
+      bundle: "home",
+      layers: { ui: { sort: "none" }, fx: {} },
+      projections: []
+    });
+
+    expect(scene.layers).toEqual([
+      { name: "ui", sort: "none" },
+      { name: "fx", sort: "none" }
+    ]);
   });
 
   it("leaves a declared ui where it was written, under the layers above it", () => {
@@ -247,5 +263,108 @@ describe("defineScene and the ui layer", () => {
         projections: [boardItems]
       })
     ).toThrow('[game] Scene "board": projection "board.items" names layer "items".');
+  });
+});
+
+describe("defineScene and the HUD layer", () => {
+  it("puts ui right under the HUD layer when the scene declares no ui", () => {
+    const scene = defineScene("ward", {
+      bundle: "ward",
+      layers: { scene: {}, hud: { above: "overlays" } },
+      projections: []
+    });
+
+    expect(scene.layers).toEqual([
+      { name: "scene", sort: "none" },
+      { name: "ui", sort: "order" },
+      { name: "hud", sort: "none", above: "overlays" }
+    ]);
+  });
+
+  it("gives a scene without above the same entries as before, with no above key at all", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {}, items: { sort: "y" } },
+      projections: []
+    });
+
+    expect(JSON.stringify(scene.layers)).toBe(
+      '[{"name":"cells","sort":"none"},{"name":"items","sort":"y"},{"name":"ui","sort":"order"}]'
+    );
+  });
+
+  it("keeps a layer declared after the HUD layer above it", () => {
+    const scene = defineScene("board", {
+      bundle: "board",
+      layers: { cells: {}, ui: { sort: "order" }, hud: { above: "overlays" }, lifted: {} },
+      projections: []
+    });
+
+    expect(scene.layers.map(layer => layer.name)).toEqual(["cells", "ui", "hud", "lifted"]);
+  });
+
+  it("throws for two HUD layers", () => {
+    expect(() =>
+      defineScene("ward", {
+        bundle: "ward",
+        layers: { hud: { above: "overlays" }, top: { above: "overlays" } },
+        projections: []
+      })
+    ).toThrow(
+      '[game] Scene "ward": two layers say above "overlays" ("hud", "top").\n  Keep one HUD layer.'
+    );
+  });
+
+  it("throws for a ui declared after the HUD layer", () => {
+    expect(() =>
+      defineScene("ward", {
+        bundle: "ward",
+        layers: { hud: { above: "overlays" }, ui: {} },
+        projections: []
+      })
+    ).toThrow(
+      '[game] Scene "ward": the layer "ui" comes after the HUD layer "hud".\n  Declare ui before it: popups are overlays and draw under the HUD.'
+    );
+  });
+
+  it("throws for above with another value, for a caller without types", () => {
+    const layers = { hud: { above: "ui" } } as unknown as Record<string, { above?: "overlays" }>;
+
+    expect(() => defineScene("ward", { bundle: "ward", layers, projections: [] })).toThrow(
+      '[game] Scene "ward": the layer "hud" has above "ui".\n  Use "overlays" or leave it out.'
+    );
+  });
+});
+
+/**
+ * The ward's bundles of state: the episode the session plays.
+ *
+ * @param state - The committed state.
+ * @param state.session - The session, whose episode names the bundle.
+ * @returns The episode bundle.
+ */
+const wardBundles = ({ session }: SceneState<Json, { episode: string }>): string[] => [
+  session.episode
+];
+
+describe("defineScene and the bundles of state", () => {
+  // Bug: the freeze drops the function, so the switch never awaits the episode.
+  it("keeps the bundles function the scene declared", () => {
+    const scene = defineScene("ward", {
+      bundle: "location",
+      bundles: wardBundles,
+      layers: { room: {} },
+      projections: []
+    });
+
+    expect(scene.bundles).toBe(wardBundles);
+    expect(scene.bundles?.({ player: {}, session: { episode: "ep02" } })).toEqual(["ep02"]);
+  });
+
+  // Bug: a flat game's scene objects change shape.
+  it("has no bundles key for a scene that declares none", () => {
+    const scene = defineScene("home", { bundle: "home", layers: { ui: {} }, projections: [] });
+
+    expect(Object.keys(scene)).toEqual(["id", "bundle", "music", "layers", "projections"]);
   });
 });

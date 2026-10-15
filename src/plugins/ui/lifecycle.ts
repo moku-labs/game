@@ -4,6 +4,7 @@
  * closes exactly those.
  */
 import { animPlugin } from "../anim";
+import { debugPlugin } from "../debug";
 import { flowPlugin } from "../flow";
 import { i18nPlugin } from "../i18n";
 import { inputPlugin } from "../input";
@@ -14,23 +15,25 @@ import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
 import { Layer, system, Tree } from "../world/ecs/define";
 import { createModules } from "./api";
-import { Box, LocalWrite, UI_OWNER } from "./components";
+import { Box, DebugTrigger, LocalWrite, UI_OWNER } from "./components";
 import { installHot } from "./hot";
+import { checkTrigger, debugTap } from "./jsx/debug";
 import { stopFields } from "./jsx/fields";
 import type { AnyComponentDefinition, JsxModule } from "./jsx/types";
 import type { LayoutModule } from "./layout/types";
 import type { Deps, KernelSlice, State, UiCtx } from "./types";
 
 /**
- * Resolves the eight dependency APIs with `ctx.require`. `anim` serves the dev hot swap, which
+ * Resolves the nine dependency APIs with `ctx.require`. `anim` serves the dev hot swap, which
  * replaces animations; the motions reach `anim` through the tween driver behind every handle.
  *
  * @param ctx - Kernel context of the ui plugin.
- * @returns The eight dependency APIs.
+ * @returns The nine dependency APIs.
  */
 function resolveDeps(ctx: KernelSlice): Deps {
   return {
     anim: ctx.require(animPlugin),
+    debug: ctx.require(debugPlugin),
     time: ctx.require(timePlugin),
     flow: ctx.require(flowPlugin),
     world: ctx.require(worldPlugin),
@@ -84,7 +87,8 @@ function registerComponents(ctx: UiCtx, jsx: JsxModule): void {
  * pointer tap that clears the keyboard focus, and the tap that starts or ends the editing of a
  * text field), the pointer door that opens the keyboard inside the DOM listener, the key listener
  * of the focus and `LocalWrite` as an input control, so the cursor shows a hand over a local-state
- * button. Every remover goes into the state, so the teardown closes exactly these, and gives every
+ * button. On an agent page also the tap counter of `DebugTrigger` and its check of a view that takes
+ * no press. Every remover goes into the state, so the teardown closes exactly these, and gives every
  * hosted view its layer back before the ui entities go.
  *
  * @param ctx - Domain context of the ui plugin.
@@ -124,6 +128,14 @@ function openRegistrations(ctx: UiCtx, jsx: JsxModule, layout: LayoutModule): vo
     () => jsx.releaseHosted(),
     () => ecs.despawnOwnedBy(UI_OWNER)
   );
+
+  // The agent guard is inline and positive: a release build defines the flag false and drops the counter.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    ctx.state.layout.cleanups.push(
+      ctx.deps.input.onTap(entity => debugTap(ctx, entity)),
+      ecs.onAdded(DebugTrigger, entity => checkTrigger(ctx, entity))
+    );
+  }
 }
 
 /**
@@ -193,9 +205,13 @@ export function stopUi(state: State): void {
   state.jsx.removing.clear();
   state.jsx.hosts.clear();
   state.jsx.hosted.clear();
+  state.jsx.risen.clear();
+  state.jsx.released.clear();
   state.jsx.scrolls.clear();
   state.jsx.remount = false;
   state.jsx.hints.length = 0;
+  state.jsx.debugTaps.length = 0;
+  state.jsx.debugWarned = false;
   // The ring entities went with the ui owner above.
   state.jsx.focus.entity = undefined;
   state.jsx.focus.ring = undefined;

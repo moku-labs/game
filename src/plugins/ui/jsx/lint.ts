@@ -4,7 +4,7 @@
  */
 import type { Message, Part } from "../../i18n/types";
 import { Tappable } from "../../input/components";
-import { LocalWrite } from "../components";
+import { DebugTrigger, LocalWrite } from "../components";
 import type { UiCtx } from "../types";
 import { fitScaleOf } from "../visual";
 import type { Element, Finding } from "./types";
@@ -24,8 +24,8 @@ export function nameOf(element: Element): string {
 }
 
 /**
- * Checks the smallest side of a tappable element or a text field against the config, at the size
- * it is drawn: a `fit: "contain"` on the element or above it shrinks the target.
+ * Checks the smallest side of a tappable element, a `DebugTrigger` view or a text field against
+ * the config, at the size it is drawn: a `fit: "contain"` on the element or above it shrinks the target.
  *
  * @param ctx - Domain context of the ui plugin.
  * @param element - The element to check.
@@ -37,7 +37,8 @@ function tapTarget(ctx: UiCtx, element: Element, scale: number): Finding | undef
   const tappable =
     element.type === "input" ||
     ecs.has(element.entity, Tappable) ||
-    ecs.has(element.entity, LocalWrite);
+    ecs.has(element.entity, LocalWrite) ||
+    ecs.has(element.entity, DebugTrigger);
 
   if (!tappable) return undefined;
 

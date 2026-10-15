@@ -1,8 +1,10 @@
 /**
  * @file effects plugin — API factory. A game does everything with effects as data on entities;
- * the API only counts, and asks the renderer for its render passes at call time.
+ * the API only counts, asks the renderer for its render passes at call time, and carries the
+ * switches of a debug build.
  */
 import { rendererPlugin } from "../renderer";
+import { createDiagnostics } from "./diagnostics";
 import type { EffectsApi, EffectsStats, KernelSlice, State } from "./types";
 
 /**
@@ -34,6 +36,7 @@ export function createEffectsApi(ctx: KernelSlice): EffectsApi {
       emitters: state.instances.size + state.orphans.size,
       filters: countFilters(state),
       renderPasses: ctx.require(rendererPlugin).sync.renderPasses()
-    })
+    }),
+    diagnostics: createDiagnostics(ctx)
   };
 }

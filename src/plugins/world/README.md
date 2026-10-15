@@ -22,14 +22,14 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 
 | Method | Behaviour |
 |---|---|
-| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. |
+| `system(def): () => void` | Registers a system at the end of its phase list. A duplicate name throws. Registered during a frame: runs from the next frame. Its `query` is read once, when it registers. A system plays animations through `res(AnimPlayer)`, the resource `anim` writes in its `onStart`. |
 | `spawn(owner, components): Entity` | The id is reserved and returned at once. Owner is required by the type. |
 | `despawn(entity)` / `despawnOwnedBy(owner)` | Removes every component (each fires `onRemoved`), frees the index, bumps the generation. A stale id is a no-op. |
 | `get(entity, Component)` | The stored value, read-only, or `undefined`. A stale id gives `undefined`. |
 | `set(entity, Component, patch)` | Shallow merge into the stored object, marks changed. Never queued. Throws for a stale entity or a missing component. |
 | `add(entity, value)` / `remove(entity, Component)` | Structural. `add` on an existing component replaces the value and marks changed, no `onAdded`. |
 | `has(entity, Component)` / `tag` / `untag` | Structural and idempotent. False for a stale id. |
-| `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C`. |
+| `query(...Components)` | Walks the store of the FIRST term in insertion order and keeps entities that carry every term. `mut(C)` marks every yielded entity changed for `C` ("Marking what changed", below). Inside a system the walk reads the store live (changes are queued until the phase ends); outside one it walks the keys taken at the start, and skips an entity despawned before its turn. Every row is a new array: keep it if you like. |
 | `resource(Resource)` | The one mutable value per world, made on first read: a deep clone of plain defaults, or one call of a factory default. |
 | `onAdded(C, fn)` / `onRemoved(C, fn)` | Fire when the structural change is applied, for a component or a tag. A component listener gets the entity and the value; a tag listener gets the entity. A throwing listener is logged; the others still run. |
 | `changed(Component)` | The coarse change set of the frame, cleared in `time` phase `signals`. |
@@ -37,8 +37,69 @@ four world-owned components (`Layer`, `Order`, `Exiting`, `Tree`) into its facto
 | `ownerOf(entity)` | The owner of a live entity, or `undefined` for a stale id, also after its index came back: the liveness check. `renderer` asks it before it forgets an entity's filters. |
 | `mode()` / `setMode(mode)` | `mode()` is the effective mode: `"fast"` while the flow walks fast, else the stored one. |
 | `snapshot(): WorldSnapshot` | The world as plain JSON, sorted by index. A value that is not JSON, and every `Tree`, is skipped and named. |
-| `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. The caller is `game.diff`. |
+| `diff(from, to): FrameDiff` | What changed between the world at the end of frame `from` and at the end of frame `to`, from the frame history (below). Dev builds only; throws outside the last 120 frames. Only marked components are compared: a value written in place without a mark (into a row of a plain term) is not recorded, also when another component of the entity was marked. The caller is `game.diff`. |
 | `schema(): ComponentSchema[]` | Every component and tag type the world met so far, sorted by name, with the JSON kind of each field. A new list on every call. The caller is `game.schema`, the editor's component palette. |
+
+A game writes its systems with the kit's `system`, from `defineGame`: the same function as the root
+`system`, with `ctx.snapshot` typed by the game's player and session. The result goes into a
+feature's `systems` list or `ecs.system` like any other.
+
+```ts
+// features/board/world/systems/looks.ts of a game: `system` comes from the kit.
+export const looks = system({
+  name: "board.looks",
+  phase: "animate",
+  query: [mut(Transform)],
+  run: (rows, { snapshot }) => {
+    const { cells } = snapshot.player.board; // Player["board"]["cells"], no cast
+    for (const [, transform] of rows) transform.alpha = cells.length > 0 ? 1 : 0.5;
+  }
+});
+```
+
+The types are `World.SystemFor`, `World.SystemContextOf` and `World.GameSystemDefinition`.
+
+### Marking what changed
+
+`mut(C)` marks every row it yields changed for `C`, written or not. The renderer, effects and the
+dev frame history look at each marked row again: a system that walks 60 frosted scene roots with
+`mut(Frost)` and writes two of them makes all 60 look changed, 120 times a second.
+
+A system that writes only some rows queries the plain term and writes with
+`world.set(entity, C, patch)` when a value changes: `set` marks only the entity it writes.
+
+```ts
+// Before: the Frost of every scene root is marked every frame, moved or not.
+const frostApply = system({
+  name: "shared.frostApply",
+  phase: "animate",
+  query: [mut(Frost), SheetOpen],
+  run: rows => {
+    for (const [, frost, open] of rows) frost.amount = open.progress;
+  }
+});
+
+// After: only a Frost whose amount moved is marked.
+const frostApply = system({
+  name: "shared.frostApply",
+  phase: "animate",
+  query: [Frost, SheetOpen],
+  run: (rows, { world }) => {
+    for (const [entity, frost, open] of rows) {
+      if (frost.amount !== open.progress) world.set(entity, Frost, { amount: open.progress });
+    }
+  }
+});
+```
+
+A dev build counts, per component, the rows marked and the rows that changed over 120 recorded
+frames. A component marked on at least 32 rows a frame, of which at most 5 % changed, and written
+by a `mut()` term of a registered system, is reported once per app:
+`ctx.log.warn("world:mut-unchanged", { component: "Frost", rowsPerFrame: 61.2, changedShare: 0, systems: ["shared.frostApply"] })`.
+A few rows marked by a tween that does change are never reported.
+
+Put the rarest component first in a query: the walk visits every entity of the first term's store
+and builds a row only for those that carry every term.
 
 `snapshot()` is typed. Both types reach a game as `World.WorldSnapshot` and `World.EntitySnapshot`;
 `diff()` and `schema()` answer `World.FrameDiff` (with `World.EntityDiff` entries) and
@@ -69,12 +130,13 @@ app.world.ecs.snapshot().entities[0];
 | `register(spec)` | Stores a projection. A duplicate name throws. Nothing is drawn until `mount`. |
 | `replace(spec)` | Swaps the spec of a registered projection. A mounted one has its layers checked and runs the new `view` for every item on the next frame, directly. An unmounted one is only stored. An unknown name throws; a throw changes nothing. The caller is the dev hot swap in `ui`. |
 | `setLayers(list)` / `layers()` | The layer list of the scene; order is draw order. Every call stores a new frozen array, so a reader compares by identity. |
-| `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. Throws for an unknown name and for a `layer` or `lift` the scene does not declare; nothing is mounted then. |
+| `mount(names, owner)` | Marks the projections mounted and reconciles them at once, direct. Throws for an unknown name and for a `layer` or `lift` the scene does not declare; nothing is mounted then. A new view is spawned with its `Layer` first, so an `onAdded` hook of a view component (the `Tree` hook of `ui`) already reads the layer. |
 | `unmount(names)` | Flush: every motion is finished, live views and the despawn queue go in the same call. |
 | `settle(entity)` | A drop with no commit: cancels the motions and plays settle for every loose component. A view that loops comes home too, and its loop runs on. In `paused` and `fast` it writes the rest pose at once. |
 | `mute(entity, Component, fields)` | The hand owns these fields; tracks never write them, also not on `finish()`. The remover is safe after the entity left. |
 | `lift(entity, on)` | Into / out of the projection's `lift` layer. `lift(false)` on a moving view takes effect when its last motion ends. A reconcile or a `settle(entity)` that ends the motions applies the pending drop itself. |
 | `keyOf(entity)` / `entityOf(projection, key)` | `keyOf` also answers for a queued view; `entityOf` never does. Both also answer for a key registered with `registerKey`. |
+| `causeOf(entity)` | Why the view's motion hooks play: `"mount"` when the view came or goes with its screen (a scene mount, a load, a restore), `"change"` when a commit changed a live screen; also answers for a view that just left, until the next sweep. A world projection passes the same value to `enter`/`exit` as their fourth argument. |
 | `motionsOf(entity)` | The component names of the running tracks on an entity, in start order, each once. `[]` for a resting view, an entity no motion drives and a stale id. A new array on every call; it only reads, no ended track is forgotten. The caller is `game.explain`. |
 | `entitiesOf(name)` | The live view entities of a mounted projection, in the order of its model keys. Exiting views and keys registered with `registerKey` are left out; `[]` when the projection is not mounted. `ui` uses it to host a projection inside a slot. |
 | `setDriver(driver)` | Installs the tween engine behind `tween`, `toRest` and `all`; the remover puts the instant writes back. `anim` calls it in `onStart`. A driver may report what its additive tracks add right now with the optional `offsetsOf(entity, component)`: the world then compares the value under a loop with the rest pose. |
@@ -99,6 +161,63 @@ system keeps its own state in a resource. `snapshot()` leaves a value that is no
 const Looks = resource("boardLooks", () => ({ shown: new Map<Entity, { look: string }>() }));
 ```
 
+#### `Now` — the frame's moment
+
+`Now` (`{ now }`, exported from the package root) is the moment of the frame on the game's clock:
+`world` writes `clock.now()` into it once when it starts and first thing in every `input` callback,
+before the reconcile and the systems of `input`, headless too. Every system of a frame reads the same
+moment, the one a node gets as `now`, so a fake clock makes it exact in tests. A write by a system is
+overwritten at the next frame. It is `0` only before the world started, and after the internal
+`ecs.clear()` until the next frame. `snapshot().resources` holds it as `Now: { now }`.
+
+A system that shows time reads it and writes its component only when its picture changes; with
+`renderer.onDemand` that is when a frame is drawn.
+
+```ts
+// A toast shows the seconds left of its energy timer: it is written once a second, not every frame.
+const toastTime = system({
+  name: "shared.toastTime",
+  phase: "animate",
+  query: [ToastTime],
+  run: (rows, { world, res }) => {
+    const { now } = res(Now);
+
+    for (const [entity, time] of rows) {
+      const left = Math.max(0, time.until - now);
+
+      if (Math.ceil(left / 1000) !== Math.ceil(time.left / 1000)) world.set(entity, ToastTime, { left });
+    }
+  }
+});
+```
+
+The engine's resource names are reserved: `"Now"` (the frame's moment), `"Pointer"` (`input`),
+`"AnimPlayer"` (`anim`) and `"UiCounters"` (`ui`). The first type read under one of these names is
+the only one read under it; a game resource of the same name throws at its first read
+`[game] world: the resource name "Now" is the engine's (the frame's moment).` with the hint to rename
+it. A resource of any other name is the game's own.
+
+### `systemTimes()` — the time per system of a debug build
+
+`app.world.systemTimes()` answers the timing table of an agent build (`__MOKU_GAME_AGENT__`: dev
+pages and `--debug` builds), `World.SystemTiming`: `names` by registration index and `ms` in the
+same order, the time each system took in the current frame. The world takes the page clock from
+`time.agentClock()` at start, reads it twice around every system run (the run's own error isolation
+unchanged), and zeroes `ms` in place at the start of the next frame, so after a frame it holds that
+frame's time. A system that comes back under the same name keeps its row; the table grows only when
+a system registers past its end, never per frame. The renderer's monitor reads it after each frame
+for the five slowest systems of the frame and of the second. It is the live table, the same object
+every call and never a copy, so that read allocates nothing; a reader that keeps numbers past the
+frame copies them, and never writes into it. `undefined` without the flag: a release build times
+nothing.
+
+```ts
+// The renderer's monitor, at the end of a frame of a debug build:
+const systems = ctx.require(worldPlugin).systemTimes();
+systems?.names[3]; // "ward.pan"
+systems?.ms[3]; // 0.42
+```
+
 ## Configuration
 
 | Key | Type | Default | Meaning |
@@ -117,7 +236,7 @@ const app = createApp({
 
 | `time` phase | What `world` does, in order |
 |---|---|
-| `input` | reconcile when dirty → drop the hint buffer → systems of `input` → flush commands |
+| `input` | write `Now` from `clock.now()` → reconcile when dirty → drop the hint buffer → systems of `input` → flush commands |
 | `animate` | sweep ended motions (the driver advanced its tracks first) → forget dead elements → start the owed loops → systems of `animate` → flush |
 | `layout` | systems of `layout` → flush |
 | `sync` | systems of `sync` → flush |
@@ -125,7 +244,9 @@ const app = createApp({
 
 `"paused"` and `"fast"` skip the phases `input`, `animate` and `layout`; phase `sync`, the reconcile
 slot of `input` and the clear in `signals` run in every mode. A throwing system is reported with
-`ctx.log.error("world:system-failed", …)` and skipped for this frame; the frame goes on.
+`ctx.log.error("world:system-failed", …)` and skipped for this frame; the frame goes on. A dev
+build that sees a store gain or lose a key while a phase walks it (an engine path past the command
+queue) logs `ctx.log.error("world:store-changed-during-walk", { component })` once per app.
 
 While a phase runs, `spawn`, `despawn`, `despawnOwnedBy`, `add`, `remove`, `tag` and `untag` are
 queued and applied in call order when the phase ends. `set` is never queued. A queued command on an
@@ -262,7 +383,7 @@ and in play mode a change, a revive, a rollback settle and `settle(entity)` that
 motions of the view and start no new one. A view the finger still holds carries no pending drop
 and stays lifted.
 
-`ViewHandle.tween`, `toRest` and `all` run on the driver `anim` installs with `setDriver`
+`ViewHandle.tween`, `toRest` and `all` (both take `reduced: "cut" | "keep"`: under reduced motion a `"keep"` track plays as written, `"cut"`, the default, jumps to its end) run on the driver `anim` installs with `setDriver`
 (`projection/driver.ts`). A track reads its start values when its `delayMs` ends, writes the exact
 target on its last frame and goes through `ecs.set`; muted fields are never written, also not on
 `finish()`. Without a driver the instant default writes every target at once and hands back an
@@ -294,7 +415,7 @@ ignores it and writes the end pose once, so a world without `anim` never loops.
   mode it reconciles at once, direct. What each cause does is in
   [The cause of a reconcile](#the-cause-of-a-reconcile).
 - **onStart** `connectWorld` reads every feature description and registers its `components`, then
-  `systems`, then `projections`, in feature order; registers the five `time.onFrame` callbacks, the
+  `systems`, then `projections`, in feature order; writes `Now` once from `clock.now()`; registers the five `time.onFrame` callbacks, the
   `onOwnerLeft` listener and `flow.fx.onHint`, and keeps the removers in state. Nothing is mounted:
   `scenes` or a test mounts.
 - **onStop** `({ state }) => clearWorld(state)` calls the removers and drops the driver, tracks,
@@ -336,9 +457,11 @@ production `define` drops it from the bundle. Its first frame logs
   a spawn from a component added to a live entity. Records cost memory only when something
   changes: 120 full snapshots of a 400-cell board would hold about 48 MB.
 - **When it records.** The first frame copies the whole world into the shadow and records
-  nothing: it is the start of the window. Every later frame compares each changed entity with the
-  shadow, with the filter of `snapshot()` (a value that is not JSON is never recorded) and deep JSON
-  equality, so a write of the same value records nothing. A despawn, and a removed component,
+  nothing: it is the start of the window. Every later frame walks the change sets: a new entity is
+  recorded whole, once; for a known one each marked component is compared with the shadow, with
+  the filter of `snapshot()` (a value that stops being JSON is recorded as gone) and deep JSON
+  equality, so a write of the same value records nothing. A value written in place without a mark
+  is not recorded. A despawn, and a removed component,
   record at once, into the frame that is open: a write after `signals` belongs to the next frame.
   Every frame gets a slot, also an empty one.
 - **What `diff(from, to)` answers.** The records of frames `from + 1 .. to`, folded per entity and
@@ -358,4 +481,5 @@ production `define` drops it from the bundle. Its first frame logs
 ## Dependencies
 
 `time` for the five frame phases, `model` for the `model:committed` hook and `store.snapshot()`,
-`flow` for `features.all()`, the effective mode of a walk and `fx.onHint`. Core APIs: `ctx.log`.
+`flow` for `features.all()`, the effective mode of a walk and `fx.onHint`, `clock` for `now()`, the
+moment written into `Now` every frame. Core APIs: `ctx.log`.

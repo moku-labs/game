@@ -108,19 +108,24 @@ function clippedOut(sctx: SyncCtx, entity: Entity, x: number, y: number): boolea
 
 /**
  * The alpha a display object really draws with, and 0 when anything on its way to the root is
- * hidden or when it hangs in no tree at all.
+ * hidden, is a HUD part an overlay fades (spec 22 O7.5), or when it hangs in no tree at all.
  *
  * @param object - The display object.
  * @param root - The root container of `sync`.
+ * @param off - Top objects that take no tap: HUD parts leaving or not fully back.
  * @returns The effective alpha.
  */
-function effectiveAlpha(object: PixiContainer, root: PixiContainer): number {
+function effectiveAlpha(
+  object: PixiContainer,
+  root: PixiContainer,
+  off: ReadonlySet<PixiContainer> | undefined
+): number {
   let alpha = 1;
   let current: PixiContainer | undefined = object;
 
   for (let depth = 0; depth < MAX_DEPTH && current !== undefined; depth += 1) {
     if (current === root) return alpha;
-    if (!current.visible) return 0;
+    if (!current.visible || off?.has(current) === true) return 0;
 
     alpha *= current.alpha;
     current = current.parent ?? undefined;
@@ -135,10 +140,15 @@ function effectiveAlpha(object: PixiContainer, root: PixiContainer): number {
  *
  * @param object - The display object.
  * @param root - The root container of `sync`.
+ * @param off - Top objects that count as not there, for the hit test: the HUD parts an overlay fades.
  * @returns True when the object is drawn.
  */
-export function isShown(object: PixiContainer, root: PixiContainer): boolean {
-  return effectiveAlpha(object, root) > MIN_ALPHA;
+export function isShown(
+  object: PixiContainer,
+  root: PixiContainer,
+  off?: ReadonlySet<PixiContainer>
+): boolean {
+  return effectiveAlpha(object, root, off) > MIN_ALPHA;
 }
 
 /**
@@ -190,7 +200,7 @@ function* hitsIn(
     const view = entity === undefined ? undefined : state.views.get(entity);
 
     if (entity === undefined || view === undefined) continue;
-    if (!isShown(object, root)) continue;
+    if (!isShown(object, root, state.overlay.offTops)) continue;
     if (!inBox(view.hitBox, localPoint(sctx, entity, point.x, point.y))) continue;
     if (clippedOut(sctx, entity, point.x, point.y)) continue;
 

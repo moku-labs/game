@@ -2,13 +2,18 @@
  * @file flow plugin — shared types of the plugin and its modules.
  */
 import type { Log } from "@moku-labs/common/browser";
-import type { AnyPluginInstance, PluginCtx } from "@moku-labs/core";
+import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as ClockApi } from "../clock/types";
 import type { Events as LifecycleEvents } from "../lifecycle/types";
 import type { Json, Api as ModelApi, Patch } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
-import type { FeatureDescription, FeaturesApi, FeaturesState } from "./features/types";
+import type {
+  FeatureDescription,
+  FeaturePlugin,
+  FeaturesApi,
+  FeaturesState
+} from "./features/types";
 import type { FxApi, FxState } from "./fx/types";
 import type { GateApi, GateState } from "./gate/types";
 import type { InboxApi, InboxState } from "./inbox/types";
@@ -175,7 +180,24 @@ export type GameTypes = {
   strings: StringTableLike;
   textStyles?: string;
   emitters?: string;
+  /** The keys of the game's HUD parts: what `HudPart({ key })` and the `hud` list of `Overlay` take. */
+  hud?: string;
 };
+
+/**
+ * The HUD part key union of a game, `string` when the game passed none. `defineGame` types `HudPart({ key })` and
+ * the `hud` list of `Overlay` with it, so a key the game did not declare does not compile.
+ *
+ * @example
+ * ```ts
+ * type Keys = HudKeysOf<{ player: {}; session: {}; assets: string; strings: {}; hud: "energy" | "gems" }>; // "energy" | "gems"
+ * ```
+ */
+export type HudKeysOf<Types extends GameTypes> = Types extends {
+  hud: infer Keys extends string;
+}
+  ? Keys
+  : string;
 
 /**
  * The text style key union of a game, `string` when the game passed none.
@@ -221,17 +243,6 @@ export type BundlesOf<Types extends GameTypes> = Types extends {
   : string;
 
 /**
- * A feature is an ordinary plugin with no API of its own; `AnyPluginInstance` is the kernel's
- * widened type for plugin lists. `logicOnly` is the same plugin reduced to the V1 keys.
- *
- * @example
- * ```ts
- * createApp({ plugins: [boardFeature.logicOnly] });
- * ```
- */
-export type FeaturePlugin = AnyPluginInstance & { readonly logicOnly: AnyPluginInstance };
-
-/**
  * What `flowFor` binds to a game: the node helper with the game's `player` and `session`, and
  * the flow and feature helpers, which take no game types.
  *
@@ -271,9 +282,22 @@ export type {
   FeatureDescription,
   FeatureEmitter,
   FeatureFilter,
-  FeaturesApi
+  FeaturePlugin,
+  FeaturesApi,
+  FeatureTree,
+  RegisteredFeature
 } from "./features/types";
-export type { Descriptor, FxApi, FxHandler, GuideOptions, Hint, NodeFx } from "./fx/types";
+export type {
+  Descriptor,
+  Effect,
+  EffectHandler,
+  EffectOptions,
+  FxApi,
+  FxHandler,
+  GuideOptions,
+  Hint,
+  NodeFx
+} from "./fx/types";
 export type { Allow, Answer, GateApi } from "./gate/types";
 export type { InboxApi, WorldEvent } from "./inbox/types";
 export type {

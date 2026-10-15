@@ -99,6 +99,7 @@ export type {
   ProviderCall,
   SaveDoc,
   Snapshot,
+  SnapshotOf,
   StoreApi,
   Transaction
 } from "./store/types";

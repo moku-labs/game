@@ -3,7 +3,13 @@ import { stopLoop } from "../../lifecycle";
 import { createTimeState } from "../../state";
 import type { Config } from "../../types";
 
-const config: Config = { maxFps: 60, maxDeltaMs: 50, idleFps: 30, idleAfterMs: 2000 };
+const config: Config = {
+  maxFps: 60,
+  maxDeltaMs: 50,
+  idleFps: 30,
+  idleAfterMs: 2000,
+  adaptive: false
+};
 
 // ─── stopLoop, the onStop of the plugin ───────────────────────
 

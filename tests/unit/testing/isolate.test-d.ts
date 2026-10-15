@@ -1,5 +1,5 @@
-import type { Clock, Flow } from "@moku-labs/game";
-import { defineGame, exit, type } from "@moku-labs/game";
+import type { Clock, Flow, Model } from "@moku-labs/game";
+import { type createApp, defineGame, exit, type } from "@moku-labs/game";
 import type { HeadlessApp, IsolateSeams, Stub, StubsOf } from "@moku-labs/game/testing";
 import { fakeClock, isolate, stub } from "@moku-labs/game/testing";
 import { describe, expectTypeOf, it } from "vitest";
@@ -10,6 +10,7 @@ import { describe, expectTypeOf, it } from "vitest";
 // them would be reported as an unused directive.
 
 type Player = { n: number };
+type Session = { rolls: number };
 
 const { defineNode, defineFlow, defineFeature } = defineGame<{
   player: Player;
@@ -150,5 +151,60 @@ describe("isolate", () => {
     const wrongSeed: IsolateSeams = { seed: "from-save" };
 
     expectTypeOf(wrongSeed).toEqualTypeOf<IsolateSeams>();
+  });
+});
+
+/** A value typed `Model.Json` as a whole: an assigned literal would narrow it by control flow. */
+declare const wideJson: Model.Json;
+
+describe("the snapshot of an isolated app", () => {
+  // The player and session of the call type `model.store.snapshot()`, inferred: no generic at
+  // the call site. Each line reads a field `Model.Json` does not have.
+  it("is typed by the player and session the call gives", () => {
+    const player: Player = { n: 0 };
+    const session: Session = { rolls: 0 };
+    const snapshot = isolate(boardFeature, {
+      flow: boardFlow,
+      player,
+      session
+    })().model.store.snapshot();
+
+    expectTypeOf(snapshot.player.n).toEqualTypeOf<number>();
+    expectTypeOf(snapshot.session.rolls).toEqualTypeOf<number>();
+    // @ts-expect-error the player has no field coins
+    expectTypeOf(snapshot.player.coins).toBeNumber();
+  });
+
+  it("keeps the session Json when the call gives none", () => {
+    const snapshot = isolate(boardFeature, {
+      flow: boardFlow,
+      player: { n: 0 }
+    })().model.store.snapshot();
+
+    expectTypeOf(snapshot.player.n).toEqualTypeOf<number>();
+    expectTypeOf(snapshot.session).toEqualTypeOf<Model.Json>();
+  });
+
+  it("keeps today's Json snapshot for a player typed Json", () => {
+    const snapshot = isolate(boardFeature, {
+      flow: boardFlow,
+      player: wideJson,
+      session: wideJson
+    })().model.store.snapshot();
+
+    expectTypeOf(snapshot.player).toEqualTypeOf<Model.Json>();
+    expectTypeOf(snapshot.session).toEqualTypeOf<Model.Json>();
+  });
+
+  it("still gives an app the untyped factory type and createHeadless take", () => {
+    const typed = isolate(boardFeature, {
+      flow: boardFlow,
+      player: { n: 0 },
+      session: { rolls: 0 }
+    });
+    const factories: ((seams?: IsolateSeams) => ReturnType<typeof createApp>)[] = [typed];
+
+    expectTypeOf(factories).toBeArray();
+    expectTypeOf(typed).returns.toExtend<HeadlessApp>();
   });
 });

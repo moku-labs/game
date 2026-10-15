@@ -18,6 +18,7 @@
  * | time | maxDeltaMs | 50 |
  * | time | idleFps | 30 |
  * | time | idleAfterMs | 2000 |
+ * | time | adaptive | false |
  * | clock | source | undefined, the system source |
  * | model | playerProvider | undefined, in memory |
  * | model | initialPlayer | {} |
@@ -37,19 +38,24 @@
  * | renderer | background | 0x000000 |
  * | renderer | antialias | false |
  * | renderer | maxResolution | 2 |
+ * | renderer | poolTrim | { restMs: 1000, aboveMb: 16 }, the idle render targets of Pixi's pool go after a second at rest, a second after a scene change and on a pause; false keeps them; shallow merge: a game that sets `poolTrim` gives both fields |
  * | renderer | preference | "webgpu", WebGL is Pixi's fallback |
- * | renderer | aspect | { min: 4/3, max: 21/9 } |
+ * | renderer | aspect | { min: 4/3, max: 21/9 }; shallow merge: a game that sets `aspect` gives both fields |
  * | renderer | poolLimit | 256 |
  * | renderer | unsupportedMessage | "This device cannot run the game." |
  * | renderer | loadPixi | () => import("pixi.js") |
- * | renderer | debug | { nineSlice: false } |
+ * | renderer | debug | { nineSlice: false, verifyFrames: false, kept: true }; shallow merge: a game that sets `debug` replaces the whole object, and a switch it leaves out is off, except `kept`, which stays on unless set to false |
+ * | renderer | onDemand | false, every frame is drawn; true draws only a frame in which something changed |
+ * | renderer | monitor | { budgetMs: "rate", frames: 1024 }, the performance log of an agent build; shallow merge: a game that sets `monitor` gives both fields |
+ * | renderer | keptMb | 64, MiB the kept pictures may hold: a filtered view that did not change is drawn from its picture, the least recently drawn goes first; 0 keeps none |
+ * | renderer | warm | 1, probe draws a drawn frame that create the GPU pipelines while the game loads; 0 creates each in the first frame that needs it |
  * | input | tapSlopPx | 12 |
  * | input | longPressMs | 450 |
  * | input | dragStartPx | 8 |
  * | input | swipeMinPx | 48 |
  * | input | swipeMaxMs | 300 |
  * | input | heldScale | 1 |
- * | input | cursor | { control: "pointer", idle: "" } |
+ * | input | cursor | { control: "pointer", idle: "" }; shallow merge: a game that sets `cursor` gives both fields |
  * | input | traceStepPx | 32 |
  * | input | traceInset | 0.4 |
  * | assets | manifest | undefined, a URL or an inline manifest |
@@ -62,12 +68,12 @@
  * | i18n | locale | "en" |
  * | i18n | fallback | "en" |
  * | i18n | locales | {} |
- * | text | fonts | { body: "ui.font-body", digits: "ui.font-digits" } |
+ * | text | fonts | { body: "ui.font-body", digits: "ui.font-digits" }; shallow merge: a game that sets `fonts` gives both fields |
  * | ui | tapTargetPt | 44 |
- * | ui | breakpoints | { tall: 2, wide: 1.5 } |
+ * | ui | breakpoints | { tall: 2, wide: 1.5 }; shallow merge: a game that sets `breakpoints` gives both fields |
  * | ui | focusRing | { stroke: 0x3a2212, strokeWidth: 4, dash: 10, offset: 9, halo: 0xfff3d6, haloWidth: 12 }; shallow merge: a game that sets `focusRing` gives all six fields |
  * | ui | textInput | { caretWidth: 3, caret: 0x000000, selection: 0x3390ff, selectionAlpha: 0.35, composingUnderline: 3, keyboardMargin: 16 }; shallow merge |
- * | audio | buses | { master: 1, music: 0.6, sfx: 1 } |
+ * | audio | buses | { master: 1, music: 0.6, sfx: 1 }; shallow merge: a game that sets `buses` gives all three fields |
  * | audio | musicFadeMs | 600 |
  * | audio | volumes | undefined, the buses stay at `buses` |
  * | audio | context | undefined, the real AudioContext |
@@ -114,6 +120,7 @@ import {
   animPlugin,
   assetsPlugin,
   clockPlugin,
+  debugPlugin,
   flowPlugin,
   i18nPlugin,
   inputPlugin,
@@ -135,6 +142,7 @@ import type {
   BundlesOf,
   EmitterIdOf,
   GameTypes,
+  HudKeysOf,
   SceneIdOf,
   TextStylesOf
 } from "./plugins/flow/types";
@@ -143,11 +151,12 @@ import { componentsFor } from "./plugins/renderer/components";
 import { scenesFor } from "./plugins/scenes/define";
 import { textFor } from "./plugins/text/components";
 import { uiFor } from "./plugins/ui/components";
+import { systemsFor } from "./plugins/world/ecs/define";
 import { projectionFor } from "./plugins/world/projection/define";
 
 const framework = createCore(coreConfig, {
   // Dependency order (spec/11 §1.3, §1.5). The screen set is a list the game spreads in (later cycles).
-  plugins: [timePlugin, lifecyclePlugin, modelPlugin, clockPlugin, flowPlugin],
+  plugins: [timePlugin, lifecyclePlugin, modelPlugin, clockPlugin, debugPlugin, flowPlugin],
   // A hook threw. Core 1.7 hands the framework `onError` the core plugin APIs, which exist before the
   // event bus and are safe whenever a hook can fail (core spec/02 §3), so the error goes to the log.
   onError: (error, { log }) => log.error("game: a hook failed", undefined, error)
@@ -184,16 +193,18 @@ export const createPlugin = framework.createPlugin;
 
 /**
  * Binds the authoring helpers to the types of one game: "createApp for a game". Each plugin binds
- * its own helpers (`flowFor`, `projectionFor`, `componentsFor`, `bundlesFor`, `scenesFor`); this
- * only spreads them, so the kit's type is inferred and never written by hand. At run time these
- * are the same functions and component objects the plugins export.
+ * its own helpers (`flowFor`, `projectionFor`, `systemsFor`, `componentsFor`, `bundlesFor`,
+ * `scenesFor`, `i18nFor`, `audioFor`); this only spreads them, so the kit's type is inferred and
+ * never written by hand. At run time these are the same functions and component objects the
+ * plugins export. The kit's `system` and `volumes` read the game's player and session; `key` types
+ * a string key written in code (a key that comes from data is checked with `app.i18n.isKey`).
  *
- * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`
- *   and `emitters`.
+ * @returns The helpers typed with the game's `player`, `session`, `assets`, `bundles`, `strings`,
+ *   `emitters` and `hud` (the HUD part keys of `HudPart` and `Overlay`).
  * @example
  * ```ts
  * // kit.ts of a game: bound once, imported by every node, flow and view file.
- * export const { defineNode, defineFlow, defineFeature, projection, sprite, Sprite, defineBundles, load, defineScene } =
+ * export const { defineNode, defineFlow, defineFeature, projection, system, sprite, Sprite, defineBundles, load, defineScene, tr, key, volumes } =
  *   defineGame<{ player: Player; session: Session; assets: AssetKey; bundles: BundleKey; strings: StringTable }>();
  * ```
  */
@@ -201,14 +212,15 @@ export function defineGame<Types extends GameTypes>() {
   return {
     ...flowFor<{ player: Types["player"]; session: Types["session"]; scenes: SceneIdOf<Types> }>(),
     ...projectionFor<Types["player"], Types["session"]>(),
-    ...componentsFor<Types["assets"]>(),
+    ...systemsFor<Types["player"], Types["session"]>(),
+    ...componentsFor<Types["assets"], HudKeysOf<Types>>(),
     ...bundlesFor<BundlesOf<Types>>(),
-    ...scenesFor<Types["assets"], BundlesOf<Types>>(),
+    ...scenesFor<Types["assets"], BundlesOf<Types>, Types["player"], Types["session"]>(),
     ...animFor<Types["assets"]>(),
     ...i18nFor<Types["strings"]>(),
     ...textFor<TextStylesOf<Types>, Types["assets"]>(),
     ...uiFor<Types["assets"], TextStylesOf<Types>, Extract<keyof Types["strings"], string>>(),
-    ...audioFor<Types["assets"]>(),
+    ...audioFor<Types["assets"], Types["player"]>(),
     ...effectsFor<Types["assets"], EmitterIdOf<Types>>()
   };
 }
@@ -243,8 +255,9 @@ export { audioPlugin, effectsPlugin, platformPlugin } from "./plugins";
 
 // ─── Helpers (explicit, never export *) ───────────────────────
 // flow: nodes, flows, features, effect descriptors
-export { defineFeature } from "./plugins/flow/feature";
+export { defineFeature, flattenFeatures } from "./plugins/flow/feature";
 export { guide, hint, schedule } from "./plugins/flow/fx/descriptors";
+export { defineEffect } from "./plugins/flow/fx/effect";
 export { exit, slot, to, type } from "./plugins/flow/runner/define";
 // model
 export { SaveUnreadableError } from "./plugins/model/store/types";
@@ -254,6 +267,7 @@ export {
   Exiting,
   Layer,
   mut,
+  Now,
   Order,
   resource,
   system,
@@ -264,13 +278,56 @@ export { projection } from "./plugins/world/projection/define";
 // renderer: the display components
 export {
   Display,
+  HudPart,
   NineSlice,
+  Overlay,
   Parent,
   Shape,
   Sprite,
   sprite,
   Transform
 } from "./plugins/renderer/components";
+export type { HudPartValue, OverlayValue } from "./plugins/renderer/components";
+// renderer: the performance log of an agent build, its frame ring and the record of one frame
+export {
+  PERF_CAUSES,
+  PERF_GAP_BUCKETS,
+  PERF_LOG_VERSION
+} from "./plugins/renderer/monitor/log-types";
+export { frameAt } from "./plugins/renderer/monitor/ring";
+export { DEMAND_REASONS } from "./plugins/renderer/reasons";
+export type {
+  FrameColumns,
+  FrameReadout,
+  FrameReadResult,
+  FrameRecord,
+  FrameRing,
+  LongFrameEntry,
+  MonitorConfig,
+  OverlayEventDetail,
+  OverlayWhat,
+  PassKind,
+  PassRecord,
+  PerfCause,
+  PerfChange,
+  PerfChangeEntry,
+  PerfCollectorLine,
+  PerfDisplay,
+  PerfEventLine,
+  PerfEventName,
+  PerfHeaderLine,
+  PerfLogLine,
+  PerfLongFrameLine,
+  PerfMarkLine,
+  PerfMeasured,
+  PerfSampleLine,
+  PerfSpikeLine,
+  PerfStartupLine,
+  PerfThermalLine,
+  PoolTrim,
+  PoolTrimDetail,
+  WarmDetail
+} from "./plugins/renderer/types";
 // input: gestures as data
 export {
   Draggable,
@@ -321,7 +378,7 @@ export type { DescriptionNode } from "./plugins/world/projection/types";
 export { bind, Countdown, defineTextStyles, label, Text } from "./plugins/text/components";
 export type { BindOptions, CountdownValue, TextFormat } from "./plugins/text/types";
 // ui: components, styles, tokens, the popup effect and the ui-owned components
-export { Box, LocalWrite, popup } from "./plugins/ui/components";
+export { Box, DebugTrigger, LocalWrite, popup } from "./plugins/ui/components";
 export { defineComponent } from "./plugins/ui/jsx/component";
 export { defineStyle } from "./plugins/ui/styles/define";
 export { resolve } from "./plugins/ui/styles/resolve";
@@ -339,6 +396,7 @@ export {
   Outline
 } from "./plugins/effects/filters/builtins";
 export { defineFilter } from "./plugins/effects/filters/define";
+export type { FilterArea } from "./plugins/effects/filters/types";
 export { Emitter } from "./plugins/effects/particles/component";
 export { defineEmitter } from "./plugins/effects/particles/define";
 // platform: the provider seam a game fills, and what one Back press ends in

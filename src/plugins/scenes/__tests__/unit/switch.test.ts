@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Json } from "../../../model/types";
 import { defineScene } from "../../define";
-import type { SceneDefinition } from "../../types";
+import type { SceneDefinition, SceneState } from "../../types";
 import { createMockScenes, type MockScenes } from "./mock-scenes";
 
 const homeScene = defineScene("home", {
@@ -271,7 +272,7 @@ describe("the synchronous block of the switch", () => {
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
       { name: "lifted", sort: "none" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
     expect(mock.world.unmounted[0]).toEqual([]);
     expect(mock.world.mounted[1]).toEqual({
@@ -513,5 +514,251 @@ describe("the switch at a transit node after the restore door expected a scene",
     expect(mock.state.pending).toBe("board");
     expect(mock.world.calls).toEqual([]);
     expect(mock.emitted).toEqual([]);
+  });
+});
+
+/** Every state the ward's `bundles` was called with, in order. */
+const wardSeen: SceneState[] = [];
+
+const wardScene = defineScene("ward", {
+  bundle: "location",
+  bundles: (state: SceneState<Json, { episode: string }>) => {
+    wardSeen.push(state);
+
+    return [state.session.episode];
+  },
+  layers: { room: {} },
+  projections: [{ name: "ward.room", layer: "room" }]
+});
+
+const brokenScene = defineScene("broken", {
+  bundle: "location",
+  bundles: () => {
+    throw new Error("no episode in the session");
+  },
+  layers: {},
+  projections: []
+});
+
+/**
+ * Starts the plugin with home, board, ward and broken registered, the session at `ep01`.
+ *
+ * @returns The started mock.
+ */
+function wardMock(): MockScenes {
+  const mock = startedMock([homeScene, boardScene, wardScene, brokenScene]);
+
+  wardSeen.length = 0;
+  mock.model.set({}, { episode: "ep01" });
+
+  return mock;
+}
+
+/**
+ * Gives the pending promise callbacks of the switch their turns.
+ */
+async function flush(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+}
+
+describe("the switch to a scene with bundles of state", () => {
+  // Bug: the world is touched while the episode is still loading, or the loads run one by one.
+  it("loads the scene bundle and every bundle bundles names before it touches the world", async () => {
+    const mock = wardMock();
+
+    mock.assets.control.gated = true;
+
+    const entering = mock.enter({ scene: "ward" });
+
+    await flush();
+
+    expect(mock.assets.loaded).toEqual(["location", "ep01"]);
+
+    mock.assets.releaseBundle("location");
+    await flush();
+
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.state.current).toBeUndefined();
+
+    mock.assets.releaseBundle("ep01");
+    await entering;
+
+    expect(mock.world.calls).toEqual(["setLayers", "mount"]);
+    expect(mock.state.current).toBe("ward");
+    expect(mock.state.named).toEqual(["location", "ep01"]);
+  });
+
+  // Bug: `bundles` reads a draft or a mutable copy instead of the committed trees.
+  it("calls bundles with the committed player and session, frozen", async () => {
+    const mock = wardMock();
+    const committed = mock.model.api.store.snapshot();
+
+    await mock.enter({ scene: "ward" });
+
+    expect(wardSeen).toHaveLength(1);
+    expect(wardSeen[0]).toEqual({ player: committed.player, session: committed.session });
+    expect(wardSeen[0]?.session).toBe(committed.session);
+    expect(Object.isFrozen(wardSeen[0])).toBe(true);
+  });
+
+  // Bug: the ward is mounted over a missing episode.
+  it("rejects and keeps the mounted scene when one named bundle fails", async () => {
+    const mock = wardMock();
+
+    await mock.enter({ scene: "home" });
+    mock.assets.control.gated = true;
+
+    const entering = mock.enter({ scene: "ward" });
+
+    await flush();
+    mock.assets.releaseBundle("location");
+    mock.assets.fail(new Error("ep01: 404"));
+
+    await expect(entering).rejects.toThrow("ep01: 404");
+    expect(mock.state.current).toBe("home");
+    expect(mock.state.named).toEqual(["home"]);
+  });
+
+  // Bug: loads start before `bundles` ran, or the switch is half done when it throws.
+  it("rejects without loading or touching the world when bundles throws", async () => {
+    const mock = wardMock();
+
+    await mock.enter({ scene: "home" });
+    mock.assets.loaded.length = 0;
+    mock.world.calls.length = 0;
+
+    await expect(mock.enter({ scene: "broken" })).rejects.toThrow("no episode in the session");
+    expect(mock.assets.loaded).toEqual([]);
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.state.current).toBe("home");
+  });
+});
+
+describe("the re-read at a node of the mounted scene", () => {
+  // Bug: the episode the state names now is never loaded, or the scene is mounted again for it.
+  it("re-reads bundles at a node of the mounted scene and awaits the newly named bundle without mounting again", async () => {
+    const mock = wardMock();
+
+    await mock.enter({ scene: "ward" });
+    mock.world.calls.length = 0;
+    mock.emitted.length = 0;
+    mock.model.set({}, { episode: "ep02" });
+    mock.assets.control.gated = true;
+
+    const settled = { done: false };
+    const entering = mock.enter({ scene: "ward", rest: true }).then(() => {
+      settled.done = true;
+    });
+
+    await flush();
+
+    expect(mock.assets.loaded).toContain("ep02");
+    expect(settled.done).toBe(false);
+
+    mock.assets.release();
+    await entering;
+
+    expect(mock.state.named).toEqual(["location", "ep02"]);
+    expect(mock.world.calls).toEqual([]);
+    expect(mock.emitted).toEqual([]);
+    expect(mock.time.wakes).toBe(1);
+  });
+
+  // Bug: every node entry starts a load, and an in-flight load delays every node.
+  it("loads nothing at a node of the mounted scene when bundles names the same list", async () => {
+    const mock = wardMock();
+
+    await mock.enter({ scene: "ward" });
+    mock.assets.loaded.length = 0;
+
+    await mock.enter({ rest: true });
+    await mock.enter({ scene: "ward" });
+    await mock.enter({ path: "main/popup", over: true });
+
+    expect(mock.assets.loaded).toEqual([]);
+
+    // A scene without bundles never re-reads: a flat game makes exactly the calls of today.
+    await mock.enter({ scene: "board" });
+    mock.assets.loaded.length = 0;
+    await mock.enter({ rest: true });
+
+    expect(mock.assets.loaded).toEqual([]);
+  });
+
+  // Bug: a fast walk loads the bundles of every transit node it passes.
+  it("does not re-read bundles at a transit node of a fast walk", async () => {
+    const mock = wardMock();
+
+    await mock.enter({ scene: "ward" });
+    mock.assets.loaded.length = 0;
+    wardSeen.length = 0;
+    mock.model.set({}, { episode: "ep02" });
+
+    await mock.enter({ path: "main/walk" }, { mode: "fast" });
+    await mock.enter({ path: "main/popup", over: true }, { mode: "fast" });
+
+    expect(wardSeen).toEqual([]);
+    expect(mock.assets.loaded).toEqual([]);
+    expect(mock.state.named).toEqual(["location", "ep01"]);
+  });
+
+  // Bug: assets never learns what the mounted scene names, or is told on every node.
+  it("tells assets what the mounted scene names after a switch and after a re-read that changed it, and not after one that did not", async () => {
+    const mock = wardMock();
+
+    await mock.enter({ scene: "ward" });
+    await mock.enter({ rest: true });
+    mock.model.set({}, { episode: "ep02" });
+    await mock.enter({ rest: true });
+    await mock.enter({ rest: true });
+
+    expect(mock.assets.named).toEqual([
+      ["location", "ep01"],
+      ["location", "ep02"]
+    ]);
+  });
+
+  // Bug: `named` lists bundles that never arrived, so the next node skips their load.
+  it("keeps the named list when the node is aborted during the re-read", async () => {
+    const mock = wardMock();
+    const controller = new AbortController();
+
+    await mock.enter({ scene: "ward" });
+    mock.model.set({}, { episode: "ep02" });
+    mock.assets.control.gated = true;
+
+    const entering = mock.enter({ rest: true }, { signal: controller.signal });
+
+    await flush();
+    controller.abort();
+    await entering;
+
+    expect(mock.state.named).toEqual(["location", "ep01"]);
+    expect(mock.assets.named).toEqual([["location", "ep01"]]);
+  });
+});
+
+describe("a switch in the performance log", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("names the scenes it switched between in an agent build, and nowhere without the flag", async () => {
+    const plain = startedMock();
+
+    await plain.enter({ scene: "home" });
+
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const agent = startedMock();
+
+    await agent.enter({ scene: "home" });
+    await agent.enter({ scene: "board" });
+
+    expect(plain.renderer.monitor.event).not.toHaveBeenCalled();
+    expect(agent.renderer.monitor.event.mock.calls).toEqual([
+      // eslint-disable-next-line unicorn/no-null -- the log is JSON: no scene before is null.
+      ["scene", { from: null, to: "home" }],
+      ["scene", { from: "home", to: "board" }]
+    ]);
   });
 });

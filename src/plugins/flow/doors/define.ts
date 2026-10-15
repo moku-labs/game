@@ -54,8 +54,13 @@ export function defineSource<S extends InputSchema, O, App = HeadlessApp>(
 }
 
 /**
- * Declares a command: a dev-only action the editor lists and runs. Its body starts with the
- * inline dev guard, so a production build drops it.
+ * Declares a command: an action the editor lists and runs on the dev page and on a debug page.
+ * Its body starts with the guard of its effect: the agent form for `read` and `cosmetic`, the
+ * control form for the others (see docs/doors.md), so a production build drops it. A game's
+ * `.dev` command with only the `__MOKU_GAME_DEV__` guard runs in dev and is refused on a debug
+ * page. `overlay` shows it in the editor's overlay: `"toggle"` with the input `{ on: "boolean" }`
+ * and a `value(app)` the switch is drawn from, `"button"` with no required input and no value;
+ * any other combination is a type error.
  *
  * @param command - The descriptor.
  * @returns The same descriptor, frozen.
@@ -74,6 +79,29 @@ export function defineSource<S extends InputSchema, O, App = HeadlessApp>(
  *   }
  * });
  * (await run(app, openShop)).state.path; // "shop"
+ * ```
+ * @example
+ * ```ts
+ * // features/ward/glow.dev.ts — the overlay's "Glow" switch of this game.
+ * export const glowSwitch = defineCommand({
+ *   id: "ward.glow",
+ *   title: "Glow",
+ *   input: { on: "boolean" },
+ *   effect: "cosmetic",
+ *   overlay: "toggle",
+ *   value: (app: { readonly effects: Effects.EffectsApi }) =>
+ *     !app.effects.diagnostics.disabled().includes("effects.glow"),
+ *   run: (app, { on }) => {
+ *     if (
+ *       (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+ *       (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+ *     ) {
+ *       throw controlRefused();
+ *     }
+ *     return on ? app.effects.diagnostics.enable("effects.glow") : app.effects.diagnostics.disable("effects.glow");
+ *   }
+ * });
+ * // The overlay draws a switch "Glow", on; a tap runs it with { on: false } and the next frame draws no glow.
  * ```
  */
 export function defineCommand<S extends InputSchema, O, App = HeadlessApp>(

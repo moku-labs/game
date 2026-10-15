@@ -1,8 +1,8 @@
 /**
  * @file The browser the page and the local save see in a plain vitest run: a `localStorage` over
- * a map that can be told to refuse, a `matchMedia` list whose `change` a test fires, and a
- * `location`. Not a test file. Every stub goes through `vi.stubGlobal`, so `vi.unstubAllGlobals()`
- * takes it back.
+ * a map that can be told to refuse, a `matchMedia` list whose `change` a test fires, a
+ * `location`, and the window's `pagehide` listeners, which a test fires. Not a test file. Every
+ * stub goes through `vi.stubGlobal`, so `vi.unstubAllGlobals()` takes it back.
  */
 import { vi } from "vitest";
 
@@ -104,4 +104,44 @@ export function stubLocation(href: string): void {
   const url = new URL(href);
 
   vi.stubGlobal("location", { href: url.href, search: url.search });
+}
+
+/** The `pagehide` listeners of the window, and how a test fires them. */
+export type FakePageHide = {
+  /** Fires `pagehide` at every listener, in the order they were added. */
+  hide(persisted: boolean): void;
+  /** How many `pagehide` listeners are registered now. */
+  count(): number;
+};
+
+/** A listener the window holds. */
+type WindowListener = (event: { type: string; persisted: boolean }) => void;
+
+/**
+ * Stubs the window's `addEventListener` and `removeEventListener`, keeping the `pagehide`
+ * listeners for the test to fire; the listeners of other events are kept and never fired.
+ *
+ * @returns The trigger and the count of the `pagehide` listeners.
+ */
+export function stubPageHide(): FakePageHide {
+  const listeners: { type: string; listener: WindowListener }[] = [];
+
+  vi.stubGlobal("addEventListener", (type: string, listener: WindowListener) => {
+    listeners.push({ type, listener });
+  });
+  vi.stubGlobal("removeEventListener", (type: string, listener: WindowListener) => {
+    const index = listeners.findIndex(held => held.type === type && held.listener === listener);
+
+    if (index !== -1) listeners.splice(index, 1);
+  });
+
+  const pageHides = (): WindowListener[] =>
+    listeners.filter(held => held.type === "pagehide").map(held => held.listener);
+
+  return {
+    hide: persisted => {
+      for (const listener of pageHides()) listener({ type: "pagehide", persisted });
+    },
+    count: () => pageHides().length
+  };
 }

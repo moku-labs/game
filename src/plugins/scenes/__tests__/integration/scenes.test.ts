@@ -171,7 +171,7 @@ describe("scenes plugin integration — a live walk", () => {
 
     expect(app.flow.state().path).toBe("home");
     expect(app.scenes.current()).toBe("home");
-    expect(app.world.projection.layers()).toEqual([{ name: "ui", sort: "none" }]);
+    expect(app.world.projection.layers()).toEqual([{ name: "ui", sort: "order" }]);
     expect(app.world.projection.entityOf("menu.buttons", "play")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i5")).toBeUndefined();
     expect(heard).toEqual([{ from: undefined, to: "home", music: "home.theme" }]);
@@ -191,7 +191,7 @@ describe("scenes plugin integration — a live walk", () => {
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
       { name: "lifted", sort: "none" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
     expect(app.world.projection.entityOf("board.cells", "c1")).toBeDefined();
     expect(app.world.projection.entityOf("board.items", "i5")).toBeDefined();

@@ -54,6 +54,7 @@ type Source = {
   key: string;
   width: number;
   height: number;
+  mips?: true;
   file: ManifestFile;
   bytes: Uint8Array;
   sha: string;
@@ -180,6 +181,7 @@ async function readTextures(run: PackRun, bundle: ManifestBundle): Promise<Sourc
         key: file.key,
         width: file.width,
         height: file.height,
+        ...(file.mips === true ? { mips: true } : {}),
         file,
         bytes,
         sha: sha256(bytes)
@@ -497,7 +499,10 @@ async function packBundle(
 
   return {
     feature: bundle.feature,
+    ...(bundle.parent === undefined ? {} : { parent: bundle.parent }),
+    ...(bundle.dir === undefined ? {} : { dir: bundle.dir }),
     tier: bundle.tier,
+    ...(bundle.release === undefined ? {} : { release: bundle.release }),
     mb,
     ...(packed.pages.length === 0
       ? {}
@@ -528,6 +533,12 @@ function checkTexture(
   }
 
   if (atlas === undefined) return [];
+
+  if (file.mips === true) {
+    return [
+      `the texture "${file.key}" has mipmaps, so it must stay loose, but lies on page "${atlas.page}".`
+    ];
+  }
 
   const page = entry.pages?.find(candidate => candidate.id === atlas.page);
 
@@ -563,7 +574,7 @@ function checkTexture(
 /**
  * Checks a packed manifest against the scan it came from: every key landed exactly once, as a
  * page frame or a file; every frame names a page of its own bundle, lies inside it and has the
- * size of its source, so `nine` stays valid as it is.
+ * size of its source, so `nine` stays valid as it is; a mipmapped texture is never a frame.
  *
  * @param source - The manifest of the scan.
  * @param packed - The packed manifest.

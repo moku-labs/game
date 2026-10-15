@@ -1,0 +1,1166 @@
+{
+  "ui": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [],
+                "key": "glintA",
+                "rect": {
+                  "h": 60,
+                  "w": 60,
+                  "x": 120,
+                  "y": 300
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {
+                  "fill": 15914106,
+                  "height": 60,
+                  "left": 120,
+                  "position": "absolute",
+                  "radius": 24,
+                  "reason": "a fixture button at a fixed place, so a test taps it by key",
+                  "top": 300,
+                  "width": 60
+                },
+                "type": "panel"
+              },
+              {
+                "children": [],
+                "key": "glintB",
+                "rect": {
+                  "h": 60,
+                  "w": 60,
+                  "x": 520,
+                  "y": 520
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {
+                  "fill": 15914106,
+                  "height": 60,
+                  "left": 520,
+                  "position": "absolute",
+                  "radius": 24,
+                  "reason": "a fixture button at a fixed place, so a test taps it by key",
+                  "top": 520,
+                  "width": 60
+                },
+                "type": "panel"
+              },
+              {
+                "children": [],
+                "key": "glintC",
+                "rect": {
+                  "h": 60,
+                  "w": 60,
+                  "x": 820,
+                  "y": 260
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {
+                  "fill": 15914106,
+                  "height": 60,
+                  "left": 820,
+                  "position": "absolute",
+                  "radius": 24,
+                  "reason": "a fixture button at a fixed place, so a test taps it by key",
+                  "top": 260,
+                  "width": 60
+                },
+                "type": "panel"
+              }
+            ],
+            "key": "wardFrost",
+            "rect": {
+              "h": 1440,
+              "w": 1080,
+              "x": 0,
+              "y": 0
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "fill": 2768207,
+              "height": "100%",
+              "left": 0,
+              "position": "absolute",
+              "reason": "a layer of the screen lies over the whole of it",
+              "top": 0,
+              "width": "100%"
+            },
+            "type": "stack"
+          },
+          {
+            "children": [],
+            "key": "wardEnergy",
+            "rect": {
+              "h": 70,
+              "w": 31,
+              "x": 0,
+              "y": 0
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {},
+            "type": "text"
+          },
+          {
+            "children": [],
+            "key": "wardObject",
+            "rect": {
+              "h": 160,
+              "w": 160,
+              "x": 460,
+              "y": 900
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "alpha": 1,
+              "fill": 9268815,
+              "height": 160,
+              "left": 460,
+              "position": "absolute",
+              "radius": 24,
+              "reason": "a fixture button at a fixed place, so a test taps it by key",
+              "top": 900,
+              "width": 160
+            },
+            "type": "button"
+          },
+          {
+            "children": [],
+            "key": "wardCase",
+            "rect": {
+              "h": 160,
+              "w": 160,
+              "x": 120,
+              "y": 1300
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "fill": 5930394,
+              "height": 160,
+              "left": 120,
+              "position": "absolute",
+              "radius": 24,
+              "reason": "a fixture button at a fixed place, so a test taps it by key",
+              "top": 1300,
+              "width": 160
+            },
+            "type": "button"
+          },
+          {
+            "children": [],
+            "key": "wardBoard",
+            "rect": {
+              "h": 160,
+              "w": 160,
+              "x": 800,
+              "y": 1300
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "fill": 5213530,
+              "height": 160,
+              "left": 800,
+              "position": "absolute",
+              "radius": 24,
+              "reason": "a fixture button at a fixed place, so a test taps it by key",
+              "top": 1300,
+              "width": 160
+            },
+            "type": "button"
+          }
+        ],
+        "key": "wardRoot",
+        "rect": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "state": {
+          "active": false,
+          "covered": false,
+          "disabled": false,
+          "focus": false,
+          "hover": false,
+          "pressed": false,
+          "selected": false
+        },
+        "style": {
+          "height": "100%",
+          "width": "100%"
+        },
+        "type": "stack"
+      },
+      {
+        "children": [
+          {
+            "children": [],
+            "key": "hudLevel",
+            "rect": {
+              "h": 160,
+              "w": 160,
+              "x": 40,
+              "y": 40
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "fill": 8015770,
+              "height": 160,
+              "left": 40,
+              "position": "absolute",
+              "radius": 24,
+              "reason": "a fixture button at a fixed place, so a test taps it by key",
+              "top": 40,
+              "width": 160
+            },
+            "type": "panel"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "key": "hudEnergyCount",
+                "rect": {
+                  "h": 70,
+                  "w": 31,
+                  "x": 240,
+                  "y": 40
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {},
+                "type": "text"
+              }
+            ],
+            "key": "hudEnergy",
+            "rect": {
+              "h": 160,
+              "w": 160,
+              "x": 240,
+              "y": 40
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "fill": 3107407,
+              "height": 160,
+              "left": 240,
+              "position": "absolute",
+              "radius": 24,
+              "reason": "a fixture button at a fixed place, so a test taps it by key",
+              "top": 40,
+              "width": 160
+            },
+            "type": "stack"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "key": "hudGemsCount",
+                "rect": {
+                  "h": 70,
+                  "w": 54,
+                  "x": 440,
+                  "y": 40
+                },
+                "state": {
+                  "active": false,
+                  "covered": false,
+                  "disabled": false,
+                  "focus": false,
+                  "hover": false,
+                  "pressed": false,
+                  "selected": false
+                },
+                "style": {},
+                "type": "text"
+              }
+            ],
+            "key": "hudGems",
+            "rect": {
+              "h": 160,
+              "w": 160,
+              "x": 440,
+              "y": 40
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "fill": 3100522,
+              "height": 160,
+              "left": 440,
+              "position": "absolute",
+              "radius": 24,
+              "reason": "a fixture button at a fixed place, so a test taps it by key",
+              "top": 40,
+              "width": 160
+            },
+            "type": "stack"
+          },
+          {
+            "children": [],
+            "key": "shopButton",
+            "rect": {
+              "h": 160,
+              "w": 160,
+              "x": 880,
+              "y": 40
+            },
+            "state": {
+              "active": false,
+              "covered": false,
+              "disabled": false,
+              "focus": false,
+              "hover": false,
+              "pressed": false,
+              "selected": false
+            },
+            "style": {
+              "fill": 12745274,
+              "height": 160,
+              "left": 880,
+              "position": "absolute",
+              "radius": 24,
+              "reason": "a fixture button at a fixed place, so a test taps it by key",
+              "top": 40,
+              "width": 160
+            },
+            "type": "button"
+          }
+        ],
+        "key": "hudBar",
+        "rect": {
+          "h": 220,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "state": {
+          "active": false,
+          "covered": false,
+          "disabled": false,
+          "focus": false,
+          "hover": false,
+          "pressed": false,
+          "selected": false
+        },
+        "style": {
+          "height": 220,
+          "width": "100%"
+        },
+        "type": "stack"
+      }
+    ],
+    "rect": {
+      "h": 0,
+      "w": 0,
+      "x": 0,
+      "y": 0
+    },
+    "state": {
+      "active": false,
+      "covered": false,
+      "disabled": false,
+      "focus": false,
+      "hover": false,
+      "pressed": false,
+      "selected": false
+    },
+    "style": {},
+    "type": "screen"
+  },
+  "views": [
+    {
+      "components": {
+        "Layer": {
+          "name": "hud"
+        },
+        "Order": {
+          "value": -5
+        }
+      },
+      "key": "hud.bar",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 220,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "Layer": {
+          "name": "hud"
+        },
+        "Order": {
+          "value": -5
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16777215,
+          "fillAlpha": 0,
+          "h": 220,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 1080
+        },
+        "Transform": {
+          "pivot": {
+            "x": 540,
+            "y": 110
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 110
+        }
+      },
+      "key": "hudBar",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 160,
+          "w": 160,
+          "x": 240,
+          "y": 40
+        },
+        "HudPart": {
+          "key": "energy"
+        },
+        "Order": {
+          "value": -0.499755859375
+        },
+        "Parent": {
+          "key": "hudBar",
+          "projection": "hud.bar"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 3107407,
+          "fillAlpha": 1,
+          "h": 160,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 160
+        },
+        "Transform": {
+          "pivot": {
+            "x": 80,
+            "y": 80
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 320,
+          "y": 120
+        }
+      },
+      "key": "hudEnergy",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 70,
+          "w": 31,
+          "x": 240,
+          "y": 40
+        },
+        "Order": {
+          "value": -0.4998779296875
+        },
+        "Parent": {
+          "key": "hudEnergy",
+          "projection": "hud.bar"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 15.5,
+            "y": 35
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 15.5,
+          "y": 35
+        }
+      },
+      "key": "hudEnergyCount",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 160,
+          "w": 160,
+          "x": 440,
+          "y": 40
+        },
+        "HudPart": {
+          "key": "gems"
+        },
+        "Order": {
+          "value": -0.4996337890625
+        },
+        "Parent": {
+          "key": "hudBar",
+          "projection": "hud.bar"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 3100522,
+          "fillAlpha": 1,
+          "h": 160,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 160
+        },
+        "Transform": {
+          "pivot": {
+            "x": 80,
+            "y": 80
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 520,
+          "y": 120
+        }
+      },
+      "key": "hudGems",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 70,
+          "w": 54,
+          "x": 440,
+          "y": 40
+        },
+        "Order": {
+          "value": -0.4998779296875
+        },
+        "Parent": {
+          "key": "hudGems",
+          "projection": "hud.bar"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 27,
+            "y": 35
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 27,
+          "y": 35
+        }
+      },
+      "key": "hudGemsCount",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 160,
+          "w": 160,
+          "x": 40,
+          "y": 40
+        },
+        "HudPart": {
+          "key": "level"
+        },
+        "Order": {
+          "value": -0.4998779296875
+        },
+        "Parent": {
+          "key": "hudBar",
+          "projection": "hud.bar"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 8015770,
+          "fillAlpha": 1,
+          "h": 160,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 160
+        },
+        "Touchable": true,
+        "Transform": {
+          "pivot": {
+            "x": 80,
+            "y": 80
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 120,
+          "y": 120
+        }
+      },
+      "key": "hudLevel",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 160,
+          "w": 160,
+          "x": 880,
+          "y": 40
+        },
+        "HudPart": {
+          "key": "shop"
+        },
+        "Order": {
+          "value": -0.49951171875
+        },
+        "Parent": {
+          "key": "hudBar",
+          "projection": "hud.bar"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 12745274,
+          "fillAlpha": 1,
+          "h": 160,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 160
+        },
+        "Tappable": {
+          "intent": "shop",
+          "payload": {}
+        },
+        "Transform": {
+          "pivot": {
+            "x": 80,
+            "y": 80
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 960,
+          "y": 120
+        }
+      },
+      "key": "shopButton",
+      "projection": "hud.bar"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 60,
+          "w": 60,
+          "x": 120,
+          "y": 300
+        },
+        "Order": {
+          "value": -0.4998779296875
+        },
+        "Parent": {
+          "key": "wardFrost",
+          "projection": "ward.root"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 15914106,
+          "fillAlpha": 1,
+          "h": 60,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 60
+        },
+        "Touchable": true,
+        "Transform": {
+          "pivot": {
+            "x": 30,
+            "y": 30
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 150,
+          "y": 330
+        }
+      },
+      "key": "glintA",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 60,
+          "w": 60,
+          "x": 520,
+          "y": 520
+        },
+        "Order": {
+          "value": -0.499755859375
+        },
+        "Parent": {
+          "key": "wardFrost",
+          "projection": "ward.root"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 15914106,
+          "fillAlpha": 1,
+          "h": 60,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 60
+        },
+        "Touchable": true,
+        "Transform": {
+          "pivot": {
+            "x": 30,
+            "y": 30
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 550,
+          "y": 550
+        }
+      },
+      "key": "glintB",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 60,
+          "w": 60,
+          "x": 820,
+          "y": 260
+        },
+        "Order": {
+          "value": -0.4996337890625
+        },
+        "Parent": {
+          "key": "wardFrost",
+          "projection": "ward.root"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 15914106,
+          "fillAlpha": 1,
+          "h": 60,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 60
+        },
+        "Touchable": true,
+        "Transform": {
+          "pivot": {
+            "x": 30,
+            "y": 30
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 850,
+          "y": 290
+        }
+      },
+      "key": "glintC",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Layer": {
+          "name": "scene"
+        },
+        "Order": {
+          "value": -6
+        }
+      },
+      "key": "ward.root",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 160,
+          "w": 160,
+          "x": 800,
+          "y": 1300
+        },
+        "Order": {
+          "value": -0.4993896484375
+        },
+        "Parent": {
+          "key": "wardRoot",
+          "projection": "ward.root"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 5213530,
+          "fillAlpha": 1,
+          "h": 160,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 160
+        },
+        "Tappable": {
+          "intent": "board",
+          "payload": {}
+        },
+        "Transform": {
+          "pivot": {
+            "x": 80,
+            "y": 80
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 880,
+          "y": 1380
+        }
+      },
+      "key": "wardBoard",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 160,
+          "w": 160,
+          "x": 120,
+          "y": 1300
+        },
+        "Order": {
+          "value": -0.49951171875
+        },
+        "Parent": {
+          "key": "wardRoot",
+          "projection": "ward.root"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 5930394,
+          "fillAlpha": 1,
+          "h": 160,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 160
+        },
+        "Tappable": {
+          "intent": "casefile",
+          "payload": {}
+        },
+        "Transform": {
+          "pivot": {
+            "x": 80,
+            "y": 80
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 200,
+          "y": 1380
+        }
+      },
+      "key": "wardCase",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 70,
+          "w": 31,
+          "x": 0,
+          "y": 0
+        },
+        "Order": {
+          "value": -0.499755859375
+        },
+        "Parent": {
+          "key": "wardRoot",
+          "projection": "ward.root"
+        },
+        "Transform": {
+          "pivot": {
+            "x": 15.5,
+            "y": 35
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 15.5,
+          "y": 35
+        }
+      },
+      "key": "wardEnergy",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "Order": {
+          "value": -0.4998779296875
+        },
+        "Parent": {
+          "key": "wardRoot",
+          "projection": "ward.root"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 2768207,
+          "fillAlpha": 1,
+          "h": 1440,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 1080
+        },
+        "Transform": {
+          "pivot": {
+            "x": 540,
+            "y": 720
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 720
+        },
+        "effects.blur": {
+          "enabled": true,
+          "order": 0,
+          "quality": 0,
+          "repeatEdgePixels": true,
+          "resolution": 0,
+          "strength": 4
+        }
+      },
+      "key": "wardFrost",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 160,
+          "w": 160,
+          "x": 460,
+          "y": 900
+        },
+        "Order": {
+          "value": -0.4996337890625
+        },
+        "Parent": {
+          "key": "wardRoot",
+          "projection": "ward.root"
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 9268815,
+          "fillAlpha": 1,
+          "h": 160,
+          "kind": "rect",
+          "radius": 24,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 160
+        },
+        "Tappable": {
+          "intent": "inspect",
+          "payload": {}
+        },
+        "Transform": {
+          "pivot": {
+            "x": 80,
+            "y": 80
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 980
+        }
+      },
+      "key": "wardObject",
+      "projection": "ward.root"
+    },
+    {
+      "components": {
+        "Box": {
+          "h": 1440,
+          "w": 1080,
+          "x": 0,
+          "y": 0
+        },
+        "Layer": {
+          "name": "scene"
+        },
+        "Order": {
+          "value": -6
+        },
+        "Shape": {
+          "alpha": 1,
+          "clip": false,
+          "dash": 0,
+          "fill": 16777215,
+          "fillAlpha": 0,
+          "h": 1440,
+          "kind": "rect",
+          "radius": 0,
+          "stroke": 0,
+          "strokeWidth": 0,
+          "w": 1080
+        },
+        "Transform": {
+          "pivot": {
+            "x": 540,
+            "y": 720
+          },
+          "rotation": 0,
+          "scale": 1,
+          "x": 540,
+          "y": 720
+        }
+      },
+      "key": "wardRoot",
+      "projection": "ward.root"
+    }
+  ]
+}

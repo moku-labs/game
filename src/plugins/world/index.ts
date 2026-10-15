@@ -6,6 +6,7 @@
  */
 import type { RegisterFunction } from "@moku-labs/core";
 import { createPlugin } from "../../config";
+import { clockPlugin } from "../clock";
 import { flowPlugin } from "../flow";
 import { modelPlugin } from "../model";
 import { timePlugin } from "../time";
@@ -31,7 +32,7 @@ const config: Config = { settleMs: 350, reconciledEvent: false };
  * ```
  */
 export const worldPlugin = /*#__PURE__*/ createPlugin("world", {
-  depends: [timePlugin, modelPlugin, flowPlugin],
+  depends: [timePlugin, modelPlugin, flowPlugin, clockPlugin],
   config,
   events: (register: RegisterFunction) =>
     register.map<Events>({ "world:reconciled": "A reconcile finished (dev only)" }),

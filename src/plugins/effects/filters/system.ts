@@ -1,32 +1,274 @@
 /**
  * @file effects/filters — the `sync` system that keeps one filter instance per view and kind,
  * writes them, hands the sorted list to `renderer.sync.filters.set` only when the kinds, their
- * order or their passes changed, destroys what left, and keeps the two filter budgets. It walks
- * the views the world hooks recorded, never the whole world.
+ * order or their passes changed, destroys what left, and keeps the two filter budgets. A value
+ * write the player can see calls `renderer.invalidate(entity)` first, once per view and frame. It
+ * walks the views the world hooks recorded, never the whole world. Its first run with a ready host
+ * starts the shader checks; a kind whose check is pending gets no instance, a broken kind its
+ * stand-in. A view whose filters declare an `area` gets the union of their areas handed to
+ * `renderer.sync.filters.area` when it changes (B4). Once the checks settled, every checked
+ * definition and every Pixi-core kind is handed to `renderer.sync.filters.warm` as a probe (F4).
  */
 import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
-import type { FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
+import type { FilterCache, FilterSlot, PixiModule, ViewportSize } from "../../renderer/types";
 import type { AnySystem, Entity } from "../../world/types";
 import type { EffectsCtx } from "../types";
-import { checkShader } from "./check";
-import { createFilter, destroyFilter, writeFilter } from "./instance";
-import type { FilteredView, FilterInstance, FilterKind } from "./types";
+import { CORE_CACHE } from "./builtins";
+import { kindStatus, pollChecks, startChecks } from "./check";
+import {
+  createFilter,
+  createStandIn,
+  createWarmFilter,
+  destroyFilter,
+  refreshInputs,
+  writeFilter
+} from "./instance";
+import type {
+  AreaBox,
+  FilterArea,
+  FilteredView,
+  FilterFields,
+  FilterInstance,
+  FilterKind,
+  WarmProbe
+} from "./types";
+import { checksSettled, warmDefinitions } from "./warm";
+
+/** The `before` of a kind a debug switch turned off: it is not drawn, so it asks for no frame. */
+const NO_SIGNAL = (): void => {};
+
+/** One of our instances: the kind that may declare an area. */
+type OursInstance = Extract<FilterInstance, { kind: "wgsl" }>;
 
 /**
- * Creates the record of a view with no filter yet. Its change marks and its sorted list are made
- * here once and reused every frame.
+ * The union of a view's areas, computed in place: the sync runs one view at a time, so one scratch box is enough and
+ * a frame where an area changed allocates nothing but the tuple it hands over.
+ */
+const union: AreaBox = { x: 0, y: 0, width: 0, height: 0, some: false };
+
+/**
+ * Creates the record of a view with no filter yet. Its change marks, its sorted list and its
+ * `signal` are made here once and reused every frame.
  *
+ * @param ectx - Domain context of the effects plugin.
+ * @param entity - The entity.
  * @returns An empty view.
  */
-function emptyView(): FilteredView {
-  return {
+function emptyView(ectx: EffectsCtx, entity: Entity): FilteredView {
+  const view: FilteredView = {
     kinds: new Set(),
     instances: new Map(),
     retired: [],
     assigned: [],
     changed: new Set(),
-    placed: []
+    placed: [],
+    signalled: false,
+    signal: (): void => {
+      if (view.signalled) return;
+
+      view.signalled = true;
+      ectx.deps.renderer.invalidate(entity);
+    },
+    areaSent: { x: 0, y: 0, width: 0, height: 0, some: false },
+    areaMask: 0
   };
+
+  return view;
+}
+
+/**
+ * Logs a warning once per key.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param key - The one-shot key: the line and the kind.
+ * @param message - The log message.
+ * @param detail - The log detail.
+ */
+function warnOnce(
+  ectx: EffectsCtx,
+  key: string,
+  message: string,
+  detail: Readonly<Record<string, unknown>>
+): void {
+  if (ectx.state.warned.has(key)) return;
+
+  ectx.state.warned.add(key);
+  ectx.log.warn(message, detail);
+}
+
+/**
+ * Tells whether a value is a finite number.
+ *
+ * @param value - A field of an area answer.
+ * @returns True for a finite number.
+ * @example
+ * ```ts
+ * isFiniteNumber(Number.NaN); // false
+ * ```
+ */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * Tells whether an area answer is four finite numbers whose width and height are at least 0.
+ *
+ * @param answer - What a definition's `area` answered.
+ * @returns True for a usable area.
+ * @example
+ * ```ts
+ * isArea([107, 101, -1, 176]); // false
+ * ```
+ */
+function isArea(answer: unknown): answer is FilterArea {
+  if (!Array.isArray(answer) || answer.length !== 4) return false;
+
+  const [x, y, width, height]: readonly unknown[] = answer;
+
+  return (
+    isFiniteNumber(x) &&
+    isFiniteNumber(y) &&
+    isFiniteNumber(width) &&
+    isFiniteNumber(height) &&
+    width >= 0 &&
+    height >= 0
+  );
+}
+
+/**
+ * Asks an instance's definition for its area at the value it holds, and keeps the answer in place. An area that
+ * throws, or answers anything but four finite numbers with a width and a height of at least 0, is logged once per kind
+ * and counts as none.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param instance - One of our instances whose value changed.
+ */
+function judgeArea(ectx: EffectsCtx, instance: OursInstance): void {
+  const { area, kindId } = instance;
+  const ask = instance.definition.area;
+  let answer: unknown;
+
+  instance.areaStale = false;
+
+  try {
+    answer = ask?.(instance.value);
+  } catch (error) {
+    warnOnce(ectx, `area-failed:${kindId}`, "effects:area-failed", { kind: kindId, error });
+    answer = undefined;
+  }
+
+  if (isArea(answer)) {
+    [area.x, area.y, area.width, area.height] = answer;
+    area.some = true;
+
+    return;
+  }
+
+  if (answer !== undefined) {
+    warnOnce(ectx, `bad-area:${kindId}`, "effects:bad-area", { kind: kindId, area: answer });
+  }
+
+  area.some = false;
+}
+
+/**
+ * The union of the areas of a view's enabled filters, into the scratch box: none while no filter is enabled, and none
+ * when an enabled filter has no area (every built-in kind, or a definition that answered `undefined`) — it draws over
+ * the view's bounds. A disabled filter, and a kind a debug switch turned off (it is not placed), do not count.
+ *
+ * @param view - The view's record, its instances placed.
+ */
+function unionOf(view: FilteredView): void {
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+
+  union.some = false;
+
+  for (const instance of view.placed) {
+    if (!instance.filter.enabled) continue;
+    if (instance.kind !== "wgsl" || !instance.area.some) {
+      union.some = false;
+
+      return;
+    }
+
+    const { area } = instance;
+
+    union.some = true;
+    left = Math.min(left, area.x);
+    top = Math.min(top, area.y);
+    right = Math.max(right, area.x + area.width);
+    bottom = Math.max(bottom, area.y + area.height);
+  }
+
+  union.x = left;
+  union.y = top;
+  union.width = right - left;
+  union.height = bottom - top;
+}
+
+/**
+ * Tells whether two areas are the same: both none, or both some with the same four numbers.
+ *
+ * @param a - One area.
+ * @param b - The other.
+ * @returns True when nothing has to be handed over.
+ */
+function sameArea(a: Readonly<AreaBox>, b: Readonly<AreaBox>): boolean {
+  if (a.some !== b.some) return false;
+
+  return !a.some || (a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
+}
+
+/**
+ * Keeps the area of one view in step (B4): asks every placed instance whose value changed for its area, and when that,
+ * the slot list or an `enabled` switch changed, judges the union again and hands it to the renderer when it differs
+ * from what was handed last. On a frame where nothing changed it reads two fields per placed instance. A despawned view
+ * gets no call: the renderer forgets the area with its filters.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param entity - The entity.
+ * @param view - Its record, its instances placed in draw order.
+ * @param relisted - The slot list was handed over again this frame.
+ */
+function syncArea(ectx: EffectsCtx, entity: Entity, view: FilteredView, relisted: boolean): void {
+  let stale = relisted;
+  let mask = 0;
+  let bit = 1;
+
+  for (const instance of view.placed) {
+    if (instance.filter.enabled) mask += bit;
+    bit *= 2;
+
+    if (instance.kind === "wgsl" && instance.areaStale) {
+      judgeArea(ectx, instance);
+      stale = true;
+    }
+  }
+
+  if (!stale && mask === view.areaMask) return;
+
+  view.areaMask = mask;
+  unionOf(view);
+
+  const sent = view.areaSent;
+
+  if (sameArea(union, sent)) return;
+
+  sent.x = union.x;
+  sent.y = union.y;
+  sent.width = union.width;
+  sent.height = union.height;
+  sent.some = union.some;
+
+  if (ectx.deps.world.ecs.ownerOf(entity) === undefined) return;
+
+  ectx.deps.renderer.sync.filters.area(
+    entity,
+    union.some ? [union.x, union.y, union.width, union.height] : undefined
+  );
 }
 
 /**
@@ -60,7 +302,7 @@ function byOrder(a: FilterInstance, b: FilterInstance): number {
 
 /**
  * Tells whether the sorted instances of this frame differ from the last list handed over: other
- * instances, another order, or other passes.
+ * instances, another order, other passes, or other stage filters of their inputs.
  *
  * @param assigned - The last list handed over.
  * @param placed - The sorted instances of this frame.
@@ -78,14 +320,118 @@ function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstanc
     index += 1;
 
     if (slot?.filter !== instance.filter || slot.passes !== instance.passes) return true;
+    if (instance.kind === "wgsl" && slot.inputs !== instance.inputs?.slot) return true;
+    if (slot.cache !== cacheOfInstance(instance) || slot.blurs !== blursOf(instance)) return true;
   }
 
   return false;
 }
 
 /**
+ * What the kept-picture cache may do with an instance (spec 23 P8.4): its definition's category for one of ours (a
+ * stand-in's is its fallback's or the dev mark's), the category of the Pixi-core kind otherwise.
+ *
+ * @param instance - The instance.
+ * @returns The category.
+ */
+function cacheOfInstance(instance: FilterInstance): FilterCache {
+  return instance.kind === "wgsl" ? instance.definition.cache : CORE_CACHE[instance.kind];
+}
+
+/**
+ * Whether an instance shows a blurred copy of what is under it (spec 23 P8.5): the built-in `Blur`, or one of ours
+ * with inputs. The predicate an overlay's held loops read (spec 22).
+ *
+ * @param instance - The instance.
+ * @returns True, or `undefined` for every other filter (the slot leaves the key out).
+ */
+function blursOf(instance: FilterInstance): true | undefined {
+  const showsBlur =
+    instance.kind === "blur" || (instance.kind === "wgsl" && instance.definition.inputs.length > 0);
+
+  return showsBlur ? true : undefined;
+}
+
+/**
+ * Tells whether a debug switch turned a kind off (`effects.diagnostics.disable`). The guard is
+ * inline and positive, so a release build folds the answer to false.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param id - The kind id.
+ * @returns True while the kind is off on a dev or agent page.
+ */
+function isSwitchedOff(ectx: EffectsCtx, id: string): boolean {
+  return (
+    ((typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)) &&
+    ectx.state.diagnostics.off.has(id)
+  );
+}
+
+/**
+ * Puts the stand-in a broken instance built while it was drawing in its place: the broken one waits
+ * in `retired` and is destroyed after the new list is handed over.
+ *
+ * @param view - The view's record.
+ * @param kind - The kind.
+ * @param instance - Its instance now.
+ * @returns The instance to keep: the stand-in, or the same instance.
+ */
+function installReplacement(
+  view: FilteredView,
+  kind: FilterKind,
+  instance: FilterInstance
+): FilterInstance {
+  const { replacement } = instance;
+
+  if (replacement === undefined) return instance;
+
+  instance.replacement = undefined;
+  view.instances.set(kind.id, replacement);
+  view.retired.push(instance);
+
+  return replacement;
+}
+
+/**
+ * Builds the first instance of a kind on a view: nothing while its shader check is pending (the
+ * view draws unfiltered, logged once per kind), the stand-in of a broken kind, the kind's own
+ * instance once every definition it draws answered ok.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param kind - The kind.
+ * @param value - The stored filter value.
+ * @returns The instance, or `undefined` while it has none.
+ */
+function firstInstance(
+  ectx: EffectsCtx,
+  pixi: PixiModule,
+  kind: FilterKind,
+  value: Readonly<FilterFields>
+): FilterInstance | undefined {
+  const status = kindStatus(ectx, kind);
+
+  if (status === "ok") return createFilter(ectx, pixi, kind, value);
+  if (status === "broken") return createStandIn(ectx, pixi, kind, value);
+
+  // Never a blank frame: nothing unchecked is drawn. By the gate of the load stage, never on a mounted scene.
+  const key = `check-pending:${kind.id}`;
+
+  if (!ectx.state.warned.has(key)) {
+    ectx.state.warned.add(key);
+    ectx.log.warn("effects:check-pending", { filter: kind.id });
+  }
+
+  return undefined;
+}
+
+/**
  * Brings one kind of one view up to date: the first frame it is seen it gets its instance, once
- * its shader check answered ok; after that it is written.
+ * its shader check answered (its stand-in when the kind is broken), which reaches the renderer
+ * through the new slot list; after that it is written, its chains run again when a uniform changed,
+ * and a visible write asks the renderer for the frame first. A stand-in a broken instance built
+ * takes its place. A kind a debug switch turned off is written but asks for nothing.
  *
  * @param ectx - Domain context of the effects plugin.
  * @param pixi - The module the renderer loaded.
@@ -93,6 +439,7 @@ function differs(assigned: readonly FilterSlot[], placed: readonly FilterInstanc
  * @param view - Its record.
  * @param kind - The kind.
  * @param changed - Whether its component changed this frame.
+ * @param off - Whether a debug switch turned the kind off.
  * @returns The instance, its `order` up to date, or `undefined` while it has none.
  */
 function syncKind(
@@ -101,7 +448,8 @@ function syncKind(
   entity: Entity,
   view: FilteredView,
   kind: FilterKind,
-  changed: boolean
+  changed: boolean,
+  off: boolean
 ): FilterInstance | undefined {
   const value = ectx.deps.world.ecs.get(entity, kind.component);
 
@@ -109,20 +457,56 @@ function syncKind(
 
   let instance = view.instances.get(kind.id);
 
-  if (instance === undefined) {
-    if (checkShader(ectx, kind) !== "ok") return undefined;
-
-    instance = createFilter(ectx, pixi, kind, value);
-
-    if (instance === undefined) return undefined;
-
-    view.instances.set(kind.id, instance);
-  } else {
-    writeFilter(ectx, instance, value, changed);
+  if (instance !== undefined) {
+    instance = installReplacement(view, kind, instance);
+    instance.value = value;
+    writeFilter(ectx, instance, value, changed, off ? NO_SIGNAL : view.signal);
     instance.order = value.order;
+    refreshInputs(ectx, pixi, instance, off);
+
+    // A chain that broke in this sync built its stand-in: it takes the place now.
+    return installReplacement(view, kind, instance);
   }
 
+  instance = firstInstance(ectx, pixi, kind, value);
+
+  if (instance === undefined) return undefined;
+
+  // A chain that broke at its first evaluation built its stand-in already.
+  instance = installReplacement(view, kind, instance);
+  view.instances.set(kind.id, instance);
+
   return instance;
+}
+
+/**
+ * The slot of one instance: its filter, its passes, its kind id for the performance log, the
+ * seam of its inputs when it has some, and what the kept-picture cache may do with it (its
+ * category, a placed filter's origin, whether it shows a blurred copy).
+ *
+ * @param instance - The instance.
+ * @returns The slot.
+ */
+function slotOf(instance: FilterInstance): FilterSlot {
+  const cache = cacheOfInstance(instance);
+  const slot: FilterSlot = {
+    filter: instance.filter,
+    passes: instance.passes,
+    kind: instance.kindId,
+    cache
+  };
+
+  if (instance.kind === "wgsl" && instance.inputs !== undefined) slot.inputs = instance.inputs.slot;
+  if (blursOf(instance)) slot.blurs = true;
+
+  // A placed filter hands over its `keptOrigin` by reference, once: the renderer writes it in place.
+  if (cache === "placed" && instance.kind === "wgsl") {
+    const origin = instance.group?.uniforms.keptOrigin;
+
+    if (origin instanceof Float32Array) slot.origin = origin;
+  }
+
+  return slot;
 }
 
 /**
@@ -141,14 +525,17 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
   const { placed } = view;
 
   placed.length = 0;
+  view.signalled = false;
 
   for (const id of view.kinds) {
     const kind = ectx.state.kinds.get(id);
     const changed = view.changed.delete(id);
+    const off = isSwitchedOff(ectx, id);
     const instance =
-      kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed);
+      kind === undefined ? undefined : syncKind(ectx, pixi, entity, view, kind, changed, off);
 
-    if (instance !== undefined) placed.push(instance);
+    // A kind a debug switch turned off stays written above and leaves the slots.
+    if (instance !== undefined && !off) placed.push(instance);
   }
 
   // A kind that left this frame leaves no mark behind for a later frame.
@@ -157,11 +544,10 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
   // Hand the renderer a new frozen list only when the sorted instances changed.
   placed.sort(byOrder);
 
-  if (differs(view.assigned, placed)) {
-    const slots = placed.map(instance => ({
-      filter: instance.filter,
-      passes: instance.passes
-    }));
+  const relisted = differs(view.assigned, placed);
+
+  if (relisted) {
+    const slots = placed.map(instance => slotOf(instance));
 
     // A despawned entity gets no call: the renderer forgot its slots when it let the view go.
     const needsSet = slots.length > 0 || ectx.deps.world.ecs.ownerOf(entity) !== undefined;
@@ -170,6 +556,9 @@ function syncView(ectx: EffectsCtx, pixi: PixiModule, entity: Entity, view: Filt
 
     view.assigned = slots;
   }
+
+  // The area of the enabled filters, judged again only when a value, the list or a switch changed (B4).
+  syncArea(ectx, entity, view, relisted);
 
   // Destroy what left only now, after the renderer stopped drawing it.
   if (view.retired.length > 0) {
@@ -232,14 +621,17 @@ function coversScreen(ectx: EffectsCtx, entity: Entity, size: ViewportSize): boo
 }
 
 /**
- * Tells whether a view has at least one enabled filter instance.
+ * Tells whether a view has at least one enabled filter instance that is drawn: a kind a debug
+ * switch turned off is not.
  *
+ * @param ectx - Domain context of the effects plugin.
  * @param view - The view.
- * @returns True when one of its instances is enabled.
+ * @returns True when one of its drawn instances is enabled.
  */
-function hasEnabledFilter(view: FilteredView): boolean {
-  for (const instance of view.instances.values()) {
-    if (instance.filter.enabled) return true;
+function hasEnabledFilter(ectx: EffectsCtx, view: FilteredView): boolean {
+  // Walk the kind ids, a Set, rather than the instances' entries, which build a pair per item.
+  for (const id of view.kinds) {
+    if (view.instances.get(id)?.filter.enabled === true && !isSwitchedOff(ectx, id)) return true;
   }
 
   return false;
@@ -289,7 +681,7 @@ function checkBudgets(ectx: EffectsCtx): void {
   let count = 0;
 
   for (const [entity, view] of state.views) {
-    if (hasEnabledFilter(view) && coversScreen(ectx, entity, size)) count += 1;
+    if (hasEnabledFilter(ectx, view) && coversScreen(ectx, entity, size)) count += 1;
   }
 
   // Warn once when more than one such view is on screen.
@@ -300,6 +692,136 @@ function checkBudgets(ectx: EffectsCtx): void {
   }
 
   state.over.fullScreen = overScreen;
+}
+
+/**
+ * Takes a probe out of the warm-up and destroys it: the renderer had nothing to warm.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param probe - The probe.
+ */
+function dropProbe(ectx: EffectsCtx, probe: WarmProbe): void {
+  const { probes } = ectx.state.warm;
+  const at = probes.indexOf(probe);
+
+  if (at === -1) return;
+
+  probes.splice(at, 1);
+  probe.destroy();
+}
+
+/**
+ * A probe of one Pixi-core kind at the frozen defaults of its component; a `Displacement` draws over Pixi's white
+ * texture, since its program does not depend on the map. Its `apply` is guarded like any instance's.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param id - The kind id.
+ * @returns The probe, or `undefined` for a kind that is gone.
+ */
+function coreProbe(ectx: EffectsCtx, pixi: PixiModule, id: string): WarmProbe | undefined {
+  const kind = ectx.state.kinds.get(id);
+  const instance =
+    kind === undefined
+      ? undefined
+      : createFilter(ectx, pixi, kind, kind.component.defaults, pixi.Texture.WHITE);
+
+  if (instance === undefined) return undefined;
+
+  return { filter: instance.filter, destroy: (): void => destroyFilter(instance) };
+}
+
+/**
+ * The probes of the warm-up, built one at a time in hand-over order: every Pixi-core kind, then every definition
+ * `warmDefinitions` lists (the body of every ready kind, every stage of its inputs, every checked fallback), each in
+ * its own order. A core kind goes first: when the renderer has nothing to warm, the one probe built to learn it is one
+ * of Pixi's own filters, and no program of a game's shader is compiled for nothing.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @yields {WarmProbe} One probe, built as it is asked for.
+ */
+function* probesOf(ectx: EffectsCtx, pixi: PixiModule): Generator<WarmProbe> {
+  for (const id of ectx.state.warm.core) {
+    const probe = coreProbe(ectx, pixi, id);
+
+    if (probe !== undefined) yield probe;
+  }
+
+  for (const entry of warmDefinitions(ectx)) yield createWarmFilter(pixi, entry.definition);
+}
+
+/**
+ * Hands one probe to `renderer.sync.filters.warm` and keeps it; a probe the renderer answers false for is destroyed.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param probe - The probe.
+ * @returns The renderer's answer: true once the probe was warmed, false when there is nothing to warm.
+ */
+function handProbe(ectx: EffectsCtx, probe: WarmProbe): Promise<boolean> {
+  const answer = ectx.deps.renderer.sync.filters.warm(probe.filter);
+
+  ectx.state.warm.probes.push(probe);
+  answer.then(warmed => {
+    if (!warmed) dropProbe(ectx, probe);
+  });
+
+  return answer;
+}
+
+/**
+ * The answer of the first probe if it is given already, `"pending"` while it is not. "Nothing to warm" is an answer
+ * already given; a warm-up answers frames later.
+ *
+ * @param answer - The renderer's answer for the first probe.
+ * @returns Resolves to the answer when it was settled, otherwise to `"pending"`.
+ */
+function answerNow(answer: Promise<boolean>): Promise<boolean | "pending"> {
+  return Promise.race([answer, Promise.resolve("pending" as const)]);
+}
+
+/**
+ * Hands every probe to `renderer.sync.filters.warm`, once the checks of this run settled. The probes live until the app
+ * stops (the renderer warms them again after a restore). A probe the renderer answers false for is destroyed: there is
+ * nothing to warm, which it answers at once, so after a first answer of false no later probe is built.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ * @param run - The check run the hand-over belongs to: a run that stopped meanwhile hands nothing over.
+ * @returns Resolves when every probe was handed over.
+ */
+async function handOver(ectx: EffectsCtx, pixi: PixiModule, run: number): Promise<void> {
+  const { warm } = ectx.state;
+
+  if (ectx.state.checks.run !== run || !warm.started) return;
+
+  const probes = probesOf(ectx, pixi);
+  const first = probes.next();
+
+  if (first.done === true) return;
+  if ((await answerNow(handProbe(ectx, first.value))) === false) return;
+  if (ectx.state.checks.run !== run || !warm.started) return;
+
+  for (const probe of probes) handProbe(ectx, probe);
+}
+
+/**
+ * Starts the warm-up hand-over at the first frame with a ready host (F4): notes the Pixi-core kinds, in registration
+ * order, and, off the frame path, once every shader check of this run answered, hands the probes over.
+ *
+ * @param ectx - Domain context of the effects plugin.
+ * @param pixi - The module the renderer loaded.
+ */
+function startWarm(ectx: EffectsCtx, pixi: PixiModule): void {
+  const { warm, checks } = ectx.state;
+  const run = checks.run;
+
+  warm.started = true;
+  warm.core = [];
+
+  for (const kind of ectx.state.kinds.values()) if (kind.source === "core") warm.core.push(kind.id);
+
+  checksSettled(ectx).then(() => handOver(ectx, pixi, run));
 }
 
 /**
@@ -319,6 +841,12 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
       const pixi = host.ready() ? host.pixi() : undefined;
 
       if (pixi === undefined) return;
+
+      // The shader checks start at the first frame with a ready host, whatever is on screen.
+      if (!ectx.state.checks.started) startChecks(ectx);
+      // So does the warm-up: its probes go to the renderer once the checks settled.
+      if (!ectx.state.warm.started) startWarm(ectx, pixi);
+      if (ectx.state.checks.gl.length > 0) pollChecks(ectx);
 
       // With no filtered view only the budgets need a look: no change to mark.
       if (ectx.state.views.size === 0) {
@@ -343,7 +871,7 @@ export function createFilterSystem(ectx: EffectsCtx): AnySystem {
  * @param entity - The entity.
  */
 export function trackFilter(ectx: EffectsCtx, kind: FilterKind, entity: Entity): void {
-  const view = ectx.state.views.get(entity) ?? emptyView();
+  const view = ectx.state.views.get(entity) ?? emptyView(ectx, entity);
 
   view.kinds.add(kind.id);
   ectx.state.views.set(entity, view);
@@ -396,17 +924,27 @@ export function retireFilterMaps(ectx: EffectsCtx, keys: readonly string[]): voi
 }
 
 /**
- * Takes every filter off every view that holds some and destroys every instance: the teardown,
- * while `renderer` still runs.
+ * Takes every filter and filter area off every view that holds some, destroys every instance and every probe of the
+ * warm-up: the teardown, while `renderer` still runs.
  *
  * @param ectx - Domain context of the effects plugin.
  */
 export function retireAllFilters(ectx: EffectsCtx): void {
+  const { filters } = ectx.deps.renderer.sync;
+
   for (const [entity, view] of ectx.state.views) {
-    if (view.assigned.length > 0) ectx.deps.renderer.sync.filters.set(entity, Object.freeze([]));
+    if (view.assigned.length > 0) filters.set(entity, Object.freeze([]));
+    // eslint-disable-next-line unicorn/no-useless-undefined -- `undefined` sends the view back to its bounds; it is not optional.
+    if (view.areaSent.some) filters.area(entity, undefined);
 
     for (const instance of [...view.instances.values(), ...view.retired]) destroyFilter(instance);
   }
 
   ectx.state.views.clear();
+
+  const { warm } = ectx.state;
+
+  for (const probe of warm.probes.splice(0)) probe.destroy();
+  warm.started = false;
+  warm.core = [];
 }

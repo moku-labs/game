@@ -1,16 +1,40 @@
 /**
- * @file i18n plugin — the pure message helpers: the merge of the modules one locale was brought
- * by, the fallback chain a key is looked up through, the parts a missing key shows, and the
- * merge of adjacent text parts. Nothing here touches the context or the log.
+ * @file i18n plugin — the pure message helpers: the unwrap of what a loader brought, the merge
+ * of the modules one locale was brought by, the fallback chain a key is looked up through, the
+ * parts a missing key shows, and the merge of adjacent text parts. Nothing here touches the
+ * context or the log.
  */
 import type {
   CompiledMessage,
   CompiledMessages,
   ElementNode,
   Part,
+  RegisteredModule,
   ResolvedModule,
   State
 } from "./types";
+
+/**
+ * Tells whether a value is a module namespace, the shape `() => import(…)` resolves with.
+ *
+ * @param value - What the loader returned.
+ * @returns True when the messages sit under `default`.
+ */
+function hasDefault(value: unknown): value is { default: unknown } {
+  return typeof value === "object" && value !== null && "default" in value;
+}
+
+/**
+ * Reads the compiled messages out of what a feature or a loader brought. A module namespace is
+ * unwrapped to its `default`; everything else is the table itself. This is the one place the
+ * opaque value `flow` carried becomes the shape `compileStrings` wrote.
+ *
+ * @param value - The module, or the namespace around it.
+ * @returns The compiled messages.
+ */
+export function messagesOf(value: unknown): CompiledMessages {
+  return (hasDefault(value) ? value.default : value) as CompiledMessages;
+}
 
 /**
  * Wraps a duplicate key in the message shape of the framework.
@@ -68,7 +92,50 @@ export function mergeLocales(entries: readonly ResolvedModule[]): CompiledMessag
 }
 
 /**
- * Finds one message through the fallback chain: the locale asked for, then the fallback.
+ * Merges one locale from what is in memory: in registration order every resolved module that is
+ * not coupled to a bundle, and the module of every coupled entry whose bundle brought one for the
+ * locale. A coupled entry keeps its loader in the registry, so its module is read from `bundled`.
+ *
+ * @param state - The plugin state.
+ * @param locale - The locale to merge.
+ * @param entries - The entries of the locale; the registry's by default, the next ones before they
+ *   are written.
+ * @returns One table of key to compiled message.
+ * @throws {Error} When two features carry the same key.
+ */
+export function mergeOf(
+  state: State,
+  locale: string,
+  entries: readonly RegisteredModule[] = state.registered.get(locale) ?? []
+): CompiledMessages {
+  const present: ResolvedModule[] = [];
+
+  for (const entry of entries) {
+    const messages =
+      entry.bundle === undefined ? entry.messages : state.bundled.get(entry.bundle)?.get(locale);
+
+    if (messages !== undefined && typeof messages !== "function") {
+      present.push({ from: entry.from, messages });
+    }
+  }
+
+  return mergeLocales(present);
+}
+
+/**
+ * Reads one key of a merged table by own property, so a name of `Object.prototype` is no key.
+ *
+ * @param table - The merged table of one locale, if it is loaded.
+ * @param key - The message key.
+ * @returns The compiled message, or `undefined` when the table has no such key.
+ */
+function ownMessage(table: CompiledMessages | undefined, key: string): CompiledMessage | undefined {
+  return table !== undefined && Object.hasOwn(table, key) ? table[key] : undefined;
+}
+
+/**
+ * Finds one message through the fallback chain: the locale asked for, then the fallback. A key is
+ * an own property of the table (`"toString"` is no key), the way `isKey` reads it.
  *
  * @param state - The plugin state.
  * @param key - The message key.
@@ -82,7 +149,7 @@ export function resolve(
   locale: string,
   fallback: string
 ): CompiledMessage | undefined {
-  return state.loaded.get(locale)?.[key] ?? state.loaded.get(fallback)?.[key];
+  return ownMessage(state.loaded.get(locale), key) ?? ownMessage(state.loaded.get(fallback), key);
 }
 
 /**

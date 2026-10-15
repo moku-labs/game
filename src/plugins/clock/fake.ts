@@ -2,7 +2,7 @@
  * @file clock plugin — fake time source for tests. Needs no real timer: `advance` fires the due
  * timers itself, so a test never waits and never depends on the device clock.
  */
-import type { FakeClock } from "./types";
+import type { ClockSource, FakeClock } from "./types";
 
 /**
  * One pending timer of a fake clock.
@@ -15,6 +15,10 @@ type FakeTimer = { readonly id: number; readonly at: number; readonly callback: 
  *
  */
 type FakeState = { now: number; nextId: number; timers: FakeTimer[] };
+
+/** Every source `fakeClock` made: the app shell keeps a fake clock's app from adapting its frame rate. */
+// eslint-disable-next-line no-restricted-syntax -- keyed by the source: each fake clock is its own entry, which is what L5 protects.
+const fakeClocks = /*#__PURE__*/ new WeakSet<ClockSource>();
 
 /**
  * Removes and returns the timer that is due first, up to and including `until`.
@@ -79,8 +83,7 @@ function runDue(state: FakeState, until: number): void {
  */
 export function fakeClock(start = 0): FakeClock {
   const state: FakeState = { now: start, nextId: 1, timers: [] };
-
-  return {
+  const clock: FakeClock = {
     now: (): number => state.now,
 
     setTimer: (callback: () => void, delayMs: number): number => {
@@ -105,4 +108,23 @@ export function fakeClock(start = 0): FakeClock {
       state.now = moment;
     }
   };
+
+  fakeClocks.add(clock);
+
+  return clock;
+}
+
+/**
+ * Tells a source `fakeClock` made from any other: the app shell's test seams run on it, and their
+ * apps never adapt their frame rate. Not in the root.
+ *
+ * @param source - A clock source.
+ * @returns True for a fake source.
+ * @example
+ * ```ts
+ * isFakeClock(fakeClock()); // true
+ * ```
+ */
+export function isFakeClock(source: ClockSource): boolean {
+  return fakeClocks.has(source);
 }

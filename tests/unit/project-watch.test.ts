@@ -424,7 +424,163 @@ describe("the batch walk and the tsconfig", () => {
   });
 });
 
+/** A door with nothing in it. */
+const DOOR = "export {};\n";
+
+/** The door of `episodes` that imports the code-only folder `tools` and lists it. */
+const LISTING_DOOR = `import { toolsFeature } from "./tools";
+
+export const episodesFeature = { features: [toolsFeature] };
+`;
+
+describe("the batch walk and the features", () => {
+  it("records each feature's folder, and the parent of a sub-feature", async () => {
+    const root = writeGame();
+
+    put(root, "features/episodes/index.ts", DOOR);
+    put(root, "features/episodes/ep01/index.ts", DOOR);
+    put(root, "features/episodes/ep01/strings/en.json", "{}\n");
+
+    const session = await openSession({ root });
+
+    expect(session.index.features).toStrictEqual({
+      episodes: { dir: "features/episodes" },
+      ep01: { dir: "features/episodes/ep01", parent: "episodes" }
+    });
+  });
+
+  it("a folder that becomes a sub-feature with no indexed file changing rebuilds: new revision, change.features names it, change.files is empty", async () => {
+    const root = writeGame();
+
+    put(root, "features/episodes/index.ts", DOOR);
+    put(root, "features/episodes/ep03/index.ts", DOOR);
+
+    const session = await openSession({ root });
+    const before = session.index.revision;
+
+    put(root, "features/episodes/ep03/strings/en.json", "{}\n");
+
+    expect(await syncWithDisk(session)).toEqual({
+      revision: session.index.revision,
+      files: [],
+      moved: [],
+      removed: [],
+      features: ["ep03"]
+    });
+    expect(session.index.revision).not.toBe(before);
+    expect(await syncWithDisk(session)).toBeUndefined();
+  });
+
+  it("a name clash keeps the last good features and adds one unresolved item with the message", async () => {
+    const root = writeGame();
+
+    put(root, "features/episodes/index.ts", DOOR);
+    put(root, "features/episodes/ep01/index.ts", DOOR);
+    put(root, "features/episodes/ep01/strings/en.json", "{}\n");
+
+    const session = await openSession({ root });
+    const good = session.index.features;
+
+    mkdirSync(path.join(root, "features/ep01"));
+
+    const change = await syncWithDisk(session);
+
+    expect(change?.files).toEqual([]);
+    expect(session.index.features).toEqual(good);
+    expect(session.index.unresolved).toEqual([
+      {
+        path: "features",
+        reason: expect.stringContaining('the feature name "ep01" is taken by two folders')
+      }
+    ]);
+    expect(await syncWithDisk(session)).toBeUndefined();
+
+    rmSync(path.join(root, "features/ep01"), { recursive: true });
+
+    expect(await syncWithDisk(session)).toBeDefined();
+    expect(session.index.unresolved).toEqual([]);
+  });
+
+  it("changed(path) re-reads the features: a new door next to strings/ shows up at once", async () => {
+    const root = writeGame();
+
+    put(root, "features/episodes/index.ts", DOOR);
+    put(root, "features/episodes/ep02/strings/en.json", "{}\n");
+
+    const session = await openSession({ root });
+
+    expect(session.index.features?.ep02).toBeUndefined();
+
+    put(root, "features/episodes/ep02/index.ts", DOOR);
+
+    const index = await reindexPath(session, "features/episodes/ep02/index.ts");
+
+    expect(index.features?.ep02).toEqual({ dir: "features/episodes/ep02", parent: "episodes" });
+
+    // A path that is no indexed file re-reads them too.
+    rmSync(path.join(root, "features/episodes/ep02/strings"), { recursive: true });
+
+    const after = await reindexPath(session, "features/episodes/ep02/strings");
+
+    expect(after.features?.ep02).toBeUndefined();
+  });
+
+  it("a code-only folder enters features when the parent's door lists it, and leaves when the listing is removed: change.features names it", async () => {
+    const root = writeGame();
+
+    put(root, "features/episodes/index.ts", DOOR);
+    put(root, "features/episodes/tools/index.ts", "export const toolsFeature = {};\n");
+
+    const session = await openSession({ root });
+
+    expect(session.index.features?.tools).toBeUndefined();
+
+    put(root, "features/episodes/index.ts", LISTING_DOOR);
+
+    expect(await syncWithDisk(session)).toMatchObject({
+      files: ["features/episodes/index.ts"],
+      features: ["tools"]
+    });
+    expect(session.index.features?.tools).toEqual({
+      dir: "features/episodes/tools",
+      parent: "episodes"
+    });
+
+    put(root, "features/episodes/index.ts", `// no listing\n${DOOR}`);
+
+    const unlisted = await syncWithDisk(session);
+
+    expect(unlisted?.features).toEqual(["tools"]);
+    expect(session.index.features?.tools).toBeUndefined();
+  });
+});
+
 describe("diffIndexes", () => {
+  it("names the features added, removed, or moved to another folder or parent, sorted, and none when the tables agree", () => {
+    const before: ProjectIndex = {
+      ...indexOf({}),
+      features: {
+        home: { dir: "features/home" },
+        ep01: { dir: "features/episodes/ep01", parent: "episodes" },
+        ep02: { dir: "features/episodes/ep02", parent: "episodes" },
+        gone: { dir: "features/gone" }
+      }
+    };
+    const after: ProjectIndex = {
+      ...indexOf({}),
+      features: {
+        home: { dir: "features/home" },
+        ep01: { dir: "features/season/ep01", parent: "episodes" },
+        ep02: { dir: "features/episodes/ep02", parent: "season" },
+        added: { dir: "features/added" }
+      }
+    };
+
+    expect(diffIndexes(before, after, []).features).toEqual(["added", "ep01", "ep02", "gone"]);
+    expect("features" in diffIndexes(before, before, [])).toBe(false);
+    expect("features" in diffIndexes(indexOf({}), indexOf({}), [])).toBe(false);
+  });
+
   it("pairs the files a key left with the files it arrived in", () => {
     const before = indexOf({
       "jsx:row": ["a.tsx", "b.tsx"],

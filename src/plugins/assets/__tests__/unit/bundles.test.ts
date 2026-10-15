@@ -27,6 +27,21 @@ describe("defineBundles", () => {
     expect(bundles.map.board).toEqual({ tier: "scene" });
   });
 
+  it("copies release and mipmaps, detached from the caller's globs", () => {
+    const globs = ["items/**"];
+    const bundles = defineBundles({
+      ep01: { tier: "lazy", release: "leave", mipmaps: globs },
+      "ep01.all": { tier: "lazy", mipmaps: true }
+    });
+
+    globs.push("ward/**");
+
+    expect(bundles.map).toEqual({
+      ep01: { tier: "lazy", release: "leave", mipmaps: ["items/**"] },
+      "ep01.all": { tier: "lazy", mipmaps: true }
+    });
+  });
+
   it("accepts an empty map", () => {
     expect(defineBundles({})).toEqual({ kind: "bundles", map: {} });
   });

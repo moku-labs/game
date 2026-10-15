@@ -156,19 +156,55 @@ export function readImageSize(head: Uint8Array, file: string): ImageSize {
 }
 
 /**
- * Estimates what one image costs on the GPU: four bytes per pixel, no mipmaps, rounded to three
- * decimals so two scans of the same tree write the same bytes.
+ * Counts the pixels of an image on the GPU: one level, or with `mips` every level of the full
+ * chain Pixi builds once `autoGenerateMipmaps` is set (`floor(log2(max(width, height))) + 1`
+ * levels, each side halved and floored, never below 1 px).
  *
  * @param width - Width in pixels.
  * @param height - Height in pixels.
+ * @param mips - True for the full mip chain.
+ * @returns The pixels of every level.
+ * @example
+ * ```ts
+ * chainPixels(4, 4, true); // 21: 16 + 4 + 1
+ * ```
+ */
+function chainPixels(width: number, height: number, mips: boolean): number {
+  if (!mips) return width * height;
+
+  const levels = Math.floor(Math.log2(Math.max(width, height))) + 1;
+  let pixels = 0;
+  let levelWidth = width;
+  let levelHeight = height;
+
+  for (let level = 0; level < levels; level += 1) {
+    pixels += levelWidth * levelHeight;
+    levelWidth = Math.max(1, Math.floor(levelWidth / 2));
+    levelHeight = Math.max(1, Math.floor(levelHeight / 2));
+  }
+
+  return pixels;
+}
+
+/**
+ * Estimates what one image costs on the GPU: four bytes per pixel, every level of the mip chain
+ * with `mips`, rounded to three decimals so two scans of the same tree write the same bytes. Its
+ * twin is `textureMb` of `manifest.ts`, which the plugin reads: a change edits both.
+ *
+ * @param width - Width in pixels.
+ * @param height - Height in pixels.
+ * @param mips - True for a texture uploaded with its full mip chain.
  * @returns The estimated texture memory in MB.
  * @example
  * ```ts
  * textureMb(256, 128); // 0.125
+ * textureMb(256, 128, true); // 0.167
  * ```
  */
-export function textureMb(width: number, height: number): number {
-  return Math.round(((width * height * BYTES_PER_PIXEL) / BYTES_PER_MB) * 1000) / 1000;
+export function textureMb(width: number, height: number, mips = false): number {
+  const bytes = chainPixels(width, height, mips) * BYTES_PER_PIXEL;
+
+  return Math.round((bytes / BYTES_PER_MB) * 1000) / 1000;
 }
 
 /**

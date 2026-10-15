@@ -1,10 +1,12 @@
 /**
  * @file renderer plugin — the renderer commands of the `/control` door: take a picture of the
- * canvas, with its options, and switch the debug drawing. Dev builds only: every body starts with
- * the inline dev guard, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
+ * canvas, with its options, and switch the debug drawing. Dev and debug builds: every body starts with
+ * the inline agent guard of a read or cosmetic command, so a bundler `define` of `false` drops it,
+ * and logs the `moku:dev` marker. A capture with `diff` writes the state, so it also takes the
+ * control guard: a `--debug` page refuses it.
  */
 import { defineCommand } from "../flow/doors/define";
-import { controlRefused } from "../flow/doors/dev";
+import { controlReadOnly, controlRefused } from "../flow/doors/dev";
 import { recordCheat } from "../flow/doors/session";
 import type { ControlApp } from "../flow/doors/types";
 import type { HeadlessApp } from "../flow/headless";
@@ -340,7 +342,8 @@ async function captureDiff(
  * itself as a raw write (`tainted` turns true), restores the bookmark and waits for its gate, takes
  * that picture, restores where the game stood and waits again, and answers the pixel diff of now
  * against then. While the game is paused it steps each frame it waits on, 1000/60 ms of game time.
- * `undefined` while the renderer is inert, as in a headless test.
+ * `undefined` while the renderer is inert, as in a headless test. A `--debug` page takes the
+ * picture and refuses `diff` with the read-only error of `controlReadOnly`.
  *
  * @example
  * ```ts
@@ -357,7 +360,12 @@ export const captureCommand = defineCommand({
   input: { legend: "boolean?", layers: "json?", sheet: "json?", diff: "json?" },
   effect: "read",
   run: (app: CaptureApp, input) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     const given = givenFields(input);
 
@@ -370,6 +378,14 @@ export const captureCommand = defineCommand({
 
     if (input.diff === undefined) return app.renderer.capture(options);
 
+    // A diff restores a bookmark and journals itself as a raw write: a --debug page refuses it.
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_CONTROL__ === "undefined" || !__MOKU_GAME_CONTROL__)
+    ) {
+      throw controlReadOnly("game.capture diff");
+    }
+
     const diff = readDiff(input.diff);
 
     if (options.sheet !== undefined) throw sheetAlone();
@@ -379,25 +395,44 @@ export const captureCommand = defineCommand({
 });
 
 /**
- * Switches the debug drawing: `nineSlice` outlines every nine-slice and the lines Pixi cuts its
- * texture at. Answers the switches as they are afterwards.
+ * Switches the debug drawing and checks: `nineSlice` outlines every nine-slice and the lines Pixi
+ * cuts its texture at, `verifyFrames` compares every frame the renderer skips (and every kept
+ * picture) with the same frame drawn live, `kept` draws every filtered view live (false) or lets
+ * the renderer keep pictures (true). Each field given is applied, one left out keeps its switch; a
+ * call with none answers the switches unchanged. Answers the switches as they are afterwards.
  *
  * @example
  * ```ts
  * // Check where the settings popup cuts its parchment.
- * (await run(app, commands.debug, { nineSlice: true })).value; // { nineSlice: true }
+ * (await run(app, commands.debug, { nineSlice: true })).value; // { nineSlice: true, verifyFrames: false, kept: true }
+ * // The visual runner checks the skipped frames of a test in the browser.
+ * (await run(app, commands.debug, { verifyFrames: true })).value; // { nineSlice: true, verifyFrames: true, kept: true }
+ * // The editor measures the memory screen without kept pictures.
+ * (await run(app, commands.debug, { kept: false })).value; // { nineSlice: true, verifyFrames: true, kept: false }
  * ```
  */
 export const debugCommand = defineCommand({
   id: "game.debug",
   title: "Debug drawing",
-  input: { nineSlice: "boolean" },
+  input: { nineSlice: "boolean?", verifyFrames: "boolean?", kept: "boolean?" },
   effect: "cosmetic",
-  run: (app: RendererApp, { nineSlice }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+  run: (app: RendererApp, { nineSlice, verifyFrames, kept }) => {
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
-    app.log.debug("moku:dev", { command: "game.debug", nineSlice });
-    app.renderer.sync.debug.nineSlice(nineSlice);
+    app.log.debug("moku:dev", {
+      command: "game.debug",
+      ...(nineSlice === undefined ? {} : { nineSlice }),
+      ...(verifyFrames === undefined ? {} : { verifyFrames }),
+      ...(kept === undefined ? {} : { kept })
+    });
+    if (nineSlice !== undefined) app.renderer.sync.debug.nineSlice(nineSlice);
+    if (verifyFrames !== undefined) app.renderer.sync.debug.verifyFrames(verifyFrames);
+    if (kept !== undefined) app.renderer.sync.debug.kept(kept);
 
     return app.renderer.sync.debug.state();
   }

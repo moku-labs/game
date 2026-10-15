@@ -26,14 +26,16 @@ import type { WorldCtx } from "../types";
 export type LayerSort = "none" | "y" | "order";
 
 /**
- * One named layer of a scene. The order of the list is draw order.
+ * One named layer of a scene. The order of the list is draw order. `above: "overlays"` marks the HUD layer of the
+ * scene: drawn above every overlay, never kept in a picture.
  *
  * @example
  * ```ts
  * const layer: LayerSpec = { name: "items", sort: "y" };
+ * const hud: LayerSpec = { name: "hud", sort: "none", above: "overlays" };
  * ```
  */
-export type LayerSpec = { name: string; sort: LayerSort };
+export type LayerSpec = { name: string; sort: LayerSort; above?: "overlays" };
 
 /**
  * Easing of a tween: one of the named curves the driver knows, or a function that gets the
@@ -80,6 +82,30 @@ export type MotionHandle = { finish(): void; cancel(): void; active(): boolean }
 export type Motion = MotionHandle | void;
 
 /**
+ * Why a motion hook plays: `"mount"` when the view or element comes or goes with its screen (a scene mount or
+ * unmount, a load, a restore, a paused or fast world), `"change"` when a commit changed a live screen (a new key,
+ * a key that left, a new element in a live tree, a popup).
+ *
+ * @example
+ * ```ts
+ * const cause: MotionCause = "change";
+ * ```
+ */
+export type MotionCause = "mount" | "change";
+
+/**
+ * What reduced motion does to one track: `"cut"` (the default) lands it on its target at the next frame step, or holds
+ * a loop on its first key; `"keep"` plays it as written. The engine never guesses which tracks are fades: the author
+ * marks them.
+ *
+ * @example
+ * ```ts
+ * const fade: ReducedMotion = "keep";
+ * ```
+ */
+export type ReducedMotion = "cut" | "keep";
+
+/**
  * Only the numeric fields of a component value: what a tween can interpolate.
  *
  * @example
@@ -112,12 +138,14 @@ export type TrackSegment = { at: number; ease?: Ease; to: Record<string, number>
  * writer of the field holds, instead of owning the field. `segments` turns the tween into a
  * keyframe walk: the segments run one after another over `ms` on one clock, and `to` is where the
  * last one ends. `repeat` runs the walk again from its first segment when it ends: a number
- * counts the extra runs, `"forever"` never ends. The world passes it to the driver unchanged;
- * without a driver the target is written once.
+ * counts the extra runs, `"forever"` never ends. `reduced: "keep"` plays the track as written under
+ * reduced motion. The world passes it to the driver unchanged; without a driver the target is
+ * written once.
  *
  * @example
  * ```ts
  * const options: TweenOptions = { ms: 350, ease: "out", delayMs: 40 };
+ * const fade: TweenOptions = { ms: 250, reduced: "keep" }; // still fades under reduced motion
  * const walk: TweenOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
  * const sway: TweenOptions = { ms: 2400, additive: true, repeat: "forever", segments: [{ at: 0.5, to: { rotation: 0.05 } }, { at: 1, to: { rotation: 0 } }] };
  * ```
@@ -129,18 +157,21 @@ export type TweenOptions = {
   additive?: boolean;
   segments?: readonly TrackSegment[];
   repeat?: number | "forever";
+  reduced?: ReducedMotion;
 };
 
 /**
  * Options of `ViewHandle.toRest`. Defaults: the plugin's `settleMs` and ease `"out"`. `delayMs`
- * lets a hook wait, for example for a flight to land, before the view comes home.
+ * lets a hook wait, for example for a flight to land, before the view comes home. `reduced: "keep"`
+ * lets the way home run its length under reduced motion.
  *
  * @example
  * ```ts
  * const options: RestOptions = { ms: 200, delayMs: 120 };
+ * const fadeIn: RestOptions = { ms: 200, reduced: "keep" };
  * ```
  */
-export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number };
+export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number; reduced?: ReducedMotion };
 
 /**
  * What the driver is told about one track: how long it runs, how it eases, how long it waits,
@@ -148,11 +179,13 @@ export type RestOptions = { ms?: number; ease?: Ease; delayMs?: number };
  * segments walks them over `ms` on one clock and claims every field a segment names; its target
  * `to` is the last segment's target. A track with `repeat` starts its walk again when it ends
  * (a number counts the extra runs, `"forever"` never ends); the instant driver ignores it and
- * writes the end pose once.
+ * writes the end pose once. `reduced: "keep"` tells the driver the author kept the track under
+ * reduced motion; the instant driver ignores that too.
  *
  * @example
  * ```ts
  * const options: TrackOptions = { ms: 250, ease: "outBack", delayMs: 0, additive: false };
+ * const kept: TrackOptions = { ms: 250, ease: "out", reduced: "keep" };
  * const walk: TrackOptions = { ms: 1000, segments: [{ at: 0.42, to: { y: 974 } }, { at: 1, to: { y: 960 } }] };
  * const twice: TrackOptions = { ms: 400, ease: "inOut", delayMs: 0, additive: true, repeat: 1 };
  * ```
@@ -164,6 +197,7 @@ export type TrackOptions = {
   additive?: boolean;
   segments?: readonly TrackSegment[];
   repeat?: number | "forever";
+  reduced?: ReducedMotion;
 };
 
 /**
@@ -325,10 +359,17 @@ export type ChangeHooks<Item> = { readonly [component: string]: ChangeHook<Item>
  * reconcile ends every track of a view: the loop is then started by the first frame in which the
  * world is live and a tween driver is installed, once.
  *
+ * `enter` and `exit` get the cause as their fourth argument; a world projection plays them only for
+ * `"change"`; `ui` plays them for both.
+ *
  * @example
  * ```ts
  * const motion: ProjectionMotion<Item> = {
  *   change: { Transform: view => view.toRest(Transform, { ms: 350 }) }
+ * };
+ * // A card that stands at rest when its screen mounts and grows in when a commit adds it.
+ * const growing: ProjectionMotion<Item> = {
+ *   enter: (view, _item, _hint, cause) => (cause === "mount" ? undefined : view.toRest(Transform, { ms: 200 }))
  * };
  * // An order card that sways forever once it entered.
  * const swaying: ProjectionMotion<Item> = {
@@ -338,9 +379,9 @@ export type ChangeHooks<Item> = { readonly [component: string]: ChangeHook<Item>
  * ```
  */
 export type ProjectionMotion<Item> = {
-  enter?(view: ViewHandle<Item>, item: Item, hint?: Hint): Motion;
+  enter?(view: ViewHandle<Item>, item: Item, hint?: Hint, cause?: MotionCause): Motion;
   loop?(view: ViewHandle<Item>): Motion;
-  exit?(view: ViewHandle<Item>, item: Item, hint?: Hint): Motion;
+  exit?(view: ViewHandle<Item>, item: Item, hint?: Hint, cause?: MotionCause): Motion;
   readonly change?: ChangeHooks<Item>;
   settle?(view: ViewHandle<Item>, components: readonly string[]): Motion;
 };
@@ -354,9 +395,9 @@ export type ProjectionMotion<Item> = {
  * ```
  */
 export type AnyProjectionMotion = {
-  enter?(view: ViewHandle<unknown>, item: unknown, hint?: Hint): Motion;
+  enter?(view: ViewHandle<unknown>, item: unknown, hint?: Hint, cause?: MotionCause): Motion;
   loop?(view: ViewHandle<unknown>): Motion;
-  exit?(view: ViewHandle<unknown>, item: unknown, hint?: Hint): Motion;
+  exit?(view: ViewHandle<unknown>, item: unknown, hint?: Hint, cause?: MotionCause): Motion;
   readonly change?: ChangeHooks<never>;
   settle?(view: ViewHandle<unknown>, components: readonly string[]): Motion;
 };
@@ -456,6 +497,8 @@ export type View = {
    */
   loopOwed: boolean;
   exiting: boolean;
+  /** How the view came, then how it leaves. */
+  cause: MotionCause;
 };
 
 /**
@@ -468,7 +511,8 @@ export type View = {
  *   owner: { kind: "projection", name: "board.items" },
  *   live: new Map(),
  *   queue: [],
- *   items: new Map()
+ *   items: new Map(),
+ *   order: -1
  * };
  * ```
  */
@@ -477,6 +521,11 @@ export type Mounted = {
   live: Map<string, View>;
   queue: View[];
   items: Map<string, unknown>;
+  /**
+   * The `Order` a screen root of this projection draws at in its layer: its place in the list `mount` was given,
+   * minus the length of that list (the roots of one scene take −n … −1, in list order).
+   */
+  order: number;
 };
 
 /**
@@ -553,6 +602,8 @@ export type ProjectionState = {
   /** The `onConverged` listeners: the owners of elements, told after a restore or a load. */
   converged: Array<() => void>;
   offHints: Array<() => void>;
+  /** The cause of every view despawned since the last sweep, so a removal hook can still ask. */
+  leaving: Map<Entity, MotionCause>;
 };
 
 /**
@@ -809,6 +860,21 @@ export type ProjectionApi = {
    * ```
    */
   keyOf(entity: Entity): ProjectionKey | undefined;
+
+  /**
+   * How the view of an entity came, or how it is leaving: `"mount"` when a direct reconcile or an unmount moved it,
+   * `"change"` when a live commit did. A despawned view still answers until the next sweep, so a hook on its removal
+   * can ask. `undefined` for an entity no projection made.
+   *
+   * @param entity - A view, or a view in its removal hook.
+   * @returns The cause, or `undefined`.
+   * @example
+   * ```ts
+   * // ui, in the `Tree` removal hook of a screen root whose scene was switched away:
+   * ctx.require(worldPlugin).projection.causeOf(root); // "mount"
+   * ```
+   */
+  causeOf(entity: Entity): MotionCause | undefined;
 
   /**
    * The components a motion still drives on an entity: its running tracks, in start order, each

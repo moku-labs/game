@@ -23,13 +23,15 @@ import {
 import { Sprite, Transform } from "../../../renderer/components";
 import { worldPlugin } from "../../../world";
 import { projection } from "../../../world/projection/define";
-import { Glow } from "../../filters/builtins";
+import { Glow, Outline } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { effectsPlugin } from "../../index";
 import { Emitter } from "../../particles/component";
 import { defineEmitter } from "../../particles/define";
 import {
   createFakeEffectsPixi,
+  type FakeFilterManager,
+  type FakeFxFilter,
   FakeFxGlProgram,
   FakeFxGpuProgram,
   FakeFxParticleContainer
@@ -232,9 +234,11 @@ async function startApp(items: Item[], mounted = true, kind: "webgpu" | "webgl" 
     pluginConfigs: {
       flow: { mainFlow: main },
       model: { initialPlayer: { items }, initialSession: { moves: 0 }, seed: 1 },
+      // The warm-up of spec 27 would hand the renderer a probe of every kind: the programs and filters counted here
+      // are the views' own (`warm.test.ts` tests the hand-over).
       renderer: mounted
-        ? { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
-        : { loadPixi: () => Promise.resolve(pixi.module) },
+        ? { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), warm: 0 }
+        : { loadPixi: () => Promise.resolve(pixi.module), warm: 0 },
       assets: mounted ? { manifest, io: createIo() } : { manifest }
     }
   });
@@ -332,9 +336,36 @@ describe("effects plugin integration", () => {
     expect(buffers.every(buffer => buffer.destroyed)).toBe(true);
   });
 
-  it("checks the GLSL on the WebGL fallback in a dev build and hangs both programs", async () => {
-    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+  it("disable then enable of effects.glow on a screen of glowing views: renderPasses drops by the glow's passes the next frame and comes back after enable, stats().filters stays", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
 
+    const app = await startApp(["a", "b", "c", "d"].map(id => ({ id, kind: "card" as const })));
+
+    step(app, 2);
+
+    // Four cards, each with one Glow pass and two Tint passes, over the one pass of the stage.
+    expect(app.effects.stats()).toEqual({
+      particles: 0,
+      emitters: 0,
+      filters: 8,
+      renderPasses: 13
+    });
+
+    expect(app.effects.diagnostics.disable("effects.glow")).toBe(true);
+    step(app, 1);
+
+    expect(app.effects.stats().renderPasses).toBe(9);
+    expect(app.effects.stats().filters).toBe(8);
+
+    expect(app.effects.diagnostics.enable("effects.glow")).toBe(true);
+    step(app, 1);
+
+    expect(app.effects.stats().renderPasses).toBe(13);
+
+    await app.stop();
+  });
+
+  it("checks the GLSL on the WebGL fallback in every build and hangs both programs", async () => {
     const app = await startApp([{ id: "card", kind: "card" }], true, "webgl");
 
     step(app, 1);
@@ -345,8 +376,9 @@ describe("effects plugin integration", () => {
     const gl = app.renderer.host.gl() as unknown as FakeGlContext;
 
     expect(app.renderer.host.kind()).toBe("webgl");
-    // The check is synchronous on WebGL: both kinds hang in the first frame they are seen.
-    expect(gl.compiled).toEqual([Glow.filter.glsl, Tint.filter.glsl]);
+    // The check is synchronous on WebGL without the parallel extension: every registered kind is compiled at the
+    // first node entry, and both kinds hang in the first frame they are seen.
+    expect(gl.compiled).toEqual([Glow.filter.glsl, Outline.filter.glsl, Tint.filter.glsl]);
     expect(FakeFxGlProgram.made.map(program => program.options.fragment)).toEqual([
       Glow.filter.glsl,
       Tint.filter.glsl
@@ -411,6 +443,53 @@ describe("effects plugin integration", () => {
     step(app, 5);
 
     expect(positions().slice(0, still.length)).not.toEqual(still);
+
+    await app.stop();
+  });
+
+  it("a filter whose apply throws draws its view unfiltered from that frame on and logs once", async () => {
+    const app = await startApp([{ id: "card", kind: "card" }]);
+
+    step(app, 1);
+
+    const entity = app.world.projection.entityOf("board.items", "card") ?? 0;
+    const object = app.renderer.sync.displayOf(entity) as FakeContainer;
+    const filters = (object.filters ?? []) as FakeFxFilter[];
+    const tint = filters[1];
+
+    if (tint === undefined) throw new Error("no Tint on the card");
+
+    const drawn: unknown[] = [];
+    // The stand-in of Pixi's filter system: the Tint's binding is gone, so its draw throws.
+    const manager: FakeFilterManager = {
+      applyFilter: (filter, input) => {
+        if (filter === tint && tint.enabled)
+          throw new Error("the resource bound as 'uMap' was destroyed");
+        drawn.push(input);
+      }
+    };
+    const enabled: boolean[] = [];
+
+    for (let frame = 0; frame < 5; frame += 1) {
+      app.time.step(16);
+      enabled.push(tint.enabled);
+      // The stand-in render: every enabled filter of the view draws once.
+      for (const filter of filters)
+        if (filter.enabled) filter.apply(manager, "view", "screen", true);
+    }
+
+    const broken = app.log.trace().filter(entry => entry.event === "effects:broken");
+
+    expect(broken).toHaveLength(1);
+    expect(broken[0]?.data).toEqual({
+      filter: "fx.tint",
+      reason: "apply",
+      message: "the resource bound as 'uMap' was destroyed"
+    });
+    expect(enabled).toEqual([true, false, false, false, false]);
+    expect(app.world.ecs.get(entity, Tint)?.enabled).toBe(true);
+    // Frame 1 drew the Glow and the Tint straight through; frames 2-5 the Glow alone.
+    expect(drawn).toHaveLength(2 + 4);
 
     await app.stop();
   });

@@ -6,6 +6,7 @@
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
 import type { Require } from "../../../../config";
+import type { Api as ClockApi } from "../../../clock/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { Descriptor, Api as FlowApi, FxHandler, Hint } from "../../../flow/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../../model/types";
@@ -13,11 +14,18 @@ import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../../time/t
 import { createWorldApi } from "../../../world/api";
 import { connectWorld } from "../../../world/lifecycle";
 import { createWorldState } from "../../../world/state";
-import type { Api as WorldApi, KernelSlice as WorldKernelSlice } from "../../../world/types";
+import type {
+  Entity,
+  Api as WorldApi,
+  KernelSlice as WorldKernelSlice
+} from "../../../world/types";
 import { createAnimApi } from "../../api";
 import { initAnim, startAnim, withDeps } from "../../lifecycle";
 import { createAnimState } from "../../state";
 import type { AnimApi, AnimCtx, Config, KernelSlice, State } from "../../types";
+
+/** What an endless loop writes that could show its view again, as `renderer.sync.loopsHeld` takes it. */
+type LoopReveals = "alpha" | "place" | "both";
 
 const PHASE_ORDER: readonly Phase[] = ["input", "animate", "layout", "sync", "signals"];
 
@@ -44,6 +52,12 @@ export type MockAnim = {
   features: Array<{ name: string; description: FeatureDescription }>;
   /** How often `time.wake()` was called. */
   wakes: { count: number };
+  /** The entities the stand-in renderer's `sync.loopsHeld` answers true for: an overlay hides their views. */
+  held: Set<Entity>;
+  /** Every ask of the stand-in's `sync.loopsHeld`, in call order, with what the loop reveals. */
+  asks: Array<{ entity: Entity; reveals: LoopReveals | undefined }>;
+  /** When set, answers `sync.loopsHeld` in place of `held`, as the renderer's rule for unseen views would. */
+  rule: { answer: ((entity: Entity, reveals: LoopReveals | undefined) => boolean) | undefined };
   time: Time;
   /** Runs `initAnim`, then `connectWorld`, then `startAnim`, as the kernel would. */
   start(): void;
@@ -141,7 +155,13 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
 
   const worldConfig = { settleMs: 350, reconciledEvent: false };
   const worldState = createWorldState({ config: worldConfig });
-  const worldApis: Record<string, unknown> = { time: timeApi, model: modelApi, flow: flowApi };
+  const clockApi = { now: (): number => time.elapsed } as unknown as ClockApi;
+  const worldApis: Record<string, unknown> = {
+    time: timeApi,
+    model: modelApi,
+    flow: flowApi,
+    clock: clockApi
+  };
   const worldCtx: WorldKernelSlice = {
     config: worldConfig,
     state: worldState,
@@ -152,7 +172,19 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
   };
   const world = createWorldApi(worldCtx);
 
-  const apis: Record<string, unknown> = { ...worldApis, world, renderer: {} };
+  const held = new Set<Entity>();
+  const asks: MockAnim["asks"] = [];
+  const rule: MockAnim["rule"] = { answer: undefined };
+  const renderer = {
+    sync: {
+      loopsHeld: (entity: Entity, reveals?: LoopReveals): boolean => {
+        asks.push({ entity, reveals });
+
+        return rule.answer === undefined ? held.has(entity) : rule.answer(entity, reveals);
+      }
+    }
+  };
+  const apis: Record<string, unknown> = { ...worldApis, world, renderer };
   const ctx: KernelSlice = {
     config,
     state,
@@ -176,6 +208,9 @@ export function createMockAnim(options: Partial<Config> = {}): MockAnim {
     handlers,
     features,
     wakes,
+    held,
+    asks,
+    rule,
     time,
     start: (): void => {
       initAnim(ctx);

@@ -1,7 +1,7 @@
 /**
  * @file assets plugin — shared fakes for the unit tests. Not a test file: the unit project only
- * collects `*.test.ts`. The real plugin files run over a fake `flow`, a fake `renderer` and a fake
- * `AssetsIo`, so nothing touches the network, a GPU or Pixi.
+ * collects `*.test.ts`. The real plugin files run over a fake `flow`, a fake `renderer`, a fake
+ * `model` and a fake `AssetsIo`, so nothing touches the network, a GPU or Pixi.
  */
 import type { Log } from "@moku-labs/common/browser";
 import { type Mock, vi } from "vitest";
@@ -14,9 +14,12 @@ import type {
   FlowGraph,
   FlowState,
   FxHandler,
+  GraphNode,
   Stage
 } from "../../../flow/types";
+import type { Json, Api as ModelApi } from "../../../model/types";
 import type { Api as RendererApi, SliceFrame, TextureProvider } from "../../../renderer/types";
+import type { SceneDefinition, SceneState } from "../../../scenes/types";
 import type { Api as TimeApi } from "../../../time/types";
 import { createAssetsApi } from "../../api";
 import { connectAssets, startAssets, withDeps } from "../../lifecycle";
@@ -35,7 +38,12 @@ import type {
 } from "../../types";
 
 /** A texture the fake io handed out. `from` is the URL its bytes came from. */
-export type FakeTexture = { id: string; from: string; nine: CreateTextureOptions["nine"] };
+export type FakeTexture = {
+  id: string;
+  from: string;
+  nine: CreateTextureOptions["nine"];
+  mips: CreateTextureOptions["mips"];
+};
 
 /** The pixel size of a decoded image. */
 export type FakeSize = { width: number; height: number };
@@ -178,7 +186,8 @@ export function createFakeIo(manifest?: unknown): FakeIo {
       const texture: FakeTexture = {
         id: `t${made.textures}`,
         from: (image as unknown as { url?: string }).url ?? "",
-        nine: options?.nine
+        nine: options?.nine,
+        mips: options?.mips
       };
 
       created.push(texture);
@@ -213,6 +222,9 @@ export type FakeRenderer = {
   api: RendererApi;
 };
 
+/** The fake `model`: the committed player and session `store.snapshot()` answers with. */
+export type FakeModel = { player: Json; session: Json; api: ModelApi };
+
 /** The fake `time`: the one member `assets` calls when a load settles. */
 export type FakeTime = { wake: Mock<() => void>; api: TimeApi };
 
@@ -241,6 +253,7 @@ export type MockAssets = {
   flow: FakeFlow;
   renderer: FakeRenderer;
   time: FakeTime;
+  model: FakeModel;
   connect(): void;
   start(): Promise<void>;
 };
@@ -254,6 +267,25 @@ function createFakeTime(): FakeTime {
   const wake: Mock<() => void> = vi.fn();
 
   return { wake, api: { wake } as unknown as TimeApi };
+}
+
+/**
+ * Creates the fake `model`: `store.snapshot()` answers a frozen snapshot of the two fields a test
+ * writes.
+ *
+ * @returns The fake model.
+ */
+function createFakeModel(): FakeModel {
+  const fake: FakeModel = { player: {}, session: {}, api: undefined as unknown as ModelApi };
+
+  fake.api = {
+    store: {
+      snapshot: () =>
+        Object.freeze({ player: fake.player, session: fake.session, rng: { seed: 1, streams: {} } })
+    }
+  } as unknown as ModelApi;
+
+  return fake;
 }
 
 /**
@@ -311,7 +343,8 @@ function createFakeRenderer(io: FakeIo): FakeRenderer {
           fake.invalidated.push([...keys]);
         }
       }
-    }
+    },
+    monitor: { event: vi.fn() }
   } as unknown as RendererApi;
 
   return fake;
@@ -395,10 +428,12 @@ export function createMockAssets(
   const flow = createFakeFlow();
   const renderer = createFakeRenderer(io);
   const time = createFakeTime();
+  const model = createFakeModel();
   const apis: Record<string, unknown> = {
     flow: flow.api,
     renderer: renderer.api,
-    time: time.api
+    time: time.api,
+    model: model.api
   };
 
   const ctx: KernelSlice = {
@@ -423,6 +458,7 @@ export function createMockAssets(
     flow,
     renderer,
     time,
+    model,
     connect: (): void => connectAssets(ctx),
     start: (): Promise<void> => startAssets(ctx)
   };
@@ -505,4 +541,87 @@ export function packedManifest(): Manifest {
       }
     }
   };
+}
+
+/**
+ * Builds a scene declaration as `defineScene` makes it, with no layer and no projection.
+ *
+ * @param id - Id of the scene.
+ * @param bundle - Its scene bundle.
+ * @param bundles - What it names of the committed state, when it names more.
+ * @returns The declaration.
+ */
+export function sceneOf(
+  id: string,
+  bundle: string,
+  bundles?: (state: SceneState) => readonly string[]
+): SceneDefinition {
+  return {
+    id,
+    bundle,
+    music: undefined,
+    layers: [],
+    projections: [],
+    ...(bundles === undefined ? {} : { bundles })
+  };
+}
+
+/** One node of `graphOf`: the feature that owns it, its scene and whether the graph rests there. */
+export type NodeOf = { owner?: string; scene?: string; rest?: boolean };
+
+/**
+ * Builds the graph `flow.describe()` answers with: flow id to node name to the node's owner and
+ * scene. Slots are empty; the start of a flow is its first node.
+ *
+ * @param flows - Flow id to its nodes.
+ * @param edges - Flow id to node to outcome to target; none by default.
+ * @returns The graph description.
+ */
+export function graphOf(
+  flows: Record<string, Record<string, NodeOf>>,
+  edges: Record<string, Record<string, Record<string, string>>> = {}
+): FlowGraph {
+  const described: FlowGraph["flows"] = {};
+
+  for (const [flow, nodes] of Object.entries(flows)) {
+    const entries: Record<string, GraphNode> = {};
+
+    for (const [node, spec] of Object.entries(nodes)) {
+      entries[node] = {
+        flow,
+        node,
+        rest: spec.rest ?? false,
+        over: false,
+        checkpoint: false,
+        barrier: false,
+        outcomes: [],
+        ...(spec.owner === undefined ? {} : { owner: spec.owner }),
+        ...(spec.scene === undefined ? {} : { scene: spec.scene })
+      };
+    }
+
+    described[flow] = {
+      start: Object.keys(nodes)[0] ?? "",
+      nodes: entries,
+      edges: edges[flow] ?? {}
+    };
+  }
+
+  return { main: Object.keys(flows)[0] ?? "", flows: described, slots: {} };
+}
+
+/**
+ * Gives the named bundles of a manifest `release: "leave"`.
+ *
+ * @param manifest - The manifest.
+ * @param names - The bundles that leave with their feature.
+ * @returns A copy with those bundles changed.
+ */
+export function leaving(manifest: Manifest, ...names: string[]): Manifest {
+  const bundles = Object.entries(manifest.bundles).map(([name, entry]) => [
+    name,
+    names.includes(name) ? { ...entry, release: "leave" as const } : entry
+  ]);
+
+  return { ...manifest, bundles: Object.fromEntries(bundles) as Manifest["bundles"] };
 }

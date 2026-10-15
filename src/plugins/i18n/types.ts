@@ -173,6 +173,11 @@ export type RegisteredModule = {
   from: string;
   /** The module itself, or the loader that fetches it on first use. */
   messages: CompiledMessages | StringsLoader;
+  /**
+   * Set for a sub-feature's lazy module: the bundle it loads and unloads with. Its loader is kept
+   * and never replaced.
+   */
+  bundle?: string;
 };
 
 /**
@@ -191,29 +196,45 @@ export type ResolvedModule = {
 export type State = {
   /** The current locale; `config.locale` until `setLocale`. */
   locale: string;
-  /** Per locale, one entry per feature and one for the config, filled in `onStart`. */
+  /**
+   * Per locale, one entry per feature and one for the config, filled in `onStart`. Coupled
+   * entries keep their loader.
+   */
   registered: Map<string, RegisteredModule[]>;
-  /** Merged and resolved modules per locale. */
+  /** Merged modules per locale: resolved non-coupled modules plus the coupled modules of loaded bundles. */
   loaded: Map<string, CompiledMessages>;
   /** One kit per locale, built on first use. */
   intl: Map<string, IntlKit>;
-  /** Keys already reported missing, so each warns once. */
+  /** Keys already reported missing (or of a bundle not loaded), so each warns once. */
   warned: Set<string>;
-  /** The `setLocale` in flight; a later call waits for it. */
+  /** The strings load in flight (start, `setLocale` or a bundle); the next one waits for it. */
   loading: Promise<void> | undefined;
+  /** Bundles assets reported loaded, each with the token of the load that brought it. */
+  held: Map<string, symbol>;
+  /** Resolved coupled modules while their bundle is loaded: bundle to locale to messages. */
+  bundled: Map<string, Map<string, CompiledMessages>>;
+  /** Sub-features whose lazy strings live with the bundle of their name. Filled in `onStart`. */
+  coupled: Set<string>;
+  /** True once `onStart` collected the registry; before that a companion call only records the bundle. */
+  started: boolean;
 };
 
 /**
  * i18n plugin events.
  */
 export type Events = {
-  /** The current locale changed, or its messages were replaced. */
+  /**
+   * The current locale changed, its messages were replaced, or the strings of a bundle arrived
+   * for a key shown missing.
+   */
   "i18n:locale-changed": { locale: string };
 };
 
 /**
  * i18n plugin API, `app.i18n`. Messages are data everywhere else in the game; this is the one
- * place a locale is read and a sentence becomes parts.
+ * place a locale is read and a sentence becomes parts. `Key` is what `isKey` narrows to: the app
+ * of a game (`game.screen().app`) carries `I18n.TextKey<Strings>` of its generated table; an engine
+ * plugin's `ctx.require(i18nPlugin)` has no table, and `isKey` narrows to `string`.
  *
  * @example
  * ```ts
@@ -223,7 +244,7 @@ export type Events = {
  * app.i18n.plain(tr("hud.orders", { n: 3 })); // "3 orders"
  * ```
  */
-export type I18nApi = {
+export type I18nApi<Key extends string = string> = {
   /**
    * The locale every `format` without a second argument reads.
    *
@@ -237,8 +258,9 @@ export type I18nApi = {
 
   /**
    * Switches the current locale. A lazy module is imported once, then `i18n:locale-changed` is
-   * emitted; `text` re-resolves every message on it. A call for the locale already current
-   * resolves at once and emits nothing.
+   * emitted; `text` re-resolves every message on it. The modules of every sub-feature whose bundle
+   * is loaded are imported for the new locale before the event; a sub-feature whose bundle is not
+   * loaded is left alone. A call for the locale already current resolves at once and emits nothing.
    *
    * @param locale - The locale to switch to.
    * @returns A promise that settles when the messages of that locale are loaded.
@@ -248,6 +270,8 @@ export type I18nApi = {
    * // features/settings/nodes.ts: the language button of the settings screen.
    * await app.i18n.setLocale("en"); // loads the compiled module, then emits i18n:locale-changed
    * app.i18n.locale(); // "en"
+   * // The ward of episode 1 is on screen (bundle "ep01" loaded): strings.ep01.en came with the switch.
+   * app.i18n.plain(tr("ep01.ward.title")); // "Ward"
    * ```
    */
   setLocale(locale: string): Promise<void>;
@@ -255,6 +279,8 @@ export type I18nApi = {
   /**
    * Formats a message in the current locale. Resolution order is the current locale, then
    * `config.fallback`, then missing: a missing key gives one text part `⟦key⟧` and one warning.
+   * A key of a sub-feature whose strings live with its bundle, while that bundle is not loaded,
+   * gives `⟦key⟧` too, and its one warning names the bundle.
    *
    * @param message - What `tr` returned.
    * @returns The parts of the sentence, adjacent text merged.
@@ -262,13 +288,15 @@ export type I18nApi = {
    * ```ts
    * // text resolves the `content` of a Text component every time the locale changes.
    * app.i18n.format(tr("hud.orders", { n: 3 })); // [{ kind: "text", text: "3 заказа" }]
+   * // Bundle "ep01" is not loaded: one warn "i18n: the bundle of a key is not loaded" { bundle: "ep01" }
+   * app.i18n.format(tr("ep01.ward.title")); // [{ kind: "text", text: "⟦ep01.ward.title⟧" }]
    * ```
    */
   format(message: Message): readonly Part[];
 
   /**
    * Formats a message in another registered locale, without switching. `ui.lint` measures a
-   * label in every locale this way.
+   * label in every locale this way. Every loaded locale carries the strings of every loaded bundle.
    *
    * @param message - What `tr` returned.
    * @param locale - The registered locale to read.
@@ -297,7 +325,8 @@ export type I18nApi = {
   plain(message: Message): string;
 
   /**
-   * Tells whether a key exists in the current locale or in the fallback.
+   * Tells whether a key exists in the current locale or in the fallback. A key of a sub-feature
+   * whose bundle is not loaded answers false.
    *
    * @param key - The message key.
    * @returns True when `format` would find a message for it.
@@ -305,9 +334,38 @@ export type I18nApi = {
    * ```ts
    * // A projection hides the label of an order that has no description yet.
    * app.i18n.has("orders.hint"); // false: no locale brought that key
+   * app.i18n.has("ep01.ward.title"); // false until bundle "ep01" is loaded, then true
    * ```
    */
   has(key: string): boolean;
+
+  /**
+   * Tells whether a value read from saved JSON is a key the game still has: a key of the loaded
+   * tables of the current locale or of the fallback. For a key of a sub-feature whose strings are
+   * not loaded yet it answers by the prefix: `"<feature>."` of a known sub-feature that has strings
+   * is accepted (the exact key is checked when its bundle loads, and `text` shows `⟦key⟧` and warns
+   * once if it does not exist). Anything that is not a string answers false. The compiled tables
+   * carry no parameter list, so a key that takes parameters answers true as well: the check is
+   * for a key renamed or removed since the save was written. Call it where the app is: an effect
+   * handler, app or page code, the code that loads a save. On the app of a game a true answer types
+   * the value as a key `tr` takes alone (`I18n.TextKey<Strings>`); through
+   * `ctx.require(i18nPlugin)` it types it as a `string`.
+   *
+   * @param value - What the save or a data source holds.
+   * @returns True when the value is a key of the game's tables; it is then typed as one.
+   * @example
+   * ```ts
+   * // The page restores the toast kept in the save before it shows it.
+   * const { app } = game.screen();
+   * await app.start();
+   * app.i18n.isKey("ui.toast.saved"); // true: the value is typed TextKey, so tr takes it alone
+   * app.i18n.isKey("ui.toast.removedLastYear"); // false: renamed since, the toast shows its fallback
+   * app.i18n.isKey(3); // false: not a string
+   * // An engine plugin asks the same question; a true answer types the value as a string.
+   * ctx.require(i18nPlugin).isKey("casefile.title"); // true while the casefile bundle is not loaded
+   * ```
+   */
+  isKey(value: unknown): value is Key;
 
   /**
    * Formats milliseconds in the current locale through `Intl.DurationFormat`. The value is rounded
@@ -330,7 +388,8 @@ export type I18nApi = {
   duration(ms: number, style?: DurationStyle): string;
 
   /**
-   * Every locale at least one feature or the config brought a module for, sorted.
+   * Every locale at least one feature, sub-feature or the config brought a module for, sorted. A
+   * sub-feature's lazy module counts while its bundle is not loaded.
    *
    * @returns The registered locales.
    * @example
@@ -343,19 +402,23 @@ export type I18nApi = {
 
   /**
    * Swaps the compiled module of one feature in a loaded locale, for the dev hot swap. The one
-   * registered module whose keys overlap `messages` takes them, the locale is merged again and
-   * every key may warn once more. When the locale is the current one or the fallback,
-   * `i18n:locale-changed` is emitted with the current locale, so `text` re-resolves every label.
-   * A locale not loaded yet is left alone: its loader imports the new module later.
+   * module in memory whose keys overlap `messages` takes them (a sub-feature's module of a loaded
+   * bundle included), the locale is merged again and every key may warn once more. When the locale
+   * is the current one or the fallback, `i18n:locale-changed` is emitted with the current locale,
+   * so `text` re-resolves every label. A locale not loaded yet, and the module of a sub-feature
+   * whose bundle is not loaded, are left alone: the loader imports the new module later.
    *
-   * @param locale - The locale of the saved `generated/strings.<locale>.ts`.
+   * @param locale - The locale of the saved `generated/strings.<locale>.ts` or `strings.<feature>.<locale>.ts`.
    * @param messages - The `default` export of the new module.
-   * @throws {Error} When no registered module, or more than one, shares a key with `messages`.
+   * @throws {Error} When no module in memory, or more than one, shares a key with `messages`.
    * @example
    * ```ts
    * // ui's hot swap: generated/strings.ru.ts was written again with "hud.orders" as "3 заказа!".
    * ctx.require(i18nPlugin).replace("ru", next.default); // emits i18n:locale-changed
    * app.i18n.plain(tr("hud.orders", { n: 3 })); // "3 заказа!": text redraws the label
+   * // generated/strings.ep01.ru.ts was written again while bundle "ep01" is loaded.
+   * ctx.require(i18nPlugin).replace("ru", next.default); // emits i18n:locale-changed
+   * app.i18n.plain(tr("ep01.ward.title")); // "Палата!"
    * ```
    */
   replace(locale: string, messages: CompiledMessages): void;
@@ -372,6 +435,8 @@ export type I18nCtx = PluginCtx<Config, State, Events> & {
   readonly global: object;
   readonly log: Log.LogApi;
   readonly require: Require;
+  /** Whether a plugin of that name is composed, whatever its place in the list. */
+  readonly has: (name: string) => boolean;
 };
 
 /**
@@ -401,6 +466,22 @@ export type KeysWithoutParameters<Table extends StringTable> = {
   string;
 
 /**
+ * The keys of a string table that take no parameters: what a data table or a save may hold and
+ * `tr` takes alone. Derived from the `Strings` type `moku-game keys` already writes (a key whose
+ * parameters are `Record<string, never>`), so no list is generated and the type cannot drift from
+ * the table.
+ *
+ * @example
+ * ```ts
+ * // core/tables.ts of a game
+ * import type { Strings } from "@generated/strings";
+ * type HintKey = I18n.TextKey<Strings>; // "board.hint.blue" | "board.hint.red" | …, never "hud.orders"
+ * export const generators: Record<string, { readonly hint: HintKey }> = { red: { hint: "board.hint.red" } };
+ * ```
+ */
+export type TextKey<Table extends StringTable> = KeysWithoutParameters<Table>;
+
+/**
  * `tr` as one game reads it: the key is checked against the generated table, and the parameters
  * are the ones that key declares. A key with no parameters takes no second argument.
  *
@@ -424,4 +505,22 @@ export type TypedTr<Table extends StringTable> = {
  * kit.tr("home.play"); // { key: "home.play" }
  * ```
  */
-export type I18nKit<Table extends StringTable> = { tr: TypedTr<Table> };
+export type I18nKit<Table extends StringTable> = {
+  /** `tr`, checked against the game's table. */
+  tr: TypedTr<Table>;
+
+  /**
+   * Checks a key that does not take parameters against the game's table and returns it, typed:
+   * what a data table stores instead of a `string`. The same string at run time.
+   *
+   * @param key - A key of the game's table that takes no parameters.
+   * @returns The same key, typed as its literal.
+   * @example
+   * ```ts
+   * // core/tables.ts of a game: the hint of every generator, checked when the table is written.
+   * export const generators = { red: { hint: key("board.hint.red") }, blue: { hint: key("board.hint.blue") } };
+   * tr(generators.red.hint); // { key: "board.hint.red" }
+   * ```
+   */
+  key: <const Key extends TextKey<Table>>(key: Key) => Key;
+};

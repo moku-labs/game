@@ -79,7 +79,7 @@ const createMockLog = (): Log.LogApi => ({
 });
 
 const createMockState = (): State => ({
-  features: { byName: new Map(), sealed: false },
+  features: { byName: new Map(), parentOf: new Map(), sealed: false },
   fx: {
     handlers: new Map(),
     buffered: [],
@@ -178,6 +178,14 @@ const setup = (main: AnyFlow | undefined, overrides: Partial<Config> = {}) => {
       pause: vi.fn(),
       resume: vi.fn(),
       wake: vi.fn(),
+      wakes: () => 0,
+      measure: vi.fn(),
+      agentClock: () => undefined,
+      chargeAgent: vi.fn(),
+      rate: vi.fn(),
+      setRate: vi.fn(),
+      frameDrawn: vi.fn(),
+      frameProbed: vi.fn(),
       isPaused: vi.fn(),
       isRunning: () => false,
       step: vi.fn()

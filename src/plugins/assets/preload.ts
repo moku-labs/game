@@ -4,7 +4,9 @@
  */
 
 import type { FlowGraph, GraphNode, NodeInfo } from "../flow/types";
-import { usedMb } from "./budget";
+import { namedBundles } from "../scenes/bundles";
+import type { SceneState } from "../scenes/types";
+import { featuresOnStack, isHeld, usedMb } from "./budget";
 import { ignoreFailure, isAbortError, loadBundle } from "./tiers";
 import type { AssetsCtx, PreloadQueue, State } from "./types";
 
@@ -46,13 +48,62 @@ function addAll(names: string[], extra: readonly string[]): void {
 }
 
 /**
- * The bundles the node being entered needs: the bundle of its scene, and every `feature`-tier
- * bundle of the feature that owns its flow. A node without a scene keeps the scene bundle of the
- * node before it.
+ * Reads the committed state a scene's `bundles` gets: the frozen `player` and `session` of
+ * `model.store.snapshot()`, never a draft of the node being entered.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns The committed player and session, frozen.
+ */
+function committedState(ctx: AssetsCtx): SceneState {
+  const { player, session } = ctx.deps.model.store.snapshot();
+
+  return Object.freeze({ player, session });
+}
+
+/**
+ * The bundles a known scene names for a committed state: its bundle, then what its `bundles`
+ * returns. An unknown scene names none.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param id - Id of the scene.
+ * @param state - The committed player and session.
+ * @returns The bundle names, the scene bundle first.
+ * @throws {Error} What the scene's `bundles` throws, or when it returns no list of names.
+ */
+function sceneNames(ctx: AssetsCtx, id: string, state: SceneState): readonly string[] {
+  const scene = ctx.state.scenes.get(id);
+
+  return scene === undefined ? [] : namedBundles(scene, state);
+}
+
+/**
+ * The bundles the preload expects a scene to name. A `bundles` that throws costs the look-ahead
+ * only that scene's extra names: the scene stage reports the error when the node is entered.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param id - Id of the scene.
+ * @param state - The committed player and session of now.
+ * @returns The bundle names, the scene bundle first.
+ */
+function expectedNames(ctx: AssetsCtx, id: string, state: SceneState): readonly string[] {
+  try {
+    return sceneNames(ctx, id, state);
+  } catch {
+    const bundle = ctx.state.scenes.get(id)?.bundle;
+
+    return bundle === undefined ? [] : [bundle];
+  }
+}
+
+/**
+ * The bundles the node being entered needs: what its scene names (the scene bundle, then what the
+ * scene's `bundles` returns for the committed state), and every `feature`-tier bundle of the
+ * feature that owns its flow. A node without a scene keeps the scene of the node before it.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - The node being entered.
  * @returns The bundle names, the scene first.
+ * @throws {Error} When the scene's `bundles` throws: the `load` stage fails and flow rolls back.
  * @example
  * ```ts
  * // Entering "board/awaitIntent", which names the scene "board".
@@ -61,10 +112,9 @@ function addAll(names: string[], extra: readonly string[]): void {
  */
 export function bundlesOfNode(ctx: AssetsCtx, node: NodeInfo): string[] {
   const names: string[] = [];
-  const scene =
-    node.scene === undefined ? ctx.state.sceneBundle : ctx.state.bundleOfScene.get(node.scene);
+  const scene = node.scene ?? ctx.state.sceneId;
 
-  if (scene !== undefined) names.push(scene);
+  if (scene !== undefined) addAll(names, sceneNames(ctx, scene, committedState(ctx)));
   addAll(names, featureBundles(ctx, node.flow));
 
   return names;
@@ -72,17 +122,17 @@ export function bundlesOfNode(ctx: AssetsCtx, node: NodeInfo): string[] {
 
 /**
  * The bundles a node of `describe()` needs. Unlike `bundlesOfNode` it carries nothing forward:
- * a walk has no "node before it".
+ * a walk has no "node before it". The scene's names are read with the state of now.
  *
  * @param ctx - Domain context of the plugin.
  * @param node - One node of the graph description.
+ * @param state - The committed player and session of now.
  * @returns The bundle names.
  */
-function bundlesOfGraphNode(ctx: AssetsCtx, node: GraphNode): string[] {
+function bundlesOfGraphNode(ctx: AssetsCtx, node: GraphNode, state: SceneState): string[] {
   const names: string[] = [];
-  const scene = node.scene === undefined ? undefined : ctx.state.bundleOfScene.get(node.scene);
 
-  if (scene !== undefined) names.push(scene);
+  if (node.scene !== undefined) addAll(names, expectedNames(ctx, node.scene, state));
   addAll(names, featureBundles(ctx, node.flow));
 
   return names;
@@ -245,13 +295,14 @@ export function neighbourhood(ctx: AssetsCtx, depth: number): string[] {
   ];
   const visited = seenIds(`${current.flow}/${current.node}`);
   const distances = emptyDistances();
+  const state = committedState(ctx);
 
   for (const visit of queue) {
     const node = graph.flows[visit.flow]?.nodes[visit.node];
 
     if (node === undefined) continue;
 
-    for (const name of bundlesOfGraphNode(ctx, node)) {
+    for (const name of bundlesOfGraphNode(ctx, node, state)) {
       if (!distances.has(name)) distances.set(name, visit.distance);
     }
 
@@ -285,9 +336,10 @@ function isStillWanted(state: State, name: string): boolean {
 }
 
 /**
- * Filters the walk's result: the `lazy` tier, a bundle that is already there or loading outside
- * the queue, and everything behind the first bundle that would break the budget are dropped.
- * Preload never evicts.
+ * Filters the walk's result: the `lazy` tier, a `"leave"` bundle nobody holds (it would be
+ * released at the next rest), a bundle that is already there or loading outside the queue, and
+ * everything behind the first bundle that would break the budget are dropped. Preload never
+ * evicts.
  *
  * @param ctx - Domain context of the plugin.
  * @param distances - Bundle name to the distance it was first seen at.
@@ -298,12 +350,14 @@ function affordable(ctx: AssetsCtx, distances: Map<string, number>): string[] {
     .toSorted((left, right) => left[1] - right[1] || left[0].localeCompare(right[0]))
     .map(([name]) => name);
   const wanted: string[] = [];
+  const onStack = featuresOnStack(ctx);
   let running = usedMb(ctx.state);
 
   for (const name of ordered) {
     const entry = ctx.state.manifest.bundles[name];
 
     if (entry === undefined || entry.tier === "lazy") continue;
+    if (entry.release === "leave" && !isHeld(ctx, name, entry, onStack)) continue;
     if (!isStillWanted(ctx.state, name)) continue;
     if (running + entry.mb > ctx.config.textureBudgetMb) break;
 

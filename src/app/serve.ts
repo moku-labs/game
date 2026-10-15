@@ -8,10 +8,20 @@
 import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { CliDeps, Signal, Watcher } from "./cli";
+import type { Child, CliDeps, Signal, Watcher } from "./cli";
 import { resolveConfig } from "./config";
+import { type EngineFingerprint, engineFingerprint, engineLine } from "./engine";
+import { type EngineChange, engineChangeLines, watchEngineAt } from "./engine-watch";
 import { writeIfChanged } from "./files";
-import { ASSETS_STAMP, assetsStamp, bunfigText, devFlag, devMain, pageHtml } from "./generate";
+import {
+  ASSETS_STAMP,
+  assetsStamp,
+  bunfigText,
+  devFlag,
+  devMain,
+  pageHtml,
+  scriptMark
+} from "./generate";
 import type { GameConfig, ResolvedGameConfig } from "./types";
 
 /** What the dev page is written with besides the game. Every path is absolute. */
@@ -24,12 +34,14 @@ export type PrepareOptions = {
   servePlugins?: readonly string[];
 };
 
-/** The two files of the written dev page a Bun server needs. */
+/** The two files of the written dev page a Bun server needs, and the engine it was written for. */
 export type PageFiles = {
   /** `<game>/.moku/index.html`, the HTML the server imports. */
   html: string;
   /** `<game>/.moku/bunfig.toml`, the config the server runs under. */
   bunfig: string;
+  /** The engine the page was written for: its id is the one `.moku/dev.ts` sets. */
+  engine: EngineFingerprint;
 };
 
 /** One `moku-game dev` run, its flags read and its paths absolute. */
@@ -50,8 +62,16 @@ export type ServeRun = {
 export type ChildRun = {
   /** The working directory of the child. */
   cwd: string;
-  /** Opens what lives exactly as long as the child, such as the scenario watcher. */
-  whileRunning?: () => Watcher | undefined;
+  /** Opens what lives exactly as long as the child, such as the scenario watcher; gets the started child. */
+  whileRunning?: (child: Child) => Watcher | undefined;
+};
+
+/** What the dev parent keeps of its running child: the child, and whether its exit restarts it. */
+type LiveChild = {
+  /** The running child, `undefined` between two children. */
+  child: Child | undefined;
+  /** True when the engine changed: the child's exit starts a new one. */
+  restart: boolean;
 };
 
 /** The server of the dev page, the part `dev` and `visual` use. Bun's `Server` fits it. */
@@ -208,14 +228,15 @@ export function checkFiles(flag: "--preload" | "--serve-plugin", files: readonly
 
 /**
  * Finds the hot plugin of the engine the game resolves: the installed `dist/hot.mjs`, or
- * `src/hot.ts` through the tsconfig `paths` of the engine repo.
+ * `src/hot.ts` through the tsconfig `paths` of the engine repo. A debug build resolves it the
+ * same way, for the engine fingerprint.
  *
  * @param root - The game folder.
  * @param resolve - Bun's resolver.
  * @returns The absolute path of the plugin.
  * @throws {Error} When the game cannot resolve `@moku-labs/game/hot`.
  */
-function hotPluginOf(root: string, resolve: CliDeps["resolve"]): string {
+export function hotPluginOf(root: string, resolve: CliDeps["resolve"]): string {
   try {
     return resolve("@moku-labs/game/hot", root);
   } catch (error) {
@@ -259,13 +280,13 @@ function isSkippedFolder(name: string): boolean {
 
 /**
  * Lists the `.dev.ts` modules under a folder of the game, outside the dot folders and the folders
- * of tools and tests.
+ * of tools and tests: what the editor's dev page and a debug page hand to their agents.
  *
  * @param root - The game folder.
  * @param relative - The folder under the game, `/` separated, `""` for the game itself.
  * @returns The modules, relative to the game, `/` separated.
  */
-function devModulesOf(root: string, relative = ""): string[] {
+export function devModulesOf(root: string, relative = ""): string[] {
   const entries: Dirent[] = readdirSync(path.join(root, relative), { withFileTypes: true });
 
   return entries.flatMap(entry => {
@@ -301,19 +322,21 @@ function mainOf(
 }
 
 /**
- * Writes the dev page of a checked game into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts`
- * and `bunfig.toml`. `moku-game visual` writes its own page into `.moku/visual/`, so the page of
- * `dev` or of the editor stays as it is; the links of the page reach the game from its depth.
- * Every text is made before the first write, so a refused value writes nothing. A game without
- * `.moku/assets-stamp.ts` gets the empty one, so the import of `main.ts` resolves with or without
- * a keys watch; a stamp that is there is the watch's and stays.
+ * Writes the dev page of a checked game into `<game>/.moku/`: `index.html`, `script.ts` (the
+ * startup mark), `dev.ts` (the flags and the engine id), `main.ts` and `bunfig.toml`. `moku-game
+ * visual` writes its own page into `.moku/visual/`, so the page of `dev` or of the editor stays as
+ * it is; the links of the page reach the game from its depth. The hot plugin is resolved and the
+ * engine fingerprinted before any text is made, and every text is made before the first write, so
+ * a refused value writes nothing. A game without `.moku/assets-stamp.ts` gets the empty one, so
+ * the import of `main.ts` resolves with or without a keys watch; a stamp that is there is the
+ * watch's and stays.
  *
  * @param root - The game folder, absolute.
  * @param settings - The resolved config.
  * @param options - The agents, the preloads and the extra plugins, absolute.
  * @param resolve - Bun's resolver, to find the hot plugin.
  * @param page - The folder of the page under the game, `/` separated: `.moku` by default.
- * @returns The paths of the HTML and the bunfig.
+ * @returns The paths of the HTML and the bunfig, and the engine the page was written for.
  * @throws {Error} When the hot plugin does not resolve, a preload or plugin is not a file, or a
  *   page value is refused.
  */
@@ -336,11 +359,14 @@ export function writePage(
   const folder = path.join(root, ...segments);
   const html = path.join(folder, "index.html");
   const bunfig = path.join(folder, "bunfig.toml");
+  const hotPlugin = hotPluginOf(root, resolve);
+  const engine = engineFingerprint(root, hotPlugin);
   const texts: [string, string][] = [
     [html, pageHtml(settings.page, { toRoot, script: "./main.ts" })],
-    [path.join(folder, "dev.ts"), devFlag()],
+    [path.join(folder, "script.ts"), scriptMark()],
+    [path.join(folder, "dev.ts"), devFlag(engine.id)],
     [path.join(folder, "main.ts"), mainOf(root, settings, options.agents, toRoot)],
-    [bunfig, bunfigText({ hotPlugin: hotPluginOf(root, resolve), servePlugins, preload })]
+    [bunfig, bunfigText({ hotPlugin, servePlugins, preload })]
   ];
 
   const stamp = path.join(root, ".moku", ASSETS_STAMP);
@@ -349,7 +375,7 @@ export function writePage(
   for (const [file, text] of texts) writeIfChanged(file, text);
   if (!existsSync(stamp)) writeIfChanged(stamp, assetsStamp([], []));
 
-  return { html, bunfig };
+  return { html, bunfig, engine };
 }
 
 /**
@@ -360,7 +386,7 @@ export function writePage(
  * @param root - The game folder, absolute.
  * @param options - The agents, the preloads and the extra plugins, absolute.
  * @param resolve - Bun's resolver, to find the hot plugin.
- * @returns The paths of the HTML and the bunfig.
+ * @returns The paths of the HTML and the bunfig, and the engine the page was written for.
  * @throws {Error} The errors of `moku-game dev` before its server starts.
  */
 export async function preparePageAt(
@@ -451,12 +477,77 @@ function devChildCommand(run: ServeRun, page: PageFiles, deps: CliDeps): string[
 }
 
 /**
+ * Hands one engine change to the dev parent: prints its lines, and when the served engine changed
+ * marks the run for a restart and stops the child with SIGTERM, the way Ctrl+C stops it.
+ *
+ * @param change - The change.
+ * @param live - The running child and the restart mark.
+ * @param deps - The console.
+ */
+function restartOnEngineChange(change: EngineChange, live: LiveChild, deps: CliDeps): void {
+  for (const line of engineChangeLines(change)) deps.ui.warn(line);
+
+  if (!change.restart) return;
+
+  live.restart = true;
+  live.child?.kill("SIGTERM");
+}
+
+/**
+ * Serves a written page in a child until it exits without a restart: prints the engine line, runs
+ * the child with the scenario watcher, and when the engine changed writes the page again (the new
+ * engine id, the hot plugin of the new install) and runs a new child.
+ *
+ * @param run - The flags of the run.
+ * @param page - The written page.
+ * @param settings - The resolved config.
+ * @param deps - The process seams.
+ * @param live - The running child and the restart mark.
+ * @returns The exit code of the last child.
+ */
+async function serveUntilStopped(
+  run: ServeRun,
+  page: PageFiles,
+  settings: ResolvedGameConfig,
+  deps: CliDeps,
+  live: LiveChild
+): Promise<number> {
+  deps.ui.info(engineLine(page.engine, run.root));
+
+  // The child serves the page from the game folder; the scenario watcher lives as long as it.
+  const code = await runChild(devChildCommand(run, page, deps), deps, {
+    cwd: run.root,
+    whileRunning: child => {
+      live.child = child;
+
+      return watchScenarios(run.root, settings, deps);
+    }
+  });
+
+  live.child = undefined;
+
+  if (!live.restart) return code;
+
+  live.restart = false;
+
+  return serveUntilStopped(
+    run,
+    writePage(run.root, settings, run, deps.resolve),
+    settings,
+    deps,
+    live
+  );
+}
+
+/**
  * The dev parent: checks the game, starts the keys watch on the raw files, writes the page,
- * re-runs the bin under the generated bunfig with the game as its working directory, and watches
- * the scenarios while the child runs. The first scan of the keys watch writes
+ * prints the engine line, re-runs the bin under the generated bunfig with the game as its working
+ * directory, and watches the scenarios while the child runs. The first scan of the keys watch writes
  * `generated/manifest.json` before the page is served, and a save of an asset or a strings file
- * scans again; `--packed` serves the pack and watches no keys. It hands Ctrl+C and the other stop
- * signals to the child and answers the child's exit code.
+ * scans again; `--packed` serves the pack and watches no keys. The installed engine is watched: a
+ * new engine stops the child with SIGTERM, writes the page again and starts a new child; a patch
+ * that changed while the engine did not is a warning. It hands Ctrl+C and the other stop signals to
+ * the child and answers the exit code of a child that ends by itself.
  *
  * @param run - The flags of the run.
  * @param deps - The process seams.
@@ -476,6 +567,8 @@ export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number>
 
   // Raw files only: generated/ is fresh before the page is written, and stays fresh on save.
   const keys = run.packed ? undefined : await deps.watchKeys(run.root, settings);
+  const live: LiveChild = { child: undefined, restart: false };
+  let engine: Watcher | undefined;
 
   try {
     // The page is written before the child imports it, into a folder git should not see.
@@ -485,13 +578,18 @@ export async function serveParent(run: ServeRun, deps: CliDeps): Promise<number>
       deps.ui.warn('[game] dev: add ".moku/" to .gitignore. moku-game writes its dev page there.');
     }
 
-    // The child serves the page from the game folder; the scenario watcher lives as long as it.
-    return await runChild(devChildCommand(run, page, deps), deps, {
-      cwd: run.root,
-      whileRunning: () => watchScenarios(run.root, settings, deps)
-    });
+    engine = watchEngineAt(
+      run.root,
+      page.engine,
+      deps,
+      change => restartOnEngineChange(change, live, deps),
+      message => deps.ui.warn(message)
+    );
+
+    return await serveUntilStopped(run, page, settings, deps, live);
   } finally {
-    // The keys watch closes with the child, and also when the page is refused or no child starts.
+    // The watches close with the child, and also when the page is refused or no child starts.
+    engine?.close();
     keys?.close();
   }
 }
@@ -519,7 +617,7 @@ export async function runChild(command: string[], deps: CliDeps, child: ChildRun
 
   // What lives as long as the child opens once it runs and closes when it exits.
   try {
-    watcher = child.whileRunning?.();
+    watcher = child.whileRunning?.(started);
 
     return await started.exited;
   } finally {
@@ -613,7 +711,7 @@ export function serveOn(run: ServeRun, page: Response | Bun.HTMLBundle): PageSer
       fetch: request => fileResponse(staticPath(base, new URL(request.url).pathname))
     });
   } catch (error) {
-    if ((error as { code?: unknown }).code === "EADDRINUSE") {
+    if (error instanceof Error && "code" in error && error.code === "EADDRINUSE") {
       throw new Error(`[game] dev: port ${run.port} is in use.\n  Pass --port 0 for a free port.`, {
         cause: error
       });

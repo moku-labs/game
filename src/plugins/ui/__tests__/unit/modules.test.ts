@@ -25,6 +25,9 @@ function rootOf(patch: Partial<Root>): Root {
     element: undefined,
     popup: undefined,
     covered: false,
+    cause: undefined,
+    slot: undefined,
+    slotRect: undefined,
     ...patch
   };
 }
@@ -72,6 +75,9 @@ function elementOf(patch: Partial<Element>): Element {
     extraHandles: new Map(),
     warnedOwned: new Set(),
     warned: new Set(),
+    index: 0,
+    cause: "change",
+    rebuilds: 0,
     scrolledIn: false,
     ...patch
   };

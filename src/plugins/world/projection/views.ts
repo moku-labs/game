@@ -3,7 +3,14 @@
  * and how the layer is written.
  */
 import type { AnyComponent, AnyComponentType, AnyComponentValue, Entity } from "../ecs/types";
-import type { AnyProjectionSpec, DescriptionNode, ProjectionCtx, View, ViewOutput } from "./types";
+import type {
+  AnyProjectionSpec,
+  DescriptionNode,
+  MotionCause,
+  ProjectionCtx,
+  View,
+  ViewOutput
+} from "./types";
 
 /**
  * Normalises a caught value into an `Error`, so the log always gets one.
@@ -53,7 +60,10 @@ function isNode(output: ViewOutput): output is DescriptionNode {
 
 /**
  * Runs `view(item)` and collects its output by component name. A view that describes a screen
- * returns one node, which becomes the `Tree` of the entity, and `ui` reconciles it from there.
+ * returns one node, which becomes the `Tree` of the entity, and `ui` reconciles it from there;
+ * the root draws at the `Order` of its place in the mounted list, written before `Tree` because the
+ * ecs fires `onAdded` in list order and the `Tree` hook of `ui` reads it. `Order` is part of the
+ * view's rest, so a new node compares it by value and writes nothing.
  * `Layer` is the projection's own component: a view that returns it is reported and ignored.
  *
  * @param pctx - Domain context of the projection module.
@@ -69,7 +79,9 @@ export function collectView(
   const values = emptyValues();
   const layerName = pctx.deps.components.Layer.componentName;
   const output = spec.view(item);
-  const produced = isNode(output) ? [pctx.deps.components.Tree({ node: output })] : output;
+  const { Order, Tree } = pctx.deps.components;
+  const order = pctx.ctx.state.projection.mounted.get(spec.name)?.order ?? 0;
+  const produced = isNode(output) ? [Order({ value: order }), Tree({ node: output })] : output;
 
   for (const value of produced) {
     if (value.type.componentName === layerName) {
@@ -130,6 +142,7 @@ export function writeValue(pctx: ProjectionCtx, entity: Entity, value: AnyCompon
  * @param key - The model key.
  * @param item - The model item.
  * @param rest - The output of `view(item)`, which is the rest pose.
+ * @param cause - How the view came: `"mount"` for a direct reconcile, `"change"` for a live commit.
  * @returns The view record.
  */
 export function createViewRecord(
@@ -137,7 +150,8 @@ export function createViewRecord(
   projection: string,
   key: string,
   item: unknown,
-  rest: Map<string, AnyComponentValue>
+  rest: Map<string, AnyComponentValue>,
+  cause: MotionCause = "mount"
 ): View {
   return {
     entity,
@@ -149,6 +163,7 @@ export function createViewRecord(
     lifted: false,
     dropWhenStill: false,
     loopOwed: false,
-    exiting: false
+    exiting: false,
+    cause
   };
 }

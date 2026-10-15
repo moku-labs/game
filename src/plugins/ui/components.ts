@@ -4,6 +4,7 @@
  * `world`, so nothing has to be registered.
  */
 import type { Descriptor } from "../flow/fx/types";
+import type { Answer } from "../flow/gate/types";
 import type { Json } from "../model/types";
 import { component, resource, tag } from "../world/ecs/define";
 import { defineComponent } from "./jsx/component";
@@ -82,6 +83,22 @@ export const Covered = /*#__PURE__*/ tag("Covered");
  * game writes the prop, never the tag.
  */
 export const Escapable = /*#__PURE__*/ tag("Escapable");
+
+/**
+ * On the view a player taps five times within three seconds to open the editor's overlay on a debug build: the
+ * version line of the settings, usually. One helper on top of `app.debug.overlay.open()`; a game that wants another
+ * gesture calls that itself. The view must take a press (a `button`, or any element with `Touchable`); a `button`
+ * that names no intent is the plain choice. Without the agent flag the tag does nothing.
+ *
+ * @example
+ * ```tsx
+ * // The version line of the settings sheet. Five taps open the overlay of `moku-game build --debug` on the phone.
+ * <button key="versionLine" style={versionLineStyle} components={[DebugTrigger()]}>
+ *   <text key="version" style="settings.version" content={tr("settings.version", { version: "1.4.0" })} />
+ * </button>
+ * ```
+ */
+export const DebugTrigger = /*#__PURE__*/ tag("DebugTrigger");
 
 /**
  * What the acceptance cases of the spikes count. Internal to `ui`: the numbers are written once
@@ -169,6 +186,7 @@ export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
  * });
  * popup(Reward, { gold: 5 });
  * // { kind: "popup", payload: { component: "Reward", props: { gold: 5 } }, answers: ["claim"] }
+ * await fx(popup(Reward, { gold: 5 })); // Answer<"claim">: { intent: "claim" }
  * ```
  * @example
  * ```ts
@@ -182,11 +200,15 @@ export const UiCounters = /*#__PURE__*/ resource("UiCounters", {
  * //   answers: ["reset", "cancel"] }
  * ```
  */
-export function popup<Properties extends object, Local extends object>(
-  component: PopupComponent<Properties, Local>,
+export function popup<
+  Properties extends object,
+  Local extends object,
+  Outcomes extends Record<string, unknown>
+>(
+  component: PopupComponent<Properties, Local, Outcomes>,
   props: Properties,
   options?: { over?: string }
-): Descriptor {
+): Descriptor<Answer<keyof Outcomes & string>> {
   const over = options?.over;
   const payload =
     over === undefined
@@ -211,11 +233,15 @@ export type UiKit<Asset extends string, TextStyleKey extends string, StringKey e
   defineComponent: typeof defineComponent;
   defineStyle: <const Given extends Style<Asset>>(style: Given) => Readonly<Given>;
   defineTokens: typeof defineTokens;
-  popup: <Properties extends object, Local extends object>(
-    component: PopupComponent<Properties, Local>,
+  popup: <
+    Properties extends object,
+    Local extends object,
+    Outcomes extends Record<string, unknown>
+  >(
+    component: PopupComponent<Properties, Local, Outcomes>,
     props: Properties,
     options?: { over?: string }
-  ) => Descriptor;
+  ) => Descriptor<Answer<keyof Outcomes & string>>;
   intrinsics: IntrinsicElementsFor<Asset, TextStyleKey, StringKey>;
 };
 

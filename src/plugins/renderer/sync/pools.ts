@@ -2,8 +2,9 @@
  * @file renderer/sync — the pools. A released object keeps its class and its texture key, so the
  * next entity with the same look gets it back without an allocation.
  */
-import type { PixiContainer, PixiNineSliceSprite, PixiSprite } from "../types";
-import { clearFilters } from "./filters";
+import type { PixiContainer, PixiGraphics, PixiNineSliceSprite, PixiSprite } from "../types";
+import { clearArea, clearFilters } from "./filters";
+import { clearHidden } from "./hidden";
 import type { SyncCtx, SyncState, View, ViewKind } from "./types";
 
 /**
@@ -15,6 +16,16 @@ import type { SyncCtx, SyncState, View, ViewKind } from "./types";
  */
 export function isSprite(object: PixiContainer): object is PixiSprite {
   return "texture" in object && !("leftWidth" in object);
+}
+
+/**
+ * Tells whether a display object draws paths, so a `Shape` can be written onto it.
+ *
+ * @param object - The display object.
+ * @returns True for a graphics object.
+ */
+export function isGraphics(object: PixiContainer): object is PixiGraphics {
+  return "roundRect" in object;
 }
 
 /**
@@ -109,12 +120,17 @@ export function poolKeyOf(kind: ViewKind, textureKey: string): string {
 }
 
 /**
- * Brings a display object back to the state a fresh one has.
+ * Brings the object of a view that left back to the state a fresh one has: detached, drawn, opaque, unmoved, white.
+ * Its hidden reasons go with `clearHidden`, so a pooled object never brings the reason of the view it belonged to; a
+ * sprite and a graphics lose their tint (a fill-only shape is coloured by it, spec 26 R2.1).
  *
- * @param object - The display object.
+ * @param view - The view whose object goes back to its pool; its wrapper is gone already.
  */
-export function resetObject(object: PixiContainer): void {
+export function resetObject(view: View): void {
+  const object = view.object;
+
   detach(object);
+  clearHidden(view);
   object.visible = true;
   object.alpha = 1;
   object.rotation = 0;
@@ -122,7 +138,7 @@ export function resetObject(object: PixiContainer): void {
   object.position.set(0, 0);
   object.pivot.set(0, 0);
   object.scale.set(1);
-  if (isSprite(object)) object.tint = 0xff_ff_ff;
+  if (isSprite(object) || isGraphics(object)) object.tint = 0xff_ff_ff;
 }
 
 /**
@@ -165,9 +181,9 @@ function oldestPool(state: SyncState): PixiContainer[] | undefined {
 
 /**
  * Puts a view's object back into its pool and evicts the oldest one when the pool grew past the
- * configured limit. A `Display` object belongs to the game and is only detached. The filters the
- * renderer hung on the object or its wrapper come off first, so a pooled object never carries a
- * filter into its next life; the filter instances themselves belong to `effects`.
+ * configured limit. A `Display` object belongs to the game and is only detached. The filters and the
+ * filter area the renderer hung on the object or its wrapper come off first, so a pooled object never
+ * carries a filter into its next life; the filter instances themselves belong to `effects`.
  *
  * @param sctx - Domain context of the sync module.
  * @param view - The view that left.
@@ -179,32 +195,45 @@ export function release(sctx: SyncCtx, view: View): void {
   dropMask(view);
   dropOutline(view);
   clearFilters(view.object);
+  // The filter area goes with the filters: a pooled object never keeps one (B4).
+  clearArea(view.object);
 
   // The wrapper is the renderer's own container, so it is destroyed, never pooled.
   if (view.wrapper !== undefined) {
     clearFilters(view.wrapper);
+    clearArea(view.wrapper);
     detach(view.wrapper);
     view.wrapper.destroy({ children: false });
     view.wrapper = undefined;
   }
 
-  // A `Display` object belongs to the game: it only leaves the tree.
+  // A `Display` object belongs to the game: it only leaves the tree, without the renderer's hidden reasons.
   if (view.kind === "Display") {
     detach(view.object);
+    clearHidden(view);
 
     return;
   }
 
-  // An adapter object belongs to the plugin that drew it: its adapter destroys it.
+  // An adapter object belongs to the plugin that drew it: its adapter destroys it, or keeps it drawn for a next life.
   if (view.kind === "adapter") {
     detach(view.object);
+    clearHidden(view);
     view.display?.adapter.destroy(view.object);
 
     return;
   }
 
-  // The renderer's own object goes back to its pool, reset for its next life.
-  resetObject(view.object);
+  // The renderer's own object goes back to its pool, reset for its next life: without a render group the kept
+  // cache made of it (spec 23 P9.3).
+  const groups = sctx.ctx.state.kept.madeGroups;
+
+  if (groups.has(view.object)) {
+    view.object.disableRenderGroup();
+    groups.delete(view.object);
+  }
+
+  resetObject(view);
 
   const pool = state.pools.get(view.poolKey) ?? emptyPool();
 

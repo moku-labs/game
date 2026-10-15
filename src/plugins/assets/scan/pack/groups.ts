@@ -15,8 +15,11 @@
  */
 export type Group = "fx" | "main";
 
-/** What the group rules read of a texture: its key and its size in pixels. */
-export type Sized = { key: string; width: number; height: number };
+/**
+ * What the group rules read of a texture: its key, its size in pixels and whether it carries
+ * mipmaps.
+ */
+export type Sized = { key: string; width: number; height: number; mips?: true };
 
 /** The textures of one bundle, sorted: the atlas groups by name, and what stays loose. */
 export type GroupPlan<Texture extends Sized> = {
@@ -39,21 +42,25 @@ const FX_FOLDER = "fx";
 const GROUP_ORDER: readonly Group[] = ["fx", "main"];
 
 /**
- * Picks the atlas group of one texture. A key whose last segment starts with `fx-`, or with a
- * folder segment `fx` between the bundle name and the stem, goes to `fx` whatever its size: the
- * frames of an animation in `fx/` too. Any other texture goes to `main` when no side is above
- * 512 px.
+ * Picks the atlas group of one texture. A mipmapped texture stays loose whatever its key: Pixi
+ * builds its full chain, and from the second level on the neighbours on a page would bleed into
+ * it. A key whose last segment starts with `fx-`, or with a folder segment `fx` between the bundle
+ * name and the stem, goes to `fx` whatever its size: the frames of an animation in `fx/` too. Any
+ * other texture goes to `main` when no side is above 512 px.
  *
- * @param texture - The key and the size of the texture.
- * @returns The group, or `undefined` when the texture stays loose by its size.
+ * @param texture - The key, the size and the mipmaps of the texture.
+ * @returns The group, or `undefined` when the texture stays loose.
  * @example
  * ```ts
  * groupOf({ key: "ui.fx-rays", width: 504, height: 512 }); // "fx"
  * groupOf({ key: "ui.fx.leaf", width: 64, height: 64 }); // "fx", from assets/fx/leaf.webp of ui
  * groupOf({ key: "ui.fx", width: 64, height: 64 }); // "main": a stem, no folder
+ * groupOf({ key: "ep01.items.cup", width: 336, height: 288, mips: true }); // undefined: loose
  * ```
  */
 export function groupOf(texture: Sized): Group | undefined {
+  if (texture.mips === true) return undefined;
+
   const segments = texture.key.split(".");
   const name = segments.at(-1) ?? "";
   // The folders sit between the bundle name and the stem.

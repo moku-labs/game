@@ -1,11 +1,12 @@
 import * as pixi from "pixi.js";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { createSyncState } from "../../sync/state";
-import { destroyTexture } from "../../sync/textures";
+import { createTexture, destroyTexture } from "../../sync/textures";
+import type { SyncCtx } from "../../sync/types";
 
 // ---------------------------------------------------------------------------
 // Unit test against the real pixi.js module, no GPU: what `destroyTexture`
-// does to the bind groups Pixi keeps. Pixi 8.21 caches the bind group of every
+// does to the bind groups Pixi keeps. Pixi 8.22 caches the bind group of every
 // batch in a module map that is never emptied, and the texture system keeps one
 // per texture a particle container drew. Each of them listens to `change` on
 // the source and on its style, and warns when one of the two is destroyed.
@@ -16,6 +17,7 @@ const SLOTS = 16;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /**
@@ -145,5 +147,43 @@ describe("destroying a texture Pixi drew", () => {
 
     expect(() => destroyTexture(state, texture)).not.toThrow();
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+/** A decoded image as Pixi's `ImageSource` recognizes it, without a browser. */
+class StubBitmap {
+  public readonly width = 336;
+  public readonly height = 288;
+
+  /** Frees nothing: there are no pixels. */
+  public close(): void {
+    // A stub has no pixels to free.
+  }
+}
+
+/**
+ * The sync context `createTexture` reads: a ready host over the real Pixi module.
+ *
+ * @returns The context.
+ */
+function readyHost(): SyncCtx {
+  return { deps: { host: { pixi: () => pixi, ready: () => true } } } as unknown as SyncCtx;
+}
+
+describe("creating a texture with the real Pixi", () => {
+  it("hands `mips` to Pixi as autoGenerateMipmaps through the public options form", () => {
+    vi.stubGlobal("ImageBitmap", StubBitmap);
+
+    const bitmap = new StubBitmap() as unknown as ImageBitmap;
+    const mipped = createTexture(readyHost(), bitmap, { mips: true });
+    const plain = createTexture(readyHost(), new StubBitmap() as unknown as ImageBitmap);
+
+    expect(mipped.source).toBeInstanceOf(pixi.ImageSource);
+    expect(mipped.source.resource).toBe(bitmap);
+    expect(mipped.source.autoGenerateMipmaps).toBe(true);
+    expect(plain.source.autoGenerateMipmaps).toBe(false);
+
+    mipped.destroy(true);
+    plain.destroy(true);
   });
 });

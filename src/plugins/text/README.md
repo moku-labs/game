@@ -14,7 +14,9 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   of the map is written over the table (a new name is added, a known one keeps its owner), the
   fonts are read, the layout cache is dropped, every label is marked and the loop is woken. The
   next frame redraws a label with the new style even when its text and its style name did not
-  change: the display adapter compares the drawn style object with the current one.
+  change: the display adapter compares the drawn style object with the current one. For a label
+  it leaves as it was (the same string, style and anchor, and the same alpha) the adapter answers
+  `false`, so a renderer drawing on demand (`renderer.onDemand`) skips the frame.
 - **Missing glyphs:** a character the loaded font has no glyph for (an emoji, CJK) is drawn as
   nothing by Pixi, so it measures 0 wide, letter spacing included, and is reported once per font
   and character. `"ab😀"` measures as `"ab"`, and a label is as wide as what is drawn.
@@ -40,7 +42,7 @@ numbers in a browser and in plain Bun — that is the contract `ui.layout` stand
   1 by default and is the alpha of the label's container, so a change is written in place,
   rebuilds no run, and a tween on `Text.alpha` costs one assignment a frame. It draws at its value
   on a distance-field font too: the renderer's own SDF shader applies every alpha once, where Pixi
-  8.21's applies it twice (renderer README, "Distance-field text"). `ui` draws a field's
+  8.22's applies it twice (renderer README, "Distance-field text"). `ui` draws a field's
   placeholder at `alpha: 0.5`.
 - **Numbers:** `bind(Component, field, { format })` shows a numeric component field of the same
   entity, read every frame, written only when the shown string changes. Formats: `int` (the

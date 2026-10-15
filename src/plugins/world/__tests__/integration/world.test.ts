@@ -206,6 +206,32 @@ describe("world plugin integration", () => {
   });
 });
 
+describe("world plugin integration — the motion cause", () => {
+  it("lets a removal hook read mount after a scene switch, then change after a commit", async () => {
+    const app = await startApp();
+    const causes: Array<string | undefined> = [];
+
+    app.world.ecs.onRemoved(Level, entity => {
+      causes.push(app.world.projection.causeOf(entity));
+    });
+    app.world.projection.setLayers([{ name: "items", sort: "y" }]);
+    app.world.projection.mount(["board.items"], { kind: "plugin", name: "scenes" });
+    // The frame of the start: the commit of the first rest node reconciles directly.
+    app.time.step(16);
+    // The scene switches away and back, as `scenes` does it.
+    app.world.projection.unmount(["board.items"]);
+    app.world.projection.mount(["board.items"], { kind: "plugin", name: "scenes" });
+
+    expect(app.flow.gate.answer({ intent: "merge", payload: { id: "a" } })).toBe(true);
+    await tick();
+    app.time.step(16);
+
+    expect(causes).toEqual(["mount", "mount", "change"]);
+
+    await app.stop();
+  });
+});
+
 describe("world doors integration", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

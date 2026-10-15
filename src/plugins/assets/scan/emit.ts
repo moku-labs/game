@@ -35,6 +35,7 @@ type PlainFile = {
   width?: number;
   height?: number;
   mb: number;
+  mips?: true;
   pages?: FontPage[];
   nine?: NineSlice;
   atlas?: AtlasFrame;
@@ -46,7 +47,10 @@ type PlainPage = { id: string; path: string; width: number; height: number; mb: 
 /** One bundle of `manifest.json`, as written: a `ManifestBundle` with plain pages and files. */
 type PlainBundle = {
   feature: string;
+  parent?: string;
+  dir?: string;
   tier: Tier;
+  release?: "leave";
   mb: number;
   pages?: PlainPage[];
   files: PlainFile[];
@@ -68,7 +72,7 @@ function byName(left: string, right: string): number {
 
 /**
  * Writes one file entry in the field order of the manifest: `key`, `path`, `kind`, `width`,
- * `height`, `mb`, `pages`, `nine`, `atlas`. A field the file does not carry is left out: a
+ * `height`, `mb`, `mips`, `pages`, `nine`, `atlas`. A field the file does not carry is left out: a
  * texture says nothing about its kind, which keeps a manifest written before fonts and audio
  * readable, and a texture packed in an atlas has no `path`. A font and a sound carry no size.
  *
@@ -95,6 +99,7 @@ function plainFile(file: ManifestFile): PlainFile {
     width: file.width,
     height: file.height,
     mb: file.mb,
+    ...(file.mips === true ? { mips: true } : {}),
     ...(file.nine === undefined ? {} : { nine: file.nine }),
     ...(file.atlas === undefined ? {} : { atlas: { ...file.atlas } })
   };
@@ -111,8 +116,9 @@ function plainPage(page: AtlasPage): PlainPage {
 }
 
 /**
- * Writes one bundle with a fixed field order, its pages sorted by id when it has any and its
- * files sorted by key.
+ * Writes one bundle with a fixed field order (`feature`, `parent`, `dir`, `tier`, `release`, `mb`,
+ * `pages`, `files`), its pages sorted by id when it has any and its files sorted by key. A field
+ * the bundle does not carry is left out, so the bundle of a flat feature keeps its old bytes.
  *
  * @param bundle - The bundle.
  * @returns The bundle as JSON data.
@@ -124,7 +130,10 @@ function plainBundle(bundle: ManifestBundle): PlainBundle {
 
   return {
     feature: bundle.feature,
+    ...(bundle.parent === undefined ? {} : { parent: bundle.parent }),
+    ...(bundle.dir === undefined ? {} : { dir: bundle.dir }),
     tier: bundle.tier,
+    ...(bundle.release === undefined ? {} : { release: bundle.release }),
     mb: bundle.mb,
     ...(pages === undefined ? {} : { pages }),
     files: bundle.files

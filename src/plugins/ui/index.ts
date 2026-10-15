@@ -8,6 +8,7 @@
  */
 import { createPlugin } from "../../config";
 import { animPlugin } from "../anim";
+import { debugPlugin } from "../debug";
 import { flowPlugin } from "../flow";
 import { i18nPlugin } from "../i18n";
 import { inputPlugin } from "../input";
@@ -43,8 +44,8 @@ const config: Config = {
 
 /**
  * Ui plugin: `app.ui.tree()`, `app.ui.find(...)`, `app.ui.lint()`, `app.ui.fill(...)`, the
- * text field `<input local>`, the components `Box` and
- * `LocalWrite`, and the helpers `defineComponent`, `defineStyle`, `defineTokens` and `popup`.
+ * text field `<input local>`, the components `Box`, `LocalWrite` and
+ * `DebugTrigger`, and the helpers `defineComponent`, `defineStyle`, `defineTokens` and `popup`.
  *
  * @example
  * ```ts
@@ -66,7 +67,9 @@ export const uiPlugin = /*#__PURE__*/ createPlugin("ui", {
     inputPlugin,
     animPlugin,
     i18nPlugin,
-    textPlugin
+    textPlugin,
+    // debugPlugin: a DebugTrigger view opens the editor's overlay through app.debug.overlay.
+    debugPlugin
   ],
   config,
   createState: createUiState,

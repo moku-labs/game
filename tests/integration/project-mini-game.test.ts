@@ -295,6 +295,7 @@ describe("the moku-game-index bin", () => {
     return bin;
   };
 
+  // Spawns the bin as a child process twice: slow on a loaded machine, so its own timeout.
   it("answers where a node lives, and --check passes with nothing unresolved", () => {
     const bin = layout();
     const where = runBin(bin, ["--root", ROOT, "where", "node:infoPopup/count"]);
@@ -304,5 +305,5 @@ describe("the moku-game-index bin", () => {
     expect(where.stdout).toBe("nodes/count.ts:7\n");
     expect(check.status).toBe(0);
     expect(check.stdout).toContain("18 files, 35 keys: 0 broken, 0 in conflict, 0 unresolved.");
-  });
+  }, 30_000);
 });

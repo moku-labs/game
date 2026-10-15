@@ -232,8 +232,57 @@ export function writeComponent(ctx: WorldCtx, entity: Entity, name: string, patc
 }
 
 /**
+ * The resource names the engine's plugins use, with what each one holds. A game resource of one
+ * of these names would share the engine's value, so it is refused.
+ */
+const ENGINE_RESOURCES = {
+  Now: "the frame's moment",
+  Pointer: "the pointer of input",
+  AnimPlayer: "the animation player of anim",
+  UiCounters: "the layout counters of ui"
+} as const;
+
+/**
+ * Tells whether a resource name is one of the engine's.
+ *
+ * @param name - The storage name of a resource.
+ * @returns True for `"Now"`, `"Pointer"`, `"AnimPlayer"` and `"UiCounters"`.
+ * @example
+ * ```ts
+ * isEngineName("Now"); // true
+ * isEngineName("Clock"); // false
+ * ```
+ */
+function isEngineName(name: string): name is keyof typeof ENGINE_RESOURCES {
+  return Object.hasOwn(ENGINE_RESOURCES, name);
+}
+
+/**
+ * Keeps an engine resource name to the type object first read under it: it records that type,
+ * and refuses another one of the same name. Any other name passes.
+ *
+ * @param state - ecs module state.
+ * @param resourceType - The resource type being read.
+ */
+function checkEngineName(state: EcsState, resourceType: ResourceType<object>): void {
+  const name = resourceType.resourceName;
+
+  if (!isEngineName(name)) return;
+
+  const recorded = state.engineResources.get(name);
+
+  if (recorded === undefined) state.engineResources.set(name, resourceType);
+  else if (recorded !== resourceType) {
+    throw new Error(
+      `[game] world: the resource name "${name}" is the engine's (${ENGINE_RESOURCES[name]}).\n  Rename the game's resource.`
+    );
+  }
+}
+
+/**
  * Returns the one mutable value of a resource, made on first read: the factory default is called,
- * plain defaults are deep-cloned.
+ * plain defaults are deep-cloned. The type stored first under an engine resource name is the only
+ * one read under it; another type of that name throws.
  *
  * @param state - ecs module state.
  * @param resourceType - The resource type.
@@ -243,14 +292,18 @@ export function resourceValue<Value extends object>(
   state: EcsState,
   resourceType: ResourceType<Value>
 ): Value {
-  const known = state.resources.get(resourceType.resourceName);
+  const name = resourceType.resourceName;
+
+  checkEngineName(state, resourceType);
+
+  const known = state.resources.get(name);
 
   if (known !== undefined) return known as Value;
 
   const defaults = resourceType.defaults;
   const fresh = typeof defaults === "function" ? defaults() : (structuredClone(defaults) as Value);
 
-  state.resources.set(resourceType.resourceName, fresh);
+  state.resources.set(name, fresh);
 
   return fresh;
 }

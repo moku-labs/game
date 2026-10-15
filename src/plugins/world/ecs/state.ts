@@ -29,6 +29,7 @@ export function createEcsState(): EcsState {
     types: emptyMap(),
     stores: emptyMap(),
     resources: emptyMap(),
+    engineResources: emptyMap(),
     systems: { input: [], animate: [], layout: [], sync: [] },
     running: undefined,
     commands: [],
@@ -39,6 +40,9 @@ export function createEcsState(): EcsState {
     mode: "live",
     offFrame: [],
     frameSnapshot: undefined,
-    history: undefined
+    history: undefined,
+    timing: undefined,
+    timingSlots: emptyMap(),
+    walkReported: false
   };
 }

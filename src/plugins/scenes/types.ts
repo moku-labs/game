@@ -7,6 +7,8 @@ import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
 import type { Api as AssetsApi } from "../assets/types";
 import type { Api as FlowApi } from "../flow/types";
+import type { Json, Api as ModelApi } from "../model/types";
+import type { Api as RendererApi } from "../renderer/types";
 import type { Api as TimeApi } from "../time/types";
 import type { LayerSort, LayerSpec, Owner, Api as WorldApi } from "../world/types";
 
@@ -22,14 +24,18 @@ export type SortRule = LayerSort;
 
 /**
  * What a scene declares about its layers: the key is the layer name, the order of the keys is
- * draw order, bottom first. An omitted `sort` means `"none"`.
+ * draw order, bottom first. An omitted `sort` means `"none"`, and `"order"` on a layer named `ui`,
+ * so the roots of a scene draw there in the order of its projections. `above: "overlays"` makes the layer
+ * the scene's HUD layer: it draws above every overlay and is never part of the picture an overlay
+ * keeps. At most one per scene.
  *
  * @example
  * ```ts
  * const layers: LayerMap = { background: {}, cells: {}, items: { sort: "y" }, lifted: {} };
+ * const ward: LayerMap = { scene: {}, ui: { sort: "order" }, hud: { above: "overlays" } };
  * ```
  */
-export type LayerMap = Record<string, { sort?: SortRule }>;
+export type LayerMap = Record<string, { sort?: SortRule; above?: "overlays" }>;
 
 /**
  * The name of the layer every scene gets on top of the layers it declared, where popups and the
@@ -122,13 +128,17 @@ export type CheckedProjections<Layer extends string, List> = {
  * What the author passes to `defineScene`. The layer names come from the keys of `layers` plus
  * the appended `ui`; `NoInfer` keeps `projections` out of that inference, so a wrong name is
  * reported on the projection and never widens the layer union. `music` is an asset key of the
- * game, narrowed to its audio keys once the scanner splits them.
+ * game, narrowed to its audio keys once the scanner splits them. `bundles` names the bundles that
+ * depend on the committed state, typed with the game's `Player` and `Session`.
  *
  * @example
  * ```ts
- * const spec: SceneSpec<{ items: Record<never, never> }, readonly [], string, "board"> = {
- *   bundle: "board",
- *   layers: { items: {} },
+ * // A scene of the location feature shows the art of the episode the session plays: the restore
+ * // of a bookmark at that scene mounts it once "location" and "ep01" are in.
+ * const spec: SceneSpec<{ room: Record<never, never> }, readonly [], string, "location" | "ep01", Json, { episode: "ep01" }> = {
+ *   bundle: "location",
+ *   bundles: ({ session }) => [session.episode],
+ *   layers: { room: {} },
  *   projections: []
  * };
  * ```
@@ -137,29 +147,42 @@ export type SceneSpec<
   Layers extends LayerMap,
   Projections extends readonly AnySceneProjection[],
   Asset extends string,
-  Bundle extends string
+  Bundle extends string,
+  Player extends Json = Json,
+  Session extends Json = Json
 > = {
   bundle: Bundle;
+  /**
+   * Bundles the scene needs on top of `bundle`, read from the committed state each time a node
+   * enters the scene. Pure and cheap: it gets frozen trees, and throwing rolls the node back.
+   *
+   * @param state - The committed `player` and `session`, frozen.
+   * @returns Bundle keys of the game, in the order they are loaded.
+   */
+  bundles?(state: SceneState<Player, Session>): readonly Bundle[];
   layers: Layers;
   projections: Projections & NoInfer<CheckedProjections<SceneLayer<Layers>, Projections>>;
   music?: Asset;
 };
 
 /**
- * The signature of `defineScene` bound to the asset and bundle keys of one game.
- * `defineGame<Types>()` returns it; the loose export accepts any string.
+ * The signature of `defineScene` bound to the asset and bundle keys and to the `Player` and
+ * `Session` of one game. `defineGame<Types>()` returns it; the loose export accepts any string and
+ * reads the state as `Json`.
  *
  * @example
  * ```ts
- * const defineGameScene: DefineScene<"board.music", "board"> = defineScene;
+ * const defineGameScene: DefineScene<"board.music", "board" | "ep01", Player, Session> = defineScene;
  * ```
  */
-export type DefineScene<Asset extends string, Bundle extends string> = <
-  Layers extends LayerMap,
-  const Projections extends readonly AnySceneProjection[]
->(
+export type DefineScene<
+  Asset extends string,
+  Bundle extends string,
+  Player extends Json = Json,
+  Session extends Json = Json
+> = <Layers extends LayerMap, const Projections extends readonly AnySceneProjection[]>(
   id: string,
-  scene: SceneSpec<Layers, Projections, Asset, Bundle>
+  scene: SceneSpec<Layers, Projections, Asset, Bundle, Player, Session>
 ) => SceneDefinition;
 
 /**
@@ -169,7 +192,7 @@ export type DefineScene<Asset extends string, Bundle extends string> = <
  * ```ts
  * // What defineScene("board", { bundle: "board", layers: { items: { sort: "y" } }, projections: [] })
  * // returns: { id: "board", bundle: "board", music: undefined,
- * //   layers: [{ name: "items", sort: "y" }, { name: "ui", sort: "none" }], projections: [] }
+ * //   layers: [{ name: "items", sort: "y" }, { name: "ui", sort: "order" }], projections: [] }
  * ```
  */
 export type SceneDefinition = {
@@ -180,6 +203,27 @@ export type SceneDefinition = {
   readonly layers: readonly LayerSpec[];
   /** Names of the projections the scene mounts. */
   readonly projections: readonly string[];
+  /**
+   * What `defineScene` was given as `bundles`; absent when the scene names no bundle of state.
+   *
+   * @param state - The committed `player` and `session`, frozen.
+   * @returns The bundle names the scene needs on top of `bundle`.
+   */
+  bundles?(state: SceneState): readonly string[];
+};
+
+/**
+ * The committed state a scene's `bundles` reads: the frozen `player` and `session` of `model.store.snapshot()`, never a
+ * draft of the node being entered.
+ *
+ * @example
+ * ```ts
+ * const state: SceneState<{ coins: number }, { episode: string }> = { player: { coins: 4 }, session: { episode: "ep01" } };
+ * ```
+ */
+export type SceneState<Player extends Json = Json, Session extends Json = Json> = {
+  readonly player: Player;
+  readonly session: Session;
 };
 
 /**
@@ -220,6 +264,11 @@ export type State = {
    * which leaves it alone.
    */
   pending: string | undefined;
+  /**
+   * The bundles the mounted scene names, its `bundle` first, as last awaited. Empty while nothing
+   * is mounted.
+   */
+  named: readonly string[];
   owner: SceneOwner;
   /** The remover of the `onEnter` callback: set in `onStart`, run in `onStop`. */
   teardown: (() => void) | undefined;
@@ -293,7 +342,15 @@ export type ScenesApi = {
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { flow: FlowApi; world: WorldApi; assets: AssetsApi; time: TimeApi };
+export type Deps = {
+  flow: FlowApi;
+  world: WorldApi;
+  assets: AssetsApi;
+  time: TimeApi;
+  model: ModelApi;
+  /** The performance log of an agent build names every switch. */
+  renderer: RendererApi;
+};
 
 /**
  * What the kernel context offers before the deps are attached.

@@ -5,7 +5,7 @@ import { createHandlers } from "../../handlers";
 import { bundlesOfNode, neighbourhood, startPreload, stopPreload } from "../../preload";
 import { loadBundle } from "../../tiers";
 import type { MockAssets } from "./mock-assets";
-import { createMockAssets, manifestOf } from "./mock-assets";
+import { createMockAssets, graphOf, leaving, manifestOf, sceneOf } from "./mock-assets";
 
 const manifest = manifestOf({
   home: { feature: "ui", tier: "scene", keys: ["ui.home"] },
@@ -95,12 +95,9 @@ async function standingAt(
 
   mock.flow.graph = graph;
   mock.flow.stack = stack.map(frame => ({ ...frame, input: 0 }));
-  mock.ctx.state.bundleOfScene = new Map([
-    ["home", "home"],
-    ["board", "board"],
-    ["shop", "shop"],
-    ["reward", "reward"]
-  ]);
+  mock.ctx.state.scenes = new Map(
+    ["home", "board", "shop", "reward"].map(id => [id, sceneOf(id, id)])
+  );
   mock.ctx.state.featureOfFlow = new Map([
     ["main", "ui"],
     ["board", "board"],
@@ -133,7 +130,7 @@ describe("bundlesOfNode", () => {
   it("keeps the previous scene bundle for a node without a scene", async () => {
     const mock = await standingAt({ flow: "board", node: "merge" });
 
-    mock.ctx.state.sceneBundle = "board";
+    mock.ctx.state.sceneId = "board";
 
     expect(bundlesOfNode(mock.assetsCtx, mock.ctx.state.current as NodeInfo)).toEqual([
       "board",
@@ -461,5 +458,115 @@ describe("the preload queue when a bundle breaks", () => {
 
     expect(queue?.controller.signal.aborted).toBe(true);
     expect(mock.ctx.state.records.get("reward")?.status).not.toBe("loaded");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The look-ahead of the episode game: from home.main/idle one edge leads to the
+// ward (whose `bundles` names the episode of the committed session), one to the
+// gallery of ep02 and one to a scene whose `bundles` throws.
+// ---------------------------------------------------------------------------
+
+const episodeManifest = leaving(
+  manifestOf({
+    homebg: { feature: "home", tier: "scene", keys: ["home.bg"] },
+    location: { feature: "episodes", tier: "scene", keys: ["episodes.location"] },
+    ep01: { feature: "ep01", tier: "scene", keys: ["ep01.room"] },
+    ep02: { feature: "ep02", tier: "scene", keys: ["ep02.room"] },
+    ep03: { feature: "ep03", tier: "scene", keys: ["ep03.room"] }
+  }),
+  "ep01",
+  "ep02"
+);
+
+/**
+ * Stands the episode game on home.main/idle, the session on an episode.
+ *
+ * @param episode - The episode the ward names.
+ * @param outer - Frames outside the current node, outermost first.
+ * @returns The prepared mock.
+ */
+async function lookingAhead(
+  episode: string,
+  outer: Array<{ flow: string; node: string }> = []
+): Promise<MockAssets> {
+  const mock = createMockAssets({ manifest: episodeManifest, preloadDepth: 1 });
+
+  await mock.start();
+  mock.flow.graph = graphOf(
+    {
+      "home.main": {
+        idle: { owner: "home", scene: "lobby", rest: true },
+        ward: { owner: "episodes", scene: "ward" },
+        gallery: { owner: "home", scene: "gallery" },
+        oops: { owner: "home", scene: "broken" }
+      },
+      "ep01.play": { hub: { owner: "ep01" } }
+    },
+    { "home.main": { idle: { play: "ward", look: "gallery", fail: "oops" } } }
+  );
+  mock.flow.stack = [...outer, { flow: "home.main", node: "idle" }].map(frame => ({
+    ...frame,
+    input: 0
+  }));
+  mock.model.session = { episode };
+  mock.ctx.state.scenes = new Map([
+    ["lobby", sceneOf("lobby", "homebg")],
+    [
+      "ward",
+      sceneOf("ward", "location", ({ session }) => [(session as { episode: string }).episode])
+    ],
+    ["gallery", sceneOf("gallery", "ep02")],
+    [
+      "broken",
+      sceneOf("broken", "location", () => {
+        throw new Error("no episode yet");
+      })
+    ]
+  ]);
+  mock.ctx.state.current = {
+    path: "idle",
+    flow: "home.main",
+    node: "idle",
+    rest: true,
+    over: false,
+    checkpoint: false,
+    barrier: false,
+    scene: "lobby"
+  };
+
+  return mock;
+}
+
+describe('neighbourhood and "leave" bundles', () => {
+  it('drops a "leave" bundle nobody holds and keeps the "budget" ones', async () => {
+    const mock = await lookingAhead("ep01");
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "location"]);
+  });
+
+  it("keeps one whose feature owns a node on the stack, and one the mounted scene names", async () => {
+    const mock = await lookingAhead("ep01", [{ flow: "ep01.play", node: "hub" }]);
+
+    mock.ctx.state.sceneNamed = ["ep02"];
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "ep01", "ep02", "location"]);
+  });
+
+  it("reads a scene's bundles with the committed state of now", async () => {
+    const mock = await lookingAhead("ep03");
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "ep03", "location"]);
+  });
+
+  it("keeps only the scene bundle of a scene whose bundles throws", async () => {
+    const mock = await lookingAhead("ep03");
+
+    mock.flow.graph = graphOf(
+      { "home.main": { idle: { owner: "home", scene: "lobby" }, oops: { scene: "broken" } } },
+      { "home.main": { idle: { fail: "oops" } } }
+    );
+
+    expect(neighbourhood(mock.assetsCtx, 1)).toEqual(["homebg", "location"]);
   });
 });

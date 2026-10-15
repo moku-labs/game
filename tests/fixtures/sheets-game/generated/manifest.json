@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "bundles": {
+    "ui": {
+      "feature": "ui",
+      "tier": "boot",
+      "mb": 1,
+      "files": [
+        {
+          "key": "ui.font-body",
+          "path": "features/ui/assets/font-body.fnt",
+          "kind": "font",
+          "mb": 1,
+          "pages": [
+            {
+              "path": "features/ui/assets/font-body.png",
+              "width": 512,
+              "height": 512,
+              "mb": 1
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

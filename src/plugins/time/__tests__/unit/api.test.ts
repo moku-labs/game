@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createTimeApi, PHASES, tickFrame } from "../../api";
 import { createTimeState } from "../../state";
 import type { Api, Config, Phase, Time, TimeCtx } from "../../types";
+import { createScript } from "./rate-script";
 
 const global = { orientation: "portrait", referenceSide: 1080 };
 
@@ -27,6 +28,7 @@ function createCtx(overrides: Partial<Config> = {}): TimeCtx {
     maxDeltaMs: 50,
     idleFps: 30,
     idleAfterMs: 2000,
+    adaptive: false,
     ...overrides
   };
 
@@ -54,6 +56,29 @@ function driveFrames(ctx: TimeCtx, from: number, count: number, stepMs = 16): nu
   }
 
   return timestamp;
+}
+
+/** Ticks once at `from`, then `rounds` times through `intervals`; answers how many ticks it made. */
+function driveIntervals(
+  ctx: TimeCtx,
+  from: number,
+  intervals: readonly number[],
+  rounds: number
+): number {
+  let timestamp = from;
+  let ticks = 1;
+
+  tickFrame(ctx, timestamp);
+
+  for (let round = 0; round < rounds; round += 1) {
+    for (const interval of intervals) {
+      timestamp += interval;
+      tickFrame(ctx, timestamp);
+      ticks += 1;
+    }
+  }
+
+  return ticks;
 }
 
 // ─── onFrame ──────────────────────────────────────────────────
@@ -388,6 +413,31 @@ describe("tickFrame", () => {
   });
 });
 
+// ─── the cap's slack ──────────────────────────────────────────
+
+describe("the cap's slack", () => {
+  it("vsync jitter of a 60 Hz panel (15.6 to 17.7 ms) skips no frame under a 60 cap", () => {
+    const { api, ctx } = createApi();
+    const ticks = driveIntervals(ctx, 1000, [16.7, 15.6, 16.6, 17.7, 16.5, 15.7, 16.8, 17.6], 10);
+
+    expect(api.snapshot().frame).toBe(ticks);
+  });
+
+  it("a 120 Hz panel with a millisecond of jitter runs every second tick under a 60 cap", () => {
+    const { api, ctx } = createApi();
+    const ticks = driveIntervals(ctx, 1000, [7.4, 7.6, 8.3, 8.4, 9.2, 9.1, 8.2, 8.5], 10);
+
+    expect(api.snapshot().frame).toBe((ticks + 1) / 2);
+  });
+
+  it("a 144 Hz panel under a 60 cap runs every third tick, 48 fps, never every second", () => {
+    const { api, ctx } = createApi();
+    const ticks = driveIntervals(ctx, 1000, [1000 / 144], 150);
+
+    expect(api.snapshot().frame).toBe((ticks - 1) / 3 + 1);
+  });
+});
+
 // ─── the idle cap ─────────────────────────────────────────────
 
 describe("the idle cap", () => {
@@ -451,6 +501,19 @@ describe("the idle cap", () => {
     driveFrames(ctx, 1000, 20);
 
     expect(api.snapshot()).toMatchObject({ frame: 20, idle: false });
+  });
+
+  it("a page throttled to 1 Hz goes idle after two frames, while its delta stays clamped", () => {
+    const { api, ctx } = createApi();
+
+    tickFrame(ctx, 1000);
+    tickFrame(ctx, 2000);
+
+    expect(api.snapshot()).toMatchObject({ idle: false, delta: 50 });
+
+    tickFrame(ctx, 3000);
+
+    expect(api.snapshot()).toMatchObject({ idle: true, delta: 50 });
   });
 
   it("keeps the idle timer running while the time scale is zero", () => {
@@ -596,5 +659,116 @@ describe("time api types", () => {
     expectTypeOf(api.wake).toEqualTypeOf<() => void>();
 
     expect(typeof api.onFrame("sync", () => {})).toBe("function");
+  });
+});
+
+// ─── wakes, the count the renderer reads ──────────────────────
+
+describe("wakes", () => {
+  it("grows by one per wake and per resume, not per step", () => {
+    const { api } = createApi();
+
+    expect(api.wakes()).toBe(0);
+
+    api.wake();
+    api.wake();
+    api.step(16);
+    api.pause();
+    api.resume();
+
+    expect(api.wakes()).toBe(3);
+  });
+});
+
+// ─── the frame rate: rate() and setRate ───────────────────────
+
+describe("setRate", () => {
+  it("forces the exact cap, and the rule leaves it alone", () => {
+    const s = createScript();
+
+    s.play(2000);
+
+    expect(s.api.setRate(60)).toMatchObject({
+      fps: 60,
+      mode: "forced",
+      reason: "forced",
+      displayHz: 120,
+      ladder: [120, 60]
+    });
+
+    s.play(6000);
+    const before = s.api.snapshot().frame;
+
+    s.play(1000);
+
+    // 60 frames a second on a 120 Hz display, and no return after the dwell.
+    expect(s.api.snapshot().frame - before).toBeGreaterThanOrEqual(59);
+    expect(s.api.snapshot().frame - before).toBeLessThanOrEqual(61);
+    expect(s.api.rate()).toMatchObject({ fps: 60, mode: "forced" });
+
+    s.api.setRate(120);
+    s.gaps(17, 30);
+    expect(s.api.rate()).toMatchObject({ fps: 120, mode: "forced" });
+  });
+
+  it("never forces above maxFps", () => {
+    const s = createScript({ config: { maxFps: 60, adaptive: false } });
+
+    expect(s.api.setRate(120)).toMatchObject({ fps: 60, mode: "forced" });
+  });
+
+  it("auto goes back to the top of the ladder, or to maxFps without adaptive", () => {
+    const adaptive = createScript();
+    const fixed = createScript({ config: { maxFps: 60, adaptive: false } });
+
+    adaptive.play(2000);
+    adaptive.api.setRate(60);
+    fixed.api.setRate(30);
+
+    expect(adaptive.api.setRate("auto")).toMatchObject({ fps: 120, mode: "auto", reason: "auto" });
+    expect(fixed.api.setRate("auto")).toMatchObject({ fps: 60, mode: "fixed", reason: "auto" });
+    expect(adaptive.changes().map(change => [change.from, change.to, change.mode])).toEqual([
+      [120, 60, "forced"],
+      [60, 120, "auto"]
+    ]);
+  });
+
+  it("a choice equal to the current one changes nothing and emits nothing", () => {
+    const adaptive = createScript();
+    const fixed = createScript({ config: { maxFps: 60, adaptive: false } });
+    const before = adaptive.api.rate();
+
+    adaptive.api.setRate("auto");
+    fixed.api.setRate("auto");
+    adaptive.api.setRate(60);
+    adaptive.api.setRate(60);
+
+    expect(adaptive.changes()).toHaveLength(1);
+    expect(fixed.changes()).toEqual([]);
+    expect(before).toMatchObject({ mode: "auto", reason: "start" });
+  });
+
+  it("refuses 90 with the message naming the choices", () => {
+    const { api } = createApi();
+
+    expect(() => api.setRate(90 as never)).toThrow(
+      '[game] time.setRate takes "auto", 30, 60 or 120.\n  Pass one of them, not 90.'
+    );
+    expect(api.rate().fps).toBe(60);
+  });
+});
+
+describe("rate", () => {
+  it("is the same frozen object until something changes", () => {
+    const s = createScript();
+    const first = s.api.rate();
+
+    s.gaps(1000 / 120, 100);
+
+    expect(s.api.rate()).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+
+    s.api.setRate(60);
+    expect(s.api.rate()).not.toBe(first);
   });
 });

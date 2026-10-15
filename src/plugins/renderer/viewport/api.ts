@@ -4,9 +4,9 @@
  */
 import type { PixiContainer, RendererCtx, ViewportModule } from "../types";
 import { fitFrame, referenceOf, scaleOf } from "./fit";
-import { measureMount, watchResize } from "./resize";
-import { clipInsets, clipToFrame, createSafeAreaProbe, readInsets } from "./safe-area";
-import type { Point, SafeArea, ViewportCtx, ViewportDeps, ViewportSize } from "./types";
+import { measureMount, watchResize, watchSafeArea } from "./resize";
+import { clipInsets, clipToFrame, createSafeAreaProbes, readInsets } from "./safe-area";
+import type { Point, Rect, ViewportCtx, ViewportDeps, ViewportSize } from "./types";
 
 /**
  * Where the canvas sits in the window, read at call time.
@@ -35,6 +35,55 @@ function windowSize(): { width: number; height: number } {
 }
 
 /**
+ * The size object `size()` hands out: the one it handed out before when no number changed, else a new frozen one.
+ * All nine values count, `scale` too: a game that reads `scale` sees its change.
+ *
+ * @param kept - The object handed out so far, or nothing.
+ * @param next - The frame the layout measured.
+ * @returns `kept`, or a new deeply frozen object.
+ * @example
+ * keptSize(undefined, { width: 1080, height: 1920, scale: 0.5, orientation: "portrait", safeArea: { top: 47, right: 0, bottom: 34, left: 0 } }).width // 1080
+ */
+function keptSize(
+  kept: Readonly<ViewportSize> | undefined,
+  next: ViewportSize
+): Readonly<ViewportSize> {
+  if (
+    kept !== undefined &&
+    kept.width === next.width &&
+    kept.height === next.height &&
+    kept.scale === next.scale &&
+    kept.orientation === next.orientation &&
+    kept.safeArea.top === next.safeArea.top &&
+    kept.safeArea.right === next.safeArea.right &&
+    kept.safeArea.bottom === next.safeArea.bottom &&
+    kept.safeArea.left === next.safeArea.left
+  ) {
+    return kept;
+  }
+
+  return frozenSize(next);
+}
+
+/**
+ * A deeply frozen copy of a frame: the object and its safe area.
+ *
+ * @param size - The frame.
+ * @returns The frozen copy.
+ */
+function frozenSize(size: ViewportSize): Readonly<ViewportSize> {
+  const { top, right, bottom, left } = size.safeArea;
+
+  return Object.freeze({
+    width: size.width,
+    height: size.height,
+    scale: size.scale,
+    orientation: size.orientation,
+    safeArea: Object.freeze({ top, right, bottom, left })
+  });
+}
+
+/**
  * Creates the viewport module: the map between the window and the reference space.
  *
  * @param ctx - Domain context of the renderer plugin.
@@ -57,7 +106,7 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
     state.frame = fitFrame(size, ctx.config.aspect, ctx.global.orientation);
 
     const clip = {
-      insets: readInsets(state.probe),
+      insets: readInsets(state.probes),
       frame: state.frame,
       canvas: canvasOrigin(deps.host.canvas()),
       window: windowSize()
@@ -67,25 +116,36 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
     state.scale = scaleOf(state.frame, orientation, referenceSide, referenceLong, clipInsets(clip));
     state.reference = referenceOf(state.frame, state.scale);
     state.safeArea = clipToFrame({ ...clip, scale: state.scale });
+    // A layout that gives the same frame (the observer's first echo, a resolution with the same CSS size) keeps it.
+    state.size = keptSize(state.size, {
+      width: state.reference.width,
+      height: state.reference.height,
+      scale: state.scale,
+      orientation,
+      safeArea: state.safeArea
+    });
   };
 
   /**
-   * The frame a game lays out in before anything was measured: the narrowest allowed shape.
+   * The frame a game lays out in before anything was measured: the narrowest allowed shape. The config and
+   * `ctx.global` are frozen for the app's life, so one object made on first use is enough.
    *
-   * @returns The `aspect.min` frame at scale 1 with no safe area.
+   * @returns The `aspect.min` frame at scale 1 with no safe area, frozen.
    */
-  const inertSize = (): ViewportSize => {
+  const inertSize = (): Readonly<ViewportSize> => {
     const short = ctx.global.referenceSide;
     const long = short * ctx.config.aspect.min;
     const portrait = ctx.global.orientation === "portrait";
 
-    return {
+    state.inert ??= frozenSize({
       width: portrait ? short : long,
       height: portrait ? long : short,
       scale: 1,
       orientation: ctx.global.orientation,
       safeArea: { top: 0, right: 0, bottom: 0, left: 0 }
-    };
+    });
+
+    return state.inert;
   };
 
   return {
@@ -115,19 +175,8 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
       };
     },
 
-    size: (): ViewportSize => {
-      if (state.reference.width <= 0) return inertSize();
-
-      const safeArea: SafeArea = { ...state.safeArea };
-
-      return {
-        width: state.reference.width,
-        height: state.reference.height,
-        scale: state.scale,
-        orientation: ctx.global.orientation,
-        safeArea
-      };
-    },
+    size: (): Readonly<ViewportSize> =>
+      state.size === undefined || state.reference.width <= 0 ? inertSize() : state.size,
 
     apply: (root: PixiContainer): void => {
       root.position.set(state.frame.x, state.frame.y);
@@ -135,8 +184,9 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
     },
 
     start: (): void => {
-      state.probe = createSafeAreaProbe();
+      state.probes = createSafeAreaProbes();
       watchResize(vctx);
+      watchSafeArea(vctx);
       layout();
     },
 
@@ -147,6 +197,8 @@ export function createViewportApi(ctx: RendererCtx, deps: ViewportDeps): Viewpor
       layout();
 
       return true;
-    }
+    },
+
+    frame: (): Readonly<Rect> => state.frame
   };
 }

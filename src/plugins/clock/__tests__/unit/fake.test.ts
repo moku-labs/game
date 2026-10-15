@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { fakeClock } from "../../fake";
+import { fakeClock, isFakeClock } from "../../fake";
+import { systemSource } from "../../system";
 import type { ClockSource, FakeClock } from "../../types";
 
 // ---------------------------------------------------------------------------
@@ -207,5 +208,12 @@ describe("fakeClock", () => {
 
       expect(source.now()).toBe(1000);
     });
+  });
+});
+
+describe("isFakeClock", () => {
+  it("tells a fake source from the system source", () => {
+    expect(isFakeClock(fakeClock())).toBe(true);
+    expect(isFakeClock(systemSource())).toBe(false);
   });
 });

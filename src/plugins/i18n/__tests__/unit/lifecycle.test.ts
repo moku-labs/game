@@ -129,5 +129,9 @@ describe("createI18nState", () => {
     expect(mock.state.intl.size).toBe(0);
     expect(mock.state.warned.size).toBe(0);
     expect(mock.state.loading).toBeUndefined();
+    expect(mock.state.held.size).toBe(0);
+    expect(mock.state.bundled.size).toBe(0);
+    expect(mock.state.coupled.size).toBe(0);
+    expect(mock.state.started).toBe(false);
   });
 });

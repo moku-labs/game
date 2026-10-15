@@ -1,5 +1,5 @@
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Unit test: probes of eslint.config.ts. A later block that sets a rule again
@@ -8,6 +8,9 @@ import { describe, expect, it } from "vitest";
 // ---------------------------------------------------------------------------
 
 /** The repository root, where eslint.config.ts lives. */
+// Every probe lints a file with the project's whole ESLint config: seconds each on a loaded machine.
+vi.setConfig({ testTimeout: 60_000 });
+
 const ROOT = new URL("../../", import.meta.url).pathname;
 
 /** The folders of block 6d2 (L1), which sets the L2 rule again, and one folder only block 6c covers. */
@@ -151,6 +154,29 @@ describe("the project index is node-only", () => {
 
     expect(door).toEqual([]);
     expect(inside).toEqual([]);
+  });
+
+  it.each([
+    ["src/app/build.ts", "../project/features"],
+    ["src/lint.ts", "./project/features.ts"],
+    ["src/plugins/assets/scan/probe.ts", "../../../project/features"],
+    ["src/plugins/i18n/compile/probe.ts", "../../../project/features"]
+  ])("allows project/features from the build-time file %s", async (path, from) => {
+    const messages = await lintBoundary(
+      `import { ownerOf } from "${from}";\n\nexport const owner = ownerOf;\n`,
+      path
+    );
+
+    expect(messages.filter(text => text.includes("project index"))).toEqual([]);
+  });
+
+  it("still refuses project/features from a runtime plugin file", async () => {
+    const messages = await lintBoundary(
+      'import { ownerOf } from "../../project/features";\n\nexport const owner = ownerOf;\n',
+      "src/plugins/flow/probe.ts"
+    );
+
+    expect(messages.some(text => text.includes(message))).toBe(true);
   });
 });
 

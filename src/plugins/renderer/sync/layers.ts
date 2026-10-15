@@ -8,7 +8,7 @@ import type { Entity, LayerSort } from "../../world/types";
 import { Transform } from "../components";
 import type { PixiContainer } from "../types";
 import { detach } from "./pools";
-import { parentOf } from "./pose";
+import { isLeaving, parentOf } from "./pose";
 import type { LayerEntry, SyncCtx, SyncState, View } from "./types";
 
 /**
@@ -44,16 +44,21 @@ export function sortOf(state: SyncState, name: string): LayerSort {
 }
 
 /**
- * Writes `zIndex` only when the number really changed. Pixi resorts a container exactly when a
- * child's `zIndex` was written with a new value, so a still board never resorts.
+ * Writes a view's depth only when the number really changed, and marks the entity before. Pixi
+ * resorts a container exactly when a child's `zIndex` was written with a new value, so a still
+ * board never resorts; a new depth moves the view among its siblings.
  *
- * @param object - The child of a layer container.
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param target - The child of a layer container or a wrapper.
  * @param value - The new depth.
  */
-export function writeZIndex(object: PixiContainer, value: number): void {
-  if (object.zIndex === value) return;
+function writeDepth(sctx: SyncCtx, entity: Entity, target: PixiContainer, value: number): void {
+  if (target.zIndex === value) return;
 
-  object.zIndex = value;
+  // The depth of the view's top: its kept picture only moves with it (spec 23 P9.4).
+  sctx.deps.demand.markMoved(entity);
+  target.zIndex = value;
 }
 
 /**
@@ -70,7 +75,7 @@ export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
   const target = view.wrapper ?? view.object;
 
   if (parentOf(ecs, entity) !== 0) {
-    writeZIndex(target, ecs.get(entity, Order)?.value ?? 0);
+    writeDepth(sctx, entity, target, ecs.get(entity, Order)?.value ?? 0);
 
     return;
   }
@@ -79,24 +84,24 @@ export function resort(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (sort === "none") {
     // A depth left over from a sorted layer would decide the hit-test order here.
-    writeZIndex(target, 0);
+    writeDepth(sctx, entity, target, 0);
 
     return;
   }
 
   if (sort === "y") {
-    writeZIndex(target, ecs.get(entity, Transform)?.y ?? 0);
+    writeDepth(sctx, entity, target, ecs.get(entity, Transform)?.y ?? 0);
 
     return;
   }
 
-  writeZIndex(target, ecs.get(entity, Order)?.value ?? 0);
+  writeDepth(sctx, entity, target, ecs.get(entity, Order)?.value ?? 0);
 }
 
 /**
  * Rebuilds the layer containers when `world.projection.layers()` handed out a new list. A name
- * that stayed keeps its container and every view in it; a name that left is detached, and the
- * views that still name it are reported.
+ * that stayed keeps its container, its hidden mask and every view in it; a name that left is
+ * detached, and the views that still name it are reported.
  *
  * @param sctx - Domain context of the sync module.
  * @returns True when the list was new and the containers were rebuilt.
@@ -121,7 +126,13 @@ export function syncLayers(sctx: SyncCtx): boolean {
 
     container.label = `layer:${spec.name}`;
     container.sortableChildren = spec.sort !== "none";
-    next.set(spec.name, { container, sort: spec.sort });
+    // A container that stays keeps the reasons that hide it; a new one starts drawn.
+    next.set(spec.name, {
+      container,
+      sort: spec.sort,
+      hidden: state.layers.get(spec.name)?.hidden ?? 0,
+      hud: spec.above === "overlays"
+    });
   }
 
   dropLeftLayers(sctx, next);
@@ -137,14 +148,16 @@ export function syncLayers(sctx: SyncCtx): boolean {
 }
 
 /**
- * Detaches the containers of the layers that are no longer declared and names the views that
- * were still drawn in them.
+ * Detaches the containers of the layers that are no longer declared and names the views that stay in them. The views
+ * that went with the scene are gone already (the pass drops the removed ones first), and a view that plays its exit
+ * (`Exiting`, a root that leaves with a motion) goes with it: neither is named.
  *
  * @param sctx - Domain context of the sync module.
  * @param next - The new table of layers.
  */
 function dropLeftLayers(sctx: SyncCtx, next: Map<string, LayerEntry>): void {
   const state = sctx.ctx.state.sync;
+  const ecs = sctx.ctx.deps.world.ecs;
   const stranded: Entity[] = [];
 
   for (const [name, entry] of state.layers) {
@@ -153,7 +166,7 @@ function dropLeftLayers(sctx: SyncCtx, next: Map<string, LayerEntry>): void {
     if (entry.container !== undefined) detach(entry.container);
 
     for (const [entity, view] of state.views) {
-      if (view.layer === name) stranded.push(entity);
+      if (view.layer === name && !isLeaving(ecs, entity)) stranded.push(entity);
     }
   }
 

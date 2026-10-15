@@ -1,7 +1,8 @@
 /**
  * @file scenes plugin — shared fakes for the unit tests. Not a test file: the unit project only
  * collects `*.test.ts`. The real state, API, lifecycle and switch run over a fake `flow`, a fake
- * `world` and a fake `assets`, so nothing loads, nothing is drawn and nothing needs a DOM.
+ * `world`, a fake `assets` and a fake `model`, so nothing loads, nothing is drawn and nothing
+ * needs a DOM.
  */
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
@@ -9,6 +10,7 @@ import type { Require } from "../../../../config";
 import type { Api as AssetsApi } from "../../../assets/types";
 import type { FeatureDescription } from "../../../flow/features/types";
 import type { EnterCallback, Api as FlowApi, NodeInfo, Stage } from "../../../flow/types";
+import type { Json, Api as ModelApi } from "../../../model/types";
 import type { Api as TimeApi } from "../../../time/types";
 import type { LayerSpec, Owner, Api as WorldApi } from "../../../world/types";
 import { createScenesApi } from "../../api";
@@ -25,9 +27,20 @@ export type FakeAssets = {
   /** While `gated` is true every load waits for `release` or `fail`. */
   control: { gated: boolean };
   held: HeldLoad[];
+  /** Every list `sceneBundles` was called with, in order. */
+  named: string[][];
   release(): void;
+  /** Releases the held loads of one bundle and keeps the others held. */
+  releaseBundle(bundle: string): void;
   fail(error: unknown): void;
   api: AssetsApi;
+};
+
+/** The fake `model`: `store.snapshot()` returns the frozen trees a test sets. */
+export type FakeModel = {
+  /** Replaces the committed trees; the next snapshot is a new frozen object. */
+  set(player: Json, session: Json): void;
+  api: ModelApi;
 };
 
 /** What the fake `world` recorded. */
@@ -67,6 +80,9 @@ export type MockScenes = {
   world: FakeWorld;
   assets: FakeAssets;
   time: FakeTime;
+  model: FakeModel;
+  /** The fake renderer: its performance log's `event`, a spy. */
+  renderer: { monitor: { event: ReturnType<typeof vi.fn> } };
   start(): void;
   stop(): void;
   /** Calls the registered `onEnter("scene")` callback, the way the runner does. */
@@ -120,6 +136,7 @@ function createFakeAssets(): FakeAssets {
   const loaded: string[] = [];
   const control = { gated: false };
   const held: HeldLoad[] = [];
+  const named: string[][] = [];
 
   const api = {
     load: async (bundle: string): Promise<void> => {
@@ -134,15 +151,25 @@ function createFakeAssets(): FakeAssets {
     unload: () => undefined,
     isLoaded: () => true,
     texture: () => undefined,
-    usage: () => ({ textureMb: 0, budgetMb: 0, bundles: [] })
+    usage: () => ({ textureMb: 0, budgetMb: 0, bundles: [] }),
+    sceneBundles: (list: readonly string[]): void => {
+      named.push([...list]);
+    }
   } as unknown as AssetsApi;
 
   return {
     loaded,
     control,
     held,
+    named,
     release: (): void => {
       for (const entry of held.splice(0)) entry.resolve();
+    },
+    releaseBundle: (bundle: string): void => {
+      for (const entry of held.filter(load => load.bundle === bundle)) {
+        held.splice(held.indexOf(entry), 1);
+        entry.resolve();
+      }
     },
     fail: (error: unknown): void => {
       for (const entry of held.splice(0)) entry.reject(error);
@@ -213,6 +240,32 @@ function createFakeTime(): FakeTime {
 }
 
 /**
+ * Creates the fake `model`: `store.snapshot()` returns one frozen `{ player, session, rng }`
+ * until a test sets new trees, the way the real store keeps one snapshot per commit.
+ *
+ * @returns The fake model and its setter.
+ */
+function createFakeModel(): FakeModel {
+  const committed: { snapshot: ReturnType<ModelApi["store"]["snapshot"]> } = {
+    snapshot: Object.freeze({
+      player: Object.freeze({}),
+      session: Object.freeze({}),
+      rng: Object.freeze({ seed: 1, streams: {} })
+    })
+  };
+
+  return {
+    set: (player: Json, session: Json): void => {
+      // Frozen in place, the way the store freezes a committed tree.
+      Object.freeze(player);
+      Object.freeze(session);
+      committed.snapshot = Object.freeze({ player, session, rng: committed.snapshot.rng });
+    },
+    api: { store: { snapshot: () => committed.snapshot } } as unknown as ModelApi
+  };
+}
+
+/**
  * Creates the fake `flow`: the two members `scenes` calls, each backed by a field a test writes.
  *
  * @returns The fake flow and its recordings.
@@ -255,11 +308,15 @@ export function createMockScenes(): MockScenes {
   const world = createFakeWorld();
   const assets = createFakeAssets();
   const time = createFakeTime();
+  const model = createFakeModel();
+  const renderer = { monitor: { event: vi.fn() } };
   const apis: Record<string, unknown> = {
     flow: flow.api,
     world: world.api,
     assets: assets.api,
-    time: time.api
+    time: time.api,
+    model: model.api,
+    renderer
   };
 
   const ctx: KernelSlice = {
@@ -284,6 +341,8 @@ export function createMockScenes(): MockScenes {
     world,
     assets,
     time,
+    model,
+    renderer,
     start: (): void => startScenes(ctx),
     stop: (): void => stopScenes({ state }),
     enter: async (node: Partial<NodeInfo>, run: Partial<RunContext> = {}): Promise<void> => {

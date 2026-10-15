@@ -1,7 +1,10 @@
 /**
- * @file time plugin — the single frame loop of the real frame source.
+ * @file time plugin — the single frame loop of the real frame source, and what `time` asks of
+ * the native shell for the length of the app.
  */
 import { tickFrame } from "./api";
+import { stopShell } from "./native";
+import { startRate, stopRate } from "./rate";
 import type { State, TimeCtx } from "./types";
 
 /**
@@ -27,8 +30,8 @@ function createFrameFunction(ctx: TimeCtx): (timestamp: number) => void {
 }
 
 /**
- * Cancels the pending frame and forgets the frame source. The `onStop` of the plugin: since
- * core 1.6 the kernel hands the plugin its own state at stop.
+ * Cancels the pending frame and forgets the frame source. Since core 1.6 the kernel hands the
+ * plugin its own state at stop.
  *
  * @param state - State of the time plugin.
  */
@@ -52,4 +55,28 @@ export function startLoop(ctx: TimeCtx): void {
 
   ctx.state.running = true;
   ctx.state.rafId = globalThis.requestAnimationFrame(createFrameFunction(ctx));
+}
+
+/**
+ * The `onStart` of the plugin: the frame loop, then the frame rate: the rate asked of the native
+ * shell and, on the shell in an agent build or with `adaptive`, the one thermal listener. The
+ * shell exists only in the page, so its requests follow the app's life.
+ *
+ * @param ctx - Domain context of the time plugin.
+ */
+export function startTime(ctx: TimeCtx): void {
+  startLoop(ctx);
+  startRate(ctx);
+}
+
+/**
+ * The `onStop` of the plugin: the loop stops, the frame rate goes back to the shell and the
+ * thermal listener is removed.
+ *
+ * @param state - State of the time plugin.
+ */
+export function stopTime(state: State): void {
+  stopLoop(state);
+  stopRate(state);
+  stopShell(state);
 }

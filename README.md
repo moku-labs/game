@@ -53,7 +53,7 @@ bun add @moku-labs/game pixi.js
 ```
 
 > [!IMPORTANT]
-> Bun only. ESM only. There is no CJS build. `pixi.js` `^8.0.0` is a peer dependency. Screens are `.tsx`, so a game sets `"jsx": "react-jsx"` and `"jsxImportSource": "@moku-labs/game"`.
+> Bun only. ESM only. There is no CJS build. `pixi.js` `^8.22.0` is a peer dependency. Screens are `.tsx`, so a game sets `"jsx": "react-jsx"` and `"jsxImportSource": "@moku-labs/game"`.
 
 A game in a native shell adds the optional peers: `bun add @moku-labs/system` for the system plugins and the store save, `bun add -d @moku-labs/native` for the native build. A web-only game installs neither.
 
@@ -144,7 +144,7 @@ The engine bin `moku-game` serves, builds and packs a game folder. A game writes
 |---|---|
 | `index.ts` | `export default defineGameApp({ ... })` |
 | `config.ts` | `page`, `native`, `system`, `save`, `assets`: plain data that `satisfies GameConfig` |
-| `core/`, `shared/`, `features/`, `plugins/` | The kit, the shared layer, the features, the game's plugins |
+| `core/`, `shared/`, `features/`, `plugins/` | The kit, the shared layer, the features (a feature may hold sub-features, `features/episodes/ep01/`), the game's plugins |
 | `tests/` | The tests. `tests/scenarios/<name>.ts` are the saves of `?player=<name>` on the dev page |
 | `.moku/` | What `moku-game` writes. Add `.moku/` to `.gitignore` |
 
@@ -160,9 +160,9 @@ The engine bin `moku-game` serves, builds and packs a game folder. A game writes
 
 | Command | Does |
 |---|---|
-| `moku-game dev [--port 3000] [--packed]` | Serves the game with hot reload. Prints the bound URL, also for `--port 0`. On the raw files it runs the scan of `keys` at start and on a save of an asset or a strings file |
-| `moku-game build [--out dist/web]` | Packs the assets and builds the production page |
-| `moku-game native build <target> [--simulator]` | Builds the native app: `ios`, `macos`, `android` |
+| `moku-game dev [--port 3000] [--packed]` | Serves the game with hot reload. Prints the bound URL, also for `--port 0`. On the raw files it runs the scan of `keys` at start and on a save of an asset or a strings file. Restarts its server when the installed engine changes |
+| `moku-game build [--out dist/web] [--debug[=full] [--editor host:port]]` | Packs the assets and builds the page; `--debug` adds the editor's page agent (read and cosmetic commands), `--debug=full` every command; `--editor` names where the agent finds the editor (default `127.0.0.1:47600`). A debug page is never shipped: a release page that carries the agent is refused |
+| `moku-game native build <target> [--simulator] [--debug[=full] [--editor host:port]]` | Builds the native app: `ios`, `macos`, `android`; `--debug` builds an Android debug app beside the store app |
 | `moku-game native dev <target>` | Runs the native shell on the dev server |
 | `moku-game native doctor`, `native clean` | Checks or removes the native project |
 | `moku-game keys [--check]` | Writes `generated/assets.ts`, the strings and `generated/manifest.json` |
@@ -201,7 +201,7 @@ A rest node waits. A player answer comes through the gate. A world event comes t
 | Flow | `defineFlow(id, { nodes, start, edges })`. A flow with `outcomes` is a node of another flow. |
 | Edge target | A node name, `exit("outcome")` to leave a sub-flow, or `to("node", mapper)`. |
 | Slot | `slot("name")`. Features contribute sub-flows to it. |
-| Feature | `defineFeature(name, { nodes?, flows?, contribute? })`. A plugin that adds to the graph. |
+| Feature | `defineFeature(name, { nodes?, flows?, contribute?, features? })`. A plugin that adds to the graph. `features` declares the sub-features of the feature; `flattenFeatures` turns the tree into the plugin list. |
 | Effect | `await fx(descriptor)` for awaited effects, `fx.emit(hint(...))` for cosmetic ones. |
 | Transition | Rest node to rest node, as one transaction. An error rolls back and retries. |
 
@@ -225,10 +225,10 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 | [`world`](./src/plugins/world/README.md) | screen | A small ECS and projections from committed state |
 | [`renderer`](./src/plugins/renderer/README.md) | screen | Pixi v8, loaded lazily, synced from the ECS |
 | [`input`](./src/plugins/input/README.md) | screen | Gestures as data: tap, press, drag, swipe |
-| [`assets`](./src/plugins/assets/README.md) | screen | Manifest, load tiers, typed keys, the production pack |
-| [`scenes`](./src/plugins/scenes/README.md) | screen | A scene as a declaration: bundle, layers, music |
+| [`assets`](./src/plugins/assets/README.md) | screen | Manifest, load tiers, typed keys, the production pack; bundles per feature and sub-feature, `release: "leave"`, `mipmaps` |
+| [`scenes`](./src/plugins/scenes/README.md) | screen | A scene as a declaration: bundle, `bundles(state)`, layers, music |
 | [`anim`](./src/plugins/anim/README.md) | screen | Choreography as data: tweens, timelines, motions |
-| [`i18n`](./src/plugins/i18n/README.md) | screen | Strings as data, ICU messages, compiled per locale |
+| [`i18n`](./src/plugins/i18n/README.md) | screen | Strings as data, ICU messages, compiled per locale; a sub-feature's strings travel with its bundle |
 | [`text`](./src/plugins/text/README.md) | screen | MSDF text, styles, inline tags and icons |
 | [`ui`](./src/plugins/ui/README.md) | screen | Screens in JSX, Yoga layout, popups, styles |
 | [`effects`](./src/plugins/effects/README.md) | opt-in | Particles and filters as components, WGSL and GLSL |
@@ -258,7 +258,7 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
 
 ### Lint for games
 
-`@moku-labs/game/lint` is an oxlint JS plugin, `moku-game`. It checks the engine rules in a game: lazy Pixi and Yoga, no native package in the logic, the editor only in dev files, no module-scope state, determinism, pure rules and JSX keys the project index can follow. Three layout rules check a game on the layered layout: the order of the layers, the doors of the features and the suffix of each test file.
+`@moku-labs/game/lint` is an oxlint JS plugin, `moku-game`. It checks the engine rules in a game: lazy Pixi and Yoga, no native package in the logic, the editor only in dev files, no module-scope state, determinism, pure rules and JSX keys the project index can follow. Four layout rules check a game on the layered layout: the order of the layers, the doors of the features at any depth, the sub-features a feature declares and the suffix of each test file. Eleven rules in all; a flat game lints exactly as in 0.14.12.
 
 ```json
 // .oxlintrc.json
@@ -274,12 +274,13 @@ createApp({ plugins: [...screen, effectsPlugin, audioPlugin, platformPlugin] });
     "moku-game/static-keys": "error",
     "moku-game/layer-imports": "error",
     "moku-game/feature-door": "error",
+    "moku-game/sub-features": "error",
     "moku-game/test-suffix": "error"
   }
 }
 ```
 
-Each rule takes `{ "files": [...], "ignores": [...] }`. `layer-imports`, `feature-door` and `rules-siblings` also take `root` and `tsconfig`; `test-suffix` takes `root` and `suffixes`. The defaults follow the layout of a game. See [Lint for games](./docs/lint.md).
+Each rule takes `{ "files": [...], "ignores": [...] }`. `layer-imports`, `feature-door`, `sub-features` and `rules-siblings` also take `root` and `tsconfig`; `test-suffix` takes `root` and `suffixes`. The defaults follow the layout of a game. See [Lint for games](./docs/lint.md).
 
 ## Docs
 
@@ -332,7 +333,7 @@ A save of a logic file reloads the page. What swaps and what reloads: [docs/hot-
 
 - **Node `>= 24`** and **Bun `>= 1.4.2`**. Use `bun` only.
 - **TypeScript** in strict mode, with `exactOptionalPropertyTypes` and `noUncheckedIndexedAccess`.
-- **`pixi.js` `^8.0.0`** as a peer dependency. `playwright-core` for visual tests, `sharp` for the asset pack, `typescript` for the project index, `@moku-labs/system` for the system shell and `@moku-labs/native` for the native build are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
+- **`pixi.js` `^8.22.0`** as a peer dependency. `playwright-core` for visual tests, `sharp` for the asset pack, `typescript` for the project index, `@moku-labs/system` for the system shell and `@moku-labs/native` for the native build are optional peers. `yoga-layout` is loaded lazily by `ui`. The string compiler uses `@formatjs/icu-messageformat-parser` at build time only.
 - **[`@moku-labs/core`](https://github.com/moku-labs/core)** is the kernel. **[`@moku-labs/common`](https://github.com/moku-labs/common)** brings `log` and `env`.
 
 ## License

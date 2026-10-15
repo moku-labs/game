@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { lookupTexture } from "../../api";
+import { releaseLeftBundles } from "../../budget";
 import { loadBundle } from "../../tiers";
 import type { Manifest } from "../../types";
-import { createMockAssets, manifestOf, packedManifest } from "./mock-assets";
+import { createMockAssets, leaving, manifestOf, packedManifest } from "./mock-assets";
 
 const manifest = manifestOf({
   ui: { feature: "ui", tier: "core", keys: ["ui.panel"] },
@@ -350,5 +351,65 @@ describe("audio", () => {
 
     expect(mock.api.audio("ui.click")).toBeUndefined();
     expect(mock.io.fetched).toEqual([]);
+  });
+});
+
+describe("sceneBundles", () => {
+  it("replaces the list of the mounted scene with a copy: only what the last call named is held", async () => {
+    const mock = createMockAssets({ manifest: leaving(manifest, "board", "board.chains") });
+
+    await mock.start();
+    await mock.api.load("board");
+    await mock.api.load("board.chains");
+
+    const named = ["board", "board.chains"];
+
+    mock.api.sceneBundles(named);
+    mock.api.sceneBundles(["board"]);
+    named.length = 0;
+    releaseLeftBundles(mock.assetsCtx);
+
+    expect(mock.ctx.state.sceneNamed).toEqual(["board"]);
+    expect(mock.api.isLoaded("board")).toBe(true);
+    expect(mock.api.isLoaded("board.chains")).toBe(false);
+  });
+});
+
+describe("companions.add", () => {
+  it("calls the companion on every load until its remover ran, and a second removal does nothing", async () => {
+    const mock = createMockAssets({ manifest });
+    const companion = { load: vi.fn(async () => undefined), unload: vi.fn() };
+    const other = { load: vi.fn(async () => undefined), unload: vi.fn() };
+
+    await mock.start();
+
+    const remove = mock.api.companions.add(companion);
+
+    mock.api.companions.add(other);
+    await mock.api.load("board");
+    remove();
+    remove();
+    await mock.api.load("board.chains");
+
+    expect(companion.load.mock.calls).toEqual([["board"]]);
+    expect(other.load.mock.calls).toEqual([["board"], ["board.chains"]]);
+  });
+});
+
+describe("has", () => {
+  it("answers from the manifest, live and headless alike", async () => {
+    const live = createMockAssets({ manifest });
+    const headless = createMockAssets({ manifest, io: undefined });
+
+    await live.start();
+    await headless.start();
+
+    for (const mock of [live, headless]) {
+      expect(mock.api.has("board.chains")).toBe(true);
+      expect(mock.api.has("ep99")).toBe(false);
+      expect(mock.api.has("toString")).toBe(false);
+    }
+
+    expect(live.api.isLoaded("board.chains")).toBe(false);
   });
 });

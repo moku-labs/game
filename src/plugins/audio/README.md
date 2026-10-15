@@ -19,9 +19,10 @@ export const deliver = defineNode({
 export const boardScene = defineScene("board", { bundle: "board", music: "board.theme", layers: {}, projections: [] });
 
 // web/main.ts — the buses follow the committed player
+// `volumes` comes from the game's `defineGame` kit, so `player` is the game's Player.
 createApp({
   plugins: [...screen, audio, settingsFeature],
-  pluginConfigs: { audio: { volumes: player => player.settings.audio } }
+  pluginConfigs: { audio: { volumes: volumes(player => player.settings.audio) } }
 });
 ```
 
@@ -37,6 +38,14 @@ Both handlers are registered with `{ runInFast: false }`: a fast walk never wait
 ## Volumes come from the player, not from a call
 
 The settings node commits `player.settings.audio`; on every `model:committed` this plugin reads `config.volumes(player)` and applies the buses it names. There is no intent plumbing and no `audio` in a node's context: what the player chose is saved with the player, and a reload applies it before the first scene.
+
+The kit of `defineGame` hands `volumes`, which types the player the callback reads, so a game needs
+no cast. At run time it returns the callback as it is (`Audio.VolumesFor<Player>`):
+
+```ts
+// index.ts of a game: `volumes` comes from the kit, `player` is the game's Player.
+pluginConfigs: { audio: { volumes: volumes(player => ({ music: player.settings.music, sfx: player.settings.sfx })) } }
+```
 
 `setVolume`, `volume`, `mute` and `muted` stay for tests and dev tools. `muted(bus)` answers the stored flag; a pause does not change it. With `volumes` configured, the next commit overwrites what `setVolume` set.
 

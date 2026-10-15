@@ -10,11 +10,14 @@ import { defineGameApp } from "../../../src/app/define";
 import type {
   AnyGameApp,
   GameApp,
+  GameDefinition,
   GamePluginConfigs,
   MemoryProvider,
-  ScreenAppOfGame
+  ScreenAppOf,
+  ScreenAppOfGame,
+  WithGameState
 } from "../../../src/app/types";
-import type { Clock, Model } from "../../../src/index";
+import type { Clock, Flow, I18n, Model } from "../../../src/index";
 import { createPlugin, defineFeature, flowPlugin, type } from "../../../src/index";
 import { fakeClock } from "../../../src/plugins/clock/fake";
 import { systemSource } from "../../../src/plugins/clock/system";
@@ -90,8 +93,110 @@ describe("defineGameApp infers the game from the object", () => {
   it("a game is an AnyGameApp, the type the page takes", () => {
     expectTypeOf(game).toExtend<AnyGameApp>();
     expectTypeOf<ScreenAppOfGame<typeof game>>().toEqualTypeOf<
-      ReturnType<typeof game.screen>["app"]
+      WithGameState<ScreenAppOf<readonly [typeof scorePlugin]>, Player, Session>
     >();
+  });
+
+  it("headless().app and screen().app read the committed snapshot typed by the game", () => {
+    type HeadlessApp = ReturnType<typeof game.headless>["app"];
+    type ScreenApp = ReturnType<typeof game.screen>["app"];
+    type HeadlessSnapshot = ReturnType<HeadlessApp["model"]["store"]["snapshot"]>;
+
+    expectTypeOf<HeadlessSnapshot["player"]>().toEqualTypeOf<Player>();
+    expectTypeOf<HeadlessSnapshot["session"]>().toEqualTypeOf<Session>();
+    expectTypeOf<
+      ReturnType<ScreenApp["model"]["store"]["snapshot"]>["player"]["count"]
+    >().toEqualTypeOf<number>();
+
+    // Every other member of the store stays the engine's.
+    expectTypeOf<HeadlessApp["model"]["store"]["load"]>().toEqualTypeOf<Model.StoreApi["load"]>();
+
+    // Built here, never called: the app is not started, so its store holds no snapshot yet.
+    const coinsOf = (app: HeadlessApp) =>
+      // @ts-expect-error -- the player of this game has no `coins`
+      app.model.store.snapshot().player.coins;
+
+    expectTypeOf(coinsOf).toBeFunction();
+  });
+});
+
+/** What `moku-game keys` writes for a game with one key that takes parameters and one that does not. */
+type GameStrings = { "hud.orders": { n: number }; "toast.saved": Record<string, never> };
+
+/**
+ * Reads the strings tag of a definition, inferring the table the way `defineGameApp` does.
+ *
+ * @param definition - The game.
+ * @returns The tag the definition carries, typed by the inferred table.
+ */
+function stringsOf<Strings extends I18n.StringTable>(
+  definition: GameDefinition<readonly [], readonly [], Player, Session, Strings>
+): Flow.TypeTag<Strings> | undefined {
+  return definition.strings;
+}
+
+describe("app.i18n.isKey is typed by the game's strings", () => {
+  it("the screen app of a game with strings narrows isKey to the game's TextKey; without strings to string", () => {
+    type TypedApp = ReturnType<
+      GameApp<readonly [], readonly [], Player, Session, GameStrings>["screen"]
+    >["app"];
+    type WideApp = ReturnType<typeof game.screen>["app"];
+
+    const savedOf = (app: TypedApp, value: unknown) => (app.i18n.isKey(value) ? value : undefined);
+    const wideOf = (app: WideApp, value: unknown) => (app.i18n.isKey(value) ? value : undefined);
+
+    expectTypeOf<ReturnType<typeof savedOf>>().toEqualTypeOf<"toast.saved" | undefined>();
+    expectTypeOf<ReturnType<typeof wideOf>>().toEqualTypeOf<string | undefined>();
+
+    // Every other member of app.i18n and the typed snapshot stay as they were.
+    expectTypeOf<TypedApp["i18n"]["format"]>().toEqualTypeOf<I18n.I18nApi["format"]>();
+    expectTypeOf<
+      ReturnType<TypedApp["model"]["store"]["snapshot"]>["player"]
+    >().toEqualTypeOf<Player>();
+
+    // A game with strings is still a game the page takes.
+    expectTypeOf<
+      GameApp<readonly [], readonly [], Player, Session, GameStrings>
+    >().toExtend<AnyGameApp>();
+  });
+
+  it("the definition carries the table as a type tag: strings: type<Strings>()", () => {
+    expectTypeOf(
+      stringsOf({ flow: mainFlow, player, session, strings: type<GameStrings>() })
+    ).toEqualTypeOf<Flow.TypeTag<GameStrings> | undefined>();
+    expectTypeOf(stringsOf({ flow: mainFlow, player, session })).toEqualTypeOf<
+      Flow.TypeTag<I18n.StringTable> | undefined
+    >();
+  });
+
+  it("defineGameApp with strings: type<Strings>() narrows app.i18n.isKey with no generic at the call", () => {
+    const typed = defineGameApp({ flow: mainFlow, player, session, strings: type<GameStrings>() });
+    const keyOf = (value: unknown) => (typed.screen().app.i18n.isKey(value) ? value : undefined);
+
+    expectTypeOf<ReturnType<typeof keyOf>>().toEqualTypeOf<"toast.saved" | undefined>();
+  });
+});
+
+describe("the design frame", () => {
+  it("takes orientation and referenceSide; refuses page.orientation's any and a string side", () => {
+    defineGameApp({
+      flow: mainFlow,
+      player,
+      session,
+      orientation: "landscape",
+      referenceSide: 390
+    });
+
+    // Both throw at run time (define.test.ts): built here, never called, for their types only.
+    const anyOrientation = () =>
+      // @ts-expect-error -- "any" belongs to page.orientation of config.ts
+      defineGameApp({ flow: mainFlow, player, session, orientation: "any" });
+    const stringSide = () =>
+      // @ts-expect-error -- a number of reference units
+      defineGameApp({ flow: mainFlow, player, session, referenceSide: "390" });
+
+    expectTypeOf(anyOrientation).toBeFunction();
+    expectTypeOf(stringSide).toBeFunction();
   });
 });
 

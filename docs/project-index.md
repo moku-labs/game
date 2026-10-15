@@ -16,7 +16,7 @@ bun add -d typescript
 
 It is loaded by a dynamic import on the first `openProject`. Without it `openProject` rejects with `[game] The project index needs the "typescript" package.`
 
-A game that imports through tsconfig `paths`, as the v15 layout does with `@core/kit` and `@features/home`, needs nothing more: the index reads `tsconfig.json` at the root. See [Aliases](#aliases).
+A game that imports through tsconfig `paths`, as the v15 layout does with `@core/kit` and `@features/home` (and `@features/episodes/ep01`, the door of a sub-feature), needs nothing more: the index reads `tsconfig.json` at the root. See [Aliases](#aliases).
 
 ## The API
 
@@ -61,12 +61,17 @@ The root is always explicit: `root` or `--root`. Nothing is inferred from the wo
 ```ts
 type ProjectIndex = {
   schemaVersion: 1;
-  revision: string;          // sha1 hex over the sorted lines `${path}\0${hash}\n`
+  revision: string;          // sha1 hex over the sorted lines `${path}\0${hash}\n`, and `${dir}/\0${parent}\n` per feature
   manifest?: string;         // root-relative, when the file exists
   tsconfig?: string;         // root-relative, when the file exists and holds `paths`
   symbols: Record<string, { def: Anchor[]; uses?: Anchor[]; conflict?: true }>;
   files: Record<string, { hash: string; state: "ok" | "broken"; error?: string }>;
   unresolved: { path: string; reason: string }[];
+  // Every feature by name: its root-relative folder and, for a sub-feature, the feature it lives in.
+  // The feature owners (each folder of features/, and a folder inside a feature with a door index.ts
+  // and assets/, assets.ts or strings/ of its own, at any depth) and the code-only sub-features a
+  // door imports from ./<folder> and lists in features: [...]. {} without a features folder.
+  features?: Record<string, { dir: string; parent?: string }>;
 };
 
 type Anchor = {
@@ -82,6 +87,15 @@ type Anchor = {
 
 A file hash is the sha1 hex of its bytes, the same value the editor uses as a file version.
 
+`features` of the episodes game, `tests/fixtures/episodes-game/`:
+
+```ts
+index.features;
+// { episodes: { dir: "features/episodes" }, ep01: { dir: "features/episodes/ep01", parent: "episodes" },
+//   ep02: { dir: "features/episodes/ep02", parent: "episodes" },
+//   "episodes-kit": { dir: "features/episodes/episodes-kit", parent: "episodes" }, home: { dir: "features/home" } }
+```
+
 ## Keys
 
 The examples are keys of the engine's own fixture, `tests/fixtures/mini-game/`, with the lines `find` answers there. The mini game builds no style in a function without a property, so that row names a file of a bigger game and no line.
@@ -90,7 +104,7 @@ The examples are keys of the engine's own fixture, `tests/fixtures/mini-game/`, 
 |---|---|---|---|
 | `flow:<id>` | `flow:main` | `defineFlow("main", …)` | the declaration, `flows/main.ts:9` |
 | `node:<flow>/<node>` | `node:infoPopup/count` | an entry of the flow's `nodes` table | the declaration of the node, `nodes/count.ts:7` |
-| `feature:<id>` | `feature:home` | `defineFeature("home", …)` | the declaration |
+| `feature:<id>` | `feature:home`; `feature:ep01` of the episodes game | `defineFeature("home", …)`, at any depth: `features/episodes/ep01/index.ts` holds `feature:ep01` | the declaration. A feature made by a factory has no `feature:` key; its folder is in `features` |
 | `scene:<id>` | `scene:home` | `defineScene("home", …)` | the declaration, `features/home/scene.ts:8` |
 | `projection:<name>` | `projection:home.screen` | `projection({ name: "home.screen", … })` | the `name` property, `features/home/view.tsx:21` |
 | `emitter:<id>` | `emitter:fx.spark` | `defineEmitter("fx.spark", …)` | the declaration, `features/info/effects.ts:8` |
@@ -128,6 +142,8 @@ The index follows an import through the `compilerOptions.paths` of the game's ts
   "@features/*": ["./features/*/index.ts"]       // @features/home -> features/home/index.ts
 }
 ```
+
+The `*` takes a nested path too, so `@features/episodes/ep01` reaches `features/episodes/ep01/index.ts`, the door of a sub-feature.
 
 ## JSX keys
 
@@ -170,6 +186,7 @@ A key that holds `*` or a prop hole such as `{id}` itself is looked up exactly.
 7. **Paths stay inside the root.** Paths in and out are root-relative POSIX. Every read resolves against the real root with `realpath`. A path that leaves the root, by `..`, as an absolute path or by a symlink, is refused with an error naming it.
 8. **In process.** No worker, no persisted file, no network. One update runs at a time.
 9. **A tsconfig change rebuilds.** A batch also checks the stamps of the tsconfig and of every file it extends inside the root. When one moved, appeared or vanished, the aliases are read again; when names now follow them elsewhere, the index is rebuilt and `change.files` lists the tsconfig. A comment or a save with the same `paths` changes nothing. While the tsconfig does not parse, the last good aliases stay and the source files keep updating. `changed("tsconfig.json")` does the same for a caller with its own file watcher.
+10. **A sub-feature folder rebuilds.** A folder that becomes or stops being a sub-feature (by its resources, or by its parent's `features: [...]` for a code-only one) rebuilds the index: `change.features` names it, and its `dir` and `parent` join the revision. A name clash keeps the last good `features` and adds one `unresolved` item, the clash message under the path `features`.
 
 ```ts
 type ProjectChange = {
@@ -177,6 +194,7 @@ type ProjectChange = {
   files: string[];
   moved: { key: string; from: string; to: string }[];
   removed: string[];
+  features?: string[];       // the feature names whose entry appeared, vanished or changed folder or parent; sorted
 };
 
 type Found = Anchor & {

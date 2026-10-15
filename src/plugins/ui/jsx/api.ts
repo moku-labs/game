@@ -4,6 +4,7 @@
  * `layout` injected.
  */
 import type { KeyInput, RawSample } from "../../input/types";
+import { rootPoseOf } from "../../renderer/sync/pose";
 import { Text } from "../../text/components";
 import type { Entity, LayerSpec } from "../../world/types";
 import type { UiCtx } from "../types";
@@ -15,28 +16,35 @@ import { coverPopup, reclaimPopup, releasePopup } from "./popups";
 import { createReconciler, type JsxModules } from "./reconcile";
 import { applyTap } from "./tap";
 import { readTree, sortedRoots } from "./tree";
-import type { AnyComponentDefinition, Finding, JsxModule, PopupLink, UiNode } from "./types";
+import type { AnyComponentDefinition, Finding, JsxModule, PopupLink, Root, UiNode } from "./types";
+
+/** The layer names of the scene in draw order, and the name of its HUD layer. */
+type SceneLayers = { names: readonly string[]; hud: string | undefined };
 
 /**
- * The layer names of the scene in draw order, mapped again only when the scene set a new layer
- * list: `projection.layers()` answers the same frozen array until then.
+ * The layer names of the scene in draw order and its HUD layer (`above: "overlays"`), read again
+ * only when the scene set a new layer list: `projection.layers()` answers the same frozen array
+ * until then.
  *
  * @param ctx - Domain context of the ui plugin.
  * @returns The reader `tree`, `find` and the focus share.
  */
-function layerNamesOf(ctx: UiCtx): () => readonly string[] {
+function sceneLayersOf(ctx: UiCtx): () => SceneLayers {
   let seen: readonly LayerSpec[] | undefined;
-  let names: readonly string[] = [];
+  let scene: SceneLayers = { names: [], hud: undefined };
 
-  return (): readonly string[] => {
+  return (): SceneLayers => {
     const layers = ctx.deps.world.projection.layers();
 
     if (layers !== seen) {
       seen = layers;
-      names = layers.map(layer => layer.name);
+      scene = {
+        names: layers.map(layer => layer.name),
+        hud: layers.find(layer => layer.above === "overlays")?.name
+      };
     }
 
-    return names;
+    return scene;
   };
 }
 
@@ -49,13 +57,16 @@ function layerNamesOf(ctx: UiCtx): () => readonly string[] {
  */
 export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   const state = ctx.state.jsx;
-  const layerNames = layerNamesOf(ctx);
-  const fields = createFields(ctx, {
-    layout: modules.layout,
-    topRoot: () => focusRoot(state, layerNames())
-  });
+  const sceneLayers = sceneLayersOf(ctx);
+  const layerNames = (): readonly string[] => sceneLayers().names;
+  const topRoot = (): Root | undefined => {
+    const scene = sceneLayers();
+
+    return focusRoot(state, scene.names, scene.hud);
+  };
+  const fields = createFields(ctx, { layout: modules.layout, topRoot });
   const frame = createReconciler(ctx, modules, fields);
-  const focus = createFocus(ctx, frame.markPointer, layerNames, fields);
+  const focus = createFocus(ctx, frame.markPointer, topRoot, fields);
   const resolvedOf = (entity: Entity): string | undefined =>
     ctx.deps.world.ecs.get(entity, Text)?.resolved;
   const find = (key: string): Entity | undefined => {
@@ -69,7 +80,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   };
 
   return {
-    tree: (): UiNode => readTree(state, layerNames(), resolvedOf),
+    tree: (): UiNode =>
+      readTree(state, layerNames(), resolvedOf, slot => rootPoseOf(ctx.deps.world.ecs, slot)),
 
     find,
 

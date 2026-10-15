@@ -16,13 +16,16 @@ only uses the texture *type*.
 
 | Method | Behaviour |
 |---|---|
-| `load(bundle): Promise<void>` | Loads every file of the bundle. Already loaded: resolves at once. Loading: joins the running load. Unknown bundle: rejects with `[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".` Headless: resolves at once, state untouched. |
-| `unload(bundle): void` | Destroys the textures through `io.destroyTexture`, calls `renderer.sync.textures.invalidate` with the keys of the bundle, emits `assets:bundle-unloaded` with reason `"request"`. A pinned bundle and the tiers `boot` and `core` are refused with a `ctx.log.warn`. A running load is aborted. |
+| `load(bundle): Promise<void>` | Loads every file of the bundle and waits for its companions. Already loaded: resolves at once. Loading: joins the running load. Unknown bundle: rejects with `[game] assets: no bundle "bord" in the manifest.\n  Run "bun run assets:keys".` Headless: resolves at once, state untouched. |
+| `unload(bundle): void` | Destroys the textures through `io.destroyTexture`, calls every companion's `unload`, calls `renderer.sync.textures.invalidate` with the keys of the bundle, emits `assets:bundle-unloaded` with reason `"request"`. A pinned bundle and the tiers `boot` and `core` are refused with a `ctx.log.warn`. A running load is aborted. |
 | `isLoaded(bundle): boolean` | `status === "loaded"`. Headless: `true` for every bundle of the manifest. |
 | `texture(key): Texture \| undefined` | The texture of a loaded key; touches the use counter of its bundle. A key of a bundle that is not loaded: `undefined`, one dev warning naming key and bundle, and a background `load` of that bundle. Headless: `undefined`. |
 | `font(key): { fnt, texture } \| undefined` | The `.fnt` file as text and the texture of its first page; touches the use counter. `text` installs it with `renderer.sync.fonts.install`. A bundle that is not loaded, another kind and headless: `undefined`, silently — no warning and no background load. |
 | `audio(key): { bytes, mime } \| undefined` | A loaded sound: its bytes, undecoded, and the MIME type of its container, `"audio/mpeg"` for an `.mp3` and `"audio/mp4"` for an `.m4a`. `audio` decodes the bytes once, or streams them from a `blob:` URL built with `mime`, and drops them when `assets:bundle-unloaded` names the key. Same silent miss as `font`. |
 | `usage(): { textureMb, budgetMb, bundles }` | Loaded bundles only, sorted by name. `lastUsed` is the use counter, never a clock. |
+| `has(bundle): boolean` | Whether the manifest carries the bundle, loaded or not; the same live and headless. A strings-only sub-feature has a file-less bundle, so `has` is true for it; a code-only sub-feature has none. |
+| `sceneBundles(named): void` | Called by `scenes` after every switch and every re-read whose list changed: the bundles the mounted scene names (its `bundle`, then its `bundles(state)`). Each call replaces the list. A listed bundle is held: never a budget victim, never released by `release: "leave"`. A game never calls it. |
+| `companions.add(companion): () => void` | Adds a `BundleCompanion` (see Companions). Returns the remover; a second removal does nothing. Bundles loaded before are not replayed, so a plugin adds it in `onInit`. |
 
 ```ts
 const assets = ctx.require(assetsPlugin);
@@ -44,7 +47,12 @@ Both are pure and exported from the package root; `defineGame` returns them type
 // features/board/assets.ts
 export const boardAssets = defineBundles({
   board: { tier: "scene" },
-  "board.chains": { tier: "lazy", files: ["chains/*.png"] }
+  "board.chains": { tier: "lazy", files: ["chains/*.png"], release: "leave" }
+});
+
+// features/episodes/ep01/assets.ts: the episode's art leaves with the episode; the items get mipmaps
+export const ep01Assets = defineBundles({
+  ep01: { tier: "lazy", release: "leave", mipmaps: ["items/**"] }
 });
 
 // a loading node
@@ -53,8 +61,10 @@ await fx(load("board.chains")); // { loaded: ["board.chains"], mb: 1.25 }
 
 | Rule | Detail |
 |---|---|
-| Default | A feature without `assets.ts` has one bundle, named as the feature, tier `"feature"`, all files of `assets/`. |
-| Names | A bundle name is the feature name, or starts with `feature.`. Anything else is a scanner error. |
+| Default | A feature or sub-feature without `assets.ts` has one bundle, named as the feature, tier `"feature"`, all files of `assets/`: `features/episodes/ep02/` gives the bundle `ep02`. A sub-feature with `strings/` and no file still has it (file-less), so its lazy strings travel with it. |
+| Names | A bundle name is the feature name, or starts with `feature.`. Anything else is a scanner error. A sub-feature's name is its inner folder name: `features/episodes/ep01/assets.ts` declares `ep01` and `ep01.*`, never `episodes.ep01`, and its parent cannot declare `ep01`. |
+| `release` | `"budget"` (the default, written as nothing) or `"leave"`: also unloaded at the next rest once its feature left (Preload and budget). `"leave"` on `boot` or `core` is a scanner error; any other value too. `defineBundles` copies it. |
+| `mipmaps` | `true` (every texture of the bundle) or globs relative to `assets/` (`["items/**"]`); a glob of one bundle marks its own files only, and a glob that matches no texture is a note. Any other value is a scanner error. A mipmapped texture is uploaded with its full chain, costs about a third more and stays loose in a pack. `defineBundles` copies the list. |
 | `files` | A bundle with `files` takes the matching files out of the feature's default bundle. A file matched by two bundles is a scanner error naming both bundles. |
 | Layers | A folder under the root scanned like one more feature, under a mapped name: `--layer shared=ui` (`layers: { shared: "ui" }` for `scanAssets`) reads `shared/assets.ts` and `shared/assets/` exactly as `features/ui/` would be read, so every key and bundle stays `ui.*`. The layer's `assets.ts` names its bundles after the mapped name. |
 
@@ -116,10 +126,13 @@ The dev manifest of `bun run assets:keys` is version 1: loose files, straight fr
 | `path` | POSIX, relative to the scan root. The URL is `baseUrl` + `path`. Absent on a texture packed in an atlas. |
 | `kind` | `"font"` or `"audio"`. A file without a `kind` is a texture, so a manifest written before fonts and audio reads the same. |
 | `pages` | A font only: the page images of its `.fnt`, in declaration order, each with `path`, `width`, `height` and `mb`. A page has no key: it belongs to the font. |
-| `mb` | Estimated memory: `width × height × 4 / 1 048 576` for a texture, the sum of the pages for a font, the file size for audio. Rounded to 3 decimals; the bundle `mb` is the sum. No mipmaps. |
+| `mb` | Estimated memory: `width × height × 4 / 1 048 576` for a texture, the sum of the pages for a font, the file size for audio. A texture with `mips` counts every level of the chain Pixi builds: `floor(log2(max(width, height))) + 1` levels, each side halved and floored, never below 1 px (256 × 128 is 0.167 instead of 0.125). Rounded to 3 decimals; the bundle `mb` is the sum. |
+| `mips` | `true` on a texture its bundle's `mipmaps` selects: uploaded with `autoGenerateMipmaps`. Never on an atlas frame. Any other value reads as absent. |
+| `parent`, `dir` | A sub-feature's bundle only: its parent feature and its owner folder relative to the scan root (`"features/episodes/ep01"`). A top-level feature's and a layer's bundle carry neither, so a flat game's manifest keeps its bytes. |
+| `release` | `"leave"` only; absent means `"budget"`, and any other value reads as absent (the scanner refuses a wrong one). |
 | `nine` | Optional, always four numbers, whichever of the three tag forms wrote them. Passed to `createTexture` as the tuple `[left, top, right, bottom]`. |
 | `atlas` | `{ page, x, y, width, height }`: the file is cut out of the page of its bundle with that id. Written by the packer. |
-| Order | Bundles sorted by name, files sorted by key. Unknown fields are ignored. |
+| Order | Bundles sorted by name, files sorted by key. A bundle writes `feature`, `parent`, `dir`, `tier`, `release`, `mb`, `pages`, `files`; a texture `key`, `path`, `width`, `height`, `mb`, `mips`, `nine`, `atlas`; a field it does not carry is left out. Unknown fields are ignored. |
 
 ## Manifest v2
 
@@ -174,8 +187,14 @@ it is.
 
 `onStart` reads `assets`, `scenes` and `flows` from `flow.features.all()`, gets the manifest,
 builds the key index, and warns once per bundle a feature declares that the manifest does not
-carry, or whose tier disagrees with it. A manifest that cannot be read rejects `onStart` in a
-browser; headless it is a warning and an empty manifest.
+carry, or whose tier or release (absent means `"budget"`) disagrees with it. A dev build also
+warns once per manifest bundle with a `parent` whose feature nobody registered (`fix: 'List it in
+features: [...] of "episodes".'`); a flat feature's and a layer's bundle are not checked. A
+manifest that cannot be read rejects `onStart` in a browser; headless it is a warning and an
+empty manifest.
+
+A sub-feature without flows (a `kit`) has a `feature`-tier bundle nothing enters: give it tier
+`core`, or name it in a scene's `bundles`, or its art and strings wait for a texture miss.
 
 ## Loading one bundle
 
@@ -204,10 +223,11 @@ their slices exist. The last one of a load has `loaded === total`, and
 `assets:bundle-loaded` comes after it. The files of an aborted load send nothing, so a loading bar
 never moves for a load that will not finish.
 
-On success the assets are stored, `renderer.sync.textures.invalidate` is called with the keys of
-the bundle, the event goes out, `time.wake()` lifts the idle frame cap — the picture changes now —
+The companions registered when a load starts load next to its files, and the bundle counts as
+loaded only after them (Companions). On success the assets are stored,
+`renderer.sync.textures.invalidate` is called with the keys of the bundle, the event goes out, `time.wake()` lifts the idle frame cap — the picture changes now —
 and the budget is enforced. On failure every texture made so far is
-destroyed (slices and loose textures first, then the pages, then the font pages, as on unload), the record goes back to `idle`, `ctx.log.error("assets: bundle failed", { bundle, file,
+destroyed (slices and loose textures first, then the pages, then the font pages, as on unload), every companion of the load gets its `unload`, the record goes back to `idle`, `ctx.log.error("assets: bundle failed", { bundle, file,
 status, contentType })` is written and every waiter rejects with
 `[game] assets: bundle "board" failed at "features/board/assets/cell.png" (404).` When the
 response had a `content-type`, it follows the status: `(200, text/html)`. An abort is not
@@ -215,23 +235,62 @@ a failure and is never logged.
 
 ## Preload and budget
 
-The `flow:rest` hook enforces the budget and rebuilds the background queue. The walk is
+The `flow:rest` hook marks the release (below), enforces the budget and rebuilds the background
+queue. The walk is
 breadth-first over `flow.describe()` from the current node, at most `preloadDepth` edges:
 `"node"` and `"map:node"` move inside the flow, a node with `subFlow` adds the start node of that
 flow at the same distance, a node with `slot` adds the start nodes of `graph.slots[slot]`, and
 `"exit:name"` continues on the parent frame taken from `flow.state().stack`. Bundles come out
-ordered by distance, then by name; the `lazy` tier, what is loaded and what is loading outside
-the running queue are skipped. The queue stops at the first bundle that would break the budget —
+ordered by distance, then by name; the `lazy` tier, a `"leave"` bundle nobody holds, what is
+loaded and what is loading outside the running queue are skipped. A scene of the walk names its
+bundles for the committed state of now (`model.store.snapshot()`); a `bundles` that throws there
+costs only that scene's extra names. The queue stops at the first bundle that would break the budget —
 preload never evicts. A rest node with the same neighbourhood keeps the running queue, so a node
 the graph comes back to often (a splash that commits its progress through a transit node) does
 not restart its loads. A different neighbourhood replaces the queue and aborts the old one. A
 fast walk skips the preload.
 
 `enforceBudget` runs after every load and at every rest node: while `usedMb > textureBudgetMb` it
-unloads the bundle with the smallest use counter that is not pinned, not `boot` or `core`, not
-loading and not in the queue, with reason `"budget"`. When nothing may go it writes one warning
+unloads the bundle with the smallest use counter that is not pinned, not named by the mounted
+scene (`sceneBundles`), not `boot` or `core`, not loading and not in the queue, with reason
+`"budget"`. It does not read `release`. When nothing may go it writes one warning
 naming the five heaviest loaded entries, loose files and atlas pages together (a page row reads
 `page "ui/main-0"` with its `mb`) — the cure is smaller art or a split bundle.
+
+The pinned bundles of a node are what its scene names — its `bundle`, then what its
+`bundles(state)` returns for the committed `player` and `session` of `model.store.snapshot()` —
+and the `feature`-tier bundles of its flow's feature. A node without a scene keeps the scene of the
+node before it. A `bundles` that throws fails the `load` stage, and flow rolls the node back.
+
+**`release: "leave"`.** A loaded `"leave"` bundle is unloaded with reason `"leave"` once nothing
+holds it. Held: pinned, named by the mounted scene (the last `sceneBundles` list), its feature on
+the stack (a frame — the outer frames of a sub-flow too — whose node's owner in
+`flow.describe()` is that feature; a node of the parent does not hold the child's bundle), or a
+permanent tier. `flow:rest` fires before the arriving node's stages, while its bundles are not
+pinned yet, so a live rest only marks the release; the arriving node's `load` stage runs it right
+after it pinned its own bundles. A bundle the arriving scene names is therefore never released on
+the rest that leads into it; a bundle only the outgoing scene named stays one rest longer (that
+scene is still mounted) and leaves at the next rest, after `scenes` reported the new list. A fast
+walk marks nothing; a transit node marks nothing. A running load is never aborted by the release.
+The preload fetches a `"leave"` bundle only while it is held, so entering its feature from outside
+waits for its load. `"leave"` adds a way out, never a protection: the budget may still evict the
+bundle, and `app.assets.unload` works as for any other.
+
+## Companions
+
+A `BundleCompanion` is a `load(bundle): Promise<void>` and `unload(bundle): void` pair that loads
+and unloads with every bundle; `i18n` registers one so the lazy strings of a sub-feature travel
+with the bundle named like it. `i18n` adds it in its own `onInit`, only when `assets` is composed
+(`if (ctx.has("assets"))`): `assets` registers before `i18n` in the screen order, so the companion
+is there before the boot and core tiers load.
+
+| Guarantee | Rule |
+|---|---|
+| Load | Called once per load of a bundle, with its name, started before the files. The bundle counts as loaded — `assets:bundle-loaded`, every waiter of `load`, a node entry, a scene's switch, a restore, a `safeNode` recovery — only after it resolved. Every bundle, so a companion resolves at once for one it has nothing for. Never for a bundle that is already loaded. |
+| Failure | A rejection, or a synchronous throw, fails the bundle like a broken file: its files are destroyed, every companion's `unload` runs, every waiter rejects, `assets: bundle failed` is logged. |
+| Unload | Synchronous, once per release: budget, request, leave, after the textures are destroyed and before the event; also after a failed or aborted load, so it is safe for a bundle the companion holds nothing of. A throw is logged (`assets: a companion failed to unload`) and the next companion still runs. |
+| Headless | No call at all: no bundle really loads, and every bundle of the manifest counts as loaded. |
+| Stop | `onStop` forgets the companions without calling `unload`: their plugin stopped before `assets`. |
 
 ## Dev hot swap
 
@@ -259,13 +318,13 @@ export default {
 |---|---|
 | Which files | Every path whose stamp differs from the `files` map applied last (`state.stamps`). The first update after boot has no map, so `changed` stands. |
 | Reload instead | A path of the manifest (a file or a font page) that is not in `files`, or a changed path that the manifest does not know and that is a new asset: a new file, a removed file, a rename, a changed nine-slice tag. `ctx.log.info("assets:swap-refused", { reason })`, then `location.reload()`. Nothing is replaced. A hook cannot refuse by throwing: the core bus catches what a hook throws. |
-| A new asset | An unknown changed path is one when it lies under a folder the manifest names (the path cut after its `assets/` segment; a path with none gives its own folder), or where the scanner reads: `<layer>/assets/…` or `<features>/<feature>/assets/…`, so `assets` is its second or third segment. The first file of an `assets/` folder that had none reloads too. The page knows neither the layers nor the features folder, so any folder counts. |
+| A new asset | An unknown changed path is one when it lies under a folder the manifest names (the path cut after its `assets/` segment; a path with none gives its own folder, and every bundle's `<dir>/assets/`), where the scanner reads a top-level owner (`<layer>/assets/…` or `<features>/<feature>/assets/…`: `assets` is its second or third segment, and any folder counts, since the page knows neither the layers nor the features folder), or under the `assets/` of a new owner of a home: `<home>/<name>/assets/…`, where the homes are every bundle's owner folder and the folder that holds it. The owner folder is the bundle's `dir`; without one (a flat feature, a layer, an older manifest) the part of its first file path before `/assets/`, and `features/<feature>` for a bundle with no file. So the first file of a new sub-feature at any depth reloads too. An image under `<owner>/<kind>/assets/` reloads the page although the scanner never reads it, an accepted false positive. |
 | Ignored | The watch stamps every image of the game tree. Any other unknown path is ignored, changed or not: a favicon at the root, `features/home/outside.webp`, an image of `web/`. |
 | Not loaded | Nothing happens: the next load fetches the new bytes, the dev server answers `no-store`. A bundle that is loading is swapped after its load settled. |
-| A texture | Fetched, decoded and uploaded through `io`, with the nine-slice of its manifest entry, and stored under the same key. Then the old texture is destroyed. |
+| A texture | Fetched, decoded and uploaded through `io`, with the nine-slice and the mipmaps of its manifest entry, and stored under the same key. Then the old texture is destroyed. |
 | A font | A changed `.fnt` or a changed page reads the whole font again, once. Then the old pages are destroyed. |
 | A sound | The bytes are fetched again and stored under the same key. |
-| The manifest | `width`, `height` and `mb` of a texture and of a font page come from the decoded image, the font `mb` from its pages, the bundle `mb` from its files and atlas pages. Then `enforceBudget` runs. |
+| The manifest | `width`, `height` and `mb` of a texture (its chain with `mips`) and of a font page come from the decoded image, the font `mb` from its pages, the bundle `mb` from its files and atlas pages. Then `enforceBudget` runs. |
 | After | `renderer.sync.textures.invalidate(keys)`, `time.wake()`, then `assets:replaced`: one event per bundle per swap. |
 | Unloaded on the way | A bundle that left while its files were fetched gets nothing: the new textures are destroyed and no event goes out. |
 | A failure | Every changed file of a bundle is loaded before one is stored. When a fetch, a decode or a parse fails, `ctx.log.error("assets:replace-failed", { path, reason })` is written and the bundle keeps its old textures, fonts and bytes: the new textures of that bundle are destroyed, nothing is stored, no `assets:replaced` goes out for it, and the page does not reload. `state.stamps` records the new stamp all the same, so the broken file is not read again until it is saved again; its next good save swaps. The other bundles of the same swap are still replaced. |
@@ -285,7 +344,7 @@ a built game and headless.
 |---|---|
 | `assets:bundle-progress` | `{ bundle, loaded, total }` |
 | `assets:bundle-loaded` | `{ bundle, tier, mb, reason: "boot" \| "enter" \| "request" \| "preload" }` |
-| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request", keys }` |
+| `assets:bundle-unloaded` | `{ bundle, tier, mb, reason: "budget" \| "request" \| "leave", keys }`; `"leave"`: its feature left (`release: "leave"`) |
 | `assets:replaced` | `{ bundle, keys }`, dev builds only |
 
 `assets:bundle-progress` is for the game: no engine plugin listens to it. A splash screen fills
@@ -354,9 +413,25 @@ work.
 
 ## What the scanner reads
 
-The scanner reads the `assets/` of every feature, and the `assets/` of every layer of `--layer`
-after the features. A layer is keyed by its mapped name: `shared/assets/button/primary.png` with
-`--layer shared=ui` is `ui.button.primary`, in the bundle `ui` whose `feature` is `"ui"`.
+The scanner reads the `assets/` and `assets.ts` of every feature owner, and of every layer of
+`--layer` after the features. A layer is keyed by its mapped name: `shared/assets/button/primary.png`
+with `--layer shared=ui` is `ui.button.primary`, in the bundle `ui` whose `feature` is `"ui"`.
+
+The owners come from `findFeatureOwners` of `src/project/features.ts`, by folder structure alone
+(no door is parsed): every folder of the features folder, and inside an owner every folder that is
+not a kind folder (`flow/`, `views/`, `assets/`, `strings/` …) and has a door `index.ts` and
+resources of its own (`assets/`, `assets.ts` or `strings/`), at any depth.
+`features/episodes/ep01/assets/ward/room.png` is `ep01.ward.room` in the bundle `ep01`, whose
+`feature` is `"ep01"`, `parent` `"episodes"` and `dir` `"features/episodes/ep01"`; only a
+sub-feature's bundle carries `parent` and `dir`. The parent's `assets/` never holds a child's
+files. A sub-feature with `strings/` and no file gets a file-less bundle; a code-only sub-feature
+(a door and no resources, listed by its parent or not) is no owner and gets none. One feature name
+in two folders (`features/episodes/kit` and `features/minigames/kit`) is one scan problem naming
+both folders, and nothing is written. A layer mapped to any owner's name, a sub-feature's too, is
+refused. A direct child folder of an owner with `assets/` or `assets.ts` but no door is a note:
+`the folder "features/episodes/ep03" has assets but is no feature: its files are not in the
+manifest. A sub-feature needs a door index.ts.` `release` and `mipmaps` of `assets.ts` are checked
+here (Authoring helpers).
 
 | File | Becomes |
 |---|---|
@@ -416,6 +491,7 @@ pack stops with `[game] assets: "--pack" needs sharp.\n  Run "bun add -d sharp".
 | Padding | 2 px between frames and a 2 px border, transparent, no extrude. |
 | Trim, rotation | Never: a rotated or trimmed nine-slice would lose its borders. |
 | Loose by size | A texture with a side above 512 px stays a file of its own. |
+| Loose by mipmaps | A texture with `mips` stays a file of its own, whatever its key or size: Pixi builds the full chain, and from the second level on the neighbours on a page would bleed into it. The pack check refuses a mipmapped frame. The packed bundle keeps `parent`, `dir` and `release`; a loose mipmapped file keeps `mips` and its chain `mb`. |
 | Groups | Per bundle: `fx` holds the textures whose key's last segment starts with `fx-` (`ui.fx-spark`) or that lie in an `fx` folder (`ui.fx.leaf` from `assets/fx/leaf.webp`), whatever their size (a particle emitter binds one page); `main` holds the other textures. The frames of an animation in `fx/` (`ui.fx.coin-spin.0`) go to `fx` too. A stem named `fx` with no folder (`ui.fx`) is not an fx folder. |
 | Group of one | Stays loose: an atlas of one file is one request either way. |
 | `fx` pages | Exactly one; more is a problem naming the bundle and the count. |
@@ -504,9 +580,14 @@ again every frame (`changes: "frame"`), because a bundle loads without a model c
 ## Dependencies
 
 - `flowPlugin` — `onEnter("load")`, `fx.handle("load", …, { runInFast: true })`, `features.all()`,
-  `describe()`, `state()`.
+  `describe()` (also the node owners of the release), `state()` (also the stack and the mode).
 - `rendererPlugin` — `sync.textures.provide / create / slice / destroy / invalidate`, `host.ready()`.
 - `timePlugin` — `wake()` when a load settles or a dev hot swap replaced files, so the idle frame
   cap lifts as the picture changes.
+- `modelPlugin` — `store.snapshot()`: the committed `player` and `session` a scene's `bundles`
+  reads for the node being entered and for the preload.
+- Module import, not a plugin dependency: `namedBundles` and `isSceneDefinition` of
+  `scenes/bundles.ts`. `scenes` calls `sceneBundles`; `i18n` calls `companions.add`, `has` and
+  `isLoaded`, only when `assets` is composed.
 
 The global `ui:hot-swap` is hooked with no `depends` on `ui`.

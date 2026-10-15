@@ -168,6 +168,29 @@ describe("sync textures", () => {
     expect(nine).toHaveProperty("defaultBorders", { left: 12, top: 10, right: 8, bottom: 6 });
   });
 
+  it("asks Pixi for the mip chain only when `mips` is set", async () => {
+    const mock = await started();
+    const mipped = mock.api.sync.textures.create({ width: 336, height: 288 } as never, {
+      mips: true
+    });
+    const plain = mock.api.sync.textures.create({ width: 336, height: 288 } as never);
+
+    expect(mipped.source).toHaveProperty("autoGenerateMipmaps", true);
+    expect(mipped).toHaveProperty("width", 336);
+    expect(plain.source).toHaveProperty("autoGenerateMipmaps", false);
+  });
+
+  it("keeps the mip chain under the nine-slice wrapper", async () => {
+    const mock = await started();
+    const texture = mock.api.sync.textures.create({ width: 64, height: 64 } as never, {
+      nine: [12, 10, 8, 6],
+      mips: true
+    });
+
+    expect(texture).toHaveProperty("defaultBorders", { left: 12, top: 10, right: 8, bottom: 6 });
+    expect(texture.source).toHaveProperty("autoGenerateMipmaps", true);
+  });
+
   it("frees the wrapper texture of a nine-slice and keeps its source", async () => {
     const mock = await started();
     const before = FakeTexture.made.length;

@@ -17,7 +17,7 @@
         "@moku-labs/ci": "1.5.7",
         "@moku-labs/common": "0.3.10",
         "@moku-labs/core": "1.7.6",
-        "@moku-labs/native": "0.3.8",
+        "@moku-labs/native": "0.3.9",
         "@moku-labs/system": "0.3.7",
         "@types/bun": "1.4.2",
         "@vitest/coverage-istanbul": "4.0.18",
@@ -30,7 +30,7 @@
         "jiti": "2.6.1",
         "lefthook": "2.1.1",
         "oxlint": "1.86.0",
-        "pixi.js": "8.21.0",
+        "pixi.js": "8.22.0",
         "playwright-core": "1.60.0",
         "publint": "0.3.21",
         "sharp": "0.34.5",
@@ -42,9 +42,9 @@
       "peerDependencies": {
         "@moku-labs/common": "^0.3.4",
         "@moku-labs/core": "^1.7.1",
-        "@moku-labs/native": "^0.3.2",
+        "@moku-labs/native": "^0.3.9",
         "@moku-labs/system": "^0.3.1",
-        "pixi.js": "^8.0.0",
+        "pixi.js": "^8.22.0",
         "playwright-core": ">=1.50.0",
         "sharp": "^0.34.0",
         "typescript": ">=5.5",
@@ -279,7 +279,7 @@
 
     "@moku-labs/core": ["@moku-labs/core@1.7.6", "", {}, "sha512-CdCxX/9zwJ9Czv45I/CmDuV8sV1r9uiOSfUzckD3MZC8eumO1QcT4PY4yiSXd0zspsTgdsntFxfDHkUUYVp5Iw=="],
 
-    "@moku-labs/native": ["@moku-labs/native@0.3.8", "", { "dependencies": { "@tauri-apps/cli": "^2" }, "peerDependencies": { "@moku-labs/common": "^0.3.4", "@moku-labs/core": "^1.7.1" } }, "sha512-KY6GmumKB5yBqXWY1R35/SufochR4ENLcfZnc3/SGpcbofjUq1ZfZZMwMEB999Vet4CHJFmRSNHE6cYDhRFzDA=="],
+    "@moku-labs/native": ["@moku-labs/native@0.3.9", "", { "dependencies": { "@tauri-apps/cli": "^2" }, "peerDependencies": { "@moku-labs/common": "^0.3.4", "@moku-labs/core": "^1.7.1" } }, "sha512-5mSMuOluJWXAw+eRJGaWUy/SdAaZFmW/HpQ/MpyOxJXLD8PS8HDG5fwbO7M5uYFab9RgOtpdrqEISJCxIwrhdw=="],
 
     "@moku-labs/system": ["@moku-labs/system@0.3.7", "", { "dependencies": { "idb-keyval": "6.3.0" }, "peerDependencies": { "@moku-labs/common": "^0.3.4", "@moku-labs/core": "^1.7.1", "@tauri-apps/api": "^2.12.0", "@tauri-apps/plugin-clipboard-manager": "^2.3.0", "@tauri-apps/plugin-deep-link": "^2.4.0", "@tauri-apps/plugin-haptics": "^2.4.0", "@tauri-apps/plugin-notification": "^2.3.0", "@tauri-apps/plugin-store": "^2.4.0" }, "optionalPeers": ["@tauri-apps/api", "@tauri-apps/plugin-clipboard-manager", "@tauri-apps/plugin-deep-link", "@tauri-apps/plugin-haptics", "@tauri-apps/plugin-notification", "@tauri-apps/plugin-store"] }, "sha512-UtxvJDOoe030Ns7eXxO8snn/y6Rs+WlodIBMGLNpD0ZtaZyt6qdSxDY4ln6YXT3AB76Ax86MHqoMGEuV0bWE0Q=="],
 
@@ -841,7 +841,7 @@
 
     "picomatch": ["picomatch@4.0.7", "", {}, "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA=="],
 
-    "pixi.js": ["pixi.js@8.21.0", "", { "dependencies": { "@pixi/colord": "^2.9.6", "@types/earcut": "^3.0.0", "@webgpu/types": "^0.1.69", "@xmldom/xmldom": "^0.8.15", "earcut": "^3.0.2", "eventemitter3": "^5.0.1", "gifuct-js": "^2.1.2", "ismobilejs": "^1.1.1", "parse-svg-path": "^0.2.0", "tiny-lru": "^11.4.7" } }, "sha512-GJ/KqBtUuWDBPMQu2D0ZHsRCYOcWRjjKrpyC+3jPQI5JTqHMC5dH8l9sSyvoUT4qJidvRzs1fwFWRWceno2Ltw=="],
+    "pixi.js": ["pixi.js@8.22.0", "", { "dependencies": { "@pixi/colord": "^2.9.6", "@types/earcut": "^3.0.0", "@webgpu/types": "^0.1.69", "@xmldom/xmldom": "^0.8.15", "earcut": "^3.0.2", "eventemitter3": "^5.0.1", "gifuct-js": "^2.1.2", "ismobilejs": "^1.1.1", "parse-svg-path": "^0.2.0", "tiny-lru": "^11.4.7" } }, "sha512-QbTANHMZ751MIjLiLSUSM8a7LNMWwMIf0KbRCqlW+SPS9hNLfSVS+cl1O2SEp9g1K/wyLzj/OJHv+1TUfiPr/w=="],
 
     "playwright-core": ["playwright-core@1.60.0", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-9bW6zvX/m0lEbgTKJ6YppOKx8H3VOPBMOCFh2irXFOT4BbHgrx5hPjwJYLT40Lu+4qtD36qKc/Hn56StUW57IA=="],
 

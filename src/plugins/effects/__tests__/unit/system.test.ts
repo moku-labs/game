@@ -559,3 +559,51 @@ describe("the particle system — modes", () => {
     expect(mock.api.stats().emitters).toBe(2);
   });
 });
+
+describe("the particle system — the renderer hears of every step", () => {
+  it("a living burst invalidates its container entity each frame, and once more the frame its last particle dies", () => {
+    const mock = started();
+    const invalidate = vi.mocked(mock.ectx.deps.renderer.invalidate);
+
+    mock.spawn([Emitter({ effect: "fx.stars" }), Transform({ x: 0, y: 0 })]);
+    mock.frame(16);
+
+    const instance = [...mock.state.instances.values()][0];
+    const container = FakeFxParticleContainer.made[0];
+
+    // The burst was born in this step: the empty container told the renderer after it.
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith(instance?.entity);
+
+    invalidate.mockClear();
+
+    let living = 0;
+
+    while ((container?.particleChildren.length ?? 0) > 0 && living < 200) {
+      mock.frame(16);
+      living += 1;
+    }
+
+    // One call per frame a particle lived into, the frame the last one died included.
+    expect(living).toBeGreaterThan(20);
+    expect(invalidate).toHaveBeenCalledTimes(living);
+
+    invalidate.mockClear();
+    frames(mock, 10);
+
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("a standing stream under reduced motion invalidates nothing", () => {
+    const mock = started();
+    const invalidate = vi.mocked(mock.ectx.deps.renderer.invalidate);
+
+    mock.spawn([Emitter({ effect: "fx.trail" }), Transform({ x: 0, y: 0 })]);
+    frames(mock, 5);
+    mock.anim.reducedMotion = true;
+    invalidate.mockClear();
+    frames(mock, 30);
+
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+});

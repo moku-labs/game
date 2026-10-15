@@ -52,7 +52,27 @@ expectTypeOf<Events["assets:bundle-progress"]>().toEqualTypeOf<{
 // @ts-expect-error — the plugin declares no such event
 assetsCtx.emit("assets:bundle-evicted", { bundle: "board" });
 
-expectTypeOf<Events["assets:bundle-unloaded"]["reason"]>().toEqualTypeOf<"budget" | "request">();
+expectTypeOf<Events["assets:bundle-unloaded"]["reason"]>().toEqualTypeOf<
+  "budget" | "request" | "leave"
+>();
+
+// The release of a bundle whose feature left: the reason a hook reads is "leave".
+assetsCtx.emit("assets:bundle-unloaded", {
+  bundle: "ep01",
+  tier: "lazy",
+  mb: 0.492,
+  reason: "leave",
+  keys: ["ep01.items.cup"]
+});
+
+// @ts-expect-error — an unload happens for the budget, a request or a left feature only
+assetsCtx.emit("assets:bundle-unloaded", {
+  bundle: "ep01",
+  tier: "lazy",
+  mb: 0.492,
+  reason: "other",
+  keys: []
+});
 
 assetsCtx.emit("assets:replaced", { bundle: "ui", keys: ["ui.body"] });
 

@@ -7,10 +7,12 @@
  * (`extras.ts`), the hint routed to a keyed element (`hints.ts`) and the remeasure of the texts
  * `text` resolved again (`remeasure.ts`).
  */
+import { printOf } from "../../anim/motion";
 import { PointerOver, Pressed, Tappable, Touchable } from "../../input/components";
 import type { Json } from "../../model/types";
 import {
   NineSlice,
+  OverlayLevel,
   Parent,
   Shape,
   Sprite,
@@ -19,7 +21,13 @@ import {
 } from "../../renderer/components";
 import { Text } from "../../text/components";
 import { Exiting, Layer, Order, Tree as WORLD_TREE } from "../../world/ecs/define";
-import type { AnyComponentType, AnyComponentValue, Entity, MotionHandle } from "../../world/types";
+import type {
+  AnyComponentType,
+  AnyComponentValue,
+  Entity,
+  MotionCause,
+  MotionHandle
+} from "../../world/types";
 import { Box, Escapable, LocalWrite, Scroll, UI_OWNER, UiCounters } from "../components";
 import { asError, asHandle } from "../errors";
 import type { LayoutModule, Rect } from "../layout/types";
@@ -29,8 +37,10 @@ import { CONTENT, visualOf } from "../visual";
 import { cancelExtra, livePatch, recordRest } from "./extras";
 import type { Fields } from "./fields";
 import { hintOf } from "./hints";
-import { hostViews, trackHost } from "./hosts";
+import { hostsOf, hostViews, slotFor, slotOf, trackHost } from "./hosts";
 import { forgetInstances, instanceFor, runView } from "./instances";
+import { childOrder, SIBLING_SPAN } from "./order";
+import { createSpan, enterOverlay, exitOverlay, overlayOf, settleOverlays } from "./overlay";
 import { settlePopups } from "./popups";
 import { createRange } from "./range";
 import { markResizedIcons, markResizedTexts } from "./remeasure";
@@ -145,10 +155,7 @@ type Change = {
  * @returns True when no component of the element has to be written for these props.
  * @example
  * ```ts
- * writesSame(
- *   { type: "button", props: { intent: "claim", payload: { id: 1 } }, children: [] },
- *   { type: "button", props: { intent: "claim", payload: { id: 2 } }, children: [] }
- * ); // false
+ * writesSame({ type: "row", props: { payload: { id: 1 } }, children: [] }, { type: "row", props: { payload: { id: 2 } }, children: [] }); // false
  * ```
  */
 function writesSame(previous: DescriptionNode, next: DescriptionNode): boolean {
@@ -230,10 +237,7 @@ export function withKey(node: DescriptionNode, key: string | undefined): Descrip
  * @returns The seven flags.
  * @example
  * ```ts
- * isFlagsOf(
- *   { type: "button", props: { state: { active: true } }, children: [] },
- *   { pressed: false, hover: true, focus: false, covered: false }
- * ).hover; // true
+ * isFlagsOf({ type: "button", props: { state: { active: true } }, children: [] }, { pressed: false, hover: true, focus: false, covered: false }).active; // true
  * ```
  */
 export function isFlagsOf(node: DescriptionNode, live: LiveFlags): IsFlags {
@@ -378,8 +382,7 @@ function listedOf(node: DescriptionNode): readonly AnyComponentValue[] {
  * @returns The values to carry, by component name.
  * @example
  * ```ts
- * const node = { type: "row", props: { components: [Transform({ x: 10 }), Held()] }, children: [] };
- * [...extrasOf({ node }).keys()]; // ["Held"]
+ * [...extrasOf({ node: { type: "row", props: { components: [Transform({ x: 10 }), Held()] }, children: [] } }).keys()]; // ["Held"]
  * ```
  */
 export function extrasOf(element: Pick<Element, "node">): ReadonlyMap<string, AnyComponentValue> {
@@ -392,6 +395,60 @@ export function extrasOf(element: Pick<Element, "node">): ReadonlyMap<string, An
   }
 
   return extras;
+}
+
+/**
+ * Tells whether the loop of a new render is the loop that runs: the same hook, or two hooks
+ * `defineMotion` built from the same keys, cycle and reduced-motion rule (their fingerprints are
+ * equal). A hand-written hook of a new reference is another loop.
+ *
+ * @param previous - The loop hook the element runs, if any.
+ * @param next - The loop hook of this render, if any.
+ * @returns True when the running loop goes on.
+ */
+function sameLoop(previous: unknown, next: unknown): boolean {
+  if (previous === next) return true;
+
+  const print = printOf(previous);
+
+  return print !== undefined && print === printOf(next);
+}
+
+/** How many patches in a row may rebuild a loop before a dev build names the element. */
+const REBUILDS_WARNED = 3;
+
+/** How many passes the solve gives the roots laid out in slots before it calls the rest a cycle. */
+const SLOT_PASSES = 4;
+
+/**
+ * Tells whether a root was last solved in a box of this size and place.
+ *
+ * @param solved - The box it was last solved in, if any.
+ * @param next - The box of this solve.
+ * @returns True when nothing moved.
+ * @example
+ * ```ts
+ * sameBox({ x: 0, y: 0, w: 10, h: 10 }, { x: 0, y: 0, w: 10, h: 10 }); // true
+ * ```
+ */
+function sameBox(solved: Rect | undefined, next: Rect): boolean {
+  return (
+    solved !== undefined &&
+    solved.x === next.x &&
+    solved.y === next.y &&
+    solved.w === next.w &&
+    solved.h === next.h
+  );
+}
+
+/**
+ * Creates the set of roots of one solve. Its own function, because lint rule L5 refuses a
+ * collection built inside an exported declaration.
+ *
+ * @returns An empty set.
+ */
+function rootSet(): Set<Root> {
+  return new Set();
 }
 
 /**
@@ -419,29 +476,40 @@ function sameFields(previous: object | true, next: object | true): boolean {
 }
 
 /**
+ * Where the element of a root is drawn: the layer and the order of its root, and the slot it is
+ * laid out in, with its place among the projections that slot hosts.
+ */
+export type RootPlacement = {
+  layer: string;
+  order: number;
+  slot?: { host: Entity; order: number };
+};
+
+/**
  * Everything an entering element gets at once, so a display object never exists without a rect.
- * A child draws with its parent, at the `zIndex` of its style among its siblings when it sets
- * one; the root element draws in the layer of its root, at its order, and ignores `zIndex`. The
+ * A child draws with its parent, always at an `Order`: its `zIndex` step and its place among its
+ * siblings (`childOrder`), so siblings draw in markup order at equal `zIndex`; the root element
+ * draws in the layer of its root, at its order, and ignores `zIndex`. A root element laid out in a
+ * slot hangs under the slot at the place the slot lists its projection, an integer `Order` (a
+ * non-element child of the slot), and keeps its layer to fall back to. The
  * extras of its `components` prop come after its own visual and input, before `Box`.
  *
  * @param element - The element whose rect, rest pose and extras are known.
- * @param root - The layer and the order of the root the element belongs to.
- * @param root.layer - The layer the root draws in.
- * @param root.order - The order of the root inside that layer.
+ * @param root - Where the root the element belongs to draws.
  * @returns The component values the entity is filled with.
  */
-export function componentsOf(
-  element: Element,
-  root: { layer: string; order: number }
-): AnyComponentValue[] {
+export function componentsOf(element: Element, root: RootPlacement): AnyComponentValue[] {
   const values: AnyComponentValue[] = [Transform(element.rest)];
 
   if (element.parent === undefined) {
-    values.push(Layer({ name: root.layer }), Order({ value: root.order }));
-  } else {
-    values.push(Parent({ entity: element.parent }));
+    values.push(Layer({ name: root.layer }), Order({ value: root.slot?.order ?? root.order }));
 
-    if (element.style.zIndex !== undefined) values.push(Order({ value: element.style.zIndex }));
+    if (root.slot !== undefined) values.push(Parent({ entity: root.slot.host }));
+  } else {
+    values.push(
+      Parent({ entity: element.parent }),
+      Order({ value: childOrder(element.style.zIndex, element.index) })
+    );
   }
 
   // `Box` is last on purpose: the world applies a queued attach in call order and fires
@@ -564,6 +632,7 @@ export function createReconciler(
    * @param node - The node to place.
    * @param identity - The identity of the element.
    * @param instance - The identity of the nearest component instance.
+   * @param index - Its place among the element children of its parent.
    * @returns The new entity.
    */
   function enter(
@@ -571,7 +640,8 @@ export function createReconciler(
     parent: Element | undefined,
     node: DescriptionNode,
     identity: string,
-    instance: string | undefined
+    instance: string | undefined,
+    index: number
   ): Entity {
     checkTag(node);
 
@@ -587,6 +657,9 @@ export function createReconciler(
       identity,
       type: node.type,
       key: node.key,
+      index,
+      cause: state.building ?? "change",
+      rebuilds: 0,
       parentType: parent?.type,
       root: root.entity,
       node,
@@ -652,25 +725,48 @@ export function createReconciler(
   }
 
   /**
-   * Writes the draw order of a live child again: the `zIndex` of its style, or 0 once a child
-   * that had one dropped it, so `renderer` sorts the siblings again. A child that never set one
-   * carries no `Order`; a root keeps the order of its root.
+   * Writes the draw order of a live child again: its `zIndex` step and its place among its
+   * siblings, so `renderer` sorts the siblings again. Nothing is written while the value stands;
+   * a root keeps the order of its root.
    *
-   * @param element - The element that changed.
+   * @param element - The element that changed or moved among its siblings.
    */
   function writeOrder(element: Element): void {
     if (element.parent === undefined) return;
 
     const current = ecs.get(element.entity, Order);
-    const value = element.style.zIndex ?? 0;
+    const value = childOrder(element.style.zIndex, element.index);
 
-    if (current === undefined) {
-      if (element.style.zIndex !== undefined) ecs.add(element.entity, Order({ value }));
+    if (current === undefined) ecs.add(element.entity, Order({ value }));
+    else if (current.value !== value) ecs.set(element.entity, Order, { value });
+  }
 
-      return;
+  /**
+   * Gives every child of a new list the place it has there: a live child whose place changed
+   * writes its `Order` again; one that is not live yet takes it from `componentsOf`. A dev build
+   * names a parent whose children spill over one `zIndex` step, once.
+   *
+   * @param parent - The element whose children were diffed.
+   * @param next - Its children of this render, in markup order.
+   */
+  function placeChildren(parent: Element, next: readonly Entity[]): void {
+    for (const [index, entity] of next.entries()) {
+      const element = state.elements.get(entity);
+
+      if (element === undefined || element.index === index) continue;
+
+      element.index = index;
+      if (element.live) writeOrder(element);
     }
 
-    if (current.value !== value) ecs.set(element.entity, Order, { value });
+    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) return;
+    if (next.length < SIBLING_SPAN || parent.warned.has("too-many-children")) return;
+
+    parent.warned.add("too-many-children");
+    ctx.log.warn("ui:too-many-children", {
+      key: parent.key ?? parent.identity,
+      count: next.length
+    });
   }
 
   /**
@@ -710,16 +806,39 @@ export function createReconciler(
     const next = extrasOf(element);
 
     warnOwned(element);
+    removeLeftExtras(element, next);
+    applyChangedExtras(element, next);
 
-    // Remove the extras that left the `components` prop, with the motion of their last change.
+    // Remember them for the next diff.
+    element.extras = next;
+  }
+
+  /**
+   * Removes the extras that left the `components` prop, with the motion of their last change.
+   *
+   * @param element - The live element that changed.
+   * @param next - The extras of this render, by component name.
+   */
+  function removeLeftExtras(element: Element, next: ReadonlyMap<string, AnyComponentValue>): void {
     for (const [name, previous] of element.extras) {
       if (next.has(name)) continue;
 
       cancelExtra(element, name);
       ecs.remove(element.entity, previous.type);
     }
+  }
 
-    // Add a new, tag or missing extra whole; play or patch the changed fields of the rest.
+  /**
+   * Adds a new, tag or missing extra whole, and plays or patches the changed fields of the rest.
+   * An extra with the same fields writes nothing.
+   *
+   * @param element - The live element that changed.
+   * @param next - The extras of this render, by component name.
+   */
+  function applyChangedExtras(
+    element: Element,
+    next: ReadonlyMap<string, AnyComponentValue>
+  ): void {
     for (const [name, value] of next) {
       const previous = element.extras.get(name);
       const isUnchanged = previous !== undefined && sameFields(previous.value, value.value);
@@ -749,9 +868,6 @@ export function createReconciler(
 
       ecs.set(element.entity, asHandle(value.type), livePatch(value.value, owned));
     }
-
-    // Remember them for the next diff.
-    element.extras = next;
   }
 
   /**
@@ -902,7 +1018,12 @@ export function createReconciler(
 
     const change = compare(root, element, node);
     const motion = node.props.motion as ElementMotion | undefined;
-    const loopChanged = motion?.loop !== element.motion?.loop;
+    const loopChanged = !sameLoop(element.motion?.loop, motion?.loop);
+
+    // The guard is inline and positive: a release build drops the count (spec 16 U5.2).
+    if (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) {
+      countRebuild(element, element.motion?.loop, motion?.loop);
+    }
 
     // A changed element has no basis until its write went through: a patch that throws on the way
     // is done in full at the next render, not taken for one that says the same.
@@ -927,6 +1048,34 @@ export function createReconciler(
     }
 
     diffChildren(root, element, childrenOf(node, range.slotsFor(element)), instance);
+  }
+
+  /**
+   * Counts a patch that brings a loop of another reference that is not really another loop: the
+   * same fingerprint, or a hook with none. A loop whose fingerprint changes is a loop that really
+   * changes, and resets the count. At three in a row the element is named, once: its motion is
+   * built in a view body and belongs at module level.
+   *
+   * @param element - The element being patched.
+   * @param previous - The loop hook it runs.
+   * @param next - The loop hook of this render.
+   */
+  function countRebuild(element: Element, previous: unknown, next: unknown): void {
+    const rebuilt =
+      previous !== undefined &&
+      next !== undefined &&
+      previous !== next &&
+      (sameLoop(previous, next) || printOf(previous) === undefined || printOf(next) === undefined);
+
+    element.rebuilds = rebuilt ? element.rebuilds + 1 : 0;
+
+    if (element.rebuilds < REBUILDS_WARNED || element.warned.has("motion-rebuilt")) return;
+
+    element.warned.add("motion-rebuilt");
+    ctx.log.warn("ui:motion-rebuilt", {
+      key: element.key ?? element.identity,
+      fingerprinted: printOf(next) !== undefined
+    });
   }
 
   /**
@@ -994,9 +1143,9 @@ export function createReconciler(
       return element.entity;
     }
 
-    if (element !== undefined) exitElement(element);
+    if (element !== undefined) exitElement(element, "change");
 
-    return enter(root, parent, effective, identity, owner);
+    return enter(root, parent, effective, identity, owner, index);
   }
 
   /**
@@ -1034,7 +1183,7 @@ export function createReconciler(
 
       if (element === undefined) continue;
       if (dropsRows) range.dropRow(element);
-      else exitElement(element);
+      else exitElement(element, "change");
     }
 
     // Keep the new list; the same children in the same order need no new placement.
@@ -1046,7 +1195,8 @@ export function createReconciler(
 
     if (same) return;
 
-    // Re-place the children in the layout once, and solve again.
+    // Draw the children in the order of this render, then re-place them in the layout once, and solve again.
+    placeChildren(parent, next);
     modules.layout.place(
       parent,
       next.map(entity => state.elements.get(entity)).filter(element => isElement(element))
@@ -1058,31 +1208,42 @@ export function createReconciler(
    * Starts the exit of an element and of everything under it.
    *
    * @param element - The element that left the description.
+   * @param cause - Why it leaves: `"change"` for a commit, `"mount"` when it goes with its screen.
    */
-  function exitElement(element: Element): void {
+  function exitElement(element: Element, cause: MotionCause): void {
     forgetSubtree(element);
     forgetInstances(state, element.identity);
     state.exiting.add(element.entity);
-    exitSubtree(element);
+    exitSubtree(element, cause);
   }
 
   /**
-   * Plays the exit hook of an element and of everything under it. A child keeps its rect and its
-   * `Exiting` tag until the whole subtree stopped moving.
+   * Plays the exit hook of an element and of everything under it, each told why it leaves. A child
+   * keeps its rect and its `Exiting` tag until the whole subtree stopped moving.
    *
    * @param element - The element that leaves, or one of its children.
+   * @param cause - Why the subtree leaves.
    */
-  function exitSubtree(element: Element): void {
+  function exitSubtree(element: Element, cause: MotionCause): void {
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
-    modules.layout.exit(element);
+
+    if (overlayOf(element) === undefined) {
+      modules.layout.exit(element, cause);
+    } else {
+      // The level of an overlay goes back with its exit motion, so the dim and the HUD are back before it goes.
+      const span = createSpan();
+
+      modules.layout.exit(element, cause, span);
+      exitOverlay(ctx, modules.layout, element, span);
+    }
 
     if (element.type === "input") fields.exit(element);
 
     for (const child of element.children) {
       const childElement = state.elements.get(child);
 
-      if (childElement !== undefined) exitSubtree(childElement);
+      if (childElement !== undefined) exitSubtree(childElement, cause);
     }
   }
 
@@ -1150,6 +1311,7 @@ export function createReconciler(
     state.hosts.delete(element.entity);
     state.scrolls.delete(element.entity);
     state.exiting.delete(element.entity);
+    state.overlays.delete(element.entity);
     state.elements.delete(element.entity);
     ecs.despawn(element.entity);
   }
@@ -1194,20 +1356,22 @@ export function createReconciler(
   /**
    * Applies a solved rect to an element that is already live. A moved one gets its `Box`, its
    * visual size and its `change.Box` motion; its rest pose then plays `change.Transform` unless
-   * the `change` hook already moves it.
+   * the `change` hook already moves it. A quiet one plays neither: its root changed its place (a
+   * slot came or went), so its rects changed units, not places.
    *
    * @param element - The live element to apply.
    * @param parent - The rect of its parent, or nothing for a root.
+   * @param quiet - Whether the rects apply with no motion.
    */
-  function applyLive(element: Element, parent: Rect | undefined): void {
+  function applyLive(element: Element, parent: Rect | undefined, quiet: boolean): void {
     // Commit a moved rect, rewrite the components and play the `change` hook with the routed hint.
     const hint = hintOf(state, element);
-    let hooked = false;
+    let hooked = quiet;
 
     if (element.moved) {
       modules.layout.commit(element, parent);
       writeLive(element);
-      hooked = modules.layout.change(element, element.previous, hint);
+      if (!quiet) hooked = modules.layout.change(element, element.previous, hint);
     }
 
     // Move the rest pose, which plays `change.Transform` only when no hook took it.
@@ -1227,15 +1391,20 @@ export function createReconciler(
     modules.layout.repose(element, parent, true);
 
     // Spawn every component the element carries, extras included.
-    const root = state.roots.get(element.root) ?? { layer: "ui", order: 0 };
+    const root = placementOf(state.roots.get(element.root));
 
     element.extras = extrasOf(element);
     warnOwned(element);
 
     for (const value of element.extras.values()) recordRest(ctx, element, value);
+    // An overlay's level and landing are the engine's: they start at 0, and its enter (at `Box`) moves them.
+    if (overlayOf(element) !== undefined) ecs.add(element.entity, OverlayLevel());
     for (const value of componentsOf(element, root)) ecs.add(element.entity, value);
 
     element.live = true;
+
+    // A host that comes now hosts its views in this solve, so they are first drawn under it (spec 16 U2.1).
+    if (state.hosts.has(element.entity)) state.risen.add(element.entity);
   }
 
   /**
@@ -1244,13 +1413,14 @@ export function createReconciler(
    * whose rest pose moved (a new rect, a new fit scale) plays `change.Transform` or takes it.
    *
    * @param element - The element to apply.
+   * @param quiet - Whether a live element takes its rect with no motion.
    */
-  function applyRects(element: Element): void {
+  function applyRects(element: Element, quiet = false): void {
     // Apply this element: a live one moves, a new one spawns its components.
     const parent = parentRect(element);
 
     if (element.live) {
-      applyLive(element, parent);
+      applyLive(element, parent, quiet);
     } else {
       applyFirst(element, parent);
     }
@@ -1261,8 +1431,258 @@ export function createReconciler(
     for (const child of element.children) {
       const childElement = lookup(child);
 
-      if (childElement !== undefined) applyRects(childElement);
+      if (childElement !== undefined) applyRects(childElement, quiet);
     }
+  }
+
+  /**
+   * Where the element of a root draws: its layer and order, and its slot with the place the slot
+   * lists the root's projection at.
+   *
+   * @param root - The root, or nothing for an element whose root is gone.
+   * @returns The placement `componentsOf` takes.
+   */
+  function placementOf(root: Root | undefined): RootPlacement {
+    if (root === undefined) return { layer: "ui", order: 0 };
+    if (root.slot === undefined) return { layer: root.layer, order: root.order };
+
+    return {
+      layer: root.layer,
+      order: root.order,
+      slot: { host: root.slot, order: slotOrderOf(root) }
+    };
+  }
+
+  /**
+   * The place a slot lists the projection of a root at: the root's `Order` among the slot's
+   * children, an integer, so it draws over the slot's element children at `zIndex` 0.
+   *
+   * @param root - A root laid out in a slot.
+   * @returns The index of its projection in the slot's `hosts`, 0 when the slot no longer names it.
+   */
+  function slotOrderOf(root: Root): number {
+    const host = root.slot === undefined ? undefined : state.elements.get(root.slot);
+    const index = host === undefined ? -1 : hostsOf(host.node).indexOf(root.name);
+
+    return Math.max(0, index);
+  }
+
+  /**
+   * Hangs the live element of a root where its root is placed now: under its new slot, with the
+   * slot's order, or back in its layer at the root's order. The renderer puts a view whose
+   * `Parent` left back in its layer. An element that is not live yet takes its place from
+   * `componentsOf`.
+   *
+   * @param root - A root whose slot changed.
+   */
+  function placeRoot(root: Root): void {
+    const element = root.element === undefined ? undefined : lookup(root.element);
+
+    if (element?.live !== true) return;
+
+    if (root.slot === undefined) {
+      ecs.remove(element.entity, Parent);
+      ecs.set(element.entity, Order, { value: root.order });
+
+      return;
+    }
+
+    ecs.add(element.entity, Parent({ entity: root.slot }));
+    ecs.set(element.entity, Order, { value: slotOrderOf(root) });
+  }
+
+  /**
+   * Names, in a dev build, every other host that names a root's projection besides its slot, once
+   * per host and projection: the first host takes it, the others draw nothing for it.
+   *
+   * @param root - The root.
+   * @param slot - The slot it took.
+   */
+  function warnTaken(root: Root, slot: Entity): void {
+    for (const host of state.hosts) {
+      const element = host === slot ? undefined : slotFor(state, root, host);
+      const once = `slot-taken:${root.name}`;
+
+      if (element === undefined || element.warned.has(once)) continue;
+
+      element.warned.add(once);
+      ctx.log.warn("ui:slot-taken", {
+        projection: root.name,
+        host: element.key ?? element.identity
+      });
+    }
+  }
+
+  /**
+   * Tells whether a root was found slotted in a root slotted in it: it stays on the viewport.
+   *
+   * @param root - The root.
+   * @returns True after a cycle of slots was logged for its element.
+   */
+  function isCyclic(root: Root): boolean {
+    const element = root.element === undefined ? undefined : lookup(root.element);
+
+    return element?.warned.has("slot-cycle") === true;
+  }
+
+  /**
+   * Gives every root its slot for this solve (spec 16 U3.3). A root whose slot changed needs a
+   * solve, and takes its new rects with no motion; a live root element hangs at its new place now.
+   *
+   * @returns The roots whose slot changed.
+   */
+  function assignSlots(): Set<Root> {
+    const moved = rootSet();
+
+    for (const root of state.roots.values()) {
+      if (state.removing.has(root.entity)) continue;
+
+      const slot = isCyclic(root) ? undefined : slotOf(state, root);
+      const dev = typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__;
+
+      if (dev && slot !== undefined) warnTaken(root, slot);
+      if (slot === root.slot) continue;
+
+      root.slot = slot;
+      root.slotRect = undefined;
+      root.needsSolve = true;
+      moved.add(root);
+      placeRoot(root);
+    }
+
+    return moved;
+  }
+
+  /**
+   * The roots this solve may lay out: every root marked for a solve, and every root in a slot,
+   * whose slot may have been resized.
+   *
+   * @returns The roots, in mount order.
+   */
+  function pendingRoots(): Set<Root> {
+    const pending = rootSet();
+
+    for (const root of state.roots.values()) {
+      if (root.element === undefined || lookup(root.element) === undefined) continue;
+      if (root.needsSolve || root.slot !== undefined) pending.add(root);
+    }
+
+    return pending;
+  }
+
+  /**
+   * The box a root in a slot is solved in: the slot's content box, once the slot's own root needs
+   * no solve in this call any more.
+   *
+   * @param root - A root laid out in a slot.
+   * @param pending - The roots still waiting in this solve.
+   * @returns The box, or `undefined` while the slot's root waits.
+   */
+  function slotBoxOf(root: Root, pending: ReadonlySet<Root>): Rect | undefined {
+    const host = root.slot === undefined ? undefined : state.elements.get(root.slot);
+
+    if (host === undefined) return undefined;
+
+    const hostRoot = state.roots.get(host.root);
+
+    return hostRoot !== undefined && pending.has(hostRoot)
+      ? undefined
+      : modules.layout.contentRect(host);
+  }
+
+  /**
+   * Solves one root in a box and applies its rects: a root on the viewport when it is marked, a
+   * root in a slot also when its slot was resized.
+   *
+   * @param root - The root.
+   * @param box - The viewport, or the slot's content box.
+   * @param quiet - Whether its live elements take their rects with no motion.
+   * @returns True when the root was solved.
+   */
+  function solveOne(root: Root, box: Rect, quiet: boolean): boolean {
+    const element = root.element === undefined ? undefined : lookup(root.element);
+
+    if (element === undefined) return false;
+
+    const resized = root.slot !== undefined && !sameBox(root.slotRect, box);
+
+    if (!root.needsSolve && !resized) return false;
+    if (root.slot !== undefined) root.slotRect = box;
+
+    modules.layout.solve(element, box, lookup);
+    root.needsSolve = false;
+    applyRects(element, quiet);
+
+    return true;
+  }
+
+  /**
+   * Solves every root that needs it, in passes: a root in a slot waits for the root of its slot,
+   * and a slot inside a slot takes one more pass. The roots still waiting after the last pass are
+   * slotted in each other: each is laid out on the viewport instead.
+   *
+   * @param size - The viewport.
+   * @param moved - The roots whose slot changed: they take their rects with no motion.
+   * @returns True when a root was solved.
+   */
+  function layOutRoots(size: Rect, moved: ReadonlySet<Root>): boolean {
+    const pending = pendingRoots();
+    let changed = false;
+
+    for (let pass = 0; pass < SLOT_PASSES && pending.size > 0; pass += 1) {
+      if (solvePass(pending, size, moved)) changed = true;
+    }
+
+    for (const root of pending) {
+      breakCycle(root);
+      if (solveOne(root, size, true)) changed = true;
+    }
+
+    return changed;
+  }
+
+  /**
+   * One pass over the waiting roots: every root whose box is known now is solved and leaves the
+   * waiting set.
+   *
+   * @param pending - The roots still waiting; emptied of the ones this pass solves.
+   * @param size - The viewport.
+   * @param moved - The roots whose slot changed: they take their rects with no motion.
+   * @returns True when a root was solved.
+   */
+  function solvePass(pending: Set<Root>, size: Rect, moved: ReadonlySet<Root>): boolean {
+    let changed = false;
+
+    for (const root of pending) {
+      const box = root.slot === undefined ? size : slotBoxOf(root, pending);
+
+      if (box === undefined) continue;
+
+      pending.delete(root);
+      if (solveOne(root, box, moved.has(root))) changed = true;
+    }
+
+    return changed;
+  }
+
+  /**
+   * Lays out a root of a cycle of slots on the viewport instead, clears its slot and logs the
+   * cycle once: it stays out of slots from then on.
+   *
+   * @param root - A root still waiting after the last pass.
+   */
+  function breakCycle(root: Root): void {
+    const element = root.element === undefined ? undefined : lookup(root.element);
+
+    root.slot = undefined;
+    root.slotRect = undefined;
+    root.needsSolve = true;
+    placeRoot(root);
+
+    if (element === undefined || element.warned.has("slot-cycle")) return;
+
+    element.warned.add("slot-cycle");
+    ctx.log.error("ui:slot-cycle", { projection: root.name });
   }
 
   /**
@@ -1280,8 +1700,17 @@ export function createReconciler(
 
     element.entered = true;
 
-    if (element.scrolledIn) modules.layout.loop(element);
-    else modules.layout.enter(element);
+    if (element.scrolledIn) {
+      modules.layout.loop(element);
+    } else if (overlayOf(element) === undefined) {
+      modules.layout.enter(element);
+    } else {
+      // The level of an overlay follows its enter motion: the hook's tracks are measured as it plays.
+      const span = createSpan();
+
+      modules.layout.enter(element, span);
+      enterOverlay(ctx, state, modules.layout, { element, span });
+    }
   }
 
   /**
@@ -1320,18 +1749,31 @@ export function createReconciler(
       root.element = undefined;
       root.dirty = true;
       root.needsSolve = true;
+      // A restore or a load is a mount: the rebuilt elements stand at rest under `when: "change"`.
+      root.cause = "mount";
     }
   }
 
   /**
-   * Reconciles one root from the node its `Tree` carries.
+   * Reconciles one root from the node its `Tree` carries. Its first build reads how the root came,
+   * from the world's view record, which exists by now; the elements entered by this diff take that
+   * cause, and the elements of any later diff take `"change"` (spec 16 U4).
    *
    * @param root - The root to reconcile.
    */
   function reconcileRoot(root: Root): void {
     const identity = String(root.entity);
+    const first = root.element === undefined;
 
-    root.element = diffNode(root, undefined, root.tree, 0, identity);
+    if (first) root.cause ??= ctx.deps.world.projection.causeOf(root.entity) ?? "change";
+
+    state.building = first ? root.cause : "change";
+
+    try {
+      root.element = diffNode(root, undefined, root.tree, 0, identity);
+    } finally {
+      state.building = undefined;
+    }
   }
 
   /**
@@ -1375,6 +1817,27 @@ export function createReconciler(
   }
 
   /**
+   * Takes the order the projection wrote on a root's entity (spec 16 U1.6) and gives it to the
+   * live root element when it changed, so the roots of a layer keep the order of the scene's list.
+   *
+   * @param root - A root with work this frame.
+   */
+  function refreshRootOrder(root: Root): void {
+    const order = ecs.get(root.entity, Order)?.value;
+
+    if (order === undefined || order === root.order) return;
+
+    root.order = order;
+
+    const element = root.element === undefined ? undefined : lookup(root.element);
+
+    // A root in a slot draws at the place its slot lists it.
+    if (element?.live === true && root.slot === undefined) {
+      ecs.set(element.entity, Order, { value: order });
+    }
+  }
+
+  /**
    * Reconciles one dirty root: reads its current tree and projection name, then diffs it. The root
    * stays dirty while the layout engine is not loaded, and a failure is logged for this root only.
    *
@@ -1387,6 +1850,8 @@ export function createReconciler(
 
     if (place !== undefined) root.name = place.projection;
     if (tree !== undefined) root.tree = tree.node as DescriptionNode;
+
+    refreshRootOrder(root);
 
     // Without the layout engine the root stays dirty and waits for a later frame.
     root.dirty = !modules.layout.loaded();
@@ -1468,28 +1933,28 @@ export function createReconciler(
   }
 
   /**
-   * The second system of phase `layout`: one solve per marked root, then the rects, the rest
-   * poses and the hooks. The hints released since the last frame step are dropped at its end, so
+   * The second system of phase `layout`: every root takes its slot, then one solve per marked
+   * root, a root in a slot after the root of its slot and in its content box, then the rects, the
+   * rest poses and the hooks, and the hosting of the hosts that came. The hints released since the last frame step are dropped at its end, so
    * the `change.Box` and `change.Transform` hooks the solve plays get the hint the reconcile
    * routed, and the next frame starts with none.
    */
   function solve(): void {
     const viewport = modules.styles.viewport();
     const size: Rect = { x: 0, y: 0, w: viewport?.width ?? 0, h: viewport?.height ?? 0 };
-    let changed = false;
-
-    for (const root of state.roots.values()) {
-      const element = root.element === undefined ? undefined : lookup(root.element);
-
-      if (!root.needsSolve || element === undefined) continue;
-
-      modules.layout.solve(element, size, lookup);
-      root.needsSolve = false;
-      applyRects(element);
-      changed = true;
-    }
+    const changed = layOutRoots(size, assignSlots());
 
     if (changed) ctx.deps.time.wake();
+
+    // Land the overlays whose enter is over: the renderer reads it in this frame.
+    settleOverlays(ctx, state, modules.layout);
+
+    // The hosts that came in this solve take their views now: the parents land at the flush of phase
+    // `layout`, before the first `sync` pass that draws the hosts (spec 16 U2.1, K4).
+    if (state.risen.size > 0) {
+      hostViews(ctx, state, state.risen);
+      state.risen.clear();
+    }
 
     state.hints.length = 0;
     writeCounters();
@@ -1515,6 +1980,8 @@ export function createReconciler(
       if (popup !== undefined) {
         known.popup = popup;
         known.name = name;
+        // A popup's open is an event: its elements play their motion whatever `when` says.
+        known.cause = "change";
       }
 
       return;
@@ -1532,13 +1999,18 @@ export function createReconciler(
       needsSolve: true,
       element: undefined,
       popup,
-      covered: false
+      covered: false,
+      cause: popup === undefined ? undefined : "change",
+      slot: undefined,
+      slotRect: undefined
     });
   }
 
   /**
    * Starts the teardown of a root: every element exits with its motion, then the sweep frees the
-   * nodes and despawns the root entity.
+   * nodes and despawns the root entity. A popup leaves by an event; a projection root leaves the
+   * way its view did, which the world still answers in its removal hook: `"mount"` with its scene,
+   * a load or a restore.
    *
    * @param entity - The root entity.
    */
@@ -1548,10 +2020,12 @@ export function createReconciler(
     if (root === undefined || state.removing.has(entity)) return;
 
     const element = root.element === undefined ? undefined : lookup(root.element);
+    const cause =
+      root.popup === undefined ? (ctx.deps.world.projection.causeOf(entity) ?? "change") : "change";
 
     state.removing.add(entity);
 
-    if (element !== undefined) exitElement(element);
+    if (element !== undefined) exitElement(element, cause);
 
     ctx.deps.time.wake();
   }

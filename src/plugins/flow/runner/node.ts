@@ -163,6 +163,8 @@ export function nodeFx(
     });
   };
 
+  // The gateway is not generic: the result type is the descriptor's promise, kept by
+  // `defineEffect` and the built-in helpers.
   return Object.assign(run, {
     /**
      * Buffers one cosmetic hint until the transaction of this node commits.
@@ -173,7 +175,7 @@ export function nodeFx(
       modules.fx.buffer(item);
     },
     start
-  });
+  }) as NodeFx;
 }
 
 /**

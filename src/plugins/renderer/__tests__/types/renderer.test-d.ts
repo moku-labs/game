@@ -1,5 +1,6 @@
 import { expectTypeOf } from "vitest";
 import type { Config as GameConfig } from "../../../../config";
+import type { Api as TimeApi } from "../../../time/types";
 import type { Entity } from "../../../world/types";
 import type {
   NineSliceValue,
@@ -16,14 +17,19 @@ import type {
   Config,
   CreateTextureOptions,
   DebugSwitches,
+  DisplayAdapter,
+  FilterCache,
   FilterSlot,
+  FilterSlotInputs,
   HitBox,
+  KeptStats,
   LegendEntry,
   Orientation,
   PictureRect,
   PixiFilter,
   PixiTexture,
   Point,
+  PoolTrim,
   RenderStats,
   SafeArea,
   SliceFrame,
@@ -136,14 +142,21 @@ expectTypeOf(renderer.sync.hitTest).toEqualTypeOf<
 // @ts-expect-error — the caller always names its filter
 renderer.sync.hitTest(540, 300);
 
-expectTypeOf(renderer.viewport.size).toEqualTypeOf<() => ViewportSize>();
+// One frozen object (spec 25 F11): read-only, and still assignable where a game annotates a `ViewportSize`.
+expectTypeOf(renderer.viewport.size).toEqualTypeOf<() => Readonly<ViewportSize>>();
 expectTypeOf(renderer.viewport.size()).toEqualTypeOf<{
-  width: number;
-  height: number;
-  scale: number;
-  orientation: Orientation;
-  safeArea: SafeArea;
+  readonly width: number;
+  readonly height: number;
+  readonly scale: number;
+  readonly orientation: Orientation;
+  readonly safeArea: SafeArea;
 }>();
+expectTypeOf(renderer.viewport.size()).toExtend<ViewportSize>();
+
+const frame = renderer.viewport.size();
+
+// @ts-expect-error — the frame is read, never written: the object is frozen
+frame.width = 1;
 expectTypeOf(renderer.viewport.size().orientation).toEqualTypeOf<"portrait" | "landscape">();
 expectTypeOf(renderer.viewport.size().safeArea).toEqualTypeOf<{
   top: number;
@@ -161,8 +174,18 @@ renderer.viewport.apply;
 // ─── debug switches and the long side of the reference space ──
 
 expectTypeOf(renderer.sync.debug.nineSlice).toEqualTypeOf<(on: boolean) => void>();
-expectTypeOf(renderer.sync.debug.state()).toEqualTypeOf<{ nineSlice: boolean }>();
-expectTypeOf<Config["debug"]>().toEqualTypeOf<DebugSwitches>();
+expectTypeOf(renderer.sync.debug.state()).toEqualTypeOf<{
+  nineSlice: boolean;
+  verifyFrames: boolean;
+  kept: boolean;
+}>();
+expectTypeOf(renderer.sync.debug.kept).toEqualTypeOf<(on: boolean) => void>();
+// The editor's A/B switch of a measurement passes the one key it changes.
+expectTypeOf<{ kept: false }>().toExtend<Config["debug"]>();
+expectTypeOf(renderer.sync.debug.verifyFrames).toEqualTypeOf<(on: boolean) => void>();
+// A game that sets only the outline at start keeps compiling: a switch left out is off.
+expectTypeOf<{ nineSlice: true }>().toExtend<Config["debug"]>();
+expectTypeOf<Config["debug"]>().toEqualTypeOf<Partial<DebugSwitches>>();
 expectTypeOf<GameConfig["referenceLong"]>().toEqualTypeOf<number>();
 
 // @ts-expect-error — the switch takes a boolean
@@ -174,14 +197,28 @@ expectTypeOf(renderer.viewport.toScreen).toEqualTypeOf<(point: Point) => Point>(
 expectTypeOf(renderer.stats()).toEqualTypeOf<RenderStats>();
 expectTypeOf<RenderStats>().toEqualTypeOf<{
   fps: number;
+  drawn: number;
   frameMs: number;
   textures: number;
   textureMb: number;
+  textureMbSplit: { art: number; targets: number; kept: number };
   views: number;
   pooled: number;
   renderPasses: number;
+  renderPassesMax: number;
+  kept: KeptStats;
   drawCalls?: number;
+  redraws?: number;
+  rebuilds?: number;
 }>();
+expectTypeOf<RenderStats["redraws"]>().toEqualTypeOf<number | undefined>();
+expectTypeOf<RenderStats["rebuilds"]>().toEqualTypeOf<number | undefined>();
+expectTypeOf<RenderStats["kept"]>().toEqualTypeOf<{
+  pictures: number;
+  mb: number;
+  retakes: number;
+}>();
+expectTypeOf<Config["keptMb"]>().toEqualTypeOf<number>();
 expectTypeOf(renderer.capture).toEqualTypeOf<
   (options?: CaptureOptions) => Promise<Captured | undefined>
 >();
@@ -196,7 +233,15 @@ renderer.begin;
 
 declare const glow: PixiFilter;
 
-expectTypeOf<FilterSlot>().toEqualTypeOf<{ filter: PixiFilter; passes: number }>();
+expectTypeOf<FilterSlot>().toEqualTypeOf<{
+  filter: PixiFilter;
+  passes: number;
+  kind?: string;
+  inputs?: FilterSlotInputs;
+  cache?: FilterCache;
+  origin?: Float32Array;
+  blurs?: boolean;
+}>();
 expectTypeOf(renderer.sync.filters.set).toEqualTypeOf<
   (entity: Entity, slots: readonly FilterSlot[]) => void
 >();
@@ -205,6 +250,13 @@ expectTypeOf(renderer.host.gl).toEqualTypeOf<() => WebGL2RenderingContext | unde
 expectTypeOf(renderer.sync.renderPasses).toEqualTypeOf<() => number>();
 
 renderer.sync.filters.set(1_048_576, [{ filter: glow, passes: 1 }]);
+// A slot of effects says what the kept cache may do with its filter; a game's own slot leaves it out.
+renderer.sync.filters.set(1_048_580, [
+  { filter: glow, passes: 1, cache: "placed", origin: new Float32Array(2) }
+]);
+
+// @ts-expect-error — a slot's cache is one of the three categories
+renderer.sync.filters.set(1_048_579, [{ filter: glow, passes: 1, cache: "always" }]);
 
 // @ts-expect-error — a slot says what one apply of its filter costs
 renderer.sync.filters.set(1_048_577, [{ filter: glow }]);
@@ -277,3 +329,57 @@ renderer.capture({ sheet: { frames: 6 } });
 
 // @ts-expect-error — layers are names, not one name
 renderer.capture({ layers: "hud" });
+
+// ─── render on demand: the switch, invalidate, adapters that answer, wakes ──
+
+expectTypeOf<Config["onDemand"]>().toEqualTypeOf<boolean>();
+
+// ─── the pool trim (spec 25 C14) ──────────────────────────────
+
+expectTypeOf<false>().toExtend<Config["poolTrim"]>();
+expectTypeOf<{ restMs: number; aboveMb: number }>().toExtend<Config["poolTrim"]>();
+expectTypeOf<PoolTrim>().toExtend<Config["poolTrim"]>();
+
+declare function trimWith(poolTrim: Config["poolTrim"]): void;
+
+trimWith({ restMs: 500, aboveMb: 32 });
+// @ts-expect-error — `true` is not a trim: give the two numbers, or false to keep the targets
+trimWith(true);
+// @ts-expect-error — a trim names both numbers
+trimWith({ restMs: 1000 });
+expectTypeOf(renderer.invalidate).toEqualTypeOf<(entity: Entity) => void>();
+
+// @ts-expect-error — there is no whole-frame form: invalidate names the entity it is about to write
+renderer.invalidate();
+
+// An adapter typed `: void` before the change still compiles, and so does one that answers.
+const quiet: DisplayAdapter<{ s: string }> = {
+  create: () => undefined,
+  update: (): void => undefined,
+  destroy: () => undefined
+};
+const answering: DisplayAdapter<{ s: string }> = {
+  create: () => undefined,
+  update: (_object, previous, next) => previous.s !== next.s,
+  destroy: () => undefined
+};
+
+// biome-ignore lint/suspicious/noConfusingVoidType: the return type of the adapter, as it is declared
+expectTypeOf(quiet.update).returns.toEqualTypeOf<boolean | void>();
+// biome-ignore lint/suspicious/noConfusingVoidType: the return type of the adapter, as it is declared
+expectTypeOf(answering.update).returns.toEqualTypeOf<boolean | void>();
+expectTypeOf<TimeApi["wakes"]>().toEqualTypeOf<() => number>();
+
+// ─── spec 27: the filter area and the warm-up ────────────────────────
+
+declare const filtersApi: Api["sync"]["filters"];
+declare const someFilter: PixiFilter;
+
+// An area is four numbers in the entity's units, or `undefined` for the view's bounds.
+filtersApi.area(1_048_590, [107, 101, 176, 176]);
+filtersApi.area(1_048_590, undefined);
+// @ts-expect-error — three numbers are no rectangle
+filtersApi.area(1_048_590, [107, 101, 176]);
+// The warm-up answers whether the pipelines were created.
+expectTypeOf(filtersApi.warm(someFilter)).toEqualTypeOf<Promise<boolean>>();
+expectTypeOf<Config["warm"]>().toEqualTypeOf<number>();

@@ -40,10 +40,32 @@ const boardItems = projection({
   layer: "items",
   from: (player: Player) => player.items,
   key: (item: Item) => item.id,
-  view: (item: Item) => [Transform({ x: item.x, y: 0, rotation: 0, scale: 1 })]
+  view: (item: Item) => [Transform({ x: item.x, y: 0, rotation: 0, scale: 1 })],
+  // The item shrinks away over 400 ms when a commit removes it.
+  motion: { exit: view => view.tween(Transform, { scale: 0 }, { ms: 400, ease: "linear" }) }
 });
 
-const home = defineNode({ outcomes: { go: type(), quit: type() }, rest: true });
+/** The flight of the item: three steps of 100 ms, one field each. */
+const flight = defineAnimation("board.flight", {
+  slots: { item: type<Target>() },
+  build: ({ item }) =>
+    sequence(
+      tween(item, Transform, { x: 100 }, { ms: 100, ease: "linear" }),
+      tween(item, Transform, { y: 100 }, { ms: 100, ease: "linear" }),
+      tween(item, Transform, { rotation: 1 }, { ms: 100, ease: "linear" })
+    )
+});
+
+const home = defineNode({ outcomes: { go: type(), drop: type(), quit: type() }, rest: true });
+
+const dropItems = defineNode({
+  outcomes: { done: type() },
+  run: ({ player, out }) => {
+    player.items = [];
+
+    return out.done();
+  }
+});
 
 const deliver = defineNode({
   outcomes: { done: type() },
@@ -55,16 +77,20 @@ const deliver = defineNode({
 });
 
 const main = defineFlow("main", {
-  nodes: { home, deliver },
+  nodes: { home, deliver, dropItems },
   start: "home",
   outcomes: { over: type() },
-  edges: { home: { go: "deliver", quit: exit("over") }, deliver: { done: "home" } }
+  edges: {
+    home: { go: "deliver", drop: "dropItems", quit: exit("over") },
+    deliver: { done: "home" },
+    dropItems: { done: "home" }
+  }
 });
 
 const boardFeature = defineFeature("board", {
   flows: [main],
   projections: [boardItems],
-  animations: [deliverOrder]
+  animations: [deliverOrder, flight]
 });
 
 /** What the probe saw in the animate phase, after the anim step of the same frame. */
@@ -210,6 +236,30 @@ describe("anim plugin integration", () => {
     await handle.done;
 
     expect(app.anim.active()).toBe(0);
+  });
+
+  it("keeps a three-step flight flying after a commit removes its item mid-flight", async () => {
+    const app = await startApp();
+    const entity = app.world.projection.entityOf("board.items", "a") ?? 0;
+    const handle = app.anim.play(flight, { item: card });
+
+    app.time.step(50);
+
+    expect(app.flow.gate.answer({ intent: "drop" })).toBe(true);
+    await tick();
+    app.time.step(16);
+
+    expect(app.world.projection.entityOf("board.items", "a")).toBeUndefined();
+
+    while (handle.active()) app.time.step(16);
+
+    expect(app.world.ecs.get(entity, Transform)).toMatchObject({ x: 100, y: 100, rotation: 1 });
+
+    for (let index = 0; index < 20; index += 1) app.time.step(16);
+
+    expect(app.world.ecs.get(entity, Transform)).toBeUndefined();
+
+    await app.stop();
   });
 
   it("loops a Frames coin on the engine clock and lets a played frames step take over", async () => {

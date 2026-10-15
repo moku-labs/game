@@ -62,7 +62,9 @@ describe("sync shapes", () => {
     expect(graphics.ops).toEqual([
       { op: "roundRect", x: 0, y: 0, width: 200, height: 100, radius: 12 }
     ]);
-    expect(graphics.fills).toEqual([{ color: 0x10_20_30 }]);
+    // A fill-only shape is drawn white and coloured by its tint (spec 26 R2.1).
+    expect(graphics.fills).toEqual([{ color: 0xff_ff_ff }]);
+    expect(graphics.tint).toBe(0x10_20_30);
     expect(graphics.alpha).toBe(0.5);
 
     mock.world.clearChanges();
@@ -70,11 +72,13 @@ describe("sync shapes", () => {
 
     expect(graphics.clears).toBe(1);
 
-    mock.world.ecs.set(entity, Shape, { fill: 0x00_ff_00 });
+    mock.world.ecs.set(entity, Shape, { w: 210 });
     mock.modules.sync.pass();
 
     expect(graphics.clears).toBe(2);
-    expect(graphics.fills).toEqual([{ color: 0x00_ff_00 }]);
+    expect(graphics.ops).toEqual([
+      { op: "roundRect", x: 0, y: 0, width: 210, height: 100, radius: 12 }
+    ]);
   });
 
   it("draws a plain rectangle without a radius and strokes only when asked", async () => {
@@ -129,13 +133,14 @@ describe("sync shapes", () => {
 
     const graphics = graphicsOf(mock, glass);
 
-    expect(graphics.fills).toEqual([{ color: 0x10_20_30, alpha: 0.5 }]);
+    expect(graphics.fills).toEqual([{ color: 0xff_ff_ff, alpha: 0.5 }]);
+    expect(graphics.tint).toBe(0x10_20_30);
     expect(graphics.alpha).toBe(0.8);
 
     mock.world.ecs.set(glass, Shape, { fillAlpha: 1 });
     mock.modules.sync.pass();
 
-    expect(graphics.fills).toEqual([{ color: 0x10_20_30 }]);
+    expect(graphics.fills).toEqual([{ color: 0xff_ff_ff }]);
   });
 
   it("draws a triangle pointing right that fills its box, whatever the radius", async () => {
@@ -453,5 +458,117 @@ describe("sync shapes", () => {
 
     expect(graphicsOf(mock, second)).toBe(graphics);
     expect(graphics.ops).toEqual([{ op: "rect", x: 0, y: 0, width: 20, height: 20, radius: 0 }]);
+  });
+
+  it("does not redraw a fill-only shape whose colour changes: its tint changes", async () => {
+    const mock = await started();
+    const pill = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 120, h: 40, radius: 20, fill: 0x10_20_30 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, pill);
+
+    mock.world.ecs.set(pill, Shape, { fill: 0x00_ff_00 });
+    mock.modules.sync.pass();
+
+    expect(graphics.clears).toBe(1);
+    expect(graphics.tint).toBe(0x00_ff_00);
+    expect(graphics.fills).toEqual([{ color: 0xff_ff_ff }]);
+  });
+
+  it("keeps the fill of a stroked shape in its path, under a white tint", async () => {
+    const mock = await started();
+    const chip = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 60, h: 60, fill: 0x10_20_30, stroke: 0xff_00_00, strokeWidth: 2 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, chip);
+
+    expect(graphics.fills).toEqual([{ color: 0x10_20_30 }]);
+    expect(graphics.strokes).toEqual([{ color: 0xff_00_00, width: 2 }]);
+    expect(graphics.tint).toBe(0xff_ff_ff);
+
+    mock.world.ecs.set(chip, Shape, { fill: 0x00_ff_00 });
+    mock.modules.sync.pass();
+
+    expect(graphics.clears).toBe(2);
+    expect(graphics.fills).toEqual([{ color: 0x00_ff_00 }]);
+    expect(graphics.tint).toBe(0xff_ff_ff);
+  });
+
+  it("redraws once when a shape switches between stroked and fill-only", async () => {
+    const mock = await started();
+    const chip = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 60, h: 60, fill: 0x10_20_30 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, chip);
+
+    mock.world.ecs.set(chip, Shape, { strokeWidth: 3 });
+    mock.modules.sync.pass();
+    mock.modules.sync.pass();
+
+    expect(graphics.clears).toBe(2);
+    expect(graphics.fills).toEqual([{ color: 0x10_20_30 }]);
+    expect(graphics.tint).toBe(0xff_ff_ff);
+
+    mock.world.ecs.set(chip, Shape, { strokeWidth: 0 });
+    mock.modules.sync.pass();
+
+    expect(graphics.clears).toBe(3);
+    expect(graphics.fills).toEqual([{ color: 0xff_ff_ff }]);
+    expect(graphics.tint).toBe(0x10_20_30);
+  });
+
+  it("writes the hit box of a changed shape into the object it had", async () => {
+    const mock = await started();
+    const pad = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 60, h: 60 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const box = mock.ctx.state.sync.views.get(pad)?.hitBox;
+
+    mock.world.ecs.set(pad, Shape, { w: 90, h: 30 });
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.views.get(pad)?.hitBox).toBe(box);
+    expect(box).toEqual({ x: 0, y: 0, width: 90, height: 30 });
+  });
+
+  it("gives a pooled Graphics back white", async () => {
+    const mock = await started();
+    const pill = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Shape({ w: 10, h: 10, fill: 0x12_34_56 })
+    ]);
+
+    mock.modules.sync.pass();
+
+    const graphics = graphicsOf(mock, pill);
+
+    expect(graphics.tint).toBe(0x12_34_56);
+
+    mock.world.ecs.despawn(pill);
+    mock.modules.sync.pass();
+
+    expect(mock.ctx.state.sync.pools.get("Shape:")).toContain(graphics);
+    expect(graphics.tint).toBe(0xff_ff_ff);
   });
 });

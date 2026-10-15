@@ -10,7 +10,7 @@
  */
 import type { Json } from "../../model/types";
 import type { WorldCtx } from "../types";
-import { componentsOf } from "./snapshot";
+import { componentsOf, jsonOf } from "./snapshot";
 import type {
   ComponentChange,
   EcsState,
@@ -19,12 +19,19 @@ import type {
   FrameDiff,
   History,
   HistorySlot,
+  MarkCount,
   Owner,
   ShadowEntry
 } from "./types";
 
 /** How many frames the history keeps: 2 s at 60 fps, so a glitch seen by eye is still in it. */
 export const HISTORY_FRAMES = 120;
+
+/** Rows a frame a component must be marked, on average over a window, to be judged wasteful. */
+const MARKED_ROWS = 32;
+
+/** The share of changed rows at or under which marked rows count as wasted: one in twenty. */
+const CHANGED_SHARE = 1 / 20;
 
 // eslint-disable-next-line unicorn/no-null -- `null` is the JSON value for "the component was not there".
 const absent: Json = null;
@@ -67,6 +74,24 @@ function emptyComponents(): Map<string, Json> {
 }
 
 /**
+ * Creates an empty table of mark counts, for the same L5 reason.
+ *
+ * @returns An empty table of component name to its counts.
+ */
+function emptyMarks(): Map<string, MarkCount> {
+  return new Map();
+}
+
+/**
+ * Creates an empty set of component names, for the same L5 reason.
+ *
+ * @returns An empty set.
+ */
+function emptyNames(): Set<string> {
+  return new Set();
+}
+
+/**
  * Creates the empty table a fold fills, for the same L5 reason.
  *
  * @returns An empty table of entity to folded entity.
@@ -76,7 +101,8 @@ function emptyFold(): Map<Entity, Folded> {
 }
 
 /**
- * Compares two JSON values structurally, the rule the projection's component diff uses.
+ * Compares two JSON values structurally, the rule the projection's component diff uses. Index and
+ * `for…in` loops: it runs for every marked row of every frame of a dev build, and allocates nothing.
  *
  * @param left - First value.
  * @param right - Second value.
@@ -91,26 +117,63 @@ function sameJson(left: Json, right: Json): boolean {
   if (typeof left !== "object" || typeof right !== "object") return false;
   if (left === null || right === null) return false;
 
-  if (Array.isArray(left) || Array.isArray(right)) {
-    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+  if (Array.isArray(left)) return Array.isArray(right) && sameArray(left, right);
+  if (Array.isArray(right)) return false;
 
-    return left.every((entry, index) => {
-      const other = right[index];
+  return sameObject(left, right);
+}
 
-      return other !== undefined && sameJson(entry, other);
-    });
+/**
+ * Compares two JSON arrays entry by entry.
+ *
+ * @param left - First array.
+ * @param right - Second array.
+ * @returns True when both have the same length and equal entries.
+ * @example
+ * ```ts
+ * sameArray([1, [2]], [1, [2]]); // true
+ * ```
+ */
+function sameArray(left: Json[], right: Json[]): boolean {
+  const count = left.length;
+
+  if (count !== right.length) return false;
+
+  for (let index = 0; index < count; index += 1) {
+    const mine = left[index];
+    const other = right[index];
+
+    if (mine === undefined || other === undefined || !sameJson(mine, other)) return false;
   }
 
-  const keys = Object.keys(left);
+  return true;
+}
 
-  if (keys.length !== Object.keys(right).length) return false;
-
-  return keys.every(key => {
+/**
+ * Compares two JSON objects: every key of the left one equal on the right, and no key on the right
+ * that the left one lacks.
+ *
+ * @param left - First object.
+ * @param right - Second object.
+ * @returns True when both hold the same keys with equal values.
+ * @example
+ * ```ts
+ * sameObject({ a: 1 }, { a: 1, b: 2 }); // false
+ * ```
+ */
+function sameObject(left: { [key: string]: Json }, right: { [key: string]: Json }): boolean {
+  for (const key in left) {
     const mine = left[key];
     const other = right[key];
 
-    return mine !== undefined && other !== undefined && sameJson(mine, other);
-  });
+    if (mine === undefined || other === undefined || !sameJson(mine, other)) return false;
+  }
+
+  for (const key in right) {
+    if (!Object.hasOwn(left, key)) return false;
+  }
+
+  return true;
 }
 
 /**
@@ -166,22 +229,6 @@ function copiedComponents(state: EcsState, entity: Entity): Map<string, Json> {
 }
 
 /**
- * The entities of every change set of the frame, each once.
- *
- * @param state - ecs module state.
- * @returns The changed entities, in the order the change sets met them.
- */
-function changedEntities(state: EcsState): Set<Entity> {
-  const entities = new Set<Entity>();
-
-  for (const changed of state.changed.values()) {
-    for (const entity of changed) entities.add(entity);
-  }
-
-  return entities;
-}
-
-/**
  * Starts a recording: the shadow becomes the whole world at the end of this frame, and this
  * frame's slot stays empty, since nothing before it was seen.
  *
@@ -234,73 +281,170 @@ function recordSpawn(
 }
 
 /**
- * Records what changed on one known entity: every component whose JSON differs from the shadow,
- * and every recorded component it no longer carries. The shadow takes the new values.
+ * Records one marked component of a known entity when its JSON differs from the shadow, and the
+ * shadow takes the new value. A component it no longer carries was recorded when it left; a value
+ * that stopped being JSON leaves the record as `snapshot()` leaves it out.
  *
  * @param state - ecs module state.
  * @param slot - The slot of this frame.
  * @param entity - The entity.
  * @param entry - Its shadow entry.
+ * @param component - The marked component.
+ * @returns True when a record was written.
  */
-function recordChanges(
+function recordComponent(
   state: EcsState,
   slot: HistorySlot,
   entity: Entity,
-  entry: ShadowEntry
-): void {
-  const now = componentsOf(state, entity).components;
+  entry: ShadowEntry,
+  component: string
+): boolean {
+  const before = entry.components.get(component);
+  const value = jsonOf(component, state.stores.get(component)?.get(entity));
 
-  for (const [component, value] of Object.entries(now)) {
-    const before = entry.components.get(component);
-
-    if (before !== undefined && sameJson(before, value)) continue;
-
-    const copy = structuredClone(value);
-
-    slot.changes.push({
-      id: entity,
-      owner: entry.owner,
-      component,
-      from: before ?? absent,
-      to: copy
-    });
-    entry.components.set(component, copy);
-  }
-
-  for (const [component, before] of entry.components) {
-    if (Object.hasOwn(now, component)) continue;
+  if (value === undefined) {
+    if (before === undefined) return false;
 
     slot.changes.push({ id: entity, owner: entry.owner, component, from: before, to: absent });
     entry.components.delete(component);
+
+    return true;
   }
+
+  if (before !== undefined && sameJson(before, value)) return false;
+
+  const copy = structuredClone(value);
+
+  slot.changes.push({
+    id: entity,
+    owner: entry.owner,
+    component,
+    from: before ?? absent,
+    to: copy
+  });
+  entry.components.set(component, copy);
+
+  return true;
 }
 
 /**
- * Records every entity that changed in one frame into that frame's slot: a new entity as a spawn,
- * a known one as its component changes.
+ * The count of marked and changed rows of one component, made the first time it is seen.
  *
- * @param state - ecs module state.
+ * @param history - The frame history.
+ * @param component - The component name.
+ * @returns Its count, mutated in place.
+ */
+function markCountOf(history: History, component: string): MarkCount {
+  const known = history.marks.get(component);
+
+  if (known !== undefined) return known;
+
+  const count: MarkCount = { marked: 0, changed: 0 };
+
+  history.marks.set(component, count);
+
+  return count;
+}
+
+/**
+ * Records one frame from its change sets, pair by pair: a new entity as a spawn, whole, once; for
+ * a known one only the marked component, compared with its shadow. Counts the marked and changed
+ * rows per component and judges them once a window is full.
+ *
+ * @param ctx - Domain context of the world plugin.
  * @param history - The frame history.
  * @param frame - The frame number.
  */
-function recordChangedEntities(state: EcsState, history: History, frame: number): void {
+function recordChangedEntities(ctx: WorldCtx, history: History, frame: number): void {
+  const state = ctx.state.ecs;
   const slot = slotFor(history, frame);
 
-  for (const entity of changedEntities(state)) {
-    const owner = state.owners.get(entity);
-    const entry = history.shadow.get(entity);
+  for (const component of state.changed.keys()) {
+    const set = state.changed.get(component);
 
-    // An entity that died in this frame was recorded when it died.
-    if (owner === undefined) continue;
+    if (set === undefined) continue;
 
-    if (entry === undefined) recordSpawn(state, history, slot, entity, owner);
-    else recordChanges(state, slot, entity, entry);
+    for (const entity of set) {
+      const owner = state.owners.get(entity);
+      const entry = history.shadow.get(entity);
+
+      // An entity that died in this frame was recorded when it died.
+      if (owner === undefined) continue;
+
+      if (entry === undefined) {
+        recordSpawn(state, history, slot, entity, owner);
+        continue;
+      }
+
+      const count = markCountOf(history, component);
+
+      count.marked += 1;
+
+      if (recordComponent(state, slot, entity, entry, component)) count.changed += 1;
+    }
   }
+
+  history.markFrames += 1;
+
+  if (history.markFrames >= HISTORY_FRAMES) judgeMarks(ctx, history);
+}
+
+/**
+ * Closes a window of mark counts: a component marked on at least `MARKED_ROWS` rows a frame of
+ * which at most one in twenty changed, and named by a `mut()` term of a registered system, is
+ * reported once per app. Then every count starts again from 0.
+ *
+ * @param ctx - Domain context of the world plugin.
+ * @param history - The frame history.
+ */
+function judgeMarks(ctx: WorldCtx, history: History): void {
+  for (const [component, count] of history.marks) {
+    const rowsPerFrame = count.marked / history.markFrames;
+    const wasted = rowsPerFrame >= MARKED_ROWS && count.changed <= count.marked * CHANGED_SHARE;
+
+    if (wasted && !history.warned.has(component)) {
+      const systems = mutSystemsOf(ctx.state.ecs, component);
+
+      if (systems.length > 0) {
+        history.warned.add(component);
+        ctx.log.warn("world:mut-unchanged", {
+          component,
+          rowsPerFrame: Math.round(rowsPerFrame * 10) / 10,
+          changedShare: Math.round((count.changed / count.marked) * 100) / 100,
+          systems
+        });
+      }
+    }
+
+    count.marked = 0;
+    count.changed = 0;
+  }
+
+  history.markFrames = 0;
+}
+
+/**
+ * The names of the registered systems whose query writes a component with `mut()`.
+ *
+ * @param state - ecs module state.
+ * @param component - The component name.
+ * @returns The system names, in phase and registration order.
+ */
+function mutSystemsOf(state: EcsState, component: string): string[] {
+  const names: string[] = [];
+
+  for (const phase of ["input", "animate", "layout", "sync"] as const) {
+    for (const entry of state.systems[phase]) {
+      if (entry.plan.written.includes(component)) names.push(entry.definition.name);
+    }
+  }
+
+  return names;
 }
 
 /**
  * Records one frame, before its change sets are cleared: the first frame starts the recording,
- * every later one compares the changed entities with the shadow. Every frame gets a slot, also
+ * every later one compares the marked components with the shadow. Every frame gets a slot, also
  * an empty one. Dev builds only: the caller guards it inline.
  *
  * @param ctx - Domain context of the world plugin.
@@ -312,14 +456,17 @@ export function recordFrame(ctx: WorldCtx, frame: number): void {
     shadow: emptyShadow(),
     slots: emptySlots(),
     newest: undefined,
-    started: undefined
+    started: undefined,
+    marks: emptyMarks(),
+    markFrames: 0,
+    warned: emptyNames()
   };
 
   state.history = history;
 
   // The first frame starts the recording; every later one records what changed.
   if (history.newest === undefined) startRecording(ctx, history, frame);
-  else recordChangedEntities(state, history, frame);
+  else recordChangedEntities(ctx, history, frame);
 
   history.newest = frame;
 }
@@ -388,6 +535,9 @@ export function resetHistory(state: EcsState): void {
   history.slots = emptySlots();
   history.newest = undefined;
   history.started = undefined;
+  history.marks.clear();
+  history.markFrames = 0;
+  history.warned.clear();
 }
 
 /**

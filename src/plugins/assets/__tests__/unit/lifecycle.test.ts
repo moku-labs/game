@@ -1,10 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { NodeInfo } from "../../../flow/types";
 import { load } from "../../bundles";
+import { createHandlers } from "../../handlers";
 import { releaseAll } from "../../lifecycle";
 import { loadBundle } from "../../tiers";
 import type { LoadResult } from "../../types";
-import { createMockAssets, manifestOf } from "./mock-assets";
+import {
+  createMockAssets,
+  graphOf,
+  leaving,
+  type MockAssets,
+  manifestOf,
+  sceneOf
+} from "./mock-assets";
 
 const manifest = manifestOf({
   boot: { feature: "ui", tier: "boot", keys: ["ui.logo"] },
@@ -64,7 +72,7 @@ describe("startAssets", () => {
     mock.flow.features.push({
       name: "board",
       description: {
-        scenes: [{ id: "board", bundle: "board" }],
+        scenes: [sceneOf("board", "board")],
         flows: [{ id: "boardFlow" }],
         assets: { kind: "bundles", map: { board: { tier: "scene" } } }
       } as never
@@ -72,7 +80,7 @@ describe("startAssets", () => {
 
     await mock.start();
 
-    expect(mock.ctx.state.bundleOfScene.get("board")).toBe("board");
+    expect(mock.ctx.state.scenes.get("board")?.bundle).toBe("board");
     expect(mock.ctx.state.featureOfFlow.get("boardFlow")).toBe("board");
     expect(mock.ctx.state.bundleOfKey.get("board.cell")).toBe("board");
   });
@@ -120,7 +128,7 @@ async function withBoardFeature(
   mock.flow.features.push({
     name: "board",
     description: {
-      scenes: [{ id: "board", bundle: "board" }],
+      scenes: [sceneOf("board", "board")],
       flows: [{ id: "board" }]
     } as never
   });
@@ -138,7 +146,7 @@ describe("the enter callback", () => {
     await entry?.callback(boardNode, { mode: "live", signal: new AbortController().signal });
 
     expect([...mock.ctx.state.pinned]).toEqual(["board", "board.chains"]);
-    expect(mock.ctx.state.sceneBundle).toBe("board");
+    expect(mock.ctx.state.sceneId).toBe("board");
     expect(mock.ctx.state.current).toBe(boardNode);
     expect(mock.api.isLoaded("board")).toBe(true);
     expect(mock.log.warn).toHaveBeenCalledWith("assets: the node waited for a bundle", {
@@ -261,7 +269,7 @@ describe("reading the feature descriptions", () => {
 
     await mock.start();
 
-    expect(mock.ctx.state.bundleOfScene.size).toBe(0);
+    expect(mock.ctx.state.scenes.size).toBe(0);
     expect(mock.ctx.state.featureOfFlow.size).toBe(0);
   });
 });
@@ -314,5 +322,240 @@ describe("releaseAll after a dev hot swap", () => {
 
     expect(mock.ctx.state.stamps).toBeUndefined();
     expect(mock.ctx.state.swapping).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The episode game: `home` rests on `home.main/idle` with the scene `lobby`;
+// `episodes` shows the scene `ward`, whose `bundles` names the episode of the
+// committed session. `ep01` and `ep02` leave with their feature.
+// ---------------------------------------------------------------------------
+
+const episodeManifest = leaving(
+  manifestOf({
+    location: { feature: "episodes", tier: "scene", keys: ["episodes.location"] },
+    "episodes.kit": { feature: "episodes", tier: "feature", keys: ["episodes.frame"] },
+    ep01: { feature: "ep01", tier: "lazy", keys: ["ep01.room"] },
+    ep02: { feature: "ep02", tier: "lazy", keys: ["ep02.room"] },
+    homebg: { feature: "home", tier: "scene", keys: ["home.bg"] }
+  }),
+  "ep01",
+  "ep02"
+);
+
+const ward = sceneOf("ward", "location", ({ session }) => [
+  (session as { episode: string }).episode
+]);
+const lobby = sceneOf("lobby", "homebg");
+const broken = sceneOf("broken", "location", () => {
+  throw new Error("no episode yet");
+});
+
+/**
+ * Builds the info of one node of the episode game.
+ *
+ * @param flow - Its flow.
+ * @param node - Its name.
+ * @param scene - Its scene, when it names one.
+ * @returns The node info `onEnter` hands over.
+ */
+function nodeAt(flow: string, node: string, scene?: string): NodeInfo {
+  return {
+    path: `${flow}/${node}`,
+    flow,
+    node,
+    rest: true,
+    over: false,
+    checkpoint: false,
+    barrier: false,
+    ...(scene === undefined ? {} : { scene })
+  };
+}
+
+const idle = nodeAt("home.main", "idle", "lobby");
+const wardNode = nodeAt("episodes.pick", "ward", "ward");
+
+/**
+ * Starts the episode game, connected, with the session on episode 1.
+ *
+ * @param options - Config overrides.
+ * @returns The started mock.
+ */
+async function episodeGame(
+  options: Parameters<typeof createMockAssets>[0] = {}
+): Promise<MockAssets> {
+  const mock = createMockAssets({ manifest: episodeManifest, preloadDepth: 0, ...options });
+
+  mock.flow.features.push(
+    { name: "home", description: { scenes: [lobby], flows: [{ id: "home.main" }] } as never },
+    {
+      name: "episodes",
+      description: { scenes: [ward, broken], flows: [{ id: "episodes.pick" }] } as never
+    }
+  );
+  mock.flow.graph = graphOf({
+    "home.main": { idle: { owner: "home", scene: "lobby", rest: true } },
+    "episodes.pick": { ward: { owner: "episodes", scene: "ward", rest: true } }
+  });
+  mock.model.session = { episode: "ep01" };
+  mock.connect();
+  await mock.start();
+
+  return mock;
+}
+
+/**
+ * Enters a node through the `load` stage, with the stack moved to it as flow does first.
+ *
+ * @param mock - The mock plugin.
+ * @param node - The node.
+ * @param mode - The runner's mode.
+ */
+async function enter(
+  mock: MockAssets,
+  node: NodeInfo,
+  mode: "live" | "fast" = "live"
+): Promise<void> {
+  mock.flow.stack = [{ flow: node.flow, node: node.node, input: 0 }];
+  await mock.flow.enter[0]?.callback(node, { mode, signal: new AbortController().signal });
+}
+
+/**
+ * Sends `flow:rest`, which fires before the arriving node's stages.
+ *
+ * @param mock - The mock plugin.
+ */
+function rest(mock: MockAssets): void {
+  createHandlers(mock.ctx)["flow:rest"]({ path: "", checkpoint: false });
+}
+
+describe("the release at a rest", () => {
+  it("runs in the arriving node's load stage: a bundle nobody holds goes, one the arriving scene names stays", async () => {
+    const mock = await episodeGame();
+
+    await mock.api.load("ep01");
+    await mock.api.load("ep02");
+    // The outgoing scene is the lobby, and the arriving ward names ep01 through bundles(state).
+    mock.api.sceneBundles(["homebg"]);
+    rest(mock);
+    await enter(mock, wardNode);
+
+    // ep01 was never let go: a release before the pin would unload it and the stage reload it.
+    expect(mock.api.isLoaded("ep01")).toBe(true);
+    expect(mock.api.isLoaded("ep02")).toBe(false);
+    expect(mock.emitted.filter(entry => entry.name === "assets:bundle-unloaded")).toEqual([
+      {
+        name: "assets:bundle-unloaded",
+        payload: { bundle: "ep02", tier: "lazy", mb: 0.063, reason: "leave", keys: ["ep02.room"] }
+      }
+    ]);
+  });
+
+  it("keeps a bundle the still mounted scene names, and releases it at the rest after the scene stopped naming it", async () => {
+    const mock = await episodeGame();
+
+    await enter(mock, wardNode);
+    mock.api.sceneBundles(["location", "ep01"]);
+
+    // The first rest on the way home: the ward is still mounted.
+    rest(mock);
+    await enter(mock, idle);
+
+    expect(mock.api.isLoaded("ep01")).toBe(true);
+
+    // The lobby is mounted now; the next rest lets ep01 go.
+    mock.api.sceneBundles(["homebg"]);
+    rest(mock);
+    await enter(mock, idle);
+
+    expect(mock.api.isLoaded("ep01")).toBe(false);
+  });
+
+  it("runs once per rest: a second entry without a rest releases nothing", async () => {
+    const mock = await episodeGame();
+
+    await mock.api.load("ep02");
+    rest(mock);
+    await enter(mock, idle);
+    await mock.api.load("ep02");
+    await enter(mock, idle);
+
+    expect(mock.api.isLoaded("ep02")).toBe(true);
+  });
+
+  it("releases nothing on a fast entry, and the rest it followed is used up", async () => {
+    const mock = await episodeGame();
+
+    await mock.api.load("ep02");
+    rest(mock);
+    await enter(mock, idle, "fast");
+
+    expect(mock.api.isLoaded("ep02")).toBe(true);
+    expect(mock.ctx.state.restPending).toBe(false);
+  });
+});
+
+describe("the scene names of the node being entered", () => {
+  it("pins what the scene names of the committed state, then the feature bundles, and carries them to a node without a scene", async () => {
+    const mock = await episodeGame();
+
+    mock.model.session = { episode: "ep02" };
+    await enter(mock, wardNode, "fast");
+
+    expect([...mock.ctx.state.pinned]).toEqual(["location", "ep02", "episodes.kit"]);
+
+    await enter(mock, nodeAt("episodes.pick", "think"), "fast");
+
+    expect([...mock.ctx.state.pinned]).toEqual(["location", "ep02", "episodes.kit"]);
+  });
+
+  it("fails the load stage when the scene's bundles throws", async () => {
+    const mock = await episodeGame();
+
+    await expect(enter(mock, nodeAt("episodes.pick", "oops", "broken"))).rejects.toThrow(
+      "no episode yet"
+    );
+  });
+
+  it('warns that the node waited for a "budget" bundle, never for a "leave" one', async () => {
+    const mock = await episodeGame();
+
+    await enter(mock, wardNode);
+
+    expect(mock.log.warn).toHaveBeenCalledWith("assets: the node waited for a bundle", {
+      bundle: "location",
+      path: "episodes.pick/ward"
+    });
+    expect(mock.log.warn).not.toHaveBeenCalledWith(
+      "assets: the node waited for a bundle",
+      expect.objectContaining({ bundle: "ep01" })
+    );
+    expect(mock.api.isLoaded("ep01")).toBe(true);
+  });
+});
+
+describe("the companions at entry and at stop", () => {
+  it("calls no companion while headless", async () => {
+    const mock = await episodeGame({ io: undefined });
+    const companion = { load: vi.fn(async () => undefined), unload: vi.fn() };
+
+    mock.api.companions.add(companion);
+    await enter(mock, wardNode);
+    await mock.api.load("ep01");
+
+    expect(companion.load).not.toHaveBeenCalled();
+    expect(companion.unload).not.toHaveBeenCalled();
+  });
+
+  it("forgets the companions in releaseAll without calling their unload", async () => {
+    const mock = await episodeGame();
+    const companion = { load: vi.fn(async () => undefined), unload: vi.fn() };
+
+    mock.api.companions.add(companion);
+    await mock.api.load("ep01");
+    releaseAll(mock.ctx.state);
+
+    expect(mock.ctx.state.companions).toEqual([]);
+    expect(companion.unload).not.toHaveBeenCalled();
   });
 });

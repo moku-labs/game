@@ -57,12 +57,16 @@ describe("game.render", () => {
     expect(renderSource.changes).toBe("frame");
     expect(read(appOf(mock), renderSource)).toEqual({
       fps: 0,
+      drawn: 0,
       frameMs: 0,
       textures: 0,
       textureMb: 0,
+      textureMbSplit: { art: 0, targets: 0, kept: 0 },
       views: 0,
       pooled: 0,
-      renderPasses: 0
+      renderPasses: 0,
+      renderPassesMax: 0,
+      kept: { pictures: 0, mb: 0, retakes: 0 }
     });
   });
 });
@@ -227,6 +231,26 @@ describe("game.capture", () => {
     );
     expect(capture).not.toHaveBeenCalled();
     expect(restored).toEqual([]);
+  });
+
+  it("on a read profile takes the picture, and refuses diff with controlReadOnly before anything restores", async () => {
+    vi.stubGlobal("__MOKU_GAME_AGENT__", true);
+    const { app, capture, restored } = diffApp();
+
+    await expect(run(app, captureCommand, { legend: true })).resolves.toMatchObject({
+      value: { png: "data:image/png;base64,theirs" }
+    });
+
+    const refused = await run(app, captureCommand, { diff: bookmarkAt("shop") }).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    expect(Reflect.get(Object(refused), "reason")).toBe("read-only");
+    expect((refused as Error).message).toContain("The command game.capture diff changes the game");
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(restored).toEqual([]);
+    expect(cheatsOf(app)).toEqual([]);
   });
 
   it("refuses diff with sheet before anything runs", async () => {
@@ -552,7 +576,11 @@ describe("game.debug", () => {
   it("is a cosmetic command with the nine-slice switch", () => {
     expect(debugCommand.id).toBe("game.debug");
     expect(debugCommand.effect).toBe("cosmetic");
-    expect(debugCommand.input).toEqual({ nineSlice: "boolean" });
+    expect(debugCommand.input).toEqual({
+      nineSlice: "boolean?",
+      verifyFrames: "boolean?",
+      kept: "boolean?"
+    });
   });
 
   it("switches the nine-slice outlines and answers the switches", async () => {
@@ -561,12 +589,52 @@ describe("game.debug", () => {
 
     const on = await run(appOf(mock), debugCommand, { nineSlice: true });
 
-    expect(on.value).toEqual({ nineSlice: true });
-    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: true });
+    expect(on.value).toEqual({ nineSlice: true, verifyFrames: false, kept: true });
+    expect(mock.api.sync.debug.state()).toEqual({
+      nineSlice: true,
+      verifyFrames: false,
+      kept: true
+    });
 
     const off = await run(appOf(mock), debugCommand, { nineSlice: false });
 
-    expect(off.value).toEqual({ nineSlice: false });
+    expect(off.value).toEqual({ nineSlice: false, verifyFrames: false, kept: true });
+  });
+
+  it("sets verifyFrames alone and answers both switches; a call with neither changes nothing", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = createMockRenderer({ dom: false });
+    const app = appOf(mock);
+
+    await run(app, debugCommand, { nineSlice: true });
+
+    const verify = await run(app, debugCommand, { verifyFrames: true });
+    const same = await run(app, debugCommand, {});
+
+    expect(verify.value).toEqual({ nineSlice: true, verifyFrames: true, kept: true });
+    expect(same.value).toEqual({ nineSlice: true, verifyFrames: true, kept: true });
+    expect(app.log.trace().slice(-2)).toEqual([
+      expect.objectContaining({ data: { command: "game.debug", verifyFrames: true } }),
+      expect.objectContaining({ data: { command: "game.debug" } })
+    ]);
+  });
+
+  it("takes { kept: false } alone, the editor's A/B switch, and draws every filtered view live", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+    const mock = createMockRenderer({ dom: false });
+    const app = appOf(mock);
+
+    const off = await run(app, debugCommand, { kept: false });
+
+    expect(off.value).toEqual({ nineSlice: false, verifyFrames: false, kept: false });
+    expect(mock.ctx.state.kept.on).toBe(false);
+    expect(app.log.trace().at(-1)).toEqual(
+      expect.objectContaining({ data: { command: "game.debug", kept: false } })
+    );
+
+    const on = await run(app, debugCommand, { kept: true });
+
+    expect(on.value).toEqual({ nineSlice: false, verifyFrames: false, kept: true });
   });
 });
 
@@ -577,7 +645,11 @@ describe("the renderer commands", () => {
 
     expect(() => captureCommand.run(app, {})).toThrow("dev builds only");
     expect(() => debugCommand.run(app, { nineSlice: true })).toThrow("dev builds only");
-    expect(mock.api.sync.debug.state()).toEqual({ nineSlice: false });
+    expect(mock.api.sync.debug.state()).toEqual({
+      nineSlice: false,
+      verifyFrames: false,
+      kept: true
+    });
 
     vi.stubGlobal("__MOKU_GAME_DEV__", true);
     mock.world.projection.setLayers([{ name: "hud", sort: "none" }]);

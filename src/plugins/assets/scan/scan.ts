@@ -1,12 +1,14 @@
 /**
- * @file assets plugin, build time — the walk. `features/*` with an `assets/` folder, and every
- * layer the options map (a folder under the root read like one more feature), becomes the manifest:
- * one bundle per feature or layer, split by the optional `assets.ts` it exports. Node and Bun only.
- * Nothing under `src/` outside `scan/` imports it, so no game bundles it.
+ * @file assets plugin, build time — the walk. Every feature owner (a folder of `features/`, and a
+ * sub-feature with a door and resources of its own at any depth, found by `findFeatureOwners`), and
+ * every layer the options map (a folder under the root read like one more feature), becomes the
+ * manifest: one bundle per owner or layer, split by the optional `assets.ts` it exports. Node and
+ * Bun only. Nothing under `src/` outside `scan/` imports it, so no game bundles it.
  */
 import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { findFeatureOwners } from "../../../project/features";
 import type {
   BundleSpec,
   FontPage,
@@ -22,6 +24,9 @@ import { bytesMb, HEADER_BYTES, type ImageSize, readImageSize, textureMb } from 
 import { assetKindOf, isAssetFile, keyOf, parseTags } from "./keys";
 
 const TIERS: readonly string[] = ["boot", "core", "scene", "feature", "lazy"];
+
+/** The name of the folder of an owner the scanner reads. */
+const ASSETS = "assets";
 
 const PREFIX = "[game] assets: ";
 
@@ -57,7 +62,10 @@ const HERE = /^\.\//;
 export type ScanOptions = {
   /** Path of the game source root, the folder that holds the features. */
   root: string;
-  /** Name of the folder that holds the features. Default `"features"`. */
+  /**
+   * Name of the folder that holds the features: the folder whose owners `findFeatureOwners`
+   * finds, at any depth. Default `"features"`.
+   */
   features?: string;
   /** Path of the `manifest.json` to write. */
   manifest: string;
@@ -90,8 +98,15 @@ export type ScanResult = {
 /** One output file: where it goes and what it should contain. */
 export type Output = { file: string; text: string };
 
-/** One bundle while it is being filled. */
-type BundleDraft = { feature: string; tier: Tier; files: ManifestFile[] };
+/** One bundle while it is being filled: its owner, when it loads and leaves, and its files. */
+type BundleDraft = {
+  feature: string;
+  parent: string | undefined;
+  folder: string;
+  tier: Tier;
+  release: "leave" | undefined;
+  files: ManifestFile[];
+};
 
 /** One declared bundle that takes files out of the default bundle of its feature. */
 type Split = { name: string; patterns: readonly RegExp[] };
@@ -99,25 +114,42 @@ type Split = { name: string; patterns: readonly RegExp[] };
 /** The page images of every font of one feature, by the path of the `.fnt` inside `assets/`. */
 type FontPages = ReadonlyMap<string, readonly string[]>;
 
-/** One folder the walk reads as a feature: its folder on disk and the name its keys take. */
-type Owner = { name: string; dir: string };
+/** One folder the walk reads as a feature or a layer. */
+type Owner = {
+  /** The name its keys and bundles take: the inner folder name, or the mapped name of a layer. */
+  name: string;
+  /** Absolute folder on disk, for reading. */
+  dir: string;
+  /** POSIX folder relative to the scan root; written as the bundle's `dir` for a sub-feature only. */
+  folder: string;
+  /** The parent feature of a sub-feature; `undefined` for a top-level feature and for a layer. */
+  parent: string | undefined;
+  /** What the folder brings of its own: `assets/` or `assets.ts`, and `strings/`. */
+  resources: { assets: boolean; strings: boolean };
+};
+
+/** Which textures of one bundle carry mipmaps: all of them, or the ones its globs match. */
+type MipRule = { all: true } | { globs: readonly { glob: string; pattern: RegExp }[] };
 
 /** One layer of the map, and the refusal that keeps it out of the walk when it has one. */
 type LayerCheck = { folder: string; name: string; refusal: string | undefined };
 
 /** What one feature's files are read with: everything the walk decided before it started. */
 type FeaturePass = {
-  feature: string;
+  owner: Owner;
   assetsFolder: string;
   splits: readonly Split[];
-  defaultTier: Tier;
+  specs: ReadonlyMap<string, BundleSpec>;
   fonts: FontPages;
+  /** Bundle name to the textures of it that carry mipmaps. */
+  mips: ReadonlyMap<string, MipRule>;
+  /** `"<bundle>\n<glob>"` of every mipmaps glob that matched a texture of its bundle. */
+  matched: Set<string>;
 };
 
 /** Everything one scan collects. */
 type ScanState = {
   root: string;
-  featuresFolder: string;
   drafts: Map<string, BundleDraft>;
   keyOwner: Map<string, string>;
   problems: string[];
@@ -151,13 +183,11 @@ function detailOf(failure: unknown): string {
  * built inside an exported declaration.
  *
  * @param root - Absolute or relative path of the game source root.
- * @param features - Name of the features folder.
  * @returns The empty state.
  */
-function createState(root: string, features: string): ScanState {
+function createState(root: string): ScanState {
   return {
     root,
-    featuresFolder: path.join(root, features),
     drafts: new Map(),
     keyOwner: new Map(),
     problems: [],
@@ -187,18 +217,42 @@ function byName(left: string, right: string): number {
 }
 
 /**
- * Lists the feature folders, sorted. A missing features folder is an empty game, not a problem.
+ * Reads the feature owners of the game, at any depth, in the order `findFeatureOwners` returns
+ * them. A missing features folder is an empty game, not a problem. One name taken by two folders
+ * is one problem of the scan, and the walk goes on with no feature owner, so the layer refusals
+ * are still collected and the scan fails with every problem at once.
  *
- * @param dir - The features folder.
- * @returns The folder names.
+ * @param scan - State of the scan.
+ * @param features - Name of the features folder.
+ * @returns The owners, each with its folder on disk.
  */
-async function listFeatures(dir: string): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+function readOwners(scan: ScanState, features: string): Owner[] {
+  try {
+    return findFeatureOwners(scan.root, features).map(owner => ({
+      name: owner.name,
+      dir: path.join(scan.root, ...owner.dir.split("/")),
+      folder: owner.dir,
+      parent: owner.parent,
+      resources: { ...owner.resources }
+    }));
+  } catch (error) {
+    scan.problems.push(detailOf(error));
 
-  return entries
-    .filter(entry => entry.isDirectory())
-    .map(entry => entry.name)
-    .toSorted(byName);
+    return [];
+  }
+}
+
+/**
+ * Tells whether a path is a file.
+ *
+ * @param file - The path to look at.
+ * @returns True for a file; false for a folder or nothing.
+ */
+async function isFile(file: string): Promise<boolean> {
+  return await stat(file).then(
+    entry => entry.isFile(),
+    () => false
+  );
 }
 
 /**
@@ -293,7 +347,7 @@ function nameTakenRefusal(
  *
  * @param layers - Folder to name.
  * @param features - Name of the features folder.
- * @param featureNames - The feature folders found under it.
+ * @param featureNames - Every feature owner name, at any depth.
  * @returns Every layer with its refusal, in the order of the sorted folders.
  */
 function checkLayers(
@@ -327,7 +381,7 @@ function checkLayers(
  *
  * @param layers - Folder to name.
  * @param features - Name of the features folder.
- * @param featureNames - The feature folders found under it.
+ * @param featureNames - Every feature owner name, at any depth.
  * @returns One line per problem, in the order of the sorted folders.
  * @example
  * ```ts
@@ -416,10 +470,79 @@ async function importDescription(file: string): Promise<Record<string, unknown> 
 }
 
 /**
- * Reads one declared bundle into the specs of its feature.
+ * Says why the release of a declared bundle is refused: a value that is neither `"budget"` nor
+ * `"leave"`, or `"leave"` on a tier that stays for the whole session.
+ *
+ * @param name - Name of the bundle.
+ * @param tier - Its tier, already checked.
+ * @param release - What the description carried as `release`.
+ * @returns The problem, or `undefined` when the release is fine.
+ * @example
+ * ```ts
+ * releaseProblem("ep01", "lazy", "later");
+ * // 'the bundle "ep01" has the unknown release "later". Use budget or leave.'
+ * ```
+ */
+function releaseProblem(name: string, tier: string, release: unknown): string | undefined {
+  if (release !== undefined && release !== "budget" && release !== "leave") {
+    return `the bundle "${name}" has the unknown release "${String(release)}". Use budget or leave.`;
+  }
+
+  // `boot` and `core` stay for the whole session: a bundle of them never leaves.
+  if (release !== "leave" || (tier !== "boot" && tier !== "core")) return undefined;
+
+  return (
+    `the bundle "${name}" is tier "${tier}", which stays for the whole session: ` +
+    'release "leave" needs scene, feature or lazy.'
+  );
+}
+
+/**
+ * Tells whether a `mipmaps` value is one the scanner reads: absent, `false`, `true` or a list of
+ * globs. `false` and `[]` are read as absent: a JavaScript or a cast description may carry them.
+ *
+ * @param mipmaps - What the description carried as `mipmaps`.
+ * @returns True when the value can be read.
+ * @example
+ * ```ts
+ * isMipmapsValue("items/**"); // false: a glob needs a list
+ * ```
+ */
+function isMipmapsValue(mipmaps: unknown): boolean {
+  if (mipmaps === undefined || typeof mipmaps === "boolean") return true;
+
+  return Array.isArray(mipmaps) && mipmaps.every(glob => typeof glob === "string");
+}
+
+/**
+ * Builds the stored spec of a declared bundle: `release` only when it is `"leave"`, `mipmaps`
+ * only when it is `true` or a non-empty list (copied).
+ *
+ * @param tier - The checked tier.
+ * @param raw - The checked description of the bundle.
+ * @returns The spec.
+ */
+function specOf(tier: Tier, raw: Record<string, unknown>): BundleSpec {
+  const files = Array.isArray(raw.files) ? raw.files.map(String) : undefined;
+  const mipmaps = raw.mipmaps;
+  const globs = Array.isArray(mipmaps) && mipmaps.length > 0 ? mipmaps.map(String) : undefined;
+
+  return {
+    tier,
+    ...(files === undefined ? {} : { files }),
+    ...(raw.release === "leave" ? { release: "leave" } : {}),
+    ...(mipmaps === true ? { mipmaps: true } : {}),
+    ...(globs === undefined ? {} : { mipmaps: globs })
+  };
+}
+
+/**
+ * Reads one declared bundle into the specs of its feature: the bundle-name rule against the owner,
+ * the tier, the release and the mipmaps. Each failure is one problem, and the bundle is then not
+ * recorded.
  *
  * @param scan - State of the scan.
- * @param feature - Name of the feature.
+ * @param feature - Name of the feature: the inner folder name, or the mapped name of a layer.
  * @param name - Name of the bundle.
  * @param raw - What the description carried under that name.
  * @param specs - Where a valid bundle goes.
@@ -442,7 +565,7 @@ function readSpec(
 
   const tier = isRecord(raw) ? raw.tier : undefined;
 
-  if (typeof tier !== "string" || !TIERS.includes(tier)) {
+  if (!isRecord(raw) || typeof tier !== "string" || !TIERS.includes(tier)) {
     scan.problems.push(
       `the bundle "${name}" has the unknown tier "${String(tier)}". ` +
         `Use one of ${TIERS.join(", ")}.`
@@ -451,9 +574,24 @@ function readSpec(
     return;
   }
 
-  const files = isRecord(raw) && Array.isArray(raw.files) ? raw.files.map(String) : undefined;
+  const refusal = releaseProblem(name, tier, raw.release);
 
-  specs.set(name, files === undefined ? { tier: tier as Tier } : { tier: tier as Tier, files });
+  if (refusal !== undefined) {
+    scan.problems.push(refusal);
+
+    return;
+  }
+
+  if (!isMipmapsValue(raw.mipmaps)) {
+    scan.problems.push(
+      `the bundle "${name}" has mipmaps ${JSON.stringify(raw.mipmaps)}: ` +
+        "use true or a list of globs relative to assets/."
+    );
+
+    return;
+  }
+
+  specs.set(name, specOf(tier as Tier, raw));
 }
 
 /**
@@ -539,6 +677,75 @@ function splitsOf(specs: Map<string, BundleSpec>): Split[] {
 }
 
 /**
+ * Builds the mipmaps rules of the declared bundles, sorted by bundle name.
+ *
+ * @param specs - The declared bundles of one owner.
+ * @returns Bundle name to its rule, for every bundle that declares mipmaps.
+ */
+function mipRulesOf(specs: ReadonlyMap<string, BundleSpec>): Map<string, MipRule> {
+  const rules = new Map<string, MipRule>();
+
+  for (const [name, spec] of [...specs].toSorted((left, right) => byName(left[0], right[0]))) {
+    const mipmaps = spec.mipmaps;
+
+    if (mipmaps === true) rules.set(name, { all: true });
+    else if (mipmaps !== undefined) {
+      rules.set(name, { globs: mipmaps.map(glob => ({ glob, pattern: globToRegExp(glob) })) });
+    }
+  }
+
+  return rules;
+}
+
+/**
+ * Tells whether a texture is mipmapped by the bundle that claims it, and notes every glob of that
+ * bundle it matched. A glob of one bundle never marks a file of another.
+ *
+ * @param pass - What this owner is read with.
+ * @param bundle - The bundle that claims the texture.
+ * @param relative - POSIX path of the texture inside `assets/`.
+ * @returns True when the texture carries mipmaps.
+ */
+function wantsMips(pass: FeaturePass, bundle: string, relative: string): boolean {
+  const rule = pass.mips.get(bundle);
+
+  if (rule === undefined) return false;
+  if ("all" in rule) return true;
+
+  let wanted = false;
+
+  for (const { glob, pattern } of rule.globs) {
+    if (!pattern.test(relative)) continue;
+
+    pass.matched.add(`${bundle}\n${glob}`);
+    wanted = true;
+  }
+
+  return wanted;
+}
+
+/**
+ * Notes every mipmaps glob of an owner that matched no texture of its bundle: a typo would
+ * otherwise leave the art without its chain in silence.
+ *
+ * @param scan - State of the scan.
+ * @param pass - What the owner was read with, after its files.
+ */
+function noteUnmatchedGlobs(scan: ScanState, pass: FeaturePass): void {
+  for (const [bundle, rule] of pass.mips) {
+    if ("all" in rule) continue;
+
+    for (const { glob } of rule.globs) {
+      if (pass.matched.has(`${bundle}\n${glob}`)) continue;
+
+      scan.notes.push(
+        `the mipmaps glob "${glob}" of the bundle "${bundle}" matches no texture of it.`
+      );
+    }
+  }
+}
+
+/**
  * Works out which declared bundle claims a file.
  *
  * @param splits - The splits of the feature.
@@ -589,20 +796,33 @@ function checkNine(nine: NineSlice | undefined, size: ImageSize, file: string): 
 }
 
 /**
- * Finds or starts the draft of one bundle.
+ * Finds or starts the draft of one bundle: its owner, and the tier and release its spec declares
+ * (the tier `feature` and no release without one).
  *
  * @param scan - State of the scan.
  * @param name - Name of the bundle.
- * @param feature - Feature that owns it.
- * @param tier - When it loads.
+ * @param owner - The feature or layer that owns it.
+ * @param spec - What the owner's `assets.ts` declared for it, if anything.
  * @returns The draft.
  */
-function draftOf(scan: ScanState, name: string, feature: string, tier: Tier): BundleDraft {
+function draftOf(
+  scan: ScanState,
+  name: string,
+  owner: Owner,
+  spec: BundleSpec | undefined
+): BundleDraft {
   const found = scan.drafts.get(name);
 
   if (found !== undefined) return found;
 
-  const draft: BundleDraft = { feature, tier, files: [] };
+  const draft: BundleDraft = {
+    feature: owner.name,
+    parent: owner.parent,
+    folder: owner.folder,
+    tier: spec?.tier ?? "feature",
+    release: spec?.release === "leave" ? "leave" : undefined,
+    files: []
+  };
 
   scan.drafts.set(name, draft);
 
@@ -725,24 +945,26 @@ async function describePages(
 }
 
 /**
- * Reads one asset file into a manifest entry: a texture by its pixels, a font with its pages, an
- * audio file by its bytes.
+ * Reads one asset file into a manifest entry: a texture by its pixels (every level of its chain
+ * when it carries mipmaps), a font with its pages, an audio file by its bytes.
  *
  * @param scan - State of the scan.
  * @param pass - What this feature is read with.
  * @param relative - POSIX path of the file inside `assets/`.
+ * @param bundle - The bundle that claims the file, whose mipmaps rule a texture follows.
  * @returns The entry.
  * @throws {Error} When the key, the tags, the header bytes or the nine-slice are wrong.
  */
 async function describeFile(
   scan: ScanState,
   pass: FeaturePass,
-  relative: string
+  relative: string,
+  bundle: string
 ): Promise<ManifestFile> {
   const absolute = path.join(pass.assetsFolder, ...relative.split("/"));
   const file = toPosix(path.relative(scan.root, absolute));
   const fileName = relative.slice(relative.lastIndexOf("/") + 1);
-  const key = keyOf(pass.feature, relative, file);
+  const key = keyOf(pass.owner.name, relative, file);
   const owner = scan.keyOwner.get(key);
 
   if (owner !== undefined) {
@@ -776,12 +998,15 @@ async function describeFile(
   // The key is taken only by a file that passed its checks, so a broken image never owns one.
   scan.keyOwner.set(key, file);
 
+  const mips = wantsMips(pass, bundle, relative);
+
   return {
     key,
     path: file,
     width: size.width,
     height: size.height,
-    mb: textureMb(size.width, size.height),
+    mb: textureMb(size.width, size.height, mips),
+    ...(mips ? { mips: true } : {}),
     ...(nine === undefined ? {} : { nine })
   };
 }
@@ -804,10 +1029,10 @@ async function addFile(scan: ScanState, pass: FeaturePass, relative: string): Pr
   }
 
   try {
-    const name = ownerOf(pass.splits, relative, file) ?? pass.feature;
-    const entry = await describeFile(scan, pass, relative);
+    const name = ownerOf(pass.splits, relative, file) ?? pass.owner.name;
+    const entry = await describeFile(scan, pass, relative, name);
 
-    draftOf(scan, name, pass.feature, pass.defaultTier).files.push(entry);
+    draftOf(scan, name, pass.owner, pass.specs.get(name)).files.push(entry);
   } catch (error) {
     scan.problems.push(detailOf(error));
   }
@@ -815,29 +1040,35 @@ async function addFile(scan: ScanState, pass: FeaturePass, relative: string): Pr
 
 /**
  * Reads one feature or layer: its description first, then its fonts, then every file of its
- * `assets/`.
+ * `assets/` (never a child owner's), then the notes of its unmatched mipmaps globs. A sub-feature
+ * with resources has its default bundle even with no file, so its lazy strings travel with it.
  *
  * @param scan - State of the scan.
- * @param owner - The feature or layer: its folder and the name its keys and bundles take.
+ * @param owner - The feature or layer: its folders and the name its keys and bundles take.
  */
 async function scanOwner(scan: ScanState, owner: Owner): Promise<void> {
   // The description first: the bundles it declares, with their tiers.
-  const feature = owner.name;
   const specs = await readBundleSpecs(scan, owner);
-  const assetsFolder = path.join(owner.dir, "assets");
+  const assetsFolder = path.join(owner.dir, ASSETS);
 
-  for (const [name, spec] of specs) draftOf(scan, name, feature, spec.tier);
+  for (const [name, spec] of specs) draftOf(scan, name, owner, spec);
+
+  if (owner.parent !== undefined && (owner.resources.assets || owner.resources.strings)) {
+    draftOf(scan, owner.name, owner, specs.get(owner.name));
+  }
 
   // Then the fonts: their page images belong to them.
   const files = await walkAssets(assetsFolder, "");
   const fonts = await readFonts(scan, assetsFolder, files);
   const pages = new Set([...fonts.values()].flat());
   const pass: FeaturePass = {
-    feature,
+    owner,
     assetsFolder,
     splits: splitsOf(specs),
-    defaultTier: specs.get(feature)?.tier ?? "feature",
-    fonts
+    specs,
+    fonts,
+    mips: mipRulesOf(specs),
+    matched: new Set()
   };
 
   // Then every other file, into the bundle that claims it.
@@ -846,6 +1077,45 @@ async function scanOwner(scan: ScanState, owner: Owner): Promise<void> {
     if (pages.has(relative)) continue;
 
     await addFile(scan, pass, relative);
+  }
+
+  noteUnmatchedGlobs(scan, pass);
+}
+
+/**
+ * Tells whether a folder brings assets of its own: an `assets/` folder or an `assets.ts` file.
+ *
+ * @param dir - The folder on disk.
+ * @returns True when it has either.
+ */
+async function hasAssets(dir: string): Promise<boolean> {
+  return (await isFolder(path.join(dir, ASSETS))) || (await isFile(path.join(dir, "assets.ts")));
+}
+
+/**
+ * Notes every near miss: a direct child folder of a feature owner that has assets but is no owner
+ * itself (it has no door), so none of its files are in the manifest. Notes never stop a build.
+ *
+ * @param scan - State of the scan.
+ * @param owners - The feature owners, in walk order.
+ */
+async function noteStrayFolders(scan: ScanState, owners: readonly Owner[]): Promise<void> {
+  const folders = new Set(owners.map(owner => owner.folder));
+
+  for (const owner of owners) {
+    const entries = await readdir(owner.dir, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of entries.toSorted((left, right) => byName(left.name, right.name))) {
+      const folder = `${owner.folder}/${entry.name}`;
+
+      if (!entry.isDirectory() || entry.name === ASSETS || folders.has(folder)) continue;
+      if (!(await hasAssets(path.join(owner.dir, entry.name)))) continue;
+
+      scan.notes.push(
+        `the folder "${folder}" has assets but is no feature: its files are not in the manifest. ` +
+          "A sub-feature needs a door index.ts."
+      );
+    }
   }
 }
 
@@ -877,7 +1147,15 @@ function toManifest(scan: ScanState): Manifest {
   )) {
     const files = draft.files.toSorted((left, right) => byName(left.key, right.key));
 
-    bundles[name] = { feature: draft.feature, tier: draft.tier, mb: sumMb(files), files };
+    // Only a sub-feature's bundle carries its parent and its folder: a flat manifest keeps its bytes.
+    bundles[name] = {
+      feature: draft.feature,
+      ...(draft.parent === undefined ? {} : { parent: draft.parent, dir: draft.folder }),
+      tier: draft.tier,
+      ...(draft.release === undefined ? {} : { release: draft.release }),
+      mb: sumMb(files),
+      files
+    };
   }
 
   return { version: 1, bundles };
@@ -963,19 +1241,30 @@ async function scanLayers(scan: ScanState, checks: readonly LayerCheck[]): Promi
       continue;
     }
 
-    await scanOwner(scan, { name, dir });
+    // A layer is read for its `assets/` and `assets.ts` only, and is never a sub-feature.
+    await scanOwner(scan, {
+      name,
+      dir,
+      folder,
+      parent: undefined,
+      resources: { assets: true, strings: false }
+    });
   }
 }
 
 /**
  * Walks the features and the layers of a game and writes its two generated files: one bundle per
- * feature or layer, split by its optional `assets.ts`, every file keyed by the key rule. A layer is
- * read like one more feature under its mapped name, after the features. A check run
- * (`write: false`) writes nothing and only reports whether something would change.
+ * feature owner or layer, split by its optional `assets.ts`, every file keyed by the key rule. A
+ * sub-feature (a folder with a door and resources inside a feature, at any depth) is an owner of
+ * its own: its keys and its bundle take the inner folder name, and only its bundle carries
+ * `parent` and `dir`. A layer is read like one more feature under its mapped name, after the
+ * features. A check run (`write: false`) writes nothing and only reports whether something would
+ * change.
  *
  * @param options - The game source root, the layers, the two output paths and whether to write.
  * @returns The manifest, the text of the key module and whether an output differed.
- * @throws {Error} One error that lists every problem the scan found, the layer problems first.
+ * @throws {Error} One error that lists every problem the scan found, the owner and layer problems
+ *   first.
  * @example
  * ```ts
  * const { manifest, changed } = await scanAssets({
@@ -985,24 +1274,28 @@ async function scanLayers(scan: ScanState, checks: readonly LayerCheck[]): Promi
  *   layers: { shared: "ui" } // shared/assets/button/primary.png keeps the key "ui.button.primary"
  * });
  * // manifest.bundles.ui.files[0].key: "ui.button.primary", changed: true on the first run
+ * // features/episodes/ep01/assets/ward/room.png keeps the key "ep01.ward.room" in the bundle "ep01"
  * ```
  */
 export async function scanAssets(options: ScanOptions): Promise<ScanResult> {
-  // The layers are checked against the features before anything is read.
+  // The layers are checked against every feature owner before anything is read.
   const features = options.features ?? "features";
-  const scan = createState(options.root, features);
-  const featureNames = await listFeatures(scan.featuresFolder);
-  const checks = checkLayers(options.layers ?? {}, features, featureNames);
+  const scan = createState(options.root);
+  const owners = readOwners(scan, features);
+  const checks = checkLayers(
+    options.layers ?? {},
+    features,
+    owners.map(owner => owner.name)
+  );
 
   for (const check of checks) {
     if (check.refusal !== undefined) scan.problems.push(check.refusal);
   }
 
-  // The features first, then every layer that passed, each like one more feature.
-  for (const feature of featureNames) {
-    await scanOwner(scan, { name: feature, dir: path.join(scan.featuresFolder, feature) });
-  }
+  // The feature owners first, then every layer that passed, each like one more feature.
+  for (const owner of owners) await scanOwner(scan, owner);
 
+  await noteStrayFolders(scan, owners);
   await scanLayers(scan, checks);
 
   // Every problem in one error: nothing is written while there is one.

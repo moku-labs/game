@@ -1,5 +1,6 @@
 import { expectTypeOf } from "vitest";
-import { createApp, screen } from "../../../../index";
+import { createApp, defineGame, screen } from "../../../../index";
+import type { NodeFx } from "../../../flow/types";
 import type { Events as ScenesEvents } from "../../../scenes/types";
 import { audioFor, music } from "../../descriptors";
 import { audioPlugin } from "../../index";
@@ -87,3 +88,39 @@ createApp({
     audio: { session: "solo" }
   }
 });
+
+// ─── music resolves nothing ───────────────────────────────────
+
+declare const fx: NodeFx;
+
+// eslint-disable-next-line unicorn/no-null -- `null` is the seam: it stops the music.
+expectTypeOf(fx(music(null))).toEqualTypeOf<Promise<void>>();
+expectTypeOf(fx(gameMusic("board.theme"))).toEqualTypeOf<Promise<void>>();
+
+// ─── the kit's volumes reads the game's player ────────────────
+
+const { volumes: gameVolumes } = defineGame<{
+  player: { settings: { music: number; sfx: number } };
+  session: { open: boolean };
+  assets: AudioKey;
+  strings: Record<string, never>;
+}>();
+
+const typedVolumes = gameVolumes(player => {
+  expectTypeOf(player.settings.music).toEqualTypeOf<number>();
+
+  return { music: player.settings.music, sfx: player.settings.sfx };
+});
+
+expectTypeOf(typedVolumes).toEqualTypeOf<Volumes>();
+
+createApp({
+  plugins: [...screen, audioPlugin],
+  pluginConfigs: { audio: { volumes: typedVolumes } }
+});
+
+// @ts-expect-error — "voice" is not one of the three buses.
+gameVolumes(player => ({ voice: player.settings.music }));
+
+// @ts-expect-error — the player of this game has no `audio` field.
+gameVolumes(player => ({ music: player.audio }));

@@ -1,50 +1,90 @@
 /**
- * @file renderer plugin — API factory. The one place that builds `host`, `viewport`, `sync` and
- * `monitor` in the accepted injection order, and the one place that reduces them to their public
- * half.
+ * @file renderer plugin — API factory. The one place that builds `host`, `viewport`, `demand`,
+ * `kept`, `sync` and `monitor` in the accepted injection order, and the one place that reduces
+ * them to their public half.
  */
+import { createDemandApi } from "./demand/api";
 import { createHostApi } from "./host/api";
-import type { HostApi, InstallDrawCounting } from "./host/types";
+import type { HostApi, InstallCounting } from "./host/types";
+import { createKeptApi } from "./kept/api";
 import { resolveDeps } from "./lifecycle";
 import { createMonitorApi } from "./monitor/api";
-import { installDrawCounting } from "./monitor/draw-calls";
+import { installCounting, installPassCounting } from "./monitor/draw-calls";
 import { createSyncApi } from "./sync/api";
-import type { SyncApi } from "./sync/types";
+import { applyFilters, clearFilters, renderPassesOf } from "./sync/filters";
+import { hiddenBy, hiddenOnlyAmong, liftFor, swapHidden } from "./sync/hidden";
+import type { SyncApi, SyncWriters } from "./sync/types";
 import type { Api, HostModule, KernelSlice, Modules, RendererCtx, SyncModule } from "./types";
 import { createViewportApi } from "./viewport/api";
 import type { ViewportApi } from "./viewport/types";
 
 /**
- * The draw-call counter `host` installs before `new Application()`: the one of `monitor` in a dev
- * build, bound to the draw counter in the monitor branch of the state, none in production. A
- * production `define` folds the guard, so the counter module leaves the bundle.
+ * The counting `host` installs before `new Application()`: the six counting classes of
+ * `monitor` in a dev build and in a debug build, bound to the sinks in the monitor branch of the
+ * state, none in production. A production `define` folds the dev or agent guard, so the counting
+ * module leaves the bundle.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @returns The bound installer, or `undefined` without the dev flag.
+ * @returns The bound installer, or `undefined` without the dev flag and the agent flag.
  */
-function devDrawCounting(ctx: RendererCtx): InstallDrawCounting | undefined {
-  return typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__
-    ? pixi => installDrawCounting(pixi, ctx.state.monitor.draws)
+function countingOf(ctx: RendererCtx): InstallCounting | undefined {
+  return (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+    (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+    ? pixi => installCounting(pixi, ctx.state.monitor.sinks)
     : undefined;
 }
 
 /**
- * Builds the four modules in the accepted order `host → viewport → sync → monitor`. Each keeps
- * its data in its branch of `ctx.state`, so these objects are views on the plugin state, not
- * owners of it. `host` gets the draw-call counter of `monitor` up front, because it installs the
- * counter before `monitor` exists; `monitor` gets the other three, since a legend places views
- * on the picture.
+ * The writers of `sync` the kept cache draws through: the one owner of `renderable`, the one writer of a view's
+ * filters, and the pass estimate a range picture reads while it is lifted. Injected here, since a module never
+ * imports another's run-time code.
+ */
+const syncWriters: SyncWriters = {
+  swapHidden,
+  hiddenBy,
+  hiddenOnlyAmong,
+  liftFor,
+  applyFilters,
+  clearFilters,
+  renderPassesOf
+};
+
+/**
+ * Builds the six modules in the accepted order `host → viewport → demand → kept → sync → monitor`.
+ * Each keeps its data in its branch of `ctx.state`, so these objects are views on the plugin
+ * state, not owners of it. `host` gets the counting of `monitor` up front, because it installs
+ * the classes before `monitor` exists (the six of a dev or debug build, the pass counter of the
+ * others); `demand` reads the views of `sync` and the kept pictures through the state, whose maps
+ * keep their identity; `kept` reads the views of `sync` the same way, and gives a bare view its
+ * wrapper through `sync.wrapForPicture` (spec 23 D4), reached through a holder filled once `sync`
+ * exists; `sync` marks every write in
+ * `demand` and asks `kept` where a view's filters hang; `monitor` gets the others, since a legend
+ * places views on the picture and the performance log reads all of them.
  *
  * @param ctx - Domain context of the renderer plugin.
- * @returns The four modules with their public and internal methods.
+ * @returns The six modules with their public and internal methods.
  */
 export function createModules(ctx: RendererCtx): Modules {
-  const host = createHostApi(ctx, { installDrawCounting: devDrawCounting(ctx) });
+  const host = createHostApi(ctx, {
+    installCounting: countingOf(ctx),
+    installPasses: pixi => installPassCounting(pixi, ctx.state.monitor.sinks)
+  });
   const viewport = createViewportApi(ctx, { host });
-  const sync = createSyncApi(ctx, { host, viewport });
-  const monitor = createMonitorApi(ctx, { host, viewport, sync });
+  const demand = createDemandApi(ctx, { host, views: ctx.state.sync.views, hiddenBy });
+  // `kept` is built before `sync`: its wrap reaches `sync` through this holder, filled below, first called in a flush.
+  const built: { sync?: SyncModule } = {};
+  const kept = createKeptApi(ctx, {
+    host,
+    demand,
+    sync: syncWriters,
+    wrap: entity => built.sync?.wrapForPicture(entity)
+  });
+  const sync = createSyncApi(ctx, { host, viewport, demand, kept });
 
-  return { host, viewport, sync, monitor };
+  built.sync = sync;
+  const monitor = createMonitorApi(ctx, { host, viewport, sync, demand, kept });
+
+  return { host, viewport, demand, kept, sync, monitor };
 }
 
 /**
@@ -60,7 +100,8 @@ function exposeHost(host: HostModule): HostApi {
     canvas: host.canvas,
     pixi: host.pixi,
     device: host.device,
-    gl: host.gl
+    gl: host.gl,
+    resolution: host.resolution
   };
 }
 
@@ -84,20 +125,21 @@ function exposeSync(sync: SyncModule): SyncApi {
     debug: sync.debug,
     filters: sync.filters,
     renderPasses: sync.renderPasses,
+    loopsHeld: sync.loopsHeld,
     displayOf: sync.displayOf
   };
 }
 
 /**
- * Creates the renderer API: `app.renderer.host`, `.viewport` and `.sync`, and `stats()` and
- * `capture()` of `monitor` on the plugin itself.
+ * Creates the renderer API: `app.renderer.host`, `.viewport`, `.sync` and `.monitor`, and
+ * `stats()` and `capture()` of `monitor` on the plugin itself.
  *
  * @param ctx - Kernel context of the renderer plugin.
  * @returns The plugin API.
  */
 export function createRendererApi(ctx: KernelSlice): Api {
   const rendererCtx: RendererCtx = { ...ctx, deps: resolveDeps(ctx) };
-  const { host, viewport, sync, monitor } = createModules(rendererCtx);
+  const { host, viewport, demand, sync, monitor } = createModules(rendererCtx);
   const publicViewport: ViewportApi = {
     toReference: viewport.toReference,
     toScreen: viewport.toScreen,
@@ -108,6 +150,16 @@ export function createRendererApi(ctx: KernelSlice): Api {
     host: exposeHost(host),
     viewport: publicViewport,
     sync: exposeSync(sync),
+    monitor: {
+      stream: monitor.stream,
+      frames: monitor.frames,
+      mark: monitor.mark,
+      event: monitor.event,
+      beginAgent: monitor.beginAgent,
+      endAgent: monitor.endAgent,
+      setResolution: monitor.setResolution
+    },
+    invalidate: demand.invalidate,
     stats: monitor.stats,
     capture: monitor.capture
   };

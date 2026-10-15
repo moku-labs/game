@@ -19,8 +19,11 @@ import type { UiCtx } from "./types";
 /** The global the footer of `@moku-labs/game/hot` calls. */
 const HOT_GLOBAL = "__moku_hot";
 
-/** A strings module `assets:keys` generates; the group is its locale. */
-const STRINGS_FILE = /\/generated\/strings\.([\w-]+)\.ts$/;
+/**
+ * A strings module `assets:keys` generates, whole-game (`strings.<locale>.ts`) or of one
+ * sub-feature (`strings.<feature>.<locale>.ts`); the group is its locale.
+ */
+const STRINGS_FILE = /\/generated\/strings\.(?:[\w-]+\.)?([\w-]+)\.ts$/;
 
 /** The stamp module the keys watch of `moku-game dev` writes: it names asset files, no view. */
 const ASSETS_STAMP = "/.moku/assets-stamp.ts";
@@ -43,7 +46,10 @@ const REGISTERED_KINDS: Readonly<Record<string, true>> = {
 /** The handler on the global: the new module namespace and the path of the saved module. */
 type HotSwap = (next: unknown, file: string) => void;
 
-/** The strings of one locale a regenerated `generated/strings.<locale>.ts` brings. */
+/**
+ * The strings of one locale a regenerated `generated/strings.<locale>.ts` or
+ * `strings.<feature>.<locale>.ts` brings.
+ */
 type Strings = { locale: string; messages: CompiledMessages };
 
 /**
@@ -242,6 +248,8 @@ function isRegisteredAtStart(value: unknown): boolean {
  * @example
  * ```ts
  * localeOf("/game/generated/strings.ru.ts"); // "ru"
+ * localeOf("/game/generated/strings.ep01.ru.ts"); // "ru": the module of the sub-feature ep01
+ * localeOf("/game/generated/strings.ts"); // undefined: the key types
  * ```
  */
 function localeOf(file: string): string | undefined {

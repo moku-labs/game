@@ -7,7 +7,8 @@ import type {
   FeatureDescription,
   FeaturesApi,
   FeaturesInternal,
-  FeaturesState
+  FeaturesState,
+  RegisteredFeature
 } from "./types";
 
 /**
@@ -30,6 +31,51 @@ function assertRegistrable(state: FeaturesState, name: string): void {
       `[game] Feature "${name}" is already registered.\n  Give the second feature another name.`
     );
   }
+}
+
+/**
+ * Refuses a parent whose sub-feature another feature already declares: a sub-feature has one
+ * parent. Runs before any write, so a refused registration records nothing.
+ *
+ * @param state - features module state.
+ * @param name - Feature name being registered.
+ * @param children - The sub-features its description declares.
+ * @throws {Error} When one of them is declared by another feature.
+ */
+function assertOneParent(
+  state: FeaturesState,
+  name: string,
+  children: readonly { readonly name: string }[]
+): void {
+  for (const child of children) {
+    const declared = state.parentOf.get(child.name);
+
+    if (declared !== undefined && declared !== name) {
+      throw new Error(
+        `[game] Feature "${child.name}" is declared by the features "${declared}" and "${name}".\n  A sub-feature has one parent: declare it in one of them, and give the other its own ${child.name}, such as "${name}-${child.name}".`
+      );
+    }
+  }
+}
+
+/**
+ * Builds one registry entry; a top-level feature has no `parent` key at all.
+ *
+ * @param name - Feature name.
+ * @param description - What the feature brings.
+ * @param parent - The feature that declares it, when one does.
+ * @returns The entry `all()` lists.
+ * @example
+ * ```ts
+ * registeredOf("home", {}, undefined); // { name: "home", description: {} }
+ * ```
+ */
+function registeredOf(
+  name: string,
+  description: FeatureDescription,
+  parent: string | undefined
+): RegisteredFeature {
+  return parent === undefined ? { name, description } : { name, description, parent };
 }
 
 /**
@@ -59,9 +105,10 @@ function contributionOf(
 }
 
 /**
- * Creates the features API: `register` from a feature plugin's `onInit` (throws after `run()`
- * and on a duplicate name), `all`, `contributions` of a slot sorted by `order`, and the internal
- * `seal`.
+ * Creates the features API: `register` from a feature plugin's `onInit` (throws after `run()`,
+ * on a duplicate name and on a sub-feature with a second parent; records the parent of each
+ * declared sub-feature), `all` with the parent read at call time, `contributions` of a slot
+ * sorted by `order`, and the internal `seal`.
  *
  * @param ctx - Domain context of the flow plugin.
  * @returns The public features API plus the methods injected into the runner.
@@ -71,12 +118,19 @@ export function createFeaturesApi(ctx: FlowCtx): FeaturesApi & FeaturesInternal 
 
   return {
     register: (name: string, description: FeatureDescription): void => {
+      const children = description.features ?? [];
+
+      // Every check before any write: a refused registration records no description and no parent.
       assertRegistrable(state, name);
+      assertOneParent(state, name, children);
       state.byName.set(name, description);
+      for (const child of children) state.parentOf.set(child.name, name);
     },
 
-    all: (): readonly { name: string; description: FeatureDescription }[] =>
-      [...state.byName].map(([name, description]) => ({ name, description })),
+    all: (): readonly RegisteredFeature[] =>
+      [...state.byName].map(([name, description]) =>
+        registeredOf(name, description, state.parentOf.get(name))
+      ),
 
     contributions: (slotName: string): readonly Contribution[] =>
       [...state.byName]

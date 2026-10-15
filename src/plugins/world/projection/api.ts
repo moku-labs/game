@@ -33,6 +33,7 @@ import type {
   Cause,
   Dirty,
   LayerSpec,
+  MotionCause,
   Mounted,
   ProjectionCtx,
   ProjectionDeps,
@@ -82,10 +83,11 @@ function isConvergeCause(cause: Cause): boolean {
  * declaration.
  *
  * @param owner - Who owns the entities of this projection.
+ * @param order - The `Order` its screen roots draw at.
  * @returns A mounted projection with nothing in it yet.
  */
-function emptyMounted(owner: Owner): Mounted {
-  return { owner, live: new Map(), queue: [], items: new Map() };
+function emptyMounted(owner: Owner, order: number): Mounted {
+  return { owner, live: new Map(), queue: [], items: new Map(), order };
 }
 
 /**
@@ -268,7 +270,8 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
     lifted: false,
     dropWhenStill: false,
     loopOwed: false,
-    exiting: false
+    exiting: false,
+    cause: "mount"
   });
 
   const api: ProjectionModule = {
@@ -327,7 +330,10 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         fresh.push(spec);
       }
 
-      for (const spec of fresh) state.mounted.set(spec.name, emptyMounted(owner));
+      // A screen root draws at its place in the list: the roots of one scene take −n … −1 (spec 16 U1.6).
+      for (const spec of fresh) {
+        state.mounted.set(spec.name, emptyMounted(owner, names.indexOf(spec.name) - names.length));
+      }
 
       if (fresh.length > 0) {
         reconcile(pctx, {
@@ -446,6 +452,9 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
         ? state.keysByEntity.get(entity)
         : { projection: view.projection, key: view.key };
     },
+
+    causeOf: (entity: Entity): MotionCause | undefined =>
+      state.byEntity.get(entity)?.cause ?? state.leaving.get(entity),
 
     motionsOf: (entity: Entity): readonly string[] => runningComponents(state.tracks, entity),
 
@@ -581,6 +590,7 @@ export function createProjectionApi(ctx: WorldCtx, deps: ProjectionDeps): Projec
       state.rests.clear();
       state.keys.clear();
       state.keysByEntity.clear();
+      state.leaving.clear();
       state.tracks.length = 0;
       state.hints.length = 0;
       state.dirty = undefined;

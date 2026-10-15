@@ -20,7 +20,7 @@ A game is a folder. `index.ts` is the game as one data object. `config.ts` is th
 | `config.ts` | `export default { page, native?, system?, save?, assets? } satisfies GameConfig`. Plain data, no call |
 | `core/` | The kit (`defineGame`) and its types |
 | `shared/` | The shared layer |
-| `features/<f>/` | One feature: `flow/`, `rules/`, `views/`, `styles/`, `motion/`, `world/`, `assets/`, `strings/` |
+| `features/<f>/` | One feature: `flow/`, `rules/`, `views/`, `styles/`, `motion/`, `world/`, `assets/`, `strings/`, and a sub-feature folder `features/<f>/<sub>/` for each of its [sub-features](#sub-features) |
 | `plugins/` | The game's own plugins |
 | `generated/` | What `moku-game keys` writes, and `moku-game dev` writes again on save: `assets.ts`, `strings.ts`, `strings.<locale>.ts` and `manifest.json`, the dev manifest |
 | `tests/` | The tests. `tests/scenarios/<name>.ts` are the prepared saves of `?player=<name>` |
@@ -74,12 +74,14 @@ export default defineGameApp({
 | `safeNode` | the start of the main flow | The checkpoint entered after a failed retry |
 | `player` | required | The player a new save starts from |
 | `session` | required | The session at every start |
+| `orientation` | `"portrait"` | The orientation the layout is designed for; not `page.orientation` of `config.ts`, which locks the native build |
+| `referenceSide` | `1080` | The short side of the design frame, in reference units |
 | `referenceLong` | `1920` | The long side the layout needs, in reference units |
 | `seed` | `42` | The rng seed of a new save |
 | `shared` | none | The shared layer, composed first among the features |
-| `features` | `[]` | The features of the screen app, in order, after `shared` |
+| `features` | `[]` | The features of the screen app, in order, after `shared`. The top-level features only: a parent brings the sub-features it declares, and the shell composes the tree depth first, a parent before its children |
 | `plugins` | `[]` | The game's own plugins, after the features. Their APIs land on `screen().app` |
-| `headless` | `{}` | `{ features?, plugins? }`: what the headless app composes, nothing else. `features` left out takes the `features` of the game; `[]` means none. `shared` is not composed |
+| `headless` | `{}` | `{ features?, plugins? }`: what the headless app composes, nothing else. `features` left out takes the `features` of the game; `[]` means none. `shared` is not composed. Flattened like `features`; it may name a sub-feature alone |
 | `pluginConfigs` | `{}` | The plugin configs of the game, without the keys the shell owns |
 
 The shell writes some plugin configs from the seams. Those keys are not in the type of `pluginConfigs`: a seam-owned key is a compile error, never a value a shallow merge would drop.
@@ -96,14 +98,51 @@ The shell writes some plugin configs from the seams. Those keys are not in the t
 
 The graph is run by the page or by the test, never by the game. A game's exit plugin calls `ctx.require(platformPlugin).exit()` itself.
 
-`defineGameApp` checks what TypeScript cannot stop, a definition from JavaScript or one that casts. `[game] defineGameApp needs flow.` A list entry that `defineFeature` did not make: `[game] defineGameApp: features[2] is not a feature.`
+`defineGameApp` checks what TypeScript cannot stop, a definition from JavaScript or one that casts. `[game] defineGameApp needs flow.` A list entry that `defineFeature` did not make, at any depth of the tree: `[game] defineGameApp: features[2] is not a feature.`, `[game] defineGameApp: features[1].features[0] is not a feature.` A feature in the tree twice, listed by the game and by its parent or by two parents: `[game] defineGameApp: the feature "ep01" is listed twice: features[1].features[1] and features[2].` with `List a sub-feature only in the features of its parent.` A `shared` that declares sub-features: `[game] defineGameApp: shared declares sub-features.` with `The shared layer has none: declare them in a feature of features.`
+
+### Sub-features
+
+A feature can hold features of its own, each in a folder inside its folder. The episodes of a game live under one parent, and what they share is a sibling sub-feature, `<parent>-kit`:
+
+```
+features/episodes/
+  index.ts           the parent's door: defineFeature("episodes", { features: [...] })
+  flow/ views/ assets/ strings/
+  episodes-kit/      what the episodes share: index.ts, flow/, views/, assets/
+  ep01/              index.ts, assets.ts, assets/, strings/, flow/
+  ep02/              index.ts, assets/, strings/, flow/
+```
+
+```ts
+// features/episodes/index.ts: the parent imports every sub-feature from ./<folder> and lists it
+import { defineFeature } from "@core/kit";
+import { ep01Feature } from "./ep01";
+import { ep02Feature } from "./ep02";
+import { episodesKitFeature } from "./episodes-kit";
+import { episodesFlow } from "./flow/episodes";
+
+export const episodesFeature = defineFeature("episodes", {
+  features: [episodesKitFeature, ep01Feature, ep02Feature],
+  flows: [episodesFlow]
+});
+
+// features/episodes/ep01/index.ts: a sub-feature is named like its folder
+export const ep01Feature = defineFeature("ep01", { flows: [ep01Flow], assets: ep01Assets });
+
+// index.ts: the game names the parent only
+export default defineGameApp({ flow: mainFlow, player, session, features: [homeFeature, episodesFeature] });
+```
+
+The shell composes `home`, `episodes`, `episodes-kit`, `ep01`, `ep02`, in that order, for `screen()` and for `headless()`. A sub-feature is an ordinary feature at run time: its flows, scenes, assets and strings register as a top-level feature's do, and `flow.features.all()` gives its entry a `parent`, `{ name: "ep01", description, parent: "episodes" }`. A parent's `onInit` throws when a sub-feature it declares is not composed: `[game] Feature "episodes" declares the sub-feature "ep01", but the app does not compose it.` with `Compose the whole tree: defineGameApp does it, a raw createApp takes flattenFeatures([...]).` A raw `createApp` passes `plugins: [...screen, ...flattenFeatures([homeFeature, episodesFeature])]`.
+
+On disk a sub-feature is a folder inside a feature, not a kind folder, with a door `index.ts` and resources of its own: `assets/`, `assets.ts` or `strings/`. Its asset keys and its bundles start with its own name (`features/episodes/ep01/assets/ward/room.png` is `ep01.ward.room`, bundle `ep01`), and its strings go into `generated/strings.ep01.<locale>.ts`, which load with that bundle. A folder whose door the parent imports and lists but that has no resources is a code-only sub-feature: lint and the project index treat it as a unit, the scanner gives it no bundle. A feature name is used once in the game, at any depth; two folders with one name fail the scan, naming both. Lint keeps the declaration and the disk equal with [`moku-game/sub-features`](./lint.md#sub-features).
 
 ## Tests: game.headless() and game.screen()
 
 | Method | Composes |
 |---|---|
 | `game.headless(seams?)` | The core plugins, `logicOnly` of `headless.features` (of `features` when left out), then `headless.plugins`. No screen plugin, no game plugin unless listed |
-| `game.screen(seams?)` | The screen set, `audio`, `effects`, `platform`, then `shared`, the features and the game's plugins |
+| `game.screen(seams?)` | The screen set, `audio`, `effects`, `platform`, then `shared`, the features and the game's plugins. Both flatten the feature tree: every feature, then its sub-features, depth first |
 
 Both return `{ app, clock, provider }`, the app not started. Each call gives a fresh app, a fresh clock and a fresh save. The clock is `fakeClock(startMoment)` and the save a fresh `memory()` unless a seam passes one. `startMoment` is `1_000_000`.
 
@@ -173,12 +212,14 @@ export default {
 | `system` | `[]` | The system plugins the shell wires: `lifecycle`, `back`, `haptics`, `keepAwake`, `store` |
 | `save` | `"memory"` | `"memory"`, `"local"` or `"store"` |
 | `assets.layers` | `{}` | Asset layers by folder: `{ shared: "ui" }` becomes `--layer shared=ui` |
+| `debug.overlay` | `"closed"` | How the editor's overlay shows when a debug page starts: `"closed"`, the `"pill"` or `"open"` (the card). The page calls `app.debug.overlay.open({ mode })` right after the agents started; only a page with the agent reads it |
 
 A value TypeScript would refuse, in a file that skips `satisfies`, stops `moku-game` and the page:
 
 - `[game] config.save is "disk".` with `Use "memory", "local" or "store".`
 - `[game] config.system names "tray", which the game shell does not wire.`
 - `[game] config.page.title is empty.`
+- `[game] config.ts: debug.overlay must be "closed", "pill" or "open", got "card".`
 - `[game] moku-game: page.background "url(x)" is not a CSS color.`, and the same for `page.lang`.
 - `[game] moku-game: page.icons.favicon "assets/icon.png" is not a file in the game.`
 
@@ -210,6 +251,9 @@ await startPage(game, config, {
 6. Follows the reduced-motion setting, also when it changes.
 7. Starts the shell, then the app, then runs the graph. A graph that stops is logged as `[game] The graph stopped.`, never thrown.
 8. In dev, starts the agents, each with `{ app, name, modules }`.
+9. Follows the page out, after the agents: an agent's own `pagehide` listener runs first, on the running game. On `pagehide` it flushes the save, and stops the app when the page is really left (`persisted` false); a page kept in the back/forward cache keeps its app running. A stop that fails is logged as `[game] The page did not stop cleanly.`
+
+A shell that knows the insets better than the WebView (a status bar the Android WebView reports late or not at all) sets the four CSS custom properties `--moku-safe-top`, `--moku-safe-right`, `--moku-safe-bottom` and `--moku-safe-left` on `:root` and sends the window event `moku-native:insets`; each left unset falls back to `env(safe-area-inset-*, 0px)`, and the next frame lays out with them.
 
 Every problem goes to the app's log. An unknown scenario logs `[game] No scenario "x".` and the page starts from the starting player.
 
@@ -244,7 +288,7 @@ A store save that cannot be read rejects the load: `[game] The save could not be
 | Package | When | Install |
 |---|---|---|
 | `@moku-labs/system` | `config.ts` names a `system` plugin, or `save` is `"store"` | `bun add @moku-labs/system@^0.3.1` |
-| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.2` |
+| `@moku-labs/native` | `moku-game native …` | `bun add -d @moku-labs/native@^0.3.9` |
 
 The page imports the shell only when the game needs it. The generated `main.ts` then imports `systemShellOf` from `@moku-labs/game/app/system` and passes `systemShellOf({ ... })` to `startPage`. It writes one `import()` for the package and one per named plugin, in the order `lifecycle`, `back`, `haptics`, `keepAwake`, `store`; the store when `system` names it or `save` is `"store"`. The engine holds no `import()` of the package, so the page bundles only the named plugins. A game with `system: ["haptics"]` and a memory save builds without `@tauri-apps/plugin-store`.
 
@@ -291,7 +335,7 @@ const { app } = game.screen({ platform: fromSystem(system) }); // Back, pause, h
 |---|---|
 | `app.name`, `app.identifier`, `app.icon` | `native.name`, `native.identifier`, `native.icon` |
 | `app.orientation`, `app.backgroundColor` | `page.orientation`, `page.background` |
-| `web.build` | `moku-game build`, with the runner flags |
+| `web.build` | `moku-game build`, with the runner flags; a debug app's adds `--debug` or `--debug=full`, and `--editor host:port` when one was given |
 | `web.devCommand`, `web.devUrl` | `moku-game dev --port 5173`, `http://127.0.0.1:5173` |
 | `web.dist` | `<game>/dist/web` |
 | `system` | One row per name that needs a Tauri capability: `back`, `haptics`, `store`. A `"store"` save adds `store` |
@@ -341,18 +385,20 @@ The global flags go before or after the command word. The exit code is `0` on su
 
 ### dev
 
-`moku-game dev` writes the dev page into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts`, `bunfig.toml` and `assets-stamp.ts`. A file is written only when its text changed. It then runs Bun again under that bunfig, in the game folder, and serves the page. On the raw files it first [scans the keys](#dev-keeps-generated-fresh) and prints the lines of that scan. Then it prints two lines; the second is the bound URL, plain, on its own line:
+`moku-game dev` writes the dev page into `<game>/.moku/`: `index.html`, `dev.ts`, `main.ts`, `bunfig.toml` and `assets-stamp.ts`. A file is written only when its text changed. It then runs Bun again under that bunfig, in the game folder, and serves the page. On the raw files it first [scans the keys](#dev-keeps-generated-fresh) and prints the lines of that scan. Then it prints the engine it serves, `engine <id>` and the patch file when there is one, and the child prints two lines; the second is the bound URL, plain, on its own line:
 
 ```
+› engine 0.14.12+9c41e0
 › mini-game: dev server, raw assets. Ctrl+C stops it.
 http://127.0.0.1:3000/
 ```
 
 - The server listens on `127.0.0.1` only, never on the network.
 - `/` is the page, `/manifest.json` the dev manifest `generated/manifest.json` of the game, or `manifest.json` of `dist/assets` with `--packed`. Its paths are relative to the game folder, `features/...`. Any other path is a file of the game, or of `dist/assets` with `--packed`. A segment that starts with a dot, such as `.moku` or `..`, and `node_modules` answer 404. Every file answers with `Cache-Control: no-store`.
-- The bunfig lists the engine's hot plugin first and defines `__MOKU_GAME_DEV__` as `true`. `dev.ts` sets the global too. See [Hot swap](./hot-swap.md).
+- The bunfig lists the engine's hot plugin first and defines `__MOKU_GAME_DEV__`, `__MOKU_GAME_AGENT__` and `__MOKU_GAME_CONTROL__` as `true`. `dev.ts` sets five globals: the build id `"dev"`, the engine id `__MOKU_GAME_ENGINE__`, CONTROL, AGENT and, last, DEV. `script.ts`, the first import of `main.ts`, marks `moku:script`; `main.ts` marks `moku:main` first after its imports. See [Hot swap](./hot-swap.md) and [Turn the dev build on](./doors.md#turn-the-dev-build-on).
 - `main.ts` lists `tests/scenarios/*.ts`, sorted, by file stem. Test files, `.d.ts` and `index.ts` are skipped. A new or removed scenario file rewrites `main.ts`, and the page reloads. A `tests/scenarios/` folder created after the start needs a restart.
 - Ctrl+C stops the server with exit code 0. A taken port: `[game] dev: port 3000 is in use.` with `Pass --port 0 for a free port.`
+- **A new engine restarts the server.** `dev` watches the installed engine: its folder, every folder of its `dist/`, the patch file's folder, and the `package.json` and lock file of the install root. 300 ms after the last change it reads the engine's id again. A new version or dist (`bun install`, `bun patch --commit`) warns `[game] dev: the engine changed (<old id> -> <new id>), restarting the dev server.`, stops the child with SIGTERM, writes the page again with the new id and starts a new child, which prints the engine line and its two lines again. A new version adds `This process keeps the tools of <old> (the keys watch); restart moku-game dev to use <new>'s.`: only the child runs the new engine. With a fixed port the URL stays; with `--port 0` the new child binds a new free port and prints its URL, and the old one stops answering. A patch file that changed while the installed engine did not is one warning, `[game] dev: the engine's patch changed (<old> -> <new>), but the installed engine did not.` with `Run bun install; the dev server restarts by itself when the engine changes.` An engine run from its sources is not watched.
 
 #### dev keeps `generated/` fresh
 
@@ -360,20 +406,33 @@ http://127.0.0.1:3000/
 
 - **At start** it runs the scan of `keys` before the page is written: same flags, same outputs, same layers. So `generated/manifest.json` is there for the first request.
 - **On save** of an asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`) or of a `strings/<locale>.json` it scans again, 100 ms after the last file event. It prints one line: `› keys: features/home/strings/en.json`, or `› keys: features/ui/assets/dot.png and 2 more`. A save of any other file costs a walk of the folder, not a scan. An output that did not change is not rewritten.
-- **The page** follows the output, see [Hot swap](./hot-swap.md#what-swaps-and-what-reloads). A changed or new string swaps: `generated/strings.<locale>.ts` is a view module. An asset file saved with new bytes swaps, and a new or removed one reloads the page: the watch rewrites `.moku/assets-stamp.ts`, which `main.ts` imports. Its shape is under [watchKeys](#watchkeys).
+- **A folder that becomes or stops being a sub-feature** scans too: it gains or loses its door `index.ts`, its `assets/`, `assets.ts` or `strings/`, so keys and bundles move between owners with no asset or strings file saved. The line names the folder, `› keys: features/episodes/ep03/`.
+- **The page** follows the output, see [Hot swap](./hot-swap.md#what-swaps-and-what-reloads). A changed or new string swaps: `generated/strings.<locale>.ts` and a sub-feature's `generated/strings.<feature>.<locale>.ts` are view modules. An asset file saved with new bytes swaps, and a new or removed one reloads the page: the watch rewrites `.moku/assets-stamp.ts`, which `main.ts` imports. Its shape is under [watchKeys](#watchkeys).
 - **A failed scan** is one warning, `[game] keys: <the scanner's message>`, the first scan too. The server runs on, and the next save scans again.
 - **A changed layer in `config.ts` needs a restart.** The config is read once, at start.
 - `--packed` serves the pack and watches nothing. `visual` does not watch either: it still stops without `generated/manifest.json`.
 
 ### build
 
-`moku-game build` packs the assets with the layers of `config.ts`, then bundles the production page into `--out`: the HTML and `main.ts` in memory, minified, for the browser, `__MOKU_GAME_DEV__` defined `false`, no hot plugin. It copies the pack beside the page, `manifest.json` next to `index.html`. It writes nothing under `.moku/`.
+`moku-game build` packs the assets with the layers of `config.ts`, then bundles the production page into `--out`: the HTML, `main.ts` and `script.ts` in memory, minified, for the browser, `__MOKU_GAME_DEV__`, `__MOKU_GAME_AGENT__` and `__MOKU_GAME_CONTROL__` defined `false`, no hot plugin. The page carries the two startup marks, `moku:script` and `moku:main`. It copies the pack beside the page, `manifest.json` next to `index.html`. It writes nothing under `.moku/`. A release page whose `.js` carries `"/__editor/hello"` or `"[moku-editor]"`, the two strings of the editor's agent bundle, fails with `[game] build: the release page carries the editor agent ("/__editor/hello" in page/main-4f2a.js).` and `Import @moku-labs/editor only behind __MOKU_GAME_DEV__, or build a debug page with --debug.`, and its output folder is removed. `moku-game native build` without `--debug` runs this build, so every store app goes through the check.
 
 The page carries no scenario, no agent, no `.dev` module and no `/control`. Every link starts with `./`, so the build runs from any http sub-path and from the Tauri protocol, not from `file://`. It prints `built "<out>": <n> files, <kb> KB.` An `--out` that is the game, holds it, touches `dist/assets`, or lies in the game outside `dist/` is refused.
 
+#### Debug build
+
+`moku-game build --debug[=full] [--editor host:port]` builds a debug page for a phone: the production page plus the editor's page agent, never shipped to a store.
+
+- **What it carries.** `main.ts` imports `script.ts` first, then `agent.ts`, which sets `__MOKU_GAME_BUILD__`, `__MOKU_GAME_ENGINE__`, `__MOKU_GAME_EDITOR__`, CONTROL, AGENT `true` and DEV `false`; then the page entry, the game's `**/*.dev.ts` modules and `@moku-labs/editor/agent/page`, which `startPage` starts after the app. The defines match: DEV `false`, AGENT `true`, CONTROL `false` for `--debug` (= `--debug=read`, read and cosmetic commands) or `true` for `--debug=full` (every command), and the three strings. No hot swap, no frame recorder, no audio journal, no scenario. The title reads `<title> Debug`.
+- **The build id** is `debug-<UTC stamp>` or `debug-full-<stamp>`, such as `debug-20261014T153012Z`. The page logs it first: `page:build` with `{ build, engine, control }`.
+- **The engine id** names the engine the page bundles: its version, a hash of its installed `dist/` and of the patch the install root declares for that version, `0.14.12+9c41e0.patch.3f2a7b`; `+src` when the game resolves the engine's sources. The dev page and `preparePage` carry the same id.
+- **`--editor`** is where the agent's bridge dials, written as `__MOKU_GAME_EDITOR__`: `127.0.0.1:47600` by default (a phone reaches it through `adb reverse tcp:47600 tcp:47600`), or the computer's LAN address. A value that is not `host:port` is refused, and so is `--editor` without `--debug`.
+- **The editor is the game's.** `@moku-labs/editor` must resolve from the game, else `[game] build --debug needs @moku-labs/editor in the game.` with `Install it: bun add -d @moku-labs/editor.`
+- **One warning** goes before the size line: `build: a DEBUG page with the editor agent, control: read and cosmetic commands. Build debug-20261014T153012Z, engine 0.14.12+9c41e0, editor 127.0.0.1:47600. Never ship it to a store.`
+- **A store page refuses it.** Tauri runs the web build with `MOKU_NATIVE_PROFILE=debug|store`; `store` with `--debug` fails before anything is built.
+
 ### native
 
-`moku-game native <verb> [<target>]` runs one verb of `@moku-labs/native` over the native config above. `build` and `dev` need a target, such as `ios`. `doctor` and `clean` take one or none. Native prints its own progress and failures.
+`moku-game native <verb> [<target>]` runs one verb of `@moku-labs/native` over the native config above. `build` and `dev` need a target, such as `ios`. `doctor` and `clean` take one or none. Native prints its own progress and failures. An Android app composes native's `shell` system first, the one that sets `globalThis.__MOKU_NATIVE__`. `native build android --debug[=full] [--editor host:port]` builds a debug app: native gets `debug: true` and installs it beside the store app with its own save (move a tester's progress with `game.saveExport` and `game.saveImport`); the web build is the [debug build](#debug-build) with the same profile and `--editor`; the engine renames nothing. It warns once: `native: a DEBUG app with the editor agent, installed beside the store app. Never ship it to a store.` Other verbs refuse `--debug`, and so do the other targets in this release.
 
 ### visual
 
@@ -396,19 +455,20 @@ export default { app: { app: fixtureApp }, tests: [rewardPopup] };
 
 ### keys and pack
 
-`keys` and `pack` run the asset scanner of `@moku-labs/game/assets` with the game's paths and one `--layer` per `assets.layers` entry. `keys` writes `generated/assets.ts`, the compiled strings and the dev manifest `generated/manifest.json`. `pack` writes `dist/assets`. See [the asset keys](./quick-start.md#a-screen-the-body-font-and-the-asset-keys).
+`keys` and `pack` run the asset scanner of `@moku-labs/game/assets` with the game's paths and one `--layer` per `assets.layers` entry. `keys` writes `generated/assets.ts`, the compiled strings and the dev manifest `generated/manifest.json`: `strings.ts` and `strings.<locale>.ts` for the top-level features and the layers, `strings.<feature>.<locale>.ts` for every sub-feature with string files, and in the manifest a sub-feature's bundle carries its owner folder `dir` and its `parent` (`"ep01": { "feature": "ep01", "parent": "episodes", "dir": "features/episodes/ep01", … }`). A flat game's files keep their bytes. `pack` writes `dist/assets`; the packed bundles keep `dir`, `parent` and `release`. See [the asset keys](./quick-start.md#a-screen-the-body-font-and-the-asset-keys).
 
 `dev` runs the scan of `keys` itself, at start and on save. `keys` is for a run without the dev server, and `keys --check` for CI.
 
 ## The editor: preparePage
 
-The editor takes the same page from the engine. `preparePage(root, options?)` of `@moku-labs/game/cli` writes the dev page of `moku-game dev` and answers its paths. It also writes the first `assets-stamp.ts`, the empty one, when the game has none. It starts no server and no watcher, and throws the same `[game]` errors.
+The editor takes the same page from the engine. `preparePage(root, options?)` of `@moku-labs/game/cli` writes the dev page of `moku-game dev` and answers its paths and `engine`, the `EngineFingerprint` the page was written for: its `id` is the one the page shows in `globalThis.__MOKU_GAME_ENGINE__`. It also writes the first `assets-stamp.ts`, the empty one, when the game has none. It starts no server and no watcher, and throws the same `[game]` errors.
 
 ```ts
 // The editor bin, started with --root games/timber:
 const { preparePage } = await import(Bun.resolveSync("@moku-labs/game/cli", root));
-await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] });
-// { html: "<cwd>/games/timber/.moku/index.html", bunfig: "<cwd>/games/timber/.moku/bunfig.toml" }
+const page = await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] });
+// { html: "<cwd>/games/timber/.moku/index.html", bunfig: "<cwd>/games/timber/.moku/bunfig.toml", engine: { … } }
+// page.engine.id: "0.14.12+9c41e0"
 ```
 
 | Option | What |
@@ -419,7 +479,7 @@ await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] });
 
 ### watchKeys
 
-The editor never runs `moku-game dev`, so it starts the keys watch itself. `watchKeys(root, options?)` is the watch of [dev](#dev-keeps-generated-fresh): one scan before it resolves, then one per save of an asset or a strings file. A folder that is not a game rejects it with the `[game]` error `preparePage` throws for it.
+The editor never runs `moku-game dev`, so it starts the keys watch itself. `watchKeys(root, options?)` is the watch of [dev](#dev-keeps-generated-fresh): one scan before it resolves, then one per save of an asset or a strings file, and one when a folder becomes or stops being a sub-feature. A folder that is not a game rejects it with the `[game]` error `preparePage` throws for it.
 
 ```ts
 // The editor bin, next to preparePage, started with --root games/timber:
@@ -455,12 +515,32 @@ export default {
 
 | Field | What |
 |---|---|
-| `files` | Every watched asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`; no strings file), relative to the game with `/`, sorted. The value is `<size>:<mtimeMs>` |
+| `files` | Every watched asset file (`.png`, `.webp`, `.fnt`, `.mp3`, `.m4a`; no strings file, never a folder: a sub-feature's folder starts a scan but is not stamped), relative to the game with `/`, sorted. The value is `<size>:<mtimeMs>` |
 | `changed` | The paths whose value differs from the batch before, sorted. A new file is listed. A removed file is not: it is missing from `files`. Empty in the first stamp of a run |
 
 - The first scan of a run writes every file and an empty `changed`.
 - A save of a strings file alone leaves the stamp as it is.
 - `preparePage` writes the empty stamp, `{ files: {}, changed: [] }`, when the game has none.
+
+### watchEngine
+
+The editor's dev server also has to notice a new engine: Bun caches nothing across a restart, but a running server keeps the engine bundle it started with. `watchEngine(root, options?)` is the engine watch of [dev](#dev): it takes the fingerprint of the installed engine now (the `id` of `preparePage(...).engine`), watches the engine's folders, its patch and the install root's `package.json` and lock, and 300 ms after the last change reads the fingerprint again. It is sync and scans nothing. An engine run from its sources is not watched.
+
+```ts
+// The editor bin, next to preparePage, started with --root games/timber:
+const { preparePage, watchEngine } = await import(Bun.resolveSync("@moku-labs/game/cli", root));
+const page = await preparePage("games/timber", { agents: ["@moku-labs/editor/agent/page"] });
+const engine = watchEngine("games/timber", { onChange: change => change.restart && restartPageServer() });
+engine.close(); // when the editor closes the game
+```
+
+| Part | What |
+|---|---|
+| `options.onChange` | Called with `{ before, after, restart }`, two `EngineFingerprint`s. `restart: true` for a new version or dist: the page server must restart. `restart: false` for a patch file that changed while the installed engine did not: the install did not happen yet. Default: the warning lines of `moku-game dev` on the console |
+| `options.onError` | Called with `[game] dev: the engine cannot be read (<message>). Waiting for the next change.` when the engine does not resolve during an install. The watch goes on. Default: a console warning |
+| `engine.close()` | Stops the watch. A second call does nothing |
+
+It throws the `[game] dev` error of `moku-game dev` when the game does not resolve `@moku-labs/game/hot`.
 
 ## A game against the engine working tree
 

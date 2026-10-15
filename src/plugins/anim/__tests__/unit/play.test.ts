@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type } from "../../../flow/runner/define";
 import { Transform } from "../../../renderer/components";
 import { Animation } from "../../components";
-import { defineAnimation, mark, sequence, tween } from "../../timeline/steps";
+import { defineAnimation, mark, parallel, sequence, set, tween } from "../../timeline/steps";
 import type { Target } from "../../types";
 import { createMockAnim, spawnTestEntity } from "./mock-anim";
 
@@ -172,5 +172,29 @@ describe("anim/timeline play", () => {
     expect(mock.api.active()).toBe(0);
     expect(handle.active()).toBe(false);
     expect(mock.world.ecs.get(entity, Transform)?.x).toBe(100);
+  });
+});
+
+describe("anim/timeline play — the entities a timeline counts on", () => {
+  it("counts each resolved entity once in Animation.playing", () => {
+    const mock = createMockAnim();
+
+    mock.start();
+
+    const entity = spawnTestEntity(mock, [Transform()]);
+    const twice = defineAnimation("hud.twice", {
+      slots: { it: type<Target>(), same: type<Target>() },
+      build: ({ it, same }) =>
+        parallel(
+          tween(it, Transform, { x: 1 }, { ms: 100 }),
+          tween(same, Transform, { y: 1 }, { ms: 100 }),
+          set(it, Transform, { scale: 2 })
+        )
+    });
+
+    mock.world.projection.registerKey("hud", "coin", entity);
+    mock.api.play(twice, { it: { projection: "hud", key: "coin" }, same: entity });
+
+    expect(mock.world.ecs.get(entity, Animation)).toEqual({ playing: 1 });
   });
 });

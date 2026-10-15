@@ -7,7 +7,8 @@ import type { FxHandler } from "../../flow/fx/types";
 import type { Hint } from "../../flow/types";
 import type { Message } from "../../i18n/types";
 import type { Size } from "../../text/types";
-import type { Entity } from "../../world/types";
+import type { Motion, ViewHandle } from "../../world/projection/types";
+import type { Ease, Entity, MotionCause, ReducedMotion } from "../../world/types";
 import type { Element, JsxModule } from "../jsx/types";
 import type { ResolvedStyle } from "../styles/types";
 
@@ -87,8 +88,11 @@ export type LayoutModule = {
   place(parent: Element, children: readonly Element[]): void;
   free(element: Element): void;
   solve(rootElement: Element, size: Rect, lookup: ElementLookup): boolean;
+  /** The content box of an element in its own units: a JSX root laid out in it as a slot is solved there. */
+  contentRect(element: Element): Rect;
   commit(element: Element, parent: Rect | undefined): void;
-  enter(element: Element): void;
+  /** Plays the enter hook and starts the loop; `span` notes the longest finite track the hook started. */
+  enter(element: Element, span?: MotionSpan): void;
   loop(element: Element): void;
   change(element: Element, previous: Rect, hint?: Hint): boolean;
   changeExtra(
@@ -99,7 +103,10 @@ export type LayoutModule = {
   ): boolean;
   repose(element: Element, parent: Rect | undefined, hooked: boolean, hint?: Hint): void;
   lift(element: Element, units: number): void;
-  exit(element: Element): void;
+  /** Starts the exit, telling the hook why the element leaves; `span` notes the longest finite track the exit hook started. */
+  exit(element: Element, cause: MotionCause, span?: MotionSpan): void;
+  /** Plays a hook on the element's handle and keeps its motion with the element's handles (the level of an overlay). */
+  playTrack(element: Element, hook: (view: ViewHandle<unknown>) => Motion): void;
   settled(element: Element): boolean;
   scroll(containers: readonly Element[], lookup: ElementLookup): void;
   clampScroll(container: Element, contentHeight: number, lookup: ElementLookup): number;
@@ -113,4 +120,23 @@ export type LayoutModule = {
   popupHandler(jsx: JsxModule): FxHandler;
   guideHandler(): FxHandler;
   counters(): { nodes: number; measured: number; solves: number };
+};
+
+/**
+ * The longest finite track a motion hook started through its view handle: where it ends (delay included), its length,
+ * delay, ease and reduced-motion rule. The level of an overlay follows the root's own enter and exit motion by it
+ * (spec 22, LEAD-FIXES-4 item 5a); `end` 0 means the hook started no timed track.
+ *
+ * @example
+ * ```ts
+ * // A sheet that fades in over 250 ms after 40 ms.
+ * const span: MotionSpan = { end: 290, ms: 250, delayMs: 40, ease: "out", reduced: undefined };
+ * ```
+ */
+export type MotionSpan = {
+  end: number;
+  ms: number;
+  delayMs: number;
+  ease: Ease | undefined;
+  reduced: ReducedMotion | undefined;
 };

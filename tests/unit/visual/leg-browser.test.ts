@@ -606,11 +606,37 @@ describe("runBrowserLeg", () => {
     await bothLegs([openPopup(7)], chromium);
 
     expect(seen).toEqual([
+      // The check of skipped frames goes on first, before the game time is held.
+      { id: "game.debug", elapsed: 83.236_666 },
       { id: "game.pause", elapsed: 83.236_666 },
       { id: "game.restore", elapsed: START_MS },
       { id: "game.tap", elapsed: expect.any(Number) }
     ]);
     expect(app.lifecycle.reasons()).toEqual(["devtools"]);
+    expect(app.renderer.sync.debug.state().verifyFrames).toBe(true);
+  });
+
+  it("leaves the check of skipped frames off with --no-verify-frames", async () => {
+    const { app } = await pageGame();
+    const seen: string[] = [];
+
+    vi.stubGlobal("doors", {
+      read,
+      sources,
+      commands,
+      run: (target: object, command: { id: string }, input: object) => {
+        seen.push(command.id);
+
+        return Reflect.apply(run, undefined, [target, command, input]);
+      }
+    });
+
+    const { chromium } = fakeChromium();
+
+    await bothLegs([openPopup(7)], chromium, { verifyFrames: false });
+
+    expect(seen).not.toContain("game.debug");
+    expect(app.renderer.sync.debug.state().verifyFrames).toBe(false);
   });
 
   it("names a page that never stops loading", async () => {

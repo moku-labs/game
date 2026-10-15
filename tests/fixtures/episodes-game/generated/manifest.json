@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "bundles": {
+    "ep01": {
+      "feature": "ep01",
+      "parent": "episodes",
+      "dir": "features/episodes/ep01",
+      "tier": "feature",
+      "release": "leave",
+      "mb": 0.036,
+      "files": [
+        {
+          "key": "ep01.audio.step",
+          "path": "features/episodes/ep01/assets/audio/step.mp3",
+          "kind": "audio",
+          "mb": 0.005
+        },
+        {
+          "key": "ep01.items.key",
+          "path": "features/episodes/ep01/assets/items/key.png",
+          "width": 32,
+          "height": 32,
+          "mb": 0.005,
+          "mips": true
+        },
+        {
+          "key": "ep01.ward.room",
+          "path": "features/episodes/ep01/assets/ward/room.png",
+          "width": 96,
+          "height": 72,
+          "mb": 0.026
+        }
+      ]
+    },
+    "ep02": {
+      "feature": "ep02",
+      "parent": "episodes",
+      "dir": "features/episodes/ep02",
+      "tier": "feature",
+      "mb": 0.026,
+      "files": [
+        {
+          "key": "ep02.ward.room",
+          "path": "features/episodes/ep02/assets/ward/room.png",
+          "width": 96,
+          "height": 72,
+          "mb": 0.026
+        }
+      ]
+    },
+    "episodes": {
+      "feature": "episodes",
+      "tier": "feature",
+      "mb": 0.009,
+      "files": [
+        {
+          "key": "episodes.cover",
+          "path": "features/episodes/assets/cover.png",
+          "width": 48,
+          "height": 48,
+          "mb": 0.009
+        }
+      ]
+    },
+    "episodes-kit": {
+      "feature": "episodes-kit",
+      "parent": "episodes",
+      "dir": "features/episodes/episodes-kit",
+      "tier": "feature",
+      "mb": 0.004,
+      "files": [
+        {
+          "key": "episodes-kit.frame",
+          "path": "features/episodes/episodes-kit/assets/frame.png",
+          "width": 32,
+          "height": 32,
+          "mb": 0.004
+        }
+      ]
+    },
+    "home": {
+      "feature": "home",
+      "tier": "feature",
+      "mb": 0.009,
+      "files": [
+        {
+          "key": "home.bg",
+          "path": "features/home/assets/bg.png",
+          "width": 64,
+          "height": 36,
+          "mb": 0.009
+        }
+      ]
+    }
+  }
+}

@@ -36,9 +36,10 @@ const config: Config = {
  * @example
  * ```ts
  * // A game composes it next to the screen set and points it at the player's settings.
+ * // `volumes` comes from the game's `defineGame` kit, so `player` is the game's Player.
  * createApp({
  *   plugins: [...screen, audioPlugin, settingsFeature],
- *   pluginConfigs: { audio: { volumes: player => player.settings.audio } }
+ *   pluginConfigs: { audio: { volumes: volumes(player => player.settings.audio) } }
  * });
  * ```
  */

@@ -4,6 +4,7 @@
  * core filters, which ship both. The plugin registers them before any feature, in this order. No
  * `pixi-filters` dependency.
  */
+import type { FilterCache } from "../../renderer/types";
 import { component } from "../../world/ecs/define";
 import { defineFilter } from "./define";
 import { GLOW_GLSL } from "./glow-glsl";
@@ -14,6 +15,7 @@ import type {
   AlphaValue,
   BlurValue,
   ColorMatrixValue,
+  CoreKind,
   DisplacementValue,
   FilterComponent,
   GlowValue,
@@ -154,6 +156,24 @@ export const Displacement = /*#__PURE__*/ component("effects.displacement", disp
  * ```
  */
 export const Alpha = /*#__PURE__*/ component("effects.alpha", alphaDefaults);
+
+/**
+ * What the kept-picture cache may do with each Pixi-core kind (spec 23 P8.4): a blur, a colour matrix and an alpha
+ * read only the view's own pixels; Pixi's noise reads the fragment position, a displacement's map is placed by its
+ * sprite's world transform, so both are drawn live. `Glow` and `Outline` are ours: their definitions carry theirs.
+ *
+ * @example
+ * ```ts
+ * CORE_CACHE.noise; // "screen"
+ * ```
+ */
+export const CORE_CACHE: Readonly<Record<CoreKind, FilterCache>> = Object.freeze({
+  blur: "local",
+  colorMatrix: "local",
+  alpha: "local",
+  noise: "screen",
+  displacement: "screen"
+});
 
 /**
  * The built-in kinds in registration order: ours first, then the Pixi-core kinds.

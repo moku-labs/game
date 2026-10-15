@@ -4,8 +4,8 @@
  * projects only collect `*.test.ts`. It extends the renderer's fake module with a particle
  * container that counts its uploads, particles with every field the step writes, a program that
  * records its sources (WGSL and GLSL), a filter that keeps the resolution it was built at and the
- * five core filters recording their setter calls, plus a fake GPU device for the dev WGSL check
- * and a fake WebGL2 context for the dev GLSL check.
+ * five core filters recording their setter calls, plus a fake GPU device for the WGSL check and a
+ * fake WebGL2 context for the GLSL check, with `KHR_parallel_shader_compile` switchable.
  */
 
 import {
@@ -131,8 +131,19 @@ export class FakeFxGlProgram extends FakeGlProgram {
   }
 }
 
-/** Pixi's `Filter` with the resolution it was built at: a number, `"inherit"`, or 1 by default. */
+/** What a fake filter's `apply` hands its draw to: Pixi's `FilterSystem.applyFilter`. */
+export type FakeFilterManager = {
+  applyFilter(filter: unknown, input: unknown, output: unknown, clear: boolean): void;
+};
+
+/**
+ * Pixi's `Filter` with the resolution it was built at: a number, `"inherit"`, or 1 by default.
+ * Its `apply` draws through the manager, as Pixi's `Filter.apply` does.
+ */
 export class FakeFxFilter extends FakeFilter {
+  /** Every filter of ours the fake module built, in creation order. */
+  public static made: FakeFxFilter[] = [];
+
   public resolution: number | "inherit";
 
   public constructor(options: Record<string, unknown> = {}) {
@@ -140,12 +151,30 @@ export class FakeFxFilter extends FakeFilter {
     const { resolution } = options;
 
     this.resolution = resolution === "inherit" || typeof resolution === "number" ? resolution : 1;
+    FakeFxFilter.made.push(this);
+  }
+
+  /**
+   * Draws the filter, as Pixi's `Filter.apply`: one `applyFilter` of itself.
+   *
+   * @param manager - The filter system.
+   * @param input - The input texture.
+   * @param output - The output.
+   * @param clear - Whether the output is cleared.
+   */
+  public apply(manager: FakeFilterManager, input: unknown, output: unknown, clear: boolean): void {
+    manager.applyFilter(this, input, output, clear);
   }
 }
 
-/** The fake of Pixi's `BlurFilter`: its four setters recorded in call order. */
+/**
+ * The fake of Pixi's `BlurFilter`: its four setters recorded in call order, and its two passes,
+ * which its `apply` draws one after the other, as Pixi's does.
+ */
 export class FakeFxBlurFilter extends FakeFilter {
   public readonly calls: string[] = [];
+  public readonly blurXFilter = new FakeFxFilter();
+  public readonly blurYFilter = new FakeFxFilter();
   private strengthValue: number;
   private qualityValue: number;
   private resolutionValue: number;
@@ -196,6 +225,19 @@ export class FakeFxBlurFilter extends FakeFilter {
   public set repeatEdgePixels(value: boolean) {
     this.calls.push(`repeatEdgePixels=${value}`);
     this.repeatValue = value;
+  }
+
+  /**
+   * Draws both passes, the horizontal one first, as Pixi's `BlurFilter.apply` does.
+   *
+   * @param manager - The filter system.
+   * @param input - The input texture.
+   * @param output - The output.
+   * @param clear - Whether the output is cleared.
+   */
+  public apply(manager: FakeFilterManager, input: unknown, output: unknown, clear: boolean): void {
+    this.blurXFilter.apply(manager, input, output, true);
+    this.blurYFilter.apply(manager, input, output, clear);
   }
 }
 
@@ -325,13 +367,18 @@ export type FakeMessage = {
 /** The fake GPU device: the sources it compiled and the messages it answers with. */
 export type FakeDevice = {
   compiled: string[];
+  /** What every compilation reports, unless `answer` says otherwise. */
   messages: FakeMessage[];
+  /** What the compilation of one source reports, read when it answers: `messages` by default. */
+  answer: (code: string) => FakeMessage[];
+  /** Per source, a promise its compilation waits for before it answers. */
+  waits: Map<string, Promise<void>>;
   device: GPUDevice;
 };
 
 /**
  * Creates a fake GPU device whose shader modules answer `getCompilationInfo()` with the messages
- * a test sets.
+ * a test sets, once the promise a test holds for that source resolved.
  *
  * @param messages - What every compilation reports.
  * @returns The device and its records.
@@ -340,13 +387,20 @@ export function createFakeDevice(messages: FakeMessage[] = []): FakeDevice {
   const fake: FakeDevice = {
     compiled: [],
     messages,
+    answer: () => fake.messages,
+    waits: new Map(),
     device: {} as GPUDevice
   };
   const device = {
     createShaderModule: (descriptor: { code: string }) => {
-      fake.compiled.push(descriptor.code);
+      const { code } = descriptor;
 
-      return { getCompilationInfo: () => Promise.resolve({ messages: fake.messages }) };
+      fake.compiled.push(code);
+
+      return {
+        getCompilationInfo: () =>
+          (fake.waits.get(code) ?? Promise.resolve()).then(() => ({ messages: fake.answer(code) }))
+      };
     }
   };
 
@@ -363,12 +417,18 @@ export type FakeGl = {
   compiled: string[];
   /** How many shaders were deleted. */
   deleted: number;
-  /** What `getShaderParameter(shader, COMPILE_STATUS)` answers. */
+  /** What `getShaderParameter(shader, COMPILE_STATUS)` answers, unless `fails` names the source. */
   status: boolean;
+  /** Set, a source it answers true for fails to compile with `log`. */
+  fails: ((source: string) => boolean) | undefined;
   /** What `getShaderInfoLog(shader)` answers. */
   log: string;
   /** False makes `createShader` answer null, as a lost context does. */
   makesShaders: boolean;
+  /** True gives the context `KHR_parallel_shader_compile`: a compile answers on a later frame. */
+  parallel: boolean;
+  /** What `getShaderParameter(shader, COMPLETION_STATUS_KHR)` answers: `null` as a lost context does. */
+  done: boolean | null;
   context: WebGL2RenderingContext;
 };
 
@@ -381,13 +441,17 @@ export type FakeGl = {
 export function createFakeGl(): FakeGl {
   const FRAGMENT_SHADER = 0x8b_30;
   const COMPILE_STATUS = 0x8b_81;
+  const COMPLETION_STATUS_KHR = 0x91_b1;
   const fake: FakeGl = {
     created: [],
     compiled: [],
     deleted: 0,
     status: true,
+    fails: undefined,
     log: "",
     makesShaders: true,
+    parallel: false,
+    done: false,
     context: {} as WebGL2RenderingContext
   };
   const context = {
@@ -405,8 +469,15 @@ export function createFakeGl(): FakeGl {
     compileShader: (shader: { source: string }): void => {
       fake.compiled.push(shader.source);
     },
-    getShaderParameter: (_shader: unknown, name: number): unknown =>
-      name === COMPILE_STATUS ? fake.status : undefined,
+    getShaderParameter: (shader: { source: string }, name: number): unknown => {
+      if (name === COMPILE_STATUS)
+        return fake.fails === undefined ? fake.status : !fake.fails(shader.source);
+
+      return name === COMPLETION_STATUS_KHR ? fake.done : undefined;
+    },
+    getExtension: (name: string): { COMPLETION_STATUS_KHR: number } | null =>
+      // eslint-disable-next-line unicorn/no-null -- WebGL answers null for an extension it lacks.
+      name === "KHR_parallel_shader_compile" && fake.parallel ? { COMPLETION_STATUS_KHR } : null,
     getShaderInfoLog: (): string => fake.log,
     deleteShader: (): void => {
       fake.deleted += 1;
@@ -434,6 +505,7 @@ export function createFakeEffectsPixi(
   const base = createFakePixi(options);
 
   FakeFxParticleContainer.made = [];
+  FakeFxFilter.made = [];
   FakeFxGpuProgram.made = [];
   FakeFxGlProgram.made = [];
 

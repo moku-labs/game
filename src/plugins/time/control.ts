@@ -1,11 +1,12 @@
 /**
- * @file time plugin — the time commands of the `/control` door: step frames by hand and set the
- * time scale. Dev builds only: every body starts with the inline dev guard, so a bundler `define`
- * of `false` drops it, and logs the `moku:dev` marker.
+ * @file time plugin — the time commands of the `/control` door: step frames by hand, set the
+ * time scale and force the frame rate. Dev and debug builds: every body starts with the inline agent guard of a cosmetic
+ * command, so a bundler `define` of `false` drops it, and logs the `moku:dev` marker.
  */
 import { defineCommand } from "../flow/doors/define";
 import { controlRefused } from "../flow/doors/dev";
 import type { ControlApp } from "../flow/doors/types";
+import type { RateChoice } from "./types";
 
 /** The length of one frame at 60 fps, the step a frame count takes by default. */
 const FRAME_MS = 1000 / 60;
@@ -56,7 +57,12 @@ export const stepCommand = defineCommand({
   input: { frames: "number", deltaMs: "number?" },
   effect: "cosmetic",
   run: (app: ControlApp, { frames, deltaMs = FRAME_MS }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.step", frames });
     checkFrames(frames);
@@ -83,12 +89,48 @@ export const timeScaleCommand = defineCommand({
   input: { scale: "number" },
   effect: "cosmetic",
   run: (app: ControlApp, { scale }) => {
-    if (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) throw controlRefused();
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
 
     app.log.debug("moku:dev", { command: "game.timeScale", scale });
     checkScale(scale);
     app.time.setScale(scale);
 
     return app.time.snapshot();
+  }
+});
+
+/**
+ * Forces the frame rate, or gives it back to the config without `fps`, and answers the rate after
+ * the call. For an A/B run on the phone: the same screen at 120 and at 60. A wrong `fps` is
+ * refused by `setRate` with its own message.
+ *
+ * @example
+ * ```ts
+ * (await run(app, commands.frameRate, { fps: 60 })).value.fps; // 60
+ * (await run(app, commands.frameRate, {})).value.mode; // "auto" with adaptive, "fixed" without
+ * ```
+ */
+export const frameRateCommand = defineCommand({
+  id: "game.frameRate",
+  title: "Frame rate",
+  input: { fps: "number?" },
+  effect: "cosmetic",
+  run: (app: ControlApp, { fps }) => {
+    if (
+      (typeof __MOKU_GAME_DEV__ === "undefined" || !__MOKU_GAME_DEV__) &&
+      (typeof __MOKU_GAME_AGENT__ === "undefined" || !__MOKU_GAME_AGENT__)
+    ) {
+      throw controlRefused();
+    }
+
+    app.log.debug("moku:dev", { command: "game.frameRate", fps });
+
+    // `setRate` checks the number: the door passes it on as the player's choice would come.
+    return app.time.setRate(fps === undefined ? "auto" : (fps as RateChoice));
   }
 });

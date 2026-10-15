@@ -476,11 +476,13 @@ export function storeSave(
  * @example
  * ```ts
  * // The in-memory .moku/build/main.ts of moku-game build, for a game whose config.ts names back.
+ * import "./script.ts";
  * import { startPage } from "@moku-labs/game/app/page";
  * import { systemShellOf } from "@moku-labs/game/app/system";
  * import game from "../../index.ts";
  * import config from "../../config.ts";
  *
+ * performance.mark("moku:main");
  * await startPage(game, config, {
  *   system: systemShellOf({
  *     system: () => import("@moku-labs/system"),

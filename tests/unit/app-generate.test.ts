@@ -9,13 +9,17 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../../src/app/config";
 import {
+  agentFlag,
   assetsStamp,
   buildMain,
   bunfigText,
+  DEBUG_AGENT,
+  debugMain,
   devFlag,
   devMain,
   pageHtml,
-  scenarioFiles
+  scenarioFiles,
+  scriptMark
 } from "../../src/app/generate";
 import type { GameConfig, ResolvedGameConfig } from "../../src/app/types";
 
@@ -163,11 +167,11 @@ describe("pageHtml", () => {
 });
 
 describe("devMain", () => {
-  it("devMain imports ./dev.ts first", () => {
+  it("devMain imports ./script.ts first and ./dev.ts second", () => {
     const text = devMain(plain, { scenarios: ["ready.ts"], devModules: [] });
-    const first = text.split("\n").find(line => line.startsWith("import"));
+    const imports = text.split("\n").filter(line => line.startsWith("import"));
 
-    expect(first).toBe('import "./dev.ts";');
+    expect(imports.slice(0, 2)).toEqual(['import "./script.ts";', 'import "./dev.ts";']);
   });
 
   it("devMain imports the assets stamp right after the dev flag, from .moku/ at both depths", () => {
@@ -175,8 +179,8 @@ describe("devMain", () => {
     const dev = devMain(plain, sources).split("\n");
     const visual = devMain(plain, sources, "../../").split("\n");
 
-    expect(dev.slice(1, 3)).toEqual(['import "./dev.ts";', 'import "./assets-stamp.ts";']);
-    expect(visual.slice(1, 3)).toEqual(['import "./dev.ts";', 'import "../assets-stamp.ts";']);
+    expect(dev.slice(2, 4)).toEqual(['import "./dev.ts";', 'import "./assets-stamp.ts";']);
+    expect(visual.slice(2, 4)).toEqual(['import "./dev.ts";', 'import "../assets-stamp.ts";']);
   });
 
   it("devMain writes .ts on every relative import", () => {
@@ -188,6 +192,7 @@ describe("devMain", () => {
     const relative = relativeImports(text);
 
     expect(relative).toEqual([
+      "./script.ts",
       "./dev.ts",
       "./assets-stamp.ts",
       "../index.ts",
@@ -210,6 +215,7 @@ describe("devMain", () => {
     );
 
     expect(relativeImports(text)).toEqual([
+      "./script.ts",
       "./dev.ts",
       "../assets-stamp.ts",
       "../../index.ts",
@@ -238,12 +244,14 @@ describe("devMain", () => {
     expect(devMain(plain, { scenarios: [], devModules: [] })).toBe(
       [
         "// Written by moku-game dev. Do not edit.",
+        'import "./script.ts";',
         'import "./dev.ts";',
         'import "./assets-stamp.ts";',
         'import { startPage } from "@moku-labs/game/app/page";',
         'import game from "../index.ts";',
         'import config from "../config.ts";',
         "",
+        'performance.mark("moku:main");',
         "await startPage(game, config, {",
         "  scenarios: {}",
         "});",
@@ -379,11 +387,13 @@ describe("buildMain", () => {
 
     expect(text).toBe(
       [
+        'import "./script.ts";',
         'import { startPage } from "@moku-labs/game/app/page";',
         'import { systemShellOf } from "@moku-labs/game/app/system";',
         'import game from "../../index.ts";',
         'import config from "../../config.ts";',
         "",
+        'performance.mark("moku:main");',
         "await startPage(game, config, {",
         "  system: systemShellOf({",
         '    system: () => import("@moku-labs/system"),',
@@ -433,9 +443,104 @@ describe("buildMain", () => {
 });
 
 describe("devFlag", () => {
-  it("devFlag sets the global and imports nothing", () => {
-    expect(devFlag()).toBe(
-      "// Written by moku-game dev. Do not edit.\nglobalThis.__MOKU_GAME_DEV__ = true;\n"
+  it("devFlag writes the build, the engine id, CONTROL and AGENT, and sets DEV last, importing nothing", () => {
+    expect(devFlag('0.0.0+"src"')).toBe(
+      [
+        "// Written by moku-game dev. Do not edit.",
+        'globalThis.__MOKU_GAME_BUILD__ = "dev";',
+        String.raw`globalThis.__MOKU_GAME_ENGINE__ = "0.0.0+\"src\"";`,
+        "globalThis.__MOKU_GAME_CONTROL__ = true;",
+        "globalThis.__MOKU_GAME_AGENT__ = true;",
+        "globalThis.__MOKU_GAME_DEV__ = true;",
+        ""
+      ].join("\n")
+    );
+  });
+});
+
+/** What a `--debug` page is built with: the build id, the profile, the engine and the editor. */
+const debugPage = {
+  build: "debug-20261014T153012Z",
+  control: false,
+  engine: "0.14.12+9c41e0",
+  editor: "127.0.0.1:47600"
+};
+
+describe("the debug page", () => {
+  it("debugMain imports script.ts first and agent.ts second, then the page entry", () => {
+    const imports = debugMain(plain, [])
+      .split("\n")
+      .filter(line => line.startsWith("import"));
+
+    expect(imports.slice(0, 3)).toEqual([
+      'import "./script.ts";',
+      'import "./agent.ts";',
+      'import { startPage } from "@moku-labs/game/app/page";'
+    ]);
+  });
+
+  it("debugMain names the editor's page agent and the .dev modules, from ../../, and no scenario, stamp or dev flag", () => {
+    const text = debugMain(settingsWith({ system: ["back"] }), [
+      "features/board/board.dev.ts",
+      "features/a/a.dev.ts"
+    ]);
+
+    expect(DEBUG_AGENT).toBe("@moku-labs/editor/agent/page");
+    expect(text).toContain('import * as devModule0 from "../../features/a/a.dev.ts";');
+    expect(text).toContain('import * as devModule1 from "../../features/board/board.dev.ts";');
+    expect(text).toContain('import agent0 from "@moku-labs/editor/agent/page";');
+    expect(text).toContain(
+      '    back: () => import("@moku-labs/system/back")\n  }),\n  agents: [agent0],\n  devModules: [devModule0, devModule1]\n});\n'
+    );
+    expect(text).not.toMatch(/scenario|assets-stamp|"\.\/dev\.ts"/);
+    expect(debugMain(plain, [])).toContain(
+      "await startPage(game, config, {\n  agents: [agent0]\n});"
+    );
+  });
+
+  it("devMain, debugMain and buildMain mark moku:main as the first statement after their imports", () => {
+    const mains = [
+      devMain(plain, { scenarios: ["ready.ts"], devModules: [], agents: [DEBUG_AGENT] }),
+      debugMain(plain, ["features/a/a.dev.ts"]),
+      buildMain(settingsWith({ system: ["back"] }))
+    ];
+
+    for (const text of mains) {
+      const lines = text.split("\n");
+      const firstStatement = lines.find(
+        line => line !== "" && !line.startsWith("import") && !line.startsWith("//")
+      );
+
+      expect(firstStatement).toBe('performance.mark("moku:main");');
+      expect(lines.findLastIndex(line => line.startsWith("import"))).toBeLessThan(
+        lines.indexOf('performance.mark("moku:main");')
+      );
+    }
+  });
+
+  it("scriptMark marks moku:script with the URL of the chunk it lands in", () => {
+    expect(scriptMark()).toBe('performance.mark("moku:script", { detail: import.meta.url });\n');
+  });
+
+  it("agentFlag sets CONTROL false for read and true for full, and writes the build, engine and editor JSON-quoted", () => {
+    const hostile = 'host"name:47600';
+
+    expect(agentFlag(debugPage)).toBe(
+      [
+        'globalThis.__MOKU_GAME_BUILD__ = "debug-20261014T153012Z";',
+        'globalThis.__MOKU_GAME_ENGINE__ = "0.14.12+9c41e0";',
+        'globalThis.__MOKU_GAME_EDITOR__ = "127.0.0.1:47600";',
+        "globalThis.__MOKU_GAME_CONTROL__ = false;",
+        "globalThis.__MOKU_GAME_AGENT__ = true;",
+        "globalThis.__MOKU_GAME_DEV__ = false;",
+        ""
+      ].join("\n")
+    );
+    expect(agentFlag({ ...debugPage, control: true })).toContain(
+      "globalThis.__MOKU_GAME_CONTROL__ = true;"
+    );
+    expect(agentFlag({ ...debugPage, editor: hostile })).toContain(
+      `globalThis.__MOKU_GAME_EDITOR__ = ${JSON.stringify(hostile)};`
     );
   });
 });
@@ -521,7 +626,7 @@ describe("bunfigText", () => {
     );
   });
 
-  it("bunfigText puts the hot plugin first and adds the dev define", () => {
+  it("bunfigText puts the hot plugin first and defines the three flags true", () => {
     expect(
       bunfigText({
         hotPlugin: "/abs/game/node_modules/@moku-labs/game/dist/hot.mjs",
@@ -535,7 +640,7 @@ describe("bunfigText", () => {
         "",
         "[serve.static]",
         'plugins = ["/abs/game/node_modules/@moku-labs/game/dist/hot.mjs", "/abs/engine/scripts/tree/bundle.ts"]',
-        'define = { "__MOKU_GAME_DEV__" = "true" }',
+        'define = { "__MOKU_GAME_DEV__" = "true", "__MOKU_GAME_AGENT__" = "true", "__MOKU_GAME_CONTROL__" = "true" }',
         ""
       ].join("\n")
     );

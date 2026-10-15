@@ -1,7 +1,8 @@
 /**
  * @file renderer plugin — shared mock kernel context for the unit tests. Not a test file: the
  * projects only collect `*.test.ts`. The real `host`, `viewport` and `sync` modules run over a
- * real `world`, a fake `time`, a fake `lifecycle`, the fake Pixi module and the fake DOM.
+ * real `world`, a fake `time` (with `measure` driven by `measureFrame`), a fake `lifecycle`, a
+ * fake `flow`, the fake Pixi module and the fake DOM.
  */
 import type { Log } from "@moku-labs/common/browser";
 import { vi } from "vitest";
@@ -10,10 +11,23 @@ import type { Api as ClockApi } from "../../clock/types";
 import type { Api as FlowApi } from "../../flow/types";
 import type { Api as LifecycleApi, PauseReason } from "../../lifecycle/types";
 import type { Json, Api as ModelApi, Snapshot } from "../../model/types";
-import type { FrameCallback, Phase, Time, Api as TimeApi } from "../../time/types";
+import { createRateState } from "../../time/rate";
+import type {
+  FrameCallback,
+  FrameMeasure,
+  FrameRate,
+  MeasureListener,
+  Phase,
+  Time,
+  Api as TimeApi
+} from "../../time/types";
 import { createModules as createWorldModules } from "../../world/api";
 import { createWorldState } from "../../world/state";
-import type { Api as WorldApi, KernelSlice as WorldKernelSlice } from "../../world/types";
+import type {
+  SystemTiming,
+  Api as WorldApi,
+  KernelSlice as WorldKernelSlice
+} from "../../world/types";
 import { createModules, createRendererApi } from "../api";
 import { createHandlers } from "../handlers";
 import { startRenderer, stopRenderer, withDeps } from "../lifecycle";
@@ -54,6 +68,22 @@ export type MockRenderer = {
   runPhase(phase: Phase): void;
   /** Runs `onStop`. */
   stop(): void;
+  /** The listeners of the fake `time.measure`. */
+  measures: MeasureListener[];
+  /** Every `time.chargeAgent` span, in call order. */
+  charged: number[];
+  /** How many times the renderer told the fake `time` that a frame was drawn. */
+  drawnCount(): number;
+  /** Sets the frame rate the fake `time.rate()` answers. */
+  setRate(rate: Readonly<FrameRate>): void;
+  /** Hands a measured frame to the `time.measure` listeners; the fields left out are of a quiet 60 fps frame. */
+  measureFrame(record?: Partial<FrameMeasure>): void;
+  /** Runs one frame: phase input, phase render, then the measure listeners with the record. */
+  drawFrame(record?: Partial<FrameMeasure>): void;
+  /** Sets the flow path the fake `flow.state()` answers. */
+  setPath(path: string): void;
+  /** Sets what the fake `world.systemTimes()` answers. */
+  setSystemTimes(timing: SystemTiming | undefined): void;
 };
 
 /**
@@ -107,20 +137,30 @@ function noRemover(): () => void {
  * Builds a real `world` API over fake `time`, `model` and `flow` APIs.
  *
  * @param timeApi - The fake time API the world shares with the renderer.
+ * @param flowApi - The fake flow API the world and the renderer share.
  * @param log - The mock log.
+ * @param systems - What the fake `systemTimes()` answers.
+ * @param systems.timing - The timing table, or `undefined`.
  * @returns The world API plus the internal change-set clear.
  */
-function createWorld(timeApi: TimeApi, log: Log.LogApi): WorldApi & { clearChanges(): void } {
+function createWorld(
+  timeApi: TimeApi,
+  flowApi: FlowApi,
+  log: Log.LogApi,
+  systems: { timing: SystemTiming | undefined }
+): WorldApi & { clearChanges(): void } {
   const modelApi = {
     store: { snapshot: emptySnapshot },
     rng: { peek: vi.fn() }
   } as unknown as ModelApi;
-  const flowApi = {
-    state: () => ({ mode: "live" }),
-    features: { all: () => [] },
-    fx: { onHint: noRemover }
-  } as unknown as FlowApi;
-  const apis: Record<string, unknown> = { time: timeApi, model: modelApi, flow: flowApi };
+  // World writes the frame's moment into its `Now` resource (spec 15): a still clock is enough here.
+  const worldClock = { now: () => 0 } as unknown as ClockApi;
+  const apis: Record<string, unknown> = {
+    time: timeApi,
+    model: modelApi,
+    flow: flowApi,
+    clock: worldClock
+  };
   const config = { settleMs: 350, reconciledEvent: false };
   const kernel = {
     config,
@@ -132,12 +172,13 @@ function createWorld(timeApi: TimeApi, log: Log.LogApi): WorldApi & { clearChang
   } as unknown as WorldKernelSlice;
   const modules = createWorldModules({
     ...kernel,
-    deps: { time: timeApi, model: modelApi, flow: flowApi }
+    deps: { time: timeApi, model: modelApi, flow: flowApi, clock: worldClock }
   });
 
   return {
     ecs: modules.ecs,
     projection: modules.projection,
+    systemTimes: () => systems.timing,
     clearChanges: () => modules.ecs.clearChanges()
   };
 }
@@ -193,12 +234,19 @@ export function createMockRenderer(
     background: 0x00_00_00,
     antialias: false,
     maxResolution: 2,
+    poolTrim: { restMs: 1000, aboveMb: 16 },
     preference: "webgpu",
     aspect: { min: 4 / 3, max: 21 / 9 },
     poolLimit: 256,
     unsupportedMessage: "This device cannot run the game.",
     loadPixi: () => Promise.resolve(pixi.module),
-    debug: { nineSlice: false },
+    debug: { nineSlice: false, verifyFrames: false },
+    monitor: { budgetMs: "rate", frames: 1024 },
+    onDemand: false,
+    keptMb: 64,
+    // The warm-up draws probes for its first frames (F4): the tests of other behaviour leave it off, the warm-up
+    // tests turn it on.
+    warm: 0,
     ...options.config
   };
   const state = createRendererState({ config });
@@ -207,7 +255,22 @@ export function createMockRenderer(
   const frames: FrameRegistration[] = [];
   const pauses: Array<{ action: "push" | "pop"; reason: PauseReason }> = [];
   const time: Time = { delta: 16, elapsed: 0, scale: 1, frame: 0, idle: false };
-  const clock = { now: 0, paused: false };
+  const clock = { now: 0, paused: false, wakes: 0 };
+  const measures: MeasureListener[] = [];
+  const charged: number[] = [];
+  // The rate of a game without `adaptive`, as the real time state starts it.
+  const rate: { now: Readonly<FrameRate>; drawn: number } = {
+    now: createRateState({
+      maxFps: 60,
+      maxDeltaMs: 50,
+      idleFps: 30,
+      idleAfterMs: 2000,
+      adaptive: false
+    }).snapshot,
+    drawn: 0
+  };
+  const flowState = { path: "home" };
+  const systems: { timing: SystemTiming | undefined } = { timing: undefined };
 
   const timeApi = {
     onFrame: (phase: Phase, callback: FrameCallback): (() => void) => {
@@ -227,8 +290,36 @@ export function createMockRenderer(
     resume: vi.fn(),
     isPaused: () => clock.paused,
     isRunning: () => false,
-    step: vi.fn()
+    wake: () => {
+      clock.wakes += 1;
+    },
+    wakes: () => clock.wakes,
+    step: vi.fn(),
+    measure: (listener: MeasureListener): (() => void) => {
+      measures.push(listener);
+
+      return () => {
+        const at = measures.indexOf(listener);
+
+        if (at !== -1) measures.splice(at, 1);
+      };
+    },
+    agentClock: () => undefined,
+    chargeAgent: (ms: number) => {
+      charged.push(ms);
+    },
+    rate: () => rate.now,
+    setRate: vi.fn(),
+    frameDrawn: () => {
+      rate.drawn += 1;
+    },
+    frameProbed: vi.fn()
   } as unknown as TimeApi;
+  const flowApi = {
+    state: () => ({ mode: "live", path: flowState.path }),
+    features: { all: () => [] },
+    fx: { onHint: noRemover }
+  } as unknown as FlowApi;
 
   const clockApi = { now: () => clock.now } as unknown as ClockApi;
 
@@ -239,12 +330,37 @@ export function createMockRenderer(
     isPaused: () => false
   } as unknown as LifecycleApi;
 
-  const world = createWorld(timeApi, log);
+  const world = createWorld(timeApi, flowApi, log, systems);
   const apis: Record<string, unknown> = {
     time: timeApi,
     lifecycle: lifecycleApi,
     world,
-    clock: clockApi
+    clock: clockApi,
+    flow: flowApi
+  };
+  // One reused record, as `time` hands its listeners: a frame of the mock allocates nothing.
+  const quiet: FrameMeasure = {
+    frame: 0,
+    at: 0,
+    gapMs: Number.NaN,
+    capMs: 1000 / 60,
+    rateMs: 1000 / 60,
+    displayMs: Number.NaN,
+    skipped: 0,
+    startMs: 0,
+    phaseMs: new Float32Array(6),
+    workMs: 0,
+    listenersMs: 0,
+    idle: false,
+    stepped: false
+  };
+  const measured: FrameMeasure = { ...quiet };
+  const measureFrame = (record: Partial<FrameMeasure> = quiet): void => {
+    Object.assign(measured, quiet);
+    measured.frame = time.frame;
+    Object.assign(measured, record);
+
+    for (let index = 0; index < measures.length; index += 1) measures[index]?.(measured);
   };
 
   const ctx: KernelSlice = {
@@ -293,6 +409,30 @@ export function createMockRenderer(
         if (registration.phase === phase) registration.callback({ ...time });
       }
     },
-    stop: () => stopRenderer({ config, state })
+    stop: () => stopRenderer({ config, state }),
+    measures,
+    charged,
+    drawnCount: () => rate.drawn,
+    setRate: (next: Readonly<FrameRate>): void => {
+      rate.now = next;
+    },
+    measureFrame,
+    drawFrame: (record: Partial<FrameMeasure> = quiet): void => {
+      time.frame += 1;
+
+      for (const registration of frames) {
+        if (registration.phase === "input") registration.callback(time);
+      }
+      for (const registration of frames) {
+        if (registration.phase === "render") registration.callback(time);
+      }
+      measureFrame(record);
+    },
+    setPath: (path: string): void => {
+      flowState.path = path;
+    },
+    setSystemTimes: (timing: SystemTiming | undefined): void => {
+      systems.timing = timing;
+    }
   };
 }

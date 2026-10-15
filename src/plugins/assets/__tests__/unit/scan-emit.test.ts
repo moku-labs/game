@@ -273,3 +273,55 @@ export const nineSlice = {} as const;
 `);
   });
 });
+
+describe("emitManifest of a sub-feature's bundle", () => {
+  it("writes the bundle and the texture fields in their fixed order", () => {
+    // The fields are given out of order: the bytes must not depend on how a manifest was built.
+    const scrambled = {
+      files: [
+        {
+          nine: { left: 4, top: 4, right: 4, bottom: 4 },
+          mips: true,
+          mb: 0.492,
+          height: 288,
+          width: 336,
+          path: "features/episodes/ep01/assets/items/cup{nine=4}.png",
+          key: "ep01.items.cup"
+        }
+      ],
+      pages: [
+        { id: "ep01/main-0", path: "ep01/main-0-0123456789.webp", width: 8, height: 8, mb: 0 }
+      ],
+      mb: 0.492,
+      release: "leave",
+      tier: "lazy",
+      dir: "features/episodes/ep01",
+      parent: "episodes",
+      feature: "ep01"
+    } as ManifestBundle;
+    const written = JSON.parse(emitManifest({ version: 2, bundles: { ep01: scrambled } })) as {
+      bundles: Record<string, { files: object[] }>;
+    };
+    const bundle = written.bundles.ep01;
+
+    expect(Object.keys(bundle ?? {})).toEqual([
+      "feature",
+      "parent",
+      "dir",
+      "tier",
+      "release",
+      "mb",
+      "pages",
+      "files"
+    ]);
+    expect(Object.keys(bundle?.files[0] ?? {})).toEqual([
+      "key",
+      "path",
+      "width",
+      "height",
+      "mb",
+      "mips",
+      "nine"
+    ]);
+  });
+});

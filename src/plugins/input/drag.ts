@@ -8,7 +8,7 @@
  * whole stack; they leave it before any settle, or they would land at rest plus the held rest.
  */
 import { Parent, Transform, type TransformValue } from "../renderer/components";
-import { localPoseOf, parentOf, poseUnder, rootPoseOf } from "../renderer/sync/pose";
+import { applyPose, localPoseOf, parentOf, poseUnder, rootPoseOf } from "../renderer/sync/pose";
 import { Exiting } from "../world/ecs/define";
 import type { Entity } from "../world/types";
 import { dropAnswer, submit } from "./answers";
@@ -148,6 +148,34 @@ function inHand(ctx: InputCtx): Entity[] {
   const { entity, carried } = ctx.state;
 
   return entity === undefined ? [] : [entity, ...carried.map(follower => follower.entity)];
+}
+
+/**
+ * Where a drop is looked up: under the aim of the view in the hand, posed the way `moveHeld`
+ * writes it for this finger point, so a release is not one frame behind; under the finger when
+ * nothing is held, the view has no `Transform` or it names no aim. A view's aim is the one its
+ * projection gives now, read from the rest pose: the projection's write merges into the stored
+ * `Draggable`, so an aim it stopped giving would stay there. An entity no projection made reads
+ * its stored `Draggable`.
+ *
+ * @param ctx - Domain context of the input plugin.
+ * @param point - Where the finger is, in reference units.
+ * @returns The point of the lookup, in reference units: `point` itself when there is no aim.
+ */
+function aimPoint(ctx: InputCtx, point: Point): Point {
+  const { entity, grabOffset } = ctx.state;
+  const { ecs, projection } = ctx.deps.world;
+
+  if (entity === undefined || !ecs.has(entity, Transform)) return point;
+
+  const aim = (projection.restOf(entity, Draggable) ?? ecs.get(entity, Draggable))?.aim;
+
+  if (aim === undefined || aim === null) return point;
+
+  return applyPose(
+    { ...rootPoseOf(ecs, entity), x: point.x + grabOffset.x, y: point.y + grabOffset.y },
+    aim
+  );
 }
 
 /**
@@ -350,14 +378,16 @@ export function moveHeld(ctx: InputCtx, point: Point): void {
 }
 
 /**
- * Moves the `Hovered` tag to the topmost drop target under the finger. At most one view carries
- * it, and never the view in the hand or a view it carries.
+ * Moves the `Hovered` tag to the topmost drop target under the finger, or under the aim point of
+ * a held view that names one. At most one view carries it, and never the view in the hand or a
+ * view it carries.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - Where the finger is, in reference units.
  */
 export function moveHover(ctx: InputCtx, point: Point): void {
-  const found = findDropTarget(ctx, point.x, point.y, inHand(ctx));
+  const at = aimPoint(ctx, point);
+  const found = findDropTarget(ctx, at.x, at.y, inHand(ctx));
 
   if (found === ctx.state.hovered) return;
 
@@ -367,15 +397,16 @@ export function moveHover(ctx: InputCtx, point: Point): void {
 }
 
 /**
- * Lets the view go. With a drop target under the finger — looked up past the whole stack — both
- * components are read NOW, not at the grab. The lifted scale comes off, the carried views leave
- * the held view at their root poses, and a view that left its parent is hung back under it, so a
- * commit that follows the answer moves it from under the finger, at its own size. Then the answer
- * goes to the gate, and always, in this order, the held view first and each carried view after
- * it: the mutes are lifted so the settle motion can write the position again, the views are sent
- * home, the lifts are released — on a view that still moves that takes effect when its last
- * motion ends, so a settling view flies home above its neighbours — the tags go, and the gate
- * learns the pointer is up.
+ * Lets the view go. With a drop target under the finger, or under the aim point of a view that
+ * names one (`aimPoint`) — looked up past the whole stack — both components are read NOW, not at
+ * the grab. The lookup point is taken first, while the view still has its lifted pose. Then the
+ * lifted scale comes off, the carried views leave the held view at their root poses, and a view
+ * that left its parent is hung back under it, so a commit that follows the answer moves it from
+ * under the finger, at its own size. Then the answer goes to the gate, and always, in this order,
+ * the held view first and each carried view after it: the mutes are lifted so the settle motion
+ * can write the position again, the views are sent home, the lifts are released — on a view that
+ * still moves that takes effect when its last motion ends, so a settling view flies home above
+ * its neighbours — the tags go, and the gate learns the pointer is up.
  *
  * @param ctx - Domain context of the input plugin.
  * @param point - Where the finger let go. Left out for a cancel, which has no target.
@@ -387,8 +418,8 @@ export function release(ctx: InputCtx, point?: Point): boolean {
   if (entity === undefined) return false;
 
   const { ecs, projection } = ctx.deps.world;
-  const target =
-    point === undefined ? undefined : findDropTarget(ctx, point.x, point.y, inHand(ctx));
+  const at = point === undefined ? undefined : aimPoint(ctx, point);
+  const target = at === undefined ? undefined : findDropTarget(ctx, at.x, at.y, inHand(ctx));
   const draggable = ecs.get(entity, Draggable);
   const dropTarget = target === undefined ? undefined : ecs.get(target, DropTarget);
 

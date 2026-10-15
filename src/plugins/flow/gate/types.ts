@@ -4,14 +4,16 @@
 import type { Json } from "../../model/types";
 
 /**
- * One answer of the player, of an agent or of a test.
+ * One answer of the player, of an agent or of a test. `Intent` narrows the intents: a popup's
+ * answer names one of the outcomes of its component.
  *
  * @example
  * ```ts
  * const answer: Answer = { intent: "merge", payload: { from: "c2", to: "c3" } };
+ * const pick: Answer<"again" | "home"> = { intent: "again" };
  * ```
  */
-export type Answer = { intent: string; payload?: Json };
+export type Answer<Intent extends string = string> = { intent: Intent; payload?: Json };
 
 /**
  * The one answer a `guide` lets through. `payload` is compared by deep equality when present.

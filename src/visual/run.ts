@@ -28,6 +28,15 @@ const DEFAULT_SETTLE_FRAMES = 600;
 /** A pixel differs above a channel delta of 24; one in a thousand may. */
 const DEFAULT_TOLERANCE = { ratio: 0.001, threshold: 24 } as const;
 
+/** The flags without a value, and what each one sets. */
+const SWITCHES: Readonly<Record<string, VisualFlags>> = {
+  "--update": { update: true },
+  "--no-pixels": { pixels: false },
+  "--pixels": { pixels: true },
+  "--webgl": { renderer: "webgl" },
+  "--no-verify-frames": { verifyFrames: false }
+};
+
 /** The lines the runner writes: a `BrandConsole` fits. */
 type ReportConsole = {
   check(ok: boolean, label: string): void;
@@ -55,8 +64,9 @@ function valueAfter(argv: readonly string[], index: number, placeholder: string)
 
 /**
  * Reads the flags of the visual tests from a command line: `--update`, `--no-pixels`, `--pixels`,
- * `--webgl`, `--only <name>` (repeatable) and `--dir <path>`. `--pixels` forces the pixel leg on
- * off a Mac; the last of `--pixels` and `--no-pixels` wins. An argument it does not know is left
+ * `--webgl`, `--no-verify-frames`, `--only <name>` (repeatable) and `--dir <path>`. `--pixels`
+ * forces the pixel leg on off a Mac; the last of `--pixels` and `--no-pixels` wins.
+ * `--no-verify-frames` keeps the browser leg from checking the frames the renderer skips. An argument it does not know is left
  * to the script that got it, so a test runner's own arguments pass through. `moku-game visual`
  * reads its flags with it.
  *
@@ -70,6 +80,7 @@ function valueAfter(argv: readonly string[], index: number, placeholder: string)
  * parseVisualArgv(["--no-pixels", "--dir", "shots"]); // { pixels: false, dir: "shots" }
  * parseVisualArgv(["--webgl"]); // { renderer: "webgl" }
  * parseVisualArgv(["--pixels"]); // { pixels: true }
+ * parseVisualArgv(["--no-verify-frames"]); // { verifyFrames: false }
  * ```
  */
 export function parseVisualArgv(argv: readonly string[]): VisualFlags {
@@ -77,10 +88,9 @@ export function parseVisualArgv(argv: readonly string[]): VisualFlags {
   const only: string[] = [];
 
   for (const [index, argument] of argv.entries()) {
-    if (argument === "--update") flags.update = true;
-    if (argument === "--no-pixels") flags.pixels = false;
-    if (argument === "--pixels") flags.pixels = true;
-    if (argument === "--webgl") flags.renderer = "webgl";
+    const switched = SWITCHES[argument];
+
+    if (switched !== undefined) Object.assign(flags, switched);
     if (argument === "--only") only.push(valueAfter(argv, index, "<name>"));
     if (argument === "--dir") flags.dir = valueAfter(argv, index, "<path>");
   }
@@ -90,7 +100,8 @@ export function parseVisualArgv(argv: readonly string[]): VisualFlags {
 
 /**
  * Fills in the options of a run: an explicit option wins over a flag of `argv`, a flag over the
- * default. `pixels` is on by default only with a `page` on a Mac; `renderer` is `"webgpu"`.
+ * default. `pixels` is on by default only with a `page` on a Mac; `renderer` is `"webgpu"`;
+ * `verifyFrames` is on.
  *
  * @param setup - The setup, for its `page`.
  * @param options - The options the script passed.
@@ -105,6 +116,7 @@ export function resolveVisualOptions(setup: VisualSetup, options: VisualOptions 
     update: options.update ?? flags.update ?? false,
     pixels:
       options.pixels ?? flags.pixels ?? (setup.page !== undefined && process.platform === "darwin"),
+    verifyFrames: options.verifyFrames ?? flags.verifyFrames ?? true,
     renderer: options.renderer ?? flags.renderer ?? "webgpu",
     settleFrames: options.settleFrames ?? DEFAULT_SETTLE_FRAMES,
     tolerance: options.tolerance ?? { ...DEFAULT_TOLERANCE }

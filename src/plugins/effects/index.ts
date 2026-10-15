@@ -26,8 +26,9 @@ const config: Config = {
 };
 
 /**
- * Effects plugin: `app.effects.stats()`; the `Emitter` component and every filter component do
- * the rest as data on entities.
+ * Effects plugin: `app.effects.stats()` and the switches of a debug build,
+ * `app.effects.diagnostics`; the `Emitter` component and every filter component do the rest as
+ * data on entities.
  *
  * @example
  * ```ts

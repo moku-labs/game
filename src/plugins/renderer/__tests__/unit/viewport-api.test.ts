@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { FakeDom } from "../fake-dom";
 import { createMockRenderer, type MockRenderer } from "../mock-renderer";
 
 afterEach(() => {
@@ -16,6 +17,31 @@ async function started(
   await mock.start();
 
   return mock;
+}
+
+/**
+ * The fake DOM of a started mock, and the observer that watches both safe-area probes.
+ *
+ * @param mock - A started mock renderer.
+ * @returns The fake DOM and the probes' observer; the test fails when either is missing.
+ */
+function probeWatch(mock: MockRenderer): {
+  dom: FakeDom;
+  observer: FakeDom["observers"][number];
+} {
+  const { dom } = mock;
+  const probes = mock.ctx.state.viewport.probes;
+
+  if (dom === undefined || probes === undefined) throw new Error("the mock made no probes");
+
+  const observer = dom.observers.find(
+    each =>
+      each.targets.includes(probes.start as never) && each.targets.includes(probes.end as never)
+  );
+
+  if (observer === undefined) throw new Error("nothing observes both probes");
+
+  return { dom, observer };
 }
 
 describe("viewport size: both sides fit", () => {
@@ -63,6 +89,124 @@ describe("viewport size: both sides fit", () => {
   });
 });
 
+/**
+ * Gives the mount of a started mock another CSS size and lays it out, as the frame does after the observer fired.
+ *
+ * @param mock - A started mock renderer.
+ * @param width - The new CSS width.
+ * @param height - The new CSS height.
+ */
+function resizeMount(mock: MockRenderer, width: number, height: number): void {
+  const mount = mock.dom?.mount;
+
+  if (mount === undefined) throw new Error("the mock has no mount");
+
+  mount.clientWidth = width;
+  mount.clientHeight = height;
+  mount.rect = { left: 0, top: 0, width, height };
+  mock.ctx.state.viewport.resizePending = true;
+  mock.modules.viewport.applyPending();
+}
+
+describe("viewport size: one frozen object", () => {
+  it("hands out the same object while the frame does not change, across frames", async () => {
+    const mock = await started({ width: 390, height: 844 });
+    const size = mock.api.viewport.size();
+
+    mock.drawFrame();
+    mock.drawFrame();
+
+    expect(mock.api.viewport.size()).toBe(size);
+  });
+
+  it("hands out a new object after a resize that changes the frame, and leaves the old one as it was", async () => {
+    const mock = await started({ width: 768, height: 1024 });
+    const before = mock.api.viewport.size();
+
+    resizeMount(mock, 390, 844);
+
+    const after = mock.api.viewport.size();
+
+    expect(after).not.toBe(before);
+    expect(after.width).toBe(1080);
+    expect(before.width).toBeCloseTo(1440, 6);
+  });
+
+  it("keeps the object through a layout that gives the same frame", async () => {
+    const mock = await started({ width: 390, height: 844 });
+    const size = mock.api.viewport.size();
+
+    resizeMount(mock, 390, 844);
+
+    expect(mock.api.viewport.size()).toBe(size);
+  });
+
+  it("hands out a new object for a change of scale alone", async () => {
+    // 1080x1920 at scale 1, then 540x960 at scale 0.5: the same reference frame.
+    const mock = await started({ width: 1080, height: 1920 });
+    const before = mock.api.viewport.size();
+
+    resizeMount(mock, 540, 960);
+
+    const after = mock.api.viewport.size();
+
+    expect([after.width, after.height]).toEqual([before.width, before.height]);
+    expect(after.scale).toBe(0.5);
+    expect(after).not.toBe(before);
+  });
+
+  it("hands out a new object for new insets, and the safe area of the old one stays", async () => {
+    const mock = await started({ width: 1080, height: 2400 });
+    const { dom, observer } = probeWatch(mock);
+    const before = mock.api.viewport.size();
+
+    dom.insets.bottom = 34;
+    observer.fire();
+    mock.modules.viewport.applyPending();
+
+    expect(mock.api.viewport.size()).not.toBe(before);
+    expect(mock.api.viewport.size().safeArea.bottom).toBe(34);
+    expect(before.safeArea.bottom).toBe(0);
+  });
+
+  it("is frozen with its safe area: a write throws", async () => {
+    const mock = await started({ width: 390, height: 844 });
+    const size = mock.api.viewport.size() as { width: number; safeArea: { top: number } };
+
+    expect(() => {
+      size.width = 1;
+    }).toThrow(TypeError);
+    expect(() => {
+      size.safeArea.top = 1;
+    }).toThrow(TypeError);
+  });
+
+  it("before the first measurement answers the inert frame, frozen too", () => {
+    const mock = createMockRenderer({ dom: false });
+    const inert = mock.api.viewport.size();
+
+    expect(inert).toEqual({
+      width: 1080,
+      height: 1440,
+      scale: 1,
+      orientation: "portrait",
+      safeArea: { top: 0, right: 0, bottom: 0, left: 0 }
+    });
+    expect(Object.isFrozen(inert) && Object.isFrozen(inert.safeArea)).toBe(true);
+  });
+
+  it("stop drops both objects: a new start measures a new one", async () => {
+    const mock = await started({ width: 390, height: 844 });
+    const size = mock.api.viewport.size();
+
+    mock.stop();
+
+    expect(mock.ctx.state.viewport.size).toBeUndefined();
+    expect(mock.ctx.state.viewport.inert).toBeUndefined();
+    expect(mock.api.viewport.size()).not.toBe(size);
+  });
+});
+
 describe("viewport toScreen: reference units to client CSS pixels", () => {
   it("scales a point of a 390x844 phone into the page", async () => {
     const mock = await started({ width: 390, height: 844 });
@@ -101,5 +245,79 @@ describe("viewport toScreen: reference units to client CSS pixels", () => {
 
     expect(screen).toEqual({ x: 120, y: 340 });
     expect(screen).not.toBe(point);
+  });
+});
+
+describe("viewport safe area: the probes are watched", () => {
+  // A 1080x2400 phone: the frame is the whole mount and the scale stays 1 with a 47 px notch.
+  const phone = { width: 1080, height: 2400 };
+
+  it("an inset that arrives after start is laid out at the next frame", async () => {
+    const mock = await started(phone);
+    const { dom, observer } = probeWatch(mock);
+
+    dom.insets.top = 47;
+    observer.fire();
+
+    expect(mock.modules.viewport.applyPending()).toBe(true);
+    expect(mock.api.viewport.size().scale).toBe(1);
+    expect(mock.api.viewport.size().safeArea.top).toBe(47);
+  });
+
+  it("a left and right swap with the same container size is laid out", async () => {
+    const mock = await started({ ...phone, insets: { left: 47 } });
+    const { dom, observer } = probeWatch(mock);
+
+    expect(mock.api.viewport.size().safeArea).toMatchObject({ left: 47, right: 0 });
+
+    Object.assign(dom.insets, { left: 0, right: 47 });
+    observer.fire();
+    mock.modules.viewport.applyPending();
+
+    expect(mock.api.viewport.size().safeArea).toMatchObject({ left: 0, right: 47 });
+  });
+
+  it("the probes' observer only raises the flag: nothing is laid out before applyPending", async () => {
+    const mock = await started(phone);
+    const { dom, observer } = probeWatch(mock);
+    const resizes = mock.pixi.last().renderer.resizes.length;
+
+    dom.insets.top = 47;
+    observer.fire();
+
+    expect(mock.api.viewport.size().safeArea.top).toBe(0);
+    expect(mock.pixi.last().renderer.resizes).toHaveLength(resizes);
+  });
+
+  it("a moku-native:insets event raises the flag and the next applyPending reads the probes; after stop it does nothing", async () => {
+    const mock = await started(phone);
+    const { dom } = probeWatch(mock);
+
+    dom.insets.bottom = 34;
+    dom.window.dispatch("moku-native:insets", { detail: { top: 999 } });
+
+    expect(mock.modules.viewport.applyPending()).toBe(true);
+    expect(mock.api.viewport.size().safeArea).toMatchObject({ top: 0, bottom: 34 });
+
+    mock.stop();
+    dom.window.dispatch("moku-native:insets", { detail: {} });
+
+    expect(mock.modules.viewport.applyPending()).toBe(false);
+  });
+
+  it("stop removes both probes from the body and disconnects their observer", async () => {
+    const mock = await started(phone);
+    const { dom, observer } = probeWatch(mock);
+    const probes = mock.ctx.state.viewport.probes;
+    const body = dom.document.body.children as unknown[];
+
+    expect(body).toEqual(expect.arrayContaining([probes?.start, probes?.end]));
+
+    mock.stop();
+
+    expect(body).not.toContain(probes?.start);
+    expect(body).not.toContain(probes?.end);
+    expect(observer.disconnected).toBe(true);
+    expect(mock.ctx.state.viewport.probes).toBeUndefined();
   });
 });

@@ -5,11 +5,14 @@
  * use the ESLint rule API, so ESLint 9 loads the same object. Every rule takes
  * `[{ files, ignores }]`: globs relative to the directory oxlint runs in; a key given replaces the
  * default. The layout rules also take the folder of the game's layers (`root`) and the tsconfig
- * whose `paths` name the aliases (`tsconfig`). Only `node:path` and `node:fs` are imported; the
- * file is erasable TypeScript, so Node loads it unbuilt.
+ * whose `paths` name the aliases (`tsconfig`). Only `node:path`, `node:fs` and
+ * `./project/features.ts` (itself `node:` only) are imported; the file is erasable TypeScript, so
+ * Node loads it unbuilt.
  */
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import type { FeatureOwner } from "./project/features.ts";
+import { findFeatureUnits, ownerOf } from "./project/features.ts";
 
 /**
  * The options every rule takes: which files it checks. A key given replaces the rule's default.
@@ -78,6 +81,16 @@ export type GameLintNode = {
   readonly property?: GameLintNode;
   readonly expression?: GameLintNode;
   readonly expressions?: readonly GameLintNode[];
+  /** The specifiers of an `ImportDeclaration`. */
+  readonly specifiers?: readonly GameLintNode[];
+  /** The name an import specifier binds. */
+  readonly local?: GameLintNode;
+  /** The properties of an `ObjectExpression`. */
+  readonly properties?: readonly GameLintNode[];
+  /** The key of a `Property`. */
+  readonly key?: GameLintNode;
+  /** The elements of an `ArrayExpression`; `null` for a hole. */
+  readonly elements?: readonly (GameLintNode | null)[];
 };
 
 /** One declaration of a name, as the scope manager of oxlint and ESLint hands it over. */
@@ -121,7 +134,7 @@ export type GameLintRule = {
   create(context: GameLintContext): GameLintListeners;
 };
 
-/** The plugin object: `moku-game` and its ten rules. */
+/** The plugin object: `moku-game` and its eleven rules. */
 export type GameLintPlugin = {
   readonly meta: { readonly name: "moku-game" };
   readonly rules: Readonly<Record<GameLintRuleName, GameLintRule>>;
@@ -138,6 +151,7 @@ export type GameLintRuleName =
   | "static-keys"
   | "layer-imports"
   | "feature-door"
+  | "sub-features"
   | "test-suffix";
 
 /** A rule's default globs. */
@@ -152,9 +166,17 @@ type Layer = "core" | "shared" | "features" | "plugins" | "generated" | "game" |
 /**
  * Where a path lies in the layout: its layer, its unit (`core`, `shared`, `features/<f>`,
  * `plugins/<p>`, or `features` and `plugins` for the two barrels) and whether it is the unit's door,
- * its `index.ts`.
+ * its `index.ts`. A unit of the `features` layer is a unit of `findFeatureUnits`
+ * (`src/project/features.ts`) at any depth: a feature owner, or a code-only sub-feature its
+ * parent's door lists.
  */
-type Place = { readonly layer: Layer; readonly unit?: string; readonly door: boolean };
+type Place = {
+  readonly layer: Layer;
+  readonly unit?: string;
+  readonly door: boolean;
+  /** The units of the features the unit lives in, nearest first; absent for a top-level unit. */
+  readonly ancestors?: readonly string[];
+};
 
 /** One key of tsconfig `paths`: the text around its `*` and its targets, absolute, `*` kept. */
 type AliasPattern = {
@@ -208,7 +230,50 @@ type Layout = {
   readonly patterns: readonly AliasPattern[];
   /** The report of a tsconfig that does not parse, once per file. */
   readonly problem: string | undefined;
+  /** The feature units of the game; none when the rule does not read them or the names clash. */
+  readonly owners: readonly FeatureOwner[];
+  /** The report of a feature name clash, once per file of the `features` layer. */
+  readonly ownersProblem: string | undefined;
 };
+
+/** The feature units of a game, or why they could not be read. */
+type UnitsRead = { readonly owners: readonly FeatureOwner[]; readonly problem: string | undefined };
+
+/** A door the sub-features rule judges: the unit it opens, every unit and where it lies. */
+type Door = {
+  /** The absolute folder of the layers. */
+  readonly root: string;
+  /** The unit whose door the file is. */
+  readonly unit: FeatureOwner;
+  /** Every unit of the game. */
+  readonly units: readonly FeatureOwner[];
+  /** The door file, relative to the root: `features/episodes/ep01/index.ts`. */
+  readonly file: string;
+};
+
+/** What sub-features collects from a door before it judges it. */
+type DoorRead = {
+  /** The value imports: the node, its source and the names it binds. */
+  readonly imports: {
+    readonly node: GameLintNode;
+    readonly source: string;
+    readonly locals: readonly string[];
+  }[];
+  /** The `features: [...]` arrays: the property, to report a hole on, and the elements. */
+  readonly lists: {
+    readonly node: GameLintNode;
+    readonly elements: readonly (GameLintNode | null)[];
+  }[];
+  /** The calls with a literal first argument: the node, the literal and whether it is `defineFeature`. */
+  readonly calls: {
+    readonly node: GameLintNode;
+    readonly name: string;
+    readonly defines: boolean;
+  }[];
+};
+
+/** One finding of sub-features. */
+type Report = { readonly node: GameLintNode; readonly message: string };
 
 /** The kind folder a test file lies in and the suffix its files end with. */
 type Kind = { readonly folder: string; readonly suffix: string; readonly end: number };
@@ -338,6 +403,20 @@ const INDEX_FILE = /^index(?:\.[jt]sx?)?$/;
 
 /** The root flow of a game, with or without its extension. */
 const GAME_FILE = /^game(?:\.[jt]sx?)?$/;
+
+/** The folders that hold one kind of code or resource of a feature: the list of `src/project/features.ts`. */
+const KIND_FOLDER =
+  /^(?:flow|views|rules|styles|motion|world|effects|nodes|assets|strings|content|__tests__)$/;
+
+/** A source naming a folder beside the door: `./<folder>`, `./<folder>/index`, either with `.ts`, `.tsx` or `.js`. */
+const FOLDER_SOURCE = /^\.\/([^/]+?)(?:\/index)?(?:\.(?:tsx?|js))?$/;
+
+/** The default scope of sub-features: the `index` files below `features/`. */
+const DOOR_FILES: Scope = { files: ["**/features/**/index.{ts,tsx}"], ignores: TESTS };
+
+/** What sub-features says about an entry of `features: [...]` that is not a name. */
+const ENTRY_SHAPE_MESSAGE =
+  'Sub-features: list each sub-feature by the name it is imported under from "./<folder>".';
 
 /** The place of every path outside the layout. */
 const OTHER: Place = { layer: "other", door: false };
@@ -1418,18 +1497,66 @@ function isDoor(inner: readonly string[]): boolean {
 }
 
 /**
- * The place of a path under `features/` or `plugins/`: the barrel, a unit and its door, or a
- * file that lies directly in the folder, which is outside the layout.
+ * The units of the features a unit lives in, nearest first: the folders above it, one per depth.
  *
- * @param layer - `features` or `plugins`.
- * @param below - The parts of the path below the layer folder.
+ * @param dir - The unit's root-relative folder.
+ * @param depth - The unit's depth: 0 for a folder of `features/`.
+ * @returns The folders of its ancestors.
+ * @example
+ * ```ts
+ * ancestorsOf("features/episodes/ep01/scene1", 2); // ["features/episodes/ep01", "features/episodes"]
+ * ```
+ */
+function ancestorsOf(dir: string, depth: number): string[] {
+  const parts = dir.split("/");
+
+  return Array.from({ length: depth }, (_, index) => parts.slice(0, -1 - index).join("/"));
+}
+
+/**
+ * The place of a path inside a feature unit: the unit, its door, and the units it lives in.
+ *
+ * @param owner - The deepest unit that holds the path.
+ * @param below - The parts of the path below the `features` folder.
  * @returns The place.
  * @example
  * ```ts
- * unitOf("features", ["orders", "index.ts"]); // { layer: "features", unit: "features/orders", door: true }
+ * unitPlace({ name: "ep01", dir: "features/episodes/ep01", depth: 1, resources: { assets: false, strings: true } }, ["episodes", "ep01", "index.ts"]);
+ * // { layer: "features", unit: "features/episodes/ep01", door: true, ancestors: ["features/episodes"] }
  * ```
  */
-function unitOf(layer: "features" | "plugins", below: readonly string[]): Place {
+function unitPlace(owner: FeatureOwner, below: readonly string[]): Place {
+  const door = isDoor(below.slice(owner.dir.split("/").length - 1));
+
+  if (owner.depth === 0) return { layer: "features", unit: owner.dir, door };
+
+  return {
+    layer: "features",
+    unit: owner.dir,
+    door,
+    ancestors: ancestorsOf(owner.dir, owner.depth)
+  };
+}
+
+/**
+ * The place of a path under `features/` or `plugins/`: the barrel, a unit and its door, or a
+ * file that lies directly in the folder, which is outside the layout. The unit of a features path
+ * is the deepest feature unit that holds it; with none on disk, the folder of `features/` it lies in.
+ *
+ * @param layer - `features` or `plugins`.
+ * @param below - The parts of the path below the layer folder.
+ * @param owners - The feature units of the game.
+ * @returns The place.
+ * @example
+ * ```ts
+ * unitOf("features", ["orders", "index.ts"], []); // { layer: "features", unit: "features/orders", door: true }
+ * ```
+ */
+function unitOf(
+  layer: "features" | "plugins",
+  below: readonly string[],
+  owners: readonly FeatureOwner[]
+): Place {
   const [name, ...inner] = below;
   const isBarrelPath = name === undefined || (inner.length === 0 && INDEX_FILE.test(name));
 
@@ -1439,6 +1566,11 @@ function unitOf(layer: "features" | "plugins", below: readonly string[]): Place 
   // Any other file directly in the layer folder is outside the layout.
   if (inner.length === 0 && path.extname(name) !== "") return OTHER;
 
+  // A features path belongs to the deepest unit on disk that holds it.
+  const owner = layer === "features" ? ownerOf(owners, [layer, ...below].join("/")) : undefined;
+
+  if (owner !== undefined) return unitPlace(owner, below);
+
   return { layer, unit: `${layer}/${name}`, door: isDoor(inner) };
 }
 
@@ -1447,13 +1579,14 @@ function unitOf(layer: "features" | "plugins", below: readonly string[]): Place 
  *
  * @param root - The absolute folder of the layers.
  * @param file - The absolute path, with or without its extension.
+ * @param owners - The feature units of the game; none puts a features path in its top-level folder.
  * @returns The place; `other` for a path outside the layout.
  * @example
  * ```ts
  * placeOf("/game", "/game/shared/index.ts"); // { layer: "shared", unit: "shared", door: true }
  * ```
  */
-function placeOf(root: string, file: string): Place {
+function placeOf(root: string, file: string, owners: readonly FeatureOwner[] = []): Place {
   const relative = insideOf(root, file);
 
   if (relative === undefined) return OTHER;
@@ -1469,7 +1602,7 @@ function placeOf(root: string, file: string): Place {
     }
     case "features":
     case "plugins": {
-      return unitOf(head, below);
+      return unitOf(head, below, owners);
     }
     case "generated":
     case "tests": {
@@ -1496,14 +1629,38 @@ function isBarrel(place: Place): boolean {
 }
 
 /**
+ * The feature units of a game. A name clash leaves none, and says why.
+ *
+ * @param root - The absolute folder of the layers.
+ * @returns The units, or none and the report of the clash.
+ */
+function readUnits(root: string): UnitsRead {
+  try {
+    return { owners: findFeatureUnits(root), problem: undefined };
+  } catch (error) {
+    const [first = ""] = (error instanceof Error ? error.message : "").split("\n");
+
+    return {
+      owners: [],
+      problem: `Lint: ${first.replace(/^\[game\] /, "")} The layout rules read the top-level features only until it is fixed.`
+    };
+  }
+}
+
+/**
  * What a layout rule knows about the file the context lints: the layers, the aliases and where
  * the file lies.
  *
  * @param context - The rule context.
  * @param reads - The tsconfig reads of the rule, by absolute path.
+ * @param units - True to read the feature units, once per file.
  * @returns The layout.
  */
-function layoutOf(context: GameLintContext, reads: Map<string, TsconfigRead>): Layout {
+function layoutOf(
+  context: GameLintContext,
+  reads: Map<string, TsconfigRead>,
+  units: boolean
+): Layout {
   const [given] = context.options as [GameLintLayoutOptions?];
   const root = path.resolve(context.cwd, given?.root ?? ".");
   const tsconfig = path.resolve(context.cwd, given?.tsconfig ?? "tsconfig.json");
@@ -1516,16 +1673,20 @@ function layoutOf(context: GameLintContext, reads: Map<string, TsconfigRead>): L
   }
 
   const broken = read.broken === undefined ? undefined : path.relative(context.cwd, read.broken);
+  const owners = units ? readUnits(root) : { owners: [], problem: undefined };
+  const importer = placeOf(root, file, owners.owners);
 
   return {
     root,
     folder: path.dirname(file),
-    importer: placeOf(root, file),
+    importer,
     patterns: read.patterns ?? patternsOf(root, V15_PATHS),
     problem:
       broken === undefined
         ? undefined
-        : `Lint: ${toPosix(broken)} does not parse. The layout rules read the v15 aliases until it does.`
+        : `Lint: ${toPosix(broken)} does not parse. The layout rules read the v15 aliases until it does.`,
+    owners: owners.owners,
+    ownersProblem: importer.layer === "features" ? owners.problem : undefined
   };
 }
 
@@ -1551,12 +1712,14 @@ function targetOf(layout: Layout, specifier: string): string | undefined {
  * @param description - What the rule enforces.
  * @param defaults - The rule's default globs.
  * @param judge - The message for one import, or undefined when it passes.
+ * @param units - True for a rule that reads the feature units and reports a name clash.
  * @returns The rule.
  */
 function layoutRule(
   description: string,
   defaults: Scope,
-  judge: (layout: Layout, specifier: string) => string | undefined
+  judge: (layout: Layout, specifier: string) => string | undefined,
+  units = false
 ): GameLintRule {
   const reads = new Map<string, TsconfigRead>();
 
@@ -1571,7 +1734,7 @@ function layoutRule(
     create(context) {
       if (!inScope(context, defaults)) return {};
 
-      const layout = layoutOf(context, reads);
+      const layout = layoutOf(context, reads, units);
       const check = (node: GameLintNode): void => {
         const specifier = specifierOf(node);
         const message = specifier === undefined ? undefined : judge(layout, specifier);
@@ -1582,6 +1745,9 @@ function layoutRule(
       return {
         Program: node => {
           if (layout.problem !== undefined) context.report({ node, message: layout.problem });
+          if (layout.ownersProblem !== undefined) {
+            context.report({ node, message: layout.ownersProblem });
+          }
         },
         ImportDeclaration: check,
         ExportAllDeclaration: check,
@@ -1623,7 +1789,7 @@ function layerMessage(layout: Layout, specifier: string): string | undefined {
 
   if (reach === undefined || target === undefined) return undefined;
 
-  const { layer } = placeOf(layout.root, target);
+  const { layer } = placeOf(layout.root, target, layout.owners);
 
   if (layer === "other" || reach.includes(layer)) return undefined;
 
@@ -1688,6 +1854,25 @@ function escapeMessage(importer: Place): string {
 }
 
 /**
+ * What feature-door says about a sub-feature that imports a feature it lives in: the fix is a
+ * sibling kit of the feature it imported.
+ *
+ * @param importer - The unit of the importing file.
+ * @param ancestor - The unit of the feature it imports.
+ * @returns The report.
+ * @example
+ * ```ts
+ * ancestorMessage("features/episodes/ep01", "features/episodes");
+ * // "Door: a sub-feature does not import the feature it lives in: features/episodes/ep01 imports features/episodes. Move what they share into a sibling sub-feature, such as features/episodes/episodes-kit, and import it from its door."
+ * ```
+ */
+function ancestorMessage(importer: string, ancestor: string): string {
+  const kit = `${ancestor}/${path.posix.basename(ancestor)}-kit`;
+
+  return `Door: a sub-feature does not import the feature it lives in: ${importer} imports ${ancestor}. Move what they share into a sibling sub-feature, such as ${kit}, and import it from its door.`;
+}
+
+/**
  * What feature-door says about an import of shared, a feature, a plugin or a barrel that lands in
  * the layout outside the barrels.
  *
@@ -1708,6 +1893,11 @@ function unitDoorMessage(importer: Place, place: Place, isRelative: boolean): st
     return place.door && !importer.door ? ownDoorMessage(importer) : undefined;
   }
 
+  // A feature reaches the door of a sub-feature it holds by relative path too.
+  const isDescendantDoor = place.door && place.ancestors?.includes(importer.unit ?? "") === true;
+
+  if (isDescendantDoor) return undefined;
+
   // The barrel reaches the doors of its own layer by relative path.
   const staysInBarrel = isBarrel(importer) && place.layer === importer.layer;
 
@@ -1715,9 +1905,9 @@ function unitDoorMessage(importer: Place, place: Place, isRelative: boolean): st
 }
 
 /**
- * What feature-door says about one import of a unit: the barrels belong to game.ts, a unit does
- * not import its own door, another feature is reached through its door, and an import that
- * leaves the unit is written as an alias.
+ * What feature-door says about one import of a unit: the barrels belong to game.ts, a sub-feature
+ * does not import a feature it lives in, a unit does not import its own door, another feature is
+ * reached through its door, and an import that leaves the unit is written as an alias.
  *
  * @param layout - The layout of the importing file.
  * @param specifier - The module specifier as written.
@@ -1729,13 +1919,16 @@ function doorMessage(layout: Layout, specifier: string): string | undefined {
 
   if (importer.unit === undefined || target === undefined) return undefined;
 
-  const place = placeOf(layout.root, target);
+  const place = placeOf(layout.root, target, layout.owners);
   const isRelative = RELATIVE.test(specifier);
 
   if (place.layer === "other") return undefined;
   if (isBarrel(place)) return place.unit === importer.unit ? undefined : BARREL_MESSAGE;
   if (importer.layer === "core") {
     return isRelative && place.layer !== "core" ? escapeMessage(importer) : undefined;
+  }
+  if (place.unit !== undefined && importer.ancestors?.includes(place.unit) === true) {
+    return ancestorMessage(importer.unit, place.unit);
   }
 
   return unitDoorMessage(importer, place, isRelative);
@@ -1757,10 +1950,371 @@ const layerImports = layoutRule(
 
 /** Doors: a feature is imported from its index.ts, and the barrels only by game.ts. */
 const featureDoor = layoutRule(
-  "A feature is imported from its index.ts; the barrels only by game.ts; an import that leaves a feature is an alias.",
+  "A feature is imported from its index.ts at any depth; a sub-feature never imports a feature it lives in; the barrels only by game.ts; an import that leaves a feature is an alias.",
   { files: ["**/{core,shared,features,plugins}/**"], ignores: TESTS },
-  doorMessage
+  doorMessage,
+  true
 );
+
+/**
+ * The folder a source names beside the importing door.
+ *
+ * @param source - The module specifier as written.
+ * @returns The folder for `./<folder>`, `./<folder>/index` and either with an extension; else undefined.
+ * @example
+ * ```ts
+ * importedFolder("./ep01/index.ts"); // "ep01"
+ * ```
+ */
+function importedFolder(source: string): string | undefined {
+  return FOLDER_SOURCE.exec(source)?.[1];
+}
+
+/**
+ * Whether a source imports a folder beside the door: `./<folder>`, `./<folder>/index`, either with
+ * `.ts`, `.tsx` or `.js`.
+ *
+ * @param source - The module specifier as written.
+ * @param folder - The folder name.
+ * @returns True when the source names the folder's door.
+ * @example
+ * ```ts
+ * isFolderImport("./ep03/index.js", "ep03"); // true
+ * ```
+ */
+function isFolderImport(source: string, folder: string): boolean {
+  return importedFolder(source) === folder;
+}
+
+/**
+ * Whether a unit brings resources of its own: a feature owner rather than a code-only sub-feature.
+ *
+ * @param unit - A feature unit.
+ * @returns True with `assets/`, `assets.ts` or `strings/`.
+ * @example
+ * ```ts
+ * hasResources({ name: "kit", dir: "features/a/kit", depth: 1, resources: { assets: true, strings: false } }); // true
+ * ```
+ */
+function hasResources(unit: FeatureOwner): boolean {
+  return unit.resources.assets || unit.resources.strings;
+}
+
+/**
+ * Whether a folder on disk is a feature owner: a door and resources of its own.
+ *
+ * @param folder - The absolute folder.
+ * @returns True with an `index.ts` or `index.tsx` and `assets/`, `assets.ts` or `strings/`.
+ */
+function isOwnerFolder(folder: string): boolean {
+  const has = (name: string, isFolder: boolean): boolean => {
+    const stat = statSync(path.join(folder, name), { throwIfNoEntry: false });
+
+    return isFolder ? stat?.isDirectory() === true : stat?.isFile() === true;
+  };
+  const hasDoor = has("index.ts", false) || has("index.tsx", false);
+
+  return hasDoor && (has("assets", true) || has("assets.ts", false) || has("strings", true));
+}
+
+/**
+ * Whether a folder holds a feature owner directly: a child folder, not a kind folder, with a door
+ * and resources.
+ *
+ * @param folder - The absolute folder of a unit, which exists: its door is being linted.
+ * @returns True when one child folder is an owner.
+ */
+function hasOwnerChild(folder: string): boolean {
+  return readdirSync(folder, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && !KIND_FOLDER.test(entry.name))
+    .some(entry => isOwnerFolder(path.join(folder, entry.name)));
+}
+
+/**
+ * The names the `features: [...]` arrays of a door list.
+ *
+ * @param lists - The arrays.
+ * @returns The identifiers among their elements.
+ */
+function listedNames(lists: DoorRead["lists"]): Set<string> {
+  const names = new Set<string>();
+
+  for (const { elements } of lists) {
+    for (const element of elements) {
+      const name = element?.type === "Identifier" ? nameOf(element) : undefined;
+
+      if (name !== undefined) names.add(name);
+    }
+  }
+
+  return names;
+}
+
+/**
+ * The elements of a `features: [...]` property.
+ *
+ * @param node - A Property.
+ * @returns The elements, or undefined for any other property.
+ */
+function listingOf(node: GameLintNode): readonly (GameLintNode | null)[] | undefined {
+  const { key } = node;
+  const isName = key?.type === "Identifier" && !node.computed && nameOf(key) === "features";
+  const isString = key?.type === "Literal" && key.value === "features";
+  const value = isNode(node.value) ? node.value : undefined;
+
+  return (isName || isString) && value?.type === "ArrayExpression"
+    ? (value.elements ?? [])
+    : undefined;
+}
+
+/**
+ * Whether a callee is `defineFeature` or a member `<x>.defineFeature`.
+ *
+ * @param callee - The callee of a CallExpression.
+ * @returns True for the definer.
+ */
+function isDefiner(callee: GameLintNode | undefined): boolean {
+  if (callee?.type === "Identifier") return nameOf(callee) === "defineFeature";
+
+  return callee?.type === "MemberExpression" && propertyName(callee) === "defineFeature";
+}
+
+/**
+ * The checks of a parent door: every child owner is imported from `./<child>` and listed.
+ *
+ * @param door - The door.
+ * @param read - What the door holds.
+ * @param program - The Program node, for a missing import.
+ * @returns The reports.
+ */
+function childReports(door: Door, read: DoorRead, program: GameLintNode): Report[] {
+  const listed = listedNames(read.lists);
+  const reports: Report[] = [];
+
+  for (const child of door.units) {
+    if (child.parent !== door.unit.name || !hasResources(child)) continue;
+
+    const imported = read.imports.filter(item => isFolderImport(item.source, child.name));
+    const [first] = imported;
+
+    if (first === undefined) {
+      reports.push({
+        node: program,
+        message: `Sub-features: ${child.dir} is a sub-feature of ${door.unit.name}, and this door does not import it. Import it from "./${child.name}" and list it in features: [...].`
+      });
+    } else if (!imported.some(item => item.locals.some(name => listed.has(name)))) {
+      const shown =
+        first.locals.find(name => name.endsWith("Feature")) ?? first.locals[0] ?? "<feature>";
+
+      reports.push({
+        node: first.node,
+        message: `Sub-features: "${first.source}" is imported but not listed in features: [...]. List the sub-feature: features: [..., ${shown}].`
+      });
+    }
+  }
+
+  return reports;
+}
+
+/**
+ * The checks of each `features: [...]` entry: a name imported from a sub-feature folder of the door.
+ *
+ * @param door - The door.
+ * @param read - What the door holds.
+ * @returns The reports.
+ */
+function entryReports(door: Door, read: DoorRead): Report[] {
+  const reports: Report[] = [];
+
+  for (const list of read.lists) {
+    for (const element of list.elements) {
+      if (element?.type !== "Identifier") {
+        reports.push({ node: element ?? list.node, message: ENTRY_SHAPE_MESSAGE });
+        continue;
+      }
+
+      const name = nameOf(element) ?? "";
+      const from = read.imports.find(item => item.locals.includes(name));
+      const folder = from === undefined ? undefined : importedFolder(from.source);
+      const isSubFeature = door.units.some(unit => unit.dir === `${door.unit.dir}/${folder}`);
+
+      if (folder === undefined || !isSubFeature) {
+        reports.push({
+          node: element,
+          message: `Sub-features: features: [...] lists ${name}, which is not imported from a sub-feature folder of ${door.unit.name}. A sub-feature lives in ${door.unit.dir}/<name> and is imported from "./<name>".`
+        });
+      }
+    }
+  }
+
+  return reports;
+}
+
+/**
+ * The check of a sub-feature's door: it registers a feature named like its folder.
+ *
+ * @param door - The door.
+ * @param read - What the door holds.
+ * @param program - The Program node, for a door that registers none.
+ * @returns The reports.
+ */
+function nameReports(door: Door, read: DoorRead, program: GameLintNode): Report[] {
+  const { name } = door.unit;
+
+  if (door.unit.depth === 0 || read.calls.some(call => call.name === name)) return [];
+
+  const others = read.calls.filter(call => call.defines);
+
+  if (others.length > 0) {
+    return others.map(call => ({
+      node: call.node,
+      message: `Sub-features: ${door.file} registers the feature "${call.name}"; a sub-feature is named like its folder: "${name}".`
+    }));
+  }
+
+  return [
+    {
+      node: program,
+      message: `Sub-features: the door of ${door.unit.dir} registers no feature named "${name}". A sub-feature is named like its folder: defineFeature("${name}", { … }).`
+    }
+  ];
+}
+
+/**
+ * The check of a code-only sub-feature: it declares no sub-features, neither listed nor on disk.
+ *
+ * @param door - The door.
+ * @param read - What the door holds.
+ * @param program - The Program node.
+ * @returns The report, or undefined for an owner or a code-only door without sub-features.
+ */
+function codeOnlyReport(door: Door, read: DoorRead, program: GameLintNode): Report | undefined {
+  const { unit } = door;
+
+  if (unit.depth === 0 || hasResources(unit)) return undefined;
+
+  const declares = read.lists.length > 0 || hasOwnerChild(path.join(door.root, unit.dir));
+
+  return declares
+    ? {
+        node: program,
+        message: `Sub-features: ${unit.dir} has no assets/, assets.ts or strings/, so its sub-features are invisible to the scanner and the compiler. Give it a resource of its own, or move them to ${unit.parent ?? "its parent"}.`
+      }
+    : undefined;
+}
+
+/**
+ * Every finding of sub-features on one door.
+ *
+ * @param door - The door.
+ * @param read - What the door holds.
+ * @param program - The Program node.
+ * @returns The reports: the declaration, then the name.
+ */
+function doorReports(door: Door, read: DoorRead, program: GameLintNode): Report[] {
+  const codeOnly = codeOnlyReport(door, read, program);
+  const declaration =
+    codeOnly === undefined
+      ? [...childReports(door, read, program), ...entryReports(door, read)]
+      : [codeOnly];
+
+  return [...declaration, ...nameReports(door, read, program)];
+}
+
+/**
+ * The door the context lints: the unit whose `index.ts` or `index.tsx` the file is.
+ *
+ * @param context - The rule context.
+ * @returns The door, or undefined for any other file and for a feature name clash.
+ */
+function doorOf(context: GameLintContext): Door | undefined {
+  const [given] = context.options as [GameLintLayoutOptions?];
+  const root = path.resolve(context.cwd, given?.root ?? ".");
+  const file = insideOf(root, path.resolve(context.cwd, context.filename));
+  const units = file === undefined ? [] : readUnits(root).owners;
+  const unit = units.find(
+    item => `${item.dir}/index.ts` === file || `${item.dir}/index.tsx` === file
+  );
+
+  return unit === undefined || file === undefined ? undefined : { root, unit, units, file };
+}
+
+/**
+ * The node visitors that collect a door: value imports, `features: [...]` arrays and calls with a
+ * literal first argument.
+ *
+ * @param read - Where they collect to.
+ * @returns The visitors.
+ */
+function doorCollectors(read: DoorRead): GameLintListeners {
+  return {
+    ImportDeclaration: node => {
+      const source = specifierOf(node);
+      const locals = (node.specifiers ?? [])
+        .map(specifier => nameOf(specifier.local))
+        .filter((name): name is string => name !== undefined);
+
+      if (source !== undefined && node.importKind !== "type") {
+        read.imports.push({ node, source, locals });
+      }
+    },
+    Property: node => {
+      const elements = listingOf(node);
+
+      if (elements !== undefined) read.lists.push({ node, elements });
+    },
+    CallExpression: node => {
+      const [first] = node.arguments ?? [];
+
+      if (first?.type === "Literal" && typeof first.value === "string") {
+        read.calls.push({ node, name: first.value, defines: isDefiner(node.callee) });
+      }
+    }
+  };
+}
+
+/**
+ * Keeps a feature's declaration and its folders equal: a door imports every sub-feature owner from
+ * `./<folder>` and lists it in `features: [...]`, lists nothing that does not come from a
+ * sub-feature folder, and a sub-feature's door registers a feature named like its folder. Owners
+ * are found by `src/project/features.ts` from folders; a code-only sub-feature is one because its
+ * parent's door lists it.
+ *
+ * @example
+ * ```json
+ * "moku-game/sub-features": ["error", { "root": "src" }]
+ * ```
+ */
+const subFeatures: GameLintRule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "A feature's door imports every sub-feature owner from ./<folder> and lists it in features: [...], lists only sub-feature folders, and a sub-feature's door registers a feature named like its folder."
+    },
+    schema: LAYOUT_SCHEMA
+  },
+  /**
+   * Visit a door of a feature unit when the rule's globs match it.
+   *
+   * @param context - The rule context.
+   * @returns The node visitors, none for a file out of scope or that is no door.
+   */
+  create(context) {
+    const door = inScope(context, DOOR_FILES) ? doorOf(context) : undefined;
+
+    if (door === undefined) return {};
+
+    const read: DoorRead = { imports: [], lists: [], calls: [] };
+
+    return {
+      ...doorCollectors(read),
+      "Program:exit": program => {
+        for (const report of doorReports(door, read, program)) context.report(report);
+      }
+    };
+  }
+};
 
 /**
  * The key of a suffix table as a folder: with a trailing `/`.
@@ -1911,6 +2465,7 @@ const plugin: GameLintPlugin = {
     "static-keys": staticKeys,
     "layer-imports": layerImports,
     "feature-door": featureDoor,
+    "sub-features": subFeatures,
     "test-suffix": testSuffix
   }
 };

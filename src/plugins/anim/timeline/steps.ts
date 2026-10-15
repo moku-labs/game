@@ -5,7 +5,7 @@
  */
 import type { Json } from "../../model/types";
 import type { AnyComponentValue } from "../../world/ecs/types";
-import type { ComponentHandle, Ease, NumericFields } from "../../world/types";
+import type { ComponentHandle, Ease, NumericFields, ReducedMotion } from "../../world/types";
 import { asComponent } from "../components";
 import type {
   AnimationDefinition,
@@ -243,6 +243,8 @@ export function mark(name: string): Step {
  * @param options.additive - `true` adds an offset instead of owning the fields.
  * @param options.space - `"root"` reads the `Transform` fields as a root pose; `"local"` when
  *   omitted.
+ * @param options.reduced - `"keep"` plays the track at its length under reduced motion, a fade
+ *   for one; `"cut"` (the default) lands it at once.
  * @returns The tween step.
  * @example
  * ```ts
@@ -271,6 +273,7 @@ export function tween<Value extends object>(
     delayMs?: number;
     additive?: boolean;
     space?: "local" | "root";
+    reduced?: ReducedMotion;
   }
 ): Step {
   return Object.freeze({
@@ -282,7 +285,8 @@ export function tween<Value extends object>(
     ease: options.ease ?? DEFAULT_EASE,
     delayMs: options.delayMs ?? 0,
     additive: options.additive === true,
-    space: options.space ?? "local"
+    space: options.space ?? "local",
+    reduced: options.reduced ?? "cut"
   });
 }
 

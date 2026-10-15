@@ -50,23 +50,41 @@ export function componentsOf(
     const value = store.get(entity);
 
     if (value === undefined) continue;
-    // An element description belongs to `ui`, not to the save file: named, never serialised.
-    if (name === Tree.componentName) {
-      skipped.push(name);
-    } else if (value === true) {
-      components[name] = true;
-    } else if (isJson(value)) {
-      components[name] = value;
-    } else {
-      skipped.push(name);
-    }
+
+    const json = jsonOf(name, value);
+
+    if (json === undefined) skipped.push(name);
+    else components[name] = json;
   }
 
   return { components, skipped };
 }
 
 /**
- * Builds the whole world as plain JSON, sorted by entity index.
+ * The JSON of one stored component value, the rule `snapshot()` and the frame history share: a
+ * tag is `true`, a plain JSON value is itself, an element description (`Tree`) and any value that
+ * is not JSON have none. The value is the stored object, not a copy.
+ *
+ * @param name - The component name.
+ * @param value - The stored value, or nothing when the entity does not carry it.
+ * @returns The JSON, or `undefined` when nothing of it is recorded.
+ * @example
+ * ```ts
+ * jsonOf("Score", { value: 3 }); // { value: 3 }
+ * ```
+ */
+export function jsonOf(name: string, value: object | true | undefined): Json | undefined {
+  // An element description belongs to `ui`, not to the save file: named, never serialised.
+  if (value === undefined || name === Tree.componentName) return undefined;
+  if (value === true) return true;
+
+  return isJson(value) ? value : undefined;
+}
+
+/**
+ * Builds the whole world as plain JSON, sorted by entity index. Every value is a copy of the
+ * moment: the stores write their objects in place, so a snapshot that held them would follow
+ * every later write, and a write into it would reach the world.
  *
  * @param state - ecs module state.
  * @param mode - The effective mode to report.
@@ -75,18 +93,23 @@ export function componentsOf(
 export function snapshotWorld(state: EcsState, mode: WorldMode): WorldSnapshot {
   const entities: EntitySnapshot[] = [...state.owners.entries()]
     .toSorted(([left], [right]) => indexOf(left) - indexOf(right))
-    .map(([entity, owner]) => ({
-      id: entity,
-      index: indexOf(entity),
-      generation: generationOf(entity),
-      owner: { kind: owner.kind, name: owner.name },
-      ...componentsOf(state, entity)
-    }));
+    .map(([entity, owner]) => {
+      const { components, skipped } = componentsOf(state, entity);
+
+      return {
+        id: entity,
+        index: indexOf(entity),
+        generation: generationOf(entity),
+        owner: { kind: owner.kind, name: owner.name },
+        components: structuredClone(components),
+        skipped
+      };
+    });
 
   const resources: Record<string, Json> = {};
 
   for (const [name, value] of state.resources) {
-    if (isJson(value)) resources[name] = value;
+    if (isJson(value)) resources[name] = structuredClone(value);
   }
 
   return { mode, entities, resources };

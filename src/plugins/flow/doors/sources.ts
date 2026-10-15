@@ -6,7 +6,7 @@
  */
 import { assetsSource } from "../../assets/inspect";
 import { audioMutedSource, soundsSource } from "../../audio/inspect";
-import { effectsSource } from "../../effects/inspect";
+import { effectsSource, filtersSource } from "../../effects/inspect";
 import { modelSource } from "../../model/inspect";
 import { atSource, renderSource } from "../../renderer/inspect";
 import { locateSource, uiSource } from "../../ui/inspect";
@@ -52,6 +52,7 @@ export const sources = Object.freeze({
   sounds: soundsSource,
   audioMuted: audioMutedSource,
   effects: effectsSource,
+  filters: filtersSource,
   assets: assetsSource,
   log: logSource,
   explain: explainSource,

@@ -12,7 +12,8 @@ import {
   pageReady,
   pageScript,
   pageStart,
-  pageStep
+  pageStep,
+  pageVerify
 } from "../../../src/visual/page-script";
 import type { VisualApp } from "../../../src/visual/types";
 import { enterPage, installCodec, pictureOf, pngOf, startPageGame, webpOf } from "./page";
@@ -358,6 +359,104 @@ describe("pageStep while the leg holds the pause", () => {
       error:
         '[game] Visual test "open-popup", the start did not finish in 3 frames.\n  The graph stands at "home"; the command waits for something the stepped frames never bring.'
     });
+  });
+});
+
+describe("the check of skipped frames", () => {
+  it("turns verifyFrames on, then fails the step after which the page logged a missed frame, with its line", async () => {
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+
+    expect(await pageVerify({ test: "open-popup", where: "the start" })).toEqual({
+      ok: true,
+      value: undefined
+    });
+    expect(app.renderer.sync.debug.state().verifyFrames).toBe(true);
+
+    app.log.warn("renderer:missed-frame", { frame: 3, pixels: 120, marked: [5] });
+
+    expect(await pageStep(restore)).toEqual({
+      ok: false,
+      reason: 'renderer:missed-frame {"frame":3,"pixels":120,"marked":[5]}'
+    });
+    // The log is read from there on: the next step is clean.
+    expect(await pageStep(restore)).toEqual({ ok: true, value: undefined });
+  });
+
+  it("fails a checkpoint on a missed mark", async () => {
+    installCodec();
+
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pageVerify({ test: "open-popup", where: "the start" });
+    app.log.warn("renderer:missed-mark", { entity: 9, label: "Display#9 stove" });
+
+    expect(
+      await pageCheckpoint({ test: "open-popup", where: "step 1 (checkpoint)", settleFrames: 60 })
+    ).toEqual({
+      ok: false,
+      reason: 'renderer:missed-mark {"entity":9,"label":"Display#9 stove"}'
+    });
+  });
+
+  // A kept picture that no longer matches its live frame shows the player an old screen (spec 23 P13.3).
+  it("fails a checkpoint on a stale picture", async () => {
+    installCodec();
+
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pageVerify({ test: "open-popup", where: "the start" });
+    app.log.warn("renderer:stale-picture", { entity: 12 });
+
+    expect(
+      await pageCheckpoint({ test: "open-popup", where: "step 1 (checkpoint)", settleFrames: 60 })
+    ).toEqual({ ok: false, reason: 'renderer:stale-picture {"entity":12}' });
+  });
+
+  // Bug: the K5 oracles compare the engine with itself, so a filter broken for good, a warm-up probe that threw inside
+  // Pixi, or an oracle whose read failed passed every step in silence (the merge game's lost Glow).
+  it.each([
+    ["effects:broken", { filter: "effects.glow", reason: "apply" }],
+    ["renderer:warm-failed", { subject: "filter", variant: "texture" }],
+    ["renderer: pixel read failed", { error: {} }]
+  ])("fails a step on %s, an error that no frame oracle can see", async (event, data) => {
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    await pageVerify({ test: "open-popup", where: "the start" });
+    app.log.error(event, data);
+
+    expect(await pageStep(restore)).toEqual({
+      ok: false,
+      reason: `${event} ${JSON.stringify(data)}`
+    });
+  });
+
+  // Bug: a filter that broke while the page loaded, before the check turned on, is never read: every checkpoint after
+  // it is drawn without the filter and passes.
+  it("fails the start on an error the page logged before the check turned on", async () => {
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    app.log.warn("renderer:missed-frame", { frame: 2, pixels: 40, marked: [] });
+    app.log.error("effects:broken", { filter: "effects.glow", reason: "apply" });
+
+    expect(await pageVerify({ test: "open-popup", where: "the start" })).toEqual({
+      ok: false,
+      reason: 'effects:broken {"filter":"effects.glow","reason":"apply"}'
+    });
+  });
+
+  it("reads nothing of the log while the check is off", async () => {
+    const { app } = await pageGame();
+
+    await pageStart({ url: URL, settleFrames: 600 });
+    app.log.warn("renderer:missed-frame", { frame: 3, pixels: 120, marked: [] });
+
+    expect(await pageStep(restore)).toEqual({ ok: true, value: undefined });
   });
 });
 

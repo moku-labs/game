@@ -1,0 +1,683 @@
+/**
+ * @file The tree oracle of the render-on-demand tests (spec 14 T0, K1). Not a test. After every
+ * frame it reads whether the frame was drawn and a fingerprint of everything the player can see,
+ * from public Pixi properties only, and fails a frame that was skipped while the screen differs
+ * from the last drawn one: a missed mark, a frozen view. It is written apart from the renderer's
+ * own `demand/shown.ts` and imports nothing of it, so a hole in the renderer's rule is not
+ * repeated here.
+ *
+ * The picture oracle of spec 23 (P13.1, D-f) watches the renders into textures the stand-in logs
+ * and checks every drawn frame at its stage render: a sprite that shows a filter output is a
+ * quad, followed back to the stand-in and the top it was drawn from; it fails when the top's
+ * subtree or the stand-in's filters differ from what was rendered, when the top is drawn too, when
+ * the quad is not where the picture lands, and when a top hidden for its picture is shown by no
+ * quad. A sprite that shows a picture of a container directly is a range picture: its leaves must
+ * not be drawn live beside it, its nodes must be as they were rendered, and it must not be in its
+ * own picture. It imports nothing of the kept module either.
+ */
+import type * as Pixi from "pixi.js";
+import { expect } from "vitest";
+import type { RenderCall, StageApplication } from "./stage-pixi";
+
+/** The real Pixi classes the oracle tells nodes apart by. */
+type PixiClasses = Pick<
+  typeof Pixi,
+  "BitmapText" | "Graphics" | "NineSliceSprite" | "ParticleContainer" | "Sprite" | "Text"
+>;
+
+/**
+ * One frame the oracle saw skipped while the picture differed: the first line that differs, as
+ * the player sees it now and as the last drawn frame showed it.
+ */
+export type MissedFrame = { frame: number; node: string; was: string };
+
+/** One drawn frame whose pictures were not current: the top's label and the first field that differs. */
+export type StalePicture = { frame: number; picture: string; field: string };
+
+/** What a test drives the oracle with. */
+export type FrameOracle = {
+  /** Reads the frame that just ran: drawn or skipped, and what the player sees. */
+  check(): void;
+  /** Every skipped frame whose picture differed from the last drawn one. */
+  readonly missed: MissedFrame[];
+  /** Every drawn frame whose kept pictures were not what their tops draw now (spec 23 P13.1). */
+  readonly pictures: StalePicture[];
+  /** Frames checked, and of them drawn. */
+  readonly counts: { frames: number; drawn: number };
+  /** Fails the test when a skipped frame differed from the last drawn one, naming the first node. */
+  expectNoMissedFrame(): void;
+  /** Fails the test when a drawn frame showed a picture that was not current, naming the top and the field. */
+  expectPicturesCurrent(): void;
+};
+
+/** A render of a container into a texture: a view's subtree picture, or a range picture of the stage root. */
+type PictureRender = {
+  container: Pixi.Container;
+  /** The container's subtree as drawn in that call, one line per node, the container's own pose left out. */
+  lines: Map<object, string>;
+  /** The leaves drawn in that call. */
+  leaves: Set<object>;
+  /** The transform it was drawn with. */
+  transform: NonNullable<RenderCall["transform"]>;
+};
+
+/** A render of a sprite of a picture into a texture: the stand-in of a filter output, with its filters then. */
+type StandInRender = {
+  standIn: Pixi.Sprite;
+  filters: string;
+  transform: NonNullable<RenderCall["transform"]>;
+};
+
+/** A transform with no move and no scale. */
+const IDENTITY = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 } as const;
+
+/** A quad lands where its picture does within this much, CSS px. */
+const PLACE_TOLERANCE = 1e-6;
+
+/**
+ * The values of a uniform group as text: numbers, and arrays copied element by element.
+ *
+ * @param uniforms - The uniforms of a group.
+ * @returns Their text.
+ */
+function uniformText(uniforms: Record<string, unknown>): string {
+  const parts: string[] = [];
+
+  for (const [name, value] of Object.entries(uniforms)) {
+    if (typeof value === "number" || typeof value === "boolean") parts.push(`${name}=${value}`);
+    else if (ArrayBuffer.isView(value)) parts.push(`${name}=[${String(value)}]`);
+    else if (Array.isArray(value)) parts.push(`${name}=[${value.map(String).join(",")}]`);
+  }
+
+  return parts.join(";");
+}
+
+/**
+ * The oracle's view of the stage of one stand-in application.
+ *
+ * @param app - The stand-in application the renderer draws with.
+ * @param pixi - The real Pixi module, for its classes.
+ * @returns The oracle.
+ */
+export function watchFrames(app: StageApplication, pixi: PixiClasses): FrameOracle {
+  const ids = new WeakMap<object, number>();
+  const redraws = new WeakMap<object, { count: number }>();
+  const missed: MissedFrame[] = [];
+  const pictures: StalePicture[] = [];
+  /** Renders into each texture so far: a quad of a texture drawn again is another picture. */
+  const versions = new WeakMap<object, number>();
+  const pictureRenders = new WeakMap<object, PictureRender>();
+  const standInRenders = new WeakMap<object, StandInRender>();
+  /** Every top a filter output was drawn from: a view kept as a quad. */
+  const pictured = new Set<Pixi.Container>();
+  /** The tops the quads of the last check drew: walked as drawn by the frame oracle. */
+  let throughTops = new Set<Pixi.Container>();
+  const counts = { frames: 0, drawn: 0 };
+  let lastRenders = app.renderer.renders;
+  let lastDrawn: string[] | undefined;
+  let lastId = 0;
+
+  /**
+   * The oracle's own id of an object, stable while the object lives.
+   *
+   * @param object - Any object of the tree.
+   * @returns Its id; 0 for none.
+   */
+  const idOf = (object: object | null | undefined): number => {
+    if (object === null || object === undefined) return 0;
+
+    const known = ids.get(object);
+
+    if (known !== undefined) return known;
+
+    lastId += 1;
+    ids.set(object, lastId);
+
+    return lastId;
+  };
+
+  /**
+   * How often a graphics context told the world it changed since the oracle first saw it: a
+   * redraw is a change, an equal one too.
+   *
+   * @param context - The context of a `Graphics`.
+   * @param context.on - Its public event subscription.
+   * @returns The count.
+   */
+  const redrawsOf = (context: { on(event: "update", fn: () => void): unknown }): number => {
+    let seen = redraws.get(context);
+
+    if (seen === undefined) {
+      const counter = { count: 0 };
+
+      seen = counter;
+      redraws.set(context, counter);
+      context.on("update", () => {
+        counter.count += 1;
+      });
+    }
+
+    return seen.count;
+  };
+
+  /**
+   * The filters of a node as text: identity, switch, padding and every uniform value.
+   *
+   * @param node - The node.
+   * @returns Their text.
+   */
+  const filtersText = (node: Pixi.Container): string => {
+    const filters = node.filters as readonly Pixi.Filter[] | null | undefined;
+
+    if (filters === null || filters === undefined || filters.length === 0) return "";
+
+    return filters
+      .map(filter => {
+        // Pixi defines its resource accessors without `enumerable`: their names are read, not their keys.
+        const held = filter.resources as Record<string, unknown>;
+        const resources = Object.getOwnPropertyNames(held)
+          .map(name => held[name])
+          .map(resource =>
+            typeof resource === "object" && resource !== null && "uniforms" in resource
+              ? uniformText((resource as { uniforms: Record<string, unknown> }).uniforms)
+              : ""
+          )
+          .join("|");
+
+        // A disabled filter draws nothing: its values are not on the screen.
+        return `f${idOf(filter)}:${filter.enabled}:${filter.padding}:${filter.enabled ? resources : ""}`;
+      })
+      .join(",");
+  };
+
+  /**
+   * What one counted node looks like, by its kind.
+   *
+   * @param node - The node.
+   * @returns Its text.
+   */
+  const lookText = (node: Pixi.Container): string => {
+    if (node instanceof pixi.NineSliceSprite) {
+      return `nine t${idOf(node.texture)} ${node.width}x${node.height} ${node.leftWidth},${node.topHeight},${node.rightWidth},${node.bottomHeight}`;
+    }
+
+    if (node instanceof pixi.Sprite) {
+      const frame = node.texture.frame;
+
+      return `sprite t${idOf(node.texture)} v${versions.get(node.texture) ?? 0} ${frame.x},${frame.y},${frame.width},${frame.height} a${node.anchor.x},${node.anchor.y}`;
+    }
+
+    if (node instanceof pixi.Graphics) {
+      return `graphics c${idOf(node.context)} r${redrawsOf(node.context)}`;
+    }
+
+    if (node instanceof pixi.BitmapText || node instanceof pixi.Text) {
+      return `text ${node.text} ${String(node.style.fontFamily)} ${String(node.style.fontSize)} ${JSON.stringify(node.style.fill)}`;
+    }
+
+    if (node instanceof pixi.ParticleContainer) {
+      return `particles ${node.particleChildren
+        .map(
+          particle =>
+            `${particle.x},${particle.y},${particle.scaleX},${particle.scaleY},${particle.rotation},${particle.tint},${particle.alpha},t${idOf(particle.texture)}`
+        )
+        .join(";")}`;
+    }
+
+    return "container";
+  };
+
+  /**
+   * Whether a leaf lands on the screen, its bounds padded by the filters of its chain.
+   *
+   * @param node - The leaf.
+   * @param pad - The paddings of its chain.
+   * @returns True when some of it is on the screen.
+   */
+  const meetsScreen = (node: Pixi.Container, pad: number): boolean => {
+    const bounds = node.getBounds();
+    const screen = app.screen;
+
+    if (bounds.width <= 0 || bounds.height <= 0) return false;
+
+    return (
+      bounds.maxX + pad > screen.x &&
+      bounds.minX - pad < screen.x + screen.width &&
+      bounds.maxY + pad > screen.y &&
+      bounds.minY - pad < screen.y + screen.height
+    );
+  };
+
+  /**
+   * Walks the stage in child order and writes one line per node the player can see: a leaf on the
+   * screen, and a container above at least one of them (a container draws nothing itself, so an
+   * empty one, or one whose children are all unseen, is left out).
+   *
+   * @param node - The node.
+   * @param pad - The paddings of the filters above it.
+   * @param into - Where the lines go.
+   * @param place - Its place among the siblings the player sees: a sibling nobody sees moves no
+   *   pixel when it leaves.
+   * @returns True when the node or something under it is seen.
+   */
+  const walk = (node: Pixi.Container, pad: number, into: string[], place: number): boolean => {
+    // A top hidden for its kept picture is seen through its quad: what it draws is what the player sees.
+    if (!node.visible || (!node.renderable && !throughTops.has(node)) || node.alpha <= 0) {
+      return false;
+    }
+
+    const filters = node.filters as readonly Pixi.Filter[] | null | undefined;
+    let padding = pad;
+
+    for (const filter of filters ?? []) padding += filter.padding;
+
+    // A leaf (a particle container is one: particles are not children) off the screen is not seen.
+    if (node.children.length === 0 && !meetsScreen(node, padding)) return false;
+
+    const parent = node.parent;
+    const at = into.length;
+
+    into.push(
+      [
+        `#${idOf(node)}`,
+        node.constructor.name,
+        JSON.stringify(node.label),
+        `p${idOf(parent)}`,
+        `i${place}`,
+        `${node.x},${node.y},${node.rotation},${node.scale.x},${node.scale.y}`,
+        `${node.pivot.x},${node.pivot.y},${node.skew.x},${node.skew.y}`,
+        `a${node.alpha} tint${node.tint} b${node.blendMode} z${node.zIndex}`,
+        `m${idOf(node.mask as object | null)}`,
+        filtersText(node),
+        lookText(node)
+      ].join(" ")
+    );
+
+    if (node.children.length === 0) return true;
+
+    let seen = 0;
+
+    for (const child of node.children) if (walk(child, padding, into, seen)) seen += 1;
+
+    if (seen === 0) into.length = at;
+
+    return seen > 0;
+  };
+
+  /**
+   * What the player sees now, one line per node.
+   *
+   * @returns The lines.
+   */
+  const fingerprint = (): string[] => {
+    const lines: string[] = [];
+
+    walk(app.stage, 0, lines, 0);
+
+    return lines;
+  };
+
+  /**
+   * The line of one node of a picture: the frame oracle's fields, its place among the siblings the picture drew, the
+   * pose left out for the picture's root.
+   *
+   * @param node - The node.
+   * @param root - True for the container the picture was rendered from.
+   * @param place - Its place among the siblings the picture drew.
+   * @returns Its text.
+   */
+  const pictureLine = (node: Pixi.Container, root: boolean, place: number): string =>
+    [
+      `#${idOf(node)}`,
+      node.constructor.name,
+      JSON.stringify(node.label),
+      root ? "root" : `p${idOf(node.parent)} i${place}`,
+      root ? "" : `${node.x},${node.y},${node.rotation},${node.scale.x},${node.scale.y}`,
+      root ? "" : `${node.pivot.x},${node.pivot.y},${node.skew.x},${node.skew.y}`,
+      // The root's depth sorts its quad among the siblings, never the picture.
+      `a${node.alpha} tint${node.tint} b${node.blendMode} z${root ? "" : node.zIndex}`,
+      `m${idOf(node.mask as object | null)}`,
+      filtersText(node),
+      lookText(node)
+    ].join(" ");
+
+  /**
+   * What a render of a container draws: every node of its subtree it reaches, as Pixi collects a render group's root
+   * (the root itself without the display test, its children by their own flags).
+   *
+   * @param root - The container rendered.
+   * @param lines - Where each node's line goes.
+   * @param leaves - Where the drawn leaves go.
+   * @param node - The node walked now.
+   */
+  const drawnBy = (
+    root: Pixi.Container,
+    lines: Map<object, string>,
+    leaves: Set<object>,
+    node: Pixi.Container = root,
+    place = 0
+  ): boolean => {
+    if (node !== root && (!node.visible || !node.renderable || node.alpha <= 0)) return false;
+
+    lines.set(node, pictureLine(node, node === root, place));
+
+    if (node.children.length === 0) leaves.add(node);
+
+    let drawnSiblings = 0;
+
+    for (const child of node.children) {
+      if (drawnBy(root, lines, leaves, child, drawnSiblings)) drawnSiblings += 1;
+    }
+
+    return true;
+  };
+
+  /**
+   * The place of a node among its siblings a picture drew.
+   *
+   * @param node - The node.
+   * @param lines - The picture's lines.
+   * @returns Its place.
+   */
+  const placeIn = (node: Pixi.Container, lines: ReadonlyMap<object, string>): number => {
+    let place = 0;
+
+    for (const sibling of node.parent?.children ?? []) {
+      if (sibling === node) break;
+      if (lines.has(sibling)) place += 1;
+    }
+
+    return place;
+  };
+
+  /**
+   * Tells whether a node is drawn in the stage pass: it and every node up to the stage are visible, renderable and
+   * not fully transparent.
+   *
+   * @param node - The node.
+   * @returns True when the stage pass draws it.
+   */
+  const drawnInStage = (node: Pixi.Container): boolean => {
+    for (let at: Pixi.Container | null = node; at !== app.stage; at = at.parent) {
+      if (at === null || !at.visible || !at.renderable || at.alpha <= 0) return false;
+    }
+
+    return true;
+  };
+
+  /**
+   * Every sprite the stage pass draws whose texture an engine render drew into: quads and range sprites.
+   *
+   * @param node - The node walked now.
+   * @param into - Where they go.
+   * @returns The same list.
+   */
+  const shownPictures = (node: Pixi.Container, into: Pixi.Sprite[] = []): Pixi.Sprite[] => {
+    if (!node.visible || !node.renderable || node.alpha <= 0) return into;
+
+    if (node instanceof pixi.Sprite && versions.has(node.texture)) into.push(node);
+
+    for (const child of node.children) shownPictures(child, into);
+
+    return into;
+  };
+
+  /**
+   * Notes a failed picture of the frame being drawn.
+   *
+   * @param picture - The top's label, or the range sprite's.
+   * @param field - What differs.
+   */
+  const fail = (picture: string, field: string): void => {
+    pictures.push({ frame: counts.frames + 1, picture, field });
+  };
+
+  /**
+   * The first line of a picture that differs from what its container draws now, or `undefined`.
+   *
+   * @param rendered - The picture.
+   * @returns The line as it is now, or the line rendered when the node left.
+   */
+  const staleLine = (rendered: PictureRender): string | undefined => {
+    const lines = new Map<object, string>();
+
+    drawnBy(rendered.container, lines, new Set());
+
+    for (const [node, line] of rendered.lines) {
+      const now = lines.get(node);
+
+      if (now !== line) return now ?? `gone: ${line}`;
+    }
+
+    for (const [node, line] of lines) if (!rendered.lines.has(node)) return `new: ${line}`;
+
+    return undefined;
+  };
+
+  /**
+   * Checks one quad (P13.1 a–d): the top's subtree and its linear part, the stand-in's filters, no double draw, the
+   * place of the quad.
+   *
+   * @param quad - The sprite of a filter output.
+   * @param standIn - The render of its stand-in.
+   */
+  const checkQuad = (quad: Pixi.Sprite, standIn: StandInRender): void => {
+    const rendered = pictureRenders.get(standIn.standIn.texture);
+
+    if (rendered === undefined) {
+      fail(quad.label, "a quad whose stand-in shows no picture");
+
+      return;
+    }
+
+    const top = rendered.container;
+    const name = top.label;
+    const world = top.getGlobalTransform(undefined, false);
+    const { transform } = rendered;
+    const stale = staleLine(rendered);
+
+    if (stale !== undefined) fail(name, `subtree: ${stale}`);
+
+    if (
+      world.a !== transform.a ||
+      world.b !== transform.b ||
+      world.c !== transform.c ||
+      world.d !== transform.d
+    ) {
+      fail(name, `linear part ${world.a},${world.b},${world.c},${world.d}`);
+    }
+
+    if (filtersText(standIn.standIn) !== standIn.filters) {
+      fail(name, `filters: ${filtersText(standIn.standIn)}`);
+    }
+
+    if (drawnInStage(top)) fail(name, "the top is drawn beside its quad");
+    if (quad.zIndex !== top.zIndex)
+      fail(name, `quad depth ${quad.zIndex}, top depth ${top.zIndex}`);
+
+    const placed = quad.getGlobalTransform(undefined, false);
+    const x = world.tx - transform.tx - standIn.transform.tx;
+    const y = world.ty - transform.ty - standIn.transform.ty;
+
+    if (
+      Math.abs(placed.tx - x) > PLACE_TOLERANCE ||
+      Math.abs(placed.ty - y) > PLACE_TOLERANCE ||
+      Math.abs(placed.a - IDENTITY.a) > PLACE_TOLERANCE ||
+      Math.abs(placed.d - IDENTITY.d) > PLACE_TOLERANCE ||
+      Math.abs(placed.b) > PLACE_TOLERANCE ||
+      Math.abs(placed.c) > PLACE_TOLERANCE
+    ) {
+      fail(name, `quad at ${placed.tx},${placed.ty}, its picture lands at ${x},${y}`);
+    }
+
+    throughTops.add(top);
+  };
+
+  /**
+   * Checks one range picture (P13.1 c, e): its nodes as they were rendered, no leaf of it drawn live beside it, and the
+   * sprite out of its own picture.
+   *
+   * @param sprite - The sprite of a range picture.
+   * @param rendered - Its render.
+   */
+  const checkRange = (sprite: Pixi.Sprite, rendered: PictureRender): void => {
+    if (rendered.lines.has(sprite)) fail(sprite.label, "the sprite is in its own picture");
+
+    for (const leaf of rendered.leaves) {
+      if (leaf !== sprite && drawnInStage(leaf as Pixi.Container)) {
+        fail(sprite.label, `drawn live beside its picture: ${rendered.lines.get(leaf) ?? ""}`);
+
+        return;
+      }
+    }
+
+    for (const [node, line] of rendered.lines) {
+      const at = node as Pixi.Container;
+      const now = pictureLine(at, at === rendered.container, placeIn(at, rendered.lines));
+
+      if (now !== line && node !== rendered.container) {
+        fail(sprite.label, `entry: ${now}`);
+
+        return;
+      }
+    }
+  };
+
+  /**
+   * Checks the pictures of the frame at its stage render, and that no top hidden for its picture is left without a
+   * quad (no frame shows neither).
+   */
+  const checkPictures = (): void => {
+    const inRanges = new Set<object>();
+
+    throughTops = new Set();
+
+    for (const sprite of shownPictures(app.stage)) {
+      const standIn = standInRenders.get(sprite.texture);
+      const rendered = pictureRenders.get(sprite.texture);
+
+      if (standIn !== undefined) checkQuad(sprite, standIn);
+      else if (rendered !== undefined) {
+        checkRange(sprite, rendered);
+        noteRange(rendered, inRanges);
+      }
+    }
+
+    for (const top of pictured) {
+      if (unseenTop(top, inRanges)) fail(top.label, "hidden for a picture that no quad shows");
+    }
+  };
+
+  /**
+   * Notes what a shown range picture draws: its nodes, and the top of every quad drawn into it.
+   *
+   * @param rendered - The range picture.
+   * @param inRanges - Where the nodes go.
+   */
+  const noteRange = (rendered: PictureRender, inRanges: Set<object>): void => {
+    for (const node of rendered.lines.keys()) {
+      inRanges.add(node);
+
+      const quad = node instanceof pixi.Sprite ? standInRenders.get(node.texture) : undefined;
+      const top = quad === undefined ? undefined : pictureRenders.get(quad.standIn.texture);
+
+      if (top !== undefined) inRanges.add(top.container);
+    }
+  };
+
+  /**
+   * Tells whether a top hidden for its picture would be seen without it, while neither a quad nor a range picture
+   * shows it: the frame shows neither the view nor its picture.
+   *
+   * @param top - A top a filter output was drawn from.
+   * @param inRanges - What the shown range pictures draw.
+   * @returns True when the player sees nothing of it.
+   */
+  const unseenTop = (top: Pixi.Container, inRanges: ReadonlySet<object>): boolean => {
+    if (top.destroyed || top.renderable || throughTops.has(top) || inRanges.has(top)) return false;
+    if (top.parent === null || !top.visible || top.alpha <= 0) return false;
+
+    for (let at: Pixi.Container | null = top.parent; at !== app.stage; at = at.parent) {
+      if (at === null || !at.visible || !at.renderable || at.alpha <= 0) return false;
+    }
+
+    return true;
+  };
+
+  /**
+   * Notes a render: into a texture, what it drew; onto the canvas, the check of the pictures.
+   *
+   * @param call - The render call.
+   */
+  const onRender = (call: RenderCall): void => {
+    const { target, container } = call;
+
+    if (target === undefined) {
+      checkPictures();
+
+      return;
+    }
+
+    versions.set(target, (versions.get(target) ?? 0) + 1);
+
+    const transform = call.transform ?? IDENTITY;
+
+    const picture =
+      container instanceof pixi.Sprite ? pictureRenders.get(container.texture) : undefined;
+
+    if (container instanceof pixi.Sprite && picture !== undefined) {
+      standInRenders.set(target, {
+        standIn: container,
+        filters: filtersText(container),
+        transform
+      });
+      pictured.add(picture.container);
+
+      return;
+    }
+
+    const lines = new Map<object, string>();
+    const leaves = new Set<object>();
+
+    drawnBy(container, lines, leaves);
+    pictureRenders.set(target, { container, lines, leaves, transform });
+  };
+
+  app.renderer.watchers.push(onRender);
+
+  return {
+    missed,
+    pictures,
+    counts,
+    check: () => {
+      const renders = app.renderer.renders;
+      const drawn = renders > lastRenders;
+      const now = fingerprint();
+
+      lastRenders = renders;
+      counts.frames += 1;
+
+      if (drawn || lastDrawn === undefined) {
+        if (drawn) counts.drawn += 1;
+        lastDrawn = now;
+
+        return;
+      }
+
+      const before = lastDrawn;
+      const at = now.findIndex((line, index) => line !== before[index]);
+
+      if (at === -1 && now.length === before.length) return;
+
+      const index = at === -1 ? now.length : at;
+
+      missed.push({ frame: counts.frames, node: now[index] ?? "", was: before[index] ?? "" });
+    },
+    expectNoMissedFrame: () => {
+      expect(missed, "a skipped frame showed a picture other than the last drawn one").toEqual([]);
+    },
+    expectPicturesCurrent: () => {
+      expect(pictures, "a drawn frame showed a kept picture that was not current").toEqual([]);
+    }
+  };
+}

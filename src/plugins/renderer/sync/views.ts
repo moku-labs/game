@@ -17,28 +17,41 @@ import type {
   PixiContainer,
   PixiGraphics,
   PixiModule,
+  PixiNineSliceSprite,
   PixiSprite,
   PixiTexture,
   Point
 } from "../types";
-import { adaptersOn, clearAdapters, createAdapterObject } from "./adapters";
-import { applyFilters, clearFilters, filtersOf, moveFilters } from "./filters";
+import { adaptersOn, clearAdapters, createAdapterObject, writeAdapterAlpha } from "./adapters";
+import {
+  applyArea,
+  applyFilters,
+  clearArea,
+  clearFilters,
+  filtersOf,
+  moveArea,
+  moveFilters
+} from "./filters";
 import { clearFonts } from "./fonts";
+import { clearHidden, setHidden, writeRenderable } from "./hidden";
 import { labelOf } from "./labels";
 import { clearLayers, layerContainer, resort } from "./layers";
 import { bordersOf, drawOutline, type OutlineShape } from "./outline";
+import { noteLeaving } from "./overlay-range";
+import { stopOverlays } from "./overlay-state";
 import {
   acquire,
   destroyPools,
   detach,
   dropMask,
   dropOutline,
+  isGraphics,
   isNineSlice,
   isSprite,
   poolKeyOf,
   release
 } from "./pools";
-import { parentOf } from "./pose";
+import { isLeaving, parentOf } from "./pose";
 import { drawShapePath, strokeShape } from "./shape-path";
 import { anchoredBox, boxOf, layoutSprite } from "./sizing";
 import {
@@ -53,7 +66,17 @@ import {
   untrackKey,
   warnMissing
 } from "./textures";
-import type { DisplayEntry, SyncCtx, SyncState, View, ViewKind } from "./types";
+import type {
+  ClipDrawn,
+  DisplayEntry,
+  DrawnShape,
+  HitBox,
+  SyncCtx,
+  SyncState,
+  View,
+  ViewKind
+} from "./types";
+import { stopWarm } from "./warm";
 
 /**
  * Which component gives an entity its display object, and what it draws.
@@ -70,6 +93,65 @@ type Visual = {
  */
 type BuiltObject = { object: PixiContainer; value: Readonly<object> | undefined };
 
+/** A point of Pixi that `sync` writes: a position, a scale, a pivot, an anchor. */
+type WritablePoint = { x: number; y: number; set(x: number, y?: number): void };
+
+/** The tint that leaves a colour as it is: a painted shape's, and the white a tinted shape's path is drawn in. */
+const WHITE = 0xff_ff_ff;
+
+/**
+ * The depth of a wrapper's own visual among the wrapper's children: a child at `Order` 0 or more draws above it, one
+ * at −1 or less below it, and a ui child at `zIndex` 0 (an `Order` between −0.5 and 0) above it too (spec 16 U1.8).
+ */
+const VISUAL_DEPTH = -0.5;
+
+/**
+ * Marks an entity before a write that changes what Pixi holds for its view: the demand module judges the view as it
+ * was drawn. A second mark of the frame costs a lookup.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity whose view is about to change.
+ */
+function markView(sctx: SyncCtx, entity: Entity): void {
+  sctx.deps.demand.mark(entity);
+}
+
+/**
+ * Marks an entity before a write of its own top's transform: the frame is decided as for any mark, and a kept picture
+ * of the view only moves (spec 23 P9.4).
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity whose top is about to move.
+ */
+function markMoved(sctx: SyncCtx, entity: Entity): void {
+  sctx.deps.demand.markMoved(entity);
+}
+
+/**
+ * Writes a point only when it differs from what Pixi holds, and marks the entity before: a move of the view's own top,
+ * or a change of what it draws for a node inside it.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the view.
+ * @param point - The point of the display object.
+ * @param x - The new x.
+ * @param y - The new y.
+ * @param mark - The mark to make: `markMoved` for the top, `markView` inside it.
+ */
+function writePoint(
+  sctx: SyncCtx,
+  entity: Entity,
+  point: WritablePoint,
+  x: number,
+  y: number,
+  mark: (sctx: SyncCtx, entity: Entity) => void = markView
+): void {
+  if (point.x === x && point.y === y) return;
+
+  mark(sctx, entity);
+  point.set(x, y);
+}
+
 /**
  * Tells whether a value is a Pixi display object, so a `Display` component can be trusted.
  *
@@ -80,16 +162,6 @@ function isDisplayObject(value: unknown): value is PixiContainer {
   return (
     typeof value === "object" && value !== null && "addChild" in value && "getLocalBounds" in value
   );
-}
-
-/**
- * Tells whether a display object draws paths, so a `Shape` can be written onto it.
- *
- * @param object - The display object.
- * @returns True for a graphics object.
- */
-function isGraphics(object: PixiContainer): object is PixiGraphics {
-  return "roundRect" in object;
 }
 
 /**
@@ -206,15 +278,46 @@ function textureFor(
 }
 
 /**
+ * Writes the texture and the tint of a sprite, each only when it differs from what Pixi holds.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param object - The sprite object.
+ * @param texture - The texture to draw, or `undefined` to keep the one it has.
+ * @param tint - The tint.
+ */
+function writeLook(
+  sctx: SyncCtx,
+  entity: Entity,
+  object: PixiSprite,
+  texture: PixiTexture | undefined,
+  tint: number
+): void {
+  if (texture !== undefined && object.texture !== texture) {
+    markView(sctx, entity);
+    object.texture = texture;
+  }
+
+  if (object.tint !== tint) {
+    markView(sctx, entity);
+    object.tint = tint;
+  }
+}
+
+/**
  * Draws the magenta square of a sprite whose key nothing answers: the 1x1 white texture
  * stretched to the box, 64 x 64 on an axis without a size.
  *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
  * @param object - The sprite object.
  * @param view - Its view.
  * @param value - The sprite component.
  * @param texture - The placeholder texture, or `undefined` while inert.
  */
 function drawPlaceholder(
+  sctx: SyncCtx,
+  entity: Entity,
   object: PixiSprite,
   view: View,
   value: Readonly<SpriteValue>,
@@ -222,9 +325,8 @@ function drawPlaceholder(
 ): void {
   const box = boxOf({ width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE }, value);
 
-  if (texture !== undefined) object.texture = texture;
-  object.tint = PLACEHOLDER_TINT;
-  object.anchor.set(value.anchor.x, value.anchor.y);
+  writeLook(sctx, entity, object, texture, PLACEHOLDER_TINT);
+  writePoint(sctx, entity, object.anchor, value.anchor.x, value.anchor.y);
   view.drawScale = { x: box.width, y: box.height };
   view.hitBox = anchoredBox(value.anchor, box);
 }
@@ -260,31 +362,110 @@ function ownsAlpha(view: View): boolean {
 /**
  * Writes the alpha of a built-in visual. It fades the entity's whole subtree: on a view with a
  * wrapper it goes on the wrapper, over the visual and the children, and the visual inside stays
- * at 1, so the alpha is applied once. A view without a wrapper keeps it on its object.
+ * at 1, so the alpha is applied once. A view without a wrapper keeps it on its object. Only a
+ * value that differs from what Pixi holds is written, and the entity is marked before. A view
+ * drawn at alpha 0, its HUD factor counted, is not drawn at all (spec 26 B9): it leaves Pixi's
+ * build, its bounds and the passes of its filters, with its subtree.
  *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
  * @param view - The view of a `Sprite`, a `NineSlice` or a `Shape`.
- * @param alpha - The alpha of the component.
+ * @param alpha - The alpha of the component; the view's HUD factor multiplies it.
  */
-function applyAlpha(view: View, alpha: number): void {
-  if (view.wrapper === undefined) {
-    view.object.alpha = alpha;
+function applyAlpha(sctx: SyncCtx, entity: Entity, view: View, alpha: number): void {
+  const target = view.wrapper ?? view.object;
+  // A HUD part an overlay fades draws its own alpha times the factor (spec 22 O7.4); every other view at 1.
+  const drawn = alpha * view.hud;
+
+  if (target.alpha !== drawn) {
+    markView(sctx, entity);
+    target.alpha = drawn;
+  }
+
+  if (view.wrapper !== undefined && view.object.alpha !== 1) {
+    markView(sctx, entity);
+    view.object.alpha = 1;
+  }
+
+  setHidden(sctx, entity, view, "alpha", drawn <= 0);
+}
+
+/**
+ * The alpha the component of a built-in visual asks for, before the HUD factor.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - The view of a `Sprite`, a `NineSlice` or a `Shape`.
+ * @returns The component's alpha, 1 when it has none.
+ */
+function componentAlpha(sctx: SyncCtx, entity: Entity, view: View): number {
+  const ecs = sctx.ctx.deps.world.ecs;
+
+  if (view.kind === "Sprite") return ecs.get(entity, Sprite)?.alpha ?? 1;
+  if (view.kind === "NineSlice") return ecs.get(entity, NineSlice)?.alpha ?? 1;
+
+  return ecs.get(entity, Shape)?.alpha ?? 1;
+}
+
+/**
+ * Fades a HUD part by the factor the overlays give it (spec 22 O7.4), marked before. A built-in visual multiplies its
+ * own alpha by it, on its top; any other view (a text, a game's object) gets a wrapper whose alpha is the factor, so
+ * its adapter keeps writing its own object's alpha. An equal factor writes nothing.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the part.
+ * @param view - Its view.
+ * @param factor - The factor, 0 to 1.
+ */
+export function applyHud(sctx: SyncCtx, entity: Entity, view: View, factor: number): void {
+  if (view.hud === factor) return;
+
+  markView(sctx, entity);
+  view.hud = factor;
+
+  if (ownsAlpha(view)) {
+    applyAlpha(sctx, entity, view, componentAlpha(sctx, entity, view));
 
     return;
   }
 
-  view.wrapper.alpha = alpha;
-  view.object.alpha = 1;
+  const wrapper = ensureWrapper(sctx, entity);
+
+  if (wrapper !== undefined && wrapper.alpha !== factor) wrapper.alpha = factor;
+  if (view.kind === "adapter") writeAdapterAlpha(sctx, entity, view);
 }
 
 /**
  * Writes the `Sprite` component onto its display object: the texture, or its crop for a `"cover"`
- * sprite, the stretch into the box, and the box as the hit box, the anchor applied.
+ * sprite, the stretch into the box, and the box as the hit box, the anchor applied. A new stretch of
+ * a view without a wrapper changes the object's own units, so its filter area is written again (B4).
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
  * @param view - Its view.
  */
 export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
+  const stretch = view.drawScale;
+
+  writeSprite(sctx, entity, view);
+
+  if (
+    view.drawScale !== stretch &&
+    view.wrapper === undefined &&
+    sctx.ctx.state.sync.areas.has(entity)
+  ) {
+    applyArea(sctx, entity, view);
+  }
+}
+
+/**
+ * The body of `applySprite`: the texture or its crop, the stretch, the anchor and the hit box.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ */
+function writeSprite(sctx: SyncCtx, entity: Entity, view: View): void {
   const value = sctx.ctx.deps.world.ecs.get(entity, Sprite);
   const object = view.object;
 
@@ -295,11 +476,11 @@ export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
   const { texture, missing } = textureFor(sctx, value.texture);
 
   view.placeholder = missing;
-  applyAlpha(view, value.alpha);
+  applyAlpha(sctx, entity, view, value.alpha);
 
   if (missing || texture === undefined) {
     showCover(sctx, entity, view, "");
-    drawPlaceholder(object, view, value, texture);
+    drawPlaceholder(sctx, entity, object, view, value, texture);
 
     return;
   }
@@ -310,35 +491,75 @@ export function applySprite(sctx: SyncCtx, entity: Entity, view: View): void {
       ? { texture, frameKey: "" }
       : coverTexture(sctx, entity, value.texture, texture, layout.box, layout.crop);
 
-  object.texture = cover.texture;
+  writeLook(sctx, entity, object, cover.texture, value.tint);
   showCover(sctx, entity, view, cover.frameKey);
-  object.tint = value.tint;
-  object.anchor.set(layout.anchor.x, layout.anchor.y);
+  writePoint(sctx, entity, object.anchor, layout.anchor.x, layout.anchor.y);
   view.drawScale = layout.drawScale;
   view.hitBox = anchoredBox(value.anchor, layout.box);
 }
 
 /**
  * Keeps the debug outline of a nine-slice in step: drawn into its wrapper while the component or
- * the global switch asks for it, gone otherwise.
+ * the global switch asks for it, gone otherwise. An outline that stands is drawn again only when
+ * the panel changed.
  *
  * @param sctx - Domain context of the sync module.
  * @param view - The view of the nine-slice.
  * @param shape - What the outline is drawn from.
  * @param debug - The component's own `debug`.
+ * @param changed - True when a field of the panel differed in this write.
  */
-function applyOutline(sctx: SyncCtx, view: View, shape: OutlineShape, debug: boolean): void {
+function applyOutline(
+  sctx: SyncCtx,
+  view: View,
+  shape: OutlineShape,
+  debug: boolean,
+  changed: boolean
+): void {
   const pixi = sctx.deps.host.pixi();
 
   if (!(debug || sctx.ctx.state.sync.debug.nineSlice) || pixi === undefined) {
+    if (view.outline !== undefined) markView(sctx, shape.entity);
     dropOutline(view);
 
     return;
   }
 
+  if (view.outline !== undefined && !changed) return;
+
   const wrapper = ensureWrapper(sctx, shape.entity);
 
-  if (wrapper !== undefined) drawOutline(pixi, wrapper, view, shape);
+  if (wrapper === undefined) return;
+
+  markView(sctx, shape.entity);
+  drawOutline(pixi, wrapper, view, shape);
+  sctx.ctx.state.sync.redraws += 1;
+}
+
+/**
+ * Writes one number of a nine-slice only when it differs from what Pixi holds: Pixi rebuilds the
+ * panel on every write of a width, even an equal one.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param object - The nine-slice sprite.
+ * @param field - Which number.
+ * @param value - The new number.
+ * @returns True when it was written.
+ */
+function writeSlice(
+  sctx: SyncCtx,
+  entity: Entity,
+  object: PixiNineSliceSprite,
+  field: "leftWidth" | "topHeight" | "rightWidth" | "bottomHeight" | "width" | "height" | "tint",
+  value: number
+): boolean {
+  if (object[field] === value) return false;
+
+  markView(sctx, entity);
+  object[field] = value;
+
+  return true;
 }
 
 /**
@@ -362,17 +583,26 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
   const { texture, missing } = textureFor(sctx, value.texture);
   const borders = bordersOf(texture);
 
-  // Write the texture, the insets, the tint, the alpha and the size.
+  // Write the texture, the insets, the tint, the alpha and the size: each only when it differs.
   view.placeholder = missing;
-  if (texture !== undefined) object.texture = texture;
-  object.leftWidth = borders.left;
-  object.topHeight = borders.top;
-  object.rightWidth = borders.right;
-  object.bottomHeight = borders.bottom;
-  object.tint = missing ? PLACEHOLDER_TINT : value.tint;
-  applyAlpha(view, value.alpha);
-  object.width = value.width;
-  object.height = value.height;
+
+  let changed = false;
+
+  if (texture !== undefined && object.texture !== texture) {
+    markView(sctx, entity);
+    object.texture = texture;
+    changed = true;
+  }
+
+  changed = writeSlice(sctx, entity, object, "leftWidth", borders.left) || changed;
+  changed = writeSlice(sctx, entity, object, "topHeight", borders.top) || changed;
+  changed = writeSlice(sctx, entity, object, "rightWidth", borders.right) || changed;
+  changed = writeSlice(sctx, entity, object, "bottomHeight", borders.bottom) || changed;
+  changed =
+    writeSlice(sctx, entity, object, "tint", missing ? PLACEHOLDER_TINT : value.tint) || changed;
+  applyAlpha(sctx, entity, view, value.alpha);
+  changed = writeSlice(sctx, entity, object, "width", value.width) || changed;
+  changed = writeSlice(sctx, entity, object, "height", value.height) || changed;
 
   // Record the hit box, then keep the outline and the clip in step.
   view.hitBox = { x: 0, y: 0, width: value.width, height: value.height };
@@ -380,7 +610,8 @@ export function applyNineSlice(sctx: SyncCtx, entity: Entity, view: View): void 
     sctx,
     view,
     { entity, width: value.width, height: value.height, borders, missing },
-    value.debug
+    value.debug,
+    changed
   );
   applyClip(sctx, entity, view, {
     ...Shape.defaults,
@@ -439,7 +670,9 @@ function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<Sh
   const pixi = sctx.deps.host.pixi();
 
   if (!value.clip || pixi === undefined) {
+    if (view.mask !== undefined || view.clipped !== undefined) markView(sctx, entity);
     dropMask(view);
+    view.clipDrawn = undefined;
 
     return;
   }
@@ -448,22 +681,207 @@ function applyClip(sctx: SyncCtx, entity: Entity, view: View, value: Readonly<Sh
 
   if (wrapper === undefined) return;
 
+  // Creating the masked container and the mask is structural.
+  if (view.clipped === undefined || view.mask === undefined) markView(sctx, entity);
+
   const clipped = ensureClipped(pixi, entity, view, wrapper);
   const mask = view.mask ?? new pixi.Graphics();
 
-  mask.label = `clip#${entity}`;
-  drawShapePath(mask, value, 1);
+  if (view.mask === undefined) mask.label = `clip#${entity}`;
+
+  // The path of the mask is drawn again only when its rectangle changed.
+  if (view.mask === undefined || !sameClip(view.clipDrawn, value)) {
+    markView(sctx, entity);
+    drawShapePath(mask, value, 1);
+    sctx.ctx.state.sync.redraws += 1;
+    view.clipDrawn = copyClip(view.clipDrawn, value);
+  }
 
   // The mask sits beside the masked container, in the same local space of the wrapper.
-  if (mask.parent !== wrapper) wrapper.addChild(mask);
+  if (mask.parent !== wrapper) {
+    markView(sctx, entity);
+    wrapper.addChild(mask);
+  }
 
-  clipped.mask = mask;
+  if (clipped.mask !== mask) {
+    markView(sctx, entity);
+    clipped.mask = mask;
+  }
+
   view.mask = mask;
 }
 
 /**
+ * Tells whether the mask of a view was drawn with this rectangle already.
+ *
+ * @param drawn - What the mask was last drawn with.
+ * @param value - The shape the mask is drawn from now.
+ * @returns True when nothing has to be drawn.
+ */
+function sameClip(drawn: ClipDrawn | undefined, value: Readonly<ShapeValue>): boolean {
+  return (
+    drawn !== undefined &&
+    drawn.kind === value.kind &&
+    drawn.w === value.w &&
+    drawn.h === value.h &&
+    drawn.radius === value.radius
+  );
+}
+
+/**
+ * Keeps what a mask was drawn with, in the object it had, or in a new one the first time.
+ *
+ * @param drawn - The copy so far.
+ * @param value - The shape the mask was drawn from.
+ * @returns The copy.
+ */
+function copyClip(drawn: ClipDrawn | undefined, value: Readonly<ShapeValue>): ClipDrawn {
+  if (drawn === undefined)
+    return { kind: value.kind, w: value.w, h: value.h, radius: value.radius };
+
+  drawn.kind = value.kind;
+  drawn.w = value.w;
+  drawn.h = value.h;
+  drawn.radius = value.radius;
+
+  return drawn;
+}
+
+/**
+ * Tells whether a shape's graphics was drawn with this value already: the path, the fill and the
+ * stroke. Its alpha, its clip and the fill of a tinted shape (its tint) are written apart.
+ *
+ * @param drawn - What the graphics was last drawn with.
+ * @param value - The shape value now.
+ * @param tinted - True when the shape is drawn white and coloured by its tint.
+ * @returns True when nothing has to be drawn.
+ */
+function sameShape(
+  drawn: DrawnShape | undefined,
+  value: Readonly<ShapeValue>,
+  tinted: boolean
+): boolean {
+  return (
+    drawn !== undefined &&
+    drawn.tinted === tinted &&
+    (tinted || drawn.fill === value.fill) &&
+    drawn.kind === value.kind &&
+    drawn.w === value.w &&
+    drawn.h === value.h &&
+    drawn.fillAlpha === value.fillAlpha &&
+    drawn.radius === value.radius &&
+    drawn.stroke === value.stroke &&
+    drawn.strokeWidth === value.strokeWidth &&
+    drawn.dash === value.dash
+  );
+}
+
+/**
+ * Keeps what a shape's graphics was drawn with, in the object it had, or in a new one the first
+ * time.
+ *
+ * @param drawn - The copy so far.
+ * @param value - The shape value it was drawn from.
+ * @param tinted - True when it was drawn white, coloured by its tint.
+ * @returns The copy.
+ */
+function copyShape(
+  drawn: DrawnShape | undefined,
+  value: Readonly<ShapeValue>,
+  tinted: boolean
+): DrawnShape {
+  if (drawn === undefined) {
+    const { kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash } = value;
+
+    return { tinted, kind, w, h, fill, fillAlpha, radius, stroke, strokeWidth, dash };
+  }
+
+  const copy = drawn;
+
+  copy.tinted = tinted;
+  copy.kind = value.kind;
+  copy.w = value.w;
+  copy.h = value.h;
+  copy.fill = value.fill;
+  copy.fillAlpha = value.fillAlpha;
+  copy.radius = value.radius;
+  copy.stroke = value.stroke;
+  copy.strokeWidth = value.strokeWidth;
+  copy.dash = value.dash;
+
+  return copy;
+}
+
+/**
+ * Tells whether a shape draws nothing: no stroke, and no fill alpha or no area. Pure.
+ *
+ * @param value - The shape value.
+ * @returns True for a shape whose `Graphics` would hold no instruction.
+ * @example
+ * ```ts
+ * isEmptyShape({ ...Shape.defaults, w: 1080, h: 200, fillAlpha: 0 }); // true
+ * ```
+ */
+function isEmptyShape(value: Readonly<ShapeValue>): boolean {
+  return value.strokeWidth <= 0 && (value.fillAlpha <= 0 || value.w <= 0 || value.h <= 0);
+}
+
+/**
+ * Draws the path of a shape that is not empty, only when it differs from the one drawn last, and writes its tint. A
+ * fill-only shape is drawn white and coloured by its tint (spec 26 R2.1): a colour change rewrites the tint, never the
+ * path, so Pixi rebuilds no instruction list. A shape with a stroke is painted in its own colours under a white tint.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param object - Its graphics.
+ * @param value - The shape value.
+ */
+function drawShape(
+  sctx: SyncCtx,
+  entity: Entity,
+  view: View,
+  object: PixiGraphics,
+  value: Readonly<ShapeValue>
+): void {
+  const tinted = value.strokeWidth <= 0;
+
+  if (!sameShape(view.drawn, value, tinted)) {
+    markView(sctx, entity);
+    drawShapePath(object, value, value.fillAlpha, tinted ? WHITE : value.fill);
+    strokeShape(object, value);
+    sctx.ctx.state.sync.redraws += 1;
+    view.drawn = copyShape(view.drawn, value, tinted);
+  }
+
+  const tint = tinted ? value.fill : WHITE;
+
+  if (object.tint !== tint) {
+    markView(sctx, entity);
+    object.tint = tint;
+  }
+}
+
+/**
+ * Writes the box of a shape into the hit box its view owns: a changed shape allocates nothing.
+ *
+ * @param box - The hit box of the view.
+ * @param width - The shape's width.
+ * @param height - The shape's height.
+ */
+function writeHitBox(box: HitBox, width: number, height: number): void {
+  box.x = 0;
+  box.y = 0;
+  box.width = width;
+  box.height = height;
+}
+
+/**
  * Writes the `Shape` component onto its graphics object and recomputes the hit box. The path is
- * drawn here and nowhere else, so a still shape costs nothing per frame.
+ * drawn here and nowhere else, and only when it differs from the one drawn last, so a still shape
+ * costs nothing per frame and an alpha-only change draws no path. A shape that draws nothing is not
+ * drawn at all (spec 26 B7): its visual leaves Pixi's build and its bounds, while its children, its
+ * clip mask and its hit box stay.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -475,11 +893,13 @@ export function applyShape(sctx: SyncCtx, entity: Entity, view: View): void {
 
   if (value === undefined || !isGraphics(object)) return;
 
-  drawShapePath(object, value, value.fillAlpha);
-  strokeShape(object, value);
+  const empty = isEmptyShape(value);
 
-  applyAlpha(view, value.alpha);
-  view.hitBox = { x: 0, y: 0, width: value.w, height: value.h };
+  setHidden(sctx, entity, view, "empty", empty);
+  if (!empty) drawShape(sctx, entity, view, object, value);
+
+  applyAlpha(sctx, entity, view, value.alpha);
+  writeHitBox(view.hitBox, value.w, value.h);
   applyClip(sctx, entity, view, value);
 }
 
@@ -538,29 +958,66 @@ export function applyTransform(sctx: SyncCtx, entity: Entity, view: View): void 
   const target = view.wrapper ?? view.object;
   const stretch: Point = view.drawScale;
 
-  target.position.set(value.x, value.y);
-  target.rotation = value.rotation;
+  // The top's own pose moves the view: a kept picture follows it (P9.4). Writes inside a wrapper change the picture.
+  writePoint(sctx, entity, target.position, value.x, value.y, markMoved);
+  writeRotation(sctx, entity, target, value.rotation, markMoved);
 
   if (view.wrapper === undefined) {
-    target.scale.set(value.scale * stretch.x, value.scale * stretch.y);
-    target.pivot.set(value.pivot.x / stretch.x, value.pivot.y / stretch.y);
+    writePoint(
+      sctx,
+      entity,
+      target.scale,
+      value.scale * stretch.x,
+      value.scale * stretch.y,
+      markMoved
+    );
+    writePoint(
+      sctx,
+      entity,
+      target.pivot,
+      value.pivot.x / stretch.x,
+      value.pivot.y / stretch.y,
+      markMoved
+    );
 
     return;
   }
 
-  target.scale.set(value.scale);
-  target.pivot.set(value.pivot.x, value.pivot.y);
-  view.object.position.set(0, 0);
-  view.object.rotation = 0;
-  view.object.pivot.set(0, 0);
-  view.object.scale.set(stretch.x, stretch.y);
+  writePoint(sctx, entity, target.scale, value.scale, value.scale, markMoved);
+  writePoint(sctx, entity, target.pivot, value.pivot.x, value.pivot.y, markMoved);
+  writePoint(sctx, entity, view.object.position, 0, 0);
+  writeRotation(sctx, entity, view.object, 0);
+  writePoint(sctx, entity, view.object.pivot, 0, 0);
+  writePoint(sctx, entity, view.object.scale, stretch.x, stretch.y);
+}
+
+/**
+ * Writes a rotation only when it differs from what Pixi holds, and marks the entity before.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param target - The display object.
+ * @param rotation - The new rotation, in radians.
+ * @param mark - The mark to make: `markMoved` for the top, `markView` inside it.
+ */
+function writeRotation(
+  sctx: SyncCtx,
+  entity: Entity,
+  target: PixiContainer,
+  rotation: number,
+  mark: (sctx: SyncCtx, entity: Entity) => void = markView
+): void {
+  if (target.rotation === rotation) return;
+
+  mark(sctx, entity);
+  target.rotation = rotation;
 }
 
 /**
  * Gives a parent entity the container its children hang in. A v8 sprite takes no children, so
  * the parent's own visual moves into the wrapper as child 0 and the transform moves with it. The
- * wrapper sorts its children by their `Order`; the visual is child 0 at depth 0, so a child with
- * the same depth draws above it. A clipping parent hangs its children one level down, in the
+ * wrapper sorts its children by their `Order`; the visual is child 0 at depth −0.5, so a child at
+ * `Order` 0, and a ui child at `zIndex` 0, draws above it. A clipping parent hangs its children one level down, in the
  * masked container `applyClip` adds. The filters and the alpha of a built-in visual move up to
  * the wrapper, so they cover the children too.
  *
@@ -575,6 +1032,9 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
   if (view === undefined || pixi === undefined) return undefined;
   if (view.wrapper !== undefined) return view.wrapper;
 
+  // A new level in the tree: structural, marked before it is built.
+  markView(sctx, parentEntity);
+
   const wrapper = new pixi.Container();
   const container = view.object.parent;
 
@@ -586,13 +1046,53 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
     container.addChildAt(wrapper, Math.max(0, container.children.indexOf(view.object)));
   }
 
-  view.object.zIndex = 0;
+  view.object.zIndex = VISUAL_DEPTH;
   wrapper.addChild(view.object);
   view.wrapper = wrapper;
+  // The subtree reasons move from the visual up to the wrapper; the visual keeps only its own.
+  sctx.ctx.state.sync.viewOfTop.delete(view.object);
+  sctx.ctx.state.sync.viewOfTop.set(wrapper, view);
+  writeRenderable(view);
   applyTransform(sctx, parentEntity, view);
   // The filters and the alpha cover the subtree: they move from the visual up to the wrapper.
-  moveFilters(sctx.ctx.state.sync, parentEntity, view);
-  if (ownsAlpha(view)) applyAlpha(view, view.object.alpha);
+  moveFilters(
+    sctx.ctx.state.sync,
+    parentEntity,
+    view,
+    () => markView(sctx, parentEntity),
+    sctx.ctx.state.kept
+  );
+  // The filter area hangs where the filters do (B4).
+  if (sctx.ctx.state.sync.areas.has(parentEntity)) moveArea(sctx, parentEntity, view);
+  if (ownsAlpha(view))
+    applyAlpha(sctx, parentEntity, view, componentAlpha(sctx, parentEntity, view));
+
+  return wrapper;
+}
+
+/**
+ * Gives a view whose picture the kept cache is about to take its wrapper, so the picture's first render has a plain
+ * `Container` for its root (spec 23 D4): a sprite, a nine-slice or a shape made the root of a render group draws other
+ * pixels than it does live. Pixi's sprite pipe keeps the group transform it cached before, so the sprite lands outside
+ * its picture, and the root's own tint and alpha are applied twice. Inside the wrapper the visual keeps its stretch and
+ * its tint; the pose, the filters, the filter area and a built-in visual's alpha move up, as for a parent. The wrapper
+ * carries the view's label, so the pictures and their passes still name the view, and it stays with the view until
+ * the view leaves. Called with the quiet context of the cache: the wrapper draws the same pixels, so it marks nothing.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity of the view.
+ * @returns The wrapper, or `undefined` when the entity has no view or Pixi is not loaded.
+ */
+export function wrapForPicture(sctx: SyncCtx, entity: Entity): PixiContainer | undefined {
+  const view = sctx.ctx.state.sync.views.get(entity);
+
+  if (view === undefined) return undefined;
+  if (view.wrapper !== undefined) return view.wrapper;
+
+  const label = view.object.label;
+  const wrapper = ensureWrapper(sctx, entity);
+
+  if (wrapper !== undefined) wrapper.label = label;
 
   return wrapper;
 }
@@ -612,8 +1112,30 @@ function childHostOf(sctx: SyncCtx, parentEntity: Entity): PixiContainer | undef
 }
 
 /**
+ * Detaches a view whose parent has no view yet and keeps it as an orphan, drawn nowhere until the pass that builds
+ * the parent's view hangs it (spec 16 U2.4). A parent that carries no visual at all is reported, once per orphan.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param parentEntity - The entity its `Parent` names.
+ */
+function keepOrphan(sctx: SyncCtx, entity: Entity, view: View, parentEntity: Entity): void {
+  const orphans = sctx.ctx.state.sync.orphans;
+  const known = orphans.has(entity);
+
+  orphans.add(entity);
+  detach(view.wrapper ?? view.object);
+
+  if (!known && visualOf(sctx, parentEntity) === undefined) {
+    sctx.ctx.log.warn("renderer: parent draws nothing", { entity, parent: parentEntity });
+  }
+}
+
+/**
  * Hangs a view where it belongs: under its parent, or in the container of the layer it names.
- * An entity with no layer and no parent is not drawn.
+ * An entity with no layer and no parent is not drawn. A view whose parent has no view yet waits
+ * as an orphan, detached, so it is never drawn in a layer while its parent waits.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -623,22 +1145,29 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
   const state = sctx.ctx.state.sync;
   const parentEntity = parentOf(sctx.ctx.deps.world.ecs, entity);
 
+  // Structural: `addChild` re-adds the view and moves it among equal depths, so it always marks.
+  markView(sctx, entity);
+  // A view that leaves an overlay's range changes its picture: judged where it was.
+  noteLeaving(state, view);
+
   if (parentEntity !== 0) {
     const host = childHostOf(sctx, parentEntity);
 
     view.layer = "";
 
     if (host === undefined) {
-      sctx.ctx.log.warn("renderer: parent draws nothing", { entity, parent: parentEntity });
-      detach(view.object);
+      keepOrphan(sctx, entity, view, parentEntity);
 
       return;
     }
 
+    state.orphans.delete(entity);
     host.addChild(view.wrapper ?? view.object);
 
     return;
   }
+
+  state.orphans.delete(entity);
 
   const name = layerNameOf(sctx, entity);
   const container = layerContainer(state, name);
@@ -728,6 +1257,9 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
 
   if (state.views.has(entity)) return false;
 
+  // Structural, before anything is built: with no view yet the mark waits for the decision.
+  markView(sctx, entity);
+
   const visual = visualOf(sctx, entity);
 
   if (visual === undefined) return false;
@@ -752,18 +1284,32 @@ export function createView(sctx: SyncCtx, entity: Entity): boolean {
     drawScale: { x: 1, y: 1 },
     frameKey: "",
     outline: undefined,
-    hitBox: { x: 0, y: 0, width: 0, height: 0 }
+    hitBox: { x: 0, y: 0, width: 0, height: 0 },
+    drawn: undefined,
+    clipDrawn: undefined,
+    hiddenSelf: 0,
+    hiddenTop: 0,
+    hud: 1
   };
 
   object.label = labelOf(sctx, nameOf(visual), entity);
   state.views.set(entity, view);
   state.entityOf.set(object, entity);
+  state.viewOfTop.set(object, view);
   if (visual.textureKey !== "") trackKey(state, entity, visual.textureKey);
 
   writeVisual(sctx, entity, view);
+  // An adapter's object built at alpha 0 is not drawn (B9); the built-in visuals do it in `applyAlpha`.
+  if (view.kind === "adapter") writeAdapterAlpha(sctx, entity, view);
   applyTransform(sctx, entity, view);
   attach(sctx, entity, view);
-  applyFilters(view, filtersOf(state, entity));
+  const slots = filtersOf(state, entity);
+
+  applyFilters(view, slots, () => markView(sctx, entity));
+  // The filter area kept for it lands with the filters (B4).
+  if (state.areas.has(entity)) applyArea(sctx, entity, view);
+  // A view built with filters kept for it gets its record of the kept cache (spec 23 P9.1).
+  if (slots.length > 0) sctx.deps.kept.slots(entity, slots);
   resort(sctx, entity, view);
 
   return true;
@@ -787,24 +1333,30 @@ function displayObjectOf(sctx: SyncCtx, entity: Entity): PixiContainer | undefin
 }
 
 /**
- * Detaches the children of a parent that left, and names them.
+ * Detaches the children of a parent that left, and names the ones that stay. A child that leaves in the same teardown
+ * is no orphan: its view goes in this very pass (it waits in `removed`), or it plays its exit (`Exiting`).
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The parent entity.
  * @param host - The container its children hang in.
  */
 function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): void {
+  const state = sctx.ctx.state.sync;
+  const ecs = sctx.ctx.deps.world.ecs;
   const orphans: Entity[] = [];
 
-  for (const [child, childView] of sctx.ctx.state.sync.views) {
+  for (const [child, childView] of state.views) {
     if (child === entity) continue;
 
     const object = childView.wrapper ?? childView.object;
 
     if (object.parent !== host) continue;
 
+    markView(sctx, child);
     detach(object);
-    orphans.push(child);
+    // A child that stays waits for the parent's next view (a new `Display`, a visual that comes back).
+    state.orphans.add(child);
+    if (!state.removed.has(child) && !isLeaving(ecs, child)) orphans.push(child);
   }
 
   if (orphans.length > 0) {
@@ -824,12 +1376,22 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 
   if (view === undefined) return;
 
+  // Structural: the view leaves the tree, judged where it was drawn.
+  markView(sctx, entity);
+  noteLeaving(state, view);
+  // Its picture goes before the object returns to the pool (P9.3): no quad, no reason, no render group left.
+  sctx.deps.kept.forget(entity);
+
   const host = view.clipped ?? view.wrapper;
 
   if (host !== undefined) detachChildren(sctx, entity, host);
 
   state.views.delete(entity);
+  // Its filters and area stay while the entity lives: the pass looks for its despawn.
+  if (state.filters.has(entity) || state.areas.has(entity)) state.viewlessEntries = true;
+  state.orphans.delete(entity);
   state.entityOf.delete(view.object);
+  state.viewOfTop.delete(view.wrapper ?? view.object);
   untrackKey(state, entity, view.textureKey);
 
   if (view.frameKey !== "") {
@@ -844,20 +1406,27 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
 }
 
 /**
- * Drops every view, every layer, every pool and every filter slot. Works on the state alone,
+ * Drops every view, every layer, every pool, every filter slot and filter area, and the warm-up (its waiting promises
+ * answer false, its probe tree is destroyed). Works on the state alone,
  * because `onStop` has no context. A `Display` object belongs to the game: it is detached, never
- * destroyed, and leaves without the filters the renderer hung on it.
+ * destroyed, and leaves without the filters, the filter area and the hidden reasons the renderer gave it.
  *
  * @param state - The sync branch of the plugin state.
  */
 export function stopSync(state: SyncState): void {
+  // The world hooks and the system go first: nothing collects into the sets below any more.
   for (const off of state.cleanups) off();
   state.cleanups.length = 0;
 
+  // Every view: the game's objects and the adapters' leave the tree; the engine's own go with the root below.
   for (const view of state.views.values()) {
+    clearHidden(view);
+    state.viewOfTop.delete(view.wrapper ?? view.object);
+
     if (view.kind === "Display") {
       detach(view.object);
       clearFilters(view.object);
+      clearArea(view.object);
     }
 
     if (view.kind === "adapter") {
@@ -872,9 +1441,13 @@ export function stopSync(state: SyncState): void {
     view.wrapper = undefined;
   }
 
+  // The modules of sync that hold their own: overlays, adapters, fonts, crops.
+  stopOverlays(state);
   clearAdapters(state);
   clearFonts(state);
   clearFrames(state);
+
+  // The maps and the change sets, empty for the next start.
   state.views.clear();
   state.entityOf.clear();
   state.byKey.clear();
@@ -883,9 +1456,17 @@ export function stopSync(state: SyncState): void {
   state.added.clear();
   state.removed.clear();
   state.reparented.clear();
+  state.orphans.clear();
+  state.mismatched.clear();
   state.providers.length = 0;
   state.filters.clear();
+  state.areas.clear();
+  state.viewlessEntries = false;
+  stopWarm(state);
+  state.held.clear();
+  state.redraws = 0;
 
+  // The tree last: the layers, the pooled objects and the root with what still hangs in it.
   clearLayers(state);
   destroyPools(state);
   state.root?.destroy({ children: true });

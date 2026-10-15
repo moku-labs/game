@@ -42,7 +42,7 @@ Only the public half of each module reaches the root. `gate.open`, `inbox.take`,
 | `fx.dispatch(descriptor): void` | Fire-and-forget delivery, `runInFast` handlers only in fast mode. Handler errors are logged, never thrown. |
 | `fx.onHint(listener): () => void` | Hears every released hint after the commit of its edge, in release order, next to any `handle` owner of the kind. Silent in fast mode. `world` routes hints to projection motions with it. |
 | `features.register(name, description)` | Called from a feature plugin's `onInit`. After `run()` it throws. |
-| `features.all()`, `features.contributions(slot)` | What the game brought, and the sub-flows of one slot in `order`. |
+| `features.all()`, `features.contributions(slot)` | What the game brought, each entry `{ name, description }` plus `parent` for a sub-feature, and the sub-flows of one slot in `order`. |
 
 ## Bookmark and restore
 
@@ -112,6 +112,9 @@ a running `guide` lets it through. Otherwise the answer is dropped.
 | Above `0` | Until it is older than `holdMs` | The last wins |
 | `Infinity` | Until the next gate opens | The last wins |
 
+The gate keeps one answer: with `holdMs` above `0` a newer refused answer replaces the held one. A
+queue would replay answers given against a board the player no longer sees.
+
 The age is counted in game time, `time.snapshot().elapsed`, from the moment of the refusal. A
 paused game ages nothing.
 
@@ -128,6 +131,33 @@ These hold nothing or drop the answer, whatever `holdMs` is:
 - Entering a bookmark drops it. The press belongs to the position the restore left.
 - Giving up on a transition drops it, before the graph goes to `safeNode`. A retry keeps it.
 - A stop drops it. The next `run()` starts with nothing held.
+
+### A flight that does not close the gate
+
+A node that awaits its flight keeps the gate closed for as long as the flight runs, and the gate
+holds one answer only. Commit at once and start the flight instead:
+
+```ts
+// Before: the node waits for the flight; two merges inside 400 ms lose the first one.
+run: async ({ input, player, fx, out }) => {
+  await fx(play(mergeFlight, { item: { projection: "board.items", key: input.from } }));
+  mergeItems(player.board, input.from, input.to);
+  return out.done();
+}
+// After: the flight starts, the merge commits on this edge, the next drop is taken in the next frame.
+run: ({ input, player, fx, out }) => {
+  fx.start(play(mergeFlight, { item: { projection: "board.items", key: input.from } }));
+  mergeItems(player.board, input.from, input.to);
+  return out.done();
+}
+```
+
+A timeline fixes its targets when it starts, so the item it flies keeps flying after the commit
+removed it from its projection, while its exit plays. `fx.start` refuses only a descriptor with
+`answers` and a `guide`; `play(...)` is neither. `mergeItems` is the game's own rule.
+
+The second form needs no timeline: the item's projection draws the flight from state with a
+`change` hook, `motion: { change: { Transform: view => view.toRest(Transform, { ms: 350 }) } }`.
 
 ## When a node fails
 
@@ -193,7 +223,7 @@ and one function. Each lives with the plugin that owns its data, in that plugin'
 | `read(app, source, input?)` | `/inspect` | Calls the source's `read` once. Never changes the game. The input may be left out when every field of the schema is optional. |
 | `watch(app, source, input, fn)` | `/inspect` | Reads on the first `signals` phase, then again when the source's change key moved: `"frame"` every frame, `"commit"` when `model.store.snapshot()` is a new object, `"edge"` when `flow.state()` is. Both are memoised, so an unchanged frame allocates nothing. Returns the stop function. |
 | `defineCommand(command)` | `/control` | Checks the id and freezes the descriptor. |
-| `run(app, command, input?)` | `/control` | Throws `[game] Control commands run in dev builds only.` unless `__MOKU_GAME_DEV__` is `true`. Resolves `{ value, state }`, where `state` is the envelope `{ path, frame, tainted }` read after the command. |
+| `run(app, command, input?)` | `/control` | Runs every command when `__MOKU_GAME_DEV__` or `__MOKU_GAME_CONTROL__` is `true`; with `__MOKU_GAME_AGENT__` alone (a `--debug` page) the `read` and `cosmetic` ones, and throws `controlReadOnly(id)` (`reason: "read-only"`) for the others; with no flag throws `[game] Control commands run in dev builds only.` Resolves `{ value, state }`, where `state` is the envelope `{ path, frame, tainted }` read after the command. |
 
 An input schema maps field names to `"string"`, `"number"`, `"boolean"` or `"json"`; a kind with a
 trailing `?` is optional. The command reads its input already typed:
@@ -211,11 +241,16 @@ export const jumpToLevel = defineCommand({
 });
 ```
 
-**The dev flag.** `__MOKU_GAME_DEV__` is a global the engine never replaces; undefined means
+**The flags.** `__MOKU_GAME_DEV__` is a global the engine never replaces; undefined means
 production. A dev build defines it `true` in the bundler, or sets `globalThis.__MOKU_GAME_DEV__ =
-true` before the engine runs. `isDev()` reads it at call time. Bun does not inline `isDev()` across
-modules, so every command body writes the guard inline, as above: a `define` of `false` folds the
-condition and the minifier drops the body. Every body logs the debug entry `moku:dev`, and a Bun
+true` before the engine runs. `__MOKU_GAME_AGENT__` (a debug page with the editor's agent) and
+`__MOKU_GAME_CONTROL__` (`--debug=full`) follow the same rules. `isDev()`, `isAgent()` and
+`isControl()` read them at call time. Bun does not inline them across modules, so every command
+body writes the guard of its effect inline: the agent form for `read` and `cosmetic`
+(`(DEV off) && (AGENT off)`), the control form for `route`, `cheat` and `raw` (`(DEV off) &&
+(CONTROL off)`); the example above keeps the dev guard, so it runs in dev and is refused on a debug
+page. A `define` of `false` folds the condition and the minifier drops the body. The forms are in
+[docs/doors.md](../../../docs/doors.md#turn-the-dev-build-on). Every body logs the debug entry `moku:dev`, and a Bun
 build test proves the marker is gone from `src/plugins/flow/control.ts` with `false` and present
 with `true`. Bun does not tree-shake a second time after it drops a body, so a module-level helper
 that only a dropped body called (the JSON readers, `reproBookmark`) stays in the bundle, unreachable.
@@ -243,6 +278,8 @@ Flow commands:
 | `game.walk` | `{ route: "json" }` | route | `flow.walk` with the route read from JSON |
 | `game.bookmark` | — | read | `flow.bookmark()`, plus `scene: scenes.current()` when the app has `scenes` and a scene is mounted |
 | `game.restore` | `{ bookmark: "json?", repro: "json?" }`, exactly one | raw | `scenes.expect(bookmark.scene)` when the bookmark has a scene, then `flow.restore(bookmark)`; or `flow.restore(reproBookmark(app, repro))` then `flow.walk(repro.route)` |
+| `game.saveExport` | — | read | `model.store.snapshot()`: `{ player, session, rng }`, the save a tester's progress moves with |
+| `game.saveImport` | `{ save: "json" }` | raw | the save of `game.saveExport` restored at the main flow's start, where a fresh start with it lands: a rest start is entered, a transit start runs again on the imported trees (its rng included) up to the first gate it opens; then `model.store.flush()`; a value without `player`, `session` and `rng` throws |
 
 The `scene` of a bookmark is what makes a restore at a popup work in a fresh page. A node without
 a scene of its own keeps the mounted scene: a rest node (`settings/open`, the Settings popup over
@@ -324,6 +361,46 @@ app.log.trace().filter(entry => entry.event === "flow:fx-cosmetic-failed");
 | After the abort of the node | Nothing is written: the handler was told to stop, so its rejection is no failure. |
 | A hint (`fx.emit`) and `fx.dispatch` | Not this entry. A handler that fails there writes the error entry `flow:fx-handler-failed` with `{ kind }`. |
 
+### What an effect resolves with
+
+`await fx(descriptor)` is typed by the descriptor. The built-in helpers declare what they resolve:
+
+| Helper | `await fx(...)` resolves | Why |
+|---|---|---|
+| `schedule(moment)`, `guide(options)` | `void` | The handler returns nothing |
+| `load(bundle)` | `Assets.LoadResult \| undefined` | `{ loaded, mb }` from `assets`; `undefined` in an app without `assets`, the app of `game.headless()` included |
+| `popup(component, props)` | `Answer<outcome names>` | The gate's answer: one of the component's outcomes |
+| `music(key)`, `sfx(key)`, `haptic(kind)`, `play(animation, slots)` | `void` | Cosmetic: nothing to read |
+| A descriptor written by hand, `{ kind: "drop" }` | `unknown` | Nobody declared it |
+
+A game declares its own effect with `defineEffect<Payload, Result>(kind, options)`, exported from the
+package root:
+
+```ts
+// shared/effects.ts of a game: the page read, typed once.
+export const envRead = defineEffect<{ notice: boolean }, EnvReadResult>("view-env.read", { fast: "run" });
+
+// In a node: no guard.
+const env = await fx(envRead({ notice: false })); // EnvReadResult
+
+// In the plugin that owns it, in onStart; the remover is called in onStop.
+ctx.state.off = envRead.handle(ctx.require(flowPlugin).fx, payload => readPage(payload.notice));
+```
+
+Only `{ fast: "run" }` without `cosmetic` resolves `Result`: the handler runs in a fast walk too, and
+the effect's owner promises it is registered in every app that awaits the effect, the headless app of
+the tests included. Every other declaration resolves `Result | undefined`, because the gateway
+resolves `undefined` there: a fast walk skips the handler, and a cosmetic effect whose handler failed
+resolves `undefined`. An app with no handler for the kind resolves `undefined` whatever the
+declaration. `defineEffect<void, Result>` declares an effect without a payload: its constructor takes
+no argument and its handler gets `undefined`. `handle` registers through `fx.handle`, so a second
+handler for the same kind throws.
+
+A popup's answer names an outcome of its component, so comparing it with an intent the component
+does not declare is a compile error. `NodeFx` is generic: a hand-written fake of it is typed with
+`NodeFx` (`Object.assign(run, { emit, start }) as NodeFx`), or replaced by `fakeFx` of
+`@moku-labs/game/testing`.
+
 ## The signal of an effect handler
 
 A handler lives above the graph and usually shows something: a popup, a tutorial hand, a sound.
@@ -358,6 +435,61 @@ composes a feature without its screen set.
 
 `GameTypes.emitters` is the emitter id union of a game. `EmitterIdOf<Types>` reads it and falls
 back to `string`, as `TextStylesOf` does for `textStyles`.
+
+### Sub-features
+
+A feature may declare sub-features: `defineFeature("episodes", { features: [episodesKitFeature,
+ep01Feature, ep02Feature] })`. A sub-feature is an ordinary feature plugin, in a folder of its own
+inside its parent's folder. Its flow id must still differ from its name: `defineFeature("ep01", {
+flows: [ep01Flow] })` with `ep01Flow = defineFlow("ep01Story", …)`, as in the episodes game
+(`tests/fixtures/episodes-game`).
+
+- The plugin carries its children in `features` (`[]` for a leaf); its `logicOnly` carries their
+  `logicOnly`, and keeps the `features` key of the description, so a headless registry knows the
+  parents too.
+- `defineFeature` throws for an entry of `features` it did not make (a game in JavaScript, or one
+  that casts), naming its index. It copies the list: a later push to the game's array changes
+  nothing.
+- The parent's `onInit` checks with `ctx.has` that the app composes every child, in any order,
+  and throws at `createApp` for the first one missing:
+  `[game] Feature "episodes" declares the sub-feature "ep01", but the app does not compose it.`
+- `flattenFeatures(list)` turns a list of trees into the flat plugin list `createApp` takes:
+  depth-first, a parent before its children, in declaration order. `defineGameApp` does it; a raw
+  `createApp` calls it, also with `logicOnly` trees. A flat list comes back unchanged. An entry at
+  any depth that is not a feature throws, with its path (`list[0].features[1]`).
+- `features.register` records the parent of each declared child and refuses a child that a second
+  feature declares, naming both: a sub-feature has one parent. `features.all()` gives `parent` for a
+  sub-feature, whatever the registration order, and no `parent` key for a top-level feature.
+
+```ts
+const app = createApp({
+  plugins: flattenFeatures([homeFeature.logicOnly, episodesFeature.logicOnly]),
+  pluginConfigs: { flow: { mainFlow } }
+});
+app.flow.features.all().find(entry => entry.name === "ep01")?.parent; // "episodes"
+```
+
+### Which feature is on the stack
+
+Feature `F` is on the stack when at least one frame of `flow.state().stack` (every frame,
+the outer frames of the sub-flows that will be returned to included) addresses an entry whose
+`owner` in `flow.describe()` is `F`:
+`describe().flows[frame.flow]?.nodes[frame.node]?.owner === F`. The owner is the feature that
+lists the node in `nodes`, or else the flow in `flows`. No API is added for it: `assets` reads it
+to release a `"leave"` bundle.
+
+- Only `F` itself counts: a node of a sub-feature does not keep its parent on the stack, and a
+  node of the parent does not keep a child. A parent that enters its child through a sub-flow node
+  is on the stack in the outer frame anyway.
+- A flow contributed to a slot (`contribute`) that its feature does not list in `flows` has no
+  owner. List it in `flows`. The owner rule is part of the graph hash, so it does not change.
+- `flow:rest` fires after the edge committed and `stack` moved to the rest node, before that
+  node's `load` and `scene` stages: the scene mounted at that moment is still the one of the node
+  before.
+
+The `onEnter` stages of a node read the state it is entered with: the state the edge into it
+committed, the bookmark's state after a restore, and the state the safe node's `recover`
+committed after a give-up.
 
 ## Configuration
 

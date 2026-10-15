@@ -39,14 +39,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** The fragment step Pixi 8.21 ships, which hands the premultiplied colour over. */
+/** The fragment step Pixi 8.22 ships, which hands the premultiplied colour over. */
 const pixiStep = "calculateMSDFAlpha(outColor, vColor, localUniforms.uDistance)";
 
 /** The fragment step of the renderer: the colour un-premultiplied, at alpha 1. */
 const singleAlphaStep =
   "calculateMSDFAlpha(outColor, vec4<f32>(vColor.rgb / max(vColor.a, 1e-4), 1.0), localUniforms.uDistance)";
 
-/** The GLSL fragment step Pixi 8.21 ships, the same double alpha on WebGL. */
+/** The GLSL fragment step Pixi 8.22 ships, the same double alpha on WebGL. */
 const pixiStepGl = "calculateMSDFAlpha(outColor, vColor, uDistance)";
 
 /** The GLSL fragment step of the renderer: the colour un-premultiplied, at alpha 1. */
@@ -54,7 +54,11 @@ const singleAlphaStepGl =
   "calculateMSDFAlpha(outColor, vec4(vColor.rgb / max(vColor.a, 1e-4), 1.0), uDistance)";
 
 /** What the fake pipe reads of its renderer. */
-type PipeRenderer = { name: "webgpu" | "webgl"; limits: { maxBatchableTextures: number } };
+type PipeRenderer = {
+  name: "webgpu" | "webgl";
+  limits: { maxBatchableTextures: number };
+  resolution: number;
+};
 
 /**
  * Builds the pipe on a fake renderer of one backend.
@@ -65,7 +69,7 @@ type PipeRenderer = { name: "webgpu" | "webgl"; limits: { maxBatchableTextures: 
  */
 function pipeOn(pixi: PixiModule, name: "webgpu" | "webgl"): object {
   const Pipe = createSdfTextPipe(pixi);
-  const renderer: PipeRenderer = { name, limits: { maxBatchableTextures: 16 } };
+  const renderer: PipeRenderer = { name, limits: { maxBatchableTextures: 16 }, resolution: 1 };
 
   return new Pipe(renderer as unknown as ConstructorParameters<typeof Pipe>[0]);
 }

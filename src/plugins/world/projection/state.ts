@@ -34,6 +34,7 @@ export function createProjectionState(): ProjectionState {
     keysByEntity: emptyMap(),
     mutes: emptyMap(),
     converged: [],
-    offHints: []
+    offHints: [],
+    leaving: emptyMap()
   };
 }

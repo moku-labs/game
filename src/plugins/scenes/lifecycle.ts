@@ -4,23 +4,29 @@
  */
 import { assetsPlugin } from "../assets";
 import { flowPlugin } from "../flow";
+import { modelPlugin } from "../model";
+import { rendererPlugin } from "../renderer";
 import { timePlugin } from "../time";
 import { worldPlugin } from "../world";
+import { isSceneDefinition } from "./bundles";
 import { enterScene } from "./switch";
-import type { Deps, KernelSlice, SceneDefinition, ScenesCtx, State } from "./types";
+import type { Deps, KernelSlice, ScenesCtx, State } from "./types";
 
 /**
- * Resolves the dependency APIs `flow`, `world`, `assets` and `time` with `ctx.require`.
+ * Resolves the dependency APIs `flow`, `world`, `assets`, `time`, `model` and `renderer` with
+ * `ctx.require`.
  *
  * @param ctx - Kernel context of the scenes plugin.
- * @returns The four dependency APIs.
+ * @returns The six dependency APIs.
  */
 export function resolveDeps(ctx: KernelSlice): Deps {
   return {
     flow: ctx.require(flowPlugin),
     world: ctx.require(worldPlugin),
     assets: ctx.require(assetsPlugin),
-    time: ctx.require(timePlugin)
+    time: ctx.require(timePlugin),
+    model: ctx.require(modelPlugin),
+    renderer: ctx.require(rendererPlugin)
   };
 }
 
@@ -32,33 +38,6 @@ export function resolveDeps(ctx: KernelSlice): Deps {
  */
 export function withDeps(ctx: KernelSlice): ScenesCtx {
   return { ...ctx, deps: resolveDeps(ctx) };
-}
-
-/**
- * Tells whether one entry of a feature's `scenes` list is a scene declaration. The key carries
- * whatever the game put there, so an entry that is not one is skipped instead of crashing.
- *
- * @param entry - One entry of the list.
- * @returns True when the entry can be read as a scene.
- * @example
- * ```ts
- * isSceneDefinition({ id: "board", bundle: "board", layers: [], projections: [] }); // true
- * isSceneDefinition("board"); // false: a scene is an object
- * ```
- */
-function isSceneDefinition(entry: unknown): entry is SceneDefinition {
-  return (
-    typeof entry === "object" &&
-    entry !== null &&
-    "id" in entry &&
-    typeof entry.id === "string" &&
-    "bundle" in entry &&
-    typeof entry.bundle === "string" &&
-    "layers" in entry &&
-    Array.isArray(entry.layers) &&
-    "projections" in entry &&
-    Array.isArray(entry.projections)
-  );
 }
 
 /**
@@ -126,7 +105,8 @@ export function startScenes(ctx: KernelSlice): void {
 }
 
 /**
- * Removes the `onEnter` callback in `onStop` and forgets every scene. Nothing is unmounted: a
+ * Removes the `onEnter` callback in `onStop` and forgets every scene and the bundles the mounted
+ * one named. Nothing is unmounted: a
  * teardown context may not call another plugin, and `world.onStop` clears every entity anyway.
  *
  * @param teardown - What the teardown context carries.
@@ -145,4 +125,5 @@ export function stopScenes(teardown: { state: State }): void {
   state.scenes.clear();
   state.current = undefined;
   state.pending = undefined;
+  state.named = [];
 }

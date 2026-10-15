@@ -1,10 +1,12 @@
 /**
  * @file scenes plugin — the switch, run inside the awaited `flow.onEnter("scene")` callback. It
- * loads the bundle first and touches the world in one synchronous block, so the renderer never
- * sees a scene half built.
+ * loads every bundle the scene names first and touches the world in one synchronous block, so the
+ * renderer never sees a scene half built. At a node of the mounted scene it re-reads what the
+ * scene names and awaits a bundle that is new, without mounting again.
  */
 import type { NodeInfo } from "../flow/types";
-import type { RunContext, SceneDefinition, ScenesCtx } from "./types";
+import { namedBundles } from "./bundles";
+import type { RunContext, SceneDefinition, SceneState, ScenesCtx } from "./types";
 
 /**
  * A promise that resolves when the node was aborted. Already aborted resolves at once.
@@ -25,28 +27,64 @@ function whenAborted(signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Loads the bundle of the scene and returns as soon as the load settles or the node is aborted.
- * A load that fails while the node still runs is rethrown, so `flow` rolls the node back; one
- * that fails after the abort is logged, because nobody waits for it any more.
+ * Loads every bundle the scene names at once and returns as soon as all loads settled or the node
+ * is aborted. The first load that fails while the node still runs is rethrown, so `flow` rolls
+ * the node back; one that fails after the abort is logged, because nobody waits for it any more.
  *
  * @param ctx - Domain context of the plugin.
- * @param bundle - Name of the bundle of the scene being entered.
+ * @param bundles - The bundles the scene being entered names, its own bundle first.
  * @param signal - The abort signal of the node.
- * @returns A promise that resolves when the load settled or the node was aborted.
- * @throws {Error} Whatever the load rejected with, while the node was not aborted.
+ * @returns A promise that resolves when the loads settled or the node was aborted.
+ * @throws {Error} Whatever the first failed load rejected with, while the node was not aborted.
  */
-async function untilAborted(ctx: ScenesCtx, bundle: string, signal: AbortSignal): Promise<void> {
+async function untilAborted(
+  ctx: ScenesCtx,
+  bundles: readonly string[],
+  signal: AbortSignal
+): Promise<void> {
   const load: { failed: boolean; error: unknown } = { failed: false, error: undefined };
-  const settled = ctx.deps.assets.load(bundle).catch((error: unknown) => {
-    load.failed = true;
-    load.error = error;
+  const loads = bundles.map(bundle =>
+    ctx.deps.assets.load(bundle).catch((error: unknown) => {
+      if (!load.failed) {
+        load.failed = true;
+        load.error = error;
+      }
 
-    if (signal.aborted) ctx.log.warn("scenes: a cancelled bundle load failed", { bundle, error });
-  });
+      if (signal.aborted) ctx.log.warn("scenes: a cancelled bundle load failed", { bundle, error });
+    })
+  );
 
-  await Promise.race([settled, whenAborted(signal)]);
+  await Promise.race([Promise.all(loads), whenAborted(signal)]);
 
   if (load.failed && !signal.aborted) throw load.error;
+}
+
+/**
+ * Reads the committed state a scene's `bundles` gets: the frozen trees of the store, in a frozen
+ * wrapper. During the scene stage no node writes, so it is the state the node is entered with.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @returns The committed `player` and `session`.
+ */
+function committedState(ctx: ScenesCtx): SceneState {
+  const { player, session } = ctx.deps.model.store.snapshot();
+
+  return Object.freeze({ player, session });
+}
+
+/**
+ * Tells whether two lists name the same bundles in the same order.
+ *
+ * @param left - One list.
+ * @param right - The other list.
+ * @returns True when both have the same names at the same places.
+ * @example
+ * ```ts
+ * sameNames(["location", "ep01"], ["location", "ep02"]); // false
+ * ```
+ */
+function sameNames(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((name, index) => name === right[index]);
 }
 
 /**
@@ -132,13 +170,14 @@ function overTargetOf(ctx: ScenesCtx, node: NodeInfo, run: RunContext): string |
 
 /**
  * Builds the scene in one synchronous block: the layers, then the projections of the old scene
- * out, then the ones of the new scene in, then the frame loop out of its idle cap, and only then
- * the event.
+ * out, then the ones of the new scene in, then the list the scene names to `assets`, then the
+ * frame loop out of its idle cap, and only then the event.
  *
  * @param ctx - Domain context of the plugin.
- * @param scene - The scene whose bundle is there.
+ * @param scene - The scene whose bundles are there.
+ * @param named - The bundles the scene names, as they were awaited.
  */
-function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
+function apply(ctx: ScenesCtx, scene: SceneDefinition, named: readonly string[]): void {
   const state = ctx.state;
   const projection = ctx.deps.world.projection;
   const from = state.current;
@@ -150,36 +189,32 @@ function apply(ctx: ScenesCtx, scene: SceneDefinition): void {
 
   projection.mount(scene.projections, state.owner);
   state.current = scene.id;
+  state.named = named;
+  ctx.deps.assets.sceneBundles(named);
   // A fresh picture is drawn at the full frame rate, even when the loop had gone idle.
   ctx.deps.time.wake();
 
   ctx.emit("scenes:changed", { from, to: scene.id, music: scene.music });
+
+  // Inline and positive: the performance log of an agent build names the switch; a production
+  // `define` folds the guard and the call goes.
+  if (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__) {
+    // eslint-disable-next-line unicorn/no-null -- the log is JSON: no scene before is `null`.
+    ctx.deps.renderer.monitor.event("scene", { from: from ?? null, to: scene.id });
+  }
 }
 
 /**
- * The `scene` stage of entering a node: the whole switch. An `over` node switches only to an
- * expected scene, a node without a scene and with nothing expected keeps the current one, and an
- * aborted node returns without touching anything.
+ * Switches to another scene: it reads what the scene names from the committed state, awaits all
+ * of it and only then builds the scene. An aborted node returns without touching anything.
  *
  * @param ctx - Domain context of the plugin.
- * @param node - The node being entered.
+ * @param target - Id of the scene to mount.
  * @param run - The runner's mode and signal.
- * @returns A promise that resolves once the scene stands, or at once when nothing changed.
- * @throws {Error} For a scene id no feature declared. A failed load and a failed `mount` also
- *   reject, so `flow` rolls the node back with the old scene still mounted.
- * @example
- * ```ts
- * // The graph entered the rest node of the board. `node` is what the runner handed over.
- * await enterScene(ctx, node, { mode: "live", signal: controller.signal });
- *
- * ctx.state.current; // "board"
- * ```
+ * @returns A promise that resolves once the scene stands, or the node was aborted.
+ * @throws {Error} For a scene id no feature declared, and whatever `bundles` or a load threw.
  */
-export async function enterScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): Promise<void> {
-  const target = node.over ? overTargetOf(ctx, node, run) : targetOf(ctx, node, run);
-
-  if (target === undefined || target === ctx.state.current) return;
-
+async function switchTo(ctx: ScenesCtx, target: string, run: RunContext): Promise<void> {
   const scene = ctx.state.scenes.get(target);
 
   if (scene === undefined) {
@@ -188,9 +223,69 @@ export async function enterScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext
     );
   }
 
-  await untilAborted(ctx, scene.bundle, run.signal);
+  const named = namedBundles(scene, committedState(ctx));
+
+  await untilAborted(ctx, named, run.signal);
 
   if (run.signal.aborted) return;
 
-  apply(ctx, scene);
+  apply(ctx, scene, named);
+}
+
+/**
+ * Reads again what the mounted scene names, at a node that keeps it: a bundle it names now and
+ * did not before is awaited, and `assets` learns the new list. Nothing is mounted again, nothing
+ * is emitted and the loop is not woken. A scene without `bundles` is never re-read.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param run - The runner's mode and signal.
+ * @returns A promise that resolves once the new bundles are in, at once when nothing changed.
+ * @throws {Error} Whatever `bundles` or a load threw.
+ */
+async function reread(ctx: ScenesCtx, run: RunContext): Promise<void> {
+  const state = ctx.state;
+  const scene = state.current === undefined ? undefined : state.scenes.get(state.current);
+
+  if (scene?.bundles === undefined) return;
+
+  const named = namedBundles(scene, committedState(ctx));
+
+  if (sameNames(named, state.named)) return;
+
+  await untilAborted(ctx, named, run.signal);
+
+  if (run.signal.aborted) return;
+
+  state.named = named;
+  ctx.deps.assets.sceneBundles(named);
+}
+
+/**
+ * The `scene` stage of entering a node, on one of two paths. A node that asks for another scene
+ * switches: every bundle the scene names for the committed state is awaited before the world is
+ * touched. Any other node keeps the mounted scene and re-reads what it names, so a restore or a
+ * recovery that changed the state awaits the new bundles before the node's gate opens. A transit
+ * node of a fast walk does neither. An `over` node switches only to an expected scene, and an
+ * aborted node returns without touching anything.
+ *
+ * @param ctx - Domain context of the plugin.
+ * @param node - The node being entered.
+ * @param run - The runner's mode and signal.
+ * @returns A promise that resolves once the scene stands, or at once when nothing changed.
+ * @throws {Error} For a scene id no feature declared, and for a `bundles` that throws or returns
+ *   something that is not a list of names. A failed load and a failed `mount` also reject, so
+ *   `flow` rolls the node back with the old scene still mounted.
+ */
+export async function enterScene(ctx: ScenesCtx, node: NodeInfo, run: RunContext): Promise<void> {
+  const target = node.over ? overTargetOf(ctx, node, run) : targetOf(ctx, node, run);
+
+  if (target !== undefined && target !== ctx.state.current) {
+    await switchTo(ctx, target, run);
+
+    return;
+  }
+
+  if (isFastTransit(node, run)) return;
+
+  await reread(ctx, run);
 }

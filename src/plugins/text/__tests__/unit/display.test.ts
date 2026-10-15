@@ -300,9 +300,49 @@ describe("the display adapter", () => {
     const object = build(mock, value({ resolved: "12" }));
     const before = object.children[0];
 
-    entry?.adapter.update(object, value({ resolved: "12" }), value({ resolved: "12" }));
+    const answer = entry?.adapter.update(
+      object,
+      value({ resolved: "12" }),
+      value({ resolved: "12" })
+    );
 
     expect(object.children[0]).toBe(before);
+    // false: nothing drawn changed, so a renderer drawing on demand skips the frame.
+    expect(answer).toBe(false);
+  });
+
+  // The bug: a label a system writes again in every frame with what it shows (a typed line, a
+  // toast) is rebuilt or retexted every frame, and a renderer drawing on demand draws them all.
+  it("a label given its own string, style and anchor again writes no text and keeps its runs", () => {
+    const mock = drawing();
+    const entry = mock.renderer.provided[0];
+    const object = build(mock, value({ resolved: "1<b>2</b>", style: "hud.rich", anchor: zero }));
+    const before = [...object.children];
+    const writes: unknown[] = [];
+
+    for (const child of before) {
+      let shown = child.text;
+
+      Object.defineProperty(child, "text", {
+        configurable: true,
+        get: () => shown,
+        set: (next: unknown) => {
+          writes.push(next);
+          shown = next;
+        }
+      });
+    }
+
+    const answer = entry?.adapter.update(
+      object,
+      value({ resolved: "1<b>2</b>", style: "hud.rich", anchor: { x: 0, y: 0 } }),
+      value({ resolved: "1<b>2</b>", style: "hud.rich", anchor: { x: 0, y: 0 } })
+    );
+
+    expect(answer).toBe(false);
+    expect(object.children).toHaveLength(2);
+    expect(object.children.every((child, index) => child === before[index])).toBe(true);
+    expect(writes).toEqual([]);
   });
 
   it("frees its children and keeps the textures of assets", () => {
@@ -760,8 +800,13 @@ describe("the alpha of a Text", () => {
     const object = build(mock, previous);
     const before = [...object.children];
 
-    entry?.adapter.update(object, previous, value({ resolved: "<icon=hud.coin>12", alpha: 0.25 }));
+    const answer = entry?.adapter.update(
+      object,
+      previous,
+      value({ resolved: "<icon=hud.coin>12", alpha: 0.25 })
+    );
 
+    expect(answer).toBe(true);
     expect(object.alpha).toBe(0.25);
     expect(object.children.map(child => child.alpha)).toEqual([1, 1]);
     expect(object.children.every((child, index) => child === before[index])).toBe(true);
@@ -774,8 +819,9 @@ describe("the alpha of a Text", () => {
     const previous = value({ resolved: "12" });
     const object = build(mock, previous);
 
-    entry?.adapter.update(object, previous, value({ resolved: "13", alpha: 0.5 }));
+    const answer = entry?.adapter.update(object, previous, value({ resolved: "13", alpha: 0.5 }));
 
+    expect(answer).toBe(true);
     expect(object.alpha).toBe(0.5);
     expect(textOf(object.children[0])).toBe("13");
   });

@@ -4,9 +4,11 @@
 import type { Log } from "@moku-labs/common/browser";
 import type { PluginCtx } from "@moku-labs/core";
 import type { Require } from "../../config";
+import type { Api as ClockApi } from "../clock/types";
 import type { Api as FlowApi } from "../flow/types";
 import type { Json, Api as ModelApi, Events as ModelEvents } from "../model/types";
 import type { Api as TimeApi } from "../time/types";
+import type { SystemTiming } from "./ecs/systems";
 import type { EcsApi, EcsInternal, EcsState, Entity, Owner } from "./ecs/types";
 import type {
   ProjectionApi,
@@ -71,12 +73,37 @@ export type State = { ecs: EcsState; projection: ProjectionState };
  * app.world.projection.entityOf("board.items", "i7"); // 1048576
  * ```
  */
-export type Api = { ecs: EcsApi; projection: ProjectionApi };
+export type Api = {
+  /** The ECS module: entities, components, systems, resources. */
+  ecs: EcsApi;
+  /** The projection module: model state to entities. */
+  projection: ProjectionApi;
+  /**
+   * Time each world system took in the current frame, in an agent build: names by registration index and ms in the
+   * same order, written while the systems run and zeroed at the start of the next frame. `undefined` without the agent
+   * flag. The renderer's monitor reads it after the frame; read it, never write it.
+   *
+   * A live view, not a copy: the table is the world's own, the same object every call, and the next frame zeroes and
+   * rewrites `ms` in place. The monitor reads it every frame of an agent build without allocating, which a copy would
+   * break. A caller that keeps numbers past the frame copies them (`[...systems.ms]`); a write into it changes what the
+   * monitor logs.
+   *
+   * @returns The live timing table, or `undefined`.
+   * @example
+   * ```ts
+   * // The renderer's monitor, at the end of a frame of a debug build:
+   * const systems = ctx.require(worldPlugin).systemTimes();
+   * systems?.names[3]; // "ward.pan"
+   * systems?.ms[3]; // 0.42
+   * ```
+   */
+  systemTimes(): Readonly<SystemTiming> | undefined;
+};
 
 /**
  * Resolved dependency APIs.
  */
-export type Deps = { time: TimeApi; model: ModelApi; flow: FlowApi };
+export type Deps = { time: TimeApi; model: ModelApi; flow: FlowApi; clock: ClockApi };
 
 /**
  * What the kernel context offers before the deps are attached.
@@ -140,6 +167,7 @@ export type EcsModule = EcsApi & EcsInternal;
  */
 export type ProjectionModule = ProjectionApi & ProjectionInternal;
 
+export type { SystemTiming } from "./ecs/systems";
 export type {
   AnyComponentType,
   AnyComponentValue,
@@ -153,6 +181,7 @@ export type {
   EntityDiff,
   EntitySnapshot,
   FrameDiff,
+  GameSystemDefinition,
   Mut,
   Narrowed,
   Owner,
@@ -160,7 +189,9 @@ export type {
   QueryTuple,
   ResourceType,
   SystemContext,
+  SystemContextOf,
   SystemDefinition,
+  SystemFor,
   TagType,
   WorldMode,
   WorldPhase,
@@ -175,12 +206,14 @@ export type {
   LayerSort,
   LayerSpec,
   Motion,
+  MotionCause,
   MotionHandle,
   NumericFields,
   ProjectionApi,
   ProjectionKey,
   ProjectionMotion,
   ProjectionSpec,
+  ReducedMotion,
   RestOptions,
   TrackOptions,
   TrackSegment,

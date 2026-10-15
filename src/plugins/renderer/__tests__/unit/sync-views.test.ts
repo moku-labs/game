@@ -1035,3 +1035,214 @@ describe("sync views: a particle container on a Display", () => {
     expect(kept.destroyed).toBe(false);
   });
 });
+
+/**
+ * One frame of the sync pass: the pass, then the change sets of the frame closed, as the world does.
+ *
+ * @param mock - The running mock.
+ */
+function frame(mock: MockRenderer): void {
+  mock.modules.sync.pass();
+  mock.world.clearChanges();
+}
+
+/**
+ * Starts the renderer with the given layers, a 64 x 64 texture for every key, and a first pass.
+ *
+ * @param layers - The layers of the scene, bottom first.
+ * @returns The running mock.
+ */
+async function startedWith(
+  layers: Array<{ name: string; sort: "none" | "y" | "order" }>
+): Promise<MockRenderer> {
+  const mock = createMockRenderer();
+
+  await mock.start();
+  mock.api.sync.textures.provide(() => new FakeTexture({}) as never);
+  mock.world.projection.setLayers(layers);
+  frame(mock);
+
+  return mock;
+}
+
+/**
+ * How often one event was logged at one level.
+ *
+ * @param method - The spy of the level.
+ * @param event - The event name.
+ * @returns The payloads it was logged with, in order.
+ */
+function logged(method: unknown, event: string): unknown[] {
+  return vi
+    .mocked(method as (name: string, payload?: unknown) => void)
+    .mock.calls.filter(([name]) => name === event)
+    .map(([, payload]) => payload);
+}
+
+describe("sync views: a view whose parent is not drawn yet (spec 16 U2)", () => {
+  // Bug H1: the child waits first in the pass, finds no parent view and is detached for good.
+  it("hangs a view built before its host in the same pass under the host", async () => {
+    const mock = await startedWith([{ name: "items", sort: "none" }]);
+    const host = mock.world.ecs.spawn(owner, []);
+    const child = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite(),
+      Parent({ entity: host })
+    ]);
+
+    mock.world.ecs.add(host, Layer({ name: "items" }));
+    mock.world.ecs.add(host, Sprite());
+
+    expect([...mock.ctx.state.sync.added]).toEqual([child, host]);
+
+    frame(mock);
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.parent).toBe(
+      mock.ctx.state.sync.views.get(host)?.wrapper
+    );
+    expect(logged(mock.log.warn, "renderer: parent draws nothing")).toEqual([]);
+  });
+
+  // Bug (K4): a view whose parent's visual comes later is either drawn alone in its layer for a frame or never hung.
+  it("draws a view whose parent gets its visual a pass later nowhere in between, and under the parent after", async () => {
+    const mock = await startedWith([{ name: "items", sort: "none" }]);
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform()]);
+    const child = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite(),
+      Parent({ entity: parent })
+    ]);
+
+    frame(mock);
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.parent).toBeNull();
+
+    mock.world.ecs.add(parent, Sprite());
+    frame(mock);
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.parent).toBe(
+      mock.ctx.state.sync.views.get(parent)?.wrapper
+    );
+  });
+
+  // Bug: every attach of a waiting child logs the warning again, so a phone log fills with one line.
+  it("reports a parent that draws nothing once, not at every attach", async () => {
+    const mock = await startedWith([
+      { name: "items", sort: "none" },
+      { name: "other", sort: "none" }
+    ]);
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform()]);
+    const child = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite(),
+      Parent({ entity: parent })
+    ]);
+
+    frame(mock);
+    mock.world.ecs.set(child, Layer, { name: "other" });
+    frame(mock);
+    frame(mock);
+
+    expect(logged(mock.log.warn, "renderer: parent draws nothing")).toEqual([
+      { entity: child, parent }
+    ]);
+  });
+
+  // Bug: a waiting child that loses its parent stays detached, or is hung under the old parent once it draws.
+  it("puts a waiting view that loses its Parent back in its layer, and keeps it there", async () => {
+    const mock = await startedWith([{ name: "items", sort: "none" }]);
+    const parent = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform()]);
+    const child = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform(),
+      Sprite(),
+      Parent({ entity: parent })
+    ]);
+    const items = mock.ctx.state.sync.layers.get("items")?.container;
+
+    frame(mock);
+    mock.world.ecs.remove(child, Parent);
+    frame(mock);
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.parent).toBe(items);
+
+    mock.world.ecs.add(parent, Sprite());
+    frame(mock);
+
+    expect(mock.ctx.state.sync.views.get(child)?.object.parent).toBe(items);
+  });
+
+  // Bug (C1, U1.8): a ui child at zIndex 0 sorts at a negative Order and drew under its parent's own picture.
+  it("draws a wrapper's own visual under a child at Order -0.4 and over a child at Order -1", async () => {
+    const mock = await startedWith([{ name: "items", sort: "none" }]);
+    const parent = mock.world.ecs.spawn(owner, [
+      Layer({ name: "items" }),
+      Transform({ x: 100, y: 100 }),
+      Sprite()
+    ]);
+    const above = mock.world.ecs.spawn(owner, [
+      Transform(),
+      Sprite(),
+      Parent({ entity: parent }),
+      Order({ value: -0.4 })
+    ]);
+    const under = mock.world.ecs.spawn(owner, [
+      Transform(),
+      Sprite(),
+      Parent({ entity: parent }),
+      Order({ value: -1 })
+    ]);
+
+    frame(mock);
+
+    expect(mock.api.sync.hitAll(100, 100)).toEqual([above, parent, under]);
+  });
+});
+
+/**
+ * Makes a layer container keep nothing it is given, as a Pixi that went its own way would.
+ *
+ * @param mock - The running mock.
+ * @param name - The layer.
+ */
+function refuse(mock: MockRenderer, name: string): void {
+  const container = mock.ctx.state.sync.layers.get(name)?.container;
+
+  if (container !== undefined) vi.spyOn(container, "addChild").mockImplementation(child => child);
+}
+
+describe("sync views: the tree check (spec 16 U2.5)", () => {
+  // Bug H2: the display tree and the ECS disagree, so a view is hit somewhere else than it is drawn, with no log.
+  it("reports a view that does not hang where sync put it, once, in a dev build", async () => {
+    vi.stubGlobal("__MOKU_GAME_DEV__", true);
+
+    const mock = await startedWith([
+      { name: "items", sort: "none" },
+      { name: "other", sort: "none" }
+    ]);
+
+    refuse(mock, "items");
+    refuse(mock, "other");
+
+    const entity = mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+
+    frame(mock);
+    mock.world.ecs.set(entity, Layer, { name: "other" });
+    frame(mock);
+
+    expect(logged(mock.log.error, "renderer:tree-mismatch")).toEqual([{ entity, parent: 0 }]);
+  });
+
+  it("checks nothing in a production build", async () => {
+    const mock = await startedWith([{ name: "items", sort: "none" }]);
+
+    refuse(mock, "items");
+    mock.world.ecs.spawn(owner, [Layer({ name: "items" }), Transform(), Sprite()]);
+    frame(mock);
+
+    expect(logged(mock.log.error, "renderer:tree-mismatch")).toEqual([]);
+  });
+});

@@ -1,11 +1,12 @@
 /**
  * @file i18n plugin — lifecycle: the compiled modules read out of the feature descriptions and
- * the config in `onStart`, the merge of every eager locale, and the one loader run that makes
- * `format` synchronous for the start locale and the fallback. There is no `onStop`: the maps die
- * with the app.
+ * the config in `onStart`, the coupling of a sub-feature's lazy modules to its bundle, the merge
+ * of every eager locale, and the one loader run that makes `format` synchronous for the start
+ * locale and the fallback. There is no `onStop`: the maps die with the app.
  */
 import { flowPlugin } from "../flow";
-import { mergeLocales } from "./messages";
+import { bundleOf, holdLoaded, ignore, runAfter } from "./bundles";
+import { mergeOf, messagesOf } from "./messages";
 import type {
   CompiledMessages,
   I18nCtx,
@@ -45,28 +46,6 @@ export function notLoaded(locale: string): Error {
 }
 
 /**
- * Tells whether a value is a module namespace, the shape `() => import(…)` resolves with.
- *
- * @param value - What the loader returned.
- * @returns True when the messages sit under `default`.
- */
-function hasDefault(value: unknown): value is { default: unknown } {
-  return typeof value === "object" && value !== null && "default" in value;
-}
-
-/**
- * Reads the compiled messages out of what a feature or a loader brought. A module namespace is
- * unwrapped to its `default`; everything else is the table itself. This is the one place the
- * opaque value `flow` carried becomes the shape `compileStrings` wrote.
- *
- * @param value - The module, or the namespace around it.
- * @returns The compiled messages.
- */
-function messagesOf(value: unknown): CompiledMessages {
-  return (hasDefault(value) ? value.default : value) as CompiledMessages;
-}
-
-/**
  * Tells whether a registered module is ready to be merged, or still a loader.
  *
  * @param entry - The registered module.
@@ -91,29 +70,40 @@ function isLoader(value: unknown): value is () => Promise<unknown> {
 }
 
 /**
- * Records one module under its locale, keeping the name it can be blamed under.
+ * Records one module under its locale, keeping the name it can be blamed under. A loader of a
+ * coupled sub-feature also keeps the bundle it lives with.
  *
  * @param state - The plugin state.
  * @param locale - The locale the module belongs to.
  * @param from - The feature that brought it, or the config.
  * @param value - The module, or the loader that fetches it.
+ * @param bundle - The bundle a coupled loader lives with; absent for every other module.
  */
-function register(state: State, locale: string, from: string, value: unknown): void {
+function register(
+  state: State,
+  locale: string,
+  from: string,
+  value: unknown,
+  bundle?: string
+): void {
   const entries = state.registered.get(locale) ?? [];
 
   if (isLoader(value)) {
     const loader: StringsLoader = async () => messagesOf(await value());
 
-    entries.push({ from, messages: loader });
+    entries.push(
+      bundle === undefined ? { from, messages: loader } : { from, messages: loader, bundle }
+    );
   } else entries.push({ from, messages: messagesOf(value) });
 
   state.registered.set(locale, entries);
 }
 
 /**
- * Reads the `strings` key of every registered feature and of the config into the registry.
- * Features register in their own `onInit`, which runs before this `onStart`, so every module of
- * the game is here.
+ * Reads the `strings` key of every registered feature and of the config into the registry, and
+ * marks the plugin started. Features register in their own `onInit`, which runs before this
+ * `onStart`, so every module of the game is here. A sub-feature's loader is coupled to the bundle
+ * of its name when the manifest has one; an eager table and the config's modules never are.
  *
  * @param ctx - Kernel context of the i18n plugin.
  */
@@ -123,34 +113,92 @@ function collect(ctx: I18nCtx): void {
 
     if (strings === undefined) continue;
 
+    const bundle = bundleOf(ctx, feature);
+
     for (const [locale, value] of Object.entries(strings)) {
-      register(ctx.state, locale, feature.name, value);
+      const coupled = bundle !== undefined && isLoader(value) ? bundle : undefined;
+
+      register(ctx.state, locale, feature.name, value, coupled);
+      if (coupled !== undefined) ctx.state.coupled.add(coupled);
     }
   }
 
   for (const [locale, value] of Object.entries(ctx.config.locales)) {
     register(ctx.state, locale, CONFIG_OWNER, value);
   }
+
+  ctx.state.started = true;
 }
 
 /**
- * Merges every locale whose modules all arrived eagerly, so `format` answers without waiting.
- * A locale with a loader is merged when that loader runs.
+ * Merges every locale whose modules that must be in memory all arrived eagerly, so `format`
+ * answers without waiting. A coupled module must be in memory only while its bundle is held; a
+ * locale with a loader that must run is merged when that loader runs.
  *
  * @param state - The plugin state.
  * @throws {Error} When two features carry the same key in one locale.
  */
 function mergeEager(state: State): void {
   for (const [locale, entries] of state.registered) {
-    const ready = entries.filter(entry => isReady(entry));
+    const waiting = entries.some(
+      entry => !isReady(entry) && (entry.bundle === undefined || state.held.has(entry.bundle))
+    );
 
-    if (ready.length === entries.length) state.loaded.set(locale, mergeLocales(ready));
+    if (!waiting) state.loaded.set(locale, mergeOf(state, locale));
   }
 }
 
 /**
- * Runs the loaders of one locale, once, and merges everything registered for it. The resolved
- * modules replace the loaders in the registry, so `replace` finds the keys of a lazy locale too.
+ * Answers the modules of one held bundle, creating its table on first use.
+ *
+ * @param state - The plugin state.
+ * @param bundle - The held bundle.
+ * @returns Locale to the bundle's module.
+ */
+function modulesOf(state: State, bundle: string): Map<string, CompiledMessages> {
+  const known = state.bundled.get(bundle);
+
+  if (known !== undefined) return known;
+
+  const modules = new Map<string, CompiledMessages>();
+
+  state.bundled.set(bundle, modules);
+
+  return modules;
+}
+
+/**
+ * Imports the module of a held bundle for one locale, once. The module is kept only when the
+ * load that held the bundle is still the one in place: an unload while the loader ran wins.
+ *
+ * @param state - The plugin state.
+ * @param entry - The coupled entry of the locale.
+ * @param bundle - The bundle the entry lives with.
+ * @param locale - The locale to load.
+ * @returns A promise that settles when the module is stored, or dropped.
+ */
+async function bringHeld(
+  state: State,
+  entry: RegisteredModule,
+  bundle: string,
+  locale: string
+): Promise<void> {
+  const token = state.held.get(bundle);
+  const loader = entry.messages;
+
+  if (token === undefined || typeof loader !== "function") return;
+  if (state.bundled.get(bundle)?.has(locale) === true) return;
+
+  const messages = messagesOf(await loader());
+
+  if (state.held.get(bundle) === token) modulesOf(state, bundle).set(locale, messages);
+}
+
+/**
+ * Runs the loaders of one locale, once, and merges everything that must be in memory for it. The
+ * resolved modules replace the loaders in the registry, so `replace` finds the keys of a lazy
+ * locale too. A coupled loader runs only while its bundle is held, and keeps its place in the
+ * registry: its module goes to `bundled`.
  *
  * @param state - The plugin state.
  * @param locale - The locale to load.
@@ -160,44 +208,72 @@ function mergeEager(state: State): void {
 export async function loadLocale(state: State, locale: string): Promise<void> {
   if (state.loaded.has(locale)) return;
 
-  const resolved: ResolvedModule[] = [];
+  const next: RegisteredModule[] = [];
 
   for (const entry of state.registered.get(locale) ?? []) {
     const brought = entry.messages;
-    const messages = typeof brought === "function" ? messagesOf(await brought()) : brought;
 
-    resolved.push({ from: entry.from, messages });
+    if (entry.bundle !== undefined) {
+      await bringHeld(state, entry, entry.bundle, locale);
+      next.push(entry);
+    } else if (typeof brought === "function") {
+      next.push({ from: entry.from, messages: messagesOf(await brought()) });
+    } else next.push(entry);
   }
 
-  const merged = mergeLocales(resolved);
+  const merged = mergeOf(state, locale, next);
 
-  state.registered.set(locale, resolved);
+  state.registered.set(locale, next);
   state.loaded.set(locale, merged);
 }
 
 /**
- * Collects every compiled module, merges the eager locales and resolves the start locale and the
- * fallback, so the first `format` never waits. A game that brought no strings at all starts with
- * an empty registry instead of failing: every key is then missing, and nothing else changes.
+ * Gives every bundle held through the start loads a table in `bundled`, an empty one when its
+ * feature brought nothing for the loaded locales, so a key of it is never called "not loaded".
+ * A bundle unloaded, or loaded again, while the start ran is left to its own load.
+ *
+ * @param state - The plugin state.
+ * @param taken - The bundles held when the start loads began, with their tokens.
+ */
+function keepHeld(state: State, taken: ReadonlyMap<string, symbol>): void {
+  for (const [bundle, token] of taken) {
+    if (state.held.get(bundle) === token) modulesOf(state, bundle);
+  }
+}
+
+/**
+ * Collects every compiled module, takes the bundles `assets` already holds, merges the eager
+ * locales and resolves the start locale and the fallback on the queue, so the first `format`
+ * never waits and a bundle load that arrives meanwhile runs after them. A game that brought no
+ * strings at all starts with an empty registry instead of failing: every key is then missing,
+ * and nothing else changes.
  *
  * @param ctx - Kernel context of the i18n plugin.
  * @returns A promise that settles when the start locale is loaded.
  * @throws {Error} When the start locale is not registered, or two features share a key.
  */
 export async function startI18n(ctx: I18nCtx): Promise<void> {
+  const { state } = ctx;
   const { locale, fallback } = ctx.config;
 
   collect(ctx);
-  mergeEager(ctx.state);
+  holdLoaded(ctx);
+  mergeEager(state);
 
-  if (ctx.state.registered.size > 0 && !ctx.state.registered.has(locale)) {
+  if (state.registered.size > 0 && !state.registered.has(locale)) {
     throw notRegistered(locale);
   }
 
-  if (ctx.state.registered.has(locale)) await loadLocale(ctx.state, locale);
-  if (fallback !== locale && ctx.state.registered.has(fallback)) {
-    await loadLocale(ctx.state, fallback);
-  }
+  const taken = new Map(state.held);
+  const chain = runAfter(state.loading, async () => {
+    if (state.registered.has(locale)) await loadLocale(state, locale);
+    if (fallback !== locale && state.registered.has(fallback)) await loadLocale(state, fallback);
 
-  ctx.state.locale = locale;
+    keepHeld(state, taken);
+    state.locale = locale;
+  });
+
+  state.loading = chain.then(ignore, ignore);
+
+  await chain;
 }

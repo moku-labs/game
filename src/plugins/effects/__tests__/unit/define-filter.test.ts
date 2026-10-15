@@ -11,9 +11,10 @@ import {
 } from "../../filters/builtins";
 import { defineFilter } from "../../filters/define";
 import { GLOW_GLSL } from "../../filters/glow-glsl";
-import { assembleGlsl, GLSL_HEADER, glslUniforms } from "../../filters/glsl";
+import { assembleGlsl, GLSL_HEADER, glslInputs, glslUniforms } from "../../filters/glsl";
 import { OUTLINE_GLSL } from "../../filters/outline-glsl";
-import { assemble, HEADER, uniformStruct } from "../../filters/wgsl";
+import { assemble, HEADER, inputBindings, uniformStruct } from "../../filters/wgsl";
+import { Along, Small, SOFT_BODIES, Soft, SoftDim, softChain } from "../filter-fixtures";
 
 // ---------------------------------------------------------------------------
 // Unit test: defineFilter validates its definition, assembles the WGSL and the
@@ -120,7 +121,7 @@ describe("defineFilter", () => {
       `${GLSL_HEADER}uniform float amount;\nuniform vec3 color;\nuniform vec2 offset;\nuniform vec4 box;\n\n${GLSL}`
     );
     // The WGSL beside it is the same as before: no public field was renamed.
-    expect(Tint.filter.source).toBe(assemble(Tint.filter.uniforms, BODY));
+    expect(Tint.filter.source).toBe(assemble(Tint.filter.uniforms, [], BODY));
   });
 
   it("writes no uniform line into the GLSL without uniforms", () => {
@@ -255,7 +256,7 @@ describe("wgsl", () => {
     expect(HEADER).toContain("@group(0) @binding(1) var uTexture: texture_2d<f32>;");
     expect(HEADER).toContain("@group(0) @binding(2) var uSampler: sampler;");
     expect(HEADER).toContain("fn mainVertex(");
-    expect(assemble([], "body")).toBe(`${HEADER}body`);
+    expect(assemble([], [], "body")).toBe(`${HEADER}body`);
   });
 });
 
@@ -284,7 +285,7 @@ describe("glsl", () => {
         "uniform vec3 tint;\nuniform vec4 box;\n\n"
     );
     expect(glslUniforms([])).toBe("");
-    expect(assembleGlsl([], "body")).toBe(`${GLSL_HEADER}body`);
+    expect(assembleGlsl([], [], "body")).toBe(`${GLSL_HEADER}body`);
   });
 });
 
@@ -372,5 +373,289 @@ describe("the built-in filters", () => {
       "alpha"
     ]);
     expect(kinds[2]?.component).toBe(Blur);
+  });
+});
+
+/** The WGSL the engine declares for the input `soft` at index 0. */
+const SOFT_WGSL =
+  "@group(1) @binding(1) var softTexture: texture_2d<f32>;\n" +
+  "@group(1) @binding(2) var softSampler: sampler;\n\n" +
+  "fn sampleSoft(uv: vec2<f32>) -> vec4<f32> {\n" +
+  "  return textureSampleLevel(softTexture, softSampler, clamp(uv * gfu.uInputSize.xy * fu.softScale, fu.softClamp.xy, fu.softClamp.zw), 0.0);\n" +
+  "}\n\n";
+
+/** The GLSL the engine declares for the input `soft`. */
+const SOFT_GLSL =
+  "uniform sampler2D softTexture;\n\n" +
+  "vec4 sampleSoft(vec2 uv) {\n" +
+  "  return textureLod(softTexture, clamp(uv * uInputSize.xy * softScale, softClamp.xy, softClamp.zw), 0.0);\n" +
+  "}\n\n";
+
+describe("defineFilter — inputs", () => {
+  it("declares the texture, the sampler, the scale, the clamp and the sample function of an input in the WGSL", () => {
+    expect(inputBindings(Soft.filter.inputs)).toBe(SOFT_WGSL);
+    expect(Soft.filter.source).toBe(
+      `${HEADER}struct FilterUniforms {\n  spread: f32,\n  tone: f32,\n  softScale: vec2<f32>,\n  softClamp: vec4<f32>,\n};\n\n` +
+        `@group(1) @binding(0) var<uniform> fu: FilterUniforms;\n${SOFT_WGSL}${SOFT_BODIES.wgsl}`
+    );
+  });
+
+  it("binds a second input at 3 and 4", () => {
+    const Two = defineFilter("fixture.two", {
+      ...SOFT_BODIES,
+      inputs: {
+        a: { stages: [Small], chain: () => [] },
+        b: { stages: [Small], chain: () => [] }
+      }
+    });
+
+    expect(Two.filter.source).toContain("@group(1) @binding(3) var bTexture: texture_2d<f32>;");
+    expect(Two.filter.source).toContain("@group(1) @binding(4) var bSampler: sampler;");
+    expect(Two.filter.uniforms).toEqual([]);
+    expect(Two.filter.passes).toBe(1);
+  });
+
+  it("declares the texture and the sample function of an input in the GLSL after the uniforms it reads", () => {
+    expect(glslInputs(Soft.filter.inputs)).toBe(SOFT_GLSL);
+    expect(Soft.filter.glsl).toBe(
+      `${GLSL_HEADER}uniform float spread;\nuniform float tone;\nuniform vec2 softScale;\nuniform vec4 softClamp;\n\n` +
+        `${SOFT_GLSL}${SOFT_BODIES.glsl}`
+    );
+  });
+
+  it("assembles a filter without inputs byte for byte as before", () => {
+    const Tint = defineFilter("fx.tint", { wgsl: BODY, glsl: GLSL, uniforms: { amount: 0.5 } });
+
+    expect(Tint.filter.source).toBe(
+      `${HEADER}struct FilterUniforms {\n  amount: f32,\n};\n\n@group(1) @binding(0) var<uniform> fu: FilterUniforms;\n${BODY}`
+    );
+    expect(Tint.filter.glsl).toBe(`${GLSL_HEADER}uniform float amount;\n\n${GLSL}`);
+    expect(Tint.filter.inputs).toEqual([]);
+    expect(Tint.filter.fallback).toBeUndefined();
+  });
+
+  it("keeps the engine's two uniforms of an input out of the component and out of the uniforms", () => {
+    const [soft] = Soft.filter.inputs;
+
+    expect(Object.keys(Soft().value)).toEqual(["spread", "tone", "enabled", "order"]);
+    expect(Soft.filter.uniforms.map(uniform => uniform.name)).toEqual(["spread", "tone"]);
+    expect([
+      soft?.texture,
+      soft?.sampler,
+      soft?.scale.name,
+      soft?.clamp.name,
+      soft?.sample
+    ]).toEqual(["softTexture", "softSampler", "softScale", "softClamp", "sampleSoft"]);
+    expect(soft?.stages.map(stage => stage.filter.id)).toEqual([
+      "fixture.small",
+      "fixture.smaller",
+      "fixture.along"
+    ]);
+  });
+
+  it("keeps each stage once, in listed order", () => {
+    const Twice = defineFilter("fixture.twice", {
+      ...SOFT_BODIES,
+      uniforms: { spread: 1, tone: 0 },
+      inputs: { soft: { stages: [Small, Along, Small], chain: softChain } }
+    });
+
+    expect(Twice.filter.inputs[0]?.stages).toEqual([Small, Along]);
+  });
+
+  it("stores the fallback's definition", () => {
+    const Veiled = defineFilter("fixture.veiled", {
+      ...SOFT_BODIES,
+      uniforms: { spread: 1, tone: 0 },
+      fallback: SoftDim
+    });
+
+    expect(Veiled.filter.fallback).toBe(SoftDim.filter);
+  });
+});
+
+/** A chain that names nothing. */
+const none = (): readonly never[] => [];
+
+/** A spec whose input or fallback breaks a rule, the rule's message. */
+const REFUSED: Array<[string, () => unknown, string]> = [
+  [
+    "inputs that are not an object",
+    () => defineFilter("fx.f", { ...SOFT_BODIES, inputs: [] as never }),
+    '[game] Filter "fx.f": inputs must be an object of named inputs.\n  Write inputs: { blur: { stages: [...], chain } }.'
+  ],
+  [
+    "five inputs",
+    () =>
+      defineFilter("fx.f", {
+        ...SOFT_BODIES,
+        inputs: Object.fromEntries(
+          ["a", "b", "c", "d", "e"].map(name => [name, { stages: [Small], chain: none }])
+        )
+      }),
+    '[game] Filter "fx.f" has 5 inputs; at most 4.\n  Each input is a texture the body reads: merge the chains.'
+  ],
+  [
+    "an input name that is no uniform name",
+    () =>
+      defineFilter("fx.f", { ...SOFT_BODIES, inputs: { Blur: { stages: [Small], chain: none } } }),
+    '[game] Filter "fx.f": input "Blur" is not a valid name.\n  Start with a lower-case letter and use letters and digits only.'
+  ],
+  [
+    "a reserved input name",
+    () =>
+      defineFilter("fx.f", { ...SOFT_BODIES, inputs: { order: { stages: [Small], chain: none } } }),
+    '[game] Filter "fx.f": input "order" is not a valid name.\n  Start with a lower-case letter and use letters and digits only.'
+  ],
+  [
+    "a made name that is a uniform",
+    () =>
+      defineFilter("fx.f", {
+        ...SOFT_BODIES,
+        uniforms: { softScale: [0, 0] },
+        inputs: { soft: { stages: [Small], chain: none } }
+      }),
+    '[game] Filter "fx.f": input "soft" makes "softScale", which is a uniform of the filter.\n  Rename the input or the uniform.'
+  ],
+  [
+    "a made name that is reserved",
+    () => defineFilter("fx.f", { ...SOFT_BODIES, inputs: { u: { stages: [Small], chain: none } } }),
+    '[game] Filter "fx.f": input "u" makes "uTexture", which is reserved.\n  Rename the input or the uniform.'
+  ],
+  [
+    "a made name another input made",
+    () =>
+      defineFilter("fx.f", {
+        ...SOFT_BODIES,
+        inputs: {
+          sampleFoo: { stages: [Small], chain: none },
+          fooTexture: { stages: [Small], chain: none }
+        }
+      }),
+    '[game] Filter "fx.f": input "fooTexture" makes "sampleFooTexture", which is made by another input.\n  Rename the input or the uniform.'
+  ],
+  [
+    "no stages",
+    () => defineFilter("fx.f", { ...SOFT_BODIES, inputs: { soft: { stages: [], chain: none } } }),
+    '[game] Filter "fx.f": input "soft" needs stages: the filters its chain may draw.\n  List each defineFilter the chain names.'
+  ],
+  [
+    "a built-in kind as a stage",
+    () =>
+      defineFilter("fx.f", {
+        ...SOFT_BODIES,
+        inputs: { soft: { stages: [Small, Blur as never], chain: none } }
+      }),
+    '[game] Filter "fx.f": stage 1 of input "soft" is not a filter made by defineFilter.\n  List what defineFilter returned; a built-in kind cannot be a stage.'
+  ],
+  [
+    "a stage with inputs of its own",
+    () =>
+      defineFilter("fx.f", { ...SOFT_BODIES, inputs: { soft: { stages: [Soft], chain: none } } }),
+    '[game] Filter "fx.f": stage "fixture.soft" of input "soft" has inputs or a fallback of its own.\n  A stage draws alone: give it neither.'
+  ],
+  [
+    "no chain",
+    () =>
+      defineFilter("fx.f", {
+        ...SOFT_BODIES,
+        inputs: { soft: { stages: [Small], chain: undefined as never } }
+      }),
+    '[game] Filter "fx.f": input "soft" needs a chain.\n  Write chain: (value, { resolution }) => [{ stage, scale }].'
+  ],
+  [
+    "passes with inputs",
+    () =>
+      defineFilter("fx.f", {
+        ...SOFT_BODIES,
+        passes: 5,
+        inputs: { soft: { stages: [Small], chain: none } }
+      }),
+    '[game] Filter "fx.f": passes is counted by the engine for a filter with inputs.\n  Leave passes out.'
+  ],
+  [
+    "a fallback that is no filter of ours",
+    () => defineFilter("fx.f", { ...SOFT_BODIES, fallback: Blur as never }),
+    '[game] Filter "fx.f": fallback is not a filter made by defineFilter.\n  Pass what defineFilter returned.'
+  ],
+  [
+    "a fallback with the same id",
+    () =>
+      defineFilter("fixture.softDim", {
+        ...SOFT_BODIES,
+        uniforms: { spread: 1 },
+        fallback: SoftDim
+      }),
+    '[game] Filter "fixture.softDim": its fallback has the same id.\n  Give the fallback an id of its own.'
+  ],
+  [
+    "a fallback with inputs",
+    () =>
+      defineFilter("fx.f", { ...SOFT_BODIES, uniforms: { spread: 1, tone: 0 }, fallback: Soft }),
+    '[game] Filter "fx.f": its fallback "fixture.soft" has inputs or a fallback of its own.\n  A fallback draws alone and simply: give it neither.'
+  ],
+  [
+    "a fallback uniform the filter does not declare",
+    () => defineFilter("fx.f", { ...SOFT_BODIES, uniforms: { tone: 0 }, fallback: SoftDim }),
+    '[game] Filter "fx.f": its fallback "fixture.softDim" declares "spread", which "fx.f" does not declare.\n  A fallback draws with the value of fx.f: use a subset of its uniforms.'
+  ],
+  [
+    "a fallback uniform of another type",
+    () => defineFilter("fx.f", { ...SOFT_BODIES, uniforms: { spread: [1, 1] }, fallback: SoftDim }),
+    '[game] Filter "fx.f": its fallback "fixture.softDim" declares "spread", which "fx.f" declares as another type.\n  A fallback draws with the value of fx.f: use a subset of its uniforms.'
+  ]
+];
+
+describe("defineFilter — refusals of inputs and fallback", () => {
+  it.each(REFUSED)("refuses %s", (_case, define, message) => {
+    expect(define).toThrow(message);
+  });
+});
+
+describe("defineFilter: the area (spec 27 B4)", () => {
+  // Bug: a box given instead of a function reaches the filter sync and throws in every frame.
+  it("an area that is not a function is refused, naming the filter", () => {
+    expect(() =>
+      defineFilter("fx.lens", {
+        wgsl: BODY,
+        glsl: GLSL,
+        uniforms: { amount: 0, color: { color: 0 } },
+        area: [0, 0, 10, 10] as never
+      })
+    ).toThrow(
+      '[game] Filter "fx.lens": area must be a function of the value.\n  Give (value) => [x, y, width, height], or leave it out.'
+    );
+  });
+
+  // Bug: the area lands in the component's value, and a game's test that compares `.value` whole breaks.
+  it("a definition keeps its area and its value has no area field", () => {
+    const Lens = defineFilter("LensWindow", {
+      wgsl: BODY,
+      glsl: GLSL,
+      uniforms: { amount: 0, color: { color: 0 }, cx: 195, cy: 189, rev: 84, soft: 4 },
+      area: value => {
+        const reach = value.rev + value.soft;
+
+        return [value.cx - reach, value.cy - reach, 2 * reach, 2 * reach];
+      }
+    });
+    const Plain = defineFilter("fx.plain", {
+      wgsl: BODY,
+      glsl: GLSL,
+      uniforms: { amount: 0, color: { color: 0 } }
+    });
+
+    expect(Lens.filter.area?.(Lens().value)).toEqual([107, 101, 176, 176]);
+    expect(Lens().value).toEqual({
+      amount: 0,
+      color: 0,
+      cx: 195,
+      cy: 189,
+      rev: 84,
+      soft: 4,
+      enabled: true,
+      order: 0
+    });
+    expect("area" in Plain.filter).toBe(false);
   });
 });

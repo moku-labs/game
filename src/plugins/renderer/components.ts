@@ -1,6 +1,6 @@
 /**
- * @file renderer plugin — the five components a game writes and the `sprite()` bundle helper.
- * Pure: no ctx, no state, no Pixi. Made with the `component()` helper of `world`, so nothing has
+ * @file renderer plugin — the components a game writes (the five of a view, the overlay marker and the HUD
+ * part), the engine's own overlay level, and the `sprite()` bundle helper. Pure: no ctx, no state, no Pixi. Made with the `component()` helper of `world`, so nothing has
  * to be registered.
  */
 import { component } from "../world/ecs/define";
@@ -173,6 +173,64 @@ export type SpriteOptions = {
   scale?: number;
 };
 
+/**
+ * How an overlay lies over what is drawn before it: the dim it brings, whether it hides what is under it, which parts
+ * of the HUD stay shown, and how long its dim and the HUD take to follow it when its root has no motion of its own.
+ * The level the overlay is at and whether it has landed are the engine's: `app.renderer.sync.debug.overlays()`
+ * reports them.
+ *
+ * @example
+ * ```ts
+ * // The shop: the board dims to 56 %, the energy and the gems stay shown above the dim, the dim takes 270 ms.
+ * const shop: OverlayValue = { dim: 0.56, dimColor: 0x1b1430, cover: "none", hud: ["energy", "gems"], fade: 270 };
+ * ```
+ */
+export type OverlayValue = {
+  /** How dark the dim is at full level, 0 to 1; 0 draws no dim. */
+  dim: number;
+  /** The colour of the dim, 0xRRGGBB. */
+  dimColor: number;
+  /** `"opaque"`: the overlay covers the whole screen once it has landed at alpha 1, so nothing under it is drawn. */
+  cover: "none" | "opaque";
+  /** The HUD parts that stay shown: every part, none, or the parts with these keys. */
+  hud: "all" | "none" | readonly string[];
+  /**
+   * Milliseconds the dim and the HUD parts take to come and go when the root plays no enter or exit motion; a root
+   * with a motion is followed for its own length. 0 follows at once.
+   */
+  fade: number;
+};
+
+/**
+ * A part of the HUD an overlay can keep shown or let fade: the view it is on and everything under it.
+ *
+ * @example
+ * ```ts
+ * const energy: HudPartValue = { key: "energy" };
+ * ```
+ */
+export type HudPartValue = { key: string };
+
+/**
+ * The engine's state of one overlay: how much it is there (0 to 1, carried by its root's own enter and exit motion,
+ * or by `fade`) and whether its enter motion is over. Written by `ui`, read by the renderer; a game reads it through
+ * `app.renderer.sync.debug.overlays()`.
+ *
+ * @example
+ * ```ts
+ * const shown: OverlayLevelValue = { level: 1, landed: true };
+ * ```
+ */
+export type OverlayLevelValue = { level: number; landed: boolean };
+
+const overlayDefaults: OverlayValue = {
+  dim: 0,
+  dimColor: 0x00_00_00,
+  cover: "none",
+  hud: "all",
+  fade: 250
+};
+
 const displayDefaults: DisplayValue = { object: undefined };
 
 const shapeDefaults: ShapeValue = {
@@ -251,6 +309,36 @@ export const Display = /*#__PURE__*/ component("Display", displayDefaults);
 export const Shape = /*#__PURE__*/ component("Shape", shapeDefaults);
 
 /**
+ * Marks the view an overlay is drawn from. Everything drawn before the root of that view is kept as one picture while
+ * the overlay is there, and drawn again in the same frame anything in it changes; `cover: "opaque"` draws nothing
+ * under it while it is fully shown. The engine draws its dim and fades the HUD parts it does not keep, with the root's
+ * own enter and exit motion (`fade` when it has none).
+ *
+ * @example
+ * ```tsx
+ * // The case file: opaque once it has faded in, the ward under it is not drawn until it starts to leave.
+ * <panel key="caseSheet" motion={sheetFade} components={[Overlay({ cover: "opaque" })]} />
+ * ```
+ */
+export const Overlay = /*#__PURE__*/ component("Overlay", overlayDefaults);
+
+/**
+ * Tags a view of the HUD layer as a part an overlay may keep or let fade, by `key`.
+ *
+ * @example
+ * ```tsx
+ * <stack key="resEnergy" components={[HudPart({ key: "energy" })]} />
+ * ```
+ */
+export const HudPart = /*#__PURE__*/ component("HudPart", { key: "" });
+
+/**
+ * The level and the landing of an overlay, on the entity that carries `Overlay`. Engine state: `ui` writes it, the
+ * renderer reads it; a game never writes it.
+ */
+export const OverlayLevel = /*#__PURE__*/ component("OverlayLevel", { level: 0, landed: false });
+
+/**
  * Bundles the two components every visual needs, so a projection `view` reads as one line.
  *
  * @param options - Texture key, position, and the four values that have defaults.
@@ -283,16 +371,18 @@ export function sprite(
 }
 
 /**
- * The display helpers bound to one game's asset keys: `texture` only takes a key the scanner
- * generated. The component objects are the same; only the call signatures narrow.
+ * The display helpers bound to one game's asset keys and HUD part keys: `texture` only takes a key the scanner
+ * generated, `HudPart({ key })` and the `hud` list of `Overlay` only a key the game declared. The component objects
+ * are the same; only the call signatures narrow.
  *
  * @example
  * ```ts
- * const kit: RendererKit<"board.cell"> = componentsFor<"board.cell">();
+ * const kit: RendererKit<"board.cell", "energy" | "gems"> = componentsFor<"board.cell", "energy" | "gems">();
  * kit.sprite({ texture: "board.cell", at: { x: 90, y: 90 } });
+ * kit.Overlay({ dim: 0.56, hud: ["energy"] }).value.hud; // ["energy"]
  * ```
  */
-export type RendererKit<Asset extends string> = {
+export type RendererKit<Asset extends string, HudKey extends string = string> = {
   sprite: (
     options: Omit<SpriteOptions, "texture"> & { texture: Asset }
   ) => ReturnType<typeof sprite>;
@@ -301,18 +391,28 @@ export type RendererKit<Asset extends string> = {
     NineSliceValue,
     Partial<Omit<NineSliceValue, "texture">> & { texture?: Asset }
   >;
+  Overlay: Narrowed<
+    OverlayValue,
+    Partial<Omit<OverlayValue, "hud">> & { hud?: "all" | "none" | readonly HudKey[] }
+  >;
+  HudPart: Narrowed<HudPartValue, { key: HudKey }>;
 };
 
 /**
- * Binds `sprite`, `Sprite` and `NineSlice` to one game's asset keys. Type-only: the same objects.
+ * Binds `sprite`, `Sprite` and `NineSlice` to one game's asset keys, and `Overlay` and `HudPart` to its HUD part keys.
+ * Type-only: the same objects.
  *
- * @returns The three helpers with `texture` narrowed to `Asset`.
+ * @returns The five helpers with `texture` narrowed to `Asset` and the HUD keys to `HudKey`.
  * @example
  * ```ts
- * const { Sprite } = componentsFor<"board.cell" | "board.item-wood-1">();
+ * const { Sprite, HudPart } = componentsFor<"board.cell" | "board.item-wood-1", "energy">();
  * Sprite({ texture: "board.cell" }).value.texture; // "board.cell"
+ * HudPart({ key: "energy" }).value.key; // "energy"
  * ```
  */
-export function componentsFor<Asset extends string>(): RendererKit<Asset> {
-  return { sprite, Sprite, NineSlice };
+export function componentsFor<Asset extends string, HudKey extends string = string>(): RendererKit<
+  Asset,
+  HudKey
+> {
+  return { sprite, Sprite, NineSlice, Overlay, HudPart };
 }

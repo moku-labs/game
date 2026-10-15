@@ -1,12 +1,13 @@
 /**
- * @file i18n plugin, build time — the walk over `features/*​/strings/<locale>.json` and the
- * `strings/` of every layer: every file read, every key claimed by one feature or layer, every
- * message compiled once and every problem collected, with the text and the translator note of each
- * key kept aside. `compileStrings`, `exportStrings` and `importStrings` all start from it. Node and
- * Bun only.
+ * @file i18n plugin, build time — the walk over every feature owner of `findFeatureOwners` (a
+ * top-level folder of `features/`, or a sub-feature at any depth) and the `strings/` of every layer:
+ * every file read, every key claimed by one feature or layer, every message compiled once and every
+ * problem collected, with the text and the translator note of each key kept aside.
+ * `compileStrings`, `exportStrings` and `importStrings` all start from it. Node and Bun only.
  */
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { type FeatureOwner, findFeatureOwners } from "../../../project/features";
 import type { LocaleEntry } from "./emit";
 import { compileMessage, type ParameterType } from "./message";
 
@@ -16,6 +17,9 @@ export const PREFIX = "[game] i18n: ";
 /** What a layer folder may not hold: a separator or a ".", which would lead out of the root. */
 const NOT_ONE_FOLDER = /[/\\.]/;
 
+/** What a sub-feature name may hold: it sits between two dots of `strings.<name>.<locale>.ts`. */
+const MODULE_NAME = /^[\w-]+$/;
+
 /**
  * What one value of a string file may be: the message, or the message with a note for the
  * translators. The note is read by people only and never reaches a generated file.
@@ -24,9 +28,16 @@ export type MessageEntry = string | { text: string; note?: string };
 
 /**
  * Where one message came from: the feature or layer label, the root-relative POSIX folder that
- * owns the file (`features/hud` or `shared`), the locale and the path a problem names it by.
+ * owns the file (`features/hud` or `shared`), the locale, the path a problem names it by, and the
+ * parent feature when the owner is a sub-feature (absent for a top-level feature and a layer).
  */
-export type Source = { feature: string; folder: string; locale: string; relative: string };
+export type Source = {
+  feature: string;
+  folder: string;
+  locale: string;
+  relative: string;
+  parent?: string;
+};
 
 /** One parameter of one key, with the file that first typed it that way. */
 export type ParameterOrigin = { type: ParameterType; relative: string };
@@ -42,7 +53,12 @@ export type StringFile = {
   file: string;
   /** The path a problem names it by: `<folder>/strings/<locale>.json`. */
   relative: string;
+  /** The parent feature when the owner is a sub-feature; absent for a top-level feature and a layer. */
+  parent?: string;
 };
+
+/** The owner one string folder is read for: its label, its folder and, for a sub-feature, its parent. */
+type StringOwner = Pick<FeatureOwner, "name" | "dir" | "parent">;
 
 /**
  * Everything one walk collects.
@@ -60,6 +76,11 @@ export type Walk = {
   texts: Map<string, Map<string, string>>;
   /** The translator note of each key per locale, where the file wrote one. */
   notes: Map<string, Map<string, string>>;
+  /**
+   * Every sub-feature that brought at least one string file: feature name to its root-relative
+   * POSIX folder.
+   */
+  subFeatures: Map<string, string>;
 };
 
 /**
@@ -96,6 +117,15 @@ function emptyParameters(): Map<string, Map<string, ParameterOrigin>> {
  * @returns An empty table.
  */
 function emptyTexts(): Map<string, Map<string, string>> {
+  return new Map();
+}
+
+/**
+ * Creates the table of the sub-features that brought string files.
+ *
+ * @returns An empty table.
+ */
+function emptySubFeatures(): Map<string, string> {
   return new Map();
 }
 
@@ -200,22 +230,17 @@ export function isMessageEntry(value: unknown): value is MessageEntry {
 }
 
 /**
- * Lists the sub-folders of a folder that may not exist.
+ * Compares two texts by code unit, the order `.toSorted()` gives strings.
  *
- * @param folder - Path of the folder.
- * @returns The names, sorted.
+ * @param left - One text.
+ * @param right - The other text.
+ * @returns A negative number, zero or a positive number.
+ * @example compareText("features/Board", "features/apple"); // -1
  */
-async function listFolders(folder: string): Promise<string[]> {
-  try {
-    const entries = await readdir(folder, { withFileTypes: true });
+function compareText(left: string, right: string): number {
+  if (left === right) return 0;
 
-    return entries
-      .filter(entry => entry.isDirectory())
-      .map(entry => entry.name)
-      .toSorted();
-  } catch {
-    return [];
-  }
+  return left < right ? -1 : 1;
 }
 
 /**
@@ -242,25 +267,36 @@ async function listLocales(folder: string): Promise<string[]> {
  * yields nothing.
  *
  * @param root - Game source root.
- * @param feature - The label: the feature folder name, or the mapped name of a layer.
- * @param folder - Root-relative POSIX path of the owner folder.
+ * @param owner - The label (the feature folder name, or the mapped name of a layer), the
+ *   root-relative POSIX folder, and the parent of a sub-feature.
  * @returns The files of that folder.
  */
-async function listOwnerFiles(
-  root: string,
-  feature: string,
-  folder: string
-): Promise<StringFile[]> {
+async function listOwnerFiles(root: string, owner: StringOwner): Promise<StringFile[]> {
+  const folder = owner.dir;
   const stringsFolder = path.join(root, ...folder.split("/"), "strings");
   const locales = await listLocales(stringsFolder);
+  const parent = owner.parent === undefined ? {} : { parent: owner.parent };
 
   return locales.map(locale => ({
-    feature,
+    feature: owner.name,
     folder,
     locale,
     file: path.join(stringsFolder, `${locale}.json`),
-    relative: `${folder}/strings/${locale}.json`
+    relative: `${folder}/strings/${locale}.json`,
+    ...parent
   }));
+}
+
+/**
+ * The owner record of a layer: no parent, so its keys take no prefix.
+ *
+ * @param folder - The layer folder under the root.
+ * @param name - The name its keys take.
+ * @returns The record `listOwnerFiles` reads.
+ * @example layerOwner("shared", "ui"); // { name: "ui", dir: "shared" }
+ */
+function layerOwner(folder: string, name: string): StringOwner {
+  return { name, dir: folder };
 }
 
 /**
@@ -278,14 +314,16 @@ function notAFolderName(folder: string): Error {
 }
 
 /**
- * Lists every string file of a game: features sorted, then the layers sorted by folder; inside
- * each, locales sorted. Every layer folder is checked before anything is read.
+ * Lists every string file of a game: the feature owners of `findFeatureOwners` (top-level features
+ * and sub-features at any depth) sorted by folder in code-unit order, then the layers sorted by
+ * folder; inside each, locales sorted. Every layer folder is checked before anything is read.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param features - Name of the folder that holds the features.
  * @param layers - Folder under the root to the name its keys take. Default `{}`: features only.
  * @returns The files, in walk order.
- * @throws {Error} When a layer folder is empty or holds "/", "\" or ".".
+ * @throws {Error} When a layer folder is empty or holds "/", "\" or ".", or when one feature name
+ *   belongs to two folders (the error of `findFeatureOwners`): nothing is read then.
  */
 export async function listStringFiles(
   root: string,
@@ -300,17 +338,17 @@ export async function listStringFiles(
 
   if (outside !== undefined) throw notAFolderName(outside[0]);
 
-  // The features first, then the layers.
+  // The feature owners first, by folder in code-unit order (the order 0.14.12 read features in),
+  // then the layers.
   const files: StringFile[] = [];
-  const featuresFolder = path.join(root, features);
-  const featuresPath = features.split(path.sep).join("/");
+  const owners = [...findFeatureOwners(root, features)].toSorted((left, right) =>
+    compareText(left.dir, right.dir)
+  );
 
-  for (const feature of await listFolders(featuresFolder)) {
-    files.push(...(await listOwnerFiles(root, feature, `${featuresPath}/${feature}`)));
-  }
+  for (const owner of owners) files.push(...(await listOwnerFiles(root, owner)));
 
   for (const [folder, name] of sortedLayers) {
-    files.push(...(await listOwnerFiles(root, name, folder)));
+    files.push(...(await listOwnerFiles(root, layerOwner(folder, name))));
   }
 
   return files;
@@ -452,6 +490,40 @@ function remember(
 }
 
 /**
+ * Tells whether a key may live in the file it came from: any key of a top-level feature or a
+ * layer, and for a sub-feature a key that starts with `<name>.` and goes on after it.
+ *
+ * @param key - The message key.
+ * @param source - Where this message came from.
+ * @returns True when the key belongs there.
+ */
+function isOwnKey(key: string, source: Source): boolean {
+  if (source.parent === undefined) return true;
+
+  const prefix = `${source.feature}.`;
+
+  return key.startsWith(prefix) && key.length > prefix.length;
+}
+
+/**
+ * Records a sub-feature that brought a string file, checking its name once: the name sits between
+ * two dots of its module's file name.
+ *
+ * @param walk - What the walk collects.
+ * @param file - One string file of the walk.
+ */
+function noteSubFeature(walk: Walk, file: StringFile): void {
+  if (file.parent === undefined || walk.subFeatures.has(file.feature)) return;
+
+  walk.subFeatures.set(file.feature, file.folder);
+  if (!MODULE_NAME.test(file.feature)) {
+    walk.problems.push(
+      `${file.folder}: a sub-feature name is letters, digits, "_" and "-", so generated/strings.<name>.<locale>.ts can be read back.`
+    );
+  }
+}
+
+/**
  * Reads one value of a string file and compiles its message into the locale it belongs to.
  *
  * @param walk - What the walk collects.
@@ -463,6 +535,15 @@ function compileOne(walk: Walk, key: string, value: unknown, source: Source): vo
   if (!isMessageEntry(value)) {
     walk.problems.push(
       `"${key}" in ${source.relative}: a message is a string or { "text": string, "note": string }.`
+    );
+
+    return;
+  }
+
+  // A sub-feature's keys start with its name, so its module holds its keys only.
+  if (!isOwnKey(key, source)) {
+    walk.problems.push(
+      `"${key}" in ${source.relative}: a key of the sub-feature "${source.feature}" starts with "${source.feature}.".`
     );
 
     return;
@@ -492,15 +573,17 @@ function compileOne(walk: Walk, key: string, value: unknown, source: Source): vo
 }
 
 /**
- * Walks every string file of a game, features first and then the layers, and compiles every
- * message once. Problems are collected, not thrown, so the caller reports them all in one error.
+ * Walks every string file of a game, the feature owners first (sub-features at any depth) and then
+ * the layers, and compiles every message once. Problems are collected, not thrown, so the caller
+ * reports them all in one error.
  *
  * @param root - Game source root, the folder that holds the features.
  * @param features - Name of the folder that holds the features.
  * @param layers - Folder under the root to the name its keys take. Default `{}`: features only.
  * @returns The compiled messages per locale, the owner and parameters of each key, the texts and
  *   notes of each key per locale, and every problem.
- * @throws {Error} When a layer folder is empty or holds "/", "\" or ".": nothing is read.
+ * @throws {Error} When a layer folder is empty or holds "/", "\" or ".", or when one feature name
+ *   belongs to two folders: nothing is read.
  */
 export async function walkStrings(
   root: string,
@@ -513,10 +596,14 @@ export async function walkStrings(
     params: emptyParameters(),
     problems: [],
     texts: emptyTexts(),
-    notes: emptyTexts()
+    notes: emptyTexts(),
+    subFeatures: emptySubFeatures()
   };
 
   for (const file of await listStringFiles(root, features, layers)) {
+    // Recorded before the file is read, so a broken file keeps the module set stable.
+    noteSubFeature(walk, file);
+
     const table = await readTable(file.file, file.relative, walk);
 
     if (table === undefined) continue;
@@ -525,7 +612,8 @@ export async function walkStrings(
       feature: file.feature,
       folder: file.folder,
       locale: file.locale,
-      relative: file.relative
+      relative: file.relative,
+      ...(file.parent === undefined ? {} : { parent: file.parent })
     };
 
     for (const [key, value] of Object.entries(table)) compileOne(walk, key, value, source);
