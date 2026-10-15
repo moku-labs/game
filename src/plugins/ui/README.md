@@ -264,10 +264,32 @@ The child form, a `scroll` with children and no `rows`, is unchanged: keep it fo
 
 ## Draw order
 
-A child draws with its parent, over the siblings before it. `zIndex` (an integer) changes that:
-it is written as the child's `Order`, so `renderer` sorts the siblings by it; a sibling without
-it draws at 0 in markup order. A new value from a variant or a new render updates the `Order`;
-a child that drops its `zIndex` goes back to 0. The views a slot hosts keep their own `Order`.
+The order of a ui tree is what is drawn and hit. A child draws with its parent, always at an
+`Order` of its own: its `zIndex` (an integer, 0 without one), less a half, plus its place among
+its siblings in small steps (`childOrder` of `ui/jsx/order.ts`). So children draw and are hit in
+markup order at equal `zIndex`, whatever order they were mounted in: a child a condition mounts
+again draws under the sibling written after it. `zIndex` still lifts a child over its siblings; a
+new value from a variant or a new render updates the `Order`, and a child that drops it goes back
+to its markup place. A parent with more than 4096 children spills into the next `zIndex` step; a
+dev build names it once (`ui:too-many-children`).
+
+Inside one element, bottom first:
+
+1. its own visual (depth −0.5);
+2. its children at `zIndex` 0, in markup order;
+3. what hangs under it at `Order` 0: the views a slot hosts, a game's own entities;
+4. its children at `zIndex` 1, then 2, and so on.
+
+The roots of a scene draw in the order of its `projections` (the k-th of n takes `Order` k − n − 1),
+also after a commit mounts one again. The `ui` layer sorts by `Order` (`scenes` makes it so); a scene
+that writes `ui: { sort: "none" }` keeps insertion order. Inside the `ui` layer, bottom first:
+
+1. the scene's JSX roots, in list order;
+2. the focus ring of a root, right above it;
+3. everything at `Order` 0 or without one: a world view drawn in `ui`, a timeline `spawn`;
+4. the popups (1, 2, …);
+5. the guide dim.
+
 A root element ignores `zIndex` (it draws at the order of its root in its layer), and `lint()`
 reports it as `z-index-on-root`.
 A JSX root draws in the layer its projection names (`layer: "scene"` puts it under every `ui`
@@ -368,10 +390,18 @@ const cardMotion: Ui.ElementMotion = {
 ```
 
 A motion with a `loop` hook (a `defineMotion` with `loop`) starts it when the element enters,
-next to `enter`, and keeps its motion apart: the exit sweep never waits for it. When the motion
-prop of a live element names another `loop`, the running loop is cancelled and the new one
-starts; a motion without a loop, or no motion, stops it. Keep a motion a module constant: a
-`defineMotion` called inside a view builds a new loop every render and restarts it.
+next to `enter`, whatever the cause, and keeps its motion apart: the exit sweep never waits for it.
+When the motion prop of a live element names another `loop`, the running loop is cancelled and the
+new one starts; a motion without a loop, or no motion, stops it. A `defineMotion` built again with
+the same loop (the same keys, cycle and reduced-motion rule) is the same loop: it runs on. Still,
+declare a motion at module level: a dev build names an element whose loop was rebuilt by three
+renders in a row (`ui:motion-rebuilt`), and a hand-written loop of a new reference restarts.
+
+`ui` tells the `enter` and `exit` hooks why they play, as their fourth argument: `"mount"` when the
+element comes or goes with its screen (a scene mount or unmount, a restore, a load), `"change"` when
+a commit adds it to or removes it from a live tree, and for every element of a popup. A
+`defineMotion({ when: "change" })` plays nothing for `"mount"`: the element stands at rest from its
+first drawn frame, and leaves with no exit when its scene goes. A default motion plays for both.
 
 ```tsx
 <row key="card" motion={order.ready ? swayWide : swayGentle} />
@@ -399,7 +429,8 @@ So nothing a mount does is written a second time, and a game needs no extra code
 - What a mount does not bring is gone with the old tree, as after a remount of the scene: the
   local state of a component, a scroll offset, the keyboard focus, a text being edited, a hover.
 - The entity of an element is another one after a restore. Ask `ui.find(key)` again.
-- A view hosted in a slot is without its parent for one frame, as after a mount.
+- A view hosted in a slot hangs under the new slot in the frame that builds it, as after a mount.
+- Every element enters with the cause `"mount"`: a `when: "change"` motion stands at rest.
 - A root that is leaving keeps leaving.
 
 `ui` builds in phase `layout`, which a `paused` or `fast` world skips. Until the world runs
@@ -468,13 +499,16 @@ full-screen `button` with a dim fill, and its panel; the panel swallows the taps
 
 ## Hosts
 
-`screen`, `row`, `column` and `stack` take `hosts`: projection names. Each `ui.reconcile`, every
-live view of those projections (`world.projection.entitiesOf`) without a `Parent` and not `Held` by
-a drag gets `Parent({ entity: element })`. It draws in the element's local space, scales with it and
-keeps its `Order` inside it. When the element leaves, or stops naming the projection, the views lose
-that `Parent` and fall back to their layer. An exiting view keeps its host while its exit plays.
-A `guide` whose target is a hosted view cuts its hole where the view is drawn: its pose through
-the `Parent` chain, and its nine-slice or sprite size times that scale.
+`screen`, `row`, `column` and `stack` take `hosts`: projection names. Every live view of those
+projections (`world.projection.entitiesOf`) without a `Parent` and not `Held` by a drag gets
+`Parent({ entity: element })`, in the frame the slot comes: the solve hosts the views of a slot
+that became live in it, so they are drawn under it from their first frame and never alone in their
+layer. A view draws in the element's local space, scales with it and keeps its `Order` inside it
+(over the slot's children at `zIndex` 0). When the element leaves, or stops naming the projection,
+the views lose that `Parent` and fall back to their layer; after a restore the new slot takes them
+in the same frame. An exiting view keeps its host while its exit plays. A `guide` whose target is a
+hosted view cuts its hole where the view is drawn: its pose through the `Parent` chain, and its
+nine-slice or sprite size times that scale.
 
 ```tsx
 <stack
@@ -483,6 +517,29 @@ the `Parent` chain, and its nine-slice or sprite size times that scale.
   style={{ width: 970, height: 970, fit: "contain" }}
 />
 ```
+
+A JSX projection named in `hosts` is laid out in the slot: its root is solved in the slot's
+content box (the box less its padding), in the slot's own units, hangs under the slot at the place
+`hosts` lists it, and moves and scales with the slot without a solve. A resized slot solves it again
+in the same frame. A slot takes a projection with one root, or roots that place themselves
+(`position: "absolute"`): every root of a keyed projection is solved in the whole box.
+
+```tsx
+<stack key="boardBack" style={backStyles.root}>
+  <stack key="rowSlot" style={backStyles.rowSlot} hosts={["orders.row"]} />
+  <stack key="boardField" style={backStyles.field} hosts={["board.cells", "board.items"]} />
+</stack>
+```
+
+- A slot that exits keeps its root until it is gone: the root leaves with it.
+- A slot that stops naming the projection gives the root back to its layer, solved at the viewport
+  size, with no change motion: its rects changed units, not places.
+- Two slots that name one projection: the first takes it, and a dev build names the other
+  (`ui:slot-taken`). Two roots slotted in each other are laid out at the viewport and logged
+  (`ui:slot-cycle`).
+- The rects of a slotted root are in the slot's units. Every reader converts them to root
+  coordinates: the focus ring, a text field, a guide hole and `tree()` (so the `ui` and `locate`
+  doors and the `tap` and `drag` commands land where the element is drawn).
 
 ## Doors
 

@@ -24,7 +24,8 @@ export type SortRule = LayerSort;
 
 /**
  * What a scene declares about its layers: the key is the layer name, the order of the keys is
- * draw order, bottom first. An omitted `sort` means `"none"`. `above: "overlays"` makes the layer
+ * draw order, bottom first. An omitted `sort` means `"none"`, and `"order"` on a layer named `ui`,
+ * so the roots of a scene draw there in the order of its projections. `above: "overlays"` makes the layer
  * the scene's HUD layer: it draws above every overlay and is never part of the picture an overlay
  * keeps. At most one per scene.
  *
@@ -191,7 +192,7 @@ export type DefineScene<
  * ```ts
  * // What defineScene("board", { bundle: "board", layers: { items: { sort: "y" } }, projections: [] })
  * // returns: { id: "board", bundle: "board", music: undefined,
- * //   layers: [{ name: "items", sort: "y" }, { name: "ui", sort: "none" }], projections: [] }
+ * //   layers: [{ name: "items", sort: "y" }, { name: "ui", sort: "order" }], projections: [] }
  * ```
  */
 export type SceneDefinition = {

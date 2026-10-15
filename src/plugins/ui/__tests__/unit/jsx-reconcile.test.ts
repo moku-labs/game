@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { Tappable } from "../../../input/components";
-import { Shape, Sprite } from "../../../renderer/components";
+import { Parent, Shape, Sprite } from "../../../renderer/components";
 import type { ViewportSize } from "../../../renderer/viewport/types";
 import { bind, Text } from "../../../text/components";
-import { component, Tree } from "../../../world/ecs/define";
+import { component, Layer, Order, Tree } from "../../../world/ecs/define";
 import type { AnyComponentType, AnyComponentValue, Entity } from "../../../world/types";
 import { LocalWrite, type UiCountersValue } from "../../components";
 import { createJsxApi } from "../../jsx/api";
-import { createReconciler } from "../../jsx/reconcile";
+import { componentsOf, createReconciler } from "../../jsx/reconcile";
 import { createJsxState } from "../../jsx/state";
 import type { DescriptionNode, Element, ElementMotion, Root } from "../../jsx/types";
 import { layoutChanged } from "../../layout/apply";
@@ -269,6 +269,7 @@ function harness() {
         projection: {
           registerKey: () => nothing,
           keyOf: () => undefined,
+          causeOf: () => undefined,
           entitiesOf: () => [],
           layers: () => [],
           setRest
@@ -329,6 +330,7 @@ function harness() {
     place: vi.fn(),
     free: vi.fn(),
     solve,
+    contentRect: element => ({ x: 0, y: 0, w: element.rect.w, h: element.rect.h }),
     commit: vi.fn(),
     enter: vi.fn(),
     loop,
@@ -786,8 +788,19 @@ describe("a prop outside the comparison", () => {
       turned.children.map(child => h.element(child.key ?? ""))
     );
     expect(h.root().needsSolve).toBe(true);
-    expect(h.touched()).toEqual([]);
+    // Only the draw order of the children follows their new places (spec 16 U1.5).
+    expect(h.ecs.add).not.toHaveBeenCalled();
+    expect(h.ecs.remove).not.toHaveBeenCalled();
+    expect(new Set(h.ecs.set.mock.calls.map(call => call[1].componentName))).toEqual(
+      new Set(["Order"])
+    );
     expect(h.resolveElement).not.toHaveBeenCalled();
+
+    const orders = turned.children.map(
+      child => (h.stored(child.key ?? "", Order) as { value: number } | undefined)?.value ?? 0
+    );
+
+    expect(orders).toEqual(orders.toSorted((first, second) => first - second));
   });
 
   it("takes another key for another element: the old one exits, the new one enters", () => {
@@ -805,7 +818,7 @@ describe("a prop outside the comparison", () => {
 
     expect(h.entity("bar")).toBe(-1);
     expect(h.entity("strip")).not.toBe(old);
-    expect(h.layout.exit).toHaveBeenCalledExactlyOnceWith(h.state.jsx.elements.get(old));
+    expect(h.layout.exit).toHaveBeenCalledExactlyOnceWith(h.state.jsx.elements.get(old), "change");
     expect(h.resolveElement).toHaveBeenCalledTimes(1);
   });
 
@@ -1062,5 +1075,55 @@ describe("refreshAll", () => {
     expect(h.resolveElement).toHaveBeenCalledTimes(ELEMENTS);
     expect(h.applyStyle).toHaveBeenCalledTimes(ELEMENTS);
     expect(h.counters.written).toBe(ELEMENTS);
+  });
+});
+
+// ─── the draw order of an element (spec 16 U1) ─────────────────
+
+describe("the draw order of an element", () => {
+  // Bug (C1): a child without zIndex carries no Order and draws where Pixi happened to insert it.
+  it("gives every child an Order from its place among its siblings", () => {
+    const h = harness();
+
+    h.mount(screen());
+
+    expect(["bar", "title", "go"].map(key => h.stored(key, Order))).toEqual([
+      { value: -0.499_877_929_687_5 },
+      { value: -0.499_755_859_375 },
+      { value: -0.499_267_578_125 }
+    ]);
+  });
+
+  // Bug (C2): a slotted root keeps its layer and draws on the whole screen, over its slot.
+  it("hangs a slotted root element under its host, at the place the host lists it, with its layer", () => {
+    const h = harness();
+
+    h.mount(screen());
+
+    const values = componentsOf(h.element("page"), {
+      layer: "ui",
+      order: -1,
+      slot: { host: 42, order: 1 }
+    });
+    const named = (name: string): unknown =>
+      values.find(value => value.type.componentName === name)?.value;
+
+    expect([named("Parent"), named("Layer"), named("Order")]).toEqual([
+      { entity: 42 },
+      { name: "ui" },
+      { value: 1 }
+    ]);
+  });
+
+  it("keeps the layer and the order of its root on a root element", () => {
+    const h = harness();
+
+    h.mount(screen());
+
+    expect([h.stored("page", Layer), h.stored("page", Order), h.stored("page", Parent)]).toEqual([
+      { name: "ui" },
+      { value: 0 },
+      undefined
+    ]);
   });
 });

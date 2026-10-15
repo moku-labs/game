@@ -15,8 +15,8 @@ import { Escapable, LocalWrite, UI_OWNER } from "../components";
 import { asHandle } from "../errors";
 import type { Rect } from "../layout/types";
 import type { FocusRing, UiCtx } from "../types";
-import { visualRectOf } from "../visual";
 import type { Fields } from "./fields";
+import { rootRectOf } from "./hosts";
 import { sortedRoots } from "./tree";
 import type { DrawnRing, Element, JsxState, PointerFlag, Root } from "./types";
 
@@ -177,7 +177,8 @@ export function createFocus(
         ecs.has(element.entity, LocalWrite);
       const backdrop = element.node.props.escape === true && element.children.length === 0;
 
-      if (answers && !backdrop) found.push({ element, rect: visualRectOf(element, lookup) });
+      if (answers && !backdrop)
+        found.push({ element, rect: rootRectOf(ctx, state, element, lookup) });
     }
 
     found.sort((first, second) => readingOrder(first.rect, second.rect));
@@ -212,7 +213,7 @@ export function createFocus(
     if (root === undefined) return;
 
     const look: FocusRing = ctx.config.focusRing;
-    const box = visualRectOf(element, lookup);
+    const box = rootRectOf(ctx, state, element, lookup);
     const radius = (element.style.radius ?? 0) + look.offset;
     const rect: DrawnRing = {
       layer: root.layer,

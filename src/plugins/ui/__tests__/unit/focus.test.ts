@@ -21,6 +21,9 @@ function rootOf(patch: Partial<Root>): Root {
     element: 100,
     popup: undefined,
     covered: false,
+    cause: undefined,
+    slot: undefined,
+    slotRect: undefined,
     ...patch
   };
 }

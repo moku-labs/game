@@ -35,6 +35,8 @@ A `scroll` takes children for a short list. A long list takes the windowed form:
 
 Row state belongs in the model: a row that leaves the window loses its local state. The full rules are in the [ui README](../src/plugins/ui/README.md#scroll-windowing).
 
+Children draw and are hit in markup order at equal `zIndex`, also a child a condition mounts again; the roots of a scene draw in the order of its `projections` (the `ui` layer sorts by `Order`). `hosts` names the projections a container holds: their world views hang under it from the slot's first frame, and a JSX projection named there is laid out in the slot's content box: `<stack key="rowSlot" hosts={["orders.row"]} style={{ width: 600, height: 200 }} />`. The rules are in the [ui README](../src/plugins/ui/README.md#draw-order).
+
 ```tsx
 // features/hud/view.tsx — the HUD, a reward popup and the choreography they share
 import type { Anim } from "@moku-labs/game";

@@ -5,10 +5,16 @@
  * a drag are pointer events on the fake canvas, which `input` listens to.
  *
  * Two scenes and a popup. `ward`: the JSX root `wardScene` in layer `scene` (a slot `pan` that
- * hosts the world projection `ward.pan`, a child stack with the door, and a badge at `zIndex: 10`)
- * and the `ui` root `wardHud`, whose shop button lies exactly over the door. `board`: the JSX root
- * `boardBack`, whose child `field` hosts `board.cells` (drop targets) and `board.items`
- * (draggable), and the JSX projection `orders.row`. The popup `Shop` opens from the ward.
+ * hosts the world projection `ward.pan` over its own child `panFrame`, a panel at `zIndex` 0, a
+ * child stack with the door, and a badge at `zIndex: 10`) and the `ui` root `wardHud`, whose shop
+ * button lies exactly over the door. `board`: the JSX root `boardBack`, whose child `field` hosts
+ * `board.cells` (drop targets) and `board.items` (draggable), the JSX projection `board.badge`
+ * keyed by the cell of the item, and the JSX projection `orders.row` over it. The popup `Shop`
+ * opens from the ward and over the board. `order.overlap`, mounted by hand, holds two overlapping
+ * buttons, the first one shown by a local flag.
+ *
+ * The app draws on the fake Pixi, or on the real one with a stand-in GPU (`startDrawnApp({ stage })`),
+ * where the tree oracle of the renderer's tests can read every frame the helpers step.
  */
 import {
   createApp,
@@ -24,8 +30,9 @@ import {
 } from "../../../index";
 import type { Manifest } from "../../assets/types";
 import type { CompiledMessages } from "../../i18n/types";
-import { type FakeDom, installFakeDom } from "../../renderer/__tests__/fake-dom";
+import { type FakeDom, type FakeElement, installFakeDom } from "../../renderer/__tests__/fake-dom";
 import { createFakePixi, type FakePixi, FakeTexture } from "../../renderer/__tests__/fake-pixi";
+import type { StagePixi } from "../../renderer/__tests__/stage-pixi";
 import type { Entity } from "../../world/types";
 import { popup } from "../components";
 import { defineComponent } from "../jsx/component";
@@ -102,7 +109,9 @@ export const wardScene = projection({
         key="pan"
         hosts={["ward.pan"]}
         style={{ position: "absolute", top: 0, left: 0, width: 1080, height: 1080, reason: "pan" }}
-      />
+      >
+        <panel key="panFrame" style={{ width: 1080, height: 1080 }} />
+      </stack>
       <column
         key="wardStack"
         style={{
@@ -206,6 +215,90 @@ export const ordersRow = projection({
   )
 });
 
+/** A badge on the cell of the first item, a JSX root keyed by that cell: a move remounts it. */
+export const boardBadge = projection({
+  name: "board.badge",
+  layer: "ui",
+  from: (player: DrawnPlayer): ScreenItem[] => [{ id: player.items[0]?.cell ?? "none" }],
+  key: (badge: ScreenItem) => badge.id,
+  view: () => (
+    <stack
+      key="badge"
+      style={{ position: "absolute", top: 1650, left: 0, width: 400, height: 200, reason: "badge" }}
+    />
+  )
+});
+
+/**
+ * Two overlapping buttons, `first` shown while the local flag says so, and the two buttons that
+ * flip the flag.
+ */
+export const Overlap = defineComponent("Overlap", {
+  local: { shown: true },
+  view: (_props: object, local) => (
+    <stack key="overlapRoot" style={{ width: 1080, height: 1920 }}>
+      {local.shown ? (
+        <button
+          key="first"
+          intent="first"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: 400,
+            height: 400,
+            reason: "first"
+          }}
+        />
+      ) : undefined}
+      <button
+        key="second"
+        intent="second"
+        style={{
+          position: "absolute",
+          top: 200,
+          left: 200,
+          width: 400,
+          height: 400,
+          reason: "second"
+        }}
+      />
+      <button
+        key="hideFirst"
+        local={{ shown: false }}
+        style={{
+          position: "absolute",
+          top: 1400,
+          left: 600,
+          width: 200,
+          height: 200,
+          reason: "hide"
+        }}
+      />
+      <button
+        key="showFirst"
+        local={{ shown: true }}
+        style={{
+          position: "absolute",
+          top: 1600,
+          left: 600,
+          width: 200,
+          height: 200,
+          reason: "show"
+        }}
+      />
+    </stack>
+  )
+});
+
+/** The screen of the overlapping buttons, mounted by hand: no scene names it. */
+export const overlapScreen = projection({
+  name: "order.overlap",
+  layer: "ui",
+  from: (): ScreenItem => ({ id: "overlap" }),
+  view: () => <Overlap key="overlap" />
+});
+
 /** The ward. The hud is listed first: only the layers put the scene root under it. */
 export const wardSceneDef = defineScene("ward", {
   bundle: "ward",
@@ -217,7 +310,7 @@ export const wardSceneDef = defineScene("ward", {
 export const boardSceneDef = defineScene("board", {
   bundle: "board",
   layers: { cells: {}, items: {}, lifted: {} },
-  projections: [boardBack, boardCells, boardItems, ordersRow]
+  projections: [boardBack, boardCells, boardItems, boardBadge, ordersRow]
 });
 
 const ward = defineNode({
@@ -238,7 +331,16 @@ const shop = defineNode({
 const board = defineNode({
   rest: true,
   scene: "board",
-  outcomes: { drop: type<{ item: string; cell: string }>(), back: type() }
+  outcomes: { drop: type<{ item: string; cell: string }>(), back: type(), shop: type() }
+});
+
+const boardShop = defineNode({
+  outcomes: { close: type() },
+  run: async ({ fx, out }) => {
+    await fx(popup(Shop, {}));
+
+    return out.close();
+  }
 });
 
 const move = defineNode({
@@ -254,13 +356,14 @@ const move = defineNode({
 });
 
 const main = defineFlow("main", {
-  nodes: { ward, shop, board, move },
+  nodes: { ward, shop, board, boardShop, move },
   start: "ward",
   outcomes: {},
   edges: {
     ward: { board: "board", shop: "shop" },
     shop: { close: "ward" },
-    board: { drop: "move", back: "ward" },
+    board: { drop: "move", back: "ward", shop: "boardShop" },
+    boardShop: { close: "board" },
     move: { done: "board" }
   }
 });
@@ -269,8 +372,18 @@ const main = defineFlow("main", {
 export const drawnFeature = defineFeature("drawn", {
   flows: [main],
   scenes: [wardSceneDef, boardSceneDef],
-  projections: [wardPan, wardScene, wardHud, boardCells, boardItems, boardBack, ordersRow],
-  ui: [Shop],
+  projections: [
+    wardPan,
+    wardScene,
+    wardHud,
+    boardCells,
+    boardItems,
+    boardBack,
+    boardBadge,
+    ordersRow,
+    overlapScreen
+  ],
+  ui: [Shop, Overlap],
   strings: { en: english }
 });
 
@@ -283,16 +396,54 @@ export async function tick(times = 80): Promise<void> {
   for (let index = 0; index < times; index += 1) await Promise.resolve();
 }
 
+/** What the app draws on: the fake Pixi, or the real one with a stand-in GPU; a press goes to its canvas. */
+export type DrawnPixi = { last(): { canvas: FakeElement } };
+
+/** How a test starts the drawn app. */
+export type DrawnOptions = {
+  /** The real Pixi with a stand-in GPU, drawn on demand, instead of the fake one. */
+  stage?: StagePixi;
+  /** The texture every key answers; a fake texture when left out. */
+  texture?: () => unknown;
+};
+
+/** What runs after every frame the helpers step, by app: the tree oracle's check. */
+const afterFrames = new WeakMap<object, () => void>();
+
+/**
+ * Calls a check after every frame the helpers of this file step for one app.
+ *
+ * @param app - The running app.
+ * @param check - What to call: the tree oracle's `check`.
+ */
+export function afterEachFrame(app: object, check: () => void): void {
+  afterFrames.set(app, check);
+}
+
+/**
+ * Steps one frame of 16 ms, then the check of `afterEachFrame`.
+ *
+ * @param app - The running app.
+ * @param app.time - Its time plugin.
+ * @param app.time.step - Steps one frame.
+ */
+export function step(app: { time: { step(deltaMs: number): void } }): void {
+  app.time.step(16);
+  afterFrames.get(app)?.();
+}
+
 /**
  * Starts the screen set plus the drawn feature on the fake page, with the flow resting on `ward`
  * and the ward drawn. The fake page stubs globals: the test takes them down with
  * `vi.unstubAllGlobals()` after each case.
  *
+ * @param options - The real Pixi and its texture, for a test the tree oracle watches.
  * @returns The started app, its page and its Pixi.
  */
-export async function startDrawnApp() {
+export async function startDrawnApp(options: DrawnOptions = {}) {
   const dom: FakeDom = installFakeDom({ width: 1080, height: 1920 });
-  const pixi: FakePixi = createFakePixi();
+  const pixi: FakePixi | StagePixi = options.stage ?? createFakePixi();
+  const drawing = options.stage === undefined ? {} : { onDemand: true, warm: 0 };
   const app = createApp({
     plugins: [...screen, drawnFeature],
     pluginConfigs: {
@@ -310,12 +461,12 @@ export async function startDrawnApp() {
         initialSession: { visits: 0 },
         seed: 1
       },
-      renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module) }
+      renderer: { mount: "#game", loadPixi: () => Promise.resolve(pixi.module), ...drawing }
     }
   });
 
   await app.start();
-  app.renderer.sync.textures.provide(() => new FakeTexture({}) as never);
+  app.renderer.sync.textures.provide(() => (options.texture?.() ?? new FakeTexture({})) as never);
   app.flow.run().catch(() => undefined);
   await settle(app, 4);
 
@@ -334,7 +485,7 @@ export type DrawnApp = Awaited<ReturnType<typeof startDrawnApp>>["app"];
 export async function settle(app: DrawnApp, frames = 3): Promise<void> {
   await tick();
 
-  for (let frame = 0; frame < frames; frame += 1) app.time.step(16);
+  for (let frame = 0; frame < frames; frame += 1) step(app);
 
   await tick();
 }
@@ -350,7 +501,7 @@ export type DrawnPoint = { x: number; y: number };
  * @param name - The DOM event name.
  * @param point - Where, in reference units.
  */
-function pointer(app: DrawnApp, pixi: FakePixi, name: string, point: DrawnPoint): void {
+export function pointer(app: DrawnApp, pixi: DrawnPixi, name: string, point: DrawnPoint): void {
   const client = app.renderer.viewport.toScreen(point);
 
   pixi.last().canvas.dispatch(name, {
@@ -369,11 +520,11 @@ function pointer(app: DrawnApp, pixi: FakePixi, name: string, point: DrawnPoint)
  * @param pixi - Its Pixi.
  * @param point - Where, in reference units.
  */
-export async function press(app: DrawnApp, pixi: FakePixi, point: DrawnPoint): Promise<void> {
+export async function press(app: DrawnApp, pixi: DrawnPixi, point: DrawnPoint): Promise<void> {
   pointer(app, pixi, "pointerdown", point);
-  app.time.step(16);
+  step(app);
   pointer(app, pixi, "pointerup", point);
-  app.time.step(16);
+  step(app);
   await settle(app, 1);
 }
 
@@ -387,25 +538,25 @@ export async function press(app: DrawnApp, pixi: FakePixi, point: DrawnPoint): P
  */
 export async function drag(
   app: DrawnApp,
-  pixi: FakePixi,
+  pixi: DrawnPixi,
   from: DrawnPoint,
   to: DrawnPoint
 ): Promise<void> {
   pointer(app, pixi, "pointerdown", from);
-  app.time.step(16);
+  step(app);
 
-  for (let step = 1; step <= 4; step += 1) {
+  for (let move = 1; move <= 4; move += 1) {
     const at = {
-      x: from.x + ((to.x - from.x) * step) / 4,
-      y: from.y + ((to.y - from.y) * step) / 4
+      x: from.x + ((to.x - from.x) * move) / 4,
+      y: from.y + ((to.y - from.y) * move) / 4
     };
 
     pointer(app, pixi, "pointermove", at);
-    app.time.step(16);
+    step(app);
   }
 
   pointer(app, pixi, "pointerup", to);
-  app.time.step(16);
+  step(app);
   await settle(app, 1);
 }
 

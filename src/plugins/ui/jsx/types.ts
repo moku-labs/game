@@ -16,7 +16,7 @@ import type {
   ProjectionMotion,
   ViewHandle
 } from "../../world/projection/types";
-import type { AnyComponentValue, Entity } from "../../world/types";
+import type { AnyComponentValue, Entity, MotionCause } from "../../world/types";
 import type { BoxValue } from "../components";
 import type { IsFlags, ResolvedStyle, Style } from "../styles/types";
 import type { ElementComponents } from "./intrinsics";
@@ -221,13 +221,21 @@ export type StyleBasis = { epoch: number; rowHeight: number | undefined };
  * `measuredSize` what its measure function last answered, before Yoga's clamp: a bound text whose
  * new string measures the same asks for no solve. `basis` is what `style` was resolved on, set
  * once the style is on the layout node and the components are written; an element without one is
- * patched in full at its next patch.
+ * patched in full at its next patch. `index` is its place among the element children of its parent
+ * at the last diff (0 for a root element): with its `zIndex` it gives the child its `Order`.
+ * `cause` is why the element appeared: `"mount"` when it came with the first build of its root and
+ * the root came by a mount, `"change"` otherwise; its `enter` hook is told. `rebuilds` counts the
+ * patches in a row that brought a loop of another reference that is not really another loop: a
+ * dev build names the element once it reaches three.
  */
 export type Element = {
   entity: Entity;
   identity: string;
   type: string;
   key: string | undefined;
+  index: number;
+  cause: MotionCause;
+  rebuilds: number;
   parentType: string | undefined;
   root: Entity;
   node: DescriptionNode;
@@ -271,7 +279,10 @@ export type PopupLink = {
 /**
  * One reconciled tree: a projection view or a popup, with the flags the frame step reads.
  * `covered` is true while the root is kept under another popup; every element of the root then
- * resolves `is.covered`.
+ * resolves `is.covered`. `cause` is how the root came, read at its first build: `"change"` for a
+ * popup (its open is an event), the cause of its projection view otherwise, `"mount"` after a
+ * restore or a load. `slot` is the host element the root is laid out in (`undefined` for the
+ * viewport), `slotRect` the content box it was last solved in, in the host's own units.
  */
 export type Root = {
   entity: Entity;
@@ -284,6 +295,9 @@ export type Root = {
   element: Entity | undefined;
   popup: PopupLink | undefined;
   covered: boolean;
+  cause: MotionCause | undefined;
+  slot: Entity | undefined;
+  slotRect: { x: number; y: number; w: number; h: number } | undefined;
 };
 
 /**
@@ -420,6 +434,12 @@ export type JsxState = {
   removing: Set<Entity>;
   hosts: Set<Entity>;
   hosted: Map<Entity, Entity>;
+  /** The host elements that became live in this solve: the solve hosts their views in the same frame (spec 16 U2). */
+  risen: Set<Entity>;
+  /** The views the full hosting step of this frame took back from their host; their removal lands at the flush. */
+  released: Set<Entity>;
+  /** The cause the elements entered by the diff running now take: the root's for its first build, else `"change"`. */
+  building: MotionCause | undefined;
   reconciles: number;
   focus: FocusState;
   fields: Map<Entity, Field>;

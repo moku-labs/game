@@ -51,6 +51,9 @@ function elementOf(patch: Partial<Element>): Element {
     extraHandles: new Map(),
     warnedOwned: new Set(),
     warned: new Set(),
+    index: 0,
+    cause: "change",
+    rebuilds: 0,
     scrolledIn: false,
     ...patch
   };
@@ -76,7 +79,10 @@ function stateWith(element: Element): JsxState {
     needsSolve: false,
     element: element.entity,
     popup: undefined,
-    covered: false
+    covered: false,
+    cause: undefined,
+    slot: undefined,
+    slotRect: undefined
   });
 
   return state;

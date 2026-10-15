@@ -87,6 +87,9 @@ function textElement(props: Record<string, unknown>): Element {
     extraHandles: new Map(),
     warnedOwned: new Set(),
     warned: new Set(),
+    index: 0,
+    cause: "change",
+    rebuilds: 0,
     scrolledIn: false
   };
 }

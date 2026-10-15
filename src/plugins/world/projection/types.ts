@@ -511,7 +511,8 @@ export type View = {
  *   owner: { kind: "projection", name: "board.items" },
  *   live: new Map(),
  *   queue: [],
- *   items: new Map()
+ *   items: new Map(),
+ *   order: -1
  * };
  * ```
  */
@@ -520,6 +521,11 @@ export type Mounted = {
   live: Map<string, View>;
   queue: View[];
   items: Map<string, unknown>;
+  /**
+   * The `Order` a screen root of this projection draws at in its layer: its place in the list `mount` was given,
+   * minus the length of that list (the roots of one scene take −n … −1, in list order).
+   */
+  order: number;
 };
 
 /**

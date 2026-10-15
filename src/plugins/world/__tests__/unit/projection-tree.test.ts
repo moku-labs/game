@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Layer, Tree } from "../../ecs/define";
+import { Layer, Order, Tree } from "../../ecs/define";
 import { projection } from "../../projection/define";
 import type { AnyProjectionSpec, DescriptionNode } from "../../projection/types";
 import { MOUNT_OWNER } from "./board";
@@ -173,5 +173,86 @@ describe("the Layer of a screen", () => {
     world.api.projection.mount([HUD], MOUNT_OWNER);
 
     expect(read).toEqual(["scene"]);
+  });
+});
+
+/**
+ * Registers three screens in layer `ui` and mounts them in one list, as a scene mounts its
+ * projections.
+ *
+ * @param world - The mock world.
+ * @param node - The node every `view` returns.
+ * @param read - Called by a `Tree` hook opened before the mount.
+ * @param changes - The `change` hooks of the three projections, by component name.
+ * @returns The entities of the three roots, in list order.
+ */
+function mountThree(
+  world: ReturnType<typeof createMockWorld>,
+  node: () => DescriptionNode,
+  read?: (entity: number) => void,
+  changes?: Record<string, () => undefined>
+): number[] {
+  const names = ["first", "second", "third"];
+
+  world.model.player = { hud: { coins: 5 } };
+  world.api.projection.setLayers([{ name: "ui", sort: "order" }]);
+
+  for (const name of names) {
+    world.api.projection.register(
+      projection({
+        name,
+        layer: "ui",
+        from: (player: { hud: Hud }) => player.hud,
+        view: () => node(),
+        ...(changes === undefined ? {} : { motion: { change: changes } })
+      }) as AnyProjectionSpec
+    );
+  }
+
+  world.start();
+  if (read !== undefined) world.api.ecs.onAdded(Tree, read);
+  world.api.projection.mount(names, MOUNT_OWNER);
+
+  return names.map(name => world.api.projection.entityOf(name, name) ?? 0);
+}
+
+describe("the Order of a screen root (spec 16 U1.6)", () => {
+  // Bug (C1): every root sorts at 0, so the roots of a scene draw in the order they were mounted.
+  it("gives the root of the k-th of n projections Order k - n - 1", () => {
+    const world = createMockWorld();
+    const roots = mountThree(world, () => hudNode(5));
+
+    expect(roots.map(entity => world.api.ecs.get(entity, Order)?.value)).toEqual([-3, -2, -1]);
+  });
+
+  // Bug: Order comes after Tree, so the hook of ui reads no order and the root draws at 0.
+  it("attaches Order before Tree, so the Tree hook reads it", () => {
+    const world = createMockWorld();
+    const read: Array<number | undefined> = [];
+
+    mountThree(
+      world,
+      () => hudNode(5),
+      entity => read.push(world.api.ecs.get(entity, Order)?.value)
+    );
+
+    expect(read).toEqual([-3, -2, -1]);
+  });
+
+  // Bug: every new node writes the root's Order again, which resorts the layer every render.
+  it("writes no Order for a new node of the same root", () => {
+    const world = createMockWorld();
+    let node = hudNode(5);
+    const changed = { Tree: vi.fn(() => undefined), Order: vi.fn(() => undefined) };
+
+    mountThree(world, () => node, undefined, changed);
+    world.frame(16);
+    node = hudNode(9);
+    world.model.player = { hud: { coins: 9 } };
+    world.commit();
+    world.frame(16);
+
+    expect(changed.Tree).toHaveBeenCalledTimes(3);
+    expect(changed.Order).not.toHaveBeenCalled();
   });
 });

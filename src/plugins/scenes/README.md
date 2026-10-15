@@ -43,14 +43,16 @@ The layer names are inferred from the keys of `layers`, and `NoInfer` keeps `pro
 
 ## The appended `ui` layer
 
-Every scene gets `{ name: "ui", sort: "none" }` on top of the layers it declared, so the HUD and the popups always have a place to mount and a game never has to remember the line. A scene that declares `ui` itself keeps the place it wrote it in and gets no second one — that is how a game puts an `fx` layer over the HUD. The layer check runs after the append, so a projection may name `ui` as its `layer` or its `lift` without declaring it, and a name that is neither declared nor `ui` is still rejected, by the compiler and at run time.
+Every scene gets `{ name: "ui", sort: "order" }` on top of the layers it declared, so the HUD and the popups always have a place to mount and a game never has to remember the line. A scene that declares `ui` itself keeps the place it wrote it in and gets no second one — that is how a game puts an `fx` layer over the HUD. The layer check runs after the append, so a projection may name `ui` as its `layer` or its `lift` without declaring it, and a name that is neither declared nor `ui` is still rejected, by the compiler and at run time.
 
 ```ts
 defineScene("board", { bundle: "board", layers: { cells: {}, items: { sort: "y" } }, projections: [hudPanel] }).layers;
-// [{ name: "cells", sort: "none" }, { name: "items", sort: "y" }, { name: "ui", sort: "none" }]
+// [{ name: "cells", sort: "none" }, { name: "items", sort: "y" }, { name: "ui", sort: "order" }]
 ```
 
-`sort` left out means `"none"`. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is plain frozen data, so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey, Player, Session>`.
+`sort` left out means `"none"`, except on a layer named `ui`, which sorts by `Order`: the roots of a scene draw there
+in the order of its `projections`, and a popup over them. A scene that writes `ui: { sort: "none" }` keeps insertion
+order. An integer-like layer name such as `"1"` throws: JavaScript lists integer keys first, so the draw order would not be the one that was written. The result is plain frozen data, so it is a helper and not an API member; `defineGame<Types>()` returns it typed as `DefineScene<AssetKey, BundleKey, Player, Session>`.
 
 ## The HUD layer: `{ above: "overlays" }`
 
@@ -58,7 +60,7 @@ A layer that says `above: "overlays"` is the scene's HUD layer: it is drawn abov
 
 ```ts
 defineScene("ward", { bundle: "ui", layers: { scene: {}, hud: { above: "overlays" } }, projections }).layers;
-// [{ name: "scene", sort: "none" }, { name: "ui", sort: "none" }, { name: "hud", sort: "none", above: "overlays" }]
+// [{ name: "scene", sort: "none" }, { name: "ui", sort: "order" }, { name: "hud", sort: "none", above: "overlays" }]
 ```
 
 Three mistakes throw:

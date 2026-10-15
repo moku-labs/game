@@ -2,9 +2,12 @@
  * @file ui/jsx — `tree()`: the live screen as plain data. A pure reader over the state, so it
  * answers in plain Bun with no renderer at all.
  */
+import type { TransformValue } from "../../renderer/components";
 import { parseTags } from "../../text/tags";
 import type { Warn } from "../../text/types";
 import type { Entity } from "../../world/types";
+import type { Rect } from "../layout/types";
+import { drawnRect } from "../visual";
 import { fieldValue } from "./fields";
 import type { Element, JsxState, Root, UiNode } from "./types";
 import { isOwnKey } from "./window";
@@ -95,14 +98,21 @@ function textStyleOf(element: Element): string | undefined {
  * Turns one element and its subtree into snapshot nodes. The rect is natural; a fitted element
  * adds the scale it is drawn at; a text adds the words it draws and the style key of a keyed
  * text; a text field adds its value; a windowed scroll adds its window. The spacers of a windowed
- * scroll are left out: its content lists the live rows.
+ * scroll are left out: its content lists the live rows. The rects of a root laid out in a slot are
+ * in the slot's units: `place` maps them into root coordinates.
  *
  * @param state - The jsx state.
  * @param element - The element to read.
  * @param resolvedOf - Reads the resolved string of a text entity; none in a read without a world.
+ * @param place - Maps a rect of a slotted root into root coordinates; none for a root on the viewport.
  * @returns The node, with its children in child order.
  */
-function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | undefined): UiNode {
+function nodeOf(
+  state: JsxState,
+  element: Element,
+  resolvedOf: ResolvedOf | undefined,
+  place?: (rect: Rect) => Rect
+): UiNode {
   // The children, in child order; the spacers of a windowed scroll are skipped.
   const children: UiNode[] = [];
 
@@ -110,7 +120,7 @@ function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | unde
     const childElement = state.elements.get(child);
 
     if (childElement !== undefined && !isOwnKey(childElement.key)) {
-      children.push(nodeOf(state, childElement, resolvedOf));
+      children.push(nodeOf(state, childElement, resolvedOf, place));
     }
   }
 
@@ -118,7 +128,7 @@ function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | unde
   const node: UiNode = {
     key: element.key,
     type: element.type,
-    rect: { ...element.rect },
+    rect: place === undefined ? { ...element.rect } : place(element.rect),
     style: element.style,
     state: { ...element.is },
     children
@@ -147,7 +157,8 @@ function nodeOf(state: JsxState, element: Element, resolvedOf: ResolvedOf | unde
 
 /**
  * Every mounted root in the order a reader meets them: the popup roots first, the highest `Order`
- * of them first, then the projection roots in the layer order of the scene.
+ * of them first, then the projection roots in the layer order of the scene, and by their `Order`
+ * inside one layer, bottom first, as they draw.
  *
  * @param state - The jsx state.
  * @param layers - The layer names of the scene, in draw order.
@@ -168,17 +179,39 @@ export function sortedRoots(state: JsxState, layers: readonly string[]): Root[] 
   };
 
   popups.sort((first, second) => second.order - first.order);
-  screens.sort((first, second) => indexOf(first) - indexOf(second));
+  // Inside one layer the roots are listed as they draw: by their order (spec 16 U1.6).
+  screens.sort((first, second) => indexOf(first) - indexOf(second) || first.order - second.order);
 
   return [...popups, ...screens];
 }
 
 /**
- * Reads every mounted root, popups first, then the projection roots in layer order.
+ * How the rects of one root reach root coordinates: unchanged on the viewport, through the root
+ * pose of its slot for a root laid out in one.
+ *
+ * @param root - The root.
+ * @param slotPose - The root pose of a slot; none in a read without a world.
+ * @returns The mapping, or `undefined` when the rects are root coordinates already.
+ */
+function placeOf(
+  root: Root,
+  slotPose: ((slot: Entity) => TransformValue) | undefined
+): ((rect: Rect) => Rect) | undefined {
+  if (root.slot === undefined || slotPose === undefined) return undefined;
+
+  const pose = slotPose(root.slot);
+
+  return (rect: Rect): Rect => drawnRect(pose, rect);
+}
+
+/**
+ * Reads every mounted root, popups first, then the projection roots in layer order. The rects of a
+ * root laid out in a slot are reported in root coordinates, through the root pose of its slot.
  *
  * @param state - The jsx state.
  * @param layers - The layer names of the scene, in draw order.
  * @param resolvedOf - Reads the string `text` resolved for an entity; none in a read without a world.
+ * @param slotPose - The root pose of a slot, `rootPoseOf` of `renderer`; none in a read without a world.
  * @returns One root node, or every root under a `screen` node.
  * @example
  * ```ts
@@ -188,14 +221,16 @@ export function sortedRoots(state: JsxState, layers: readonly string[]): Root[] 
 export function readTree(
   state: JsxState,
   layers: readonly string[] = [],
-  resolvedOf?: ResolvedOf
+  resolvedOf?: ResolvedOf,
+  slotPose?: (slot: Entity) => TransformValue
 ): UiNode {
   const nodes: UiNode[] = [];
 
   for (const root of sortedRoots(state, layers)) {
     const element = root.element === undefined ? undefined : state.elements.get(root.element);
 
-    if (element !== undefined) nodes.push(nodeOf(state, element, resolvedOf));
+    if (element !== undefined)
+      nodes.push(nodeOf(state, element, resolvedOf, placeOf(root, slotPose)));
   }
 
   const single = nodes.length === 1 ? nodes[0] : undefined;

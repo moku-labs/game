@@ -40,7 +40,8 @@ function isIntegerKey(name: string): boolean {
 
 /**
  * One frozen layer entry: `above` is copied only when the author wrote it, so a scene without a HUD layer gives the
- * same entries as before.
+ * same entries as before. A layer named `ui` sorts by `Order` unless the scene says otherwise; every other layer
+ * keeps insertion order unless it says otherwise.
  *
  * @param id - Id of the scene, for the error.
  * @param name - The layer name.
@@ -49,7 +50,8 @@ function isIntegerKey(name: string): boolean {
  * @throws {Error} For an `above` other than `"overlays"`.
  */
 function layerEntry(id: string, name: string, spec: LayerMap[string]): LayerSpec {
-  const sort = spec.sort ?? "none";
+  // The roots of a scene draw in the ui layer in the order of its projections (spec 16 U1.7).
+  const sort = spec.sort ?? (name === UI_LAYER ? "order" : "none");
 
   if (spec.above === undefined) return Object.freeze({ name, sort });
 
@@ -121,7 +123,7 @@ function layersOf(id: string, layers: LayerMap): LayerSpec[] {
   const hud = hudIndexOf(id, list);
 
   if (!list.some(layer => layer.name === UI_LAYER)) {
-    const ui = Object.freeze({ name: UI_LAYER, sort: "none" as const });
+    const ui = Object.freeze({ name: UI_LAYER, sort: "order" as const });
 
     if (hud === -1) list.push(ui);
     else list.splice(hud, 0, ui);
@@ -192,11 +194,11 @@ function namesOf(
  * });
  *
  * boardScene.layers[2]; // { name: "items", sort: "y" }
- * boardScene.layers[4]; // { name: "ui", sort: "none" }, appended for the HUD
+ * boardScene.layers[4]; // { name: "ui", sort: "order" }, appended for the HUD
  *
  * // A HUD layer above every overlay: `ui` goes right under it.
  * defineScene("ward", { bundle: "ui", layers: { scene: {}, hud: { above: "overlays" } }, projections }).layers;
- * // [{ name: "scene", sort: "none" }, { name: "ui", sort: "none" }, { name: "hud", sort: "none", above: "overlays" }]
+ * // [{ name: "scene", sort: "none" }, { name: "ui", sort: "order" }, { name: "hud", sort: "none", above: "overlays" }]
  *
  * // features/location/view/ward.ts: the room is the art of the episode the session plays.
  * export const wardScene = defineScene("ward", {

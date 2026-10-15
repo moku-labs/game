@@ -272,7 +272,7 @@ describe("the synchronous block of the switch", () => {
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
       { name: "lifted", sort: "none" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
     expect(mock.world.unmounted[0]).toEqual([]);
     expect(mock.world.mounted[1]).toEqual({

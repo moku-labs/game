@@ -3,6 +3,7 @@
  * reconcile, so its siblings reflow this frame while it plays its exit over them.
  */
 import { Exiting } from "../../world/ecs/define";
+import type { MotionCause } from "../../world/types";
 import type { Element } from "../jsx/types";
 import type { UiCtx } from "../types";
 import { play, still } from "./motion";
@@ -17,12 +18,14 @@ import type { LayoutState, MotionSpan } from "./types";
  * @param ctx - Domain context of the ui plugin.
  * @param state - The layout state.
  * @param element - The element that left the description.
+ * @param cause - Why it leaves: a `when: "change"` hook plays nothing for `"mount"`, and the next sweep takes it.
  * @param span - Notes the longest finite track the exit hook starts, for the level of an overlay.
  */
 export function beginExit(
   ctx: UiCtx,
   state: LayoutState,
   element: Element,
+  cause: MotionCause,
   span?: MotionSpan
 ): void {
   detachNode(state, element);
@@ -36,7 +39,12 @@ export function beginExit(
 
   const hook = element.motion?.exit;
 
-  play(ctx, element, hook === undefined ? undefined : view => hook(view, element.node), span);
+  play(
+    ctx,
+    element,
+    hook === undefined ? undefined : view => hook(view, element.node, undefined, cause),
+    span
+  );
 }
 
 /**

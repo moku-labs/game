@@ -64,6 +64,8 @@ export type StageRenderer = {
     base64(options: unknown): Promise<string>;
     pixels(options: unknown): { pixels: Uint8ClampedArray; width: number; height: number };
   };
+  /** WebGPU only: loses the device, as a phone under memory pressure does; the engine builds a new application. */
+  loseDevice?(reason?: string): void;
   gpu?: {
     device: {
       lost: Promise<{ reason: string }>;
@@ -335,10 +337,18 @@ function createRenderer(
   };
 
   if (kind === "webgpu") {
+    let lose: ((info: { reason: string }) => void) | undefined;
+
     renderer.gpu = {
-      // A device that is never lost: the promise never settles.
-      device: { lost: new Promise(() => undefined), createShaderModule: compileShader }
+      // A device that is lost only when a test says so: until then the promise never settles.
+      device: {
+        lost: new Promise(resolve => {
+          lose = resolve;
+        }),
+        createShaderModule: compileShader
+      }
     };
+    renderer.loseDevice = (reason = "destroyed") => lose?.({ reason });
   } else {
     renderer.runners = {
       prerender: new pixi.SystemRunner("prerender"),

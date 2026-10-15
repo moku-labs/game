@@ -1286,6 +1286,13 @@ export type SyncState = {
   removed: Set<Entity>;
   /** Entities whose `Parent` was removed: `world` marks no change then, only `onRemoved` fires. */
   reparented: Set<Entity>;
+  /**
+   * Views whose `Parent` has no view yet: detached, drawn nowhere, attached at the end of the pass that builds the
+   * parent's view (spec 16 U2.4).
+   */
+  orphans: Set<Entity>;
+  /** Entities the tree check of a dev or agent build already reported, so each is reported once (spec 16 U2.5). */
+  mismatched: Set<Entity>;
   /** The nine-slice switch, from `config.debug` and `debug.nineSlice`; the pixel check lives in `demand`. */
   debug: { nineSlice: boolean };
   /** The nine-slice switch moved: the next pass writes every nine-slice again. */

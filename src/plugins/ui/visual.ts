@@ -266,3 +266,25 @@ export function samePose(
     first.pivot.y === second.pivot.y
   );
 }
+
+/**
+ * Where a local box of a view lands in root space: moved by the pose, scaled around its pivot.
+ * A guide hole is axis-aligned, so the rotation is left out.
+ *
+ * @param pose - The root pose of the view, `rootPoseOf` of `renderer`.
+ * @param local - The box in the view's local units.
+ * @returns The rect in root coordinates.
+ * @example
+ * ```ts
+ * drawnRect({ x: 200, y: 200, rotation: 0, scale: 0.8, pivot: { x: 250, y: 250 } },
+ *   { x: 50, y: 50, w: 100, h: 100 }); // { x: 40, y: 40, w: 80, h: 80 }
+ * ```
+ */
+export function drawnRect(pose: Readonly<TransformValue>, local: Rect): Rect {
+  return {
+    x: pose.x + pose.scale * (local.x - pose.pivot.x),
+    y: pose.y + pose.scale * (local.y - pose.pivot.y),
+    w: local.w * pose.scale,
+    h: local.h * pose.scale
+  };
+}

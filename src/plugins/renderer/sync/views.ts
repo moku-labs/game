@@ -100,6 +100,12 @@ type WritablePoint = { x: number; y: number; set(x: number, y?: number): void };
 const WHITE = 0xff_ff_ff;
 
 /**
+ * The depth of a wrapper's own visual among the wrapper's children: a child at `Order` 0 or more draws above it, one
+ * at −1 or less below it, and a ui child at `zIndex` 0 (an `Order` between −0.5 and 0) above it too (spec 16 U1.8).
+ */
+const VISUAL_DEPTH = -0.5;
+
+/**
  * Marks an entity before a write that changes what Pixi holds for its view: the demand module judges the view as it
  * was drawn. A second mark of the frame costs a lookup.
  *
@@ -1010,8 +1016,8 @@ function writeRotation(
 /**
  * Gives a parent entity the container its children hang in. A v8 sprite takes no children, so
  * the parent's own visual moves into the wrapper as child 0 and the transform moves with it. The
- * wrapper sorts its children by their `Order`; the visual is child 0 at depth 0, so a child with
- * the same depth draws above it. A clipping parent hangs its children one level down, in the
+ * wrapper sorts its children by their `Order`; the visual is child 0 at depth −0.5, so a child at
+ * `Order` 0, and a ui child at `zIndex` 0, draws above it. A clipping parent hangs its children one level down, in the
  * masked container `applyClip` adds. The filters and the alpha of a built-in visual move up to
  * the wrapper, so they cover the children too.
  *
@@ -1040,7 +1046,7 @@ export function ensureWrapper(sctx: SyncCtx, parentEntity: Entity): PixiContaine
     container.addChildAt(wrapper, Math.max(0, container.children.indexOf(view.object)));
   }
 
-  view.object.zIndex = 0;
+  view.object.zIndex = VISUAL_DEPTH;
   wrapper.addChild(view.object);
   view.wrapper = wrapper;
   // The subtree reasons move from the visual up to the wrapper; the visual keeps only its own.
@@ -1079,8 +1085,30 @@ function childHostOf(sctx: SyncCtx, parentEntity: Entity): PixiContainer | undef
 }
 
 /**
+ * Detaches a view whose parent has no view yet and keeps it as an orphan, drawn nowhere until the pass that builds
+ * the parent's view hangs it (spec 16 U2.4). A parent that carries no visual at all is reported, once per orphan.
+ *
+ * @param sctx - Domain context of the sync module.
+ * @param entity - The entity.
+ * @param view - Its view.
+ * @param parentEntity - The entity its `Parent` names.
+ */
+function keepOrphan(sctx: SyncCtx, entity: Entity, view: View, parentEntity: Entity): void {
+  const orphans = sctx.ctx.state.sync.orphans;
+  const known = orphans.has(entity);
+
+  orphans.add(entity);
+  detach(view.wrapper ?? view.object);
+
+  if (!known && visualOf(sctx, parentEntity) === undefined) {
+    sctx.ctx.log.warn("renderer: parent draws nothing", { entity, parent: parentEntity });
+  }
+}
+
+/**
  * Hangs a view where it belongs: under its parent, or in the container of the layer it names.
- * An entity with no layer and no parent is not drawn.
+ * An entity with no layer and no parent is not drawn. A view whose parent has no view yet waits
+ * as an orphan, detached, so it is never drawn in a layer while its parent waits.
  *
  * @param sctx - Domain context of the sync module.
  * @param entity - The entity.
@@ -1101,16 +1129,18 @@ export function attach(sctx: SyncCtx, entity: Entity, view: View): void {
     view.layer = "";
 
     if (host === undefined) {
-      sctx.ctx.log.warn("renderer: parent draws nothing", { entity, parent: parentEntity });
-      detach(view.object);
+      keepOrphan(sctx, entity, view, parentEntity);
 
       return;
     }
 
+    state.orphans.delete(entity);
     host.addChild(view.wrapper ?? view.object);
 
     return;
   }
+
+  state.orphans.delete(entity);
 
   const name = layerNameOf(sctx, entity);
   const container = layerContainer(state, name);
@@ -1295,6 +1325,8 @@ function detachChildren(sctx: SyncCtx, entity: Entity, host: PixiContainer): voi
     markView(sctx, child);
     detach(object);
     orphans.push(child);
+    // A child that stays waits for the parent's next view (a new `Display`, a visual that comes back).
+    sctx.ctx.state.sync.orphans.add(child);
   }
 
   if (orphans.length > 0) {
@@ -1325,6 +1357,7 @@ export function dropView(sctx: SyncCtx, entity: Entity): void {
   if (host !== undefined) detachChildren(sctx, entity, host);
 
   state.views.delete(entity);
+  state.orphans.delete(entity);
   state.entityOf.delete(view.object);
   state.viewOfTop.delete(view.wrapper ?? view.object);
   untrackKey(state, entity, view.textureKey);
@@ -1386,6 +1419,8 @@ export function stopSync(state: SyncState): void {
   state.added.clear();
   state.removed.clear();
   state.reparented.clear();
+  state.orphans.clear();
+  state.mismatched.clear();
   state.providers.length = 0;
   state.filters.clear();
   state.areas.clear();

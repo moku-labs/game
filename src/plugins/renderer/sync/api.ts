@@ -26,6 +26,7 @@ import { destroyPools, detach, dropPooled } from "./pools";
 import { parentOf } from "./pose";
 import { createSyncSystem } from "./system";
 import { clearFrames, createTexture, destroyTexture, sliceTexture } from "./textures";
+import { checkTree } from "./tree-check";
 import type {
   CreateTextureOptions,
   DebugSwitches,
@@ -231,6 +232,51 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
+   * Step 4 for the orphans (spec 16 U2.4): every view that waits for its parent's view is hung once the parent has one,
+   * placed and sorted there, in the pass that built the parent. A view that lost its `Parent` meanwhile goes to its
+   * layer. One whose parent still has no view is left alone: nothing is written, so no frame is asked for.
+   *
+   * @param touched - The entities the tree check reads, in a dev or agent build: the hung ones join it.
+   */
+  const attachOrphans = (touched: Set<Entity> | undefined): void => {
+    if (state.orphans.size === 0) return;
+
+    const ecs = ctx.deps.world.ecs;
+
+    for (const entity of copyOf(state.orphans)) {
+      const parent = parentOf(ecs, entity);
+
+      if (!state.views.has(entity)) state.orphans.delete(entity);
+      else if (parent === 0 || state.views.has(parent)) {
+        withView(entity, view => {
+          attach(sctx, entity, view);
+          applyTransform(sctx, entity, view);
+          resort(sctx, entity, view);
+        });
+        touched?.add(entity);
+      }
+    }
+  };
+
+  /**
+   * The entities the tree check of this pass reads: the ones it built and the ones it hangs again (a new `Parent` or
+   * `Layer`, a `Parent` that left). Read before the change steps clear the set of the views that lost their `Parent`.
+   *
+   * @param built - The entities this pass has just built.
+   * @returns A new set, which the orphan step adds to.
+   */
+  const touchedBy = (built: ReadonlySet<Entity>): Set<Entity> => {
+    const touched = copyOf(built);
+    const ecs = ctx.deps.world.ecs;
+
+    for (const entity of ecs.changed(Parent)) touched.add(entity);
+    for (const entity of ecs.changed(Layer)) touched.add(entity);
+    for (const entity of state.reparented) touched.add(entity);
+
+    return touched;
+  };
+
+  /**
    * Step 4 for the components a plugin above draws its own way: one `update` per changed value.
    *
    * @param built - The entities this pass has just built, whose adapter wrote them already.
@@ -410,7 +456,7 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
   };
 
   /**
-   * One pass: removed, layers, added, changed, invalidated. A despawned entity takes its filter
+   * One pass: removed, layers, added, changed, orphans, invalidated. A despawned entity takes its filter
    * slots with it, also when its view left in an earlier pass; a live one keeps them for its next
    * view.
    */
@@ -442,12 +488,21 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     }
 
     const built = buildParentFirst(takeAdded());
+    // The tree check runs in a dev or an agent build only; the guard is inline so a release build drops it (U2.5).
+    const touched =
+      (typeof __MOKU_GAME_DEV__ !== "undefined" && __MOKU_GAME_DEV__) ||
+      (typeof __MOKU_GAME_AGENT__ !== "undefined" && __MOKU_GAME_AGENT__)
+        ? touchedBy(built)
+        : undefined;
 
     applyChanges(built);
     applyReparented(built);
+    attachOrphans(touched);
     applyAdapterChanges(built);
     applyInvalidated();
     applyOutlines();
+
+    if (touched !== undefined) checkTree(sctx, touched);
   };
 
   /**
@@ -473,6 +528,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
     state.views.clear();
     state.entityOf.clear();
     state.byKey.clear();
+    // The rebuild hangs every view again, parent first: nothing waits for a parent of the old tree.
+    state.orphans.clear();
+    state.mismatched.clear();
     // The views that showed the crops are gone; the rebuild cuts them again for its own views.
     clearFrames(state);
     destroyPools(state);

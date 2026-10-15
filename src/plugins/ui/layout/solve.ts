@@ -140,3 +140,19 @@ export function solveRoot(
 
   return place(state, rootElement, { origin: { x: size.x, y: size.y }, content: size }, lookup);
 }
+
+/**
+ * The content box of an element in its own units: its rect less its computed padding, at the
+ * padding's top-left corner. A JSX root laid out in a slot is solved in it (spec 16 U3.4). Without
+ * Yoga or a node it is the whole box at 0, 0.
+ *
+ * @param state - The layout state, for the node of the element and the edge enums of Yoga.
+ * @param element - The element, a slot.
+ * @returns The content box.
+ */
+export function contentRectOf(state: LayoutState, element: Element): Rect {
+  const box: Rect = { x: 0, y: 0, w: element.rect.w, h: element.rect.h };
+  const node = state.byEntity.get(element.entity);
+
+  return node === undefined ? box : frameOf(state, box, node).content;
+}

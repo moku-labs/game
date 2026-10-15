@@ -814,8 +814,9 @@ jump, because `Transform` is in reference space on every layer. The first time a
 a parent it gets a wrapper `Container` (a v8 sprite takes no children); its own visual becomes child
 0 and the transform moves to the wrapper. A wrapper sorts its children: a parented entity takes
 `zIndex` from its `Order` (0 without one) when it is attached and when `Order` changes, whatever
-layer its parent is in. The parent's own visual has depth 0, so a child with the same depth draws
-above it and a child with a negative `Order` below it. A layer container keeps its own sort rule.
+layer its parent is in. The parent's own visual has depth −0.5, so a child at `Order` 0 or more
+draws above it, a child at −1 or less below it, and a `ui` child at `zIndex` 0 (an `Order` between
+−0.5 and 0) above it too. A layer container keeps its own sort rule.
 A clipping parent (`Shape.clip`, `NineSlice.clip`) masks only its children. Its wrapper holds the
 parent's own visual, a sortable `Container` labelled `children#<entity>` that the children hang in,
 and the mask `Graphics` (`clip#<entity>`) beside it, so the mask never cuts the parent's stroke or
@@ -859,6 +860,21 @@ back a held loop shows its old phase once.
 
 Removing `Parent` puts the view back in the layer its `Layer` names, at its own pose, in the same
 pass: `world` records no change for a removed component, so `sync` watches `onRemoved(Parent)`.
+
+A pass builds every parent before its child when both wait in it. A view whose `Parent` has no view
+yet (its parent comes in a later pass, or carries no visual yet, or left and comes back) is an
+orphan: detached and drawn nowhere, never in its layer while its parent waits. The pass that builds
+the parent's view hangs every orphan of it at the end, placed and sorted there, so a view a game
+hosts under a root spawned after it is drawn inside that root from the root's first frame, on start,
+on a node entry, after a restore and after a lost device. `"renderer: parent draws nothing"` is
+logged only for a parent that carries no visual component at all, once per orphan.
+
+A dev or agent build checks the tree after every pass: every view the pass built, hung again or took
+out of the orphans must hang under its parent's child container, or in its layer without a parent.
+One that does not is logged once, `ctx.log.error("renderer:tree-mismatch", { entity, parent })`:
+the hit test maps a point through the ECS `Parent` chain and finds its candidates in the Pixi tree,
+so a mismatch is a press that misses. Read it first in the log of a debug build when a phone run
+takes no input. A production build checks nothing.
 
 ## Textures
 

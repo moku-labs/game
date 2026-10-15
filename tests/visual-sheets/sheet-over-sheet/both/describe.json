@@ -701,6 +701,9 @@
       "components": {
         "Layer": {
           "name": "hud"
+        },
+        "Order": {
+          "value": -5
         }
       },
       "key": "hud.bar",
@@ -718,7 +721,7 @@
           "name": "hud"
         },
         "Order": {
-          "value": 0
+          "value": -5
         },
         "Shape": {
           "alpha": 1,
@@ -757,6 +760,9 @@
         },
         "HudPart": {
           "key": "energy"
+        },
+        "Order": {
+          "value": -0.499755859375
         },
         "Parent": {
           "key": "hudBar",
@@ -797,6 +803,9 @@
           "x": 240,
           "y": 40
         },
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "hudEnergy",
           "projection": "hud.bar"
@@ -825,6 +834,9 @@
         },
         "HudPart": {
           "key": "gems"
+        },
+        "Order": {
+          "value": -0.4996337890625
         },
         "Parent": {
           "key": "hudBar",
@@ -865,6 +877,9 @@
           "x": 440,
           "y": 40
         },
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "hudGems",
           "projection": "hud.bar"
@@ -893,6 +908,9 @@
         },
         "HudPart": {
           "key": "level"
+        },
+        "Order": {
+          "value": -0.4998779296875
         },
         "Parent": {
           "key": "hudBar",
@@ -937,6 +955,9 @@
         "HudPart": {
           "key": "shop"
         },
+        "Order": {
+          "value": -0.49951171875
+        },
         "Parent": {
           "key": "hudBar",
           "projection": "hud.bar"
@@ -976,6 +997,9 @@
       "components": {
         "Layer": {
           "name": "ui"
+        },
+        "Order": {
+          "value": -3
         }
       },
       "key": "settings",
@@ -990,6 +1014,9 @@
           "y": 900
         },
         "Escapable": true,
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "settingsPanel",
           "projection": "settings.sheet"
@@ -1037,7 +1064,7 @@
           "name": "ui"
         },
         "Order": {
-          "value": 0
+          "value": -3
         },
         "Overlay": {
           "cover": "none",
@@ -1085,6 +1112,9 @@
           "x": 240,
           "y": 600
         },
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "settingsLayer",
           "projection": "settings.sheet"
@@ -1124,6 +1154,9 @@
           "w": 160,
           "x": 220,
           "y": 980
+        },
+        "Order": {
+          "value": -0.4998779296875
         },
         "Parent": {
           "key": "shopSheetPanel",
@@ -1168,6 +1201,9 @@
           "x": 700,
           "y": 980
         },
+        "Order": {
+          "value": -0.499755859375
+        },
         "Parent": {
           "key": "shopSheetPanel",
           "projection": "shop.sheet"
@@ -1207,6 +1243,9 @@
       "components": {
         "Layer": {
           "name": "ui"
+        },
+        "Order": {
+          "value": -4
         }
       },
       "key": "shop",
@@ -1221,6 +1260,9 @@
           "y": 0
         },
         "Escapable": true,
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "shopDimLayer",
           "projection": "shop.sheet"
@@ -1268,7 +1310,7 @@
           "name": "ui"
         },
         "Order": {
-          "value": 0
+          "value": -4
         },
         "Overlay": {
           "cover": "none",
@@ -1319,6 +1361,9 @@
           "x": 140,
           "y": 900
         },
+        "Order": {
+          "value": -0.499755859375
+        },
         "Parent": {
           "key": "shopDimLayer",
           "projection": "shop.sheet"
@@ -1358,6 +1403,9 @@
           "w": 60,
           "x": 120,
           "y": 300
+        },
+        "Order": {
+          "value": -0.4998779296875
         },
         "Parent": {
           "key": "wardFrost",
@@ -1399,6 +1447,9 @@
           "x": 520,
           "y": 520
         },
+        "Order": {
+          "value": -0.499755859375
+        },
         "Parent": {
           "key": "wardFrost",
           "projection": "ward.root"
@@ -1439,6 +1490,9 @@
           "x": 820,
           "y": 260
         },
+        "Order": {
+          "value": -0.4996337890625
+        },
         "Parent": {
           "key": "wardFrost",
           "projection": "ward.root"
@@ -1475,6 +1529,9 @@
       "components": {
         "Layer": {
           "name": "scene"
+        },
+        "Order": {
+          "value": -6
         }
       },
       "key": "ward.root",
@@ -1487,6 +1544,9 @@
           "w": 160,
           "x": 800,
           "y": 1300
+        },
+        "Order": {
+          "value": -0.4993896484375
         },
         "Parent": {
           "key": "wardRoot",
@@ -1531,6 +1591,9 @@
           "x": 120,
           "y": 1300
         },
+        "Order": {
+          "value": -0.49951171875
+        },
         "Parent": {
           "key": "wardRoot",
           "projection": "ward.root"
@@ -1574,6 +1637,9 @@
           "x": 0,
           "y": 0
         },
+        "Order": {
+          "value": -0.499755859375
+        },
         "Parent": {
           "key": "wardRoot",
           "projection": "ward.root"
@@ -1599,6 +1665,9 @@
           "w": 1080,
           "x": 0,
           "y": 0
+        },
+        "Order": {
+          "value": -0.4998779296875
         },
         "Parent": {
           "key": "wardRoot",
@@ -1647,6 +1716,9 @@
           "x": 460,
           "y": 900
         },
+        "Order": {
+          "value": -0.4996337890625
+        },
         "Parent": {
           "key": "wardRoot",
           "projection": "ward.root"
@@ -1694,7 +1766,7 @@
           "name": "scene"
         },
         "Order": {
-          "value": 0
+          "value": -6
         },
         "Shape": {
           "alpha": 1,

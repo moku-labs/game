@@ -3,19 +3,13 @@
  * a hole over it. The gate narrowing belongs to the runner; `ui` only draws.
  */
 import type { FxHandler } from "../../flow/fx/types";
-import {
-  NineSlice,
-  Shape,
-  Sprite,
-  Transform,
-  type TransformValue
-} from "../../renderer/components";
+import { NineSlice, Shape, Sprite, Transform } from "../../renderer/components";
 import { rootPoseOf } from "../../renderer/sync/pose";
 import { Layer, Order } from "../../world/ecs/define";
 import type { Entity } from "../../world/types";
 import { Box, UI_OWNER } from "../components";
 import type { UiCtx } from "../types";
-import { visualRectOf } from "../visual";
+import { drawnRect, visualRectOf } from "../visual";
 import type { ElementLookup, Rect } from "./types";
 
 /** How dark the four rectangles around the hole are. */
@@ -49,30 +43,9 @@ export function readTarget(payload: unknown): { projection: string; key: string 
 }
 
 /**
- * Where a local box of a view lands in root space: moved by the pose, scaled around its pivot.
- * A guide hole is axis-aligned, so the rotation is left out.
- *
- * @param pose - The root pose of the view, `rootPoseOf` of `renderer`.
- * @param local - The box in the view's local units.
- * @returns The rect in root coordinates.
- * @example
- * ```ts
- * drawnRect({ x: 200, y: 200, rotation: 0, scale: 0.8, pivot: { x: 250, y: 250 } },
- *   { x: 50, y: 50, w: 100, h: 100 }); // { x: 40, y: 40, w: 80, h: 80 }
- * ```
- */
-export function drawnRect(pose: Readonly<TransformValue>, local: Rect): Rect {
-  return {
-    x: pose.x + pose.scale * (local.x - pose.pivot.x),
-    y: pose.y + pose.scale * (local.y - pose.pivot.y),
-    w: local.w * pose.scale,
-    h: local.h * pose.scale
-  };
-}
-
-/**
  * The rect of the view a guide points at: where a ui element is drawn (its `Box` scaled by every
- * fitted element on the way up), the `Box` of an element the lookup does not know, else where a
+ * fitted element on the way up, through the pose of its slot for a root laid out in one), the `Box`
+ * of an element the lookup does not know, else where a
  * view is drawn: its pose composed through the `Parent` chain (a view a ui slot hosts sits in the
  * slot's space) with the size of its panel or its sprite. A sprite of size 0 is drawn at its
  * texture's size, which `ui` does not know: its hole has size 0.
@@ -85,7 +58,13 @@ export function drawnRect(pose: Readonly<TransformValue>, local: Rect): Rect {
 export function rectOfTarget(ctx: UiCtx, entity: Entity, lookup?: ElementLookup): Rect | undefined {
   const element = lookup?.(entity);
 
-  if (element !== undefined && lookup !== undefined) return visualRectOf(element, lookup);
+  if (element !== undefined && lookup !== undefined) {
+    const rect = visualRectOf(element, lookup);
+    // A root laid out in a slot is solved in the slot's units: its rect is mapped through the slot's pose (spec 16 U3).
+    const slot = ctx.state.jsx.roots.get(element.root)?.slot;
+
+    return slot === undefined ? rect : drawnRect(rootPoseOf(ctx.deps.world.ecs, slot), rect);
+  }
 
   const ecs = ctx.deps.world.ecs;
   const box = ecs.get(entity, Box);

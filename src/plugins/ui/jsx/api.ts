@@ -4,6 +4,7 @@
  * `layout` injected.
  */
 import type { KeyInput, RawSample } from "../../input/types";
+import { rootPoseOf } from "../../renderer/sync/pose";
 import { Text } from "../../text/components";
 import type { Entity, LayerSpec } from "../../world/types";
 import type { UiCtx } from "../types";
@@ -79,7 +80,8 @@ export function createJsxApi(ctx: UiCtx, modules: JsxModules): JsxModule {
   };
 
   return {
-    tree: (): UiNode => readTree(state, layerNames(), resolvedOf),
+    tree: (): UiNode =>
+      readTree(state, layerNames(), resolvedOf, slot => rootPoseOf(ctx.deps.world.ecs, slot)),
 
     find,
 

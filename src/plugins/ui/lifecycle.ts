@@ -205,6 +205,8 @@ export function stopUi(state: State): void {
   state.jsx.removing.clear();
   state.jsx.hosts.clear();
   state.jsx.hosted.clear();
+  state.jsx.risen.clear();
+  state.jsx.released.clear();
   state.jsx.scrolls.clear();
   state.jsx.remount = false;
   state.jsx.hints.length = 0;

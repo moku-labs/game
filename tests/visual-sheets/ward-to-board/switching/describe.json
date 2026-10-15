@@ -330,6 +330,9 @@
       "components": {
         "Layer": {
           "name": "scene"
+        },
+        "Order": {
+          "value": -4
         }
       },
       "key": "board.root",
@@ -342,6 +345,9 @@
           "w": 160,
           "x": 200,
           "y": 500
+        },
+        "Order": {
+          "value": -0.4998779296875
         },
         "Parent": {
           "key": "boardRoot",
@@ -382,6 +388,9 @@
           "w": 160,
           "x": 500,
           "y": 500
+        },
+        "Order": {
+          "value": -0.499755859375
         },
         "Parent": {
           "key": "boardRoot",
@@ -427,7 +436,7 @@
           "name": "scene"
         },
         "Order": {
-          "value": 0
+          "value": -4
         },
         "Shape": {
           "alpha": 1,
@@ -463,6 +472,9 @@
           "w": 160,
           "x": 800,
           "y": 1300
+        },
+        "Order": {
+          "value": -0.4996337890625
         },
         "Parent": {
           "key": "boardRoot",
@@ -503,6 +515,9 @@
       "components": {
         "Layer": {
           "name": "hud"
+        },
+        "Order": {
+          "value": -3
         }
       },
       "key": "hud.bar",
@@ -520,7 +535,7 @@
           "name": "hud"
         },
         "Order": {
-          "value": 0
+          "value": -3
         },
         "Shape": {
           "alpha": 1,
@@ -559,6 +574,9 @@
         },
         "HudPart": {
           "key": "energy"
+        },
+        "Order": {
+          "value": -0.499755859375
         },
         "Parent": {
           "key": "hudBar",
@@ -599,6 +617,9 @@
           "x": 240,
           "y": 40
         },
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "hudEnergy",
           "projection": "hud.bar"
@@ -627,6 +648,9 @@
         },
         "HudPart": {
           "key": "gems"
+        },
+        "Order": {
+          "value": -0.4996337890625
         },
         "Parent": {
           "key": "hudBar",
@@ -667,6 +691,9 @@
           "x": 440,
           "y": 40
         },
+        "Order": {
+          "value": -0.4998779296875
+        },
         "Parent": {
           "key": "hudGems",
           "projection": "hud.bar"
@@ -695,6 +722,9 @@
         },
         "HudPart": {
           "key": "level"
+        },
+        "Order": {
+          "value": -0.4998779296875
         },
         "Parent": {
           "key": "hudBar",
@@ -738,6 +768,9 @@
         },
         "HudPart": {
           "key": "shop"
+        },
+        "Order": {
+          "value": -0.49951171875
         },
         "Parent": {
           "key": "hudBar",

@@ -64,6 +64,9 @@ export function createJsxState(): JsxState {
     removing: emptySet(),
     hosts: emptySet(),
     hosted: emptyMap(),
+    risen: emptySet(),
+    released: emptySet(),
+    building: undefined,
     reconciles: 0,
     focus: {
       entity: undefined,

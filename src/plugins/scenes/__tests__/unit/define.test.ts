@@ -53,7 +53,7 @@ describe("defineScene", () => {
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
       { name: "lifted", sort: "none" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
   });
 
@@ -178,20 +178,34 @@ describe("defineScene and the ui layer", () => {
     expect(scene.layers).toEqual([
       { name: "cells", sort: "none" },
       { name: "items", sort: "y" },
-      { name: "ui", sort: "none" }
+      { name: "ui", sort: "order" }
     ]);
   });
 
   it("appends it to a scene that declares no layer at all", () => {
     const scene = defineScene("boot", { bundle: "boot", layers: {}, projections: [] });
 
-    expect(scene.layers).toEqual([{ name: "ui", sort: "none" }]);
+    expect(scene.layers).toEqual([{ name: "ui", sort: "order" }]);
   });
 
-  it("appends it once and not twice when the scene declares ui itself", () => {
+  // Bug (C1, U1.7): the roots of a scene draw in mount order, so a root remounted by a commit covers the others.
+  it("appends it once and not twice when the scene declares ui itself, sorted by order", () => {
     const scene = defineScene("home", { bundle: "home", layers: { ui: {} }, projections: [] });
 
-    expect(scene.layers).toEqual([{ name: "ui", sort: "none" }]);
+    expect(scene.layers).toEqual([{ name: "ui", sort: "order" }]);
+  });
+
+  it("keeps insertion order for a ui layer the scene declares with sort none", () => {
+    const scene = defineScene("home", {
+      bundle: "home",
+      layers: { ui: { sort: "none" }, fx: {} },
+      projections: []
+    });
+
+    expect(scene.layers).toEqual([
+      { name: "ui", sort: "none" },
+      { name: "fx", sort: "none" }
+    ]);
   });
 
   it("leaves a declared ui where it was written, under the layers above it", () => {
@@ -262,7 +276,7 @@ describe("defineScene and the HUD layer", () => {
 
     expect(scene.layers).toEqual([
       { name: "scene", sort: "none" },
-      { name: "ui", sort: "none" },
+      { name: "ui", sort: "order" },
       { name: "hud", sort: "none", above: "overlays" }
     ]);
   });
@@ -275,7 +289,7 @@ describe("defineScene and the HUD layer", () => {
     });
 
     expect(JSON.stringify(scene.layers)).toBe(
-      '[{"name":"cells","sort":"none"},{"name":"items","sort":"y"},{"name":"ui","sort":"none"}]'
+      '[{"name":"cells","sort":"none"},{"name":"items","sort":"y"},{"name":"ui","sort":"order"}]'
     );
   });
 

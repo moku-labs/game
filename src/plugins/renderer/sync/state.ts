@@ -87,7 +87,7 @@ function createWarmState(): WarmState {
 }
 
 /**
- * Creates the initial sync state: no root, no layers, no view, no pool, no provider, no filter, no
+ * Creates the initial sync state: no root, no layers, no view, no orphan, no pool, no provider, no filter, no
  * filter area, no slice, no hidden mask, no overlay, no warm-up, no redraw counted and no unseen walk kept.
  *
  * @param debug - The debug switches of the config; copied, so the frozen config stays untouched.
@@ -114,6 +114,8 @@ export function createSyncState(debug: Readonly<Partial<DebugSwitches>>): SyncSt
     added: emptySet(),
     removed: emptySet(),
     reparented: emptySet(),
+    orphans: emptySet(),
+    mismatched: emptySet(),
     debug: { nineSlice: debug.nineSlice === true },
     outlinesStale: false,
     filters: emptyMap(),

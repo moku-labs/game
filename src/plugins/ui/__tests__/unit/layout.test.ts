@@ -8,11 +8,13 @@ import { Fragment, jsx } from "../../jsx/runtime";
 import { createJsxState } from "../../jsx/state";
 import { applyTap } from "../../jsx/tap";
 import type { Element, Instance } from "../../jsx/types";
+import { applyStyleToNode } from "../../layout/apply";
 import { beginExit } from "../../layout/exit";
 import { rectOfTarget } from "../../layout/guide";
 import { createNode, detachNode, freeNode, placeChildren } from "../../layout/nodes";
-import { solveRoot } from "../../layout/solve";
+import { contentRectOf, solveRoot } from "../../layout/solve";
 import { createLayoutState } from "../../layout/state";
+import { loadYogaModule } from "../../layout/yoga";
 import { createStylesApi } from "../../styles/api";
 import type { UiCtx } from "../../types";
 
@@ -59,6 +61,9 @@ function elementOf(patch: Partial<Element> = {}): Element {
     extraHandles: new Map(),
     warnedOwned: new Set(),
     warned: new Set(),
+    index: 0,
+    cause: "change",
+    rebuilds: 0,
     scrolledIn: false,
     ...patch
   };
@@ -115,7 +120,7 @@ describe("beginExit", () => {
     const tag = vi.fn();
     const ctx = { deps: { world: { ecs: { tag } } } } as unknown as UiCtx;
 
-    beginExit(ctx, state, elementOf({ dropKey: drop, live: false }));
+    beginExit(ctx, state, elementOf({ dropKey: drop, live: false }), "change");
 
     expect(drop).toHaveBeenCalledOnce();
     expect(tag).not.toHaveBeenCalled();
@@ -313,5 +318,34 @@ describe("the runtime with a function that returns many nodes", () => {
 
   it("builds a fragment when it is called directly", () => {
     expect(Fragment({ children: ["a", "b"] }).children).toHaveLength(2);
+  });
+});
+
+// ─── the content box of a slot (spec 16 U3.4) ─────────────────
+
+describe("contentRectOf", () => {
+  // Bug: a JSX root laid out in a slot covers the slot's padding.
+  it("is the box less the computed padding, in the element's own units", async () => {
+    const state = createLayoutState();
+    const yoga = await loadYogaModule();
+    const slot = elementOf({
+      style: { width: 600, height: 300, padding: { top: 20, left: 30, right: 10, bottom: 40 } }
+    });
+
+    state.yoga = yoga;
+    createNode(state, slot);
+
+    const node = state.byEntity.get(slot.entity);
+
+    if (node !== undefined) applyStyleToNode(yoga, node, slot.style, slot.type, undefined);
+    solveRoot(state, slot, { x: 0, y: 0, w: 1080, h: 1920 }, () => undefined);
+
+    expect(contentRectOf(state, slot)).toEqual({ x: 30, y: 20, w: 560, h: 240 });
+  });
+
+  it("is the whole box at 0, 0 without a Yoga node", () => {
+    const slot = elementOf({ rect: { x: 40, y: 50, w: 600, h: 300 } });
+
+    expect(contentRectOf(createLayoutState(), slot)).toEqual({ x: 0, y: 0, w: 600, h: 300 });
   });
 });
