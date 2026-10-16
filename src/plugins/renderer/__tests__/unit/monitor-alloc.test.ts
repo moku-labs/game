@@ -51,11 +51,11 @@ type Part = "frame" | "spike" | "flush";
 type Sampled = Record<Part, number> & { top: string };
 
 /**
- * The modules whose code runs on the per-frame path: every module of the monitor, the renderer's frame callback, `time`
- * and `world`.
+ * The modules whose code runs on the per-frame path: every module of the monitor and of `demand`, the renderer's frame
+ * callback, `time` and `world`.
  */
 const PER_FRAME =
-  /src\/plugins\/(renderer\/(monitor\/[\w-]+|lifecycle)|time\/(measure|phases|api|rate-rules)|world\/ecs\/systems)\.ts/;
+  /src\/plugins\/(renderer\/(monitor\/[\w-]+|demand\/[\w-]+|lifecycle)|time\/(measure|phases|api|rate-rules)|world\/ecs\/systems)\.ts/;
 
 /** The monitor's modules: what the flush allocates is counted in them, a listener's own work left out. */
 const MONITOR = /src\/plugins\/renderer\/monitor\/[\w-]+\.ts/;

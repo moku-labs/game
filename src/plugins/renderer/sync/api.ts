@@ -512,8 +512,9 @@ export function createSyncApi(ctx: RendererCtx, deps: SyncDeps): SyncModule {
    * view. A still frame (nothing added, removed or left without a view) builds no set and walks no entry.
    */
   const pass = (): void => {
-    // The pass may change the tree: the unseen walks of the loops are taken again in the next frame.
-    state.held.clear();
+    // The pass may change the tree: the unseen walks of the loops are taken again in the next frame. Cleared only when
+    // it holds something: V8 gives an empty map a new table at every `clear()`, and the pass runs every frame.
+    if (state.held.size > 0) state.held.clear();
 
     if (state.removed.size > 0) {
       for (const entity of state.removed) {
